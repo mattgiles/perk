@@ -25,11 +25,21 @@ import {
   readSessionData,
   type SessionDataCtx,
   sessionArtifactNameProblem,
-  writeSessionArtifact,
   writeSessionArtifactClassified,
   writeSessionData,
 } from "./sessionData.ts";
 import { type EntrySink, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
+
+/** The retired production write wrapper, kept as a TEST fixture (plant artifact + pointer). */
+function writeSessionArtifact(
+  sink: Parameters<typeof writeSessionArtifactClassified>[0],
+  ctx: Parameters<typeof writeSessionArtifactClassified>[1],
+  name: string,
+  content: string,
+): string | null {
+  const result = writeSessionArtifactClassified(sink, ctx, name, content);
+  return result.status === "applied" || result.status === "unchanged" ? result.path : null;
+}
 
 // --- compile-time satisfaction: the structural slice can never drift from the SDK ------------
 

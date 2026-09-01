@@ -39,6 +39,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { GIST_AUTHOR_STAGE } from "../../authoring/gist/draft.ts";
+import { OBJECTIVE_AUTHOR_STAGE } from "../../authoring/objective/prose.ts";
 import { PLAN_DRAFT_ARTIFACT, revisePlanDraft } from "../../authoring/plan/draft.ts";
 import {
   PLAN_CONTEXT_TYPE,
@@ -53,7 +54,6 @@ import {
   savePlan,
 } from "../../authoring/plan/save.ts";
 import { extractPlanMarkdown, resolvePlanSource } from "../../authoring/plan/source.ts";
-import { OBJECTIVE_AUTHOR_STAGE } from "../../factories/objectiveAuthor.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { PlanRef } from "../../substrate/cache.ts";
 import {

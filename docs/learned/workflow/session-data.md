@@ -162,8 +162,9 @@ The full producer→consumer recipe, composed from the rules proven above and in
 (`plan_draft` → `resolvePlanSource` is the end-to-end precedent):
 
 1. **Producer**: a fixed artifact-name constant (the `PLAN_DRAFT_ARTIFACT` precedent,
-   `extension/authoring/plan/draft.ts`); write only via `writeSessionArtifact` (file + provenance pointer in
-   one gesture); pointer appends carry the **whole merged map** (per-field LWW — see "Provenance
+   `extension/authoring/plan/draft.ts`); write only via the session seam's `writeArtifact`
+   (`writeSessionArtifactClassified` underneath — file + provenance pointer in one gesture);
+   pointer appends carry the **whole merged map** (per-field LWW — see "Provenance
    pointers" above); a `null` return ⇒ not consumable, even if the file visibly exists.
 2. **Read-only writer** (only if the producer must run under the gate) — the carve-out recipe
    below.
@@ -185,14 +186,14 @@ The full producer→consumer recipe, composed from the rules proven above and in
 
 For any future writer that must work in read-only mode (step 2 above). `objective_draft` confirmed
 the `plan_draft` checklist generalizes — a third stage-scoped draft tool should copy
-`extension/factories/objectiveDraft.ts` mechanically:
+`extension/authoring/objective/draft.ts` mechanically:
 
 1. A **fixed artifact-name constant** — no path/name tool parameter.
 2. The path derived **exclusively through the session-data accessor seam**
-   (`writeSessionArtifact` = file + provenance pointer in one gesture).
+   (the session seam's `writeArtifact` = file + provenance pointer in one gesture).
 3. Allowlist only the tool *name* in `extension/substrate/toolGating.ts::READ_ONLY_TOOLS`, with a carve-out
    comment — the gate's edit/write/bash blocking stays untouched.
-4. Register in the factory **before the gate snapshots tools**.
+4. Register in the installer **before the gate snapshots tools**.
 5. The `invalid_input`/`no_run_id`/`write_failed` failure taxonomy via `failFor`.
 6. A contracts §8.1 paragraph + registry `cache.session-data` in the owning stage's `writes` +
    both planes' registry tests.

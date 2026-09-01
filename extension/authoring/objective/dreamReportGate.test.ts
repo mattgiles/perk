@@ -15,30 +15,30 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { runScratchDir } from "../substrate/cache.ts";
-import { digestSessionData, type SessionDataCtx } from "../substrate/sessionData.ts";
-import { WORKFLOW_STATE_TYPE } from "../substrate/workflowState.ts";
+import { runScratchDir } from "../../substrate/cache.ts";
+import { digestSessionData, type SessionDataCtx } from "../../substrate/sessionData.ts";
+import { WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import {
   composeDreamBundle,
   DREAM_ANALYSES_FILENAME,
   DREAM_REDUCER_ANGLES,
   type DreamReducerAnalysis,
   finalizeDreamBundle,
-} from "../waves/dreamReducerWave.ts";
+} from "../../waves/dreamReducerWave.ts";
 import {
   DREAM_MANIFEST_FILENAME,
   type DreamDocAssessment,
   type DreamLaneAnalysis,
   type DreamManifest,
   decodeDreamManifest,
-} from "../waves/dreamWave.ts";
+} from "../../waves/dreamWave.ts";
 import {
   COMPANION_COMMENT_MAX_CHARS,
   type DreamReportGateOutcome,
   decodeDreamReportBlock,
   reportPartInvarianceViolations,
   resolveDreamReportGate,
-} from "./objectiveDreamReport.ts";
+} from "./dreamReportGate.ts";
 
 const RUN_ID = "01DREAMGATE";
 const STAMP = "2026-02-03T04:05:06Z";
@@ -593,6 +593,7 @@ test("gate: non-dream and pre-recovery arms never invoke the bracket (spy)", () 
 
 const PARITY_FIXTURE_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
+  "..",
   "..",
   "..",
   "tests",

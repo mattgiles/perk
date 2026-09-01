@@ -390,13 +390,13 @@ routes:
     role: control-guidance
     priority: 80
   - id: ts-objective-plan
-    match: { paths: ["extension/factories/objectivePlan.ts"] }
+    match: { paths: ["extension/pi/v1/objectivePlanning.ts"] }
     capability: planning.objective
     audience: shipped
     role: tool-contract
     priority: 85
   - id: ts-objective-author
-    match: { paths: ["extension/factories/objective*.ts"] }
+    match: { paths: ["extension/pi/v1/objective.ts", "extension/pi/v1/objectiveAuthoring.ts", "extension/authoring/objective/**"] }
     capability: intent.objective
     audience: shipped
     role: tool-contract

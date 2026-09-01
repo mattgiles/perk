@@ -46,7 +46,7 @@ fixes).
 |---|---|---|---|---|
 | `report.ts` · `report()` | notify / stderr / attached detail entry | (the seam itself) | transient headline / durable command detail | 1-line headline / complete detail |
 | `planMode.ts` · plan-mode toggles | notify via `report()` (info) | `/plan`, gate enter/exit | transient | 1 line |
-| `objective.ts` · `/objective` handler + `reportError` | notify via `report()` (info/error) | `/objective [<id>\|clear]`, render failures | transient | 1 line |
+| `pi/v1/objective.ts` · `/objective` handler + `reportError` | notify via `report()` (info/error) | `/objective [<id>\|clear]`, render failures | transient | 1 line |
 | `lifecycleGates.ts` · dirty gate + `/implement` handoff | notify via `report()` (warning/info) | `session_before_switch`/`fork`, `/implement` | transient | 1 line |
 | `planSave.ts` · save outcomes | notify via `report()` (varies) | `plan_save` tool / `/plan-save` | transient | 1 line |
 | `learnDocs.ts` · gather failure paths | notify via `report()` (warning/error) | `/learn-docs` gather errors | transient | 1 line |
@@ -54,8 +54,8 @@ fixes).
 | `address.ts` · error path | notify via `report()` (error, `alsoLog`) | `/address` failure | transient | 1 line |
 | `index.ts` · workflow-state linkage error | notify via `report()` (error, `alsoLog`) | `session_start` linkage failure | transient | 1 line |
 | `result.ts` · `failFor` | notify via `report()` (error, `alsoLog`) | any soft-result tool path | transient | 1-line headline |
-| `objectivePlan.ts` · no-objective warnings | notify via `report()` (warning) | `/objective-plan`, `/objective-reconcile` arg errors | transient | 1 line |
-| `objectiveSave.ts` · failure path | notify via `report()` | `/objective-save` errors | transient | 1 line |
+| `pi/v1/objectivePlanning.ts` · no-objective warnings | notify via `report()` (warning) | `/objective-plan`, `/objective-reconcile` arg errors | transient | 1 line |
+| `pi/v1/objectiveAuthoring.ts` · failure path | notify via `report()` | `/objective-save` errors | transient | 1 line |
 
 Every `registerPerkCommand` handler attaches a detail sink to its exact command-context object
 before the `running…` report and before the handler runs. A multiline report therefore projects to
@@ -79,8 +79,8 @@ additionally mirrors the complete diagnostic to stderr.
 | `prReview.ts` · `/pr-review` handler | notify (info) | door announce | transient | 1 line |
 | `learn.ts` · `/learn` handler | notify (info/error) | door announce + door result | transient | 1 line |
 | `learnDocs.ts` · `/learn-docs` success | notify (info) | gather success announce | transient | 1 line |
-| `objectivePlan.ts` · door announces | notify (info) | `/objective-plan`, `/objective-reconcile` | transient | 1 line |
-| `objectiveSave.ts` · door announce | notify (info) | `/objective-save` | transient | 1 line |
+| `pi/v1/objectivePlanning.ts` · door announces | notify (info) | `/objective-plan`, `/objective-reconcile` | transient | 1 line |
+| `pi/v1/objectiveAuthoring.ts` · door announce | notify (info) | `/objective-save` | transient | 1 line |
 | `checkpoints.ts` · `/checkpoints` list | notify (info) | `/checkpoints` | transient | 1 + N lines (one per step) |
 
 ### Standing surfaces (statuses + widgets)
@@ -91,8 +91,8 @@ additionally mirrors the complete diagnostic to stderr.
 |---|---|---|---|---|
 | `checkpoints.ts` · `renderStatus` | status `perk-checkpoints` | `session_start`, `session_tree`, `turn_end` | standing | `📋 done/total · ▶n` (or `📋 <stage>` coarse fallback) |
 | `checkpoints.ts` · `renderStatus` | widget `perk-checkpoints` (plain strings, above-editor, unthemed, **no width truncation**) | same | standing | **one line per plan step, unbounded** (`☑ ▶ ☐` via `stepGlyph`); 1 line on the coarse/prose fallback |
-| `objective.ts` · `renderStatus` | status `perk-objective` | `session_start`, `session_tree`, `turn_end`, `/objective` | standing | `🎯 <id> · <tokens> tok · <elapsed>` |
-| `objective.ts` · `renderStatus` | widget `perk-objective` (plain strings, above-editor, unthemed) | same | standing | 2 fixed lines (`objective:` / `budget:`) |
+| `pi/v1/objective.ts` · `renderStatus` | status `perk-objective` | `session_start`, `session_tree`, `turn_end`, `/objective` | standing | `🎯 <id> · <tokens> tok · <elapsed>` |
+| `pi/v1/objective.ts` · `renderStatus` | widget `perk-objective` (plain strings, above-editor, unthemed) | same | standing | 2 fixed lines (`objective:` / `budget:`) |
 
 ### Interactive prompts + headless mirror
 

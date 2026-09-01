@@ -93,7 +93,7 @@ the inspector below the center pane, but mobile authoring is not a goal.
 │ CAPABILITY TREE      │ Planning / Plan / Warm / plan_review     │ RELATIONSHIPS & SOURCE    │
 │                      │                                          │                           │
 │ ▾ Planning           │ [ Edit ] [ Compare ] [ Assembly ]        │ Canonical source          │
-│   ▾ Plan authoring   │ ┌──────────────────────────────────────┐ │ extension/factories/…   │
+│   ▾ Plan authoring   │ ┌──────────────────────────────────────┐ │ extension/pi/v1/…       │
 │     ○ Cold           │ │ source-native focused editor         │ │ tool:plan_review.…      │
 │     ● Warm           │ │ with surrounding read-only context   │ │                           │
 │       1 Pi boundary  │ └──────────────────────────────────────┘ │ Consumed by               │

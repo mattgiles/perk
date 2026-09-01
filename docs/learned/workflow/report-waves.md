@@ -63,7 +63,7 @@ session-scoped guard-state patterns, and the wave test machinery worth reusing.
   `classify_review_feedback` tool (`extension/doors/address.ts`): ONE `perk.review-classifier`
   lane, strict completeness, no retry (the flow's posture is "surface the error and stop").
 - `objectiveExplorerWave.ts` — the objective-plan factory's OPTIONAL single-lane explore wave
-  behind `explore_objective_node` (`extension/factories/objectivePlan.ts`): ONE
+  behind `explore_objective_node` (`extension/pi/v1/objectivePlanning.ts`): ONE
   `perk.objective-explorer` lane, strict completeness, no retry (on failure the guidance says
   "explore directly instead"). Both single-lane entrypoints hold their report schema as a module
   constant — the migration that killed the hand-transcribed `outputSchema` blocks.

@@ -67,7 +67,7 @@ construction.
 Two nuances from the `[subagents]` → `[models.subagents]` sweep:
 
 - **Grep the regex-escaped form too, and end with full CI.** A literal-string sweep missed a test
-  pin written as the escaped regex `\[subagents\]` (`extension/factories/objectivePlan.test.ts`) —
+  pin written as the escaped regex `\[subagents\]` (now `extension/pi/v1/objectivePlanning.test.ts`) —
   which also survived the plain-grep verification and surfaced only in full `just ci`. **A sweep's
   exit gate is the full CI run, not a spot grep.** (The same sweep's plan-file enumeration also
   missed two SKILL.md files that the repo-wide grep caught — reinforcing the rule above.)

@@ -3,13 +3,15 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
-import type { PlanRef } from "../substrate/cache.ts";
-import { type BranchEntry, branchOf, type WorkflowState } from "../substrate/workflowState.ts";
-import { loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
+import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
+import type { PlanRef } from "../../substrate/cache.ts";
+import { type BranchEntry, branchOf, type WorkflowState } from "../../substrate/workflowState.ts";
+import { createPerkStatus } from "../../surfaces/surfaces.ts";
+import { loadPerkSession, plantSession, scaffoldRepo } from "../../testing/harness.ts";
 import {
   DEFAULT_COMPACT_THRESHOLD,
   findBudgetMarker,
+  installObjectiveBindings,
   OBJECTIVE_BUDGET_TYPE,
   rebuildBudget,
   shouldCompact,
@@ -85,10 +87,10 @@ test("rebuildBudget: inert with no marker", () => {
 });
 
 test("shouldCompact: threshold boundaries", () => {
-  assert.equal(shouldCompact({ percent: 79, tokens: 1 }, 0.8), false);
-  assert.equal(shouldCompact({ percent: 80, tokens: 1 }, 0.8), true);
-  assert.equal(shouldCompact({ percent: 95, tokens: 1 }, 0.8), true);
-  assert.equal(shouldCompact({ percent: null, tokens: null }, 0.8), false);
+  assert.equal(shouldCompact({ percent: 79 }, 0.8), false);
+  assert.equal(shouldCompact({ percent: 80 }, 0.8), true);
+  assert.equal(shouldCompact({ percent: 95 }, 0.8), true);
+  assert.equal(shouldCompact({ percent: null }, 0.8), false);
   assert.equal(shouldCompact(undefined, 0.8), false);
   assert.equal(DEFAULT_COMPACT_THRESHOLD, 0.8);
 });
@@ -162,6 +164,43 @@ test("session_tree rebuild preserves the budget marker", async () => {
     const branch = branchOf(h.session);
     assert.ok(findBudgetMarker(branch as never));
     assert.equal(h.workflowState().active_objective, "obj-9");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("installObjectiveBindings registers all four budget lifecycle hooks", () => {
+  // The budget substrate is hook-driven: status renders on session_start / session_tree /
+  // agent_settled and threshold compaction fires on turn_end. Losing any one silently degrades
+  // the accounting, so the installer's hook set is pinned structurally.
+  const hooked: string[] = [];
+  const pi = {
+    on(event: string) {
+      hooked.push(event);
+    },
+    registerCommand() {},
+  } as unknown as ExtensionAPI;
+  installObjectiveBindings(pi, createPerkStatus());
+  assert.deepEqual([...hooked].sort(), [
+    "agent_settled",
+    "session_start",
+    "session_tree",
+    "turn_end",
+  ]);
+});
+
+// --- registration parity (the baseline-exact metadata pin) ---------------------------------------
+
+const BASELINE_OBJECTIVE_COMMAND = {
+  name: "objective",
+  description: "Show, set (`<id>`), or clear (`clear`) the active perk objective + budget.",
+};
+
+test("registration parity: the /objective command surface matches the frozen baseline", async () => {
+  const cwd = scaffoldRepo();
+  const h = await loadPerkSession({ cwd });
+  try {
+    assert.deepEqual(h.registeredCommand("objective"), BASELINE_OBJECTIVE_COMMAND);
   } finally {
     h.dispose();
   }

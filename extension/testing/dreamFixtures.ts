@@ -5,7 +5,7 @@
 // so the boundary suites exercise the production revalidation bracket (contracts.md §8.65)
 // end-to-end. Both objective boundary suites (objectiveDraft.test.ts, objectiveSave.test.ts)
 // and the dream-wave registered-tool e2e consume this one encoding of the persisted format
-// instead of each maintaining a copy; the resolver suite (objectiveDreamReport.test.ts) keeps
+// instead of each maintaining a copy; the resolver suite (authoring/objective/dreamReportGate.test.ts) keeps
 // its own richer 2-lane fixture (with injected bracket stubs) because it exercises
 // proposal/stance shapes and per-arm corruption this minimal fixture deliberately lacks.
 // Test-only — never imported by production modules.

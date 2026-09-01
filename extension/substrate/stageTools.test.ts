@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
+import { reconcileGuidance } from "../authoring/objective/prose.ts";
 import { commitAndCompactContinuation, commitAndCompactGuidance } from "../doors/commitCompact.ts";
 import {
   objectiveLandGuidance,
@@ -13,7 +14,6 @@ import {
 } from "../doors/objectiveStack.ts";
 import { prReviewGuidance } from "../doors/prReview.ts";
 import { stackReviewGuidance } from "../doors/stackReviewBrowser.ts";
-import { reconcileGuidance } from "../factories/objectivePlan.ts";
 import {
   loadPerkSession,
   type PerkSession,

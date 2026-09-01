@@ -11,9 +11,11 @@
 // identity.
 //
 // `apply(change)` is a CLOSED union admitted from proven callers (never a feature dispatcher);
-// this slice's two variants come from the plan-save surfaces. Deliberate deviation from the
-// illustrative contracts sketch: no snapshot payloads on the applied/unchanged arms — nothing
-// consumes them (narrow until proven).
+// the first two variants come from the plan-save surfaces, the second two from the objective
+// flows (`transitionObjectiveNode`'s planning arm records the claim; `saveObjective`'s
+// post-save linkage sets `active_objective`). Deliberate deviation from the illustrative
+// contracts sketch: no snapshot payloads on the applied/unchanged arms — nothing consumes them
+// (narrow until proven).
 //
 // Two backings implement it: `branchWorkflowSession.ts` (the branch/file production backing,
 // delegating to `substrate/sessionData.ts`'s classified cores and the strict-append seam) and
@@ -27,7 +29,8 @@
 // | `run_id` | seam (`WorkflowSession.runId`) | three-way mint (contracts §8.3): Python exterior cold mint → interior claim; TS interior `mintRunId()` on the warm identity-less arm; fork/adopt derive `<parent>.<n>` interior-side | current value | recompute (derive `<parent>.<n>`) | permitted (appears in tool results) | strict read-back at claim (outside this seam); read-only here | keys artifact dirs + pointers |
 // | `session_artifacts` | seam (artifact ops) | session interior | current map (per-name latest) | reset (cross-run pointers refuse) | permitted (pointer details in results) | strict read-back (append→rebuild→compare) + digest-validated reads | pointer + digest authority |
 // | `active_plan_ref` | seam (`apply({kind:"link-plan-ref"})`) | the save surfaces — warm `savePlan` appends after a verified cold-door save; the Python cold door + the stage-gated session_start reconciliation (index.ts, substrate-direct) are the other writers | current value (LWW) | inherit (fork entries never touch it; the branch LWW carries the parent's) | permitted (save results render the ref; the footer/status probe reads it) | strict read-back (append → rebuild → `planRefsEqual`) | none (mirrors the exterior plan issue / `cache.plan-ref`; not a session artifact) |
-// | `objective_node_claim` | seam (`nodeClaim()` read + `apply({kind:"clear-node-claim"})`) | exterior — the objective-plan handoff records it at the session_start claim (index.ts); the interior only CLEARS it, on a verified node-linked save | current value until cleared (a null append clears) | inherit (fork entries omit it — a fork continues the same node's planning session); adopt never impersonates it | permitted (claim recovery + the implement-here refusal surface it) | strict read-back on clear (append → rebuild → `nodeClaimsEqual`); the claim WRITE stays lifecycle-owned | none |
+// | `objective_node_claim` | seam (`nodeClaim()` read + `apply({kind:"record-node-claim"})` + `apply({kind:"clear-node-claim"})`) | the interior RECORDS it on a verified `planning` transition (`transitionObjectiveNode`) and CLEARS it on a verified non-planning transition / node-linked save — both through the seam; the cold-claim write lives in `session/lifecycle.ts`'s claim arm (the objective-plan handoff carrier) | current value until cleared (a null append clears) | inherit (fork entries omit it — a fork continues the same node's planning session); adopt never impersonates it | permitted (claim recovery + the implement-here refusal surface it) | strict read-back on record + clear (append → rebuild → `nodeClaimsEqual`) | none |
+// | `active_objective` | seam (`activeObjective()` read + `apply({kind:"link-objective"})`) | the save surfaces (`saveObjective`'s post-save linkage) + the `/objective` command's set/clear (pi/v1/objective.ts) | current value (LWW; explicit null clears) | inherit (fork entries never touch it; the branch LWW carries the parent's) | permitted (save results render the id; the budget status reads it) | strict read-back on the seam path (append → rebuild → string equality); the `/objective` command path stays a raw LWW append — stated honestly | none |
 // | `stage` | adapter-read (hook/dispatch routing; NOT seam-backed this slice) | exterior handoff, recorded at cold claim | current value | **inherit** (the fork entry omits `stage`; LWW retains the parent's — deliberate, contracts §8.40); only **adopt** never impersonates the launched stage | permitted (drives routing) | best effort | none |
 // | `mode` | gate-owned (`ToolGating`; NOT seam-backed this slice) | session interior (gate transitions), seeded from handoff | current value | inherit (adopt carries parent mode) | permitted via injected mode context | best effort (`gating.exit` appends without read-back — honest tier) | none |
 
@@ -73,7 +76,15 @@ export type WorkflowChange =
    * Clear `objective_node_claim` iff the live claim matches BOTH fields (never clobbers an
    * unrelated claim — a save linked to objective B node 1.1 must not clear objective A's 1.1).
    */
-  | { kind: "clear-node-claim"; claim: { objective: string; node: string } };
+  | { kind: "clear-node-claim"; claim: { objective: string; node: string } }
+  /**
+   * Record `objective_node_claim` iff the live claim differs (`nodeClaimsEqual`) — an
+   * idempotent re-claim short-circuits `unchanged` (the re-append "refresh" carries no
+   * semantic payload: the claim has no timestamp and rebuilds identically).
+   */
+  | { kind: "record-node-claim"; claim: { objective: string; node: string } }
+  /** Link the live session to a saved objective: append `active_objective` iff it differs. */
+  | { kind: "link-objective"; objective: string };
 
 /**
  * The classified change outcome: `applied` proves the append landed and read back; `unchanged`
@@ -98,5 +109,7 @@ export interface WorkflowSession {
   writeArtifact(name: string, content: string): WriteArtifactResult;
   /** Snapshot read of the rebuilt `objective_node_claim` (malformed ⇒ null). */
   nodeClaim(): { objective: string; node: string } | null;
+  /** Snapshot read of the rebuilt `active_objective` (malformed/throwing ⇒ null). */
+  activeObjective(): string | null;
   apply(change: WorkflowChange): WorkflowChangeResult;
 }

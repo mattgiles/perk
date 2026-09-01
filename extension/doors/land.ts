@@ -6,7 +6,7 @@
 // false` — no marker, no /learn nudge). Never throws.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { reconcileGuidance } from "../factories/objectivePlan.ts";
+import { reconcileGuidance } from "../authoring/objective/prose.ts";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import { PENDING_LEARN, setMarker } from "../substrate/cache.ts";
 import {

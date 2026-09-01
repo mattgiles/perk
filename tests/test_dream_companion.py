@@ -4,7 +4,7 @@ The ``tests/test_delivery_persistence.py`` fake pattern: an in-memory issue back
 programmable POST/read plans, so the rescan-one-retry ambiguity policy and the dual-candidate
 byte-compare convergence are pinned end to end. The invariance-rule fixtures are the shared
 cross-plane set (``tests/parity/dream_report_invariance.json``), asserted rejected by BOTH this
-suite and the TS gate mirror (``extension/factories/objectiveDreamReport.test.ts``).
+suite and the TS gate mirror (``extension/authoring/objective/dreamReportGate.test.ts``).
 """
 
 import itertools
@@ -359,6 +359,6 @@ def test_transfer_model_rejects_malformed(raw: dict):
 
 
 def test_transfer_filename_parity():
-    # The TS mirror (extension/factories/objectiveSave.ts DREAM_REPORT_TRANSFER_FILENAME) pins
+    # The TS mirror (extension/pi/v1/objectiveAuthoring.ts DREAM_REPORT_TRANSFER_FILENAME) pins
     # the same literal.
     assert dc.DREAM_REPORT_TRANSFER_FILENAME == "dream-report-transfer.json"

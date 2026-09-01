@@ -209,10 +209,10 @@ Author and save objectives and their roadmaps.
 | `markdown:prompts/stages/objective-save.md` | `launch` | `shipped` | [`prompts/stages/objective-save.md`](../../prompts/stages/objective-save.md) · `file` | — |
 | `markdown:skills/perk-objective-author/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-objective-author/SKILL.md`](../../skills/perk-objective-author/SKILL.md) · `file` | objective.cold, objective.warm |
 | `python-symbol:src/perk/cli/commands/objective/author_cmd.py:_render_source` | `context` | `shipped` | [`src/perk/cli/commands/objective/author_cmd.py`](../../src/perk/cli/commands/objective/author_cmd.py) · `symbol:_render_source` | — |
-| `typescript-model-call:extension/factories/objectiveAuthor.ts:module:before-agent-start:0` | `tool-contract` | `shipped` | [`extension/factories/objectiveAuthor.ts`](../../extension/factories/objectiveAuthor.ts) · `symbol:module/event:before_agent_start/0` | — |
-| `typescript-model-call:extension/factories/objectiveSave.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/factories/objectiveSave.ts`](../../extension/factories/objectiveSave.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-tool:objective_draft` | `tool-contract` | `shipped` | [`extension/factories/objectiveDraft.ts`](../../extension/factories/objectiveDraft.ts) · `tool:objective_draft` | objective.cold, objective.warm |
-| `typescript-tool:objective_save` | `tool-contract` | `shipped` | [`extension/factories/objectiveSave.ts`](../../extension/factories/objectiveSave.ts) · `tool:objective_save` | — |
+| `typescript-model-call:extension/pi/v1/objectiveAuthoring.ts:module:before-agent-start:0` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveAuthoring.ts`](../../extension/pi/v1/objectiveAuthoring.ts) · `symbol:module/event:before_agent_start/0` | — |
+| `typescript-model-call:extension/pi/v1/objectiveAuthoring.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveAuthoring.ts`](../../extension/pi/v1/objectiveAuthoring.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-tool:objective_draft` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveAuthoring.ts`](../../extension/pi/v1/objectiveAuthoring.ts) · `tool:objective_draft` | objective.cold, objective.warm |
+| `typescript-tool:objective_save` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveAuthoring.ts`](../../extension/pi/v1/objectiveAuthoring.ts) · `tool:objective_save` | — |
 
 <details>
 <summary>Logical fragments</summary>
@@ -237,9 +237,9 @@ Author and save objectives and their roadmaps.
   - `section:authoring-a-perk-objective-the-objective-author-stage/never-delegate-boundaries` — Never-delegate boundaries (`heading:authoring-a-perk-objective-the-objective-author-stage/never-delegate-boundaries`)
 - `python-symbol:src/perk/cli/commands/objective/author_cmd.py:_render_source`
   - `symbol:_render_source` — Render source (`symbol:_render_source`)
-- `typescript-model-call:extension/factories/objectiveAuthor.ts:module:before-agent-start:0`
+- `typescript-model-call:extension/pi/v1/objectiveAuthoring.ts:module:before-agent-start:0`
   - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
-- `typescript-model-call:extension/factories/objectiveSave.ts:module:sendUserMessage:0`
+- `typescript-model-call:extension/pi/v1/objectiveAuthoring.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-tool:objective_draft`
   - `description` — description (`tool:objective_draft.description`)
@@ -302,12 +302,12 @@ Select, explore, and plan the next objective roadmap node.
 | `markdown:skills/perk-objective-reconcile/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-objective-reconcile/SKILL.md`](../../skills/perk-objective-reconcile/SKILL.md) · `file` | — |
 | `markdown:skills/perk-objective-replan/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-objective-replan/SKILL.md`](../../skills/perk-objective-replan/SKILL.md) · `file` | — |
 | `python-symbol:src/perk/cli/commands/objective/plan_cmd.py:_layer_context_block` | `context` | `shipped` | [`src/perk/cli/commands/objective/plan_cmd.py`](../../src/perk/cli/commands/objective/plan_cmd.py) · `symbol:_layer_context_block` | — |
-| `typescript-model-call:extension/factories/objectivePlan.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/factories/objectivePlan.ts`](../../extension/factories/objectivePlan.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/factories/objectivePlan.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/factories/objectivePlan.ts`](../../extension/factories/objectivePlan.ts) · `symbol:module/call:sendUserMessage/1` | — |
-| `typescript-tool:add_objective_node` | `tool-contract` | `shipped` | [`extension/factories/objectivePlan.ts`](../../extension/factories/objectivePlan.ts) · `tool:add_objective_node` | — |
-| `typescript-tool:explore_objective_node` | `tool-contract` | `shipped` | [`extension/factories/objectivePlan.ts`](../../extension/factories/objectivePlan.ts) · `tool:explore_objective_node` | — |
-| `typescript-tool:objective_node` | `tool-contract` | `shipped` | [`extension/factories/objectivePlan.ts`](../../extension/factories/objectivePlan.ts) · `tool:objective_node` | — |
-| `typescript-tool:reconcile_objective` | `tool-contract` | `shipped` | [`extension/factories/objectivePlan.ts`](../../extension/factories/objectivePlan.ts) · `tool:reconcile_objective` | — |
+| `typescript-model-call:extension/pi/v1/objectivePlanning.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/objectivePlanning.ts`](../../extension/pi/v1/objectivePlanning.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/objectivePlanning.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/objectivePlanning.ts`](../../extension/pi/v1/objectivePlanning.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-tool:add_objective_node` | `tool-contract` | `shipped` | [`extension/pi/v1/objectivePlanning.ts`](../../extension/pi/v1/objectivePlanning.ts) · `tool:add_objective_node` | — |
+| `typescript-tool:explore_objective_node` | `tool-contract` | `shipped` | [`extension/pi/v1/objectivePlanning.ts`](../../extension/pi/v1/objectivePlanning.ts) · `tool:explore_objective_node` | — |
+| `typescript-tool:objective_node` | `tool-contract` | `shipped` | [`extension/pi/v1/objectivePlanning.ts`](../../extension/pi/v1/objectivePlanning.ts) · `tool:objective_node` | — |
+| `typescript-tool:reconcile_objective` | `tool-contract` | `shipped` | [`extension/pi/v1/objectivePlanning.ts`](../../extension/pi/v1/objectivePlanning.ts) · `tool:reconcile_objective` | — |
 
 <details>
 <summary>Logical fragments</summary>
@@ -347,9 +347,9 @@ Select, explore, and plan the next objective roadmap node.
   - `section:re-authoring-an-objective-the-objective-replan-cold-door/carrying-node-issues-forward-linear-only` — Carrying node-issues forward (Linear only) (`heading:re-authoring-an-objective-the-objective-replan-cold-door/carrying-node-issues-forward-linear-only`)
 - `python-symbol:src/perk/cli/commands/objective/plan_cmd.py:_layer_context_block`
   - `symbol:_layer_context_block` — Layer context block (`symbol:_layer_context_block`)
-- `typescript-model-call:extension/factories/objectivePlan.ts:module:sendUserMessage:0`
+- `typescript-model-call:extension/pi/v1/objectivePlanning.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/factories/objectivePlan.ts:module:sendUserMessage:1`
+- `typescript-model-call:extension/pi/v1/objectivePlanning.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-tool:add_objective_node`
   - `description` — description (`tool:add_objective_node.description`)

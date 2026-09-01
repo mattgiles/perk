@@ -36,21 +36,25 @@ import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { registerOpenStackReview, registerStackReviewBrowser } from "./doors/stackReviewBrowser.ts";
 import { registerSubmit } from "./doors/submit.ts";
 import { registerSubmitPrReview } from "./doors/submitPrReview.ts";
-import { registerObjective } from "./factories/objective.ts";
-import { registerObjectiveAuthor } from "./factories/objectiveAuthor.ts";
-import { registerObjectiveDraft } from "./factories/objectiveDraft.ts";
-import { registerObjectivePlan } from "./factories/objectivePlan.ts";
-import { registerObjectiveSave } from "./factories/objectiveSave.ts";
 import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
+import { installObjectiveBindings } from "./pi/v1/objective.ts";
+import { installObjectiveAuthoringBindings } from "./pi/v1/objectiveAuthoring.ts";
+import { installObjectivePlanningBindings } from "./pi/v1/objectivePlanning.ts";
 import { installPlanBindings } from "./pi/v1/plan.ts";
 import { installPlannotatorPlanAdapter } from "./pi/v1/providers/plannotator.ts";
 import { installTombellPlanAdapter } from "./pi/v1/providers/tombell.ts";
+import {
+  branchSessionStateStore,
+  establishSessionIdentity,
+  resolveRunStage,
+} from "./session/lifecycle.ts";
 import { createAgentScratchProvisioner, registerAgentScratch } from "./substrate/agentScratch.ts";
 import { registerBindingDelivery } from "./substrate/bindingDelivery.ts";
 import {
   atomicWriteFileSync,
   ensureRunScratch,
+  listRunIds,
   markHandoffConsumed,
   readHandoff,
   readPlanRef,
@@ -65,10 +69,8 @@ import { registerToolGating } from "./substrate/toolGating.ts";
 import {
   appendWorkflowState,
   branchOf,
-  decideClaim,
   planRefsEqual,
   rebuildWorkflowState,
-  resolveRunStage,
   WORKFLOW_STATE_TYPE,
   type WorkflowState,
 } from "./substrate/workflowState.ts";
@@ -174,9 +176,12 @@ export default function (pi: ExtensionAPI) {
   // plannotator is selected.
   installPlannotatorPlanAdapter(pi);
 
-  // Objective-author context injection (the objective mirror of plan mode's authoring
-  // half). Keyed off (read-only gate AND stage === objective-author); planMode defers to it.
-  registerObjectiveAuthor(pi, gating);
+  // The v1 objective-authoring installer: the objective-author context hook pair (this call
+  // sits at the frozen hooks-ordering slot the injection always held — keyed off (read-only
+  // gate AND stage === objective-author); planMode defers to it), plus the
+  // `objective_draft`/`objective_save` tools and the `/objective-save` command (registration is
+  // name-keyed — only the hooks ordering is frozen).
+  installObjectiveAuthoringBindings(pi, gating);
 
   // The v1 gist installer: the gist-authoring context hook pair (this call sits at the frozen
   // hooks-ordering slot the injection always held; planMode defers to it too), plus the
@@ -233,144 +238,38 @@ export default function (pi: ExtensionAPI) {
       report(ctx, "workflow-state linkage error", "error", message, { alsoLog: true });
     };
 
-    const decision = decideClaim({
-      state: rebuildWorkflowState(branchEntries()),
-      currentSessionId,
-      envRunId: process.env.PERK_RUN_ID ?? null,
-      cwd: ctx.cwd,
-    });
-
-    // The session-audit exact-vintage stamp (§8.3), recorded by every run-identity arm below
+    // The session-audit exact-vintage stamp (§8.3), recorded by every run-identity arm
     // (claim/fork/adopt/mint); undefined on the perkVersion() failure sentinel, which drops the
     // key on serialize and leaves the session on the timestamp-estimate arm.
     const stamp = versionStamp(version);
 
-    // `claim`/`adopt` carry no prior branch state (adopt's is written by its arm below).
-    let resolved: WorkflowState =
-      decision.action === "claim" || decision.action === "adopt" ? {} : decision.state;
-    let minted = false;
-
-    if (decision.action === "claim") {
-      // Cold claim — establish before consume (strict).
-      const handoff = readHandoff(ctx.cwd, decision.runId);
-      if (handoff === null || handoff.run_id !== decision.runId) {
-        reportError(`handoff missing or mismatched for run ${decision.runId}`);
-      } else {
-        // The objective-plan cold door's handoff_extra carries the node link
-        // (objective_id/node_id): persist it as the objective_node_claim so the implement-here
-        // exits are structurally suppressed in COLD objective-plan sessions too (the warm
-        // `objective_node` tool records the claim; a cold factory session never calls it — the
-        // door marked the node before launch). Blank/absent ids persist nothing; the claim
-        // clears on a successful node-linked save exactly as the warm-recorded one does.
-        const handoffObjective = handoff.objective_id;
-        const handoffNode = handoff.node_id;
-        const nodeClaim =
-          typeof handoffObjective === "string" &&
-          handoffObjective.trim() !== "" &&
-          typeof handoffNode === "string" &&
-          handoffNode.trim() !== ""
-            ? { objective: handoffObjective, node: handoffNode }
-            : undefined;
-        const data: WorkflowState = {
-          run_id: decision.runId,
-          pi_session_id: currentSessionId ?? undefined,
-          mode: handoff.mode,
-          perk_version: stamp,
-          // Record the launched stage so the interior can tell e.g. objective-author from plan
-          // (both are read-only) and inject the right authoring context (planMode vs objectiveAuthor).
-          stage: handoff.stage,
-          ...(nodeClaim !== undefined ? { objective_node_claim: nodeClaim } : {}),
-        };
-        const okAppend = appendWorkflowState(pi, ctx, {
-          data,
-          field: "run_id",
-          expected: decision.runId,
-          scope: "workflow-state linkage error",
-          failure: `read-back failed for run ${decision.runId}`,
-        });
-        if (!okAppend) {
-          // do NOT consume
-        } else {
-          markHandoffConsumed(ctx.cwd, decision.runId, {
-            piSessionId: currentSessionId ?? undefined,
-          });
-          resolved = data;
-        }
-      }
-    } else if (decision.action === "fork") {
-      // Inherited a run_id from a different session file → isolate the child's scratch. A static
-      // redirect or filesystem failure is loud but does not prevent the derived workflow identity
-      // from settling; later eligible turns retry through the agent-scratch resolver.
-      try {
-        ensureRunScratch(ctx.cwd, decision.childRunId);
-      } catch (error) {
-        report(
-          ctx,
-          "run scratch",
-          "warning",
-          `could not create fork run root for ${decision.childRunId}: ${String(error)}`,
-          { alsoLog: true },
-        );
-      }
-      const data: WorkflowState = {
-        run_id: decision.childRunId,
-        pi_session_id: currentSessionId ?? undefined,
-        predecessor: decision.parentRunId,
-        mode: decision.state.mode,
-        perk_version: stamp,
-      };
-      pi.appendEntry(WORKFLOW_STATE_TYPE, data);
-      resolved = data;
-    } else if (decision.action === "adopt") {
-      // An env-inherited run id whose handoff was already consumed by a different session: a
-      // spawned child (contracts §8.2). Mirror the fork arm — derived child identity, isolated
-      // scratch, inherited mode (read-only gating survives) — minus everything that belongs to
-      // the launched session: never re-consume the handoff (its pi_session_id keeps the true
-      // claimer), no `stage` (no stage impersonation / stage-binding injection), and no
-      // implementation/main pointer capture (resolveRunStage stays null for adopt).
-      try {
-        ensureRunScratch(ctx.cwd, decision.childRunId);
-      } catch (error) {
-        report(
-          ctx,
-          "run scratch",
-          "warning",
-          `could not create adopted run root for ${decision.childRunId}: ${String(error)}`,
-          { alsoLog: true },
-        );
-      }
-      const data: WorkflowState = {
-        run_id: decision.childRunId,
-        pi_session_id: currentSessionId ?? undefined,
-        predecessor: decision.parentRunId,
-        mode: decision.mode,
-        perk_version: stamp,
-      };
-      pi.appendEntry(WORKFLOW_STATE_TYPE, data);
-      resolved = data;
-    } else if (decision.action === "none") {
-      // A warm session with no identity mints its own run_id so
-      // per-run state (the session data dir) can key off it. No disk artifacts —
-      // dirs are the accessor's job; provenance is recorded separately. A failed cold claim above never
-      // falls here (claim stays a loud unclaimed error).
-      const runId = mintRunId();
-      const data: WorkflowState = {
-        run_id: runId,
-        pi_session_id: currentSessionId ?? undefined,
-        perk_version: stamp,
-      };
-      const okAppend = appendWorkflowState(pi, ctx, {
-        data,
-        field: "run_id",
-        expected: runId,
-        scope: "workflow-state linkage error",
-        failure: `read-back failed for minted run ${runId}`,
-      });
-      if (okAppend) {
-        resolved = { ...decision.state, ...data };
-        minted = true;
-      }
+    // The identity lifecycle (claim / fork / adopt / mint / keep) is the named session
+    // operation (session/lifecycle.ts owns the arms); this handler binds the production ports
+    // and renders the outcome's per-arm problems/warnings with the exact report scopes the
+    // arms always used. The strict appends keep reporting read-back failures through the
+    // strict-append seam's own loudness channel.
+    const identityPorts = {
+      readHandoff: (runId: string) => readHandoff(ctx.cwd, runId),
+      listRunIds: () => listRunIds(ctx.cwd),
+      markHandoffConsumed: (runId: string, opts: { piSessionId?: string }) =>
+        markHandoffConsumed(ctx.cwd, runId, opts),
+      ensureRunScratch: (runId: string) => {
+        ensureRunScratch(ctx.cwd, runId);
+      },
+      mintRunId,
+      versionStamp: stamp,
+    };
+    const identity = establishSessionIdentity(branchSessionStateStore(pi, ctx), identityPorts, {
+      currentSessionId,
+      envRunId: process.env.PERK_RUN_ID ?? null,
+    });
+    for (const problem of identity.problems) reportError(problem);
+    for (const warning of identity.warnings) {
+      report(ctx, "run scratch", "warning", warning, { alsoLog: true });
     }
+    const decision = identity.decision;
+    const minted = identity.arm === "minted";
+    let resolved: WorkflowState = identity.resolved;
 
     // Reapply the read-only allowlist + stage scoping from the resolved mode/stage — FIRST,
     // before the plan-ref/stage reconciliation below. `resolved.mode` is final once the
@@ -402,7 +301,7 @@ export default function (pi: ExtensionAPI) {
     // run_id claim so the run is settled first; the two append independent LWW fields.
     // Reload/fork/tree (no launched stage) rely on the LWW rebuild — never re-read the file.
     const linked = rebuildWorkflowState(branchEntries()).active_plan_ref ?? null;
-    const runStage = resolveRunStage(decision, ctx.cwd);
+    const runStage = resolveRunStage(decision, identityPorts);
     // Registry-missing is permissive when a stage is present, to preserve implement linkage.
     const consumesPlanRef =
       runStage !== null && (registry === null || stageConsumesPlanRef(registry, runStage));
@@ -557,9 +456,6 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // The `objective_draft` working-objective file tool (the plan_draft twin).
-  registerObjectiveDraft(pi);
-
   // Lifecycle gates: the dirty-repo switch/fork guard + the guard-only `/implement`.
   registerLifecycleGates(pi);
 
@@ -652,7 +548,7 @@ export default function (pi: ExtensionAPI) {
   // The objective substrate: `/objective` set/clear, budget accounting, threshold
   // compaction, all keyed off the now-live `active_objective`. Inert when no objective is active.
   // (The deterministic objective mechanics live in the Python plane: `perk objective …`.)
-  registerObjective(pi, perkStatus);
+  installObjectiveBindings(pi, perkStatus);
 
   // The warm `/commit-and-compact` utility door: drive a commit of the work so far, compact once
   // a successful outcome is known, then completion-gate an automatic evidence-first continuation
@@ -660,16 +556,12 @@ export default function (pi: ExtensionAPI) {
   // Human-only — no tool twin.
   registerCommitAndCompact(pi, gating);
 
-  // The warm `objective_save` door: the `objective_save` tool + `/objective-save` command
-  // (the objective mirror of plan-save). Takes `gating` for the read-only → read-write boundary.
-  registerObjectiveSave(pi, gating);
-
   // The objective plan factory's warm transition surface: the `objective_node` bounded
   // tool (delegates to the Python cold door; `status:"done"` requires a completion audit) + the
   // `/objective-plan` command (select the next node and author a bounded plan). The command now
   // enters the read-only gate on invocation (parity with the cold door's `mode: read-only`
   // handoff; exit stays with plan_save / `/plan` off) — hence `gating`.
-  registerObjectivePlan(pi, gating);
+  installObjectivePlanningBindings(pi, gating);
 
   // The learned-docs plan factory's warm surface: the `/learn-docs` command gathers open
   // perk:learn issues into an inbox (via the `perk learn docs --gather` cold door) and injects the

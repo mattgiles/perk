@@ -51,12 +51,14 @@ export function openMemoryWorkflowSession(opts: {
   runId: string | null;
   nodeClaim?: { objective: string; node: string } | null;
   activePlanRef?: PlanRef | null;
+  activeObjective?: string | null;
 }): MemoryWorkflowSession {
   const runId = opts.runId;
   const contents = new Map<string, string>();
   const pointers = new Map<string, SessionArtifactPointer>();
   let claim = opts.nodeClaim ?? null;
   let activePlanRef = opts.activePlanRef ?? null;
+  let activeObjective = opts.activeObjective ?? null;
   let failWrite = false;
   let failPointerAppend = false;
   let failApply = false;
@@ -95,6 +97,9 @@ export function openMemoryWorkflowSession(opts: {
     },
     nodeClaim() {
       return claim;
+    },
+    activeObjective() {
+      return activeObjective;
     },
     readArtifact(name: string): ReadArtifactResult {
       if (runId === null) return { status: "absent" }; // no identity — silent, branchable
@@ -192,6 +197,41 @@ export function openMemoryWorkflowSession(opts: {
             return {
               status: "unverified",
               problem: `objective_node_claim clear read-back failed for node ${change.claim.node}`,
+            };
+          }
+          return { status: "applied" };
+        }
+        case "record-node-claim": {
+          // The idempotent re-claim short-circuit (an equal claim rebuilds identically).
+          if (nodeClaimsEqual(claim, change.claim)) return { status: "unchanged" };
+          if (failApply) {
+            failApply = false;
+            return { status: "rejected", problem: "workflow-state append refused (induced)" };
+          }
+          claim = change.claim;
+          if (failApplyVerification) {
+            failApplyVerification = false;
+            return {
+              status: "unverified",
+              problem:
+                `objective_node_claim read-back failed for #${change.claim.objective} node ` +
+                change.claim.node,
+            };
+          }
+          return { status: "applied" };
+        }
+        case "link-objective": {
+          if (activeObjective === change.objective) return { status: "unchanged" };
+          if (failApply) {
+            failApply = false;
+            return { status: "rejected", problem: "workflow-state append refused (induced)" };
+          }
+          activeObjective = change.objective;
+          if (failApplyVerification) {
+            failApplyVerification = false;
+            return {
+              status: "unverified",
+              problem: `active_objective read-back failed for #${change.objective}`,
             };
           }
           return { status: "applied" };

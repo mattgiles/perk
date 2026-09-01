@@ -10,7 +10,8 @@
 // surface the structured result, never throw.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { fetchObjectiveUrl, objectiveReadInstruction } from "../factories/objectivePlan.ts";
+import { objectiveReadInstruction } from "../authoring/objective/prose.ts";
+import { fetchObjectiveUrl } from "../pi/v1/objective.ts";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import {
   booleanField,

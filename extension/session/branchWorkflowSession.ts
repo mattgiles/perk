@@ -30,6 +30,16 @@ import type {
   WorkflowSession,
 } from "./workflowSession.ts";
 
+/** The rebuilt `active_objective`, read fail-open (malformed/throwing branch ⇒ null). */
+function readActiveObjective(source: SessionArtifactCtx): string | null {
+  try {
+    const value = rebuildWorkflowState(branchOf(source)).active_objective ?? null;
+    return typeof value === "string" && value !== "" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Open the branch-backed session for the current context — ALWAYS opens; `runId: null` is the
  * identity-less arm (the classified artifact cores refuse writes and read `absent` without a
@@ -70,6 +80,9 @@ export function openBranchWorkflowSession(
     nodeClaim() {
       return readNodeClaim(source);
     },
+    activeObjective() {
+      return readActiveObjective(source);
+    },
     apply(change: WorkflowChange): WorkflowChangeResult {
       switch (change.kind) {
         case "link-plan-ref": {
@@ -102,6 +115,31 @@ export function openBranchWorkflowSession(
             scope: "plan-save",
             failure: `objective_node_claim clear read-back failed for node ${claim.node}`,
             equals: nodeClaimsEqual,
+          });
+        }
+        case "record-node-claim": {
+          const claim = change.claim;
+          // The idempotent re-claim short-circuit: an equal live claim rebuilds identically, so
+          // a re-append would carry no semantic payload (the claim has no timestamp).
+          if (nodeClaimsEqual(readNodeClaim(source), claim)) return { status: "unchanged" };
+          return appendWorkflowStateClassified(sink, source, {
+            data: { objective_node_claim: claim },
+            field: "objective_node_claim",
+            expected: claim,
+            scope: "objective-plan",
+            failure: `objective_node_claim read-back failed for #${claim.objective} node ${claim.node}`,
+            equals: nodeClaimsEqual,
+          });
+        }
+        case "link-objective": {
+          const objective = change.objective;
+          if (readActiveObjective(source) === objective) return { status: "unchanged" };
+          return appendWorkflowStateClassified(sink, source, {
+            data: { active_objective: objective },
+            field: "active_objective",
+            expected: objective,
+            scope: "objective-save",
+            failure: `active_objective read-back failed for #${objective}`,
           });
         }
       }

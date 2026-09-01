@@ -125,7 +125,7 @@ degrades to `plan_required`).
 ### Sweep ALL id consumers, not just decoders
 
 The relaxation's blast radius reached beyond the planned decoder list: the warm objective tools
-(`extension/factories/objectivePlan.ts`'s number-typed params, the `/objective-reconcile` `\d+` arg parser),
+(the objective-planning tools' formerly number-typed params, the `/objective-reconcile` `\d+` arg parser),
 `workflow run list`'s `isdigit()` PR-overlay gate, and `launch.py`'s checkpoint gate — which ALSO
 had a `provider != "github"` early-return that skipped Linear; both gates had to go. **Grep for
 `isdigit` / `\d+` / number-typed params when widening an id type.** The string-or-number tool-param
