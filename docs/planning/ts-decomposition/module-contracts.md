@@ -14,6 +14,15 @@ The governing rule is:
 
 ## Target topology
 
+> **Status (Objective #2130, Node 1.1):** planned → realized paths after the #2083 train
+> landed: `session/` — built as drawn. `config/perkConfig.ts` — not created; configuration
+> stayed `substrate/config.ts` (see § PerkConfig). `execution/reportWave.ts` — the wave
+> engine stayed `waves/` (see § ReportWave). `execution/stageRunner.ts` — stage drive
+> stayed `worker/stageExecution.ts` (see § StageRunner). `pi/v1/` — built as drawn.
+> `pi/application/` — not created (Phase 8; an explicit objective #2130 non-goal).
+> `doors/` (absent from the sketch) is 74% evacuated — 7 surviving modules, owed by
+> objective #2130 node 3.1.
+
 ```text
 extension/
   index.ts                     Pi composition root
@@ -156,6 +165,60 @@ layout remains a presentation concern.
 This division prevents the future contribution registry from becoming the
 authority for Perk prompt concerns. A registry carries the prose; the feature
 defines what it means.
+
+## Storage freedom
+
+> **Status (Objective #2130, Node 1.1):** this section pins the normative policy the
+> objective's Phase-2 work enforces and Phase-5 verifies. It is new with node 1.1; the
+> census below is the bounding input for node 2.3.
+
+### The rule
+
+Feature homes (`authoring/`, `delivery/`, `codeReview/`, `learning/`) must not observe
+session or branch storage. The Pi/session edge recovers context and passes
+runtime-validated values inward.
+
+The **deny set** — imports forbidden in feature homes:
+
+- `substrate/workflowState.ts` — raw workflow state (branch-backed state mechanics);
+- `substrate/sessionData.ts` — session-data mechanics;
+- the run-scratch surface of `substrate/cache.ts` — `scratchDir`, `runScratchDir`,
+  `ensureRunScratch`, `atomicWriteFileSync`;
+- `substrate/git.ts` — git bracketing.
+
+### The allow rule
+
+Legitimate domain file I/O is permitted: injectable fs probes with production defaults
+(existence or realpath checks over caller-supplied paths — e.g. resolved-containment
+verification) and pure path vocabulary. What distinguishes allowed domain I/O from
+storage mechanics is this classification: an allowed probe answers a question about a
+path the caller supplied; storage mechanics locate, read, or write Perk's own
+session/branch/run storage.
+
+### Enforcement
+
+- Objective #2130 node 2.3 extends the import-direction guard
+  (`extension/importDirectionGuard.test.ts`) with the deny set above — the Rule-D
+  sibling: storage freedom guarded like Pi freedom — and executes the `migrate-in-2.3`
+  rows below.
+- Objective #2130 node 5.1 verifies the final state against this section.
+
+### Census (as of commit `53fe2d7d`)
+
+One row per observed use in the feature homes, each re-verified by import inspection at
+the stamped commit. Classifications: `migrate-in-2.3` / `allowed-domain-I/O` /
+`owed-by-2.2` / `census correction — no feature-home use`.
+
+| File | Observed use | Classification | Rationale |
+| --- | --- | --- | --- |
+| `authoring/objective/dreamReportGate.ts` | imports `node:fs` (`existsSync`/`readFileSync`), `substrate/cache.ts::runScratchDir`, `substrate/git.ts::revalidationBracket`, `substrate/sessionData.ts` (`digestSessionData`, `SessionDataCtx`), and `substrate/workflowState.ts` (`branchOf`, `rebuildWorkflowState`, `WorkflowState`) | `migrate-in-2.3` | the full forbidden set — session storage recovered inside a feature home; 2.3 keeps the decision pure behind a runtime-minted narrow capability recovered at the Pi/session edge |
+| `delivery/ci.ts` | imports `node:fs` (`existsSync`/`mkdirSync`) and the `substrate/cache.ts` scratch writers (`atomicWriteFileSync`, `ensureRunScratch`, `scratchDir`); `CiCheckOutcome.executed` returns `scratchPath` | `migrate-in-2.3` | run-scratch imports are in the explicit deny set — scratch routing is session-storage mechanics, not domain I/O |
+| `learning/containment.ts` | `node:fs` `existsSync`/`realpathSync` as injectable production defaults for `verifyDocContainment`, the resolved-containment layer (symlink-escape detection); `lexicalContainmentError` is pure string/path normalization with no fs use | `allowed-domain-I/O` | injectable-default fs probes over caller-supplied paths for resolved-containment verification; not session-storage mechanics |
+| `learning/harvest.ts` | `node:fs` `existsSync` as the injectable default (`opts.exists ?? existsSync`) for `stampHarvestReport`'s pointer post-pass | `allowed-domain-I/O` | an injectable existence probe over caller-supplied doc paths; not session-storage mechanics |
+| `learning/dream.ts` | none — zero `node:fs`/file-read usage in the file | `census correction — no feature-home use` | the objective's census item is stale: the manifest/bundle file reads live at the Pi adapter `pi/v1/learning/dream.ts` (`existsSync`/`readFileSync`/`rmSync` — allowed by construction) and in `dreamReportGate.ts` (already classified above) |
+| `learning/dreamAnalysis.ts` | imports `digestSessionData` from `substrate/sessionData.ts` (a pure sha256 helper) | `migrate-in-2.3` | relocate or inject the pure digest helper so `substrate/sessionData.ts` can be module-level denied |
+| `authoring/gist/draft.ts`, `authoring/plan/draft.ts`, `authoring/objective/draft.ts` | type-only `SessionArtifactPointer` imports from `substrate/workflowState.ts` | `owed-by-2.2` | the session-receipt work replaces the exposed substrate pointer shape; explicitly outside 2.3's bucket |
+| `authoring/plan/save.ts`, `learning/prose.ts` | type-only `PlanRef` imports from `substrate/cache.ts` | `owed-by-2.2` | the same session-owned receipt/vocabulary work; explicitly outside 2.3's bucket |
 
 ## Feature modules
 
@@ -315,6 +378,15 @@ adapter disposal never deletes that state.
 
 ## PromptEvidence
 
+> **Disposition (Objective #2130, Node 1.1): deferred.** The value type was never built
+> (the Phase-2 narrow-until-proven rule, reaffirmed at every later phase). The inline
+> `branchCarries(activeContextWindow(branch), MARKER)` idiom is the realized shape of
+> context evidence; objective #2130 node 4.2 consolidates its repeated implementations
+> into one pi/v1 helper. The `PromptEvidence` value itself waits for a second context
+> projection — the format-4 host — whose adapter would give the type its second real
+> deriver. Until then this section documents the target semantics, not a binding
+> criterion (removed from the final acceptance criteria by node 1.1).
+
 `PromptEvidence` is an immutable value describing which Prose units are
 directly evidenced in the current Prompt assembly:
 
@@ -351,6 +423,19 @@ run-owned disposable files are neither `WorkflowSession` artifacts nor Pi
 application state.
 
 ## ReportWave
+
+> **Disposition (Objective #2130, Node 1.1): owed by objective #2130 node 2.1.** The
+> Node 5.1 status note in `migration-and-verification.md` recorded the opaque
+> `start`/`collect`/`run` + `ReportWaveRef` lifecycle as superseded by the kept
+> `startReportWave`/`runReportWave`-over-`WaveAdapter` shape; objective #2130 reverses
+> that disposition. The reversal rationale: the mechanism now has ten proven consumers
+> behind two adapters, yet nine `rpcAdapter` construction sites leak transport selection
+> to callers and pending state remains door-owned (`doors/pendingWave.ts`) — exactly the
+> caller-visible mechanics this section says the wave must own. Node 2.1 restores this
+> section's opaque lifecycle as one atomic layer; the realized lifecycle semantics it
+> must preserve (never-rejecting detached results, subscribe-before-spawn buffering, the
+> start-vs-run cancellation split, the pending-collect semantics) are enumerated in the
+> #2130 roadmap.
 
 `ReportWave` is the shared mechanism for asking several named reporters to
 produce reports and then collecting their outcomes. It owns:
@@ -395,6 +480,15 @@ isolation, cancellation, and recovery satisfy this interface.
 
 ## StageRunner
 
+> **Disposition (Objective #2130, Node 1.1): deferred.** The realized shape is SDK
+> confinement around `worker/stageExecution.ts::runStage` (the Phase-3 rename + private
+> SDK adapter + drive-session handle), not a `StageRunner` protocol object. Objective
+> #2130 node 4.1 narrows the module's exported surface to the real production interface.
+> The protocol object waits for a second execution root — the durable-drive host — whose
+> adapter would give the interface its second implementation. Until then this section
+> documents the confinement invariants the worker seam already enforces, not a binding
+> criterion (removed from the final acceptance criteria by node 1.1).
+
 `StageRunner` executes an actual registered Perk stage in a session-interior
 execution root. Its feature-facing shape stays small:
 
@@ -434,6 +528,15 @@ the allowlist after their maturity gate. A free-form task runner remains an
 unearned abstraction.
 
 ## PerkConfig
+
+> **Disposition (Objective #2130, Node 1.1): deferred.** Configuration stayed
+> `substrate/config.ts`; no `config/` directory was created. The motivating problem —
+> the `config.ts ⇄ bindings.ts` import cycle — was broken in place by Phase 1 (bindings
+> no longer import config vocabulary), so the module's cycle-breaking justification is
+> already satisfied without it. The directory is re-earned only when a real second host
+> or substrate consumer appears with its own configuration lifecycle. Until then this
+> section documents the ownership rules `substrate/config.ts` already obeys, not a
+> required move (removed from the final acceptance criteria by node 1.1).
 
 `config/` owns parsing, validation, defaults, and the typed `PerkConfig`.
 Configuration is decoded from the active `cwd` at the same session or
