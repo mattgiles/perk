@@ -10,8 +10,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
-import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
-import { RUN_KEY_PATTERN, type WaveAdapter } from "../waves/reportWave.ts";
+import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
+import { reportWaveOver, RUN_KEY_PATTERN } from "../waves/reportWave.ts";
+import type { WaveAdapter } from "../waves/transport.ts";
 import {
   AUDIT_VERDICT_SCHEMA,
   type AuditJudgmentOutcome,
@@ -219,7 +220,7 @@ test("judgeAuditBundle: packetized pairs only, ordinal-keyed, per-lane task comp
   const adapter = createMemoryWaveAdapter({});
   const writer = recordingWriter();
   const outcome = assertWritten(
-    await judgeAuditBundle(adapter, {
+    await judgeAuditBundle(reportWaveOver(adapter), {
       bundleDir: BUNDLE_DIR,
       manifest: m,
       writeVerdicts: writer.write,
@@ -288,7 +289,7 @@ test("judgeAuditBundle: every composed lane key satisfies the pi-subagents run-k
     { id: "\u2603", pairs: [pair("\u2603", "s5.jsonl")] },
   ]);
   const adapter = createMemoryWaveAdapter({});
-  await judgeAuditBundle(adapter, {
+  await judgeAuditBundle(reportWaveOver(adapter), {
     bundleDir: "/b",
     manifest: m,
     writeVerdicts: recordingWriter().write,
@@ -313,7 +314,7 @@ test("judgeAuditBundle: the spawn contract — schema, best-effort, model forwar
   };
 
   const withModel = createMemoryWaveAdapter({ aggregate });
-  await judgeAuditBundle(withModel, {
+  await judgeAuditBundle(reportWaveOver(withModel), {
     bundleDir: "/b",
     manifest: m,
     writeVerdicts: recordingWriter().write,
@@ -330,7 +331,7 @@ test("judgeAuditBundle: the spawn contract — schema, best-effort, model forwar
   assert.equal(withModel.calls.spawn.length, 1, "ONE attempt, no retry");
 
   const withoutModel = createMemoryWaveAdapter({ aggregate });
-  await judgeAuditBundle(withoutModel, {
+  await judgeAuditBundle(reportWaveOver(withoutModel), {
     bundleDir: "/b",
     manifest: m,
     writeVerdicts: recordingWriter().write,
@@ -344,7 +345,7 @@ test("judgeAuditBundle: a zero-exercising manifest short-circuits — no launch,
   const adapter = createMemoryWaveAdapter({});
   const writer = recordingWriter();
   const outcome = assertWritten(
-    await judgeAuditBundle(adapter, {
+    await judgeAuditBundle(reportWaveOver(adapter), {
       bundleDir: BUNDLE_DIR,
       manifest: manifest([{ id: GRILL, pairs: [] }]),
       writeVerdicts: writer.write,
@@ -367,7 +368,7 @@ test("judgeAuditBundle: an all-degraded manifest short-circuits with the degrade
   const adapter = createMemoryWaveAdapter({});
   const writer = recordingWriter();
   const outcome = assertWritten(
-    await judgeAuditBundle(adapter, {
+    await judgeAuditBundle(reportWaveOver(adapter), {
       bundleDir: BUNDLE_DIR,
       manifest: manifest([{ id: GRILL, pairs: [twinA, twinB] }]),
       writeVerdicts: writer.write,
@@ -392,7 +393,7 @@ test("judgeAuditBundle: a packetized pair without packet_path degrades (defensiv
   const broken = pair(GRILL, "s1.jsonl", { packet_path: null });
   const adapter = createMemoryWaveAdapter({});
   const writer = recordingWriter();
-  await judgeAuditBundle(adapter, {
+  await judgeAuditBundle(reportWaveOver(adapter), {
     bundleDir: BUNDLE_DIR,
     manifest: manifest([{ id: GRILL, pairs: [broken] }]),
     writeVerdicts: writer.write,
@@ -459,7 +460,7 @@ test("judgeAuditBundle: the write matrix — report / lane-failed / malformed / 
   });
   const writer = recordingWriter();
   const outcome = assertWritten(
-    await judgeAuditBundle(adapter, {
+    await judgeAuditBundle(reportWaveOver(adapter), {
       bundleDir: BUNDLE_DIR,
       manifest: m,
       writeVerdicts: writer.write,
@@ -605,7 +606,7 @@ test("judgeAuditBundle: the sanitizer rejects each out-of-vocabulary field indep
   });
   const writer = recordingWriter();
   const outcome = assertWritten(
-    await judgeAuditBundle(adapter, {
+    await judgeAuditBundle(reportWaveOver(adapter), {
       bundleDir: BUNDLE_DIR,
       manifest: m,
       writeVerdicts: writer.write,
@@ -643,7 +644,7 @@ test("judgeAuditBundle: a wave-level failure fails ALL planned lanes with the wa
   const m = manifest([{ id: GRILL, pairs: [pair(GRILL, "s1.jsonl"), pair(GRILL, "s2.jsonl")] }]);
   const writer = recordingWriter();
   const outcome = assertWritten(
-    await judgeAuditBundle(createMemoryWaveAdapter({ ping: null }), {
+    await judgeAuditBundle(reportWaveOver(createMemoryWaveAdapter({ ping: null })), {
       bundleDir: BUNDLE_DIR,
       manifest: m,
       writeVerdicts: writer.write,
@@ -684,7 +685,7 @@ test("judgeAuditBundle: a mid-flight abort stops the run, fails the lanes, and s
   const m = manifest([{ id: GRILL, pairs: [pair(GRILL, "s1.jsonl"), pair(GRILL, "s2.jsonl")] }]);
   const writer = recordingWriter();
   const outcome = assertWritten(
-    await judgeAuditBundle(adapter, {
+    await judgeAuditBundle(reportWaveOver(adapter), {
       bundleDir: BUNDLE_DIR,
       manifest: m,
       writeVerdicts: writer.write,
@@ -711,7 +712,7 @@ test("judgeAuditBundle: a pre-aborted signal settles as cancelled — no spawn, 
   const m = manifest([{ id: GRILL, pairs: [pair(GRILL, "s1.jsonl")] }]);
   const writer = recordingWriter();
   const outcome = assertWritten(
-    await judgeAuditBundle(adapter, {
+    await judgeAuditBundle(reportWaveOver(adapter), {
       bundleDir: BUNDLE_DIR,
       manifest: m,
       writeVerdicts: writer.write,
@@ -737,7 +738,7 @@ test("judgeAuditBundle: a throwing writer returns write_failed with the in-memor
       value: [{ key: laneKey(1), ok: true, error: null, report: report("s1.jsonl") }],
     },
   });
-  const outcome = await judgeAuditBundle(adapter, {
+  const outcome = await judgeAuditBundle(reportWaveOver(adapter), {
     bundleDir: BUNDLE_DIR,
     manifest: m,
     writeVerdicts: () => {

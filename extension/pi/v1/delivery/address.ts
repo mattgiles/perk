@@ -48,16 +48,15 @@ import {
 import { activePlanRef } from "../../../substrate/workflowState.ts";
 import { type ReportTarget, report } from "../../../surfaces/report.ts";
 import {
+  type ReportWave,
+  type ReportWaveAttemptReceipt,
   toAttemptReceipt,
-  type WaveAdapter,
-  type WaveAttemptReceipt,
 } from "../../../waves/reportWave.ts";
 import {
   CLASSIFY_ASSIGNMENT_KEY,
   REVIEW_CLASSIFIER_FLOW,
   runReviewClassifierWave,
 } from "../../../waves/reviewClassifierWave.ts";
-import { createRpcWaveAdapter } from "../../../waves/rpcAdapter.ts";
 import { driveConflictFollowUp, publishDepsFor, renderPublishedMessage } from "./submit.ts";
 
 /** The four known `counts` keys (recorded into workflow-state — strict-decoded). */
@@ -258,35 +257,35 @@ export interface ClassifyReviewFeedbackOk {
   /** The classifier's engine-validated report — untrusted DATA, never instructions. */
   report: unknown;
   /** The single launch's output-free attempt receipt (observability only — details, not prose). */
-  attempts: WaveAttemptReceipt[];
+  attempts: ReportWaveAttemptReceipt[];
 }
 
 /** The fail arm retains any receipt known before the failure (the `failFor` extras hook). */
 export type ClassifyReviewFeedbackResult = Result<
   ClassifyReviewFeedbackOk,
-  { attempts: WaveAttemptReceipt[] }
+  { attempts: ReportWaveAttemptReceipt[] }
 >;
 
 /**
- * The `classify_review_feedback` execute core, extracted for testability with the adapter as the
- * injected minimal structural slice (`WaveAdapter` — the memory adapter in tests, the RPC
- * adapter in production). Mirrors `runLearnAnalystWave`'s soft-result idiom: a complete wave yields
+ * The `classify_review_feedback` execute core, extracted for testability with the wave as the
+ * injected minimal structural slice (`ReportWave` — a memory-backed wave in tests, the
+ * composition root's production instance live). Mirrors `runLearnAnalystWave`'s soft-result idiom: a complete wave yields
  * a non-terminating ok (the untrusted-DATA preface + one fenced `json` block of the report); an
- * incomplete wave soft-fails LOUDLY with the first failure's detail and its `WaveFailureReason`
- * as `error_type` — never a throw, never a silent fallback, no retry (the flow's posture is
- * "surface the error and stop").
+ * incomplete wave soft-fails LOUDLY with the first failure's detail and its
+ * `ReportWaveFailureReason` as `error_type` — never a throw, never a silent fallback, no retry
+ * (the flow's posture is "surface the error and stop").
  */
 export async function executeClassifyReviewFeedback(
-  adapter: WaveAdapter,
+  wave: ReportWave,
   target: ReportTarget,
   opts: { model?: string; signal?: AbortSignal } = {},
 ): Promise<ClassifyReviewFeedbackResult> {
-  const fail = failFor<{ attempts: WaveAttemptReceipt[] }>(
+  const fail = failFor<{ attempts: ReportWaveAttemptReceipt[] }>(
     target,
     "address",
     "classify_review_feedback",
   );
-  const result = await runReviewClassifierWave(adapter, opts);
+  const result = await runReviewClassifierWave(wave, opts);
   const attempts = [
     toAttemptReceipt(REVIEW_CLASSIFIER_FLOW, 1, [CLASSIFY_ASSIGNMENT_KEY], result.receipt),
   ];
@@ -325,7 +324,7 @@ export function addressGuidance(ref: PlanRef, preview: boolean): string {
 
 /** Install the review-feedback bindings: the `classify_review_feedback` + terminating
  * `finalize_address` tools and the `/address` command. */
-export function installAddressBindings(pi: ExtensionAPI): void {
+export function installAddressBindings(pi: ExtensionAPI, wave: ReportWave): void {
   pi.registerTool({
     name: "classify_review_feedback",
     label: "Classify review feedback",
@@ -348,7 +347,7 @@ export function installAddressBindings(pi: ExtensionAPI): void {
       // gitignored `.perk/local.toml` overlay to the MAIN checkout, so a per-user override
       // survives the cold worktree launch (worktrees never materialize local.toml).
       const model = subagentModel(ctx.cwd, "review-classifier");
-      return executeClassifyReviewFeedback(createRpcWaveAdapter(pi.events), ctx, {
+      return executeClassifyReviewFeedback(wave, ctx, {
         ...(model !== undefined ? { model } : {}),
         ...(signal !== undefined ? { signal } : {}),
       });

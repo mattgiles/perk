@@ -39,7 +39,8 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../testing/harness.ts";
-import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
+import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
+import { reportWaveOver } from "../waves/reportWave.ts";
 import {
   clearDraftReviewContext,
   createDraftReviewWaveState,
@@ -97,7 +98,7 @@ async function draftContextPrimed(): Promise<boolean> {
   const target = { hasUI: false, ui: undefined } as unknown as ReportTarget;
   const result = await executeStartDraftReviewWave(
     draftReview,
-    createMemoryWaveAdapter({ ping: null }),
+    reportWaveOver(createMemoryWaveAdapter({ ping: null })),
     target,
     {
       angles: ["grounding", "risk"],
@@ -808,7 +809,9 @@ test("open core: primes BOTH surfaces (plan mode + objective draft type), RETURN
   // (probed through a spawn-recording adapter whose spawn fails — nothing stays pending).
   const spawns = createMemoryWaveAdapter({ spawnError: "probe only" });
   const target = { hasUI: false, ui: undefined } as unknown as ReportTarget;
-  await executeStartDraftReviewWave(draftReview, spawns, target, { angles: ["grounding", "risk"] });
+  await executeStartDraftReviewWave(draftReview, reportWaveOver(spawns), target, {
+    angles: ["grounding", "risk"],
+  });
   const script = spawns.calls.spawn[0]?.workflowScript ?? "";
   assert.match(script, /Draft type: objective\./, "the wave reviews the objective draft type");
   assert.ok(

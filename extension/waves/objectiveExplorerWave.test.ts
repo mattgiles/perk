@@ -9,7 +9,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
-import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
+import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
+import { reportWaveOver } from "./reportWave.ts";
 import {
   EXPLORE_ASSIGNMENT_KEY,
   explorerLaneTask,
@@ -115,7 +116,7 @@ test("explorerLaneTask: the focus-present arm appends the focus as untrusted DAT
 
 test("runObjectiveExplorerWave: ONE lane with the fixed flow/key/agent, module contract + acceptance-none", async () => {
   const adapter = createMemoryWaveAdapter({ aggregate: okAggregate() });
-  const result = await runObjectiveExplorerWave(adapter, {
+  const result = await runObjectiveExplorerWave(reportWaveOver(adapter), {
     node: "2.3",
     description: "Wire the adapter seam",
     focus: "map the config consumers",
@@ -152,7 +153,7 @@ test("runObjectiveExplorerWave: ONE lane with the fixed flow/key/agent, module c
 
 test("runObjectiveExplorerWave: no configured model → no model key on the spawn", async () => {
   const adapter = createMemoryWaveAdapter({ aggregate: okAggregate() });
-  await runObjectiveExplorerWave(adapter, { node: "2.3", description: "Wire the adapter seam" });
+  await runObjectiveExplorerWave(reportWaveOver(adapter), { node: "2.3", description: "Wire the adapter seam" });
   assert.ok(adapter.calls.spawn[0] !== undefined && !("model" in adapter.calls.spawn[0]));
 });
 
@@ -165,7 +166,7 @@ test("runObjectiveExplorerWave: a failed lane is incomplete under strict (no ret
       value: [{ key: EXPLORE_ASSIGNMENT_KEY, ok: false, error: "explorer exploded", report: null }],
     },
   });
-  const result = await runObjectiveExplorerWave(adapter, {
+  const result = await runObjectiveExplorerWave(reportWaveOver(adapter), {
     node: "2.3",
     description: "Wire the adapter seam",
   });
@@ -178,7 +179,7 @@ test("runObjectiveExplorerWave: a failed lane is incomplete under strict (no ret
 });
 
 test("runObjectiveExplorerWave: an unavailable adapter degrades loudly (wave-level failure)", async () => {
-  const result = await runObjectiveExplorerWave(createMemoryWaveAdapter({ ping: null }), {
+  const result = await runObjectiveExplorerWave(reportWaveOver(createMemoryWaveAdapter({ ping: null })), {
     node: "2.3",
     description: "Wire the adapter seam",
   });

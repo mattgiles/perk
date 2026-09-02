@@ -1,23 +1,22 @@
-// The `/learn` flow's analyst-wave policy over the shared report-wave runner: the analyst
+// The `/learn` flow's analyst-wave policy over the shared report-wave module: the analyst
 // fan-out as CODE. It owns the four learn angles, the analyst report schema, the tool-enforced
 // angle policy (2–4 angles, `session-deviations` mandatory — parse-don't-validate), the
 // assignment/task composition, and the typed outcome mapping — delegating spawn/timeout/
-// aggregate mechanics to `runReportWave` under the `best-effort` completeness policy (a failed
+// aggregate mechanics to `wave.run` under the `best-effort` completeness policy (a failed
 // analyst is an explicitly-reported skipped angle, never a failed pass). Analyst reports come
 // back as engine-validated structured output (the workflow-level `outputSchema` → the injected
 // `structured_output` tool).
 //
-// Pi-free by construction: the `WaveAdapter` injection seam (one of reportWave's sanctioned
-// transport re-exports) is the only mechanism edge; the adapter constructs and threads it.
+// Pi-free by construction: the `ReportWave` seam is the only mechanism edge; the adapter
+// constructs the wave at the composition root and threads it.
 
 import { join } from "node:path";
 import {
   type ReportAssignment,
-  runReportWave,
+  type ReportWave,
+  type ReportWaveAttemptReceipt,
+  type ReportWaveFailureReason,
   toAttemptReceipt,
-  type WaveAdapter,
-  type WaveAttemptReceipt,
-  type WaveFailureReason,
 } from "../waves/reportWave.ts";
 import { CAPTURED_DECISIONS } from "./capture.ts";
 
@@ -158,15 +157,15 @@ function assignmentTask(
 export type LearnWaveOutcome =
   | {
       kind: "wave_failed";
-      reason: WaveFailureReason;
+      reason: ReportWaveFailureReason;
       detail: string;
-      attempts: WaveAttemptReceipt[];
+      attempts: ReportWaveAttemptReceipt[];
     }
   | {
       kind: "complete";
       reports: { angle: string; report: unknown }[];
-      skipped: { angle: string; reason: WaveFailureReason; detail: string }[];
-      attempts: WaveAttemptReceipt[];
+      skipped: { angle: string; reason: ReportWaveFailureReason; detail: string }[];
+      attempts: ReportWaveAttemptReceipt[];
     };
 
 /**
@@ -175,13 +174,13 @@ export type LearnWaveOutcome =
  * completeness (assignment failure = a skipped angle; only a wave-level failure — found via
  * `key === null` — makes the outcome `wave_failed`). ONE attempt, no retry — the receipt rides
  * the outcome for observability only. Assumes a validated selection (`parseAngleSelections`
- * runs at the tool boundary); the runner's programmer-error throws (empty/duplicate keys)
- * remain the backstop. Cancellation: the caller's `AbortSignal` threads into `runReportWave`;
+ * runs at the tool boundary); the wave's programmer-error throws (empty/duplicate keys)
+ * remain the backstop. Cancellation: the caller's `AbortSignal` threads into `wave.run`;
  * an abort settles the wave as `cancelled` with a best-effort stop of an already-launched run,
  * normalized into the outcome — never a throw; the wave does not outlive the abort.
  */
 export async function runLearnAnalystWave(
-  adapter: WaveAdapter,
+  wave: ReportWave,
   opts: {
     bundleDir: string;
     selections: LearnAngleSelection[];
@@ -197,8 +196,7 @@ export async function runLearnAnalystWave(
     phase: "learn",
     task: assignmentTask(selection, manifestPath, opts.bundleDir),
   }));
-  const result = await runReportWave(
-    adapter,
+  const result = await wave.run(
     {
       flow: "learn",
       assignments,
@@ -206,7 +204,7 @@ export async function runLearnAnalystWave(
       completeness: "best-effort",
       ...(opts.model !== undefined ? { model: opts.model } : {}),
     },
-    opts.signal,
+    { signal: opts.signal },
   );
   // The learn flow has no retry — ONE attempt over the validated selection.
   const attempts = [

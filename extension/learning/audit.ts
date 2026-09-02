@@ -25,18 +25,16 @@
 // lanes and degrade honestly (`lane-failed`, named detail) instead of grading the wrong
 // transcript.
 //
-// Pi-free by construction: the `WaveAdapter` injection seam and the function-shaped
-// `writeVerdicts` capability are the only mechanism edges; the adapter constructs and threads
-// them.
+// Pi-free by construction: the `ReportWave` seam and the function-shaped `writeVerdicts`
+// capability are the only mechanism edges; the adapter constructs and threads them.
 
 import { join } from "node:path";
-import {
-  type AssignmentFailure,
-  type ReportAssignment,
-  runReportWave,
-  type WaveAdapter,
-  type WaveLevelFailureReason,
-  type WaveResult,
+import type {
+  AssignmentFailure,
+  ReportAssignment,
+  ReportWave,
+  ReportWaveLevelFailureReason,
+  ReportWaveResult,
 } from "../waves/reportWave.ts";
 
 /** The tri-state verdict vocabulary — the single source both the schema enum and the
@@ -337,7 +335,7 @@ export interface AuditSkippedPair {
  */
 export type AuditWaveStatus =
   | { complete: true }
-  | { complete: false; failure: { reason: WaveLevelFailureReason; detail: string } };
+  | { complete: false; failure: { reason: ReportWaveLevelFailureReason; detail: string } };
 
 /** The typed judgment outcome: verdicts persisted (with the wave status + the written lanes),
  * or the write itself failed (the in-memory lanes attached so a caller can still present the
@@ -374,9 +372,9 @@ function integerArrayOf(value: unknown): number[] | null {
 
 /** Correlate the wave result into the typed status: the found `key === null` failure IS the
  * incompleteness (under `best-effort`, one exists exactly when the wave is incomplete), and the
- * discriminated `WaveFailure` union already pins a null-key failure's reason to the wave-level
- * subset — no local re-narrowing. */
-function waveStatusOf(result: WaveResult): AuditWaveStatus {
+ * discriminated `ReportWaveFailure` union already pins a null-key failure's reason to the
+ * wave-level subset — no local re-narrowing. */
+function waveStatusOf(result: ReportWaveResult): AuditWaveStatus {
   const failure = result.failures.find((f) => f.key === null);
   if (failure === undefined) return { complete: true };
   return {
@@ -463,7 +461,7 @@ function degradeLanes(plan: AuditLanePlan): AuditVerdictLane[] {
 function assembleLanes(
   plan: AuditLanePlan,
   wave: AuditWaveStatus,
-  result: WaveResult,
+  result: ReportWaveResult,
 ): AuditVerdictLane[] {
   const reportsByKey = new Map(result.reports.map((r) => [r.key, r.report]));
   const failuresByKey = new Map<string, AssignmentFailure>();
@@ -511,7 +509,7 @@ function assembleLanes(
  * wave-level failure, never a throw) — verdicts are still written.
  */
 export async function judgeAuditBundle(
-  adapter: WaveAdapter,
+  wave: ReportWave,
   opts: {
     bundleDir: string;
     manifest: AuditManifest;
@@ -522,14 +520,13 @@ export async function judgeAuditBundle(
 ): Promise<AuditJudgmentOutcome> {
   const plan = buildAuditLanes(opts.manifest, opts.bundleDir);
 
-  let wave: AuditWaveStatus;
+  let status: AuditWaveStatus;
   let lanes: AuditVerdictLane[];
   if (plan.planned.length === 0) {
-    wave = { complete: true };
+    status = { complete: true };
     lanes = degradeLanes(plan);
   } else {
-    const result = await runReportWave(
-      adapter,
+    const result = await wave.run(
       {
         flow: "audit",
         assignments: plan.planned.map((p) => p.lane),
@@ -537,10 +534,10 @@ export async function judgeAuditBundle(
         completeness: "best-effort",
         ...(opts.model !== undefined ? { model: opts.model } : {}),
       },
-      opts.signal,
+      { signal: opts.signal },
     );
-    wave = waveStatusOf(result);
-    lanes = assembleLanes(plan, wave, result);
+    status = waveStatusOf(result);
+    lanes = assembleLanes(plan, status, result);
   }
 
   const skippedPairs: AuditSkippedPair[] = plan.skipped.map((pair) => ({
@@ -557,5 +554,5 @@ export async function judgeAuditBundle(
     const detail = error instanceof Error ? error.message : String(error);
     return { kind: "write_failed", detail, lanes };
   }
-  return { kind: "verdicts_written", wave, lanes, skippedPairs, verdictsPath };
+  return { kind: "verdicts_written", wave: status, lanes, skippedPairs, verdictsPath };
 }

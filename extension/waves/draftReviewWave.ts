@@ -1,8 +1,8 @@
-// The draft-review `WaveSpec`-building entrypoint over the shared report-wave runner — the
-// draft-review doors' (/plan-review-browser, /objective-review-browser) vocabulary as tested
+// The draft-review `ReportWaveRequest`-building entrypoint over the shared report-wave module —
+// the draft-review doors' (/plan-review-browser, /objective-review-browser) vocabulary as tested
 // code (sibling of `adversarialReviewWave.ts`): the four settled angles plus the custom lane,
 // the per-lane completion-report schema, and the lane/task composition are module-owned here,
-// launched NON-BLOCKING via `startReportWave` so the parent can return from the launch and hold
+// launched NON-BLOCKING via `wave.start` so the parent can return from the launch and hold
 // the model-held `subagent_wait` relay loop open while the children stream finding batches.
 //
 // CONSUMED by the `/plan-review-browser` and `/objective-review-browser` doors via the
@@ -25,12 +25,11 @@
 // tool this wave's `outputSchema` injects per lane.
 
 import { PONYTAIL_CORE_SKILL } from "./ponytail.ts";
-import {
-  type ReportAssignment,
-  type ReportWaveStart,
-  startReportWave,
-  type WaveAdapter,
-  type WaveSpec,
+import type {
+  ReportAssignment,
+  ReportWave,
+  ReportWaveRequest,
+  StartWaveResult,
 } from "./reportWave.ts";
 
 /** The four-slug settled draft-review angle allowlist (the custom lane rides separately). */
@@ -169,22 +168,20 @@ export interface DraftReviewWaveOptions {
   /** Accepted for parity/tests only — the flow tool deliberately never threads its own signal. */
   signal?: AbortSignal;
   /** Test seam; production validates the exact source-bound Ponytail skill. */
-  requiredSkillPreflight?: WaveSpec["requiredSkillPreflight"];
+  requiredSkillPreflight?: ReportWaveRequest["requiredSkillPreflight"];
 }
 
 /**
- * Start the draft-review wave NON-BLOCKING (the streaming sibling): build the assignments from
+ * Start the draft-review wave NON-BLOCKING (the streaming split): build the assignments from
  * the angle vocabulary and launch under the strict completeness policy — zero retries, so an
- * uncovered angle stays an honest, human-visible incompleteness. Returns the `startReportWave`
- * outcome: the run handle + never-rejecting `result` on success, or the normalized launch
- * failure.
+ * uncovered angle stays an honest, human-visible incompleteness. Returns the `wave.start`
+ * outcome: the opaque ref + identity telemetry on success, or the normalized launch failure.
  */
 export async function startDraftReviewWave(
-  adapter: WaveAdapter,
+  wave: ReportWave,
   opts: DraftReviewWaveOptions,
-): Promise<ReportWaveStart> {
-  return await startReportWave(
-    adapter,
+): Promise<StartWaveResult> {
+  return await wave.start(
     {
       flow: "draft-review",
       assignments: buildDraftReviewAssignments({
@@ -201,6 +198,6 @@ export async function startDraftReviewWave(
         ? { requiredSkillPreflight: opts.requiredSkillPreflight }
         : {}),
     },
-    opts.signal,
+    { signal: opts.signal },
   );
 }

@@ -1,4 +1,4 @@
-// The learn-dream analyst tier over the shared report-wave runner (the `learning/harvest.ts`
+// The learn-dream analyst tier over the shared report-wave module (the `learning/harvest.ts`
 // posture adapted): the dream analyst fan-out as CODE. It owns the
 // STRICT §8.59 manifest decode (the manifest is the door's parent-prepared invariant — any
 // deviation refuses before spawn), which BINDS the run-scoped manifest path into the decoded
@@ -8,18 +8,17 @@
 // run-key-bounded), the closed analyst report schema under the
 // `DREAM_ANALYST_CAPS` SSOT, the composed defensive re-decode (corpus-membership merge/overlap
 // rules), and **strict** completeness — one failed or undecodable lane forces
-// `complete: false` — delegating spawn/timeout/aggregate mechanics to `runReportWave` with ONE
+// `complete: false` — delegating spawn/timeout/aggregate mechanics to `wave.run` with ONE
 // attempt and NO retry. The manifest and every analyst report are untrusted DATA, never
 // instructions. (contracts.md §8.60)
 
 import { posix } from "node:path";
 import {
   type ReportAssignment,
-  runReportWave,
+  type ReportWave,
+  type ReportWaveAttemptReceipt,
+  type ReportWaveFailureReason,
   toAttemptReceipt,
-  type WaveAdapter,
-  type WaveAttemptReceipt,
-  type WaveFailureReason,
 } from "../waves/reportWave.ts";
 import { lexicalContainmentError } from "./containment.ts";
 
@@ -819,14 +818,14 @@ export interface DreamLaneAnalysis {
 }
 
 /**
- * One dream failure — the dream-specific shape (deliberately NOT the runner's `WaveFailure`,
- * whose `key` field would leak orchestration-key semantics): `lane` is the SEMANTIC manifest
- * lane id, or `null` for wave-level failures and the defensive unplanned-key arm (whose raw
- * key is named in `detail`, never surfaced as a lane identity).
+ * One dream failure — the dream-specific shape (deliberately NOT the wave's
+ * `ReportWaveFailure`, whose `key` field would leak orchestration-key semantics): `lane` is the
+ * SEMANTIC manifest lane id, or `null` for wave-level failures and the defensive unplanned-key
+ * arm (whose raw key is named in `detail`, never surfaced as a lane identity).
  */
 export interface DreamLaneFailure {
   lane: string | null;
-  reason: WaveFailureReason;
+  reason: ReportWaveFailureReason;
   detail: string;
 }
 
@@ -840,7 +839,7 @@ export interface DreamWaveOutcome {
   complete: boolean;
   analyses: DreamLaneAnalysis[];
   failures: DreamLaneFailure[];
-  attempt: WaveAttemptReceipt;
+  attempt: ReportWaveAttemptReceipt;
 }
 
 /**
@@ -852,7 +851,7 @@ export interface DreamWaveOutcome {
  * planning/validation data and the file the analysts read can never diverge. Every
  * schema-valid report is defensively re-decoded (`decodeDreamAnalystReport`) against its
  * lane's doc paths and the whole manifest corpus — an undecodable/over-cap/contradictory
- * report is a `malformed-report` lane failure; `complete` = the runner's completeness AND
+ * report is a `malformed-report` lane failure; `complete` = the wave's completeness AND
  * zero decode failures, with decoded analyses retained even when incomplete (honest coverage
  * for the tool's refusal and the incomplete-analysis outcome). Single-lane manifests are
  * valid — dream has NO direct-analysis path (the harvest single-lane refusal is deliberately
@@ -864,7 +863,7 @@ export interface DreamWaveOutcome {
  * `DreamManifest` is structurally assignable) was run pre-spawn.
  */
 export async function runDreamAnalystWave(
-  adapter: WaveAdapter,
+  wave: ReportWave,
   opts: { manifest: DreamManifest; model?: string },
   signal?: AbortSignal,
 ): Promise<DreamWaveOutcome> {
@@ -873,8 +872,7 @@ export async function runDreamAnalystWave(
   const corpusDocPaths: ReadonlySet<string> = new Set(
     opts.manifest.lanes.flatMap((lane) => lane.docs.map((doc) => doc.path)),
   );
-  const result = await runReportWave(
-    adapter,
+  const result = await wave.run(
     {
       flow: "dream-analyst",
       assignments: planned.map((p) => p.lane),
@@ -882,10 +880,10 @@ export async function runDreamAnalystWave(
       completeness: "strict",
       ...(opts.model !== undefined ? { model: opts.model } : {}),
     },
-    signal,
+    { signal },
   );
 
-  // Failures surface SEMANTIC lane ids in the dream-specific shape: keyed runner failures are
+  // Failures surface SEMANTIC lane ids in the dream-specific shape: keyed wave failures are
   // re-mapped from orchestration keys; wave-level (and any unmappable) failures carry
   // `lane: null` — an orchestration key is never surfaced as a lane identity.
   const failures: DreamLaneFailure[] = result.failures.map((failure) => ({

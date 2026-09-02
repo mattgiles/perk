@@ -12,7 +12,8 @@ import assert from "node:assert/strict";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { digestSessionData } from "../substrate/sessionData.ts";
-import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
+import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
+import { reportWaveOver } from "../waves/reportWave.ts";
 import { type DreamManifest, decodeDreamManifest } from "./dream.ts";
 import {
   analyzeDream,
@@ -276,7 +277,7 @@ test("analyzeDream: an incomplete first wave skips write + reducers (entry remov
   });
   const spies = bundleSpies();
   const details = aggregateOf(
-    await analyzeDream(adapter, {
+    await analyzeDream(reportWaveOver(adapter), {
       manifest,
       manifestDigest: MANIFEST_DIGEST,
       markBundleDigest: spies.markBundleDigest,
@@ -349,7 +350,7 @@ test("analyzeDream: an over-budget bundle refuses with accounting — nothing wr
   const adapter = createMemoryWaveAdapter({ aggregate });
   const spies = bundleSpies();
   const details = aggregateOf(
-    await analyzeDream(adapter, {
+    await analyzeDream(reportWaveOver(adapter), {
       manifest,
       manifestDigest: MANIFEST_DIGEST,
       markBundleDigest: spies.markBundleDigest,
@@ -385,7 +386,7 @@ test("analyzeDream: a throwing entry-time removal is a typed io_failed refusal �
   const manifest = TWO_LANE_MANIFEST();
   const adapter = createMemoryWaveAdapter();
   const spies = bundleSpies();
-  const outcome = await analyzeDream(adapter, {
+  const outcome = await analyzeDream(reportWaveOver(adapter), {
     manifest,
     manifestDigest: MANIFEST_DIGEST,
     markBundleDigest: spies.markBundleDigest,
@@ -416,7 +417,7 @@ test("analyzeDream: an UNVERIFIED marker clear refuses io_failed before ANY file
   // no such mixed state) can happen — asserted here with a remove spy that would also fail.
   const adapter = createMemoryWaveAdapter();
   const spies = bundleSpies({ clearFails: true });
-  const outcome = await analyzeDream(adapter, {
+  const outcome = await analyzeDream(reportWaveOver(adapter), {
     manifest: TWO_LANE_MANIFEST(),
     manifestDigest: MANIFEST_DIGEST,
     markBundleDigest: spies.markBundleDigest,
@@ -447,7 +448,7 @@ test("analyzeDream: a bundle-write throw is the io_failed arm retaining analyses
   const manifest = TWO_LANE_MANIFEST();
   const adapter = createMemoryWaveAdapter({ aggregate: completeAnalystAggregate() });
   const spies = bundleSpies({ writeThrows: "disk full" });
-  const outcome = await analyzeDream(adapter, {
+  const outcome = await analyzeDream(reportWaveOver(adapter), {
     manifest,
     manifestDigest: MANIFEST_DIGEST,
     markBundleDigest: spies.markBundleDigest,
@@ -473,7 +474,7 @@ test("analyzeDream: the happy path — analyst write, reducers read it, finalize
   });
   const spies = bundleSpies();
   const details = aggregateOf(
-    await analyzeDream(adapter, {
+    await analyzeDream(reportWaveOver(adapter), {
       manifest,
       manifestDigest: MANIFEST_DIGEST,
       markBundleDigest: spies.markBundleDigest,
@@ -566,7 +567,7 @@ test("analyzeDream: a finalize-write throw is the second io_failed arm — marke
     aggregates: [completeAnalystAggregate(), completeReducerAggregate()],
   });
   const spies = bundleSpies({ finalizeThrows: "disk full at finalize" });
-  const outcome = await analyzeDream(adapter, {
+  const outcome = await analyzeDream(reportWaveOver(adapter), {
     manifest,
     manifestDigest: MANIFEST_DIGEST,
     markBundleDigest: spies.markBundleDigest,
@@ -598,7 +599,7 @@ test("analyzeDream: a failed marker set is an honestly-incomplete aggregate, nev
   });
   const spies = bundleSpies({ setFails: true });
   const details = aggregateOf(
-    await analyzeDream(adapter, {
+    await analyzeDream(reportWaveOver(adapter), {
       manifest,
       manifestDigest: MANIFEST_DIGEST,
       markBundleDigest: spies.markBundleDigest,
@@ -626,7 +627,7 @@ test("analyzeDream: a drifted bracket skips the finalize AND the marker set", as
   });
   const spies = bundleSpies({ drift: "HEAD moved from aaa to bbb" });
   const details = aggregateOf(
-    await analyzeDream(adapter, {
+    await analyzeDream(reportWaveOver(adapter), {
       manifest,
       manifestDigest: MANIFEST_DIGEST,
       markBundleDigest: spies.markBundleDigest,
@@ -677,7 +678,7 @@ test("analyzeDream: a reducer lane failure ⇒ complete: false with analyses ret
   });
   const spies = bundleSpies();
   const details = aggregateOf(
-    await analyzeDream(adapter, {
+    await analyzeDream(reportWaveOver(adapter), {
       manifest,
       manifestDigest: MANIFEST_DIGEST,
       markBundleDigest: spies.markBundleDigest,
@@ -713,7 +714,7 @@ test("analyzeDream: cancellation at the glue boundary — no reducer spawn after
   const controller = new AbortController();
   const spies = bundleSpies();
   const details = aggregateOf(
-    await analyzeDream(adapter, {
+    await analyzeDream(reportWaveOver(adapter), {
       manifest,
       manifestDigest: MANIFEST_DIGEST,
       markBundleDigest: spies.markBundleDigest,

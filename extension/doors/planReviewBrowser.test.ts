@@ -38,7 +38,8 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../testing/harness.ts";
-import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
+import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
+import { reportWaveOver } from "../waves/reportWave.ts";
 import {
   clearDraftReviewContext,
   createDraftReviewWaveState,
@@ -96,7 +97,7 @@ async function draftContextPrimed(): Promise<boolean> {
   const target = { hasUI: false, ui: undefined } as unknown as ReportTarget;
   const result = await executeStartDraftReviewWave(
     draftReview,
-    createMemoryWaveAdapter({ ping: null }),
+    reportWaveOver(createMemoryWaveAdapter({ ping: null })),
     target,
     {
       angles: ["grounding", "risk"],

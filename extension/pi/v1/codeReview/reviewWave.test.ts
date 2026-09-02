@@ -12,7 +12,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { collectGraceMs, type PendingWaveState } from "../../../doors/pendingWave.ts";
 import { PERK_TOOLS, STAGE_TOOLS } from "../../../substrate/toolGating.ts";
 import {
   createFakeSubagents,
@@ -21,12 +20,14 @@ import {
 } from "../../../testing/fakeSubagents.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
 import type { AdversarialReviewAngle } from "../../../waves/adversarialReviewWave.ts";
-import { createMemoryWaveAdapter } from "../../../waves/memoryAdapter.ts";
+import { createMemoryWaveAdapter } from "../../../testing/memoryAdapter.ts";
+import { reportWaveOver } from "../../../waves/reportWave.ts";
 import {
   decodeStartReviewWaveParams,
   executeCollectReviewWave,
   executeStartReviewWave as executeStartReviewWaveBase,
   installReviewWaveBindings,
+  type ReviewWaveState,
 } from "./reviewWave.ts";
 
 const TWO_ANGLES: AdversarialReviewAngle[] = ["claimed-intent", "correctness"];
@@ -37,8 +38,8 @@ const executeStartReviewWave = (...args: Parameters<typeof executeStartReviewWav
     requiredSkillPreflight: PREFLIGHT_OK,
   });
 
-/** A fresh per-test pending-wave slot (what a registration owns in its closure). */
-function freshState(): PendingWaveState<string> {
+/** A fresh per-test pending-ref slot (what a registration owns in its closure). */
+function freshState(): ReviewWaveState {
   return { pending: null };
 }
 
@@ -232,7 +233,8 @@ test("executeStartReviewWave: happy path stores the pending wave and returns the
       value: [okEntry("claimed-intent"), okEntry("correctness"), okEntry("ponytail")],
     },
   });
-  const result = await executeStartReviewWave(state, adapter, target, START_OPTS);
+  const wave = reportWaveOver(adapter);
+  const result = await executeStartReviewWave(state, wave, target, START_OPTS);
   assert.equal(result.details.ok, true);
   const details = result.details as {
     asyncId?: string;
@@ -251,16 +253,16 @@ test("executeStartReviewWave: happy path stores the pending wave and returns the
   assert.match(text, /subagent_wait/);
   assert.match(text, /collect_review_wave/);
 
-  // The pending wave is stored: a second start refuses with wave_active…
-  const second = await executeStartReviewWave(state, adapter, target, START_OPTS);
+  // The pending ref is stored: a second start refuses with wave_active…
+  const second = await executeStartReviewWave(state, wave, target, START_OPTS);
   assert.equal(second.details.ok, false);
   assert.equal((second.details as { error_type?: string }).error_type, "wave_active");
   assert.match(second.content[0]?.text ?? "", /collect_review_wave first/);
 
   // …and collect drains it (clearing pending — a following collect is no_wave).
-  const collected = await executeCollectReviewWave(state, target);
+  const collected = await executeCollectReviewWave(state, wave, target);
   assert.equal(collected.details.ok, true);
-  const drained = await executeCollectReviewWave(state, target);
+  const drained = await executeCollectReviewWave(state, wave, target);
   assert.equal((drained.details as { error_type?: string }).error_type, "no_wave");
 });
 
@@ -269,7 +271,7 @@ test("executeStartReviewWave: a launch failure soft-fails with the wave reason a
   const { target, notified } = fakeTarget();
   const unavailable = await executeStartReviewWave(
     state,
-    createMemoryWaveAdapter({ ping: null }),
+    reportWaveOver(createMemoryWaveAdapter({ ping: null })),
     target,
     START_OPTS,
   );
@@ -293,7 +295,7 @@ test("executeStartReviewWave: a launch failure soft-fails with the wave reason a
   // A failed launch leaves nothing pending — the next start is not wave_active.
   const spawnFailed = await executeStartReviewWave(
     state,
-    createMemoryWaveAdapter({ spawnError: "no session" }),
+    reportWaveOver(createMemoryWaveAdapter({ spawnError: "no session" })),
     target,
     START_OPTS,
   );
@@ -304,13 +306,6 @@ test("executeStartReviewWave: a launch failure soft-fails with the wave reason a
 test("executeCollectReviewWave: no_wave without a launch; wave_running retains the pending wave", async () => {
   const state = freshState();
   const { target } = fakeTarget();
-  const none = await executeCollectReviewWave(state, target);
-  assert.equal(none.details.ok, false);
-  assert.equal((none.details as { error_type?: string }).error_type, "no_wave");
-  assert.match(none.content[0]?.text ?? "", /start_review_wave/);
-
-  // Launch a wave that never completes on its own; an early collect (tiny injected grace)
-  // soft-fails wave_running and RETAINS the pending wave.
   const adapter = createMemoryWaveAdapter({
     completion: false,
     aggregate: {
@@ -318,16 +313,30 @@ test("executeCollectReviewWave: no_wave without a launch; wave_running retains t
       value: [okEntry("claimed-intent"), okEntry("correctness"), okEntry("ponytail")],
     },
   });
-  const start = await executeStartReviewWave(state, adapter, target, START_OPTS);
+  const wave = reportWaveOver(adapter);
+  const none = await executeCollectReviewWave(state, wave, target);
+  assert.equal(none.details.ok, false);
+  assert.equal((none.details as { error_type?: string }).error_type, "no_wave");
+  assert.match(none.content[0]?.text ?? "", /start_review_wave/);
+
+  // Launch a wave that never completes on its own; an early collect (a tiny env-driven grace —
+  // the one grace seam) soft-fails wave_running and RETAINS the pending ref.
+  const start = await executeStartReviewWave(state, wave, target, START_OPTS);
   assert.equal(start.details.ok, true);
-  const running = await executeCollectReviewWave(state, target, { graceMs: 20 });
+  process.env.PERK_WAVE_COLLECT_GRACE_MS = "20";
+  let running: Awaited<ReturnType<typeof executeCollectReviewWave>>;
+  try {
+    running = await executeCollectReviewWave(state, wave, target);
+  } finally {
+    delete process.env.PERK_WAVE_COLLECT_GRACE_MS;
+  }
   assert.equal(running.details.ok, false);
   assert.equal((running.details as { error_type?: string }).error_type, "wave_running");
   assert.match(running.content[0]?.text ?? "", /keep looping subagent_wait/);
 
-  // Once the run completes, the retained wave collects normally.
+  // Once the run completes, the retained wave collects normally (default grace).
   adapter.emitCompletion({ asyncId: "wave-async-1", asyncDir: "/memory/wave-async-1" });
-  const collected = await executeCollectReviewWave(state, target, { graceMs: 1_000 });
+  const collected = await executeCollectReviewWave(state, wave, target);
   assert.equal(collected.details.ok, true);
   const details = collected.details as {
     complete?: boolean;
@@ -373,8 +382,9 @@ test("executeCollectReviewWave: an incomplete wave is an ok result with the loud
       ],
     },
   });
-  await executeStartReviewWave(state, adapter, target, START_OPTS);
-  const collected = await executeCollectReviewWave(state, target);
+  const wave = reportWaveOver(adapter);
+  await executeStartReviewWave(state, wave, target, START_OPTS);
+  const collected = await executeCollectReviewWave(state, wave, target);
   assert.equal(collected.details.ok, true, "honest incompleteness is an ok result, never a throw");
   const details = collected.details as {
     complete?: boolean;
@@ -399,22 +409,23 @@ test("executeCollectReviewWave: an incomplete wave is an ok result with the loud
   );
 });
 
-test("collectGraceMs: the module default with the env override (the waveTimeoutMs idiom)", async () => {
-  assert.equal(collectGraceMs(), 15_000, "the module default before any env override");
+test("the collect grace rides PERK_WAVE_COLLECT_GRACE_MS (the one grace seam — no per-call knob)", async () => {
   const state = freshState();
   const { target } = fakeTarget();
   const adapter = createMemoryWaveAdapter({ completion: false });
+  const wave = reportWaveOver(adapter);
   // Bound the never-completing wave's module timeout so its timer never outlives the test
   // (the settled-by-timeout result also proves an uncollected wave never rejects unhandled).
   process.env.PERK_WAVE_TIMEOUT_MS = "200";
   process.env.PERK_WAVE_COLLECT_GRACE_MS = "20";
   try {
-    await executeStartReviewWave(state, adapter, target, START_OPTS);
-    // No injected graceMs: the env override keeps the never-completing wave from stalling 15s.
-    const running = await executeCollectReviewWave(state, target);
+    await executeStartReviewWave(state, wave, target, START_OPTS);
+    // The env override keeps the never-completing wave from stalling 15s.
+    const running = await executeCollectReviewWave(state, wave, target);
     assert.equal((running.details as { error_type?: string }).error_type, "wave_running");
     // After the module timeout fires, the retained wave drains into the timeout failure.
-    const drained = await executeCollectReviewWave(state, target, { graceMs: 2_000 });
+    process.env.PERK_WAVE_COLLECT_GRACE_MS = "2000";
+    const drained = await executeCollectReviewWave(state, wave, target);
     assert.equal(drained.details.ok, true);
     const details = drained.details as { complete?: boolean; failures?: { reason: string }[] };
     assert.equal(details.complete, false);
@@ -437,11 +448,12 @@ test("installReviewWaveBindings registers exactly the two tools over registratio
       value: [okEntry("claimed-intent"), okEntry("correctness"), okEntry("ponytail")],
     },
   });
-  await executeStartReviewWave(seeded, adapter, target, START_OPTS);
+  const seededWave = reportWaveOver(adapter);
+  await executeStartReviewWave(seeded, seededWave, target, START_OPTS);
 
   // …then a registration owns its OWN fresh closure slot: its collect sees no wave.
   const { pi, tools } = fakePi();
-  installReviewWaveBindings(pi);
+  installReviewWaveBindings(pi, reportWaveOver(createMemoryWaveAdapter({})));
   assert.deepEqual(
     [...tools.keys()].sort(),
     ["collect_review_wave", "start_review_wave"],
@@ -456,7 +468,7 @@ test("installReviewWaveBindings registers exactly the two tools over registratio
   };
   assert.equal(cleared.details.error_type, "no_wave");
   // …and the seeded slot is untouched by the registration (no shared module state).
-  const collected = await executeCollectReviewWave(seeded, target);
+  const collected = await executeCollectReviewWave(seeded, seededWave, target);
   assert.equal(collected.details.ok, true);
 
   // Both promptGuidelines carry the relay-loop discipline.
@@ -484,7 +496,7 @@ test("the review-wave pair is in the tool census (PERK_TOOLS + every worktree st
 
 test("registered start_review_wave: a bad selection decodes to bad_input before any spawn", async () => {
   const { pi, tools } = fakePi();
-  installReviewWaveBindings(pi);
+  installReviewWaveBindings(pi, reportWaveOver(createMemoryWaveAdapter({})));
   const def = tools.get("start_review_wave");
   assert.ok(def);
   const { target, notified } = fakeTarget();

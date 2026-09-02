@@ -11,7 +11,8 @@ import { readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { test } from "node:test";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
-import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
+import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
+import { reportWaveOver } from "../waves/reportWave.ts";
 import { RUN_KEY_PATTERN } from "../waves/reportWave.ts";
 import { verifyDocContainment } from "./containment.ts";
 import {
@@ -247,7 +248,7 @@ test("decodeDreamManifest: an exact-cap lane (laneDocs docs) is valid and launch
       value: [{ key: "pi-1.1", ok: true, error: null, report: fullReport }],
     },
   });
-  const outcome = await runDreamAnalystWave(adapter, { manifest });
+  const outcome = await runDreamAnalystWave(reportWaveOver(adapter), { manifest });
   assert.equal(adapter.calls.spawn.length, 1, "the exact-cap lane launches");
   assert.equal(outcome.complete, true);
   assert.equal(outcome.analyses[0]?.report.docs.length, DREAM_ANALYST_CAPS.laneDocs);
@@ -458,7 +459,7 @@ test("decodeDreamManifest: each refusal arm carries its named detail", () => {
 test("lane composition: code-owned keys, semantic labels, per-key task identity (via the adapter)", async () => {
   const manifest = decoded(TWO_LANE_RAW);
   const adapter = createMemoryWaveAdapter();
-  await runDreamAnalystWave(adapter, { manifest });
+  await runDreamAnalystWave(reportWaveOver(adapter), { manifest });
   const items = spawnedLaneItems(adapter.calls.spawn[0]?.workflowScript ?? "");
   assert.deepEqual(
     items.map((item) => item.key),
@@ -499,7 +500,7 @@ test("lane composition: hostile ids sanitize to unique run-key-safe keys (ordina
     ]),
   );
   const adapter = createMemoryWaveAdapter();
-  await runDreamAnalystWave(adapter, { manifest });
+  await runDreamAnalystWave(reportWaveOver(adapter), { manifest });
   const items = spawnedLaneItems(adapter.calls.spawn[0]?.workflowScript ?? "");
   const keys = items.map((item) => item.key);
   assert.deepEqual(keys.slice(0, 3), ["a-b.1", "a-b.2", "weird-lane.3"]);
@@ -955,7 +956,7 @@ test("runDreamAnalystWave: all-valid multi-lane → complete, analyses under sem
       ],
     },
   });
-  const outcome = await runDreamAnalystWave(adapter, { manifest, model: "faux/dream" });
+  const outcome = await runDreamAnalystWave(reportWaveOver(adapter), { manifest, model: "faux/dream" });
   assert.equal(outcome.complete, true);
   assert.deepEqual(outcome.failures, []);
   assert.deepEqual(
@@ -992,7 +993,7 @@ test("runDreamAnalystWave: STRICT — one failed lane ⇒ incomplete, surviving 
       ],
     },
   });
-  const outcome = await runDreamAnalystWave(adapter, { manifest });
+  const outcome = await runDreamAnalystWave(reportWaveOver(adapter), { manifest });
   assert.equal(outcome.complete, false, "strict: one failed lane fails the analysis");
   assert.deepEqual(outcome.failures, [
     { lane: "workflow-1", reason: "lane-failed", detail: "analyst crashed" },
@@ -1021,7 +1022,7 @@ test("runDreamAnalystWave: a schema-valid but re-decode-failing report is malfor
       ],
     },
   });
-  const outcome = await runDreamAnalystWave(adapter, { manifest });
+  const outcome = await runDreamAnalystWave(reportWaveOver(adapter), { manifest });
   assert.equal(outcome.complete, false);
   assert.equal(outcome.failures.length, 1);
   assert.equal(outcome.failures[0]?.lane, "workflow-1", "the failure carries the semantic id");
@@ -1049,7 +1050,7 @@ test("runDreamAnalystWave: a single-lane manifest launches (no direct-analysis r
       value: [{ key: "workflow-1.1", ok: true, error: null, report: LANE_TWO_REPORT }],
     },
   });
-  const outcome = await runDreamAnalystWave(adapter, { manifest });
+  const outcome = await runDreamAnalystWave(reportWaveOver(adapter), { manifest });
   assert.equal(adapter.calls.spawn.length, 1, "the single-lane wave IS launched");
   assert.equal(outcome.complete, true);
   assert.deepEqual(
@@ -1061,7 +1062,7 @@ test("runDreamAnalystWave: a single-lane manifest launches (no direct-analysis r
 test("runDreamAnalystWave: the unavailable arm is a wave-level failure (complete: false)", async () => {
   const manifest = decoded(TWO_LANE_RAW);
   const adapter = createMemoryWaveAdapter({ ping: null });
-  const outcome = await runDreamAnalystWave(adapter, { manifest });
+  const outcome = await runDreamAnalystWave(reportWaveOver(adapter), { manifest });
   assert.equal(outcome.complete, false);
   assert.deepEqual(outcome.analyses, []);
   assert.equal(outcome.failures[0]?.lane, null, "a wave-level failure carries lane: null");
@@ -1073,7 +1074,7 @@ test("runDreamAnalystWave: a pre-aborted signal cancels before launch, naming th
   const adapter = createMemoryWaveAdapter();
   const controller = new AbortController();
   controller.abort();
-  const outcome = await runDreamAnalystWave(adapter, { manifest }, controller.signal);
+  const outcome = await runDreamAnalystWave(reportWaveOver(adapter), { manifest }, controller.signal);
   assert.equal(adapter.calls.spawn.length, 0, "no spawn is issued");
   assert.equal(outcome.complete, false);
   assert.equal(outcome.failures[0]?.reason, "cancelled");

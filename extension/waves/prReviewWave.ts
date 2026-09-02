@@ -1,4 +1,4 @@
-// The pr-review `WaveSpec`-building entrypoint over the shared report-wave runner: the flow's
+// The pr-review `ReportWaveRequest`-building entrypoint over the shared report-wave module: the flow's
 // angle vocabulary, the per-assignment report schema, and the ONE bounded retry are module-owned,
 // tested implementation here — reached through the flow-scoped `run_pr_review_wave` tool
 // (`extension/pi/v1/codeReview/automated.ts`), never model-authored prompt mechanics.
@@ -20,16 +20,15 @@ import {
   type RequiredPonytailSkill,
 } from "./ponytail.ts";
 import {
+  type AssignmentReport,
   type ReportAssignment,
-  runReportWave,
+  type ReportWave,
+  type ReportWaveAttemptReceipt,
+  type ReportWaveFailure,
+  type ReportWaveFailureReason,
+  type ReportWaveRequest,
+  type ReportWaveResult,
   toAttemptReceipt,
-  type WaveAdapter,
-  type WaveAttemptReceipt,
-  type WaveFailure,
-  type WaveFailureReason,
-  type WaveReport,
-  type WaveResult,
-  type WaveSpec,
 } from "./reportWave.ts";
 
 /** The seven-slug review-angle allowlist (plan-fidelity is mandatory at the tool boundary). */
@@ -129,7 +128,7 @@ export const PR_REVIEW_REPORT_SCHEMA = {
 
 type EffectivePrReviewAngle = PrReviewAngle | "ponytail";
 
-type RequiredSkillPreflight = NonNullable<WaveSpec["requiredSkillPreflight"]>;
+type RequiredSkillPreflight = NonNullable<ReportWaveRequest["requiredSkillPreflight"]>;
 
 export interface PrReviewWaveOptions {
   /** The resolved active-plan PR number shared by every lane in this pass. */
@@ -143,7 +142,7 @@ export interface PrReviewWaveOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   /** Test seam; production validates the exact source-bound Ponytail review skill. */
-  requiredSkillPreflight?: WaveSpec["requiredSkillPreflight"];
+  requiredSkillPreflight?: ReportWaveRequest["requiredSkillPreflight"];
 }
 
 export interface PrReviewWaveOutcome {
@@ -153,18 +152,18 @@ export interface PrReviewWaveOutcome {
   covered: string[];
   /** Lane keys sent in the retry wave (empty when none ran). */
   retried: string[];
-  reports: WaveReport[];
+  reports: AssignmentReport[];
   /** The surviving failures (the retry wave's, when one ran). */
-  failures: WaveFailure[];
+  failures: ReportWaveFailure[];
   /**
    * One output-free receipt per top-level launch, run order (observability only — never a
    * decision input; a failed lane and its relaunch stay distinguishable as distinct attempts).
    */
-  attempts: WaveAttemptReceipt[];
+  attempts: ReportWaveAttemptReceipt[];
 }
 
 /** The wave-level failure reasons worth one full-selection retry (transient, not deterministic). */
-const RETRYABLE_WAVE_REASONS: ReadonlySet<WaveFailureReason> = new Set([
+const RETRYABLE_WAVE_REASONS: ReadonlySet<ReportWaveFailureReason> = new Set([
   "spawn-failed",
   "timeout",
   "run-failed",
@@ -246,11 +245,11 @@ function buildEffectivePrReviewAssignments(
   );
 }
 
-function buildSpec(
+function buildRequest(
   assignments: ReportAssignment[],
   opts: PrReviewWaveOptions,
   requiredSkillPreflight: RequiredSkillPreflight,
-): WaveSpec {
+): ReportWaveRequest {
   return {
     flow: "pr-review",
     assignments,
@@ -263,14 +262,14 @@ function buildSpec(
 }
 
 /**
- * Pick the retry keys from the first wave's failures. A `WaveResult` carries either ONE
+ * Pick the retry keys from the first wave's failures. A `ReportWaveResult` carries either ONE
  * wave-level failure (`key: null`, no reports) or per-assignment failures — the wave-level
  * reason decides whole-selection vs none; assignment-level failures retry exactly the failed
  * keys.
  */
 function retrySelection(
   angles: EffectivePrReviewAngle[],
-  failures: WaveFailure[],
+  failures: ReportWaveFailure[],
 ): EffectivePrReviewAngle[] {
   const unavailable = new Set(
     failures
@@ -293,10 +292,10 @@ function retrySelection(
 
 function outcomeOf(
   angles: EffectivePrReviewAngle[],
-  reports: WaveReport[],
-  failures: WaveFailure[],
+  reports: AssignmentReport[],
+  failures: ReportWaveFailure[],
   retried: string[],
-  attempts: WaveAttemptReceipt[],
+  attempts: ReportWaveAttemptReceipt[],
 ): PrReviewWaveOutcome {
   const byKey = new Map(reports.map((report) => [report.key, report]));
   const ordered = angles.flatMap((angle) => {
@@ -315,13 +314,13 @@ function outcomeOf(
 
 /**
  * Run the pr-review report wave: build the assignments from the angle vocabulary, run the
- * shared runner under the strict completeness policy, and — when incomplete — apply the ONE
+ * shared wave under the strict completeness policy, and — when incomplete — apply the ONE
  * bounded retry (failed assignments only, or the whole selection on a retryable wave-level failure, or none on
  * `unavailable`/`cancelled`), merging first-wave successes for non-retried keys with the retry
  * wave's results.
  */
 export async function runPrReviewWave(
-  adapter: WaveAdapter,
+  wave: ReportWave,
   opts: PrReviewWaveOptions,
 ): Promise<PrReviewWaveOutcome> {
   if (opts.angles.length === 0) {
@@ -338,14 +337,13 @@ export async function runPrReviewWave(
     }
     return check;
   };
-  const first: WaveResult = await runReportWave(
-    adapter,
-    buildSpec(
+  const first: ReportWaveResult = await wave.run(
+    buildRequest(
       buildEffectivePrReviewAssignments(angles, opts.pr, opts.directive),
       opts,
       requiredSkillPreflight,
     ),
-    opts.signal,
+    { signal: opts.signal },
   );
   // The first attempt's receipt is preserved VERBATIM even when a retry runs — ordered
   // attempts keep a failed lane and its relaunch distinguishable (distinct child runIds).
@@ -359,14 +357,13 @@ export async function runPrReviewWave(
     return outcomeOf(angles, first.reports, first.failures, [], attempts);
   }
 
-  const second = await runReportWave(
-    adapter,
-    buildSpec(
+  const second = await wave.run(
+    buildRequest(
       buildEffectivePrReviewAssignments(retried, opts.pr, opts.directive),
       opts,
       requiredSkillPreflight,
     ),
-    opts.signal,
+    { signal: opts.signal },
   );
   attempts.push(toAttemptReceipt("pr-review", 2, retried, second.receipt));
   const retriedSet = new Set<string>(retried);

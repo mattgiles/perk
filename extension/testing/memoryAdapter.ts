@@ -1,8 +1,10 @@
-// The in-memory `WaveAdapter` test double — a FIRST-CLASS deliverable: the runner's own tests
-// and the future flow tests drive the whole wave lifecycle through it with no event bus, no
-// child processes, and no temp dirs. Every failure arm of `runReportWave` is reachable through
-// a config knob, and the recorded calls let tests assert the spawn contract (`mission: false`,
-// `context: "fresh"`, the rendered script) and the stop-on-timeout/cancel behavior.
+// The in-memory `WaveAdapter` test double — a FIRST-CLASS deliverable, living under
+// `extension/testing/` (dev-only: outside the production corpus, the guard scans, and the npm
+// tarball): the wave module's own tests and the flow tests drive the whole lifecycle through it
+// (wrapped via `reportWaveOver`) with no event bus, no child processes, and no temp dirs. Every
+// operational failure arm is reachable through a config knob, and the recorded calls let tests
+// assert the spawn contract (`mission: false`, `context: "fresh"`, the rendered script) and the
+// stop-on-timeout/cancel behavior.
 //
 // It honors the same sequencing contract as the production adapter: `onComplete()` before a
 // successful `ping()` throws (the async-complete channel is advertised by ping, not pinned).
@@ -13,7 +15,7 @@ import type {
   WavePing,
   WaveRunHandle,
   WaveSpawnParams,
-} from "./transport.ts";
+} from "../waves/transport.ts";
 
 export interface MemoryWaveAdapterConfig {
   /** The ping outcome; null exercises the unavailable arm. Defaults to a valid ping. */

@@ -17,7 +17,8 @@ import {
   isDraftReviewAngle,
   startDraftReviewWave,
 } from "./draftReviewWave.ts";
-import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
+import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
+import { reportWaveOver } from "./reportWave.ts";
 
 const TWO_ANGLES: DraftReviewAngle[] = ["grounding", "scope"];
 const PREFLIGHT_OK = async () => ({ ok: true }) as const;
@@ -267,7 +268,8 @@ test("startDraftReviewWave: spawn params pin the module contract, the schema, an
       value: [okEntry("grounding"), okEntry("scope"), okEntry("ponytail")],
     },
   });
-  const start = await startDraftReviewWave(adapter, {
+  const wave = reportWaveOver(adapter);
+  const start = await startDraftReviewWave(wave, {
     angles: TWO_ANGLES,
     draftType: "plan",
     draft: "# The draft",
@@ -277,7 +279,10 @@ test("startDraftReviewWave: spawn params pin the module contract, the schema, an
   });
   assert.equal(start.ok, true);
   if (!start.ok) return;
-  const result = await start.result;
+  const collected = await wave.collect(start.ref);
+  assert.equal(collected.kind, "settled");
+  if (collected.kind !== "settled") return;
+  const result = collected.result;
   assert.equal(result.complete, true);
   assert.deepEqual(
     result.reports.map((r) => r.key),
@@ -303,7 +308,8 @@ test("startDraftReviewWave: failed Ponytail preflight omits only that child and 
       value: [okEntry("grounding"), okEntry("scope")],
     },
   });
-  const start = await startDraftReviewWave(adapter, {
+  const wave = reportWaveOver(adapter);
+  const start = await startDraftReviewWave(wave, {
     angles: TWO_ANGLES,
     draftType: "plan",
     draft: "# The draft",
@@ -311,7 +317,10 @@ test("startDraftReviewWave: failed Ponytail preflight omits only that child and 
   });
   assert.equal(start.ok, true, "ordinary lanes still launch");
   if (!start.ok) return;
-  const result = await start.result;
+  const collected = await wave.collect(start.ref);
+  assert.equal(collected.kind, "settled");
+  if (collected.kind !== "settled") return;
+  const result = collected.result;
   assert.equal(result.complete, false);
   assert.deepEqual(
     result.reports.map((report) => report.key),
@@ -342,7 +351,8 @@ test("startDraftReviewWave: strict completeness — a failed lane leaves the wav
       ],
     },
   });
-  const start = await startDraftReviewWave(adapter, {
+  const wave = reportWaveOver(adapter);
+  const start = await startDraftReviewWave(wave, {
     angles: TWO_ANGLES,
     draftType: "plan",
     draft: "# The draft",
@@ -351,7 +361,10 @@ test("startDraftReviewWave: strict completeness — a failed lane leaves the wav
   });
   assert.equal(start.ok, true);
   if (!start.ok) return;
-  const result = await start.result;
+  const collected = await wave.collect(start.ref);
+  assert.equal(collected.kind, "settled");
+  if (collected.kind !== "settled") return;
+  const result = collected.result;
   assert.equal(result.complete, false);
   assert.deepEqual(
     result.reports.map((r) => r.key),
@@ -365,7 +378,7 @@ test("startDraftReviewWave: strict completeness — a failed lane leaves the wav
 });
 
 test("startDraftReviewWave: the wave-level launch failure comes back normalized (ok: false)", async () => {
-  const start = await startDraftReviewWave(createMemoryWaveAdapter({ ping: null }), {
+  const start = await startDraftReviewWave(reportWaveOver(createMemoryWaveAdapter({ ping: null })), {
     angles: TWO_ANGLES,
     draftType: "objective",
     draft: "body",
@@ -385,7 +398,7 @@ test("startDraftReviewWave: the flow is named 'draft-review' (observed via the p
   // The one seam where the flow identifier surfaces through the public entrypoint: the shared
   // runner names the flow in its cancelled-before-launch detail, so a typo in the module's
   // `flow` value trips here.
-  const start = await startDraftReviewWave(createMemoryWaveAdapter({}), {
+  const start = await startDraftReviewWave(reportWaveOver(createMemoryWaveAdapter({})), {
     angles: TWO_ANGLES,
     draftType: "plan",
     draft: "# The draft",
@@ -402,7 +415,7 @@ test("startDraftReviewWave: the flow is named 'draft-review' (observed via the p
 
 test("startDraftReviewWave: duplicate angles throw at start time (programmer error via renderWaveScript)", async () => {
   await assert.rejects(
-    startDraftReviewWave(createMemoryWaveAdapter({}), {
+    startDraftReviewWave(reportWaveOver(createMemoryWaveAdapter({})), {
       angles: ["grounding", "grounding"],
       draftType: "plan",
       draft: "# The draft",

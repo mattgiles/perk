@@ -13,7 +13,7 @@
 // record — a failed cleanup leaves prior files behind, but recovery refuses them), set to the
 // sha256 of the finalized bytes only after the finalize write succeeds.
 //
-// Pi-free by construction: the `WaveAdapter` injection seam and the function-shaped
+// Pi-free by construction: the `ReportWave` seam and the function-shaped
 // capabilities (`markBundleDigest`, `bracket`, `writeBundle`, `removeBundle`) are the only
 // mechanism edges — the adapter constructs and threads them; artifact storage is never owned
 // here. Analyst and reducer reports are untrusted DATA, re-decoded in code before they reach
@@ -21,7 +21,7 @@
 
 import { dirname, join } from "node:path";
 import { digestSessionData } from "../substrate/sessionData.ts";
-import type { WaveAdapter, WaveAttemptReceipt } from "../waves/reportWave.ts";
+import type { ReportWave, ReportWaveAttemptReceipt } from "../waves/reportWave.ts";
 import {
   type DreamLaneAnalysis,
   type DreamLaneFailure,
@@ -87,7 +87,7 @@ interface WrittenBundle {
  * failed marker set (finalize landed; the unverified append is the synthetic `digest-marker`
  * failure — honestly incomplete) · complete.
  */
-export type DreamAnalysisAggregate = { attempts: WaveAttemptReceipt[] } & (
+export type DreamAnalysisAggregate = { attempts: ReportWaveAttemptReceipt[] } & (
   | {
       complete: false;
       analysis: AnalysisSection<false>;
@@ -149,7 +149,7 @@ export type DreamAnalysisOutcome =
       kind: "io_failed";
       detail: string;
       analyses: DreamLaneAnalysis[];
-      attempts: WaveAttemptReceipt[];
+      attempts: ReportWaveAttemptReceipt[];
     }
   | { kind: "aggregate"; details: DreamAnalysisAggregate };
 
@@ -164,7 +164,7 @@ export type DreamAnalysisOutcome =
  * §8.65 bracket (only after BOTH waves) → the finalize-in-place rewrite → the marker set.
  */
 export async function analyzeDream(
-  adapter: WaveAdapter,
+  wave: ReportWave,
   opts: {
     manifest: DreamManifest;
     /** The `sha256:<hex>` digest of the manifest BYTES the caller read + decoded — bound into
@@ -219,7 +219,7 @@ export async function analyzeDream(
   }
 
   const analysis = await runDreamAnalystWave(
-    adapter,
+    wave,
     {
       manifest: opts.manifest,
       ...(opts.analystModel !== undefined ? { model: opts.analystModel } : {}),
@@ -303,7 +303,7 @@ export async function analyzeDream(
   };
 
   const reducers = await runDreamReducerWave(
-    adapter,
+    wave,
     {
       manifestPath: opts.manifest.manifestPath,
       bundlePath,

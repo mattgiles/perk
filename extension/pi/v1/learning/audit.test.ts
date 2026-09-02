@@ -18,7 +18,8 @@ import type {
 import { workflowDir } from "../../../substrate/cache.ts";
 import { createFakeSubagents, type FakeSubagents } from "../../../testing/fakeSubagents.ts";
 import { loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
-import { createMemoryWaveAdapter } from "../../../waves/memoryAdapter.ts";
+import { createMemoryWaveAdapter } from "../../../testing/memoryAdapter.ts";
+import { reportWaveOver } from "../../../waves/reportWave.ts";
 import { executeAuditWave } from "./audit.ts";
 
 const GRILL = "plan.grill-before-review";
@@ -214,7 +215,7 @@ test("executeAuditWave: the happy path with a skipped pair — the FULL rendered
   });
   const bundleDir = scaffoldRepo();
   const verdictsPath = join(bundleDir, "verdicts.json");
-  const result = await executeAuditWave(adapter, target(), { bundleDir, manifest });
+  const result = await executeAuditWave(reportWaveOver(adapter), target(), { bundleDir, manifest });
 
   const expectedLanes = [
     {
@@ -263,7 +264,7 @@ test("executeAuditWave: the wave-level-failure arm — the FULL rendered text + 
   const adapter = createMemoryWaveAdapter({ ping: null }); // unavailable — nothing launched
   const bundleDir = scaffoldRepo();
   const verdictsPath = join(bundleDir, "verdicts.json");
-  const result = await executeAuditWave(adapter, target(), { bundleDir, manifest });
+  const result = await executeAuditWave(reportWaveOver(adapter), target(), { bundleDir, manifest });
 
   const detail =
     "pi-subagents did not advertise the report-wave capabilities (ping failed or incomplete)";
@@ -313,7 +314,7 @@ test("executeAuditWave: the atomic seam replaces a stale verdicts.json and leave
       value: [{ key: laneKey(1), ok: true, error: null, report: report("s1.jsonl") }],
     },
   });
-  const result = await executeAuditWave(adapter, target(), { bundleDir, manifest });
+  const result = await executeAuditWave(reportWaveOver(adapter), target(), { bundleDir, manifest });
   assert.equal((result.details as { ok: boolean }).ok, true);
   const written = readVerdicts(bundleDir);
   assert.equal(written.lanes[0]?.status, "report");
@@ -330,7 +331,7 @@ test("executeAuditWave: a throwing write is the io_error arm with the lanes atta
       value: [{ key: laneKey(1), ok: true, error: null, report: report("s1.jsonl") }],
     },
   });
-  const result = await executeAuditWave(adapter, target(), {
+  const result = await executeAuditWave(reportWaveOver(adapter), target(), {
     bundleDir: "/abs/bundle",
     manifest,
     writeVerdicts: () => {

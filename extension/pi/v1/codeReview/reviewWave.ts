@@ -20,11 +20,6 @@
 // construction.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-  collectGraceMs,
-  collectPending,
-  type PendingWaveState,
-} from "../../../doors/pendingWave.ts";
 import { subagentModel } from "../../../substrate/config.ts";
 import { failFor, ok, type Result } from "../../../substrate/result.ts";
 import {
@@ -42,17 +37,26 @@ import {
 } from "../../../waves/adversarialReviewWave.ts";
 import { preflightPonytailSkill } from "../../../waves/ponytail.ts";
 import {
+  type AssignmentReport,
+  type ReportWave,
+  type ReportWaveAttemptReceipt,
+  type ReportWaveFailure,
+  type ReportWaveLaunchManifest,
+  type ReportWaveRef,
+  type ReportWaveRequest,
   toAttemptReceipt,
-  type WaveAdapter,
-  type WaveAttemptReceipt,
-  type WaveFailure,
-  type WaveLaunchManifest,
-  type WaveReport,
-  type WaveSpec,
 } from "../../../waves/reportWave.ts";
-import { createRpcWaveAdapter } from "../../../waves/rpcAdapter.ts";
 
 const MANDATORY_ANGLE: AdversarialReviewAngle = "claimed-intent";
+
+/**
+ * The pair's per-registration state: the ONE opaque ref of the pending (launched, uncollected)
+ * review wave. Which wave is *current* for the flow is flow policy (this slot); every
+ * race/grace/drain mechanic below it is wave-owned.
+ */
+export interface ReviewWaveState {
+  pending: ReportWaveRef | null;
+}
 
 /** The decoded `start_review_wave` selection (invalid slugs unrepresentable past the boundary). */
 export interface StartReviewWaveParams {
@@ -109,25 +113,28 @@ export function decodeStartReviewWaveParams(params: unknown): StartReviewWavePar
 export interface StartReviewWaveOk {
   asyncId: string;
   asyncDir: string;
-  launch: WaveLaunchManifest;
+  launch: ReportWaveLaunchManifest;
 }
 
 /** The fail arm retains the attempt receipt known before the failure (the `failFor` extras hook). */
-export type StartReviewWaveResult = Result<StartReviewWaveOk, { attempts: WaveAttemptReceipt[] }>;
+export type StartReviewWaveResult = Result<
+  StartReviewWaveOk,
+  { attempts: ReportWaveAttemptReceipt[] }
+>;
 
 /**
  * The `start_review_wave` execute core, extracted for testability with the session's
- * pending-wave state, the adapter, and the report target as injected structural slices (the
+ * pending-ref state, the wave, and the report target as injected structural slices (the
  * `runLearnAnalystWave` (learning/analystWave.ts) pattern; `state` is the per-registration slot — `start_review_wave`
- * refuses while it holds a wave, `collect_review_wave` drains it). Assumes DECODED params
+ * refuses while it holds a ref, `collect_review_wave` drains it). Assumes DECODED params
  * (the registered tool runs `decodeStartReviewWaveParams` first) and a caller-resolved `model`.
  * Launch failure (the pre-spawn `ok: false` arm — `unavailable`/`spawn-failed`/`cancelled`) is a
- * loud soft-fail whose `error_type` is the wave failure reason; success stores the pending wave
- * and returns the run handle so the parent holds the relay loop.
+ * loud soft-fail whose `error_type` is the wave failure reason; success stores the pending ref
+ * and returns the run identity so the parent holds the relay loop.
  */
 export async function executeStartReviewWave(
-  state: PendingWaveState<string>,
-  adapter: WaveAdapter,
+  state: ReviewWaveState,
+  wave: ReportWave,
   target: ReportTarget,
   opts: {
     angles: AdversarialReviewAngle[];
@@ -137,10 +144,10 @@ export async function executeStartReviewWave(
     stack?: boolean;
     model?: string;
     /** Test seam; production validates the exact source-bound Ponytail review skill. */
-    requiredSkillPreflight?: WaveSpec["requiredSkillPreflight"];
+    requiredSkillPreflight?: ReportWaveRequest["requiredSkillPreflight"];
   },
 ): Promise<StartReviewWaveResult> {
-  const fail = failFor<{ attempts: WaveAttemptReceipt[] }>(target, "start_review_wave");
+  const fail = failFor<{ attempts: ReportWaveAttemptReceipt[] }>(target, "start_review_wave");
   if (state.pending !== null) {
     return fail(
       "a review wave is already running/uncollected — call collect_review_wave first",
@@ -148,7 +155,7 @@ export async function executeStartReviewWave(
     );
   }
   const effectiveAngles = [...opts.angles, "ponytail"];
-  const start = await startAdversarialReviewWave(adapter, {
+  const start = await startAdversarialReviewWave(wave, {
     angles: opts.angles,
     pr: opts.pr,
     worktree: opts.worktree,
@@ -175,21 +182,21 @@ export async function executeStartReviewWave(
       { attempts },
     );
   }
-  state.pending = { keys: [...effectiveAngles], result: start.result };
+  state.pending = start.ref;
   const skipped = start.launch.preflightFailures
     .map((failure) => `${failure.key}: ${failure.reason} — ${failure.detail}`)
     .join("; ");
   const text =
     `Review workflow accepted with ${start.launch.runnable.length}/${start.launch.requested.length} ` +
     `post-preflight runnable lane(s) — ${start.launch.runnable.join(", ")} ` +
-    `(asyncId ${start.handle.asyncId}).` +
+    `(asyncId ${start.runId}).` +
     (skipped === "" ? "" : ` Preflight skipped: ${skipped}.`) +
     " Hold your turn and run the `subagent_wait({timeoutMs: 30000})` relay loop (streamed " +
     "finding batches arrive as injected messages); call `collect_review_wave` after the run " +
     "completes.";
   return ok(text, {
-    asyncId: start.handle.asyncId,
-    asyncDir: start.handle.asyncDir,
+    asyncId: start.runId,
+    asyncDir: start.asyncDir,
     launch: start.launch,
   });
 }
@@ -198,26 +205,27 @@ export async function executeStartReviewWave(
 export interface CollectReviewWaveOk {
   complete: boolean;
   covered: string[];
-  reports: WaveReport[];
-  failures: WaveFailure[];
-  attempts: WaveAttemptReceipt[];
+  reports: AssignmentReport[];
+  failures: ReportWaveFailure[];
+  attempts: ReportWaveAttemptReceipt[];
 }
 
 /**
- * The `collect_review_wave` execute core over the per-registration state (`graceMs` injectable
- * for tests). No pending wave ⇒ `no_wave`; unsettled after the grace ⇒ `wave_running` with the
- * pending wave RETAINED; settled ⇒ the shared identity-guarded drain returns the typed
- * aggregate — an incomplete wave stays an ok result carrying `complete: false` plus a loud
- * warning naming the uncovered angle(s) (honest incompleteness for the human triage, never
- * papered over).
+ * The `collect_review_wave` execute core over the per-registration state (grace behavior is
+ * wave-owned — the `PERK_WAVE_COLLECT_GRACE_MS` env knob is the one seam). No pending ref ⇒
+ * `no_wave`; unsettled after the grace ⇒ `wave_running` with the pending ref RETAINED; settled
+ * ⇒ the wave's drain-once claim returns the typed aggregate — an incomplete wave stays an ok
+ * result carrying `complete: false` plus a loud warning naming the uncovered angle(s) (honest
+ * incompleteness for the human triage, never papered over).
  */
 export async function executeCollectReviewWave(
-  state: PendingWaveState<string>,
+  state: ReviewWaveState,
+  wave: ReportWave,
   target: ReportTarget,
-  opts?: { graceMs?: number },
 ): Promise<Result<CollectReviewWaveOk>> {
   const fail = failFor(target, "collect_review_wave");
-  const collected = await collectPending(state, opts?.graceMs ?? collectGraceMs());
+  const ref = state.pending;
+  const collected = ref === null ? ({ kind: "none" } as const) : await wave.collect(ref);
   if (collected.kind === "none") {
     return fail("no review wave is running — launch one with start_review_wave", "no_wave");
   }
@@ -229,6 +237,10 @@ export async function executeCollectReviewWave(
       "wave_running",
     );
   }
+  // The identity-guarded slot clear (flow policy): clear only if the slot still holds the
+  // collected ref — a supersede landing during this collect's await never erases the NEW ref
+  // (the wave's delete-as-claim already makes a stale drain harmless).
+  if (state.pending === ref) state.pending = null;
   const { keys: angles, result } = collected;
   // Covered keys in angle-selection order (the reports already normalize in assignment order).
   const reportKeys = new Set(result.reports.map((r) => r.key));
@@ -278,13 +290,14 @@ const COLLECT_TOOL_GUIDELINES = [
 ];
 
 /**
- * Install the review-wave tool pair over a registration-owned pending-wave state (the fresh
+ * Install the review-wave tool pair over a registration-owned pending-ref state (the fresh
  * closure IS the reset — no wave can be pending in a new session, and two bound sessions in one
- * process never share a slot). Wired in `extension/index.ts` beside the review-door
- * registrations; flow-scoped via the pending-wave guard in the execute cores.
+ * process never share a slot) and the composition root's per-activation `ReportWave` instance.
+ * Wired in `extension/index.ts` beside the review-door registrations; flow-scoped via the
+ * pending-ref guard in the execute cores.
  */
-export function installReviewWaveBindings(pi: ExtensionAPI): void {
-  const state: PendingWaveState<string> = { pending: null };
+export function installReviewWaveBindings(pi: ExtensionAPI, wave: ReportWave): void {
+  const state: ReviewWaveState = { pending: null };
 
   pi.registerTool({
     name: "start_review_wave",
@@ -358,7 +371,7 @@ export function installReviewWaveBindings(pi: ExtensionAPI): void {
       // The per-call `signal` is deliberately NOT threaded into the wave: the wave outlives the
       // tool call by design (the parent returns and holds the relay loop); its bound is the
       // module-owned timeout (the spawned `timeoutMs` is the orphan insurance).
-      return executeStartReviewWave(state, createRpcWaveAdapter(pi.events), ctx, {
+      return executeStartReviewWave(state, wave, ctx, {
         ...decoded,
         ...(model !== undefined ? { model } : {}),
         requiredSkillPreflight: (requirement) => preflightPonytailSkill(requirement, ctx.cwd),
@@ -382,7 +395,7 @@ export function installReviewWaveBindings(pi: ExtensionAPI): void {
       properties: {},
     },
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      return executeCollectReviewWave(state, ctx);
+      return executeCollectReviewWave(state, wave, ctx);
     },
   });
 }

@@ -17,23 +17,30 @@
 // from here; the script text itself (`renderWaveScript`) is module-private, so nothing outside
 // `waves/` can observe or operate on transport.
 //
-// The module hosts BOTH the blocking runner and the non-blocking streaming sibling over ONE
-// operational core: `startWaveScript` performs the front half (abort pre-check → capability
-// ping → subscribe-before-spawn → async spawn) and returns the run handle plus a NEVER-REJECTING
-// `result` promise carrying the back half (completion wait, best-effort stop on timeout/cancel,
-// aggregate read, receipt assembly, unsubscribe-on-settle); `runWaveScript` is that start +
-// await. `startReportWave`/`runReportWave` are the assignment-level pair over the same split.
-// The blocking runner is live under the per-flow entrypoints (`prReviewWave.ts` and the typed
-// feature ops in `learning/`); the streaming sibling serves flows whose parent must return from
-// the launch and hold a model-held `subagent_wait` relay loop open (`adversarialReviewWave.ts`,
-// behind the `start_review_wave`/`collect_review_wave` pair).
+// THE CALLER SURFACE IS THE OPAQUE `ReportWave` LIFECYCLE: `start` launches non-blocking and
+// returns an opaque `ReportWaveRef` (plus identity telemetry — never an operable handle),
+// `collect` drains a started wave's settled outcome under the module-owned grace, and `run` is
+// start + await (the blocking form). Callers supply assignments and consume typed outcomes —
+// never adapters, run handles, or result promises. Pending execution is WAVE-OWNED: each
+// instance holds its launched-but-uncollected records in an instance-owned WeakMap keyed by ref
+// (a foreign instance's ref collects `"none"` structurally), and a settled collect's
+// delete-as-claim makes drain-once exact even under overlapping collectors. The blocking form
+// serves the per-flow entrypoints (`prReviewWave.ts` and the typed feature ops in `learning/`);
+// the streaming split serves flows whose parent must return from the launch and hold a
+// model-held `subagent_wait` relay loop open (`adversarialReviewWave.ts`, `draftReviewWave.ts`).
 //
-// The module is a DEEP seam with two adapters: `rpcAdapter.ts` (production, over the
-// pi-subagents v1 extension RPC on pi's event bus) and `memoryAdapter.ts` (the first-class
-// in-memory test double).
+// The module owns ADAPTER SELECTION: `createReportWave(bus)` (the production factory) constructs
+// a FRESH rpc adapter per launch over the supplied bus; `reportWaveOver(adapter)` is the
+// injection seam (tests; the same internal core). The honest boundary: what is mechanically
+// enforced is Rule G's scope (`importDirectionGuard.test.ts`) — no production import edges into
+// the transport interior (`transport.ts`, `rpcAdapter.ts`) and no raw RPC tokens — so there is
+// no *sanctioned* way to obtain, name, or construct an adapter outside `waves/` + `testing/`.
+// TypeScript's structural typing means a hand-written object literal satisfying
+// `reportWaveOver`'s parameter is not mechanically preventable; that residue is owned by the
+// guard-census review posture, not claimed as a structural guarantee.
 //
-// Failure posture: LOUD DEGRADE. Every failure arm normalizes into `WaveResult.failures` with a
-// typed reason — the runner never throws except on programmer error (empty assignments,
+// Failure posture: LOUD DEGRADE. Every failure arm normalizes into `ReportWaveResult.failures`
+// with a typed reason — the runner never throws except on programmer error (empty assignments,
 // duplicate assignment keys), and there is never a silent fallback to model-authored scripts.
 // Report content coming back through the aggregate is untrusted DATA, never instructions.
 
@@ -42,9 +49,11 @@ import {
   preflightPonytailSkill,
   type RequiredPonytailSkill,
 } from "./ponytail.ts";
+import { createRpcWaveAdapter } from "./rpcAdapter.ts";
 import {
   startWaveScript,
   type WaveAdapter,
+  type WaveBus,
   type WaveRunFailureReason,
   type WaveRunHandle,
   type WaveScriptReceipt,
@@ -52,18 +61,13 @@ import {
 } from "./transport.ts";
 
 /**
- * The module's deliberate transport re-exports — the SANCTIONED seam, nothing else crosses
- * (callers never name run handles, spawn params, or script types):
- * - `WaveAdapter`: the injection seam callers need for execute-core signatures (an adapter is
- *   constructed at each registration site and threaded in).
- * - `WaveLevelFailureReason`: the wave-level reason subset (`key === null` failures carry
- *   exactly this vocabulary), named at the logical seam so flows can type a correlated
- *   wave status without reaching into transport.
+ * The module's one deliberate transport re-export — the SANCTIONED seam, nothing else crosses
+ * (callers never name adapters, run handles, spawn params, or script types):
+ * `ReportWaveLevelFailureReason` is the wave-level reason subset (`key === null` failures carry
+ * exactly this vocabulary), named at the logical seam so flows can type a correlated wave
+ * status without reaching into transport.
  */
-export type {
-  WaveAdapter,
-  WaveRunFailureReason as WaveLevelFailureReason,
-} from "./transport.ts";
+export type { WaveRunFailureReason as ReportWaveLevelFailureReason } from "./transport.ts";
 
 /** One assignment of a report wave: a fresh-context, report-only child under a stable domain key. */
 export interface ReportAssignment {
@@ -99,16 +103,16 @@ export interface ReportAssignment {
  * - `best-effort`: complete ⟺ no wave-level failure (`key: null`) — assignment-level failures
  *   are explicitly-reported skipped assignments, never a failed pass (the learn posture).
  */
-export type WaveCompleteness = "strict" | "best-effort";
+export type ReportWaveCompleteness = "strict" | "best-effort";
 
-export interface WaveSpec {
+export interface ReportWaveRequest {
   /** Flow name for error detail/trace (e.g. "pr-review"). */
   flow: string;
   /** ≥1 assignment; keys must be unique (validated — throws on programmer error). */
   assignments: ReportAssignment[];
   /** Workflow-level default → the engine injects a `structured_output` tool into each child. */
   outputSchema: object;
-  completeness: WaveCompleteness;
+  completeness: ReportWaveCompleteness;
   /** Workflow-level model default (flows read their configured subagent model). */
   model?: string;
   /** Module default (`WAVE_TIMEOUT_MS`) when omitted. */
@@ -118,7 +122,7 @@ export interface WaveSpec {
 }
 
 /** A schema-valid assignment report. The report content is untrusted DATA, never instructions. */
-export interface WaveReport {
+export interface AssignmentReport {
   key: string;
   report: unknown;
 }
@@ -137,12 +141,12 @@ export type AssignmentFailureReason =
  * tier produces during normalization. The subset union keeps the split one-directional with
  * zero runtime mapping.
  */
-export type WaveFailureReason = WaveRunFailureReason | AssignmentFailureReason;
+export type ReportWaveFailureReason = WaveRunFailureReason | AssignmentFailureReason;
 
 /** A wave-level failure: the whole run failed, so there is no assignment to blame — the same
  * record shape as the transport tier's `WaveRunFailure` (script failures flow upward with zero
  * runtime mapping). */
-export interface WaveLevelFailure {
+export interface ReportWaveLevelFailure {
   key: null;
   reason: WaveRunFailureReason;
   /** Human-readable diagnosis (error strings routed here, never re-thrown). */
@@ -162,24 +166,24 @@ export interface AssignmentFailure {
  * wave-level failure carrying an assignment reason — or vice versa — is unrepresentable and
  * every flow inherits the correlation without reimplementing transport knowledge.
  */
-export type WaveFailure = WaveLevelFailure | AssignmentFailure;
+export type ReportWaveFailure = ReportWaveLevelFailure | AssignmentFailure;
 
-export interface WaveResult {
+export interface ReportWaveResult {
   complete: boolean;
-  reports: WaveReport[];
-  failures: WaveFailure[];
+  reports: AssignmentReport[];
+  failures: ReportWaveFailure[];
   /** The launch's output-free attempt receipt — write-only telemetry, never a decision input. */
   receipt: WaveScriptReceipt;
 }
 
-/** The truthful preflight partition reported by every streaming report-wave start. */
-export type WaveLaunchManifest = {
-  /** The complete logical assignment manifest, in `spec.assignments` order. */
+/** The truthful preflight partition reported by every report-wave start. */
+export type ReportWaveLaunchManifest = {
+  /** The complete logical assignment manifest, in `request.assignments` order. */
   requested: string[];
   /** The ordered subset rendered into the static workflow after required-skill preflight. */
   runnable: string[];
   /** One ordered keyed `skill-unavailable` failure per preflight-omitted assignment. */
-  preflightFailures: WaveFailure[];
+  preflightFailures: ReportWaveFailure[];
 };
 
 // -------------------------------------------------------------------- the attempt receipts
@@ -189,7 +193,7 @@ export type WaveLaunchManifest = {
  * (one-based, assigned by the flow entrypoint that owns retry policy). `requestedKeys` is the
  * assignment manifest BEFORE launch — never reconstructed from the observed children.
  */
-export interface WaveAttemptReceipt extends WaveScriptReceipt {
+export interface ReportWaveAttemptReceipt extends WaveScriptReceipt {
   flow: string;
   attempt: number;
   requestedKeys: string[];
@@ -199,9 +203,9 @@ export interface WaveAttemptReceipt extends WaveScriptReceipt {
 export function toAttemptReceipt(
   flow: string,
   attempt: number,
-  requestedKeys: string[],
+  requestedKeys: readonly string[],
   receipt: WaveScriptReceipt,
-): WaveAttemptReceipt {
+): ReportWaveAttemptReceipt {
   return { flow, attempt, requestedKeys: [...requestedKeys], ...receipt };
 }
 
@@ -270,7 +274,7 @@ function waveFailure(
   reason: WaveRunFailureReason,
   detail: string,
   receipt: WaveScriptReceipt,
-): WaveResult {
+): ReportWaveResult {
   return { complete: false, reports: [], failures: [{ key: null, reason, detail }], receipt };
 }
 
@@ -282,16 +286,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Normalize the aggregate's entries against the expected assignment keys (defensive — the
  * module rendered the script, but the aggregate crossed a process boundary). Unknown extra keys
  * are ignored: the module owns the script, so extras cannot occur without upstream drift, and
- * the per-assignment reasons below already make the wave incomplete under `strict`. Exported
- * for the per-flow entrypoints whose scripts produce the same compact projection (e.g. the
- * dynamic-review sibling normalizing against its runtime-selected keys).
+ * the per-assignment reasons below already make the wave incomplete under `strict`.
+ * Module-private: the wave's settle is the only consumer.
  */
-export function normalizeAssignments(
+function normalizeAssignments(
   keys: string[],
   entries: unknown[],
-): { reports: WaveReport[]; failures: WaveFailure[] } {
-  const reports: WaveReport[] = [];
-  const failures: WaveFailure[] = [];
+): { reports: AssignmentReport[]; failures: ReportWaveFailure[] } {
+  const reports: AssignmentReport[] = [];
+  const failures: ReportWaveFailure[] = [];
   for (const key of keys) {
     const entry = entries.find((e) => isRecord(e) && e.key === key);
     if (!isRecord(entry)) {
@@ -362,28 +365,12 @@ function enrichReceipt(
 }
 
 /**
- * A launched (or launch-failed) report wave — the assignment-level sibling of
- * `WaveScriptStart`. On `ok: true` the wave is LIVE: `result` settles into the normalized
- * `WaveResult` (assignment normalization + completeness policy + receipt enrichment) and never
- * rejects. On `ok: false` the launch failure is already normalized into a `WaveResult` (receipt
- * included) — no promise to await, nothing left running.
+ * Settle one script outcome into the assignment-level `ReportWaveResult`: receipt enrichment,
+ * the workflow.value array check, per-key normalization, and the completeness policy — the
+ * single back half both the blocking and streaming lifecycles apply.
  */
-export type ReportWaveStart =
-  | {
-      ok: true;
-      handle: WaveRunHandle;
-      result: Promise<WaveResult>;
-      launch: WaveLaunchManifest;
-    }
-  | { ok: false; result: WaveResult; launch: WaveLaunchManifest };
-
-/**
- * Settle one script outcome into the assignment-level `WaveResult`: receipt enrichment, the
- * workflow.value array check, per-key normalization, and the completeness policy — the single
- * back half both the blocking runner and the streaming sibling apply.
- */
-function settleReportWave(run: WaveScriptResult, spec: WaveSpec): WaveResult {
-  const receipt = enrichReceipt(run.receipt, spec.assignments);
+function settleReportWave(run: WaveScriptResult, request: ReportWaveRequest): ReportWaveResult {
+  const receipt = enrichReceipt(run.receipt, request.assignments);
   if (!run.ok) {
     return { complete: false, reports: [], failures: [run.failure], receipt };
   }
@@ -396,36 +383,138 @@ function settleReportWave(run: WaveScriptResult, spec: WaveSpec): WaveResult {
   }
 
   const { reports, failures } = normalizeAssignments(
-    spec.assignments.map((assignment) => assignment.key),
+    request.assignments.map((assignment) => assignment.key),
     run.value,
   );
   const complete =
-    spec.completeness === "strict"
+    request.completeness === "strict"
       ? failures.length === 0
       : failures.every((failure) => failure.key !== null);
   return { complete, reports, failures, receipt };
 }
 
+// -------------------------------------------------------------------- the opaque lifecycle
+
+declare const REPORT_WAVE_REF: unique symbol;
+
 /**
- * Start a report wave without blocking on completion: render the all-settled assignment script
- * (the programmer-error throws — empty/duplicate keys — are preserved), launch it via
- * `startWaveScript`, and on success return the run handle plus a `result` promise that applies
- * the shared settle (normalization + completeness + receipt enrichment) when the run finishes.
- * A launch failure comes back as an already-settled, normalized `WaveResult`.
+ * The opaque handle to one started, uncollected report wave — NOMINAL by a declared
+ * (value-less) unique-symbol brand: no structural forgery can satisfy it, and it exposes no
+ * operational members. Minted at exactly one internal site (immediately after the runtime
+ * evidence of a successful launch); meaningful only to the instance that minted it — a foreign
+ * instance's `collect` answers `"none"` structurally.
  */
-export async function startReportWave(
+export interface ReportWaveRef {
+  readonly [REPORT_WAVE_REF]: true;
+}
+
+/** The optional per-call controls; `signal` cancels pre-launch and best-effort stops post-launch. */
+export interface WaveControl {
+  signal?: AbortSignal;
+}
+
+/**
+ * A started (or launch-failed) report wave. On `ok: true` the wave is LIVE behind the opaque
+ * `ref` — `runId`/`asyncDir` are identity telemetry only (receipt vocabulary), never an
+ * operable handle. On `ok: false` the launch failure is already normalized into a
+ * `ReportWaveResult` (receipt included) — nothing left running, nothing to collect.
+ */
+export type StartWaveResult =
+  | {
+      ok: true;
+      ref: ReportWaveRef;
+      /** Identity telemetry only (receipt vocabulary) — never an operable handle. */
+      runId: string;
+      asyncDir: string;
+      launch: ReportWaveLaunchManifest;
+    }
+  | { ok: false; result: ReportWaveResult; launch: ReportWaveLaunchManifest };
+
+/**
+ * A collect's outcome:
+ * - `"none"`: unknown ref — never started here, already drained, or a foreign instance's.
+ * - `"running"`: unsettled after the grace — the ref stays pending; collect again later (the
+ *   wave's bound remains the module-owned timeout).
+ * - `"settled"`: this collector won the drain — `keys` is the launch's frozen requested
+ *   manifest snapshot, `result` the normalized outcome. Drain-once is exact even under
+ *   overlapping collectors (delete-as-claim).
+ */
+export type CollectWaveResult =
+  | { kind: "none" }
+  | { kind: "running" }
+  | { kind: "settled"; keys: readonly string[]; result: ReportWaveResult };
+
+/**
+ * The deep seam: callers supply assignments and consume typed outcomes — never adapters, run
+ * handles, or result promises. `start`/`collect` are the streaming split (the parent returns
+ * from the launch and holds a relay loop open); `run` is the blocking form (start + await, no
+ * ref escapes). The only throws are programmer errors (empty assignments, duplicate keys, keys
+ * outside `RUN_KEY_PATTERN`); every operational failure normalizes into `ReportWaveResult`.
+ */
+export interface ReportWave {
+  start(request: ReportWaveRequest, control?: WaveControl): Promise<StartWaveResult>;
+  collect(ref: ReportWaveRef): Promise<CollectWaveResult>;
+  run(request: ReportWaveRequest, control?: WaveControl): Promise<ReportWaveResult>;
+}
+
+/**
+ * The grace a collect allows a not-yet-settled wave before answering `"running"`: long enough
+ * to absorb the completion-event-vs-`subagent_wait` wake race, short enough that an early call
+ * never stalls the relay loop. The `PERK_WAVE_COLLECT_GRACE_MS` env knob is the ONE grace seam
+ * (module-private — there is no per-call grace parameter); invalid values fall back.
+ */
+const WAVE_COLLECT_GRACE_MS = 15_000;
+
+function collectGraceMs(): number {
+  const raw = Number(process.env.PERK_WAVE_COLLECT_GRACE_MS ?? "");
+  return Number.isFinite(raw) && raw > 0 ? raw : WAVE_COLLECT_GRACE_MS;
+}
+
+/**
+ * One pending (started, uncollected) wave: the frozen pre-launch key manifest snapshot (copied
+ * from the launch manifest at start — caller mutation of the returned `StartWaveResult.launch`
+ * can never change a later collect's keys) plus the never-rejecting result promise. NO drained
+ * flag: presence in the instance's map IS pending.
+ */
+interface PendingRecord {
+  keys: readonly string[];
+  result: Promise<ReportWaveResult>;
+}
+
+/**
+ * A launched (or launch-failed) wave as the internal core reports it — the module-private
+ * predecessor shape the opaque lifecycle wraps (the run handle and result promise never leave
+ * the module).
+ */
+type InternalStart =
+  | {
+      ok: true;
+      handle: WaveRunHandle;
+      result: Promise<ReportWaveResult>;
+      launch: ReportWaveLaunchManifest;
+    }
+  | { ok: false; result: ReportWaveResult; launch: ReportWaveLaunchManifest };
+
+/**
+ * The internal launch core: validate the COMPLETE requested manifest (the programmer-error
+ * throws — empty/duplicate/invalid keys — are preserved even for an unavailable required
+ * skill), run the required-skill preflight partition, render the all-settled assignment script
+ * over the runnable subset, and launch it via `startWaveScript`. On success the never-rejecting
+ * `result` promise applies the shared settle (normalization + completeness + receipt
+ * enrichment + preflight-failure merge) when the run finishes; a launch failure comes back as
+ * an already-settled, normalized `ReportWaveResult`.
+ */
+async function startWave(
   adapter: WaveAdapter,
-  spec: WaveSpec,
+  request: ReportWaveRequest,
   signal?: AbortSignal,
-): Promise<ReportWaveStart> {
-  // Validate the COMPLETE requested manifest before source preflight partitions any assignment
-  // out. This preserves the programmer-error contract even for an unavailable required skill.
-  validateAssignments(spec.assignments);
-  const preflight = spec.requiredSkillPreflight ?? preflightPonytailSkill;
+): Promise<InternalStart> {
+  validateAssignments(request.assignments);
+  const preflight = request.requiredSkillPreflight ?? preflightPonytailSkill;
   const checked = new Map<string, PonytailPreflight>();
   const runnable: ReportAssignment[] = [];
-  const skillFailures: WaveFailure[] = [];
-  for (const assignment of spec.assignments) {
+  const skillFailures: ReportWaveFailure[] = [];
+  for (const assignment of request.assignments) {
     if (assignment.requiredSkill === undefined) {
       runnable.push(assignment);
       continue;
@@ -446,17 +535,17 @@ export async function startReportWave(
     }
   }
 
-  const launch: WaveLaunchManifest = {
-    requested: spec.assignments.map((assignment) => assignment.key),
+  const launch: ReportWaveLaunchManifest = {
+    requested: request.assignments.map((assignment) => assignment.key),
     runnable: runnable.map((assignment) => assignment.key),
     preflightFailures: [...skillFailures],
   };
 
-  const settleWithSkillFailures = (result: WaveResult): WaveResult => {
+  const settleWithSkillFailures = (result: ReportWaveResult): ReportWaveResult => {
     if (skillFailures.length === 0) return result;
     const failures = [...result.failures, ...skillFailures];
     const complete =
-      spec.completeness === "strict"
+      request.completeness === "strict"
         ? failures.length === 0
         : failures.every((failure) => failure.key !== null);
     return { ...result, complete, failures };
@@ -472,17 +561,17 @@ export async function startReportWave(
   }
 
   // Required-skill metadata never reaches the renderer; only runnable assignments spawn.
-  const runnableSpec: WaveSpec = { ...spec, assignments: runnable };
+  const runnableRequest: ReportWaveRequest = { ...request, assignments: runnable };
   const workflowScript = renderWaveScript(runnable);
 
   const start = await startWaveScript(
     adapter,
     {
-      flow: spec.flow,
+      flow: request.flow,
       workflowScript,
-      outputSchema: spec.outputSchema,
-      ...(spec.model !== undefined ? { model: spec.model } : {}),
-      ...(spec.timeoutMs !== undefined ? { timeoutMs: spec.timeoutMs } : {}),
+      outputSchema: request.outputSchema,
+      ...(request.model !== undefined ? { model: request.model } : {}),
+      ...(request.timeoutMs !== undefined ? { timeoutMs: request.timeoutMs } : {}),
     },
     signal,
   );
@@ -492,7 +581,7 @@ export async function startReportWave(
       result: settleWithSkillFailures(
         settleReportWave(
           { ok: false, failure: start.failure, receipt: start.receipt },
-          runnableSpec,
+          runnableRequest,
         ),
       ),
       launch,
@@ -502,22 +591,88 @@ export async function startReportWave(
     ok: true,
     handle: start.handle,
     result: start.result.then((run) =>
-      settleWithSkillFailures(settleReportWave(run, runnableSpec)),
+      settleWithSkillFailures(settleReportWave(run, runnableRequest)),
     ),
     launch,
   };
 }
 
+const STILL_RUNNING = Symbol("wave-still-running");
+
 /**
- * Run a report wave to completion — the blocking form: `startReportWave` + await its `result`
- * (one operational core). Every operational failure normalizes into `WaveResult` — the only
- * throws are programmer errors (empty assignments / duplicate keys, via the renderer).
+ * The one internal core both factories share: an instance-owned pending map over a per-launch
+ * adapter supplier. Pending state belongs to the wave INSTANCE — `waveB.collect(refFromA)` is
+ * `"none"` structurally — and the WeakMap plus the settled drain's delete both release retained
+ * results promptly.
  */
-export async function runReportWave(
-  adapter: WaveAdapter,
-  spec: WaveSpec,
-  signal?: AbortSignal,
-): Promise<WaveResult> {
-  const start = await startReportWave(adapter, spec, signal);
-  return start.ok ? await start.result : start.result;
+function waveOver(supplyAdapter: () => WaveAdapter): ReportWave {
+  const records = new WeakMap<ReportWaveRef, PendingRecord>();
+
+  return {
+    async start(request, control) {
+      const start = await startWave(supplyAdapter(), request, control?.signal);
+      if (!start.ok) {
+        return { ok: false, result: start.result, launch: start.launch };
+      }
+      // The ONE mint site — the isolated assertion, immediately after the runtime evidence of
+      // a successful launch. The keys snapshot is frozen and copied, never an alias of the
+      // returned manifest.
+      const ref = {} as ReportWaveRef;
+      records.set(ref, { keys: Object.freeze([...start.launch.requested]), result: start.result });
+      return {
+        ok: true,
+        ref,
+        runId: start.handle.asyncId,
+        asyncDir: start.handle.asyncDir,
+        launch: start.launch,
+      };
+    },
+
+    async collect(ref) {
+      const record = records.get(ref);
+      if (record === undefined) return { kind: "none" };
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let raced: ReportWaveResult | typeof STILL_RUNNING;
+      try {
+        raced = await Promise.race([
+          record.result,
+          new Promise<typeof STILL_RUNNING>((resolve) => {
+            timer = setTimeout(() => resolve(STILL_RUNNING), collectGraceMs());
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+      if (raced === STILL_RUNNING) {
+        // The record stays in the map: its bound remains the module-owned wave timeout, and a
+        // later collect drains whatever it settles into.
+        return { kind: "running" };
+      }
+      // The delete IS the atomic drain claim: single-threaded JS makes the post-await
+      // delete-as-claim exact — overlapping collects of one ref yield exactly one settled
+      // winner; the loser (already-deleted) answers `"none"`.
+      if (!records.delete(ref)) return { kind: "none" };
+      return { kind: "settled", keys: record.keys, result: raced };
+    },
+
+    async run(request, control) {
+      const start = await startWave(supplyAdapter(), request, control?.signal);
+      return start.ok ? await start.result : start.result;
+    },
+  };
+}
+
+/**
+ * The PRODUCTION factory — the wave owns adapter selection: constructs a FRESH rpc adapter per
+ * launch over the supplied bus (per-execute adapter freshness; no shared mutable ping state).
+ * One per-activation instance is constructed at the composition root (`extension/index.ts`) and
+ * threaded to the installers.
+ */
+export function createReportWave(bus: WaveBus): ReportWave {
+  return waveOver(() => createRpcWaveAdapter(bus));
+}
+
+/** The adapter-injection seam (tests; the production factory rides the same internal core). */
+export function reportWaveOver(adapter: WaveAdapter): ReportWave {
+  return waveOver(() => adapter);
 }
