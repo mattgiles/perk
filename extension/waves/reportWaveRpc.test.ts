@@ -9,6 +9,7 @@
 // refs). The live pi-subagents leg remains the phase dogfood's.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createFakeSubagents, waveScriptItems } from "../testing/fakeSubagents.ts";
 import { createReportWave, type ReportWaveRequest } from "./reportWave.ts";
@@ -145,10 +146,31 @@ test("rpc integration: timeout stops the real run best-effort (the recorded stop
   assert.equal(fake.stops[0]?.id, result.receipt.runId, "the stop request names the spawned run");
 });
 
-test("rpc integration: two OVERLAPPING waves ride fresh per-launch adapters (out-of-order correlation)", async () => {
-  // NEW coverage (not a port): the production factory constructs a FRESH rpc adapter per
-  // launch — each launch pings + subscribes independently (no shared advertised state), and
-  // completions arriving OUT OF LAUNCH ORDER correlate to the right refs.
+test("rpc integration: adapter construction is per-launch inside the supplier (source pin)", () => {
+  // The per-launch adapter freshness is not observable over the bus (a shared adapter would
+  // still ping per launch and correlate per run), and the module deliberately ships no
+  // test-only construction-count seam — so the invariant is pinned structurally: the module's
+  // ONE `createRpcWaveAdapter` call site must be the lazy per-launch supplier arrow. Hoisting
+  // the construction out of the supplier (one shared adapter, shared mutable ping state)
+  // breaks this pin.
+  const source = readFileSync(new URL("./reportWave.ts", import.meta.url), "utf8");
+  const mentions = source.match(/createRpcWaveAdapter/g) ?? [];
+  assert.equal(
+    mentions.length,
+    2,
+    "reportWave.ts must reference createRpcWaveAdapter exactly twice: the import + the supplier",
+  );
+  assert.match(
+    source,
+    /=> createRpcWaveAdapter\(bus\)/,
+    "the one construction call must sit inside the per-launch supplier arrow",
+  );
+});
+
+test("rpc integration: two OVERLAPPING waves through one factory correlate out of launch order", async () => {
+  // NEW coverage (not a port): the behavioral half of per-launch freshness (the structural
+  // half is the source pin above) — two overlapping launches each ping, and completions
+  // arriving OUT OF LAUNCH ORDER correlate to the right refs with no cross-wave bleed.
   const bus = createFakeBus();
   let pings = 0;
   const countingBus: WaveBus = {
@@ -186,7 +208,7 @@ test("rpc integration: two OVERLAPPING waves ride fresh per-launch adapters (out
   assert.equal(a.ok, true);
   assert.equal(b.ok, true);
   if (!a.ok || !b.ok) return;
-  assert.equal(pings, 2, "each launch pings independently (a fresh adapter per launch)");
+  assert.equal(pings, 2, "each launch pings (the launch path never reuses a prior ping reply)");
   assert.equal(fake.spawns.length, 2);
   assert.notEqual(a.runId, b.runId);
 

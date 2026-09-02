@@ -18,7 +18,6 @@ import {
   type CollectWaveResult,
   type ReportAssignment,
   type ReportWaveRequest,
-  type ReportWaveResult,
   reportWaveOver,
   toAttemptReceipt,
 } from "./reportWave.ts";
@@ -85,22 +84,13 @@ return reports.map(({key, ok, error, structuredOutput}) => ({key, ok, error: err
 
 const PREFLIGHT_OK = async (): Promise<{ ok: true }> => ({ ok: true });
 
-/** The blocking form over a fresh wave instance (the suite's shorthand — one wave per run). */
-function runReportWave(
-  adapter: WaveAdapter,
-  request: ReportWaveRequest,
-  signal?: AbortSignal,
-): Promise<ReportWaveResult> {
-  return reportWaveOver(adapter).run(request, { signal });
-}
-
 /**
  * Render through the seam: the renderer is module-private, so the script bytes are observed the
  * only way production can — as the spawned `workflowScript` on the adapter's spawn params.
  */
 async function renderedScript(overrides: Partial<ReportWaveRequest>): Promise<string> {
   const adapter = createMemoryWaveAdapter({ aggregate: { state: "complete", value: [] } });
-  await runReportWave(adapter, makeSpec({ completeness: "best-effort", ...overrides }));
+  await reportWaveOver(adapter).run(makeSpec({ completeness: "best-effort", ...overrides }));
   const script = adapter.calls.spawn[0]?.workflowScript;
   assert.ok(script !== undefined, "the wave spawned no script");
   return script;
@@ -172,8 +162,7 @@ test("the rendered script serializes opted-in skill but never required-skill met
 
 test("the wave throws on duplicate assignment keys and empty assignments", async () => {
   await assert.rejects(
-    runReportWave(
-      createMemoryWaveAdapter({}),
+    reportWaveOver(createMemoryWaveAdapter({})).run(
       makeSpec({
         assignments: [
           { key: "same", agent: "a", task: "t1" },
@@ -184,7 +173,7 @@ test("the wave throws on duplicate assignment keys and empty assignments", async
     /duplicate lane key 'same'/,
   );
   await assert.rejects(
-    runReportWave(createMemoryWaveAdapter({}), makeSpec({ assignments: [] })),
+    reportWaveOver(createMemoryWaveAdapter({})).run(makeSpec({ assignments: [] })),
     /at least one lane/,
   );
 });
@@ -201,8 +190,7 @@ test("the wave rejects assignment keys outside the pi-subagents run-key contract
     `x${"y".repeat(128)}`, // 129 chars
   ]) {
     await assert.rejects(
-      runReportWave(
-        createMemoryWaveAdapter({}),
+      reportWaveOver(createMemoryWaveAdapter({})).run(
         makeSpec({ assignments: [{ key: bad, agent: "a", task: "t" }] }),
       ),
       /violates the pi-subagents run-key contract|at least one lane/,
@@ -265,7 +253,7 @@ test("wave.start validates the whole manifest BEFORE any preflight runs", async 
 
 // -------------------------------------------------------------------------- the runner matrix
 
-test("runReportWave: happy path yields reports under lane keys and complete", async () => {
+test("wave.run: happy path yields reports under lane keys and complete", async () => {
   const adapter = createMemoryWaveAdapter({
     aggregate: {
       state: "complete",
@@ -275,7 +263,7 @@ test("runReportWave: happy path yields reports under lane keys and complete", as
       ],
     },
   });
-  const result = await runReportWave(adapter, makeSpec());
+  const result = await reportWaveOver(adapter).run(makeSpec());
   assert.deepEqual(result, {
     complete: true,
     reports: [
@@ -292,12 +280,12 @@ test("runReportWave: happy path yields reports under lane keys and complete", as
   });
 });
 
-test("runReportWave: spawn params carry the fixed module contract + spec fields", async () => {
+test("wave.run: spawn params carry the fixed module contract + spec fields", async () => {
   const spec = makeSpec({ model: "anthropic/claude-sonnet-4", timeoutMs: 1_234 });
   const adapter = createMemoryWaveAdapter({
     aggregate: { state: "complete", value: [] },
   });
-  await runReportWave(adapter, spec);
+  await reportWaveOver(adapter).run(spec);
   assert.equal(adapter.calls.spawn.length, 1);
   assert.deepEqual(adapter.calls.spawn[0], {
     workflowScript: TWO_ASSIGNMENT_SCRIPT,
@@ -311,7 +299,7 @@ test("runReportWave: spawn params carry the fixed module contract + spec fields"
   });
 });
 
-test("runReportWave: failed required-skill preflight skips only that lane and stays uncovered", async () => {
+test("wave.run: failed required-skill preflight skips only that lane and stays uncovered", async () => {
   const assignments: ReportAssignment[] = [
     ASSIGNMENTS[0] as ReportAssignment,
     {
@@ -329,8 +317,7 @@ test("runReportWave: failed required-skill preflight skips only that lane and st
       value: [okEntry("plan-fidelity", { verdict: "clean" })],
     },
   });
-  const result = await runReportWave(
-    adapter,
+  const result = await reportWaveOver(adapter).run(
     makeSpec({
       assignments,
       requiredSkillPreflight: async () => {
@@ -357,7 +344,7 @@ test("runReportWave: failed required-skill preflight skips only that lane and st
   assert.deepEqual(attempt.requestedKeys, ["plan-fidelity", "ponytail"]);
 });
 
-test("runReportWave: a failed lane is incomplete under strict, complete under best-effort", async () => {
+test("wave.run: a failed lane is incomplete under strict, complete under best-effort", async () => {
   const aggregate = {
     state: "complete",
     value: [
@@ -365,15 +352,14 @@ test("runReportWave: a failed lane is incomplete under strict, complete under be
       { key: "correctness", ok: false, error: "lane exploded", report: null },
     ],
   };
-  const strict = await runReportWave(createMemoryWaveAdapter({ aggregate }), makeSpec());
+  const strict = await reportWaveOver(createMemoryWaveAdapter({ aggregate })).run(makeSpec());
   assert.equal(strict.complete, false);
   assert.deepEqual(strict.reports, [{ key: "plan-fidelity", report: { verdict: "clean" } }]);
   assert.deepEqual(strict.failures, [
     { key: "correctness", reason: "lane-failed", detail: "lane exploded" },
   ]);
 
-  const bestEffort = await runReportWave(
-    createMemoryWaveAdapter({ aggregate }),
+  const bestEffort = await reportWaveOver(createMemoryWaveAdapter({ aggregate })).run(
     makeSpec({ completeness: "best-effort" }),
   );
   assert.equal(bestEffort.complete, true);
@@ -382,7 +368,7 @@ test("runReportWave: a failed lane is incomplete under strict, complete under be
   ]);
 });
 
-test("runReportWave: Ponytail preflight success without a report stays uncovered", async () => {
+test("wave.run: Ponytail preflight success without a report stays uncovered", async () => {
   const ponytail: ReportAssignment = {
     key: "ponytail",
     agent: "perk.pr-reviewer",
@@ -399,8 +385,7 @@ test("runReportWave: Ponytail preflight success without a report stays uncovered
       ],
     },
   });
-  const result = await runReportWave(
-    adapter,
+  const result = await reportWaveOver(adapter).run(
     makeSpec({
       assignments: [ASSIGNMENTS[0] as ReportAssignment, ponytail],
       requiredSkillPreflight: async () => ({ ok: true }),
@@ -417,7 +402,7 @@ test("runReportWave: Ponytail preflight success without a report stays uncovered
   ]);
 });
 
-test("runReportWave: unusable entry shapes are malformed-report", async () => {
+test("wave.run: unusable entry shapes are malformed-report", async () => {
   const adapter = createMemoryWaveAdapter({
     aggregate: {
       state: "complete",
@@ -427,7 +412,7 @@ test("runReportWave: unusable entry shapes are malformed-report", async () => {
       ],
     },
   });
-  const result = await runReportWave(adapter, makeSpec());
+  const result = await reportWaveOver(adapter).run(makeSpec());
   assert.equal(result.complete, false);
   assert.deepEqual(result.reports, []);
   assert.deepEqual(
@@ -439,7 +424,7 @@ test("runReportWave: unusable entry shapes are malformed-report", async () => {
   );
 });
 
-test("runReportWave: an absent lane key is missing-lane; unknown extra keys are ignored", async () => {
+test("wave.run: an absent lane key is missing-lane; unknown extra keys are ignored", async () => {
   const adapter = createMemoryWaveAdapter({
     aggregate: {
       state: "complete",
@@ -449,7 +434,7 @@ test("runReportWave: an absent lane key is missing-lane; unknown extra keys are 
       ],
     },
   });
-  const result = await runReportWave(adapter, makeSpec());
+  const result = await reportWaveOver(adapter).run(makeSpec());
   assert.equal(result.complete, false);
   assert.deepEqual(result.reports, [{ key: "plan-fidelity", report: { verdict: "clean" } }]);
   assert.deepEqual(result.failures, [
@@ -461,9 +446,9 @@ test("runReportWave: an absent lane key is missing-lane; unknown extra keys are 
   ]);
 });
 
-test("runReportWave: a null ping is a wave-level unavailable failure (loud degrade, no spawn)", async () => {
+test("wave.run: a null ping is a wave-level unavailable failure (loud degrade, no spawn)", async () => {
   const adapter = createMemoryWaveAdapter({ ping: null });
-  const result = await runReportWave(adapter, makeSpec());
+  const result = await reportWaveOver(adapter).run(makeSpec());
   assert.equal(result.complete, false);
   assert.deepEqual(result.reports, []);
   assert.equal(result.failures.length, 1);
@@ -472,9 +457,9 @@ test("runReportWave: a null ping is a wave-level unavailable failure (loud degra
   assert.equal(adapter.calls.spawn.length, 0);
 });
 
-test("runReportWave: a rejected spawn is a wave-level spawn-failed failure", async () => {
+test("wave.run: a rejected spawn is a wave-level spawn-failed failure", async () => {
   const adapter = createMemoryWaveAdapter({ spawnError: "no session" });
-  const result = await runReportWave(adapter, makeSpec());
+  const result = await reportWaveOver(adapter).run(makeSpec());
   assert.equal(result.complete, false);
   assert.deepEqual(
     result.failures.map((f) => [f.key, f.reason]),
@@ -483,9 +468,9 @@ test("runReportWave: a rejected spawn is a wave-level spawn-failed failure", asy
   assert.match(result.failures[0]?.detail ?? "", /no session/);
 });
 
-test("runReportWave: timeout stops the run best-effort and fails the wave", async () => {
+test("wave.run: timeout stops the run best-effort and fails the wave", async () => {
   const adapter = createMemoryWaveAdapter({ completion: false });
-  const result = await runReportWave(adapter, makeSpec({ timeoutMs: 20 }));
+  const result = await reportWaveOver(adapter).run(makeSpec({ timeoutMs: 20 }));
   assert.equal(result.complete, false);
   assert.deepEqual(
     result.failures.map((f) => [f.key, f.reason]),
@@ -496,12 +481,12 @@ test("runReportWave: timeout stops the run best-effort and fails the wave", asyn
   assert.equal(adapter.calls.stop[0]?.asyncId, "wave-async-1");
 });
 
-test("runReportWave: PERK_WAVE_TIMEOUT_MS overrides the module default timeout", async () => {
+test("wave.run: PERK_WAVE_TIMEOUT_MS overrides the module default timeout", async () => {
   assert.equal(WAVE_TIMEOUT_MS, 15 * 60_000);
   process.env.PERK_WAVE_TIMEOUT_MS = "20";
   try {
     const adapter = createMemoryWaveAdapter({ completion: false });
-    const result = await runReportWave(adapter, makeSpec({ timeoutMs: undefined }));
+    const result = await reportWaveOver(adapter).run(makeSpec({ timeoutMs: undefined }));
     assert.deepEqual(
       result.failures.map((f) => [f.key, f.reason]),
       [[null, "timeout"]],
@@ -512,11 +497,11 @@ test("runReportWave: PERK_WAVE_TIMEOUT_MS overrides the module default timeout",
   }
 });
 
-test("runReportWave: an AbortSignal cancels the wave and stops the run best-effort", async () => {
+test("wave.run: an AbortSignal cancels the wave and stops the run best-effort", async () => {
   const adapter = createMemoryWaveAdapter({ completion: false });
   const controller = new AbortController();
   setTimeout(() => controller.abort(), 10);
-  const result = await runReportWave(adapter, makeSpec(), controller.signal);
+  const result = await reportWaveOver(adapter).run(makeSpec(), { signal: controller.signal });
   assert.equal(result.complete, false);
   assert.deepEqual(
     result.failures.map((f) => [f.key, f.reason]),
@@ -525,11 +510,11 @@ test("runReportWave: an AbortSignal cancels the wave and stops the run best-effo
   assert.equal(adapter.calls.stop.length, 1);
 });
 
-test("runReportWave: a pre-aborted signal cancels before launch (no spawn)", async () => {
+test("wave.run: a pre-aborted signal cancels before launch (no spawn)", async () => {
   const adapter = createMemoryWaveAdapter({});
   const controller = new AbortController();
   controller.abort();
-  const result = await runReportWave(adapter, makeSpec(), controller.signal);
+  const result = await reportWaveOver(adapter).run(makeSpec(), { signal: controller.signal });
   assert.deepEqual(
     result.failures.map((f) => [f.key, f.reason]),
     [[null, "cancelled"]],
@@ -537,7 +522,7 @@ test("runReportWave: a pre-aborted signal cancels before launch (no spawn)", asy
   assert.equal(adapter.calls.spawn.length, 0);
 });
 
-test("runReportWave: an abort arriving during the ping await cancels before spawn", async () => {
+test("wave.run: an abort arriving during the ping await cancels before spawn", async () => {
   const adapter = createMemoryWaveAdapter({});
   const controller = new AbortController();
   // The abort fires while `ping()` is pending — the post-ping re-check must catch it; the
@@ -550,7 +535,9 @@ test("runReportWave: an abort arriving during the ping await cancels before spaw
       return adapter.ping();
     },
   };
-  const result = await runReportWave(delayedPingAdapter, makeSpec(), controller.signal);
+  const result = await reportWaveOver(delayedPingAdapter).run(makeSpec(), {
+    signal: controller.signal,
+  });
   assert.deepEqual(
     result.failures.map((f) => [f.key, f.reason]),
     [[null, "cancelled"]],
@@ -558,11 +545,11 @@ test("runReportWave: an abort arriving during the ping await cancels before spaw
   assert.equal(adapter.calls.spawn.length, 0);
 });
 
-test("runReportWave: a non-complete terminal state is run-failed with the status error", async () => {
+test("wave.run: a non-complete terminal state is run-failed with the status error", async () => {
   const adapter = createMemoryWaveAdapter({
     aggregate: { state: "failed", error: "workflow script threw", value: undefined },
   });
-  const result = await runReportWave(adapter, makeSpec());
+  const result = await reportWaveOver(adapter).run(makeSpec());
   assert.deepEqual(
     result.failures.map((f) => [f.key, f.reason]),
     [[null, "run-failed"]],
@@ -570,27 +557,27 @@ test("runReportWave: a non-complete terminal state is run-failed with the status
   assert.match(result.failures[0]?.detail ?? "", /'failed': workflow script threw/);
 });
 
-test("runReportWave: an unreadable status.json is aggregate-unreadable", async () => {
+test("wave.run: an unreadable status.json is aggregate-unreadable", async () => {
   const adapter = createMemoryWaveAdapter({ aggregateError: true });
-  const result = await runReportWave(adapter, makeSpec());
+  const result = await reportWaveOver(adapter).run(makeSpec());
   assert.deepEqual(
     result.failures.map((f) => [f.key, f.reason]),
     [[null, "aggregate-unreadable"]],
   );
 });
 
-test("runReportWave: a non-array workflow.value is aggregate-unreadable", async () => {
+test("wave.run: a non-array workflow.value is aggregate-unreadable", async () => {
   const adapter = createMemoryWaveAdapter({
     aggregate: { state: "complete", value: "not an array" },
   });
-  const result = await runReportWave(adapter, makeSpec());
+  const result = await reportWaveOver(adapter).run(makeSpec());
   assert.deepEqual(
     result.failures.map((f) => [f.key, f.reason]),
     [[null, "aggregate-unreadable"]],
   );
 });
 
-test("runReportWave: a completion arriving before the spawn reply still resolves", async () => {
+test("wave.run: a completion arriving before the spawn reply still resolves", async () => {
   const adapter = createMemoryWaveAdapter({
     ordering: "complete-then-reply",
     aggregate: {
@@ -601,16 +588,15 @@ test("runReportWave: a completion arriving before the spawn reply still resolves
       ],
     },
   });
-  const result = await runReportWave(adapter, makeSpec());
+  const result = await reportWaveOver(adapter).run(makeSpec());
   assert.equal(result.complete, true);
   assert.equal(result.reports.length, 2);
 });
 
-test("runReportWave: duplicate lane keys throw (programmer error, never normalized)", async () => {
+test("wave.run: duplicate lane keys throw (programmer error, never normalized)", async () => {
   const adapter = createMemoryWaveAdapter({});
   await assert.rejects(
-    runReportWave(
-      adapter,
+    reportWaveOver(adapter).run(
       makeSpec({
         assignments: [
           { key: "same", agent: "a", task: "t1" },
@@ -625,21 +611,19 @@ test("runReportWave: duplicate lane keys throw (programmer error, never normaliz
 // ------------------------------------------------------------------- the attempt receipts
 
 test("receipt: unavailable (null ping) — no handle, no children", async () => {
-  const result = await runReportWave(createMemoryWaveAdapter({ ping: null }), makeSpec());
+  const result = await reportWaveOver(createMemoryWaveAdapter({ ping: null })).run(makeSpec());
   assert.deepEqual(result.receipt, { state: "unavailable", children: [] });
 });
 
 test("receipt: spawn-failed — no handle, no children", async () => {
-  const result = await runReportWave(
-    createMemoryWaveAdapter({ spawnError: "no session" }),
+  const result = await reportWaveOver(createMemoryWaveAdapter({ spawnError: "no session" })).run(
     makeSpec(),
   );
   assert.deepEqual(result.receipt, { state: "spawn-failed", children: [] });
 });
 
 test("receipt: timed-out preserves the spawn handle (no completion, empty children)", async () => {
-  const result = await runReportWave(
-    createMemoryWaveAdapter({ completion: false }),
+  const result = await reportWaveOver(createMemoryWaveAdapter({ completion: false })).run(
     makeSpec({ timeoutMs: 20 }),
   );
   assert.deepEqual(result.receipt, {
@@ -654,7 +638,7 @@ test("receipt: post-spawn cancel preserves the spawn handle", async () => {
   const adapter = createMemoryWaveAdapter({ completion: false });
   const controller = new AbortController();
   setTimeout(() => controller.abort(), 10);
-  const result = await runReportWave(adapter, makeSpec(), controller.signal);
+  const result = await reportWaveOver(adapter).run(makeSpec(), { signal: controller.signal });
   assert.deepEqual(result.receipt, {
     runId: "wave-async-1",
     asyncDir: "/memory/wave-async-1",
@@ -666,7 +650,9 @@ test("receipt: post-spawn cancel preserves the spawn handle", async () => {
 test("receipt: pre-launch cancel yields a handle-less cancelled receipt", async () => {
   const controller = new AbortController();
   controller.abort();
-  const result = await runReportWave(createMemoryWaveAdapter({}), makeSpec(), controller.signal);
+  const result = await reportWaveOver(createMemoryWaveAdapter({})).run(makeSpec(), {
+    signal: controller.signal,
+  });
   assert.deepEqual(result.receipt, { state: "cancelled", children: [] });
 });
 
@@ -679,7 +665,7 @@ test("receipt: a non-complete terminal state is failed, retaining handle + compl
       children: [{ key: "plan-fidelity", runId: "child-1", success: false }],
     },
   });
-  const result = await runReportWave(adapter, makeSpec());
+  const result = await reportWaveOver(adapter).run(makeSpec());
   assert.deepEqual(result.receipt, {
     runId: "wave-async-1",
     asyncDir: "/memory/wave-async-1",
@@ -691,22 +677,20 @@ test("receipt: a non-complete terminal state is failed, retaining handle + compl
 });
 
 test("receipt: aggregate-unreadable retains the completion identity (success false ⇒ failed)", async () => {
-  const failed = await runReportWave(
+  const failed = await reportWaveOver(
     createMemoryWaveAdapter({
       aggregateError: true,
       completionDetail: { success: false, children: [{ key: "correctness", runId: "child-2" }] },
     }),
-    makeSpec(),
-  );
+  ).run(makeSpec());
   assert.equal(failed.receipt.state, "failed");
   assert.deepEqual(failed.receipt.children, [
     { key: "correctness", agent: "perk.pr-reviewer", runId: "child-2" },
   ]);
 
-  const completeish = await runReportWave(
+  const completeish = await reportWaveOver(
     createMemoryWaveAdapter({ aggregateError: true, completionDetail: { success: true } }),
-    makeSpec(),
-  );
+  ).run(makeSpec());
   assert.equal(completeish.receipt.state, "complete");
   // The authoritative failure reason stays in failures[] — the receipt is a correlation label.
   assert.deepEqual(
@@ -731,7 +715,7 @@ test("receipt: complete run enriches child agents from the lane specs by key", a
     },
     completionDetail: { state: "complete", success: true, children },
   });
-  const result = await runReportWave(adapter, makeSpec());
+  const result = await reportWaveOver(adapter).run(makeSpec());
   assert.deepEqual(result.receipt.children, [
     {
       key: "plan-fidelity",
@@ -756,7 +740,7 @@ test("receipt: an identity-only completion yields empty children on a complete r
       ],
     },
   });
-  const result = await runReportWave(adapter, makeSpec());
+  const result = await reportWaveOver(adapter).run(makeSpec());
   assert.equal(result.complete, true);
   assert.deepEqual(result.receipt.children, []);
 });
@@ -773,7 +757,7 @@ test("receipt: completion-before-reply buffering retains the receipt detail", as
     },
     completionDetail: { state: "complete", success: true, children: [{ key: "plan-fidelity" }] },
   });
-  const result = await runReportWave(adapter, makeSpec());
+  const result = await reportWaveOver(adapter).run(makeSpec());
   assert.equal(result.complete, true);
   assert.deepEqual(result.receipt.children, [{ key: "plan-fidelity", agent: "perk.pr-reviewer" }]);
 });
@@ -786,10 +770,10 @@ test("receipt data never alters complete/reports/failures (behavior parity)", as
       okEntry("correctness", { verdict: "clean" }),
     ],
   };
-  const identityOnly = await runReportWave(createMemoryWaveAdapter({ aggregate }), makeSpec());
+  const identityOnly = await reportWaveOver(createMemoryWaveAdapter({ aggregate })).run(makeSpec());
   // A completion whose children CLAIM failure changes nothing — the durable aggregate is the
   // sole authority for reports and completeness.
-  const contradicting = await runReportWave(
+  const contradicting = await reportWaveOver(
     createMemoryWaveAdapter({
       aggregate,
       completionDetail: {
@@ -801,8 +785,7 @@ test("receipt data never alters complete/reports/failures (behavior parity)", as
         ],
       },
     }),
-    makeSpec(),
-  );
+  ).run(makeSpec());
   assert.deepEqual(
     {
       complete: contradicting.complete,
@@ -999,24 +982,24 @@ test("the runner releases its completion subscription on every settle arm", asyn
       },
     }),
   );
-  await runReportWave(normal.adapter, makeSpec());
+  await reportWaveOver(normal.adapter).run(makeSpec());
   assert.equal(normal.active(), 0);
 
   // Timeout.
   const timedOut = countingSubscriptions(createMemoryWaveAdapter({ completion: false }));
-  await runReportWave(timedOut.adapter, makeSpec({ timeoutMs: 20 }));
+  await reportWaveOver(timedOut.adapter).run(makeSpec({ timeoutMs: 20 }));
   assert.equal(timedOut.active(), 0);
 
   // Post-launch cancel.
   const cancelled = countingSubscriptions(createMemoryWaveAdapter({ completion: false }));
   const controller = new AbortController();
   setTimeout(() => controller.abort(), 10);
-  await runReportWave(cancelled.adapter, makeSpec(), controller.signal);
+  await reportWaveOver(cancelled.adapter).run(makeSpec(), { signal: controller.signal });
   assert.equal(cancelled.active(), 0);
 
   // Pre-spawn failure: the runner subscribes before spawning, so a rejected spawn must release.
   const spawnFailed = countingSubscriptions(createMemoryWaveAdapter({ spawnError: "no session" }));
-  await runReportWave(spawnFailed.adapter, makeSpec());
+  await reportWaveOver(spawnFailed.adapter).run(makeSpec());
   assert.equal(spawnFailed.active(), 0);
 });
 
@@ -1075,13 +1058,8 @@ test("wave.start: the ok arm carries ref + identity telemetry; collect settles i
     runnable: ["plan-fidelity", "correctness"],
     preflightFailures: [],
   });
-  // Unsettled under a tiny grace: the ref stays pending (`running`), never dropped.
-  process.env.PERK_WAVE_COLLECT_GRACE_MS = "20";
-  try {
-    assert.deepEqual(await wave.collect(start.ref), { kind: "running" });
-  } finally {
-    delete process.env.PERK_WAVE_COLLECT_GRACE_MS;
-  }
+  // (The unsettled `running` probe and the drain-once tail live in the dedicated ported
+  // lifecycle pin below — this test owns the start telemetry + settle normalization.)
   adapter.emitCompletion({
     asyncId: start.runId,
     asyncDir: start.asyncDir,
@@ -1101,8 +1079,6 @@ test("wave.start: the ok arm carries ref + identity telemetry; collect settles i
   assert.deepEqual(result.receipt.children, [
     { key: "plan-fidelity", agent: "perk.pr-reviewer", runId: "child-1" },
   ]);
-  // Drain-once: the ref is spent.
-  assert.deepEqual(await wave.collect(start.ref), { kind: "none" });
 });
 
 test("wave.start: the launch-failure arm returns an already-settled normalized ReportWaveResult", async () => {
@@ -1313,31 +1289,42 @@ test("collect: running retains the ref; the later collect drains once; a second 
   assert.deepEqual(await wave.collect(start.ref), { kind: "none" });
 });
 
-test("collect grace: PERK_WAVE_COLLECT_GRACE_MS overrides; invalid values fall back (never a zero grace)", async () => {
-  // The env knob is the one grace seam (the collectGraceMs default is module-private, so the
-  // 15s default and the invalid-value fallback are pinned behaviorally): an unsettled wave
-  // answers `running` under a tiny valid override, while an INVALID override falls back to the
-  // module default — a result settling ~50ms in wins the race instead of a zero/NaN grace
-  // expiring first.
-  const adapter = collectableAdapter({ completion: false });
-  const wave = reportWaveOver(adapter);
-  const start = await wave.start(makeSpec());
-  assert.equal(start.ok, true);
-  if (!start.ok) return;
-  const prev = process.env.PERK_WAVE_COLLECT_GRACE_MS;
-  try {
-    process.env.PERK_WAVE_COLLECT_GRACE_MS = "20";
-    assert.deepEqual(await wave.collect(start.ref), { kind: "running" });
-    process.env.PERK_WAVE_COLLECT_GRACE_MS = "nope";
-    setTimeout(
-      () => adapter.emitCompletion({ asyncId: start.runId, asyncDir: start.asyncDir }),
-      50,
+test("collect grace: exact delays — the valid override, the 15s default, every invalid form", async (t) => {
+  // The env knob is the one grace seam and collectGraceMs is module-private, so the contract is
+  // pinned at the observable seam: the DELAY handed to setTimeout by collect's grace race
+  // (captured via the node:test timer mock; the wrapped call still runs). collect allocates its
+  // grace timer synchronously, so the first setTimeout recorded during the call is the grace —
+  // then the wave settles and the collect drains normally (no real waiting).
+  const graceDelayFor = async (envValue: string | undefined): Promise<unknown> => {
+    const adapter = collectableAdapter({ completion: false });
+    const wave = reportWaveOver(adapter);
+    const start = await wave.start(makeSpec());
+    assert.equal(start.ok, true);
+    if (!start.ok) throw new Error("unreachable");
+    const spy = t.mock.method(globalThis, "setTimeout");
+    let pending: Promise<CollectWaveResult>;
+    if (envValue === undefined) delete process.env.PERK_WAVE_COLLECT_GRACE_MS;
+    else process.env.PERK_WAVE_COLLECT_GRACE_MS = envValue;
+    try {
+      pending = wave.collect(start.ref);
+    } finally {
+      delete process.env.PERK_WAVE_COLLECT_GRACE_MS;
+    }
+    const delay: unknown = spy.mock.calls[0]?.arguments[1];
+    spy.mock.restore();
+    adapter.emitCompletion({ asyncId: start.runId, asyncDir: start.asyncDir });
+    assert.equal((await pending).kind, "settled");
+    return delay;
+  };
+
+  assert.equal(await graceDelayFor("20"), 20, "a valid override is used exactly");
+  assert.equal(await graceDelayFor(undefined), 15_000, "unset falls back to the 15s default");
+  for (const invalid of ["nope", "0", "-5", ""]) {
+    assert.equal(
+      await graceDelayFor(invalid),
+      15_000,
+      `invalid form ${JSON.stringify(invalid)} falls back to the 15s default (never a zero grace)`,
     );
-    const settled = await wave.collect(start.ref);
-    assert.equal(settled.kind, "settled", "an invalid override falls back to the module grace");
-  } finally {
-    if (prev === undefined) delete process.env.PERK_WAVE_COLLECT_GRACE_MS;
-    else process.env.PERK_WAVE_COLLECT_GRACE_MS = prev;
   }
 });
 
@@ -1411,10 +1398,11 @@ test("collect: draining ref A never affects a concurrently pending ref B", async
   assert.deepEqual(drainedB.keys, ["correctness"]);
 });
 
-test("collect: the grace timer is cleared on the settled-immediately arm (no timer leak)", async () => {
+test("collect: the grace timer is cleared on the settled-immediately arm (no timer leak)", async (t) => {
   // NEW coverage (not a port): the finally-scoped clearTimeout — a collect whose result is
-  // already settled must not leave its grace timer live (observed by patching the global
-  // timer functions around exactly the collect call).
+  // already settled must not leave its grace timer live. Observed via the node:test timer
+  // mocks (wrapped calls still run; restoration is automatic): every handle setTimeout
+  // returned during the collect must have been passed to clearTimeout.
   const adapter = collectableAdapter();
   const wave = reportWaveOver(adapter);
   const start = await wave.start(makeSpec());
@@ -1422,26 +1410,16 @@ test("collect: the grace timer is cleared on the settled-immediately arm (no tim
   if (!start.ok) return;
   // Let the auto-emitted completion (a macrotask) settle the wave before collecting.
   await new Promise((resolve) => setTimeout(resolve, 20));
-  const originalSetTimeout = globalThis.setTimeout;
-  const originalClearTimeout = globalThis.clearTimeout;
-  const live = new Set<unknown>();
-  globalThis.setTimeout = ((fn: () => void, ms?: number) => {
-    const timer = originalSetTimeout(fn, ms);
-    live.add(timer);
-    return timer;
-  }) as typeof setTimeout;
-  globalThis.clearTimeout = ((timer: Parameters<typeof clearTimeout>[0]) => {
-    live.delete(timer);
-    return originalClearTimeout(timer);
-  }) as typeof clearTimeout;
-  try {
-    const collected = await wave.collect(start.ref);
-    assert.equal(collected.kind, "settled");
-  } finally {
-    globalThis.setTimeout = originalSetTimeout;
-    globalThis.clearTimeout = originalClearTimeout;
+  const setSpy = t.mock.method(globalThis, "setTimeout");
+  const clearSpy = t.mock.method(globalThis, "clearTimeout");
+  const collected = await wave.collect(start.ref);
+  assert.equal(collected.kind, "settled");
+  const allocated = setSpy.mock.calls.map((call) => call.result);
+  const cleared = clearSpy.mock.calls.map((call) => call.arguments[0]);
+  assert.ok(allocated.length >= 1, "the collect allocated its grace timer");
+  for (const handle of allocated) {
+    assert.ok(cleared.includes(handle), "an allocated timer was never cleared (grace leak)");
   }
-  assert.equal(live.size, 0, "the settled-immediately collect cleared its grace timer");
 });
 
 test("collect keys are a frozen snapshot — mutating the returned launch manifest changes nothing", async () => {
