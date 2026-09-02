@@ -10,7 +10,6 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
-import { reportWaveOver } from "./reportWave.ts";
 import {
   EXPLORE_ASSIGNMENT_KEY,
   explorerLaneTask,
@@ -18,6 +17,7 @@ import {
   OBJECTIVE_EXPLORER_REPORT_SCHEMA,
   runObjectiveExplorerWave,
 } from "./objectiveExplorerWave.ts";
+import { reportWaveOver } from "./reportWave.ts";
 import { WAVE_ACCEPTANCE } from "./transport.ts";
 
 /** A schema-shaped explorer report (the engine already validated it — shape only matters here). */
@@ -153,7 +153,10 @@ test("runObjectiveExplorerWave: ONE lane with the fixed flow/key/agent, module c
 
 test("runObjectiveExplorerWave: no configured model → no model key on the spawn", async () => {
   const adapter = createMemoryWaveAdapter({ aggregate: okAggregate() });
-  await runObjectiveExplorerWave(reportWaveOver(adapter), { node: "2.3", description: "Wire the adapter seam" });
+  await runObjectiveExplorerWave(reportWaveOver(adapter), {
+    node: "2.3",
+    description: "Wire the adapter seam",
+  });
   assert.ok(adapter.calls.spawn[0] !== undefined && !("model" in adapter.calls.spawn[0]));
 });
 
@@ -179,10 +182,13 @@ test("runObjectiveExplorerWave: a failed lane is incomplete under strict (no ret
 });
 
 test("runObjectiveExplorerWave: an unavailable adapter degrades loudly (wave-level failure)", async () => {
-  const result = await runObjectiveExplorerWave(reportWaveOver(createMemoryWaveAdapter({ ping: null })), {
-    node: "2.3",
-    description: "Wire the adapter seam",
-  });
+  const result = await runObjectiveExplorerWave(
+    reportWaveOver(createMemoryWaveAdapter({ ping: null })),
+    {
+      node: "2.3",
+      description: "Wire the adapter seam",
+    },
+  );
   assert.equal(result.complete, false);
   assert.deepEqual(
     result.failures.map((f) => [f.key, f.reason]),

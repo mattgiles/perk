@@ -779,8 +779,9 @@ test("tool: run_learn_wave threads the execute signal into the wave (pre-aborted
 
 test("tool: run_learn_wave with no RPC responder soft-fails loudly as unavailable", async () => {
   // No fakeSubagentsRpc bound → the capability ping goes unanswered → the wave-level
-  // `unavailable` arm: a loud soft-fail (error_type = the WaveFailureReason), never a throw and
-  // never a silent fallback — the guidance routes the parent to analyze the bundle itself.
+  // `unavailable` arm: a loud soft-fail (error_type = the ReportWaveFailureReason), never a
+  // throw and never a silent fallback — the guidance routes the parent to analyze the bundle
+  // itself.
   const { cwd, bundleDir } = scaffoldBundle();
   const h = await loadPerkSession({ cwd, env: { PERK_WAVE_RPC_PING_MS: "20" } });
   try {

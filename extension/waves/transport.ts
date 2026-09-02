@@ -13,7 +13,7 @@
 // The failure vocabulary here is the WAVE-LEVEL subset only (`WaveRunFailureReason`): the six
 // reasons a script run itself can produce, always `key: null`. The logical tier widens it with
 // the assignment-level reasons — `WaveRunFailure` is structurally assignable to the caller-facing
-// `WaveFailure`, so script failures flow upward with zero runtime mapping, and an
+// `ReportWaveFailure`, so script failures flow upward with zero runtime mapping, and an
 // assignment-level reason on a script-run failure is unrepresentable.
 //
 // Failure posture: LOUD DEGRADE. Every operational arm normalizes into a typed failure — the
@@ -144,7 +144,7 @@ export interface WaveAdapter {
 
 /**
  * The wave-level failure vocabulary: exactly the six reasons the script runner can produce.
- * The logical tier's `WaveFailureReason` is the superset union over this plus the
+ * The logical tier's `ReportWaveFailureReason` is the superset union over this plus the
  * assignment-level reasons — the reason literals are shared bytes.
  */
 export type WaveRunFailureReason =
@@ -157,7 +157,7 @@ export type WaveRunFailureReason =
 
 /**
  * A wave-level failure: always `key: null` (there is no assignment to blame — the whole run
- * failed). Structurally assignable to the logical tier's `WaveFailure`, so script failures are
+ * failed). Structurally assignable to the logical tier's `ReportWaveFailure`, so script failures are
  * absorbed upward with zero runtime mapping.
  */
 export interface WaveRunFailure {
@@ -181,7 +181,7 @@ function waveTimeoutMs(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : WAVE_TIMEOUT_MS;
 }
 
-/** The judgment-bearing pieces a script run needs (the assignment-free slice of `WaveSpec`). */
+/** The judgment-bearing pieces a script run needs (the assignment-free request slice). */
 export interface WaveScriptSpec {
   /** Flow name for error detail/trace (e.g. "pr-review"). */
   flow: string;

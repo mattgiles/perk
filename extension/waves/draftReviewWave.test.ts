@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
 import {
   buildDraftReviewAssignments,
   DRAFT_REVIEW_REPORT_SCHEMA,
@@ -17,7 +18,6 @@ import {
   isDraftReviewAngle,
   startDraftReviewWave,
 } from "./draftReviewWave.ts";
-import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
 import { reportWaveOver } from "./reportWave.ts";
 
 const TWO_ANGLES: DraftReviewAngle[] = ["grounding", "scope"];
@@ -378,12 +378,15 @@ test("startDraftReviewWave: strict completeness — a failed lane leaves the wav
 });
 
 test("startDraftReviewWave: the wave-level launch failure comes back normalized (ok: false)", async () => {
-  const start = await startDraftReviewWave(reportWaveOver(createMemoryWaveAdapter({ ping: null })), {
-    angles: TWO_ANGLES,
-    draftType: "objective",
-    draft: "body",
-    requiredSkillPreflight: PREFLIGHT_OK,
-  });
+  const start = await startDraftReviewWave(
+    reportWaveOver(createMemoryWaveAdapter({ ping: null })),
+    {
+      angles: TWO_ANGLES,
+      draftType: "objective",
+      draft: "body",
+      requiredSkillPreflight: PREFLIGHT_OK,
+    },
+  );
   assert.equal(start.ok, false);
   if (start.ok) return;
   assert.equal(start.result.complete, false);

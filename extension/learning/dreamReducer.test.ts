@@ -16,8 +16,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
-import { reportWaveOver } from "../waves/reportWave.ts";
-import { RUN_KEY_PATTERN } from "../waves/reportWave.ts";
+import { RUN_KEY_PATTERN, reportWaveOver } from "../waves/reportWave.ts";
 import {
   type DreamDocAssessment,
   type DreamLaneAnalysis,

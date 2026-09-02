@@ -18,8 +18,8 @@ import {
   waveScriptItems,
 } from "../testing/fakeSubagents.ts";
 import { fakePerk, loadPerkSession, type PerkSession, scaffoldRepo } from "../testing/harness.ts";
-import type { DraftReviewAngle } from "../waves/draftReviewWave.ts";
 import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
+import type { DraftReviewAngle } from "../waves/draftReviewWave.ts";
 import { reportWaveOver } from "../waves/reportWave.ts";
 import {
   clearDraftReviewContext,
@@ -286,7 +286,6 @@ test("primeDraftReviewContext resets the pending wave (a new browser session sup
   assert.match(script, /# Draft v2/, "the new session's draft rides the new wave");
 });
 
-
 test("a supersede during the collect's await never erases the NEW pending wave", async () => {
   // The latent-erasure regression (ported from the retired doors/pendingWave.ts suite,
   // re-expressed against the identity-guarded clear in the collect core): a collect awaits
@@ -333,11 +332,7 @@ test("a supersede during the collect's await never erases the NEW pending wave",
   adapter.emitCompletion({ asyncId: "wave-async-2", asyncDir: "/memory/wave-async-2" });
   const next = await executeCollectDraftReviewWave(state, wave, target);
   assert.equal(next.details.ok, true, "the NEW pending wave stayed collectable");
-  assert.deepEqual((next.details as { covered?: string[] }).covered, [
-    "scope",
-    "risk",
-    "ponytail",
-  ]);
+  assert.deepEqual((next.details as { covered?: string[] }).covered, ["scope", "risk", "ponytail"]);
   const drained = await executeCollectDraftReviewWave(state, wave, target);
   assert.equal((drained.details as { error_type?: string }).error_type, "no_wave");
 });

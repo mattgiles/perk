@@ -163,7 +163,9 @@ test("runReviewClassifierWave: a failed lane is incomplete under strict (no retr
 });
 
 test("runReviewClassifierWave: an unavailable adapter degrades loudly (wave-level failure)", async () => {
-  const result = await runReviewClassifierWave(reportWaveOver(createMemoryWaveAdapter({ ping: null })));
+  const result = await runReviewClassifierWave(
+    reportWaveOver(createMemoryWaveAdapter({ ping: null })),
+  );
   assert.equal(result.complete, false);
   assert.deepEqual(
     result.failures.map((f) => [f.key, f.reason]),

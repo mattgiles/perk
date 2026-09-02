@@ -275,7 +275,7 @@ interface ReadOnlyExecutor {
 }
 
 interface WaveRunner {
-  run(spec: WaveSpec, control: RunControl): Promise<WaveResult>;
+  run(request: ReportWaveRequest, control: RunControl): Promise<ReportWaveResult>;
 }
 ```
 
@@ -302,10 +302,16 @@ interface WaveRunner {
 - lane-backed wave execution; and
 - remote attach/event projection.
 
-The existing [`WaveAdapter`](../../extension/waves/reportWave.ts) is a proven internal seam: it has
+The existing `WaveAdapter` (`extension/waves/transport.ts`) is a proven internal seam: it has
 memory and RPC adapters plus one shared behavioral suite. Callers should continue to use the
-deep `runReportWave()` interface rather than learning `ping`, `spawn`, completion races, stop,
-and aggregate-file mechanics.
+deep `ReportWave` lifecycle (`start`/`collect`/`run`) rather than learning `ping`, `spawn`,
+completion races, stop, and aggregate-file mechanics.
+
+> **Update (Objective #2130, Node 2.1):** the caller surface is now the opaque `ReportWave`
+> lifecycle over `createReportWave(bus)` — adapter selection is wave-owned (a fresh rpc adapter
+> per launch), and the `WaveAdapter` injection seam still exists but is waves-interior behind
+> the supplier (`reportWaveOver` is the test seam). Future lane adapters still implement
+> `WaveAdapter` inside `waves/`.
 
 The worker's present `StageRunDeps` and structural Pi mirrors are useful internal test seams.
 They should not become the new library's external interface.
@@ -558,8 +564,8 @@ This is the highest-priority seam because both format 4 and typed values/lists a
 - Extract stage budget, terminal outcome, event projection, and terminating-tool policy from SDK
   construction.
 - Keep SDK/session construction in the current Pi adapter.
-- Promote `runReportWave()` as the WaveRunner implementation while keeping `WaveAdapter`
-  internal.
+- Promote the `ReportWave` lifecycle (`createReportWave`) as the WaveRunner implementation while
+  keeping `WaveAdapter` internal (already waves-interior since Objective #2130, Node 2.1).
 - Add interface-level suites for stage execution, read-only execution, and waves.
 
 This prepares current SDK, durable Harness, server, and lane adapters to coexist.

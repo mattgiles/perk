@@ -5343,19 +5343,19 @@ text), derives `manifest.json` itself (`bad_input` when absent), and resolves th
 from `[models.subagents] learn-analyst` at execute time (the wave's workflow-level `model`
 default). The manifest write rule above and the DECISION vocabulary are unchanged.
 
-**Streaming launch manifests.** `startReportWave` returns one preflight-derived
-`WaveLaunchManifest = {requested, runnable, preflightFailures}` on both result arms. `requested`
+**Streaming launch manifests.** The report wave's `start` returns one preflight-derived
+`ReportWaveLaunchManifest = {requested, runnable, preflightFailures}` on both result arms. `requested`
 preserves the declared lane order; `runnable` is the ordered subset eligible for the rendered
 workflow after required-skill preflight; `preflightFailures` contains one ordered keyed
 `skill-unavailable` row per omission. The streaming adversarial/draft start tools expose this
 nested `launch` shape and say only runnable lanes launched; pending collection still keeps the full
 requested denominator. If every lane is skipped, no workflow is spawned: the start is unavailable,
 its receipt has no children, and the same keyed failures appear in the manifest/result without a
-synthetic wave-level failure. `WaveAttemptReceipt.requestedKeys` remains the pre-launch logical
-manifest and is not narrowed by this launch vocabulary.
+synthetic wave-level failure. `ReportWaveAttemptReceipt.requestedKeys` remains the pre-launch
+logical manifest and is not narrowed by this launch vocabulary.
 
 **Attempt receipts (flow-generic).** Every code-owned wave flow records an **output-free**
-`WaveAttemptReceipt` per top-level workflow launch when the completion payload carries the
+`ReportWaveAttemptReceipt` per top-level workflow launch when the completion payload carries the
 projection (pi-subagents ≥ 0.45.0): the child lane key ↔ child `runId` ↔ artifact paths —
 reports, summaries, and structured output NEVER enter a receipt. Retries retain every ordered
 attempt (a failed lane and its relaunch stay distinguishable). `status.json.workflow.value`
@@ -9882,8 +9882,8 @@ the failure-details shape below — error fields plus `{analyses, attempts}` —
 the `skip_reason` vocabulary is `incomplete-analysis` (strict first wave failed —
 no bundle write, **no reducer launch**) and `budget-exceeded` (composed but over budget —
 nothing written, no reducer launch). A drifted bracket retains the analyses AND reducer
-reports in the aggregate (honest coverage). `attempts` carries one output-free `WaveAttemptReceipt`
-per wave invocation — including a pre-spawn `unavailable` outcome, preserved as an attempt —
+reports in the aggregate (honest coverage). `attempts` carries one output-free
+`ReportWaveAttemptReceipt` per wave invocation — including a pre-spawn `unavailable` outcome, preserved as an attempt —
 built from each wave's code-owned `requestedKeys` (they correlate with
 `children[*].key`, never semantic labels). The TWO post-launch fail arms are the
 analyst-bundle-write and the finalize-write `io_error`s, whose typed extras retain BOTH the

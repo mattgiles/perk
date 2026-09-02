@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
-import { reportWaveOver, RUN_KEY_PATTERN } from "../waves/reportWave.ts";
+import { RUN_KEY_PATTERN, reportWaveOver } from "../waves/reportWave.ts";
 import type { WaveAdapter } from "../waves/transport.ts";
 import {
   AUDIT_VERDICT_SCHEMA,

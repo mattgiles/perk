@@ -19,8 +19,8 @@ import {
   waveScriptItems,
 } from "../../../testing/fakeSubagents.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
-import type { AdversarialReviewAngle } from "../../../waves/adversarialReviewWave.ts";
 import { createMemoryWaveAdapter } from "../../../testing/memoryAdapter.ts";
+import type { AdversarialReviewAngle } from "../../../waves/adversarialReviewWave.ts";
 import { reportWaveOver } from "../../../waves/reportWave.ts";
 import {
   decodeStartReviewWaveParams,

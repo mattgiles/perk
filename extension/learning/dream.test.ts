@@ -12,8 +12,7 @@ import { join, sep } from "node:path";
 import { test } from "node:test";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
-import { reportWaveOver } from "../waves/reportWave.ts";
-import { RUN_KEY_PATTERN } from "../waves/reportWave.ts";
+import { RUN_KEY_PATTERN, reportWaveOver } from "../waves/reportWave.ts";
 import { verifyDocContainment } from "./containment.ts";
 import {
   DREAM_ANALYST_CAPS,
@@ -956,7 +955,10 @@ test("runDreamAnalystWave: all-valid multi-lane → complete, analyses under sem
       ],
     },
   });
-  const outcome = await runDreamAnalystWave(reportWaveOver(adapter), { manifest, model: "faux/dream" });
+  const outcome = await runDreamAnalystWave(reportWaveOver(adapter), {
+    manifest,
+    model: "faux/dream",
+  });
   assert.equal(outcome.complete, true);
   assert.deepEqual(outcome.failures, []);
   assert.deepEqual(
@@ -1074,7 +1076,11 @@ test("runDreamAnalystWave: a pre-aborted signal cancels before launch, naming th
   const adapter = createMemoryWaveAdapter();
   const controller = new AbortController();
   controller.abort();
-  const outcome = await runDreamAnalystWave(reportWaveOver(adapter), { manifest }, controller.signal);
+  const outcome = await runDreamAnalystWave(
+    reportWaveOver(adapter),
+    { manifest },
+    controller.signal,
+  );
   assert.equal(adapter.calls.spawn.length, 0, "no spawn is issued");
   assert.equal(outcome.complete, false);
   assert.equal(outcome.failures[0]?.reason, "cancelled");

@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
 import {
   ADVERSARIAL_REVIEW_ANGLES,
   ADVERSARIAL_REVIEW_REPORT_SCHEMA,
@@ -17,7 +18,6 @@ import {
   isAdversarialReviewAngle,
   startAdversarialReviewWave,
 } from "./adversarialReviewWave.ts";
-import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
 import { reportWaveOver } from "./reportWave.ts";
 
 const TWO_ANGLES: AdversarialReviewAngle[] = ["claimed-intent", "correctness"];
@@ -370,12 +370,15 @@ test("startAdversarialReviewWave: strict completeness — a failed lane leaves t
 });
 
 test("startAdversarialReviewWave: the wave-level launch failure comes back normalized (ok: false)", async () => {
-  const start = await startAdversarialReviewWave(reportWaveOver(createMemoryWaveAdapter({ ping: null })), {
-    angles: TWO_ANGLES,
-    pr: 42,
-    worktree: "/abs/wt",
-    requiredSkillPreflight: PREFLIGHT_OK,
-  });
+  const start = await startAdversarialReviewWave(
+    reportWaveOver(createMemoryWaveAdapter({ ping: null })),
+    {
+      angles: TWO_ANGLES,
+      pr: 42,
+      worktree: "/abs/wt",
+      requiredSkillPreflight: PREFLIGHT_OK,
+    },
+  );
   assert.equal(start.ok, false);
   if (start.ok) return;
   assert.equal(start.result.complete, false);

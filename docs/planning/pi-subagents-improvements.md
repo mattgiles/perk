@@ -738,10 +738,15 @@ Those belong in the implementation.
 Internally, both entrypoints may share:
 
 ```ts
-runReportWave(spec, delegationPort)
+wave.run(request)
 ```
 
 But a generic `subagent_wave` model tool should be avoided. It would merely expose pi-subagents vocabulary through a second, shallow interface.
+
+> **Update (Objective #2130, Node 2.1):** realized as the opaque `ReportWave` lifecycle
+> (`start`/`collect`/`run` in `extension/waves/reportWave.ts`): flow entrypoints take a
+> `ReportWave` and call `wave.run`/`wave.start`; the delegation port (`WaveAdapter`) is
+> waves-interior behind `createReportWave`'s per-launch adapter supply.
 
 ### 9.2 Adapter strategy
 

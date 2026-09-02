@@ -173,10 +173,7 @@ export async function executeStartDraftReviewWave(
     requiredSkillPreflight?: ReportWaveRequest["requiredSkillPreflight"];
   },
 ): Promise<StartDraftReviewWaveResult> {
-  const fail = failFor<{ attempts: ReportWaveAttemptReceipt[] }>(
-    target,
-    "start_draft_review_wave",
-  );
+  const fail = failFor<{ attempts: ReportWaveAttemptReceipt[] }>(target, "start_draft_review_wave");
   const context = state.context;
   if (context === null) {
     return fail(

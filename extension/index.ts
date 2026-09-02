@@ -73,7 +73,6 @@ import { perkVersion, sharedDir, versionStamp } from "./substrate/resources.ts";
 import { mintRunId } from "./substrate/runId.ts";
 import { captureSessionPointer } from "./substrate/sessionPointers.ts";
 import { registerToolGating } from "./substrate/toolGating.ts";
-import { createReportWave } from "./waves/reportWave.ts";
 import {
   appendWorkflowState,
   branchOf,
@@ -95,6 +94,7 @@ import {
 } from "./surfaces/surfaces.ts";
 import { registerBtw } from "./vendor/btw/btw.ts";
 import { registerWhimsical } from "./vendor/whimsical/whimsical.ts";
+import { createReportWave } from "./waves/reportWave.ts";
 
 // Cross-plane proof marker (TS writes via cache.ts; the Python helper reads it — gate check 3).
 const T3_MARKER = "t3-extension-cache-write";
