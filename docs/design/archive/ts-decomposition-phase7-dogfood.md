@@ -125,7 +125,27 @@ The protocol places leg D at this record's own first commit: this file (plus the
 amendments) is the real dirty tree the migrated binding commits. The observed
 report/continuation render is appended here in commit 2.
 
-*(Commit-2 addendum lands here.)*
+**Commit-2 addendum — observed-live (2026-09-02, the node-1.1 implementation session,
+run `01M1HFJKZDBBGJNKE1XK085BQE`):** the operator ran `/commit-and-compact` with the
+five drafted deliverables as the real dirty tree. Observed sequence, in order:
+
+1. The migrated binding injected the commit-drive instructions into the session —
+   "Commit the work completed so far — perk will compact this session once your commit
+   is in." with the three-step drive (review the working tree; stage exactly the changes
+   that belong — no blanket `git add -A`; commit with a descriptive message, do NOT
+   push) and the nothing-to-commit escape hatch ("perk will then skip compaction").
+2. The driven commit — this record's own first commit — landed as `f0b5633e`
+   ("Reconcile ts-decomposition contract, pin storage-freedom policy + #2130 baseline,
+   author Phase-7 closing record"): 5 files changed, 620 insertions(+), 8 deletions(-),
+   exactly the five deliverables staged by path; not pushed.
+3. Compaction ran automatically once the run settled, and the continuation resumed the
+   session against plan #2131 with the driven commit presented as evidence: "Compaction
+   completed successfully. Resume work on the active plan #2131 …" followed by the
+   untrusted `<commit-evidence>` block listing `f0b5633e` as ahead of the
+   invocation-time HEAD, plus the reorient-from-repository-evidence instructions.
+
+Leg D is **closed observed-live**: the migrated `/commit-and-compact` binding drove a
+real commit→compact→resume cycle on this record's own first commit.
 
 ### Leg A — run-all `run_ci` — protocol-recorded + one observed-live instance
 
