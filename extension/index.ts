@@ -7,20 +7,6 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-  createDraftReviewWaveState,
-  registerDraftReviewWaveTools,
-} from "./doors/draftReviewWaveTools.ts";
-
-import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
-import {
-  openObjectiveReviewSurface,
-  registerObjectiveReviewBrowser,
-} from "./doors/objectiveReviewBrowser.ts";
-
-import { plannotatorPresent } from "./doors/plannotatorHandoff.ts";
-import { openPlanReviewSurface, registerPlanReviewBrowser } from "./doors/planReviewBrowser.ts";
-import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
 import { installAutomatedReviewBindings } from "./pi/v1/codeReview/automated.ts";
 import { installPrReviewBrowserBindings } from "./pi/v1/codeReview/browser.ts";
@@ -38,19 +24,31 @@ import { installStackRecoverBindings } from "./pi/v1/delivery/stackRecover.ts";
 import { installStackStatusBindings } from "./pi/v1/delivery/stackStatus.ts";
 import { installStackSyncBindings } from "./pi/v1/delivery/stackSync.ts";
 import { installSubmitBindings } from "./pi/v1/delivery/submit.ts";
+import {
+  createDraftReviewWaveState,
+  registerDraftReviewWaveTools,
+} from "./pi/v1/draftReviewWaveTools.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installAuditBindings } from "./pi/v1/learning/audit.ts";
 import { installDreamBindings } from "./pi/v1/learning/dream.ts";
 import { installLearnFactoryBindings } from "./pi/v1/learning/factory.ts";
 import { installHarvestBindings } from "./pi/v1/learning/harvest.ts";
 import { installLearnBindings } from "./pi/v1/learning/learn.ts";
+import { registerLifecycleGates } from "./pi/v1/lifecycleGates.ts";
 import { installObjectiveBindings } from "./pi/v1/objective.ts";
 import { installObjectiveAuthoringBindings } from "./pi/v1/objectiveAuthoring.ts";
 import { installObjectivePlanningBindings } from "./pi/v1/objectivePlanning.ts";
+import {
+  openObjectiveReviewSurface,
+  registerObjectiveReviewBrowser,
+} from "./pi/v1/objectiveReviewBrowser.ts";
 import { installPlanBindings } from "./pi/v1/plan.ts";
+import { openPlanReviewSurface, registerPlanReviewBrowser } from "./pi/v1/planReviewBrowser.ts";
 import { createAnnotationState, installAnnotationBindings } from "./pi/v1/providers/annotations.ts";
 import { installPlannotatorPlanAdapter } from "./pi/v1/providers/plannotator.ts";
+import { plannotatorPresent } from "./pi/v1/providers/plannotatorHandoff.ts";
 import { installTombellPlanAdapter } from "./pi/v1/providers/tombell.ts";
+import { registerSelfcheck } from "./pi/v1/selfcheck.ts";
 import {
   branchSessionStateStore,
   establishSessionIdentity,

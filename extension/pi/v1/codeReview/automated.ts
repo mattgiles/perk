@@ -24,7 +24,6 @@ import {
   type ReviewTargetResolver,
   runAutomatedReview,
 } from "../../../codeReview/automated.ts";
-import { decodePrUrl } from "../../../doors/plannotatorHandoff.ts";
 import { openBranchWorkflowSession } from "../../../session/branchWorkflowSession.ts";
 import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
 import {
@@ -54,6 +53,7 @@ import {
   runPrReviewWave,
 } from "../../../waves/prReviewWave.ts";
 import type { ReportWave } from "../../../waves/reportWave.ts";
+import { decodePrUrl } from "../providers/plannotatorHandoff.ts";
 
 // ------------------------------------------------------------------- the tool-boundary decode
 

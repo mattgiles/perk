@@ -13,11 +13,15 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import type { PlanRef } from "../substrate/cache.ts";
-import { registerPerkCommand } from "../substrate/command.ts";
-import { planReadInstruction, render } from "../substrate/prompts.ts";
-import { type BranchSource, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
-import { report } from "../surfaces/report.ts";
+import type { PlanRef } from "../../substrate/cache.ts";
+import { registerPerkCommand } from "../../substrate/command.ts";
+import { planReadInstruction, render } from "../../substrate/prompts.ts";
+import {
+  type BranchSource,
+  branchOf,
+  rebuildWorkflowState,
+} from "../../substrate/workflowState.ts";
+import { report } from "../../surfaces/report.ts";
 
 // The planning stages whose sessions never legitimately run lifecycle doors. After an approved
 // save, a still-live planning session holds TWO plan identities — the cwd binding (a positioned

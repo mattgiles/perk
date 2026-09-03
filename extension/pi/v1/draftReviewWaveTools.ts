@@ -24,16 +24,16 @@
 // headless-safe by construction.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { subagentModel } from "../substrate/config.ts";
-import { failFor, ok, type Result } from "../substrate/result.ts";
-import { paramsOf, stringArrayParam } from "../substrate/toolParams.ts";
-import { type ReportTarget, report } from "../surfaces/report.ts";
+import { subagentModel } from "../../substrate/config.ts";
+import { failFor, ok, type Result } from "../../substrate/result.ts";
+import { paramsOf, stringArrayParam } from "../../substrate/toolParams.ts";
+import { type ReportTarget, report } from "../../surfaces/report.ts";
 import {
   type DraftReviewAngle,
   isDraftReviewAngle,
   startDraftReviewWave,
-} from "../waves/draftReviewWave.ts";
-import { preflightPonytailSkill } from "../waves/ponytail.ts";
+} from "../../waves/draftReviewWave.ts";
+import { preflightPonytailSkill } from "../../waves/ponytail.ts";
 import {
   type AssignmentReport,
   type ReportWave,
@@ -43,7 +43,7 @@ import {
   type ReportWaveRef,
   type ReportWaveRequest,
   toAttemptReceipt,
-} from "../waves/reportWave.ts";
+} from "../../waves/reportWave.ts";
 
 // ------------------------------------------------------------------ the door-primed context
 

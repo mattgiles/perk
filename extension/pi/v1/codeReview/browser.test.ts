@@ -10,7 +10,6 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { CodeReviewOutcome, StartedBrowser } from "../../../doors/plannotatorHandoff.ts";
 import { writePlanRef } from "../../../substrate/cache.ts";
 import {
   fakePerk,
@@ -25,6 +24,7 @@ import {
   type FetchLike,
   primeAnnotationSurface,
 } from "../providers/annotations.ts";
+import type { CodeReviewOutcome, StartedBrowser } from "../providers/plannotatorHandoff.ts";
 import { observeBrowserReadiness, prReviewBrowserGuidance } from "./browser.ts";
 
 /** Probe an annotation state: `findings: []` with nothing held makes NO fetch (pure probe). */

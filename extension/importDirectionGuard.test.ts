@@ -16,8 +16,10 @@
 //   B. Stable mechanisms never import features: the mechanism homes — current (`substrate/`,
 //      `waves/`, `worker/`) or future (`config/`, `execution/`, `session/` — the
 //      module-contracts ownership map's stable layer) — have no edge into the feature-policy
-//      homes — current (`doors/`, `factories/`, `adapters/`) or future (`authoring/`,
-//      `delivery/`, `codeReview/`, `learning/`) — beyond the ratcheted allowlist (EMPTY today:
+//      homes (`adapters/`, `authoring/`, `codeReview/`, `delivery/`, `factories/`,
+//      `learning/` — cheap literals cover absent homes from the day they appear; `doors/`
+//      left the list when node 3.1 evacuated and deleted it) — beyond the ratcheted
+//      allowlist (EMPTY today:
 //      the last entry died when the plan-read gate moved behind the stage-execution seam).
 //      Mechanisms take dependencies as parameters; feature policy calls mechanisms, never the
 //      reverse. (`surfaces/` is the sanctioned rendering seam, not a feature home —
@@ -74,7 +76,8 @@
 //      the guard-census review posture, not claimed as a structural guarantee.
 //   H. Storage freedom: the storage-free feature homes (`authoring/`, `codeReview/`,
 //      `delivery/`, `learning/` — NOT `session/`, the session engine legitimately owns these
-//      imports; NOT `doors/`, which node 3.1 deletes) have NO edge — type-only edges count —
+//      imports; `doors/` was evacuated and deleted by node 3.1) have NO edge — type-only
+//      edges count —
 //      into the storage-interior modules (`substrate/workflowState.ts`,
 //      `substrate/sessionData.ts`, `substrate/cache.ts`, `substrate/git.ts`, plus
 //      `session/branchWorkflowSession.ts` — the concrete branch/file adapter that would
@@ -123,7 +126,6 @@ const FEATURE_HOMES = [
   "authoring/",
   "codeReview/",
   "delivery/",
-  "doors/",
   "factories/",
   "learning/",
 ];
@@ -143,7 +145,6 @@ const MECHANISM_EDGE_ALLOWLIST: Array<{ from: string; to: string }> = [];
 // standing rule ("every directory-creating slice adds or refreshes a known-anchor assertion"),
 // as structure.
 const KNOWN_TOP_LEVEL_DIRS = [
-  "doors",
   "hunkFeedback",
   "substrate",
   "surfaces",
@@ -173,8 +174,8 @@ const PI_FREE_HOMES = ["authoring/", "codeReview/", "delivery/", "learning/", "s
 
 /**
  * The storage-free feature homes (Rule H sources): the census's deny set applies to feature
- * policy only — `session/` (the engine that owns the storage seams) and `doors/` (deleted by
- * node 3.1) are deliberately outside.
+ * policy only — `session/` (the engine that owns the storage seams) is deliberately outside;
+ * `doors/` was evacuated and deleted by node 3.1.
  */
 const STORAGE_FREE_HOMES = ["authoring/", "codeReview/", "delivery/", "learning/"];
 
@@ -230,11 +231,6 @@ const TRANSPORT_TOKEN = /\bWAVE_RPC_|subagents:rpc:v1/;
 // join it (new registrations go under `pi/`). The three deleted gist factories left the census
 // in the activating change itself — the first burn-down.
 const LEGACY_REGISTRANTS = [
-  "doors/draftReviewWaveTools.ts",
-  "doors/lifecycleGates.ts",
-  "doors/objectiveReviewBrowser.ts",
-  "doors/planReviewBrowser.ts",
-  "doors/selfcheck.ts",
   "substrate/agentScratch.ts",
   "substrate/bindingDelivery.ts",
   "substrate/command.ts",
@@ -885,8 +881,8 @@ test("control 1: corpus + edge-map floors and known anchors", () => {
   // Explicit type-extraction floor: this live edge is a type-only import
   // (`import type { ReviewOutcome }`) — if type edges were dropped, this would match nothing.
   assert.ok(
-    (edges.get("doors/plannotatorHandoff.ts") ?? []).includes("pi/v1/review.ts"),
-    "edge map missed the live type-only edge doors/plannotatorHandoff.ts → pi/v1/review.ts",
+    (edges.get("pi/v1/providers/plannotatorHandoff.ts") ?? []).includes("pi/v1/review.ts"),
+    "edge map missed the live type-only edge pi/v1/providers/plannotatorHandoff.ts → pi/v1/review.ts",
   );
 });
 
@@ -971,28 +967,28 @@ test("control 5: baseline ratchet fixtures (new cycle fails; stale entry fails)"
 
 test("control 6: direction-rule fixtures (violation, allowlisted, stale, future home)", () => {
   const flagged = checkDirection(
-    new Map([["substrate/x.ts", ["doors/y.ts"]]]),
+    new Map([["substrate/x.ts", ["delivery/y.ts"]]]),
     MECHANISM_HOMES,
     FEATURE_HOMES,
     [],
   );
-  assert.deepEqual(flagged.violations, [{ from: "substrate/x.ts", to: "doors/y.ts" }]);
+  assert.deepEqual(flagged.violations, [{ from: "substrate/x.ts", to: "delivery/y.ts" }]);
 
   // A synthetic allowlist entry (the live allowlist is empty): a matched entry is neither a
   // violation nor stale.
   const allowlisted = checkDirection(
-    new Map([["worker/x.ts", ["doors/y.ts"]]]),
+    new Map([["worker/x.ts", ["delivery/y.ts"]]]),
     MECHANISM_HOMES,
     FEATURE_HOMES,
-    [{ from: "worker/x.ts", to: "doors/y.ts" }],
+    [{ from: "worker/x.ts", to: "delivery/y.ts" }],
   );
   assert.deepEqual(allowlisted.violations, [], "the allowlisted edge shape must not be flagged");
   assert.deepEqual(allowlisted.stale, [], "a matched allowlist entry must not read as stale");
 
   const staleEntry = checkDirection(new Map(), MECHANISM_HOMES, FEATURE_HOMES, [
-    { from: "substrate/gone.ts", to: "doors/gone.ts" },
+    { from: "substrate/gone.ts", to: "delivery/gone.ts" },
   ]);
-  assert.deepEqual(staleEntry.stale, [{ from: "substrate/gone.ts", to: "doors/gone.ts" }]);
+  assert.deepEqual(staleEntry.stale, [{ from: "substrate/gone.ts", to: "delivery/gone.ts" }]);
 
   const futureHome = checkDirection(
     new Map([["substrate/x.ts", ["authoring/y.ts"]]]),
@@ -1087,7 +1083,6 @@ test("control 8: every contractual Rule B prefix bites (literal, array-independe
     "authoring/",
     "codeReview/",
     "delivery/",
-    "doors/",
     "factories/",
     "learning/",
   ];

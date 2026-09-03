@@ -37,6 +37,17 @@
 // (installed by `installCuratedSubmissionBindings`). The local (pre-PR) mode never primes.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
+import { runColdDoor } from "../../../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../../../substrate/command.ts";
+import { interceptConsoleError } from "../../../substrate/consoleCapture.ts";
+import { render } from "../../../substrate/prompts.ts";
+import { type ReportTarget, report } from "../../../surfaces/report.ts";
+import {
+  type AnnotationState,
+  clearAnnotationSurface,
+  primeAnnotationSurface,
+} from "../providers/annotations.ts";
 import {
   type CodeReviewOutcome,
   decodePrUrl,
@@ -50,18 +61,7 @@ import {
   routePrReviewOutcome,
   type StartedBrowser,
   startPlannotatorBrowser,
-} from "../../../doors/plannotatorHandoff.ts";
-import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
-import { runColdDoor } from "../../../substrate/coldDoor.ts";
-import { registerPerkCommand } from "../../../substrate/command.ts";
-import { interceptConsoleError } from "../../../substrate/consoleCapture.ts";
-import { render } from "../../../substrate/prompts.ts";
-import { type ReportTarget, report } from "../../../surfaces/report.ts";
-import {
-  type AnnotationState,
-  clearAnnotationSurface,
-  primeAnnotationSurface,
-} from "../providers/annotations.ts";
+} from "../providers/plannotatorHandoff.ts";
 import { type CheckoutOk, decodeCheckout } from "./checkout.ts";
 import { parseReviewDoorArgs } from "./terminal.ts";
 

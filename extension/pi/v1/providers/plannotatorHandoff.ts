@@ -56,22 +56,19 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import {
-  type PlannotatorBus,
-  requestPlannotatorPlanReview,
-} from "../pi/v1/providers/plannotator.ts";
-// Type-only (erased at runtime — no cycle): the outcome vocabulary lives with the shared
-// review-surface machinery.
-import type { ReviewOutcome } from "../pi/v1/review.ts";
-import { readPlanRef } from "../substrate/cache.ts";
+import { readPlanRef } from "../../../substrate/cache.ts";
 import {
   type ColdDoorResult,
   type ColdJson,
   numberField,
   objectField,
   stringField,
-} from "../substrate/coldDoor.ts";
-import { type ReportTarget, report } from "../surfaces/report.ts";
+} from "../../../substrate/coldDoor.ts";
+import { type ReportTarget, report } from "../../../surfaces/report.ts";
+// Type-only (erased at runtime — no cycle): the outcome vocabulary lives with the shared
+// review-surface machinery.
+import type { ReviewOutcome } from "../review.ts";
+import { type PlannotatorBus, requestPlannotatorPlanReview } from "./plannotator.ts";
 
 /** Plannotator's code-review slash command — its presence detects the extension is loaded. */
 export const PLANNOTATOR_REVIEW_COMMAND = "plannotator-review";

@@ -11,16 +11,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { PERK_TOOLS, STAGE_TOOLS } from "../substrate/toolGating.ts";
+import { PERK_TOOLS, STAGE_TOOLS } from "../../substrate/toolGating.ts";
 import {
   createFakeSubagents,
   type FakeSubagents,
   waveScriptItems,
-} from "../testing/fakeSubagents.ts";
-import { fakePerk, loadPerkSession, type PerkSession, scaffoldRepo } from "../testing/harness.ts";
-import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
-import type { DraftReviewAngle } from "../waves/draftReviewWave.ts";
-import { reportWaveOver } from "../waves/reportWave.ts";
+} from "../../testing/fakeSubagents.ts";
+import {
+  fakePerk,
+  loadPerkSession,
+  type PerkSession,
+  scaffoldRepo,
+} from "../../testing/harness.ts";
+import { createMemoryWaveAdapter } from "../../testing/memoryAdapter.ts";
+import type { DraftReviewAngle } from "../../waves/draftReviewWave.ts";
+import { reportWaveOver } from "../../waves/reportWave.ts";
 import {
   clearDraftReviewContext,
   createDraftReviewWaveState,

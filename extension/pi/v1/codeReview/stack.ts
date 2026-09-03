@@ -33,11 +33,6 @@
 
 import { existsSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import {
-  LOCAL_REVIEW_DIFF_TYPE,
-  plannotatorPresent,
-  stackRespondMessage,
-} from "../../../doors/plannotatorHandoff.ts";
 import { openBranchWorkflowSession } from "../../../session/branchWorkflowSession.ts";
 import type { WorkflowSession } from "../../../session/workflowSession.ts";
 import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
@@ -48,6 +43,11 @@ import { render } from "../../../substrate/prompts.ts";
 import { failFor, ok } from "../../../substrate/result.ts";
 import { report } from "../../../surfaces/report.ts";
 import type { AnnotationState } from "../providers/annotations.ts";
+import {
+  LOCAL_REVIEW_DIFF_TYPE,
+  plannotatorPresent,
+  stackRespondMessage,
+} from "../providers/plannotatorHandoff.ts";
 import { openReviewBrowserCore } from "./browser.ts";
 import { type CheckoutOk, decodeCheckout, PR_URL_RE } from "./checkout.ts";
 

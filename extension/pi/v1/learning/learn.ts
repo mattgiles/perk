@@ -42,7 +42,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { planningStageRefusal } from "../../../doors/lifecycleGates.ts";
 import {
   LEARN_ANGLES,
   type LearnAnalystReport,
@@ -77,6 +76,7 @@ import { arrayParam, paramsOf, stringParam } from "../../../substrate/toolParams
 import { activePlanRef } from "../../../substrate/workflowState.ts";
 import { report } from "../../../surfaces/report.ts";
 import type { ReportWave, ReportWaveAttemptReceipt } from "../../../waves/reportWave.ts";
+import { planningStageRefusal } from "../lifecycleGates.ts";
 
 /** The ok-arm fields. */
 export interface LearnOk {

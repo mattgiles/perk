@@ -12,26 +12,18 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { OBJECTIVE_DRAFT_ARTIFACT, renderObjectiveDraft } from "../authoring/objective/draft.ts";
-import {
-  clearAnnotationSurface,
-  createAnnotationState,
-  executePushAnnotations,
-  type FetchLike,
-  primeAnnotationSurface,
-} from "../pi/v1/providers/annotations.ts";
-import type { ReviewOutcome } from "../pi/v1/review.ts";
-import { openBranchWorkflowSession } from "../session/branchWorkflowSession.ts";
-import { sessionDataDir } from "../substrate/cache.ts";
+import { OBJECTIVE_DRAFT_ARTIFACT, renderObjectiveDraft } from "../../authoring/objective/draft.ts";
+import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import { sessionDataDir } from "../../substrate/cache.ts";
 import {
   digestSessionData,
   type SessionArtifactCtx,
   type SessionDataCtx,
-} from "../substrate/sessionData.ts";
-import type { ToolGating } from "../substrate/toolGating.ts";
-import type { EntrySink } from "../substrate/workflowState.ts";
-import { WORKFLOW_STATE_TYPE } from "../substrate/workflowState.ts";
-import type { ReportTarget } from "../surfaces/report.ts";
+} from "../../substrate/sessionData.ts";
+import type { ToolGating } from "../../substrate/toolGating.ts";
+import type { EntrySink } from "../../substrate/workflowState.ts";
+import { WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
+import type { ReportTarget } from "../../surfaces/report.ts";
 import {
   fakePerk,
   loadPerkSession,
@@ -39,9 +31,9 @@ import {
   plantSession,
   scaffoldRepo,
   spyInjections,
-} from "../testing/harness.ts";
-import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
-import { reportWaveOver } from "../waves/reportWave.ts";
+} from "../../testing/harness.ts";
+import { createMemoryWaveAdapter } from "../../testing/memoryAdapter.ts";
+import { reportWaveOver } from "../../waves/reportWave.ts";
 import {
   clearDraftReviewContext,
   createDraftReviewWaveState,
@@ -55,7 +47,15 @@ import {
   openObjectiveReviewSurface,
   routeObjectiveReviewDecision,
 } from "./objectiveReviewBrowser.ts";
-import type { StartedSurface } from "./plannotatorHandoff.ts";
+import {
+  clearAnnotationSurface,
+  createAnnotationState,
+  executePushAnnotations,
+  type FetchLike,
+  primeAnnotationSurface,
+} from "./providers/annotations.ts";
+import type { StartedSurface } from "./providers/plannotatorHandoff.ts";
+import type { ReviewOutcome } from "./review.ts";
 
 /** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(

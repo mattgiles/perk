@@ -6,9 +6,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { formatSkillsForPrompt, type Skill, type ToolInfo } from "@earendil-works/pi-coding-agent";
-import { BINDING_HEADER } from "../substrate/bindingDelivery.ts";
-import { REPORT_DETAIL_TYPE } from "../surfaces/surfaces.ts";
-import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { BINDING_HEADER } from "../../substrate/bindingDelivery.ts";
+import { REPORT_DETAIL_TYPE } from "../../surfaces/surfaces.ts";
+import { loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
 import {
   ambientIndexProbe,
   branchContextCensus,

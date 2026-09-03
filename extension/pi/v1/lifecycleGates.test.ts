@@ -7,15 +7,15 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { type PlanRef, readPlanRef, writePlanRef } from "../substrate/cache.ts";
-import type { WorkflowState } from "../substrate/workflowState.ts";
+import { type PlanRef, readPlanRef, writePlanRef } from "../../substrate/cache.ts";
+import type { WorkflowState } from "../../substrate/workflowState.ts";
 import {
   fakePerk,
   gitInit,
   loadPerkSession,
   plantSession,
   scaffoldRepo,
-} from "../testing/harness.ts";
+} from "../../testing/harness.ts";
 import { gateDecision, implementHandoffPrompt, planningStageRefusal } from "./lifecycleGates.ts";
 
 const REF: PlanRef = {

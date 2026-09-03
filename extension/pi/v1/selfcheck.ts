@@ -30,10 +30,10 @@ import {
   type Skill,
   type ToolInfo,
 } from "@earendil-works/pi-coding-agent";
-import { BINDING_HEADER } from "../substrate/bindingDelivery.ts";
-import { registerPerkCommand } from "../substrate/command.ts";
-import { branchOf } from "../substrate/workflowState.ts";
-import { report as reportTo } from "../surfaces/report.ts";
+import { BINDING_HEADER } from "../../substrate/bindingDelivery.ts";
+import { registerPerkCommand } from "../../substrate/command.ts";
+import { branchOf } from "../../substrate/workflowState.ts";
+import { report as reportTo } from "../../surfaces/report.ts";
 
 /** Project-scoped ambient routing index, relative to the repo root. */
 export const AMBIENT_INDEX_REL_PATH = join(".pi", "APPEND_SYSTEM.md");
