@@ -131,7 +131,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `extension/authoring/objective/draft.ts`). The artifact is a **single JSON file**
   carrying `{schema_version: 1, title?, prose, roadmap}` — plus, in a `perk learn dream`
   session, the **tool-written** `dream_report` block `{input, generated_at, parts}` (§8.63;
-  `resumeObjectiveDraft` refuses the WHOLE draft on a malformed block — deliberately stricter
+  `resumeObjectiveDraft` refuses the WHOLE draft on a malformed block (the `refused` arm) —
+  deliberately stricter
   than the lenient junk→absent `base`/`delivery` handling, because silently dropping a
   malformed report is exactly what §8.63 forbids) — the structured roadmap rides
   **verbatim** (node-shape validation stays with the Python plane at save time, the
@@ -143,19 +144,33 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   §8.63) derived from the artifact, never raw JSON. **The review surface:**
   `plan_review` in an objective-authoring session (stage `objective-author` or
   `objective-save`) reviews the **rendered markdown** —
-  `resumeObjectiveDraft` (fail-open validation over the artifact: stderr warning + `null` on
-  malformed JSON / non-object payload / wrong `schema_version` / blank prose) +
+  `resumeObjectiveDraft` (CLASSIFIED validation over the artifact:
+  `valid{draft} | absent | refused{problem}` — seam-invalid reads fold into `refused` carrying
+  the seam's problem; malformed JSON / non-object payload / wrong `schema_version` / blank
+  prose refuse with the decoder's problem bytes, rendered by the consuming Pi edge, no
+  feature-level stderr) +
   `renderObjectiveDraft` (the prose plus a `## Roadmap` markdown table; a `Phase` column only
   when some node carries one; cells sanitized) — **never raw JSON, never the `plan` param,
   never the transcript**. No draft → soft-skip `reason: "no_objective_draft"` with an
-  `objective_draft` redirect. **The approval→save orchestration:** an
+  `objective_draft` redirect; a REFUSED draft → the fail-closed soft-skip
+  `reason: "objective_draft_refused"` (`bad_state`, the classified problem in the text —
+  rewrite with `objective_draft`, then re-review; the gate untouched). **The approval→save
+  orchestration:** an
   APPROVED outcome wires into the `objectiveApprovalSave` seam (`extension/authoring/objective/save.ts`,
   the objective sibling of `approvalSave`): the seam **re-reads the structured artifact at save
   time** (`resumeObjectiveDraft` — never the rendered markdown, never a param, never the
   transcript) → `saveObjective` → D1a gate exit on a successful save (snapshot
   `gating.isActive()` before the save) → a **terminating** result; a failed save is
   non-terminating, the gate stays read-only, and the human `/objective-save` failsafe is
-  directed. Title precedence: an explicit title wins; else the draft's `title`; else the cold
+  directed. A save-time REFUSED draft returns `refused-draft{problem}` BEFORE the gate
+  snapshot (nothing saved, the gate never touched, no budget activation); the shared
+  approval-race rendering (`approvedSubjectSaveResult`'s `refused-draft` arm) is
+  non-terminating `bad_state` directing **rewrite + a FRESH review — never the slash-save
+  failsafe** (a post-rewrite failsafe save would bypass review of the replacement bytes).
+  The two manual failsafes (`/objective-save`, `/gist-save`) STOP on a refused artifact with
+  an error report — no gate exit, no driven turn (those fallbacks are for draft-LESS
+  sessions; every no-draft arm and message stays byte-stable). Title precedence: an explicit
+  title wins; else the draft's `title`; else the cold
   door derives from the prose heading.
 
   **Provenance.** Session artifacts become *consumable* only via their
@@ -167,9 +182,11 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   carries an older pointer while disk holds newer bytes ⇒ digest mismatch ⇒ refusal; **fork /
   concurrent sessions** ⇒ the pointer's `run_id` ≠ the active one ⇒ refusal (no inheritance —
   a fork child's data dir starts empty); **reload / compaction** ⇒ same `run_id` ⇒ pointer and
-  dir persist through the LWW rebuild. Consumers fail open to their fallback when validation
-  refuses (the reader returns `null`; mismatched-run_id refusals are silent by design, broken
-  promises — missing file, digest mismatch — warn on stderr).
+  dir persist through the LWW rebuild. The seam classifies reads as `found`/`absent`/`invalid`
+  (mismatched-run_id refusals are silently `absent` by design; broken promises — missing file,
+  digest mismatch — are `invalid` and warn on stderr). Draft-less fallbacks apply only to
+  `absent`; the review-style draft consumers (gist/objective) fold `invalid` into their
+  classified `refused` resume arm and STOP with a rendered refusal instead of falling back.
 - **Agent scratch.** `.perk/workflow/scratch/runs/<run_id>/agent/` is the run-owned directory for
   disposable command/model intermediates. Interior run-directory creation shares one hardened
   boundary — `extension/substrate/cache.ts::ensureRunScratch` + `ensureAgentScratch` own the
@@ -5912,7 +5929,17 @@ JSON), VIEW-ONLY first-party (the objective-arm shape; deny+feedback is the chan
 under the plannotator selection the browser reviewer may edit the rendered gist — an approval
 carrying `# Direct Edits` does NOT auto-save (§8.23's gist arm: a fold-and-re-review round);
 APPROVED auto-saves via `gistApprovalSave` → the `gist_save` tool / `perk gist create`;
-`/gist-save` is the manual failsafe. No draft → soft-skip `reason: "no_gist_draft"`. No session
+`/gist-save` is the manual failsafe. The draft resume is CLASSIFIED
+(`resumeGistDraft`: `valid{draft} | absent | refused{problem}` — seam-invalid reads and
+`decodeGistDraft` refusals fold into `refused`, rendered at the Pi edge; no feature-level
+stderr). No draft → soft-skip `reason: "no_gist_draft"`; a REFUSED draft → the fail-closed
+soft-skip `reason: "gist_draft_refused"` (`bad_state`, the classified problem in the text —
+rewrite with `gist_draft`, then re-review; the gate untouched). A save-time refused draft is
+`refused-draft{problem}` BEFORE the gate snapshot; the approval race (corrupted between the
+review read and the save re-read) renders via the shared `approvedSubjectSaveResult`
+`refused-draft` arm — rewrite + a FRESH review, never `/gist-save` — and `/gist-save` itself
+STOPS on a refused artifact (error report; no gate exit, no driven turn — the drive fallback
+stays the draft-LESS arm, byte-stable). No session
 linkage after save — nothing consumes a gist in-session.
 
 ## §8.42 · Objective delivery policy (stacked delivery — the stored domain contract)
@@ -9777,14 +9804,18 @@ consumer (the session-artifacts digest-pointer doctrine). The execute clears it 
 unconditionally at entry BEFORE the stale-bundle removal attempt — the invalidation record
 that keeps the removal `io_error` refusal fail-closed for downstream consumers — and sets it
 to the sha256 of the finalized bytes (`digestSessionData`, the `sha256:<hex>` convention)
-only after the finalize write succeeds. The entry clear is **verified**: `markers.clear()`
-returns the append+read-back result, and an UNVERIFIED clear refuses `io_error` before ANY
+only after the finalize write succeeds. The entry clear is **verified**:
+`markBundleDigest(null)` returns the append+read-back result, and an UNVERIFIED clear refuses
+`io_error` before ANY
 filesystem work or spawn — with the old digest possibly still live, proceeding into a failed
 removal would leave the prior bundle + prior digest PAIR recoverable as fresh, so the wave
 stops instead (no mutation happens, and the untouched prior finalized state remains exactly
-what it was). The marker seam is injected into the execute core (`markers: {clear, set}`;
-the registered tool wires the production `appendWorkflowState` pair); `set` returns
-`appendWorkflowState`'s read-back boolean, and a failed set makes the wave outcome
+what it was). The marker seam is the ONE injected capability
+`markBundleDigest(finalized: string | null): boolean` — `null` is the invalidation clear
+(appended as `""`); a string is the FINALIZED BUNDLE BYTES, digested by the capability owner
+(the digest convention lives with the Pi edge: the registered tool wires the production
+`appendWorkflowState` closure, which computes `digestSessionData(finalized)`); the boolean is
+the verified append+read-back result. A failed publish makes the wave outcome
 `complete: false` with a named `digest-marker` failure entry (the wave ran — the outcome is
 honestly incomplete, never the `io_error` fail arm); the marker stays
 cleared by the entry clear, so recovery refuses, and re-running the wave repairs it. A
@@ -10064,40 +10095,64 @@ shared `decodeObjectiveSaveParams` decodes it as a tri-state plain object (absen
 `undefined`, present-but-not-a-plain-object → strict-fail); deep validation stays with the
 gate resolver.
 
-**The ONE gate resolver.** `resolveDreamReportGate(ctx, input, generatedAt)`
-(`extension/authoring/objective/dreamReportGate.ts`) implements the whole matrix ONCE — both
+**The ONE gate resolver.** `resolveDreamReportGate(recovery, input, generatedAt)`
+(`extension/authoring/objective/dreamReportGate.ts`) implements the whole matrix ONCE over the
+runtime-minted `DreamGateRecovery` capability — both
 `reviseObjectiveDraft` and `saveObjective` consume its typed outcome
 (`absent` | `block` | `refuse{errorType, detail}`); no parallel branch/message
-implementations. "Dream session" is detected structurally, exactly like `run_dream_wave`: the
+implementations. The capability (feature-owned interface; the production value is minted per
+operation by `productionDreamGateRecovery(ctx)` in `extension/pi/v1/objectiveDreamGate.ts`)
+carries the storage/git mechanics that used to live in the feature: `readSession()` — ONE
+fresh workflow-state snapshot per gate resolution (run identity + the `dream_bundle_digest`
+freshness marker + dream detection); `recoverContext(runId, marker)` — the fresh
+manifest+bundle read + the full decode/digest ladder, re-executed on EVERY call, never
+cached; `bracket(expectedSha)` — the §8.65 revalidation bracket (production:
+`revalidationBracket(ctx.cwd, sha)`; tests inject fakes at the capability seam). The
+detail-rendering division: `readSession()`'s unreadable `detail` is always the RAW CAUSE —
+the resolver owns the one rendering prefix (`` `session workflow state is unreadable — cannot
+resolve the dream_report gate: ${detail}` ``) and refuses `bad_state` BEFORE the matrix;
+`recoverContext` failure details pass through UNPREFIXED (complete sentences). "Dream
+session" is detected structurally, exactly like `run_dream_wave`: the
 session's claimed `run_id` + the existence of `runScratchDir(run_id)/dream-manifest.json` (no
-claimed run counts as non-dream). The matrix (identical at draft-write and save): non-dream +
+claimed run counts as non-dream). Two deliberate fail-closed hardenings live in the
+production capability: a non-empty claimed `run_id` is narrowed through `isSafeRunId`
+BEFORE any path derivation (an unsafe id is `unreadable` — the gate refuses loudly on a
+pathological id, never silently "non-dream"); and the CAST `dream_bundle_digest` is
+runtime-narrowed to string-or-absent (any other defined value is `unreadable` — corrupted
+state is `bad_state`, not "no finalized wave"). The matrix (identical at draft-write and
+save): non-dream +
 absent → `absent` (unchanged, byte-identical behavior); non-dream + present → refuse
 `invalid_input` (refusing rather than silently dropping it); dream + absent → refuse
 `invalid_input` (the objective and its report review as ONE bundle — draft-time enforcement
 means a report-less dream bundle can never reach review, so an approval is always savable,
-the §8.62 "validates BEFORE review" promise); dream + present → recover trusted context →
+the §8.62 "validates BEFORE review" promise); dream + present →
+`recovery.recoverContext(runId, marker)` (the marker passed from the SAME snapshot — the
+one-snapshot rule stays feature-visible) →
 **the revalidation-bracket re-check** (§8.65's bracket, and its rationale: after context
 recovery authenticates the
-manifest, `bracket(ctx.cwd, manifest.commit_sha)` runs at draft-write AND save, both
+manifest, `recovery.bracket(manifest.commit_sha)` runs at draft-write AND save, both
 consumers flowing through this one resolver; drift refuses `bad_state`;
-non-dream paths never reach the bracket; the resolver's optional fourth parameter defaults to
-the production `revalidationBracket`, injected only by tests) →
-`buildDreamReport(input, context)` → refuse on any failure, else yield the block. The gate
-reads ONE workflow-state snapshot with error distinction: an UNREADABLE state (a throwing
-branch read) refuses `bad_state` BEFORE the matrix — never conflated with a confirmed
-non-dream session (a transient read failure must not surface as `absent`). Failure
+non-dream paths never reach the bracket) →
+`buildDreamReport(input, context)` → refuse on any failure, else yield the block. An
+UNREADABLE session read refuses `bad_state` BEFORE the matrix — never conflated with a
+confirmed non-dream session (a transient read failure must not surface as `absent`). Failure
 taxonomy (soft results, never throws): gate violations and `buildDreamReport` validation
 refusals → `invalid_input` (the bounded ≤25 named details ride the message, newline-joined);
 an unreadable workflow state, context-recovery failures (missing/stale/tampered/undecodable
 run-scratch state — "re-run the dream wave"), and the save-time stored-parts mismatch →
-`bad_state`.
+`bad_state`. **The every-operation runtime-verification invariant (anti-proof-object):** the
+decode/digest/revalidation checks are runtime verification executed on EVERY consuming
+operation (draft-write and save), never replaced by a structural type, an assertion, or a
+previously computed proof object.
 
-**Trusted-context recovery** (module-internal, fail-closed, every arm a named detail):
+**Trusted-context recovery** (edge-owned in `productionDreamGateRecovery`, fail-closed, every
+arm a named detail):
 (1) read + parse the run-scoped manifest and `decodeDreamManifest(raw, manifestPath)` (the
 strict §8.60 decoder, path bound at decode time; no `verifyDocContainment` — the report path
 reads no doc files, so the lexical decode suffices; resolved containment stays the wave
 tool's pre-spawn concern); (2) **the freshness check** — the `dream_bundle_digest` marker
-(§8.3/§8.61, read from the gate's one workflow-state snapshot) must be present, non-empty,
+(§8.3/§8.61, read from the gate's one workflow-state snapshot and passed into
+`recoverContext`) must be present, non-empty,
 and equal the digest of the bundle bytes just read (missing/empty/mismatch refuses); (3)
 `decodeFinalizedDreamBundle(parsedBundle, manifest, digest-of-manifest-bytes-just-read)`
 (§8.61 — the analyses-only mid-wave shape refuses here, and the bundle's bound
@@ -10111,7 +10166,8 @@ artifact): `reviseObjectiveDraft` runs the gate, stamps `generated_at` ONCE
 (`new Date().toISOString()`), and stores the validated input beside the rendered CANONICAL
 parts. `resumeObjectiveDraft` validates the block via `decodeDreamReportBlock` (a plain-object
 `input`, a non-blank `generated_at`, a non-empty all-string `parts`) and refuses the WHOLE
-draft on a malformed block (warn + `null`) — deliberately stricter than the lenient
+draft on a malformed block (the classified `refused` arm, rendered at the consuming Pi edge)
+— deliberately stricter than the lenient
 junk→absent handling of `base`/`delivery` (§8.1).
 
 **One approval bundle.** `renderObjectiveDraft` appends the stored parts as the final section

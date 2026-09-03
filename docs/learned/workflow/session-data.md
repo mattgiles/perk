@@ -104,10 +104,13 @@ distinction and refuse `bad_state` on couldn't-read — "confirmed absent" ≠ "
   untrusted session history, so validation always re-derives the path from `run_id` + `name`
   through the owning seam and never dereferences `pointer.path`. Generalizes: never trust a
   path/locator stored in a session entry.
-- **Refusal tiering is two-grade by design**: run_id mismatch → *silent* `null` (it IS the
-  fork-no-inheritance / concurrent-isolation mechanism, not an anomaly); pointer-present-but-broken
-  (missing file, digest mismatch) → stderr warn + `null` (a broken promise). Don't "fix" the
-  silent arm into a warning — forks would spam.
+- **Refusal tiering is two-grade by design**: run_id mismatch → *silently classified `absent`*
+  (it IS the fork-no-inheritance / concurrent-isolation mechanism, not an anomaly);
+  pointer-present-but-broken (missing file, digest mismatch) → the seam's `invalid{problem}`
+  arm plus its own stderr warn (a broken promise). Don't "fix" the
+  silent arm into a warning — forks would spam. Review-style draft consumers (gist/objective)
+  fold `invalid` into a classified `refused{problem}` resume arm and STOP with a refusal
+  rendered at the Pi edge — never a fallback.
 - **Writer success = fully recorded**: an `applied`/`unchanged` write result (carrying the
   session-owned `SessionArtifactReceipt` — validated/re-derived `{runId, path, digest}`, never
   the persisted pointer) means file written + read back + pointer strict-appended.
@@ -173,13 +176,15 @@ The full producer→consumer recipe, composed from the rules proven above and in
 2. **Read-only writer** (only if the producer must run under the gate) — the carve-out recipe
    below.
 3. **Consumer**: read only via the `WorkflowSession` seam's `readArtifact` (digest-validated,
-   fail-open); design the
-   fallback chain up front and pick the tier law deliberately — save-style (… → a universal
-   fallback, e.g. the transcript scrape) vs review-style (validated sources only, never the
-   scrape — see `plan-review-flow.md`); never dereference `pointer.path` (re-derive from
-   `run_id` + `name` through the seam).
-4. **Refusal tiers**: run_id mismatch → *silent* `null` (fork isolation, not an anomaly);
-   broken-promise (missing file / digest mismatch) → stderr warn + `null`.
+   classified `found`/`absent`/`invalid`); design the
+   fallback chain up front and pick the tier law deliberately — save-style (`absent` → … → a
+   universal fallback, e.g. the transcript scrape) vs review-style (validated sources only,
+   never the scrape — see `plan-review-flow.md`; the gist/objective draft consumers STOP on a
+   `refused` resume with a rendered refusal instead of falling back); never dereference
+   `pointer.path` (re-derive from `run_id` + `name` through the seam).
+4. **Refusal tiers**: run_id mismatch → silently `absent` (fork isolation, not an anomaly);
+   broken-promise (missing file / digest mismatch) → the `invalid{problem}` arm (+ the seam's
+   stderr warn); draft-less fallbacks key off `absent` only.
 5. **GC**: artifacts are prunable (`src/perk/state/gc.py`); pruned runs leave dangling pointers **by
    design** — consumers must tolerate `null` forever.
 6. **Guards + registry**: manual `scratch`/`runs` path construction trips
