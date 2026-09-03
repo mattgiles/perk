@@ -173,17 +173,22 @@ export function installDreamBindings(pi: ExtensionAPI, wave: ReportWave): void {
       const analystModel = subagentModel(ctx.cwd, "dream-analyst");
       const reducerModel = subagentModel(ctx.cwd, "dream-reducer");
       // The production digest-marker capability: the ordinary strict-append session-entry
-      // channel. The boolean is the verified append+read-back result — the feature op refuses
-      // the wave on an unverified CLEAR (fail-closed); a failed SET makes the aggregate
-      // honestly incomplete (the entry clear already invalidated, so recovery refuses).
-      const markBundleDigest = (digest: string): boolean =>
-        appendWorkflowState(pi, ctx, {
+      // channel. The digest convention is owned HERE — the feature hands over the finalized
+      // bundle bytes (or `null` for the invalidation clear, appended as the empty string) and
+      // this closure digests them. The boolean is the verified append+read-back result — the
+      // feature op refuses the wave on an unverified CLEAR (fail-closed); a failed SET makes
+      // the aggregate honestly incomplete (the entry clear already invalidated, so recovery
+      // refuses).
+      const markBundleDigest = (finalized: string | null): boolean => {
+        const digest = finalized === null ? "" : digestSessionData(finalized);
+        return appendWorkflowState(pi, ctx, {
           data: { dream_bundle_digest: digest },
           field: "dream_bundle_digest",
           expected: digest,
           scope: "run_dream_wave",
           failure: `dream_bundle_digest read-back failed (${digest === "" ? "clear" : digest})`,
         });
+      };
       return executeDreamWave(wave, ctx, {
         manifest: decoded.manifest,
         manifestDigest: digestSessionData(manifestBytes),

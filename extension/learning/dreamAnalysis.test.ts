@@ -11,7 +11,6 @@
 import assert from "node:assert/strict";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { digestSessionData } from "../substrate/sessionData.ts";
 import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
 import { reportWaveOver } from "../waves/reportWave.ts";
 import { type DreamManifest, decodeDreamManifest } from "./dream.ts";
@@ -208,7 +207,7 @@ function bundleSpies(
   writes: { path: string; content: string }[];
   removes: string[];
   events: string[];
-  markBundleDigest: (digest: string) => boolean;
+  markBundleDigest: (finalized: string | null) => boolean;
   bracket: () => { ok: boolean; detail: string | null };
   writeBundle: (path: string, content: string) => void;
   removeBundle: (path: string) => void;
@@ -226,13 +225,14 @@ function bundleSpies(
         ? { ok: false, detail: opts.drift }
         : { ok: true, detail: null };
     },
-    // The ONE function-shaped marker capability: "" is the invalidation clear.
-    markBundleDigest: (digest) => {
-      if (digest === "") {
+    // The ONE function-shaped marker capability: `null` is the invalidation clear; a string
+    // publish records the EXACT finalized bytes it received (digesting is the owner's job).
+    markBundleDigest: (finalized) => {
+      if (finalized === null) {
         events.push("clear");
         return opts.clearFails !== true;
       }
-      events.push(`set:${digest}`);
+      events.push(`set:${finalized}`);
       return opts.setFails !== true;
     },
     writeBundle: (path, content) => {
@@ -510,15 +510,16 @@ test("analyzeDream: the happy path — analyst write, reducers read it, finalize
     MANIFEST_DIGEST,
     "the caller's manifest digest is bound into the finalized bundle",
   );
-  // The marker is set to the digest of the finalized bytes, after the finalize write — and
-  // the bracket runs BETWEEN the reducer wave and the finalize write.
+  // The marker publish receives the EXACT finalized bytes handed to `writeBundle` (digesting
+  // is the capability owner's job), after the finalize write — and the bracket runs BETWEEN
+  // the reducer wave and the finalize write.
   assert.deepEqual(spies.events, [
     "clear",
     "remove",
     "write",
     "bracket",
     "write",
-    `set:${digestSessionData(finalized)}`,
+    `set:${finalized}`,
   ]);
   assert.deepEqual(details.bracket, { ok: true, detail: null });
   assert.deepEqual(details.bundle, {
