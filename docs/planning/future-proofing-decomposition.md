@@ -169,7 +169,10 @@ truly crosses planes, not as a dumping ground for ordinary shared-looking types.
 
 **Working name:** `@mgiles/perk-workflow`
 
-**Candidate current sources:**
+**Candidate current sources** (as written; the ts-decomposition work has since dissolved the
+first three homes — `doors/`, `factories/`, and `adapters/` were evacuated and deleted, their
+flows now living in the Pi-free feature homes `authoring/`/`delivery/`/`codeReview/`/`learning/`
+behind `extension/pi/v1/` adapters, which are today's candidate sources for this library):
 
 - `extension/doors/`
 - `extension/factories/`

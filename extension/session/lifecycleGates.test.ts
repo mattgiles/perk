@@ -1,12 +1,12 @@
-// Pure session-lifecycle policy tests: the gateDecision matrix, the implement handoff priming,
-// and the planning-stage lifecycle-door refusal — no harness, no git, no LLM / network. The
-// registration half (the gate:/implement arcs through a real bound session) is covered in
+// Pure session-lifecycle policy tests: the implement handoff priming and the planning-stage
+// lifecycle-door refusal — no harness, no git, no LLM / network. The registration half (the
+// gate:/implement arcs through a real bound session) is covered in
 // `pi/v1/lifecycleGates.test.ts`.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { PlanRef } from "../substrate/cache.ts";
-import { gateDecision, implementHandoffPrompt, planningStageRefusal } from "./lifecycleGates.ts";
+import { implementHandoffPrompt, planningStageRefusal } from "./lifecycleGates.ts";
 
 const REF: PlanRef = {
   provider: "github",
@@ -15,13 +15,6 @@ const REF: PlanRef = {
   labels: ["perk:plan"],
   objective_id: null,
 };
-
-test("gateDecision: cancels only inside an active workflow with a dirty tree", () => {
-  assert.equal(gateDecision({ active: true, dirty: true }).cancel, true);
-  assert.equal(gateDecision({ active: true, dirty: false }).cancel, false);
-  assert.equal(gateDecision({ active: false, dirty: true }).cancel, false);
-  assert.equal(gateDecision({ active: false, dirty: false }).cancel, false);
-});
 
 test("implementHandoffPrompt: carries the plan forward (read it; never summarize)", () => {
   const prompt = implementHandoffPrompt(REF);

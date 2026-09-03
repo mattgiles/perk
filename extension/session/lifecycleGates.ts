@@ -1,8 +1,8 @@
 // Pi-free session-lifecycle gate policy: the planning-stage lifecycle-door refusal (the shared
-// first check of the warm /submit, /address, /land, and /learn doors), the pure dirty-tree gate
-// decision, and the plan-read handoff priming for a fresh implement session. The Pi registration
-// half (the session_before_fork/switch hooks + the guard-only `/implement` command) lives in
-// `pi/v1/lifecycleGates.ts`; this module carries the policy those adapters apply.
+// first check of the warm /submit, /address, /land, and /learn doors) and the plan-read handoff
+// priming for a fresh implement session. The Pi registration half (the session_before_fork/
+// switch hooks + the guard-only `/implement` command) lives in `pi/v1/lifecycleGates.ts`; this
+// module carries the policy those adapters apply.
 
 import type { PlanRef } from "../substrate/cache.ts";
 import { planReadInstruction, render } from "../substrate/prompts.ts";
@@ -41,14 +41,6 @@ export function planningStageRefusal(ctx: BranchSource, door: string): string | 
     "hold two plan identities (its checkout's own binding and the just-saved plan) — " +
     "implement the saved plan with `perk impl <N>` in a fresh session instead."
   );
-}
-
-/**
- * Pure gate policy: cancel a transition only inside an active perk workflow whose tree is
- * dirty. Kept separate from the `pi.exec` effect so the matrix is unit-testable offline.
- */
-export function gateDecision(inputs: { active: boolean; dirty: boolean }): { cancel: boolean } {
-  return { cancel: inputs.active && inputs.dirty };
 }
 
 /**

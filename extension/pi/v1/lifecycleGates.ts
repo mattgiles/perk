@@ -4,8 +4,7 @@
 // transition never silently orphans work. Plus the guard-only `/implement` command that
 // *enforces* the implement stage's `warm: false` legality (the plan→implement jump requires
 // fresh context; that is the cold door `perk implement`). The Pi-free policy these hooks apply
-// (`gateDecision`, `implementHandoffPrompt`, `planningStageRefusal`) lives in
-// `session/lifecycleGates.ts`.
+// (`implementHandoffPrompt`, `planningStageRefusal`) lives in `session/lifecycleGates.ts`.
 //
 // pi.on("session_before_fork"/"...switch") handlers are fired by extensionRunner.emit({type,...})
 // and their { cancel } result round-trips; the handler's
@@ -16,7 +15,7 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { gateDecision, implementHandoffPrompt } from "../../session/lifecycleGates.ts";
+import { implementHandoffPrompt } from "../../session/lifecycleGates.ts";
 import type { PlanRef } from "../../substrate/cache.ts";
 import { registerPerkCommand } from "../../substrate/command.ts";
 import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
@@ -41,11 +40,10 @@ async function guardTransition(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
 ): Promise<{ cancel: true } | undefined> {
-  const active = workflowActive(ctx);
-  if (!active) return undefined; // perk does not interfere with non-perk transitions
+  if (!workflowActive(ctx)) return undefined; // perk does not interfere with non-perk transitions
   const res = await pi.exec("git", ["status", "--porcelain"], { cwd: ctx.cwd });
   const dirty = res.code === 0 && res.stdout.trim().length > 0;
-  if (!gateDecision({ active, dirty }).cancel) return undefined;
+  if (!dirty) return undefined;
   report(ctx, "lifecycle", "warning", DIRTY_MESSAGE); // fail-safe-headless: loud, still cancels
   return { cancel: true };
 }

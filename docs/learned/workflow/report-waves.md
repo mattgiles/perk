@@ -42,12 +42,12 @@ session-scoped guard-state patterns, and the wave test machinery worth reusing.
 ## Orientation
 
 `extension/waves/reportWave.ts` is the LOGICAL core — `ReportAssignment` (the renamed
-`WaveLane`; `WaveSpec.assignments`), normalization, the runner, and the caller-facing failure
-union — over the transport tier in `waves/transport.ts`: the adapter seam (`WaveAdapter`,
+`WaveLane`; `ReportWaveRequest.assignments`), normalization, the runner, and the caller-facing
+failure union — over the transport tier in `waves/transport.ts`: the adapter seam (`WaveAdapter`,
 `WaveSpawnParams`, `WAVE_ACCEPTANCE`), the script tier (`startWaveScript`/`runWaveScript`,
 `WAVE_TIMEOUT_MS`), receipt primitives, and the transport failure vocabulary
 (`WaveRunFailureReason` — the six wave-level reasons, a structural SUBSET of the logical tier's
-`WaveFailureReason`, so script failures flow up with zero runtime mapping and a lane-level
+`ReportWaveFailureReason`, so script failures flow up with zero runtime mapping and a lane-level
 reason on a script-run failure is unrepresentable). Callers consume the opaque `ReportWave`
 lifecycle — `start`/`collect`/`run` over opaque `ReportWaveRef`s: they supply assignments and
 consume typed outcomes, never adapters, run handles, or result promises (the blocking `run` is
@@ -65,9 +65,10 @@ census burned down to zero when `createReportWave` made adapter selection wave-o
 censuses raw `WAVE_RPC_`/channel tokens (tests included). The flow entrypoints:
 
 - `prReviewWave.ts` — `/pr-review`'s bounded-retry wave behind the `run_pr_review_wave` tool.
-- `learnWave.ts` — `/learn`'s analyst fan-out behind `run_learn_wave` (best-effort, no retry).
-- `prReviewDynamicWave.ts` — the experimental selector-driven wave behind
-  `run_pr_review_dynamic_wave`.
+- `extension/learning/analystWave.ts` — `/learn`'s analyst fan-out policy behind the
+  `run_learn_wave` tool (`extension/pi/v1/learning/learn.ts`), best-effort, no retry. (The
+  experimental selector-driven `/pr-review-dynamic` flow was retired wholesale — see the
+  CHANGELOG.)
 - `adversarialReviewWave.ts` — the human review doors' streaming wave behind the
   `start_review_wave`/`collect_review_wave` tool pair (`extension/pi/v1/codeReview/reviewWave.ts`),
   registered and in the `extension/substrate/toolGating.ts` census. It landed **dormant** first
@@ -87,31 +88,34 @@ censuses raw `WAVE_RPC_`/channel tokens (tests included). The flow entrypoints:
   `perk.objective-explorer` lane, strict completeness, no retry (on failure the guidance says
   "explore directly instead"). Both single-lane entrypoints hold their report schema as a module
   constant — the migration that killed the hand-transcribed `outputSchema` blocks.
-- `auditWave.ts` — the perk-dev session-audit wave behind `run_audit_wave`
-  (`extension/pi/v1/learning/audit.ts`): the learnWave-shaped sibling with a **structural write
-  binding**. The tool is a `READ_ONLY_TOOLS` member whose write target comes only from the cold
+- `extension/learning/audit.ts` (`judgeAuditBundle`) — the perk-dev session-audit wave behind
+  `run_audit_wave` (the `extension/pi/v1/learning/audit.ts` adapter): the analyst-wave-shaped
+  sibling with a **structural write binding**. The tool is a `READ_ONLY_TOOLS` member whose write target comes only from the cold
   door's workflow-state (`audit_bundle_dir`), with **no parameters** — no model-relayed path ⇒ no
   aimable writer. This is the precedent for read-only-gated tools that must write. Side effect
   worth sweeping for: adding an isolated registry stage (empty `successors`) implicitly grows
   GC's terminal set (`terminal_stage_ids()`), firing the exact-set pin in `tests/test_gc.py` — a
   stage-adding plan should sweep `src/perk/state/gc.py` alongside the
   stageTools/toolGating/registry pins.
-- `harvestWave.ts` — the seeded `perk learn harvest` session's analyst fan-out behind the
-  `run_harvest_wave` tool (`extension/pi/v1/learning/harvest.ts`). The one `manifest_path` param
+- `extension/learning/harvest.ts` (`analyzeHarvest`) — the seeded `perk learn harvest`
+  session's analyst fan-out behind the `run_harvest_wave` tool
+  (the `extension/pi/v1/learning/harvest.ts` adapter). The one `manifest_path` param
   is a **relay handshake, not an authority**: the execute derives the only acceptable run-scoped
   path from the claimed run's workflow-state and reads the derived path (contracts §8.48); a
   single-lane manifest is refused toward the seed's direct-analysis path. Best-effort
   completeness, ONE attempt, no retry; reports re-decoded + pointer-stamped in code.
-- `dreamWave.ts` — the `perk learn dream` session's FIRST-level analyst wave: strict §8.59
-  manifest decode that binds the run-scoped manifest path into the decoded value, run-key-safe
-  orchestration keys (the `auditWave.ts` pattern), the `DREAM_ANALYST_CAPS` SSOT, and **strict**
-  completeness (one failed/undecodable lane forces `complete: false`); one attempt, no retry
-  (contracts §8.60).
-- `dreamReducerWave.ts` — the SECOND-level wave: three FIXED fresh-context `perk.dream-reducer`
-  lanes (`DREAM_REDUCER_ANGLES`) cross-examining the complete analyst outcome; **pure
-  orchestration** — it composes/finalizes the bundle content while the door owns every fs write;
-  the `DREAM_REDUCER_CAPS` SSOT; strict (contracts §8.61). Both dream levels run behind the ONE
-  **parameterless** `run_dream_wave` tool (`extension/pi/v1/learning/dream.ts`) — the
+- `extension/learning/dream.ts` — the `perk learn dream` session's FIRST-level analyst wave:
+  strict §8.59 manifest decode that binds the run-scoped manifest path into the decoded value,
+  run-key-safe orchestration keys (the `audit.ts` pattern), the `DREAM_ANALYST_CAPS` SSOT, and
+  **strict** completeness (one failed/undecodable lane forces `complete: false`); one attempt,
+  no retry (contracts §8.60).
+- `extension/learning/dreamReducer.ts` — the SECOND-level wave: three FIXED fresh-context
+  `perk.dream-reducer` lanes (`DREAM_REDUCER_ANGLES`) cross-examining the complete analyst
+  outcome; **pure orchestration** — it composes/finalizes the bundle content while the door owns
+  every fs write; the `DREAM_REDUCER_CAPS` SSOT; strict (contracts §8.61). Both dream levels run
+  behind the ONE **parameterless** `run_dream_wave` tool over the two-level ordering/recovery
+  policy in `extension/learning/dreamAnalysis.ts` (`analyzeDream`; the
+  `extension/pi/v1/learning/dream.ts` adapter) — the
   `run_audit_wave` workflow-state-bound posture on BOTH the read and write sides; reducers
   launch only after a complete first wave and an in-budget bundle write.
 
@@ -172,8 +176,9 @@ Adjacent lessons:
   curl cheat sheet never confronted (see `plan-review-flow.md`).
 - **When a mechanics module is scheduled to delete interim guidance prose, keep that prose
   minimal** and spend the design effort on the conventions the module will inherit. What survived
-  into `learnWave.ts` were the contract-ish decisions — angle-slug keys, the compact per-lane
-  projection, all-settled semantics; the prose skeletons did not.
+  into `learnWave.ts` (today `extension/learning/analystWave.ts`) were the contract-ish
+  decisions — angle-slug keys, the compact per-lane projection, all-settled semantics; the
+  prose skeletons did not.
 
 ### The dormant-first → atomic-flip migration is validated
 
@@ -332,7 +337,7 @@ silently dropping it lets old callers appear successful under changed semantics.
 
 ### Truthful launch and coverage manifests
 
-`WaveLaunchManifest` preserves three ordered sets: requested lanes, runnable lanes, and keyed
+`ReportWaveLaunchManifest` preserves three ordered sets: requested lanes, runnable lanes, and keyed
 preflight failures. If preflight rejects every lane, launch returns `ok: false` with those specific
 failures rather than manufacturing a synthetic wave failure. Pending state keeps the full requested
 order so collection retains the true coverage denominator even when some lanes never spawn.
@@ -400,8 +405,9 @@ Instances:
   offline e2e pattern for any RPC-launched wave (bind via the harness's `extraExtensions` or
   `attach` on a bare fake bus; ten door/pi suites ride it). `waveScriptItems` is the shared
   `runs.all(`-slice parser (a failed parse throws, never a silent empty list).
-- **The render-then-execute pattern** for dynamic in-script logic
-  (`prReviewDynamicWave.test.ts`, `prReviewDynamic.test.ts`): the module renders deterministic JS
+- **The render-then-execute pattern** for dynamic in-script logic (the worked instance was the
+  since-retired `/pr-review-dynamic` flow's `prReviewDynamicWave.test.ts` /
+  `prReviewDynamic.test.ts` suites): the module renders deterministic JS
   (all dynamic data `JSON.stringify`-embedded); unit tests execute the rendered script via the
   `AsyncFunction` constructor over a scripted fake `runs` global; and the e2e responder
   *evaluates* the received script and writes its actual return into `status.json` — a full
@@ -439,15 +445,17 @@ Instances:
 
 - The module-rendered script's `runs.all(` … `);\nreturn` shape is parsed by ONE shared helper
   (`testing/fakeSubagents.ts`'s `waveScriptItems`, adopted at the thirteen former slice sites) —
-  a renderer output-shape change now fails loudly in one place (the dynamic wave's `const TASKS`
-  slice and rendered-script execution stay bespoke single-consumer idioms).
+  a renderer output-shape change now fails loudly in one place (the retired dynamic wave's
+  `const TASKS` slice and rendered-script execution were bespoke single-consumer idioms and left
+  with the flow).
 - The review-wave pair (and the draft pair) HAVE now run against real pi-subagents — the
   2026-08-10 live dogfood of the three streaming browser doors
   (`docs/design/archive/streaming-doors-dogfood.md`: streaming cadence, dedupe, `replace` reshape,
-  typed collect aggregates, all live-confirmed). The **dynamic flow**
-  (`prReviewDynamicWave.ts`) has still not run against real pi-subagents — that half of the
-  residual stands, with the stale-session gotcha: a landing session predates its own
-  extension code (see `pi/extension-api.md` on dogfooding just-changed extension code).
+  typed collect aggregates, all live-confirmed). The dynamic-flow half of the residual was
+  discharged by retirement — `/pr-review-dynamic` was removed wholesale (see the CHANGELOG)
+  without ever running against real pi-subagents. The stale-session gotcha stands: a landing
+  session predates its own extension code (see `pi/extension-api.md` on dogfooding just-changed
+  extension code).
 - `pr`/`worktree`/`bundle_dir` stay model-relayed (an accepted trust posture;
   `decodeStartReviewWaveParams` is the single seam to adjust if door-recorded context is
   adopted).
@@ -469,7 +477,7 @@ Instances:
   `outputSchema`, supervisor channel) and the pre-digest recipe
 - `docs/learned/workflow/warm-door-commands.md` — the toolGating census + drive-coverage guard
 - `docs/learned/workflow/learn-evidence-pipeline.md` — the `/learn` orchestrator that rides
-  `learnWave.ts`
+  `extension/learning/analystWave.ts`
 - `docs/learned/workflow/plan-review-flow.md` — the annotation-push module (the sibling
   prompt-discipline-into-code migration)
 - `extension/waves/reportWave.ts` (the logical tier + the opaque `ReportWave` lifecycle) +
@@ -478,9 +486,9 @@ Instances:
 - `extension/testing/fakeSubagents.ts` — the shared fake responder + `waveScriptItems`
 - `extension/authoring/review/draftContext.ts` — the draft pair's flow-owned pending/context
   slots (opaque refs only)
-- `extension/waves/prReviewWave.ts`, `learnWave.ts`, `prReviewDynamicWave.ts`,
-  `adversarialReviewWave.ts`, `draftReviewWave.ts`, `reviewClassifierWave.ts`,
-  `objectiveExplorerWave.ts`, `auditWave.ts`, `harvestWave.ts`, `dreamWave.ts`,
-  `dreamReducerWave.ts` — the flow entrypoints
+- `extension/waves/prReviewWave.ts`, `adversarialReviewWave.ts`, `draftReviewWave.ts`,
+  `reviewClassifierWave.ts`, `objectiveExplorerWave.ts` + `extension/learning/analystWave.ts`,
+  `audit.ts`, `harvest.ts`, `dream.ts`, `dreamReducer.ts`, `dreamAnalysis.ts` — the flow
+  entrypoints
 - `extension/pi/v1/codeReview/reviewWave.ts` — the start/collect tool pair (live — the review
   doors drive it)

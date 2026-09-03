@@ -273,7 +273,7 @@ test("executeStartDraftReviewWave: a primed custom lane rides the launch and the
 });
 
 test("primeDraftReviewContext resets the pending wave (a new browser session supersedes)", async () => {
-  const state = primePlan();
+  const state = primePlan("focus the phasing");
   const { target } = fakeTarget();
   const adapter = createMemoryWaveAdapter({
     aggregate: {
@@ -291,6 +291,14 @@ test("primeDraftReviewContext resets the pending wave (a new browser session sup
   assert.equal(second.details.ok, true, "priming reset the pending wave");
   const script = (adapter.calls.spawn[1]?.workflowScript as string) ?? "";
   assert.match(script, /# Draft v2/, "the new session's draft rides the new wave");
+  // The re-prime replaces the context wholesale: the first session's custom lane is gone, and a
+  // prime without `custom` leaves no custom key at all (the key-absence representation the
+  // execute cores key their custom-lane inclusion on).
+  assert.deepEqual(
+    state.context,
+    { draftType: "plan", draft: "# Draft v2\n" },
+    "the stale custom lane does not survive a re-prime",
+  );
 });
 
 test("a supersede during the collect's await never erases the NEW pending wave", async () => {

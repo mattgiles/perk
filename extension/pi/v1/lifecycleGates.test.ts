@@ -1,7 +1,7 @@
 // Lifecycle-gate registration tests: the dirty-repo gate + the guard-only `/implement` driven
 // through a REAL bound offline session (T1 harness) over a REAL git repo (gitInit). No LLM /
-// network. The pure policy units (gateDecision, implementHandoffPrompt, planningStageRefusal)
-// live in `session/lifecycleGates.test.ts`.
+// network. The pure policy units (implementHandoffPrompt, planningStageRefusal) live in
+// `session/lifecycleGates.test.ts`.
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
