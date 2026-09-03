@@ -72,6 +72,19 @@
 //      TypeScript's structural typing means a hand-written object literal satisfying
 //      `reportWaveOver`'s parameter is not mechanically preventable — that residue is owned by
 //      the guard-census review posture, not claimed as a structural guarantee.
+//   H. Storage freedom: the storage-free feature homes (`authoring/`, `codeReview/`,
+//      `delivery/`, `learning/` — NOT `session/`, the session engine legitimately owns these
+//      imports; NOT `doors/`, which node 3.1 deletes) have NO edge — type-only edges count —
+//      into the storage-interior modules (`substrate/workflowState.ts`,
+//      `substrate/sessionData.ts`, `substrate/cache.ts`, `substrate/git.ts`); the allowlist is
+//      EMPTY. Module-level bans on the resolved-edge map (exact module paths as `startsWith`
+//      target prefixes — safe: no production path extends another's filename). The cache.ts
+//      denial is deliberately module-level — a conservative superset of the census's pinned
+//      run-scratch surface; pure cache vocabulary rides `session/workflowSession.ts`
+//      re-exports (the 2.2 precedent), and a future legitimate need is a reviewed guard edit,
+//      not binding-aware machinery. `node:fs` is deliberately NOT matched (an edge-level rule
+//      only — the allowed injectable probes in `learning/containment.ts`/`harvest.ts` hold by
+//      construction). Anti-vacuity floor: every storage-free home must match ≥1 scanned file.
 //
 // Test-only `typescript` import: the guard lexes with the exact-pinned `typescript` devDependency;
 // production sources gain no imports (`bareImportGuard.test.ts` scans production files only, and
@@ -154,6 +167,26 @@ const ANCHORED_DIRS: Record<string, string[]> = {
  * with NO sanctioned re-export seams for these homes (see the header).
  */
 const PI_FREE_HOMES = ["authoring/", "codeReview/", "delivery/", "learning/", "session/"];
+
+/**
+ * The storage-free feature homes (Rule H sources): the census's deny set applies to feature
+ * policy only — `session/` (the engine that owns the storage seams) and `doors/` (deleted by
+ * node 3.1) are deliberately outside.
+ */
+const STORAGE_FREE_HOMES = ["authoring/", "codeReview/", "delivery/", "learning/"];
+
+/**
+ * The storage-interior modules (Rule H banned targets) — exact module paths used as
+ * `checkDirection` target prefixes (safe: `startsWith` on a full `x.ts` path matches only that
+ * module; no production path extends another's filename). `substrate/cache.ts` is banned
+ * module-level on purpose — a conservative superset of the pinned run-scratch surface.
+ */
+const STORAGE_INTERIOR = [
+  "substrate/workflowState.ts",
+  "substrate/sessionData.ts",
+  "substrate/cache.ts",
+  "substrate/git.ts",
+];
 
 /**
  * Rule E's registration tokens: whitespace-tolerant (a registration split across lines still
@@ -800,6 +833,27 @@ test("Rule G: report-wave transport confinement (interior ban; supplier floor; t
   );
 });
 
+test("Rule H: storage-free feature homes never import the storage interior", () => {
+  const { files, edges } = scan();
+  const { violations, stale } = checkDirection(edges, STORAGE_FREE_HOMES, STORAGE_INTERIOR, []);
+  assert.deepEqual(
+    violations.map((edge) => `${edge.from} → ${edge.to}`),
+    [],
+    "storage-interior import(s) from a storage-free feature home: session identity, workflow " +
+      "state, run-scratch paths, and git probes are edge-owned — take the capability/port as a " +
+      "parameter (pi/v1 wires production; tests inject fakes) instead of importing the storage " +
+      "interior. The allowlist is empty by design; a legitimate need is a reviewed guard edit.",
+  );
+  assert.deepEqual(stale, [], "the Rule H allowlist is empty — nothing can be stale");
+  // The anti-vacuity floor: an emptied home fails loudly instead of passing vacuously.
+  for (const home of STORAGE_FREE_HOMES) {
+    assert.ok(
+      files.some((file) => file.startsWith(home)),
+      `Rule H visited no files under ${home} — the rule is vacuous for that home`,
+    );
+  }
+});
+
 // ---------------------------------------------------------------------------------------------
 // Non-vacuity controls (synthetic inputs through the SAME pure functions; no production edits)
 // ---------------------------------------------------------------------------------------------
@@ -1230,4 +1284,52 @@ test("control 13: Rule G mutation fixtures (interior edge; supplier floor; token
     "doors/rawChannel.ts:1: subagents:rpc:v1",
     "doors/rawConstant.test.ts:1: WAVE_RPC_",
   ]);
+});
+
+test("control 14: Rule H mutation fixtures", () => {
+  // One violating edge per banned interior module, from four distinct feature-home sources,
+  // threaded through checkDirection with the REAL constants — every interior module bites.
+  const flagged = checkDirection(
+    new Map([
+      ["authoring/x.ts", ["substrate/workflowState.ts"]],
+      ["codeReview/x.ts", ["substrate/sessionData.ts"]],
+      ["delivery/x.ts", ["substrate/cache.ts"]],
+      ["learning/x.ts", ["substrate/git.ts"]],
+    ]),
+    STORAGE_FREE_HOMES,
+    STORAGE_INTERIOR,
+    [],
+  );
+  assert.deepEqual(flagged.violations, [
+    { from: "authoring/x.ts", to: "substrate/workflowState.ts" },
+    { from: "codeReview/x.ts", to: "substrate/sessionData.ts" },
+    { from: "delivery/x.ts", to: "substrate/cache.ts" },
+    { from: "learning/x.ts", to: "substrate/git.ts" },
+  ]);
+
+  // A clean substrate edge from a feature home is never flagged (only the interior is banned).
+  const clean = checkDirection(
+    new Map([["authoring/x.ts", ["substrate/config.ts"]]]),
+    STORAGE_FREE_HOMES,
+    STORAGE_INTERIOR,
+    [],
+  );
+  assert.deepEqual(clean.violations, [], "substrate/config.ts is not storage interior");
+
+  // Sources OUTSIDE the storage-free homes are never flagged: the session engine owns these
+  // imports, and the Pi adapter is the production wiring site.
+  const sessionSource = checkDirection(
+    new Map([["session/x.ts", ["substrate/sessionData.ts"]]]),
+    STORAGE_FREE_HOMES,
+    STORAGE_INTERIOR,
+    [],
+  );
+  assert.deepEqual(sessionSource.violations, [], "session/ is outside the storage-free homes");
+  const adapterSource = checkDirection(
+    new Map([["pi/v1/x.ts", ["substrate/cache.ts"]]]),
+    STORAGE_FREE_HOMES,
+    STORAGE_INTERIOR,
+    [],
+  );
+  assert.deepEqual(adapterSource.violations, [], "pi/ is outside the storage-free homes");
 });
