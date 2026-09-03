@@ -1,11 +1,13 @@
-// Fully-offline coverage for the stage-execution seam: the pure policy helpers
-// (applyStageEvent/evaluateTerminal/assembleOutcome/initialPromptFor), the budget/abort watchdog
-// and the happy-path drive via an INJECTED runtime (no model turn / network ever), the seam's
-// never-throws contract under adversarial fakes, the cross-plane prompt-parity invariant
-// (reciprocal of tests/test_worker_prompt_parity.py), and the Gap-4 verification (a throwaway
-// agentDir still loads + binds the project `@mgiles/perk` extension, with the `session_start`
-// claim engaging). The adapter-owned helpers (translateEvent, the drive-session handle,
-// resolveAuth/resolveWorkerModel) are covered in sdkAdapter.test.ts. See stageExecution.ts.
+// Interface-level coverage for the stage-execution seam: every behavior is proven through
+// `runStage` over an INJECTED runtime (`StageRunDeps` — no model turn / network ever) plus the
+// `initialPromptForWorktree` prompt derivation over written plan-refs. The suite carries the
+// runStage terminal-classification matrix, the two frozen-RunOutcome lockstep literals
+// (reciprocal of tests/test_run_report.py), the budget/abort watchdog with exact `>=` thresholds,
+// the seam's never-throws contract under adversarial fakes, the structured run-event stream, and
+// the cross-plane prompt-parity invariant (reciprocal of tests/test_worker_prompt_parity.py).
+// The adapter-owned helpers (translateEvent, the drive-session handle,
+// resolveAuth/resolveWorkerModel) are covered in sdkAdapter.test.ts; the real-factory tier lives
+// in stageExecutionE2e.test.ts. See stageExecution.ts.
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -15,29 +17,19 @@ import { test } from "node:test";
 import type { PlanRef } from "../substrate/cache.ts";
 import { planRefPath, runEventsPath, workflowDir } from "../substrate/cache.ts";
 import { readSessionPointers } from "../substrate/sessionPointers.ts";
-import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 // The nominal model token is adapter-owned; tests mint it deliberately.
 import { WorkerModelSelection } from "./sdkAdapter.ts";
 import {
-  applyStageEvent,
-  assembleOutcome,
-  budgetTripped,
-  createEventEmitter,
   type DriveEvent,
   type DriveRuntimeLike,
   type DriveSessionLike,
-  evaluateTerminal,
-  freshCounters,
-  initialPromptFor,
   initialPromptForWorktree,
-  missingTerminatingTool,
   type RunEvent,
   runStage,
-  toolOutcomeOf,
 } from "./stageExecution.ts";
 
-// The cross-plane prompt-parity invariant: these substrings MUST appear in BOTH the TS
-// `initialPromptFor` output and the Python `perk/run/launch.py` prompts. The same literals live in
+// The cross-plane prompt-parity invariant: these substrings MUST appear in BOTH the TS worker
+// prompt output and the Python `perk/run/launch.py` prompts. The same literals live in
 // tests/test_worker_prompt_parity.py, so drift in EITHER plane fails CI.
 // The linear plan-read instruction — keep in lockstep with LINEAR_READ_SUBSTRINGS in
 // tests/test_worker_prompt_parity.py (the literal fragments of the shared linear arm).
@@ -55,293 +47,13 @@ const samplePlanRef: PlanRef = {
   objective_id: "137",
 };
 
-// --- pure: applyStageEvent — the seam's policy fold over the adapter's translated events --------
-
-test("applyStageEvent: counts turns/tokens, captures terminal tool details + model error", () => {
-  const c = freshCounters();
-  applyStageEvent(c, { kind: "turn_ended", freshTokens: 15 });
-  applyStageEvent(c, { kind: "turn_ended", freshTokens: 3 });
-  assert.equal(c.turns, 2);
-  assert.equal(c.tokens, 18);
-
-  applyStageEvent(c, {
-    kind: "tool_ended",
-    tool: "submit",
-    ok: true,
-    details: { ok: true, pr: { number: 1, url: "u" } },
-    errorText: null,
-  });
-  assert.deepEqual(c.submitDetails, { ok: true, pr: { number: 1, url: "u" } });
-
-  // A finalizer's nested submit lands in the same latest-evidence slot with the ok marker
-  // restored (the finalizer only exposes the block after submit succeeded).
-  applyStageEvent(c, {
-    kind: "tool_ended",
-    tool: "finalize_address",
-    ok: true,
-    details: { ok: true, submit: { mergeable: false } },
-    errorText: null,
-  });
-  assert.deepEqual(c.finalizeDetails, { ok: true, submit: { mergeable: false } });
-  assert.deepEqual(c.submitDetails, { ok: true, mergeable: false });
-
-  // A later standalone clean submit is the effective mergeability evidence.
-  applyStageEvent(c, {
-    kind: "tool_ended",
-    tool: "submit",
-    ok: true,
-    details: { ok: true, mergeable: true },
-    errorText: null,
-  });
-  assert.deepEqual(c.submitDetails, { ok: true, mergeable: true });
-
-  applyStageEvent(c, { kind: "model_errored", message: "net" });
-  assert.deepEqual(c.modelError, { message: "net" });
-});
-
-// --- pure: evaluateTerminal ---------------------------------------------------------------------
-
-test("evaluateTerminal: implement with a successful submit → completed/submit_tool + pr", () => {
-  const v = evaluateTerminal({
-    stage: "implement",
-    submitDetails: { ok: true, pr: { number: 7, url: "https://x/pr/7" } },
-    finalizeDetails: null,
-    lastReviewBatchPresent: false,
-    modelError: null,
-  });
-  assert.equal(v.status, "completed");
-  assert.equal(v.terminal_signal, "submit_tool");
-  assert.deepEqual(v.pr, { number: 7, url: "https://x/pr/7" });
-  assert.equal(v.errorMessage, null);
-});
-
-test("evaluateTerminal: implement with an unmergeable PR → failed/agent_idle_incomplete", () => {
-  const v = evaluateTerminal({
-    stage: "implement",
-    submitDetails: { ok: true, pr: { number: 7, url: "https://x/pr/7" }, mergeable: false },
-    finalizeDetails: null,
-    lastReviewBatchPresent: false,
-    modelError: null,
-  });
-  assert.equal(v.status, "failed");
-  assert.equal(v.terminal_signal, "agent_idle_incomplete");
-  assert.equal(v.pr, null);
-  assert.match(v.errorMessage ?? "", /unmergeable PR \(merge conflicts unresolved\)/);
-});
-
-test("evaluateTerminal: implement with mergeable true/null/absent → completed", () => {
-  for (const mergeable of [true, null, undefined]) {
-    const v = evaluateTerminal({
-      stage: "implement",
-      submitDetails: { ok: true, pr: { number: 7, url: "https://x/pr/7" }, mergeable },
-      finalizeDetails: null,
-      lastReviewBatchPresent: false,
-      modelError: null,
-    });
-    assert.equal(v.status, "completed", `mergeable=${mergeable} → completed`);
-    assert.equal(v.terminal_signal, "submit_tool");
-  }
-});
-
-test("evaluateTerminal: implement idle without a PR → failed/agent_idle_incomplete", () => {
-  const v = evaluateTerminal({
-    stage: "implement",
-    submitDetails: null,
-    finalizeDetails: null,
-    lastReviewBatchPresent: false,
-    modelError: null,
-  });
-  assert.equal(v.status, "failed");
-  assert.equal(v.terminal_signal, "agent_idle_incomplete");
-  assert.equal(v.pr, null);
-  assert.equal(v.errorType, "incomplete");
-});
-
-test("evaluateTerminal: implement with submit ok:false → failed/agent_idle_incomplete", () => {
-  const v = evaluateTerminal({
-    stage: "implement",
-    submitDetails: { ok: false, error: "boom" },
-    finalizeDetails: null,
-    lastReviewBatchPresent: false,
-    modelError: null,
-  });
-  assert.equal(v.status, "failed");
-  assert.equal(v.terminal_signal, "agent_idle_incomplete");
-});
-
-test("evaluateTerminal: finalized address + batch + mergeable submit → completed", () => {
-  const v = evaluateTerminal({
-    stage: "address",
-    submitDetails: null,
-    finalizeDetails: { ok: true, submit: { mergeable: true } },
-    lastReviewBatchPresent: true,
-    modelError: null,
-  });
-  assert.equal(v.status, "completed");
-  assert.equal(v.terminal_signal, "address_resolved");
-  assert.equal(v.pr, null);
-});
-
-test("evaluateTerminal: finalized address with an unmergeable submit → incomplete", () => {
-  const v = evaluateTerminal({
-    stage: "address",
-    submitDetails: null,
-    finalizeDetails: { ok: true, submit: { mergeable: false } },
-    lastReviewBatchPresent: true,
-    modelError: null,
-  });
-  assert.equal(v.status, "failed");
-  assert.equal(v.terminal_signal, "agent_idle_incomplete");
-});
-
-test("evaluateTerminal: a later clean standalone submit completes an unmergeable finalizer", () => {
-  const v = evaluateTerminal({
-    stage: "address",
-    submitDetails: { ok: true, mergeable: true },
-    finalizeDetails: { ok: true, submit: { mergeable: false } },
-    lastReviewBatchPresent: true,
-    modelError: null,
-  });
-  assert.equal(v.status, "completed");
-  assert.equal(v.terminal_signal, "address_resolved");
-});
-
-test("evaluateTerminal: a later failed submit cannot complete an unmergeable finalizer", () => {
-  const v = evaluateTerminal({
-    stage: "address",
-    submitDetails: { ok: false, error: "push failed" },
-    finalizeDetails: { ok: true, submit: { mergeable: false } },
-    lastReviewBatchPresent: true,
-    modelError: null,
-  });
-  assert.equal(v.status, "failed");
-  assert.equal(v.terminal_signal, "agent_idle_incomplete");
-});
-
-test("evaluateTerminal: finalized address without last_review_batch → failed", () => {
-  const v = evaluateTerminal({
-    stage: "address",
-    submitDetails: null,
-    finalizeDetails: { ok: true, submit: { mergeable: true } },
-    lastReviewBatchPresent: false,
-    modelError: null,
-  });
-  assert.equal(v.status, "failed");
-  assert.equal(v.terminal_signal, "agent_idle_incomplete");
-});
-
-test("evaluateTerminal: a model error wins over the stage predicate", () => {
-  const v = evaluateTerminal({
-    stage: "implement",
-    submitDetails: { ok: true, pr: { number: 7, url: "https://x/pr/7" } },
-    finalizeDetails: null,
-    lastReviewBatchPresent: false,
-    modelError: { message: "overloaded" },
-  });
-  assert.equal(v.status, "failed");
-  assert.equal(v.terminal_signal, "model_error");
-  assert.equal(v.errorMessage, "overloaded");
-});
-
-// --- pure: assembleOutcome ----------------------------------------------------------------------
-
-// LOCKSTEP LITERAL (contracts.md §8.11/§8.38): the completed RunOutcome asserted below is pinned
-// byte-identically in tests/test_run_report.py (_COMPLETED_OUTCOME_LOCKSTEP), which feeds it
-// through the Python remote reporter — a field rename here must break that suite too. Change
-// BOTH suites together.
-test("assembleOutcome: completed has error:null and the frozen shape", () => {
-  const outcome = assembleOutcome({
-    stage: "implement",
-    verdict: {
-      status: "completed",
-      terminal_signal: "submit_tool",
-      pr: { number: 7, url: "https://x/pr/7" },
-      errorType: null,
-      errorMessage: null,
-    },
-    budget: { turns: 3, tokens: 100, elapsed_ms: 42 },
-    runId: "RID123",
-  });
-  assert.deepEqual(outcome, {
-    run_id: "RID123",
-    stage: "implement",
-    status: "completed",
-    terminal_signal: "submit_tool",
-    pr: { number: 7, url: "https://x/pr/7" },
-    budget: { turns: 3, tokens: 100, elapsed_ms: 42 },
-    error: null,
-  });
-});
-
-// LOCKSTEP LITERAL: the failure shape below (error.summary present) is pinned byte-identically
-// in tests/test_run_report.py (_FAILED_OUTCOME_LOCKSTEP) — the failure-report arm's twin.
-test("assembleOutcome: a failure carries a capped error.summary", () => {
-  const outcome = assembleOutcome({
-    stage: "address",
-    verdict: {
-      status: "failed",
-      terminal_signal: "agent_idle_incomplete",
-      pr: null,
-      errorType: "incomplete",
-      errorMessage: "went idle",
-    },
-    budget: { turns: 1, tokens: 0, elapsed_ms: 1 },
-    runId: "RID",
-  });
-  assert.deepEqual(outcome, {
-    run_id: "RID",
-    stage: "address",
-    status: "failed",
-    terminal_signal: "agent_idle_incomplete",
-    pr: null,
-    budget: { turns: 1, tokens: 0, elapsed_ms: 1 },
-    error: { type: "incomplete", message: "went idle", summary: "went idle" },
-  });
-});
-
-test("assembleOutcome: run_id falls back to PERK_RUN_ID then ''", () => {
-  const saved = process.env.PERK_RUN_ID;
-  try {
-    process.env.PERK_RUN_ID = "ENVRID";
-    const a = assembleOutcome({
-      stage: "implement",
-      verdict: {
-        status: "completed",
-        terminal_signal: "submit_tool",
-        pr: null,
-        errorType: null,
-        errorMessage: null,
-      },
-      budget: { turns: 0, tokens: 0, elapsed_ms: 0 },
-    });
-    assert.equal(a.run_id, "ENVRID");
-    delete process.env.PERK_RUN_ID;
-    const b = assembleOutcome({
-      stage: "implement",
-      verdict: {
-        status: "completed",
-        terminal_signal: "submit_tool",
-        pr: null,
-        errorType: null,
-        errorMessage: null,
-      },
-      budget: { turns: 0, tokens: 0, elapsed_ms: 0 },
-    });
-    assert.equal(b.run_id, "");
-  } finally {
-    if (saved === undefined) delete process.env.PERK_RUN_ID;
-    else process.env.PERK_RUN_ID = saved;
-  }
-});
-
-// --- pure: budgetTripped ------------------------------------------------------------------------
-
-test("budgetTripped: trips on turns OR tokens", () => {
-  const budget = { maxTurns: 3, maxTokens: 100, wallClockMs: 1000 };
-  assert.equal(budgetTripped({ ...freshCounters(), turns: 2, tokens: 10 }, budget), false);
-  assert.equal(budgetTripped({ ...freshCounters(), turns: 3, tokens: 10 }, budget), true);
-  assert.equal(budgetTripped({ ...freshCounters(), turns: 1, tokens: 100 }, budget), true);
-});
+/** Scaffold a prepared worktree carrying the given plan-ref (the seam reads `cache.plan-ref`). */
+function writePlanRef(ref: PlanRef): string {
+  const worktree = mkdtempSync(join(tmpdir(), "perk-worker-planref-"));
+  mkdirSync(workflowDir(worktree), { recursive: true });
+  writeFileSync(planRefPath(worktree), JSON.stringify(ref), "utf8");
+  return worktree;
+}
 
 // --- a fake runtime/session for the drive tests -------------------------------------------------
 
@@ -401,7 +113,27 @@ function fakeRuntime(session: FakeSession): FakeRuntime {
   return runtime;
 }
 
+/** The `perk:workflow-state` branch entry carrying `last_review_batch` (address completion). */
+function lastReviewBatchEntry(): unknown {
+  return {
+    type: "custom",
+    customType: "perk:workflow-state",
+    data: { last_review_batch: { pr: 7, actionable: 1 } },
+  };
+}
+
 const baseBudget = { maxTurns: 100, maxTokens: 1_000_000, wallClockMs: 60_000 };
+
+/** Drive one stage over a scripted fake with a fixed clock (the matrix tests' shared shape). */
+function driveFake(
+  session: FakeSession,
+  stage: "implement" | "address" = "implement",
+): ReturnType<typeof runStage> {
+  return runStage(
+    { worktree: "/tmp/wt", stage, initialPrompt: "go", budget: baseBudget },
+    { createRuntime: async () => fakeRuntime(session), now: () => 1000 },
+  );
+}
 
 // --- drive: happy path via injected runtime -----------------------------------------------------
 
@@ -433,15 +165,236 @@ test("runStage: implement happy path → completed with pr, disposes, never thro
   assert.equal(runtime.disposed, true);
 });
 
-// --- pure: missingTerminatingTool + drive: the terminating-tool preflight -----------------------
+// --- the runStage terminal-classification matrix -------------------------------------------------
+// One test per natural-idle classification arm, each a scripted FakeSession through the seam.
+// The implement successful-submit arm is the happy-path test above; the implement idle-without-PR
+// arm is the frozen failed-RunOutcome lockstep test below.
 
-test("missingTerminatingTool: names the stage's terminating tool when absent, null when present", () => {
-  assert.equal(missingTerminatingTool("implement", []), "submit");
-  assert.equal(missingTerminatingTool("implement", ["read", "bash"]), "submit");
-  assert.equal(missingTerminatingTool("implement", ["submit"]), null);
-  assert.equal(missingTerminatingTool("address", ["submit"]), "finalize_address");
-  assert.equal(missingTerminatingTool("address", ["finalize_address"]), null);
+test("runStage: implement with an unmergeable submit → failed/agent_idle_incomplete", async () => {
+  const session = new FakeSession((emit) => {
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: {
+        details: { ok: true, pr: { number: 7, url: "https://x/pr/7" }, mergeable: false },
+      },
+    });
+  });
+  const outcome = await driveFake(session);
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.terminal_signal, "agent_idle_incomplete");
+  assert.equal(outcome.pr, null);
+  assert.match(outcome.error?.message ?? "", /unmergeable PR \(merge conflicts unresolved\)/);
 });
+
+test("runStage: implement with mergeable true/null/absent → completed", async () => {
+  for (const mergeable of [true, null, undefined]) {
+    const details: Record<string, unknown> = {
+      ok: true,
+      pr: { number: 7, url: "https://x/pr/7" },
+    };
+    if (mergeable !== undefined) details.mergeable = mergeable;
+    const session = new FakeSession((emit) => {
+      emit({ type: "tool_execution_end", toolName: "submit", result: { details } });
+    });
+    const outcome = await driveFake(session);
+    assert.equal(outcome.status, "completed", `mergeable=${mergeable} → completed`);
+    assert.equal(outcome.terminal_signal, "submit_tool");
+  }
+});
+
+test("runStage: implement with submit ok:false → failed/agent_idle_incomplete", async () => {
+  const session = new FakeSession((emit) => {
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: false, error: "boom" } },
+    });
+  });
+  const outcome = await driveFake(session);
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.terminal_signal, "agent_idle_incomplete");
+});
+
+test("runStage: a model error wins over a successful submit → failed/model_error", async () => {
+  const session = new FakeSession((emit) => {
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: true, pr: { number: 7, url: "https://x/pr/7" } } },
+    });
+    emit({
+      type: "message_end",
+      message: { role: "assistant", stopReason: "error", errorMessage: "overloaded" },
+    });
+  });
+  const outcome = await driveFake(session);
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.terminal_signal, "model_error");
+  assert.equal(outcome.error?.message, "overloaded");
+});
+
+test("runStage: finalized address + batch + mergeable nested submit → completed", async () => {
+  // The nested finalizer submit lacks an `ok` marker on its public shape; completion proves the
+  // seam restores it when folding the finalizer's evidence.
+  const session = new FakeSession((emit) => {
+    emit({
+      type: "tool_execution_end",
+      toolName: "finalize_address",
+      result: { details: { ok: true, submit: { mergeable: true } } },
+    });
+  });
+  session.branch = [lastReviewBatchEntry()];
+  const outcome = await driveFake(session, "address");
+  assert.equal(outcome.status, "completed");
+  assert.equal(outcome.terminal_signal, "address_resolved");
+  assert.equal(outcome.pr, null);
+});
+
+test("runStage: a finalized address with an unmergeable nested submit → failed", async () => {
+  const session = new FakeSession((emit) => {
+    emit({
+      type: "tool_execution_end",
+      toolName: "finalize_address",
+      result: { details: { ok: true, submit: { mergeable: false } } },
+    });
+  });
+  session.branch = [lastReviewBatchEntry()];
+  const outcome = await driveFake(session, "address");
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.terminal_signal, "agent_idle_incomplete");
+});
+
+test("runStage: a later clean standalone submit completes an unmergeable finalizer", async () => {
+  // The conflict-resolver re-drive shape: the latest submit-bearing evidence supersedes the
+  // finalizer's unmergeable nested submit.
+  const session = new FakeSession((emit) => {
+    emit({
+      type: "tool_execution_end",
+      toolName: "finalize_address",
+      result: { details: { ok: true, submit: { mergeable: false } } },
+    });
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: true, mergeable: true } },
+    });
+  });
+  session.branch = [lastReviewBatchEntry()];
+  const outcome = await driveFake(session, "address");
+  assert.equal(outcome.status, "completed");
+  assert.equal(outcome.terminal_signal, "address_resolved");
+});
+
+test("runStage: a later failed standalone submit cannot complete an unmergeable finalizer", async () => {
+  const session = new FakeSession((emit) => {
+    emit({
+      type: "tool_execution_end",
+      toolName: "finalize_address",
+      result: { details: { ok: true, submit: { mergeable: false } } },
+    });
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: false, error: "push failed" } },
+    });
+  });
+  session.branch = [lastReviewBatchEntry()];
+  const outcome = await driveFake(session, "address");
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.terminal_signal, "agent_idle_incomplete");
+});
+
+test("runStage: a finalized address without last_review_batch → failed", async () => {
+  const session = new FakeSession((emit) => {
+    emit({
+      type: "tool_execution_end",
+      toolName: "finalize_address",
+      result: { details: { ok: true, submit: { mergeable: true } } },
+    });
+  });
+  const outcome = await driveFake(session, "address");
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.terminal_signal, "agent_idle_incomplete");
+});
+
+// --- the frozen RunOutcome lockstep literals ------------------------------------------------------
+
+// LOCKSTEP LITERAL (contracts.md §8.11/§8.38): the completed RunOutcome asserted below is pinned
+// byte-identically in tests/test_run_report.py (_COMPLETED_OUTCOME_LOCKSTEP), which feeds it
+// through the Python remote reporter — a field rename here must break that suite too. Change
+// BOTH suites together.
+test("runStage: the frozen completed RunOutcome (lockstep with tests/test_run_report.py)", async () => {
+  const saved = process.env.PERK_RUN_ID;
+  process.env.PERK_RUN_ID = "RID123";
+  try {
+    let t = 0;
+    const session = new FakeSession((emit) => {
+      emit({ type: "turn_end", message: { role: "assistant", usage: { input: 20, output: 20 } } });
+      emit({ type: "turn_end", message: { role: "assistant", usage: { input: 20, output: 20 } } });
+      emit({ type: "turn_end", message: { role: "assistant", usage: { input: 10, output: 10 } } });
+      emit({
+        type: "tool_execution_end",
+        toolName: "submit",
+        result: { details: { ok: true, pr: { number: 7, url: "https://x/pr/7" } } },
+      });
+      t = 42;
+    });
+    const outcome = await runStage(
+      { worktree: "/tmp/wt", stage: "implement", initialPrompt: "go", budget: baseBudget },
+      { createRuntime: async () => fakeRuntime(session), now: () => t, eventSink: () => {} },
+    );
+    assert.deepEqual(outcome, {
+      run_id: "RID123",
+      stage: "implement",
+      status: "completed",
+      terminal_signal: "submit_tool",
+      pr: { number: 7, url: "https://x/pr/7" },
+      budget: { turns: 3, tokens: 100, elapsed_ms: 42 },
+      error: null,
+    });
+  } finally {
+    if (saved === undefined) delete process.env.PERK_RUN_ID;
+    else process.env.PERK_RUN_ID = saved;
+  }
+});
+
+// LOCKSTEP LITERAL: the failure shape below (error.summary present) is pinned byte-identically
+// in tests/test_run_report.py (_FAILED_OUTCOME_LOCKSTEP) — the failure-report arm's twin. This
+// test doubles as the implement idle-without-PR classification arm.
+test("runStage: the frozen failed RunOutcome (lockstep with tests/test_run_report.py)", async () => {
+  const saved = process.env.PERK_RUN_ID;
+  process.env.PERK_RUN_ID = "RID";
+  try {
+    let t = 0;
+    const session = new FakeSession((emit) => {
+      emit({ type: "turn_end", message: { role: "assistant" } });
+      t = 1;
+    });
+    const outcome = await runStage(
+      { worktree: "/tmp/wt", stage: "implement", initialPrompt: "go", budget: baseBudget },
+      { createRuntime: async () => fakeRuntime(session), now: () => t, eventSink: () => {} },
+    );
+    assert.deepEqual(outcome, {
+      run_id: "RID",
+      stage: "implement",
+      status: "failed",
+      terminal_signal: "agent_idle_incomplete",
+      pr: null,
+      budget: { turns: 1, tokens: 0, elapsed_ms: 1 },
+      error: {
+        type: "incomplete",
+        message: "implement drive went idle without an opened PR (no successful submit).",
+        summary: "implement drive went idle without an opened PR (no successful submit).",
+      },
+    });
+  } finally {
+    if (saved === undefined) delete process.env.PERK_RUN_ID;
+    else process.env.PERK_RUN_ID = saved;
+  }
+});
+
+// --- the terminating-tool preflight ---------------------------------------------------------------
 
 test("runStage: preflight — zero registered tools → fast no_extension_tools failure, no prompt", async () => {
   let promptRan = false;
@@ -498,6 +451,31 @@ test("runStage: preflight — the terminating tool present → the drive proceed
   assert.equal(outcome.status, "completed");
   assert.equal(outcome.terminal_signal, "submit_tool");
 });
+
+test("runStage: preflight — an address drive without finalize_address names it, no prompt", async () => {
+  let promptRan = false;
+  const session = new FakeSession(() => {
+    promptRan = true;
+  });
+  session.extensionRunner = {
+    getAllRegisteredTools: () => [{ definition: { name: "submit" } }],
+  };
+  const outcome = await runStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "address",
+      initialPrompt: "go",
+      budget: baseBudget,
+    },
+    { createRuntime: async () => fakeRuntime(session), now: () => 1000 },
+  );
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.error?.type, "no_extension_tools");
+  assert.ok(outcome.error?.message.includes("finalize_address"), "names the missing tool");
+  assert.equal(promptRan, false, "the drive never prompted");
+});
+
+// --- session pointers -----------------------------------------------------------------------------
 
 test("runStage: implement records the implementation/worker session pointer", async () => {
   const wt = mkdtempSync(join(tmpdir(), "perk-worker-cap-"));
@@ -558,9 +536,15 @@ test("runStage: a non-implement stage records no worker pointer", async () => {
   }
 });
 
-test("runStage: maxTurns budget trips → budget_exhausted/budget + abort called", async () => {
+// --- the budget/abort watchdog --------------------------------------------------------------------
+
+test("runStage: exactly maxTurns turn_ends trip → budget_exhausted/budget + abort called", async () => {
+  // The exact `>=` threshold: two turn_ends against maxTurns: 2 trip the watchdog once.
+  // Repeated-trip abort idempotence is pinned at the adapter tier (sdkAdapter.test.ts
+  // "abort is idempotent").
   const session = new FakeSession((emit) => {
-    for (let i = 0; i < 5; i++) emit({ type: "turn_end", message: { role: "assistant" } });
+    emit({ type: "turn_end", message: { role: "assistant" } });
+    emit({ type: "turn_end", message: { role: "assistant" } });
   });
   const outcome = await runStage(
     {
@@ -573,14 +557,14 @@ test("runStage: maxTurns budget trips → budget_exhausted/budget + abort called
   );
   assert.equal(outcome.status, "budget_exhausted");
   assert.equal(outcome.terminal_signal, "budget");
-  // 3 post-trip turn_ends each re-trip → the handle's idempotent abort fires exactly once.
   assert.equal(session.abortCalls, 1);
 });
 
-test("runStage: maxTokens budget trips → budget_exhausted", async () => {
+test("runStage: turns summing exactly maxTokens trip → budget_exhausted", async () => {
+  // The exact `>=` threshold: 60 + 40 fresh tokens against maxTokens: 100.
   const session = new FakeSession((emit) => {
-    emit({ type: "turn_end", message: { role: "assistant", usage: { input: 60, output: 60 } } });
-    emit({ type: "turn_end", message: { role: "assistant", usage: { input: 60, output: 60 } } });
+    emit({ type: "turn_end", message: { role: "assistant", usage: { input: 30, output: 30 } } });
+    emit({ type: "turn_end", message: { role: "assistant", usage: { input: 20, output: 20 } } });
   });
   const outcome = await runStage(
     {
@@ -736,17 +720,17 @@ test("runStage: a throwing unsubscribe + rejecting runtime.dispose() cannot repl
 
 // --- prompt parity (reciprocal of tests/test_worker_prompt_parity.py) ---------------------------
 
-test("initialPromptFor: implement output composes the template with the read_cmd", () => {
+test("initialPromptForWorktree: implement output composes the template with the read_cmd", () => {
   // Thin composition guard (the live-parity case proves cross-plane byte-identity of the template;
   // this proves the helper wires body + read_cmd + the inline progress paragraph).
-  const prompt = initialPromptFor("implement", samplePlanRef);
+  const prompt = initialPromptForWorktree(writePlanRef(samplePlanRef), "implement");
   assert.ok(prompt);
   assert.ok(prompt?.startsWith("You are implementing perk plan github #148"));
   assert.ok(prompt?.includes("gh issue view 148 --comments"));
   assert.ok(prompt?.endsWith("where the implementation actually stands."));
 });
 
-test("initialPromptFor: linear implement output carries the linear read substrings", () => {
+test("initialPromptForWorktree: linear implement output carries the linear read substrings", () => {
   const linearRef: PlanRef = {
     provider: "linear",
     pr_id: "a1b2c3d4-0000-0000-0000-000000000000",
@@ -754,14 +738,14 @@ test("initialPromptFor: linear implement output carries the linear read substrin
     labels: [],
     objective_id: null,
   };
-  const prompt = initialPromptFor("implement", linearRef);
+  const prompt = initialPromptForWorktree(writePlanRef(linearRef), "implement");
   assert.ok(prompt);
   for (const s of LINEAR_READ_SUBSTRINGS) assert.ok(prompt?.includes(s), `missing: ${s}`);
   assert.ok(prompt?.includes("open https://linear.app/acme/issue/ENG-123"));
 });
 
-test("initialPromptFor: address names classify_review_feedback — no transcribed mechanics, no model clause", () => {
-  const prompt = initialPromptFor("address", samplePlanRef) ?? "";
+test("initialPromptForWorktree: address names classify_review_feedback — no transcribed mechanics, no model clause", () => {
+  const prompt = initialPromptForWorktree(writePlanRef(samplePlanRef), "address") ?? "";
   assert.match(prompt, /classify_review_feedback/);
   assert.match(prompt, /finalize_address/);
   // The tool reads the classifier model at execute time — nothing model-shaped in the prompt.
@@ -770,15 +754,17 @@ test("initialPromptFor: address names classify_review_feedback — no transcribe
   assert.doesNotMatch(prompt, /outputSchema/);
 });
 
-test("initialPromptFor: a non-github implement plan uses the open-url read command", () => {
+test("initialPromptForWorktree: a non-github implement plan uses the open-url read command", () => {
   const ref: PlanRef = { ...samplePlanRef, provider: "gitlab", url: "https://gl/x" };
-  const prompt = initialPromptFor("implement", ref);
+  const prompt = initialPromptForWorktree(writePlanRef(ref), "implement");
   assert.ok(prompt?.includes("open https://gl/x"));
 });
 
-test("initialPromptFor: a null plan-ref yields null (nothing to prime)", () => {
-  assert.equal(initialPromptFor("implement", null), null);
-  assert.equal(initialPromptFor("address", null), null);
+test("initialPromptForWorktree: an absent plan-ref yields null (nothing to prime)", () => {
+  const worktree = mkdtempSync(join(tmpdir(), "perk-worker-planref-"));
+  mkdirSync(workflowDir(worktree), { recursive: true });
+  assert.equal(initialPromptForWorktree(worktree, "implement"), null);
+  assert.equal(initialPromptForWorktree(worktree, "address"), null);
 });
 
 test("initialPromptForWorktree: a corrupt plan-ref reads as absent → null, no throw", () => {
@@ -796,98 +782,15 @@ test("initialPromptForWorktree: a corrupt plan-ref reads as absent → null, no 
   }
 });
 
-// --- Gap-4 verification: throwaway agentDir still loads + binds the project @mgiles/perk extension ---
-
-test("Gap-4: a bound perk session registers the worker's terminal tools and claims its run", async () => {
-  const runId = "01JWORKERTESTRUNID000000000";
-  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-write", stage: "implement" } });
-  const perk = await loadPerkSession({
-    cwd,
-    headful: false,
-    mode: "json",
-    env: { PERK_RUN_ID: runId },
-  });
-  try {
-    const tools = perk.session.extensionRunner
-      .getAllRegisteredTools()
-      .map((t) => t.definition.name);
-    assert.ok(tools.includes("submit"), "submit tool should be registered");
-    assert.ok(tools.includes("finalize_address"), "finalize_address tool should be registered");
-    assert.ok(!tools.includes("resolve_review_threads"), "retired resolve tool should be absent");
-    // The session_start claim path engaged for the planted handoff + PERK_RUN_ID.
-    assert.equal(perk.workflowState().run_id, runId);
-    assert.equal(perk.sentinel()?.run_id, runId);
-  } finally {
-    perk.dispose();
-  }
-});
-
 // --- structured run-event stream ------------------------------------------------------
 
-// --- pure: toolOutcomeOf ------------------------------------------------------------------------
-
-test("toolOutcomeOf: null summary on success, capped error summary on failure", () => {
-  assert.deepEqual(
-    toolOutcomeOf({
-      kind: "tool_ended",
-      tool: "submit",
-      ok: true,
-      details: { ok: true },
-      errorText: null,
-    }),
-    { tool: "submit", ok: true, summary: null },
-  );
-  const bigErr = "x".repeat(5000);
-  const out = toolOutcomeOf({
-    kind: "tool_ended",
-    tool: "submit",
-    ok: false,
-    details: { ok: false, error: bigErr },
-    errorText: bigErr,
-  });
-  assert.equal(out.ok, false);
-  assert.ok(out.summary && out.summary.length < bigErr.length, "summary is capped");
-  assert.ok(out.summary?.includes("[Output truncated"), "carries the truncation notice");
-  // Defensive fallback: a failed tool with no error text still yields a named summary.
-  assert.equal(
-    toolOutcomeOf({ kind: "tool_ended", tool: "bash", ok: false, details: null, errorText: null })
-      .summary,
-    "tool bash failed",
-  );
+test("RunEvent: the deprecated step_marker variant stays in the grammar (compile-time pin)", () => {
+  // Additive-stable §8.12 grammar fact: historical events.ndjson files may carry `step_marker`,
+  // so the variant must stay a member of the RunEvent union even though the runtime never emits
+  // it (the "[WIP:1]/[DONE:1] emits no step_marker" runStage test pins the runtime negative).
+  const historical: RunEvent = { kind: "step_marker", seq: 3, t: 250, marker: "wip", step: 1 };
+  assert.equal(historical.kind, "step_marker");
 });
-
-// --- createEventEmitter -------------------------------------------------------------------------
-
-// Deliberately emits the deprecated `step_marker` variant: pins that it still serializes
-// through the emitter/sink even though the drive never emits it (contracts §8.12).
-test("createEventEmitter: monotonic seq, t from the injected clock, fail-soft on a throwing sink", () => {
-  const seen: RunEvent[] = [];
-  let clock = 1000;
-  const emitter = createEventEmitter(
-    (e) => seen.push(e),
-    () => clock,
-    1000,
-  );
-  emitter.emit({ kind: "run_started", run_id: "r", stage: "implement" });
-  clock = 1250;
-  emitter.emit({ kind: "step_marker", marker: "wip", step: 1 });
-  assert.equal(seen[0]?.seq, 0);
-  assert.equal(seen[0]?.t, 0);
-  assert.equal(seen[1]?.seq, 1);
-  assert.equal(seen[1]?.t, 250);
-
-  // A throwing sink is swallowed (does not break emission).
-  const thrower = createEventEmitter(
-    () => {
-      throw new Error("boom");
-    },
-    () => 0,
-    0,
-  );
-  assert.doesNotThrow(() => thrower.emit({ kind: "step_marker", marker: "done", step: 1 }));
-});
-
-// --- runStage with an injected array sink -----------------------------------------------------
 
 const eventBudget = { maxTurns: 100, maxTokens: 1_000_000, wallClockMs: 60_000 };
 
@@ -928,8 +831,44 @@ test("runStage: a happy implement run emits run_started → tool_outcome(submit)
   const tool = events[1] as Extract<RunEvent, { kind: "tool_outcome" }>;
   assert.equal(tool.tool, "submit");
   assert.equal(tool.ok, true);
+  assert.equal(tool.summary, null, "a successful tool_outcome carries no summary");
   const finished = events[2] as Extract<RunEvent, { kind: "run_finished" }>;
   assert.equal(finished.outcome.status, "completed");
+});
+
+test("runStage: a failing tool emits a tool_outcome with ok:false and a capped summary", async () => {
+  // The offline twin of the e2e FAILING-TOOL scenario (route-don't-relay): the summary is the
+  // capped rendering of the adapter's pre-cap error text, never the raw tool payload.
+  const events: RunEvent[] = [];
+  const bigErr = "x".repeat(5000);
+  const session = new FakeSession((emit) => {
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: false, error: bigErr } },
+    });
+  });
+  await runStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "implement",
+      initialPrompt: "go",
+      budget: eventBudget,
+    },
+    {
+      createRuntime: async () => fakeRuntime(session),
+      now: () => 0,
+      eventSink: (e) => events.push(e),
+    },
+  );
+  const tool = events.find((e) => e.kind === "tool_outcome") as Extract<
+    RunEvent,
+    { kind: "tool_outcome" }
+  >;
+  assert.ok(tool, "a tool_outcome was emitted");
+  assert.equal(tool.ok, false);
+  assert.ok(tool.summary && tool.summary.length < bigErr.length, "summary is capped");
+  assert.ok(tool.summary?.includes("[Output truncated"), "carries the truncation notice");
 });
 
 test("runStage: assistant prose carrying [WIP:1]/[DONE:1] emits no step_marker events (deprecated)", async () => {
@@ -1031,6 +970,40 @@ test("runStage: the no_model early return still emits run_started + run_finished
   assert.ok((finished.outcome.error?.summary?.length ?? 0) > 0);
 });
 
+test("runStage: a throwing injected eventSink never breaks the drive (fail-soft)", async () => {
+  const savedErr = console.error;
+  console.error = () => {};
+  try {
+    const session = new FakeSession((emit) => {
+      emit({ type: "turn_end", message: { role: "assistant", usage: { input: 10, output: 5 } } });
+      emit({
+        type: "tool_execution_end",
+        toolName: "submit",
+        result: { details: { ok: true, pr: { number: 3, url: "https://x/pr/3" } } },
+      });
+    });
+    const outcome = await runStage(
+      {
+        worktree: "/tmp/wt",
+        stage: "implement",
+        initialPrompt: "go",
+        budget: eventBudget,
+      },
+      {
+        createRuntime: async () => fakeRuntime(session),
+        now: () => 0,
+        eventSink: () => {
+          throw new Error("sink boom");
+        },
+      },
+    );
+    assert.equal(outcome.status, "completed", "a broken sink never aborts the drive");
+    assert.deepEqual(outcome.pr, { number: 3, url: "https://x/pr/3" });
+  } finally {
+    console.error = savedErr;
+  }
+});
+
 // --- default file sink (NDJSON under the gitignored run scratch dir) -----------------------------
 
 test("runStage: with no eventSink + a set run_id writes parseable NDJSON to runEventsPath", async () => {
@@ -1050,7 +1023,7 @@ test("runStage: with no eventSink + a set run_id writes parseable NDJSON to runE
         result: { details: { ok: true, pr: { number: 9, url: "u" } } },
       });
     });
-    await runStage(
+    const outcome = await runStage(
       {
         worktree,
         stage: "implement",
@@ -1059,6 +1032,7 @@ test("runStage: with no eventSink + a set run_id writes parseable NDJSON to runE
       },
       { createRuntime: async () => fakeRuntime(session) },
     );
+    assert.equal(outcome.run_id, runId, "the outcome carries the env-inherited run_id");
     const lines = readFileSync(runEventsPath(worktree, runId), "utf8").trim().split("\n");
     const parsed = lines.map((l) => JSON.parse(l) as RunEvent);
     assert.equal(parsed[0]?.kind, "run_started");
@@ -1078,7 +1052,7 @@ test("runStage: with an empty run_id writes nothing (the no-op default sink)", a
     const session = new FakeSession((emit) => {
       emit({ type: "turn_end", message: { role: "assistant" } });
     });
-    await runStage(
+    const outcome = await runStage(
       {
         worktree,
         stage: "implement",
@@ -1087,6 +1061,7 @@ test("runStage: with an empty run_id writes nothing (the no-op default sink)", a
       },
       { createRuntime: async () => fakeRuntime(session) },
     );
+    assert.equal(outcome.run_id, "", "an unset PERK_RUN_ID reads as the empty run_id");
     assert.ok(!existsSync(runEventsPath(worktree, "")), "no events file when run_id is empty");
   } finally {
     if (prior === undefined) delete process.env.PERK_RUN_ID;

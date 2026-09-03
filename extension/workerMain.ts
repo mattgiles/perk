@@ -36,7 +36,7 @@ interface ParsedArgs {
 }
 
 /** Parse argv/env into the worker inputs; throws a plain Error on a usage/precondition failure. */
-export function parseArgs(rawArgv: string[], environ: NodeJS.ProcessEnv): ParsedArgs {
+function parseArgs(rawArgv: string[], environ: NodeJS.ProcessEnv): ParsedArgs {
   const args = rawArgv.slice(2);
   const flags = new Map<string, string>();
   let stageArg: string | undefined;
