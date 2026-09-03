@@ -85,7 +85,7 @@ export type SaveObjectiveOutcome =
 export interface ObjectiveSaveDeps {
   session: WorkflowSession;
   backend: ObjectiveBackend;
-  /** The §8.63 gate, ctx-bound by the adapter (`resolveDreamReportGate`). */
+  /** The §8.63 gate, adapter-bound (`resolveDreamReportGate` over the production recovery capability). */
   resolveDreamGate: (input: unknown, generatedAt: string) => DreamReportGateOutcome;
 }
 

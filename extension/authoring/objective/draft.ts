@@ -91,7 +91,7 @@ export function reviseObjectiveDraft(
   input: ObjectiveDraftInput,
   deps: {
     session: WorkflowSession;
-    /** The §8.63 gate, ctx-bound by the adapter (`resolveDreamReportGate`). */
+    /** The §8.63 gate, adapter-bound (`resolveDreamReportGate` over the production recovery capability). */
     resolveDreamGate: (input: unknown, generatedAt: string) => DreamReportGateOutcome;
   },
 ): ReviseObjectiveDraftResult {

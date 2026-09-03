@@ -73,6 +73,7 @@ import {
 } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
+import { productionDreamGateRecovery } from "./objectiveDreamGate.ts";
 
 // ------------------------------------------------------------------- the tool-boundary decode
 
@@ -280,11 +281,13 @@ function gateFor(gating: ToolGating, ctx: ExtensionContext): ObjectiveGate {
   return { isActive: () => gating.isActive(), exit: () => gating.exit(ctx) };
 }
 
-/** The ctx-bound §8.63 gate resolver the feature ops consume. */
+/** The ctx-bound §8.63 gate resolver the feature ops consume — the resolver over the
+ * runtime-minted production recovery capability (`pi/v1/objectiveDreamGate.ts`). */
 function dreamGateFor(
   ctx: ExtensionContext,
 ): (input: unknown, generatedAt: string) => DreamReportGateOutcome {
-  return (input, generatedAt) => resolveDreamReportGate(ctx, input, generatedAt);
+  return (input, generatedAt) =>
+    resolveDreamReportGate(productionDreamGateRecovery(ctx), input, generatedAt);
 }
 
 /**

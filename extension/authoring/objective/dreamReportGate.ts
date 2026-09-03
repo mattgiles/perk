@@ -13,35 +13,25 @@
 // Trusted-context recovery follows the session-artifacts digest-pointer doctrine: the bare
 // run-scratch bundle is never trusted — the `dream_bundle_digest` workflow-state marker
 // (cleared at wave entry, set to the finalized bytes' digest after a successful finalize) is
-// the freshness/integrity authority, and the bundle is strictly re-decoded through
-// `decodeFinalizedDreamBundle` on every recovery read (untrusted-at-rest posture). After a
-// successful recovery the revalidation bracket (contracts.md §8.65) re-proves HEAD-unchanged +
-// tree-clean against the manifest's stamped `commit_sha` — at draft-write AND save, since both
-// consumers flow through the one resolver; drift refuses `bad_state` (the analysis is stale).
+// the freshness/integrity authority, and the bundle is strictly re-decoded through the
+// finalized-bundle decoder on every recovery read (untrusted-at-rest posture). The recovery
+// MECHANICS are edge-owned: the resolver consumes the runtime-minted `DreamGateRecovery`
+// capability (production: `pi/v1/objectiveDreamGate.ts`), so this module stays storage-free.
+// After a successful recovery the revalidation bracket (contracts.md §8.65) re-proves
+// HEAD-unchanged + tree-clean against the manifest's stamped `commit_sha` — at draft-write AND
+// save, since both consumers flow through the one resolver; drift refuses `bad_state` (the
+// analysis is stale).
 //
-// Imports only the dream wave siblings, the substrate seams, and node builtins — cycle-free
-// (nothing in `waves/` imports `authoring/`) and loadable under `node --test`.
+// Imports only the dream wave siblings — cycle-free (nothing in `waves/` imports `authoring/`)
+// and loadable under `node --test`.
 
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import {
   codePointLength,
-  DREAM_MANIFEST_FILENAME,
-  decodeDreamManifest,
+  type DreamLaneAnalysis,
+  type DreamManifest,
 } from "../../learning/dream.ts";
-import {
-  DREAM_ANALYSES_FILENAME,
-  decodeFinalizedDreamBundle,
-} from "../../learning/dreamReducer.ts";
+import type { DreamReducerAnalysis } from "../../learning/dreamReducer.ts";
 import { buildDreamReport, type DreamReportContext } from "../../learning/dreamReport.ts";
-import { runScratchDir } from "../../substrate/cache.ts";
-import { revalidationBracket } from "../../substrate/git.ts";
-import { digestSessionData, type SessionDataCtx } from "../../substrate/sessionData.ts";
-import {
-  branchOf,
-  rebuildWorkflowState,
-  type WorkflowState,
-} from "../../substrate/workflowState.ts";
 
 /**
  * The shared part-invariance + size rule's comment-body cap (contracts §8.64) — the full
@@ -159,91 +149,35 @@ export function decodeDreamReportBlock(value: unknown): ObjectiveDreamReportBloc
 }
 
 /**
- * Recover the trusted `DreamReportContext` from the claimed run's scratch state — every arm
- * fail-closed with a named detail (the caller maps them to `bad_state`):
- *
- *  1. the run-scoped manifest: read + parse + `decodeDreamManifest` (the strict §8.60 decoder,
- *     path bound at decode time). No `verifyDocContainment` — this path reads no doc files;
- *     the lexical decode suffices (resolved containment is the wave tool's pre-spawn concern);
- *  2. the freshness check: the `dream_bundle_digest` marker (read from the caller's ONE
- *     workflow-state snapshot) must be present, non-empty, and equal the digest of the bundle
- *     bytes just read — a bare file is never trusted (missing marker = no finalized wave;
- *     empty = invalidated by a newer attempt, including a cleanup-failure residue; mismatch =
- *     stale/tampered bytes);
- *  3. the strict finalized decode (`decodeFinalizedDreamBundle` over the digest of the
- *     manifest bytes just read — the marker authenticates the bundle bytes and the bundle's
- *     `manifest_digest` extends that authority to the manifest, so an at-rest manifest edit
- *     refuses; the analyses-only mid-wave shape refuses here too).
+ * The narrow per-operation trusted-context recovery capability the Pi/session edge mints
+ * (production: `productionDreamGateRecovery` in `pi/v1/objectiveDreamGate.ts`; tests inject
+ * fakes). ANTI-PROOF-OBJECT CONTRACT: the decode/digest/revalidation checks behind
+ * `recoverContext` and `bracket` are runtime verification executed on EVERY consuming
+ * operation (draft-write and save), never replaced by a structural type, assertion, or
+ * previously computed proof object.
  */
-function recoverDreamReportContext(
-  ctx: SessionDataCtx,
-  runId: string,
-  marker: string | undefined,
-  generatedAt: string,
-): { ok: true; context: DreamReportContext } | { ok: false; detail: string } {
-  const manifestPath = join(runScratchDir(ctx.cwd, runId), DREAM_MANIFEST_FILENAME);
-  let manifestBytes: string;
-  let rawManifest: unknown;
-  try {
-    manifestBytes = readFileSync(manifestPath, "utf8");
-    rawManifest = JSON.parse(manifestBytes);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    return { ok: false, detail: `dream manifest unreadable at '${manifestPath}': ${detail}` };
-  }
-  const manifest = decodeDreamManifest(rawManifest, manifestPath);
-  if (!manifest.ok) {
-    return { ok: false, detail: `dream manifest invalid: ${manifest.detail}` };
-  }
-
-  const bundlePath = join(dirname(manifestPath), DREAM_ANALYSES_FILENAME);
-  let bundleBytes: string;
-  try {
-    bundleBytes = readFileSync(bundlePath, "utf8");
-  } catch {
-    return {
-      ok: false,
-      detail: `no dream bundle at '${bundlePath}' — re-run the dream wave`,
-    };
-  }
-  if (marker === undefined || marker === "") {
-    return {
-      ok: false,
-      detail: "no finalized dream wave for this session — re-run the dream wave",
-    };
-  }
-  if (digestSessionData(bundleBytes) !== marker) {
-    return {
-      ok: false,
-      detail:
-        "the dream bundle does not match the session's finalized digest — re-run the dream wave",
-    };
-  }
-  let rawBundle: unknown;
-  try {
-    rawBundle = JSON.parse(bundleBytes);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    return { ok: false, detail: `dream bundle is not valid JSON: ${detail}` };
-  }
-  const decoded = decodeFinalizedDreamBundle(
-    rawBundle,
-    manifest.manifest,
-    digestSessionData(manifestBytes),
-  );
-  if (!decoded.ok) {
-    return { ok: false, detail: `${decoded.detail} — re-run the dream wave` };
-  }
-  return {
-    ok: true,
-    context: {
-      manifest: manifest.manifest,
-      analyses: decoded.analyses,
-      reducers: decoded.reducers,
-      run_id: runId,
-      generated_at: generatedAt,
-    },
-  };
+export interface DreamGateRecovery {
+  /** ONE fresh workflow-state snapshot per gate resolution (run identity + freshness marker + dream detection).
+   *  `detail` is always the RAW CAUSE (a caught message or a fixed cause literal) — the resolver
+   *  owns the one rendering prefix; the capability never pre-renders. */
+  readSession():
+    | { kind: "unreadable"; detail: string }
+    | { kind: "read"; runId: string | null; dream: boolean; marker: string | undefined };
+  /** Fresh manifest+bundle read + the full decode/digest ladder — re-executed on EVERY call, never cached.
+   *  `detail` here IS the final text (today's recovery details are complete sentences; byte-preserved). */
+  recoverContext(
+    runId: string,
+    marker: string | undefined,
+  ):
+    | {
+        ok: true;
+        manifest: DreamManifest;
+        analyses: DreamLaneAnalysis[];
+        reducers: DreamReducerAnalysis[];
+      }
+    | { ok: false; detail: string };
+  /** The §8.65 revalidation bracket against the recovered manifest's stamped commit_sha. */
+  bracket(expectedSha: string): { ok: boolean; detail: string | null };
 }
 
 /** The typed gate outcome both consumers branch on — the whole matrix, one vocabulary. */
@@ -264,40 +198,34 @@ export type DreamReportGateOutcome =
  * | dream     | absent         | refuse `invalid_input` (one approval bundle) |
  * | dream     | present        | recover context → `buildDreamReport` → refuse or `block` |
  *
- * An UNREADABLE workflow state (a throwing branch read) refuses `bad_state` BEFORE the matrix —
- * it is never conflated with a confirmed non-dream session (the `activeSessionRunId`
+ * An UNREADABLE workflow state (`readSession()`'s `unreadable` arm — a throwing branch read,
+ * or the capability's fail-closed run-id/marker narrowing) refuses `bad_state` BEFORE the
+ * matrix — it is never conflated with a confirmed non-dream session (the `activeSessionRunId`
  * null-on-throw sentinel would otherwise let a transient read failure surface as `absent`).
+ * The capability's `detail` is the RAW CAUSE; this resolver owns the one rendering prefix.
  *
  * Failure taxonomy: gate violations + `buildDreamReport` refusals → `invalid_input` (the
  * bounded ≤25 named details newline-joined); an unreadable workflow state and
- * context-recovery failures → `bad_state`.
+ * context-recovery failures → `bad_state` (recovery details pass through UNPREFIXED).
  */
 export function resolveDreamReportGate(
-  ctx: SessionDataCtx,
+  recovery: DreamGateRecovery,
   input: unknown,
   generatedAt: string,
-  bracket: (
-    cwd: string,
-    expectedSha: string,
-  ) => { ok: boolean; detail: string | null } = revalidationBracket,
 ): DreamReportGateOutcome {
-  // ONE workflow-state snapshot for the whole gate (run identity + the freshness marker),
-  // read with error distinction: unreadable state fails closed, never "non-dream".
-  let state: WorkflowState;
-  try {
-    state = rebuildWorkflowState(branchOf(ctx));
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
+  // ONE workflow-state snapshot for the whole gate (run identity + the freshness marker +
+  // dream detection), read with error distinction: unreadable state fails closed, never
+  // "non-dream".
+  const session = recovery.readSession();
+  if (session.kind === "unreadable") {
     return {
       kind: "refuse",
       errorType: "bad_state",
-      detail: `session workflow state is unreadable — cannot resolve the dream_report gate: ${detail}`,
+      detail: `session workflow state is unreadable — cannot resolve the dream_report gate: ${session.detail}`,
     };
   }
-  const runId = typeof state.run_id === "string" && state.run_id.length > 0 ? state.run_id : null;
-  const dream =
-    runId !== null && existsSync(join(runScratchDir(ctx.cwd, runId), DREAM_MANIFEST_FILENAME));
-  if (runId === null || !dream) {
+  const runId = session.runId;
+  if (runId === null || !session.dream) {
     if (input === undefined) return { kind: "absent" };
     return {
       kind: "refuse",
@@ -316,17 +244,25 @@ export function resolveDreamReportGate(
         "report review as one bundle",
     };
   }
-  const recovered = recoverDreamReportContext(ctx, runId, state.dream_bundle_digest, generatedAt);
+  // The marker rides the SAME snapshot as the run identity (the one-snapshot rule); the
+  // capability re-executes the full read+decode+digest ladder on every call, never caching.
+  const recovered = recovery.recoverContext(runId, session.marker);
   if (!recovered.ok) {
     return { kind: "refuse", errorType: "bad_state", detail: recovered.detail };
   }
+  const context: DreamReportContext = {
+    manifest: recovered.manifest,
+    analyses: recovered.analyses,
+    reducers: recovered.reducers,
+    run_id: runId,
+    generated_at: generatedAt,
+  };
   // The revalidation-bracket re-check (contracts.md §8.65): the manifest — with its stamped
   // commit_sha — is now decoded and authenticated, so re-prove HEAD-unchanged + tree-clean
   // against it. Both `writeObjectiveDraft` and `saveObjective` flow through this resolver, so
   // the bracket re-fires at draft-write AND save; non-dream paths never reach it (the matrix
-  // above returned already). The parameter default is the production bracket — tests inject
-  // stubs.
-  const drift = bracket(ctx.cwd, recovered.context.manifest.commit_sha);
+  // above returned already).
+  const drift = recovery.bracket(context.manifest.commit_sha);
   if (!drift.ok) {
     return {
       kind: "refuse",
@@ -336,7 +272,7 @@ export function resolveDreamReportGate(
         "stale; re-run perk learn dream",
     };
   }
-  const built = buildDreamReport(input, recovered.context);
+  const built = buildDreamReport(input, context);
   if (!built.ok) {
     return { kind: "refuse", errorType: "invalid_input", detail: built.details.join("\n") };
   }

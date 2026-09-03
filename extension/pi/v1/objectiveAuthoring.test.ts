@@ -53,6 +53,7 @@ import {
   objectiveApprovalSaveV1,
   ROADMAP_PARAM_SCHEMA,
 } from "./objectiveAuthoring.ts";
+import { productionDreamGateRecovery } from "./objectiveDreamGate.ts";
 
 /** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(
@@ -766,7 +767,11 @@ test("objectiveApprovalSaveV1: a dream draft whose stored parts match the re-ren
       stateEntry({ run_id: DREAM_RUN, mode: "read-only", dream_bundle_digest: digest }),
     ];
     const ctx = reportableCtx(cwd, branch);
-    const gate = resolveDreamReportGate(ctx, dreamReportInput(), DREAM_STAMP);
+    const gate = resolveDreamReportGate(
+      productionDreamGateRecovery(ctx as unknown as ExtensionContext),
+      dreamReportInput(),
+      DREAM_STAMP,
+    );
     assert.equal(gate.kind, "block", JSON.stringify(gate));
     const block = (gate as { kind: "block"; block: { parts: string[] } }).block;
     const payload = `${JSON.stringify({
@@ -813,7 +818,11 @@ test("objectiveApprovalSaveV1: the dream arm stages the transfer file with the e
     stateEntry({ run_id: DREAM_RUN, mode: "read-only", dream_bundle_digest: digest }),
   ];
   const ctx = reportableCtx(cwd, branch);
-  const gate = resolveDreamReportGate(ctx, dreamReportInput(), DREAM_STAMP);
+  const gate = resolveDreamReportGate(
+    productionDreamGateRecovery(ctx as unknown as ExtensionContext),
+    dreamReportInput(),
+    DREAM_STAMP,
+  );
   assert.equal(gate.kind, "block", JSON.stringify(gate));
   const block = (gate as { kind: "block"; block: { parts: string[] } }).block;
   const payload = `${JSON.stringify({
@@ -855,7 +864,11 @@ test("objectiveApprovalSaveV1: a transfer write failure is soft scratch_failed â
     stateEntry({ run_id: DREAM_RUN, mode: "read-only", dream_bundle_digest: digest }),
   ];
   const ctx = reportableCtx(cwd, branch);
-  const gate = resolveDreamReportGate(ctx, dreamReportInput(), DREAM_STAMP);
+  const gate = resolveDreamReportGate(
+    productionDreamGateRecovery(ctx as unknown as ExtensionContext),
+    dreamReportInput(),
+    DREAM_STAMP,
+  );
   assert.equal(gate.kind, "block", JSON.stringify(gate));
   const block = (gate as { kind: "block"; block: { parts: string[] } }).block;
   const payload = `${JSON.stringify({

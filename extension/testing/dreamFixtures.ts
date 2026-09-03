@@ -3,11 +3,13 @@
 // the real run-scratch files the §8.63 gate recovers (the manifest + the FINALIZED bundle with
 // its bound manifest digest) over a REAL clean git repo whose HEAD is the stamped `commit_sha`,
 // so the boundary suites exercise the production revalidation bracket (contracts.md §8.65)
-// end-to-end. Both objective boundary suites (objectiveDraft.test.ts, objectiveSave.test.ts)
-// and the dream-wave registered-tool e2e consume this one encoding of the persisted format
-// instead of each maintaining a copy; the resolver suite (authoring/objective/dreamReportGate.test.ts) keeps
-// its own richer 2-lane fixture (with injected bracket stubs) because it exercises
-// proposal/stance shapes and per-arm corruption this minimal fixture deliberately lacks.
+// end-to-end. The objective boundary suites (objectiveAuthoring.test.ts), the dream-wave
+// registered-tool e2e, and the gate capability's boundary suite
+// (pi/v1/objectiveDreamGate.test.ts — which layers its own per-arm corruption over this
+// planted state) all consume this one encoding of the persisted format instead of each
+// maintaining a copy; the pure resolver suite (authoring/objective/dreamReportGate.test.ts)
+// runs over a FAKE `DreamGateRecovery` — no scratch, no git — keeping only an in-memory
+// richer 2-lane fixture for proposal/stance shapes.
 // Test-only — never imported by production modules.
 
 import { execFileSync } from "node:child_process";
