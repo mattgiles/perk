@@ -10,7 +10,7 @@ cluster: cross-plane-contracts
 skill vs contracts), with the other tiers pointing rather than restating. The evidence base for
 this doc is the two carrier migrations run so far — the authoring family and the six review/wave
 doors. Anchors: `shared/contracts.md` §8.57, the seeds under `prompts/`, the `skills/perk-*`
-bodies, and the door-suite tests (e.g. `extension/doors/prReviewTerminal.test.ts`).
+bodies, and the door-suite tests (e.g. `extension/pi/v1/codeReview/terminal.test.ts`).
 
 ## Diet economics and verification
 

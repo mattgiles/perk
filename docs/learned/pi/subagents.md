@@ -10,7 +10,7 @@ perk delegates fresh-context work — PR review, classification, objective explo
 resolution, plan/objective draft review, and per-lane `docs/learned` harvest mining
 (`harvest-analyst`, live as a multi-lane wave via `run_harvest_wave` — contracts §8.48) — to subagents
 via the `pi-subagents` package. Draft review is live via `/plan-review-browser` and
-`/objective-review-browser` (`extension/doors/objectiveReviewBrowser.ts`). perk's agent defs — the `PERK_AGENTS`
+`/objective-review-browser` (`extension/pi/v1/objectiveReviewBrowser.ts`). perk's agent defs — the `PERK_AGENTS`
 tuple in `src/perk/convergence/init/agents.py` — are **delivered into consumer repos by `perk
 init`** (a committed managed convergence — see below); the warm commands (`/pr-review`, `/address`)
 and the `/submit` mergeability drive spawn them. This doc captures the
@@ -347,7 +347,7 @@ prompt change. The non-obvious mechanics and the cross-cutting lesson:
 The reviewer rubric is **entirely** in the agent **system prompt** — SSOT `agents/pr-reviewer.md`
 (root `agents/`, no leading dot), materialized by `perk init`'s `_converge_subagent_agents` into
 `.pi/agents/perk/pr-reviewer.md`. The skill (`skills/perk-pr-review/SKILL.md`) and the door
-(`extension/doors/prReview.ts`) **defer** to it — **don't look there for review logic**. After
+(`extension/pi/v1/codeReview/automated.ts`) **defer** to it — **don't look there for review logic**. After
 editing the source, **re-run `perk init`** to reconverge and commit **both** copies byte-identical
 (the init-idempotency + doctor `subagent-agents` checks expect consistency). **Stale-path gotcha:**
 the materialized copy is the `perk/`-namespaced `.pi/agents/perk/pr-reviewer.md`, **not** the old
@@ -723,7 +723,7 @@ the `post_pr_review` tool turn + the `last_pr_review` record have existed since 
 
 ## Cross-references
 
-- `extension/doors/prReview.ts` — `prReviewGuidance` (judgment-bearing inputs only — the guidance no longer carries wave mechanics), `registerPrReview` (the flow-scoped `run_pr_review_wave` tool + the `post_pr_review` clean guard); defers the review rubric to the agent prompt
+- `extension/pi/v1/codeReview/automated.ts` — `prReviewGuidance` (judgment-bearing inputs only — the guidance no longer carries wave mechanics), `installAutomatedReviewBindings` (the flow-scoped `run_pr_review_wave` tool + the `post_pr_review` clean guard); defers the review rubric to the agent prompt
 - `extension/waves/reportWave.ts` (+ `rpcAdapter.ts`, `memoryAdapter.ts`) — the Perk-owned report-wave module over the v1 RPC seam; `/pr-review` rides it via `extension/waves/prReviewWave.ts` (`PR_REVIEW_REPORT_SCHEMA`, `runPrReviewWave` — the bounded-retry entrypoint behind `run_pr_review_wave`)
 - `docs/learned/workflow/report-waves.md` — the perk-side report-wave module doc (flow migrations, lane semantics, guard state, wave test machinery); this doc keeps the upstream mechanics
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the `/submit` orchestration that drives the `conflict-resolver` agent

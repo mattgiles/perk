@@ -203,7 +203,7 @@ The judgment tier's packet bounding (`perk-dev audit evidence`;
 ## The verdicts-write hardening patterns (audit judge → run_audit_wave → audit fold)
 
 The judgment tier's write path — `perk-dev audit judge` builds the bundle, the wave
-(`extension/waves/auditWave.ts` + `extension/doors/auditWaveTools.ts`) writes `verdicts.json`,
+(`extension/waves/auditWave.ts` + `extension/pi/v1/learning/audit.ts`) writes `verdicts.json`,
 `perk-dev audit fold` (`packages/perk-dev/src/perk_dev/audit/fold.py`) folds it — hardened into
 a reusable pattern set:
 
@@ -233,7 +233,7 @@ a reusable pattern set:
   *after* the wave launched returns `io_error` with in-memory lane records and **no guaranteed
   foldable file** — unlike the pre-launch `bad_state` arm, which writes nothing. Consumers must
   not assume `io_error` implies an untouched bundle dir. (Source pointers:
-  `extension/doors/auditWaveTools.ts`; the fold side in
+  `extension/pi/v1/learning/audit.ts`; the fold side in
   `packages/perk-dev/src/perk_dev/audit/`.)
 
 Two CLI-boundary patterns from `perk-dev audit attribution` (the attribution report verbs in

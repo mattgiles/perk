@@ -48,23 +48,28 @@ union — over the transport tier in `waves/transport.ts`: the adapter seam (`Wa
 `WAVE_TIMEOUT_MS`), receipt primitives, and the transport failure vocabulary
 (`WaveRunFailureReason` — the six wave-level reasons, a structural SUBSET of the logical tier's
 `WaveFailureReason`, so script failures flow up with zero runtime mapping and a lane-level
-reason on a script-run failure is unrepresentable). The blocking runner (`runReportWave`) is
-re-expressed as start + await over the **start/settle split** (`startWaveScript`/
-`startReportWave`); `renderWaveScript` + assignment validation are module-private — script text
-is invisible outside `waves/`, so renderer assertions observe the spawned `workflowScript`
-through the adapter seam. `rpcAdapter.ts` is the live pi-subagents v1 RPC adapter;
-`memoryAdapter.ts` is the first-class test double. Callers import ONLY `reportWave.ts` (its one
-sanctioned `WaveAdapter` type re-export is the injection seam) plus `rpcAdapter.ts` at the ten
-registration sites — guard Rule G (`extension/importDirectionGuard.test.ts`) pins that exact
-importer set, bans outside edges into `transport.ts`/`memoryAdapter.ts`, and censuses raw
-`WAVE_RPC_`/channel tokens (tests included). The flow entrypoints:
+reason on a script-run failure is unrepresentable). Callers consume the opaque `ReportWave`
+lifecycle — `start`/`collect`/`run` over opaque `ReportWaveRef`s: they supply assignments and
+consume typed outcomes, never adapters, run handles, or result promises (the blocking `run` is
+start + await inside the instance; pending execution is instance-owned with drain-once,
+delete-as-claim collection). Adapter selection is wave-owned: `createReportWave(bus)` constructs
+the ONE per-activation production instance at the composition root (`extension/index.ts`);
+`reportWaveOver(adapter)` is the test injection seam. `renderWaveScript` + assignment validation
+are module-private — script text is invisible outside `waves/`, so renderer assertions observe
+the spawned `workflowScript` through the adapter seam. `rpcAdapter.ts` is the live pi-subagents
+v1 RPC adapter (interior — `reportWave.ts` is its one sanctioned production construction site);
+the first-class test double lives in `extension/testing/memoryAdapter.ts`. Guard Rule G
+(`extension/importDirectionGuard.test.ts`) bans production edges into
+`transport.ts`/`rpcAdapter.ts` from outside `waves/` (the old ten-site adapter-construction
+census burned down to zero when `createReportWave` made adapter selection wave-owned) and
+censuses raw `WAVE_RPC_`/channel tokens (tests included). The flow entrypoints:
 
 - `prReviewWave.ts` — `/pr-review`'s bounded-retry wave behind the `run_pr_review_wave` tool.
 - `learnWave.ts` — `/learn`'s analyst fan-out behind `run_learn_wave` (best-effort, no retry).
 - `prReviewDynamicWave.ts` — the experimental selector-driven wave behind
   `run_pr_review_dynamic_wave`.
 - `adversarialReviewWave.ts` — the human review doors' streaming wave behind the
-  `start_review_wave`/`collect_review_wave` tool pair (`extension/doors/reviewWaveTools.ts`),
+  `start_review_wave`/`collect_review_wave` tool pair (`extension/pi/v1/codeReview/reviewWave.ts`),
   registered and in the `extension/substrate/toolGating.ts` census. It landed **dormant** first
   (built + tested, unregistered) because registration, the agent-def fenced-JSON →
   `structured_output` flip, and the census additions had to land **atomically** — registering
@@ -72,7 +77,8 @@ importer set, bans outside edges into `transport.ts`/`memoryAdapter.ts`, and cen
 - `draftReviewWave.ts` — the draft doors' (`/plan-review-browser`,
   `/objective-review-browser`) streaming wave behind the
   `start_draft_review_wave`/`collect_draft_review_wave` tool pair
-  (`extension/doors/draftReviewWaveTools.ts`), registered and census'd.
+  (`extension/pi/v1/draftReviewWaveTools.ts`, over the door-primed context state in
+  `extension/authoring/review/draftContext.ts`), registered and census'd.
 - `reviewClassifierWave.ts` — `/address`'s single-lane classify wave behind the
   `classify_review_feedback` tool (`extension/pi/v1/delivery/address.ts`): ONE `perk.review-classifier`
   lane, strict completeness, no retry (the flow's posture is "surface the error and stop").
@@ -82,7 +88,7 @@ importer set, bans outside edges into `transport.ts`/`memoryAdapter.ts`, and cen
   "explore directly instead"). Both single-lane entrypoints hold their report schema as a module
   constant — the migration that killed the hand-transcribed `outputSchema` blocks.
 - `auditWave.ts` — the perk-dev session-audit wave behind `run_audit_wave`
-  (`extension/doors/auditWaveTools.ts`): the learnWave-shaped sibling with a **structural write
+  (`extension/pi/v1/learning/audit.ts`): the learnWave-shaped sibling with a **structural write
   binding**. The tool is a `READ_ONLY_TOOLS` member whose write target comes only from the cold
   door's workflow-state (`audit_bundle_dir`), with **no parameters** — no model-relayed path ⇒ no
   aimable writer. This is the precedent for read-only-gated tools that must write. Side effect
@@ -91,7 +97,7 @@ importer set, bans outside edges into `transport.ts`/`memoryAdapter.ts`, and cen
   stage-adding plan should sweep `src/perk/state/gc.py` alongside the
   stageTools/toolGating/registry pins.
 - `harvestWave.ts` — the seeded `perk learn harvest` session's analyst fan-out behind the
-  `run_harvest_wave` tool (`extension/doors/harvestWaveTools.ts`). The one `manifest_path` param
+  `run_harvest_wave` tool (`extension/pi/v1/learning/harvest.ts`). The one `manifest_path` param
   is a **relay handshake, not an authority**: the execute derives the only acceptable run-scoped
   path from the claimed run's workflow-state and reads the derived path (contracts §8.48); a
   single-lane manifest is refused toward the seed's direct-analysis path. Best-effort
@@ -105,7 +111,7 @@ importer set, bans outside edges into `transport.ts`/`memoryAdapter.ts`, and cen
   lanes (`DREAM_REDUCER_ANGLES`) cross-examining the complete analyst outcome; **pure
   orchestration** — it composes/finalizes the bundle content while the door owns every fs write;
   the `DREAM_REDUCER_CAPS` SSOT; strict (contracts §8.61). Both dream levels run behind the ONE
-  **parameterless** `run_dream_wave` tool (`extension/doors/dreamWaveTools.ts`) — the
+  **parameterless** `run_dream_wave` tool (`extension/pi/v1/learning/dream.ts`) — the
   `run_audit_wave` workflow-state-bound posture on BOTH the read and write sides; reducers
   launch only after a complete first wave and an in-budget bundle write.
 
@@ -126,7 +132,9 @@ row is the drift tripwire.
 `start*` returns a handle plus a `result` promise that **never rejects** — every arm normalizes —
 so a detached/uncollected run can never become an unhandled rejection. The blocking form is start
 + await result: ONE operational core, applied at two levels (script: `transport.ts`'s
-`startWaveScript`; assignment: `reportWave.ts`'s `startReportWave`). Discipline details: the completion subscription is released exactly on settle;
+`startWaveScript`; assignment: the module-private start behind the opaque `ReportWave.start` —
+the handle and result promise never leave `reportWave.ts`; callers hold a `ReportWaveRef` and
+`collect` drains it). Discipline details: the completion subscription is released exactly on settle;
 pre-spawn failures unsubscribe immediately and return the same failure/receipt values the blocking
 runner reported.
 
@@ -184,7 +192,7 @@ wiring lands.
 ## Shape parity is not contract parity (schema forward-binding)
 
 When forward-binding a wave report schema to a downstream consumer's shape
-(`DRAFT_REVIEW_REPORT_SCHEMA` → the plan-finding shape in `extension/doors/annotationPush.ts`),
+(`DRAFT_REVIEW_REPORT_SCHEMA` → the plan-finding shape in `extension/pi/v1/providers/annotations.ts`),
 matching keys/types is not enough — **trace representative *values* through the next decoder**.
 The schema accepted whitespace-only `phrase` strings that plan-mode `push_annotations` rejects
 *wholesale* (one bad anchor fails the batch), so an engine-valid report could fail the
@@ -346,17 +354,20 @@ The registered-tool census has a fourth leg: the docs-site table
 registration) — keep that guard in mind when registering tools (#1997).
 
 For start/collect wave pairs, `executionMode: "sequential"` remains the concurrency guard — and
-the pending slot is PER-REGISTRATION closure state, never module-global: `doors/pendingWave.ts`
-owns the plain `PendingWaveState` shape + the one shared `collectPending` (deliberately no
-interface/factory protocol), threaded as an explicit parameter into the execute cores (the draft
-pair's primed `DraftReviewWaveState.context` rides the same object, created in `index.ts` and
-threaded to the tool pair AND both browser doors). Collect races the pending result against a
-bounded, environment-overridable grace (`PERK_WAVE_COLLECT_GRACE_MS`) to absorb the completion-
-event versus `subagent_wait` wake race. An unsettled result soft-fails while retaining pending;
-the module timeout eventually settles a stuck run and a later collect drains it. The clear is
-identity-guarded: a supersede landing during an in-flight collect's await never erases the NEW
-pending wave (pinned in `doors/pendingWave.test.ts`; two-session isolation in
-`doors/waveIsolation.test.ts`).
+pending execution is INSTANCE-OWNED: the `ReportWave` instance holds every launched,
+uncollected run behind opaque `ReportWaveRef`s with drain-once (delete-as-claim) collection.
+Flow state holds only the opaque ref — which wave is *current* is flow policy: the draft pair's
+`DraftReviewWaveState.pending` slot (with the door-primed `context` beside it) lives in
+`extension/authoring/review/draftContext.ts`, created per-activation in `index.ts` and threaded
+to the tool pair AND both browser doors, never module-global. Collect races the pending result
+against a bounded, environment-overridable grace (`PERK_WAVE_COLLECT_GRACE_MS` — wave-owned) to
+absorb the completion-event versus `subagent_wait` wake race. An unsettled result soft-fails
+while retaining pending; the module timeout eventually settles a stuck run and a later collect
+drains it. The flow-side slot clear is identity-guarded: a supersede landing during an in-flight
+collect's await never erases the NEW pending wave (the drain/race pins live in
+`extension/waves/reportWave.test.ts`, the flow-slot pins in
+`extension/pi/v1/draftReviewWaveTools.test.ts`; two-session isolation in
+`extension/pi/v1/waveIsolation.test.ts`).
 
 ## Deliberate non-behaviors need regression pins
 
@@ -422,7 +433,7 @@ Instances:
 - **Probing door-primed module state without test-only exports.** The zero-item push
   (`findings: []`) with an injected throwing `fetchLike` is a side-effect-free primed/unprimed
   probe — nothing held means no fetch. Companion gotcha: background-`finally` clears need a
-  bounded poll, not an immediate assert (`extension/doors/prReviewBrowser.test.ts`).
+  bounded poll, not an immediate assert (`extension/pi/v1/codeReview/browser.test.ts`).
 
 ## Watch items / residuals
 
@@ -461,13 +472,15 @@ Instances:
   `learnWave.ts`
 - `docs/learned/workflow/plan-review-flow.md` — the annotation-push module (the sibling
   prompt-discipline-into-code migration)
-- `extension/waves/reportWave.ts` (the logical tier) + `waves/transport.ts` (the confined
-  transport tier) + `rpcAdapter.ts`, `memoryAdapter.ts` — the operational core and its adapters
+- `extension/waves/reportWave.ts` (the logical tier + the opaque `ReportWave` lifecycle) +
+  `waves/transport.ts` (the confined transport tier) + `rpcAdapter.ts` — the operational core
+  and its live adapter; `extension/testing/memoryAdapter.ts` — the first-class test double
 - `extension/testing/fakeSubagents.ts` — the shared fake responder + `waveScriptItems`
-- `extension/doors/pendingWave.ts` — the per-registration pending-wave state + `collectPending`
+- `extension/authoring/review/draftContext.ts` — the draft pair's flow-owned pending/context
+  slots (opaque refs only)
 - `extension/waves/prReviewWave.ts`, `learnWave.ts`, `prReviewDynamicWave.ts`,
   `adversarialReviewWave.ts`, `draftReviewWave.ts`, `reviewClassifierWave.ts`,
   `objectiveExplorerWave.ts`, `auditWave.ts`, `harvestWave.ts`, `dreamWave.ts`,
   `dreamReducerWave.ts` — the flow entrypoints
-- `extension/doors/reviewWaveTools.ts` — the start/collect tool pair (live — the review doors
-  drive it)
+- `extension/pi/v1/codeReview/reviewWave.ts` — the start/collect tool pair (live — the review
+  doors drive it)

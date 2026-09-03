@@ -96,10 +96,10 @@ template, binding trigger, a `select` callable picking this kind's subset out of
 `run_factory`. `docs_cmd.py` / `code_cmd.py` are then thin Click delegators that pass their kind
 constant into `run_factory`. This is the reusable shape for adding a third sibling: add a constant,
 not a code path. The TS plane now mirrors the shape for the warm doors:
-`extension/doors/learnFactory.ts` holds the `LearnFactoryDoorKind` config interface, the
-`DOCS_DOOR` / `CODE_DOOR` constants, and the shared `registerLearnFactoryDoor` (no per-door
-delegator files — `extension/index.ts` is the single registration site and passes the kind
-constants directly).
+`extension/learning/routing.ts` holds the `LearnFactoryKind` config interface and the
+`DOCS_FACTORY` / `CODE_FACTORY` constants; `extension/pi/v1/learning/factory.ts` holds the shared
+`registerLearnFactoryDoor` behind `installLearnFactoryBindings` (no per-door delegator files —
+`extension/index.ts` is the single registration site).
 
 ## The shared seeded-cold-door pipeline (run_seeded_door / SeededLaunch / seeded_door_options)
 

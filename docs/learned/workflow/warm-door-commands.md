@@ -349,7 +349,7 @@ responsibility, because only the door output is guaranteed to reach the human.
 The bare-minimum requirements for that hunk handoff (door-level loud print +
 clipboard copy with a test seam + wait-for-the-human, degrade only on the human's say-so) rode
 objective #1206 node 4.3 and are live today in `handleHunkLaunch`
-(`extension/doors/hunkHandoff.ts`, serving `/pr-review-terminal`) — a status pointer; don't
+(`extension/pi/v1/codeReview/checkout.ts`, serving `/pr-review-terminal`) — a status pointer; don't
 duplicate the requirement list here.
 
 ## Honesty hygiene when converting a command

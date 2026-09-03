@@ -177,8 +177,9 @@ export default function (pi: ExtensionAPI) {
   // mode and to COMPOSE the approval→save seam (auto-save → D1a gate exit) — Invariant 1 holds:
   // the surfaces compose the gate through the seams, never own it. The injected wave-launch
   // deps power the plannotator launch chooser (§8.23): the presence probe + the two door open
-  // cores are composed HERE so the pi/v1 review arms import nothing from door modules (the
-  // value-import cycle break — planReviewBrowser.ts value-imports the review arms).
+  // cores are composed HERE so plan.ts/planReview.ts import nothing from the browser modules
+  // (planReviewBrowser.ts/objectiveReviewBrowser.ts — the value-import cycle break:
+  // planReviewBrowser.ts value-imports the review arms).
   installPlanBindings(pi, gating, {
     present: () => plannotatorPresent(pi),
     plan: (ctx, opts) => openPlanReviewSurface(pi, ctx, gating, opts, draftReviewWave, annotations),

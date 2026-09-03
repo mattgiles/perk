@@ -20,8 +20,10 @@ The governing rule is:
 > engine stayed `waves/` (see § ReportWave). `execution/stageRunner.ts` — stage drive
 > stayed `worker/stageExecution.ts` (see § StageRunner). `pi/v1/` — built as drawn.
 > `pi/application/` — not created (Phase 8; an explicit objective #2130 non-goal).
-> `doors/` (absent from the sketch) is 74% evacuated — 7 surviving modules, owed by
-> objective #2130 node 3.1.
+> `doors/` (absent from the sketch) was evacuated and deleted by objective #2130 node 3.1:
+> `planReviewBrowser`/`objectiveReviewBrowser`/`selfcheck`/`draftReviewWaveTools`/
+> `lifecycleGates` → `pi/v1/`, `plannotatorHandoff` → `pi/v1/providers/`, with the Pi-free
+> policy splits landing `session/lifecycleGates.ts` + `authoring/review/draftContext.ts`.
 
 ```text
 extension/
