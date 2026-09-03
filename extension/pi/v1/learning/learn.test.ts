@@ -725,6 +725,69 @@ test("tool: run_learn_wave end-to-end over the RPC seam — typed reports + expl
   }
 });
 
+test("tool: run_learn_wave renders a malformed lane in the skipped block — never attributed", async () => {
+  const { cwd, bundleDir } = scaffoldBundle();
+  // A schema-valid report that echoes the WRONG angle: the decoder refuses attribution, so the
+  // lane degrades to a skipped angle — the report body must never reach the reports relay.
+  const contradictory = {
+    angle: "existing-docs",
+    verdict: "actionable",
+    candidates: [
+      { decision: "CAPTURE_LEARN", summary: "misattributed", target: null, evidence: "e" },
+    ],
+    fyi: [],
+  };
+  const aggregate = [
+    { key: "session-deviations", ok: true, error: null, report: contradictory },
+    {
+      key: "existing-docs",
+      ok: true,
+      error: null,
+      report: { angle: "existing-docs", verdict: "clean", candidates: [], fyi: [] },
+    },
+  ];
+  const h = await loadPerkSession({
+    cwd,
+    extraExtensions: [fakeSubagentsRpc(aggregate).extension],
+  });
+  try {
+    const result = await h.invokeTool("run_learn_wave", {
+      bundle_dir: bundleDir,
+      angles: TWO_ANGLES,
+    });
+    const details = result.details as {
+      ok: boolean;
+      reports?: { angle: string; report: unknown }[];
+      skipped?: { angle: string; reason: string; detail: string }[];
+    };
+    assert.equal(details.ok, true);
+    assert.deepEqual(details.reports, [
+      {
+        angle: "existing-docs",
+        report: { angle: "existing-docs", verdict: "clean", candidates: [], fyi: [] },
+      },
+    ]);
+    assert.deepEqual(details.skipped, [
+      {
+        angle: "session-deviations",
+        reason: "malformed-report",
+        detail:
+          "analyst report angle 'existing-docs' contradicts the assigned lane " +
+          "'session-deviations'",
+      },
+    ]);
+    const text = result.content[0]?.text ?? "";
+    assert.match(text, /Skipped angles:/);
+    assert.match(
+      text,
+      /session-deviations \(malformed-report\): analyst report angle 'existing-docs' contradicts/,
+    );
+    assert.equal(text.includes("misattributed"), false, "the refused body never renders");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tool: run_learn_wave resolves [models.subagents] learn-analyst onto the wave spawn", async () => {
   const { cwd, bundleDir } = scaffoldBundle();
   mkdirSync(join(cwd, ".perk"), { recursive: true });
