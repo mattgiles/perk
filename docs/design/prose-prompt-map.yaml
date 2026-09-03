@@ -402,7 +402,7 @@ routes:
     role: tool-contract
     priority: 75
   - id: ts-plan-review
-    match: { paths: ["extension/pi/v1/planReview.ts", "extension/pi/v1/objectiveReview.ts", "extension/pi/v1/review.ts", "extension/doors/planReviewBrowser.ts", "extension/doors/objectiveReviewBrowser.ts", "extension/doors/plannotatorHandoff.ts", "extension/doors/draftReviewWaveTools.ts"] }
+    match: { paths: ["extension/pi/v1/planReview.ts", "extension/pi/v1/objectiveReview.ts", "extension/pi/v1/review.ts", "extension/pi/v1/planReviewBrowser.ts", "extension/pi/v1/objectiveReviewBrowser.ts", "extension/pi/v1/providers/plannotatorHandoff.ts", "extension/pi/v1/draftReviewWaveTools.ts"] }
     capability: review.drafts
     audience: shipped
     role: tool-contract
@@ -428,7 +428,7 @@ routes:
     role: tool-contract
     priority: 90
   - id: ts-pr-review
-    match: { paths: ["extension/doors/*Review*.ts", "extension/codeReview/**", "extension/pi/v1/codeReview/**", "extension/pi/v1/providers/annotations.ts", "extension/waves/**"] }
+    match: { paths: ["extension/codeReview/**", "extension/pi/v1/codeReview/**", "extension/pi/v1/providers/annotations.ts", "extension/waves/**"] }
     capability: review.pr
     audience: shipped
     role: tool-contract
@@ -476,7 +476,7 @@ routes:
     role: context
     priority: 100
   - id: ts-session
-    match: { paths: ["extension/pi/v1/delivery/commitCompact.ts", "extension/doors/lifecycleGates.ts", "extension/substrate/bindingDelivery.ts", "extension/substrate/toolGating.ts"] }
+    match: { paths: ["extension/pi/v1/delivery/commitCompact.ts", "extension/pi/v1/lifecycleGates.ts", "extension/substrate/bindingDelivery.ts", "extension/substrate/toolGating.ts"] }
     capability: foundation.session
     audience: shipped
     role: context
