@@ -991,17 +991,15 @@ test("harness: objective_draft succeeds while read-only; artifact + pointer land
       prose: PROSE,
       roadmap: DRAFT_ROADMAP,
     });
-    const details = result.details as { ok: boolean; run_id?: string; roadmap_nodes?: number };
-    assert.equal(details.ok, true);
-    assert.equal(details.run_id, "01RID");
-    assert.equal(details.roadmap_nodes, 1);
-    assert.match(
-      (result.content[0] as { text?: string })?.text ?? "",
-      /Objective draft written → /,
-    );
-    assert.match((result.content[0] as { text?: string })?.text ?? "", /1 roadmap nodes/);
-    assert.equal(result.terminate, undefined, "non-terminating by design");
-
+    const details = result.details as {
+      ok: boolean;
+      name?: string;
+      path?: string;
+      digest?: string;
+      bytes?: number;
+      run_id?: string;
+      roadmap_nodes?: number;
+    };
     const path = join(sessionDataDir(cwd, "01RID"), OBJECTIVE_DRAFT_ARTIFACT);
     assert.ok(existsSync(path));
     const content = readFileSync(path, "utf8");
@@ -1010,6 +1008,29 @@ test("harness: objective_draft succeeds while read-only; artifact + pointer land
       prose: PROSE,
       roadmap: DRAFT_ROADMAP,
     });
+    // The receipt→Pi mapping is pinned exactly: derived repo-relative path, proven digest,
+    // byte count, run id, roadmap count, and the complete rendered line.
+    const relPath = join(
+      ".perk",
+      "workflow",
+      "scratch",
+      "runs",
+      "01RID",
+      "data",
+      OBJECTIVE_DRAFT_ARTIFACT,
+    );
+    assert.equal(details.ok, true);
+    assert.equal(details.name, OBJECTIVE_DRAFT_ARTIFACT);
+    assert.equal(details.path, relPath);
+    assert.equal(details.digest, digestSessionData(content));
+    assert.equal(details.bytes, Buffer.byteLength(content, "utf8"));
+    assert.equal(details.run_id, "01RID");
+    assert.equal(details.roadmap_nodes, 1);
+    assert.equal(
+      (result.content[0] as { text?: string })?.text,
+      `Objective draft written → ${relPath} (${digestSessionData(content)}; 1 roadmap nodes)`,
+    );
+    assert.equal(result.terminate, undefined, "non-terminating by design");
     const pointer = soundPointer(h.workflowState().session_artifacts?.[OBJECTIVE_DRAFT_ARTIFACT]);
     assert.equal(pointer?.digest, digestSessionData(content));
   } finally {

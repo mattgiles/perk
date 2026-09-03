@@ -43,8 +43,6 @@ export interface MemoryWorkflowSession extends WorkflowSession {
   failNextApply(): void;
   /** Drop the NEXT append on the floor — the read-back proof misses (`unverified`, not landed). */
   failNextApplyVerification(): void;
-  /** Seed/replace the live node claim (the lifecycle write stays outside the seam). */
-  setNodeClaim(claim: { objective: string; node: string } | null): void;
   /** The live linked plan-ref (test observation of the `link-plan-ref` effect). */
   linkedPlanRef(): PlanRef | null;
   /** The live `last_review` record (test observation of the `record-review` effect). */
@@ -112,9 +110,11 @@ export function openMemoryWorkflowSession(opts: {
   };
 
   let failWrite = false;
+  // One store per opened session, keyed by name: the run id the engine passes selects nothing
+  // here (fork isolation is engine policy over the pointer's run_id, proven before any load).
   const contents = new Map<string, string>();
   const artifacts: ArtifactContentStore = {
-    store(name: string, content: string): boolean {
+    store(_runId: string, name: string, content: string): boolean {
       if (failWrite) {
         failWrite = false;
         return false;
@@ -122,10 +122,10 @@ export function openMemoryWorkflowSession(opts: {
       contents.set(name, content);
       return true;
     },
-    load(name: string): string | null {
+    load(_runId: string, name: string): string | null {
       return contents.get(name) ?? null;
     },
-    displayPath(name: string): string {
+    displayPath(_runId: string, name: string): string {
       return name;
     },
   };
@@ -164,9 +164,6 @@ export function openMemoryWorkflowSession(opts: {
     },
     failNextApplyVerification() {
       dropNextAppend = true;
-    },
-    setNodeClaim(claim: { objective: string; node: string } | null) {
-      seed({ objective_node_claim: claim });
     },
     linkedPlanRef() {
       return rebuildWorkflowState(branch).active_plan_ref ?? null;

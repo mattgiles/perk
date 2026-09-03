@@ -82,15 +82,17 @@ export interface SessionArtifactReceipt {
 
 /**
  * The artifact content port: content I/O only, mechanical results, zero error prose —
- * classification, policy, and all problem text are engine-owned.
+ * classification, policy, and all problem text are engine-owned. Every operation receives the
+ * ENGINE-VALIDATED run id (the artifact namespace), so storage, pointer, and receipt share one
+ * identity by construction — a backing never derives its own.
  */
 export interface ArtifactContentStore {
-  /** Persist bytes; false = refusal (the port has already warned where its tier is loud). */
-  store(name: string, content: string): boolean;
-  /** Current bytes; null = missing/unreadable. */
-  load(name: string): string | null;
-  /** The receipt/warning display path, re-derived — NEVER a persisted pointer field. */
-  displayPath(name: string): string;
+  /** Persist bytes under the run; false = refusal (the port has already warned where its tier is loud). */
+  store(runId: string, name: string, content: string): boolean;
+  /** The run's current bytes; null = missing/unreadable. */
+  load(runId: string, name: string): string | null;
+  /** The receipt/warning display path, re-derived from the given identity — NEVER a persisted pointer field. */
+  displayPath(runId: string, name: string): string;
 }
 
 /**
@@ -331,30 +333,22 @@ function artifactMapsEqual(
 }
 
 /**
- * Strict `review_posts` decode for the append pre-read (CONTRAST with the tolerant
- * `reviewPostsOf`): a present-but-malformed persisted ledger — non-array, or any row that is
- * not `{pr: integer, event: string, at: string}` — refuses with a problem naming the malformed
- * variant instead of silently narrowing (a tolerant pre-read would let the whole-list LWW
- * re-append ERASE malformed-but-possibly-real rows, violating the ledger invariant that a
- * confirmed post is never erased by a write). Extra row fields are narrowed out.
+ * Strict `review_posts` decode for the append pre-read — the ONE row schema is `reviewPostsOf`,
+ * consumed strictly: a present-but-malformed persisted ledger (non-array, or any row the
+ * tolerant decode would DROP) refuses with a problem naming the malformed variant instead of
+ * silently narrowing (a tolerant pre-read would let the whole-list LWW re-append ERASE
+ * malformed-but-possibly-real rows, violating the ledger invariant that a confirmed post is
+ * never erased by a write). Extra row fields are narrowed out, never a refusal.
  */
 function strictReviewPosts(raw: unknown): { rows: ReviewPostRow[] } | { malformed: string } {
   if (!Array.isArray(raw)) return { malformed: `not a list (${JSON.stringify(raw)})` };
-  const rows: ReviewPostRow[] = [];
-  for (const item of raw) {
-    const row = soundReviewPostRow(item);
-    if (row === null) return { malformed: `malformed row ${JSON.stringify(item)}` };
-    rows.push(row);
+  const rows = reviewPostsOf(raw);
+  if (rows.length !== raw.length) {
+    return {
+      malformed: `${raw.length - rows.length} malformed row(s) in ${JSON.stringify(raw)}`,
+    };
   }
   return { rows };
-}
-
-function soundReviewPostRow(item: unknown): ReviewPostRow | null {
-  if (typeof item !== "object" || item === null || Array.isArray(item)) return null;
-  const row = item as Record<string, unknown>;
-  if (typeof row.pr !== "number" || !Number.isInteger(row.pr)) return null;
-  if (typeof row.event !== "string" || typeof row.at !== "string") return null;
-  return { pr: row.pr, event: row.event, at: row.at };
 }
 
 /** The two ports the engine runs over — the backings supply ONLY these. */
@@ -442,17 +436,17 @@ export function openWorkflowSession(deps: WorkflowSessionDeps): WorkflowSession 
       if (pointer === null) return { status: "absent" }; // no pointer — or a malformed one (no provenance)
       if (pointer.run_id !== runId) return { status: "absent" }; // fork isolation — by design, silent
 
-      const content = artifacts.load(name);
+      const content = artifacts.load(runId, name);
       if (content === null) {
         console.error(
           `perk: warning: session artifact ${name} has a pointer but no file at ` +
-            artifacts.displayPath(name),
+            artifacts.displayPath(runId, name),
         );
         return { status: "invalid", problem: `session artifact ${name} has a pointer but no file` };
       }
       if (digestSessionData(content) !== pointer.digest) {
         console.error(
-          `perk: warning: session artifact ${artifacts.displayPath(name)} digest mismatch ` +
+          `perk: warning: session artifact ${artifacts.displayPath(runId, name)} digest mismatch ` +
             "(rewound or modified) — refusing",
         );
         return {
@@ -486,7 +480,7 @@ export function openWorkflowSession(deps: WorkflowSessionDeps): WorkflowSession 
         current = null;
       }
       if (current !== null && current.run_id === runId) {
-        const stored = artifacts.load(name);
+        const stored = artifacts.load(runId, name);
         if (
           stored !== null &&
           digestSessionData(stored) === current.digest &&
@@ -496,14 +490,14 @@ export function openWorkflowSession(deps: WorkflowSessionDeps): WorkflowSession 
             status: "unchanged",
             receipt: {
               runId,
-              path: artifacts.displayPath(name),
+              path: artifacts.displayPath(runId, name),
               digest: digestSessionData(stored),
             },
           };
         }
       }
 
-      if (!artifacts.store(name, content)) {
+      if (!artifacts.store(runId, name, content)) {
         // the port already warned; never point at an unwritten file
         return {
           status: "rejected",
@@ -512,9 +506,9 @@ export function openWorkflowSession(deps: WorkflowSessionDeps): WorkflowSession 
       }
 
       // Digest the bytes as read back from the store — catches encoding/disk surprises.
-      const readBack = artifacts.load(name);
+      const readBack = artifacts.load(runId, name);
       if (readBack === null) {
-        const problem = `session artifact ${artifacts.displayPath(name)} unreadable after write`;
+        const problem = `session artifact ${artifacts.displayPath(runId, name)} unreadable after write`;
         console.error(`perk: warning: ${problem}`);
         return { status: "unverified", problem };
       }
@@ -524,7 +518,7 @@ export function openWorkflowSession(deps: WorkflowSessionDeps): WorkflowSession 
       const pointer: SessionArtifactPointer = {
         run_id: runId,
         name,
-        path: artifacts.displayPath(name),
+        path: artifacts.displayPath(runId, name),
         digest: digestSessionData(readBack),
         at: new Date().toISOString(),
       };

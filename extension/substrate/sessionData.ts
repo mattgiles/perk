@@ -15,6 +15,10 @@
 // - Reads return `null` on absence (normal, branchable) and on I/O errors (with a loud stderr
 //   warning); writes return the written path or `null` on failure (with a warning). Never
 //   throws — a broken disk must not wedge a session.
+// - The file primitives (`readSessionData`/`writeSessionData`/`ensureSessionDataDir`) take an
+//   EXPLICIT run id — identity is resolved ONCE (by the session engine, or here via
+//   `activeSessionRunId`) and passed down, so two independent identity reads can never
+//   disagree about which run's storage an operation touches.
 //
 // The ARTIFACT DISCIPLINE (provenance pointers, digest validation, the classified write/read
 // tiers — contracts §8.1/§8.3) lives in the session engine, `session/workflowSession.ts`: this
@@ -68,13 +72,16 @@ export function activeSessionDataDir(ctx: SessionDataCtx): string | null {
   return sessionDataDir(ctx.cwd, runId);
 }
 
-/** Ensure the validated run root, then its data dir; `null` + a warning on failure. */
-export function ensureSessionDataDir(ctx: SessionDataCtx): string | null {
-  const runId = activeSessionRunId(ctx);
-  if (runId === null) return null;
-  const dir = sessionDataDir(ctx.cwd, runId);
+/**
+ * Ensure the validated run root, then its data dir, for an EXPLICIT run id; `null` + a warning
+ * on failure (an unsafe id is refused loudly by the write path's `ensureRunScratch`). The run
+ * identity is the CALLER's: the session engine passes its one validated id so storage, pointer,
+ * and receipt can never disagree.
+ */
+export function ensureSessionDataDir(cwd: string, runId: string): string | null {
+  const dir = sessionDataDir(cwd, runId);
   try {
-    ensureRunScratch(ctx.cwd, runId);
+    ensureRunScratch(cwd, runId);
     mkdirSync(dir, { recursive: true });
   } catch (error) {
     console.error(`perk: warning: could not create session data dir ${dir}: ${error}`);
@@ -84,13 +91,11 @@ export function ensureSessionDataDir(ctx: SessionDataCtx): string | null {
 }
 
 /**
- * Read a session-data file; `null` on no run_id or an absent file (normal, branchable), and on
- * read errors (with a stderr warning). Never throws.
+ * Read a run's session-data file; `null` on an absent file (normal, branchable) and on read
+ * errors (with a stderr warning). Never throws.
  */
-export function readSessionData(ctx: SessionDataCtx, name: string): string | null {
-  const dir = activeSessionDataDir(ctx);
-  if (dir === null) return null;
-  const path = join(dir, name);
+export function readSessionData(cwd: string, runId: string, name: string): string | null {
+  const path = join(sessionDataDir(cwd, runId), name);
   if (!existsSync(path)) return null;
   try {
     return readFileSync(path, "utf8");
@@ -101,15 +106,16 @@ export function readSessionData(ctx: SessionDataCtx, name: string): string | nul
 }
 
 /**
- * Write a session-data file (creating the data dir lazily); returns the absolute path, or
- * `null` + a stderr warning on any failure. Never throws.
+ * Write a run's session-data file (creating the data dir lazily); returns the absolute path,
+ * or `null` + a stderr warning on any failure. Never throws.
  */
 export function writeSessionData(
-  ctx: SessionDataCtx,
+  cwd: string,
+  runId: string,
   name: string,
   content: string,
 ): string | null {
-  const dir = ensureSessionDataDir(ctx);
+  const dir = ensureSessionDataDir(cwd, runId);
   if (dir === null) return null;
   const path = join(dir, name);
   try {

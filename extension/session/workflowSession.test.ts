@@ -1085,6 +1085,93 @@ test("branch: append-review-post FAILS CLOSED when the prior ledger cannot be re
   }
 });
 
+test("branch: the link-plan-ref pre-read is deliberately un-caught — a throwing rebuild propagates", () => {
+  // Unlike the fail-open named reads, the link dedupe must never treat an unreadable branch as
+  // "no current ref": a rebuild failure propagates to the caller and nothing is appended.
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-link-throws-"));
+  try {
+    const appends: unknown[] = [];
+    const sink: EntrySink = {
+      appendEntry: (customType, data) => appends.push({ customType, data }),
+    };
+    const throwing = openBranchWorkflowSession(sink, {
+      cwd,
+      sessionManager: {
+        getBranch(): unknown[] {
+          throw new Error("adversarial branch read");
+        },
+      },
+      hasUI: false,
+      ui: { notify() {} },
+    });
+    assert.throws(
+      () => throwing.apply({ kind: "link-plan-ref", ref: planRef("42") }),
+      /adversarial branch read/,
+    );
+    assert.equal(appends.length, 0, "the exception propagates before any append effect");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("branch: the persisted pointer keeps the full five-field wire shape (contracts §8.3)", () => {
+  // The receipt deliberately narrows what RESULTS carry — but the PERSISTED `session_artifacts`
+  // entry stays the cross-plane five-field pointer. Pin the raw rebuilt map value so the engine
+  // can never silently drop or rename a wire field.
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-wire-shape-"));
+  try {
+    const branch: unknown[] = [stateEntry({ run_id: "RID" })];
+    const sink: EntrySink = {
+      appendEntry: (customType, data) => branch.push({ type: "custom", customType, data }),
+    };
+    const session = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+    assert.equal(session.writeArtifact("draft.json", "v1").status, "applied");
+    const raw = rebuildWorkflowState(branch as Parameters<typeof rebuildWorkflowState>[0])
+      .session_artifacts?.["draft.json"];
+    assert.ok(typeof raw === "object" && raw !== null, "a pointer object persisted");
+    const pointer = raw as Record<string, unknown>;
+    assert.deepEqual(Object.keys(pointer).sort(), ["at", "digest", "name", "path", "run_id"]);
+    assert.equal(pointer.run_id, "RID");
+    assert.equal(pointer.name, "draft.json");
+    assert.equal(pointer.path, relative(cwd, join(sessionDataDir(cwd, "RID"), "draft.json")));
+    assert.equal(pointer.digest, digestSessionData("v1"));
+    assert.ok(
+      typeof pointer.at === "string" && !Number.isNaN(Date.parse(pointer.at)),
+      "at is a parseable timestamp",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("branch: nodeClaim() is fail-open — malformed persisted claims and a throwing branch read null", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-claim-fail-open-"));
+  try {
+    const sink: EntrySink = { appendEntry: () => {} };
+    for (const malformed of [null, { objective: 7, node: "1.2" }, { objective: "7", node: "" }]) {
+      const branch: unknown[] = [
+        stateEntry({ run_id: "RID" }),
+        stateEntry({ objective_node_claim: malformed }),
+      ];
+      const session = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+      assert.equal(session.nodeClaim(), null, JSON.stringify(malformed));
+    }
+    const throwing = openBranchWorkflowSession(sink, {
+      cwd,
+      sessionManager: {
+        getBranch(): unknown[] {
+          throw new Error("adversarial branch read");
+        },
+      },
+      hasUI: false,
+      ui: { notify() {} },
+    });
+    assert.equal(throwing.nodeClaim(), null, "a throwing branch read is fail-open");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("branch: a malformed persisted pointer reads absent; a write proceeds and replaces it", () => {
   // Branch data is cast, not validated: a malformed session entry can put null (or any
   // non-pointer value) where a pointer belongs. The engine's decode treats it as "no pointer":

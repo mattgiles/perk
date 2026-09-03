@@ -60,24 +60,20 @@ function captureStderr(fn: () => void): string[] {
   return lines;
 }
 
-// --- with a run_id ------------------------------------------------------------------------------
+// --- the explicit-run-id file primitives --------------------------------------------------------
 
-test("run_id present: dir resolution + write/read round-trip under scratch/runs/<rid>/data/", () => {
+test("write/read round-trip under scratch/runs/<rid>/data/ for an explicit run id", () => {
   const cwd = tempCwd();
   try {
-    const ctx = fakeCtx(cwd, [runIdEntry("RID")]);
-    assert.equal(activeSessionRunId(ctx), "RID");
-
     const expected = join(cwd, ".perk", "workflow", "scratch", "runs", "RID", "data");
-    assert.equal(activeSessionDataDir(ctx), expected);
     assert.equal(expected, sessionDataDir(cwd, "RID"));
-    // Pure path: nothing is created by resolution alone.
-    assert.ok(!existsSync(expected));
 
-    const written = writeSessionData(ctx, "draft.md", "hello");
+    const written = writeSessionData(cwd, "RID", "draft.md", "hello");
     assert.equal(written, join(expected, "draft.md"));
-    assert.equal(readSessionData(ctx, "draft.md"), "hello");
-    assert.equal(readSessionData(ctx, "missing.md"), null);
+    assert.equal(readSessionData(cwd, "RID", "draft.md"), "hello");
+    assert.equal(readSessionData(cwd, "RID", "missing.md"), null);
+    // Another run id reads nothing — the explicit identity keys the storage.
+    assert.equal(readSessionData(cwd, "OTHER", "draft.md"), null);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -86,57 +82,25 @@ test("run_id present: dir resolution + write/read round-trip under scratch/runs/
 test("ensureSessionDataDir creates the dir lazily and is idempotent", () => {
   const cwd = tempCwd();
   try {
-    const ctx = fakeCtx(cwd, [runIdEntry("RID")]);
-    const dir = ensureSessionDataDir(ctx);
+    const dir = ensureSessionDataDir(cwd, "RID");
     assert.ok(dir !== null && existsSync(dir));
-    assert.equal(ensureSessionDataDir(ctx), dir);
+    assert.equal(ensureSessionDataDir(cwd, "RID"), dir);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-// --- without an identity: every helper degrades to null, nothing touches disk ------------------
-
-for (const [label, branch] of [
-  ["no workflow-state entries", []],
-  ["empty run_id", [{ type: "custom", customType: WORKFLOW_STATE_TYPE, data: { run_id: "" } }]],
-  ["non-string run_id", [{ type: "custom", customType: WORKFLOW_STATE_TYPE, data: { run_id: 7 } }]],
-] as const) {
-  test(`${label}: all helpers return null and create nothing`, () => {
-    const cwd = tempCwd();
-    try {
-      const ctx = fakeCtx(cwd, [...branch]);
-      assert.equal(activeSessionRunId(ctx), null);
-      assert.equal(activeSessionDataDir(ctx), null);
-      assert.equal(ensureSessionDataDir(ctx), null);
-      assert.equal(readSessionData(ctx, "draft.md"), null);
-      assert.equal(writeSessionData(ctx, "draft.md", "x"), null);
-      assert.deepEqual(readdirSync(cwd), []);
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  });
-}
-
-test("unsafe run ids degrade to no-identity at the seam — null before any path derivation", () => {
-  // The read-path trust boundary (isSafeRunId): a hostile rebuilt run_id never reaches a path
-  // derivation, a write, or a receipt — the SILENT identity-less arm, not a warning (the write
-  // path's ensureRunScratch keeps its loud throw for callers with explicit ids).
+test("an unsafe explicit run id is refused loudly through the write path, before any write", () => {
   const cwd = tempCwd();
   try {
-    for (const hostile of ["../escape", "a/b", "a\\b", ".", "..", "nul\0l"]) {
-      const ctx = fakeCtx(cwd, [runIdEntry(hostile)]);
+    for (const hostile of ["../escape", "a/b", "a\\b", ".", ".."]) {
       const warnings = captureStderr(() => {
-        assert.equal(activeSessionRunId(ctx), null, JSON.stringify(hostile));
-        assert.equal(activeSessionDataDir(ctx), null);
-        assert.equal(ensureSessionDataDir(ctx), null);
-        assert.equal(writeSessionData(ctx, "draft.md", "x"), null);
+        assert.equal(ensureSessionDataDir(cwd, hostile), null, JSON.stringify(hostile));
+        assert.equal(writeSessionData(cwd, hostile, "draft.md", "x"), null);
       });
-      assert.deepEqual(warnings, [], "the identity-less degrade is silent");
+      assert.ok(warnings.some((line) => line.includes("unsafe run id")));
       assert.deepEqual(readdirSync(cwd), [], "traversal-bearing identity wrote checkout content");
     }
-    // Legitimate ids (ULID mints, fork derivations) pass the boundary untouched.
-    assert.equal(activeSessionRunId(fakeCtx(cwd, [runIdEntry("RID.1")])), "RID.1");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -147,16 +111,88 @@ test("a symlinked checkout cache is refused through the session-data write seam"
   const outside = tempCwd();
   try {
     symlinkSync(outside, join(cwd, ".perk"), "dir");
-    const ctx = fakeCtx(cwd, [runIdEntry("RID")]);
     const warnings = captureStderr(() => {
-      assert.equal(ensureSessionDataDir(ctx), null);
-      assert.equal(writeSessionData(ctx, "draft.md", "x"), null);
+      assert.equal(ensureSessionDataDir(cwd, "RID"), null);
+      assert.equal(writeSessionData(cwd, "RID", "draft.md", "x"), null);
     });
     assert.ok(warnings.some((line) => line.includes("symlinked run-scratch path")));
     assert.deepEqual(readdirSync(outside), [], "session-data followed the cache redirect");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+// --- I/O failure: warn + null, never throw ------------------------------------------------------
+
+test("write failure (read-only parent) returns null without throwing", () => {
+  const cwd = tempCwd();
+  const perkDir = join(cwd, ".perk");
+  try {
+    mkdirSync(perkDir, { recursive: true });
+    chmodSync(perkDir, 0o444);
+    const warnings = captureStderr(() => {
+      assert.equal(ensureSessionDataDir(cwd, "RID"), null);
+      assert.equal(writeSessionData(cwd, "RID", "draft.md", "x"), null);
+    });
+    assert.ok(warnings.some((line) => line.includes("could not create session data dir")));
+  } finally {
+    chmodSync(perkDir, 0o755);
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// --- the identity probes: derive once, degrade to null, never invent ----------------------------
+
+test("activeSessionRunId/activeSessionDataDir: resolved identity keys the pure derived path", () => {
+  const cwd = tempCwd();
+  try {
+    const ctx = fakeCtx(cwd, [runIdEntry("RID")]);
+    assert.equal(activeSessionRunId(ctx), "RID");
+    assert.equal(activeSessionDataDir(ctx), sessionDataDir(cwd, "RID"));
+    // Pure path: nothing is created by resolution alone.
+    assert.ok(!existsSync(sessionDataDir(cwd, "RID")));
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+for (const [label, branch] of [
+  ["no workflow-state entries", []],
+  ["empty run_id", [{ type: "custom", customType: WORKFLOW_STATE_TYPE, data: { run_id: "" } }]],
+  ["non-string run_id", [{ type: "custom", customType: WORKFLOW_STATE_TYPE, data: { run_id: 7 } }]],
+] as const) {
+  test(`${label}: the identity probes degrade to null`, () => {
+    const cwd = tempCwd();
+    try {
+      const ctx = fakeCtx(cwd, [...branch]);
+      assert.equal(activeSessionRunId(ctx), null);
+      assert.equal(activeSessionDataDir(ctx), null);
+      assert.deepEqual(readdirSync(cwd), [], "resolution touches nothing on disk");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+}
+
+test("unsafe rebuilt run ids degrade to no-identity at the probe — null before any path derivation", () => {
+  // The read-path trust boundary (isSafeRunId): a hostile rebuilt run_id never reaches a path
+  // derivation, a write, or a receipt — the SILENT identity-less arm, not a warning (the write
+  // path's ensureRunScratch keeps its loud throw for callers with explicit ids, above).
+  const cwd = tempCwd();
+  try {
+    for (const hostile of ["../escape", "a/b", "a\\b", ".", "..", "nul\0l"]) {
+      const ctx = fakeCtx(cwd, [runIdEntry(hostile)]);
+      const warnings = captureStderr(() => {
+        assert.equal(activeSessionRunId(ctx), null, JSON.stringify(hostile));
+        assert.equal(activeSessionDataDir(ctx), null);
+      });
+      assert.deepEqual(warnings, [], "the identity-less degrade is silent");
+    }
+    // Legitimate ids (ULID mints, fork derivations) pass the boundary untouched.
+    assert.equal(activeSessionRunId(fakeCtx(cwd, [runIdEntry("RID.1")])), "RID.1");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
   }
 });
 
@@ -172,29 +208,9 @@ test("a throwing getBranch degrades to null (no stamp fallback, unlike coldDoor.
       },
     };
     assert.equal(activeSessionRunId(ctx), null);
-    assert.equal(writeSessionData(ctx, "draft.md", "x"), null);
+    assert.equal(activeSessionDataDir(ctx), null);
     assert.deepEqual(readdirSync(cwd), []);
   } finally {
-    rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-// --- I/O failure: warn + null, never throw ------------------------------------------------------
-
-test("write failure (read-only parent) returns null without throwing", () => {
-  const cwd = tempCwd();
-  const perkDir = join(cwd, ".perk");
-  try {
-    const ctx = fakeCtx(cwd, [runIdEntry("RID")]);
-    mkdirSync(perkDir, { recursive: true });
-    chmodSync(perkDir, 0o444);
-    const warnings = captureStderr(() => {
-      assert.equal(ensureSessionDataDir(ctx), null);
-      assert.equal(writeSessionData(ctx, "draft.md", "x"), null);
-    });
-    assert.ok(warnings.some((line) => line.includes("could not create session data dir")));
-  } finally {
-    chmodSync(perkDir, 0o755);
     rmSync(cwd, { recursive: true, force: true });
   }
 });

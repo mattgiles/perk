@@ -563,10 +563,35 @@ test("harness: plan_draft succeeds while read-only; artifact + pointer land", as
   try {
     assert.equal(h.workflowState().mode, "read-only", "the gate is active");
     const result = await h.invokeTool("plan_draft", { plan: PLAN_MD });
-    const details = result.details as { ok: boolean; run_id?: string; digest?: string };
+    const details = result.details as {
+      ok: boolean;
+      name?: string;
+      path?: string;
+      digest?: string;
+      bytes?: number;
+      run_id?: string;
+    };
+    // The receipt→Pi mapping is pinned exactly: derived repo-relative path, proven digest,
+    // byte count, run id, and the complete rendered line.
+    const relPath = join(
+      ".perk",
+      "workflow",
+      "scratch",
+      "runs",
+      "01RID",
+      "data",
+      PLAN_DRAFT_ARTIFACT,
+    );
     assert.equal(details.ok, true);
+    assert.equal(details.name, PLAN_DRAFT_ARTIFACT);
+    assert.equal(details.path, relPath);
+    assert.equal(details.digest, digestSessionData(PLAN_MD));
+    assert.equal(details.bytes, Buffer.byteLength(PLAN_MD, "utf8"));
     assert.equal(details.run_id, "01RID");
-    assert.match(result.content[0]?.text ?? "", /Plan draft written → /);
+    assert.equal(
+      result.content[0]?.text,
+      `Plan draft written → ${relPath} (${digestSessionData(PLAN_MD)})`,
+    );
 
     const path = join(sessionDataDir(cwd, "01RID"), PLAN_DRAFT_ARTIFACT);
     assert.ok(existsSync(path));

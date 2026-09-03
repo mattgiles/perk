@@ -317,9 +317,6 @@ export function setConflictAttempts(
   });
 }
 
-/** The warm node-link carrier's non-null shape (the `objective_node_claim` field). */
-export type ObjectiveNodeClaim = NonNullable<WorkflowState["objective_node_claim"]>;
-
 /** Structural claim equality (objective + node match); absent compares equal only to absent. */
 export function nodeClaimsEqual(
   a: WorkflowState["objective_node_claim"] | undefined,
@@ -329,25 +326,6 @@ export function nodeClaimsEqual(
   const bn = b ?? null;
   if (an === null || bn === null) return an === bn;
   return an.objective === bn.objective && an.node === bn.node;
-}
-
-/** The rebuilt `objective_node_claim`, read fail-open (malformed/throwing branch → null). */
-export function readNodeClaim(ctx: BranchSource): ObjectiveNodeClaim | null {
-  try {
-    const claim = rebuildWorkflowState(branchOf(ctx)).objective_node_claim ?? null;
-    if (
-      claim !== null &&
-      typeof claim.objective === "string" &&
-      claim.objective !== "" &&
-      typeof claim.node === "string" &&
-      claim.node !== ""
-    ) {
-      return claim;
-    }
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 /**
