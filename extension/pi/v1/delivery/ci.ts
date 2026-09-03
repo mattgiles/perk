@@ -25,6 +25,8 @@
 // sent to the model; partials are mode-agnostic — they also serialize in JSON/RPC modes; the
 // deterministic final report is unchanged).
 
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   type CiCheckOutcome,
@@ -34,9 +36,11 @@ import {
   type CiRunOutcome,
   decideCiScope,
   type ObserveChangedFiles,
+  type PersistCheckOutput,
   type RunConfiguredCheck,
   runCiChecks,
 } from "../../../delivery/ci.ts";
+import { atomicWriteFileSync, ensureRunScratch, scratchDir } from "../../../substrate/cache.ts";
 import { registerPerkCommand } from "../../../substrate/command.ts";
 import { type CiCheck, loadPerkConfig } from "../../../substrate/config.ts";
 import { capForModel, DEFAULT_MODEL_VISIBLE_CAP } from "../../../substrate/modelVisible.ts";
@@ -91,7 +95,9 @@ export interface CiResult {
   details: CiReport;
 }
 
-/** Map one executed/skipped feature outcome to the exact wire row (`passed` derived here). */
+/** Map one executed/skipped feature outcome to the exact wire row (`passed` derived here;
+ * the wire field keeps its `scratchPath` name and bytes — mapped from the feature's opaque
+ * `outputPath` — so `run_ci`/`/ci` output and every downstream consumer stay untouched). */
 function toWireCheck(outcome: CiCheckOutcome): CiCheckResult {
   if (outcome.kind === "skipped") {
     return {
@@ -114,7 +120,7 @@ function toWireCheck(outcome: CiCheckOutcome): CiCheckResult {
     exitCode: outcome.exitCode,
     passed: outcome.exitCode === 0,
     shown: outcome.shown,
-    scratchPath: outcome.scratchPath,
+    scratchPath: outcome.outputPath,
     bytesTotal: outcome.bytesTotal,
     bytesShown: outcome.bytesShown,
     truncated: outcome.truncated,
@@ -304,6 +310,30 @@ export function renderCiProse(report: CiReport): string {
   return capForModel(lines.join("\n"), DEFAULT_MODEL_VISIBLE_CAP).shown;
 }
 
+/** Resolve the scratch file for a check's full output (run-scoped when a runId is given). */
+export function ciScratchPath(cwd: string, runId: string | undefined, check: string): string {
+  if (runId) {
+    return join(ensureRunScratch(cwd, runId), `ci-${check}.md`);
+  }
+  const dir = join(scratchDir(cwd), "ci");
+  mkdirSync(dir, { recursive: true });
+  return join(dir, `${check}.md`);
+}
+
+/**
+ * The production `PersistCheckOutput` port: resolve the run-scoped (or unscoped) scratch path
+ * and write atomically — `atomicWriteFileSync` is a synchronous write+rename that returns only
+ * after success or throws, so the returned path IS the verified location (throws propagate to
+ * the feature's per-check failure fold).
+ */
+export function scratchPersistOutput(cwd: string, runId: string | undefined): PersistCheckOutput {
+  return (checkName, output) => {
+    const path = ciScratchPath(cwd, runId, checkName);
+    atomicWriteFileSync(path, output);
+    return path;
+  };
+}
+
 /** Production command runner: `bash -lc <command>`; never throws (spawn failure / killed ⇒ -1). */
 async function piExec(
   pi: ExtensionAPI,
@@ -442,11 +472,12 @@ async function runCiImpl(
     piExec(pi, check.command, { cwd: ctx.cwd, signal: o.signal });
   const observeChangedFiles: ObserveChangedFiles = (o) =>
     changedFiles(ctx.cwd, (cmd, eo) => piExec(pi, cmd, eo), o.signal);
+  const persistOutput = scratchPersistOutput(ctx.cwd, runId);
   const progress = onUpdate ? progressTranslation(onUpdate) : undefined;
   try {
     const outcome = await runCiChecks(
-      { cwd: ctx.cwd, checks, only: opts.check, runId, signal: ctx.signal },
-      { runCheck, observeChangedFiles, onProgress: progress?.sink },
+      { checks, only: opts.check, signal: ctx.signal },
+      { runCheck, persistOutput, observeChangedFiles, onProgress: progress?.sink },
     );
     return wrap(toWire(outcome));
   } finally {
