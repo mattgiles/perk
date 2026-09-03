@@ -45,11 +45,11 @@ import {
   primeAnnotationSurface,
 } from "../pi/v1/providers/annotations.ts";
 import type { ReviewOutcome } from "../pi/v1/review.ts";
+import { openBranchWorkflowSession } from "../session/branchWorkflowSession.ts";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
 import { interceptConsoleError } from "../substrate/consoleCapture.ts";
 import { render } from "../substrate/prompts.ts";
-import { readSessionArtifact } from "../substrate/sessionData.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { type ReportTarget, report } from "../surfaces/report.ts";
@@ -226,8 +226,8 @@ export async function routePlanReviewDecision(
     // still carries the exact bytes the browser reviewed. A mismatch (a concurrent plan_draft
     // write) or a missing/invalid artifact refuses loudly — nothing saved, gate untouched.
     // (Best-effort: it closes the human-scale race; the check-to-save window is accepted.)
-    const current = readSessionArtifact(ctx, PLAN_DRAFT_ARTIFACT);
-    if (current === null || current.content !== draft) {
+    const current = openBranchWorkflowSession(pi, ctx).readArtifact(PLAN_DRAFT_ARTIFACT);
+    if (current.status !== "found" || current.content !== draft) {
       report(
         ctx,
         SCOPE,
@@ -477,8 +477,8 @@ export function registerPlanReviewBrowser(
       }
       // The draft resolve, artifact ONLY: no param tier, no transcript tier (the review-surface
       // law tightened to drafts-only — an approval auto-saves the reviewed bytes).
-      const artifact = readSessionArtifact(ctx, PLAN_DRAFT_ARTIFACT);
-      if (artifact === null || artifact.content.trim().length === 0) {
+      const artifact = openBranchWorkflowSession(pi, ctx).readArtifact(PLAN_DRAFT_ARTIFACT);
+      if (artifact.status !== "found" || artifact.content.trim().length === 0) {
         report(
           ctx,
           SCOPE,

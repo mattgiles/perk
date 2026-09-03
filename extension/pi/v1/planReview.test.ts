@@ -19,11 +19,8 @@ import { GIST_DRAFT_ARTIFACT } from "../../authoring/gist/draft.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "../../authoring/objective/draft.ts";
 import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
 import { PLANNOTATOR_REVIEW_COMMAND } from "../../doors/plannotatorHandoff.ts";
-import {
-  readSessionArtifact,
-  type SessionDataCtx,
-  writeSessionArtifactClassified,
-} from "../../substrate/sessionData.ts";
+import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
@@ -39,15 +36,17 @@ import {
 } from "./planReview.ts";
 import type { PlanReviewUI, ReviewLaunchUI, ReviewOutcome, WaveLaunch } from "./review.ts";
 
-/** The retired production write wrapper, kept as a TEST fixture (plant artifact + pointer). */
+/** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(
-  sink: Parameters<typeof writeSessionArtifactClassified>[0],
-  ctx: Parameters<typeof writeSessionArtifactClassified>[1],
+  sink: EntrySink,
+  ctx: SessionArtifactCtx,
   name: string,
   content: string,
 ): string | null {
-  const result = writeSessionArtifactClassified(sink, ctx, name, content);
-  return result.status === "applied" || result.status === "unchanged" ? result.path : null;
+  const result = openBranchWorkflowSession(sink, ctx).writeArtifact(name, content);
+  return result.status === "applied" || result.status === "unchanged"
+    ? join(ctx.cwd, result.receipt.path)
+    : null;
 }
 
 function selectPlanProvider(cwd: string, id: string): void {
@@ -1441,8 +1440,9 @@ test("chooser: an abort landing during the awaited opener -> aborted, never wave
 // ---------------------------------------------------- the objective wave arm (baseline ordering)
 
 /**
- * Measure how many `getBranch` calls ONE validated artifact read makes (self-adapting to seam
- * refactors) so the ordering pin below can swap the world exactly between the two reads.
+ * Measure how many `getBranch` calls the production baseline prefix makes — the session open
+ * plus ONE validated artifact read (self-adapting to seam refactors) — so the ordering pin
+ * below can swap the world exactly between the baseline read and the validated re-read.
  */
 function measureArtifactReadCalls(): number {
   const cwd = scaffoldRepo();
@@ -1458,8 +1458,13 @@ function measureArtifactReadCalls(): number {
         return branch;
       },
     },
-  } as unknown as SessionDataCtx;
-  assert.ok(readSessionArtifact(countingCtx, OBJECTIVE_DRAFT_ARTIFACT) !== null);
+    hasUI: false,
+    ui: { notify() {} },
+  } as unknown as SessionArtifactCtx;
+  const read = openBranchWorkflowSession(fakeSink(branch), countingCtx).readArtifact(
+    OBJECTIVE_DRAFT_ARTIFACT,
+  );
+  assert.equal(read.status, "found");
   assert.ok(calls > 0, "the read consults the branch");
   return calls;
 }

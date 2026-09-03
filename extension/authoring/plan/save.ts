@@ -10,8 +10,11 @@
 // identity-independent (today's behavior, preserved). Backend saves are not abortable
 // mid-flight (today's behavior — stated, not changed).
 
-import type { WorkflowChangeResult, WorkflowSession } from "../../session/workflowSession.ts";
-import type { PlanRef } from "../../substrate/cache.ts";
+import type {
+  PlanRef,
+  WorkflowChangeResult,
+  WorkflowSession,
+} from "../../session/workflowSession.ts";
 import { resumePlanDraft } from "./draft.ts";
 import { type PlanSource, resolvePlanSource } from "./source.ts";
 

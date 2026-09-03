@@ -147,16 +147,28 @@ export function sessionDataDir(cwd: string, runId: string): string {
   return join(runScratchDir(cwd, runId), "data");
 }
 
+/**
+ * Whether a run id can only select one child of the shared runs directory: non-empty, not
+ * `.`/`..`, and free of `/`, `\`, and NUL. The one run-id trust predicate — the write path
+ * throws through it (`assertSafeRunId`); the read-path identity seam
+ * (`sessionData.activeSessionRunId`) narrows through it so a hostile rebuilt run_id degrades to
+ * no-identity before any path derivation. Legitimate ids (ULID mints, `<parent>.<n>` fork
+ * derivations) all pass.
+ */
+export function isSafeRunId(runId: string): boolean {
+  return (
+    runId.length > 0 &&
+    runId !== "." &&
+    runId !== ".." &&
+    !runId.includes("/") &&
+    !runId.includes("\\") &&
+    !runId.includes("\0")
+  );
+}
+
 /** Reject run ids that could select anything except one child of the shared runs directory. */
 function assertSafeRunId(runId: string): void {
-  if (
-    runId.length === 0 ||
-    runId === "." ||
-    runId === ".." ||
-    runId.includes("/") ||
-    runId.includes("\\") ||
-    runId.includes("\0")
-  ) {
+  if (!isSafeRunId(runId)) {
     throw new Error(`refusing unsafe run id ${JSON.stringify(runId)}`);
   }
 }

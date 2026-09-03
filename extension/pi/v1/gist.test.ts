@@ -17,11 +17,13 @@ import {
   GIST_SAVE_TOOL_GUIDELINES,
 } from "../../authoring/gist/prose.ts";
 import { PLAN_CONTEXT_TYPE } from "../../authoring/plan/prose.ts";
+import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import { soundPointer } from "../../session/workflowSession.ts";
 import { sessionDataDir } from "../../substrate/cache.ts";
 import {
   digestSessionData,
+  type SessionArtifactCtx,
   type SessionDataCtx,
-  writeSessionArtifactClassified,
 } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
@@ -42,15 +44,17 @@ import {
 } from "./gist.ts";
 import type { PlanReviewUI, ReviewOutcome } from "./review.ts";
 
-/** The retired production write wrapper, kept as a TEST fixture (plant artifact + pointer). */
+/** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(
-  sink: Parameters<typeof writeSessionArtifactClassified>[0],
-  ctx: Parameters<typeof writeSessionArtifactClassified>[1],
+  sink: EntrySink,
+  ctx: SessionArtifactCtx,
   name: string,
   content: string,
 ): string | null {
-  const result = writeSessionArtifactClassified(sink, ctx, name, content);
-  return result.status === "applied" || result.status === "unchanged" ? result.path : null;
+  const result = openBranchWorkflowSession(sink, ctx).writeArtifact(name, content);
+  return result.status === "applied" || result.status === "unchanged"
+    ? join(ctx.cwd, result.receipt.path)
+    : null;
 }
 
 const PROSE = "# Faster reviews\n\nWe would likely want review turnaround under a day.\n";
@@ -226,7 +230,7 @@ test("harness: gist_draft succeeds while read-only; artifact + pointer land", as
     );
     assert.match(String(result.content[0]?.text), /Gist draft written → /);
     assert.equal(result.terminate, undefined, "non-terminating by design");
-    const pointer = h.workflowState().session_artifacts?.[GIST_DRAFT_ARTIFACT];
+    const pointer = soundPointer(h.workflowState().session_artifacts?.[GIST_DRAFT_ARTIFACT]);
     assert.equal(pointer?.digest, digestSessionData(content));
 
     // A byte-identical rewrite renders the SAME success bytes (the interior short-circuit is

@@ -6,11 +6,11 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { PlanRef } from "../../substrate/cache.ts";
 import {
   type MemoryWorkflowSession,
   openMemoryWorkflowSession,
-} from "../../session/memoryWorkflowSession.ts";
-import type { PlanRef } from "../../substrate/cache.ts";
+} from "../../testing/memoryWorkflowSession.ts";
 import { revisePlanDraft } from "./draft.ts";
 import {
   type ObjectiveNodeLink,
@@ -61,6 +61,17 @@ function fakeGate(active: boolean): PlanGate & { exits: number } {
     },
   };
   return gate;
+}
+
+/** Capture console.error calls for the duration of `fn` (silences the seam's loud warnings). */
+async function quietly<T>(fn: () => Promise<T> | T): Promise<T> {
+  const original = console.error;
+  console.error = () => {};
+  try {
+    return await fn();
+  } finally {
+    console.error = original;
+  }
 }
 
 function depsFor(
@@ -199,7 +210,9 @@ test("savePlan: linkage arms — unchanged (same ref), rejected and unverified (
 
   const rejected = openMemoryWorkflowSession({ runId: "RID" });
   rejected.failNextApply();
-  const rejectedOutcome = await savePlan({ plan: PLAN }, depsFor(rejected, fakeBackend()));
+  const rejectedOutcome = await quietly(() =>
+    savePlan({ plan: PLAN }, depsFor(rejected, fakeBackend())),
+  );
   assert.equal(
     rejectedOutcome.status === "saved" ? rejectedOutcome.linkage?.status : null,
     "rejected",
@@ -207,7 +220,9 @@ test("savePlan: linkage arms — unchanged (same ref), rejected and unverified (
 
   const unverified = openMemoryWorkflowSession({ runId: "RID" });
   unverified.failNextApplyVerification();
-  const unverifiedOutcome = await savePlan({ plan: PLAN }, depsFor(unverified, fakeBackend()));
+  const unverifiedOutcome = await quietly(() =>
+    savePlan({ plan: PLAN }, depsFor(unverified, fakeBackend())),
+  );
   assert.equal(
     unverifiedOutcome.status === "saved" ? unverifiedOutcome.linkage?.status : null,
     "unverified",
@@ -231,9 +246,11 @@ test("savePlan: claimClear arms — rejected/unverified via the seam knobs (link
     nodeClaim: { objective: "7", node: "1.2" },
   });
   rejected.failNextApply();
-  const rejectedOutcome = await savePlan(
-    { plan: PLAN, objectiveId: "7", nodeId: "1.2" },
-    depsFor(rejected, fakeBackend(savedResult(nodeLink))),
+  const rejectedOutcome = await quietly(() =>
+    savePlan(
+      { plan: PLAN, objectiveId: "7", nodeId: "1.2" },
+      depsFor(rejected, fakeBackend(savedResult(nodeLink))),
+    ),
   );
   assert.equal(
     rejectedOutcome.status === "saved" ? rejectedOutcome.claimClear?.status : null,
@@ -247,9 +264,11 @@ test("savePlan: claimClear arms — rejected/unverified via the seam knobs (link
     nodeClaim: { objective: "7", node: "1.2" },
   });
   unverified.failNextApplyVerification();
-  const unverifiedOutcome = await savePlan(
-    { plan: PLAN, objectiveId: "7", nodeId: "1.2" },
-    depsFor(unverified, fakeBackend(savedResult(nodeLink))),
+  const unverifiedOutcome = await quietly(() =>
+    savePlan(
+      { plan: PLAN, objectiveId: "7", nodeId: "1.2" },
+      depsFor(unverified, fakeBackend(savedResult(nodeLink))),
+    ),
   );
   assert.equal(
     unverifiedOutcome.status === "saved" ? unverifiedOutcome.claimClear?.status : null,

@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openMemoryWorkflowSession } from "../../session/memoryWorkflowSession.ts";
+import { openMemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "./draft.ts";
 import {
   type ObjectiveDraftReviewer,

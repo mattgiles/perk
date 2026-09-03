@@ -30,7 +30,6 @@ import {
   reviewObjectiveDraft,
 } from "../../authoring/objective/review.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
-import { readSessionArtifact } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import {
   type ObjectiveApprovalSaveV1Outcome,
@@ -254,8 +253,8 @@ export async function executeObjectiveReview(
   //    guard refuses the approval — the reverse order would fail open (approve unreviewed
   //    bytes). Raw artifact bytes on purpose: the save-authoritative surface catches
   //    render-invisible changes.
-  const baseline = readSessionArtifact(ctx, OBJECTIVE_DRAFT_ARTIFACT);
   const session = openBranchWorkflowSession(pi, ctx);
+  const baseline = session.readArtifact(OBJECTIVE_DRAFT_ARTIFACT);
   // 3. Backend dispatch (mirrors the plan path): plannotator-selected → the bridge; ANY other
   //    selection → the first-party editor, view-only. The draft resume/render is owned by the
   //    feature op (step 4) — only the wave arm needs the rendered bytes up front.
@@ -267,8 +266,9 @@ export async function executeObjectiveReview(
     // (silently: there is no forced mode to warn about). An unresolvable draft (raw bytes
     // present but invalid) also skips the wave arm — the plain review below reports the
     // no-draft skip through the feature op.
-    const draft = wave?.present() && baseline !== null ? resumeObjectiveDraft(session) : null;
-    if (draft !== null && baseline !== null) {
+    const draft =
+      wave?.present() && baseline.status === "found" ? resumeObjectiveDraft(session) : null;
+    if (draft !== null && baseline.status === "found") {
       const choice = await chooseReviewLaunch(ctx.ui, "Objective", sig);
       if (choice.launch === "aborted") return objectiveReviewOutcomeResult({ status: "aborted" });
       if (choice.launch === "wave") {

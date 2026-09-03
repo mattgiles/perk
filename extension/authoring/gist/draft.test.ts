@@ -2,8 +2,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { MemoryWorkflowSession } from "../../session/memoryWorkflowSession.ts";
-import { openMemoryWorkflowSession } from "../../session/memoryWorkflowSession.ts";
+import type { MemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
+import { openMemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
 import {
   decodeGistDraft,
   encodeGistDraft,
@@ -102,14 +102,15 @@ test("revise: diagnostic precedence — blank prose rejects BEFORE missing ident
   assert.equal(noIdentity.problem, "session has no run_id — cannot write the gist-draft artifact");
 });
 
-test("revise: happy path writes the artifact, pointer digests the encoded bytes", () => {
+test("revise: happy path writes the artifact, receipt digests the encoded bytes", () => {
   const session = memorySession();
   const result = reviseGistDraft({ prose: PROSE, title: "Faster reviews", scope: "plan" }, session);
   assert.equal(result.status, "revised");
   assert.ok(result.status === "revised");
   const content = encodeGistDraft({ prose: PROSE, title: "Faster reviews", scope: "plan" });
   assert.equal(result.bytes, Buffer.byteLength(content, "utf8"));
-  assert.equal(result.pointer.name, GIST_DRAFT_ARTIFACT);
+  assert.equal(result.receipt.path, GIST_DRAFT_ARTIFACT);
+  assert.match(result.receipt.digest, /^sha256:[0-9a-f]{64}$/);
   const read = session.readArtifact(GIST_DRAFT_ARTIFACT);
   assert.equal(read.status === "found" && read.content, content);
 });
@@ -125,7 +126,7 @@ test("revise: a whole-value rewrite replaces everything; identical bytes short-c
   assert.equal(identical.status, "unchanged");
   assert.ok(identical.status === "unchanged");
   assert.ok(rewrite.status === "revised");
-  assert.deepEqual(identical.pointer, rewrite.pointer, "the recorded pointer is returned as-is");
+  assert.deepEqual(identical.receipt, rewrite.receipt, "the re-derived receipt is identical");
   assert.equal(identical.bytes, rewrite.bytes);
 });
 
@@ -143,7 +144,7 @@ test("revise: seam refusal → rejected/write_refused; pointer failure → unver
 
   const orphaned = memorySession();
   orphaned.failNextPointerAppend();
-  const unverified = reviseGistDraft({ prose: PROSE }, orphaned);
+  const unverified = quietly(() => reviseGistDraft({ prose: PROSE }, orphaned));
   assert.equal(unverified.status, "unverified");
   assert.ok(unverified.status === "unverified");
   assert.equal(

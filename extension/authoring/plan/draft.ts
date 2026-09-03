@@ -9,8 +9,7 @@
 // WHOLE-VALUE replacement — full rewrite per call, never a save (`plan_save`/`/plan-save` still
 // persist to GitHub).
 
-import type { WorkflowSession } from "../../session/workflowSession.ts";
-import type { SessionArtifactPointer } from "../../substrate/workflowState.ts";
+import type { SessionArtifactReceipt, WorkflowSession } from "../../session/workflowSession.ts";
 
 /** The fixed working-plan artifact name (NOT `plan.md` — `cache.plan` is a different file). */
 export const PLAN_DRAFT_ARTIFACT = "plan-draft.md";
@@ -23,8 +22,8 @@ export const PLAN_DRAFT_ARTIFACT = "plan-draft.md";
  * message bytes.
  */
 export type RevisePlanDraftResult =
-  | { status: "revised"; pointer: SessionArtifactPointer; bytes: number }
-  | { status: "unchanged"; pointer: SessionArtifactPointer; bytes: number }
+  | { status: "revised"; receipt: SessionArtifactReceipt; bytes: number }
+  | { status: "unchanged"; receipt: SessionArtifactReceipt; bytes: number }
   | { status: "rejected"; reason: "blank_plan" | "no_identity" | "write_refused"; problem: string }
   | { status: "unverified"; problem: string };
 
@@ -33,7 +32,7 @@ export type RevisePlanDraftResult =
  * Diagnostic precedence preserved: a blank plan is refused FIRST, missing identity second (the
  * identity-optional session classifies `runId: null` — an identity-less caller still opens),
  * then the verified artifact write. A byte-identical rewrite short-circuits `unchanged` (the
- * seam's classified cores own the probe). Never throws.
+ * session engine owns the probe). Never throws.
  */
 export function revisePlanDraft(
   input: { plan: string },
@@ -57,9 +56,9 @@ export function revisePlanDraft(
   const written = session.writeArtifact(PLAN_DRAFT_ARTIFACT, input.plan);
   switch (written.status) {
     case "applied":
-      return { status: "revised", pointer: written.pointer, bytes };
+      return { status: "revised", receipt: written.receipt, bytes };
     case "unchanged":
-      return { status: "unchanged", pointer: written.pointer, bytes };
+      return { status: "unchanged", receipt: written.receipt, bytes };
     case "rejected":
       return {
         status: "rejected",

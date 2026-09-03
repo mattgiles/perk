@@ -19,11 +19,13 @@ import { resolveDreamReportGate } from "../../authoring/objective/dreamReportGat
 import { OBJECTIVE_AUTHOR_CONTEXT_TYPE } from "../../authoring/objective/prose.ts";
 import { PLAN_CONTEXT_TYPE } from "../../authoring/plan/prose.ts";
 import { DREAM_REPORT_INPUT_SCHEMA } from "../../learning/dreamReport.ts";
+import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import { soundPointer } from "../../session/workflowSession.ts";
 import { sessionDataDir } from "../../substrate/cache.ts";
 import {
   digestSessionData,
+  type SessionArtifactCtx,
   type SessionDataCtx,
-  writeSessionArtifactClassified,
 } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import {
@@ -52,15 +54,17 @@ import {
   ROADMAP_PARAM_SCHEMA,
 } from "./objectiveAuthoring.ts";
 
-/** The retired production write wrapper, kept as a TEST fixture (plant artifact + pointer). */
+/** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(
-  sink: Parameters<typeof writeSessionArtifactClassified>[0],
-  ctx: Parameters<typeof writeSessionArtifactClassified>[1],
+  sink: EntrySink,
+  ctx: SessionArtifactCtx,
   name: string,
   content: string,
 ): string | null {
-  const result = writeSessionArtifactClassified(sink, ctx, name, content);
-  return result.status === "applied" || result.status === "unchanged" ? result.path : null;
+  const result = openBranchWorkflowSession(sink, ctx).writeArtifact(name, content);
+  return result.status === "applied" || result.status === "unchanged"
+    ? join(ctx.cwd, result.receipt.path)
+    : null;
 }
 
 const CREATE_JSON = JSON.stringify({
@@ -1006,7 +1010,7 @@ test("harness: objective_draft succeeds while read-only; artifact + pointer land
       prose: PROSE,
       roadmap: DRAFT_ROADMAP,
     });
-    const pointer = h.workflowState().session_artifacts?.[OBJECTIVE_DRAFT_ARTIFACT];
+    const pointer = soundPointer(h.workflowState().session_artifacts?.[OBJECTIVE_DRAFT_ARTIFACT]);
     assert.equal(pointer?.digest, digestSessionData(content));
   } finally {
     h.dispose();

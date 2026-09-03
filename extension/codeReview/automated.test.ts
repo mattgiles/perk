@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openMemoryWorkflowSession } from "../session/memoryWorkflowSession.ts";
+import { openMemoryWorkflowSession } from "../testing/memoryWorkflowSession.ts";
 import {
   type AutomatedPost,
   type ChangeReviewer,
@@ -24,6 +24,17 @@ import {
 } from "./automated.ts";
 
 const TARGET = { number: 42, url: "https://github.test/o/r/pull/42" };
+
+/** Silence the strict-append seam's loud stderr report for a deliberately induced failure. */
+async function quietly<T>(fn: () => Promise<T>): Promise<T> {
+  const original = console.error;
+  console.error = () => {};
+  try {
+    return await fn();
+  } finally {
+    console.error = original;
+  }
+}
 
 function okResolver(): ReviewTargetResolver {
   return { resolve: () => Promise.resolve({ ok: true, target: TARGET }) };
@@ -369,7 +380,7 @@ test("the record's session classification is ignored — a rejected append never
   const state: ReviewPassHolder = { current: null };
   const deps = publishDeps(state);
   deps.session.failNextApply();
-  const result = await publishAutomatedReview(post(), deps);
+  const result = await quietly(() => publishAutomatedReview(post(), deps));
   assert.equal(result.kind, "posted", "the seam owns loudness; the post already succeeded");
   assert.equal(deps.session.lastPrReviewRecord(), null);
 });

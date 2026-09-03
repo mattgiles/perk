@@ -17,6 +17,9 @@ export const WORKFLOW_STATE_TYPE = "perk:workflow-state";
  * A session-artifact provenance pointer (contracts §8.3): the session tier's proof
  * that a `scratch/runs/<run_id>/data/` file is current for THIS run. Reads validate the
  * on-disk file against the rebuilt pointer (run_id match + digest match) and refuse otherwise.
+ * This is the PERSISTENCE format only — rebuilt branch data is unvalidated, so consumption
+ * flows through the session engine's exported decode (`session/workflowSession.ts`), which
+ * narrows exactly the fields it validates.
  */
 export interface SessionArtifactPointer {
   run_id: string;
@@ -66,8 +69,13 @@ export interface WorkflowState {
    * Best-effort tier (per-field LWW in `rebuildWorkflowState`, no rebuild change).
    */
   review_posts?: unknown;
-  /** Session-artifact provenance pointers, keyed by artifact name (§8.3). */
-  session_artifacts?: Record<string, SessionArtifactPointer> | null;
+  /**
+   * Session-artifact provenance pointers, keyed by artifact name (§8.3). The persisted wire
+   * shape is `SessionArtifactPointer`, but rebuilt branch data is UNVALIDATED (`rebuildWorkflowState`
+   * trusts entry data) — so the values are `unknown` and consumption goes through the session
+   * engine's exported persisted-pointer decode (`session/workflowSession.ts`), never a cast.
+   */
+  session_artifacts?: Record<string, unknown> | null;
   /**
    * The objective node this session has claimed `planning` (§8.3) — the warm
    * node-link carrier an approval-triggered save recovers from. Written by the `objective_node`

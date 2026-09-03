@@ -530,14 +530,14 @@ export function installObjectiveAuthoringBindings(pi: ExtensionAPI, gating: Tool
           // A byte-identical rewrite short-circuits interior-side; the rendered result is
           // computed from identical content either way, so the surface stays byte-stable.
           return ok(
-            `Objective draft written → ${revised.pointer.path} (${revised.pointer.digest}; ` +
+            `Objective draft written → ${revised.receipt.path} (${revised.receipt.digest}; ` +
               `${revised.roadmapNodes} roadmap nodes)`,
             {
               name: OBJECTIVE_DRAFT_ARTIFACT,
-              path: revised.pointer.path,
-              digest: revised.pointer.digest,
+              path: revised.receipt.path,
+              digest: revised.receipt.digest,
               bytes: revised.bytes,
-              run_id: revised.pointer.run_id,
+              run_id: revised.receipt.runId,
               roadmap_nodes: revised.roadmapNodes,
             },
           );

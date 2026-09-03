@@ -209,6 +209,13 @@ One row per observed use in the feature homes, each re-verified by import inspec
 the stamped commit. Classifications: `migrate-in-2.3` / `allowed-domain-I/O` /
 `owed-by-2.2` / `census correction — no feature-home use`.
 
+> **Fresh stamp (Node 2.2):** the two `owed-by-2.2` rows below are **executed** — re-verified
+> by import inspection in node 2.2's change: the three draft ops now carry results with the
+> session-owned `SessionArtifactReceipt` (imported from `session/workflowSession.ts`; zero
+> `substrate/workflowState.ts` imports remain), and the two `PlanRef` imports ride the
+> `session/workflowSession.ts` re-export (zero feature-home `substrate/cache.ts` `PlanRef`
+> imports remain).
+
 | File | Observed use | Classification | Rationale |
 | --- | --- | --- | --- |
 | `authoring/objective/dreamReportGate.ts` | imports `node:fs` (`existsSync`/`readFileSync`), `substrate/cache.ts::runScratchDir`, `substrate/git.ts::revalidationBracket`, `substrate/sessionData.ts` (`digestSessionData`, `SessionDataCtx`), and `substrate/workflowState.ts` (`branchOf`, `rebuildWorkflowState`, `WorkflowState`) | `migrate-in-2.3` | the full forbidden set — session storage recovered inside a feature home; 2.3 keeps the decision pure behind a runtime-minted narrow capability recovered at the Pi/session edge |
@@ -217,8 +224,8 @@ the stamped commit. Classifications: `migrate-in-2.3` / `allowed-domain-I/O` /
 | `learning/harvest.ts` | `node:fs` `existsSync` as the injectable default (`opts.exists ?? existsSync`) for `stampHarvestReport`'s pointer post-pass | `allowed-domain-I/O` | an injectable existence probe over caller-supplied doc paths; not session-storage mechanics |
 | `learning/dream.ts` | none — zero `node:fs`/file-read usage in the file | `census correction — no feature-home use` | the objective's census item is stale: the manifest/bundle file reads live at the Pi adapter `pi/v1/learning/dream.ts` (`existsSync`/`readFileSync`/`rmSync` — allowed by construction) and in `dreamReportGate.ts` (already classified above) |
 | `learning/dreamAnalysis.ts` | imports `digestSessionData` from `substrate/sessionData.ts` (a pure sha256 helper) | `migrate-in-2.3` | relocate or inject the pure digest helper so `substrate/sessionData.ts` can be module-level denied |
-| `authoring/gist/draft.ts`, `authoring/plan/draft.ts`, `authoring/objective/draft.ts` | type-only `SessionArtifactPointer` imports from `substrate/workflowState.ts` | `owed-by-2.2` | the session-receipt work replaces the exposed substrate pointer shape; explicitly outside 2.3's bucket |
-| `authoring/plan/save.ts`, `learning/prose.ts` | type-only `PlanRef` imports from `substrate/cache.ts` | `owed-by-2.2` | the same session-owned receipt/vocabulary work; explicitly outside 2.3's bucket |
+| `authoring/gist/draft.ts`, `authoring/plan/draft.ts`, `authoring/objective/draft.ts` | type-only `SessionArtifactPointer` imports from `substrate/workflowState.ts` | `owed-by-2.2` — **executed** (see the fresh stamp above) | the session-receipt work replaced the exposed substrate pointer shape (`SessionArtifactReceipt` via `session/workflowSession.ts`); explicitly outside 2.3's bucket |
+| `authoring/plan/save.ts`, `learning/prose.ts` | type-only `PlanRef` imports from `substrate/cache.ts` | `owed-by-2.2` — **executed** (see the fresh stamp above) | the same session-owned receipt/vocabulary work (the `PlanRef` re-export from `session/workflowSession.ts`); explicitly outside 2.3's bucket |
 
 ## Feature modules
 
