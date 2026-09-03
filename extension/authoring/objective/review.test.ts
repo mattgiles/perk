@@ -18,6 +18,7 @@ const PROSE = "# Objective\n\nThe why.\n";
 /** A save-outcome twin richer than the structural shape (proves the generic passthrough). */
 type FakeSaveOutcome =
   | { status: "no-draft" }
+  | { status: "refused-draft"; problem: string }
   | { status: "saved"; rendered: string; gateExited: boolean }
   | { status: "save-failed"; rendered: string; gateExited: false };
 
@@ -76,6 +77,47 @@ test("review: no draft ⇒ noDraft — the reviewer is never consulted", async (
   assert.deepEqual(result, { status: "noDraft" });
   assert.equal(seen.length, 0);
   assert.equal(save.calls(), 0);
+});
+
+test("review: refused draft ⇒ refusedDraft — the reviewer is never consulted", async () => {
+  const session = sessionWithDraft();
+  session.corruptContent(OBJECTIVE_DRAFT_ARTIFACT);
+  const { reviewer, seen } = scriptedReviewer({ status: "approved" });
+  const save = fakeApprovalSave({ status: "no-draft" });
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const result = await reviewObjectiveDraft({
+      session,
+      reviewer,
+      approvalSave: save.approvalSave,
+    });
+    assert.deepEqual(result, {
+      status: "refusedDraft",
+      problem: `session artifact ${OBJECTIVE_DRAFT_ARTIFACT} digest mismatch (rewound or modified)`,
+    });
+  } finally {
+    console.error = quiet;
+  }
+  assert.equal(seen.length, 0, "nothing reviewed");
+  assert.equal(save.calls(), 0, "nothing saved");
+});
+
+test("review: approved ⇒ the widened refused-draft save shape passes through verbatim", async () => {
+  const session = sessionWithDraft();
+  const { reviewer } = scriptedReviewer({ status: "approved", feedback: "f", reviewId: "r2" });
+  const save = fakeApprovalSave({ status: "refused-draft", problem: "corrupted at save time" });
+  const result = await reviewObjectiveDraft({
+    session,
+    reviewer,
+    approvalSave: save.approvalSave,
+  });
+  assert.deepEqual(result, {
+    status: "approvedSave",
+    save: { status: "refused-draft", problem: "corrupted at save time" },
+    feedback: "f",
+    reviewId: "r2",
+  });
 });
 
 test("review: the reviewed bytes are the RENDERED markdown, never the JSON artifact", async () => {

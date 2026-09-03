@@ -228,7 +228,10 @@ test("revise: a gate block stores the tool-written dream_report before prose; re
   const parsed = JSON.parse(storedContent(session) ?? "{}") as Record<string, unknown>;
   assert.deepEqual(Object.keys(parsed), ["schema_version", "dream_report", "prose", "roadmap"]);
   assert.deepEqual(parsed.dream_report, DREAM_BLOCK);
-  assert.deepEqual(resumeObjectiveDraft(session)?.dream_report, DREAM_BLOCK);
+  assert.deepEqual(resumeObjectiveDraft(session), {
+    kind: "valid",
+    draft: { dream_report: DREAM_BLOCK, prose: PROSE, roadmap: [] },
+  });
 });
 
 // --- resumeObjectiveDraft: the refusal matrix ----------------------------------------------------
@@ -240,9 +243,24 @@ function plantedSession(content: string): ReturnType<typeof openMemoryWorkflowSe
   return session;
 }
 
-test("resume: no draft ⇒ null (silent); identity-less session reads absent ⇒ null", () => {
-  assert.equal(resumeObjectiveDraft(openMemoryWorkflowSession({ runId: "RID" })), null);
-  assert.equal(resumeObjectiveDraft(openMemoryWorkflowSession({ runId: null })), null);
+test("resume: no draft ⇒ absent (silent); identity-less session reads absent too", () => {
+  assert.deepEqual(resumeObjectiveDraft(openMemoryWorkflowSession({ runId: "RID" })), {
+    kind: "absent",
+  });
+  assert.deepEqual(resumeObjectiveDraft(openMemoryWorkflowSession({ runId: null })), {
+    kind: "absent",
+  });
+});
+
+test("resume: a seam-invalid artifact ⇒ refused carrying the seam's problem", () => {
+  const session = plantedSession(JSON.stringify({ schema_version: 1, prose: PROSE, roadmap: [] }));
+  session.corruptContent(OBJECTIVE_DRAFT_ARTIFACT);
+  // The seam's own stderr tier still speaks (untouched); the classified arm carries the problem.
+  const { value } = capturingStderr(() => resumeObjectiveDraft(session));
+  assert.deepEqual(value, {
+    kind: "refused",
+    problem: `session artifact ${OBJECTIVE_DRAFT_ARTIFACT} digest mismatch (rewound or modified)`,
+  });
 });
 
 test("resume: happy path round-trips a revise", () => {
@@ -252,9 +270,12 @@ test("resume: happy path round-trips a revise", () => {
     { session, resolveDreamGate: scriptedGate().resolveDreamGate },
   );
   assert.deepEqual(resumeObjectiveDraft(session), {
-    title: "Objective title",
-    prose: PROSE,
-    roadmap: ROADMAP,
+    kind: "valid",
+    draft: {
+      title: "Objective title",
+      prose: PROSE,
+      roadmap: ROADMAP,
+    },
   });
 });
 
@@ -272,40 +293,35 @@ function capturingStderr<T>(fn: () => T): { value: T; lines: string[] } {
   }
 }
 
-test("resume: malformed payloads null with the exact byte-stable warning line", () => {
+test("resume: malformed payloads refuse with the exact byte-stable problem", () => {
   // The diagnostic contract is part of the reader's behavior: each failure names the artifact,
-  // the reason, and the refusal — deleting or misrouting a warning must fail this pin, not
-  // just the null return.
-  for (const [content, expected] of [
-    ["{ not json", "perk: warning: objective-draft.json is not valid JSON — refusing the draft"],
-    [
-      '["an", "array"]\n',
-      "perk: warning: objective-draft.json is not a JSON object — refusing the draft",
-    ],
+  // the reason, and the refusal — now as the classified `refused` arm's problem bytes (the
+  // consuming edge renders them; the decoder no longer writes stderr).
+  for (const [content, problem] of [
+    ["{ not json", "objective-draft.json is not valid JSON — refusing the draft"],
+    ['["an", "array"]\n', "objective-draft.json is not a JSON object — refusing the draft"],
     [
       JSON.stringify({ schema_version: 2, prose: PROSE, roadmap: [] }),
-      "perk: warning: objective-draft.json has an unsupported schema_version (2) — refusing the draft",
+      "objective-draft.json has an unsupported schema_version (2) — refusing the draft",
     ],
     [
       JSON.stringify({ schema_version: "one", prose: PROSE, roadmap: [] }),
-      'perk: warning: objective-draft.json has an unsupported schema_version ("one") — refusing the draft',
+      'objective-draft.json has an unsupported schema_version ("one") — refusing the draft',
     ],
     [
       JSON.stringify({ schema_version: 1, prose: "  \n", roadmap: [] }),
-      "perk: warning: objective-draft.json has no prose — refusing the draft",
+      "objective-draft.json has no prose — refusing the draft",
     ],
     [
       JSON.stringify({ schema_version: 1, roadmap: [] }),
-      "perk: warning: objective-draft.json has no prose — refusing the draft",
+      "objective-draft.json has no prose — refusing the draft",
     ],
   ] as const) {
-    const { value, lines } = capturingStderr(() => resumeObjectiveDraft(plantedSession(content)));
-    assert.equal(value, null, expected);
-    assert.deepEqual(lines, [expected]);
+    assert.deepEqual(resumeObjectiveDraft(plantedSession(content)), { kind: "refused", problem });
   }
 });
 
-test("resume: a malformed dream_report block refuses the WHOLE draft (exact warning + null)", () => {
+test("resume: a malformed dream_report block refuses the WHOLE draft (exact problem)", () => {
   for (const dreamReport of [
     "nope",
     { input: "not-an-object", generated_at: "2026-01-01T00:00:00Z", parts: ["p"] },
@@ -316,13 +332,12 @@ test("resume: a malformed dream_report block refuses the WHOLE draft (exact warn
     const session = plantedSession(
       JSON.stringify({ schema_version: 1, dream_report: dreamReport, prose: PROSE, roadmap: [] }),
     );
-    const { value, lines } = capturingStderr(() => resumeObjectiveDraft(session));
-    assert.equal(value, null, JSON.stringify(dreamReport));
     assert.deepEqual(
-      lines,
-      [
-        "perk: warning: objective-draft.json carries a malformed dream_report block — refusing the draft",
-      ],
+      resumeObjectiveDraft(session),
+      {
+        kind: "refused",
+        problem: "objective-draft.json carries a malformed dream_report block — refusing the draft",
+      },
       JSON.stringify(dreamReport),
     );
   }
@@ -339,7 +354,10 @@ test("resume: junk base/delivery drop to absent; blank title dropped; roadmap de
       roadmap: "nope",
     }),
   );
-  assert.deepEqual(resumeObjectiveDraft(session), { prose: PROSE, roadmap: [] });
+  assert.deepEqual(resumeObjectiveDraft(session), {
+    kind: "valid",
+    draft: { prose: PROSE, roadmap: [] },
+  });
 });
 
 test("resume: valid base/delivery survive the validated read", () => {
@@ -353,10 +371,13 @@ test("resume: valid base/delivery survive the validated read", () => {
     }),
   );
   assert.deepEqual(resumeObjectiveDraft(session), {
-    base: "develop",
-    delivery: "stacked",
-    prose: PROSE,
-    roadmap: [],
+    kind: "valid",
+    draft: {
+      base: "develop",
+      delivery: "stacked",
+      prose: PROSE,
+      roadmap: [],
+    },
   });
 });
 

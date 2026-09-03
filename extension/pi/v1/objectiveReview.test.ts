@@ -253,6 +253,41 @@ test("objective arm: no draft -> skipped/no_objective_draft, no backend invoked"
   assert.match(String(result.content[0]?.text), /write the working objective with objective_draft/);
 });
 
+test("objective arm: a refused draft -> the bad_state soft skip; nothing reviewed, gate untouched", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
+  const ui = fakeUI({});
+  const ctx = headfulCtx(cwd, branch, ui);
+  plantObjectiveDraft(ctx, branch, "{ not json");
+  const bridge = cannedBridge(APPROVED);
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    bridge,
+    stubDeps(pi, ctx),
+    {},
+  );
+  const problem = "objective-draft.json is not valid JSON — refusing the draft";
+  assert.equal(
+    String(result.content[0]?.text),
+    `the working objective draft is invalid: ${problem} — rewrite it with objective_draft, ` +
+      "then call plan_review again.",
+  );
+  assert.deepEqual(result.details, {
+    ok: false,
+    error: problem,
+    error_type: "bad_state",
+    status: "skipped",
+    reason: "objective_draft_refused",
+  });
+  assert.equal(bridge.reviewed.length, 0, "the bridge was never invoked");
+  assert.equal(ui.editors.length, 0, "no first-party dialog opened");
+  assert.equal(gating.exits, 0, "the gate stays untouched");
+});
+
 test("objective-save stage: plan_review routes to the objective arm too (never the plan path)", async () => {
   // Both objective-authoring stages' working draft IS the objective draft (neither carries
   // plan_draft), so the dispatch must never fall through to plan-draft resolution at
@@ -630,6 +665,30 @@ test("approvedObjectiveSaveResult: the defensively-unreachable no-draft arm maps
   assert.equal(details.ok, false);
   assert.equal(details.error, "no objective draft resolved");
   assert.equal(details.error_type, "save_failed");
+  assert.equal(details.saved, false);
+  assert.equal(details.save, null);
+});
+
+test("approvedObjectiveSaveResult: refused-draft -> rewrite + FRESH review, never /objective-save", () => {
+  const result = approvedObjectiveSaveResult(OBJECTIVE_APPROVED_FB, {
+    status: "refused-draft",
+    problem: "objective-draft.json is not valid JSON — refusing the draft",
+  });
+  assert.equal(result.terminate, undefined, "non-terminating");
+  assert.equal(
+    String(result.content[0]?.text),
+    "objective APPROVED by reviewer, but the working draft was invalid at save time " +
+      "(objective-draft.json is not valid JSON — refusing the draft) — NOTHING was saved; the " +
+      "session stays read-only. Rewrite it with objective_draft and request a fresh review — " +
+      "the replacement bytes were never reviewed, so do not use /objective-save to bypass " +
+      "review.\n\nReviewer feedback (implementation guidance — the approved objective was saved " +
+      "verbatim):\nphase 3 can shrink",
+  );
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, false);
+  assert.equal(details.error, "objective-draft.json is not valid JSON — refusing the draft");
+  assert.equal(details.error_type, "bad_state");
+  assert.equal(details.subject, "objective");
   assert.equal(details.saved, false);
   assert.equal(details.save, null);
 });

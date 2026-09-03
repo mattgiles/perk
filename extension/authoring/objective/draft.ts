@@ -14,7 +14,7 @@
 // session, the gate-written `dream_report` block — contracts §8.63) — the structured roadmap
 // rides verbatim (node-shape validation stays with the Python plane at save time, the
 // `parse_structured_roadmap` path). The review surface reads the draft via
-// `resumeObjectiveDraft` (digest-validated, fail-open) and renders markdown via
+// `resumeObjectiveDraft` (digest-validated, classified valid/absent/refused) and renders markdown via
 // `renderObjectiveDraft` (the prose + a roadmap table) — never raw JSON; the
 // approval→`objective_save` orchestration feeds the recovered roadmap back as structured JSON.
 //
@@ -181,24 +181,33 @@ export interface ObjectiveDraft {
   dream_report?: ObjectiveDreamReportBlock;
 }
 
-/**
- * Resume + validate the working-objective draft artifact from the session. Fail-open `null`
- * everywhere (mirroring the seam's loud tier): no pointer/file/digest → `null` (the seam
- * already spoke); malformed JSON, a non-object payload, an unsupported `schema_version`, or
- * blank prose → a stderr warning + `null`. `roadmap` defaults to `[]` when absent/non-array;
- * `title` is kept only when a non-blank string. A present-but-malformed `dream_report` block
- * refuses the WHOLE draft (warn + `null`) — deliberately stricter than the lenient junk→absent
- * handling of `base`/`delivery`, because silently dropping a malformed report is exactly what
- * §8.63 forbids. Never throws.
- */
-export function resumeObjectiveDraft(session: WorkflowSession): ObjectiveDraft | null {
-  const read = session.readArtifact(OBJECTIVE_DRAFT_ARTIFACT);
-  if (read.status !== "found") return null;
+/** The classified resume outcome: a refused draft is a fail-closed STOP at every consumer —
+ * it never takes the no-draft fallbacks' side effects (gate exit, driven turn). */
+export type ResumeObjectiveDraftResult =
+  | { kind: "valid"; draft: ObjectiveDraft }
+  | { kind: "absent" }
+  | { kind: "refused"; problem: string };
 
-  const refuse = (why: string): null => {
-    console.error(`perk: warning: ${OBJECTIVE_DRAFT_ARTIFACT} ${why} — refusing the draft`);
-    return null;
-  };
+/**
+ * Resume + validate the working-objective draft artifact from the session, classified: seam
+ * `absent` → `absent` (the genuine no-draft arm); seam `invalid` → `refused` carrying the
+ * seam's problem (a corrupted artifact is truthfully rendered at the edge — the seam's own
+ * stderr tier is untouched); malformed JSON, a non-object payload, an unsupported
+ * `schema_version`, or blank prose → `refused` with the decoder's problem. `roadmap` defaults
+ * to `[]` when absent/non-array; `title` is kept only when a non-blank string. A
+ * present-but-malformed `dream_report` block refuses the WHOLE draft — deliberately stricter
+ * than the lenient junk→absent handling of `base`/`delivery`, because silently dropping a
+ * malformed report is exactly what §8.63 forbids. Never throws.
+ */
+export function resumeObjectiveDraft(session: WorkflowSession): ResumeObjectiveDraftResult {
+  const read = session.readArtifact(OBJECTIVE_DRAFT_ARTIFACT);
+  if (read.status === "absent") return { kind: "absent" };
+  if (read.status === "invalid") return { kind: "refused", problem: read.problem };
+
+  const refuse = (why: string): { kind: "refused"; problem: string } => ({
+    kind: "refused",
+    problem: `${OBJECTIVE_DRAFT_ARTIFACT} ${why} — refusing the draft`,
+  });
   let parsed: unknown;
   try {
     parsed = JSON.parse(read.content);
@@ -233,12 +242,15 @@ export function resumeObjectiveDraft(session: WorkflowSession): ObjectiveDraft |
     dreamReport = block;
   }
   return {
-    ...(title !== undefined ? { title } : {}),
-    ...(base !== undefined ? { base } : {}),
-    ...(delivery !== undefined ? { delivery } : {}),
-    ...(dreamReport !== undefined ? { dream_report: dreamReport } : {}),
-    prose,
-    roadmap,
+    kind: "valid",
+    draft: {
+      ...(title !== undefined ? { title } : {}),
+      ...(base !== undefined ? { base } : {}),
+      ...(delivery !== undefined ? { delivery } : {}),
+      ...(dreamReport !== undefined ? { dream_report: dreamReport } : {}),
+      prose,
+      roadmap,
+    },
   };
 }
 

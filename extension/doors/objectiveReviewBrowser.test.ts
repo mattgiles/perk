@@ -1089,11 +1089,14 @@ test("/objective-review-browser: an INVALID artifact (malformed JSON) → the re
   try {
     await h.runCommandHandler("objective-review-browser", "");
     assert.ok(
-      h.notifies.some(
-        (n) =>
-          n.includes("invalid") && n.includes("rewrite it with") && n.includes("objective_draft"),
+      h.notifies.some((n) =>
+        n.endsWith(
+          "the working objective draft is invalid: objective-draft.json is not valid JSON — " +
+            "refusing the draft — rewrite it with objective_draft, then re-run " +
+            "/objective-review-browser",
+        ),
       ),
-      "an invalid artifact refuses with the rewrite redirect",
+      `an invalid artifact refuses with the classified problem + rewrite redirect (got ${JSON.stringify(h.notifies)})`,
     );
     assert.equal(injected.length, 0, "nothing injected");
     assert.equal(sink.envelopes.length, 0, "no bridge emitted");

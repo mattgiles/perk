@@ -300,6 +300,18 @@ export async function routeObjectiveReviewDecision(
       (result.content[0]?.text ?? "");
     if (save.status === "saved") {
       report(ctx, SCOPE, "info", "objective APPROVED in the browser — saved");
+    } else if (save.status === "refused-draft") {
+      // Defensively unreachable behind the stale guard (identical raw bytes decode
+      // deterministically), but rendered truthfully: rewrite + a FRESH review — never the
+      // /objective-save failsafe (the composed text carries the same guidance).
+      report(
+        ctx,
+        SCOPE,
+        "error",
+        "objective APPROVED in the browser but the working draft was invalid at save time — " +
+          "NOTHING was saved; rewrite it with objective_draft and request a fresh review",
+        { alsoLog: true },
+      );
     } else {
       // save-failed + the defensively-unreachable no-draft arm: loud, gate left on, the
       // /objective-save manual failsafe named (the composed text carries it too).
@@ -537,21 +549,32 @@ export function registerObjectiveReviewBrowser(
         );
         return;
       }
-      // The validated read (digest-checked, schema-checked; the reader already warned on the
-      // null arm). The micro-window between the raw read above and this re-read is the accepted
-      // check-to-open race — the same posture as the plan door's check-to-save window.
-      const draft = resumeObjectiveDraft(openBranchWorkflowSession(pi, ctx));
-      if (draft === null) {
+      // The validated read (digest-checked, schema-checked), classified. The micro-window
+      // between the raw read above and this re-read is the accepted check-to-open race — the
+      // same posture as the plan door's check-to-save window: `absent` here renders the SAME
+      // absent literal as the raw check above; `refused` carries the classified problem.
+      const resumed = resumeObjectiveDraft(openBranchWorkflowSession(pi, ctx));
+      if (resumed.kind === "absent") {
         report(
           ctx,
           SCOPE,
           "error",
-          "the working objective draft is invalid (malformed artifact) — rewrite it with " +
+          "no working objective draft — write it with objective_draft (prose + the structured " +
+            "roadmap), then re-run /objective-review-browser",
+        );
+        return;
+      }
+      if (resumed.kind === "refused") {
+        report(
+          ctx,
+          SCOPE,
+          "error",
+          `the working objective draft is invalid: ${resumed.problem} — rewrite it with ` +
             "objective_draft, then re-run /objective-review-browser",
         );
         return;
       }
-      const rendered = renderObjectiveDraft(draft);
+      const rendered = renderObjectiveDraft(resumed.draft);
       // The entire trimmed arg string is the optional custom-angle definition (no parse-failure
       // arm — any text is a valid lens definition).
       const custom = (args ?? "").trim();

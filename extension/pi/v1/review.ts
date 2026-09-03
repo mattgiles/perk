@@ -173,6 +173,7 @@ export function subjectReviewOutcomeResult(
  */
 export type SubjectSaveOutcome =
   | { status: "no-source" }
+  | { status: "refused-draft"; problem: string }
   | { status: "saved" | "save-failed"; result: Result<object>; gateExited: boolean };
 
 /**
@@ -187,7 +188,10 @@ export type SubjectSaveOutcome =
  * Edits section was seen but could not be honored — the saved arm gains a loud warning that the
  * plan was saved WITHOUT the reviewer's edits, and details carry `direct_edits_applied: false`.
  * The `no-source` arm is defensively unreachable (the reviewed source is always
- * non-blank) but maps to the save-failed shape rather than throwing.
+ * non-blank) but maps to the save-failed shape rather than throwing. The `refused-draft` arm
+ * is the approval-time race (the artifact corrupted between the review read and the save
+ * re-read): non-terminating, gate untouched, and it directs rewrite + a FRESH review — never
+ * the slash-save failsafe, which would bypass review of the replacement bytes.
  */
 export function approvedSubjectSaveResult(
   subject: ReviewSubject,
@@ -208,6 +212,28 @@ export function approvedSubjectSaveResult(
     ...(opts?.edited === true ? { edited: true } : {}),
     ...(opts?.directEditsFailed === true ? { direct_edits_applied: false } : {}),
   };
+  if (save.status === "refused-draft") {
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `${subject.noun} APPROVED by reviewer, but the working draft was invalid at save ` +
+            `time (${save.problem}) — NOTHING was saved; the session stays read-only. Rewrite ` +
+            `it with ${subject.draftTool} and request a fresh review — the replacement bytes ` +
+            `were never reviewed, so do not use ${subject.failsafeCmd} to bypass review.${feedback}`,
+        },
+      ],
+      details: {
+        ok: false,
+        error: save.problem,
+        error_type: "bad_state",
+        ...base,
+        saved: false,
+        save: null,
+      },
+    };
+  }
   if (save.status === "saved") {
     const saveText = save.result.content[0]?.text ?? "";
     const edited =

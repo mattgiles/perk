@@ -439,6 +439,39 @@ test("command: /gist-save with an explicit title overrides the draft title", asy
   }
 });
 
+test("command: /gist-save with a refused draft → error stop; NO gate exit, NO drive injection", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
+  const bin = fakePerk(cwd, { stdout: CREATE_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  const sent = spyInjections(h);
+  try {
+    const drafted = await h.invokeTool("gist_draft", { prose: PROSE });
+    assert.equal((drafted.details as { ok?: boolean }).ok, true, "the draft landed");
+    // Corrupt the artifact FILE under its intact pointer: the save re-read refuses (digest
+    // mismatch) — the fail-closed stop, never the draft-less drive fallback.
+    writeFileSync(
+      join(cwd, ".perk", "workflow", "scratch", "runs", "01RID", "data", GIST_DRAFT_ARTIFACT),
+      "junk",
+    );
+    await h.invokeCommand("gist-save");
+    assert.ok(
+      h.notifyEvents.some(
+        (e) =>
+          e.severity === "error" &&
+          e.message.endsWith(
+            "the working gist draft is invalid: session artifact gist-draft.json digest " +
+              "mismatch (rewound or modified) — rewrite it with gist_draft, then re-run /gist-save",
+          ),
+      ),
+      `the refused-draft error report (got ${JSON.stringify(h.notifyEvents)})`,
+    );
+    assert.equal(sent.length, 0, "no drive injection on a refused draft");
+    assert.equal(h.workflowState().mode, "read-only", "the gate stays on");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("command: /gist-save without a draft → the legacy drive fallback", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: "/nonexistent" } });
@@ -973,6 +1006,36 @@ test("gist arm: no draft -> skipped/no_gist_draft, no backend invoked", async ()
   assert.match(String(result.content[0]?.text), /write the working gist with gist_draft/);
 });
 
+test("gist arm: a refused draft -> the bad_state soft skip; nothing reviewed, gate untouched", async () => {
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry(GIST_STATE)];
+  const ui = fakeUI({});
+  const ctx = headfulCtx(cwd, branch, ui);
+  plantGistDraft(ctx, branch, "{ not json");
+  const bridge = cannedBridge(APPROVED);
+  const pi = fakeColdDoorPi(branch, { stdout: GIST_JSON });
+  const gating = fakeGating(true);
+  const result = await runGistReviewV1(pi, ctx as unknown as ExtensionContext, gating, bridge);
+  const problem = "gist-draft.json is not valid JSON — refusing the draft";
+  assert.equal(
+    String(result.content[0]?.text),
+    `the working gist draft is invalid: ${problem} — rewrite it with gist_draft, then call ` +
+      "plan_review again.",
+  );
+  assert.deepEqual(result.details, {
+    ok: false,
+    error: problem,
+    error_type: "bad_state",
+    status: "skipped",
+    reason: "gist_draft_refused",
+    subject: "gist",
+  });
+  assert.equal(bridge.reviewed.length, 0, "the bridge was never invoked");
+  assert.equal(ui.editors.length, 0, "no first-party dialog opened");
+  assert.equal(gating.exits, 0, "the gate stays untouched");
+});
+
 test("gist arm: plannotator selected -> the bridge receives the RENDERED markdown", async () => {
   const cwd = scaffoldRepo();
   selectPlanProvider(cwd, "plannotator-plan");
@@ -1162,7 +1225,7 @@ test("gist arm: approved but the cold door fails -> non-terminating, gate stays 
   assert.match(text, /\/gist-save \(the manual failsafe\)/);
 });
 
-test("gist arm: approved but the draft vanished before the save re-read -> the no-source shape", async () => {
+test("gist arm: approved but the draft corrupted before the save re-read -> the refused-draft race", async () => {
   const cwd = scaffoldRepo();
   selectPlanProvider(cwd, "plannotator-plan");
   const branch: unknown[] = [stateEntry(GIST_STATE)];
@@ -1173,7 +1236,8 @@ test("gist arm: approved but the draft vanished before the save re-read -> the n
   const bridge = {
     reviewed: [] as string[],
     async review(plan: string): Promise<ReviewOutcome> {
-      // The draft vanishes between the review read and the save-time re-read.
+      // The draft file vanishes between the review read and the save-time re-read — the seam
+      // classifies the intact pointer + missing file as invalid, so the save re-read refuses.
       bridge.reviewed.push(plan);
       rmSync(drafted);
       return { status: "completed", approved: true, reviewId: "rev-gone" };
@@ -1192,12 +1256,22 @@ test("gist arm: approved but the draft vanished before the save re-read -> the n
   } finally {
     console.error = quiet;
   }
-  assert.equal(result.terminate, undefined);
-  assert.match(String(result.content[0]?.text), /auto-save FAILED \(no gist draft resolved\)/);
+  const problem = "session artifact gist-draft.json has a pointer but no file";
+  assert.equal(result.terminate, undefined, "non-terminating");
+  assert.equal(
+    String(result.content[0]?.text),
+    `gist APPROVED by reviewer, but the working draft was invalid at save time (${problem}) — ` +
+      "NOTHING was saved; the session stays read-only. Rewrite it with gist_draft and request " +
+      "a fresh review — the replacement bytes were never reviewed, so do not use /gist-save to " +
+      "bypass review.",
+  );
   const details = result.details as Record<string, unknown>;
   assert.equal(details.ok, false);
-  assert.equal(details.error, "no gist draft resolved");
+  assert.equal(details.error, problem);
+  assert.equal(details.error_type, "bad_state");
+  assert.equal(details.saved, false);
   assert.equal(details.save, null);
+  assert.equal(details.subject, "gist");
   assert.equal(argvs.length, 0, "the cold door was never invoked");
 });
 

@@ -556,6 +556,34 @@ test("approvedSubjectSaveResult: save-failed -> non-terminating, error surfaced,
   assert.equal((details.save as { ok?: boolean }).ok, false);
 });
 
+test("approvedSubjectSaveResult: refused-draft -> non-terminating, rewrite + FRESH review, never the failsafe", () => {
+  // The approval-time race arm (plan-flavored here; the gist/objective delegators pin their
+  // own composed texts): gate untouched, feedback surfaced, and the guidance is rewrite + a
+  // fresh review — explicitly NOT the slash-save failsafe (unreviewed replacement bytes).
+  const result = approvedSubjectSaveResult(PLAN_SUBJECT, APPROVED_FB, {
+    status: "refused-draft",
+    problem: "the artifact digest mismatched",
+  });
+  assert.equal(result.terminate, undefined);
+  assert.equal(
+    String(result.content[0]?.text),
+    "plan APPROVED by reviewer, but the working draft was invalid at save time (the artifact " +
+      "digest mismatched) — NOTHING was saved; the session stays read-only. Rewrite it with " +
+      "plan_draft and request a fresh review — the replacement bytes were never reviewed, so do " +
+      "not use /plan-save to bypass review.\n\nReviewer feedback (implementation guidance — the " +
+      "approved plan was saved verbatim):\nship it; watch the edge case",
+  );
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, false);
+  assert.equal(details.error, "the artifact digest mismatched");
+  assert.equal(details.error_type, "bad_state");
+  assert.equal(details.status, "completed");
+  assert.equal(details.approved, true);
+  assert.equal(details.feedback, "ship it; watch the edge case");
+  assert.equal(details.saved, false);
+  assert.equal(details.save, null);
+});
+
 test("approvedSubjectSaveResult: the defensively-unreachable no-source arm maps to the failed shape", () => {
   const result = approvedSubjectSaveResult(
     PLAN_SUBJECT,

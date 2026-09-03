@@ -52,18 +52,21 @@ export function encodeGistDraft(draft: {
   return `${JSON.stringify(payload, null, 2)}\n`;
 }
 
+/** The classified decode outcome — `problem` carries the exact refusal bytes for edge rendering. */
+export type DecodeGistDraftResult = { ok: true; draft: GistDraft } | { ok: false; problem: string };
+
 /**
- * Decode + validate working-gist artifact bytes. Fail-open `null` with a stderr warning on
- * malformed JSON, a non-object payload, an unsupported `schema_version`, or blank prose (the
- * same refusal taxonomy + warning strings the reader always had). `title` is kept only when a
- * non-blank string; `scope` only when a member of the enum (an unknown scope degrades to
- * absent, never poisons the draft). Never throws.
+ * Decode + validate working-gist artifact bytes. A CLASSIFIED refusal (never a warn+null
+ * fallback) on malformed JSON, a non-object payload, an unsupported `schema_version`, or blank
+ * prose — the same refusal taxonomy, with the problem bytes rendered by the consuming edge.
+ * `title` is kept only when a non-blank string; `scope` only when a member of the enum (an
+ * unknown scope degrades to absent, never poisons the draft). Never throws.
  */
-export function decodeGistDraft(content: string): GistDraft | null {
-  const refuse = (why: string): null => {
-    console.error(`perk: warning: ${GIST_DRAFT_ARTIFACT} ${why} — refusing the draft`);
-    return null;
-  };
+export function decodeGistDraft(content: string): DecodeGistDraftResult {
+  const refuse = (why: string): { ok: false; problem: string } => ({
+    ok: false,
+    problem: `${GIST_DRAFT_ARTIFACT} ${why} — refusing the draft`,
+  });
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
@@ -88,9 +91,12 @@ export function decodeGistDraft(content: string): GistDraft | null {
       ? (payload.scope as GistScope)
       : undefined;
   return {
-    ...(title !== undefined ? { title } : {}),
-    ...(scope !== undefined ? { scope } : {}),
-    prose,
+    ok: true,
+    draft: {
+      ...(title !== undefined ? { title } : {}),
+      ...(scope !== undefined ? { scope } : {}),
+      prose,
+    },
   };
 }
 
@@ -164,13 +170,24 @@ export function reviseGistDraft(
   }
 }
 
+/** The classified resume outcome: a refused draft is a fail-closed STOP at every consumer —
+ * it never takes the no-draft fallbacks' side effects (gate exit, driven turn). */
+export type ResumeGistDraftResult =
+  | { kind: "valid"; draft: GistDraft }
+  | { kind: "absent" }
+  | { kind: "refused"; problem: string };
+
 /**
- * Resume the working gist draft from the session. Fail-open `null` everywhere: `absent` is the
- * silent no-draft arm; `invalid` was already warned by the seam; a decodable-but-refused payload
- * warns through `decodeGistDraft`'s refusal taxonomy. Never throws.
+ * Resume the working gist draft from the session, classified: seam `absent` → `absent` (the
+ * genuine no-draft arm); seam `invalid` → `refused` carrying the seam's problem (a corrupted
+ * artifact is truthfully rendered at the edge — the seam's own stderr tier is untouched); a
+ * decodable-but-refused payload → `refused` with the decoder's problem. Never throws.
  */
-export function resumeGistDraft(session: WorkflowSession): GistDraft | null {
+export function resumeGistDraft(session: WorkflowSession): ResumeGistDraftResult {
   const read = session.readArtifact(GIST_DRAFT_ARTIFACT);
-  if (read.status !== "found") return null;
-  return decodeGistDraft(read.content);
+  if (read.status === "absent") return { kind: "absent" };
+  if (read.status === "invalid") return { kind: "refused", problem: read.problem };
+  const decoded = decodeGistDraft(read.content);
+  if (!decoded.ok) return { kind: "refused", problem: decoded.problem };
+  return { kind: "valid", draft: decoded.draft };
 }

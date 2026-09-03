@@ -170,9 +170,12 @@ export interface ObjectiveApprovalSaveDeps extends ObjectiveSaveDeps {
   gate: ObjectiveGate;
 }
 
-/** The approval→save orchestration outcome (the objective `ApprovalSaveOutcome`). */
+/** The approval→save orchestration outcome (the objective `ApprovalSaveOutcome`).
+ * `refused-draft` is the fail-closed stop for an invalid artifact: nothing saved, the gate
+ * never touched — distinct from `no-draft` (the genuine draft-less fallback arm). */
 export type ObjectiveApprovalSaveOutcome =
   | { status: "no-draft" }
+  | { status: "refused-draft"; problem: string }
   | {
       status: "saved";
       result: Extract<SaveObjectiveOutcome, { status: "saved" }>;
@@ -192,7 +195,8 @@ export type ObjectiveApprovalSaveOutcome =
  * `dream_report` block passes through whole: stored stamp + stored parts) → `saveObjective` →
  * gate exit ONLY on a successful save while read-only (the D1a pattern: snapshot
  * `gate.isActive()` BEFORE the save; a failed save leaves the gate ON). No draft → `no-draft`
- * (nothing saved, the gate untouched); callers render their own fallback. Title precedence: an
+ * (nothing saved, the gate untouched); a REFUSED draft → `refused-draft` before the gate
+ * snapshot (fail-closed stop — `gateExited` semantics never arise). Title precedence: an
  * explicit `opts.title` wins; else the draft's `title`; else the cold door derives from the
  * prose heading.
  */
@@ -200,8 +204,10 @@ export async function objectiveApprovalSave(
   deps: ObjectiveApprovalSaveDeps,
   opts: { title?: string } = {},
 ): Promise<ObjectiveApprovalSaveOutcome> {
-  const draft = resumeObjectiveDraft(deps.session);
-  if (draft === null) return { status: "no-draft" };
+  const resumed = resumeObjectiveDraft(deps.session);
+  if (resumed.kind === "absent") return { status: "no-draft" };
+  if (resumed.kind === "refused") return { status: "refused-draft", problem: resumed.problem };
+  const draft = resumed.draft;
   // D1a: snapshot the gate BEFORE the save; on success, exit it so save marks the read-only →
   // read-write boundary in one gesture. A failed save leaves the gate on.
   const wasReadOnly = deps.gate.isActive();

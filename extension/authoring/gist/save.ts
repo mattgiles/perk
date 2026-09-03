@@ -74,9 +74,12 @@ export interface GistGate {
   exit(): void;
 }
 
-/** The approval→save orchestration outcome (the gist `ApprovalSaveOutcome`). */
+/** The approval→save orchestration outcome (the gist `ApprovalSaveOutcome`). `refused-draft`
+ * is the fail-closed stop for an invalid artifact: nothing saved, the gate never touched —
+ * distinct from `no-draft` (the genuine draft-less fallback arm). */
 export type GistApprovalSaveOutcome =
   | { status: "no-draft" }
+  | { status: "refused-draft"; problem: string }
   | { status: "saved"; save: Extract<SaveGistOutcome, { status: "saved" }>; gateExited: boolean }
   | {
       status: "save-failed";
@@ -90,7 +93,8 @@ export type GistApprovalSaveOutcome =
  * (`resumeGistDraft` — never the rendered markdown, never in-hand bytes) → `saveGist` → gate
  * exit on a verified successful save while read-only (the D1a pattern: snapshot
  * `gate.isActive()` BEFORE the save; a failed save leaves the gate ON). No draft → `no-draft`
- * (nothing saved, the gate untouched); callers render their own fallback. Title precedence:
+ * (nothing saved, the gate untouched); a REFUSED draft → `refused-draft` before the gate
+ * snapshot (fail-closed stop — `gateExited` semantics never arise). Title precedence:
  * the explicit override (`/gist-save [title]` — a pinned behavior) wins over the draft's; scope
  * is always the draft's.
  */
@@ -98,8 +102,10 @@ export async function gistApprovalSave(
   deps: { session: WorkflowSession; backend: GistBackend; gate: GistGate },
   opts: { title?: string } = {},
 ): Promise<GistApprovalSaveOutcome> {
-  const draft = resumeGistDraft(deps.session);
-  if (draft === null) return { status: "no-draft" };
+  const resumed = resumeGistDraft(deps.session);
+  if (resumed.kind === "absent") return { status: "no-draft" };
+  if (resumed.kind === "refused") return { status: "refused-draft", problem: resumed.problem };
+  const draft = resumed.draft;
   // D1a: snapshot the gate BEFORE the save; on success, exit it so save marks the read-only →
   // read-write boundary in one gesture. A failed save leaves the gate on.
   const wasReadOnly = deps.gate.isActive();

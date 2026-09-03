@@ -367,6 +367,43 @@ test("approvalSave: no draft ⇒ no-draft — nothing saved, the gate untouched"
   assert.equal(gate.isActive(), true);
 });
 
+test("approvalSave: refused draft ⇒ refused-draft BEFORE the gate snapshot; nothing saved", async () => {
+  const session = sessionWithDraft();
+  session.corruptContent(OBJECTIVE_DRAFT_ARTIFACT);
+  const { backend, requests } = fakeBackend();
+  // A probing gate: any isActive() call means the refused arm reached the gate snapshot.
+  let probed = 0;
+  const gate: ObjectiveGate & { exits: number } = {
+    exits: 0,
+    isActive: () => {
+      probed += 1;
+      return true;
+    },
+    exit() {
+      gate.exits += 1;
+    },
+  };
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const outcome = await objectiveApprovalSave({
+      session,
+      backend,
+      resolveDreamGate: scriptedGate().resolveDreamGate,
+      gate,
+    });
+    assert.deepEqual(outcome, {
+      status: "refused-draft",
+      problem: `session artifact ${OBJECTIVE_DRAFT_ARTIFACT} digest mismatch (rewound or modified)`,
+    });
+  } finally {
+    console.error = quiet;
+  }
+  assert.equal(requests.length, 0, "nothing saved");
+  assert.equal(probed, 0, "returned before the gate snapshot");
+  assert.equal(gate.exits, 0, "the gate stays untouched");
+});
+
 test("approvalSave: saved while read-only ⇒ gate exits; draft fields feed the save", async () => {
   const session = sessionWithDraft();
   const gate = fakeGate(true);
