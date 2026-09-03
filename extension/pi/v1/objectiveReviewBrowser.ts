@@ -45,6 +45,11 @@ import {
   OBJECTIVE_DRAFT_ARTIFACT,
   renderObjectiveDraft,
 } from "../../authoring/objective/draft.ts";
+import {
+  clearDraftReviewContext,
+  type DraftReviewWaveState,
+  primeDraftReviewContext,
+} from "../../authoring/review/draftContext.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
 import { registerPerkCommand } from "../../substrate/command.ts";
@@ -53,11 +58,6 @@ import { render } from "../../substrate/prompts.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { type ReportTarget, report } from "../../surfaces/report.ts";
-import {
-  clearDraftReviewContext,
-  type DraftReviewWaveState,
-  primeDraftReviewContext,
-} from "./draftReviewWaveTools.ts";
 import { objectiveApprovalSaveV1 } from "./objectiveAuthoring.ts";
 import { approvedObjectiveSaveResult } from "./objectiveReview.ts";
 import {

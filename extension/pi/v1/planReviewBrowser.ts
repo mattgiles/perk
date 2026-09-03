@@ -37,6 +37,11 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
+import {
+  clearDraftReviewContext,
+  type DraftReviewWaveState,
+  primeDraftReviewContext,
+} from "../../authoring/review/draftContext.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
 import { registerPerkCommand } from "../../substrate/command.ts";
@@ -45,11 +50,6 @@ import { render } from "../../substrate/prompts.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { type ReportTarget, report } from "../../surfaces/report.ts";
-import {
-  clearDraftReviewContext,
-  type DraftReviewWaveState,
-  primeDraftReviewContext,
-} from "./draftReviewWaveTools.ts";
 import { approvalSave } from "./plan.ts";
 import { applyPlannotatorDirectEdits, approvedSaveResult } from "./planReview.ts";
 import {

@@ -7,6 +7,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createDraftReviewWaveState } from "./authoring/review/draftContext.ts";
 import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
 import { installAutomatedReviewBindings } from "./pi/v1/codeReview/automated.ts";
 import { installPrReviewBrowserBindings } from "./pi/v1/codeReview/browser.ts";
@@ -24,10 +25,7 @@ import { installStackRecoverBindings } from "./pi/v1/delivery/stackRecover.ts";
 import { installStackStatusBindings } from "./pi/v1/delivery/stackStatus.ts";
 import { installStackSyncBindings } from "./pi/v1/delivery/stackSync.ts";
 import { installSubmitBindings } from "./pi/v1/delivery/submit.ts";
-import {
-  createDraftReviewWaveState,
-  registerDraftReviewWaveTools,
-} from "./pi/v1/draftReviewWaveTools.ts";
+import { registerDraftReviewWaveTools } from "./pi/v1/draftReviewWaveTools.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installAuditBindings } from "./pi/v1/learning/audit.ts";
 import { installDreamBindings } from "./pi/v1/learning/dream.ts";

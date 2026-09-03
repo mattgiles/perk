@@ -13,6 +13,11 @@ import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
+import {
+  clearDraftReviewContext,
+  createDraftReviewWaveState,
+  primeDraftReviewContext,
+} from "../../authoring/review/draftContext.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import { sessionDataDir } from "../../substrate/cache.ts";
 import {
@@ -33,12 +38,7 @@ import {
 } from "../../testing/harness.ts";
 import { createMemoryWaveAdapter } from "../../testing/memoryAdapter.ts";
 import { reportWaveOver } from "../../waves/reportWave.ts";
-import {
-  clearDraftReviewContext,
-  createDraftReviewWaveState,
-  executeStartDraftReviewWave,
-  primeDraftReviewContext,
-} from "./draftReviewWaveTools.ts";
+import { executeStartDraftReviewWave } from "./draftReviewWaveTools.ts";
 import {
   observePlanReviewReadiness,
   openPlanReviewAndGuide,
