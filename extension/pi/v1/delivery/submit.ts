@@ -24,6 +24,7 @@ import {
   type SubmitChangeOutcome,
   submitChange,
 } from "../../../delivery/submit.ts";
+import { planningStageRefusal } from "../../../session/lifecycleGates.ts";
 import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
 import {
   booleanField,
@@ -45,7 +46,6 @@ import {
   setConflictAttempts,
 } from "../../../substrate/workflowState.ts";
 import { report } from "../../../surfaces/report.ts";
-import { planningStageRefusal } from "../lifecycleGates.ts";
 
 /**
  * A tri-state read of the advisory `mergeable` field: `true`/`false`/`null` pass through;

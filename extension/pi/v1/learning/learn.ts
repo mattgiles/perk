@@ -60,6 +60,7 @@ import {
 } from "../../../learning/capture.ts";
 import { learnGuidance, learnOrchestrateGuidance } from "../../../learning/prose.ts";
 import { decideLearnLaunch } from "../../../learning/routing.ts";
+import { planningStageRefusal } from "../../../session/lifecycleGates.ts";
 import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
 import { clearMarker, hasMarker, PENDING_LEARN } from "../../../substrate/cache.ts";
 import {
@@ -76,7 +77,6 @@ import { arrayParam, paramsOf, stringParam } from "../../../substrate/toolParams
 import { activePlanRef } from "../../../substrate/workflowState.ts";
 import { report } from "../../../surfaces/report.ts";
 import type { ReportWave, ReportWaveAttemptReceipt } from "../../../waves/reportWave.ts";
-import { planningStageRefusal } from "../lifecycleGates.ts";
 
 /** The ok-arm fields. */
 export interface LearnOk {

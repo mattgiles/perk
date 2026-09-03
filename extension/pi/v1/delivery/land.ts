@@ -10,6 +10,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { reconcileGuidance } from "../../../authoring/objective/prose.ts";
+import { planningStageRefusal } from "../../../session/lifecycleGates.ts";
 import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
 import { PENDING_LEARN, setMarker } from "../../../substrate/cache.ts";
 import {
@@ -24,7 +25,6 @@ import {
 import { registerPerkCommand } from "../../../substrate/command.ts";
 import { failFor, ok, type Result } from "../../../substrate/result.ts";
 import { report } from "../../../surfaces/report.ts";
-import { planningStageRefusal } from "../lifecycleGates.ts";
 
 // Learn-consume skip reasons that are ordinary, not failures: non-factory plans carry no
 // `consumed_learn` (`no_consumed_learn`), and a dry run reports `dry_run`. Anything else surfaces.

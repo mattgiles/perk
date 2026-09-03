@@ -23,6 +23,7 @@ import {
 } from "../../../delivery/address.ts";
 import type { PublishedChange } from "../../../delivery/submit.ts";
 import { openBranchWorkflowSession } from "../../../session/branchWorkflowSession.ts";
+import { planningStageRefusal } from "../../../session/lifecycleGates.ts";
 import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
 import type { PlanRef } from "../../../substrate/cache.ts";
 import {
@@ -56,7 +57,6 @@ import {
   REVIEW_CLASSIFIER_FLOW,
   runReviewClassifierWave,
 } from "../../../waves/reviewClassifierWave.ts";
-import { planningStageRefusal } from "../lifecycleGates.ts";
 import { driveConflictFollowUp, publishDepsFor, renderPublishedMessage } from "./submit.ts";
 
 /** The four known `counts` keys (recorded into workflow-state — strict-decoded). */
