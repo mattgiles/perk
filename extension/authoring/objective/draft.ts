@@ -192,25 +192,37 @@ export type ResumeObjectiveDraftResult =
  * Resume + validate the working-objective draft artifact from the session, classified: seam
  * `absent` → `absent` (the genuine no-draft arm); seam `invalid` → `refused` carrying the
  * seam's problem (a corrupted artifact is truthfully rendered at the edge — the seam's own
- * stderr tier is untouched); malformed JSON, a non-object payload, an unsupported
- * `schema_version`, or blank prose → `refused` with the decoder's problem. `roadmap` defaults
- * to `[]` when absent/non-array; `title` is kept only when a non-blank string. A
- * present-but-malformed `dream_report` block refuses the WHOLE draft — deliberately stricter
- * than the lenient junk→absent handling of `base`/`delivery`, because silently dropping a
- * malformed report is exactly what §8.63 forbids. Never throws.
+ * stderr tier is untouched); decoder refusals (`decodeObjectiveDraft`) pass through. Never
+ * throws.
  */
 export function resumeObjectiveDraft(session: WorkflowSession): ResumeObjectiveDraftResult {
   const read = session.readArtifact(OBJECTIVE_DRAFT_ARTIFACT);
   if (read.status === "absent") return { kind: "absent" };
   if (read.status === "invalid") return { kind: "refused", problem: read.problem };
+  return decodeObjectiveDraft(read.content);
+}
 
+/**
+ * Decode + validate working-objective artifact bytes (the content half of
+ * `resumeObjectiveDraft`, for consumers that already hold the seam-validated bytes — e.g. the
+ * browser door, whose stale-guard baseline and decode input must be the SAME read): malformed
+ * JSON, a non-object payload, an unsupported `schema_version`, or blank prose → `refused`
+ * with the decoder's problem. `roadmap` defaults to `[]` when absent/non-array; `title` is
+ * kept only when a non-blank string. A present-but-malformed `dream_report` block refuses the
+ * WHOLE draft — deliberately stricter than the lenient junk→absent handling of
+ * `base`/`delivery`, because silently dropping a malformed report is exactly what §8.63
+ * forbids. Never throws.
+ */
+export function decodeObjectiveDraft(
+  content: string,
+): Exclude<ResumeObjectiveDraftResult, { kind: "absent" }> {
   const refuse = (why: string): { kind: "refused"; problem: string } => ({
     kind: "refused",
     problem: `${OBJECTIVE_DRAFT_ARTIFACT} ${why} — refusing the draft`,
   });
   let parsed: unknown;
   try {
-    parsed = JSON.parse(read.content);
+    parsed = JSON.parse(content);
   } catch {
     return refuse("is not valid JSON");
   }

@@ -174,13 +174,13 @@ export interface LearnAnalystReport {
  * Decode one lane's engine-validated structured report at the trust boundary (the
  * `stampHarvestReport` pattern): whitelist construction field-by-field — never a spread — with
  * `angle` set from the validated assignment KEY, so a report can never re-attribute itself.
- * The observable detail taxonomy is exactly three byte-shapes: the angle-contradiction arm (a
+ * The observable detail taxonomy is exactly two byte-shapes: the angle-contradiction arm (a
  * schema-valid report whose echoed angle names a DIFFERENT lane — unattributable content,
- * never salvaged), the defensive unknown-key arm, and ONE stable generic vocabulary detail for
- * everything else (no per-field diagnostics — schema enforcement is upstream, engine-validated;
- * this decoder is a boundary, not a linter). The defensive arms (unknown key, non-record
- * report) are unreachable on the production path: `ReportWave.normalizeAssignments` filters
- * non-object reports and unknown aggregate keys first.
+ * never salvaged) and ONE stable generic vocabulary detail for everything else (no per-field
+ * diagnostics — schema enforcement is upstream, engine-validated; this decoder is a boundary,
+ * not a linter). The defensive narrowings (a non-angle key, a non-record report) are
+ * unreachable on the production path — `ReportWave.normalizeAssignments` filters non-object
+ * reports and unknown aggregate keys first — so they fold into the generic detail.
  */
 export function decodeLearnAnalystReport(
   key: string,
@@ -190,9 +190,7 @@ export function decodeLearnAnalystReport(
     ok: false as const,
     detail: `analyst report for lane '${key}' is outside the report schema vocabulary`,
   };
-  if (!isLearnAngle(key)) {
-    return { ok: false, detail: `analyst lane key '${key}' is not a learn angle` };
-  }
+  if (!isLearnAngle(key)) return generic;
   if (typeof report !== "object" || report === null || Array.isArray(report)) return generic;
   const raw = report as Record<string, unknown>;
   const angle = raw.angle;

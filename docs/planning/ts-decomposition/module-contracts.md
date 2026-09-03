@@ -232,9 +232,12 @@ the stamped commit. Classifications: `migrate-in-2.3` / `allowed-domain-I/O` /
 > `substrate/sessionData.ts`). The allowed rows are kept. **Rule H is live**
 > (`extension/importDirectionGuard.test.ts`): the storage-free homes × the storage interior
 > over the resolved-edge map, empty allowlist, per-home anti-vacuity floor, control-14
-> mutation fixtures. Noted strengthening: `substrate/cache.ts` is enforced MODULE-LEVEL — a
+> mutation fixtures. Noted strengthenings: `substrate/cache.ts` is enforced MODULE-LEVEL — a
 > conservative superset of the pinned run-scratch export surface (pure cache vocabulary rides
-> `session/workflowSession.ts` re-exports, the 2.2 precedent).
+> `session/workflowSession.ts` re-exports, the 2.2 precedent) — and the guarded interior also
+> covers `session/branchWorkflowSession.ts`, the concrete branch/file session adapter (a
+> feature importing it could open storage itself; the abstract `session/workflowSession.ts`
+> seam stays importable).
 
 | File | Observed use | Classification | Rationale |
 | --- | --- | --- | --- |

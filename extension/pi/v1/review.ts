@@ -203,6 +203,11 @@ export function approvedSubjectSaveResult(
     ? `\n\nReviewer feedback (implementation guidance — the approved ${subject.noun} was saved ` +
       `verbatim):\n${outcome.feedback}`
     : "";
+  // The refused-draft arm saved NOTHING — the saved-verbatim preamble would contradict it, so
+  // its feedback rides a rewrite-directed label instead.
+  const refusedFeedback = outcome.feedback
+    ? `\n\nReviewer feedback (fold it into the rewritten draft — nothing was saved):\n${outcome.feedback}`
+    : "";
   const base = {
     status: "completed",
     approved: true,
@@ -221,7 +226,7 @@ export function approvedSubjectSaveResult(
             `${subject.noun} APPROVED by reviewer, but the working draft was invalid at save ` +
             `time (${save.problem}) — NOTHING was saved; the session stays read-only. Rewrite ` +
             `it with ${subject.draftTool} and request a fresh review — the replacement bytes ` +
-            `were never reviewed, so do not use ${subject.failsafeCmd} to bypass review.${feedback}`,
+            `were never reviewed, so do not use ${subject.failsafeCmd} to bypass review.${refusedFeedback}`,
         },
       ],
       details: {

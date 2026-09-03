@@ -570,8 +570,8 @@ test("approvedSubjectSaveResult: refused-draft -> non-terminating, rewrite + FRE
     "plan APPROVED by reviewer, but the working draft was invalid at save time (the artifact " +
       "digest mismatched) — NOTHING was saved; the session stays read-only. Rewrite it with " +
       "plan_draft and request a fresh review — the replacement bytes were never reviewed, so do " +
-      "not use /plan-save to bypass review.\n\nReviewer feedback (implementation guidance — the " +
-      "approved plan was saved verbatim):\nship it; watch the edge case",
+      "not use /plan-save to bypass review.\n\nReviewer feedback (fold it into the rewritten " +
+      "draft — nothing was saved):\nship it; watch the edge case",
   );
   const details = result.details as Record<string, unknown>;
   assert.equal(details.ok, false);

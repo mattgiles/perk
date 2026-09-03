@@ -186,7 +186,9 @@ The full producer→consumer recipe, composed from the rules proven above and in
    broken-promise (missing file / digest mismatch) → the `invalid{problem}` arm (+ the seam's
    stderr warn); draft-less fallbacks key off `absent` only.
 5. **GC**: artifacts are prunable (`src/perk/state/gc.py`); pruned runs leave dangling pointers **by
-   design** — consumers must tolerate `null` forever.
+   design** — a later same-run read classifies `invalid` (pointer-but-no-file); every other run
+   reads `absent` (run_id mismatch). Consumers must tolerate both forever — a prune is never an
+   anomaly to repair.
 6. **Guards + registry**: manual `scratch`/`runs` path construction trips
    `extension/cacheGuard.test.ts` / `tests/test_cache_guard.py` — go through the seam; if a stage
    owns the artifact, declare `cache.session-data` in its registry `writes` (vocabulary keys land
@@ -238,9 +240,11 @@ Key policies:
   fork children) → terminal-stage rule (requires a *consumed* handoff; unreadable handoff ⇒ never
   terminal-pruned, age rule only) → age rule (ULID self-date, `st_mtime` fallback for non-ULID
   names). **Never delete on a guess** — mirrors `worktree wipe`'s skip-on-uncertainty posture.
-- **Pruned runs leave dangling provenance pointers by design**: the accessor seams degrade absent
-  files to `None`/`null` by contract, so no pointer cleanup exists — check contracts §8.1 before
-  "fixing" this.
+- **Pruned runs leave dangling provenance pointers by design**: no pointer cleanup exists by
+  contract — the raw accessors (Python `perk/state/cache.py`, TS `readSessionData`) degrade a
+  missing file to `None`/`null`, and the TS `WorkflowSession.readArtifact` seam classifies the
+  dangling pointer `invalid{problem}` (consumers tolerate both forever) — check contracts §8.1
+  before "fixing" this.
 - `DEFAULT_MAX_AGE_DAYS` is a module constant pinned in §8.1; a `[gc]` config table was
   deliberately deferred as premature.
 - The result-envelope helpers (`fail`/`emit`/`EXIT_FOR_TYPE`) live once in `src/perk/cli/emit.py`, a

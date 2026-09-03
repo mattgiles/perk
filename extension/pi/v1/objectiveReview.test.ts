@@ -22,7 +22,7 @@ import {
 } from "./objectiveReview.ts";
 import { planSaveDepsFor } from "./plan.ts";
 import { executePlanReview, type PlanReviewV1Deps } from "./planReview.ts";
-import type { PlanReviewUI, ReviewOutcome } from "./review.ts";
+import type { PlanReviewUI, ReviewOutcome, WaveLaunch } from "./review.ts";
 
 /** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(
@@ -283,6 +283,54 @@ test("objective arm: a refused draft -> the bad_state soft skip; nothing reviewe
     status: "skipped",
     reason: "objective_draft_refused",
   });
+  assert.equal(bridge.reviewed.length, 0, "the bridge was never invoked");
+  assert.equal(ui.editors.length, 0, "no first-party dialog opened");
+  assert.equal(gating.exits, 0, "the gate stays untouched");
+});
+
+test("objective arm: wave present + a refused draft -> classification FIRST; no chooser, no wave, no bridge, gate untouched", async () => {
+  // The launch chooser and the wave opener must never run over a corrupt draft: the classified
+  // resume happens before any wave-arm activity, and the ONE bad_state soft skip renders.
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
+  const ui = fakeUI({ select: ["Browser review + reviewer wave"] }); // scripted, must stay unconsumed
+  const ctx = headfulCtx(cwd, branch, ui);
+  plantObjectiveDraft(ctx, branch, "{ not json");
+  const bridge = cannedBridge(APPROVED);
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const gating = fakeGating(true);
+  const objectiveCalls: unknown[] = [];
+  const wave: WaveLaunch = {
+    present: () => true,
+    async plan() {
+      throw new Error("the plan opener must never run on the objective arm");
+    },
+    async objective(_ctx: ExtensionContext, o: unknown) {
+      objectiveCalls.push(o);
+      return "OBJECTIVE WAVE GUIDANCE";
+    },
+  } as WaveLaunch;
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    bridge,
+    stubDeps(pi, ctx),
+    {},
+    undefined,
+    wave,
+  );
+  const problem = "objective-draft.json is not valid JSON — refusing the draft";
+  assert.deepEqual(result.details, {
+    ok: false,
+    error: problem,
+    error_type: "bad_state",
+    status: "skipped",
+    reason: "objective_draft_refused",
+  });
+  assert.equal(ui.selects.length, 0, "the launch chooser never opened");
+  assert.equal(objectiveCalls.length, 0, "the wave opener never ran");
   assert.equal(bridge.reviewed.length, 0, "the bridge was never invoked");
   assert.equal(ui.editors.length, 0, "no first-party dialog opened");
   assert.equal(gating.exits, 0, "the gate stays untouched");
@@ -681,8 +729,8 @@ test("approvedObjectiveSaveResult: refused-draft -> rewrite + FRESH review, neve
       "(objective-draft.json is not valid JSON — refusing the draft) — NOTHING was saved; the " +
       "session stays read-only. Rewrite it with objective_draft and request a fresh review — " +
       "the replacement bytes were never reviewed, so do not use /objective-save to bypass " +
-      "review.\n\nReviewer feedback (implementation guidance — the approved objective was saved " +
-      "verbatim):\nphase 3 can shrink",
+      "review.\n\nReviewer feedback (fold it into the rewritten draft — nothing was saved):\n" +
+      "phase 3 can shrink",
   );
   const details = result.details as Record<string, unknown>;
   assert.equal(details.ok, false);

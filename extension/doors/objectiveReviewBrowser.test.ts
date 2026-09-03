@@ -1052,12 +1052,66 @@ test("/objective-review-browser: no working draft → the objective_draft redire
   }
 });
 
+test("/objective-review-browser: a SEAM-invalid artifact (pointer, no file) → the classified rewrite refusal, never the absent arm", async () => {
+  const cwd = scaffoldRepo();
+  const runId = "01RIDGONEOBJ";
+  // Plant a session whose workflow state carries a pointer to a file that does NOT exist — the
+  // seam's readArtifact classifies `invalid` (corruption), which must NOT be collapsed into the
+  // no-draft message: the door surfaces the seam problem + the rewrite redirect.
+  const dataDir = sessionDataDir(cwd, runId);
+  const file = plantSession(cwd, [
+    {
+      run_id: runId,
+      mode: "read-only",
+      stage: "objective-author",
+      session_artifacts: {
+        [OBJECTIVE_DRAFT_ARTIFACT]: {
+          run_id: runId,
+          name: OBJECTIVE_DRAFT_ARTIFACT,
+          path: join(dataDir, OBJECTIVE_DRAFT_ARTIFACT),
+          digest: digestSessionData("never written"),
+          at: new Date().toISOString(),
+        },
+      },
+    },
+  ]);
+  const sink = newSink();
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+    extraExtensions: [fakePlannotator(sink)],
+  });
+  const injected = spyInjections(h);
+  try {
+    await h.runCommandHandler("objective-review-browser", "");
+    assert.ok(
+      h.notifies.some((n) =>
+        n.endsWith(
+          "the working objective draft is invalid: session artifact objective-draft.json has a " +
+            "pointer but no file — rewrite it with objective_draft, then re-run " +
+            "/objective-review-browser",
+        ),
+      ),
+      `a seam-invalid artifact refuses with the classified problem, not the absent message (got ${JSON.stringify(h.notifies)})`,
+    );
+    assert.ok(
+      !h.notifies.some((n) => n.includes("no working objective draft")),
+      "the absent arm never fires for seam corruption",
+    );
+    assert.equal(injected.length, 0, "nothing injected");
+    assert.equal(sink.envelopes.length, 0, "no bridge emitted");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("/objective-review-browser: an INVALID artifact (malformed JSON) → the rewrite refusal", async () => {
   const cwd = scaffoldRepo();
   const invalid = "not json at all\n";
   const runId = "01RIDBADOBJ";
   // Plant a session whose workflow state carries a VALID pointer to malformed artifact bytes —
-  // the seam's readArtifact succeeds (non-blank, digest ok) but readObjectiveDraft refuses.
+  // the seam's readArtifact succeeds (non-blank, digest ok) but decodeObjectiveDraft refuses.
   const dataDir = sessionDataDir(cwd, runId);
   const { mkdirSync } = await import("node:fs");
   mkdirSync(dataDir, { recursive: true });

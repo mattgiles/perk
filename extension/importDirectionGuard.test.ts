@@ -76,7 +76,10 @@
 //      `delivery/`, `learning/` — NOT `session/`, the session engine legitimately owns these
 //      imports; NOT `doors/`, which node 3.1 deletes) have NO edge — type-only edges count —
 //      into the storage-interior modules (`substrate/workflowState.ts`,
-//      `substrate/sessionData.ts`, `substrate/cache.ts`, `substrate/git.ts`); the allowlist is
+//      `substrate/sessionData.ts`, `substrate/cache.ts`, `substrate/git.ts`, plus
+//      `session/branchWorkflowSession.ts` — the concrete branch/file adapter that would
+//      otherwise let a feature open storage itself; the abstract `session/workflowSession.ts`
+//      seam stays importable); the allowlist is
 //      EMPTY. Module-level bans on the resolved-edge map (exact module paths as `startsWith`
 //      target prefixes — safe: no production path extends another's filename). The cache.ts
 //      denial is deliberately module-level — a conservative superset of the census's pinned
@@ -180,12 +183,17 @@ const STORAGE_FREE_HOMES = ["authoring/", "codeReview/", "delivery/", "learning/
  * `checkDirection` target prefixes (safe: `startsWith` on a full `x.ts` path matches only that
  * module; no production path extends another's filename). `substrate/cache.ts` is banned
  * module-level on purpose — a conservative superset of the pinned run-scratch surface.
+ * `session/branchWorkflowSession.ts` is the concrete branch/file session adapter: importing it
+ * would let a feature open storage itself, defeating the edge-owned composition — features
+ * take the abstract `WorkflowSession` (the `session/workflowSession.ts` engine, which stays
+ * importable) as a parameter instead.
  */
 const STORAGE_INTERIOR = [
   "substrate/workflowState.ts",
   "substrate/sessionData.ts",
   "substrate/cache.ts",
   "substrate/git.ts",
+  "session/branchWorkflowSession.ts",
 ];
 
 /**
@@ -1287,14 +1295,21 @@ test("control 13: Rule G mutation fixtures (interior edge; supplier floor; token
 });
 
 test("control 14: Rule H mutation fixtures", () => {
-  // One violating edge per banned interior module, from four distinct feature-home sources,
-  // threaded through checkDirection with the REAL constants — every interior module bites.
+  // ONE edge map through checkDirection with the REAL constants: one violating edge per banned
+  // interior module (every interior module bites, the concrete session adapter included) mixed
+  // with never-flagged edges — a clean substrate module from a feature home, the abstract
+  // session engine from a feature home, and interior imports from sources OUTSIDE the
+  // storage-free homes (the session engine owns them; the Pi adapter is the production wiring
+  // site). Exactly the banned edges surface.
   const flagged = checkDirection(
     new Map([
-      ["authoring/x.ts", ["substrate/workflowState.ts"]],
+      ["authoring/x.ts", ["substrate/workflowState.ts", "substrate/config.ts"]],
       ["codeReview/x.ts", ["substrate/sessionData.ts"]],
       ["delivery/x.ts", ["substrate/cache.ts"]],
-      ["learning/x.ts", ["substrate/git.ts"]],
+      ["learning/x.ts", ["substrate/git.ts", "session/workflowSession.ts"]],
+      ["authoring/y.ts", ["session/branchWorkflowSession.ts"]],
+      ["session/x.ts", ["substrate/sessionData.ts"]],
+      ["pi/v1/x.ts", ["substrate/cache.ts"]],
     ]),
     STORAGE_FREE_HOMES,
     STORAGE_INTERIOR,
@@ -1305,31 +1320,6 @@ test("control 14: Rule H mutation fixtures", () => {
     { from: "codeReview/x.ts", to: "substrate/sessionData.ts" },
     { from: "delivery/x.ts", to: "substrate/cache.ts" },
     { from: "learning/x.ts", to: "substrate/git.ts" },
+    { from: "authoring/y.ts", to: "session/branchWorkflowSession.ts" },
   ]);
-
-  // A clean substrate edge from a feature home is never flagged (only the interior is banned).
-  const clean = checkDirection(
-    new Map([["authoring/x.ts", ["substrate/config.ts"]]]),
-    STORAGE_FREE_HOMES,
-    STORAGE_INTERIOR,
-    [],
-  );
-  assert.deepEqual(clean.violations, [], "substrate/config.ts is not storage interior");
-
-  // Sources OUTSIDE the storage-free homes are never flagged: the session engine owns these
-  // imports, and the Pi adapter is the production wiring site.
-  const sessionSource = checkDirection(
-    new Map([["session/x.ts", ["substrate/sessionData.ts"]]]),
-    STORAGE_FREE_HOMES,
-    STORAGE_INTERIOR,
-    [],
-  );
-  assert.deepEqual(sessionSource.violations, [], "session/ is outside the storage-free homes");
-  const adapterSource = checkDirection(
-    new Map([["pi/v1/x.ts", ["substrate/cache.ts"]]]),
-    STORAGE_FREE_HOMES,
-    STORAGE_INTERIOR,
-    [],
-  );
-  assert.deepEqual(adapterSource.violations, [], "pi/ is outside the storage-free homes");
 });

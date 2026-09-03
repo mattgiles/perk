@@ -16,7 +16,7 @@
 // never run on this path.
 //
 // ARTIFACT-FIRST, DRAFTS ONLY: the reviewed bytes are the RENDERED validated
-// `objective-draft.json` artifact (`resumeObjectiveDraft` + `renderObjectiveDraft`) — no param
+// `objective-draft.json` artifact (one seam read + `decodeObjectiveDraft` + `renderObjectiveDraft`) — no param
 // tier, no transcript tier, never raw JSON (the review-surface law; JSON is storage only).
 // Stage-gated to the two registry stages whose STAGE_TOOLS carry `objective_draft`
 // ({objective-author, objective-save}); anything else refuses loudly.
@@ -41,9 +41,9 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
+  decodeObjectiveDraft,
   OBJECTIVE_DRAFT_ARTIFACT,
   renderObjectiveDraft,
-  resumeObjectiveDraft,
 } from "../authoring/objective/draft.ts";
 import { objectiveApprovalSaveV1 } from "../pi/v1/objectiveAuthoring.ts";
 import { approvedObjectiveSaveResult } from "../pi/v1/objectiveReview.ts";
@@ -536,9 +536,23 @@ export function registerObjectiveReviewBrowser(
         return;
       }
       // The draft resolve, artifact ONLY: no param tier, no transcript tier (the review-surface
-      // law tightened to drafts-only — an approval auto-saves the reviewed bytes). The raw
-      // artifact bytes are kept as the stale guard's baseline (the save-authoritative surface).
+      // law tightened to drafts-only — an approval auto-saves the reviewed bytes). ONE
+      // seam-validated read (digest-checked): its bytes are BOTH the decode input and the stale
+      // guard's baseline (the save-authoritative surface), so there is no check-to-open window
+      // between what was validated and what the approval compares against.
       const artifact = openBranchWorkflowSession(pi, ctx).readArtifact(OBJECTIVE_DRAFT_ARTIFACT);
+      if (artifact.status === "invalid") {
+        // Seam-level corruption (pointer-without-file, digest mismatch) is NOT absence — the
+        // classified problem + rewrite guidance surface here, mirroring the decode arm below.
+        report(
+          ctx,
+          SCOPE,
+          "error",
+          `the working objective draft is invalid: ${artifact.problem} — rewrite it with ` +
+            "objective_draft, then re-run /objective-review-browser",
+        );
+        return;
+      }
       if (artifact.status !== "found" || artifact.content.trim().length === 0) {
         report(
           ctx,
@@ -549,21 +563,8 @@ export function registerObjectiveReviewBrowser(
         );
         return;
       }
-      // The validated read (digest-checked, schema-checked), classified. The micro-window
-      // between the raw read above and this re-read is the accepted check-to-open race — the
-      // same posture as the plan door's check-to-save window: `absent` here renders the SAME
-      // absent literal as the raw check above; `refused` carries the classified problem.
-      const resumed = resumeObjectiveDraft(openBranchWorkflowSession(pi, ctx));
-      if (resumed.kind === "absent") {
-        report(
-          ctx,
-          SCOPE,
-          "error",
-          "no working objective draft — write it with objective_draft (prose + the structured " +
-            "roadmap), then re-run /objective-review-browser",
-        );
-        return;
-      }
+      // Decode the SAME bytes (schema-checked), classified: `refused` carries the problem.
+      const resumed = decodeObjectiveDraft(artifact.content);
       if (resumed.kind === "refused") {
         report(
           ctx,

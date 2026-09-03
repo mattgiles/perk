@@ -95,14 +95,6 @@ test("decodeLearnAnalystReport: a schema-valid report echoing a DIFFERENT angle 
   });
 });
 
-test("decodeLearnAnalystReport: the defensive unknown-key arm (unreachable in production)", () => {
-  const decoded = decodeLearnAnalystReport("not-an-angle", analystReport("session-deviations"));
-  assert.deepEqual(decoded, {
-    ok: false,
-    detail: "analyst lane key 'not-an-angle' is not a learn angle",
-  });
-});
-
 test("decodeLearnAnalystReport: everything else → the ONE stable generic vocabulary detail", () => {
   const generic = {
     ok: false,

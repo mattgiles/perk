@@ -212,6 +212,20 @@ test("boundary: recovery failure arms are bad_state with named details", () => {
       detail: /dream manifest unreadable/,
     },
     {
+      // JSON-valid but schema-invalid: JSON.parse succeeds, `decodeDreamManifest` refuses — the
+      // adapter's invalid-manifest mapping, distinct from the unreadable (parse-failure) arm.
+      label: "schema-invalid manifest (parseable)",
+      plant: () => {
+        const planted = plantGate();
+        const sha = dreamRepoCommitSha(planted.cwd);
+        const invalid = dreamRawManifest(sha);
+        invalid.doc_count = -1;
+        writeFileSync(manifestPath(planted.cwd), `${JSON.stringify(invalid, null, 2)}\n`);
+        return planted;
+      },
+      detail: /dream manifest invalid: manifest doc_count must be a non-negative integer/,
+    },
+    {
       label: "bundle absent",
       plant: () => {
         const planted = plantGate();
