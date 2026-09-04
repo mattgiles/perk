@@ -22,6 +22,20 @@ built on files.
 - **Directory-identity (inode) fencing:** renew/release on a replaceable lock dir need identity
   fencing on top of token checks; design residual windows to degrade **fail-closed on both
   sides** — never two live consumers, never misdelivery.
+- **"We own it" is not a fence.** Ownership is proven per acquisition: mint a per-acquisition
+  ownership token into the lease record, and release token-fenced — quarantine-rename the lock
+  dir, verify the token in the moved state, then delete (or restore on mismatch). A process's
+  memory of having acquired is not evidence at release time.
+- **The post-rename re-check re-judges the FULL non-reclaimability predicate** against the
+  *moved* state — grace window included — and restores any claim that changed since the original
+  judgment; re-checking only the field that triggered the reclaim re-opens the race.
+- **Lease fs catches need three-way classification:** a missing/malformed lease is DATA (it
+  routes to the reclaim rules); expected race codes (ENOENT/EEXIST) are contention; everything
+  else propagates to a typed io_error arm — a blanket catch turns real I/O failures into
+  phantom contention.
+
+The realized second instance: the `/objective-sync` resolver-dispatch lease (PR #2075) —
+`extension/substrate/resolverLease.ts`.
 
 ## Observation-acked delivery
 
