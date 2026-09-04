@@ -13,6 +13,26 @@ don't fit — distilled from the headless-safe `report()` seam (`extension/surfa
 predecessor `branchOf`/`BranchSource`, and the `appendWorkflowState`/`EntrySink` strict-append seam
 (`extension/substrate/workflowState.ts`).
 
+## Distillation
+
+- Export a tiny structural interface the real context satisfies and a fake implements trivially
+  (`ReportTarget`, `EntrySink`, `BranchSource`) — "The minimal-structural-interface recipe".
+- Nothing a survivor needs may live in a module slated for deletion — extract at the survivor's
+  birth — "Extract-to-survive-retirement".
+- Door→typed-op extractions preserve implicit failure ORDERING (lazy ports, pinned order), keep
+  lazy reads lazy, and pair narrowing readers with refusing writers — "Door→typed-op extraction
+  craft".
+- Strict decode = tolerant decode + count check; identities the engine validates are port
+  parameters, never re-derived in a backing; provider flag-bags become discriminated variants at
+  the adapter — "Door→typed-op extraction craft".
+- The strict-append seam never throws, returns a boolean, and verifies only the contracted
+  linkage tier — "The strict-append seam".
+- Grep call sites before trusting a one-line idiom framing ("1 base + 1 superset" — prefer an
+  opt-in flag); comments claiming an unadopted idiom mark migration sites — "'One idiom' is often
+  1 base + 1 superset" / "Aspirational-comment fiction".
+- Seams that own a prefix de-prefix migrated messages; not every site fits a single-message seam
+  (the P1/P2/P3 triage) — "The de-prefixing trap" / "Not every site fits".
+
 ## The minimal-structural-interface recipe
 
 Export a **tiny structural interface** that the real `ExtensionContext` satisfies *and* a test fake
@@ -56,6 +76,58 @@ door's test file needed only import-path churn), so the retirement completed as 
 extract when the survivor is born, parameterizing call-site differences (the launch handoff grew
 a report-scope param) rather than duplicating, so the later retirement is a wholesale `rm`
 instead of a second extraction under pressure.
+
+## Door→typed-op extraction craft
+
+Seam-design rules from the door→typed-op extraction train (one owner each, cross-referenced: the
+move/sweep mechanics live in `toolchain/ts-module-moves.md`, the slice scope/review economics in
+`workflow/objective-delivery.md`, the parity-pin shapes in `workflow/execution-path-parity.md`):
+
+Ordering and laziness:
+
+- **An inline door's control flow encodes an implicit failure *ordering*** — hoisting
+  throwing/effectful reads into an eager deps factory moves them earlier in the run. Make them
+  lazy ports and pin the ordering with a test (#2184).
+- **Pure-function extraction of a resolution chain converts lazy reads eager** — keep laziness
+  when tiers have side-effectful reads (#2171).
+
+Read/write postures:
+
+- **A reader that narrows demands a writer that refuses** — narrowing on read while the writer
+  still accepts the wide shape only moves the failure later (#2184).
+- **Fail-open is a read-path posture** — never feed a fail-open rebuild into an LWW write of an
+  append-only ledger; the degraded read would overwrite good state (#2174).
+- **Strict decode = tolerant decode + count check** — decode leniently, then require the decoded
+  count to equal the input count so nothing is silently dropped (#2183).
+- **Refusal-before-effect via read-back classification** when a write throws ambiguously: read
+  the state back and classify, rather than guessing which side of the effect the throw landed on
+  (#2170).
+- **Cold-door decode honesty:** required fields at a process boundary return `null`/`bad_output`
+  when absent — never a defaulted value (#2171).
+
+Identity and typing:
+
+- **Any identity the engine validates is a port *parameter***, never re-derived inside a backing
+  (#2183).
+- **Mint-only nominal evidence snapshots primitives** — never retain caller-reachable references
+  (#2180).
+- **When a spec repeats one identity across ≥2 fields, key a table by that identity** so drift
+  fails at the literal-type level (#2191).
+- **Provider flag-bags translate INTO discriminated variants at the adapter** (#2169);
+  wire-faithful discriminated unions can internalize Result-skinned policy with zero wire delta
+  (#2186).
+- **Parallel discriminants are legitimate when the vocabularies have non-isomorphic domains** —
+  name the one conversion point and record the declined unification (#2180).
+- **A per-flow correlation wrapper compensating for a loosely-typed mechanism tier** is a signal
+  the fix belongs at the seam, not in another wrapper (#2176).
+
+Testability:
+
+- **A declared behavior delta needs a positive test exercising its failure arm in the same
+  commit** (#2171).
+- **Execute-core extraction with a narrow injectable dependency** (the browser-open seam) makes
+  failure arms testable — including pinning that a failed open never consumes a single-use latch
+  (#2033).
 
 ## The type-only-import cycle break
 
@@ -172,3 +244,8 @@ planSave change deliberately inherited the seam's fail-safe.
   the harness notify/status recipes
 - `docs/learned/workflow/session-data.md` — the provenance map field behind the identity-subset
   comparator
+- `docs/learned/toolchain/ts-module-moves.md` — the move/sweep mechanics of the extraction train
+- `docs/learned/workflow/objective-delivery.md` — the façade-slice migration pattern (slice
+  scope/review economics)
+- `docs/learned/workflow/execution-path-parity.md` — migration parity pins over registration
+  objects
