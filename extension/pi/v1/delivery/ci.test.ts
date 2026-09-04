@@ -9,14 +9,20 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mock, test } from "node:test";
-import type { CiExecOutcome } from "../../../delivery/ci.ts";
+import { type CiExecOutcome, runCiChecks } from "../../../delivery/ci.ts";
 import { DEFAULT_MODEL_VISIBLE_CAP } from "../../../substrate/modelVisible.ts";
 import { gitInit, loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
-import { changedFiles, renderCiProgress, renderCiProse } from "./ci.ts";
+import {
+  changedFiles,
+  ciScratchPath,
+  renderCiProgress,
+  renderCiProse,
+  scratchPersistOutput,
+} from "./ci.ts";
 
 function tmpCwd(): string {
   return mkdtempSync(join(tmpdir(), "perk-ci-adapter-"));
@@ -486,6 +492,76 @@ test("changedFiles: the supplied signal instance reaches every git invocation", 
     seen.every((s) => s === ac.signal),
     "the exact signal instance reaches every git invocation",
   );
+});
+
+// --- the production persist port (the scratch mechanics moved out of the feature) -----------
+
+test("scratchPersistOutput: run-scoped writes land at scratch/runs/<runId>/ci-<name>.md", () => {
+  const cwd = tmpCwd();
+  const persist = scratchPersistOutput(cwd, "01RUN");
+  const path = persist("lint", "full lint output");
+  assert.equal(path, join(cwd, ".perk", "workflow", "scratch", "runs", "01RUN", "ci-lint.md"));
+  assert.equal(ciScratchPath(cwd, "01RUN", "lint"), path, "the path derivation is the port's");
+  assert.equal(readFileSync(path, "utf8"), "full lint output");
+});
+
+test("scratchPersistOutput: unscoped writes land at scratch/ci/<name>.md", () => {
+  const cwd = tmpCwd();
+  const persist = scratchPersistOutput(cwd, undefined);
+  const path = persist("test", "unscoped output");
+  assert.equal(path, join(cwd, ".perk", "workflow", "scratch", "ci", "test.md"));
+  assert.equal(readFileSync(path, "utf8"), "unscoped output");
+});
+
+test("production port through the feature op: full bytes in scratch, capped tail shown", async () => {
+  const cwd = tmpCwd();
+  const huge = `HEAD-MARKER${"x".repeat(200_000 - 22)}TAIL-MARKER`;
+  const outcome = await runCiChecks(
+    { checks: [{ name: "test", command: "X" }] },
+    {
+      runCheck: async () => ({ code: 1, output: huge }),
+      persistOutput: scratchPersistOutput(cwd, undefined),
+      observeChangedFiles: async () => null,
+    },
+  );
+  assert.equal(outcome.kind, "completed");
+  if (outcome.kind !== "completed") return;
+  const c = outcome.checks[0];
+  assert.equal(c?.kind, "executed");
+  if (c?.kind !== "executed") return;
+  assert.equal(c.truncated, true);
+  assert.equal(c.bytesTotal, 200_000);
+  assert.ok(c.bytesShown <= DEFAULT_MODEL_VISIBLE_CAP);
+  assert.ok(c.shown.endsWith("TAIL-MARKER"), "shown keeps the output tail");
+  assert.ok(!c.shown.includes("HEAD-MARKER"), "shown drops the output head");
+  // Full output preserved in scratch (the un-run-scoped path under .perk/workflow/scratch/ci/).
+  assert.ok(c.outputPath?.includes(join("scratch", "ci", "test.md")));
+  assert.ok(c.outputPath && existsSync(c.outputPath));
+  assert.equal(readFileSync(c.outputPath, "utf8").length, 200_000);
+});
+
+test("production port: a real write failure folds to the feature's failure shape (no throw)", async () => {
+  // A FILE occupies the path where the scratch dir should be — the port's mkdir throws, the
+  // feature folds it: exit code intact, outputPath null, error reported.
+  const cwd = tmpCwd();
+  mkdirSync(join(cwd, ".perk", "workflow", "scratch"), { recursive: true });
+  writeFileSync(join(cwd, ".perk", "workflow", "scratch", "ci"), "", "utf8"); // a file, not a dir
+  const outcome = await runCiChecks(
+    { checks: [{ name: "test", command: "X" }] },
+    {
+      runCheck: async () => ({ code: 1, output: "fail output" }),
+      persistOutput: scratchPersistOutput(cwd, undefined),
+      observeChangedFiles: async () => null,
+    },
+  );
+  assert.equal(outcome.kind, "completed");
+  if (outcome.kind !== "completed") return;
+  const c = outcome.checks[0];
+  assert.equal(c?.kind, "executed");
+  if (c?.kind !== "executed") return;
+  assert.equal(c.exitCode, 1);
+  assert.equal(c.outputPath, null);
+  assert.ok(c.error);
 });
 
 // --- the 1s elapsed ticker (through the registered tool) ----------------------------------

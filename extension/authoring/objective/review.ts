@@ -45,12 +45,15 @@ export interface ObjectiveDraftReviewer {
  * through VERBATIM via the generic, so no information is erased and no cast is needed.
  */
 export interface ObjectiveApprovalSaveShape {
-  status: "no-draft" | "saved" | "save-failed";
+  status: "no-draft" | "refused-draft" | "saved" | "save-failed";
 }
 
-/** The one-entry review outcome — each arm carries exactly what its caller renders. */
+/** The one-entry review outcome — each arm carries exactly what its caller renders.
+ * `refusedDraft` is the pre-review fail-closed stop for an invalid artifact (the approval-time
+ * race arm rides the save shape verbatim through `approvedSave`). */
 export type ReviewObjectiveDraftResult<A extends ObjectiveApprovalSaveShape> =
   | { status: "noDraft" }
+  | { status: "refusedDraft"; problem: string }
   | { status: "approvedSave"; save: A; feedback?: string; reviewId?: string }
   | { status: "approvedDirectEdits"; rawFeedback: string; reviewId?: string }
   | { status: "denied"; feedback?: string; reviewId?: string }
@@ -75,10 +78,11 @@ export async function reviewObjectiveDraft<A extends ObjectiveApprovalSaveShape>
   signal?: AbortSignal,
 ): Promise<ReviewObjectiveDraftResult<A>> {
   if (signal?.aborted) return { status: "aborted" };
-  const draft = resumeObjectiveDraft(deps.session);
-  if (draft === null) return { status: "noDraft" };
+  const resumed = resumeObjectiveDraft(deps.session);
+  if (resumed.kind === "absent") return { status: "noDraft" };
+  if (resumed.kind === "refused") return { status: "refusedDraft", problem: resumed.problem };
 
-  const outcome = await deps.reviewer.review(renderObjectiveDraft(draft), signal);
+  const outcome = await deps.reviewer.review(renderObjectiveDraft(resumed.draft), signal);
   // The abort checkpoint: a turn interrupted while the reviewer ran must produce NO effect —
   // no save, no gate exit (the aborted arm wins over any verdict).
   if (signal?.aborted) return { status: "aborted" };

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { MemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
 import { openMemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
-import { reviseGistDraft } from "./draft.ts";
+import { GIST_DRAFT_ARTIFACT, reviseGistDraft } from "./draft.ts";
 import { type GistBackend, type GistGate, gistApprovalSave, saveGist } from "./save.ts";
 
 const PROSE = "# Faster reviews\n\nWe would likely want review turnaround under a day.\n";
@@ -118,6 +118,38 @@ test("gistApprovalSave: no draft → no-draft, no backend call, gate untouched",
   assert.deepEqual(outcome, { status: "no-draft" });
   assert.equal(backend.requests.length, 0);
   assert.equal(gate.exits, 0);
+});
+
+test("gistApprovalSave: refused draft → refused-draft BEFORE the gate snapshot; nothing saved", async () => {
+  const backend = fakeBackend();
+  // A probing gate: any isActive() call means the refused arm reached the gate snapshot.
+  let probed = 0;
+  const gate: GistGate & { exits: number } = {
+    exits: 0,
+    isActive: () => {
+      probed += 1;
+      return true;
+    },
+    exit() {
+      gate.exits += 1;
+    },
+  };
+  const session = draftedSession();
+  session.corruptContent(GIST_DRAFT_ARTIFACT);
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const outcome = await gistApprovalSave({ session, backend, gate });
+    assert.deepEqual(outcome, {
+      status: "refused-draft",
+      problem: `session artifact ${GIST_DRAFT_ARTIFACT} digest mismatch (rewound or modified)`,
+    });
+  } finally {
+    console.error = quiet;
+  }
+  assert.equal(backend.requests.length, 0, "nothing saved");
+  assert.equal(probed, 0, "returned before the gate snapshot");
+  assert.equal(gate.exits, 0, "the gate stays untouched");
 });
 
 test("gistApprovalSave: happy path — the draft's title/scope ride the port; gate exited once", async () => {

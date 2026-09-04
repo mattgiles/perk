@@ -45,6 +45,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { planningStageRefusal } from "../../../doors/lifecycleGates.ts";
 import {
   LEARN_ANGLES,
+  type LearnAnalystReport,
+  type LearnAngle,
   learnManifestPath,
   parseAngleSelections,
   runLearnAnalystWave,
@@ -256,9 +258,10 @@ async function finishLearnResult(
   }
 }
 
-/** The `run_learn_wave` ok-arm details: typed per-angle reports + explicitly-skipped angles. */
+/** The `run_learn_wave` ok-arm details: typed per-angle reports + explicitly-skipped angles
+ * (a malformed lane report surfaces as a skipped angle, never a raw relay). */
 export interface LearnWaveOk {
-  reports: { angle: string; report: unknown }[];
+  reports: { angle: LearnAngle; report: LearnAnalystReport }[];
   skipped: { angle: string; reason: string; detail: string }[];
   /** The single launch's output-free attempt receipt (observability only — details, not prose). */
   attempts: ReportWaveAttemptReceipt[];

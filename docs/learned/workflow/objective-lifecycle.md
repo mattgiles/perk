@@ -246,8 +246,10 @@ artifact, `plan_review` renders + reviews it, and an APPROVED verdict auto-saves
   `unknown[]` — node-shape validation stays with the Python plane at save time. JSON is
   storage/transport only; the human review surface renders markdown from it.
 - **Renderers live with the artifact owner, not the consumer.** `extension/authoring/objective/draft.ts`
-  exports both the reader (`resumeObjectiveDraft` — fail-open validation, warn+null on bad
-  JSON/shape/schema_version/blank prose) and the markdown renderer (`renderObjectiveDraft`).
+  exports both the reader (`resumeObjectiveDraft` — classified `valid{draft}`/`absent`/
+  `refused{problem}`: seam-invalid reads and bad JSON/shape/schema_version/blank prose fold
+  into `refused`, rendered at the consuming Pi edge) and the markdown renderer
+  (`renderObjectiveDraft`).
   That keeps `planReview → objectiveDraft` cycle-free: the draft module never imports review
   modules. `schema_version` is the consumer branch point — consumers must validate/branch on it
   rather than assuming the shape.
@@ -258,7 +260,10 @@ artifact, `plan_review` renders + reviews it, and an APPROVED verdict auto-saves
 - **The asymmetric objective failsafe.** `/objective-save` is artifact-first but keeps the
   drive-the-session injection as the **no-draft fallback** — objectives have no transcript scrape
   by design (a structured roadmap is unscrapeable), so unlike `/plan-save` (which warns and stops
-  on no-plan) the objective command must still hand the save to the model. Its severity ladder is
+  on no-plan) the objective command must still hand the save to the model. The fallback is
+  `absent`-only: a REFUSED draft (corrupted/undecodable artifact) STOPS with an error report —
+  no gate exit, no driven turn (driving a fresh model-authored save over a corrupted artifact
+  would silently abandon its bytes). Its severity ladder is
   also simpler: no `warning` tier, because objective saves have no node-link sub-step.
 - **Known wart: an approved empty-roadmap draft save-fails.** The draft reader accepts
   `roadmap: []`, so the review surface happily reviews a roadmap-less objective; the save then

@@ -53,6 +53,7 @@ import {
   objectiveApprovalSaveV1,
   ROADMAP_PARAM_SCHEMA,
 } from "./objectiveAuthoring.ts";
+import { productionDreamGateRecovery } from "./objectiveDreamGate.ts";
 
 /** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(
@@ -499,6 +500,26 @@ test("objectiveApprovalSaveV1: a failed save leaves the gate on, no linkage", as
   );
 });
 
+test("objectiveApprovalSaveV1: refused draft → refused-draft passthrough — no exec, gate untouched", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ctx = reportableCtx(cwd, branch);
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), ctx, OBJECTIVE_DRAFT_ARTIFACT, "{ not json"),
+    "the invalid artifact landed",
+  );
+  const argvs: string[][] = [];
+  const pi = fakeApprovalPi(branch, { stdout: CREATE_JSON, argvs });
+  const gating = fakeGating(true);
+  const outcome = await objectiveApprovalSaveV1(pi, ctx as unknown as ExtensionContext, gating);
+  assert.deepEqual(outcome, {
+    status: "refused-draft",
+    problem: "objective-draft.json is not valid JSON — refusing the draft",
+  });
+  assert.equal(argvs.length, 0, "no cold-door exec");
+  assert.equal(gating.exits, 0, "the gate was untouched");
+});
+
 test("objectiveApprovalSaveV1: a successful save while already read-write never exits the gate", async () => {
   const cwd = scaffoldRepo();
   const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-write" })];
@@ -534,6 +555,40 @@ test("command: /objective-save with a draft → the seam saves; no drive injecti
     assert.equal(sent.length, 0, "no drive injection when a draft exists");
     assert.equal(h.workflowState().active_objective, "7", "the session was linked");
     assert.equal(h.workflowState().mode, "read-write", "the gate exited on the saved arm");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("command: /objective-save with a refused draft → error stop; NO gate exit, NO drive injection", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
+  const bin = fakePerk(cwd, { stdout: CREATE_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  const sent = spyInjections(h);
+  try {
+    const drafted = await h.invokeTool("objective_draft", { prose: PROSE, roadmap: DRAFT_ROADMAP });
+    assert.equal((drafted.details as { ok?: boolean }).ok, true, "the draft landed");
+    // Corrupt the artifact FILE under its intact pointer: the save re-read refuses (digest
+    // mismatch) — the fail-closed stop, never the draft-less drive fallback.
+    writeFileSync(
+      join(cwd, ".perk", "workflow", "scratch", "runs", "01RID", "data", OBJECTIVE_DRAFT_ARTIFACT),
+      "junk",
+    );
+    await h.invokeCommand("objective-save");
+    assert.ok(
+      h.notifyEvents.some(
+        (e) =>
+          e.severity === "error" &&
+          e.message.endsWith(
+            "the working objective draft is invalid: session artifact objective-draft.json " +
+              "digest mismatch (rewound or modified) — rewrite it with objective_draft, then " +
+              "re-run /objective-save",
+          ),
+      ),
+      `the refused-draft error report (got ${JSON.stringify(h.notifyEvents)})`,
+    );
+    assert.equal(sent.length, 0, "no drive injection on a refused draft");
+    assert.equal(h.workflowState().mode, "read-only", "the gate stays on");
   } finally {
     h.dispose();
   }
@@ -766,7 +821,11 @@ test("objectiveApprovalSaveV1: a dream draft whose stored parts match the re-ren
       stateEntry({ run_id: DREAM_RUN, mode: "read-only", dream_bundle_digest: digest }),
     ];
     const ctx = reportableCtx(cwd, branch);
-    const gate = resolveDreamReportGate(ctx, dreamReportInput(), DREAM_STAMP);
+    const gate = resolveDreamReportGate(
+      productionDreamGateRecovery(ctx as unknown as ExtensionContext),
+      dreamReportInput(),
+      DREAM_STAMP,
+    );
     assert.equal(gate.kind, "block", JSON.stringify(gate));
     const block = (gate as { kind: "block"; block: { parts: string[] } }).block;
     const payload = `${JSON.stringify({
@@ -813,7 +872,11 @@ test("objectiveApprovalSaveV1: the dream arm stages the transfer file with the e
     stateEntry({ run_id: DREAM_RUN, mode: "read-only", dream_bundle_digest: digest }),
   ];
   const ctx = reportableCtx(cwd, branch);
-  const gate = resolveDreamReportGate(ctx, dreamReportInput(), DREAM_STAMP);
+  const gate = resolveDreamReportGate(
+    productionDreamGateRecovery(ctx as unknown as ExtensionContext),
+    dreamReportInput(),
+    DREAM_STAMP,
+  );
   assert.equal(gate.kind, "block", JSON.stringify(gate));
   const block = (gate as { kind: "block"; block: { parts: string[] } }).block;
   const payload = `${JSON.stringify({
@@ -855,7 +918,11 @@ test("objectiveApprovalSaveV1: a transfer write failure is soft scratch_failed �
     stateEntry({ run_id: DREAM_RUN, mode: "read-only", dream_bundle_digest: digest }),
   ];
   const ctx = reportableCtx(cwd, branch);
-  const gate = resolveDreamReportGate(ctx, dreamReportInput(), DREAM_STAMP);
+  const gate = resolveDreamReportGate(
+    productionDreamGateRecovery(ctx as unknown as ExtensionContext),
+    dreamReportInput(),
+    DREAM_STAMP,
+  );
   assert.equal(gate.kind, "block", JSON.stringify(gate));
   const block = (gate as { kind: "block"; block: { parts: string[] } }).block;
   const payload = `${JSON.stringify({

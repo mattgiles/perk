@@ -207,7 +207,7 @@ const MANIFEST_DIGEST = "sha256:test-manifest-digest";
 
 /** The always-happy capability set for the execute-core render arms. */
 function happyCapabilities(): {
-  markBundleDigest: (digest: string) => boolean;
+  markBundleDigest: (finalized: string | null) => boolean;
   bracket: () => { ok: boolean; detail: string | null };
   writeBundle: (path: string, content: string) => void;
   removeBundle: (path: string) => void;

@@ -165,20 +165,65 @@ test("approved but the draft vanished between reads → approvedNoDraft (defensi
   const backend = fakeBackend();
   const reviewer: GistDraftReviewer = {
     async review() {
-      // Simulate the draft vanishing between the review read and the save-time re-read.
-      session.dropContent(GIST_DRAFT_ARTIFACT);
+      // Simulate the draft vanishing between the review read and the save-time re-read (the
+      // silent absent arm — a foreign-run pointer reads absent by fork isolation).
+      session.disownPointer(GIST_DRAFT_ARTIFACT);
       return APPROVED;
+    },
+  };
+  const result = await reviewGist({ session, reviewer, backend, gate: fakeGate() });
+  assert.equal(result.status, "approvedNoDraft");
+  assert.equal(backend.calls, 0);
+});
+
+test("pre-review refused draft → refusedDraft; the reviewer is never invoked", async () => {
+  const session = draftedSession();
+  session.corruptContent(GIST_DRAFT_ARTIFACT);
+  const reviewer = scriptedReviewer(APPROVED);
+  const backend = fakeBackend();
+  const gate = fakeGate();
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const result = await reviewGist({ session, reviewer, backend, gate });
+    assert.deepEqual(result, {
+      status: "refusedDraft",
+      problem: `session artifact ${GIST_DRAFT_ARTIFACT} digest mismatch (rewound or modified)`,
+    });
+  } finally {
+    console.error = quiet;
+  }
+  assert.equal(reviewer.reviewed.length, 0, "nothing reviewed");
+  assert.equal(backend.calls, 0, "nothing saved");
+  assert.equal(gate.exits, 0, "the gate stays untouched");
+});
+
+test("approved but the draft corrupted between reads → approvedRefusedDraft (race), feedback preserved", async () => {
+  const session = draftedSession();
+  const backend = fakeBackend();
+  const gate = fakeGate(true);
+  const reviewer: GistDraftReviewer = {
+    async review() {
+      // Simulate corruption between the review read and the save-time re-read.
+      session.corruptContent(GIST_DRAFT_ARTIFACT);
+      return { ...APPROVED, feedback: "ship it" };
     },
   };
   const quiet = console.error;
   console.error = () => {};
   try {
-    const result = await reviewGist({ session, reviewer, backend, gate: fakeGate() });
-    assert.equal(result.status, "approvedNoDraft");
+    const result = await reviewGist({ session, reviewer, backend, gate });
+    assert.deepEqual(result, {
+      status: "approvedRefusedDraft",
+      problem: `session artifact ${GIST_DRAFT_ARTIFACT} digest mismatch (rewound or modified)`,
+      feedback: "ship it",
+      reviewId: "rev-a",
+    });
   } finally {
     console.error = quiet;
   }
-  assert.equal(backend.calls, 0);
+  assert.equal(backend.calls, 0, "nothing saved");
+  assert.equal(gate.exits, 0, "the gate stays untouched");
 });
 
 test("denied / dismissed / aborted / unavailable pass through typed", async () => {

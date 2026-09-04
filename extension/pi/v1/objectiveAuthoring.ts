@@ -73,6 +73,7 @@ import {
 } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
+import { productionDreamGateRecovery } from "./objectiveDreamGate.ts";
 
 // ------------------------------------------------------------------- the tool-boundary decode
 
@@ -280,11 +281,13 @@ function gateFor(gating: ToolGating, ctx: ExtensionContext): ObjectiveGate {
   return { isActive: () => gating.isActive(), exit: () => gating.exit(ctx) };
 }
 
-/** The ctx-bound §8.63 gate resolver the feature ops consume. */
+/** The ctx-bound §8.63 gate resolver the feature ops consume — the resolver over the
+ * runtime-minted production recovery capability (`pi/v1/objectiveDreamGate.ts`). */
 function dreamGateFor(
   ctx: ExtensionContext,
 ): (input: unknown, generatedAt: string) => DreamReportGateOutcome {
-  return (input, generatedAt) => resolveDreamReportGate(ctx, input, generatedAt);
+  return (input, generatedAt) =>
+    resolveDreamReportGate(productionDreamGateRecovery(ctx), input, generatedAt);
 }
 
 /**
@@ -346,9 +349,12 @@ function objectiveSaveResultOf(
   );
 }
 
-/** The approval→save orchestration outcome, rendered (the door/arm-facing twin). */
+/** The approval→save orchestration outcome, rendered (the door/arm-facing twin).
+ * `refused-draft` passes through unrendered — no `result`, no `gateExited`: nothing was saved,
+ * the gate was never touched, and no budget activation runs. */
 export type ObjectiveApprovalSaveV1Outcome =
   | { status: "no-draft" }
+  | { status: "refused-draft"; problem: string }
   | { status: "saved" | "save-failed"; result: ObjectiveSaveResult; gateExited: boolean };
 
 /**
@@ -366,6 +372,9 @@ export async function objectiveApprovalSaveV1(
 ): Promise<ObjectiveApprovalSaveV1Outcome> {
   const outcome = await objectiveApprovalSave(objectiveSaveDepsFor(pi, ctx, gating), opts);
   if (outcome.status === "no-draft") return { status: "no-draft" };
+  if (outcome.status === "refused-draft") {
+    return { status: "refused-draft", problem: outcome.problem };
+  }
   activateBudgetIfLinked(pi, outcome.result);
   return {
     status: outcome.status,
@@ -627,6 +636,19 @@ export function installObjectiveAuthoringBindings(pi: ExtensionAPI, gating: Tool
       // as the NO-DRAFT fallback — objectives have no transcript scrape by design, so a draftless
       // session still needs a working save path.
       const outcome = await objectiveApprovalSaveV1(pi, ctx, gating, { title });
+      if (outcome.status === "refused-draft") {
+        // Fail-closed stop: the command's own precondition is a VALID draft — no gate exit,
+        // no driven turn (those fallbacks are for draft-LESS sessions; driving a fresh
+        // model-authored save over a corrupted artifact would silently abandon its bytes).
+        report(
+          ctx,
+          "objective-save",
+          "error",
+          `the working objective draft is invalid: ${outcome.problem} — rewrite it with ` +
+            "objective_draft, then re-run /objective-save",
+        );
+        return;
+      }
       if (outcome.status === "no-draft") {
         // Exit the read-only gate so the objective_save tool (excluded from READ_ONLY_TOOLS)
         // becomes reachable on the driven turn, then drive the turn (mirrors /address and

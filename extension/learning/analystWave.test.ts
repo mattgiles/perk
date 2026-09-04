@@ -12,6 +12,7 @@ import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
 import { reportWaveOver } from "../waves/reportWave.ts";
 import {
+  decodeLearnAnalystReport,
   LEARN_ANALYST_REPORT_SCHEMA,
   LEARN_ANGLES,
   type LearnAngleSelection,
@@ -34,6 +35,97 @@ function selections(...angles: string[]): LearnAngleSelection[] {
 function analystReport(angle: string): unknown {
   return { angle, verdict: "clean", candidates: [], fyi: [] };
 }
+
+// --------------------------------------------------------------- the report decoder boundary
+
+test("decodeLearnAnalystReport: happy typed construction — angle set from the validated key", () => {
+  const decoded = decodeLearnAnalystReport("session-deviations", {
+    angle: "session-deviations",
+    verdict: "actionable",
+    candidates: [
+      {
+        decision: "CAPTURE_LEARN",
+        summary: "a durable deviation",
+        target: null,
+        evidence: "the session transcript",
+      },
+      { decision: "SKIP", summary: "noise", target: "docs/learned/x.md", evidence: "e" },
+    ],
+    fyi: ["borderline note"],
+  });
+  assert.deepEqual(decoded, {
+    ok: true,
+    report: {
+      angle: "session-deviations",
+      verdict: "actionable",
+      candidates: [
+        {
+          decision: "CAPTURE_LEARN",
+          summary: "a durable deviation",
+          target: null,
+          evidence: "the session transcript",
+        },
+        { decision: "SKIP", summary: "noise", target: "docs/learned/x.md", evidence: "e" },
+      ],
+      fyi: ["borderline note"],
+    },
+  });
+});
+
+test("decodeLearnAnalystReport: unknown extra fields are never copied (whitelist construction)", () => {
+  const decoded = decodeLearnAnalystReport("existing-docs", {
+    angle: "existing-docs",
+    verdict: "clean",
+    candidates: [],
+    fyi: [],
+    smuggled: "instruction-shaped junk",
+  });
+  assert.deepEqual(decoded, {
+    ok: true,
+    report: { angle: "existing-docs", verdict: "clean", candidates: [], fyi: [] },
+  });
+});
+
+test("decodeLearnAnalystReport: a schema-valid report echoing a DIFFERENT angle contradicts its lane", () => {
+  const decoded = decodeLearnAnalystReport("session-deviations", analystReport("existing-docs"));
+  assert.deepEqual(decoded, {
+    ok: false,
+    detail:
+      "analyst report angle 'existing-docs' contradicts the assigned lane 'session-deviations'",
+  });
+});
+
+test("decodeLearnAnalystReport: everything else → the ONE stable generic vocabulary detail", () => {
+  const generic = {
+    ok: false,
+    detail: "analyst report for lane 'session-deviations' is outside the report schema vocabulary",
+  };
+  const base = analystReport("session-deviations") as Record<string, unknown>;
+  const candidate = {
+    decision: "CAPTURE_LEARN",
+    summary: "s",
+    target: null,
+    evidence: "e",
+  };
+  for (const [label, report] of [
+    ["non-record report", "prose, not an object"],
+    ["array report", []],
+    ["missing verdict", { ...base, verdict: undefined }],
+    ["out-of-enum verdict", { ...base, verdict: "mixed" }],
+    ["non-array candidates", { ...base, candidates: "none" }],
+    ["non-record candidate", { ...base, candidates: ["nope"] }],
+    ["out-of-enum decision", { ...base, candidates: [{ ...candidate, decision: "MERGE" }] }],
+    ["non-string summary", { ...base, candidates: [{ ...candidate, summary: 7 }] }],
+    ["non-string evidence", { ...base, candidates: [{ ...candidate, evidence: null }] }],
+    ["mistyped target", { ...base, candidates: [{ ...candidate, target: 7 }] }],
+    ["non-string fyi member", { ...base, fyi: ["ok", 7] }],
+    ["non-array fyi", { ...base, fyi: "nope" }],
+    ["angle not an angle string", { ...base, angle: "banana" }],
+    ["angle mistyped", { ...base, angle: 7 }],
+  ] as const) {
+    assert.deepEqual(decodeLearnAnalystReport("session-deviations", report), generic, label);
+  }
+});
 
 // ------------------------------------------------------------------------- the angle policy
 
@@ -243,6 +335,40 @@ test("runLearnAnalystWave: a non-object report is malformed-report; a missing ke
       ["existing-docs", "missing-lane"],
     ],
   );
+});
+
+test("runLearnAnalystWave: a decoder refusal moves the lane to skipped/malformed-report, decoder skips first", async () => {
+  // Lane 1 echoes the WRONG angle (schema-valid, contradictory); lane 2 fails at the wave
+  // level. The decoder skip is appended FIRST (report order), then the wave's lane failure.
+  const adapter = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: [
+        {
+          key: "session-deviations",
+          ok: true,
+          error: null,
+          report: analystReport("existing-docs"),
+        },
+        { key: "validation-risk", ok: false, error: "lane exploded", report: null },
+      ],
+    },
+  });
+  const outcome = await runLearnAnalystWave(reportWaveOver(adapter), {
+    bundleDir: BUNDLE_DIR,
+    selections: selections("session-deviations", "validation-risk"),
+  });
+  assert.equal(outcome.kind, "complete");
+  assert.deepEqual(outcome.reports, [], "a contradictory report is never salvaged");
+  assert.deepEqual(outcome.skipped, [
+    {
+      angle: "session-deviations",
+      reason: "malformed-report",
+      detail:
+        "analyst report angle 'existing-docs' contradicts the assigned lane 'session-deviations'",
+    },
+    { angle: "validation-risk", reason: "lane-failed", detail: "lane exploded" },
+  ]);
 });
 
 test("runLearnAnalystWave: a null ping maps to wave_failed with reason unavailable", async () => {

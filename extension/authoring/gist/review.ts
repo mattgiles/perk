@@ -39,9 +39,12 @@ export interface GistDraftReviewer {
   review(rendered: string, signal?: AbortSignal): Promise<GistReviewOutcome>;
 }
 
-/** The one-entry review outcome — each arm carries exactly what its caller renders. */
+/** The one-entry review outcome — each arm carries exactly what its caller renders.
+ * `refusedDraft` (pre-review) and `approvedRefusedDraft` (the approval-time race) are the
+ * fail-closed stops for an invalid artifact: nothing reviewed/saved, the gate untouched. */
 export type ReviewGistResult =
   | { status: "noDraft" }
+  | { status: "refusedDraft"; problem: string }
   | { status: "directEditsRevise"; feedback: string; reviewId?: string }
   | {
       status: "approvedSaved";
@@ -56,6 +59,7 @@ export type ReviewGistResult =
       reviewId?: string;
     }
   | { status: "approvedNoDraft"; feedback?: string; reviewId?: string }
+  | { status: "approvedRefusedDraft"; problem: string; feedback?: string; reviewId?: string }
   | { status: "denied"; feedback?: string; reviewId?: string }
   | { status: "dismissed" }
   | { status: "aborted" }
@@ -65,7 +69,8 @@ export type ReviewGistResult =
  * Review the working gist draft end-to-end: resume → render → review → route. An approval with
  * `directEdits` (and feedback to fold) returns the revise round with NOTHING saved and the gate
  * untouched; a plain approval runs `gistApprovalSave` (which re-reads the artifact at save time
- * — `approvedNoDraft` is the defensive vanished-between-reads arm). Never throws.
+ * — `approvedNoDraft` is the defensive vanished-between-reads arm; `approvedRefusedDraft` its
+ * corrupted-between-reads sibling, feedback/reviewId preserved across the race). Never throws.
  */
 export async function reviewGist(
   deps: {
@@ -76,9 +81,10 @@ export async function reviewGist(
   },
   signal?: AbortSignal,
 ): Promise<ReviewGistResult> {
-  const draft = resumeGistDraft(deps.session);
-  if (draft === null) return { status: "noDraft" };
-  const rendered = renderGistDraft(draft);
+  const resumed = resumeGistDraft(deps.session);
+  if (resumed.kind === "absent") return { status: "noDraft" };
+  if (resumed.kind === "refused") return { status: "refusedDraft", problem: resumed.problem };
+  const rendered = renderGistDraft(resumed.draft);
   const outcome = await deps.reviewer.review(rendered, signal);
   if (outcome.status === "approvedDirectEdits") {
     return {
@@ -104,6 +110,8 @@ export async function reviewGist(
         return { status: "approvedSaveFailed", save, ...carried };
       case "no-draft":
         return { status: "approvedNoDraft", ...carried };
+      case "refused-draft":
+        return { status: "approvedRefusedDraft", problem: save.problem, ...carried };
     }
   }
   switch (outcome.status) {

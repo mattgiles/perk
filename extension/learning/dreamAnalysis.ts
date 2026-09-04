@@ -20,7 +20,6 @@
 // the caller. (contracts.md §8.61/§8.65)
 
 import { dirname, join } from "node:path";
-import { digestSessionData } from "../substrate/sessionData.ts";
 import type { ReportWave, ReportWaveAttemptReceipt } from "../waves/reportWave.ts";
 import {
   type DreamLaneAnalysis,
@@ -170,11 +169,12 @@ export async function analyzeDream(
     /** The `sha256:<hex>` digest of the manifest BYTES the caller read + decoded — bound into
      * the finalized bundle so recovery authenticates the manifest too. */
     manifestDigest: string;
-    /** The one function-shaped `dream_bundle_digest` marker capability: the empty string is
-     * the invalidation clear, any other value publishes the finalized bytes' digest; the
-     * boolean is the verified append+read-back result. The adapter wires the production
+    /** The one function-shaped `dream_bundle_digest` marker capability: `null` is the
+     * invalidation clear; a string is the FINALIZED BUNDLE BYTES, digested by the capability
+     * owner (the digest convention lives with the adapter, not the feature); the boolean is
+     * the verified append+read-back result. The adapter wires the production
      * `appendWorkflowState` closure; tests inject fakes. */
-    markBundleDigest: (digest: string) => boolean;
+    markBundleDigest: (finalized: string | null) => boolean;
     /** The post-wave revalidation bracket (contracts.md §8.65) — REQUIRED on purpose: every
      * call site (production and tests) makes an explicit choice; production wires
      * `revalidationBracket(ctx.cwd, manifest.commit_sha)`. */
@@ -190,7 +190,7 @@ export async function analyzeDream(
   // attempt below, so a failed cleanup leaves prior files behind that recovery refuses. An
   // UNVERIFIED clear refuses outright — with the old digest possibly still live, a failed
   // removal below would leave the prior bundle+digest pair recoverable as fresh.
-  if (!opts.markBundleDigest("")) {
+  if (!opts.markBundleDigest(null)) {
     return {
       kind: "io_failed",
       detail:
@@ -387,7 +387,7 @@ export async function analyzeDream(
   // A failed marker append (an unverified read-back) leaves the marker cleared by the
   // entry clear — recovery refuses (fail-closed) — and the aggregate reports the outcome
   // as honestly incomplete; re-running the wave repairs it.
-  if (!opts.markBundleDigest(digestSessionData(finalized))) {
+  if (!opts.markBundleDigest(finalized)) {
     return {
       kind: "aggregate",
       details: {

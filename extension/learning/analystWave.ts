@@ -1,9 +1,10 @@
 // The `/learn` flow's analyst-wave policy over the shared report-wave module: the analyst
 // fan-out as CODE. It owns the four learn angles, the analyst report schema, the tool-enforced
 // angle policy (2–4 angles, `session-deviations` mandatory — parse-don't-validate), the
-// assignment/task composition, and the typed outcome mapping — delegating spawn/timeout/
-// aggregate mechanics to `wave.run` under the `best-effort` completeness policy (a failed
-// analyst is an explicitly-reported skipped angle, never a failed pass). Analyst reports come
+// assignment/task composition, the whitelist report decoder (`decodeLearnAnalystReport` — the
+// trust boundary keyed by the validated assignment), and the typed outcome mapping — delegating
+// spawn/timeout/aggregate mechanics to `wave.run` under the `best-effort` completeness policy
+// (a failed analyst is an explicitly-reported skipped angle, never a failed pass). Analyst reports come
 // back as engine-validated structured output (the workflow-level `outputSchema` → the injected
 // `structured_output` tool).
 //
@@ -18,7 +19,7 @@ import {
   type ReportWaveFailureReason,
   toAttemptReceipt,
 } from "../waves/reportWave.ts";
-import { CAPTURED_DECISIONS } from "./capture.ts";
+import { CAPTURED_DECISIONS, type CapturedDecision, isCapturedDecision } from "./capture.ts";
 
 /** The four learn angles; `session-deviations` is the mandatory member of every selection. */
 export const LEARN_ANGLES = [
@@ -153,6 +154,80 @@ function assignmentTask(
   return emphasis !== undefined && emphasis !== "" ? `${base} Emphasis: ${emphasis}` : base;
 }
 
+/** One decoded analyst candidate (the typed twin of the schema's `candidates` items). */
+export interface LearnAnalystCandidate {
+  decision: CapturedDecision | "SKIP";
+  summary: string;
+  target: string | null;
+  evidence: string;
+}
+
+/** The decoded analyst report (the typed twin of `LEARN_ANALYST_REPORT_SCHEMA`). */
+export interface LearnAnalystReport {
+  angle: LearnAngle;
+  verdict: "clean" | "actionable";
+  candidates: LearnAnalystCandidate[];
+  fyi: string[];
+}
+
+/**
+ * Decode one lane's engine-validated structured report at the trust boundary (the
+ * `stampHarvestReport` pattern): whitelist construction field-by-field — never a spread — with
+ * `angle` set from the validated assignment KEY, so a report can never re-attribute itself.
+ * The observable detail taxonomy is exactly two byte-shapes: the angle-contradiction arm (a
+ * schema-valid report whose echoed angle names a DIFFERENT lane — unattributable content,
+ * never salvaged) and ONE stable generic vocabulary detail for everything else (no per-field
+ * diagnostics — schema enforcement is upstream, engine-validated; this decoder is a boundary,
+ * not a linter). The defensive narrowings (a non-angle key, a non-record report) are
+ * unreachable on the production path — `ReportWave.normalizeAssignments` filters non-object
+ * reports and unknown aggregate keys first — so they fold into the generic detail.
+ */
+export function decodeLearnAnalystReport(
+  key: string,
+  report: unknown,
+): { ok: true; report: LearnAnalystReport } | { ok: false; detail: string } {
+  const generic = {
+    ok: false as const,
+    detail: `analyst report for lane '${key}' is outside the report schema vocabulary`,
+  };
+  if (!isLearnAngle(key)) return generic;
+  if (typeof report !== "object" || report === null || Array.isArray(report)) return generic;
+  const raw = report as Record<string, unknown>;
+  const angle = raw.angle;
+  if (typeof angle !== "string" || !isLearnAngle(angle)) return generic;
+  if (angle !== key) {
+    return {
+      ok: false,
+      detail: `analyst report angle '${angle}' contradicts the assigned lane '${key}'`,
+    };
+  }
+  const verdict = raw.verdict;
+  if (verdict !== "clean" && verdict !== "actionable") return generic;
+  if (!Array.isArray(raw.candidates)) return generic;
+  const candidates: LearnAnalystCandidate[] = [];
+  for (const item of raw.candidates) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) return generic;
+    const c = item as Record<string, unknown>;
+    const decision = c.decision;
+    if (typeof decision !== "string") return generic;
+    if (!isCapturedDecision(decision) && decision !== "SKIP") return generic;
+    const summary = c.summary;
+    const target = c.target;
+    const evidence = c.evidence;
+    if (typeof summary !== "string" || typeof evidence !== "string") return generic;
+    if (target !== null && typeof target !== "string") return generic;
+    candidates.push({ decision, summary, target, evidence });
+  }
+  const fyiRaw = raw.fyi;
+  if (!Array.isArray(fyiRaw)) return generic;
+  const fyi: string[] = [];
+  for (const entry of fyiRaw) {
+    if (typeof entry !== "string") return generic;
+    fyi.push(entry);
+  }
+  return { ok: true, report: { angle: key, verdict, candidates, fyi } };
+}
+
 /** The typed analyst-wave outcome: a wave-level failure, or the per-angle reports + skips. */
 export type LearnWaveOutcome =
   | {
@@ -163,7 +238,7 @@ export type LearnWaveOutcome =
     }
   | {
       kind: "complete";
-      reports: { angle: string; report: unknown }[];
+      reports: { angle: LearnAngle; report: LearnAnalystReport }[];
       skipped: { angle: string; reason: ReportWaveFailureReason; detail: string }[];
       attempts: ReportWaveAttemptReceipt[];
     };
@@ -226,9 +301,24 @@ export async function runLearnAnalystWave(
     };
   }
 
-  const reports = result.reports.map((r) => ({ angle: r.key, report: r.report }));
-  const skipped = result.failures
-    .filter((f) => f.key !== null)
-    .map((f) => ({ angle: f.key as string, reason: f.reason, detail: f.detail }));
+  // Decode every lane report at the trust boundary: an undecodable/contradictory report moves
+  // its lane to `skipped` (`malformed-report`) with the decoder's detail. Skip ordering:
+  // decoder skips first (report order), then the wave's own lane failures.
+  const reports: { angle: LearnAngle; report: LearnAnalystReport }[] = [];
+  const decoderSkips: { angle: string; reason: ReportWaveFailureReason; detail: string }[] = [];
+  for (const r of result.reports) {
+    const decoded = decodeLearnAnalystReport(r.key, r.report);
+    if (decoded.ok) {
+      reports.push({ angle: decoded.report.angle, report: decoded.report });
+    } else {
+      decoderSkips.push({ angle: r.key, reason: "malformed-report", detail: decoded.detail });
+    }
+  }
+  const skipped = [
+    ...decoderSkips,
+    ...result.failures
+      .filter((f) => f.key !== null)
+      .map((f) => ({ angle: f.key as string, reason: f.reason, detail: f.detail })),
+  ];
   return { kind: "complete", reports, skipped, attempts };
 }

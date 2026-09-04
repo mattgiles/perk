@@ -48,23 +48,25 @@ test("encodeGistDraft: deterministic key order; blank title/scope omitted", () =
   });
 });
 
-test("decodeGistDraft: round-trips an encode; refuses malformed payloads with warnings", () => {
+test("decodeGistDraft: round-trips an encode; refuses malformed payloads with exact problems", () => {
   assert.deepEqual(
     decodeGistDraft(encodeGistDraft({ prose: PROSE, title: "Faster reviews", scope: "objective" })),
-    { title: "Faster reviews", scope: "objective", prose: PROSE },
+    { ok: true, draft: { title: "Faster reviews", scope: "objective", prose: PROSE } },
   );
-  for (const [label, content] of [
-    ["malformed JSON", "{ not json"],
-    ["non-object payload", '["an", "array"]\n'],
-    ["wrong schema_version", JSON.stringify({ schema_version: 2, prose: PROSE })],
-    ["blank prose", JSON.stringify({ schema_version: 1, prose: "  \n" })],
-    ["missing prose", JSON.stringify({ schema_version: 1 })],
+  for (const [content, problem] of [
+    ["{ not json", "gist-draft.json is not valid JSON — refusing the draft"],
+    ['["an", "array"]\n', "gist-draft.json is not a JSON object — refusing the draft"],
+    [
+      JSON.stringify({ schema_version: 2, prose: PROSE }),
+      "gist-draft.json has an unsupported schema_version (2) — refusing the draft",
+    ],
+    [
+      JSON.stringify({ schema_version: 1, prose: "  \n" }),
+      "gist-draft.json has no prose — refusing the draft",
+    ],
+    [JSON.stringify({ schema_version: 1 }), "gist-draft.json has no prose — refusing the draft"],
   ] as const) {
-    assert.equal(
-      quietly(() => decodeGistDraft(content)),
-      null,
-      label,
-    );
+    assert.deepEqual(decodeGistDraft(content), { ok: false, problem });
   }
 });
 
@@ -73,7 +75,7 @@ test("decodeGistDraft: blank title dropped; an unknown scope degrades to absent"
     decodeGistDraft(
       JSON.stringify({ schema_version: 1, title: "   ", scope: "banana", prose: PROSE }),
     ),
-    { prose: PROSE },
+    { ok: true, draft: { prose: PROSE } },
   );
 });
 
@@ -120,7 +122,10 @@ test("revise: a whole-value rewrite replaces everything; identical bytes short-c
   assert.equal(reviseGistDraft({ prose: PROSE, title: "T" }, session).status, "revised");
   const rewrite = reviseGistDraft({ prose: "# v2\n", scope: "objective" }, session);
   assert.equal(rewrite.status, "revised");
-  assert.deepEqual(resumeGistDraft(session), { scope: "objective", prose: "# v2\n" });
+  assert.deepEqual(resumeGistDraft(session), {
+    kind: "valid",
+    draft: { scope: "objective", prose: "# v2\n" },
+  });
 
   const identical = reviseGistDraft({ prose: "# v2\n", scope: "objective" }, session);
   assert.equal(identical.status, "unchanged");
@@ -155,24 +160,28 @@ test("revise: seam refusal → rejected/write_refused; pointer failure → unver
 
 // --- resumeGistDraft -------------------------------------------------------------------------------
 
-test("resume: absent → null (silent); invalid seam read → null; refused payload → null", () => {
+test("resume: absent → absent (silent); invalid seam read and refused payload → refused", () => {
   const empty = memorySession();
-  assert.equal(resumeGistDraft(empty), null, "no draft");
+  assert.deepEqual(resumeGistDraft(empty), { kind: "absent" }, "no draft");
 
   const corrupted = memorySession();
   assert.equal(reviseGistDraft({ prose: PROSE }, corrupted).status, "revised");
   corrupted.corruptContent(GIST_DRAFT_ARTIFACT);
-  assert.equal(
+  // The seam's own stderr tier still speaks (untouched); the classified arm carries its problem.
+  assert.deepEqual(
     quietly(() => resumeGistDraft(corrupted)),
-    null,
-    "an invalid (rewound) artifact refuses",
+    {
+      kind: "refused",
+      problem: `session artifact ${GIST_DRAFT_ARTIFACT} digest mismatch (rewound or modified)`,
+    },
+    "an invalid (rewound) artifact refuses with the seam's problem",
   );
 
   const malformed = memorySession();
   assert.equal(malformed.writeArtifact(GIST_DRAFT_ARTIFACT, "{ not json").status, "applied");
-  assert.equal(
-    quietly(() => resumeGistDraft(malformed)),
-    null,
+  assert.deepEqual(
+    resumeGistDraft(malformed),
+    { kind: "refused", problem: "gist-draft.json is not valid JSON — refusing the draft" },
     "a malformed payload refuses through the decode taxonomy",
   );
 });
@@ -181,8 +190,11 @@ test("resume: round-trips a revise", () => {
   const session = memorySession();
   reviseGistDraft({ prose: PROSE, title: "Faster reviews", scope: "objective" }, session);
   assert.deepEqual(resumeGistDraft(session), {
-    title: "Faster reviews",
-    scope: "objective",
-    prose: PROSE,
+    kind: "valid",
+    draft: {
+      title: "Faster reviews",
+      scope: "objective",
+      prose: PROSE,
+    },
   });
 });

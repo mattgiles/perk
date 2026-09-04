@@ -216,6 +216,29 @@ the stamped commit. Classifications: `migrate-in-2.3` / `allowed-domain-I/O` /
 > `session/workflowSession.ts` re-export (zero feature-home `substrate/cache.ts` `PlanRef`
 > imports remain).
 
+> **Fresh stamp (Node 2.3):** the three `migrate-in-2.3` rows below are **executed** —
+> re-verified by import inspection in node 2.3's change:
+> `authoring/objective/dreamReportGate.ts` is a pure resolver over the runtime-minted
+> `DreamGateRecovery` capability (production capability + recovery ladder + bracket live in
+> `pi/v1/objectiveDreamGate.ts`; the feature imports only `learning/dream.ts`,
+> `learning/dreamReducer.ts`, `learning/dreamReport.ts` — zero `node:fs`, zero `substrate/*`);
+> `delivery/ci.ts` persists through the required `PersistCheckOutput` port (the scratch
+> path derivation + atomic write live in `pi/v1/delivery/ci.ts`; the feature imports only
+> `substrate/config.ts` + `substrate/modelVisible.ts` — the wire `CiCheckResult.scratchPath`
+> keeps its name and bytes); and `learning/dreamAnalysis.ts` resolved via the marker-port
+> fold — the existing `markBundleDigest` capability retyped to
+> `(finalized: string | null) => boolean` so digesting lives with the sole production closure
+> at the Pi edge (`pi/v1/learning/dream.ts`; `digestSessionData` stays in
+> `substrate/sessionData.ts`). The allowed rows are kept. **Rule H is live**
+> (`extension/importDirectionGuard.test.ts`): the storage-free homes × the storage interior
+> over the resolved-edge map, empty allowlist, per-home anti-vacuity floor, control-14
+> mutation fixtures. Noted strengthenings: `substrate/cache.ts` is enforced MODULE-LEVEL — a
+> conservative superset of the pinned run-scratch export surface (pure cache vocabulary rides
+> `session/workflowSession.ts` re-exports, the 2.2 precedent) — and the guarded interior also
+> covers `session/branchWorkflowSession.ts`, the concrete branch/file session adapter (a
+> feature importing it could open storage itself; the abstract `session/workflowSession.ts`
+> seam stays importable).
+
 | File | Observed use | Classification | Rationale |
 | --- | --- | --- | --- |
 | `authoring/objective/dreamReportGate.ts` | imports `node:fs` (`existsSync`/`readFileSync`), `substrate/cache.ts::runScratchDir`, `substrate/git.ts::revalidationBracket`, `substrate/sessionData.ts` (`digestSessionData`, `SessionDataCtx`), and `substrate/workflowState.ts` (`branchOf`, `rebuildWorkflowState`, `WorkflowState`) | `migrate-in-2.3` | the full forbidden set — session storage recovered inside a feature home; 2.3 keeps the decision pure behind a runtime-minted narrow capability recovered at the Pi/session edge |

@@ -92,7 +92,11 @@ export function approvedObjectiveSaveResult(
   return approvedSubjectSaveResult(
     OBJECTIVE_SUBJECT,
     outcome,
-    save.status === "no-draft" ? { status: "no-source" } : save,
+    save.status === "no-draft"
+      ? { status: "no-source" }
+      : save.status === "refused-draft"
+        ? { status: "refused-draft", problem: save.problem }
+        : save,
   );
 }
 
@@ -263,11 +267,12 @@ export async function executeObjectiveReview(
     // The launch chooser (contracts.md §8.23): every eligible round the human picks with/without
     // the streamed reviewer wave BEFORE anything launches. Eligibility is drafts-only — the wave
     // door stale-guards the raw artifact baseline, so a null baseline keeps the plain path
-    // (silently: there is no forced mode to warn about). An unresolvable draft (raw bytes
-    // present but invalid) also skips the wave arm — the plain review below reports the
-    // no-draft skip through the feature op.
-    const draft =
+    // (silently: there is no forced mode to warn about). A non-`valid` resume (raw bytes
+    // present but refused) also skips the wave arm — the plain review below renders the
+    // refused-draft skip through the feature op's arm, exactly once.
+    const resumed =
       wave?.present() && baseline.status === "found" ? resumeObjectiveDraft(session) : null;
+    const draft = resumed !== null && resumed.kind === "valid" ? resumed.draft : null;
     if (draft !== null && baseline.status === "found") {
       const choice = await chooseReviewLaunch(ctx.ui, "Objective", sig);
       if (choice.launch === "aborted") return objectiveReviewOutcomeResult({ status: "aborted" });
@@ -308,6 +313,26 @@ export async function executeObjectiveReview(
   switch (result.status) {
     case "noDraft":
       return noObjectiveDraftResult();
+    case "refusedDraft":
+      // Fail-closed soft skip (the `noObjectiveDraftResult` shape): an invalid artifact is
+      // never reviewed — rewrite, then re-review. Gate untouched.
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `the working objective draft is invalid: ${result.problem} — rewrite it with ` +
+              "objective_draft, then call plan_review again.",
+          },
+        ],
+        details: {
+          ok: false,
+          error: result.problem,
+          error_type: "bad_state",
+          status: "skipped",
+          reason: "objective_draft_refused",
+        },
+      };
     case "approvedDirectEdits":
       return directEditsReviseResult(result.rawFeedback, result.reviewId);
     case "approvedSave":

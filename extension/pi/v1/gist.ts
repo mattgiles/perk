@@ -419,6 +419,19 @@ export function installGistBindings(pi: ExtensionAPI, gating: ToolGating): void 
         { session, backend: coldDoorGistBackend(pi, ctx), gate: gateFor(gating, ctx) },
         { title },
       );
+      if (outcome.status === "refused-draft") {
+        // Fail-closed stop: the command's own precondition is a VALID draft — no gate exit,
+        // no driven turn (those fallbacks are for draft-LESS sessions; driving a fresh
+        // model-authored save over a corrupted artifact would silently abandon its bytes).
+        report(
+          ctx,
+          "gist-save",
+          "error",
+          `the working gist draft is invalid: ${outcome.problem} — rewrite it with gist_draft, ` +
+            "then re-run /gist-save",
+        );
+        return;
+      }
       if (outcome.status !== "no-draft") {
         // Saved or save-failed: relay the save message (which carries the consumption hint).
         const result = gistSaveResultOf(ctx, outcome.save);
@@ -584,6 +597,27 @@ export async function runGistReviewV1(
   switch (result.status) {
     case "noDraft":
       return noGistDraftResult();
+    case "refusedDraft":
+      // Fail-closed soft skip (the `noGistDraftResult` shape): an invalid artifact is never
+      // reviewed — rewrite, then re-review. Gate untouched.
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `the working gist draft is invalid: ${result.problem} — rewrite it with ` +
+              "gist_draft, then call plan_review again.",
+          },
+        ],
+        details: {
+          ok: false,
+          error: result.problem,
+          error_type: "bad_state",
+          status: "skipped",
+          reason: "gist_draft_refused",
+          subject: "gist",
+        },
+      };
     case "directEditsRevise":
       // The Direct-Edits carve-out (contracts §8.23's gist arm): rendered edits cannot be
       // folded back into the structured draft mechanically — one model-mediated revise round,
@@ -625,6 +659,13 @@ export async function runGistReviewV1(
     case "approvedNoDraft":
       return approvedSubjectSaveResult(GIST_SUBJECT, completedOutcome(true, result), {
         status: "no-source",
+      });
+    case "approvedRefusedDraft":
+      // The approval-time race: corrupted between the review read and the save re-read — the
+      // shared refused-draft arm (rewrite + a FRESH review, never /gist-save).
+      return approvedSubjectSaveResult(GIST_SUBJECT, completedOutcome(true, result), {
+        status: "refused-draft",
+        problem: result.problem,
       });
     case "denied":
       return subjectReviewOutcomeResult(GIST_SUBJECT, completedOutcome(false, result));

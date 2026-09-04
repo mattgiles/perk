@@ -1,24 +1,33 @@
 // Fully-offline coverage for the CI-execution feature: the pure scope gate and the deterministic
-// check runner over its two semantic ports (`RunConfiguredCheck`, `ObserveChangedFiles`) — the
-// typed outcome union, selection/ordering/glob policy, route-don't-relay scratch handling,
-// fail-closed recovery, and the typed progress stream. No Pi, no timers. See ci.ts.
+// check runner over its three semantic ports (`RunConfiguredCheck`, `PersistCheckOutput`,
+// `ObserveChangedFiles`) — the typed outcome union, selection/ordering/glob policy,
+// route-don't-relay output handling, fail-closed recovery, and the typed progress stream. No
+// Pi, no filesystem, no timers (the production scratch port's mechanics live with the adapter:
+// pi/v1/delivery/ci.test.ts). See ci.ts.
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_MODEL_VISIBLE_CAP } from "../substrate/modelVisible.ts";
 import {
   type CiProgressEvent,
   decideCiScope,
   type ObserveChangedFiles,
+  type PersistCheckOutput,
+  type RunCiChecksDeps,
+  type RunCiChecksOpts,
   type RunConfiguredCheck,
   runCiChecks,
 } from "./ci.ts";
 
-function tmpCwd(): string {
-  return mkdtempSync(join(tmpdir(), "perk-ci-cwd-"));
+/** The default fake persist port: a path-shaped opaque location per check name. */
+const pathPersist: PersistCheckOutput = (checkName) => `/scratch/ci-${checkName}.md`;
+
+/** Run the feature op with the fake persist port defaulted (tests override to record/throw). */
+function runCi(
+  opts: RunCiChecksOpts,
+  deps: Omit<RunCiChecksDeps, "persistOutput"> & { persistOutput?: PersistCheckOutput },
+): ReturnType<typeof runCiChecks> {
+  return runCiChecks(opts, { persistOutput: pathPersist, ...deps });
 }
 
 /** A fake check port that maps each row's command string to a fixed { code, output }. */
@@ -82,17 +91,16 @@ test("decideCiScope: trusted → run on every surface (headless + UI), overridin
 // --- runCiChecks: empty / unknown / run-all --------------------------------------------
 
 test("runCiChecks: empty checks → not_configured (inert)", async () => {
-  const outcome = await runCiChecks(
-    { cwd: tmpCwd(), checks: [] },
+  const outcome = await runCi(
+    { checks: [] },
     { runCheck: fakeRun({}), observeChangedFiles: noObserve },
   );
   assert.deepEqual(outcome, { kind: "not_configured" });
 });
 
 test("runCiChecks: unknown `only` → invalid_selection listing available names", async () => {
-  const outcome = await runCiChecks(
+  const outcome = await runCi(
     {
-      cwd: tmpCwd(),
       checks: [
         { name: "lint", command: "echo lint" },
         { name: "test", command: "echo test" },
@@ -108,9 +116,8 @@ test("runCiChecks: unknown `only` → invalid_selection listing available names"
 });
 
 test("runCiChecks: run-all preserves declared order; mixed pass/fail → passed:false", async () => {
-  const outcome = await runCiChecks(
+  const outcome = await runCi(
     {
-      cwd: tmpCwd(),
       checks: [
         { name: "lint", command: "L" },
         { name: "typecheck", command: "T" },
@@ -141,9 +148,8 @@ test("runCiChecks: run-all preserves declared order; mixed pass/fail → passed:
 });
 
 test("runCiChecks: single `only` runs exactly one check", async () => {
-  const outcome = await runCiChecks(
+  const outcome = await runCi(
     {
-      cwd: tmpCwd(),
       checks: [
         { name: "lint", command: "L" },
         { name: "test", command: "X" },
@@ -159,14 +165,13 @@ test("runCiChecks: single `only` runs exactly one check", async () => {
 });
 
 test('runCiChecks: scope — run-all → "all"; explicit `only` → "subset"; error arms carry none', async () => {
-  const all = await runCiChecks(
-    { cwd: tmpCwd(), checks: [{ name: "lint", command: "L" }] },
+  const all = await runCi(
+    { checks: [{ name: "lint", command: "L" }] },
     { runCheck: fakeRun({ L: { code: 0, output: "ok" } }), observeChangedFiles: noObserve },
   );
   assert.equal(all.kind === "completed" ? all.scope : undefined, "all");
-  const subset = await runCiChecks(
+  const subset = await runCi(
     {
-      cwd: tmpCwd(),
       checks: [
         { name: "lint", command: "L" },
         { name: "test", command: "X" },
@@ -177,13 +182,13 @@ test('runCiChecks: scope — run-all → "all"; explicit `only` → "subset"; er
   );
   assert.equal(subset.kind === "completed" ? subset.scope : undefined, "subset");
   // The early-return arms are scope-less by construction (no scope field on their union arms).
-  const empty = await runCiChecks(
-    { cwd: tmpCwd(), checks: [] },
+  const empty = await runCi(
+    { checks: [] },
     { runCheck: fakeRun({}), observeChangedFiles: noObserve },
   );
   assert.equal(empty.kind, "not_configured");
-  const unknown = await runCiChecks(
-    { cwd: tmpCwd(), checks: [{ name: "a", command: "A" }], only: "nope" },
+  const unknown = await runCi(
+    { checks: [{ name: "a", command: "A" }], only: "nope" },
     { runCheck: fakeRun({}), observeChangedFiles: noObserve },
   );
   assert.equal(unknown.kind, "invalid_selection");
@@ -202,9 +207,8 @@ test("runCiChecks: checks launch concurrently; report keeps declared order", asy
     log.push(`end:${check.command}`);
     return { code: 0, output: "ok" };
   };
-  const outcome = await runCiChecks(
+  const outcome = await runCi(
     {
-      cwd: tmpCwd(),
       checks: [
         { name: "a", command: "A" },
         { name: "b", command: "B" },
@@ -242,9 +246,8 @@ test("runCiChecks: out-of-order completion still reports declared order", async 
     release?.();
     return { code: 1, output: "fast failed" };
   };
-  const outcome = await runCiChecks(
+  const outcome = await runCi(
     {
-      cwd: tmpCwd(),
       checks: [
         { name: "slow", command: "SLOW" },
         { name: "fast", command: "FAST" },
@@ -267,9 +270,8 @@ test("runCiChecks: out-of-order completion still reports declared order", async 
 });
 
 test("runCiChecks: one port throw under concurrency — siblings' results intact, no rejection", async () => {
-  const outcome = await runCiChecks(
+  const outcome = await runCi(
     {
-      cwd: tmpCwd(),
       checks: [
         { name: "good", command: "G" },
         { name: "boom", command: "BOOM" },
@@ -314,9 +316,8 @@ test("runCiChecks: comma-separated `only` runs exactly those rows CONCURRENTLY, 
     log.push(`end:${check.command}`);
     return { code: 0, output: "ok" };
   };
-  const outcome = await runCiChecks(
+  const outcome = await runCi(
     {
-      cwd: tmpCwd(),
       checks: [
         { name: "a", command: "A", glob: "*.py" },
         { name: "b", command: "B" },
@@ -346,9 +347,8 @@ test("runCiChecks: comma-separated `only` runs exactly those rows CONCURRENTLY, 
 test("runCiChecks: an exact `only` match beats comma-splitting (delimiter-unsafe names stay selectable)", async () => {
   // `parseCiChecks` accepts any nonblank name — including one containing a comma. The exact-match
   // path keeps such a name selectable, exactly as the pre-list single-name selector did.
-  const outcome = await runCiChecks(
+  const outcome = await runCi(
     {
-      cwd: tmpCwd(),
       checks: [
         { name: "lint", command: "L" },
         { name: "fast", command: "F" },
@@ -369,15 +369,14 @@ test("runCiChecks: an exact `only` match beats comma-splitting (delimiter-unsafe
 
 test("runCiChecks: duplicate names — explicit `only` selects the FIRST declared row only", async () => {
   // Pre-concurrency `find` semantics: `only: "a"` never broadens to every row named `a` (which
-  // would race on the same ci-a.md scratch target).
+  // would race on the same name-keyed persisted-output target).
   const ran: string[] = [];
   const runCheck: RunConfiguredCheck = async (check) => {
     ran.push(check.command);
     return { code: 0, output: "ok" };
   };
-  const outcome = await runCiChecks(
+  const outcome = await runCi(
     {
-      cwd: tmpCwd(),
       checks: [
         { name: "a", command: "A1" },
         { name: "a", command: "A2" },
@@ -410,9 +409,8 @@ test("runCiChecks: one shared AbortSignal reaches every in-flight check; abort s
       });
       if (started.length === 2) ac.abort();
     });
-  const outcome = await runCiChecks(
+  const outcome = await runCi(
     {
-      cwd: tmpCwd(),
       checks: [
         { name: "a", command: "A" },
         { name: "b", command: "B" },
@@ -436,9 +434,8 @@ test("runCiChecks: one shared AbortSignal reaches every in-flight check; abort s
 });
 
 test("runCiChecks: `only` with an unknown name among knowns → invalid_selection naming it", async () => {
-  const outcome = await runCiChecks(
+  const outcome = await runCi(
     {
-      cwd: tmpCwd(),
       checks: [
         { name: "a", command: "A" },
         { name: "b", command: "B" },
@@ -454,8 +451,8 @@ test("runCiChecks: `only` with an unknown name among knowns → invalid_selectio
 });
 
 test('runCiChecks: `only` of blanks (",") → the no-names invalid_selection diagnostic', async () => {
-  const outcome = await runCiChecks(
-    { cwd: tmpCwd(), checks: [{ name: "a", command: "A" }], only: "," },
+  const outcome = await runCi(
+    { checks: [{ name: "a", command: "A" }], only: "," },
     { runCheck: fakeRun({}), observeChangedFiles: noObserve },
   );
   assert.deepEqual(outcome, {
@@ -465,9 +462,8 @@ test('runCiChecks: `only` of blanks (",") → the no-names invalid_selection dia
 });
 
 test("runCiChecks: whitespace around names tolerated", async () => {
-  const outcome = await runCiChecks(
+  const outcome = await runCi(
     {
-      cwd: tmpCwd(),
       checks: [
         { name: "a", command: "A" },
         { name: "b", command: "B" },
@@ -488,14 +484,21 @@ test("runCiChecks: whitespace around names tolerated", async () => {
   );
 });
 
-// --- route-don't-relay + scratch -------------------------------------------------------
+// --- route-don't-relay through the PersistCheckOutput port --------------------------------
 
-test("runCiChecks: huge failing output → full text in scratch, shown capped to the tail", async () => {
-  const cwd = tmpCwd();
+test("runCiChecks: huge failing output → full bytes to the persist port, shown capped to the tail", async () => {
   const huge = `HEAD-MARKER${"x".repeat(200_000 - 22)}TAIL-MARKER`;
-  const outcome = await runCiChecks(
-    { cwd, checks: [{ name: "test", command: "X" }] },
-    { runCheck: fakeRun({ X: { code: 1, output: huge } }), observeChangedFiles: noObserve },
+  const persisted: { checkName: string; output: string }[] = [];
+  const outcome = await runCi(
+    { checks: [{ name: "test", command: "X" }] },
+    {
+      runCheck: fakeRun({ X: { code: 1, output: huge } }),
+      persistOutput: (checkName, output) => {
+        persisted.push({ checkName, output });
+        return `/scratch/ci-${checkName}.md`;
+      },
+      observeChangedFiles: noObserve,
+    },
   );
   assert.equal(outcome.kind, "completed");
   if (outcome.kind !== "completed") return;
@@ -508,32 +511,16 @@ test("runCiChecks: huge failing output → full text in scratch, shown capped to
   // The model-visible slice keeps the TAIL (failure summaries end pytest/tsc output).
   assert.ok(c.shown.endsWith("TAIL-MARKER"), "shown must keep the output tail");
   assert.ok(!c.shown.includes("HEAD-MARKER"), "shown must drop the output head");
-  // Full output preserved in scratch (un-run-scoped path under .perk/workflow/scratch/ci/).
-  assert.ok(c.scratchPath?.includes(join("scratch", "ci", "test.md")));
-  assert.ok(c.scratchPath && existsSync(c.scratchPath));
-  assert.equal(readFileSync(c.scratchPath, "utf8").length, 200_000);
-});
-
-test("runCiChecks: run-scoped scratch path under scratch/runs/<runId>/ci-<name>.md", async () => {
-  const cwd = tmpCwd();
-  const outcome = await runCiChecks(
-    { cwd, checks: [{ name: "lint", command: "L" }], runId: "01RUN" },
-    { runCheck: fakeRun({ L: { code: 0, output: "ok" } }), observeChangedFiles: noObserve },
-  );
-  assert.equal(outcome.kind, "completed");
-  if (outcome.kind !== "completed") return;
-  const c = outcome.checks[0];
-  assert.equal(c?.kind, "executed");
-  if (c?.kind !== "executed") return;
-  assert.ok(c.scratchPath?.includes(join("scratch", "runs", "01RUN", "ci-lint.md")));
-  assert.ok(c.scratchPath && existsSync(c.scratchPath));
+  // The FULL bytes crossed the port; the port's returned location is the opaque outputPath.
+  assert.deepEqual(persisted, [{ checkName: "test", output: huge }]);
+  assert.equal(c.outputPath, "/scratch/ci-test.md");
 });
 
 // --- fail-closed -----------------------------------------------------------------------
 
 test("runCiChecks: port throw → fail-closed (exitCode:-1, error captured, no throw)", async () => {
-  const outcome = await runCiChecks(
-    { cwd: tmpCwd(), checks: [{ name: "test", command: "BOOM" }] },
+  const outcome = await runCi(
+    { checks: [{ name: "test", command: "BOOM" }] },
     {
       runCheck: async () => {
         throw new Error("spawn failed");
@@ -551,15 +538,14 @@ test("runCiChecks: port throw → fail-closed (exitCode:-1, error captured, no t
   assert.ok(c.error?.includes("spawn failed"));
 });
 
-test("runCiChecks: scratch-verify failure → exit code still reported, no throw", async () => {
-  // Point cwd at a path whose scratch dir cannot be created (a FILE where the dir should be).
-  const cwd = tmpCwd();
-  mkdirSync(join(cwd, ".perk", "workflow", "scratch"), { recursive: true });
-  writeFileSync(join(cwd, ".perk", "workflow", "scratch", "ci"), "", "utf8"); // a file, not a dir
-  const outcome = await runCiChecks(
-    { cwd, checks: [{ name: "test", command: "X" }] },
+test("runCiChecks: a throwing persist port → error reported, exit code intact, no throw", async () => {
+  const outcome = await runCi(
+    { checks: [{ name: "test", command: "X" }] },
     {
       runCheck: fakeRun({ X: { code: 1, output: "fail output" } }),
+      persistOutput: () => {
+        throw new Error("persist exploded");
+      },
       observeChangedFiles: noObserve,
     },
   );
@@ -568,16 +554,16 @@ test("runCiChecks: scratch-verify failure → exit code still reported, no throw
   const c = outcome.checks[0];
   assert.equal(c?.kind, "executed");
   if (c?.kind !== "executed") return;
-  assert.equal(c.exitCode, 1);
-  assert.equal(c.scratchPath, null);
-  assert.ok(c.error);
+  assert.equal(c.exitCode, 1, "the exit code survives the persistence failure");
+  assert.equal(c.outputPath, null);
+  assert.ok(c.error?.includes("persist exploded"));
 });
 
 // --- change-scoped gating through the ObserveChangedFiles port ---------------------------
 
 test("runCiChecks: globbed check skipped when no changed file matches; basename matches at any depth", async () => {
-  const skip = await runCiChecks(
-    { cwd: tmpCwd(), checks: [{ name: "lint-py", command: "PY", glob: "*.py" }] },
+  const skip = await runCi(
+    { checks: [{ name: "lint-py", command: "PY", glob: "*.py" }] },
     { runCheck: fakeRun({}), observeChangedFiles: observing(["docs/readme.md"]) },
   );
   assert.equal(skip.kind, "completed");
@@ -587,8 +573,8 @@ test("runCiChecks: globbed check skipped when no changed file matches; basename 
   ]);
   assert.equal(skip.passed, true);
   // A slash-free pattern gates on the BASENAME at any depth (the gitignore/fnmatch rule).
-  const run = await runCiChecks(
-    { cwd: tmpCwd(), checks: [{ name: "lint-py", command: "PY", glob: "*.py" }] },
+  const run = await runCi(
+    { checks: [{ name: "lint-py", command: "PY", glob: "*.py" }] },
     {
       runCheck: fakeRun({ PY: { code: 0, output: "ok" } }),
       observeChangedFiles: observing(["a/b/c.py"]),
@@ -599,8 +585,8 @@ test("runCiChecks: globbed check skipped when no changed file matches; basename 
 
 test("runCiChecks: ** crosses directories; a slash pattern matches the full repo-relative path", async () => {
   const checks = [{ name: "docs", command: "D", glob: "docs/*.md" }];
-  const deep = await runCiChecks(
-    { cwd: tmpCwd(), checks },
+  const deep = await runCi(
+    { checks },
     { runCheck: fakeRun({}), observeChangedFiles: observing(["docs/sub/a.md"]) },
   );
   assert.equal(
@@ -608,16 +594,16 @@ test("runCiChecks: ** crosses directories; a slash pattern matches the full repo
     "skipped",
     "docs/*.md never crosses a directory",
   );
-  const shallow = await runCiChecks(
-    { cwd: tmpCwd(), checks },
+  const shallow = await runCi(
+    { checks },
     {
       runCheck: fakeRun({ D: { code: 0, output: "ok" } }),
       observeChangedFiles: observing(["docs/a.md"]),
     },
   );
   assert.equal(shallow.kind === "completed" ? shallow.checks[0]?.kind : "?", "executed");
-  const doubleStar = await runCiChecks(
-    { cwd: tmpCwd(), checks: [{ name: "docs", command: "D", glob: "docs/**" }] },
+  const doubleStar = await runCi(
+    { checks: [{ name: "docs", command: "D", glob: "docs/**" }] },
     {
       runCheck: fakeRun({ D: { code: 0, output: "ok" } }),
       observeChangedFiles: observing(["docs/sub/a.md"]),
@@ -632,25 +618,24 @@ test("runCiChecks: ** crosses directories; a slash pattern matches the full repo
 
 test("runCiChecks: comma multi-pattern globs match any pattern", async () => {
   const checks = [{ name: "js", command: "J", glob: "*.ts,*.tsx,*.js" }];
-  const hit = await runCiChecks(
-    { cwd: tmpCwd(), checks },
+  const hit = await runCi(
+    { checks },
     {
       runCheck: fakeRun({ J: { code: 0, output: "ok" } }),
       observeChangedFiles: observing(["x.tsx"]),
     },
   );
   assert.equal(hit.kind === "completed" ? hit.checks[0]?.kind : "?", "executed");
-  const miss = await runCiChecks(
-    { cwd: tmpCwd(), checks },
+  const miss = await runCi(
+    { checks },
     { runCheck: fakeRun({}), observeChangedFiles: observing(["x.md"]) },
   );
   assert.equal(miss.kind === "completed" ? miss.checks[0]?.kind : "?", "skipped");
 });
 
 test("runCiChecks: mixed run/skip → overall passed:true; no-glob row always runs", async () => {
-  const outcome = await runCiChecks(
+  const outcome = await runCi(
     {
-      cwd: tmpCwd(),
       checks: [
         { name: "lint-py", command: "PY", glob: "*.py" },
         { name: "lint-js", command: "JS", glob: "*.ts" },
@@ -671,8 +656,8 @@ test("runCiChecks: mixed run/skip → overall passed:true; no-glob row always ru
 });
 
 test("runCiChecks: a null observation (fail-open) runs every globbed check", async () => {
-  const outcome = await runCiChecks(
-    { cwd: tmpCwd(), checks: [{ name: "lint-py", command: "PY", glob: "*.py" }] },
+  const outcome = await runCi(
+    { checks: [{ name: "lint-py", command: "PY", glob: "*.py" }] },
     {
       runCheck: fakeRun({ PY: { code: 0, output: "ran anyway" } }),
       observeChangedFiles: observing(null),
@@ -682,8 +667,8 @@ test("runCiChecks: a null observation (fail-open) runs every globbed check", asy
 });
 
 test("runCiChecks: a THROWING observer folds to the fail-open arm (never skip on uncertainty)", async () => {
-  const outcome = await runCiChecks(
-    { cwd: tmpCwd(), checks: [{ name: "lint-py", command: "PY", glob: "*.py" }] },
+  const outcome = await runCi(
+    { checks: [{ name: "lint-py", command: "PY", glob: "*.py" }] },
     {
       runCheck: fakeRun({ PY: { code: 0, output: "ran anyway" } }),
       observeChangedFiles: async () => {
@@ -695,9 +680,8 @@ test("runCiChecks: a THROWING observer folds to the fail-open arm (never skip on
 });
 
 test("runCiChecks: explicit `only` runs even when its glob would not match (no observation)", async () => {
-  const outcome = await runCiChecks(
+  const outcome = await runCi(
     {
-      cwd: tmpCwd(),
       checks: [{ name: "lint-py", command: "PY", glob: "*.py" }],
       only: "lint-py",
     },
@@ -709,9 +693,8 @@ test("runCiChecks: explicit `only` runs even when its glob would not match (no o
 
 test("runCiChecks: no observation when no selected row is globbed", async () => {
   // The throwing observer fake would fail the run if consulted.
-  const outcome = await runCiChecks(
+  const outcome = await runCi(
     {
-      cwd: tmpCwd(),
       checks: [
         { name: "a", command: "A" },
         { name: "b", command: "B" },
@@ -732,9 +715,8 @@ test("runCiChecks: no observation when no selected row is globbed", async () => 
 
 test("runCiChecks: run_started is synchronous with ordered entries; skips render skipped", async () => {
   const events: CiProgressEvent[] = [];
-  const promise = runCiChecks(
+  const promise = runCi(
     {
-      cwd: tmpCwd(),
       checks: [
         { name: "lint-py", command: "PY", glob: "*.py" },
         { name: "docs", command: "D" },
@@ -787,9 +769,8 @@ test("runCiChecks: a check_settled arrives while a sibling is still pending; fin
     await failGate;
     return { code: 1, output: "bad" };
   };
-  const promise = runCiChecks(
+  const promise = runCi(
     {
-      cwd: tmpCwd(),
       checks: [
         { name: "pass", command: "P" },
         { name: "fail", command: "F" },
@@ -836,12 +817,12 @@ test("runCiChecks: a check_settled arrives while a sibling is still pending; fin
 test("runCiChecks: the refusal arms emit nothing", async () => {
   const events: CiProgressEvent[] = [];
   const onProgress = (event: CiProgressEvent) => events.push(event);
-  await runCiChecks(
-    { cwd: tmpCwd(), checks: [] },
+  await runCi(
+    { checks: [] },
     { runCheck: fakeRun({}), observeChangedFiles: noObserve, onProgress },
   );
-  await runCiChecks(
-    { cwd: tmpCwd(), checks: [{ name: "a", command: "A" }], only: "nope" },
+  await runCi(
+    { checks: [{ name: "a", command: "A" }], only: "nope" },
     { runCheck: fakeRun({}), observeChangedFiles: noObserve, onProgress },
   );
   assert.deepEqual(events, [], "not_configured and invalid_selection emit no progress");
@@ -851,8 +832,8 @@ test("runCiChecks: snapshot isolation — retained events never mutate; a mutati
   // (a) A retained run_started event stays deep-equal to its original bytes after settlement:
   // shared references to the internal state array would mutate it in place.
   const retained: CiProgressEvent[] = [];
-  await runCiChecks(
-    { cwd: tmpCwd(), checks: [{ name: "a", command: "A" }] },
+  await runCi(
+    { checks: [{ name: "a", command: "A" }] },
     {
       runCheck: fakeRun({ A: { code: 0, output: "ok" } }),
       observeChangedFiles: noObserve,
@@ -865,8 +846,8 @@ test("runCiChecks: snapshot isolation — retained events never mutate; a mutati
   });
   // (b) A sink that MUTATES its received entries changes neither later events nor the outcome.
   const seen: CiProgressEvent[] = [];
-  const outcome = await runCiChecks(
-    { cwd: tmpCwd(), checks: [{ name: "a", command: "A" }] },
+  const outcome = await runCi(
+    { checks: [{ name: "a", command: "A" }] },
     {
       runCheck: fakeRun({ A: { code: 0, output: "ok" } }),
       observeChangedFiles: noObserve,
@@ -890,8 +871,8 @@ test("runCiChecks: snapshot isolation — retained events never mutate; a mutati
 });
 
 test("runCiChecks: a throwing sink leaves the run intact", async () => {
-  const throwing = await runCiChecks(
-    { cwd: tmpCwd(), checks: [{ name: "ok", command: "K" }] },
+  const throwing = await runCi(
+    { checks: [{ name: "ok", command: "K" }] },
     {
       runCheck: fakeRun({ K: { code: 0, output: "fine" } }),
       observeChangedFiles: noObserve,
@@ -908,8 +889,8 @@ test("runCiChecks: a throwing sink leaves the run intact", async () => {
 test("runCiChecks: the opts.signal instance reaches both ports", async () => {
   const ac = new AbortController();
   const seen: (AbortSignal | undefined)[] = [];
-  const outcome = await runCiChecks(
-    { cwd: tmpCwd(), checks: [{ name: "py", command: "PY", glob: "*.py" }], signal: ac.signal },
+  const outcome = await runCi(
+    { checks: [{ name: "py", command: "PY", glob: "*.py" }], signal: ac.signal },
     {
       runCheck: async (_check, o) => {
         seen.push(o.signal);

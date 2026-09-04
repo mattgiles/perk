@@ -11,11 +11,9 @@
 // commands run with full shell access through the injected `RunConfiguredCheck` port. The
 // untrusted-config scope gate (`decideCiScope`) and the output-isolation wrapping live with the
 // adapter that composes the ports; the feature's own defenses are output routing (full output
-// to scratch, capped model-visible slice) and never-throw per-check folding.
+// persisted through the `PersistCheckOutput` port, capped model-visible slice) and never-throw
+// per-check folding.
 
-import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
-import { atomicWriteFileSync, ensureRunScratch, scratchDir } from "../substrate/cache.ts";
 import type { CiCheck } from "../substrate/config.ts";
 import { capForModel, DEFAULT_MODEL_VISIBLE_CAP } from "../substrate/modelVisible.ts";
 
@@ -28,9 +26,12 @@ export type CiCheckOutcome =
       name: string;
       command: string;
       exitCode: number;
-      /** The capped, model-visible output (route-don't-relay — the full output lives in scratch). */
+      /** The capped, model-visible output (route-don't-relay — the full output was persisted
+       * through the port). */
       shown: string;
-      scratchPath: string | null;
+      /** The port-minted opaque location of the persisted full output (`null` = persistence
+       * failed; the failure rides `error`). */
+      outputPath: string | null;
       bytesTotal: number;
       bytesShown: number;
       truncated: boolean;
@@ -81,6 +82,9 @@ export type RunConfiguredCheck = (
   opts: { signal?: AbortSignal },
 ) => Promise<CiExecOutcome>;
 
+/** "Persist this check's full output and return its opaque location" — throws on failure. */
+export type PersistCheckOutput = (checkName: string, output: string) => string;
+
 /** The semantic port "changed files vs trunk"; `null` = unknown (the fail-open sentinel — the
  * run then skips nothing). One production adapter: the git composition in the Pi adapter. */
 export type ObserveChangedFiles = (opts: {
@@ -106,26 +110,17 @@ export function decideCiScope(args: {
   return args.hasUI ? "confirm" : "refuse";
 }
 
-/** Resolve the scratch file for a check's full output (run-scoped when a runId is given). */
-function ciScratchPath(cwd: string, runId: string | undefined, check: string): string {
-  if (runId) {
-    return join(ensureRunScratch(cwd, runId), `ci-${check}.md`);
-  }
-  const dir = join(scratchDir(cwd), "ci");
-  mkdirSync(dir, { recursive: true });
-  return join(dir, `${check}.md`);
-}
-
 /**
- * Run one configured check deterministically: run the port, persist the FULL combined output to
- * scratch and verify it landed (write→verify→pass-path), cap the model-visible output. Never
- * throws — a port throw becomes `exitCode: -1` with the error captured.
+ * Run one configured check deterministically: run the port, persist the FULL combined output
+ * through the `PersistCheckOutput` port, cap the model-visible output. Never throws — a
+ * run-port throw becomes `exitCode: -1` with the error captured; a persistence throw folds to
+ * the same failure shape (`error` = the thrown message, `outputPath: null`) with the exit code
+ * intact.
  */
 async function runOneCheck(
-  cwd: string,
-  runId: string | undefined,
   check: CiCheck,
   runCheck: RunConfiguredCheck,
+  persistOutput: PersistCheckOutput,
   signal?: AbortSignal,
 ): Promise<CiCheckOutcome> {
   let outcome: CiExecOutcome;
@@ -139,7 +134,7 @@ async function runOneCheck(
       command: check.command,
       exitCode: -1,
       shown: message,
-      scratchPath: null,
+      outputPath: null,
       bytesTotal: 0,
       bytesShown: 0,
       truncated: false,
@@ -147,28 +142,26 @@ async function runOneCheck(
     };
   }
 
-  // write → verify → pass-path: persist the full output, then confirm it landed.
-  let scratchPath: string | null = null;
+  // Persist the full output through the port: a returned string IS the location; ANY throw
+  // folds to the failure shape (the port owns write+verify semantics — no post-write probe).
+  let outputPath: string | null = null;
   let writeError: string | undefined;
   try {
-    const path = ciScratchPath(cwd, runId, check.name);
-    atomicWriteFileSync(path, outcome.output);
-    if (existsSync(path)) scratchPath = path;
-    else writeError = "scratch write could not be verified";
+    outputPath = persistOutput(check.name, outcome.output);
   } catch (err) {
     writeError = err instanceof Error ? err.message : String(err);
   }
 
   // Tail-keep: pytest/tsc failure summaries live at the END of the output, so the model-visible
-  // slice keeps the last `cap` bytes; the scratch file still holds the full output.
-  const capped = capForModel(outcome.output, DEFAULT_MODEL_VISIBLE_CAP, scratchPath, "tail");
+  // slice keeps the last `cap` bytes; the persisted location still holds the full output.
+  const capped = capForModel(outcome.output, DEFAULT_MODEL_VISIBLE_CAP, outputPath, "tail");
   return {
     kind: "executed",
     name: check.name,
     command: check.command,
     exitCode: outcome.code,
     shown: capped.shown,
-    scratchPath,
+    outputPath,
     bytesTotal: capped.bytesTotal,
     bytesShown: capped.bytesShown,
     truncated: capped.truncated,
@@ -205,15 +198,16 @@ function skippedResult(check: CiCheck, glob: string): CiCheckOutcome {
 }
 
 export interface RunCiChecksOpts {
-  cwd: string;
   checks: CiCheck[];
   only?: string;
-  runId?: string;
   signal?: AbortSignal;
 }
 
 export interface RunCiChecksDeps {
   runCheck: RunConfiguredCheck;
+  /** Persist one check's full output; the returned string is the opaque location this feature
+   * treats as data (a throw folds to the check's failure shape). */
+  persistOutput: PersistCheckOutput;
   observeChangedFiles: ObserveChangedFiles;
   /** Optional typed live-progress sink. Failure-owned here: a throwing OR async-rejecting sink
    * can neither affect the run nor leak an unhandled rejection. */
@@ -279,7 +273,7 @@ export async function runCiChecks(
     }
     // Each requested name selects the FIRST declared row with that name (the pre-concurrency
     // `find` semantics): duplicate names never broaden an explicit selection into extra rows
-    // racing on the same `ci-<name>.md` scratch target.
+    // racing on the same name-keyed persisted-output target.
     const wanted = new Set(requested);
     const seen = new Set<string>();
     selected = checks.filter((c) => {
@@ -342,7 +336,7 @@ export async function runCiChecks(
       if (glob !== undefined && skipsByGlob(check)) {
         return Promise.resolve(skippedResult(check, glob));
       }
-      return runOneCheck(opts.cwd, opts.runId, check, deps.runCheck, opts.signal).then((result) => {
+      return runOneCheck(check, deps.runCheck, deps.persistOutput, opts.signal).then((result) => {
         const entry = states[i];
         if (entry) {
           entry.state = result.kind === "executed" && result.exitCode === 0 ? "passed" : "failed";

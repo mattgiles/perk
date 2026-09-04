@@ -151,7 +151,9 @@ Investigate the landed change, capture durable learning when warranted, clear th
 semaphore, and release the worktree. Bare interactive `/learn` gathers one session-grounded
 evidence bundle (planning and implementation sessions, saved plan, merged PR, existing-docs
 inventory), then runs 2–4 fresh `perk.learn-analyst` lanes through `run_learn_wave`. Missing
-evidence is surfaced rather than guessed; a failed analyst is a reported skipped angle. The parent
+evidence is surfaced rather than guessed; a failed analyst is a reported skipped angle, and a
+malformed or misattributed analyst report degrades to a skipped angle too (its body is never
+relayed). The parent
 reconciles all reports into one classified decision and either captures it or skips.
 
 If bundle gathering fails, the flow degrades to a single-pass capture. `/learn skip` records a
@@ -213,7 +215,9 @@ manual approval → save failsafe and read-only → read-write boundary. Paired 
 The review surface renders the delivery choice directly below the title. When the validated draft
 exists, `/objective-save` drives the shared approval-save seam. If no draft exists, it exits the
 read-only gate and hands a structured save turn to the session instead of silently failing; that
-turn must create the draft and call `objective_save`.
+turn must create the draft and call `objective_save`. If the draft exists but is invalid
+(corrupted or undecodable), the command stops with an error naming the problem — rewrite the
+draft with `objective_draft` and re-run; it never hands a save turn over a corrupted artifact.
 
 The cold `perk objective author` door has no `/objective-author` twin.
 
@@ -280,6 +284,8 @@ In a `gist-author` session, `plan_review` reviews the rendered gist. First-party
 view-only and approval auto-saves. Plannotator Direct Edits turn an approval into a revise round:
 fold title, scope, and prose hunks into `gist_draft`, then re-review. If `/gist-save` finds no draft,
 it drives the session to create one and call `gist_save`; it does not invent or scrape gist content.
+If the draft exists but is invalid (corrupted or undecodable), the command stops with an error
+naming the problem — rewrite the draft with `gist_draft` and re-run.
 
 ## Utility commands & factories
 
