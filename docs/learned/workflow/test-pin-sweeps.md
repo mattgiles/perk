@@ -96,6 +96,33 @@ And when prose changes from optional guidance to a mandatory obligation, a bare 
 survives a softening regression — pair it with a wrap-safe semantic pin on the mandatory framing
 (#1955).
 
+## Whole-file token pins are ownership-blind — scope pins to the owning section
+
+A pin that normalizes a whole file into tokens and asserts presence proves the token exists
+*somewhere*, not where the contract puts it. When placement is the contract (a rule that must
+live under a specific `## <heading>` section or numbered step), scope the pin to that section's
+extracted text — a whole-file pin stays green when the clause migrates to a section where it no
+longer governs (#2153).
+
+## Narrowing an exposed result type deletes wire-shape coverage
+
+Narrowing a function's exposed result type (dropping fields callers no longer read) silently
+deletes test coverage of the wire shape those fields rode — the suite compiles and passes while
+the persisted/serialized form loses its pin. Add a raw-persisted wire-shape pin (assert the
+serialized bytes/JSON keys) in the same change as the narrowing (#2183).
+
+## Opt-in suites accumulate stale pins from predecessors
+
+A suite outside the default CI gate (an opt-in carve-out) accumulates stale pins from predecessor
+changes that never ran it. When a change touches such a suite's domain, reconcile the
+predecessor-caused drift as part of the change, not as a separate cleanup (#2188).
+
+## Count-pin sweeps scan every exact-set and textual count pin
+
+Landing a new surface (a tool, a fragment source, a registry row) sweeps for count pins by
+scanning ALL exact-set pins and textual counts in test sources — never an assumed list of known
+pin sites; the pin-inventory rule above applies to counts exactly as to phrases (#2033).
+
 ## Inserting a test between tests — anchor the complete boundary (the F821 trap)
 
 Inserting a new test function *between* two existing tests with an `edit` `oldText` that stops at
