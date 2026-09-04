@@ -127,18 +127,19 @@ class _FakeIssues:
     plan_header_writes: list[tuple[str, dict[str, object]]] = field(default_factory=list)
     _seq: "itertools.count[int]" = field(default_factory=lambda: itertools.count(1))
 
-    def seed(self, issue_id: str, body: str) -> None:
-        """Seed a pre-existing comment on a carrier (bypassing the POST plan)."""
-        self._record(issue_id, body)
+    def seed(self, issue_id: str, body: str, *, edited_at: str | None = None) -> None:
+        """Seed a pre-existing comment on a carrier (bypassing the POST plan). ``edited_at``
+        seeds an edit fact — mutable prose comments get edited; perk's own POSTs never do."""
+        self._record(issue_id, body, edited_at=edited_at)
 
-    def _record(self, issue_id: str, body: str) -> None:
+    def _record(self, issue_id: str, body: str, *, edited_at: str | None = None) -> None:
         n = next(self._seq)
         self.comments.setdefault(issue_id, []).append(
             engagement.EngagementComment(
                 id=f"c{n}",
                 body=body,
                 created_at=f"2026-01-01T00:{n // 60:02d}:{n % 60:02d}Z",
-                edited_at=None,
+                edited_at=edited_at,
                 author=_PERK_AUTHOR,
             )
         )
@@ -320,6 +321,40 @@ class TestReadJournal:
         store.add("B", supersedes="A")
         with pytest.raises(TrainPersistenceError, match="does not exist"):
             persistence.read_journal("B")
+
+    def test_edited_prose_mentioning_stamp_text_never_corrupts_the_journal(self) -> None:
+        # The problem-statement regression: an EDITED mutable objective-prose comment that
+        # merely mentions the ready-stamp marker text mid-body is unrelated DATA — the fold
+        # raises nothing and the real stamp still projects. Status consequence: no
+        # JournalCorruptionError means status carries no `journal_corruption` blocker, and the
+        # fold→LayerHandoff.READY derivation (pinned by tests/test_delivery_train.py::
+        # TestHandoff) reports the handoff ready.
+        persistence, store, issues = _make()
+        store.add("100")
+        issues.seed(
+            "100",
+            "Objective notes.\n\nThe perk:stack-ready-stamp comment below records the handoff.\n",
+            edited_at="2026-02-01T00:00:00Z",
+        )
+        issues.seed("100", journal.render_stamp_event(_stamp()))
+        fold = persistence.read_journal("100")
+        stamp = fold.latest_ready_stamp(objective_id="100", plan_id="201")
+        assert stamp is not None
+        assert stamp.record == _stamp()
+
+    def test_edited_prose_mentioning_operation_text_never_corrupts_the_journal(self) -> None:
+        # The operation-marker mirror: edited prose mentioning the operation marker text
+        # mid-body is DATA; the valid prepared event alongside it folds cleanly.
+        persistence, store, issues = _make()
+        store.add("100")
+        issues.seed(
+            "100",
+            "Objective notes.\n\nSee the perk:stack-operation-event records below.\n",
+            edited_at="2026-02-01T00:00:00Z",
+        )
+        issues.seed("100", journal.render_event(_prepared()))
+        fold = persistence.read_journal("100")
+        assert list(fold.operations) == [_OP_1]
 
     def test_foreign_lineage_event_never_folds(self) -> None:
         persistence, store, issues = _make()

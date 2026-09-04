@@ -2,7 +2,9 @@
 
 Covers: render→parse round trips in BOTH marker encodings (the canonical HTML form and the
 Linear-transcoded inline-code form, proving the logical key + payload are identical across
-backends), the fail-closed strict rejections (edited / tampered / malformed / oversized), the
+backends), the positional recognition rule (marker text on the first nonblank line — mid-body
+mentions are unrelated DATA), the fail-closed strict rejections (edited / tampered / malformed /
+oversized), the
 fold rules (dedupe, conflicts, orphans = out-of-band deletion, accepted gating, lineage checks,
 unresolved detection), the size cap against a realistic 100-layer land record, the ready-stamp
 grammar + routing dispatcher + fold scoping (contracts.md §8.43), and the engagement-exclusion
@@ -188,6 +190,28 @@ class TestRoundTrip:
             is None
         )
 
+    @pytest.mark.parametrize("edited_at", [None, "t2"], ids=["unedited", "edited"])
+    def test_prose_mentioning_marker_text_mid_body_is_ignored(self, edited_at: str | None) -> None:
+        """Recognition is positional: mutable objective prose merely *mentioning* the marker
+        text mid-body is unrelated untrusted DATA — edited or not (the motivating regression:
+        edited prose must never raise the edited-event corruption)."""
+        body = "Objective notes.\n\nSee the perk:stack-operation-event records below.\n"
+        assert (
+            journal.parse_journal_comment(
+                body, comment_id="c1", created_at="t1", edited_at=edited_at
+            )
+            is None
+        )
+
+    def test_leading_blank_lines_before_marker_still_parse(self) -> None:
+        # "First NONBLANK line" is load-bearing: leading blank lines never hide the marker.
+        record = _prepared()
+        parsed = journal.parse_journal_comment(
+            "\n\n" + journal.render_event(record), comment_id="c1", created_at="t1", edited_at=None
+        )
+        assert parsed is not None
+        assert parsed.record == record
+
     def test_mint_operation_id_is_ulid(self) -> None:
         minted = journal.mint_operation_id()
         assert len(minted) == 26
@@ -301,16 +325,23 @@ class TestStrictRejections:
         with pytest.raises(journal.JournalCorruptionError, match="marker \\+ one yaml fence"):
             self._parse(marker + "\n\nevent: prepared")
 
-    def test_marker_quoted_in_human_prose_is_fail_closed(self) -> None:
-        """Marker detection is substring-based like every perk marker: a human comment quoting
-        the marker text inside a code block still parses strictly — and is corruption when the
-        body is not exactly marker + fence (the fail-closed pin)."""
+    def test_marker_quoted_in_human_prose_is_unrelated_data(self) -> None:
+        """Recognition is positional: a human comment quoting the marker text inside a code
+        block (the first nonblank line is prose) is unrelated untrusted DATA, never parsed."""
         body = f"look at this:\n\n```\n<!-- perk:stack-operation-event:{_ULID}:prepared -->\n```\n"
-        with pytest.raises(journal.JournalCorruptionError):
-            self._parse(body)
+        assert self._parse(body) is None
 
-    def test_marker_not_on_leading_line(self) -> None:
+    def test_marker_not_on_leading_line_is_unrelated_data(self) -> None:
+        # A prose-prefixed event body is unrecognized rather than corruption — equivalent to
+        # out-of-band deletion of the comment (the accepted exposure class; fail-safe: an
+        # orphaned outcome still folds as corruption).
         body = "prose first\n" + journal.render_event(_prepared())
+        assert self._parse(body) is None
+
+    def test_first_line_mentioning_marker_text_is_still_corruption(self) -> None:
+        # The retained near-miss net: a FIRST line carrying the marker text without being a
+        # well-formed marker line stays fail-closed corruption.
+        body = "about perk:stack-operation-event markers\n\nprose"
         with pytest.raises(journal.JournalCorruptionError, match="well-formed"):
             self._parse(body)
 
@@ -519,6 +550,18 @@ class TestStampRoundTrip:
             is None
         )
 
+    def test_leading_blank_lines_before_marker_still_parse(self) -> None:
+        # "First NONBLANK line" is load-bearing: leading blank lines never hide the marker.
+        record = _stamp()
+        parsed = journal.parse_stamp_comment(
+            "\n\n" + journal.render_stamp_event(record),
+            comment_id="s1",
+            created_at="t1",
+            edited_at=None,
+        )
+        assert parsed is not None
+        assert parsed.record == record
+
 
 class TestCarrierRouting:
     """The one-grammar-per-comment dispatcher (operation-marker precedence)."""
@@ -573,10 +616,63 @@ class TestCarrierRouting:
             is None
         )
 
-    def test_two_region_body_routes_to_the_operation_grammar_and_raises(self) -> None:
+    def test_stamp_first_two_region_body_routes_to_the_stamp_grammar_and_raises(self) -> None:
+        # Routing is by the FIRST nonblank line: a stamp-first two-region body is owned by the
+        # stamp grammar — still corruption (text outside the marker + fence), only the owning
+        # grammar changed.
         body = journal.render_stamp_event(_stamp()) + "\n\n" + journal.render_event(_prepared())
-        with pytest.raises(journal.JournalCorruptionError, match="stack-operation-event"):
+        with pytest.raises(
+            journal.JournalCorruptionError, match="body carries text outside the marker"
+        ):
             journal.parse_carrier_comment(body, comment_id="c1", created_at="t1", edited_at=None)
+
+    def test_operation_first_two_region_body_routes_to_the_operation_grammar_and_raises(
+        self,
+    ) -> None:
+        # The mirror ordering: an operation-first body is owned by the operation grammar —
+        # the appended stamp is text outside the marker + fence (corruption either way).
+        body = journal.render_event(_prepared()) + "\n\n" + journal.render_stamp_event(_stamp())
+        with pytest.raises(
+            journal.JournalCorruptionError, match="body carries text outside the marker"
+        ):
+            journal.parse_carrier_comment(body, comment_id="c1", created_at="t1", edited_at=None)
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "Objective notes.\n\nSee the perk:stack-operation-event records below.\n",
+            "Objective notes.\n\nSee the perk:stack-ready-stamp comment below.\n",
+        ],
+        ids=["operation-text", "stamp-text"],
+    )
+    def test_prose_mentioning_marker_text_mid_body_is_none(self, body: str) -> None:
+        # The motivating regression at the dispatcher: edited objective prose mentioning
+        # either marker text mid-body is unrelated DATA, never a grammar's problem.
+        assert (
+            journal.parse_carrier_comment(body, comment_id="c1", created_at="t1", edited_at="t2")
+            is None
+        )
+
+    def test_leading_blank_operation_event_routes_to_the_operation_grammar(self) -> None:
+        # "First NONBLANK line" is load-bearing at the dispatcher too: leading blank lines
+        # never make a valid event fall through to the stamp grammar or to unrelated DATA.
+        record = _prepared()
+        parsed = journal.parse_carrier_comment(
+            "\n\n" + journal.render_event(record), comment_id="c1", created_at="t1", edited_at=None
+        )
+        assert isinstance(parsed, journal.JournalEvent)
+        assert parsed.record == record
+
+    def test_leading_blank_stamp_event_routes_to_the_stamp_grammar(self) -> None:
+        record = _stamp()
+        parsed = journal.parse_carrier_comment(
+            "\n\n" + journal.render_stamp_event(record),
+            comment_id="s1",
+            created_at="t1",
+            edited_at=None,
+        )
+        assert isinstance(parsed, journal.ReadyStampEvent)
+        assert parsed.record == record
 
     def test_unrelated_comment_is_none(self) -> None:
         assert (
@@ -609,8 +705,25 @@ class TestStampStrictRejections:
         with pytest.raises(journal.JournalCorruptionError, match="well-formed"):
             self._parse(body)
 
-    def test_marker_not_on_leading_line(self) -> None:
+    def test_marker_not_on_leading_line_is_unrelated_data(self) -> None:
+        # A prose-prefixed stamp body is unrecognized rather than corruption — equivalent to
+        # out-of-band deletion of the comment (fail-safe: a vanished stamp degrades toward
+        # unstamped/stale — the handoff gate blocks, never falsely ready).
         body = "prose first\n" + journal.render_stamp_event(_stamp())
+        assert self._parse(body) is None
+
+    @pytest.mark.parametrize("edited_at", [None, "t2"], ids=["unedited", "edited"])
+    def test_prose_mentioning_stamp_text_mid_body_is_unrelated_data(
+        self, edited_at: str | None
+    ) -> None:
+        # The motivating regression: edited objective prose mentioning the stamp marker text
+        # mid-body never parses and never corrupts.
+        body = "Objective notes.\n\nSee the perk:stack-ready-stamp comment below.\n"
+        assert self._parse(body, edited_at=edited_at) is None
+
+    def test_first_line_mentioning_stamp_text_is_still_corruption(self) -> None:
+        # The retained near-miss net, stamp mirror.
+        body = "about perk:stack-ready-stamp markers\n\nprose"
         with pytest.raises(journal.JournalCorruptionError, match="well-formed"):
             self._parse(body)
 

@@ -12,12 +12,20 @@ adapter that reads/writes carriers lives in :mod:`perk.delivery.persistence`.
 
 Fail-closed disciplines (mirroring §8.42's fail-closed ``delivery_policy`` classifier):
 
-- A comment with neither the ``perk:stack-operation-event`` nor the ``perk:stack-ready-stamp``
-  marker text is unrelated untrusted DATA (ignored, never parsed). A comment carrying a marker
-  text is perk's own region and MUST parse strictly under exactly ONE grammar — the routing
-  dispatcher :func:`parse_carrier_comment` gives the operation marker precedence — and a
-  malformed / edited / tampered perk-marked event raises :class:`JournalCorruptionError`,
-  never a silent skip.
+- Recognition is **positional**: a comment is a journal region iff its FIRST nonblank line
+  carries the ``perk:stack-operation-event`` or ``perk:stack-ready-stamp`` marker text (the
+  canonical marker position — perk always renders marker-first bodies). Marker text anywhere
+  else in the body is ordinary untrusted DATA (ignored, never parsed) — mutable prose that
+  merely *mentions* a marker, edited or not, never parses and never corrupts. A recognized
+  region MUST parse strictly under exactly ONE grammar — the routing dispatcher
+  :func:`parse_carrier_comment` gives the operation marker precedence on the first nonblank
+  line — and a malformed / edited / tampered perk-marked event raises
+  :class:`JournalCorruptionError`, never a silent skip. The accepted trade: a real event body
+  prefixed with prose is *unrecognized* rather than corruption — equivalent to out-of-band
+  deletion of the comment (the already-accepted exposure class for a lone prepared/stamp
+  comment); the fail-safe directions hold (an orphaned outcome still folds as corruption; a
+  vanished stamp degrades toward ``unstamped``/``stale`` — the handoff gate blocks, never
+  falsely ready).
 - Byte-identity for idempotency is **canonical-serialization equality**: two events are "the
   same" iff their re-rendered canonical payloads are byte-equal — which makes GitHub (HTML
   marker) and Linear (transcoded inline-code marker) events comparable, because the logical key
@@ -529,16 +537,18 @@ def parse_journal_comment(
 ) -> JournalEvent | None:
     """Parse one carrier comment into a :class:`JournalEvent`.
 
-    Returns ``None`` when the body carries no ``perk:stack-operation-event`` marker text in
-    either encoding (an unrelated comment — human or other perk machinery — ignored as untrusted
-    DATA). Marker detection is substring-based like every perk marker, so ANY body carrying the
-    marker text (even quoted inside a code block) is treated as a journal region and must parse
-    strictly — the fail-closed pin. Raises :class:`JournalCorruptionError` when the marker text
-    is present but the event is detectably edited, malformed, or tampered — with ``carrier``
-    (the carrier issue-tier id, when the caller knows it) named alongside the comment id so a
-    succession fold's corruption points at the corrupt physical carrier.
+    Recognition is positional (contracts.md §8.43): returns ``None`` unless the body's FIRST
+    nonblank line carries the ``perk:stack-operation-event`` marker text in either encoding —
+    marker text anywhere else in the body is ordinary untrusted DATA (a human or objective-prose
+    comment merely *mentioning* the marker, edited or not, is ignored, never parsed). Once
+    recognized, every strict check is retained: raises :class:`JournalCorruptionError` when the
+    event is detectably edited, malformed, or tampered — with ``carrier`` (the carrier
+    issue-tier id, when the caller knows it) named alongside the comment id so a succession
+    fold's corruption points at the corrupt physical carrier.
     """
-    if _MARKER_TEXT not in body:
+    lines = body.strip().splitlines()
+    first = lines[0].rstrip() if lines else ""
+    if _MARKER_TEXT not in first:
         return None
     where = f"journal comment {comment_id}"
     if carrier is not None:
@@ -549,12 +559,10 @@ def parse_journal_comment(
         raise JournalCorruptionError(
             f"{where}: journal event was edited at {edited_at} (perk never edits an event)"
         )
-    lines = body.strip().splitlines()
-    first = lines[0].rstrip() if lines else ""
     match = _HTML_MARKER_RE.match(first) or _INLINE_MARKER_RE.match(first)
     if match is None:
         raise JournalCorruptionError(
-            f"{where}: marker text present but the body does not start with a well-formed "
+            f"{where}: the first line carries the marker text but is not a well-formed "
             "stack-operation-event marker line"
         )
     marker_operation_id, marker_role = match.group(1), match.group(2)
@@ -640,13 +648,18 @@ def parse_stamp_comment(
 ) -> ReadyStampEvent | None:
     """Parse one carrier comment into a :class:`ReadyStampEvent`.
 
-    Returns ``None`` when the body carries no ``perk:stack-ready-stamp`` marker text in either
-    encoding; fail-closed otherwise, mirroring :func:`parse_journal_comment` arm for arm — a
-    present-but-malformed / edited / tampered stamp raises :class:`JournalCorruptionError`.
-    Callers routing whole carriers go through :func:`parse_carrier_comment` (one grammar per
-    comment, operation-marker precedence); this parser assumes the body is a stamp region.
+    Recognition is positional, mirroring :func:`parse_journal_comment` arm for arm: returns
+    ``None`` unless the body's FIRST nonblank line carries the ``perk:stack-ready-stamp``
+    marker text in either encoding — marker text anywhere else is ordinary untrusted DATA
+    (edited or not). Once recognized, fail-closed throughout — a present-but-malformed /
+    edited / tampered stamp raises :class:`JournalCorruptionError`. Callers routing whole
+    carriers go through :func:`parse_carrier_comment` (one grammar per comment,
+    operation-marker precedence at the first nonblank line); this parser assumes the body is
+    a stamp region.
     """
-    if _STAMP_MARKER_TEXT not in body:
+    lines = body.strip().splitlines()
+    first = lines[0].rstrip() if lines else ""
+    if _STAMP_MARKER_TEXT not in first:
         return None
     where = f"ready-stamp comment {comment_id}"
     if carrier is not None:
@@ -657,12 +670,10 @@ def parse_stamp_comment(
         raise JournalCorruptionError(
             f"{where}: ready stamp was edited at {edited_at} (perk never edits an event)"
         )
-    lines = body.strip().splitlines()
-    first = lines[0].rstrip() if lines else ""
     match = _STAMP_HTML_MARKER_RE.match(first) or _STAMP_INLINE_MARKER_RE.match(first)
     if match is None:
         raise JournalCorruptionError(
-            f"{where}: marker text present but the body does not start with a well-formed "
+            f"{where}: the first line carries the marker text but is not a well-formed "
             "stack-ready-stamp marker line"
         )
     payload_text = _extract_single_yaml_fence(lines[1:], where=where)
@@ -700,16 +711,22 @@ def parse_carrier_comment(
 ) -> JournalEvent | ReadyStampEvent | None:
     """Route one carrier comment through exactly ONE grammar (contracts.md §8.43).
 
-    Operation-marker precedence: a body carrying the operation marker text parses under the
-    operation grammar — whatever it returns or raises stands — so an operation whose opaque
-    ``before``/``after`` payload merely *mentions* the stamp text (e.g. journaled user-authored
-    prose) parses cleanly as an operation, never as a malformed stamp. Only a body with no
-    operation marker text and the stamp marker text parses under the stamp grammar (the reverse
-    collision is structurally impossible: every stamp payload field is a marker-safe allowlisted
-    segment or 40-hex, so a rendered stamp body can never contain the colon-carrying operation
-    marker text). Neither text → unrelated untrusted DATA (``None``).
+    Routing dispatches on the body's FIRST nonblank line (positional recognition,
+    contracts.md §8.43). Operation-marker precedence applies there: a first line carrying the
+    operation marker text routes to the operation grammar — whatever it returns or raises
+    stands — so an operation whose opaque ``before``/``after`` payload merely *mentions* the
+    stamp text (e.g. journaled user-authored prose) parses cleanly as an operation, never as a
+    malformed stamp. Otherwise the body falls through to the stamp grammar, which self-gates
+    on the first line (the reverse collision is structurally impossible: every stamp payload
+    field is a marker-safe allowlisted segment or 40-hex, so a rendered stamp body can never
+    contain the colon-carrying operation marker text). Neither text on the first nonblank
+    line → unrelated untrusted DATA (``None``) — objective prose mentioning either marker
+    text mid-body is DATA by construction.
     """
-    if _MARKER_TEXT in body:
+    # The canonical marker position — the same recognition gate each parser applies itself.
+    lines = body.strip().splitlines()
+    first = lines[0].rstrip() if lines else ""
+    if _MARKER_TEXT in first:
         return parse_journal_comment(
             body,
             comment_id=comment_id,

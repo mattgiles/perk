@@ -6122,9 +6122,16 @@ drives both (the backend-aligned guarantee). Journal reads go through the cursor
 transcoder rewrites it to the inline-code form
 `` `perk:stack-operation-event:<operation-id>:<event-role>` `` (perk never renders that form
 directly). The parser accepts both encodings. A comment body is exactly one marker line + one
-`yaml` fence carrying the payload; marker detection is substring-based (like every perk marker),
-so ANY body carrying the marker text parses strictly or is corruption. One comment carries
-exactly one event. The TRANSFER kind's `before`/`after` payload shapes are owned by
+`yaml` fence carrying the payload. **Recognition is positional**: a comment is a journal region
+iff its FIRST nonblank line carries the marker text (the canonical marker position — perk always
+renders marker-first bodies); marker text anywhere else in the body is ordinary untrusted DATA
+(mutable prose mentioning a marker, edited or not, never parses and never corrupts). A recognized
+region retains every strict rule: one marker per body (the whole-body count), the edited-comment
+raise, the well-formed marker line, exactly marker + one `yaml` fence, and the marker↔payload
+tamper cross-checks. The accepted consequence: a prose-prefixed event body is unrecognized —
+equivalent to out-of-band deletion of the comment (the accepted exposure class; an orphaned
+outcome still folds as corruption, and a missing stamp fails toward `unstamped`, never a false
+`ready`). One comment carries exactly one event. The TRANSFER kind's `before`/`after` payload shapes are owned by
 `perk/delivery/transfer.py` (§8.53's manifest models) — the journal stores them as opaque
 mappings; outcome events route to the carrier **holding the operation's prepared event** (the
 transfer prepares on the predecessor and keeps that operation's later events there).
@@ -6212,12 +6219,13 @@ accepts both encodings. The disjointness is the deliberate compatibility posture
 carries no `perk:stack-operation-event` substring, so pre-stamp perk versions skip stamp
 comments as unrelated DATA rather than raising `JournalCorruptionError` and blocking the whole
 train on mixed-version machines. **One grammar per comment, operation-marker precedence**: every
-carrier comment routes through ONE dispatcher (`parse_carrier_comment`), never both parsers — a
-body carrying the operation marker text parses under the operation grammar (its own rules stand,
-including the double-marker rule), so an operation whose opaque `before`/`after` payload merely
-*mentions* the stamp text (journaled user-authored prose) parses cleanly as an operation, never
-as a malformed stamp; only a body with no operation marker text and the stamp marker text parses
-under the stamp grammar; neither text → unrelated DATA. The reverse collision is structurally
+carrier comment routes through ONE dispatcher (`parse_carrier_comment`), never both parsers —
+the dispatcher routes on the FIRST nonblank line: operation marker text there parses under the
+operation grammar (its own rules stand, including the double-marker rule), so an operation whose
+opaque `before`/`after` payload merely *mentions* the stamp text (journaled user-authored prose)
+parses cleanly as an operation, never as a malformed stamp; else stamp marker text there parses
+under the stamp grammar; neither text on the first nonblank line → unrelated DATA (objective
+prose mentioning either marker text mid-body is DATA by construction — the motivating fix). The reverse collision is structurally
 impossible: every stamp payload field is validated against the **marker-safe segment
 allowlist** or is 40-hex (the collision-proofing mechanics live in `journal.py`), so a rendered
 stamp body can never contain the colon-carrying operation marker text nor break either marker
