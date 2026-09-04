@@ -18,7 +18,6 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { GIST_DRAFT_ARTIFACT } from "../../authoring/gist/draft.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "../../authoring/objective/draft.ts";
 import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
-import { PLANNOTATOR_REVIEW_COMMAND } from "../../doors/plannotatorHandoff.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
@@ -34,6 +33,7 @@ import {
   type PlanReviewV1Deps,
   reviewOutcomeResult,
 } from "./planReview.ts";
+import { PLANNOTATOR_REVIEW_COMMAND } from "./providers/plannotatorHandoff.ts";
 import type { PlanReviewUI, ReviewLaunchUI, ReviewOutcome, WaveLaunch } from "./review.ts";
 
 /** Plant a draft artifact (file + verified pointer) through the branch session seam. */

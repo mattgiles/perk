@@ -24,7 +24,7 @@ import {
   type SubmitChangeOutcome,
   submitChange,
 } from "../../../delivery/submit.ts";
-import { planningStageRefusal } from "../../../doors/lifecycleGates.ts";
+import { planningStageRefusal } from "../../../session/lifecycleGates.ts";
 import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
 import {
   booleanField,

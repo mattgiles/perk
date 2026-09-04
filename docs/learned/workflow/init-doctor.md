@@ -220,7 +220,7 @@ audits diff against; the committed baseline is `docs/design/archive/context-payl
 
 This made `<!-- BEGIN perk managed -->` a **cross-plane string contract**:
 `src/perk/convergence/init/blocks.py` (`AGENTS_BEGIN`, facade-re-exported) writes it,
-`extension/doors/selfcheck.ts` (`MANAGED_AGENTS_MARKER`) reads it. Changing the
+`extension/pi/v1/selfcheck.ts` (`MANAGED_AGENTS_MARKER`) reads it. Changing the
 literal in one plane must update the other in the same turn (recorded in `shared/contracts.md` §8.7).
 
 **Byte-match proof for the managed AGENTS block:** after editing the convergence source
@@ -474,7 +474,7 @@ the `again.fixed == []` idempotency tests.
 - `src/perk/substrate/git.py` — `is_tracked`, `rm_cached`
 - `tests/test_doctor.py` — `test_every_required_capability_has_a_doctor_check`
 - `tests/test_init_t5.py` — `test_cli_idempotent_second_run`
-- `extension/doors/selfcheck.ts` — `MANAGED_AGENTS_MARKER`, `readAmbientIndex`, `buildSelfcheckReport`
+- `extension/pi/v1/selfcheck.ts` — `MANAGED_AGENTS_MARKER`, `readAmbientIndex`, `buildSelfcheckReport`
 - `docs/learned/pi/extension-api.md` — why selfcheck must be a command handler
 - `docs/learned/workflow/linear-backend.md` — the full Linear readiness probe shape
 - `docs/learned/workflow/distribution.md` — the npm extension-delivery lifecycle that superseded the git-clone lifecycle

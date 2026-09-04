@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { PlannotatorBus } from "../pi/v1/providers/plannotator.ts";
+import type { PlannotatorBus } from "./plannotator.ts";
 import {
   CODE_REVIEW_READINESS_PROBE_PATH,
   type CodeReviewOutcome,

@@ -73,9 +73,9 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
 | `python-symbol:src/perk/backends/engagement.py:render_node_engagement` | `context` | `shipped` | [`src/perk/backends/engagement.py`](../../src/perk/backends/engagement.py) · `symbol:render_node_engagement` | — |
 | `python-symbol:src/perk/backends/engagement.py:render_objective_engagement` | `context` | `shipped` | [`src/perk/backends/engagement.py`](../../src/perk/backends/engagement.py) · `symbol:render_objective_engagement` | — |
 | `python-symbol:src/perk/backends/engagement.py:render_plan_engagement` | `context` | `shipped` | [`src/perk/backends/engagement.py`](../../src/perk/backends/engagement.py) · `symbol:render_plan_engagement` | — |
-| `typescript-model-call:extension/doors/lifecycleGates.ts:module:sendUserMessage:0` | `context` | `shipped` | [`extension/doors/lifecycleGates.ts`](../../extension/doors/lifecycleGates.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/delivery/commitCompact.ts:module:sendUserMessage:0` | `context` | `shipped` | [`extension/pi/v1/delivery/commitCompact.ts`](../../extension/pi/v1/delivery/commitCompact.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/delivery/commitCompact.ts:module:sendUserMessage:1` | `context` | `shipped` | [`extension/pi/v1/delivery/commitCompact.ts`](../../extension/pi/v1/delivery/commitCompact.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-model-call:extension/pi/v1/lifecycleGates.ts:module:sendUserMessage:0` | `context` | `shipped` | [`extension/pi/v1/lifecycleGates.ts`](../../extension/pi/v1/lifecycleGates.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/substrate/bindingDelivery.ts:module:before-agent-start:0` | `context` | `shipped` | [`extension/substrate/bindingDelivery.ts`](../../extension/substrate/bindingDelivery.ts) · `symbol:module/event:before_agent_start/0` | — |
 | `typescript-model-call:extension/substrate/toolGating.ts:module:before-agent-start:0` | `context` | `shipped` | [`extension/substrate/toolGating.ts`](../../extension/substrate/toolGating.ts) · `symbol:module/event:before_agent_start/0` | — |
 
@@ -100,12 +100,12 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
   - `symbol:render_objective_engagement` — Render objective engagement (`symbol:render_objective_engagement`)
 - `python-symbol:src/perk/backends/engagement.py:render_plan_engagement`
   - `symbol:render_plan_engagement` — Render plan engagement (`symbol:render_plan_engagement`)
-- `typescript-model-call:extension/doors/lifecycleGates.ts:module:sendUserMessage:0`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/delivery/commitCompact.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/delivery/commitCompact.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
+- `typescript-model-call:extension/pi/v1/lifecycleGates.ts:module:sendUserMessage:0`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/substrate/bindingDelivery.ts:module:before-agent-start:0`
   - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
 - `typescript-model-call:extension/substrate/toolGating.ts:module:before-agent-start:0`
@@ -799,27 +799,27 @@ Human and agent review surfaces for gists, objectives, and plans.
 | `markdown:prompts/contexts/adapters/tombell-plan.md` | `adapter` | `shipped` | [`prompts/contexts/adapters/tombell-plan.md`](../../prompts/contexts/adapters/tombell-plan.md) · `file` | — |
 | `markdown:prompts/stages/objective-review-browser.md` | `adapter` | `shipped` | [`prompts/stages/objective-review-browser.md`](../../prompts/stages/objective-review-browser.md) · `file` | — |
 | `markdown:prompts/stages/plan-review-browser.md` | `adapter` | `shipped` | [`prompts/stages/plan-review-browser.md`](../../prompts/stages/plan-review-browser.md) · `file` | — |
-| `typescript-model-call:extension/doors/objectiveReviewBrowser.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/objectiveReviewBrowser.ts`](../../extension/doors/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/doors/objectiveReviewBrowser.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/objectiveReviewBrowser.ts`](../../extension/doors/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/1` | — |
-| `typescript-model-call:extension/doors/objectiveReviewBrowser.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/doors/objectiveReviewBrowser.ts`](../../extension/doors/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/2` | — |
-| `typescript-model-call:extension/doors/objectiveReviewBrowser.ts:module:sendUserMessage:3` | `tool-contract` | `shipped` | [`extension/doors/objectiveReviewBrowser.ts`](../../extension/doors/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/3` | — |
-| `typescript-model-call:extension/doors/objectiveReviewBrowser.ts:module:sendUserMessage:4` | `tool-contract` | `shipped` | [`extension/doors/objectiveReviewBrowser.ts`](../../extension/doors/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/4` | — |
-| `typescript-model-call:extension/doors/planReviewBrowser.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/planReviewBrowser.ts`](../../extension/doors/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/doors/planReviewBrowser.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/planReviewBrowser.ts`](../../extension/doors/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/1` | — |
-| `typescript-model-call:extension/doors/planReviewBrowser.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/doors/planReviewBrowser.ts`](../../extension/doors/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/2` | — |
-| `typescript-model-call:extension/doors/planReviewBrowser.ts:module:sendUserMessage:3` | `tool-contract` | `shipped` | [`extension/doors/planReviewBrowser.ts`](../../extension/doors/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/3` | — |
-| `typescript-model-call:extension/doors/planReviewBrowser.ts:module:sendUserMessage:4` | `tool-contract` | `shipped` | [`extension/doors/planReviewBrowser.ts`](../../extension/doors/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/4` | — |
-| `typescript-model-call:extension/doors/plannotatorHandoff.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/doors/plannotatorHandoff.ts`](../../extension/doors/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/doors/plannotatorHandoff.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/doors/plannotatorHandoff.ts`](../../extension/doors/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/1` | — |
-| `typescript-model-call:extension/doors/plannotatorHandoff.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/doors/plannotatorHandoff.ts`](../../extension/doors/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/2` | — |
-| `typescript-model-call:extension/doors/plannotatorHandoff.ts:module:sendUserMessage:3` | `tool-contract` | `shipped` | [`extension/doors/plannotatorHandoff.ts`](../../extension/doors/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/3` | — |
+| `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveReviewBrowser.ts`](../../extension/pi/v1/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveReviewBrowser.ts`](../../extension/pi/v1/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveReviewBrowser.ts`](../../extension/pi/v1/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/2` | — |
+| `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:3` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveReviewBrowser.ts`](../../extension/pi/v1/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/3` | — |
+| `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:4` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveReviewBrowser.ts`](../../extension/pi/v1/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/4` | — |
 | `typescript-model-call:extension/pi/v1/planReview.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/planReview.ts`](../../extension/pi/v1/planReview.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/planReview.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/planReview.ts`](../../extension/pi/v1/planReview.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/planReviewBrowser.ts`](../../extension/pi/v1/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/planReviewBrowser.ts`](../../extension/pi/v1/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/pi/v1/planReviewBrowser.ts`](../../extension/pi/v1/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/2` | — |
+| `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:3` | `tool-contract` | `shipped` | [`extension/pi/v1/planReviewBrowser.ts`](../../extension/pi/v1/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/3` | — |
+| `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:4` | `tool-contract` | `shipped` | [`extension/pi/v1/planReviewBrowser.ts`](../../extension/pi/v1/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/4` | — |
 | `typescript-model-call:extension/pi/v1/providers/plannotator.ts:module:before-agent-start:0` | `adapter` | `shipped` | [`extension/pi/v1/providers/plannotator.ts`](../../extension/pi/v1/providers/plannotator.ts) · `symbol:module/event:before_agent_start/0` | — |
+| `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/plannotatorHandoff.ts`](../../extension/pi/v1/providers/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/plannotatorHandoff.ts`](../../extension/pi/v1/providers/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/plannotatorHandoff.ts`](../../extension/pi/v1/providers/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/2` | — |
+| `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:3` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/plannotatorHandoff.ts`](../../extension/pi/v1/providers/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/3` | — |
 | `typescript-model-call:extension/pi/v1/providers/tombell.ts:module:before-agent-start:0` | `adapter` | `shipped` | [`extension/pi/v1/providers/tombell.ts`](../../extension/pi/v1/providers/tombell.ts) · `symbol:module/event:before_agent_start/0` | — |
-| `typescript-tool:collect_draft_review_wave` | `tool-contract` | `shipped` | [`extension/doors/draftReviewWaveTools.ts`](../../extension/doors/draftReviewWaveTools.ts) · `tool:collect_draft_review_wave` | — |
+| `typescript-tool:collect_draft_review_wave` | `tool-contract` | `shipped` | [`extension/pi/v1/draftReviewWaveTools.ts`](../../extension/pi/v1/draftReviewWaveTools.ts) · `tool:collect_draft_review_wave` | — |
 | `typescript-tool:plan_review` | `tool-contract` | `shipped` | [`extension/pi/v1/plan.ts`](../../extension/pi/v1/plan.ts) · `tool:plan_review` | plan.cold, plan.warm |
-| `typescript-tool:start_draft_review_wave` | `tool-contract` | `shipped` | [`extension/doors/draftReviewWaveTools.ts`](../../extension/doors/draftReviewWaveTools.ts) · `tool:start_draft_review_wave` | — |
+| `typescript-tool:start_draft_review_wave` | `tool-contract` | `shipped` | [`extension/pi/v1/draftReviewWaveTools.ts`](../../extension/pi/v1/draftReviewWaveTools.ts) · `tool:start_draft_review_wave` | — |
 
 <details>
 <summary>Logical fragments</summary>
@@ -836,40 +836,40 @@ Human and agent review surfaces for gists, objectives, and plans.
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/plan-review-browser.md`
   - `body` — Document body (`file-body`)
-- `typescript-model-call:extension/doors/objectiveReviewBrowser.ts:module:sendUserMessage:0`
+- `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/doors/objectiveReviewBrowser.ts:module:sendUserMessage:1`
+- `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
-- `typescript-model-call:extension/doors/objectiveReviewBrowser.ts:module:sendUserMessage:2`
+- `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:2`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/2/argument:0`)
-- `typescript-model-call:extension/doors/objectiveReviewBrowser.ts:module:sendUserMessage:3`
+- `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:3`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/3/argument:0`)
-- `typescript-model-call:extension/doors/objectiveReviewBrowser.ts:module:sendUserMessage:4`
+- `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:4`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/4/argument:0`)
-- `typescript-model-call:extension/doors/planReviewBrowser.ts:module:sendUserMessage:0`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/doors/planReviewBrowser.ts:module:sendUserMessage:1`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
-- `typescript-model-call:extension/doors/planReviewBrowser.ts:module:sendUserMessage:2`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/2/argument:0`)
-- `typescript-model-call:extension/doors/planReviewBrowser.ts:module:sendUserMessage:3`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/3/argument:0`)
-- `typescript-model-call:extension/doors/planReviewBrowser.ts:module:sendUserMessage:4`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/4/argument:0`)
-- `typescript-model-call:extension/doors/plannotatorHandoff.ts:module:sendUserMessage:0`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/doors/plannotatorHandoff.ts:module:sendUserMessage:1`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
-- `typescript-model-call:extension/doors/plannotatorHandoff.ts:module:sendUserMessage:2`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/2/argument:0`)
-- `typescript-model-call:extension/doors/plannotatorHandoff.ts:module:sendUserMessage:3`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/3/argument:0`)
 - `typescript-model-call:extension/pi/v1/planReview.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/planReview.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
+- `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:0`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
+- `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:1`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
+- `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:2`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/2/argument:0`)
+- `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:3`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/3/argument:0`)
+- `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:4`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/4/argument:0`)
 - `typescript-model-call:extension/pi/v1/providers/plannotator.ts:module:before-agent-start:0`
   - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
+- `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:0`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
+- `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:1`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
+- `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:2`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/2/argument:0`)
+- `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:3`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/3/argument:0`)
 - `typescript-model-call:extension/pi/v1/providers/tombell.ts:module:before-agent-start:0`
   - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
 - `typescript-tool:collect_draft_review_wave`

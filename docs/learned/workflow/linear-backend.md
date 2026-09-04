@@ -350,7 +350,7 @@ every request the emitters compose without touching emitter code or the real cli
 
 - **Per-plane plan-read SSOT helpers**: `src/perk/run/launch/prompts.py::_plan_read_instruction`
   (re-exported by the `src/perk/run/launch/` package) ↔
-  `extension/doors/lifecycleGates.ts::planReadInstruction`, byte-parity pinned by lockstep
+  `extension/substrate/prompts.ts::planReadInstruction`, byte-parity pinned by lockstep
   `LINEAR_READ_SUBSTRINGS` lists asserted from BOTH suites
   (`tests/test_worker_prompt_parity.py` ↔ `extension/worker/worker.test.ts`).
 - **The linear plan-read arm is prose, not a command** (a `linear_get_issue` /

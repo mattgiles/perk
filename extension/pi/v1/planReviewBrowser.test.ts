@@ -1,6 +1,6 @@
-// Tests for the warm `/objective-review-browser` door. The pure `objectiveReviewBrowserGuidance`
-// + `observeObjectiveReviewReadiness` + `routeObjectiveReviewDecision` are pinned directly (fake
-// pi/ctx slices; the objectiveSave.test.ts fakeApprovalPi recipe for the approve→save
+// Tests for the warm `/plan-review-browser` door. The pure `planReviewBrowserGuidance` +
+// `observePlanReviewReadiness` + `routePlanReviewDecision` are pinned directly (fake pi/ctx
+// slices; the planSave.test.ts fakeColdDoorPi recipe with PERK_NO_LLM=1 for the approve→save
 // composition); the background open runs over fake `StartBrowserDeps` + a fake bus; the
 // command's entry gates / draft resolve / injection run against a REAL bound session via the
 // T1 harness, OFFLINE (a fake plannotator extension registers the presence-probe command + the
@@ -12,50 +12,49 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { OBJECTIVE_DRAFT_ARTIFACT, renderObjectiveDraft } from "../authoring/objective/draft.ts";
+import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
+import {
+  clearDraftReviewContext,
+  createDraftReviewWaveState,
+  primeDraftReviewContext,
+} from "../../authoring/review/draftContext.ts";
+import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import { sessionDataDir } from "../../substrate/cache.ts";
+import {
+  digestSessionData,
+  type SessionArtifactCtx,
+  type SessionDataCtx,
+} from "../../substrate/sessionData.ts";
+import type { ToolGating } from "../../substrate/toolGating.ts";
+import type { EntrySink } from "../../substrate/workflowState.ts";
+import { WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
+import type { ReportTarget } from "../../surfaces/report.ts";
+import {
+  loadPerkSession,
+  type PerkSession,
+  plantSession,
+  scaffoldRepo,
+  spyInjections,
+} from "../../testing/harness.ts";
+import { createMemoryWaveAdapter } from "../../testing/memoryAdapter.ts";
+import { reportWaveOver } from "../../waves/reportWave.ts";
+import { executeStartDraftReviewWave } from "./draftReviewWaveTools.ts";
+import {
+  observePlanReviewReadiness,
+  openPlanReviewAndGuide,
+  openPlanReviewSurface,
+  planReviewBrowserGuidance,
+  routePlanReviewDecision,
+} from "./planReviewBrowser.ts";
 import {
   clearAnnotationSurface,
   createAnnotationState,
   executePushAnnotations,
   type FetchLike,
   primeAnnotationSurface,
-} from "../pi/v1/providers/annotations.ts";
-import type { ReviewOutcome } from "../pi/v1/review.ts";
-import { openBranchWorkflowSession } from "../session/branchWorkflowSession.ts";
-import { sessionDataDir } from "../substrate/cache.ts";
-import {
-  digestSessionData,
-  type SessionArtifactCtx,
-  type SessionDataCtx,
-} from "../substrate/sessionData.ts";
-import type { ToolGating } from "../substrate/toolGating.ts";
-import type { EntrySink } from "../substrate/workflowState.ts";
-import { WORKFLOW_STATE_TYPE } from "../substrate/workflowState.ts";
-import type { ReportTarget } from "../surfaces/report.ts";
-import {
-  fakePerk,
-  loadPerkSession,
-  type PerkSession,
-  plantSession,
-  scaffoldRepo,
-  spyInjections,
-} from "../testing/harness.ts";
-import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
-import { reportWaveOver } from "../waves/reportWave.ts";
-import {
-  clearDraftReviewContext,
-  createDraftReviewWaveState,
-  executeStartDraftReviewWave,
-  primeDraftReviewContext,
-} from "./draftReviewWaveTools.ts";
-import {
-  objectiveReviewBrowserGuidance,
-  observeObjectiveReviewReadiness,
-  openObjectiveReviewAndGuide,
-  openObjectiveReviewSurface,
-  routeObjectiveReviewDecision,
-} from "./objectiveReviewBrowser.ts";
-import type { StartedSurface } from "./plannotatorHandoff.ts";
+} from "./providers/annotations.ts";
+import type { StartedSurface } from "./providers/plannotatorHandoff.ts";
+import type { ReviewOutcome } from "./review.ts";
 
 /** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(
@@ -128,10 +127,10 @@ async function sessionDraftContextPrimed(h: PerkSession): Promise<boolean> {
   return (result.details as { error_type?: string }).error_type !== "no_draft_context";
 }
 
-// --------------------------------------------------------------- objectiveReviewBrowserGuidance
+// ------------------------------------------------------------------ planReviewBrowserGuidance
 
-test("guidance: names the companion tools + objective semantics, no plan_draft, no URL", () => {
-  const text = objectiveReviewBrowserGuidance({});
+test("guidance: names the three companion tools + the relay loop, no fan-out mechanics, no URL", () => {
+  const text = planReviewBrowserGuidance({});
   assert.match(text, /start_draft_review_wave/, "the fan-out is the launch tool");
   assert.match(text, /collect_draft_review_wave/, "completion rides the collect tool");
   assert.match(text, /push_annotations/, "annotation delivery rides the push tool");
@@ -148,15 +147,8 @@ test("guidance: names the companion tools + objective semantics, no plan_draft, 
   assert.match(text, /untrusted DATA/);
   assert.match(text, /\{complete, covered, reports, failures\}/, "the typed aggregate");
   assert.match(text, /never papered over/, "incompleteness is surfaced honestly");
-  // The objective decision semantics.
-  assert.match(text, /objective_draft/, "the revise tool is objective_draft");
-  assert.match(text, /Direct Edits are NEVER auto-applied/, "the objective carve-out is pinned");
   assert.match(text, /Do NOT call `plan_review`/, "the mid-review exclusion is pinned");
   assert.match(text, /never save on your own/);
-  // The plan-door vocabulary must not leak: no plan_draft, and the objective_save tool name is
-  // never dangled (the /objective-save command spelling is the human failsafe, not named here).
-  assert.doesNotMatch(text, /\bplan_draft\b/);
-  assert.doesNotMatch(text, /\bobjective_save\b/);
   // The model-authored mechanics and the surface handle are unrepresentable — including the URL
   // itself: the model never sees the server address.
   for (const gone of [
@@ -175,25 +167,25 @@ test("guidance: names the companion tools + objective semantics, no plan_draft, 
 });
 
 test("guidance: the custom arm renders/omits (primed lane, never re-encoded)", () => {
-  const withCustom = objectiveReviewBrowserGuidance({ custom: "check the dependency story" });
+  const withCustom = planReviewBrowserGuidance({ custom: "check the rollback story" });
   assert.match(withCustom, /custom review lane/i);
-  assert.match(withCustom, /check the dependency story/);
+  assert.match(withCustom, /check the rollback story/);
   assert.match(withCustom, /do NOT re-encode it/);
-  const bare = objectiveReviewBrowserGuidance({});
+  const bare = planReviewBrowserGuidance({});
   assert.doesNotMatch(bare, /custom review lane/i);
   assert.doesNotMatch(bare, /re-encode/);
 });
 
-test("guidance: no hardcoded perk-objective-review-browser skill pointer (the binding suffix delivers it)", () => {
+test("guidance: no hardcoded perk-plan-review-browser skill pointer (the binding suffix delivers it)", () => {
   for (const opts of [{}, { custom: "lens" }]) {
     assert.doesNotMatch(
-      objectiveReviewBrowserGuidance(opts),
-      /Follow the `perk-objective-review-browser` skill/,
+      planReviewBrowserGuidance(opts),
+      /Follow the `perk-plan-review-browser` skill/,
     );
   }
 });
 
-// ------------------------------------------------------- observeObjectiveReviewReadiness
+// ------------------------------------------------------- observePlanReviewReadiness
 
 const COMPLETED: ReviewOutcome = { status: "completed", approved: true, reviewId: "r1" };
 
@@ -218,7 +210,7 @@ async function observe(
 }> {
   const notifies: { message: string; severity?: string }[] = [];
   const sent: { message: string; options?: { deliverAs?: string } }[] = [];
-  await observeObjectiveReviewReadiness(
+  await observePlanReviewReadiness(
     {
       sendUserMessage: (message: string, options?: { deliverAs?: "steer" | "followUp" }) => {
         sent.push(options === undefined ? { message } : { message, options });
@@ -239,7 +231,7 @@ async function observe(
 /** Prime BOTH door surfaces (the pre-degrade state). */
 function primeBoth(): void {
   primeAnnotationSurface(annotations, { mode: "plan", url: "http://127.0.0.1:45001" });
-  primeDraftReviewContext(draftReview, { draftType: "objective", draft: "# The objective\n" });
+  primeDraftReviewContext(draftReview, { draftType: "plan", draft: "# The draft\n" });
 }
 
 test("observer: ready → the info note naming the URL, nothing injected, surfaces untouched", async () => {
@@ -265,8 +257,7 @@ test("observer: timeout → loud error + the degrade notice (idle → immediate)
   assert.match(sent[0]?.message ?? "", /plan-review browser is unavailable/);
   assert.match(sent[0]?.message ?? "", /surface the draft-review wave's findings/);
   assert.match(sent[0]?.message ?? "", /push_annotations` now refuses \(`no_surface`\)/);
-  assert.match(sent[0]?.message ?? "", /\/objective-save/, "the objective failsafe is named");
-  assert.doesNotMatch(sent[0]?.message ?? "", /\/plan-save/, "never the plan failsafe");
+  assert.match(sent[0]?.message ?? "", /\/plan-save/);
   assert.equal(sent[0]?.options, undefined, "idle ⇒ an immediate turn");
   assert.equal(await annotationMode(), null, "the degrade arm clears the annotation surface");
   assert.equal(await draftContextPrimed(), false, "…and the draft-review context");
@@ -309,20 +300,33 @@ test("observer: bridge settled unavailable → degrade + clear; completed/aborte
   clearDraftReviewContext(draftReview);
 });
 
-// --------------------------------------------------------------- routeObjectiveReviewDecision
+// --------------------------------------------------------------- routePlanReviewDecision
 
-const PROSE = "# Ship retries\n\nThe gateway needs retries.\n";
-const ROADMAP = [{ id: "1.1", description: "first" }];
-const DRAFT_PAYLOAD = `${JSON.stringify(
-  { schema_version: 1, title: "Ship retries", prose: PROSE, roadmap: ROADMAP },
-  null,
-  2,
-)}\n`;
+/** Run `fn` with PERK_NO_LLM pinned on (deterministic: no title generation path). */
+async function withNoLlm(fn: () => Promise<void>): Promise<void> {
+  const prev = process.env.PERK_NO_LLM;
+  process.env.PERK_NO_LLM = "1";
+  try {
+    await fn();
+  } finally {
+    if (prev === undefined) delete process.env.PERK_NO_LLM;
+    else process.env.PERK_NO_LLM = prev;
+  }
+}
 
-const CREATE_JSON = JSON.stringify({
+const PLAN_JSON = JSON.stringify({
   success: true,
   error_type: null,
-  objective: { id: "7", url: "https://gh/o/r/issues/7", existed: false },
+  message: null,
+  issue: { id: "42", url: "https://gh/o/r/issues/42", existed: false },
+  plan_ref: {
+    provider: "github",
+    pr_id: "42",
+    url: "https://gh/o/r/issues/42",
+    labels: ["perk:plan"],
+    objective_id: null,
+  },
+  cached: true,
   dry_run: false,
 });
 
@@ -332,23 +336,26 @@ const FAIL_JSON = JSON.stringify({
   message: "gh exploded",
 });
 
-const DE_FEEDBACK = [
+const DE_BASE = "# The draft\n\nStep one.\nStep two.\n";
+const DE_PATCHED = "# The draft\n\nStep one (edited by reviewer).\nStep two.\n";
+const DE_SECTION = [
   "# Direct Edits",
   "",
   "The user edited the document directly. Apply these exact changes — a unified diff against the version you submitted:",
   "",
   "```diff",
-  "--- objective.md (original)",
-  "+++ objective.md (edited)",
-  "@@ -1,1 +1,1 @@",
-  "-# Ship retries",
-  "+# Ship retries (edited)",
+  "===================================================================",
+  "--- plan.md (original)",
+  "+++ plan.md (edited)",
+  "@@ -1,4 +1,4 @@",
+  " # The draft",
+  " ",
+  "-Step one.",
+  "+Step one (edited by reviewer).",
+  " Step two.",
   "```",
-  "",
-  "---",
-  "",
-  "Also settle the rollout order.",
 ].join("\n");
+const DE_FEEDBACK = `${DE_SECTION}\n\n---\n\nAlso add a rollback note.`;
 
 function stateEntry(data: Record<string, unknown>): unknown {
   return { type: "custom", customType: WORKFLOW_STATE_TYPE, data };
@@ -369,16 +376,14 @@ function fakeGating(active: boolean): ToolGating & { exits: number } {
 }
 
 /** The decision-routing scaffold: a fake pi (cold door + injections) over a live branch. */
-function decisionScaffold(
-  opts: { saveJson?: string; saveCode?: number; idle?: boolean; plantDraft?: boolean } = {},
-): {
+function decisionScaffold(opts: { saveJson?: string; saveCode?: number; idle?: boolean } = {}): {
   pi: ExtensionAPI;
   ctx: ExtensionContext;
   gating: ToolGating & { exits: number };
   argvs: string[][];
   injected: { message: string; options?: { deliverAs?: string } }[];
   notified: { message: string; severity?: string }[];
-  sink: EntrySink;
+  drafted: string;
 } {
   const cwd = scaffoldRepo();
   const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
@@ -392,7 +397,7 @@ function decisionScaffold(
     async exec(_cmd: string, args: string[]) {
       argvs.push(args);
       return {
-        stdout: opts.saveJson ?? CREATE_JSON,
+        stdout: opts.saveJson ?? PLAN_JSON,
         stderr: "",
         code: opts.saveCode ?? 0,
         killed: false,
@@ -409,200 +414,100 @@ function decisionScaffold(
     ui: { notify: (message: string, severity?: string) => notified.push({ message, severity }) },
     isIdle: () => opts.idle ?? true,
   } as unknown as ExtensionContext;
-  const sink: EntrySink = {
-    appendEntry: (t, d) => branch.push({ type: "custom", customType: t, data: d }),
-  };
-  if (opts.plantDraft !== false) {
-    const drafted = writeSessionArtifact(
-      sink,
-      ctx as unknown as SessionDataCtx & ReportTarget,
-      OBJECTIVE_DRAFT_ARTIFACT,
-      DRAFT_PAYLOAD,
-    );
-    assert.ok(drafted, "the objective-draft artifact landed");
-  }
-  return { pi, ctx, gating: fakeGating(true), argvs, injected, notified, sink };
+  const drafted = writeSessionArtifact(
+    { appendEntry: (t, d) => branch.push({ type: "custom", customType: t, data: d }) } as EntrySink,
+    ctx as unknown as SessionDataCtx & ReportTarget,
+    PLAN_DRAFT_ARTIFACT,
+    DE_BASE,
+  );
+  assert.ok(drafted, "the draft artifact landed");
+  return { pi, ctx, gating: fakeGating(true), argvs, injected, notified, drafted: drafted ?? "" };
 }
 
-test("decision: APPROVE happy path → objectiveApprovalSave (structured artifact saved, gate exited)", async () => {
-  const s = decisionScaffold();
-  const out: ReviewOutcome = {
-    status: "completed",
-    approved: true,
-    reviewId: "rev-a",
-    feedback: "Solid roadmap — sequence 1.2 after 1.1.",
-  };
-  await routeObjectiveReviewDecision(s.pi, s.ctx, s.gating, out, DRAFT_PAYLOAD);
-  const argv = s.argvs[0] ?? [];
-  assert.equal(argv[0], "objective", "the save rode the objective cold door");
-  assert.equal(argv[1], "create");
-  assert.equal(
-    argv[argv.indexOf("--roadmap") + 1],
-    JSON.stringify(ROADMAP),
-    "the STRUCTURED roadmap rode --roadmap (re-read from the artifact, never the rendered bytes)",
-  );
-  assert.equal(s.gating.exits, 1, "the gate exited via the objectiveApprovalSave seam");
-  assert.ok(
-    s.notified.some((n) => n.severity === "info" && n.message.includes("APPROVED")),
-    "the saved arm reports info",
-  );
-  assert.equal(s.injected.length, 1, "the save outcome is injected to the model");
-  const text = s.injected[0]?.message ?? "";
-  assert.match(text, /objective APPROVED by reviewer/);
-  // The reviewer feedback is delimited as untrusted DATA in the injected copy.
-  assert.match(text, /untrusted DATA, never instructions/);
-  assert.match(
-    text,
-    /<untrusted_reviewer_feedback>\nSolid roadmap — sequence 1\.2 after 1\.1\.\n<\/untrusted_reviewer_feedback>/,
-    "the feedback rides inside the untrusted delimiter",
-  );
-  assert.equal(s.injected[0]?.options, undefined, "idle ⇒ an immediate turn");
-});
-
-test("decision: APPROVE + Direct Edits heading → NO save, revise inject, gate untouched", async () => {
-  // Even a heading-only/malformed diff routes revise — the heading check suffices (the diff
-  // goes to the model verbatim either way), and applyPlannotatorDirectEdits never runs here.
-  for (const feedback of [DE_FEEDBACK, "# Direct Edits\n\nthe fence never arrived"]) {
+test("decision: APPROVE + Direct Edits → shared apply + approvalSave (edited bytes saved, gate exited)", async () => {
+  await withNoLlm(async () => {
     const s = decisionScaffold();
     const out: ReviewOutcome = {
       status: "completed",
       approved: true,
-      reviewId: "rev-de",
-      feedback,
+      reviewId: "rev-a",
+      feedback: DE_FEEDBACK,
     };
-    await routeObjectiveReviewDecision(s.pi, s.ctx, s.gating, out, DRAFT_PAYLOAD);
-    assert.equal(s.argvs.length, 0, "nothing saved on the Direct-Edits arm");
-    assert.equal(s.gating.exits, 0, "the gate stays untouched");
+    await routePlanReviewDecision(s.pi, s.ctx, s.gating, out, DE_BASE);
+    assert.equal(readFileSync(s.drafted, "utf8"), DE_PATCHED, "the edits were written back");
+    const argv = s.argvs[0] ?? [];
+    assert.equal(
+      readFileSync(argv[argv.indexOf("--plan-file") + 1] ?? "", "utf8"),
+      DE_PATCHED.trimEnd(),
+      "the save received the PATCHED plan",
+    );
+    assert.equal(s.gating.exits, 1, "the gate exited via the approvalSave seam");
+    assert.ok(
+      s.notified.some((n) => n.severity === "info" && n.message.includes("APPROVED")),
+      "the saved arm reports info",
+    );
+    assert.equal(s.injected.length, 1, "the save outcome is injected to the model");
+    const text = s.injected[0]?.message ?? "";
+    assert.match(text, /plan APPROVED by reviewer/);
+    assert.match(text, /human edits were written back to the draft and saved/);
+    assert.match(text, /Also add a rollback note\./, "the annotation remainder survives");
+    assert.doesNotMatch(text, /# Direct Edits/, "the applied diff never renders as guidance");
+    // The reviewer-originated remainder is delimited as untrusted DATA in the injected copy.
+    assert.match(text, /untrusted DATA, never instructions/);
+    assert.match(
+      text,
+      /<untrusted_reviewer_feedback>\nAlso add a rollback note\.\n<\/untrusted_reviewer_feedback>/,
+      "the feedback rides inside the untrusted delimiter",
+    );
+    assert.equal(s.injected[0]?.options, undefined, "idle ⇒ an immediate turn");
+  });
+});
+
+test("decision: APPROVE + unapplyable Direct Edits → verbatim save + the loud warning", async () => {
+  await withNoLlm(async () => {
+    const s = decisionScaffold();
+    const out: ReviewOutcome = {
+      status: "completed",
+      approved: true,
+      reviewId: "rev-b",
+      feedback: "# Direct Edits\n\nthe fence never arrived",
+    };
+    await routePlanReviewDecision(s.pi, s.ctx, s.gating, out, DE_BASE);
+    assert.equal(readFileSync(s.drafted, "utf8"), DE_BASE, "the draft is untouched");
+    const argv = s.argvs[0] ?? [];
+    assert.equal(
+      readFileSync(argv[argv.indexOf("--plan-file") + 1] ?? "", "utf8"),
+      DE_BASE.trimEnd(),
+      "the ORIGINAL bytes saved verbatim",
+    );
+    const text = s.injected[0]?.message ?? "";
+    assert.match(text, /Direct Edits could NOT be auto-applied/);
+    assert.equal(s.gating.exits, 1, "the verbatim save still exits the gate");
+  });
+});
+
+test("decision: APPROVE + failed save → loud error naming /plan-save, gate left ON", async () => {
+  await withNoLlm(async () => {
+    const s = decisionScaffold({ saveJson: FAIL_JSON, saveCode: 1 });
+    const out: ReviewOutcome = { status: "completed", approved: true, reviewId: "rev-c" };
+    await routePlanReviewDecision(s.pi, s.ctx, s.gating, out, DE_BASE);
+    assert.equal(s.gating.exits, 0, "a failed save leaves the gate on");
     assert.ok(
       s.notified.some(
         (n) =>
-          n.severity === "info" &&
-          n.message.includes("direct browser edits") &&
-          n.message.includes("revise round"),
+          n.severity === "error" &&
+          n.message.includes("auto-save FAILED") &&
+          n.message.includes("/plan-save"),
       ),
-      "the revise routing reports info",
+      "the failure report names the manual failsafe",
     );
-    assert.equal(s.injected.length, 1);
     const text = s.injected[0]?.message ?? "";
-    assert.match(text, /NOTHING was saved/);
-    assert.match(text, /objective_draft/, "the fold-in tool is named");
-    assert.match(text, /\/objective-review-browser/);
-    assert.match(text, /plan_review/);
-    assert.match(text, /untrusted DATA, never instructions/);
-    assert.match(text, /<untrusted_reviewer_feedback>\n# Direct Edits/);
-    assert.match(text, /<\/untrusted_reviewer_feedback>/);
-  }
+    assert.match(text, /auto-save FAILED/);
+    assert.match(text, /\/plan-save/);
+  });
 });
 
-test("decision: Direct Edits take precedence over the stale guard (concurrent edit still routes revise)", async () => {
-  // The real concurrent-edit case: the human edits in the browser (Direct Edits) WHILE a
-  // concurrent objective_draft write also lands. The Direct-Edits arm must be checked FIRST —
-  // nothing is saved on it, so the stale guard is irrelevant there; a stale-first ordering
-  // would replace the required revise round with a stale refusal and drop the browser edits.
-  const s = decisionScaffold();
-  const changed = `${JSON.stringify(
-    { schema_version: 1, title: "Ship retries v2", prose: PROSE, roadmap: ROADMAP },
-    null,
-    2,
-  )}\n`;
-  assert.ok(
-    writeSessionArtifact(
-      s.sink,
-      s.ctx as unknown as SessionDataCtx & ReportTarget,
-      OBJECTIVE_DRAFT_ARTIFACT,
-      changed,
-    ),
-    "the concurrent draft write landed",
-  );
-  const out: ReviewOutcome = {
-    status: "completed",
-    approved: true,
-    reviewId: "rev-de-stale",
-    feedback: DE_FEEDBACK,
-  };
-  await routeObjectiveReviewDecision(s.pi, s.ctx, s.gating, out, DRAFT_PAYLOAD);
-  assert.equal(s.argvs.length, 0, "nothing saved");
-  assert.equal(s.gating.exits, 0, "the gate stays untouched");
-  const text = s.injected[0]?.message ?? "";
-  assert.match(text, /Fold the Direct Edits diff/, "the revise round routed");
-  assert.doesNotMatch(text, /STALE bytes/, "the stale refusal never fired on the Direct-Edits arm");
-  assert.ok(
-    s.notified.every((n) => !n.message.includes("stale bytes")),
-    "no stale report either",
-  );
-});
-
-test("decision: APPROVE + failed save → loud error naming /objective-save, gate left ON", async () => {
-  const s = decisionScaffold({ saveJson: FAIL_JSON, saveCode: 1 });
-  const out: ReviewOutcome = { status: "completed", approved: true, reviewId: "rev-c" };
-  await routeObjectiveReviewDecision(s.pi, s.ctx, s.gating, out, DRAFT_PAYLOAD);
-  assert.equal(s.argvs.length, 1, "the save was attempted");
-  assert.equal(s.gating.exits, 0, "a failed save leaves the gate on");
-  assert.ok(
-    s.notified.some(
-      (n) =>
-        n.severity === "error" &&
-        n.message.includes("auto-save FAILED") &&
-        n.message.includes("/objective-save"),
-    ),
-    "the failure report names the manual failsafe",
-  );
-  const text = s.injected[0]?.message ?? "";
-  assert.match(text, /auto-save FAILED/);
-  assert.match(text, /\/objective-save/);
-});
-
-test("decision: APPROVE with CHANGED raw artifact bytes (render-invisible) → stale refusal", async () => {
-  const s = decisionScaffold();
-  // A concurrent objective_draft write lands while the browser review is open — changing ONLY
-  // `base` (render-invisible: the rendered markdown is byte-identical). The guard compares the
-  // save-authoritative RAW artifact bytes, so it still refuses.
-  const changed = `${JSON.stringify(
-    { schema_version: 1, title: "Ship retries", base: "release", prose: PROSE, roadmap: ROADMAP },
-    null,
-    2,
-  )}\n`;
-  assert.ok(
-    writeSessionArtifact(
-      s.sink,
-      s.ctx as unknown as SessionDataCtx & ReportTarget,
-      OBJECTIVE_DRAFT_ARTIFACT,
-      changed,
-    ),
-    "the concurrent draft write landed (valid pointer + digest)",
-  );
-  const out: ReviewOutcome = { status: "completed", approved: true, reviewId: "rev-stale" };
-  await routeObjectiveReviewDecision(s.pi, s.ctx, s.gating, out, DRAFT_PAYLOAD);
-  assert.equal(s.argvs.length, 0, "nothing saved");
-  assert.equal(s.gating.exits, 0, "the gate stays on");
-  assert.ok(
-    s.notified.some(
-      (n) =>
-        n.severity === "error" &&
-        n.message.includes("stale bytes") &&
-        n.message.includes("nothing saved"),
-    ),
-    "the stale refusal reports loudly",
-  );
-  assert.equal(s.injected.length, 1, "the model is told the approval did not save");
-  assert.match(s.injected[0]?.message ?? "", /STALE bytes/);
-  assert.match(s.injected[0]?.message ?? "", /NOTHING was saved/);
-  assert.match(s.injected[0]?.message ?? "", /\/objective-review-browser/);
-});
-
-test("decision: APPROVE with the artifact missing at decision time → stale refusal, no save", async () => {
-  const s = decisionScaffold({ plantDraft: false });
-  const out: ReviewOutcome = { status: "completed", approved: true, reviewId: "rev-gone" };
-  await routeObjectiveReviewDecision(s.pi, s.ctx, s.gating, out, DRAFT_PAYLOAD);
-  assert.equal(s.argvs.length, 0, "nothing saved");
-  assert.equal(s.gating.exits, 0, "the gate stays on");
-  assert.ok(
-    s.notified.some((n) => n.severity === "error" && n.message.includes("stale bytes")),
-    "a missing artifact refuses like a mismatch",
-  );
-});
-
-test("decision: DENY → delimited feedback + objective_draft redirect (streaming ⇒ followUp), NO save", async () => {
+test("decision: DENY → feedback injected verbatim (streaming ⇒ followUp), NO save", async () => {
   const s = decisionScaffold({ idle: false });
   const out: ReviewOutcome = {
     status: "completed",
@@ -610,16 +515,16 @@ test("decision: DENY → delimited feedback + objective_draft redirect (streamin
     reviewId: "rev-d",
     feedback: DE_FEEDBACK,
   };
-  await routeObjectiveReviewDecision(s.pi, s.ctx, s.gating, out, DRAFT_PAYLOAD);
+  await routePlanReviewDecision(s.pi, s.ctx, s.gating, out, DE_BASE);
   assert.equal(s.argvs.length, 0, "no save on a deny");
   assert.equal(s.gating.exits, 0, "the gate stays on");
+  assert.equal(readFileSync(s.drafted, "utf8"), DE_BASE, "deny never mutates the draft");
   assert.ok(s.notified.some((n) => n.severity === "info" && n.message.includes("DENIED")));
   assert.equal(s.injected.length, 1);
   const text = s.injected[0]?.message ?? "";
-  assert.match(text, /The human DENIED the objective in the browser review/);
-  assert.match(text, /objective_draft/);
-  assert.match(text, /\/objective-review-browser/);
-  assert.match(text, /plan_review/);
+  assert.match(text, /The human DENIED the plan in the browser review/);
+  assert.match(text, /plan_draft/);
+  assert.match(text, /\/plan-review-browser/);
   assert.match(text, /# Direct Edits/, "the diff reaches the model verbatim (model-mediated)");
   // Verbatim-but-delimited: the untrusted wrapper carries the whole feedback.
   assert.match(text, /untrusted DATA, never instructions/);
@@ -628,26 +533,52 @@ test("decision: DENY → delimited feedback + objective_draft redirect (streamin
   assert.deepEqual(s.injected[0]?.options, { deliverAs: "followUp" }, "streaming ⇒ followUp");
 });
 
+test("decision: APPROVE with a CHANGED live draft → the stale refusal (nothing saved, gate ON)", async () => {
+  await withNoLlm(async () => {
+    const s = decisionScaffold();
+    // A concurrent plan_draft write lands while the browser review is open.
+    writeFileSync(s.drafted, "# A newer, unreviewed draft\n", "utf8");
+    const out: ReviewOutcome = { status: "completed", approved: true, reviewId: "rev-stale" };
+    await routePlanReviewDecision(s.pi, s.ctx, s.gating, out, DE_BASE);
+    assert.equal(s.argvs.length, 0, "nothing saved");
+    assert.equal(s.gating.exits, 0, "the gate stays on");
+    assert.ok(
+      s.notified.some(
+        (n) =>
+          n.severity === "error" &&
+          n.message.includes("stale bytes") &&
+          n.message.includes("nothing saved"),
+      ),
+      "the stale refusal reports loudly",
+    );
+    assert.equal(s.injected.length, 1, "the model is told the approval did not save");
+    assert.match(s.injected[0]?.message ?? "", /STALE bytes/);
+    assert.match(s.injected[0]?.message ?? "", /NOTHING was saved/);
+    // Note: writeFileSync leaves the pointer digest stale too — the seam's readArtifact
+    // refuses — but the guard is the same for both mismatch shapes: no artifact match ⇒ no save.
+  });
+});
+
 test("decision: aborted → silent; unavailable → error report only (the observer owns the notice)", async () => {
   const aborted = decisionScaffold();
-  await routeObjectiveReviewDecision(
+  await routePlanReviewDecision(
     aborted.pi,
     aborted.ctx,
     aborted.gating,
     { status: "aborted" },
-    DRAFT_PAYLOAD,
+    DE_BASE,
   );
   assert.equal(aborted.injected.length, 0);
   assert.equal(aborted.notified.length, 0);
   assert.equal(aborted.argvs.length, 0);
 
   const unavailable = decisionScaffold();
-  await routeObjectiveReviewDecision(
+  await routePlanReviewDecision(
     unavailable.pi,
     unavailable.ctx,
     unavailable.gating,
     { status: "unavailable", warning: "handshake timeout" },
-    DRAFT_PAYLOAD,
+    DE_BASE,
   );
   assert.equal(unavailable.injected.length, 0, "the degrade notice is the observer's job");
   assert.ok(
@@ -655,7 +586,7 @@ test("decision: aborted → silent; unavailable → error report only (the obser
   );
 });
 
-// ---------------------------------------------- openObjectiveReviewSurface (fake deps + bus)
+// ------------------------------------------------- openPlanReviewAndGuide (fake deps + bus)
 
 /** A minimal in-process event bus (the pi.events shape the bridge speaks). */
 function fakeBus(): {
@@ -678,8 +609,6 @@ function fakeBus(): {
     },
   };
 }
-
-const RENDERED = renderObjectiveDraft({ title: "Ship retries", prose: PROSE, roadmap: ROADMAP });
 
 test("open: a post-degrade decision is ignored loudly (never routed into a save)", async () => {
   const cwd = scaffoldRepo();
@@ -710,11 +639,11 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
   } as unknown as ExtensionContext;
 
   // probe:false + a tiny budget → the readiness poll times out → the degrade arm fires.
-  await openObjectiveReviewAndGuide(
+  await openPlanReviewAndGuide(
     pi,
     ctx,
     fakeGating(true),
-    { rendered: RENDERED, artifactRaw: DRAFT_PAYLOAD },
+    { draft: "# The draft\n" },
     draftReview,
     annotations,
     {
@@ -759,7 +688,7 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
   );
 });
 
-test("open core: primes BOTH surfaces (plan mode + objective draft type), RETURNS URL-free guidance (nothing sent), clears on settle", async () => {
+test("open core: primes BOTH surfaces with the deterministic URL/plan mode, RETURNS URL-free guidance (nothing sent), clears on settle", async () => {
   const cwd = scaffoldRepo();
   const bus = fakeBus();
   const injected: string[] = [];
@@ -790,11 +719,11 @@ test("open core: primes BOTH surfaces (plan mode + objective draft type), RETURN
     signal: undefined,
   } as unknown as ExtensionContext;
 
-  const guidance = await openObjectiveReviewSurface(
+  const guidance = await openPlanReviewSurface(
     pi,
     ctx,
     fakeGating(false),
-    { rendered: RENDERED, artifactRaw: DRAFT_PAYLOAD, custom: "check the dependency story" },
+    { draft: "# The draft\n", custom: "check the rollback story" },
     draftReview,
     annotations,
     {
@@ -808,40 +737,24 @@ test("open core: primes BOTH surfaces (plan mode + objective draft type), RETURN
   // Both surfaces primed with the deterministic handle the moment the open returns.
   assert.equal(await annotationMode(), "plan", "the annotation surface is primed in plan mode");
   assert.equal(await draftContextPrimed(), true, "the draft-review context is primed");
-  // The primed wave context carries draftType objective + the RENDERED bytes + the custom lane
-  // (probed through a spawn-recording adapter whose spawn fails — nothing stays pending).
-  const spawns = createMemoryWaveAdapter({ spawnError: "probe only" });
-  const target = { hasUI: false, ui: undefined } as unknown as ReportTarget;
-  await executeStartDraftReviewWave(draftReview, reportWaveOver(spawns), target, {
-    angles: ["grounding", "risk"],
-  });
-  const script = spawns.calls.spawn[0]?.workflowScript ?? "";
-  assert.match(script, /Draft type: objective\./, "the wave reviews the objective draft type");
-  assert.ok(
-    script.includes(JSON.stringify(RENDERED).slice(1, -1)),
-    "the wave reviews the RENDERED bytes",
-  );
-  assert.match(script, /check the dependency story/, "the custom lane is threaded");
-  // The handshake saw the preset port and the EXACT rendered bytes (never the JSON artifact).
+  // The handshake saw the preset port and the EXACT draft bytes.
   assert.equal(requests.length, 1);
   assert.equal(requests[0]?.portAtEmit, "45001");
-  assert.equal(requests[0]?.payload?.planContent, RENDERED);
-  assert.match(requests[0]?.payload?.planContent ?? "", /## Roadmap/);
-  assert.doesNotMatch(requests[0]?.payload?.planContent ?? "", /schema_version/);
+  assert.equal(requests[0]?.payload?.planContent, "# The draft\n");
   // The core RETURNS the guidance (template launch line + the binding suffix) and sends nothing
   // itself — delivery belongs to the caller (the door wrapper / plan_review's wave arm).
   assert.equal(injected.length, 0, "the core never sends — the caller owns delivery");
   assert.match(guidance ?? "", /start_draft_review_wave/, "the template launch line");
   assert.match(
     guidance ?? "",
-    /Follow the `perk-objective-review-browser` skill/,
-    "the command:objective-review-browser binding suffix rides the returned guidance",
+    /Follow the `perk-plan-review-browser` skill/,
+    "the command:plan-review-browser binding suffix rides the returned guidance",
   );
-  assert.match(guidance ?? "", /check the dependency story/);
+  assert.match(guidance ?? "", /check the rollback story/);
   assert.doesNotMatch(guidance ?? "", /127\.0\.0\.1|localhost|45001/);
   assert.ok(
     notified.some(
-      (n) => n.severity === "info" && n.message.includes("custom lane: check the dependency story"),
+      (n) => n.severity === "info" && n.message.includes("custom lane: check the rollback story"),
     ),
     "the entry line names the custom focus",
   );
@@ -929,10 +842,10 @@ async function settleBridges(sink: FakePlannotatorSink): Promise<void> {
   }
 }
 
-test("/objective-review-browser: headless → the headless-specific refusal, nothing executed", async () => {
-  const cwd = scaffoldRepo({
-    handoff: { runId: "01RID", mode: "read-write", stage: "objective-author" },
-  });
+const DRAFT_MD = "# The working draft\n\nStep one.\n";
+
+test("/plan-review-browser: headless → the headless-specific refusal, nothing executed (no prime, no bridge)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "plan" } });
   const sink = newSink();
   const h = await loadPerkSession({
     cwd,
@@ -942,21 +855,18 @@ test("/objective-review-browser: headless → the headless-specific refusal, not
   });
   const injected = spyInjections(h);
   try {
-    assert.ok(
-      h.registeredCommands().includes("objective-review-browser"),
-      "the command is registered",
-    );
+    assert.ok(h.registeredCommands().includes("plan-review-browser"), "the command is registered");
     // Seed a VALID draft so every later gate would pass — the hasUI gate is then the ONLY
     // refusing gate, and the headless-specific message proves it fired (a fall-through to the
     // no-draft refusal can no longer fake this test green).
-    await h.invokeTool("objective_draft", { prose: PROSE, roadmap: ROADMAP });
+    await h.invokeTool("plan_draft", { plan: DRAFT_MD });
     const errors: string[] = [];
     const prevError = console.error;
     console.error = (...args: unknown[]) => {
       errors.push(args.map(String).join(" "));
     };
     try {
-      await h.runCommandHandler("objective-review-browser", "");
+      await h.runCommandHandler("plan-review-browser", "");
     } finally {
       console.error = prevError;
     }
@@ -973,14 +883,12 @@ test("/objective-review-browser: headless → the headless-specific refusal, not
   }
 });
 
-test("/objective-review-browser: plannotator absent → the pinned provider-selection refusal, no work", async () => {
-  const cwd = scaffoldRepo({
-    handoff: { runId: "01RID", mode: "read-write", stage: "objective-author" },
-  });
+test("/plan-review-browser: plannotator absent → the pinned provider-selection refusal, no work", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "plan" } });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
   const injected = spyInjections(h);
   try {
-    await h.runCommandHandler("objective-review-browser", "");
+    await h.runCommandHandler("plan-review-browser", "");
     assert.ok(
       h.notifies.some(
         (n) =>
@@ -997,8 +905,8 @@ test("/objective-review-browser: plannotator absent → the pinned provider-sele
   }
 });
 
-test("/objective-review-browser: wrong/absent stage → the stage-gate refusal, nothing executed", async () => {
-  for (const stage of ["plan", undefined]) {
+test("/plan-review-browser: wrong/absent stage → the stage-gate refusal, nothing executed", async () => {
+  for (const stage of ["implement", undefined]) {
     const cwd = scaffoldRepo({
       handoff: { runId: "01RID", mode: "read-write", ...(stage !== undefined ? { stage } : {}) },
     });
@@ -1010,9 +918,9 @@ test("/objective-review-browser: wrong/absent stage → the stage-gate refusal, 
     });
     const injected = spyInjections(h);
     try {
-      await h.runCommandHandler("objective-review-browser", "");
+      await h.runCommandHandler("plan-review-browser", "");
       assert.ok(
-        h.notifies.some((n) => n.includes("only runs inside an objective-authoring session")),
+        h.notifies.some((n) => n.includes("only runs inside a plan-authoring session")),
         `the refusal names the requirement (stage=${stage})`,
       );
       assert.equal(injected.length, 0, "nothing injected");
@@ -1024,10 +932,8 @@ test("/objective-review-browser: wrong/absent stage → the stage-gate refusal, 
   }
 });
 
-test("/objective-review-browser: no working draft → the objective_draft redirect, nothing executed", async () => {
-  const cwd = scaffoldRepo({
-    handoff: { runId: "01RID", mode: "read-only", stage: "objective-author" },
-  });
+test("/plan-review-browser: no working draft → the plan_draft redirect, nothing executed", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
   const sink = newSink();
   const h = await loadPerkSession({
     cwd,
@@ -1036,13 +942,12 @@ test("/objective-review-browser: no working draft → the objective_draft redire
   });
   const injected = spyInjections(h);
   try {
-    await h.runCommandHandler("objective-review-browser", "");
+    await h.runCommandHandler("plan-review-browser", "");
     assert.ok(
       h.notifies.some(
-        (n) =>
-          n.includes("no working objective draft") && n.includes("write it with objective_draft"),
+        (n) => n.includes("no working plan draft") && n.includes("write it with plan_draft"),
       ),
-      "the refusal directs objective_draft",
+      "the refusal directs plan_draft",
     );
     assert.equal(injected.length, 0, "nothing injected");
     assert.equal(sink.envelopes.length, 0, "no bridge emitted");
@@ -1052,81 +957,26 @@ test("/objective-review-browser: no working draft → the objective_draft redire
   }
 });
 
-test("/objective-review-browser: a SEAM-invalid artifact (pointer, no file) → the classified rewrite refusal, never the absent arm", async () => {
+test("/plan-review-browser: a BLANK validated draft → the same refusal (drafts-only, param-never)", async () => {
   const cwd = scaffoldRepo();
-  const runId = "01RIDGONEOBJ";
-  // Plant a session whose workflow state carries a pointer to a file that does NOT exist — the
-  // seam's readArtifact classifies `invalid` (corruption), which must NOT be collapsed into the
-  // no-draft message: the door surfaces the seam problem + the rewrite redirect.
-  const dataDir = sessionDataDir(cwd, runId);
-  const file = plantSession(cwd, [
-    {
-      run_id: runId,
-      mode: "read-only",
-      stage: "objective-author",
-      session_artifacts: {
-        [OBJECTIVE_DRAFT_ARTIFACT]: {
-          run_id: runId,
-          name: OBJECTIVE_DRAFT_ARTIFACT,
-          path: join(dataDir, OBJECTIVE_DRAFT_ARTIFACT),
-          digest: digestSessionData("never written"),
-          at: new Date().toISOString(),
-        },
-      },
-    },
-  ]);
-  const sink = newSink();
-  const h = await loadPerkSession({
-    cwd,
-    sessionManager: SessionManager.open(file),
-    env: { PERK_RUN_ID: undefined },
-    extraExtensions: [fakePlannotator(sink)],
-  });
-  const injected = spyInjections(h);
-  try {
-    await h.runCommandHandler("objective-review-browser", "");
-    assert.ok(
-      h.notifies.some((n) =>
-        n.endsWith(
-          "the working objective draft is invalid: session artifact objective-draft.json has a " +
-            "pointer but no file — rewrite it with objective_draft, then re-run " +
-            "/objective-review-browser",
-        ),
-      ),
-      `a seam-invalid artifact refuses with the classified problem, not the absent message (got ${JSON.stringify(h.notifies)})`,
-    );
-    assert.ok(
-      !h.notifies.some((n) => n.includes("no working objective draft")),
-      "the absent arm never fires for seam corruption",
-    );
-    assert.equal(injected.length, 0, "nothing injected");
-    assert.equal(sink.envelopes.length, 0, "no bridge emitted");
-  } finally {
-    h.dispose();
-  }
-});
-
-test("/objective-review-browser: an INVALID artifact (malformed JSON) → the rewrite refusal", async () => {
-  const cwd = scaffoldRepo();
-  const invalid = "not json at all\n";
-  const runId = "01RIDBADOBJ";
-  // Plant a session whose workflow state carries a VALID pointer to malformed artifact bytes —
-  // the seam's readArtifact succeeds (non-blank, digest ok) but decodeObjectiveDraft refuses.
+  const blank = "   \n";
+  const runId = "01RIDBLANK";
+  // Plant a session whose workflow state carries a VALID pointer to blank artifact bytes.
   const dataDir = sessionDataDir(cwd, runId);
   const { mkdirSync } = await import("node:fs");
   mkdirSync(dataDir, { recursive: true });
-  writeFileSync(join(dataDir, OBJECTIVE_DRAFT_ARTIFACT), invalid, "utf8");
+  writeFileSync(join(dataDir, PLAN_DRAFT_ARTIFACT), blank, "utf8");
   const file = plantSession(cwd, [
     {
       run_id: runId,
       mode: "read-only",
-      stage: "objective-author",
+      stage: "plan",
       session_artifacts: {
-        [OBJECTIVE_DRAFT_ARTIFACT]: {
+        [PLAN_DRAFT_ARTIFACT]: {
           run_id: runId,
-          name: OBJECTIVE_DRAFT_ARTIFACT,
-          path: join(dataDir, OBJECTIVE_DRAFT_ARTIFACT),
-          digest: digestSessionData(invalid),
+          name: PLAN_DRAFT_ARTIFACT,
+          path: join(dataDir, PLAN_DRAFT_ARTIFACT),
+          digest: digestSessionData(blank),
           at: new Date().toISOString(),
         },
       },
@@ -1141,16 +991,10 @@ test("/objective-review-browser: an INVALID artifact (malformed JSON) → the re
   });
   const injected = spyInjections(h);
   try {
-    await h.runCommandHandler("objective-review-browser", "");
+    await h.runCommandHandler("plan-review-browser", "");
     assert.ok(
-      h.notifies.some((n) =>
-        n.endsWith(
-          "the working objective draft is invalid: objective-draft.json is not valid JSON — " +
-            "refusing the draft — rewrite it with objective_draft, then re-run " +
-            "/objective-review-browser",
-        ),
-      ),
-      `an invalid artifact refuses with the classified problem + rewrite redirect (got ${JSON.stringify(h.notifies)})`,
+      h.notifies.some((n) => n.includes("no working plan draft")),
+      "a blank draft refuses like a missing one",
     );
     assert.equal(injected.length, 0, "nothing injected");
     assert.equal(sink.envelopes.length, 0, "no bridge emitted");
@@ -1159,76 +1003,8 @@ test("/objective-review-browser: an INVALID artifact (malformed JSON) → the re
   }
 });
 
-test("/objective-review-browser: harness APPROVE — the command's artifact read threads the stale guard and the save runs (gate exits)", async () => {
-  // The full command→open→decision composition: the command captures the RAW artifact bytes as
-  // the stale baseline (mis-threading e.g. the rendered markdown as artifactRaw would make
-  // every real approval stale-refuse), the approval passes the guard, objectiveApprovalSave
-  // runs through the cold door, and the D1a gate exit lands (mode flips read-write).
-  const cwd = scaffoldRepo({
-    handoff: { runId: "01RID", mode: "read-only", stage: "objective-author" },
-  });
-  const argvFile = join(cwd, "argv.txt");
-  const bin = fakePerk(cwd, { stdout: CREATE_JSON, argvFile });
-  const sink = newSink();
-  const h = await loadPerkSession({
-    cwd,
-    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
-    extraExtensions: [fakePlannotator(sink)],
-  });
-  const injected = spyInjections(h);
-  try {
-    await h.invokeTool("objective_draft", {
-      prose: PROSE,
-      title: "Ship retries",
-      roadmap: ROADMAP,
-    });
-    assert.equal(h.workflowState().mode, "read-only", "the session starts gated");
-    await h.runCommandHandler("objective-review-browser", "");
-    assert.equal(sink.envelopes.length, 1, "the plan-review bridge request was emitted");
-
-    // The human APPROVES (no Direct Edits): the stale guard passes on the live artifact and
-    // the objective save runs.
-    sink.emitDecision({ reviewId: "r-1", approved: true, feedback: "ship it" });
-    const start = Date.now();
-    while (
-      !injected.some((m) => m.includes("objective APPROVED by reviewer")) &&
-      Date.now() - start < 5000
-    ) {
-      await new Promise((r) => setTimeout(r, 25));
-    }
-    const approveText = injected.find((m) => m.includes("objective APPROVED by reviewer")) ?? "";
-    assert.ok(approveText, "the approve→save outcome was injected");
-    assert.doesNotMatch(
-      approveText,
-      /STALE bytes/,
-      "the real artifactRaw threading passed the guard",
-    );
-    assert.match(approveText, /Saved objective #7/, "the save outcome is relayed");
-    // The cold door really ran with the STRUCTURED roadmap re-read from the artifact.
-    const argv = readFileSync(argvFile, "utf8").split("\n");
-    assert.equal(argv[0], "objective");
-    assert.equal(argv[1], "create");
-    assert.equal(argv[argv.indexOf("--roadmap") + 1], JSON.stringify(ROADMAP));
-    // The save linked the session and the D1a gate exit landed.
-    assert.equal(h.workflowState().active_objective, "7", "active_objective linked");
-    assert.equal(h.workflowState().mode, "read-write", "the gate exited on the ok save");
-    // The settle clears both companion surfaces.
-    const settleStart = Date.now();
-    while ((await sessionAnnotationMode(h)) !== null && Date.now() - settleStart < 5000) {
-      await new Promise((r) => setTimeout(r, 25));
-    }
-    assert.equal(await sessionAnnotationMode(h), null, "the settle clears the annotation surface");
-    assert.equal(await sessionDraftContextPrimed(h), false, "…and the draft-review context");
-  } finally {
-    await settleBridges(sink);
-    h.dispose();
-  }
-});
-
-test("/objective-review-browser: happy path — RENDERED bytes to the bridge, both surfaces primed, decision routes + clears", async () => {
-  const cwd = scaffoldRepo({
-    handoff: { runId: "01RID", mode: "read-only", stage: "objective-author" },
-  });
+test("/plan-review-browser: happy path — primes both surfaces, injects URL-free guidance, decision routes + clears", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
   const sink = newSink();
   const h = await loadPerkSession({
     cwd,
@@ -1238,40 +1014,32 @@ test("/objective-review-browser: happy path — RENDERED bytes to the bridge, bo
   });
   const injected = spyInjections(h);
   try {
-    await h.invokeTool("objective_draft", {
-      prose: PROSE,
-      title: "Ship retries",
-      roadmap: ROADMAP,
-    });
-    await h.runCommandHandler("objective-review-browser", "check the dependency story");
+    await h.invokeTool("plan_draft", { plan: DRAFT_MD });
+    await h.runCommandHandler("plan-review-browser", "check the rollback story");
     assert.ok(
       h.notifies.some(
         (n) =>
-          n.includes("working objective draft → plannotator browser review") &&
-          n.includes("custom lane: check the dependency story"),
+          n.includes("working plan draft → plannotator browser review") &&
+          n.includes("custom lane: check the rollback story"),
       ),
       "the info line names the flow + custom focus",
     );
     assert.equal(injected.length, 1, "one guidance injection");
     const text = injected[0] ?? "";
     assert.match(text, /start_draft_review_wave/);
-    assert.match(text, /check the dependency story/);
+    assert.match(text, /check the rollback story/);
     assert.doesNotMatch(text, /127\.0\.0\.1|localhost/);
     const marker =
-      "Follow the `perk-objective-review-browser` skill (read `.agents/skills/perk-objective-review-browser/SKILL.md`).";
+      "Follow the `perk-plan-review-browser` skill (read `.agents/skills/perk-plan-review-browser/SKILL.md`).";
     assert.equal(
       text.split(marker).length - 1,
       1,
-      "exactly one command:objective-review-browser pointer",
+      "exactly one command:plan-review-browser pointer",
     );
-    // The bridge saw the RENDERED markdown (prose + Delivery line + roadmap table — never the
-    // raw JSON artifact) with the preset port.
+    // The bridge saw the EXACT draft bytes with the preset port.
     assert.equal(sink.envelopes.length, 1, "the plan-review bridge request was emitted");
     assert.equal(sink.envelopes[0]?.action, "plan-review");
-    assert.equal(sink.envelopes[0]?.payload.planContent, RENDERED);
-    assert.match(sink.envelopes[0]?.payload.planContent ?? "", /\*\*Delivery: incremental\*\*/);
-    assert.match(sink.envelopes[0]?.payload.planContent ?? "", /## Roadmap/);
-    assert.doesNotMatch(sink.envelopes[0]?.payload.planContent ?? "", /schema_version/);
+    assert.equal(sink.envelopes[0]?.payload.planContent, DRAFT_MD);
     assert.match(sink.envAtEmit[0] ?? "", /^\d+$/, "PLANNOTATOR_PORT preset at emit time");
     // Both companion surfaces primed.
     assert.equal(
@@ -1282,7 +1050,7 @@ test("/objective-review-browser: happy path — RENDERED bytes to the bridge, bo
     assert.equal(await sessionDraftContextPrimed(h), true, "the draft-review context is primed");
 
     // The human DENIES: the feedback injects a revision turn and both surfaces clear.
-    sink.emitDecision({ reviewId: "r-1", approved: false, feedback: "tighten node 1.1" });
+    sink.emitDecision({ reviewId: "r-1", approved: false, feedback: "tighten the rollout step" });
     const start = Date.now();
     while ((await sessionAnnotationMode(h)) !== null && Date.now() - start < 5000) {
       await new Promise((r) => setTimeout(r, 25));
@@ -1290,7 +1058,7 @@ test("/objective-review-browser: happy path — RENDERED bytes to the bridge, bo
     assert.equal(await sessionAnnotationMode(h), null, "the settle clears the annotation surface");
     assert.equal(await sessionDraftContextPrimed(h), false, "…and the draft-review context");
     assert.ok(
-      injected.some((m) => m.includes("DENIED") && m.includes("tighten node 1.1")),
+      injected.some((m) => m.includes("DENIED") && m.includes("tighten the rollout step")),
       "the deny feedback injected verbatim",
     );
   } finally {

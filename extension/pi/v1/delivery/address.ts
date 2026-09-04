@@ -22,8 +22,8 @@ import {
   type ThreadResultRow,
 } from "../../../delivery/address.ts";
 import type { PublishedChange } from "../../../delivery/submit.ts";
-import { planningStageRefusal } from "../../../doors/lifecycleGates.ts";
 import { openBranchWorkflowSession } from "../../../session/branchWorkflowSession.ts";
+import { planningStageRefusal } from "../../../session/lifecycleGates.ts";
 import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
 import type { PlanRef } from "../../../substrate/cache.ts";
 import {

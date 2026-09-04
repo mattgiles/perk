@@ -670,7 +670,8 @@ the session identity lifecycle — the §8.2 claim/fork/adopt/mint/keep arms as 
 (`extension/session/lifecycle.ts::establishSessionIdentity`; `extension/index.ts` keeps the
 adapter wiring: gathering inputs, rendering the per-arm reports, and the downstream gate/stage
 sync);
-session-lifecycle gates + the warm `/implement` handoff (`extension/doors/lifecycleGates.ts`,
+session-lifecycle gates + the warm `/implement` handoff (`extension/session/lifecycleGates.ts`
+(the Pi-free policy) + `extension/pi/v1/lifecycleGates.ts` (the registration),
 `extension/pi/v1/planReview.ts`'s implement-here seam); status/footer rendering detail
 (`extension/surfaces/surfaces.ts`,
 `docs/design/tui-charter.md`); plan mode + the plan provider deferral
@@ -678,7 +679,7 @@ session-lifecycle gates + the warm `/implement` handoff (`extension/doors/lifecy
 owns the provider seams); the read-only CI executor
 (`extension/pi/v1/delivery/ci.ts` over the `extension/delivery/ci.ts` feature op); the spawned delegation seam + `/address` + `/pr-review` + `/pr-review-terminal` + `/pr-review-browser`
 (`extension/pi/v1/delivery/address.ts` / `extension/pi/v1/codeReview/automated.ts` / `terminal.ts` /
-`browser.ts` / `submit.ts` / `checkout.ts` / `extension/doors/plannotatorHandoff.ts`, `agents/*.md`, `skills/perk-address/` /
+`browser.ts` / `submit.ts` / `checkout.ts` / `extension/pi/v1/providers/plannotatorHandoff.ts`, `agents/*.md`, `skills/perk-address/` /
 `perk-pr-review/` / `perk-pr-review-terminal/` / `perk-pr-review-browser/`; the gateway op shapes stay in §8.4); the conflict-resolution drive
 (`extension/pi/v1/delivery/submit.ts`; the probe contract stays in §8.4).
 
@@ -1355,7 +1356,7 @@ local (pre-PR) mode never primes. Accepted concurrent double-open edge: a second
 everything), and the first bridge's later settle would clear the second session's surface —
 rare and loud already (the fixed-port EADDRINUSE caveat below), noted, not engineered around.
 Its shared substrate lives in
-`extension/doors/plannotatorHandoff.ts` (the `checkout.ts` mirror — the pinned `code-review`
+`extension/pi/v1/providers/plannotatorHandoff.ts` (the `checkout.ts` mirror — the pinned `code-review`
 envelope, the presence probe, the active-PR ladder, the respond routing, and the browser-open
 core), imported by this door and `/pr-review-terminal`'s active mode.
 
@@ -1566,7 +1567,7 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
   plan-ref → `resolve_plan_worktree_name` → `find_pr_for_branch`) emits `{pr:{number,url}}` (exit
   0 ok / 1 no-plan·no-PR·op-failure / 2 not-a-repo). It fronts the active modes of the warm
   `/pr-review-browser` and `/pr-review-terminal` doors
-  (`extension/doors/plannotatorHandoff.ts` owns the envelope + fallback ladder).
+  (`extension/pi/v1/providers/plannotatorHandoff.ts` owns the envelope + fallback ladder).
 - **Draft → ready is a deliberate gesture.** Submit keeps the PR **draft**; perk does **not**
   auto-publish. `perk pr ready` (warm `/ready`) is the explicit review gate — `mark_pr_ready` if
   draft, idempotent. On a **stacked** layer the same gesture is the deliberate post-review human
@@ -1987,9 +1988,9 @@ literal markers are a cross-plane contract:
 
 - **`<!-- BEGIN perk managed -->`** — the managed `AGENTS.md` block. `perk init` (Python plane)
   writes it; Pi loads `AGENTS.md` into `contextFiles`; the extension's `/perk-selfcheck` (TS plane,
-  `extension/doors/selfcheck.ts`) reads `getSystemPromptOptions().contextFiles` and confirms some file
+  `extension/pi/v1/selfcheck.ts`) reads `getSystemPromptOptions().contextFiles` and confirms some file
   carries this marker. Changing the literal in `perk/convergence/init/blocks.py` **must** update
-  `MANAGED_AGENTS_MARKER` in `extension/doors/selfcheck.ts` in the same turn.
+  `MANAGED_AGENTS_MARKER` in `extension/pi/v1/selfcheck.ts` in the same turn.
 - **`.pi/APPEND_SYSTEM.md`** — the ambient routing index (maintained by `/learn-docs`, never
   `init`). Pi joins it into `appendSystemPrompt`; selfcheck confirms the on-disk content reached the
   prompt verbatim (a trimmed-substring probe).
@@ -3877,8 +3878,8 @@ discipline); this section keeps the unique cross-cutting rules.
   the exact bytes captured at open (the stale guard). Door mechanics — the launch chooser,
   port/readiness handling, wave lifecycle, abort ordering, stale guards, prime/clear
   lifecycle, and the accepted concurrency behavior — live in the owning modules:
-  `extension/doors/planReviewBrowser.ts` + `extension/doors/objectiveReviewBrowser.ts` (over
-  `plannotatorHandoff.ts` + `draftReviewWaveTools.ts`). Bindings:
+  `extension/pi/v1/planReviewBrowser.ts` + `extension/pi/v1/objectiveReviewBrowser.ts` (over
+  `pi/v1/providers/plannotatorHandoff.ts` + `pi/v1/draftReviewWaveTools.ts`). Bindings:
   `command:plan-review-browser` → `perk-plan-review-browser`;
   `command:objective-review-browser` → `perk-objective-review-browser` (nudge, §8.9).
 
@@ -3923,7 +3924,7 @@ discipline); this section keeps the unique cross-cutting rules.
 
   **Planning-stage lifecycle-door refusal** (the same family): the warm `/submit`, `/address`,
   `/land`, and `/learn` doors (tool + command surfaces) run `planningStageRefusal`
-  (`extension/doors/lifecycleGates.ts`) as their first check — when the session's
+  (`extension/session/lifecycleGates.ts`) as their first check — when the session's
   workflow-state `stage` is a planning stage (`plan` / `objective-plan`) they refuse (typed
   `planning_session`) and direct the human at `perk impl <N>` in a fresh session. Rationale:
   after an approved save a still-live positioned planning session holds TWO plan identities —

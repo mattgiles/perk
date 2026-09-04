@@ -12,18 +12,12 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-  createAnnotationState,
-  executePushAnnotations,
-  type FetchLike,
-  primeAnnotationSurface,
-} from "../pi/v1/providers/annotations.ts";
-import { runScratchDir } from "../substrate/cache.ts";
+import { runScratchDir } from "../../substrate/cache.ts";
 import {
   createFakeSubagents,
   type FakeSubagents,
   waveScriptItems,
-} from "../testing/fakeSubagents.ts";
+} from "../../testing/fakeSubagents.ts";
 import {
   fakePerk,
   fakePerkRouter,
@@ -31,7 +25,13 @@ import {
   type PerkSession,
   scaffoldRepo,
   spyInjections,
-} from "../testing/harness.ts";
+} from "../../testing/harness.ts";
+import {
+  createAnnotationState,
+  executePushAnnotations,
+  type FetchLike,
+  primeAnnotationSurface,
+} from "./providers/annotations.ts";
 
 /** The shared fake in dynamic mode, watermarking every report with the session's marker. */
 function markedFake(marker: string): FakeSubagents {

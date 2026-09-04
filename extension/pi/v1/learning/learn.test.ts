@@ -524,7 +524,7 @@ test("tool: an out-of-enum decision → bad_input AND the marker is NOT cleared"
 
 test("planning-stage refusal: the learn tool + /learn refuse in a planning session", async () => {
   // The host lifecycle gate stays at both adapter entry points (the full lifecycle matrix lives
-  // in doors/lifecycleGates.test.ts).
+  // in pi/v1/lifecycleGates.test.ts + session/lifecycleGates.test.ts).
   const cwd = scaffoldRepo();
   const argvFile = join(cwd, "cold-door-argv.txt");
   const bin = fakePerk(cwd, { stdout: "{}", argvFile });

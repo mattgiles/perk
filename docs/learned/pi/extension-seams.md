@@ -48,7 +48,8 @@ scheduled for wholesale deletion**. Instance: the `/review` door (the since-dele
 extension/doors/review.ts) was retired once the surface-named doors owned the flows.
 Everything the surviving `/pr-review-terminal` door needed — the PR-token arg grammar
 (`parseReviewArgs`), the strict checkout decode, the `hunk --version` probe, and the launch
-handoff — had been extracted to `extension/doors/hunkHandoff.ts` **at the survivor's birth**,
+handoff — had been extracted to `extension/doors/hunkHandoff.ts` (live today as
+`extension/pi/v1/codeReview/checkout.ts`) **at the survivor's birth**,
 with the retiring module importing it back (behaviorally byte-stable; the proof was that the
 door's test file needed only import-path churn), so the retirement completed as a wholesale
 `rm`. The hosting rule: **nothing a survivor needs may live in a module slated for deletion** —

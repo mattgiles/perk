@@ -44,36 +44,36 @@ import {
   decodeObjectiveDraft,
   OBJECTIVE_DRAFT_ARTIFACT,
   renderObjectiveDraft,
-} from "../authoring/objective/draft.ts";
-import { objectiveApprovalSaveV1 } from "../pi/v1/objectiveAuthoring.ts";
-import { approvedObjectiveSaveResult } from "../pi/v1/objectiveReview.ts";
-import {
-  type AnnotationState,
-  clearAnnotationSurface,
-  primeAnnotationSurface,
-} from "../pi/v1/providers/annotations.ts";
-import { hasDirectEditsHeading } from "../pi/v1/providers/plannotator.ts";
-import type { ReviewOutcome } from "../pi/v1/review.ts";
-import { openBranchWorkflowSession } from "../session/branchWorkflowSession.ts";
-import { bindingSuffix } from "../substrate/bindingDelivery.ts";
-import { registerPerkCommand } from "../substrate/command.ts";
-import { interceptConsoleError } from "../substrate/consoleCapture.ts";
-import { render } from "../substrate/prompts.ts";
-import type { ToolGating } from "../substrate/toolGating.ts";
-import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
-import { type ReportTarget, report } from "../surfaces/report.ts";
+} from "../../authoring/objective/draft.ts";
 import {
   clearDraftReviewContext,
   type DraftReviewWaveState,
   primeDraftReviewContext,
-} from "./draftReviewWaveTools.ts";
+} from "../../authoring/review/draftContext.ts";
+import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
+import { registerPerkCommand } from "../../substrate/command.ts";
+import { interceptConsoleError } from "../../substrate/consoleCapture.ts";
+import { render } from "../../substrate/prompts.ts";
+import type { ToolGating } from "../../substrate/toolGating.ts";
+import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
+import { type ReportTarget, report } from "../../surfaces/report.ts";
+import { objectiveApprovalSaveV1 } from "./objectiveAuthoring.ts";
+import { approvedObjectiveSaveResult } from "./objectiveReview.ts";
+import {
+  type AnnotationState,
+  clearAnnotationSurface,
+  primeAnnotationSurface,
+} from "./providers/annotations.ts";
+import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import {
   plannotatorPresent,
   type RespondSink,
   type StartBrowserDeps,
   type StartedSurface,
   startPlannotatorPlanReview,
-} from "./plannotatorHandoff.ts";
+} from "./providers/plannotatorHandoff.ts";
+import type { ReviewOutcome } from "./review.ts";
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
 const SCOPE = "objective-review-browser";

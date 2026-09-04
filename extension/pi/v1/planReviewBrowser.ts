@@ -36,35 +36,35 @@
 //    collectable (the wave module's timeout is the orphan insurance).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { PLAN_DRAFT_ARTIFACT } from "../authoring/plan/draft.ts";
-import { approvalSave } from "../pi/v1/plan.ts";
-import { applyPlannotatorDirectEdits, approvedSaveResult } from "../pi/v1/planReview.ts";
-import {
-  type AnnotationState,
-  clearAnnotationSurface,
-  primeAnnotationSurface,
-} from "../pi/v1/providers/annotations.ts";
-import type { ReviewOutcome } from "../pi/v1/review.ts";
-import { openBranchWorkflowSession } from "../session/branchWorkflowSession.ts";
-import { bindingSuffix } from "../substrate/bindingDelivery.ts";
-import { registerPerkCommand } from "../substrate/command.ts";
-import { interceptConsoleError } from "../substrate/consoleCapture.ts";
-import { render } from "../substrate/prompts.ts";
-import type { ToolGating } from "../substrate/toolGating.ts";
-import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
-import { type ReportTarget, report } from "../surfaces/report.ts";
+import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
 import {
   clearDraftReviewContext,
   type DraftReviewWaveState,
   primeDraftReviewContext,
-} from "./draftReviewWaveTools.ts";
+} from "../../authoring/review/draftContext.ts";
+import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
+import { registerPerkCommand } from "../../substrate/command.ts";
+import { interceptConsoleError } from "../../substrate/consoleCapture.ts";
+import { render } from "../../substrate/prompts.ts";
+import type { ToolGating } from "../../substrate/toolGating.ts";
+import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
+import { type ReportTarget, report } from "../../surfaces/report.ts";
+import { approvalSave } from "./plan.ts";
+import { applyPlannotatorDirectEdits, approvedSaveResult } from "./planReview.ts";
+import {
+  type AnnotationState,
+  clearAnnotationSurface,
+  primeAnnotationSurface,
+} from "./providers/annotations.ts";
 import {
   plannotatorPresent,
   type RespondSink,
   type StartBrowserDeps,
   type StartedSurface,
   startPlannotatorPlanReview,
-} from "./plannotatorHandoff.ts";
+} from "./providers/plannotatorHandoff.ts";
+import type { ReviewOutcome } from "./review.ts";
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
 const SCOPE = "plan-review-browser";

@@ -1,8 +1,10 @@
-// Session-lifecycle gates (the interior safety primitive). One reusable dirty-repo guard on
-// session_before_switch / session_before_fork that returns { cancel: true } when an *active perk
-// workflow* has uncommitted changes — so a stage transition never silently orphans work. Plus the
-// guard-only `/implement` command that *enforces* the implement stage's `warm: false` legality (the
-// plan→implement jump requires fresh context; that is the cold door `perk implement`).
+// Session-lifecycle gates (the interior safety primitive), the Pi registration half. One
+// reusable dirty-repo guard on session_before_switch / session_before_fork that returns
+// { cancel: true } when an *active perk workflow* has uncommitted changes — so a stage
+// transition never silently orphans work. Plus the guard-only `/implement` command that
+// *enforces* the implement stage's `warm: false` legality (the plan→implement jump requires
+// fresh context; that is the cold door `perk implement`). The Pi-free policy these hooks apply
+// (`implementHandoffPrompt`, `planningStageRefusal`) lives in `session/lifecycleGates.ts`.
 //
 // pi.on("session_before_fork"/"...switch") handlers are fired by extensionRunner.emit({type,...})
 // and their { cancel } result round-trips; the handler's
@@ -13,59 +15,16 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import type { PlanRef } from "../substrate/cache.ts";
-import { registerPerkCommand } from "../substrate/command.ts";
-import { planReadInstruction, render } from "../substrate/prompts.ts";
-import { type BranchSource, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
-import { report } from "../surfaces/report.ts";
-
-// The planning stages whose sessions never legitimately run lifecycle doors. After an approved
-// save, a still-live planning session holds TWO plan identities — the cwd binding (a positioned
-// stacked session's predecessor checkout, read via readPlanRef(ctx.cwd)) and the just-saved plan
-// on active_plan_ref — so a door invocation there could act on the predecessor. At the repo root
-// the same invocation fails confusingly today; the refusal is honest in both shapes.
-const PLANNING_STAGES = new Set(["plan", "objective-plan"]);
-
-/**
- * The planning-stage lifecycle-door refusal (the shared first check of the warm /submit,
- * /address, /land, and /learn doors): when this session's workflow-state `stage` is a planning
- * stage, return the refusal message directing the human at the fresh-session implement door;
- * `null` otherwise (non-planning stages — and stage-less sessions — are unaffected). Fail-CLOSED
- * on an unreadable branch: without the state this guard cannot prove the session is not a
- * positioned planning session (whose cwd binding is the PREDECESSOR — the exact target it
- * protects), so an unreadable read refuses rather than letting the door act.
- */
-export function planningStageRefusal(ctx: BranchSource, door: string): string | null {
-  let stage: string | undefined;
-  try {
-    stage = rebuildWorkflowState(branchOf(ctx)).stage;
-  } catch (error) {
-    return (
-      `${door} is unavailable: the session's workflow state could not be read ` +
-      `(${String(error)}), so this cannot be proven not to be a planning session — ` +
-      "retry, or implement the saved plan with `perk impl <N>` in a fresh session."
-    );
-  }
-  if (stage === undefined || !PLANNING_STAGES.has(stage)) return null;
-  return (
-    `${door} is unavailable in a planning session (stage ${stage}): a planning session can ` +
-    "hold two plan identities (its checkout's own binding and the just-saved plan) — " +
-    "implement the saved plan with `perk impl <N>` in a fresh session instead."
-  );
-}
+import { implementHandoffPrompt } from "../../session/lifecycleGates.ts";
+import type { PlanRef } from "../../substrate/cache.ts";
+import { registerPerkCommand } from "../../substrate/command.ts";
+import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
+import { report } from "../../surfaces/report.ts";
 
 const DIRTY_MESSAGE = "uncommitted changes — commit or stash before switching/forking this stage.";
 const HANDOFF_DIRTY_MESSAGE =
   "uncommitted changes — commit before a fresh-context /implement handoff (the plan is the " +
   "only artifact that crosses the boundary).";
-
-/**
- * Pure gate policy: cancel a transition only inside an active perk workflow whose tree is
- * dirty. Kept separate from the `pi.exec` effect so the matrix is unit-testable offline.
- */
-export function gateDecision(inputs: { active: boolean; dirty: boolean }): { cancel: boolean } {
-  return { cancel: inputs.active && inputs.dirty };
-}
 
 /** True when this session is linked to a plan (a perk workflow is in progress). */
 function workflowActive(ctx: ExtensionContext): boolean {
@@ -81,33 +40,12 @@ async function guardTransition(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
 ): Promise<{ cancel: true } | undefined> {
-  const active = workflowActive(ctx);
-  if (!active) return undefined; // perk does not interfere with non-perk transitions
+  if (!workflowActive(ctx)) return undefined; // perk does not interfere with non-perk transitions
   const res = await pi.exec("git", ["status", "--porcelain"], { cwd: ctx.cwd });
   const dirty = res.code === 0 && res.stdout.trim().length > 0;
-  if (!gateDecision({ active, dirty }).cancel) return undefined;
+  if (!dirty) return undefined;
   report(ctx, "lifecycle", "warning", DIRTY_MESSAGE); // fail-safe-headless: loud, still cancels
   return { cancel: true };
-}
-
-/**
- * The plan-read priming seed for a fresh implement session. The in-session twin of
- * `perk/run/launch.py`'s `_implement_prompt`: carry the plan FORWARD (read it from its canonical
- * source), never summarize it — the plan is the only artifact that crosses the boundary.
- *
- * The wording lives in the canonical template `prompts/stages/implement.md`, rendered by the shared
- * seam (contracts.md §8.31); branching stays in code — only the `read_cmd` var differs. This warm
- * handoff is now byte-identical to the cold/worker primer, so it carries the same "Progress
- * tracking:" tail (the prior shorter near-copy omission is removed).
- */
-export function implementHandoffPrompt(ref: PlanRef): string {
-  const readCmd = planReadInstruction(ref.provider, String(ref.pr_id), ref.url);
-  return render("stages/implement.md", {
-    provider: ref.provider,
-    pr_id: String(ref.pr_id),
-    url: ref.url,
-    read_cmd: readCmd,
-  });
 }
 
 /**

@@ -10,7 +10,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { reconcileGuidance } from "../../../authoring/objective/prose.ts";
-import { planningStageRefusal } from "../../../doors/lifecycleGates.ts";
+import { planningStageRefusal } from "../../../session/lifecycleGates.ts";
 import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
 import { PENDING_LEARN, setMarker } from "../../../substrate/cache.ts";
 import {

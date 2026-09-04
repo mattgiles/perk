@@ -14,7 +14,9 @@
 > as drawn; the wave engine stayed `waves/` (not `execution/reportWave.ts`); stage drive
 > stayed `worker/stageExecution.ts` (not `execution/stageRunner.ts`); configuration stayed
 > `substrate/config.ts` (no `config/` directory was created); `pi/v1/` exists as drawn;
-> `doors/` is 74% evacuated (7 surviving modules, owed by objective #2130 node 3.1).
+> `doors/` was evacuated and deleted by objective #2130 node 3.1 (the survivors moved to
+> `pi/v1/` — `plannotatorHandoff` under `pi/v1/providers/` — with the two prescribed splits
+> landing `session/lifecycleGates.ts` and `authoring/review/draftContext.ts`).
 >
 > Seam dispositions, one line each (the detailed rationale and re-earn condition for each
 > live in the named `module-contracts.md` section — the one canonical home):

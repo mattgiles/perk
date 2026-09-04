@@ -42,7 +42,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { planningStageRefusal } from "../../../doors/lifecycleGates.ts";
 import {
   LEARN_ANGLES,
   type LearnAnalystReport,
@@ -61,6 +60,7 @@ import {
 } from "../../../learning/capture.ts";
 import { learnGuidance, learnOrchestrateGuidance } from "../../../learning/prose.ts";
 import { decideLearnLaunch } from "../../../learning/routing.ts";
+import { planningStageRefusal } from "../../../session/lifecycleGates.ts";
 import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
 import { clearMarker, hasMarker, PENDING_LEARN } from "../../../substrate/cache.ts";
 import {

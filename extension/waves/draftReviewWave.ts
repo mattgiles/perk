@@ -7,7 +7,8 @@
 //
 // CONSUMED by the `/plan-review-browser` and `/objective-review-browser` doors via the
 // `start_draft_review_wave` / `collect_draft_review_wave` tool pair
-// (`extension/doors/draftReviewWaveTools.ts`) — `draftType` parameterizes the lane tasks.
+// (`extension/pi/v1/draftReviewWaveTools.ts`, over the door-primed context in
+// `extension/authoring/review/draftContext.ts`) — `draftType` parameterizes the lane tasks.
 //
 // ZERO retries — deliberate: the doors' contract is honest incompleteness surfaced to the human
 // during triage (an `ok: false` lane is reported, never papered over), so the pr-review

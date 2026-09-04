@@ -350,7 +350,7 @@ They do not prove:
 - A missing required angle blocks a clean verdict.
 - Result ordering cannot change semantics.
 
-See [prReview.test.ts](/Users/mattgiles/dev/github/mattgiles/perk/extension/doors/prReview.test.ts:13).
+See [automated.test.ts](../../extension/pi/v1/codeReview/automated.test.ts) (at writing time: `extension/doors/prReview.test.ts`).
 
 ### 5.4 Contracts already drift from the installed extension
 

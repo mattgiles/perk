@@ -192,7 +192,7 @@ facts**; single-plane narrative lives in the owning module's header docstring.
 ## The cross-plane SSOT prompt-fragment pattern
 
 When a prompt fragment must agree **byte-for-byte across planes**, give each plane one exported
-helper (`src/perk/run/launch/prompts.py::_plan_read_instruction` ↔ `extension/doors/lifecycleGates.ts::planReadInstruction`)
+helper (`src/perk/run/launch/prompts.py::_plan_read_instruction` ↔ `extension/substrate/prompts.ts::planReadInstruction`)
 plus a shared literal-fragment substring list (`LINEAR_READ_SUBSTRINGS`) asserted from BOTH suites
 (`tests/test_worker_prompt_parity.py` ↔ `extension/worker/worker.test.ts`). Choose substrings as
 fragments of the *instruction*, not the scaffold — scaffold fragments match every arm and pin

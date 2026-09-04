@@ -7,20 +7,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-  createDraftReviewWaveState,
-  registerDraftReviewWaveTools,
-} from "./doors/draftReviewWaveTools.ts";
-
-import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
-import {
-  openObjectiveReviewSurface,
-  registerObjectiveReviewBrowser,
-} from "./doors/objectiveReviewBrowser.ts";
-
-import { plannotatorPresent } from "./doors/plannotatorHandoff.ts";
-import { openPlanReviewSurface, registerPlanReviewBrowser } from "./doors/planReviewBrowser.ts";
-import { registerSelfcheck } from "./doors/selfcheck.ts";
+import { createDraftReviewWaveState } from "./authoring/review/draftContext.ts";
 import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
 import { installAutomatedReviewBindings } from "./pi/v1/codeReview/automated.ts";
 import { installPrReviewBrowserBindings } from "./pi/v1/codeReview/browser.ts";
@@ -38,19 +25,28 @@ import { installStackRecoverBindings } from "./pi/v1/delivery/stackRecover.ts";
 import { installStackStatusBindings } from "./pi/v1/delivery/stackStatus.ts";
 import { installStackSyncBindings } from "./pi/v1/delivery/stackSync.ts";
 import { installSubmitBindings } from "./pi/v1/delivery/submit.ts";
+import { registerDraftReviewWaveTools } from "./pi/v1/draftReviewWaveTools.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installAuditBindings } from "./pi/v1/learning/audit.ts";
 import { installDreamBindings } from "./pi/v1/learning/dream.ts";
 import { installLearnFactoryBindings } from "./pi/v1/learning/factory.ts";
 import { installHarvestBindings } from "./pi/v1/learning/harvest.ts";
 import { installLearnBindings } from "./pi/v1/learning/learn.ts";
+import { registerLifecycleGates } from "./pi/v1/lifecycleGates.ts";
 import { installObjectiveBindings } from "./pi/v1/objective.ts";
 import { installObjectiveAuthoringBindings } from "./pi/v1/objectiveAuthoring.ts";
 import { installObjectivePlanningBindings } from "./pi/v1/objectivePlanning.ts";
+import {
+  openObjectiveReviewSurface,
+  registerObjectiveReviewBrowser,
+} from "./pi/v1/objectiveReviewBrowser.ts";
 import { installPlanBindings } from "./pi/v1/plan.ts";
+import { openPlanReviewSurface, registerPlanReviewBrowser } from "./pi/v1/planReviewBrowser.ts";
 import { createAnnotationState, installAnnotationBindings } from "./pi/v1/providers/annotations.ts";
 import { installPlannotatorPlanAdapter } from "./pi/v1/providers/plannotator.ts";
+import { plannotatorPresent } from "./pi/v1/providers/plannotatorHandoff.ts";
 import { installTombellPlanAdapter } from "./pi/v1/providers/tombell.ts";
+import { registerSelfcheck } from "./pi/v1/selfcheck.ts";
 import {
   branchSessionStateStore,
   establishSessionIdentity,
@@ -181,8 +177,9 @@ export default function (pi: ExtensionAPI) {
   // mode and to COMPOSE the approval→save seam (auto-save → D1a gate exit) — Invariant 1 holds:
   // the surfaces compose the gate through the seams, never own it. The injected wave-launch
   // deps power the plannotator launch chooser (§8.23): the presence probe + the two door open
-  // cores are composed HERE so the pi/v1 review arms import nothing from door modules (the
-  // value-import cycle break — planReviewBrowser.ts value-imports the review arms).
+  // cores are composed HERE so plan.ts/planReview.ts import nothing from the browser modules
+  // (planReviewBrowser.ts/objectiveReviewBrowser.ts — the value-import cycle break:
+  // planReviewBrowser.ts value-imports the review arms).
   installPlanBindings(pi, gating, {
     present: () => plannotatorPresent(pi),
     plan: (ctx, opts) => openPlanReviewSurface(pi, ctx, gating, opts, draftReviewWave, annotations),

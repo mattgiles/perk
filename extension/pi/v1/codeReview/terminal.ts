@@ -20,17 +20,17 @@
 // `installCuratedSubmissionBindings`), whose gate ladder (contracts §8.4) applies unchanged.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import {
-  decodePrUrl,
-  planRefBaseOf,
-  resolveReviewTarget,
-} from "../../../doors/plannotatorHandoff.ts";
 import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
 import { runColdDoor } from "../../../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../../../substrate/command.ts";
 import { sinceBaseSha } from "../../../substrate/git.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { report } from "../../../surfaces/report.ts";
+import {
+  decodePrUrl,
+  planRefBaseOf,
+  resolveReviewTarget,
+} from "../providers/plannotatorHandoff.ts";
 import {
   type CheckoutOk,
   decodeCheckout,

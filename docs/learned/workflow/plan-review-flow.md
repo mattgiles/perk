@@ -229,11 +229,11 @@ guidance between the gather list and the executor paragraph.**
   code-review-only, `/api/plan` plan-server-only) are exported constants so a probe can never
   false-positive against the wrong server flavor — but a constants-only pin passes even if the
   wrappers swap routes. When a generic engine (`startPlannotatorSurface<T>` in
-  `extension/doors/plannotatorHandoff.ts`) takes per-flavor parameters, add one test mocking
+  `extension/pi/v1/providers/plannotatorHandoff.ts`) takes per-flavor parameters, add one test mocking
   `globalThis.fetch` that exercises the real default wiring end-to-end (each wrapper hands the
   engine its own route).
 - **Consumers:** `startPlannotatorPlanReview` is consumed by the `/plan-review-browser` door
-  (`extension/doors/planReviewBrowser.ts`). Route/envelope/bind-order pins
+  (`extension/pi/v1/planReviewBrowser.ts`). Route/envelope/bind-order pins
   are at `@plannotator/pi-extension@0.26.4`; drift degrades loudly (readiness `timeout` /
   handshake `unavailable`), never silently.
 
@@ -253,7 +253,7 @@ guidance between the gather list and the executor paragraph.**
 ## Summoned background review doors — three race classes the blocking path doesn't have
 
 Unlike the model-called `plan_review` (a blocking wait), the `/plan-review-browser` door
-(`extension/doors/planReviewBrowser.ts`) leaves the session **live while the human decides in
+(`extension/pi/v1/planReviewBrowser.ts`) leaves the session **live while the human decides in
 the browser**. That structural difference creates three race classes beyond the two edges the
 plan explicitly accepted (double-open stale-clear; early decision mid-wave):
 
@@ -353,7 +353,7 @@ trigger**.
 The plannotator browser code-review doors (today `/pr-review-browser`; originally
 `/pr-review-local`, retired) open plannotator's browser **code-review** UI — the **second**
 plannotator event-bus bridge (after `plan_review`'s `createPlannotatorBridge`; the bridge now
-lives in `extension/doors/plannotatorHandoff.ts`) and the reusable cross-extension pattern:
+lives in `extension/pi/v1/providers/plannotatorHandoff.ts`) and the reusable cross-extension pattern:
 
 - **Cross-extension invocation has no API — speak the published event bus.** pi exposes no way for
   one extension to invoke another's slash command (`sendUserMessage` sends model text;
@@ -383,7 +383,7 @@ lives in `extension/doors/plannotatorHandoff.ts`) and the reusable cross-extensi
 
 ## The annotation-push module (`push_annotations`)
 
-The flow-scoped `push_annotations` tool (`extension/doors/annotationPush.ts`) — live in review
+The flow-scoped `push_annotations` tool (`extension/pi/v1/providers/annotations.ts`) — live in review
 mode behind the `/pr-review-browser` door's prime/clear lifecycle, and in plan mode behind the
 `/plan-review-browser` and `/objective-review-browser` doors (which prime `mode: "plan"`) —
 owns the finding→annotation mechanics for **both** plannotator modes

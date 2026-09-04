@@ -1531,8 +1531,9 @@ and process mechanics in the Python exterior and adapters.
 >     `substrate/toolGating.ts` (the gate's `before_agent_start` hook), `surfaces/surfaces.ts`
 >     (the sanctioned rich-UI module's entry renderers), `vendor/btw/btw.ts` +
 >     `vendor/whimsical/whimsical.ts` (borrowed packages, the named exception).
-> - **Recorded deferrals**: Phase 8 — application-host adapters; migrating the 7 surviving
->   doors + the browser/wave mechanisms behind typed operations. The kept deliberate seams
+> - **Recorded deferrals**: Phase 8 — application-host adapters (stands); migrating the 7
+>   surviving doors — discharged by objective #2130 node 3.1 (`doors/` evacuated and
+>   deleted; the browser/wave mechanisms behind typed operations remain Phase-8 scope). The kept deliberate seams
 >   (sweep items above). The ONE remaining full-branch `branchCarries` consumer —
 >   `substrate/toolGating.ts` (the learned doc `pi/context-injection.md` overstates the
 >   residue; reconciling it rides `/learn`, not this node). The 7.3 + 7.4 live-proof closeouts

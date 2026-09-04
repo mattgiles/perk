@@ -103,7 +103,7 @@ The reusable part of plan review already exists independently of Plannotator:
   against a draft;
 - [`planReview.ts`](../../../extension/factories/planReview.ts) defines the standard plan-review
   angles and assembles the standard lanes plus Ponytail;
-- [`planReviewBrowser.ts`](../../../extension/doors/planReviewBrowser.ts) is the human browser
+- [`planReviewBrowser.ts`](../../../extension/pi/v1/planReviewBrowser.ts) is the human browser
   adapter that primes context, invokes the wave, sends annotations to Plannotator, and accepts a
   human verdict.
 

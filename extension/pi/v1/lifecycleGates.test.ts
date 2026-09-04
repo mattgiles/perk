@@ -1,22 +1,22 @@
-// Lifecycle-gate tests. The pure gateDecision matrix as units; the dirty-repo
-// gate + the guard-only `/implement` driven through a REAL bound offline session (T1 harness) over a
-// REAL git repo (gitInit). No LLM / network.
+// Lifecycle-gate registration tests: the dirty-repo gate + the guard-only `/implement` driven
+// through a REAL bound offline session (T1 harness) over a REAL git repo (gitInit). No LLM /
+// network. The pure policy units (implementHandoffPrompt, planningStageRefusal) live in
+// `session/lifecycleGates.test.ts`.
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { type PlanRef, readPlanRef, writePlanRef } from "../substrate/cache.ts";
-import type { WorkflowState } from "../substrate/workflowState.ts";
+import { type PlanRef, readPlanRef, writePlanRef } from "../../substrate/cache.ts";
+import type { WorkflowState } from "../../substrate/workflowState.ts";
 import {
   fakePerk,
   gitInit,
   loadPerkSession,
   plantSession,
   scaffoldRepo,
-} from "../testing/harness.ts";
-import { gateDecision, implementHandoffPrompt, planningStageRefusal } from "./lifecycleGates.ts";
+} from "../../testing/harness.ts";
 
 const REF: PlanRef = {
   provider: "github",
@@ -45,15 +45,6 @@ async function loadOverGit(
     headful: opts.headful ?? true,
   });
 }
-
-// --- pure policy ------------------------------------------------------------------------
-
-test("gateDecision: cancels only inside an active workflow with a dirty tree", () => {
-  assert.equal(gateDecision({ active: true, dirty: true }).cancel, true);
-  assert.equal(gateDecision({ active: true, dirty: false }).cancel, false);
-  assert.equal(gateDecision({ active: false, dirty: true }).cancel, false);
-  assert.equal(gateDecision({ active: false, dirty: false }).cancel, false);
-});
 
 // --- live gate matrix -------------------------------------------------------------------
 
@@ -138,24 +129,6 @@ test("/implement: outside an impl worktree -> refuses, points to the cold door",
   }
 });
 
-test("implementHandoffPrompt: carries the plan forward (read it; never summarize)", () => {
-  const prompt = implementHandoffPrompt(REF);
-  assert.match(prompt, /implementing perk plan github #42/);
-  assert.match(prompt, /gh issue view 42 --comments/);
-  assert.match(prompt, /\/submit/);
-  // The warm handoff is now unified with the cold/worker primer — it carries the progress tail.
-  assert.match(prompt, /Progress tracking:/);
-  // …and the validation discipline (run_ci while iterating; a green run-all is terminal).
-  assert.match(prompt, /Validation:/);
-  // A non-github provider falls back to opening the url.
-  const other = implementHandoffPrompt({ ...REF, provider: "gitlab" });
-  assert.match(other, /open https:\/\/gh\/o\/r\/issues\/42/);
-  // A linear ref renders the pi-mono-linear read recipe.
-  const linear = implementHandoffPrompt({ ...REF, provider: "linear" });
-  assert.match(linear, /linear_get_issue/);
-  assert.match(linear, /linear_list_comments/);
-});
-
 test("/implement: inside a clean impl worktree -> seeded ctx.newSession handoff (output capped)", async () => {
   const h = await loadOverGit(scaffoldRepo(), [ACTIVE], { dirty: false });
   try {
@@ -208,46 +181,6 @@ test("/implement: outside an impl worktree via handler -> no newSession, points 
 });
 
 // --- the planning-stage lifecycle-door refusal --------------------------------------------
-
-test("planningStageRefusal: planning stages refuse; other/absent stages pass", () => {
-  const ctxFor = (stage?: string) => ({
-    sessionManager: {
-      getBranch: () => [
-        {
-          type: "custom",
-          customType: "perk:workflow-state",
-          data: { run_id: "01RID", ...(stage !== undefined ? { stage } : {}) },
-        },
-      ],
-    },
-  });
-  for (const stage of ["plan", "objective-plan"]) {
-    const message = planningStageRefusal(ctxFor(stage), "submit");
-    assert.ok(message !== null, `${stage} refuses`);
-    assert.match(message, /planning session/);
-    assert.match(message, /perk impl <N>/);
-    assert.match(message, new RegExp(stage));
-  }
-  for (const stage of ["implement", "address", "learn", undefined]) {
-    assert.equal(planningStageRefusal(ctxFor(stage), "submit"), null, `${stage} passes`);
-  }
-});
-
-test("planningStageRefusal: an unreadable branch refuses (fail-closed)", () => {
-  // Without the state the guard cannot prove the session is not a positioned planning session
-  // (whose cwd binding is the PREDECESSOR), so an unreadable branch refuses, never allows.
-  const throwing = {
-    sessionManager: {
-      getBranch: () => {
-        throw new Error("branch unavailable");
-      },
-    },
-  };
-  const message = planningStageRefusal(throwing, "land");
-  assert.ok(message !== null, "unreadable state refuses");
-  assert.match(message, /could not be read/);
-  assert.match(message, /branch unavailable/);
-});
 
 test("lifecycle doors refuse in a planning session — the two-ref regression", async () => {
   // The dangerous shape after an approved save in a positioned stacked planning session: the

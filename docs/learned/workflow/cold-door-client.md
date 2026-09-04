@@ -32,7 +32,7 @@ narrowing helpers, and the migration playbook that keeps door tests green.
 Every warm door that shells to a Python `--json` cold door delegates through `runColdDoor`,
 enforced by the source-scan guard `extension/coldDoorGuard.test.ts` (no `PERK_BIN` reference and
 no perk exec outside `substrate/coldDoor.ts`). The live consumer census is **derived, never
-listed** — grep `runColdDoor` imports under `extension/doors/` + `extension/pi/v1/` (this
+listed** — grep `runColdDoor` imports under `extension/pi/v1/` (this
 census froze once at "nine" and drifted). No per-door `activeRunId` copies remain (the stamp
 fallback is uniformly `cold-door-<ts>`). **A new warm door that shells to a Python `--json` cold
 door MUST consume the substrate — hand-rolled exec/parse is a regression, not a style choice.**
@@ -69,7 +69,7 @@ field:
 - **Fully lenient when *every* payload field is advisory display detail:** the decode defaults each
   field (`?? false`) and never returns null — the `bad_output` arm is deliberately unreachable for
   that door and needs **no decode-edge tests** (they can't fail). References: the objectivePlan
-  decode and `extension/doors/learn.ts` (`decodeLearnCapture` — `learn_issue` is render-only and the
+  decode and `extension/pi/v1/learning/learn.ts` (`decodeLearnCapture` — `learn_issue` is render-only and the
   capture mutation precedes the decode, so a success envelope must survive an undecodable
   sub-object — `learn_issue?` is optional, never null, and `bad_output` is unreachable for that
   door; the post-#387 cold/warm skew lesson).
