@@ -125,9 +125,9 @@ every lane; when unset, the `perk.pr-reviewer` agent's committed default model i
 (`[models.subagents]` is the unified, agent-keyed table that also configures `review-classifier`
 and `objective-explorer`.)
 
-> Note: an `agentOverrides` entry cannot displace the agent's frontmatter-pinned `model:` (the
-> custom-agent override path is frontmatter-sensitive), so the workflow-level `model` default
-> the wave module passes — not an override map — is the configuration mechanism.
+> Note: the workflow-level `model` default the wave module passes — not a settings override
+> map — is the configuration mechanism: it is applied at spawn time and wins over the agent
+> def's model.
 
 ## Untrusted-text discipline
 

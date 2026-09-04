@@ -114,9 +114,9 @@ The analyst model is set by `[models.subagents] learn-analyst` in `.perk/config.
 gitignored `.perk/local.toml` for a per-user override that doesn't dirty committed files). The
 `run_learn_wave` tool reads it at execute time and, when set, applies it as the wave's
 **workflow-level `model` default** (flowing onto every lane); when unset, the `perk.learn-analyst`
-agent's committed default model is used. (An `agentOverrides` entry cannot displace the agent's
-frontmatter-pinned `model:`, so the workflow-level `model` default — not an override map — is
-the mechanism.)
+agent's committed default model is used. (The workflow-level `model` default — not a settings
+override map — is the mechanism: it is applied at spawn time and wins over the agent def's
+model.)
 
 ## Never-delegate boundaries
 

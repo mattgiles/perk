@@ -58,10 +58,12 @@ export interface PerkConfig {
    * workflowScript call — a default flowing onto every lane, single-child runs included (as
    * /pr-review does); when a key is absent the agent's frontmatter `model` (in
    * `.pi/agents/perk/<name>.md`; the session-auditor's in its repo-local def) is the default.
-   * (Since pi-subagents 0.52, `subagents.agentOverrides` also reaches custom/project agents —
-   * but only as a frontmatter-sensitive fill that never displaces a field the def's own
-   * frontmatter sets; every perk def pins `model:` in frontmatter, so this inline workflow-level
-   * injection remains the mechanism.)
+   * (Since pi-subagents 0.64.0, `subagents.agentOverrides` applies its FULL override set to
+   * custom/project agents too — a settings override CAN displace a def's frontmatter-pinned
+   * `model:` (the pre-0.64 frontmatter-sensitive fill is gone; verified in the installed
+   * package source). The inline workflow-level injection remains perk's mechanism on its own
+   * merits: the config table is perk-owned (no settings churn), and the spawn-time
+   * workflow-level `model` wins over the def-level model however that def model was set.)
    * A value may carry a `:thinking` suffix (`"anthropic/claude-sonnet-4-5:high"`) or be the
    * `"inherit"` sentinel (child inherits the parent session's model) — both resolved by
    * pi-subagents on the injected value (the last-colon segment counts as thinking only when it

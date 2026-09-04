@@ -3,10 +3,9 @@
 A *seeded cold door* is a launcher command with one orchestration shape: parse inputs, resolve
 backend state up front (the read-only session it launches cannot be trusted to), materialize
 untrusted DATA into a scratch/inbox file, support a ``--dry-run``/``--json`` supervisor report,
-and end by ``exec``-ing pi via ``launch_stage`` with a seeded prompt. ``plan from``,
-``plan replan``, ``objective plan``, ``objective replan``, ``objective author --from``, and the
-four learn doors (``learn docs`` / ``learn code`` / ``learn harvest`` / ``learn dream``) all
-share it.
+and end by ``exec``-ing pi via ``launch_stage`` with a seeded prompt. Derive the current caller
+set instead of trusting a listed roster (rosters freeze):
+``grep -rn 'run_seeded_door(' src/perk/cli/commands/``, minus this module's definition.
 
 Three exports:
 

@@ -27,10 +27,10 @@ non-obvious rules an agent can't derive from any single file.
 
 ## Distillation
 
-- Since 0.52, `subagents.agentOverrides` also reaches custom (user/project/package) agents via a
-  **frontmatter-sensitive fill** — an override never displaces a field the def's frontmatter
-  sets; builtins keep the full-override path. perk defs pin `model:` in frontmatter, so
-  `[models.subagents]` + the workflow-level `model` stays perk's knob (its own section below).
+- Since 0.64.0, `subagents.agentOverrides` applies the FULL override set to custom agents too
+  (the 0.52–0.63 frontmatter-sensitive fill is gone — an override can now displace a
+  frontmatter-pinned `model:`). perk's knob stays `[models.subagents]` + the workflow-level
+  `model` (spawn-time — wins over the def model) — its own section below.
 - Builtins are OFF in every perk repo; the re-enable precedence lives in "Builtins are OFF in
   every perk repo — and the re-enable precedence".
 - Mutation shapes: the current shape is read-only child + PARENT posts once after reconciling
@@ -54,31 +54,33 @@ non-obvious rules an agent can't derive from any single file.
 - Historical: the correction blocks and landed-arc passages (the agent-def delivery arc, the
   reconverge ritual chronicle) record settled history — read them as records, not open work.
 
-## `subagents.agentOverrides` — full overrides for builtins, frontmatter-sensitive fills for custom agents
+## `subagents.agentOverrides` — full overrides for builtins and (since 0.64) custom agents
 
 `subagents.agentOverrides` takes two paths
-(`.pi/npm/node_modules/pi-subagents/src/agents/agents.ts`):
+(`.pi/npm/node_modules/pi-subagents/src/agents/agents.ts`), and since **0.64.0** both apply the
+same full override set:
 
-- **Builtins**: `applyBuiltinOverrides` — override fields displace unconditionally.
+- **Builtins**: `applyBuiltinOverrides` — override fields displace unconditionally, with the
+  bulk-disable/re-enable precedence in the next section.
 - **Custom agents** (user/project/package sources): `applyCustomAgentOverrides` →
-  `applyCustomAgentOverride`, a **frontmatter-sensitive fill** — an override never displaces a
-  field the def's own frontmatter sets (`agentHasFrontmatterField` over the recorded frontmatter
-  set). Exceptions: `description` always applies; `disabled` always applies — custom defs cannot
-  set it in frontmatter, so a project override's `disabled` replaces a user one; `model` fills
-  only when frontmatter has no `model` (and clears `modelSource`); `tools` fills only when
-  frontmatter has no `tools`. Scopes layer **user-then-project** (since 0.54.0, #1348): the user
-  override fills first, then the project override fills over the result — project fields win
-  without dropping user-only fields (the project scope no longer preempts the user scope
-  outright; before 0.54.0 a project override's presence skipped the user override entirely).
+  `applyCustomAgentOverride`, which since 0.64.0 (#1796) applies the **full override set** — a
+  settings override now DISPLACES a field the def's own frontmatter sets, `model` included
+  (verified against the installed 0.64.x source). Scopes layer **user-then-project** (since
+  0.54.0, #1348): the user override applies first, then the project override over the result —
+  project fields win without dropping user-only fields.
 
-Before 0.52, overrides reached builtins only (this doc's prior absolute).
+Dated history: before 0.52, overrides reached builtins only; from 0.52 through 0.63 the
+custom-agent path was a **frontmatter-sensitive fill** — an override never displaced a
+frontmatter-set field (narrow exceptions: `description` and `disabled` always applied;
+`model`/`tools` filled only when frontmatter had none) — and 0.64.0 removed the fill.
 
-**Correction:** a prior `shared/contracts.md` §8.3 note claimed the classifier model is "overridable
-via `subagents.agentOverrides`." That was **wrong when made** and stands corrected as history.
-Under the 0.52 custom-agent override path the *conclusion* still holds for perk's agents, for a
-new reason: every perk def pins `model:` in frontmatter, and the custom-agent override path
-never displaces a frontmatter-set field. Do not resurrect the claim — or the old builtins-only
-mechanism story.
+**Correction (kept as history):** a prior `shared/contracts.md` §8.3 note claimed the classifier
+model is "overridable via `subagents.agentOverrides`." Wrong when made (overrides then reached
+builtins only), and through 0.63 still effectively false for perk's agents (every perk def pins
+`model:` in frontmatter and the fill never displaced it). Since 0.64.0 an override CAN displace a
+perk def's model — but perk's sanctioned knob remains `[models.subagents]` + the workflow-level
+`model` (spawn-time — wins over the def model however it was set); do not resurrect
+`agentOverrides` as perk's mechanism.
 
 ## Builtins are OFF in every perk repo — and the re-enable precedence
 
@@ -114,6 +116,10 @@ applies it as the wave's workflow-level `model` default — **no committed-file 
 `agentOverrides` model can't displace the defs' frontmatter-pinned `model:` — see the
 agentOverrides section — so the workflow-level `model` default, not an override map, is the
 mechanism.)
+
+*(Update at 0.64.0: an `agentOverrides` entry now CAN displace a frontmatter-pinned `model:` —
+see the agentOverrides section — but the workflow-level `model` default is spawn-time and wins
+over the def-level model however it was set, so it stays perk's mechanism.)*
 
 Placement rule: a `[models.subagents]` key belongs beside a **code-owned spawn surface** only (a
 wave module or flow tool that reads the key at execute time); an ad-hoc or hand-launched agent
