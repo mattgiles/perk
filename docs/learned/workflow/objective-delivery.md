@@ -37,10 +37,9 @@ history a future delivery/recovery node should not re-derive.
 - Recovery proves fresh product state in both terminal directions — "Recovery proof is a fresh
   product-state proof, not a ref comparison (§8.51)".
 - "Residual proof bounds" is the register of open proof bounds (dated one-liners).
-- Façade migrations use narrow internal Protocols, complete-or-nothing laziness, bounded error
-  subsets, explicit consent, real-runtime tests, and exact export cuts; typed-seam slices land
-  net-positive under a named-excess ledger, and zero-policy passthrough seams are a plan-time
-  smell — "Façade-slice migration pattern".
+- Façade migrations: narrow Protocols, complete-or-nothing laziness, bounded error subsets,
+  explicit consent, exact export cuts; typed slices land net-positive under a named-excess
+  ledger; zero-policy passthroughs are a smell — "Façade-slice migration pattern".
 
 ## The seam map
 
