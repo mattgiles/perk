@@ -39,6 +39,26 @@
 > Phase 5 verifies the reconciled acceptance criteria against the final state and closes
 > the objective with a per-feature-family live dogfood record.
 
+> **Update (Objective #2130, Node 5.1, 2026-09-04):** the "What objective #2130 owes"
+> paragraph above is **discharged**, one line per phase:
+>
+> - Phase 1 — delivered (node 1.1): the documents reconciled, the storage-freedom policy +
+>   quantitative baseline pinned, the Phase-7/objective gate record closed
+>   (`docs/design/archive/ts-decomposition-phase7-dogfood.md`, reconciled by node 5.1's
+>   addendum there).
+> - Phase 2 — delivered (nodes 2.1–2.3): the opaque `ReportWave` lifecycle, the deep
+>   `WorkflowSession` authority behind session-owned receipts, and the storage-freedom
+>   migrations + guard Rule H.
+> - Phase 3 — delivered (node 3.1): `doors/` evacuated and deleted.
+> - Phase 4 — delivered (nodes 4.1–4.2): test-shaped production surface retired
+>   (`worker/stageExecution.ts` 26/30 → 13/16 exports), duplication + migration commentary
+>   compressed.
+> - Phase 5 — delivered (node 5.1): the reworked acceptance criteria verified against the
+>   final state, the final measurement taken, and the objective closed with the
+>   per-feature-family live dogfood record.
+>
+> The closing evidence record is `docs/design/archive/ts-seam-deepening-closeout.md`.
+
 This memo is the current architecture proposal for decomposing the TypeScript in
 `extension/`. It replaces the TypeScript topology proposed in
 `docs/planning/future-proofing-decomposition.md`; it does not supersede that document's

@@ -218,6 +218,14 @@ the stamped commit. Classifications: `migrate-in-2.3` / `allowed-domain-I/O` /
 > `session/workflowSession.ts` re-export (zero feature-home `substrate/cache.ts` `PlanRef`
 > imports remain).
 
+> **Fresh stamp (Objective #2130, Node 5.1, 2026-09-04):** the final state is **re-verified**
+> against this section — the closing verification the Enforcement bullet names. Rule H is
+> live and green (empty allowlist, per-home floors, control-14 mutation fixtures); the three
+> `migrate-in-2.3` rows remain executed; the two `allowed-domain-I/O` rows
+> (`learning/containment.ts`, `learning/harvest.ts`) were re-inspected against the allow
+> rule — both still carry only injectable-default fs probes over caller-supplied paths.
+> Evidence: `docs/design/archive/ts-seam-deepening-closeout.md` §1 (Dependency direction).
+
 > **Fresh stamp (Node 2.3):** the three `migrate-in-2.3` rows below are **executed** —
 > re-verified by import inspection in node 2.3's change:
 > `authoring/objective/dreamReportGate.ts` is a pure resolver over the runtime-minted

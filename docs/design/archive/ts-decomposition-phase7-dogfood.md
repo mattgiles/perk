@@ -156,13 +156,22 @@ real commit→compact→resume cycle on this record's own first commit.
 
 *(Commit-3 addendum lands here.)*
 
+*(Node 5.1 reconciliation, 2026-09-04: commit 3 never landed — this run is unrecorded; see
+the addendum at the end of this record.)*
+
 ### Leg B — `/submit` — forward-referenced until commit 3
 
 *(Commit-3 addendum lands here: the PR number.)*
 
+*(Node 5.1 reconciliation, 2026-09-04: commit 3 never landed — leg B is resolved-completed
+from durable artifacts; see the addendum at the end of this record.)*
+
 ### Leg E — the stack family — forward-referenced until commit 3
 
 *(Commit-3 addendum lands here: session id + the five observed renders.)*
+
+*(Node 5.1 reconciliation, 2026-09-04: commit 3 never landed — leg E is UNOBSERVED — NOT
+PASSED; see the addendum at the end of this record.)*
 
 ### Leg C — the warm `/ready` — forward-referenced (definitionally post-review)
 
@@ -176,3 +185,40 @@ No sacrificial state is created by this protocol: every leg is either a read
 (status/dry-run observations, CI), an ordinary publication gesture the node needs anyway
 (commit, submit, ready), or the one real base sync on #2130's own train (its intended
 operation). Nothing to tear down.
+
+## Reconciliation addendum (Objective #2130, Node 5.1, 2026-09-04)
+
+This record's promised **commit 3 never landed**: `plan-2131`'s branch carries exactly two
+commits — `f0b5633e` + `5de49442` (verified 2026-09-04 against PR #2132's commit list) — and
+the `(Commit-3 addendum lands here.)` placeholders above were still unfilled when node 5.1
+reconciled this record. This is the **post-submit evidence sequencing failure mode**: legs
+whose recording depended on a future commit were stranded when that commit never came. Node
+5.1's own closing protocol (`docs/design/archive/ts-seam-deepening-closeout.md` §3) is
+designed against exactly this — no leg's completion may depend on a future commit; every
+forward reference must be self-describing. Per-leg disposition, each claim re-verified from
+durable artifacts at edit time (never renumbering or rewriting the record above):
+
+- **Leg B (`/submit`): resolved-completed.** PR #2132 exists; plan #2131's `plan-header`
+  carries `published_head_sha: 5de4944285464142acd7b33a8bd913f493214f91`; and the §8.43
+  ready stamp for plan 2131 on issue #2130 names the same SHA
+  (`perk:stack-ready-stamp:2130:2131:1.1:5de49442…`). The migrated submit binding
+  observably published this record's plan.
+- **Leg C (the warm `/ready`): resolved-completed.** The `perk:stack-ready-stamp` journal
+  comment for objective 2130 / plan 2131 / node 1.1 @ `5de49442…` exists on issue #2130 —
+  the record's own named verification pointer, now confirmed.
+- **Leg A, the commit-2-head run: missing/unrecorded.** The promised observed-live
+  recording was the commit-3 addendum that never landed, and no durable artifact proves
+  that specific run. Classified honestly as **unrecorded**. The DIFFERENT final-head
+  instance stays protocol-recorded per this record's own Part A step 3 — the two are not
+  conflated. The repo-discipline consolation (a green run-all precedes every submit) is
+  context, not evidence.
+- **Leg E (the stack family; the folded Node 7.4 closeout): unexecuted-as-specified /
+  missing.** Issue #2130's journal carries 13 `perk:stack-operation-event` records, every
+  one `operation_kind: publish` — zero `sync`/`recover`/`land` events exist (re-verified
+  2026-09-04; the journal also carries 7 `perk:stack-ready-stamp` comments, one per accepted
+  layer through plan 2147) — and no session evidence of the prescribed
+  `/objective-stack` + dry-run sequence was ever recorded. The leg (and the Node 7.4
+  closeout it folded) is classified **UNOBSERVED — NOT PASSED**, a named residual of this
+  record. Node 5.1 does NOT re-run it (out of scope); #2130's own land-time operations will
+  exercise the sync/recover/land bindings as future events, which is not evidence for this
+  protocol.
