@@ -549,6 +549,13 @@ move code-review policy behind typed operations.
 >   (the automated post state, the annotation-push state), and the phase dogfood gate (the live
 >   pi-subagents leg — the offline runner-over-real-RPC integration landed in 5.1).
 >
+> **Update (Objective #2130, Node 1.1, 2026-09-02):** the first bullet's SUPERSEDED
+> disposition of the opaque `ReportWaveRef` lifecycle is **reversed** — the seam is owed
+> by objective #2130 node 2.1 (see `module-contracts.md` § ReportWave for the canonical
+> reversal rationale); the docs and the #2130 roadmap now agree. The original note above
+> is byte-preserved as history (its superseded phrase wraps across two source lines, so a
+> single-line grep for the phrase does not match it — verify with a multiline search).
+>
 > **Status (Objective #2083, Node 5.2):** the code-review half landed — realized-shape notes:
 >
 > - **The code-review flows sit behind typed feature operations** in the Pi-free
@@ -1201,6 +1208,20 @@ and process mechanics in the Python exterior and adapters.
 >   uncommitted evidence or a stale stamp; the definitive `run_ci` remains the pre-submit one.
 >   The full Phase-7 dogfood gate closes at 7.5.
 
+> **Update (Objective #2130, Node 1.1, 2026-09-02):** the live-proof closeout protocol
+> above was never executed — its arms were bound to the pre-land #2083 train, which
+> landed (and #2083 closed) before any arm ran; no evidence append exists. The closeout
+> is closed via the Phase-7 record at
+> `docs/design/archive/ts-decomposition-phase7-dogfood.md`: its equivalent fresh leg
+> exercises the same migrated binding — the warm in-session `/ready` on objective #2130
+> node 1.1's plan (leg C there). Surface correction, recorded honestly: the protocol's
+> step 2 names `perk ready <plan>`, but the migrated binding
+> (`pi/v1/delivery/ready.ts::installReadyBindings`) is the warm in-session `ready` tool +
+> `/ready` command; the cold `perk ready` CLI is the Python continuation wrapper
+> (`src/perk/cli/commands/pr/ready_cmd.py` — worker mechanics plus the launch of the
+> ready-time reconcile session, whose in-session drive, `driveReadyContinuation`, is
+> adapter code). A live leg for the migrated binding therefore uses the warm `/ready`.
+
 > **Status (Objective #2083, Node 7.4):** slice 6 landed — the delivery train-operation family
 > + per-plan land (`objective_stack_sync`/`adopt`/`recover`/`land`, `/objective-sync`/
 > `/objective-recover`/`/objective-land`, the §8.56 reconcile drive, the §8.51 sync-conflict
@@ -1341,6 +1362,16 @@ and process mechanics in the Python exterior and adapters.
 >   to this note. (3) Re-run the tip's handoff stamp. The mutating arms carry the wire
 >   baselines, and the objective's own eventual recover/land runs through these migrated
 >   bindings by construction — stated honestly. The full Phase-7 dogfood gate closes at 7.5.
+
+> **Update (Objective #2130, Node 1.1, 2026-09-02):** the live-proof closeout protocol
+> above was never executed — its arms were bound to the pre-land #2083 train, which
+> landed (and #2083 closed) before any arm ran. The closeout is closed via the Phase-7
+> record at `docs/design/archive/ts-decomposition-phase7-dogfood.md`: its equivalent
+> fresh legs exercise the same migrated stack-family bindings on objective #2130's own
+> train — `/objective-stack 2130`, `objective_stack_sync {dry_run: true}` then
+> `{base: true}` (the real base-absorbing sync; a no-op outcome is still a live
+> exercise), `objective_stack_recover {dry_run: true}`, and `objective_stack_land`
+> `{dry_run: true}` — recorded there as leg E.
 
 > **Status (Objective #2083, Node 7.5):** slice 7 implementation landed — `/commit-and-compact`
 > migrated behind a typed delivery operation; the LAST delivery door deleted; the closing sweep
@@ -1520,6 +1551,20 @@ and process mechanics in the Python exterior and adapters.
 >   registration + render shells that can decide nothing (the installer's switches only
 >   translate the feature's closed unions to effects).
 
+> **Update (Objective #2130, Node 1.1, 2026-09-02):** the ordered closeout protocol's
+> arms are **superseded** — the train landed (`40a30df8..a5dc757e` on `main`, the 16
+> squash merges) and objective #2083 closed before any arm ran; arm E's target train and
+> arm C's target plan no longer exist as written. The Phase-7 dogfood gate AND the
+> objective closing gate are **closed via the record** at
+> `docs/design/archive/ts-decomposition-phase7-dogfood.md`, which carries the landing
+> evidence plus fresh live legs of the migrated delivery bindings re-bound to objective
+> #2130 node 1.1. The leg → original-arm mapping: the record's own commit driven by
+> `/commit-and-compact` (leg D) → arm D; the run-all `run_ci` at the final published head
+> (leg A) → arm A; `/submit` plus the warm `/ready` on node 1.1's plan (legs B/C) → arms
+> B/C; the stack sync with dry-run preview and `{base: true}` on #2130's train (leg E) →
+> arm E. The final structural ledger above was re-measured at the #2130 baseline
+> (`current-system-map.md` § Objective #2130 baseline) — the headline values reproduce.
+
 ### Changes
 
 Migrate in effect-sized slices:
@@ -1676,28 +1721,50 @@ Every implementation plan created from this proposal should record:
 
 ## Final acceptance criteria
 
+> **Update (Objective #2130, Node 1.1, 2026-09-02):** this binding list is reworked in
+> place — it is the list objective #2130 node 5.1 verifies. The deferred seams are
+> removed from the binding criteria and recorded below with pointers to their one
+> canonical rationale home (`module-contracts.md`); the storage-freedom criterion is
+> added per `module-contracts.md` § Storage freedom.
+
 ### Architecture
 
 - `authoring/`, `delivery/`, `codeReview/`, and `learning/` expose typed
   feature operations, not one common interface.
 - There is no application kernel, global feature catalog, generic invocation,
   or universal result wrapper.
-- `WorkflowSession` is authoritative for feature-facing state and artifacts.
-- `PromptEvidence` is an explicit available/unavailable value derived at the Pi
-  edge.
+- `WorkflowSession` is authoritative for feature-facing state and artifacts
+  (deepened by objective #2130 node 2.2).
 - `ReportWave` exposes report assignments and opaque references, not RPC or Pi
-  lanes.
-- `StageRunner` is stage-specific and used only by approved execution roots.
+  lanes (owed by objective #2130 node 2.1).
 - Extension v1 and application facets are adapters, not domain dispatchers.
+- The planning documents describe the built architecture; no contradictory
+  architecture documents remain.
+
+#### Deferred seams (recorded)
+
+Removed from the binding list above; each owning `module-contracts.md` section
+carries the one canonical rationale and re-earn condition:
+
+- `config/` — deferred; see `module-contracts.md` § PerkConfig.
+- `PromptEvidence` — deferred; see `module-contracts.md` § PromptEvidence.
+- `StageRunner` — deferred; see `module-contracts.md` § StageRunner.
 
 ### Dependency direction
 
 - Feature modules have no Pi runtime, TUI, RPC wire, raw branch, raw process,
   facet, service, value/list, Harness, lane, view, or slot dependencies.
+- Feature homes are storage-free per `module-contracts.md` § Storage freedom
+  (allow-listed domain I/O excepted), enforced by the import-direction guard.
 - Stable mechanisms do not import features.
 - Provider adapters depend on feature role interfaces, not the reverse.
+- Pi adapters carry no feature policy — they decode, delegate to typed feature
+  operations, and render.
+- `extension/index.ts` is composition-only: per-`cwd` dependency loading and
+  named installers, no feature policy.
 - Rich UI calls remain confined to the sanctioned surfaces files.
-- The two baseline import cycles are gone.
+- The production import graph contains no cycles (guard-enforced; the two
+  baseline import cycles are gone).
 
 ### Behavior
 
@@ -1724,6 +1791,8 @@ Every implementation plan created from this proposal should record:
 - Current and future adapters pass equivalent observable interface cases before
   cutover.
 - The existing framework suites and guards remain green.
+- Production modules ship no test-only implementations and no test-only
+  exports (deliberate, recorded guard/test seams excepted).
 - The npm tarball remains one package; current entrypoints remain until an
   intentional application-host entry is added under a normative Pi contract.
 - Workspaces and the zero-runtime-dependency policy remain unchanged.
@@ -1733,6 +1802,7 @@ Every implementation plan created from this proposal should record:
 
 - Old registration and policy paths are gone.
 - Transitional wrappers and re-exports are gone.
+- No legacy compatibility paths remain.
 - Removing one feature does not require editing a universal protocol.
 
 ## Application-host cutover rule

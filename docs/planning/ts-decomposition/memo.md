@@ -2,6 +2,40 @@
 
 ## Status
 
+> **Status (Objective #2130, Node 1.1):** the migration this memo authorized has landed —
+> the 16-layer #2083 train merged (`40a30df8..a5dc757e` on `main`, each commit subject
+> carrying its merge PR number, `#2090` … `#2129`) and objective #2083 is closed. The
+> dependency goals hold: both baseline import cycles are gone, Pi importers fell 56 → 52,
+> `adapters/` and `factories/` were deleted whole, the feature homes (`authoring/`,
+> `delivery/`, `codeReview/`, `learning/`) are Pi-free with direct tests, and `index.ts`
+> is composition-only.
+>
+> The realized topology differs from this memo's sketch in named places: `session/` exists
+> as drawn; the wave engine stayed `waves/` (not `execution/reportWave.ts`); stage drive
+> stayed `worker/stageExecution.ts` (not `execution/stageRunner.ts`); configuration stayed
+> `substrate/config.ts` (no `config/` directory was created); `pi/v1/` exists as drawn;
+> `doors/` is 74% evacuated (7 surviving modules, owed by objective #2130 node 3.1).
+>
+> Seam dispositions, one line each (the detailed rationale and re-earn condition for each
+> live in the named `module-contracts.md` section — the one canonical home):
+>
+> - `config/` — deferred; see `module-contracts.md` § PerkConfig.
+> - `PromptEvidence` — deferred; see `module-contracts.md` § PromptEvidence.
+> - `StageRunner` — deferred; see `module-contracts.md` § StageRunner.
+> - `ReportWave` — owed by objective #2130 node 2.1, reversing the Node 5.1 recorded
+>   supersession; see `module-contracts.md` § ReportWave.
+>
+> What objective #2130 owes (one sentence per phase; the roadmap on issue #2130 is the
+> authority): Phase 1 reconciles these architecture documents, pins the storage-freedom
+> policy and the quantitative baseline, and closes the Phase-7/objective gate record.
+> Phase 2 deepens the seams — node 2.1 restores the opaque `ReportWave` lifecycle, node
+> 2.2 makes `WorkflowSession` one deep authority behind a session-owned receipt, and node
+> 2.3 executes the storage-freedom migrations and extends the import-direction guard.
+> Phase 3 finishes the `doors/` evacuation and deletes the directory. Phase 4 retires
+> test-shaped production surface and compresses duplication and migration commentary.
+> Phase 5 verifies the reconciled acceptance criteria against the final state and closes
+> the objective with a per-feature-family live dogfood record.
+
 This memo is the current architecture proposal for decomposing the TypeScript in
 `extension/`. It replaces the TypeScript topology proposed in
 `docs/planning/future-proofing-decomposition.md`; it does not supersede that document's
@@ -435,10 +469,12 @@ The decomposition succeeds when:
 - `WorkflowSession` is the only feature-facing authority for session state and
   artifacts;
 - live context is passed as `PromptEvidence`, including explicit
-  unavailability;
+  unavailability; *(Deferred — see `module-contracts.md` § PromptEvidence and the Node 1.1
+  status note.)*
 - report-wave callers cannot observe RPC or Pi lane mechanics;
 - only approved execution roots consume `StageRunner`, initially
-  `workerMain.ts`;
+  `workerMain.ts`; *(Deferred — see `module-contracts.md` § StageRunner and the Node 1.1
+  status note.)*
 - current and future Pi adapters invoke the same feature operations without a
   common application dispatcher;
 - reload generations reconstruct standing state without process-global
