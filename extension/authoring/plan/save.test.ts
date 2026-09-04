@@ -11,12 +11,12 @@ import {
   type MemoryWorkflowSession,
   openMemoryWorkflowSession,
 } from "../../testing/memoryWorkflowSession.ts";
+import type { ApprovalGate } from "../review/approvalGate.ts";
 import { revisePlanDraft } from "./draft.ts";
 import {
   type ObjectiveNodeLink,
   type PlanBackend,
   type PlanBackendSaveResult,
-  type PlanGate,
   type PlanSaveDeps,
   planApprovalSave,
   savePlan,
@@ -52,7 +52,7 @@ function fakeBackend(result?: PlanBackendSaveResult): PlanBackend & {
 }
 
 /** A gate fake recording exits; `active` is the isActive snapshot. */
-function fakeGate(active: boolean): PlanGate & { exits: number } {
+function fakeGate(active: boolean): ApprovalGate & { exits: number } {
   const gate = {
     exits: 0,
     isActive: () => active,
@@ -341,7 +341,7 @@ test("savePlan: the identity-less arm — backend runId null, linkage still appl
 function approvalDeps(
   session: MemoryWorkflowSession,
   backend: PlanBackend,
-  gate: PlanGate,
+  gate: ApprovalGate,
   transcript?: () => string | null,
 ) {
   return {
@@ -394,30 +394,18 @@ test("planApprovalSave: reviewedPlan is the explicit fallback; transcript is the
   assert.equal(scraped.status === "saved" ? scraped.result.source : null, "transcript");
 });
 
-test("planApprovalSave: already read-write → saved with gateExited false, no exit", async () => {
-  const gate = fakeGate(false);
-  const outcome = await planApprovalSave(
-    approvalDeps(openMemoryWorkflowSession({ runId: "RID" }), fakeBackend(), gate),
-    { reviewedPlan: PLAN },
-  );
-  assert.equal(outcome.status === "saved" ? outcome.gateExited : null, false);
-  assert.equal(gate.exits, 0);
-});
-
-test("planApprovalSave: a failed save leaves the gate ON (save-failed, gateExited false)", async () => {
-  const gate = fakeGate(true);
+test("planApprovalSave: a failed save maps to save-failed (message preserved, gateExited false)", async () => {
   const outcome = await planApprovalSave(
     approvalDeps(
       openMemoryWorkflowSession({ runId: "RID" }),
       fakeBackend({ status: "failed", message: "gh exploded", errorType: "github_error" }),
-      gate,
+      fakeGate(true),
     ),
     { reviewedPlan: PLAN },
   );
   assert.equal(outcome.status, "save-failed");
   if (outcome.status !== "save-failed") return;
   assert.equal(outcome.gateExited, false);
-  assert.equal(gate.exits, 0);
   assert.equal(outcome.result.message, "gh exploded");
 });
 

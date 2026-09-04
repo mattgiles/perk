@@ -11,13 +11,9 @@
 // detection stays in the adapter — the feature never sees `hasUI`.
 
 import type { WorkflowSession } from "../../session/workflowSession.ts";
+import type { ApprovalGate } from "../review/approvalGate.ts";
 import { renderGistDraft, resumeGistDraft } from "./draft.ts";
-import {
-  type GistApprovalSaveOutcome,
-  type GistBackend,
-  type GistGate,
-  gistApprovalSave,
-} from "./save.ts";
+import { type GistApprovalSaveOutcome, type GistBackend, gistApprovalSave } from "./save.ts";
 
 /**
  * The reviewer's verdict on the rendered draft. An approval carrying reviewer edits of the
@@ -77,7 +73,7 @@ export async function reviewGist(
     session: WorkflowSession;
     reviewer: GistDraftReviewer;
     backend: GistBackend;
-    gate: GistGate;
+    gate: ApprovalGate;
   },
   signal?: AbortSignal,
 ): Promise<ReviewGistResult> {

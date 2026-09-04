@@ -8,6 +8,7 @@
 // just carries the backend's id/url/scope facts for the caller to relay.
 
 import type { WorkflowSession } from "../../session/workflowSession.ts";
+import { type ApprovalGate, saveThroughApprovalGate } from "../review/approvalGate.ts";
 import { GIST_SCOPES, type GistScope, resumeGistDraft } from "./draft.ts";
 
 /** The backend save facts (`id` is the opaque string gist id — contracts §8.21). */
@@ -68,12 +69,6 @@ export async function saveGist(
   });
 }
 
-/** The structural gate slice the approval→save flow releases (the adapter builds it over ToolGating). */
-export interface GistGate {
-  isActive(): boolean;
-  exit(): void;
-}
-
 /** The approval→save orchestration outcome (the gist `ApprovalSaveOutcome`). `refused-draft`
  * is the fail-closed stop for an invalid artifact: nothing saved, the gate never touched —
  * distinct from `no-draft` (the genuine draft-less fallback arm). */
@@ -90,40 +85,34 @@ export type GistApprovalSaveOutcome =
 /**
  * The shared APPROVED-review → save orchestration (an APPROVED `plan_review` gist arm and the
  * manual `/gist-save` failsafe both run THIS). Flow: re-read the draft artifact at save time
- * (`resumeGistDraft` — never the rendered markdown, never in-hand bytes) → `saveGist` → gate
- * exit on a verified successful save while read-only (the D1a pattern: snapshot
- * `gate.isActive()` BEFORE the save; a failed save leaves the gate ON). No draft → `no-draft`
+ * (`resumeGistDraft` — never the rendered markdown, never in-hand bytes) → `saveGist` through
+ * `saveThroughApprovalGate` (the D1a invariant: snapshot before the save; exit only after a
+ * successful save while read-only; a failed save leaves the gate ON). No draft → `no-draft`
  * (nothing saved, the gate untouched); a REFUSED draft → `refused-draft` before the gate
  * snapshot (fail-closed stop — `gateExited` semantics never arise). Title precedence:
  * the explicit override (`/gist-save [title]` — a pinned behavior) wins over the draft's; scope
  * is always the draft's.
  */
 export async function gistApprovalSave(
-  deps: { session: WorkflowSession; backend: GistBackend; gate: GistGate },
+  deps: { session: WorkflowSession; backend: GistBackend; gate: ApprovalGate },
   opts: { title?: string } = {},
 ): Promise<GistApprovalSaveOutcome> {
   const resumed = resumeGistDraft(deps.session);
   if (resumed.kind === "absent") return { status: "no-draft" };
   if (resumed.kind === "refused") return { status: "refused-draft", problem: resumed.problem };
   const draft = resumed.draft;
-  // D1a: snapshot the gate BEFORE the save; on success, exit it so save marks the read-only →
-  // read-write boundary in one gesture. A failed save leaves the gate on.
-  const wasReadOnly = deps.gate.isActive();
-  const save = await saveGist(
-    {
-      prose: draft.prose,
-      ...(opts.title !== undefined || draft.title !== undefined
-        ? { title: opts.title ?? draft.title }
-        : {}),
-      ...(draft.scope !== undefined ? { scope: draft.scope } : {}),
-    },
-    { backend: deps.backend, runId: deps.session.runId },
+  const { outcome: save, gateExited } = await saveThroughApprovalGate(deps.gate, () =>
+    saveGist(
+      {
+        prose: draft.prose,
+        ...(opts.title !== undefined || draft.title !== undefined
+          ? { title: opts.title ?? draft.title }
+          : {}),
+        ...(draft.scope !== undefined ? { scope: draft.scope } : {}),
+      },
+      { backend: deps.backend, runId: deps.session.runId },
+    ),
   );
   if (save.status !== "saved") return { status: "save-failed", save, gateExited: false };
-  let gateExited = false;
-  if (wasReadOnly) {
-    deps.gate.exit();
-    gateExited = true;
-  }
   return { status: "saved", save, gateExited };
 }

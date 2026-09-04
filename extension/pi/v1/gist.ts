@@ -38,11 +38,11 @@ import {
 } from "../../authoring/gist/review.ts";
 import {
   type GistBackend,
-  type GistGate,
   gistApprovalSave,
   type SaveGistOutcome,
   saveGist,
 } from "../../authoring/gist/save.ts";
+import type { ApprovalGate } from "../../authoring/review/approvalGate.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
@@ -59,10 +59,7 @@ import { render } from "../../substrate/prompts.ts";
 import { failFor, ok, type Result } from "../../substrate/result.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { paramsOf, stringParam } from "../../substrate/toolParams.ts";
-import {
-  type BranchEntry,
-  rebuildWorkflowState,
-} from "../../substrate/workflowState.ts";
+import { type BranchEntry, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
 import { installInjectedContext } from "./contextInjection.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
@@ -203,7 +200,7 @@ function openSession(pi: ExtensionAPI, ctx: ExtensionContext): WorkflowSession {
 }
 
 /** The narrow gate slice the feature releases (D1a: exit only after a verified save). */
-function gateFor(gating: ToolGating, ctx: ExtensionContext): GistGate {
+function gateFor(gating: ToolGating, ctx: ExtensionContext): ApprovalGate {
   return { isActive: () => gating.isActive(), exit: () => gating.exit(ctx) };
 }
 

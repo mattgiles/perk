@@ -12,11 +12,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { BranchEntry } from "../../../substrate/workflowState.ts";
-import {
-  loadPerkSession,
-  plantSession,
-  scaffoldRepo,
-} from "../../../testing/harness.ts";
+import { loadPerkSession, plantSession, scaffoldRepo } from "../../../testing/harness.ts";
 import { isTombellPlanSelected } from "./selection.ts";
 import { isTombellPlanModeEnabled, PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE } from "./tombell.ts";
 

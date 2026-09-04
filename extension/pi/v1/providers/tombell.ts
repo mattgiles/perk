@@ -38,10 +38,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { GIST_AUTHOR_STAGE } from "../../../authoring/gist/draft.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "../../../authoring/objective/prose.ts";
 import { render } from "../../../substrate/prompts.ts";
-import {
-  type BranchEntry,
-  rebuildWorkflowState,
-} from "../../../substrate/workflowState.ts";
+import { type BranchEntry, rebuildWorkflowState } from "../../../substrate/workflowState.ts";
 import { installInjectedContext } from "../contextInjection.ts";
 import { isTombellPlanSelected } from "./selection.ts";
 

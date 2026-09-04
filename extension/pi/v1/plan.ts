@@ -78,6 +78,7 @@ import { report, type Severity } from "../../surfaces/report.ts";
 // `Key` via the surfaces re-export (keybinding vocabulary, not rich UI) — keeps pi-tui imports
 // structurally confined to the surfaces module (the surfacesGuard pi-tui import rule).
 import { Key } from "../../surfaces/surfaces.ts";
+import { installInjectedContext } from "./contextInjection.ts";
 import {
   type ApprovalSaveOutcome,
   executePlanReview,
@@ -85,7 +86,6 @@ import {
   runImplementHereCommand,
   type SaveResult,
 } from "./planReview.ts";
-import { installInjectedContext } from "./contextInjection.ts";
 import { generatePlanTitle } from "./planTitle.ts";
 import { createPlannotatorBridge } from "./providers/plannotator.ts";
 import { resolvedPlanProviderId } from "./providers/selection.ts";

@@ -69,7 +69,10 @@ function priorCopy(): BranchEntry {
 test("injects when eligible and no live marker (display:false, the owned customType)", async () => {
   const { spec, counts } = countingSpec();
   const { inject } = hooksFor(spec);
-  const result = (await inject({}, ctxOver(() => []))) as {
+  const result = (await inject(
+    {},
+    ctxOver(() => []),
+  )) as {
     message: { customType: string; content: string; display: boolean };
   };
   assert.equal(result.message.customType, CONTEXT_TYPE);
@@ -81,7 +84,10 @@ test("injects when eligible and no live marker (display:false, the owned customT
 test("a live marker in the active window suppresses — the content thunk is never invoked", async () => {
   const { spec, counts } = countingSpec();
   const { inject } = hooksFor(spec);
-  const result = await inject({}, ctxOver(() => [priorCopy()]));
+  const result = await inject(
+    {},
+    ctxOver(() => [priorCopy()]),
+  );
   assert.equal(result, undefined, "no re-injection over a live copy");
   assert.equal(counts.select, 1, "eligibility still consulted");
   assert.equal(counts.content, 0, "the content thunk never ran on the dedup-suppressed turn");
@@ -95,7 +101,10 @@ test("re-injects when the marker sits only BEFORE the compaction cutoff", async 
     { type: "compaction" } as BranchEntry,
     { type: "assistant" } as BranchEntry,
   ];
-  const result = (await inject({}, ctxOver(() => branch))) as { message?: unknown } | undefined;
+  const result = (await inject(
+    {},
+    ctxOver(() => branch),
+  )) as { message?: unknown } | undefined;
   assert.ok(result?.message !== undefined, "a copy outside the active window must not suppress");
 });
 
@@ -103,9 +112,15 @@ test("a compaction summary QUOTING the marker does not suppress", async () => {
   const { spec } = countingSpec();
   const { inject } = hooksFor(spec);
   const branch = [
-    { type: "compaction", data: { summary: `quoting ${MARKER} is not a live copy` } } as BranchEntry,
+    {
+      type: "compaction",
+      data: { summary: `quoting ${MARKER} is not a live copy` },
+    } as BranchEntry,
   ];
-  const result = (await inject({}, ctxOver(() => branch))) as { message?: unknown } | undefined;
+  const result = (await inject(
+    {},
+    ctxOver(() => branch),
+  )) as { message?: unknown } | undefined;
   assert.ok(result?.message !== undefined, "a quoting summary is not a live custom block");
 });
 
@@ -117,7 +132,10 @@ test("a live retained copy (kept across compaction via firstKeptEntryId) still d
     { type: "assistant", id: "e2" } as BranchEntry,
     { type: "compaction", firstKeptEntryId: "e1" } as BranchEntry,
   ];
-  const result = await inject({}, ctxOver(() => branch));
+  const result = await inject(
+    {},
+    ctxOver(() => branch),
+  );
   assert.equal(result, undefined, "a retained live copy still suppresses");
   assert.equal(counts.content, 0);
 });
@@ -125,7 +143,10 @@ test("a live retained copy (kept across compaction via firstKeptEntryId) still d
 test("no injection when select returns null (ineligible/defer)", async () => {
   const { spec, counts } = countingSpec({ select: () => null });
   const { inject } = hooksFor(spec);
-  const result = await inject({}, ctxOver(() => []));
+  const result = await inject(
+    {},
+    ctxOver(() => []),
+  );
   assert.equal(result, undefined);
   assert.equal(counts.content, 0);
 });

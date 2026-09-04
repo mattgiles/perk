@@ -10,6 +10,7 @@ import {
   type MemoryWorkflowSession,
   openMemoryWorkflowSession,
 } from "../../testing/memoryWorkflowSession.ts";
+import type { ApprovalGate } from "../review/approvalGate.ts";
 import { resumePlanDraft, revisePlanDraft } from "./draft.ts";
 import {
   applyReviewerEdits,
@@ -18,7 +19,7 @@ import {
   type ReviewPlanDraftDeps,
   reviewPlanDraft,
 } from "./review.ts";
-import type { PlanBackend, PlanBackendSaveResult, PlanGate } from "./save.ts";
+import type { PlanBackend, PlanBackendSaveResult } from "./save.ts";
 
 const PLAN = "# A plan\n\n## Steps\n\n1. Do the thing.\n";
 
@@ -57,7 +58,7 @@ function fakeBackend(result?: PlanBackendSaveResult): PlanBackend & {
   return backend;
 }
 
-function fakeGate(active: boolean): PlanGate & { exits: number } {
+function fakeGate(active: boolean): ApprovalGate & { exits: number } {
   const gate = {
     exits: 0,
     isActive: () => active,
@@ -89,7 +90,7 @@ function depsFor(
   reviewer: PlanDraftReviewer,
   opts: {
     backend?: PlanBackend;
-    gate?: PlanGate;
+    gate?: ApprovalGate;
     explicit?: string;
     allowImplementHere?: boolean;
   } = {},

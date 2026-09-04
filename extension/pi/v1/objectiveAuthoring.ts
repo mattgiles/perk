@@ -42,11 +42,11 @@ import {
 import {
   type ObjectiveApprovalSaveDeps,
   type ObjectiveBackend,
-  type ObjectiveGate,
   objectiveApprovalSave,
   type SaveObjectiveOutcome,
   saveObjective,
 } from "../../authoring/objective/save.ts";
+import type { ApprovalGate } from "../../authoring/review/approvalGate.ts";
 import { DREAM_REPORT_INPUT_SCHEMA } from "../../learning/dreamReport.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { WorkflowSession } from "../../session/workflowSession.ts";
@@ -272,7 +272,7 @@ function openSession(pi: ExtensionAPI, ctx: ExtensionContext): WorkflowSession {
 }
 
 /** The narrow gate slice the feature releases (D1a: exit only after a verified save). */
-function gateFor(gating: ToolGating, ctx: ExtensionContext): ObjectiveGate {
+function gateFor(gating: ToolGating, ctx: ExtensionContext): ApprovalGate {
   return { isActive: () => gating.isActive(), exit: () => gating.exit(ctx) };
 }
 
@@ -423,8 +423,7 @@ export function installObjectiveAuthoringBindings(pi: ExtensionAPI, gating: Tool
       isObjectiveAuthoring(gating, branch)
         ? {
             marker: OBJECTIVE_AUTHOR_MARKER,
-            content: () =>
-              objectiveAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
+            content: () => objectiveAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
           }
         : null,
     live: (_ctx, branch) => isObjectiveAuthoring(gating, branch),

@@ -15,6 +15,7 @@ import type {
   WorkflowChangeResult,
   WorkflowSession,
 } from "../../session/workflowSession.ts";
+import { type ApprovalGate, saveThroughApprovalGate } from "../review/approvalGate.ts";
 import { resumePlanDraft } from "./draft.ts";
 import { type PlanSource, resolvePlanSource } from "./source.ts";
 
@@ -197,12 +198,6 @@ export async function savePlan(
   };
 }
 
-/** The structural gate slice the approval→save flow releases (the adapter builds it over ToolGating). */
-export interface PlanGate {
-  isActive(): boolean;
-  exit(): void;
-}
-
 /** The approval→save orchestration outcome (the plan `GistApprovalSaveOutcome` mirror). */
 export type PlanApprovalSaveOutcome =
   | { status: "no-plan" }
@@ -215,7 +210,7 @@ export type PlanApprovalSaveOutcome =
 
 /** The approval→save dependency bag: the save deps + the gate + the save-mode transcript tier. */
 export interface PlanApprovalSaveDeps extends PlanSaveDeps {
-  gate: PlanGate;
+  gate: ApprovalGate;
   /** The transcript-scrape thunk (save-mode last resort); omit where the tier cannot apply. */
   transcript?: () => string | null;
 }
@@ -224,9 +219,9 @@ export interface PlanApprovalSaveDeps extends PlanSaveDeps {
  * The shared APPROVED-review → save orchestration (an APPROVED `plan_review` outcome and the
  * manual `/plan-save` failsafe both run THIS — contracts §8.23 pins the name). Flow:
  * artifact-first resolution (`resolvePlanSource` — `reviewedPlan` is the explicit fallback, the
- * transcript scrape last) → `savePlan` (warm node-claim recovery happens inside) → gate exit
- * ONLY on a verified successful save while read-only (the D1a pattern: snapshot
- * `gate.isActive()` BEFORE the save; a failed save leaves the gate ON). No resolvable plan
+ * transcript scrape last) → `savePlan` (warm node-claim recovery happens inside) through
+ * `saveThroughApprovalGate` (the D1a invariant: snapshot before the save; exit only after a
+ * successful save while read-only; a failed save leaves the gate ON). No resolvable plan
  * source → `no-plan` (nothing saved, the gate untouched); callers render their own fallback.
  */
 export async function planApprovalSave(
@@ -242,23 +237,17 @@ export async function planApprovalSave(
     "save",
   );
   if (src === null) return { status: "no-plan" };
-  // D1a: snapshot the gate BEFORE the save; on success, exit it so save marks the read-only →
-  // read-write boundary in one gesture. A failed save leaves the gate on.
-  const wasReadOnly = deps.gate.isActive();
-  const result = await savePlan(
-    {
-      plan: src.plan,
-      source: src.source,
-      paramMismatch: src.paramMismatch,
-      ...(opts.title !== undefined ? { title: opts.title } : {}),
-    },
-    deps,
+  const { outcome: result, gateExited } = await saveThroughApprovalGate(deps.gate, () =>
+    savePlan(
+      {
+        plan: src.plan,
+        source: src.source,
+        paramMismatch: src.paramMismatch,
+        ...(opts.title !== undefined ? { title: opts.title } : {}),
+      },
+      deps,
+    ),
   );
   if (result.status === "failed") return { status: "save-failed", result, gateExited: false };
-  let gateExited = false;
-  if (wasReadOnly) {
-    deps.gate.exit();
-    gateExited = true;
-  }
   return { status: "saved", result, gateExited };
 }
