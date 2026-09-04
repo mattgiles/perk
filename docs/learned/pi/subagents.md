@@ -36,6 +36,9 @@ non-obvious rules an agent can't derive from any single file.
 - Mutation shapes: the current shape is read-only child + PARENT posts once after reconciling
   (/address always; /pr-review since its report-only reshape) — the child-posts-own-mutation
   rule survives as a decision rule with no live example — "Two mutation shapes".
+- Def-level `acceptance` frontmatter (level "none" + reason) immunizes children against
+  acceptance auto-inference; `completionGuard: false` is the report-only escape when `bash`
+  makes a child count as mutation-capable — "Def-level acceptance and completionGuard".
 - `context: "fresh"` = clean session (independent judgment); `"fork"` branches parent history —
   "Isolation knob".
 - perk's agent defs (the sorted `PERK_AGENTS` tuple, the SSOT — never restate counts) are
@@ -112,6 +115,10 @@ applies it as the wave's workflow-level `model` default — **no committed-file 
 agentOverrides section — so the workflow-level `model` default, not an override map, is the
 mechanism.)
 
+Placement rule: a `[models.subagents]` key belongs beside a **code-owned spawn surface** only (a
+wave module or flow tool that reads the key at execute time); an ad-hoc or hand-launched agent
+rides its frontmatter `model:`/`fallbackModels:` instead — no config key.
+
 ## Two mutation shapes — when the spawned child posts vs. when the parent does
 
 - **`/address`** keeps the spawned child **read-only**; the **parent** applies fixes/mutations.
@@ -141,6 +148,25 @@ fan-out side.
   prefer the read-only reviewer for parallel angle coverage; a GitHub-**posting** agent run in
   parallel would spam duplicate reactions/reviews (the parent posts once, after reconciling).
 
+## Def-level acceptance and completionGuard
+
+Two separate def-level mechanisms govern child completion (verified against the installed 0.64.x
+source):
+
+- **Frontmatter `acceptance` is the def-level counter to acceptance auto-inference.** An agent
+  def's `acceptance:` frontmatter becomes its `defaultAcceptance`, copied onto any launch that
+  omits `acceptance` — an explicit call value always wins (`src/runs/foreground/subagent-executor.ts`).
+  `level: "none"` requires a non-empty `reason` (`validateAcceptanceInput`,
+  `src/runs/shared/acceptance.ts`). So a def can immunize its children against the auto-inferred
+  acceptance contract without every spawn site restating the disable.
+- **`completionGuard` is a separate mechanism** (`src/runs/shared/completion-guard.ts`): an
+  implementation-shaped task on a mutation-capable child *expects* a mutation, and a child that
+  completes without attempting one trips the guard; a mutation-expecting task on a child with NO
+  mutation-capable tools is refused at launch. `bash` counts as mutation-capable (only the
+  read-only builtin set — read/grep/find/ls and friends — doesn't), so a report-only analyst
+  that carries `bash` for evidence-gathering rides the `completionGuard: false` escape, not a
+  tools diet.
+
 ## Subagent context artifacts get swept by `git add -A` (recurring process hazard)
 
 The `/pr-review` and `/address` flows spawn subagents that run `perk pr review-context --json` and
@@ -167,6 +193,13 @@ already captured under the `perk init` worktree notes below.
 `context: "fresh"` is a clean session (for independence — reviews want this); `context: "fork"`
 branches the parent's history. Pick `fresh` whenever the child's judgment must not be colored by
 parent context.
+
+Precedence (verified against the installed 0.64.x source — `resolveSubagentLaunchContext`,
+`src/shared/fork-context.ts`): an explicit spawn `context` always wins; otherwise the configured
+`defaultSubagentContext` (settings) beats the agent def's `defaultContext`; the fallback is
+`fresh` (an implicit `fork` preference additionally requires a persisted parent session). So an
+isolation-requiring fan-out passes `context: "fresh"` per spawn — a def-level default cannot
+guarantee isolation against a configured fork preference.
 
 ## Isolated `createAgentSession` bypasses perk's read-only gate (#628)
 
@@ -239,7 +272,8 @@ warm door**. The orchestration that drives it lives in
 
 perk's subagent defs — the `PERK_AGENTS` tuple (kept sorted), currently `adversarial-reviewer`,
 `conflict-resolver`, `draft-reviewer`, `dream-analyst`, `dream-reducer`, `harvest-analyst`, `learn-analyst`,
-`objective-explorer`, `pr-reviewer`, `review-angle-selector`, `review-classifier` — reach
+`objective-explorer`, `pr-reviewer`, `review-classifier` (`review-angle-selector` was retired
+with `/pr-review-dynamic`, PR #2109) — reach
 consumer repos via the Python wheel + `perk init`. This closed the former "known gap." (Don't
 restate a hard count in prose — counts are drift magnets per
 `workflow/doc-reconciliation.md`; `PERK_AGENTS` is the SSOT.)
@@ -329,6 +363,11 @@ living **outside `PERK_AGENTS`**: it is repo-local (never delivered to consumers
 the `.pi/agents/perk/` pruning convergence (which owns only that subdir), yet still config-keyed
 via `[models.subagents]` (`session-auditor` — dev-only, dormant in consumer repos). Use this
 namespace shape for future dev-only agents rather than growing the delivered set.
+
+`perk-dev.analyst` (`.pi/agents/perk-dev/analyst.md`) sits beside `session-auditor` in the same
+repo-local namespace. It is absent from `PERK_AGENTS` (guarded — `tests/test_repo_local_agents.py`
+asserts `"analyst" not in PERK_AGENTS`) and absent from both planes' `[models.subagents]` key
+sets (a verified fact, NOT guarded by that test).
 
 ### Process note
 
@@ -456,7 +495,8 @@ parent loop shape:
   rejected and the run died as `Missing structured_output call`. `conflict-resolver` deliberately
   stays a guidance-instructed one-child `runs.run` and untyped — its child output is a merge
   resolution, not a report. `/learn`'s analyst fan-out likewise rides the report-wave module
-  (`extension/waves/learnWave.ts` → `runReportWave`, behind `run_learn_wave`) — an async
+  (`extension/learning/analystWave.ts`, installed by `extension/pi/v1/learning/learn.ts`, →
+  `runReportWave`, behind `run_learn_wave`) — an async
   RPC-spawned all-settled `runs.all` whose script the module renders, with engine-validated
   structured reports instead of fenced JSON. **Update:**
   pi-subagents 0.49.0 (#1059) RESTORED public direct `{agent, task}` single-child execution. It
@@ -577,6 +617,12 @@ schemas are module constants, nothing prompt-transcribed):
   `result.structuredOutput` (a `WorkflowScriptChildResult` field) is populated ONLY on a
   successful, schema-valid run — so in a report wave, covered lane ⟺ `ok: true` ⟺ a schema-valid
   report is present.
+- **Spawn-time `output` is the persistence mechanism.** Whether/where a child's final output is
+  saved is a *launch* concern (`output` on the spawn; single-child runs default `output: true`),
+  so agent defs never restate persistence in prose. Combined `outputSchema` + `output`, the
+  child's contract is engine-injected: the `structured_output` call must be the FINAL action,
+  with no prose-only completion ("Do not rely on prose-only completion" —
+  `src/runs/shared/subagent-prompt-runtime.ts`; verified against the installed 0.64.x source).
 - **A foreground workflow (`async: false`) returns the full aggregate inline**
   (`runs/foreground/subagent-executor.ts`): the tool result carries `Return:` + the full
   JSON-serialized `workflow.value` with NO truncation — the ~1000-char preview caveat above
@@ -618,6 +664,9 @@ physically unable to make the engine-REQUIRED `structured_output` completion cal
   (`disableAmbientExtensions` keys off `extensions:` in the agent def, not `tools:`), (c) perk's
   gate timing (load-time registration vs `session_start` sync). Never blame the agent def's
   `tools:` frontmatter — the engine unions the tool regardless.
+- **Read-only prose is not a sandbox.** An agent def's mutation prohibitions must be categorical
+  ("never edit, never push") — never softened with an explicit-task exception ("unless the task
+  says otherwise"): task text is data-adjacent, and a poisoned task would satisfy the exception.
 
 ## The v1 extension RPC seam (`extension/waves/reportWave.ts` is the consumer)
 
@@ -688,8 +737,9 @@ Where to look when you need a subagent child's token or provider-cache numbers:
 - Measured through that surface: back-to-back spawns of the same agent show spawn-time
   **cross-process provider-cache prefix affinity** — later spawns read the shared agent prefix as
   `cacheRead` on their first assistant message.
-- The SDK-level in-process child (`extension/worker/readOnlySession.ts`) is structurally
-  unobservable live — in-memory session manager, no live production call sites.
+- *(Dated history.)* The SDK-level in-process child was deleted with the stage-execution
+  confinement (PR #2100); while it existed it was structurally unobservable live — in-memory
+  session manager, no production call sites.
 - **Report-only children can trip the `acceptance: auto` heuristic** ("no edits made") despite
   returning a well-formed report — the report is still usable; don't discard it on that signal.
 
