@@ -1,7 +1,7 @@
 // The v1 Pi installer for the curated-submission flow: `installCuratedSubmissionBindings` owns
 // the warm `submit_pr_review` tool — the agent-driven curated-posting surface shared by the
 // PR-review doors (`/pr-review-terminal`, `/pr-review-browser`, `/stack-review-browser`).
-// Registration metadata is baseline-exact; the policy (gate ladder, resume guard, session
+// Registration metadata is pinned by the suite's registration-parity tests; the policy (gate ladder, resume guard, session
 // records) lives in `codeReview/submission.ts` — this module decodes at the tool boundary,
 // composes the `perk pr review-submit` cold-door `ReviewSubmitter` (mutations canonical in
 // Python; the batch rides the run-scratch stdin channel), selects the `FormalEventGate` arm
@@ -209,7 +209,7 @@ export function formalEventGateFor(ctx: SubmitGateCtx): FormalEventGate {
 
 // ------------------------------------------------------------------------ result rendering
 
-/** Map the enumerated feature outcome onto the tool Result envelope (texts baseline-exact). */
+/** Map the enumerated feature outcome onto the tool Result envelope (texts pinned by tests). */
 function renderSubmitOutcome(
   fail: (message: string, errorType: string) => Result<SubmitOk>,
   input: CuratedSubmission,

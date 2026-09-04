@@ -761,7 +761,7 @@ function validateDreamReport(
 
   const details: string[] = [];
 
-  // Phase 1 (D4) — exact path-set equality: no duplicate, no extra, no missing rows.
+  // Phase 1 — exact path-set equality: no duplicate, no extra, no missing rows.
   const rowByPath = new Map<string, DreamReportInputRow>();
   for (const row of typed.rows) {
     if (rowByPath.has(row.path)) {
@@ -780,7 +780,7 @@ function validateDreamReport(
     }
   }
 
-  // Phase 2 (D4) — per-row rules in manifest doc order: rationale non-empty, the
+  // Phase 2 — per-row rules in manifest doc order: rationale non-empty, the
   // merge-target shape, downgrade-only against the analyst proposal, the fallback rule.
   const joined = new Map<string, JoinedRow>();
   for (const path of manifestPaths) {
@@ -849,7 +849,7 @@ function validateDreamReport(
     }
   }
 
-  // Phase 3 (D5) — the destructive evidence bar, computed ONLY from context stances: an
+  // Phase 3 — the destructive evidence bar, computed ONLY from context stances: an
   // explicit endorse from BOTH gate angles and no challenge from ANY angle; silence counts as
   // non-endorsement. The bar is necessary, not sufficient — an eligible proposal MAY still be
   // downgraded by parent judgment.
@@ -888,7 +888,7 @@ function validateDreamReport(
     }
   }
 
-  // Phase 4 (D6) — merge-target existence + survival over FINAL dispositions. Survival
+  // Phase 4 — merge-target existence + survival over FINAL dispositions. Survival
   // structurally forbids merge chains and cycles (a merge-into doc can never be a target).
   for (const path of manifestPaths) {
     const state = joined.get(path);
@@ -909,7 +909,7 @@ function validateDreamReport(
     }
   }
 
-  // Phase 5 (D7) — curation units: corpus membership, no doc in two units, no empty unit, no
+  // Phase 5 — curation units: corpus membership, no doc in two units, no empty unit, no
   // final-keep doc in a unit, the exact partition over the final non-keep set, non-empty
   // roadmap nodes, and the ≤12-distinct-node cap (many-to-one node mapping is allowed).
   const claimedBy = new Set<string>();
@@ -971,7 +971,7 @@ function validateDreamReport(
     );
   }
 
-  // Phase 6 (D8) — harvest follow-ups cite SURVIVING destinations: a keep/revise corpus doc,
+  // Phase 6 — harvest follow-ups cite SURVIVING destinations: a keep/revise corpus doc,
   // or a cluster named by at least one keep/revise doc.
   const survivingDocs = new Set<string>();
   for (const path of manifestPaths) {
@@ -1018,7 +1018,7 @@ function validateDreamReport(
     }
   }
 
-  // Phase 7 (D9) — predicted effects carry deliberately NO directional/quota rule: a growth
+  // Phase 7 — predicted effects carry deliberately NO directional/quota rule: a growth
   // prediction is valid (type sanity was structural).
 
   if (details.length > 0) {

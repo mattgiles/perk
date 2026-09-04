@@ -1,7 +1,8 @@
 // The v1 Pi installer for the objective planning flow (module-contracts.md's named-installer
 // shape): `installObjectivePlanningBindings` owns the `objective_node` /
 // `explore_objective_node` / `reconcile_objective` / `add_objective_node` tools and the
-// `/objective-plan` + `/objective-reconcile` commands — registration metadata baseline-exact.
+// `/objective-plan` + `/objective-reconcile` commands — registration metadata pinned by the
+// suite's registration-parity tests.
 // The feature policy (the completion-audit gate, the claim-carrier maintenance, the three-tier
 // reconcile resolution) lives in `authoring/objective/planning.ts`; this module decodes at the
 // tool boundary, builds the cold-door backend adapters and argv, and renders the Result
@@ -441,8 +442,8 @@ const ADD_NODE_TOOL_GUIDELINES = [
  * Install every objective-planning Pi binding: the `objective_node` bounded transition tool,
  * the optional `explore_objective_node` wave tool, the `reconcile_objective` /
  * `add_objective_node` reconcile-pass tools, and the `/objective-plan` +
- * `/objective-reconcile` commands — registration metadata baseline-exact. Headless-safe; the
- * tools never throw.
+ * `/objective-reconcile` commands — registration metadata pinned by the registration-parity
+ * tests. Headless-safe; the tools never throw.
  */
 export function installObjectivePlanningBindings(
   pi: ExtensionAPI,

@@ -136,8 +136,8 @@ export function learnManifestPath(bundleDir: string): string {
 }
 
 /**
- * Compose one assignment's task text IN CODE (the prompt-drift-proof half of the migration):
- * the assigned angle, the absolute manifest path (read first), the bundle dir, and the parent's
+ * Compose one assignment's task text IN CODE (prompt-drift-proof: task text composed in code,
+ * never a template): the assigned angle, the absolute manifest path (read first), the bundle dir, and the parent's
  * optional emphasis appended verbatim. Deliberately short — the angle rubric lives in the agent
  * def, not the task.
  */

@@ -1,6 +1,6 @@
 // The v1 Pi installer for the fixed automated review flow: `installAutomatedReviewBindings`
 // owns the `/pr-review` command and the `run_pr_review_wave` + `post_pr_review` tools —
-// registration metadata baseline-exact. The feature policy (the per-activation review-pass
+// registration metadata pinned by the suite's registration-parity tests. The feature policy (the per-activation review-pass
 // state machine, the eligibility ladder, the `last_pr_review` record) lives in
 // `codeReview/automated.ts`; this module decodes at the tool boundary, composes the productions
 // at execute sites — the `perk pr url` resolver, the `ChangeReviewer` over the composition

@@ -2,8 +2,8 @@
 // `installPlanBindings` owns EVERY plan registration — perk-owned plan mode (the `/plan`
 // command, `Ctrl+Alt+P` shortcut, `--plan` flag, and the plan-authoring context hook pair, with
 // the three-tier provider deferral), the `plan_draft`/`plan_save` tools, the `/plan-save` and
-// `/implement-here` commands, and the `plan_review` registration — with baseline-exact
-// registration metadata. The feature logic lives in `authoring/plan/`; this module decodes at
+// `/implement-here` commands, and the `plan_review` registration — registration metadata
+// pinned by the suite's registration-parity tests. The feature logic lives in `authoring/plan/`; this module decodes at
 // the tool boundary, builds the provider/backend/gate adapters (`planSaveDepsFor` — the ONE
 // production composition point every plan-save surface AND the review door consume), constructs
 // the warm-door Result envelopes (the byte-stable message assembly), and places the

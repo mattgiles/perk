@@ -1,7 +1,7 @@
 // The v1 Pi installer for the gist feature (module-contracts.md's named-installer shape):
 // `installGistBindings` owns every gist registration — the `gist_draft`/`gist_save` tools, the
-// `/gist-save` command, and the gist-authoring context hook pair — with baseline-exact
-// registration metadata; `runGistReviewV1` is the injected `plan_review` gist arm. The feature
+// `/gist-save` command, and the gist-authoring context hook pair — registration metadata
+// pinned by the suite's registration-parity tests; `runGistReviewV1` is the injected `plan_review` gist arm. The feature
 // logic lives in `authoring/gist/`; this module decodes at the tool boundary, builds the
 // provider/backend/gate adapters, constructs the warm-door Result envelopes, and places the
 // feature-owned prose units in Pi fields.
@@ -224,7 +224,8 @@ function isGistAuthoring(gating: ToolGating, branch: readonly BranchEntry[]): bo
 /**
  * Install every gist Pi binding: the gist-authoring context hook pair (the frozen hooks-ordering
  * slot index.ts calls this at), the `gist_draft` and `gist_save` tools, and the `/gist-save`
- * command — registration metadata baseline-exact. Inert outside gist sessions; never throws.
+ * command — registration metadata pinned by the registration-parity tests. Inert outside gist
+ * sessions; never throws.
  */
 export function installGistBindings(pi: ExtensionAPI, gating: ToolGating): void {
   // The gist-authoring context injection (display:false), keyed off (read-only gate AND stage
@@ -380,11 +381,11 @@ export function installGistBindings(pi: ExtensionAPI, gating: ToolGating): void 
     handler: async (args, ctx) => {
       const title = args.trim() || undefined;
       // The artifact-first manual-failsafe invocation of the shared approval→save seam (the D1a
-      // gate exit lives in the seam). The legacy drive-the-session behavior is kept as the
-      // NO-DRAFT fallback — gists have no transcript scrape by design, so a draftless session
-      // still needs a working save path.
+      // gate exit lives in the seam). The drive-the-session fallback covers draft-LESS
+      // sessions — gists have no transcript scrape by design, so a draftless session still
+      // needs a working save path.
       // The session always opens (identity-optional): an identity-less session reads the
-      // draft `absent` → the no-draft fallback below, exactly the old open-absent branch.
+      // draft `absent` → the no-draft fallback below, exactly the open-absent branch.
       const session = openSession(pi, ctx);
       const outcome = await gistApprovalSave(
         { session, backend: coldDoorGistBackend(pi, ctx), gate: gateFor(gating, ctx) },

@@ -1,6 +1,6 @@
 // The per-plan landing bindings: the terminating `land` tool + the `/land` command, the
 // in-session twin of the Python cold door (`perk pr land`). A deliberately ZERO-POLICY adapter
-// slice (the stack-status precedent — no feature operation backs it): the tool DELEGATES the
+// module (no feature operation backs it — zero-policy passthrough): the tool DELEGATES the
 // GitHub merge (mutations canonical in Python), then mirrors the envelope's `pending_learn` for
 // the in-session path — setting the `pending-learn` marker (an idempotent existence-semaphore;
 // the worker sets it too on the cold path) unless the cold door reports the learn-docs

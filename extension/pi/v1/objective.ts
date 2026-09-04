@@ -178,7 +178,9 @@ function objectiveCommand(
       return;
     }
 
-    // Activate: set the LWW field + seed a fresh budget activation marker.
+    // Activate: set the LWW field + seed a fresh budget activation marker. This command path's
+    // `active_objective` write is a raw LWW append WITHOUT the session seam's strict read-back
+    // (the seam path in `saveObjective` verifies; this one stays best-effort — stated honestly).
     pi.appendEntry(WORKFLOW_STATE_TYPE, { active_objective: arg });
     pi.appendEntry(OBJECTIVE_BUDGET_TYPE, {
       objective_id: arg,

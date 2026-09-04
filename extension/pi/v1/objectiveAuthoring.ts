@@ -1,7 +1,7 @@
 // The v1 Pi installer for the objective authoring flow (module-contracts.md's named-installer
 // shape): `installObjectiveAuthoringBindings` owns the objective-authoring context hook pair,
-// the `objective_draft`/`objective_save` tools, and the `/objective-save` command — with
-// baseline-exact registration metadata. The feature logic lives in `authoring/objective/`; this
+// the `objective_draft`/`objective_save` tools, and the `/objective-save` command —
+// registration metadata pinned by the suite's registration-parity tests. The feature logic lives in `authoring/objective/`; this
 // module decodes at the tool boundary, builds the cold-door backend + gate + dream-gate
 // adapters, constructs the warm-door Result envelopes, and places the feature-owned prose in Pi
 // fields. `objectiveApprovalSaveV1` is the composed approval→save twin the review arm
@@ -409,8 +409,8 @@ const SAVE_TOOL_GUIDELINES = [
  * Install every objective-authoring Pi binding: the objective-authoring context hook pair (the
  * frozen hooks-ordering slot index.ts calls this at — planMode.ts defers when the stage is
  * objective-author, so exactly one authoring context is injected), the `objective_draft` and
- * `objective_save` tools, and the `/objective-save` command — registration metadata
- * baseline-exact. Inert outside objective sessions; never throws.
+ * `objective_save` tools, and the `/objective-save` command — registration metadata pinned by
+ * the registration-parity tests. Inert outside objective sessions; never throws.
  */
 export function installObjectiveAuthoringBindings(pi: ExtensionAPI, gating: ToolGating): void {
   // The objective-authoring context injection (display:false), keyed off (read-only gate AND
@@ -589,8 +589,8 @@ export function installObjectiveAuthoringBindings(pi: ExtensionAPI, gating: Tool
     handler: async (args, ctx) => {
       const title = args.trim() || undefined;
       // The artifact-first manual-failsafe invocation of the shared approval→save
-      // seam (the D1a gate exit lives in the seam). The legacy drive-the-session behavior is kept
-      // as the NO-DRAFT fallback — objectives have no transcript scrape by design, so a draftless
+      // seam (the D1a gate exit lives in the seam). The drive-the-session fallback covers
+      // draft-LESS sessions — objectives have no transcript scrape by design, so a draftless
       // session still needs a working save path.
       const outcome = await objectiveApprovalSaveV1(pi, ctx, gating, { title });
       if (outcome.status === "refused-draft") {
