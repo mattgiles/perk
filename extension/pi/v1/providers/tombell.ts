@@ -87,16 +87,15 @@ export function installTombellPlanAdapter(pi: ExtensionAPI): void {
   // inject/strip mechanics (active-window dedup, stale-marker strip) live in the shared helper.
   installInjectedContext(pi, {
     customType: PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE,
-    markers: [PLAN_ADAPTER_TOMBELL_MARKER],
+    flavors: {
+      [PLAN_ADAPTER_TOMBELL_MARKER]: () => PLAN_ADAPTER_TOMBELL_CONTEXT,
+    },
     select: (ctx, branch) => {
       if (!isTombellPlanSelected(ctx.cwd)) return null;
       const state = rebuildWorkflowState(branch);
       if (state.stage === OBJECTIVE_AUTHOR_STAGE || state.stage === GIST_AUTHOR_STAGE) return null;
       if (state.mode !== "read-only" && !isTombellPlanModeEnabled(branch)) return null;
-      return {
-        marker: PLAN_ADAPTER_TOMBELL_MARKER,
-        content: () => PLAN_ADAPTER_TOMBELL_CONTEXT,
-      };
+      return PLAN_ADAPTER_TOMBELL_MARKER;
     },
     live: (ctx) => isTombellPlanSelected(ctx.cwd),
   });

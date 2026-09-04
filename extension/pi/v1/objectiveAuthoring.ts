@@ -418,14 +418,12 @@ export function installObjectiveAuthoringBindings(pi: ExtensionAPI, gating: Tool
   // strip) live in the shared helper.
   installInjectedContext(pi, {
     customType: OBJECTIVE_AUTHOR_CONTEXT_TYPE,
-    markers: [OBJECTIVE_AUTHOR_MARKER],
-    select: (ctx, branch) =>
-      isObjectiveAuthoring(gating, branch)
-        ? {
-            marker: OBJECTIVE_AUTHOR_MARKER,
-            content: () => objectiveAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
-          }
-        : null,
+    flavors: {
+      [OBJECTIVE_AUTHOR_MARKER]: (ctx) =>
+        objectiveAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
+    },
+    select: (_ctx, branch) =>
+      isObjectiveAuthoring(gating, branch) ? OBJECTIVE_AUTHOR_MARKER : null,
     live: (_ctx, branch) => isObjectiveAuthoring(gating, branch),
   });
 

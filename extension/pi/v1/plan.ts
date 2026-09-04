@@ -767,17 +767,16 @@ function installPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
   // on the gate alone.
   installInjectedContext(pi, {
     customType: PLAN_CONTEXT_TYPE,
-    markers: [PLAN_MARKER],
-    select: (ctx, branch) => {
+    flavors: {
+      [PLAN_MARKER]: (ctx) => planAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
+    },
+    select: (_ctx, branch) => {
       if (!gating.isActive()) return null;
       const launchedStage = rebuildWorkflowState(branch).stage;
       if (launchedStage === OBJECTIVE_AUTHOR_STAGE || launchedStage === GIST_AUTHOR_STAGE) {
         return null;
       }
-      return {
-        marker: PLAN_MARKER,
-        content: () => planAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
-      };
+      return PLAN_MARKER;
     },
     live: () => gating.isActive(),
   });

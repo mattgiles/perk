@@ -45,16 +45,15 @@ function countingSpec(overrides: Partial<InjectedContextSpec> = {}): {
   const counts = { select: 0, content: 0 };
   const spec: InjectedContextSpec = {
     customType: CONTEXT_TYPE,
-    markers: [MARKER],
+    flavors: {
+      [MARKER]: () => {
+        counts.content += 1;
+        return `${MARKER}\ninjected content`;
+      },
+    },
     select: () => {
       counts.select += 1;
-      return {
-        marker: MARKER,
-        content: () => {
-          counts.content += 1;
-          return `${MARKER}\ninjected content`;
-        },
-      };
+      return MARKER;
     },
     live: () => false,
     ...overrides,
@@ -151,6 +150,19 @@ test("no injection when select returns null (ineligible/defer)", async () => {
   assert.equal(counts.content, 0);
 });
 
+test("an off-table select key (a widened K) names no flavor — never injects", async () => {
+  const { spec, counts } = countingSpec({ select: () => "[NOT A FLAVOR]" });
+  const { inject } = hooksFor(spec);
+  assert.equal(
+    await inject(
+      {},
+      ctxOver(() => []),
+    ),
+    undefined,
+  );
+  assert.equal(counts.content, 0);
+});
+
 test("a THROWING branch read: injection short-circuits (no select call, no throw); the strip still fires over []", async () => {
   const { spec, counts } = countingSpec();
   const liveBranches: (readonly BranchEntry[])[] = [];
@@ -185,7 +197,12 @@ test("a THROWING branch read: injection short-circuits (no select call, no throw
 });
 
 test("strip: drops the owned customType and any user turn carrying ANY owned marker", async () => {
-  const { spec } = countingSpec({ markers: [MARKER, SECOND_MARKER] });
+  const { spec } = countingSpec({
+    flavors: {
+      [MARKER]: () => `${MARKER}\ninjected content`,
+      [SECOND_MARKER]: () => `${SECOND_MARKER}\nsecond flavor`,
+    },
+  });
   const { strip } = hooksFor(spec);
   const result = (await strip(
     {

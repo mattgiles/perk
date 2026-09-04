@@ -30,20 +30,25 @@ import {
   branchOf,
 } from "../../substrate/workflowState.ts";
 
-/** One marker-dedup'd injected context: the owned customType + its FULL marker set. */
-export interface InjectedContextSpec {
+/**
+ * One marker-dedup'd injected context: the owned customType + the flavor table. Each flavor is
+ * declared ONCE — the marker literal keys its content thunk — so the strip set (every key), the
+ * dedup key (the selected key), and the injected content cannot drift apart: `select` returns a
+ * KEY of the table, never a free-floating marker/content pair.
+ */
+export interface InjectedContextSpec<K extends string = string> {
   customType: string;
-  /** Every marker the strip owns (plannotator: all three flavor markers). */
-  markers: readonly string[];
   /**
-   * Feature policy: the flavor to inject this turn, or null (ineligible/defer). `content` is a
-   * thunk — invoked ONLY after the dedup scan passes, preserving the scan-before-construct
-   * ordering (config reads/renders never run on dedup-suppressed turns).
+   * The flavor table: marker literal → content thunk (plannotator: all three flavor markers).
+   * The strip owns every key. A thunk is invoked ONLY after the dedup scan passes, preserving
+   * the scan-before-construct ordering (config reads/renders never run on dedup-suppressed
+   * turns). Caller contract: the rendered content carries its own key (the marker rides inside
+   * the template bytes — pinned by each caller's content tests); a marker-less content would
+   * defeat the dedup and re-inject every turn.
    */
-  select(
-    ctx: ExtensionContext,
-    branch: readonly BranchEntry[],
-  ): { marker: string; content: () => string } | null;
+  flavors: Readonly<Record<K, (ctx: ExtensionContext) => string>>;
+  /** Feature policy: the flavor to inject this turn (a `flavors` key), or null (ineligible/defer). */
+  select(ctx: ExtensionContext, branch: readonly BranchEntry[]): K | null;
   /** Feature policy: true while the injected context is still relevant (the strip fires when false). */
   live(ctx: ExtensionContext, branch: readonly BranchEntry[]): boolean;
 }
@@ -58,14 +63,14 @@ interface StrippableMessage {
 /**
  * The stale-strip filter (module-private — tests drive it through the registered hook): drop the
  * owned customType; drop `role === "user"` messages whose string content or text-part array
- * carries ANY owned marker; keep everything else (non-user roles are never marker-scanned — a
- * cold launch's user prompt is the only leak surface the markers ride).
+ * carries ANY owned marker (every `flavors` key); keep everything else (non-user roles are never
+ * marker-scanned — a cold launch's user prompt is the only leak surface the markers ride).
  */
-function stripStaleMessages<T>(messages: T[], spec: InjectedContextSpec): T[] {
-  const hasMarker = (text: string): boolean => spec.markers.some((m) => text.includes(m));
+function stripStaleMessages<T>(messages: T[], customType: string, markers: readonly string[]): T[] {
+  const hasMarker = (text: string): boolean => markers.some((m) => text.includes(m));
   return messages.filter((m) => {
     const msg = m as StrippableMessage;
-    if (msg.customType === spec.customType) return false;
+    if (msg.customType === customType) return false;
     if (msg.role !== "user") return true;
     const content = msg.content;
     if (typeof content === "string") return !hasMarker(content);
@@ -86,14 +91,18 @@ function stripStaleMessages<T>(messages: T[], spec: InjectedContextSpec): T[] {
  * ordering is frozen by each installer's internal sequence.
  *
  * - `before_agent_start`: guarded branch read (a failed read short-circuits — no `select` call,
- *   no injection) → `spec.select` (null → no injection) → dedup on the SELECTED marker over the
- *   compaction-active window (a live copy suppresses; the content thunk is never invoked) →
- *   inject `{ customType, content, display: false }`.
+ *   no injection) → `spec.select` (null → no injection) → dedup on the SELECTED flavor's marker
+ *   over the compaction-active window (a live copy suppresses; the content thunk is never
+ *   invoked) → inject `{ customType, content, display: false }`.
  * - `context`: guarded branch read (a failed read degrades to `[]` and proceeds) → keep
  *   everything while `spec.live`; otherwise strip the owned customType and any user turn
  *   carrying an owned marker.
  */
-export function installInjectedContext(pi: ExtensionAPI, spec: InjectedContextSpec): void {
+export function installInjectedContext<K extends string>(
+  pi: ExtensionAPI,
+  spec: InjectedContextSpec<K>,
+): void {
+  const markers = Object.keys(spec.flavors);
   pi.on("before_agent_start", async (_event, ctx) => {
     let branch: readonly BranchEntry[];
     try {
@@ -101,13 +110,16 @@ export function installInjectedContext(pi: ExtensionAPI, spec: InjectedContextSp
     } catch {
       return;
     }
-    const picked = spec.select(ctx, branch);
-    if (picked === null) return;
-    if (branchCarries(activeContextWindow(branch), picked.marker)) return;
+    const marker = spec.select(ctx, branch);
+    if (marker === null) return;
+    // Defensive over a widened K (string): an off-table key names no flavor — never inject.
+    const content: ((ctx: ExtensionContext) => string) | undefined = spec.flavors[marker];
+    if (content === undefined) return;
+    if (branchCarries(activeContextWindow(branch), marker)) return;
     return {
       message: {
         customType: spec.customType,
-        content: picked.content(),
+        content: content(ctx),
         display: false,
       },
     };
@@ -121,6 +133,6 @@ export function installInjectedContext(pi: ExtensionAPI, spec: InjectedContextSp
       branch = [];
     }
     if (spec.live(ctx, branch)) return;
-    return { messages: stripStaleMessages(event.messages, spec) };
+    return { messages: stripStaleMessages(event.messages, spec.customType, markers) };
   });
 }

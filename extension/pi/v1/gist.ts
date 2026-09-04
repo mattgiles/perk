@@ -233,14 +233,11 @@ export function installGistBindings(pi: ExtensionAPI, gating: ToolGating): void 
   // live in the shared helper.
   installInjectedContext(pi, {
     customType: GIST_AUTHOR_CONTEXT_TYPE,
-    markers: [GIST_AUTHOR_MARKER],
-    select: (ctx, branch) =>
-      isGistAuthoring(gating, branch)
-        ? {
-            marker: GIST_AUTHOR_MARKER,
-            content: () => gistAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
-          }
-        : null,
+    flavors: {
+      [GIST_AUTHOR_MARKER]: (ctx) =>
+        gistAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
+    },
+    select: (_ctx, branch) => (isGistAuthoring(gating, branch) ? GIST_AUTHOR_MARKER : null),
     live: (_ctx, branch) => isGistAuthoring(gating, branch),
   });
 

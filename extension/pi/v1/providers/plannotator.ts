@@ -387,38 +387,20 @@ export function installPlannotatorPlanAdapter(pi: ExtensionAPI): void {
   // mechanics live in the shared helper.
   installInjectedContext(pi, {
     customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
-    markers: [
-      PLAN_ADAPTER_PLANNOTATOR_MARKER,
-      OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER,
-      GIST_ADAPTER_PLANNOTATOR_MARKER,
-    ],
+    flavors: {
+      [PLAN_ADAPTER_PLANNOTATOR_MARKER]: () => PLAN_ADAPTER_PLANNOTATOR_CONTEXT,
+      [OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER]: () => OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT,
+      [GIST_ADAPTER_PLANNOTATOR_MARKER]: () => GIST_ADAPTER_PLANNOTATOR_CONTEXT,
+    },
     select: (ctx, branch) => {
       if (!isPlannotatorPlanSelected(ctx.cwd)) return null;
       const state = rebuildWorkflowState(branch);
       if (state.mode !== "read-only") return null;
-      const flavor =
-        state.stage === OBJECTIVE_AUTHOR_STAGE || state.stage === OBJECTIVE_SAVE_STAGE
-          ? "objective"
-          : state.stage === GIST_AUTHOR_STAGE
-            ? "gist"
-            : "plan";
-      switch (flavor) {
-        case "objective":
-          return {
-            marker: OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER,
-            content: () => OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT,
-          };
-        case "gist":
-          return {
-            marker: GIST_ADAPTER_PLANNOTATOR_MARKER,
-            content: () => GIST_ADAPTER_PLANNOTATOR_CONTEXT,
-          };
-        case "plan":
-          return {
-            marker: PLAN_ADAPTER_PLANNOTATOR_MARKER,
-            content: () => PLAN_ADAPTER_PLANNOTATOR_CONTEXT,
-          };
-      }
+      return state.stage === OBJECTIVE_AUTHOR_STAGE || state.stage === OBJECTIVE_SAVE_STAGE
+        ? OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER
+        : state.stage === GIST_AUTHOR_STAGE
+          ? GIST_ADAPTER_PLANNOTATOR_MARKER
+          : PLAN_ADAPTER_PLANNOTATOR_MARKER;
     },
     live: (ctx) => isPlannotatorPlanSelected(ctx.cwd),
   });
