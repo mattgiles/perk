@@ -4,7 +4,7 @@
 // they ride the skill-binding suffix at the adapter's injection site. Pure + exported for
 // offline tests.
 
-import type { PlanRef } from "../substrate/cache.ts";
+import type { PlanRef } from "../session/workflowSession.ts";
 import { planReadInstruction, render } from "../substrate/prompts.ts";
 import type { LearnFactoryKind } from "./routing.ts";
 

@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openMemoryWorkflowSession } from "../../session/memoryWorkflowSession.ts";
+import { openMemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
 import {
   OBJECTIVE_DRAFT_ARTIFACT,
   type ObjectiveDraft,
@@ -148,7 +148,7 @@ test("revise: write refusal ⇒ rejected/write_refused; pointer failure ⇒ unve
   );
 });
 
-test("revise: happy path ⇒ revised with pointer + bytes + roadmapNodes; re-write is unchanged", () => {
+test("revise: happy path ⇒ revised with receipt + bytes + roadmapNodes; re-write is unchanged", () => {
   const session = openMemoryWorkflowSession({ runId: "RID" });
   const gate = scriptedGate();
   const input = { prose: PROSE, title: "Objective title", roadmap: ROADMAP };
@@ -159,13 +159,13 @@ test("revise: happy path ⇒ revised with pointer + bytes + roadmapNodes; re-wri
   assert.equal(first.status, "revised");
   if (first.status !== "revised") return;
   assert.equal(first.roadmapNodes, 2);
-  assert.equal(first.pointer.name, OBJECTIVE_DRAFT_ARTIFACT);
-  assert.equal(first.pointer.run_id, "RID");
+  assert.equal(first.receipt.path, OBJECTIVE_DRAFT_ARTIFACT);
+  assert.equal(first.receipt.runId, "RID");
   const content = storedContent(session);
   assert.ok(content !== null);
   assert.equal(first.bytes, Buffer.byteLength(content, "utf8"));
 
-  // Byte-identical rewrite short-circuits via the seam's classified cores.
+  // Byte-identical rewrite short-circuits via the session engine's unchanged probe.
   const again = reviseObjectiveDraft(input, {
     session,
     resolveDreamGate: gate.resolveDreamGate,
@@ -173,7 +173,7 @@ test("revise: happy path ⇒ revised with pointer + bytes + roadmapNodes; re-wri
   assert.equal(again.status, "unchanged");
   if (again.status !== "unchanged") return;
   assert.equal(again.roadmapNodes, 2);
-  assert.deepEqual(again.pointer.digest, first.pointer.digest);
+  assert.deepEqual(again.receipt.digest, first.receipt.digest);
 });
 
 // --- payload key order + omission rules ----------------------------------------------------------

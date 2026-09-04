@@ -8,10 +8,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "../../authoring/objective/draft.ts";
-import {
-  type SessionDataCtx,
-  writeSessionArtifactClassified,
-} from "../../substrate/sessionData.ts";
+import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
@@ -26,15 +24,17 @@ import { planSaveDepsFor } from "./plan.ts";
 import { executePlanReview, type PlanReviewV1Deps } from "./planReview.ts";
 import type { PlanReviewUI, ReviewOutcome } from "./review.ts";
 
-/** The retired production write wrapper, kept as a TEST fixture (plant artifact + pointer). */
+/** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(
-  sink: Parameters<typeof writeSessionArtifactClassified>[0],
-  ctx: Parameters<typeof writeSessionArtifactClassified>[1],
+  sink: EntrySink,
+  ctx: SessionArtifactCtx,
   name: string,
   content: string,
 ): string | null {
-  const result = writeSessionArtifactClassified(sink, ctx, name, content);
-  return result.status === "applied" || result.status === "unchanged" ? result.path : null;
+  const result = openBranchWorkflowSession(sink, ctx).writeArtifact(name, content);
+  return result.status === "applied" || result.status === "unchanged"
+    ? join(ctx.cwd, result.receipt.path)
+    : null;
 }
 
 function selectPlanProvider(cwd: string, id: string): void {

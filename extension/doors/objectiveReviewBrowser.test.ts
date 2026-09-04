@@ -21,11 +21,12 @@ import {
   primeAnnotationSurface,
 } from "../pi/v1/providers/annotations.ts";
 import type { ReviewOutcome } from "../pi/v1/review.ts";
+import { openBranchWorkflowSession } from "../session/branchWorkflowSession.ts";
 import { sessionDataDir } from "../substrate/cache.ts";
 import {
   digestSessionData,
+  type SessionArtifactCtx,
   type SessionDataCtx,
-  writeSessionArtifactClassified,
 } from "../substrate/sessionData.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import type { EntrySink } from "../substrate/workflowState.ts";
@@ -56,15 +57,17 @@ import {
 } from "./objectiveReviewBrowser.ts";
 import type { StartedSurface } from "./plannotatorHandoff.ts";
 
-/** The retired production write wrapper, kept as a TEST fixture (plant artifact + pointer). */
+/** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(
-  sink: Parameters<typeof writeSessionArtifactClassified>[0],
-  ctx: Parameters<typeof writeSessionArtifactClassified>[1],
+  sink: EntrySink,
+  ctx: SessionArtifactCtx,
   name: string,
   content: string,
 ): string | null {
-  const result = writeSessionArtifactClassified(sink, ctx, name, content);
-  return result.status === "applied" || result.status === "unchanged" ? result.path : null;
+  const result = openBranchWorkflowSession(sink, ctx).writeArtifact(name, content);
+  return result.status === "applied" || result.status === "unchanged"
+    ? join(ctx.cwd, result.receipt.path)
+    : null;
 }
 
 // ------------------------------------------------------------------ surface probes (shared)
@@ -1054,7 +1057,7 @@ test("/objective-review-browser: an INVALID artifact (malformed JSON) → the re
   const invalid = "not json at all\n";
   const runId = "01RIDBADOBJ";
   // Plant a session whose workflow state carries a VALID pointer to malformed artifact bytes —
-  // readSessionArtifact succeeds (non-blank, digest ok) but readObjectiveDraft refuses.
+  // the seam's readArtifact succeeds (non-blank, digest ok) but readObjectiveDraft refuses.
   const dataDir = sessionDataDir(cwd, runId);
   const { mkdirSync } = await import("node:fs");
   mkdirSync(dataDir, { recursive: true });

@@ -1,35 +1,39 @@
-// The shared WorkflowSession interface suite, parameterized over BOTH backings (branch/file and
-// in-memory) — every classification arm is reached on each: identity (including the
-// identity-less always-open arm: artifact writes reject, reads read absent, state ops work),
-// applied (pointer recorded + read-back roundtrip), the unchanged short-circuit, rejected
-// (invalid name, io refusal), unverified (pointer-append failure), the read tiers (found /
-// absent — no pointer, cross-run fork pointer / invalid — missing file, digest mismatch), and
-// the workflow-state ops (`nodeClaim()`/`activeObjective()` reads + `apply()` over all four
-// change variants: applied / unchanged / unverified / rejected / non-matching claim /
+// The shared WorkflowSession interface suite, parameterized over BOTH bindings of the one
+// session engine (branch/file production and the testing/ in-memory ports) — every
+// classification arm is reached on each: identity (including the identity-less always-open arm:
+// artifact writes reject, reads read absent, state ops work; and the unsafe-run-id degrade),
+// applied (receipt + read-back roundtrip), the unchanged short-circuit (no fresh append),
+// rejected (invalid name, io refusal), unverified (pointer-append failure), the read tiers
+// (found / absent — no pointer, malformed pointer, cross-run fork pointer / invalid — missing
+// file, digest mismatch), the strict ledger append pre-read, and the workflow-state ops
+// (`nodeClaim()`/`activeObjective()`/`reviewPosts()` reads + `apply()` over the closed change
+// union: applied / unchanged / unverified / rejected / non-matching claim /
 // same-node-different-objective / no-identity). Branch-only seam-level cases prove the
 // fork/reload reconstruction shapes (identity + claims + active_objective rebuild from the
-// persisted branch; a fork-derived child reads the parent's artifacts as absent).
+// persisted branch; a fork-derived child reads the parent's artifacts as absent) and the
+// persisted-pointer trust pins (junk never flows; hostile paths never dereferenced).
 
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { test } from "node:test";
 import { type PlanRef, sessionDataDir } from "../substrate/cache.ts";
-import type { SessionArtifactCtx } from "../substrate/sessionData.ts";
+import { digestSessionData, type SessionArtifactCtx } from "../substrate/sessionData.ts";
 import {
   type EntrySink,
   rebuildWorkflowState,
   WORKFLOW_STATE_TYPE,
 } from "../substrate/workflowState.ts";
+import { openMemoryWorkflowSession } from "../testing/memoryWorkflowSession.ts";
 import { openBranchWorkflowSession } from "./branchWorkflowSession.ts";
-import { openMemoryWorkflowSession } from "./memoryWorkflowSession.ts";
 import {
   type PrReviewRecord,
   type ReviewBatchRecord,
   type ReviewPostRow,
   type ReviewSubmissionRecord,
   reviewPostsOf,
+  soundPointer,
   type WorkflowSession,
 } from "./workflowSession.ts";
 
@@ -97,6 +101,10 @@ interface SessionHarness {
   lastPrReview(): PrReviewRecord | null;
   /** The rebuilt/live `last_review_batch` record (observation of the record-review-batch effect). */
   lastReviewBatch(): ReviewBatchRecord | null;
+  /** Attempted workflow-state appends (the no-append observation for the unchanged arm). */
+  appendCount(): number;
+  /** The backing's derived display path for `name` (what a receipt's `path` must equal). */
+  expectedPath(name: string): string;
   dispose(): void;
 }
 
@@ -104,7 +112,8 @@ interface HarnessOpts {
   nodeClaim?: { objective: string; node: string };
   activePlanRef?: PlanRef;
   activeObjective?: string;
-  reviewPosts?: ReviewPostRow[];
+  /** Deliberately wide: the strict-ledger pins seed malformed persisted shapes. */
+  reviewPosts?: unknown;
 }
 
 interface Backing {
@@ -168,8 +177,10 @@ function branchBacking(): Backing {
       }
       let dropAppends = false;
       let throwNextAppend = false;
+      let appends = 0;
       const sink: EntrySink = {
         appendEntry: (customType, data) => {
+          appends += 1;
           if (throwNextAppend) {
             throwNextAppend = false;
             throw new Error("append refused (induced)");
@@ -240,6 +251,12 @@ function branchBacking(): Backing {
           ).last_review_batch;
           return (value ?? null) as ReviewBatchRecord | null;
         },
+        appendCount() {
+          return appends;
+        },
+        expectedPath(name) {
+          return relative(cwd, join(sessionDataDir(cwd, runId ?? ""), name));
+        },
         dispose() {
           if (lockedPerkDir) chmodSync(perkDir, 0o755);
           rmSync(cwd, { recursive: true, force: true });
@@ -261,7 +278,9 @@ function memoryBacking(): Backing {
         ...(opts.nodeClaim !== undefined ? { nodeClaim: opts.nodeClaim } : {}),
         ...(opts.activePlanRef !== undefined ? { activePlanRef: opts.activePlanRef } : {}),
         ...(opts.activeObjective !== undefined ? { activeObjective: opts.activeObjective } : {}),
-        ...(opts.reviewPosts !== undefined ? { reviewPosts: opts.reviewPosts } : {}),
+        ...(opts.reviewPosts !== undefined
+          ? { reviewPosts: opts.reviewPosts as ReviewPostRow[] }
+          : {}),
       });
       return {
         session,
@@ -276,6 +295,8 @@ function memoryBacking(): Backing {
         lastReview: () => session.lastReviewRecord(),
         lastPrReview: () => session.lastPrReviewRecord(),
         lastReviewBatch: () => session.lastReviewBatchRecord(),
+        appendCount: () => session.appendCount(),
+        expectedPath: (name) => name,
         dispose() {},
       };
     },
@@ -310,16 +331,15 @@ for (const backing of [branchBacking(), memoryBacking()]) {
     }
   });
 
-  test(`${backing.label}: applied — pointer recorded, read-back roundtrips`, () => {
+  test(`${backing.label}: applied — receipt carries validated identity + derived path, read-back roundtrips`, () => {
     const h = backing.harness("RID");
     try {
       const written = h.session.writeArtifact("draft.json", "v1");
       assert.equal(written.status, "applied");
       assert.ok(written.status === "applied");
-      assert.equal(written.pointer.run_id, "RID");
-      assert.equal(written.pointer.name, "draft.json");
-      assert.match(written.pointer.digest, /^sha256:[0-9a-f]{64}$/);
-      assert.ok(!Number.isNaN(Date.parse(written.pointer.at)));
+      assert.equal(written.receipt.runId, "RID");
+      assert.equal(written.receipt.path, h.expectedPath("draft.json"));
+      assert.match(written.receipt.digest, /^sha256:[0-9a-f]{64}$/);
       assert.deepEqual(h.session.readArtifact("draft.json"), {
         status: "found",
         content: "v1",
@@ -334,14 +354,16 @@ for (const backing of [branchBacking(), memoryBacking()]) {
     try {
       const first = h.session.writeArtifact("draft.json", "same bytes");
       assert.equal(first.status, "applied");
+      const afterFirst = h.appendCount();
       const second = h.session.writeArtifact("draft.json", "same bytes");
       assert.equal(second.status, "unchanged");
       assert.ok(first.status === "applied" && second.status === "unchanged");
-      assert.equal(second.pointer.digest, first.pointer.digest);
-      assert.equal(second.pointer.at, first.pointer.at, "no fresh pointer entry was appended");
-      // Different bytes still apply.
+      assert.deepEqual(second.receipt, first.receipt, "the receipt re-derives identically");
+      assert.equal(h.appendCount(), afterFirst, "no fresh pointer entry was appended");
+      // Different bytes still apply (and append a fresh pointer).
       const third = h.session.writeArtifact("draft.json", "different bytes");
       assert.equal(third.status, "applied");
+      assert.equal(h.appendCount(), afterFirst + 1);
       assert.deepEqual(h.session.readArtifact("draft.json"), {
         status: "found",
         content: "different bytes",
@@ -829,6 +851,80 @@ for (const backing of [branchBacking(), memoryBacking()]) {
       h.dispose();
     }
   });
+
+  test(`${backing.label}: an unsafe rebuilt run_id degrades to no identity (the read-path trust boundary)`, () => {
+    // A hostile persisted run_id (path traversal, separators) must never key a path derivation
+    // or reach a receipt: identity degrades to null — reads absent, writes rejected, no append.
+    for (const hostile of ["../evil", "a/b"]) {
+      const h = backing.harness(hostile);
+      try {
+        assert.equal(h.session.runId, null, JSON.stringify(hostile));
+        assert.deepEqual(h.session.readArtifact("draft.json"), { status: "absent" });
+        const written = h.session.writeArtifact("draft.json", "x");
+        assert.equal(written.status, "rejected");
+        assert.ok(written.status === "rejected" && /no run_id/.test(written.problem));
+        assert.equal(h.appendCount(), 0, "the refusal lands before any effect");
+      } finally {
+        h.dispose();
+      }
+    }
+    // Legitimate ids — ULID mints and `<parent>.<n>` fork derivations — pass unaffected.
+    assert.equal(backing.open("RID").runId, "RID");
+    assert.equal(backing.open("RID.1").runId, "RID.1");
+  });
+
+  test(`${backing.label}: append-review-post refuses over a MALFORMED persisted ledger (strict decode)`, () => {
+    // Deliberately stricter than the tolerant reviewPosts() read: silently narrowing a
+    // malformed persisted ledger would let the whole-list LWW re-append ERASE
+    // malformed-but-possibly-real rows — a confirmed post must never be erased by a write.
+    const malformedLedgers: unknown[] = [
+      "junk", // not a list
+      { pr: 41 }, // not a list
+      [{ pr: "41", event: "comment", at: "t0" }], // malformed row: pr not an integer
+      [{ pr: 41, event: "comment", at: "t0" }, 7], // malformed row amid sound ones
+    ];
+    for (const seeded of malformedLedgers) {
+      const h = backing.harness("RID", { reviewPosts: seeded });
+      try {
+        const before = h.appendCount();
+        const result = h.session.apply({ kind: "append-review-post", row: POST_ROW });
+        assert.equal(result.status, "rejected", JSON.stringify(seeded));
+        assert.ok(
+          result.status === "rejected" &&
+            /refusing to append over an unknown ledger/.test(result.problem),
+        );
+        assert.equal(h.appendCount(), before, "the refusal lands before any append effect");
+      } finally {
+        h.dispose();
+      }
+    }
+  });
+
+  test(`${backing.label}: append-review-post over an ABSENT ledger applies (the normal first append)`, () => {
+    const h = backing.harness("RID");
+    try {
+      assert.deepEqual(h.session.apply({ kind: "append-review-post", row: POST_ROW }), {
+        status: "applied",
+      });
+      assert.deepEqual(h.session.reviewPosts(), [POST_ROW]);
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: extra fields on sound ledger rows are narrowed out by the append pre-read`, () => {
+    const h = backing.harness("RID", {
+      reviewPosts: [{ pr: 41, event: "comment", at: "t0", extra: "junk" }],
+    });
+    try {
+      assert.deepEqual(h.session.apply({ kind: "append-review-post", row: POST_ROW }), {
+        status: "applied",
+      });
+      assert.deepEqual(h.session.reviewPosts(), [{ pr: 41, event: "comment", at: "t0" }, POST_ROW]);
+    } finally {
+      h.dispose();
+    }
+  });
 }
 
 // --- seam-level fork/reload reconstruction (branch backing only: the persisted branch IS the
@@ -984,6 +1080,242 @@ test("branch: append-review-post FAILS CLOSED when the prior ledger cannot be re
         /refusing to append over an unknown ledger/.test(result.problem),
     );
     assert.equal(appends.length, 0, "the refusal lands before any append effect");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("branch: the link-plan-ref pre-read is deliberately un-caught — a throwing rebuild propagates", () => {
+  // Unlike the fail-open named reads, the link dedupe must never treat an unreadable branch as
+  // "no current ref": a rebuild failure propagates to the caller and nothing is appended.
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-link-throws-"));
+  try {
+    const appends: unknown[] = [];
+    const sink: EntrySink = {
+      appendEntry: (customType, data) => appends.push({ customType, data }),
+    };
+    const throwing = openBranchWorkflowSession(sink, {
+      cwd,
+      sessionManager: {
+        getBranch(): unknown[] {
+          throw new Error("adversarial branch read");
+        },
+      },
+      hasUI: false,
+      ui: { notify() {} },
+    });
+    assert.throws(
+      () => throwing.apply({ kind: "link-plan-ref", ref: planRef("42") }),
+      /adversarial branch read/,
+    );
+    assert.equal(appends.length, 0, "the exception propagates before any append effect");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("branch: the persisted pointer keeps the full five-field wire shape (contracts §8.3)", () => {
+  // The receipt deliberately narrows what RESULTS carry — but the PERSISTED `session_artifacts`
+  // entry stays the cross-plane five-field pointer. Pin the raw rebuilt map value so the engine
+  // can never silently drop or rename a wire field.
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-wire-shape-"));
+  try {
+    const branch: unknown[] = [stateEntry({ run_id: "RID" })];
+    const sink: EntrySink = {
+      appendEntry: (customType, data) => branch.push({ type: "custom", customType, data }),
+    };
+    const session = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+    assert.equal(session.writeArtifact("draft.json", "v1").status, "applied");
+    const raw = rebuildWorkflowState(branch as Parameters<typeof rebuildWorkflowState>[0])
+      .session_artifacts?.["draft.json"];
+    assert.ok(typeof raw === "object" && raw !== null, "a pointer object persisted");
+    const pointer = raw as Record<string, unknown>;
+    assert.deepEqual(Object.keys(pointer).sort(), ["at", "digest", "name", "path", "run_id"]);
+    assert.equal(pointer.run_id, "RID");
+    assert.equal(pointer.name, "draft.json");
+    assert.equal(pointer.path, relative(cwd, join(sessionDataDir(cwd, "RID"), "draft.json")));
+    assert.equal(pointer.digest, digestSessionData("v1"));
+    assert.ok(
+      typeof pointer.at === "string" && !Number.isNaN(Date.parse(pointer.at)),
+      "at is a parseable timestamp",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("branch: nodeClaim() is fail-open — malformed persisted claims and a throwing branch read null", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-claim-fail-open-"));
+  try {
+    const sink: EntrySink = { appendEntry: () => {} };
+    for (const malformed of [null, { objective: 7, node: "1.2" }, { objective: "7", node: "" }]) {
+      const branch: unknown[] = [
+        stateEntry({ run_id: "RID" }),
+        stateEntry({ objective_node_claim: malformed }),
+      ];
+      const session = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+      assert.equal(session.nodeClaim(), null, JSON.stringify(malformed));
+    }
+    const throwing = openBranchWorkflowSession(sink, {
+      cwd,
+      sessionManager: {
+        getBranch(): unknown[] {
+          throw new Error("adversarial branch read");
+        },
+      },
+      hasUI: false,
+      ui: { notify() {} },
+    });
+    assert.equal(throwing.nodeClaim(), null, "a throwing branch read is fail-open");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("branch: a malformed persisted pointer reads absent; a write proceeds and replaces it", () => {
+  // Branch data is cast, not validated: a malformed session entry can put null (or any
+  // non-pointer value) where a pointer belongs. The engine's decode treats it as "no pointer":
+  // the read classifies `absent`, and the write's unchanged probe fails so the write proceeds
+  // and REPLACES the junk with a sound pointer.
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-malformed-"));
+  try {
+    for (const malformed of [null, "junk", 7, { run_id: 42 }, { run_id: "RID" }]) {
+      const branch: unknown[] = [
+        stateEntry({ run_id: "RID" }),
+        stateEntry({ session_artifacts: { "draft.json": malformed } }),
+      ];
+      const sink: EntrySink = {
+        appendEntry: (customType, data) => branch.push({ type: "custom", customType, data }),
+      };
+      const session = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+      assert.deepEqual(
+        session.readArtifact("draft.json"),
+        { status: "absent" },
+        `read classifies (${JSON.stringify(malformed)})`,
+      );
+      const written = session.writeArtifact("draft.json", "fresh");
+      assert.equal(written.status, "applied", `write proceeds (${JSON.stringify(malformed)})`);
+      const repaired = soundPointer(
+        rebuildWorkflowState(branch as Parameters<typeof rebuildWorkflowState>[0])
+          .session_artifacts?.["draft.json"],
+      );
+      assert.equal(repaired?.run_id, "RID", "the malformed pointer was replaced by a sound one");
+      rmSync(join(cwd, ".perk"), { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("branch: a shape-sound pointer with junk path/name/at yields a fully RE-DERIVED receipt", () => {
+  // The unchanged arm must never leak persisted junk through the receipt: only run_id + digest
+  // are validated, so path/name/at can carry any JSON value — the receipt re-derives all three
+  // of its fields and the junk stays unobservable.
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-junk-pointer-"));
+  try {
+    const branch: unknown[] = [stateEntry({ run_id: "RID" })];
+    const sink: EntrySink = {
+      appendEntry: (customType, data) => branch.push({ type: "custom", customType, data }),
+    };
+    const session = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+    assert.equal(session.writeArtifact("draft.json", "same bytes").status, "applied");
+    // Doctor the persisted pointer: digest still matches the stored bytes; everything else junk.
+    branch.push(
+      stateEntry({
+        session_artifacts: {
+          "draft.json": {
+            run_id: "RID",
+            digest: digestSessionData("same bytes"),
+            path: 123,
+            name: 99,
+            at: {},
+          },
+        },
+      }),
+    );
+    const rewrite = session.writeArtifact("draft.json", "same bytes");
+    assert.equal(rewrite.status, "unchanged");
+    assert.ok(rewrite.status === "unchanged");
+    assert.equal(typeof rewrite.receipt.path, "string");
+    assert.deepEqual(rewrite.receipt, {
+      runId: "RID",
+      path: relative(cwd, join(sessionDataDir(cwd, "RID"), "draft.json")),
+      digest: digestSessionData("same bytes"),
+    });
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("branch: untrusted pointer.path is never dereferenced — validation uses the derived path only", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-hostile-path-"));
+  try {
+    const branch: unknown[] = [stateEntry({ run_id: "RID" })];
+    const sink: EntrySink = {
+      appendEntry: (customType, data) => branch.push({ type: "custom", customType, data }),
+    };
+    const session = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+    assert.equal(session.writeArtifact("draft.md", "real").status, "applied");
+    // …and a foreign file elsewhere that a malicious pointer.path points at.
+    const foreign = join(cwd, "foreign.md");
+    writeFileSync(foreign, "foreign", "utf8");
+    branch.push(
+      stateEntry({
+        session_artifacts: {
+          "draft.md": {
+            run_id: "RID",
+            name: "draft.md",
+            path: foreign, // absolute, hostile — must be ignored
+            digest: digestSessionData("real"),
+            at: new Date().toISOString(),
+          },
+        },
+      }),
+    );
+    // The derived file is read (and digest-validated), never the foreign one.
+    assert.deepEqual(session.readArtifact("draft.md"), { status: "found", content: "real" });
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("branch: sibling pointers survive — each append carries the whole merged map", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-siblings-"));
+  try {
+    const branch: unknown[] = [stateEntry({ run_id: "RID" })];
+    const sink: EntrySink = {
+      appendEntry: (customType, data) => branch.push({ type: "custom", customType, data }),
+    };
+    const session = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+    assert.equal(session.writeArtifact("a.md", "alpha").status, "applied");
+    assert.equal(session.writeArtifact("b.md", "beta").status, "applied");
+    const map =
+      rebuildWorkflowState(branch as Parameters<typeof rebuildWorkflowState>[0])
+        .session_artifacts ?? {};
+    assert.deepEqual(Object.keys(map).sort(), ["a.md", "b.md"]);
+    assert.deepEqual(session.readArtifact("a.md"), { status: "found", content: "alpha" });
+    assert.deepEqual(session.readArtifact("b.md"), { status: "found", content: "beta" });
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("branch: concurrent sessions — run_id keying isolates pointers and dirs", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-concurrent-"));
+  try {
+    const branchA: unknown[] = [stateEntry({ run_id: "A" })];
+    const branchB: unknown[] = [stateEntry({ run_id: "B" })];
+    const sinkFor = (branch: unknown[]): EntrySink => ({
+      appendEntry: (customType, data) => branch.push({ type: "custom", customType, data }),
+    });
+    const a = openBranchWorkflowSession(sinkFor(branchA), reportableCtx(cwd, branchA));
+    const b = openBranchWorkflowSession(sinkFor(branchB), reportableCtx(cwd, branchB));
+    assert.equal(a.writeArtifact("a.md", "from A").status, "applied");
+    assert.equal(b.writeArtifact("b.md", "from B").status, "applied");
+    assert.deepEqual(a.readArtifact("a.md"), { status: "found", content: "from A" });
+    assert.deepEqual(b.readArtifact("b.md"), { status: "found", content: "from B" });
+    assert.deepEqual(a.readArtifact("b.md"), { status: "absent" }); // silent: no pointer on A's branch
+    assert.deepEqual(b.readArtifact("a.md"), { status: "absent" });
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

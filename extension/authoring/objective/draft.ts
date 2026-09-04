@@ -21,8 +21,7 @@
 // The §8.63 dream gate arrives INJECTED (`resolveDreamGate` — ctx-bound by the adapter) so the
 // module stays session-pure; `dreamReportGate.ts` owns the matrix.
 
-import type { WorkflowSession } from "../../session/workflowSession.ts";
-import type { SessionArtifactPointer } from "../../substrate/workflowState.ts";
+import type { SessionArtifactReceipt, WorkflowSession } from "../../session/workflowSession.ts";
 import {
   type DreamReportGateOutcome,
   decodeDreamReportBlock,
@@ -69,8 +68,8 @@ export interface ObjectiveDraftInput {
  * needs no re-parse.
  */
 export type ReviseObjectiveDraftResult =
-  | { status: "revised"; pointer: SessionArtifactPointer; bytes: number; roadmapNodes: number }
-  | { status: "unchanged"; pointer: SessionArtifactPointer; bytes: number; roadmapNodes: number }
+  | { status: "revised"; receipt: SessionArtifactReceipt; bytes: number; roadmapNodes: number }
+  | { status: "unchanged"; receipt: SessionArtifactReceipt; bytes: number; roadmapNodes: number }
   | {
       status: "rejected";
       reason: "blank_prose" | "no_identity" | "gate_refused" | "write_refused";
@@ -86,7 +85,7 @@ export type ReviseObjectiveDraftResult =
  * readers), gate `dream_report` at write time (§8.63 — validated here so a report-less dream
  * bundle can never reach review), then write. Diagnostic precedence preserved: blank prose →
  * identity → the dream gate → the write. A byte-identical rewrite short-circuits `unchanged`
- * (the seam's classified cores own the probe). Never throws.
+ * (the session engine owns the probe). Never throws.
  */
 export function reviseObjectiveDraft(
   input: ObjectiveDraftInput,
@@ -144,11 +143,11 @@ export function reviseObjectiveDraft(
   const written = deps.session.writeArtifact(OBJECTIVE_DRAFT_ARTIFACT, content);
   switch (written.status) {
     case "applied":
-      return { status: "revised", pointer: written.pointer, bytes, roadmapNodes: roadmap.length };
+      return { status: "revised", receipt: written.receipt, bytes, roadmapNodes: roadmap.length };
     case "unchanged":
       return {
         status: "unchanged",
-        pointer: written.pointer,
+        receipt: written.receipt,
         bytes,
         roadmapNodes: roadmap.length,
       };

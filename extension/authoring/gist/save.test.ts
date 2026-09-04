@@ -3,8 +3,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { MemoryWorkflowSession } from "../../session/memoryWorkflowSession.ts";
-import { openMemoryWorkflowSession } from "../../session/memoryWorkflowSession.ts";
+import type { MemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
+import { openMemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
 import { reviseGistDraft } from "./draft.ts";
 import { type GistBackend, type GistGate, gistApprovalSave, saveGist } from "./save.ts";
 

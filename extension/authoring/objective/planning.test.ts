@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openMemoryWorkflowSession } from "../../session/memoryWorkflowSession.ts";
+import { openMemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
 import {
   isNonTrivialAudit,
   MIN_AUDIT_LENGTH,
@@ -34,11 +34,11 @@ function fakeNodeBackend(result?: Awaited<ReturnType<ObjectiveNodeBackend["trans
 }
 
 /** Capture console.error calls for the duration of `fn` (silences the seam's loud warnings). */
-function quietly<T>(fn: () => T): T {
+async function quietly<T>(fn: () => Promise<T> | T): Promise<T> {
   const original = console.error;
   console.error = () => {};
   try {
-    return fn();
+    return await fn();
   } finally {
     console.error = original;
   }

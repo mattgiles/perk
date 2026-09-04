@@ -59,7 +59,6 @@ import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import { registerPerkCommand } from "../substrate/command.ts";
 import { interceptConsoleError } from "../substrate/consoleCapture.ts";
 import { render } from "../substrate/prompts.ts";
-import { readSessionArtifact } from "../substrate/sessionData.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { type ReportTarget, report } from "../surfaces/report.ts";
@@ -270,8 +269,8 @@ export async function routeObjectiveReviewDecision(
     // bytes, never the rendered markdown. Mismatch/missing → loud refusal, nothing saved, gate
     // untouched. (Best-effort: it closes the human-scale race; the check-to-save window is
     // accepted.)
-    const current = readSessionArtifact(ctx, OBJECTIVE_DRAFT_ARTIFACT);
-    if (current === null || current.content !== artifactRaw) {
+    const current = openBranchWorkflowSession(pi, ctx).readArtifact(OBJECTIVE_DRAFT_ARTIFACT);
+    if (current.status !== "found" || current.content !== artifactRaw) {
       report(
         ctx,
         SCOPE,
@@ -527,8 +526,8 @@ export function registerObjectiveReviewBrowser(
       // The draft resolve, artifact ONLY: no param tier, no transcript tier (the review-surface
       // law tightened to drafts-only — an approval auto-saves the reviewed bytes). The raw
       // artifact bytes are kept as the stale guard's baseline (the save-authoritative surface).
-      const artifact = readSessionArtifact(ctx, OBJECTIVE_DRAFT_ARTIFACT);
-      if (artifact === null || artifact.content.trim().length === 0) {
+      const artifact = openBranchWorkflowSession(pi, ctx).readArtifact(OBJECTIVE_DRAFT_ARTIFACT);
+      if (artifact.status !== "found" || artifact.content.trim().length === 0) {
         report(
           ctx,
           SCOPE,

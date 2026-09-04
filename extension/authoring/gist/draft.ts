@@ -12,8 +12,7 @@
 // light: a gist is a problem-space statement of intent with no structured roadmap
 // (contracts.md §8.41).
 
-import type { WorkflowSession } from "../../session/workflowSession.ts";
-import type { SessionArtifactPointer } from "../../substrate/workflowState.ts";
+import type { SessionArtifactReceipt, WorkflowSession } from "../../session/workflowSession.ts";
 
 /** The registry stage id of the gist-authoring session (shared with planMode's defer check). */
 export const GIST_AUTHOR_STAGE = "gist-author";
@@ -114,8 +113,8 @@ export function renderGistDraft(draft: GistDraft): string {
  * landed but the read-back proof failed. `problem` carries the caller-facing message bytes.
  */
 export type ReviseGistDraftResult =
-  | { status: "revised"; pointer: SessionArtifactPointer; bytes: number }
-  | { status: "unchanged"; pointer: SessionArtifactPointer; bytes: number }
+  | { status: "revised"; receipt: SessionArtifactReceipt; bytes: number }
+  | { status: "unchanged"; receipt: SessionArtifactReceipt; bytes: number }
   | { status: "rejected"; reason: "blank_prose" | "no_identity" | "write_refused"; problem: string }
   | { status: "unverified"; problem: string };
 
@@ -148,9 +147,9 @@ export function reviseGistDraft(
   const written = session.writeArtifact(GIST_DRAFT_ARTIFACT, content);
   switch (written.status) {
     case "applied":
-      return { status: "revised", pointer: written.pointer, bytes };
+      return { status: "revised", receipt: written.receipt, bytes };
     case "unchanged":
-      return { status: "unchanged", pointer: written.pointer, bytes };
+      return { status: "unchanged", receipt: written.receipt, bytes };
     case "rejected":
       return {
         status: "rejected",

@@ -160,14 +160,16 @@ export function decideClaim(args: {
 // --------------------------------------------------------------- the identity establishment
 
 /**
- * The narrow workflow-state slice the lifecycle writes through: the LWW rebuild, the plain
- * (honest-tier, no read-back) append the fork/adopt arms use, and the strict verified append
- * the claim/mint arms use — `run_id` is the only field the lifecycle ever verifies.
+ * The narrow workflow-state store port: the LWW rebuild, the plain (honest-tier, no read-back)
+ * append the fork/adopt arms use, and the strict verified append. ONE port serves both the
+ * identity lifecycle (which verifies `run_id`) and the session engine
+ * (`session/workflowSession.ts`, which verifies each change's own field) — hence the generic
+ * verified append.
  */
 export interface SessionStateStore {
   rebuild(): WorkflowState;
   append(data: WorkflowState): void;
-  appendVerified(opts: AppendWorkflowStateOpts<"run_id">): ClassifiedAppend;
+  appendVerified<K extends keyof WorkflowState>(opts: AppendWorkflowStateOpts<K>): ClassifiedAppend;
 }
 
 /**

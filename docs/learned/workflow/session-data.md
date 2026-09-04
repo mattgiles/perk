@@ -108,12 +108,15 @@ distinction and refuse `bad_state` on couldn't-read — "confirmed absent" ≠ "
   fork-no-inheritance / concurrent-isolation mechanism, not an anomaly); pointer-present-but-broken
   (missing file, digest mismatch) → stderr warn + `null` (a broken promise). Don't "fix" the
   silent arm into a warning — forks would spam.
-- **Writer success = fully recorded**: a returned path means file written + read back + pointer
-  strict-appended. Pointer-append failure returns `null` and deliberately leaves an orphan file
-  (gitignored scratch; GC prunes). Consumers must treat `null` as "not consumable", even if the
-  file visibly exists.
+- **Writer success = fully recorded**: an `applied`/`unchanged` write result (carrying the
+  session-owned `SessionArtifactReceipt` — validated/re-derived `{runId, path, digest}`, never
+  the persisted pointer) means file written + read back + pointer strict-appended.
+  Pointer-append failure classifies `unverified` and deliberately leaves an orphan file
+  (gitignored scratch; GC prunes). Consumers must treat a non-`applied`/`unchanged` result as
+  "not consumable", even if the file visibly exists.
 - **Two digests, two roles.** The pointer digest validates *file integrity* (rewind/tamper,
-  enforced inside `readSessionArtifact`). A consumer wanting *cache invalidation* must add its own
+  enforced inside the `WorkflowSession` read seam, `readArtifact`). A consumer wanting *cache
+  invalidation* must add its own
   content-key field (historically: the since-removed checkpoint generator's `plan_body_digest`
   over the current `plan.md`) and
   check it **after** the seam validates. Reuse the `sha256:` convention for both so there is one
@@ -163,12 +166,14 @@ The full producer→consumer recipe, composed from the rules proven above and in
 
 1. **Producer**: a fixed artifact-name constant (the `PLAN_DRAFT_ARTIFACT` precedent,
    `extension/authoring/plan/draft.ts`); write only via the session seam's `writeArtifact`
-   (`writeSessionArtifactClassified` underneath — file + provenance pointer in one gesture);
-   pointer appends carry the **whole merged map** (per-field LWW — see "Provenance
-   pointers" above); a `null` return ⇒ not consumable, even if the file visibly exists.
+   (the one engine in `extension/session/workflowSession.ts` — file + provenance pointer in one
+   gesture; results carry the session-owned receipt, never the persisted pointer); pointer
+   appends carry the **whole merged map** (per-field LWW — see "Provenance pointers" above); a
+   `rejected`/`unverified` result ⇒ not consumable, even if the file visibly exists.
 2. **Read-only writer** (only if the producer must run under the gate) — the carve-out recipe
    below.
-3. **Consumer**: read only via `readSessionArtifact` (digest-validated, fail-open); design the
+3. **Consumer**: read only via the `WorkflowSession` seam's `readArtifact` (digest-validated,
+   fail-open); design the
    fallback chain up front and pick the tier law deliberately — save-style (… → a universal
    fallback, e.g. the transcript scrape) vs review-style (validated sources only, never the
    scrape — see `plan-review-flow.md`); never dereference `pointer.path` (re-derive from

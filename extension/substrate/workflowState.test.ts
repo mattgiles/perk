@@ -15,7 +15,6 @@ import {
   type EntrySink,
   nodeClaimsEqual,
   planRefsEqual,
-  readNodeClaim,
   rebuildWorkflowState,
   resolveStackObjective,
   setConflictAttempts,
@@ -280,7 +279,7 @@ test("appendWorkflowState: multi-field data verifies only the named field", () =
   assert.deepEqual(notifications, []);
 });
 
-// --- nodeClaimsEqual / readNodeClaim (pure units) -------------------------------------------
+// --- nodeClaimsEqual (pure unit) -------------------------------------------------------------
 
 test("nodeClaimsEqual: structural objective+node identity; absent equals only absent", () => {
   const a = { objective: "7", node: "1.2" };
@@ -292,31 +291,8 @@ test("nodeClaimsEqual: structural objective+node identity; absent equals only ab
   assert.equal(nodeClaimsEqual(undefined, null), true);
 });
 
-test("readNodeClaim: rebuilt claim, fail-open on malformed/missing", () => {
-  const src = (data: unknown): { sessionManager: { getBranch(): unknown[] } } => ({
-    sessionManager: {
-      getBranch: () => [{ type: "custom", customType: "perk:workflow-state", data }],
-    },
-  });
-  assert.deepEqual(readNodeClaim(src({ objective_node_claim: { objective: "7", node: "1.2" } })), {
-    objective: "7",
-    node: "1.2",
-  });
-  assert.equal(readNodeClaim(src({})), null);
-  assert.equal(readNodeClaim(src({ objective_node_claim: null })), null);
-  assert.equal(readNodeClaim(src({ objective_node_claim: { objective: 7, node: "1.2" } })), null);
-  assert.equal(readNodeClaim(src({ objective_node_claim: { objective: "7", node: "" } })), null);
-  assert.equal(
-    readNodeClaim({
-      sessionManager: {
-        getBranch: () => {
-          throw new Error("boom");
-        },
-      },
-    }),
-    null,
-  );
-});
+// The rebuilt-claim read (fail-open on malformed/missing) is the session engine's `nodeClaim()`,
+// pinned in session/workflowSession.test.ts.
 
 // --- activePlanRef (the shared worktree-first plan-ref resolution) ------------------------------
 

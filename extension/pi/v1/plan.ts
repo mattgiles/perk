@@ -459,12 +459,12 @@ export function installPlanBindings(pi: ExtensionAPI, gating: ToolGating, wave?:
         case "unchanged":
           // A byte-identical rewrite short-circuits interior-side; the rendered result is
           // computed from identical content either way, so the surface stays byte-stable.
-          return ok(`Plan draft written → ${revised.pointer.path} (${revised.pointer.digest})`, {
+          return ok(`Plan draft written → ${revised.receipt.path} (${revised.receipt.digest})`, {
             name: PLAN_DRAFT_ARTIFACT,
-            path: revised.pointer.path,
-            digest: revised.pointer.digest,
+            path: revised.receipt.path,
+            digest: revised.receipt.digest,
             bytes: revised.bytes,
-            run_id: revised.pointer.run_id,
+            run_id: revised.receipt.runId,
           });
         case "rejected":
           return fail(

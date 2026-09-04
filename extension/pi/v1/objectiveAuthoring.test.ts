@@ -19,11 +19,13 @@ import { resolveDreamReportGate } from "../../authoring/objective/dreamReportGat
 import { OBJECTIVE_AUTHOR_CONTEXT_TYPE } from "../../authoring/objective/prose.ts";
 import { PLAN_CONTEXT_TYPE } from "../../authoring/plan/prose.ts";
 import { DREAM_REPORT_INPUT_SCHEMA } from "../../learning/dreamReport.ts";
+import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import { soundPointer } from "../../session/workflowSession.ts";
 import { sessionDataDir } from "../../substrate/cache.ts";
 import {
   digestSessionData,
+  type SessionArtifactCtx,
   type SessionDataCtx,
-  writeSessionArtifactClassified,
 } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import {
@@ -52,15 +54,17 @@ import {
   ROADMAP_PARAM_SCHEMA,
 } from "./objectiveAuthoring.ts";
 
-/** The retired production write wrapper, kept as a TEST fixture (plant artifact + pointer). */
+/** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(
-  sink: Parameters<typeof writeSessionArtifactClassified>[0],
-  ctx: Parameters<typeof writeSessionArtifactClassified>[1],
+  sink: EntrySink,
+  ctx: SessionArtifactCtx,
   name: string,
   content: string,
 ): string | null {
-  const result = writeSessionArtifactClassified(sink, ctx, name, content);
-  return result.status === "applied" || result.status === "unchanged" ? result.path : null;
+  const result = openBranchWorkflowSession(sink, ctx).writeArtifact(name, content);
+  return result.status === "applied" || result.status === "unchanged"
+    ? join(ctx.cwd, result.receipt.path)
+    : null;
 }
 
 const CREATE_JSON = JSON.stringify({
@@ -987,17 +991,15 @@ test("harness: objective_draft succeeds while read-only; artifact + pointer land
       prose: PROSE,
       roadmap: DRAFT_ROADMAP,
     });
-    const details = result.details as { ok: boolean; run_id?: string; roadmap_nodes?: number };
-    assert.equal(details.ok, true);
-    assert.equal(details.run_id, "01RID");
-    assert.equal(details.roadmap_nodes, 1);
-    assert.match(
-      (result.content[0] as { text?: string })?.text ?? "",
-      /Objective draft written → /,
-    );
-    assert.match((result.content[0] as { text?: string })?.text ?? "", /1 roadmap nodes/);
-    assert.equal(result.terminate, undefined, "non-terminating by design");
-
+    const details = result.details as {
+      ok: boolean;
+      name?: string;
+      path?: string;
+      digest?: string;
+      bytes?: number;
+      run_id?: string;
+      roadmap_nodes?: number;
+    };
     const path = join(sessionDataDir(cwd, "01RID"), OBJECTIVE_DRAFT_ARTIFACT);
     assert.ok(existsSync(path));
     const content = readFileSync(path, "utf8");
@@ -1006,7 +1008,30 @@ test("harness: objective_draft succeeds while read-only; artifact + pointer land
       prose: PROSE,
       roadmap: DRAFT_ROADMAP,
     });
-    const pointer = h.workflowState().session_artifacts?.[OBJECTIVE_DRAFT_ARTIFACT];
+    // The receipt→Pi mapping is pinned exactly: derived repo-relative path, proven digest,
+    // byte count, run id, roadmap count, and the complete rendered line.
+    const relPath = join(
+      ".perk",
+      "workflow",
+      "scratch",
+      "runs",
+      "01RID",
+      "data",
+      OBJECTIVE_DRAFT_ARTIFACT,
+    );
+    assert.equal(details.ok, true);
+    assert.equal(details.name, OBJECTIVE_DRAFT_ARTIFACT);
+    assert.equal(details.path, relPath);
+    assert.equal(details.digest, digestSessionData(content));
+    assert.equal(details.bytes, Buffer.byteLength(content, "utf8"));
+    assert.equal(details.run_id, "01RID");
+    assert.equal(details.roadmap_nodes, 1);
+    assert.equal(
+      (result.content[0] as { text?: string })?.text,
+      `Objective draft written → ${relPath} (${digestSessionData(content)}; 1 roadmap nodes)`,
+    );
+    assert.equal(result.terminate, undefined, "non-terminating by design");
+    const pointer = soundPointer(h.workflowState().session_artifacts?.[OBJECTIVE_DRAFT_ARTIFACT]);
     assert.equal(pointer?.digest, digestSessionData(content));
   } finally {
     h.dispose();

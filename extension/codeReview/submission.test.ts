@@ -10,7 +10,7 @@ import { test } from "node:test";
 import {
   type MemoryWorkflowSession,
   openMemoryWorkflowSession,
-} from "../session/memoryWorkflowSession.ts";
+} from "../testing/memoryWorkflowSession.ts";
 import {
   type CuratedSubmission,
   type FormalEventGate,
@@ -68,6 +68,17 @@ function input(overrides: Partial<CuratedSubmission> = {}): CuratedSubmission {
 
 function session(): MemoryWorkflowSession {
   return openMemoryWorkflowSession({ runId: "RID" });
+}
+
+/** Silence the strict-append seam's loud stderr report for a deliberately induced failure. */
+async function quietly<T>(fn: () => Promise<T>): Promise<T> {
+  const original = console.error;
+  console.error = () => {};
+  try {
+    return await fn();
+  } finally {
+    console.error = original;
+  }
 }
 
 test("a formal event raises the confirm (wire event + count + first body line); declined → nothing submitted", async () => {
@@ -309,11 +320,13 @@ test("BOTH session changes are always attempted — a rejected record never skip
   const { submitter } = fakeSubmitter();
   const s = session();
   s.failNextApply(); // record-review rejects; append-review-post must still be attempted
-  const outcome = await submitCuratedReview(input(), {
-    submitter,
-    gate: { kind: "headless" },
-    session: s,
-  });
+  const outcome = await quietly(() =>
+    submitCuratedReview(input(), {
+      submitter,
+      gate: { kind: "headless" },
+      session: s,
+    }),
+  );
   assert.equal(outcome.kind, "posted", "the classifications are ignored — the post succeeded");
   assert.equal(s.lastReviewRecord(), null, "the rejected record landed nothing");
   assert.equal(s.reviewPosts().length, 1, "the ledger row was still attempted and landed");

@@ -21,11 +21,12 @@ import {
   primeAnnotationSurface,
 } from "../pi/v1/providers/annotations.ts";
 import type { ReviewOutcome } from "../pi/v1/review.ts";
+import { openBranchWorkflowSession } from "../session/branchWorkflowSession.ts";
 import { sessionDataDir } from "../substrate/cache.ts";
 import {
   digestSessionData,
+  type SessionArtifactCtx,
   type SessionDataCtx,
-  writeSessionArtifactClassified,
 } from "../substrate/sessionData.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import type { EntrySink } from "../substrate/workflowState.ts";
@@ -55,15 +56,17 @@ import {
   routePlanReviewDecision,
 } from "./planReviewBrowser.ts";
 
-/** The retired production write wrapper, kept as a TEST fixture (plant artifact + pointer). */
+/** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(
-  sink: Parameters<typeof writeSessionArtifactClassified>[0],
-  ctx: Parameters<typeof writeSessionArtifactClassified>[1],
+  sink: EntrySink,
+  ctx: SessionArtifactCtx,
   name: string,
   content: string,
 ): string | null {
-  const result = writeSessionArtifactClassified(sink, ctx, name, content);
-  return result.status === "applied" || result.status === "unchanged" ? result.path : null;
+  const result = openBranchWorkflowSession(sink, ctx).writeArtifact(name, content);
+  return result.status === "applied" || result.status === "unchanged"
+    ? join(ctx.cwd, result.receipt.path)
+    : null;
 }
 
 // ------------------------------------------------------------------ surface probes (shared)
@@ -551,8 +554,8 @@ test("decision: APPROVE with a CHANGED live draft → the stale refusal (nothing
     assert.equal(s.injected.length, 1, "the model is told the approval did not save");
     assert.match(s.injected[0]?.message ?? "", /STALE bytes/);
     assert.match(s.injected[0]?.message ?? "", /NOTHING was saved/);
-    // Note: writeFileSync leaves the pointer digest stale too — readSessionArtifact refuses —
-    // but the guard is the same for both mismatch shapes: no artifact match ⇒ no save.
+    // Note: writeFileSync leaves the pointer digest stale too — the seam's readArtifact
+    // refuses — but the guard is the same for both mismatch shapes: no artifact match ⇒ no save.
   });
 });
 

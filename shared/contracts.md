@@ -98,22 +98,24 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   (`extension/substrate/toolGating.ts`) as a **narrow structural carve-out**: the tool has no
   path/name parameter — the artifact name is a fixed constant and the path derives exclusively
   through the accessor seam (the `WorkflowSession` artifact write: file + provenance pointer,
-  `writeSessionArtifactClassified` underneath) — so the only
+  implemented once by the session engine, `extension/session/workflowSession.ts`) — so the only
   bytes it can ever write are its one working artifact in the current run's data dir
   (gitignored scratch); the gate's `tool_call` `edit`/`write`/bash blocking is unchanged.
   Semantics: full rewrite per call, non-terminating, NOT a save — `plan_save`/`/plan-save` and
   `objective_save`/`/objective-save` remain the canonical persist surfaces. Failure taxonomy
   (soft results, never throws): mistyped params → `bad_input`; empty/whitespace payload →
   `invalid_input`; no session `run_id` → `no_run_id`; file-or-pointer write failure →
-  `write_failed`. Consumers read a draft only via `readSessionArtifact` (digest-validated,
-  fail-open). `plan_draft` writes the working plan during read-only plan authoring to
+  `write_failed`. Consumers read a draft only via the `WorkflowSession` read seam
+  (`readArtifact` — digest-validated, fail-open). `plan_draft` writes the working plan during
+  read-only plan authoring to
   `plan-draft.md` (`PLAN_DRAFT_ARTIFACT`, `extension/authoring/plan/draft.ts`); `objective_draft`'s
   per-artifact differences are below.
 
   **File-first plan save.** Both save surfaces resolve their plan through one shared
   resolver (`resolvePlanSource`, `extension/authoring/plan/source.ts`), in order: (1) the validated
-  `plan-draft.md` artifact (`readSessionArtifact` — digest-validated, fail-open: no run_id / no
-  pointer / fork run_id mismatch / missing file / digest mismatch all fall through); (2) the
+  `plan-draft.md` artifact (the `WorkflowSession` read seam — digest-validated, fail-open: no
+  run_id / no pointer / fork run_id mismatch / missing file / digest mismatch all fall through);
+  (2) the
   explicit `plan` param (tool only — now **optional** in the `plan_save` schema); (3) the
   `extractPlanMarkdown` transcript scrape — the universal fail-open last resort for every save
   surface; else the save refuses (`invalid_input` on the tool, a warning report on the command).
@@ -467,7 +469,7 @@ end of the section).
 | `last_review_batch` | object \| null | the last fully processed review batch, appended by `finalize_address` only after publication and thread resolution succeed: `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
 | `last_pr_review` | object \| null | the last `/pr-review` outcome posted via the shared warm `post_pr_review` tool: `{ pr, verdict, angles, covered_angles, comment_count, mode, at:ISO }`; a recorded wave is PR-bound and single-use, and supplies authoritative ordered `angles` / schema-valid `covered_angles`; standalone posting before any valid wave uses caller-supplied angles for both (or `[]`); best-effort tier (the PR review is the canonical record) |
 | `last_review` | object \| null | the last review-door outcome posted via the warm `submit_pr_review` tool: `{ pr, event, comment_count, mode, at:ISO }`; best-effort tier (the submitted PR review is the canonical record) |
-| `review_posts` | array | the accumulating per-PR posting ledger of a stacked review: one `{ pr, event, at:ISO }` row per REAL `submit_pr_review` success, in posting order (read-rebuild-append — each write carries the whole list; the append-path rebuild FAILS CLOSED: an unrebuildable branch refuses the append rather than LWW-erasing earlier confirmed rows, while the plain ledger READ stays fail-open); best-effort tier with an asymmetric trust rule — a row can be MISSING spuriously (append failed after a real post) but never PRESENT spuriously, so `submit_pr_review` enforces skip-on-resume on presence (`already_posted` refusal; `allow_repost: true` is the deliberate override) while a missing row means verify posted-vs-pending against GitHub before re-posting |
+| `review_posts` | array | the accumulating per-PR posting ledger of a stacked review: one `{ pr, event, at:ISO }` row per REAL `submit_pr_review` success, in posting order (read-rebuild-append — each write carries the whole list; the append-path pre-read FAILS CLOSED and is STRICT-DECODED: an unrebuildable branch OR a malformed persisted ledger — a non-array, or any row that is not `{pr: integer, event: string, at: string}` — refuses the append rather than LWW-erasing possibly-real earlier rows (an absent field is the normal empty first-append ledger; extra row fields are narrowed out), while the plain ledger READ stays fail-open/tolerant); best-effort tier with an asymmetric trust rule — a row can be MISSING spuriously (append failed after a real post) but never PRESENT spuriously, so `submit_pr_review` enforces skip-on-resume on presence (`already_posted` refusal; `allow_repost: true` is the deliberate override) while a missing row means verify posted-vs-pending against GitHub before re-posting |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
 | `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`); written by the warm `objective_node` tool on a successful `planning` transition (idempotent — a re-claim equal to the live claim appends nothing) **and by the cold claim** (`session_start` persists it from the claimed handoff's non-blank `objective_id`/`node_id` — the objective-plan cold door's `handoff_extra` — so implement-here suppression is structural in cold objective-plan sessions too), cleared on a successful non-planning transition for the same node and after a successful node-linked plan save (the save-path clear matches the **full claim identity** — objective **and** node — so a save linked elsewhere never clobbers an unrelated standing claim); best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
 | `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter: incremented on each `perk.conflict-resolver` dispatch from EITHER warm surface — `/submit`'s PR-rebase drive on a definitively-unmergeable PR, or `/objective-sync`'s retained-continuation drive (§8.51) — (cap `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`, shared, through `delivery/submit.ts`'s ONE `inspectConflictBudget` cap read + each consumer's strict verified `attempts.write`); the increment is persisted-and-verified BEFORE any dispatch on BOTH surfaces — an unverified write (strict read-back `false`) WITHHOLDS the dispatch with a loud report (the surface-uniform withhold posture; a THROWING read/write still propagates on the submit/address path — the pinned load-bearing failure arm — while the stack pipeline's total boundary translates it to `state_error`); reset to 0 on any clean mutating completion (a clean submit; a clean non-declined mutating stack sync/continue/abort/adopt); best-effort tier (cheaply reconstructable) |

@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { openMemoryWorkflowSession } from "../session/memoryWorkflowSession.ts";
+import { openMemoryWorkflowSession } from "../testing/memoryWorkflowSession.ts";
 import {
   type AddressFinalization,
   type FinalizeAddressDeps,
@@ -83,6 +83,17 @@ function batch(...threads: AddressFinalization["threads"]): AddressFinalization 
 }
 
 // --- ordering + atomicity -------------------------------------------------------------------
+
+/** Silence the strict-append seam's loud stderr report for a deliberately induced failure. */
+async function quietly<T>(fn: () => Promise<T>): Promise<T> {
+  const original = console.error;
+  console.error = () => {};
+  try {
+    return await fn();
+  } finally {
+    console.error = original;
+  }
+}
 
 test("empty batch refuses before any port with the exact text", async () => {
   const { deps, calls } = world({});
@@ -347,13 +358,14 @@ test("a failed session recording never sinks a corroborated completion (rejected
       resolve: { ok: true, rows: rowsOf(["PRRT_1", true, true]) },
     });
     session[induce]();
-    const outcome = await finalizeAddress(deps, batch({ thread_id: "PRRT_1" }));
+    const outcome = await quietly(() => finalizeAddress(deps, batch({ thread_id: "PRRT_1" })));
     assert.equal(outcome.kind, "completed", induce);
     if (induce === "failNextApply") {
       assert.equal(session.lastReviewBatchRecord(), null, "the rejected apply landed nothing");
     } else {
-      // The unverified arm landed the value in the memory backing — the attempt is observable.
-      assert.deepEqual(session.lastReviewBatchRecord()?.resolved_thread_ids, ["PRRT_1"]);
+      // The unverified arm models the NOT-landed append (dropped before the read-back proof):
+      // nothing observable landed — an unverified record is never consumable.
+      assert.equal(session.lastReviewBatchRecord(), null, "the unverified apply landed nothing");
     }
   }
 });

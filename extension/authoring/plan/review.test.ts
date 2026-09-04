@@ -5,11 +5,11 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { PlanRef } from "../../substrate/cache.ts";
 import {
   type MemoryWorkflowSession,
   openMemoryWorkflowSession,
-} from "../../session/memoryWorkflowSession.ts";
-import type { PlanRef } from "../../substrate/cache.ts";
+} from "../../testing/memoryWorkflowSession.ts";
 import { resumePlanDraft, revisePlanDraft } from "./draft.ts";
 import {
   applyReviewerEdits,
