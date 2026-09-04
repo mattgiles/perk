@@ -16,6 +16,7 @@ from perk.backends.linear.client import (
     RATELIMITED_CODE,
     LinearClient,
     LinearGraphQLError,
+    _is_entity_not_found,
     client_from_env,
 )
 
@@ -161,6 +162,82 @@ class TestGraphQLErrors:
             client.request("q")
         assert "malformed Linear error entry" in str(excinfo.value)
 
+    def test_user_presentable_message_is_appended_to_the_entry_text(self) -> None:
+        # Linear's actionable detail lives in extensions.userPresentableMessage — the generic
+        # top-level message alone is opaque (the 80-char project-name incident shape).
+        client, _ = _client_with_response(
+            status=400,
+            body={
+                "errors": [
+                    {
+                        "message": "Argument Validation Error",
+                        "extensions": {
+                            "code": "INVALID_INPUT",
+                            "userPresentableMessage": (
+                                "name must be shorter than or equal to 80 characters"
+                            ),
+                        },
+                    }
+                ]
+            },
+        )
+        with pytest.raises(LinearGraphQLError) as excinfo:
+            client.request("q")
+        assert (
+            "Argument Validation Error — "
+            "name must be shorter than or equal to 80 characters" in str(excinfo.value)
+        )
+        assert excinfo.value.codes == ("INVALID_INPUT",)
+
+    def test_user_presentable_message_identical_to_message_appears_once(self) -> None:
+        client, _ = _client_with_response(
+            status=400,
+            body={
+                "errors": [
+                    {
+                        "message": "same text either way",
+                        "extensions": {"userPresentableMessage": "same text either way"},
+                    }
+                ]
+            },
+        )
+        with pytest.raises(LinearGraphQLError) as excinfo:
+            client.request("q")
+        assert str(excinfo.value).count("same text either way") == 1
+
+    def test_non_string_user_presentable_message_is_ignored(self) -> None:
+        client, _ = _client_with_response(
+            status=400,
+            body={
+                "errors": [
+                    {
+                        "message": "boom",
+                        "extensions": {"userPresentableMessage": {"detail": "nested junk"}},
+                    }
+                ]
+            },
+        )
+        with pytest.raises(LinearGraphQLError) as excinfo:
+            client.request("q")
+        assert str(excinfo.value).endswith("boom")
+
+    def test_malformed_message_still_carries_the_presentable_detail(self) -> None:
+        # The decided mixed case: the detail is exactly what makes a malformed entry diagnosable.
+        client, _ = _client_with_response(
+            status=400,
+            body={
+                "errors": [
+                    {
+                        "message": 42,
+                        "extensions": {"userPresentableMessage": "the actionable detail"},
+                    }
+                ]
+            },
+        )
+        with pytest.raises(LinearGraphQLError) as excinfo:
+            client.request("q")
+        assert "(malformed Linear error entry) — the actionable detail" in str(excinfo.value)
+
     def test_authentication_error_code_appends_the_api_key_hint(self) -> None:
         client, _ = _client_with_response(
             status=400,
@@ -182,6 +259,28 @@ class TestGraphQLErrors:
         with pytest.raises(IssueBackendError) as excinfo:
             client.request("q")
         assert isinstance(excinfo.value, LinearGraphQLError)
+
+
+class TestEntityNotFoundPredicate:
+    """Not-found detection scans the full enriched message text (the decided contract) —
+    presentable detail may add semantically-correct matches, and a validation error is never
+    swallowed as not-found."""
+
+    def test_validation_error_with_presentable_detail_is_not_a_not_found(self) -> None:
+        # The exact production shape from the 80-char project-name incident.
+        exc = LinearGraphQLError(
+            "Linear GraphQL error: Argument Validation Error — "
+            "name must be shorter than or equal to 80 characters",
+            codes=("INPUT_ERROR",),
+        )
+        assert not _is_entity_not_found(exc)
+
+    def test_not_found_with_presentable_detail_still_matches(self) -> None:
+        exc = LinearGraphQLError(
+            "Linear GraphQL error: Entity not found: Project — Could not find referenced Project.",
+            codes=("INPUT_ERROR",),
+        )
+        assert _is_entity_not_found(exc)
 
 
 class TestHTTPFailures:

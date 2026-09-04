@@ -290,6 +290,45 @@ class TestLinearProjectOps:
         assert payload["name"] == "Phase 3"
         assert payload["content"] == "overview"
 
+    def test_create_project_truncates_over_long_name_with_ellipsis(self) -> None:
+        # Linear caps ProjectCreateInput.name at 80 chars; the guard truncates, never rejects.
+        long_name = "An objective title long enough to blow past the Linear project-name cap " + (
+            "x" * 24
+        )
+        assert len(long_name) > 80
+        ops, fake = _make_project_ops(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projectCreate(": [
+                    {"projectCreate": {"success": True, "project": {"id": "p-1", "url": "u"}}}
+                ],
+            }
+        )
+        ops.create_project(name=long_name, content="overview")
+        [(_, variables)] = _queries(fake, "projectCreate(")
+        payload = _input_payload(variables)
+        sent = payload["name"]
+        assert isinstance(sent, str)
+        assert len(sent) <= 80
+        assert sent.endswith("…")
+        assert long_name.startswith(sent[:-1])
+        assert payload["content"] == "overview"  # the guard never touches content
+
+    def test_create_project_exactly_80_char_name_passes_through(self) -> None:
+        # The boundary no-op: a name at the cap is sent byte-identical.
+        name = "n" * 80
+        ops, fake = _make_project_ops(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projectCreate(": [
+                    {"projectCreate": {"success": True, "project": {"id": "p-1", "url": "u"}}}
+                ],
+            }
+        )
+        ops.create_project(name=name, content="overview")
+        [(_, variables)] = _queries(fake, "projectCreate(")
+        assert _input_payload(variables)["name"] == name
+
     def test_create_project_failure_raises(self) -> None:
         ops, _ = _make_project_ops(
             {
