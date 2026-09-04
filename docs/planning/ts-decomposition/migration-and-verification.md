@@ -1741,6 +1741,14 @@ Every implementation plan created from this proposal should record:
 > canonical rationale home (`module-contracts.md`); the storage-freedom criterion is
 > added per `module-contracts.md` § Storage freedom.
 
+> **Update (Objective #2130, Node 5.1, 2026-09-04):** **verified** — every criterion under
+> all five headings below was verified against the final train state (measured at the
+> node-4.2 verified head `cead475a`; node 5.1 ships no `extension/` change). The
+> criterion→evidence ledger — one classified row per criterion (guard-enforced /
+> suite-pinned / derivation-verified / inspection-verified), every anchor re-resolved at
+> verification time — lives in the closing record,
+> `docs/design/archive/ts-seam-deepening-closeout.md` §1.
+
 ### Architecture
 
 - `authoring/`, `delivery/`, `codeReview/`, and `learning/` expose typed

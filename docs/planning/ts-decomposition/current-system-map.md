@@ -562,6 +562,15 @@ interfaces. Physical reorganization should follow ownership, not precede it.
 
 ## Objective #2130 baseline (commit `53fe2d7d`, measured 2026-09-02)
 
+> **Update (Objective #2130, Node 5.1, 2026-09-04):** the final measurement is **taken** —
+> node 5.1 re-ran these four pipelines verbatim at the final train state (`cead475a`); the
+> before/after tables, the file-by-file importer and export deltas, and the named rationale
+> for the remaining excess live in `docs/design/archive/ts-seam-deepening-closeout.md` §2.
+> This section stays as-stamped: the pinned before-snapshot. One expectation moved with the
+> train: pipeline 4's calibration row, `extension/worker/stageExecution.ts`, reports
+> 13 declarations / 16 names at the final state (node 4.1's landed narrowing of the 26 / 30
+> pinned below) — the closing record's calibration gate carries the updated numbers.
+
 This section is objective #2130's quantitative baseline, measured independently of — and
 without modifying — the frozen #2083-era snapshot above (`95ff7cc7`). Every measure
 records its complete, copy-paste-runnable command followed by the value measured at the
