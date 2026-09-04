@@ -508,14 +508,6 @@ def render_stamp_event(record: ReadyStampRecord) -> str:
 # ----------------------------------------------------------------- parsing
 
 
-def _first_nonblank_line(body: str) -> str:
-    """The body's first nonblank line (rstripped; ``""`` for a blank body) — the canonical
-    marker position. Recognition is positional: only marker text HERE makes a body a journal
-    region (contracts.md §8.43)."""
-    lines = body.strip().splitlines()
-    return lines[0].rstrip() if lines else ""
-
-
 @dataclass(frozen=True)
 class JournalEvent:
     """One parsed journal event: the strict record plus its physical-comment identity.
@@ -731,7 +723,10 @@ def parse_carrier_comment(
     line → unrelated untrusted DATA (``None``) — objective prose mentioning either marker
     text mid-body is DATA by construction.
     """
-    if _MARKER_TEXT in _first_nonblank_line(body):
+    # The canonical marker position — the same recognition gate each parser applies itself.
+    lines = body.strip().splitlines()
+    first = lines[0].rstrip() if lines else ""
+    if _MARKER_TEXT in first:
         return parse_journal_comment(
             body,
             comment_id=comment_id,

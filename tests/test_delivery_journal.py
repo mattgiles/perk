@@ -653,6 +653,27 @@ class TestCarrierRouting:
             is None
         )
 
+    def test_leading_blank_operation_event_routes_to_the_operation_grammar(self) -> None:
+        # "First NONBLANK line" is load-bearing at the dispatcher too: leading blank lines
+        # never make a valid event fall through to the stamp grammar or to unrelated DATA.
+        record = _prepared()
+        parsed = journal.parse_carrier_comment(
+            "\n\n" + journal.render_event(record), comment_id="c1", created_at="t1", edited_at=None
+        )
+        assert isinstance(parsed, journal.JournalEvent)
+        assert parsed.record == record
+
+    def test_leading_blank_stamp_event_routes_to_the_stamp_grammar(self) -> None:
+        record = _stamp()
+        parsed = journal.parse_carrier_comment(
+            "\n\n" + journal.render_stamp_event(record),
+            comment_id="s1",
+            created_at="t1",
+            edited_at=None,
+        )
+        assert isinstance(parsed, journal.ReadyStampEvent)
+        assert parsed.record == record
+
     def test_unrelated_comment_is_none(self) -> None:
         assert (
             journal.parse_carrier_comment(
