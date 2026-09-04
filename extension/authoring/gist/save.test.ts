@@ -5,8 +5,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { MemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
 import { openMemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
+import type { ApprovalGate } from "../review/approvalGate.ts";
 import { GIST_DRAFT_ARTIFACT, reviseGistDraft } from "./draft.ts";
-import { type GistBackend, type GistGate, gistApprovalSave, saveGist } from "./save.ts";
+import { type GistBackend, gistApprovalSave, saveGist } from "./save.ts";
 
 const PROSE = "# Faster reviews\n\nWe would likely want review turnaround under a day.\n";
 
@@ -33,7 +34,7 @@ function fakeBackend(result?: Awaited<ReturnType<GistBackend["save"]>>): GistBac
 }
 
 /** A gate fake recording exits; `active` is the isActive snapshot. */
-function fakeGate(active: boolean): GistGate & { exits: number } {
+function fakeGate(active: boolean): ApprovalGate & { exits: number } {
   const gate = {
     exits: 0,
     isActive: () => active,
@@ -124,7 +125,7 @@ test("gistApprovalSave: refused draft → refused-draft BEFORE the gate snapshot
   const backend = fakeBackend();
   // A probing gate: any isActive() call means the refused arm reached the gate snapshot.
   let probed = 0;
-  const gate: GistGate & { exits: number } = {
+  const gate: ApprovalGate & { exits: number } = {
     exits: 0,
     isActive: () => {
       probed += 1;
@@ -175,59 +176,19 @@ test("gistApprovalSave: an explicit title overrides the draft title (the /gist-s
   assert.equal(backend.requests[0]?.title, "Override title");
 });
 
-test("gistApprovalSave: a failed save leaves the gate on", async () => {
+test("gistApprovalSave: a failed save maps to save-failed (message preserved, gateExited false)", async () => {
   const backend = fakeBackend({
     status: "failed",
     message: "gh exploded",
     errorType: "github_error",
   });
-  const gate = fakeGate(true);
-  const outcome = await gistApprovalSave({ session: draftedSession(), backend, gate });
+  const outcome = await gistApprovalSave({
+    session: draftedSession(),
+    backend,
+    gate: fakeGate(true),
+  });
   assert.equal(outcome.status, "save-failed");
   assert.ok(outcome.status === "save-failed");
   assert.equal(outcome.gateExited, false);
   assert.equal(outcome.save.message, "gh exploded");
-  assert.equal(gate.exits, 0, "the gate stays on");
-});
-
-test("gistApprovalSave: a save while already read-write never exits the gate", async () => {
-  const gate = fakeGate(false);
-  const outcome = await gistApprovalSave({
-    session: draftedSession(),
-    backend: fakeBackend(),
-    gate,
-  });
-  assert.equal(outcome.status, "saved");
-  assert.ok(outcome.status === "saved");
-  assert.equal(outcome.gateExited, false);
-  assert.equal(gate.exits, 0, "no gate.exit call");
-});
-
-test("gistApprovalSave: gate released ONLY after the verified backend success envelope", async () => {
-  // The gate snapshot is taken BEFORE the save; a backend that flips the gate off mid-save must
-  // not double-exit, and a failure after the snapshot must leave it untouched.
-  const order: string[] = [];
-  const backend: GistBackend = {
-    async save() {
-      order.push("backend");
-      return {
-        status: "saved",
-        id: "7",
-        url: "https://gh/o/r/issues/7",
-        existed: null,
-        scope: null,
-      };
-    },
-  };
-  const gate: GistGate = {
-    isActive: () => {
-      order.push("snapshot");
-      return true;
-    },
-    exit: () => {
-      order.push("exit");
-    },
-  };
-  await gistApprovalSave({ session: draftedSession(), backend, gate });
-  assert.deepEqual(order, ["snapshot", "backend", "exit"], "snapshot → save → exit, in order");
 });

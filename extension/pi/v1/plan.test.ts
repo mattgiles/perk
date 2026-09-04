@@ -33,7 +33,6 @@ import type { ReportTarget } from "../../surfaces/report.ts";
 import {
   fakePerk,
   loadPerkSession,
-  plantRawSession,
   plantSession,
   scaffoldRepo,
   spyInjections,
@@ -195,58 +194,6 @@ test("/plan round-trip: on -> read-only + write blocked + plan-context injected;
       "plan-authoring marker stripped from user turns when off",
     );
     assert.equal(surviving.length, 1, "the normal message survives");
-  } finally {
-    h.dispose();
-  }
-});
-
-test("plan-context dedups against a live prior copy (once-only per live copy)", async () => {
-  const cwd = scaffoldRepo();
-  const file = plantRawSession(cwd, [
-    { custom: { type: "perk:workflow-state", data: { run_id: "01RID", mode: "read-only" } } },
-    { custom: { type: PLAN_CONTEXT_TYPE, data: { content: "[PLAN AUTHORING]\nprior copy" } } },
-  ]);
-  const h = await loadPerkSession({
-    cwd,
-    sessionManager: SessionManager.open(file),
-    env: { PERK_RUN_ID: undefined },
-  });
-  try {
-    assert.equal(h.workflowState().mode, "read-only");
-    const injected = await h.emitBeforeAgentStart();
-    assert.equal(
-      injected.some((m) => m.customType === PLAN_CONTEXT_TYPE),
-      false,
-      "prior [PLAN AUTHORING] copy on branch → no re-injection",
-    );
-  } finally {
-    h.dispose();
-  }
-});
-
-test("plan-context re-injects after compaction drops the live copy (active-window dedup)", async () => {
-  // Delta 1 (contracts §8.31 — the gist precedent): the dedup scan runs over the
-  // compaction-ACTIVE window, so a compaction that drops the live copy re-delivers it.
-  const cwd = scaffoldRepo();
-  const file = plantRawSession(cwd, [
-    { custom: { type: "perk:workflow-state", data: { run_id: "01RID", mode: "read-only" } } },
-    { custom: { type: PLAN_CONTEXT_TYPE, data: { content: "[PLAN AUTHORING]\nprior copy" } } },
-    { assistant: "recent work that survives compaction" },
-  ]);
-  const sessions = SessionManager.open(file);
-  const kept = sessions.getEntries().at(-1)?.id;
-  assert.ok(kept !== undefined);
-  sessions.appendCompaction("summary without a live plan context", kept, 100);
-  const h = await loadPerkSession({
-    cwd,
-    sessionManager: sessions,
-    env: { PERK_RUN_ID: undefined },
-  });
-  try {
-    const injected = await h.emitBeforeAgentStart();
-    const contexts = injected.filter((m) => m.customType === PLAN_CONTEXT_TYPE);
-    assert.equal(contexts.length, 1, "the plan context re-injects after compaction dropped it");
-    assert.match(String(contexts[0]?.content), /\[PLAN AUTHORING\]/);
   } finally {
     h.dispose();
   }

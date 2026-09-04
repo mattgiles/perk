@@ -411,10 +411,12 @@ adapter disposal never deletes that state.
 ## PromptEvidence
 
 > **Disposition (Objective #2130, Node 1.1): deferred.** The value type was never built
-> (the Phase-2 narrow-until-proven rule, reaffirmed at every later phase). The inline
+> (the Phase-2 narrow-until-proven rule, reaffirmed at every later phase). The
 > `branchCarries(activeContextWindow(branch), MARKER)` idiom is the realized shape of
-> context evidence; objective #2130 node 4.2 consolidates its repeated implementations
-> into one pi/v1 helper. The `PromptEvidence` value itself waits for a second context
+> context evidence, consolidated into one pi/v1 helper —
+> `extension/pi/v1/contextInjection.ts::installInjectedContext` composes the dedup scan
+> and the stale-strip filter behind every injected authoring/adapter context. The
+> `PromptEvidence` value itself waits for a second context
 > projection — the format-4 host — whose adapter would give the type its second real
 > deriver. Until then this section documents the target semantics, not a binding
 > criterion (removed from the final acceptance criteria by node 1.1).

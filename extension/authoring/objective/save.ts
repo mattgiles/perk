@@ -15,6 +15,7 @@
 // `dream-report-transfer.json` handoff atomically before the cold door.
 
 import type { WorkflowChangeResult, WorkflowSession } from "../../session/workflowSession.ts";
+import { type ApprovalGate, saveThroughApprovalGate } from "../review/approvalGate.ts";
 import type { DeliveryChoice } from "./draft.ts";
 import { resumeObjectiveDraft } from "./draft.ts";
 import type { DreamReportGateOutcome, ObjectiveDreamReportBlock } from "./dreamReportGate.ts";
@@ -159,15 +160,9 @@ export async function saveObjective(
   return { status: "saved", id: saved.id, url: saved.url, existed: saved.existed, linkage };
 }
 
-/** The structural gate slice the approval→save flow releases (the `GistGate`/`PlanGate` sibling). */
-export interface ObjectiveGate {
-  isActive(): boolean;
-  exit(): void;
-}
-
 /** The approval→save dependency bag: the save deps + the gate. */
 export interface ObjectiveApprovalSaveDeps extends ObjectiveSaveDeps {
-  gate: ObjectiveGate;
+  gate: ApprovalGate;
 }
 
 /** The approval→save orchestration outcome (the objective `ApprovalSaveOutcome`).
@@ -192,9 +187,9 @@ export type ObjectiveApprovalSaveOutcome =
  * an APPROVED objective review (`plan_review`'s objective arm) and the manual `/objective-save`
  * failsafe both run THIS. Flow: re-read the STRUCTURED draft artifact at save time
  * (`resumeObjectiveDraft` — never the rendered markdown, never in-hand bytes; the artifact's
- * `dream_report` block passes through whole: stored stamp + stored parts) → `saveObjective` →
- * gate exit ONLY on a successful save while read-only (the D1a pattern: snapshot
- * `gate.isActive()` BEFORE the save; a failed save leaves the gate ON). No draft → `no-draft`
+ * `dream_report` block passes through whole: stored stamp + stored parts) → `saveObjective`
+ * through `saveThroughApprovalGate` (the D1a invariant: snapshot before the save; exit only
+ * after a successful save while read-only; a failed save leaves the gate ON). No draft → `no-draft`
  * (nothing saved, the gate untouched); a REFUSED draft → `refused-draft` before the gate
  * snapshot (fail-closed stop — `gateExited` semantics never arise). Title precedence: an
  * explicit `opts.title` wins; else the draft's `title`; else the cold door derives from the
@@ -208,28 +203,22 @@ export async function objectiveApprovalSave(
   if (resumed.kind === "absent") return { status: "no-draft" };
   if (resumed.kind === "refused") return { status: "refused-draft", problem: resumed.problem };
   const draft = resumed.draft;
-  // D1a: snapshot the gate BEFORE the save; on success, exit it so save marks the read-only →
-  // read-write boundary in one gesture. A failed save leaves the gate on.
-  const wasReadOnly = deps.gate.isActive();
   const title = opts.title ?? draft.title;
-  const result = await saveObjective(
-    {
-      prose: draft.prose,
-      ...(title !== undefined ? { title } : {}),
-      roadmap: draft.roadmap,
-      ...(draft.base !== undefined ? { base: draft.base } : {}),
-      ...(draft.delivery !== undefined ? { delivery: draft.delivery } : {}),
-      ...(draft.dream_report !== undefined
-        ? { dream_report: { source: "reviewed" as const, block: draft.dream_report } }
-        : {}),
-    },
-    deps,
+  const { outcome: result, gateExited } = await saveThroughApprovalGate(deps.gate, () =>
+    saveObjective(
+      {
+        prose: draft.prose,
+        ...(title !== undefined ? { title } : {}),
+        roadmap: draft.roadmap,
+        ...(draft.base !== undefined ? { base: draft.base } : {}),
+        ...(draft.delivery !== undefined ? { delivery: draft.delivery } : {}),
+        ...(draft.dream_report !== undefined
+          ? { dream_report: { source: "reviewed" as const, block: draft.dream_report } }
+          : {}),
+      },
+      deps,
+    ),
   );
   if (result.status === "failed") return { status: "save-failed", result, gateExited: false };
-  let gateExited = false;
-  if (wasReadOnly) {
-    deps.gate.exit();
-    gateExited = true;
-  }
   return { status: "saved", result, gateExited };
 }

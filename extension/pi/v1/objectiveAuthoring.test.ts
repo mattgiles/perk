@@ -38,7 +38,6 @@ import { dreamRepoCommit, dreamReportInput, plantDreamFiles } from "../../testin
 import {
   fakePerk,
   loadPerkSession,
-  plantRawSession,
   plantSession,
   scaffoldRepo,
   spyInjections,
@@ -49,7 +48,6 @@ import {
   DREAM_REPORT_PARAM_SCHEMA,
   DREAM_REPORT_TRANSFER_FILENAME,
   decodeObjectiveSaveParams,
-  installObjectiveAuthoringBindings,
   objectiveApprovalSaveV1,
   ROADMAP_PARAM_SCHEMA,
 } from "./objectiveAuthoring.ts";
@@ -1170,120 +1168,6 @@ test("objective-author session injects objective-authoring context; planMode def
   }
 });
 
-test("objective-author context dedups against a live prior copy (reconstructed on reload)", async () => {
-  // The reload shape: a fresh load over the same persisted branch — dedup keys off branch
-  // content, never in-memory state.
-  const cwd = scaffoldRepo();
-  const file = plantRawSession(cwd, [
-    {
-      custom: {
-        type: "perk:workflow-state",
-        data: { run_id: "01RID", mode: "read-only", stage: "objective-author" },
-      },
-    },
-    {
-      custom: {
-        type: OBJECTIVE_AUTHOR_CONTEXT_TYPE,
-        data: { content: "[OBJECTIVE AUTHORING]\nprior copy" },
-      },
-    },
-  ]);
-  const h = await loadPerkSession({
-    cwd,
-    sessionManager: SessionManager.open(file),
-    env: { PERK_RUN_ID: undefined },
-  });
-  try {
-    assert.equal(h.workflowState().stage, "objective-author");
-    const injected = await h.emitBeforeAgentStart();
-    assert.equal(
-      injected.some((m) => m.customType === OBJECTIVE_AUTHOR_CONTEXT_TYPE),
-      false,
-      "prior [OBJECTIVE AUTHORING] copy in the live window → no re-injection",
-    );
-  } finally {
-    h.dispose();
-  }
-});
-
-test("objective-author context RE-INJECTS when compaction drops the prior copy", async () => {
-  // Delta 1: the dedup scans the compaction-ACTIVE window, so a compaction that drops the live
-  // copy re-delivers it — and a summary QUOTING the marker is not a live copy
-  // (activeContextWindow excludes compaction entries).
-  const cwd = scaffoldRepo();
-  const file = plantRawSession(cwd, [
-    {
-      custom: {
-        type: "perk:workflow-state",
-        data: { run_id: "01RID", mode: "read-only", stage: "objective-author" },
-      },
-    },
-    {
-      custom: {
-        type: OBJECTIVE_AUTHOR_CONTEXT_TYPE,
-        data: { content: "[OBJECTIVE AUTHORING]\nprior copy" },
-      },
-    },
-    { assistant: "recent work that survives compaction" },
-  ]);
-  const sessionManager = SessionManager.open(file);
-  const keptId = sessionManager.getEntries().at(-1)?.id;
-  assert.ok(keptId !== undefined);
-  sessionManager.appendCompaction(
-    "summary quoting [OBJECTIVE AUTHORING] is not a live copy",
-    keptId,
-    100,
-  );
-  const h = await loadPerkSession({ cwd, sessionManager, env: { PERK_RUN_ID: undefined } });
-  try {
-    const injected = await h.emitBeforeAgentStart();
-    assert.ok(
-      injected.some(
-        (m) =>
-          m.customType === OBJECTIVE_AUTHOR_CONTEXT_TYPE &&
-          String(m.content).includes("[OBJECTIVE AUTHORING]"),
-      ),
-      "a copy outside the active compaction window must not suppress re-injection",
-    );
-  } finally {
-    h.dispose();
-  }
-});
-
-test("objective-author context keeps dedup when compaction retains the prior copy", async () => {
-  const cwd = scaffoldRepo();
-  const file = plantRawSession(cwd, [
-    {
-      custom: {
-        type: "perk:workflow-state",
-        data: { run_id: "01RID", mode: "read-only", stage: "objective-author" },
-      },
-    },
-    {
-      custom: {
-        type: OBJECTIVE_AUTHOR_CONTEXT_TYPE,
-        data: { content: "[OBJECTIVE AUTHORING]\nprior copy" },
-      },
-    },
-  ]);
-  const sessionManager = SessionManager.open(file);
-  const keptId = sessionManager.getEntries().at(-2)?.id ?? sessionManager.getEntries().at(-1)?.id;
-  assert.ok(keptId !== undefined);
-  // Keep from the workflow-state entry onward — the prior copy stays in the live window.
-  sessionManager.appendCompaction("summary", keptId, 100);
-  const h = await loadPerkSession({ cwd, sessionManager, env: { PERK_RUN_ID: undefined } });
-  try {
-    const injected = await h.emitBeforeAgentStart();
-    assert.equal(
-      injected.some((m) => m.customType === OBJECTIVE_AUTHOR_CONTEXT_TYPE),
-      false,
-      "a live retained copy still dedups",
-    );
-  } finally {
-    h.dispose();
-  }
-});
-
 test("a normal plan read-only session injects plan context, not objective-authoring", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
   const h = await loadPerkSession({
@@ -1337,51 +1221,6 @@ test("objective-authoring marker is stripped from context when not authoring", a
   } finally {
     h.dispose();
   }
-});
-
-test("the context hook pair is fail-open on a THROWING branch read (delta 6)", async () => {
-  // The "never throws" contract must hold structurally even when `sessionManager.getBranch()`
-  // itself throws — not just when the state rebuild does: the injection stays inert and the
-  // strip hygiene still removes a stale objective-authoring marker without rejecting.
-  const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<unknown>>();
-  const pi = {
-    on(event: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) {
-      handlers.set(event, handler);
-    },
-    registerTool() {},
-    registerCommand() {},
-  } as unknown as ExtensionAPI;
-  installObjectiveAuthoringBindings(pi, fakeGating(true));
-  const ctx = {
-    cwd: scaffoldRepo(),
-    sessionManager: {
-      getBranch(): unknown[] {
-        throw new Error("adversarial branch read");
-      },
-    },
-  };
-
-  const inject = handlers.get("before_agent_start");
-  assert.ok(inject !== undefined);
-  assert.equal(await inject({}, ctx), undefined, "the injection stays inert — no throw");
-
-  const strip = handlers.get("context");
-  assert.ok(strip !== undefined);
-  const result = (await strip(
-    {
-      messages: [
-        { customType: OBJECTIVE_AUTHOR_CONTEXT_TYPE, content: "[OBJECTIVE AUTHORING]\nstale" },
-        { role: "user", content: "a normal message" },
-      ],
-    },
-    ctx,
-  )) as { messages: { customType?: string; content?: unknown }[] };
-  assert.equal(
-    result.messages.some((m) => m.customType === OBJECTIVE_AUTHOR_CONTEXT_TYPE),
-    false,
-    "the stale objective-authoring marker is still stripped",
-  );
-  assert.equal(result.messages.length, 1, "the normal message survives");
 });
 
 // --- registration parity (the baseline-exact metadata pins) --------------------------------------

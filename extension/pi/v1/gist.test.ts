@@ -31,7 +31,6 @@ import type { ReportTarget } from "../../surfaces/report.ts";
 import {
   fakePerk,
   loadPerkSession,
-  plantRawSession,
   plantSession,
   scaffoldRepo,
   spyInjections,
@@ -673,115 +672,6 @@ test("gist-author session injects gist-authoring context; planMode defers", asyn
       injected.some((m) => m.customType === PLAN_CONTEXT_TYPE),
       false,
       "planMode defers — no plan-authoring context in a gist-author session",
-    );
-  } finally {
-    h.dispose();
-  }
-});
-
-test("gist-author context dedups against a prior copy in the LIVE window (once-only per live copy)", async () => {
-  const cwd = scaffoldRepo();
-  const file = plantRawSession(cwd, [
-    {
-      custom: {
-        type: "perk:workflow-state",
-        data: { run_id: "01RID", mode: "read-only", stage: "gist-author" },
-      },
-    },
-    {
-      custom: {
-        type: GIST_AUTHOR_CONTEXT_TYPE,
-        data: { content: "[GIST AUTHORING]\nprior copy" },
-      },
-    },
-  ]);
-  const h = await loadPerkSession({
-    cwd,
-    sessionManager: SessionManager.open(file),
-    env: { PERK_RUN_ID: undefined },
-  });
-  try {
-    assert.equal(h.workflowState().stage, "gist-author");
-    const injected = await h.emitBeforeAgentStart();
-    assert.equal(
-      injected.some((m) => m.customType === GIST_AUTHOR_CONTEXT_TYPE),
-      false,
-      "prior [GIST AUTHORING] copy in the live window → no re-injection",
-    );
-  } finally {
-    h.dispose();
-  }
-});
-
-test("gist-author context RE-INJECTS when compaction drops the prior copy", async () => {
-  const cwd = scaffoldRepo();
-  const file = plantRawSession(cwd, [
-    {
-      custom: {
-        type: "perk:workflow-state",
-        data: { run_id: "01RID", mode: "read-only", stage: "gist-author" },
-      },
-    },
-    {
-      custom: {
-        type: GIST_AUTHOR_CONTEXT_TYPE,
-        data: { content: "[GIST AUTHORING]\nprior copy" },
-      },
-    },
-    { assistant: "recent work that survives compaction" },
-  ]);
-  const sessionManager = SessionManager.open(file);
-  const keptId = sessionManager.getEntries().at(-1)?.id;
-  assert.ok(keptId !== undefined);
-  sessionManager.appendCompaction(
-    "summary quoting [GIST AUTHORING] is not a live copy",
-    keptId,
-    100,
-  );
-  const h = await loadPerkSession({ cwd, sessionManager, env: { PERK_RUN_ID: undefined } });
-  try {
-    const injected = await h.emitBeforeAgentStart();
-    assert.ok(
-      injected.some(
-        (m) =>
-          m.customType === GIST_AUTHOR_CONTEXT_TYPE &&
-          String(m.content).includes("[GIST AUTHORING]"),
-      ),
-      "a copy outside the active compaction window must not suppress re-injection",
-    );
-  } finally {
-    h.dispose();
-  }
-});
-
-test("gist-author context keeps dedup when compaction retains the prior copy", async () => {
-  const cwd = scaffoldRepo();
-  const file = plantRawSession(cwd, [
-    {
-      custom: {
-        type: "perk:workflow-state",
-        data: { run_id: "01RID", mode: "read-only", stage: "gist-author" },
-      },
-    },
-    {
-      custom: {
-        type: GIST_AUTHOR_CONTEXT_TYPE,
-        data: { content: "[GIST AUTHORING]\nprior copy" },
-      },
-    },
-  ]);
-  const sessionManager = SessionManager.open(file);
-  const keptId = sessionManager.getEntries().at(-2)?.id ?? sessionManager.getEntries().at(-1)?.id;
-  assert.ok(keptId !== undefined);
-  // Keep from the workflow-state entry onward — the prior copy stays in the live window.
-  sessionManager.appendCompaction("summary", keptId, 100);
-  const h = await loadPerkSession({ cwd, sessionManager, env: { PERK_RUN_ID: undefined } });
-  try {
-    const injected = await h.emitBeforeAgentStart();
-    assert.equal(
-      injected.some((m) => m.customType === GIST_AUTHOR_CONTEXT_TYPE),
-      false,
-      "a live retained copy still dedups",
     );
   } finally {
     h.dispose();

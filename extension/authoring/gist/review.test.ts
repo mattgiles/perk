@@ -5,9 +5,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { MemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
 import { openMemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
+import type { ApprovalGate } from "../review/approvalGate.ts";
 import { GIST_DRAFT_ARTIFACT, reviseGistDraft } from "./draft.ts";
 import { type GistDraftReviewer, type GistReviewOutcome, reviewGist } from "./review.ts";
-import type { GistBackend, GistGate } from "./save.ts";
+import type { GistBackend } from "./save.ts";
 
 const PROSE = "The intent and the why.\n";
 
@@ -55,7 +56,7 @@ function fakeBackend(fail = false): GistBackend & { calls: number } {
   return backend;
 }
 
-function fakeGate(active = true): GistGate & { exits: number } {
+function fakeGate(active = true): ApprovalGate & { exits: number } {
   const gate = {
     exits: 0,
     isActive: () => active,

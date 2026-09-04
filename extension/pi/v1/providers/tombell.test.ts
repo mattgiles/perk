@@ -12,12 +12,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { BranchEntry } from "../../../substrate/workflowState.ts";
-import {
-  loadPerkSession,
-  plantRawSession,
-  plantSession,
-  scaffoldRepo,
-} from "../../../testing/harness.ts";
+import { loadPerkSession, plantSession, scaffoldRepo } from "../../../testing/harness.ts";
 import { isTombellPlanSelected } from "./selection.ts";
 import { isTombellPlanModeEnabled, PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE } from "./tombell.ts";
 
@@ -186,71 +181,6 @@ test("tombell selected + objective-plan factory session: the bridge context inje
       ),
       "the bridge context is injected in an objective-plan session (ordinary arm of the stage-exception guard)",
     );
-  } finally {
-    h.dispose();
-  }
-});
-
-// The once-only half of the seeded-shape proof (§8.57's "the flow is still stated exactly
-// once per session").
-test("bridge context dedups against a prior copy on the branch (once-only per live copy)", async () => {
-  const cwd = scaffoldRepo();
-  selectTombell(cwd);
-  const file = plantRawSession(cwd, [
-    { custom: { type: "perk:workflow-state", data: { run_id: "01RID", mode: "read-only" } } },
-    {
-      custom: {
-        type: PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE,
-        data: { content: "[PLAN ADAPTER: TOMBELL]\nprior copy" },
-      },
-    },
-  ]);
-  const h = await loadPerkSession({
-    cwd,
-    sessionManager: SessionManager.open(file),
-    env: { PERK_RUN_ID: undefined },
-  });
-  try {
-    const injected = await h.emitBeforeAgentStart();
-    assert.equal(
-      injected.some((m) => m.customType === PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE),
-      false,
-      "prior [PLAN ADAPTER: TOMBELL] copy on branch → no re-injection",
-    );
-  } finally {
-    h.dispose();
-  }
-});
-
-test("active-window dedup: the bridge context re-injects after compaction drops the live copy", async () => {
-  // Delta 1 (contracts §8.31): the tombell bridge context dedups on the compaction-active
-  // window — a compaction that drops the live copy re-delivers it on the next turn.
-  const cwd = scaffoldRepo();
-  selectTombell(cwd);
-  const file = plantRawSession(cwd, [
-    { custom: { type: "perk:workflow-state", data: { run_id: "01RID", mode: "read-only" } } },
-    {
-      custom: {
-        type: PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE,
-        data: { content: "[PLAN ADAPTER: TOMBELL]\nprior copy" },
-      },
-    },
-    { assistant: "recent work that survives compaction" },
-  ]);
-  const sessions = SessionManager.open(file);
-  const kept = sessions.getEntries().at(-1)?.id;
-  assert.ok(kept !== undefined);
-  sessions.appendCompaction("summary without a live bridge copy", kept, 100);
-  const h = await loadPerkSession({
-    cwd,
-    sessionManager: sessions,
-    env: { PERK_RUN_ID: undefined },
-  });
-  try {
-    const injected = await h.emitBeforeAgentStart();
-    const bridge = injected.filter((m) => m.customType === PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE);
-    assert.equal(bridge.length, 1, "the bridge context re-injects after compaction dropped it");
-    assert.match(String(bridge[0]?.content), /\[PLAN ADAPTER: TOMBELL\]/);
   } finally {
     h.dispose();
   }

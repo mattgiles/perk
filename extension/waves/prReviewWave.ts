@@ -43,8 +43,7 @@ export type PrReviewAngle =
 
 /**
  * The per-angle lane-task vocabulary (`angle: <slug> — review ONLY <angle description>.`) — the
- * same task shape the `perk.pr-reviewer` agent def is written against, so no agent-def change
- * rides the flow migration.
+ * same task shape the `perk.pr-reviewer` agent def is written against.
  */
 export const PR_REVIEW_ANGLES: Readonly<Record<PrReviewAngle, string>> = {
   "plan-fidelity": "angle: plan-fidelity — review ONLY plan fidelity & completeness.",

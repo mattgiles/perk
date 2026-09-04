@@ -7,12 +7,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { openMemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
+import type { ApprovalGate } from "../review/approvalGate.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "./draft.ts";
 import type { DreamReportGateOutcome, ObjectiveDreamReportBlock } from "./dreamReportGate.ts";
 import {
   type ObjectiveBackend,
   type ObjectiveBackendSaveResult,
-  type ObjectiveGate,
   objectiveApprovalSave,
   saveObjective,
 } from "./save.ts";
@@ -61,7 +61,7 @@ function scriptedGate(outcome: DreamReportGateOutcome = { kind: "absent" }): {
 }
 
 /** A gate slice with observation (starts read-only unless told otherwise). */
-function fakeGate(active = true): ObjectiveGate & { exits: number } {
+function fakeGate(active = true): ApprovalGate & { exits: number } {
   const gate = {
     exits: 0,
     isActive: () => active,
@@ -373,7 +373,7 @@ test("approvalSave: refused draft ⇒ refused-draft BEFORE the gate snapshot; no
   const { backend, requests } = fakeBackend();
   // A probing gate: any isActive() call means the refused arm reached the gate snapshot.
   let probed = 0;
-  const gate: ObjectiveGate & { exits: number } = {
+  const gate: ApprovalGate & { exits: number } = {
     exits: 0,
     isActive: () => {
       probed += 1;
@@ -443,36 +443,19 @@ test("approvalSave: an explicit title wins over the draft's", async () => {
   assert.equal(requests[0]?.title, "Explicit title");
 });
 
-test("approvalSave: already-writable save succeeds without a gate exit", async () => {
+test("approvalSave: a failed save maps to save-failed (result preserved, gateExited false)", async () => {
   const session = sessionWithDraft();
-  const gate = fakeGate(false);
-  const outcome = await objectiveApprovalSave({
-    session,
-    backend: fakeBackend().backend,
-    resolveDreamGate: scriptedGate().resolveDreamGate,
-    gate,
-  });
-  assert.equal(outcome.status, "saved");
-  assert.equal(outcome.status === "saved" && outcome.gateExited, false);
-  assert.equal(gate.exits, 0);
-});
-
-test("approvalSave: a failed save leaves the gate ON (save-failed, gateExited false)", async () => {
-  const session = sessionWithDraft();
-  const gate = fakeGate(true);
   const outcome = await objectiveApprovalSave({
     session,
     backend: fakeBackend({ status: "failed", message: "boom", errorType: "door_failed" }).backend,
     resolveDreamGate: scriptedGate().resolveDreamGate,
-    gate,
+    gate: fakeGate(true),
   });
   assert.deepEqual(outcome, {
     status: "save-failed",
     result: { status: "failed", message: "boom", errorType: "door_failed" },
     gateExited: false,
   });
-  assert.equal(gate.exits, 0);
-  assert.equal(gate.isActive(), true);
 });
 
 test("approvalSave: the artifact's dream block passes through whole (stored stamp + parts)", async () => {

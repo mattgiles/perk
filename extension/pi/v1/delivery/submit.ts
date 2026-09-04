@@ -180,7 +180,7 @@ function conflictAttemptsFor(pi: ExtensionAPI, ctx: ExtensionContext): ConflictA
  * (`rebuildWorkflowState(branchOf(ctx)).run_id ?? ""` — deliberately NOT `activeSessionRunId`,
  * which catches and would silently drop the stamp), invoked lazily at publish time so a
  * throwing branch read still fails BEFORE the external call while the finalize empty-batch
- * refusal keeps firing first (the pre-migration order). Stamping the id into the plan-header
+ * refusal keeps firing first (the pinned refusal order). Stamping the id into the plan-header
  * `impl_run_ids` linkage (contracts §8.35) mirrors planSave's `--run-id` thread; absent run_id
  * ⇒ omit (bare-stamp untouched).
  */

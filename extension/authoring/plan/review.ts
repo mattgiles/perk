@@ -21,11 +21,11 @@
 
 import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { applyUnifiedDiff } from "../../substrate/unifiedDiff.ts";
+import type { ApprovalGate } from "../review/approvalGate.ts";
 import { PLAN_DRAFT_ARTIFACT, resumePlanDraft } from "./draft.ts";
 import {
   type PlanApprovalSaveOutcome,
   type PlanBackend,
-  type PlanGate,
   type PlanSaveDeps,
   planApprovalSave,
 } from "./save.ts";
@@ -91,7 +91,7 @@ export function applyReviewerEdits(
 export interface ReviewPlanDraftDeps extends PlanSaveDeps {
   reviewer: PlanDraftReviewer;
   backend: PlanBackend;
-  gate: PlanGate;
+  gate: ApprovalGate;
   /** The `plan` param fallback (the artifact wins; review mode never sees a transcript). */
   explicit?: string;
   /** False in an objective-node planning session — the no-save exit refuses there. */

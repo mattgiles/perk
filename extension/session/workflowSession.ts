@@ -32,25 +32,8 @@
 // `apply(change)` is a CLOSED union admitted from proven callers (never a feature dispatcher);
 // the first two variants come from the plan-save surfaces, the second two from the objective
 // flows (`transitionObjectiveNode`'s planning arm records the claim; `saveObjective`'s
-// post-save linkage sets `active_objective`). Deliberate deviation from the illustrative
-// contracts sketch: no snapshot payloads on the applied/unchanged arms — nothing consumes them
-// (narrow until proven).
-//
-// Field classification — every workflow-state field the migrated slices touch, by access path:
-//
-// | Field | Access in this slice | Authority | Retention | Fork behavior | Model visibility | Verification | Artifact relationship |
-// | --- | --- | --- | --- | --- | --- | --- | --- |
-// | `run_id` | seam (`WorkflowSession.runId`) | three-way mint (contracts §8.3): Python exterior cold mint → interior claim; TS interior `mintRunId()` on the warm identity-less arm; fork/adopt derive `<parent>.<n>` interior-side | current value | recompute (derive `<parent>.<n>`) | permitted (appears in tool results) | strict read-back at claim (outside this seam); read-only here | keys artifact dirs + pointers |
-// | `session_artifacts` | seam (artifact ops) | session interior | current map (per-name latest) | reset (cross-run pointers refuse) | permitted (pointer details in results) | strict read-back (append→rebuild→compare) + digest-validated reads | pointer + digest authority |
-// | `active_plan_ref` | seam (`apply({kind:"link-plan-ref"})`) | the save surfaces — warm `savePlan` appends after a verified cold-door save; the Python cold door + the stage-gated session_start reconciliation (index.ts, substrate-direct) are the other writers | current value (LWW) | inherit (fork entries never touch it; the branch LWW carries the parent's) | permitted (save results render the ref; the footer/status probe reads it) | strict read-back (append → rebuild → `planRefsEqual`) | none (mirrors the exterior plan issue / `cache.plan-ref`; not a session artifact) |
-// | `objective_node_claim` | seam (`nodeClaim()` read + `apply({kind:"record-node-claim"})` + `apply({kind:"clear-node-claim"})`) | the interior RECORDS it on a verified `planning` transition (`transitionObjectiveNode`) and CLEARS it on a verified non-planning transition / node-linked save — both through the seam; the cold-claim write lives in `session/lifecycle.ts`'s claim arm (the objective-plan handoff carrier) | current value until cleared (a null append clears) | inherit (fork entries omit it — a fork continues the same node's planning session); adopt never impersonates it | permitted (claim recovery + the implement-here refusal surface it) | strict read-back on record + clear (append → rebuild → `nodeClaimsEqual`) | none |
-// | `active_objective` | seam (`activeObjective()` read + `apply({kind:"link-objective"})`) | the save surfaces (`saveObjective`'s post-save linkage) + the `/objective` command's set/clear (pi/v1/objective.ts) | current value (LWW; explicit null clears) | inherit (fork entries never touch it; the branch LWW carries the parent's) | permitted (save results render the id; the budget status reads it) | strict read-back on the seam path (append → rebuild → string equality); the `/objective` command path stays a raw LWW append — stated honestly | none |
-// | `last_review_batch` | seam (`apply({kind:"record-review-batch"})`) | session interior — the address finalizer, only after publication AND corroborated full thread resolution | current value (LWW) | inherit (via LWW) | permitted (nothing renders the record itself today — the finalize details carry the same facts independently) | strict read-back on the seam path (seam-reported warning, never a tool failure) | none |
-// | `last_pr_review` | seam (`apply({kind:"record-pr-review"})`) | session interior — the automated post surface (`post_pr_review`) | current value (LWW) | inherit (via LWW) | permitted (tool results render it) | strict read-back on the seam path (seam-reported warning, never a tool failure) | none |
-// | `last_review` | seam (`apply({kind:"record-review"})`) | session interior — the curated-submission post surface (`submit_pr_review`) | current value (LWW) | inherit (via LWW) | permitted (tool results render it) | strict read-back on the seam path (seam-reported warning, never a tool failure) | none |
-// | `review_posts` | seam (`reviewPosts()` read + `apply({kind:"append-review-post"})`) | session interior — the curated-submission post surface (one row per REAL success; the stack flow's resume authority) | append-only list (read-rebuild-append — each write carries the whole ordered list) | inherit (via LWW) | permitted (the resume guard's refusal names the prior row) | strict read-back on the seam path (order-sensitive `reviewPostsEqual`; seam-reported warning, never a tool failure) | none |
-// | `stage` | adapter-read (hook/dispatch routing; NOT seam-backed this slice) | exterior handoff, recorded at cold claim | current value | **inherit** (the fork entry omits `stage`; LWW retains the parent's — deliberate, contracts §8.40); only **adopt** never impersonates the launched stage | permitted (drives routing) | best effort | none |
-// | `mode` | gate-owned (`ToolGating`; NOT seam-backed this slice) | session interior (gate transitions), seeded from handoff | current value | inherit (adopt carries parent mode) | permitted via injected mode context | best effort (`gating.exit` appends without read-back — honest tier) | none |
+// post-save linkage sets `active_objective`). No snapshot payloads on the applied/unchanged
+// arms — nothing consumes them (narrow until proven).
 
 import { isSafeRunId, type PlanRef } from "../substrate/cache.ts";
 import { digestSessionData } from "../substrate/sessionData.ts";
@@ -203,8 +186,8 @@ export function reviewPostsEqual(rebuilt: unknown, expected: unknown): boolean {
 
 /**
  * The closed workflow-state change union — admitted variant-by-variant from proven callers
- * (this slice: the plan-save surfaces). Reads stay NAMED (`nodeClaim()`); only changes ride the
- * union.
+ * (the proven callers: the plan-save surfaces). Reads stay NAMED (`nodeClaim()`); only changes
+ * ride the union.
  */
 export type WorkflowChange =
   /** Link the live session to a saved plan: append `active_plan_ref` iff it differs. */

@@ -1,16 +1,16 @@
 // The v1 Pi installer for the objective authoring flow (module-contracts.md's named-installer
 // shape): `installObjectiveAuthoringBindings` owns the objective-authoring context hook pair,
-// the `objective_draft`/`objective_save` tools, and the `/objective-save` command — with
-// baseline-exact registration metadata. The feature logic lives in `authoring/objective/`; this
+// the `objective_draft`/`objective_save` tools, and the `/objective-save` command —
+// registration metadata pinned by the suite's registration-parity tests. The feature logic lives in `authoring/objective/`; this
 // module decodes at the tool boundary, builds the cold-door backend + gate + dream-gate
 // adapters, constructs the warm-door Result envelopes, and places the feature-owned prose in Pi
 // fields. `objectiveApprovalSaveV1` is the composed approval→save twin the review arm
 // (`pi/v1/objectiveReview.ts`) and the browser door consume.
 //
-// The objective-authoring injection dedups on the COMPACTION-ACTIVE window
-// (`branchCarries(activeContextWindow(branch), marker)` — the bindingDelivery composition): a
-// live copy suppresses re-injection, and compaction dropping it from model context re-injects
-// on the next turn even though the historical entry still sits on the branch.
+// The objective-authoring injection rides the shared `installInjectedContext` helper
+// (pi/v1/contextInjection.ts — contracts §8.31 semantics): a live copy in the
+// compaction-active window suppresses re-injection, and compaction dropping it from model
+// context re-injects on the next turn.
 //
 // Format doctrine (rides the tools): JSON is the storage/transport format, NEVER the human
 // review surface — the review arm renders markdown via the feature's resume+render helpers; the
@@ -42,11 +42,11 @@ import {
 import {
   type ObjectiveApprovalSaveDeps,
   type ObjectiveBackend,
-  type ObjectiveGate,
   objectiveApprovalSave,
   type SaveObjectiveOutcome,
   saveObjective,
 } from "../../authoring/objective/save.ts";
+import type { ApprovalGate } from "../../authoring/review/approvalGate.ts";
 import { DREAM_REPORT_INPUT_SCHEMA } from "../../learning/dreamReport.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { WorkflowSession } from "../../session/workflowSession.ts";
@@ -64,14 +64,9 @@ import { loadPerkConfig } from "../../substrate/config.ts";
 import { failFor, ok, type Result } from "../../substrate/result.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { arrayParam, objectParam, paramsOf, stringParam } from "../../substrate/toolParams.ts";
-import {
-  activeContextWindow,
-  type BranchEntry,
-  branchCarries,
-  branchOf,
-  rebuildWorkflowState,
-} from "../../substrate/workflowState.ts";
+import { type BranchEntry, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
+import { installInjectedContext } from "./contextInjection.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { productionDreamGateRecovery } from "./objectiveDreamGate.ts";
 
@@ -277,7 +272,7 @@ function openSession(pi: ExtensionAPI, ctx: ExtensionContext): WorkflowSession {
 }
 
 /** The narrow gate slice the feature releases (D1a: exit only after a verified save). */
-function gateFor(gating: ToolGating, ctx: ExtensionContext): ObjectiveGate {
+function gateFor(gating: ToolGating, ctx: ExtensionContext): ApprovalGate {
   return { isActive: () => gating.isActive(), exit: () => gating.exit(ctx) };
 }
 
@@ -384,19 +379,6 @@ export async function objectiveApprovalSaveV1(
 }
 
 /**
- * The fail-open branch read for the two context hooks: a throwing `getBranch()` reports the
- * empty branch, so the handlers' "never throws" contract holds structurally — the injection
- * stays inert (an empty branch is never objective-authoring) and the strip hygiene proceeds.
- */
-function safeBranchOf(ctx: ExtensionContext): readonly BranchEntry[] {
-  try {
-    return branchOf(ctx);
-  } catch {
-    return [];
-  }
-}
-
-/**
  * Whether the current branch is an objective-author session (read-only gate AND stage match).
  * Fail-open: a throwing state rebuild reports false.
  */
@@ -427,49 +409,22 @@ const SAVE_TOOL_GUIDELINES = [
  * Install every objective-authoring Pi binding: the objective-authoring context hook pair (the
  * frozen hooks-ordering slot index.ts calls this at — planMode.ts defers when the stage is
  * objective-author, so exactly one authoring context is injected), the `objective_draft` and
- * `objective_save` tools, and the `/objective-save` command — registration metadata
- * baseline-exact. Inert outside objective sessions; never throws.
+ * `objective_save` tools, and the `/objective-save` command — registration metadata pinned by
+ * the registration-parity tests. Inert outside objective sessions; never throws.
  */
 export function installObjectiveAuthoringBindings(pi: ExtensionAPI, gating: ToolGating): void {
   // The objective-authoring context injection (display:false), keyed off (read-only gate AND
-  // stage === objective-author). Dedup on the COMPACTION-ACTIVE window: a live copy suppresses
-  // re-injection; compaction dropping it from model context re-injects on the next turn.
-  pi.on("before_agent_start", async (_event, ctx) => {
-    const branch = safeBranchOf(ctx);
-    if (!isObjectiveAuthoring(gating, branch)) return;
-    if (branchCarries(activeContextWindow(branch), OBJECTIVE_AUTHOR_MARKER)) return;
-    return {
-      message: {
-        customType: OBJECTIVE_AUTHOR_CONTEXT_TYPE,
-        content: objectiveAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
-        display: false,
-      },
-    };
-  });
-
-  // Strip the stale objective-authoring marker from context once the session is no longer
-  // authoring (gate off, or the stage moved on) so it never lingers — the same hygiene planMode
-  // applies.
-  pi.on("context", async (event, ctx) => {
-    const branch = safeBranchOf(ctx);
-    if (isObjectiveAuthoring(gating, branch)) return;
-    return {
-      messages: event.messages.filter((m) => {
-        const msg = m as { customType?: string; role?: string; content?: unknown };
-        if (msg.customType === OBJECTIVE_AUTHOR_CONTEXT_TYPE) return false;
-        if (msg.role !== "user") return true;
-        const content = msg.content;
-        if (typeof content === "string") return !content.includes(OBJECTIVE_AUTHOR_MARKER);
-        if (Array.isArray(content)) {
-          return !content.some(
-            (c) =>
-              (c as { type?: string; text?: string }).type === "text" &&
-              ((c as { text?: string }).text ?? "").includes(OBJECTIVE_AUTHOR_MARKER),
-          );
-        }
-        return true;
-      }),
-    };
+  // stage === objective-author); the inject/strip mechanics (active-window dedup, stale-marker
+  // strip) live in the shared helper.
+  installInjectedContext(pi, {
+    customType: OBJECTIVE_AUTHOR_CONTEXT_TYPE,
+    flavors: {
+      [OBJECTIVE_AUTHOR_MARKER]: (ctx) =>
+        objectiveAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
+    },
+    select: (_ctx, branch) =>
+      isObjectiveAuthoring(gating, branch) ? OBJECTIVE_AUTHOR_MARKER : null,
+    live: (_ctx, branch) => isObjectiveAuthoring(gating, branch),
   });
 
   pi.registerTool({
@@ -632,8 +587,8 @@ export function installObjectiveAuthoringBindings(pi: ExtensionAPI, gating: Tool
     handler: async (args, ctx) => {
       const title = args.trim() || undefined;
       // The artifact-first manual-failsafe invocation of the shared approval→save
-      // seam (the D1a gate exit lives in the seam). The legacy drive-the-session behavior is kept
-      // as the NO-DRAFT fallback — objectives have no transcript scrape by design, so a draftless
+      // seam (the D1a gate exit lives in the seam). The drive-the-session fallback covers
+      // draft-LESS sessions — objectives have no transcript scrape by design, so a draftless
       // session still needs a working save path.
       const outcome = await objectiveApprovalSaveV1(pi, ctx, gating, { title });
       if (outcome.status === "refused-draft") {

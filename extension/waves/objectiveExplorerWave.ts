@@ -74,8 +74,8 @@ export interface ObjectiveExplorerWaveOptions {
 }
 
 /**
- * Compose the single assignment's task text IN CODE (the prompt-drift-proof half of the
- * migration): the node id + the fenced untrusted node text, plus the optional focus. The agent
+ * Compose the single assignment's task text IN CODE (prompt-drift-proof: task text composed in
+ * code, never a template): the node id + the fenced untrusted node text, plus the optional focus. The agent
  * def requires the node id and a description of the work to reach the child.
  */
 export function explorerLaneTask(node: string, description: string, focus?: string): string {

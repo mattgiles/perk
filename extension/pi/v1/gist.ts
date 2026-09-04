@@ -1,7 +1,7 @@
 // The v1 Pi installer for the gist feature (module-contracts.md's named-installer shape):
 // `installGistBindings` owns every gist registration — the `gist_draft`/`gist_save` tools, the
-// `/gist-save` command, and the gist-authoring context hook pair — with baseline-exact
-// registration metadata; `runGistReviewV1` is the injected `plan_review` gist arm. The feature
+// `/gist-save` command, and the gist-authoring context hook pair — registration metadata
+// pinned by the suite's registration-parity tests; `runGistReviewV1` is the injected `plan_review` gist arm. The feature
 // logic lives in `authoring/gist/`; this module decodes at the tool boundary, builds the
 // provider/backend/gate adapters, constructs the warm-door Result envelopes, and places the
 // feature-owned prose units in Pi fields.
@@ -11,10 +11,10 @@
 // runs through the shared review-surface machinery (`pi/v1/review.ts` — the leaf every review
 // arm composes; the review door's stage dispatcher imports this module's arm directly).
 //
-// The gist-authoring injection dedups on the COMPACTION-ACTIVE window
-// (`branchCarries(activeContextWindow(branch), marker)` — the bindingDelivery composition): a
-// live copy suppresses re-injection, and compaction dropping it from model context re-injects
-// on the next turn even though the historical entry still sits on the branch.
+// The gist-authoring injection rides the shared `installInjectedContext` helper
+// (pi/v1/contextInjection.ts — contracts §8.31 semantics): a live copy in the
+// compaction-active window suppresses re-injection, and compaction dropping it from model
+// context re-injects on the next turn.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
@@ -38,11 +38,11 @@ import {
 } from "../../authoring/gist/review.ts";
 import {
   type GistBackend,
-  type GistGate,
   gistApprovalSave,
   type SaveGistOutcome,
   saveGist,
 } from "../../authoring/gist/save.ts";
+import type { ApprovalGate } from "../../authoring/review/approvalGate.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
@@ -59,14 +59,9 @@ import { render } from "../../substrate/prompts.ts";
 import { failFor, ok, type Result } from "../../substrate/result.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { paramsOf, stringParam } from "../../substrate/toolParams.ts";
-import {
-  activeContextWindow,
-  type BranchEntry,
-  branchCarries,
-  branchOf,
-  rebuildWorkflowState,
-} from "../../substrate/workflowState.ts";
+import { type BranchEntry, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
+import { installInjectedContext } from "./contextInjection.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import { isPlannotatorPlanSelected } from "./providers/selection.ts";
 import {
@@ -205,7 +200,7 @@ function openSession(pi: ExtensionAPI, ctx: ExtensionContext): WorkflowSession {
 }
 
 /** The narrow gate slice the feature releases (D1a: exit only after a verified save). */
-function gateFor(gating: ToolGating, ctx: ExtensionContext): GistGate {
+function gateFor(gating: ToolGating, ctx: ExtensionContext): ApprovalGate {
   return { isActive: () => gating.isActive(), exit: () => gating.exit(ctx) };
 }
 
@@ -229,47 +224,21 @@ function isGistAuthoring(gating: ToolGating, branch: readonly BranchEntry[]): bo
 /**
  * Install every gist Pi binding: the gist-authoring context hook pair (the frozen hooks-ordering
  * slot index.ts calls this at), the `gist_draft` and `gist_save` tools, and the `/gist-save`
- * command — registration metadata baseline-exact. Inert outside gist sessions; never throws.
+ * command — registration metadata pinned by the registration-parity tests. Inert outside gist
+ * sessions; never throws.
  */
 export function installGistBindings(pi: ExtensionAPI, gating: ToolGating): void {
   // The gist-authoring context injection (display:false), keyed off (read-only gate AND stage
-  // === gist-author). Dedup on the COMPACTION-ACTIVE window: a live copy suppresses
-  // re-injection; compaction dropping it from model context re-injects on the next turn.
-  pi.on("before_agent_start", async (_event, ctx) => {
-    const branch = branchOf(ctx);
-    if (!isGistAuthoring(gating, branch)) return;
-    if (branchCarries(activeContextWindow(branch), GIST_AUTHOR_MARKER)) return;
-    return {
-      message: {
-        customType: GIST_AUTHOR_CONTEXT_TYPE,
-        content: gistAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
-        display: false,
-      },
-    };
-  });
-
-  // Strip the stale gist-authoring marker from context once the session is no longer authoring
-  // (gate off, or the stage moved on) so it never lingers — the same hygiene planMode applies.
-  pi.on("context", async (event, ctx) => {
-    const branch = branchOf(ctx);
-    if (isGistAuthoring(gating, branch)) return;
-    return {
-      messages: event.messages.filter((m) => {
-        const msg = m as { customType?: string; role?: string; content?: unknown };
-        if (msg.customType === GIST_AUTHOR_CONTEXT_TYPE) return false;
-        if (msg.role !== "user") return true;
-        const content = msg.content;
-        if (typeof content === "string") return !content.includes(GIST_AUTHOR_MARKER);
-        if (Array.isArray(content)) {
-          return !content.some(
-            (c) =>
-              (c as { type?: string; text?: string }).type === "text" &&
-              ((c as { text?: string }).text ?? "").includes(GIST_AUTHOR_MARKER),
-          );
-        }
-        return true;
-      }),
-    };
+  // === gist-author); the inject/strip mechanics (active-window dedup, stale-marker strip)
+  // live in the shared helper.
+  installInjectedContext(pi, {
+    customType: GIST_AUTHOR_CONTEXT_TYPE,
+    flavors: {
+      [GIST_AUTHOR_MARKER]: (ctx) =>
+        gistAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
+    },
+    select: (_ctx, branch) => (isGistAuthoring(gating, branch) ? GIST_AUTHOR_MARKER : null),
+    live: (_ctx, branch) => isGistAuthoring(gating, branch),
   });
 
   pi.registerTool({
@@ -409,11 +378,11 @@ export function installGistBindings(pi: ExtensionAPI, gating: ToolGating): void 
     handler: async (args, ctx) => {
       const title = args.trim() || undefined;
       // The artifact-first manual-failsafe invocation of the shared approval→save seam (the D1a
-      // gate exit lives in the seam). The legacy drive-the-session behavior is kept as the
-      // NO-DRAFT fallback — gists have no transcript scrape by design, so a draftless session
-      // still needs a working save path.
+      // gate exit lives in the seam). The drive-the-session fallback covers draft-LESS
+      // sessions — gists have no transcript scrape by design, so a draftless session still
+      // needs a working save path.
       // The session always opens (identity-optional): an identity-less session reads the
-      // draft `absent` → the no-draft fallback below, exactly the old open-absent branch.
+      // draft `absent` → the no-draft fallback below, exactly the open-absent branch.
       const session = openSession(pi, ctx);
       const outcome = await gistApprovalSave(
         { session, backend: coldDoorGistBackend(pi, ctx), gate: gateFor(gating, ctx) },
