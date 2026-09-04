@@ -245,6 +245,17 @@ as optional (defaults `pending`), but shared `validate_roadmap` *requires* it (t
 on that) — so the default was applied in the new `parse_structured_roadmap` edge, leaving the shared
 validator strict.
 
+## Contract-edit mechanics — census leads, anchor proofs, atomic edit batches
+
+- **Census/wave prescriptions are leads, never an ownership map** — a §-pointer is written only
+  in the pass that grep-confirms the owner text actually carries the claim (#2044).
+- **Anchor-inventory proofs scan every supported heading level** and compare ordered — a proof
+  scoped to `##` misses `###` anchors, and an unordered set comparison hides duplicates and
+  reorderings (#2030).
+- **Multi-block `edit` batches are atomic** — a partial-failure report means NONE of the blocks
+  applied. Re-read every intended region before proceeding, keep batches per-section, and
+  re-verify locators after any failure (#2030).
+
 ## Cross-references
 
 - `src/perk/substrate/registry.py` — `Issue`/`FindingSeverity`, the validator invariants (the canonical first contract)

@@ -309,6 +309,15 @@ duplicates past ~30 open issues. The rules (#2003, #2004):
 - **Latent same-class residual:** comment-list finders (`find_comment_id_by_marker`) stay
   unpaginated past ~30 comments — a marker placed late in a long thread is exposed.
 
+## The stack chain-walk reads (`list_open_prs_for_base` + `head_repo`)
+
+The stack-review chain walk added the base-filtered open-PR list read
+(`src/perk/github/prs.py::list_open_prs_for_base` — `base=<branch>&state=open`, the base-filter
+mirror of the branch read) and the `PullRequest.head_repo` identity (#2033): **branch names alone
+cannot distinguish a same-repo head from a fork head** carrying the same branch name, so chain
+membership requires the head-repo identity to equal the home repo — and a **blank/unavailable
+head-repo identity fails closed** (the PR is excluded, the reason named), never read as same-repo.
+
 ## Gateway purification by hoisting a backend-specific read to the consumer
 
 A gateway meant to be **backend-neutral** can silently accrete a **backend-specific** read. The

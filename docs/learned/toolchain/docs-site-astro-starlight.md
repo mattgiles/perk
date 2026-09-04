@@ -353,6 +353,10 @@ facts that every mirror must reconcile.
   never re-introduce test literals.
 - The metadata guard's section-index rule keys on path depth (`parts <= 2`) and needs revisiting
   for nested subsections.
+- **Parallel run-all checks race the Astro/Vite caches** — concurrent `typecheck-js` +
+  `docs-check` can fail with `UnknownFilesystemError`/`ENOTEMPTY` under contention; a targeted
+  re-run of the failed check passes. The parallel gate stays nondeterministic on this axis —
+  treat such a failure as a re-run candidate before debugging the site (#2033).
 
 ## Cross-references
 

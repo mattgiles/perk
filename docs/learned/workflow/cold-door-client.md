@@ -104,6 +104,13 @@ A dropped advisory field must also **short-circuit any follow-up drive** — lan
 skips when `objective` is `undefined` (pinned by test). Don't let a downstream drive dereference an
 advisory field the decode dropped.
 
+## Launch-binding shape diet
+
+The `stack_review` binding set the diet rule for launch bindings (#2033): carry ONLY the fields
+the in-session consumer actually reads, derive endpoints from the ordered snapshot rows instead
+of duplicating them, and delete duplicate fields at birth. And a decoder advertised as strict
+must require EVERY field — a tolerated-absent field on a "strict" decoder is a drift magnet.
+
 ## Version skew between the planes
 
 **Cross-plane skew is structural for the dev flow.** Warm doors exec bare `perk` from PATH (a

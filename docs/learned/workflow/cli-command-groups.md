@@ -498,6 +498,18 @@ A CLI regrouping does not ripple into the warm plane: `/learn-docs`, `command:le
 deliverable command targets, and inbox artifact paths/headers all survive a cold rename untouched —
 only the `pi.exec` argv arrays in the extension change.
 
+## Selector parsing, stream-split testing, and argv-safe vocabularies
+
+- **Click 8.4.1's `CliRunner` splits streams** — output written with `err=True` lands on
+  `result.stderr`, not `result.output`; assert the stream the contract names (#2030).
+- **Selector/URL parsers anchor on the terminal route** and gate digit conversion on
+  `value.isascii() and value.isdigit()` (`_is_ascii_digits` in `src/perk/cli/plan_selection.py`) —
+  neither `str.isdigit` nor `int()` alone is that predicate (#2033).
+- **Vocabularies guarding values that reach unquoted argv or injected-guidance positions require
+  an alphanumeric first character** — the full hint-confinement rule has one owner:
+  `workflow/mergeability-and-conflict-resolution.md` § "Warm-route hints on cold refusals"
+  (#2182).
+
 ## Residuals
 
 - `docs/design/first-principles/python-cli-guidelines.md` has been reconciled against the grouped
