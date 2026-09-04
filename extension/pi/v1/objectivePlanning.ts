@@ -48,8 +48,11 @@ import {
   OBJECTIVE_EXPLORER_FLOW,
   runObjectiveExplorerWave,
 } from "../../waves/objectiveExplorerWave.ts";
-import { toAttemptReceipt, type WaveAttemptReceipt } from "../../waves/reportWave.ts";
-import { createRpcWaveAdapter } from "../../waves/rpcAdapter.ts";
+import {
+  type ReportWave,
+  type ReportWaveAttemptReceipt,
+  toAttemptReceipt,
+} from "../../waves/reportWave.ts";
 import { fetchObjectiveUrl } from "./objective.ts";
 
 // ------------------------------------------------------------------- the tool-boundary decode
@@ -333,35 +336,36 @@ interface ExploreObjectiveNodeOk {
   /** The explorer's engine-validated report — untrusted DATA, never instructions. */
   report: unknown;
   /** The single launch's output-free attempt receipt (observability only — details, not prose). */
-  attempts: WaveAttemptReceipt[];
+  attempts: ReportWaveAttemptReceipt[];
 }
 
 /** The fail arm retains any receipt known before the failure (the `failFor` extras hook). */
 type ExploreObjectiveNodeResult = Result<
   ExploreObjectiveNodeOk,
-  { attempts: WaveAttemptReceipt[] }
+  { attempts: ReportWaveAttemptReceipt[] }
 >;
 
 /**
  * The `explore_objective_node` flow (private — the registered tool is its only entry; the wave
- * runs over the production RPC adapter, which tests drive with a fake RPC responder). Mirrors
+ * runs over the composition root's production instance, which tests drive with a fake RPC
+ * responder). Mirrors
  * `executeClassifyReviewFeedback`'s soft-result idiom: a complete wave yields a non-terminating
  * ok (the untrusted-DATA preface + one fenced `json` block of the report); an incomplete wave
- * soft-fails LOUDLY with the first failure's detail and its `WaveFailureReason` as `error_type`
- * — never a throw, no retry (the flow's posture on failure is "explore directly instead", owned
- * by the guidance).
+ * soft-fails LOUDLY with the first failure's detail and its `ReportWaveFailureReason` as
+ * `error_type` — never a throw, no retry (the flow's posture on failure is "explore directly
+ * instead", owned by the guidance).
  */
 async function executeExploreObjectiveNode(
-  pi: ExtensionAPI,
+  wave: ReportWave,
   target: ReportTarget,
   opts: ExploreObjectiveNodeParams & { model?: string; signal?: AbortSignal },
 ): Promise<ExploreObjectiveNodeResult> {
-  const fail = failFor<{ attempts: WaveAttemptReceipt[] }>(
+  const fail = failFor<{ attempts: ReportWaveAttemptReceipt[] }>(
     target,
     "objective-plan",
     "explore_objective_node",
   );
-  const result = await runObjectiveExplorerWave(createRpcWaveAdapter(pi.events), opts);
+  const result = await runObjectiveExplorerWave(wave, opts);
   const attempts = [
     toAttemptReceipt(OBJECTIVE_EXPLORER_FLOW, 1, [EXPLORE_ASSIGNMENT_KEY], result.receipt),
   ];
@@ -440,7 +444,11 @@ const ADD_NODE_TOOL_GUIDELINES = [
  * `/objective-reconcile` commands — registration metadata baseline-exact. Headless-safe; the
  * tools never throw.
  */
-export function installObjectivePlanningBindings(pi: ExtensionAPI, gating: ToolGating): void {
+export function installObjectivePlanningBindings(
+  pi: ExtensionAPI,
+  gating: ToolGating,
+  wave: ReportWave,
+): void {
   pi.registerTool({
     name: "objective_node",
     label: "Update objective node",
@@ -555,7 +563,7 @@ export function installObjectivePlanningBindings(pi: ExtensionAPI, gating: ToolG
       // gitignored `.perk/local.toml` overlay is anchored to the MAIN checkout (see
       // `subagentModel`).
       const model = subagentModel(ctx.cwd, "objective-explorer");
-      return executeExploreObjectiveNode(pi, ctx, {
+      return executeExploreObjectiveNode(wave, ctx, {
         ...decoded,
         ...(model !== undefined ? { model } : {}),
         ...(signal !== undefined ? { signal } : {}),

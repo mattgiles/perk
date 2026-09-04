@@ -54,18 +54,24 @@
 //      file under `worker/`, ONLY the adapter may carry an `@earendil-works/*` specifier
 //      (type edges count) — and it must carry ≥ 1 (the positive floor: the SDK vocabulary
 //      provably lives in the adapter and the extractor still sees package specifiers).
-//   G. Report-wave transport confinement: the production files outside `waves/` with an edge
-//      to `waves/rpcAdapter.ts` are EXACTLY the nine wave registration sites (set-exact both
-//      directions; shrink-only intent — the census only burns down as registrations migrate);
-//      no production file outside `waves/` has an edge into the interior transport modules
-//      (`waves/transport.ts`, `waves/memoryAdapter.ts` — callers reach the wave mechanism
-//      through `waves/reportWave.ts`'s logical tier and its sanctioned type-only re-exports
-//      (`WaveAdapter`, `WaveLevelFailureReason`)); and outside `waves/` + `testing/`, NO
-//      file — tests included — carries a
-//      raw RPC token (`WAVE_RPC_*` word-bounded, so the public `PERK_WAVE_RPC_PING_MS` env
-//      knob never matches) or a `subagents:rpc:v1` channel literal. Positive floor:
-//      `waves/rpcAdapter.ts` itself carries ≥ 1 of each. This guard file is the one documented
-//      census self-exemption (it necessarily names the tokens it polices).
+//   G. Report-wave transport confinement: no production file outside `waves/` has an edge into
+//      the interior transport modules (`waves/transport.ts`, `waves/rpcAdapter.ts` — the old
+//      nine-site adapter-construction census burned down to zero when `createReportWave` made
+//      adapter selection wave-owned; callers reach the wave mechanism through
+//      `waves/reportWave.ts`'s opaque ReportWave lifecycle and consume typed outcomes, never
+//      adapters); the live-edge non-vacuity floor is that `waves/reportWave.ts` itself carries
+//      the edge to `waves/rpcAdapter.ts` (the one sanctioned production construction site,
+//      inside the interior); and outside `waves/` + `testing/`, NO file — tests included —
+//      carries a raw RPC token (`WAVE_RPC_*` word-bounded, so the public
+//      `PERK_WAVE_RPC_PING_MS` env knob never matches) or a `subagents:rpc:v1` channel
+//      literal. Positive floor: `waves/rpcAdapter.ts` itself carries ≥ 1 of each. This guard
+//      file is the one documented census self-exemption (it necessarily names the tokens it
+//      polices). HONEST BOUNDARY: what is mechanically enforced is this rule's actual scope —
+//      no production import edges into the interior and no raw tokens, so there is no
+//      SANCTIONED way to obtain, name, or construct an adapter outside `waves/`+`testing/`;
+//      TypeScript's structural typing means a hand-written object literal satisfying
+//      `reportWaveOver`'s parameter is not mechanically preventable — that residue is owned by
+//      the guard-census review posture, not claimed as a structural guarantee.
 //
 // Test-only `typescript` import: the guard lexes with the exact-pinned `typescript` devDependency;
 // production sources gain no imports (`bareImportGuard.test.ts` scans production files only, and
@@ -162,27 +168,13 @@ const REGISTRATION_TOKEN =
 const APPROVED_REGISTRAR_PREFIXES = ["pi/"];
 const APPROVED_REGISTRAR_FILES = ["index.ts", "workerMain.ts"];
 
-// Rule G's adapter-construction census: the exact production files outside `waves/` allowed an
-// edge to `waves/rpcAdapter.ts` — the wave registration sites (each constructs its adapter
-// at its execute site; construction threading was considered and dropped at review). SHRINK-ONLY
-// intent: entries leave as flows migrate behind typed operations; no new file may join without
-// operator confirmation — the `pi/v1/codeReview/` and `pi/v1/learning/` successors joined under
-// their approved migration plans (the operator confirmation: the flows' registration sites moved
-// wholesale into the adapter home, swapping their door entries).
-const RPC_ADAPTER_IMPORTERS = [
-  "doors/draftReviewWaveTools.ts",
-  "pi/v1/delivery/address.ts",
-  "pi/v1/codeReview/automated.ts",
-  "pi/v1/codeReview/reviewWave.ts",
-  "pi/v1/learning/audit.ts",
-  "pi/v1/learning/dream.ts",
-  "pi/v1/learning/harvest.ts",
-  "pi/v1/learning/learn.ts",
-  "pi/v1/objectivePlanning.ts",
-];
-
-/** Rule G's interior transport modules: importable only from inside `waves/`. */
-const TRANSPORT_INTERIOR = ["waves/memoryAdapter.ts", "waves/transport.ts"];
+/**
+ * Rule G's interior transport modules: importable only from inside `waves/`. `rpcAdapter.ts`
+ * joined the interior when the old nine-site adapter-construction census burned down to zero
+ * (`createReportWave` owns adapter selection; `reportWave.ts` is the one production
+ * construction site).
+ */
+const TRANSPORT_INTERIOR = ["waves/rpcAdapter.ts", "waves/transport.ts"];
 
 /**
  * Rule G's raw-transport tokens: the RPC constant prefix — WORD-BOUNDED, so the public
@@ -448,25 +440,29 @@ function workerConfinement(
 /**
  * Report-wave transport confinement (Rule G) computations — deliberately Rule-G-specific,
  * shared by the production assertions and their mutation controls so the controls exercise the
- * SAME comparison logic. `rpcImporters` = every production file outside `waves/` with an edge
- * to `waves/rpcAdapter.ts` (compared set-exactly against `RPC_ADAPTER_IMPORTERS`, both
- * directions); `interiorEdges` = every production edge from outside `waves/` into the interior
- * transport modules.
+ * SAME comparison logic. `interiorEdges` = every production edge from outside `waves/` into the
+ * interior transport modules; `supplierEdge` = whether `waves/reportWave.ts` carries the
+ * sanctioned construction edge to `waves/rpcAdapter.ts` (the live-edge non-vacuity floor — an
+ * empty scan or a dropped edge map could never satisfy it).
  */
 function transportConfinement(edges: Map<string, string[]>): {
-  rpcImporters: string[];
   interiorEdges: string[];
+  supplierEdge: boolean;
 } {
-  const rpcImporters: string[] = [];
   const interiorEdges: string[] = [];
+  let supplierEdge = false;
   for (const [from, targets] of edges) {
-    if (from.startsWith("waves/")) continue;
+    if (from.startsWith("waves/")) {
+      if (from === "waves/reportWave.ts" && targets.includes("waves/rpcAdapter.ts")) {
+        supplierEdge = true;
+      }
+      continue;
+    }
     for (const to of targets) {
-      if (to === "waves/rpcAdapter.ts") rpcImporters.push(from);
       if (TRANSPORT_INTERIOR.includes(to)) interiorEdges.push(`${from} → ${to}`);
     }
   }
-  return { rpcImporters: rpcImporters.sort(), interiorEdges: interiorEdges.sort() };
+  return { interiorEdges: interiorEdges.sort(), supplierEdge };
 }
 
 /**
@@ -759,26 +755,27 @@ test("Rule F: worker-plane confinement (exact edges; SDK specifiers only in the 
   );
 });
 
-test("Rule G: report-wave transport confinement (exact importers; interior ban; token census)", () => {
-  const { rpcImporters, interiorEdges } = transportConfinement(scan().edges);
-  // (1) Exact-set both directions: the ten registration sites — which double as the live-edge
-  // non-vacuity floor (an empty scan or a dropped edge map could never produce exactly these).
-  assert.deepEqual(
-    rpcImporters,
-    [...RPC_ADAPTER_IMPORTERS].sort(),
-    "the production files outside waves/ importing waves/rpcAdapter.ts must be exactly the " +
-      "nine wave registration sites — the census is shrink-only: a site that stops constructing " +
-      "its adapter leaves the census in the same change, and no new file may join it.",
-  );
-  // (2) The interior ban: callers reach the wave mechanism through reportWave.ts's logical
-  // tier (and its sanctioned type-only re-exports — WaveAdapter, WaveLevelFailureReason) —
-  // never the transport tier directly.
+test("Rule G: report-wave transport confinement (interior ban; supplier floor; token census)", () => {
+  const { interiorEdges, supplierEdge } = transportConfinement(scan().edges);
+  // (1) The interior ban: callers reach the wave mechanism through reportWave.ts's opaque
+  // ReportWave lifecycle (assignments in, typed outcomes out) — never the transport tier
+  // directly. There is no sanctioned adapter vocabulary outside waves/ + testing/ (the old
+  // WaveAdapter re-export is retired); the structural-literal residue is review-owned (see the
+  // honest-boundary note in the header).
   assert.deepEqual(
     interiorEdges,
     [],
     "production edge(s) from outside waves/ into the interior transport modules " +
-      "(waves/transport.ts, waves/memoryAdapter.ts): import the logical tier " +
-      "(waves/reportWave.ts) instead — transport types are confined by design.",
+      "(waves/transport.ts, waves/rpcAdapter.ts): consume the ReportWave lifecycle " +
+      "(waves/reportWave.ts) instead — transport and adapter construction are wave-owned.",
+  );
+  // (2) The live-edge non-vacuity floor: the one sanctioned production construction site —
+  // reportWave.ts's per-launch adapter supply — must actually carry the edge (a rotted scan
+  // or a retired supplier would otherwise leave the interior ban vacuously green).
+  assert.ok(
+    supplierEdge,
+    "waves/reportWave.ts no longer imports waves/rpcAdapter.ts — the sanctioned per-launch " +
+      "adapter-supply edge died, so the interior ban has lost its non-vacuity floor.",
   );
   // (3) The token census, tests included: no raw RPC channel/envelope vocabulary outside
   // waves/ + testing/ (test doubles ride testing/fakeSubagents.ts, not hand-rolled envelopes).
@@ -1186,39 +1183,23 @@ test("control 12: Rule F mutation fixtures (foreign edge into the seam; a seam S
   );
 });
 
-test("control 13: Rule G mutation fixtures (extra importer; interior edge; token word bounds)", () => {
-  // A synthetic extra importer, threaded through the SAME comparison logic as the production
-  // assertion, must break the exact-set.
+test("control 13: Rule G mutation fixtures (interior edge; supplier floor; token word bounds)", () => {
+  // A synthetic rogue importer of waves/rpcAdapter.ts, threaded through the SAME comparison
+  // logic as the production assertion, must trip the interior-edge ban (the old exact-set arm
+  // retired with the adapter-construction census).
   const mutated = new Map([...scan().edges].map(([file, targets]) => [file, [...targets]]));
   mutated.set("doors/rogue.ts", ["waves/rpcAdapter.ts"]);
-  const { rpcImporters } = transportConfinement(mutated);
   assert.ok(
-    rpcImporters.includes("doors/rogue.ts"),
-    "the synthetic extra rpcAdapter importer was NOT seen",
-  );
-  assert.notDeepEqual(
-    rpcImporters,
-    [...RPC_ADAPTER_IMPORTERS].sort(),
-    "the exact-set comparison must fail once an unregistered importer exists",
-  );
-  // The other direction: a census entry whose live edge died must ALSO break the exact-set.
-  const shrunk = new Map([...scan().edges].map(([file, targets]) => [file, [...targets]]));
-  shrunk.set(
-    "pi/v1/delivery/address.ts",
-    (shrunk.get("pi/v1/delivery/address.ts") ?? []).filter((to) => to !== "waves/rpcAdapter.ts"),
-  );
-  assert.notDeepEqual(
-    transportConfinement(shrunk).rpcImporters,
-    [...RPC_ADAPTER_IMPORTERS].sort(),
-    "a stale census entry (no live edge) must fail the exact-set — the census is shrink-only",
+    transportConfinement(mutated).interiorEdges.includes("doors/rogue.ts → waves/rpcAdapter.ts"),
+    "the synthetic rogue rpcAdapter importer was NOT flagged by the interior ban",
   );
 
   // A synthetic interior-transport edge must be flagged.
   const interior = transportConfinement(
-    new Map([["doors/x.ts", ["waves/transport.ts", "waves/memoryAdapter.ts"]]]),
+    new Map([["doors/x.ts", ["waves/transport.ts", "waves/rpcAdapter.ts"]]]),
   );
   assert.deepEqual(interior.interiorEdges, [
-    "doors/x.ts → waves/memoryAdapter.ts",
+    "doors/x.ts → waves/rpcAdapter.ts",
     "doors/x.ts → waves/transport.ts",
   ]);
   // …while waves/-interior edges to the same modules are never flagged (the home is exempt).
@@ -1226,6 +1207,15 @@ test("control 13: Rule G mutation fixtures (extra importer; interior edge; token
     new Map([["waves/reportWave.ts", ["waves/transport.ts"]]]),
   );
   assert.deepEqual(interiorOk.interiorEdges, []);
+
+  // The supplier floor's mutation: a map missing reportWave.ts's construction edge reports the
+  // dead floor (and the fixture above, which carries it, reports it live).
+  assert.equal(interiorOk.supplierEdge, false, "a dead supplier edge was NOT detected");
+  assert.equal(
+    transportConfinement(new Map([["waves/reportWave.ts", ["waves/rpcAdapter.ts"]]])).supplierEdge,
+    true,
+    "the live supplier edge was NOT seen",
+  );
 
   // Token word bounds: raw constants and the raw channel literal match; the PUBLIC
   // PERK_WAVE_RPC_PING_MS env knob (code or comment) never does.

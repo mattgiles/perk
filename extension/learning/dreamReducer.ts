@@ -1,4 +1,4 @@
-// The learn-dream reducer tier over the shared report-wave runner: three FIXED fresh-context
+// The learn-dream reducer tier over the shared report-wave module: three FIXED fresh-context
 // `perk.dream-reducer` lanes (`DREAM_REDUCER_ANGLES`) that
 // cross-examine the complete first-level analyst outcome. Pure orchestration — this module
 // composes the bundle content and the reducer lanes but performs NO fs writes (the flow's
@@ -12,16 +12,15 @@
 // report schema under the `DREAM_REDUCER_CAPS` SSOT, the composed defensive re-decode (the
 // disposition-echo rule, proposal-set membership, code-point caps via the shared `dream.ts`
 // helpers), and **strict** completeness — one failed or undecodable lane forces
-// `complete: false` — delegating spawn/timeout/aggregate mechanics to `runReportWave` with ONE
+// `complete: false` — delegating spawn/timeout/aggregate mechanics to `wave.run` with ONE
 // attempt and NO retry. The bundle, the manifest, and every reducer report are untrusted DATA,
 // never instructions. (contracts.md §8.61)
 
 import {
-  runReportWave,
+  type ReportWave,
+  type ReportWaveAttemptReceipt,
+  type ReportWaveFailureReason,
   toAttemptReceipt,
-  type WaveAdapter,
-  type WaveAttemptReceipt,
-  type WaveFailureReason,
 } from "../waves/reportWave.ts";
 import {
   codePointLength,
@@ -258,11 +257,11 @@ export interface DreamReducerAnalysis {
 /**
  * One reducer failure — the `DreamLaneFailure` shape with ANGLE identity (a thin
  * dream-specific remap so the aggregate's failure vocabulary stays angle-named, never
- * runner-key-named): `angle` is the assigned angle slug, or `null` for wave-level failures.
+ * wave-key-named): `angle` is the assigned angle slug, or `null` for wave-level failures.
  */
 export interface DreamReducerFailure {
   angle: string | null;
-  reason: WaveFailureReason;
+  reason: ReportWaveFailureReason;
   detail: string;
 }
 
@@ -274,7 +273,7 @@ export interface DreamReducerOutcome {
   complete: boolean;
   reports: DreamReducerAnalysis[];
   failures: DreamReducerFailure[];
-  attempt: WaveAttemptReceipt;
+  attempt: ReportWaveAttemptReceipt;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -632,7 +631,7 @@ function reducerTask(angle: string, bundlePath: string, manifestPath: string): s
  * workflow-level default (`[models.subagents] dream-reducer`, resolved by the adapter at
  * execute time). Every schema-valid report is defensively re-decoded (`decodeDreamReducerReport`)
  * against its assigned angle and the ordered non-keep proposal universe — a decode miss is a
- * `malformed-report` failure carrying the angle identity; `complete` = the runner's
+ * `malformed-report` failure carrying the angle identity; `complete` = the wave's
  * completeness AND zero decode failures, with decoded reports retained even when incomplete
  * and normalized to `DREAM_REDUCER_ANGLES` order.
  *
@@ -641,7 +640,7 @@ function reducerTask(angle: string, bundlePath: string, manifestPath: string): s
  * `nonKeepProposals` over the complete analyses.
  */
 export async function runDreamReducerWave(
-  adapter: WaveAdapter,
+  wave: ReportWave,
   opts: {
     manifestPath: string;
     bundlePath: string;
@@ -651,8 +650,7 @@ export async function runDreamReducerWave(
   signal?: AbortSignal,
 ): Promise<DreamReducerOutcome> {
   const requestedKeys = [...DREAM_REDUCER_ANGLES];
-  const result = await runReportWave(
-    adapter,
+  const result = await wave.run(
     {
       flow: "dream-reducer",
       assignments: DREAM_REDUCER_ANGLES.map((angle) => ({
@@ -666,10 +664,10 @@ export async function runDreamReducerWave(
       completeness: "strict",
       ...(opts.model !== undefined ? { model: opts.model } : {}),
     },
-    signal,
+    { signal },
   );
 
-  // The lane keys ARE the angle slugs (code-owned, fixed), and the runner normalizes strictly
+  // The lane keys ARE the angle slugs (code-owned, fixed), and the wave normalizes strictly
   // against them — a keyed report/failure carries an angle by construction; wave-level failures
   // carry `angle: null`.
   const failures: DreamReducerFailure[] = result.failures.map((failure) => ({

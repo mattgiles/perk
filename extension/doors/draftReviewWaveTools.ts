@@ -35,16 +35,15 @@ import {
 } from "../waves/draftReviewWave.ts";
 import { preflightPonytailSkill } from "../waves/ponytail.ts";
 import {
+  type AssignmentReport,
+  type ReportWave,
+  type ReportWaveAttemptReceipt,
+  type ReportWaveFailure,
+  type ReportWaveLaunchManifest,
+  type ReportWaveRef,
+  type ReportWaveRequest,
   toAttemptReceipt,
-  type WaveAdapter,
-  type WaveAttemptReceipt,
-  type WaveFailure,
-  type WaveLaunchManifest,
-  type WaveReport,
-  type WaveSpec,
 } from "../waves/reportWave.ts";
-import { createRpcWaveAdapter } from "../waves/rpcAdapter.ts";
-import { collectGraceMs, collectPending, type PendingWaveState } from "./pendingWave.ts";
 
 // ------------------------------------------------------------------ the door-primed context
 
@@ -59,13 +58,16 @@ export interface DraftReviewContext {
 }
 
 /**
- * The draft pair's per-activation state: the ONE pending (launched, uncollected) draft-review
- * wave (the `pi/v1/codeReview/reviewWave.ts` pending-slot mirror — `start_draft_review_wave` refuses while
- * it is set, and `collect_draft_review_wave` drains it; `keys` includes the `custom` lane when
- * one was primed — the covered computation needs it) PLUS the door-primed context slot (same
- * defect class, same lifetime — one browser session's inputs, superseded by the next prime).
+ * The draft pair's per-activation state: the ONE opaque ref of the pending (launched,
+ * uncollected) draft-review wave (the `pi/v1/codeReview/reviewWave.ts` pending-slot mirror —
+ * `start_draft_review_wave` refuses while it is set, and `collect_draft_review_wave` drains it;
+ * the wave's settled keys include the `custom` lane when one was primed — the covered
+ * computation needs it) PLUS the door-primed context slot (same defect class, same lifetime —
+ * one browser session's inputs, superseded by the next prime). Which wave is *current* is flow
+ * policy (this slot); every race/grace/drain mechanic below it is wave-owned.
  */
-export interface DraftReviewWaveState extends PendingWaveState<string> {
+export interface DraftReviewWaveState {
+  pending: ReportWaveRef | null;
   context: DraftReviewContext | null;
 }
 
@@ -142,36 +144,36 @@ export interface StartDraftReviewWaveOk {
   asyncId: string;
   asyncDir: string;
   /** The truthful requested/runnable/preflight partition for this start. */
-  launch: WaveLaunchManifest;
+  launch: ReportWaveLaunchManifest;
 }
 
 /** The fail arm retains the attempt receipt known before the failure (the `failFor` extras hook). */
 export type StartDraftReviewWaveResult = Result<
   StartDraftReviewWaveOk,
-  { attempts: WaveAttemptReceipt[] }
+  { attempts: ReportWaveAttemptReceipt[] }
 >;
 
 /**
  * The `start_draft_review_wave` execute core, extracted for testability with the
- * per-registration state, the adapter, and the report target as injected structural slices
+ * per-registration state, the wave, and the report target as injected structural slices
  * (the `executeStartReviewWave` mirror). Assumes DECODED params and a caller-resolved `model`.
  * An unprimed context is a loud soft-fail (`no_draft_context` — the door primes the draft under
  * review); a launch failure (the pre-spawn `ok: false` arm) is a loud soft-fail whose
- * `error_type` is the wave failure reason; success stores the pending wave and returns the run
- * handle so the parent holds the relay loop.
+ * `error_type` is the wave failure reason; success stores the pending ref and returns the run
+ * identity so the parent holds the relay loop.
  */
 export async function executeStartDraftReviewWave(
   state: DraftReviewWaveState,
-  adapter: WaveAdapter,
+  wave: ReportWave,
   target: ReportTarget,
   opts: {
     angles: DraftReviewAngle[];
     model?: string;
     /** Test seam; production validates the exact source-bound Ponytail skill. */
-    requiredSkillPreflight?: WaveSpec["requiredSkillPreflight"];
+    requiredSkillPreflight?: ReportWaveRequest["requiredSkillPreflight"];
   },
 ): Promise<StartDraftReviewWaveResult> {
-  const fail = failFor<{ attempts: WaveAttemptReceipt[] }>(target, "start_draft_review_wave");
+  const fail = failFor<{ attempts: ReportWaveAttemptReceipt[] }>(target, "start_draft_review_wave");
   const context = state.context;
   if (context === null) {
     return fail(
@@ -187,7 +189,7 @@ export async function executeStartDraftReviewWave(
     );
   }
   const keys = [...opts.angles, ...(context.custom !== undefined ? ["custom"] : []), "ponytail"];
-  const start = await startDraftReviewWave(adapter, {
+  const start = await startDraftReviewWave(wave, {
     angles: opts.angles,
     draftType: context.draftType,
     draft: context.draft,
@@ -211,21 +213,21 @@ export async function executeStartDraftReviewWave(
       { attempts },
     );
   }
-  state.pending = { keys: [...keys], result: start.result };
+  state.pending = start.ref;
   const skipped = start.launch.preflightFailures
     .map((failure) => `${failure.key}: ${failure.reason} — ${failure.detail}`)
     .join("; ");
   const text =
     `Draft-review workflow accepted with ${start.launch.runnable.length}/${start.launch.requested.length} ` +
     `post-preflight runnable lane(s) — ${start.launch.runnable.join(", ")} ` +
-    `(asyncId ${start.handle.asyncId}).` +
+    `(asyncId ${start.runId}).` +
     (skipped === "" ? "" : ` Preflight skipped: ${skipped}.`) +
     " Hold your turn and run the `subagent_wait({timeoutMs: 30000})` relay loop (streamed " +
     "finding batches arrive as injected messages); call `collect_draft_review_wave` after the " +
     "run completes.";
   return ok(text, {
-    asyncId: start.handle.asyncId,
-    asyncDir: start.handle.asyncDir,
+    asyncId: start.runId,
+    asyncDir: start.asyncDir,
     launch: start.launch,
   });
 }
@@ -234,26 +236,28 @@ export async function executeStartDraftReviewWave(
 export interface CollectDraftReviewWaveOk {
   complete: boolean;
   covered: string[];
-  reports: WaveReport[];
-  failures: WaveFailure[];
-  attempts: WaveAttemptReceipt[];
+  reports: AssignmentReport[];
+  failures: ReportWaveFailure[];
+  attempts: ReportWaveAttemptReceipt[];
 }
 
 /**
- * The `collect_draft_review_wave` execute core over the per-registration state (`graceMs`
- * injectable for tests; the `executeCollectReviewWave` mirror). No pending wave ⇒ `no_wave`;
- * unsettled after the grace ⇒ `wave_running` with the pending wave RETAINED; settled ⇒ the
- * shared identity-guarded drain returns the typed aggregate — an incomplete wave stays an ok
- * result carrying `complete: false` plus a loud warning naming the uncovered lane(s) (honest
- * incompleteness for the human triage, never papered over — zero retries by design).
+ * The `collect_draft_review_wave` execute core over the per-registration state (grace behavior
+ * is wave-owned — the `PERK_WAVE_COLLECT_GRACE_MS` env knob is the one seam; the
+ * `executeCollectReviewWave` mirror). No pending ref ⇒ `no_wave`; unsettled after the grace ⇒
+ * `wave_running` with the pending ref RETAINED; settled ⇒ the wave's drain-once claim returns
+ * the typed aggregate — an incomplete wave stays an ok result carrying `complete: false` plus a
+ * loud warning naming the uncovered lane(s) (honest incompleteness for the human triage, never
+ * papered over — zero retries by design).
  */
 export async function executeCollectDraftReviewWave(
   state: DraftReviewWaveState,
+  wave: ReportWave,
   target: ReportTarget,
-  opts?: { graceMs?: number },
 ): Promise<Result<CollectDraftReviewWaveOk>> {
   const fail = failFor(target, "collect_draft_review_wave");
-  const collected = await collectPending(state, opts?.graceMs ?? collectGraceMs());
+  const ref = state.pending;
+  const collected = ref === null ? ({ kind: "none" } as const) : await wave.collect(ref);
   if (collected.kind === "none") {
     return fail(
       "no draft-review wave is running — launch one with start_draft_review_wave",
@@ -268,6 +272,11 @@ export async function executeCollectDraftReviewWave(
       "wave_running",
     );
   }
+  // The identity-guarded slot clear (flow policy): clear only if the slot still holds the
+  // collected ref — a supersede (re-prime + new start) landing during this collect's await
+  // never erases the NEW pending ref (the wave's delete-as-claim already makes a stale drain
+  // harmless).
+  if (state.pending === ref) state.pending = null;
   const { keys, result } = collected;
   // Covered keys in lane order (the reports already normalize in lane order).
   const reportKeys = new Set(result.reports.map((r) => r.key));
@@ -325,7 +334,11 @@ const COLLECT_TOOL_GUIDELINES = [
  * in `extension/index.ts` beside `installReviewWaveBindings`; flow-scoped via the door-primed
  * context + the pending-wave guard in the execute cores.
  */
-export function registerDraftReviewWaveTools(pi: ExtensionAPI, state: DraftReviewWaveState): void {
+export function registerDraftReviewWaveTools(
+  pi: ExtensionAPI,
+  state: DraftReviewWaveState,
+  wave: ReportWave,
+): void {
   pi.registerTool({
     name: "start_draft_review_wave",
     label: "Start draft review wave",
@@ -376,7 +389,7 @@ export function registerDraftReviewWaveTools(pi: ExtensionAPI, state: DraftRevie
       // The per-call `signal` is deliberately NOT threaded into the wave: the wave outlives the
       // tool call by design (the parent returns and holds the relay loop); its bound is the
       // module-owned timeout (the spawned `timeoutMs` is the orphan insurance).
-      return executeStartDraftReviewWave(state, createRpcWaveAdapter(pi.events), ctx, {
+      return executeStartDraftReviewWave(state, wave, ctx, {
         ...decoded,
         ...(model !== undefined ? { model } : {}),
         requiredSkillPreflight: (requirement) => preflightPonytailSkill(requirement, ctx.cwd),
@@ -400,7 +413,7 @@ export function registerDraftReviewWaveTools(pi: ExtensionAPI, state: DraftRevie
       properties: {},
     },
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      return executeCollectDraftReviewWave(state, ctx);
+      return executeCollectDraftReviewWave(state, wave, ctx);
     },
   });
 }

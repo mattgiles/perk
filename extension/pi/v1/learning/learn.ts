@@ -74,8 +74,7 @@ import { failFor, ok, type Result } from "../../../substrate/result.ts";
 import { arrayParam, paramsOf, stringParam } from "../../../substrate/toolParams.ts";
 import { activePlanRef } from "../../../substrate/workflowState.ts";
 import { report } from "../../../surfaces/report.ts";
-import type { WaveAttemptReceipt } from "../../../waves/reportWave.ts";
-import { createRpcWaveAdapter } from "../../../waves/rpcAdapter.ts";
+import type { ReportWave, ReportWaveAttemptReceipt } from "../../../waves/reportWave.ts";
 
 /** The ok-arm fields. */
 export interface LearnOk {
@@ -262,11 +261,11 @@ export interface LearnWaveOk {
   reports: { angle: string; report: unknown }[];
   skipped: { angle: string; reason: string; detail: string }[];
   /** The single launch's output-free attempt receipt (observability only — details, not prose). */
-  attempts: WaveAttemptReceipt[];
+  attempts: ReportWaveAttemptReceipt[];
 }
 
 /** The fail arm retains any receipt known before the failure (the `failFor` extras hook). */
-export type LearnWaveResult = Result<LearnWaveOk, { attempts: WaveAttemptReceipt[] }>;
+export type LearnWaveResult = Result<LearnWaveOk, { attempts: ReportWaveAttemptReceipt[] }>;
 
 /** Decode the `angles` param rows' SHAPE strictly (any mistype ⇒ null — the bad_input refusal);
  * the semantic narrowing (known slugs, 2–4, mandatory member) is `parseAngleSelections`. */
@@ -285,7 +284,7 @@ function decodeAngleRows(raw: unknown[]): { angle: string; emphasis?: string }[]
 }
 
 /** Install the warm learn bindings: the `learn` + `run_learn_wave` tools and the `/learn` command. */
-export function installLearnBindings(pi: ExtensionAPI): void {
+export function installLearnBindings(pi: ExtensionAPI, wave: ReportWave): void {
   pi.registerTool({
     name: "learn",
     label: "Finish learn",
@@ -401,7 +400,7 @@ export function installLearnBindings(pi: ExtensionAPI): void {
       },
     },
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const fail = failFor<{ attempts: WaveAttemptReceipt[] }>(ctx, "run_learn_wave");
+      const fail = failFor<{ attempts: ReportWaveAttemptReceipt[] }>(ctx, "run_learn_wave");
       // Strict tool-boundary decode (mirrors the `learn` tool): any mistype ⇒ bad_input.
       const p = paramsOf(params);
       if (p === null) {
@@ -437,7 +436,7 @@ export function installLearnBindings(pi: ExtensionAPI): void {
       // Model resolution lives here (not in the guidance): `[models.subagents] learn-analyst`
       // rides the wave as the workflow-level `model` default.
       const model = subagentModel(ctx.cwd, "learn-analyst");
-      const outcome = await runLearnAnalystWave(createRpcWaveAdapter(pi.events), {
+      const outcome = await runLearnAnalystWave(wave, {
         bundleDir,
         selections: parsed.selections,
         ...(model !== undefined ? { model } : {}),
@@ -446,7 +445,7 @@ export function installLearnBindings(pi: ExtensionAPI): void {
 
       if (outcome.kind === "wave_failed") {
         // A wave-level failure is a loud soft-fail whose `error_type` is the wave-level
-        // `WaveFailureReason` — never a throw, never a silent fallback; the receipt known
+        // `ReportWaveFailureReason` — never a throw, never a silent fallback; the receipt known
         // before the failure rides the fail details (never the prose).
         return fail(outcome.detail, outcome.reason, { attempts: outcome.attempts });
       }

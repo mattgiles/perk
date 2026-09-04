@@ -761,6 +761,11 @@ assignments first, then one disposable tool-using assignment. Compare reports, f
 receipts, cancellation, and restart with the current RPC adapter. Retain `pi-subagents` until
 the lane adapter wins that comparison on a released surface.
 
+> **Update (Objective #2130, Node 2.1):** `WaveAdapter` is now waves-interior behind the
+> `ReportWave` lifecycle's supplier (`createReportWave` constructs a fresh rpc adapter per
+> launch; `reportWaveOver` is the injection seam). A lane adapter still implements
+> `WaveAdapter` — inside `waves/`, swapped in at the supplier.
+
 ### E. Chord validates Perk's decomposition
 
 The [TypeScript decomposition](ts-decomposition/memo.md) chose typed feature operations with Pi
@@ -997,8 +1002,8 @@ the next dated assessment or an implementation-specific admission record.
 
 1. **Adopt supported contracts, not branch vocabulary.**
 2. **Replace through existing Perk seams.** Storage through `WorkflowSession`, drive through
-   `StageRunner`, lanes through `WaveAdapter`, UI through surfaces, host registration through
-   Pi adapters.
+   `StageRunner`, lanes through `WaveAdapter` (waves-interior behind `createReportWave` since
+   Objective #2130, Node 2.1), UI through surfaces, host registration through Pi adapters.
 3. **Keep domain types Pi-free.**
 4. **Preserve branch and audit semantics field by field.**
 5. **Separate stable-version compatibility from optional host adoption.**

@@ -36,23 +36,23 @@ import { failFor, ok, type Result } from "../../../substrate/result.ts";
 import { paramsOf, stringParam } from "../../../substrate/toolParams.ts";
 import { branchOf, rebuildWorkflowState } from "../../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../../surfaces/report.ts";
-import type { WaveAdapter, WaveAttemptReceipt } from "../../../waves/reportWave.ts";
-import { createRpcWaveAdapter } from "../../../waves/rpcAdapter.ts";
+import type { ReportWave, ReportWaveAttemptReceipt } from "../../../waves/reportWave.ts";
 
 /** The `run_harvest_wave` ok-arm details: stamped per-lane reports + explicitly-skipped lanes. */
 export interface HarvestWaveOk {
   reports: HarvestLaneReport[];
   skipped: { lane: string; reason: string; detail: string }[];
   /** The single launch's output-free attempt receipt (observability only — details, not prose). */
-  attempts: WaveAttemptReceipt[];
+  attempts: ReportWaveAttemptReceipt[];
 }
 
 /** The fail arm retains any receipt known before the failure (the `failFor` extras hook). */
-export type HarvestWaveResult = Result<HarvestWaveOk, { attempts: WaveAttemptReceipt[] }>;
+export type HarvestWaveResult = Result<HarvestWaveOk, { attempts: ReportWaveAttemptReceipt[] }>;
 
 /**
- * The `run_harvest_wave` execute core, exported for testability with the adapter injected (the
- * `executeAuditWave` seam; the memory adapter in tests, the RPC adapter in production) — the
+ * The `run_harvest_wave` execute core, exported for testability with the wave injected (the
+ * `executeAuditWave` seam; a memory-backed wave in tests, the composition root's production
+ * instance live) — the
  * thin Result-rendering tier over `analyzeHarvest`. Assumes a VALIDATED manifest (the
  * registered tool runs the whole pre-spawn refusal ladder first). Outcome mapping:
  *  - `wave_failed` → a loud soft-fail whose `error_type` is the wave-level failure reason —
@@ -61,7 +61,7 @@ export type HarvestWaveResult = Result<HarvestWaveOk, { attempts: WaveAttemptRec
  *    DATA, lane-level failures listed explicitly.
  */
 export async function executeHarvestWave(
-  adapter: WaveAdapter,
+  wave: ReportWave,
   target: ReportTarget,
   opts: {
     manifest: HarvestManifest;
@@ -72,8 +72,8 @@ export async function executeHarvestWave(
     exists?: (p: string) => boolean;
   },
 ): Promise<HarvestWaveResult> {
-  const fail = failFor<{ attempts: WaveAttemptReceipt[] }>(target, "run_harvest_wave");
-  const outcome = await analyzeHarvest(adapter, opts);
+  const fail = failFor<{ attempts: ReportWaveAttemptReceipt[] }>(target, "run_harvest_wave");
+  const outcome = await analyzeHarvest(wave, opts);
   if (outcome.kind === "wave_failed") {
     return fail(outcome.detail, outcome.reason, { attempts: outcome.attempts });
   }
@@ -102,7 +102,7 @@ export async function executeHarvestWave(
 }
 
 /** Install the warm harvest binding: the `run_harvest_wave` tool. */
-export function installHarvestBindings(pi: ExtensionAPI): void {
+export function installHarvestBindings(pi: ExtensionAPI, wave: ReportWave): void {
   pi.registerTool({
     name: "run_harvest_wave",
     label: "Run harvest wave",
@@ -213,7 +213,7 @@ export function installHarvestBindings(pi: ExtensionAPI): void {
       // Model resolution at execute time: `[models.subagents] harvest-analyst` rides the wave
       // as the workflow-level model default.
       const model = subagentModel(ctx.cwd, "harvest-analyst");
-      return executeHarvestWave(createRpcWaveAdapter(pi.events), ctx, {
+      return executeHarvestWave(wave, ctx, {
         manifest: decoded.manifest,
         manifestPath: expected,
         checkoutRoot: ctx.cwd,

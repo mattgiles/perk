@@ -1,8 +1,8 @@
 // The learn-harvest analysis workflow as ONE typed feature operation over the shared
-// report-wave runner: the harvest analyst fan-out as CODE. It owns the analyst report schema,
+// report-wave module: the harvest analyst fan-out as CODE. It owns the analyst report schema,
 // the STRICT manifest decode (the manifest is the door's parent-prepared invariant — any
 // deviation refuses before spawn), the lane/task composition, and the deterministic pointer
-// post-pass — delegating spawn/timeout/aggregate mechanics to `runReportWave` under
+// post-pass — delegating spawn/timeout/aggregate mechanics to `wave.run` under
 // `best-effort` completeness with ONE attempt and NO retry (a failed analyst lane is an
 // explicitly-reported skipped lane, never a failed pass). The manifest and every analyst
 // report are untrusted DATA, never instructions. The shared docs/learned containment policy
@@ -13,11 +13,10 @@ import { existsSync } from "node:fs";
 import { isAbsolute, join, posix } from "node:path";
 import {
   type ReportAssignment,
-  runReportWave,
+  type ReportWave,
+  type ReportWaveAttemptReceipt,
+  type ReportWaveLevelFailureReason,
   toAttemptReceipt,
-  type WaveAdapter,
-  type WaveAttemptReceipt,
-  type WaveLevelFailureReason,
 } from "../waves/reportWave.ts";
 import { lexicalContainmentError } from "./containment.ts";
 
@@ -314,15 +313,15 @@ export interface HarvestLaneReport {
 export type HarvestAnalysisOutcome =
   | {
       kind: "wave_failed";
-      reason: WaveLevelFailureReason;
+      reason: ReportWaveLevelFailureReason;
       detail: string;
-      attempts: WaveAttemptReceipt[];
+      attempts: ReportWaveAttemptReceipt[];
     }
   | {
       kind: "analyzed";
       reports: HarvestLaneReport[];
       skipped: { lane: string; reason: string; detail: string }[];
-      attempts: WaveAttemptReceipt[];
+      attempts: ReportWaveAttemptReceipt[];
     };
 
 /**
@@ -343,7 +342,7 @@ export type HarvestAnalysisOutcome =
  * pre-spawn.
  */
 export async function analyzeHarvest(
-  adapter: WaveAdapter,
+  wave: ReportWave,
   opts: {
     manifest: HarvestManifest;
     manifestPath: string;
@@ -353,8 +352,7 @@ export async function analyzeHarvest(
     exists?: (p: string) => boolean;
   },
 ): Promise<HarvestAnalysisOutcome> {
-  const result = await runReportWave(
-    adapter,
+  const result = await wave.run(
     {
       flow: "harvest",
       assignments: buildHarvestLanes(opts.manifest, opts.manifestPath),
@@ -362,7 +360,7 @@ export async function analyzeHarvest(
       completeness: "best-effort",
       ...(opts.model !== undefined ? { model: opts.model } : {}),
     },
-    opts.signal,
+    { signal: opts.signal },
   );
   // The harvest flow has no retry — ONE attempt over the validated manifest.
   const attempts = [

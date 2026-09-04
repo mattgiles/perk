@@ -9,7 +9,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
-import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
+import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
+import { reportWaveOver } from "../waves/reportWave.ts";
 import {
   LEARN_ANALYST_REPORT_SCHEMA,
   LEARN_ANGLES,
@@ -134,7 +135,7 @@ test("LEARN_ANALYST_REPORT_SCHEMA: enums are derived from the vocabulary constan
 
 test("runLearnAnalystWave: the spawn carries the module contract + the flow-owned schema", async () => {
   const adapter = createMemoryWaveAdapter({ aggregate: { state: "complete", value: [] } });
-  await runLearnAnalystWave(adapter, {
+  await runLearnAnalystWave(reportWaveOver(adapter), {
     bundleDir: BUNDLE_DIR,
     selections: selections("session-deviations", "existing-docs"),
     model: "google/gemini-3.5-flash",
@@ -155,7 +156,7 @@ test("runLearnAnalystWave: the spawn carries the module contract + the flow-owne
 
 test("runLearnAnalystWave: no configured model → no model key on the spawn", async () => {
   const adapter = createMemoryWaveAdapter({ aggregate: { state: "complete", value: [] } });
-  await runLearnAnalystWave(adapter, {
+  await runLearnAnalystWave(reportWaveOver(adapter), {
     bundleDir: BUNDLE_DIR,
     selections: selections("session-deviations", "existing-docs"),
   });
@@ -164,7 +165,7 @@ test("runLearnAnalystWave: no configured model → no model key on the spawn", a
 
 test("runLearnAnalystWave: the composed task derives the manifest path and appends emphasis verbatim", async () => {
   const adapter = createMemoryWaveAdapter({ aggregate: { state: "complete", value: [] } });
-  await runLearnAnalystWave(adapter, {
+  await runLearnAnalystWave(reportWaveOver(adapter), {
     bundleDir: BUNDLE_DIR,
     selections: [
       { angle: "session-deviations", emphasis: "the agent misread the adapter seam & looped" },
@@ -204,7 +205,7 @@ test("runLearnAnalystWave: a failed lane maps to a complete outcome with an expl
       ],
     },
   });
-  const outcome = await runLearnAnalystWave(adapter, {
+  const outcome = await runLearnAnalystWave(reportWaveOver(adapter), {
     bundleDir: BUNDLE_DIR,
     selections: selections("session-deviations", "existing-docs"),
   });
@@ -229,7 +230,7 @@ test("runLearnAnalystWave: a non-object report is malformed-report; a missing ke
       value: [{ key: "session-deviations", ok: true, error: null, report: "prose, not an object" }],
     },
   });
-  const outcome = await runLearnAnalystWave(adapter, {
+  const outcome = await runLearnAnalystWave(reportWaveOver(adapter), {
     bundleDir: BUNDLE_DIR,
     selections: selections("session-deviations", "existing-docs"),
   });
@@ -246,7 +247,7 @@ test("runLearnAnalystWave: a non-object report is malformed-report; a missing ke
 
 test("runLearnAnalystWave: a null ping maps to wave_failed with reason unavailable", async () => {
   const adapter = createMemoryWaveAdapter({ ping: null });
-  const outcome = await runLearnAnalystWave(adapter, {
+  const outcome = await runLearnAnalystWave(reportWaveOver(adapter), {
     bundleDir: BUNDLE_DIR,
     selections: selections("session-deviations", "existing-docs"),
   });
@@ -266,7 +267,7 @@ test("runLearnAnalystWave: a null ping maps to wave_failed with reason unavailab
 
 test("runLearnAnalystWave: a spawn failure maps to wave_failed with its reason + detail", async () => {
   const adapter = createMemoryWaveAdapter({ spawnError: "no session" });
-  const outcome = await runLearnAnalystWave(adapter, {
+  const outcome = await runLearnAnalystWave(reportWaveOver(adapter), {
     bundleDir: BUNDLE_DIR,
     selections: selections("session-deviations", "existing-docs"),
   });
@@ -282,7 +283,7 @@ test("runLearnAnalystWave: a pre-aborted signal settles as cancelled — no spaw
   const adapter = createMemoryWaveAdapter({ aggregate: { state: "complete", value: [] } });
   const controller = new AbortController();
   controller.abort();
-  const outcome = await runLearnAnalystWave(adapter, {
+  const outcome = await runLearnAnalystWave(reportWaveOver(adapter), {
     bundleDir: BUNDLE_DIR,
     selections: selections("session-deviations", "existing-docs"),
     signal: controller.signal,

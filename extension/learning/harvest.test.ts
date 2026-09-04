@@ -11,7 +11,8 @@ import { readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { test } from "node:test";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
-import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
+import { createMemoryWaveAdapter, type MemoryWaveAdapter } from "../testing/memoryAdapter.ts";
+import { reportWaveOver } from "../waves/reportWave.ts";
 import { verifyDocContainment } from "./containment.ts";
 import {
   analyzeHarvest,
@@ -50,11 +51,11 @@ const MANIFEST_PATH = "/abs/scratch/runs/RUN/harvest-manifest.json";
 
 /** Run `analyzeHarvest` and narrow to the `analyzed` arm (the matrices' common path). */
 async function analyzed(
-  adapter: Parameters<typeof analyzeHarvest>[0],
+  adapter: MemoryWaveAdapter,
   opts: Omit<Parameters<typeof analyzeHarvest>[1], "manifestPath" | "checkoutRoot"> &
     Partial<Pick<Parameters<typeof analyzeHarvest>[1], "manifestPath" | "checkoutRoot">>,
 ): Promise<Extract<HarvestAnalysisOutcome, { kind: "analyzed" }>> {
-  const outcome = await analyzeHarvest(adapter, {
+  const outcome = await analyzeHarvest(reportWaveOver(adapter), {
     manifestPath: MANIFEST_PATH,
     checkoutRoot: "/checkout",
     ...opts,
@@ -341,7 +342,7 @@ test("analyzeHarvest: per-key lane identity — every lane's task opens with its
     ]),
   );
   const adapter = createMemoryWaveAdapter();
-  await analyzeHarvest(adapter, {
+  await analyzeHarvest(reportWaveOver(adapter), {
     manifest,
     manifestPath: MANIFEST_PATH,
     checkoutRoot: "/checkout",
@@ -611,7 +612,7 @@ test("analyzeHarvest: the spawn contract over the memory adapter (schema, best-e
 test("analyzeHarvest: the unavailable arm is wave_failed carrying the attempt receipt", async () => {
   const manifest = decoded(TWO_LANE_RAW);
   const adapter = createMemoryWaveAdapter({ ping: null });
-  const outcome = await analyzeHarvest(adapter, {
+  const outcome = await analyzeHarvest(reportWaveOver(adapter), {
     manifest,
     manifestPath: MANIFEST_PATH,
     checkoutRoot: "/checkout",

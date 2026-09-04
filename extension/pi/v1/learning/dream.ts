@@ -41,14 +41,13 @@ import {
   rebuildWorkflowState,
 } from "../../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../../surfaces/report.ts";
-import type { WaveAdapter, WaveAttemptReceipt } from "../../../waves/reportWave.ts";
-import { createRpcWaveAdapter } from "../../../waves/rpcAdapter.ts";
+import type { ReportWave, ReportWaveAttemptReceipt } from "../../../waves/reportWave.ts";
 
 /** The one post-launch fail arm (`io_error`) retains the analyst analyses AND every
  * already-recorded attempt receipt (the `HarvestWaveResult` receipt-retention discipline). */
 export type DreamWaveToolResult = Result<
   DreamAnalysisAggregate,
-  { analyses: DreamLaneAnalysis[]; attempts: WaveAttemptReceipt[] }
+  { analyses: DreamLaneAnalysis[]; attempts: ReportWaveAttemptReceipt[] }
 >;
 
 /** Render the model-facing result text: the untrusted-DATA banner, the JSON aggregate, and —
@@ -76,7 +75,7 @@ function resultText(details: DreamAnalysisAggregate): string {
 }
 
 /**
- * The `run_dream_wave` execute core, exported for testability with the adapter and every
+ * The `run_dream_wave` execute core, exported for testability with the wave and every
  * capability injected (the `executeAuditWave` seam) — the thin Result-rendering tier over
  * `analyzeDream`. Assumes a VALIDATED manifest (the registered tool runs the pre-launch ladder
  * first). Outcome mapping (compiler-checked exhaustive):
@@ -85,15 +84,15 @@ function resultText(details: DreamAnalysisAggregate): string {
  *    outcomes return ok with `complete: false` — the audit posture).
  */
 export async function executeDreamWave(
-  adapter: WaveAdapter,
+  wave: ReportWave,
   target: ReportTarget,
   opts: Parameters<typeof analyzeDream>[1],
 ): Promise<DreamWaveToolResult> {
-  const fail = failFor<{ analyses: DreamLaneAnalysis[]; attempts: WaveAttemptReceipt[] }>(
+  const fail = failFor<{ analyses: DreamLaneAnalysis[]; attempts: ReportWaveAttemptReceipt[] }>(
     target,
     "run_dream_wave",
   );
-  const outcome = await analyzeDream(adapter, opts);
+  const outcome = await analyzeDream(wave, opts);
   if (outcome.kind === "io_failed") {
     return fail(outcome.detail, "io_error", {
       analyses: outcome.analyses,
@@ -104,7 +103,7 @@ export async function executeDreamWave(
 }
 
 /** Install the warm dream binding: the `run_dream_wave` tool. */
-export function installDreamBindings(pi: ExtensionAPI): void {
+export function installDreamBindings(pi: ExtensionAPI, wave: ReportWave): void {
   pi.registerTool({
     name: "run_dream_wave",
     label: "Run dream wave",
@@ -185,7 +184,7 @@ export function installDreamBindings(pi: ExtensionAPI): void {
           scope: "run_dream_wave",
           failure: `dream_bundle_digest read-back failed (${digest === "" ? "clear" : digest})`,
         });
-      return executeDreamWave(createRpcWaveAdapter(pi.events), ctx, {
+      return executeDreamWave(wave, ctx, {
         manifest: decoded.manifest,
         manifestDigest: digestSessionData(manifestBytes),
         markBundleDigest,

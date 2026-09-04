@@ -10,7 +10,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
-import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
+import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
+import { reportWaveOver } from "./reportWave.ts";
 import {
   CLASSIFY_ASSIGNMENT_KEY,
   REVIEW_CLASSIFIER_FLOW,
@@ -101,7 +102,7 @@ test("REVIEW_CLASSIFIER_REPORT_SCHEMA is pinned in FULL (every unasserted piece 
 
 test("runReviewClassifierWave: ONE lane with the fixed flow/key/agent/task, module contract + acceptance-none", async () => {
   const adapter = createMemoryWaveAdapter({ aggregate: okAggregate() });
-  const result = await runReviewClassifierWave(adapter, {
+  const result = await runReviewClassifierWave(reportWaveOver(adapter), {
     model: "anthropic/claude-haiku-4-5",
     timeoutMs: 1_234,
   });
@@ -137,7 +138,7 @@ test("runReviewClassifierWave: ONE lane with the fixed flow/key/agent/task, modu
 
 test("runReviewClassifierWave: no configured model → no model key on the spawn", async () => {
   const adapter = createMemoryWaveAdapter({ aggregate: okAggregate() });
-  await runReviewClassifierWave(adapter);
+  await runReviewClassifierWave(reportWaveOver(adapter));
   assert.ok(adapter.calls.spawn[0] !== undefined && !("model" in adapter.calls.spawn[0]));
 });
 
@@ -152,7 +153,7 @@ test("runReviewClassifierWave: a failed lane is incomplete under strict (no retr
       ],
     },
   });
-  const result = await runReviewClassifierWave(adapter);
+  const result = await runReviewClassifierWave(reportWaveOver(adapter));
   assert.equal(result.complete, false);
   assert.deepEqual(result.reports, []);
   assert.deepEqual(result.failures, [
@@ -162,7 +163,9 @@ test("runReviewClassifierWave: a failed lane is incomplete under strict (no retr
 });
 
 test("runReviewClassifierWave: an unavailable adapter degrades loudly (wave-level failure)", async () => {
-  const result = await runReviewClassifierWave(createMemoryWaveAdapter({ ping: null }));
+  const result = await runReviewClassifierWave(
+    reportWaveOver(createMemoryWaveAdapter({ ping: null })),
+  );
   assert.equal(result.complete, false);
   assert.deepEqual(
     result.failures.map((f) => [f.key, f.reason]),

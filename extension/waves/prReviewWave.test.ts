@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
-import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
+import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
 import {
   buildPrReviewAssignments,
   directiveSuffix,
@@ -18,7 +18,8 @@ import {
   reviewTargetSuffix,
   runPrReviewWave as runPrReviewWaveBase,
 } from "./prReviewWave.ts";
-import type { WaveAdapter } from "./reportWave.ts";
+import { reportWaveOver } from "./reportWave.ts";
+import type { WaveAdapter } from "./transport.ts";
 
 const TWO_ANGLES: PrReviewAngle[] = ["plan-fidelity", "correctness"];
 const PONYTAIL_TASK =
@@ -28,7 +29,7 @@ const runPrReviewWave = (
   adapter: WaveAdapter,
   opts: Omit<PrReviewWaveOptions, "pr"> & { pr?: number },
 ) =>
-  runPrReviewWaveBase(adapter, {
+  runPrReviewWaveBase(reportWaveOver(adapter), {
     pr: opts.pr ?? 42,
     ...opts,
     requiredSkillPreflight: PREFLIGHT_OK,
@@ -350,7 +351,7 @@ test("skill-unavailable is non-retryable while an ordinary failed lane still ret
       { state: "complete", value: [okEntry("correctness")] },
     ],
   });
-  const outcome = await runPrReviewWaveBase(adapter, {
+  const outcome = await runPrReviewWaveBase(reportWaveOver(adapter), {
     pr: 42,
     angles: TWO_ANGLES,
     timeoutMs: 5_000,

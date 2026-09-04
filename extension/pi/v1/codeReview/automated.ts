@@ -3,8 +3,8 @@
 // registration metadata baseline-exact. The feature policy (the per-activation review-pass
 // state machine, the eligibility ladder, the `last_pr_review` record) lives in
 // `codeReview/automated.ts`; this module decodes at the tool boundary, composes the productions
-// at execute sites — the `perk pr url` resolver, the `ChangeReviewer` over
-// `createRpcWaveAdapter(pi.events)` + `runPrReviewWave` + the configured
+// at execute sites — the `perk pr url` resolver, the `ChangeReviewer` over the composition
+// root's `ReportWave` + `runPrReviewWave` + the configured
 // `[models.subagents] pr-reviewer` model + the Ponytail preflight, and the
 // `perk pr review-post --json --batch` publisher — and renders the Result envelopes.
 //
@@ -53,7 +53,7 @@ import {
   type PrReviewAngle,
   runPrReviewWave,
 } from "../../../waves/prReviewWave.ts";
-import { createRpcWaveAdapter } from "../../../waves/rpcAdapter.ts";
+import type { ReportWave } from "../../../waves/reportWave.ts";
 
 // ------------------------------------------------------------------- the tool-boundary decode
 
@@ -185,17 +185,16 @@ function createColdDoorTargetResolver(
 }
 
 /**
- * The production `ChangeReviewer`: `createRpcWaveAdapter(pi.events)` + `runPrReviewWave` + the
- * configured `[models.subagents] pr-reviewer` model + the Ponytail preflight. Model resolution
- * is adapter-side config, never feature input; the request's signal forwards into
+ * The production `ChangeReviewer`: the composition root's `ReportWave` + `runPrReviewWave` +
+ * the configured `[models.subagents] pr-reviewer` model + the Ponytail preflight. Model
+ * resolution is adapter-side config, never feature input; the request's signal forwards into
  * `runPrReviewWave`'s `opts.signal`.
  */
-function createRpcChangeReviewer(pi: ExtensionAPI, ctx: ExtensionContext): ChangeReviewer {
+function createRpcChangeReviewer(wave: ReportWave, ctx: ExtensionContext): ChangeReviewer {
   return {
     review(request) {
       const model = subagentModel(ctx.cwd, "pr-reviewer");
-      const adapter = createRpcWaveAdapter(pi.events);
-      return runPrReviewWave(adapter, {
+      return runPrReviewWave(wave, {
         pr: request.pr,
         angles: [...request.angles],
         ...(request.directive !== undefined ? { directive: request.directive } : {}),
@@ -278,7 +277,7 @@ const WAVE_TOOL_GUIDELINES = [
  * review-pass state is PER-ACTIVATION (one holder per install — two bound sessions in one
  * process never share/clobber it); the two feature ops own every transition.
  */
-export function installAutomatedReviewBindings(pi: ExtensionAPI): void {
+export function installAutomatedReviewBindings(pi: ExtensionAPI, wave: ReportWave): void {
   const state: ReviewPassHolder = { current: null };
 
   pi.registerTool({
@@ -348,7 +347,7 @@ export function installAutomatedReviewBindings(pi: ExtensionAPI): void {
         },
         {
           resolver: createColdDoorTargetResolver(pi, ctx),
-          reviewer: createRpcChangeReviewer(pi, ctx),
+          reviewer: createRpcChangeReviewer(wave, ctx),
           state,
         },
       );

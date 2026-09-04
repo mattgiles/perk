@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
 import {
   ADVERSARIAL_REVIEW_ANGLES,
   ADVERSARIAL_REVIEW_REPORT_SCHEMA,
@@ -17,7 +18,7 @@ import {
   isAdversarialReviewAngle,
   startAdversarialReviewWave,
 } from "./adversarialReviewWave.ts";
-import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
+import { reportWaveOver } from "./reportWave.ts";
 
 const TWO_ANGLES: AdversarialReviewAngle[] = ["claimed-intent", "correctness"];
 const PREFLIGHT_OK = async () => ({ ok: true }) as const;
@@ -261,7 +262,8 @@ test("startAdversarialReviewWave: spawn params pin the module contract, the sche
       value: [okEntry("claimed-intent"), okEntry("correctness"), okEntry("ponytail")],
     },
   });
-  const start = await startAdversarialReviewWave(adapter, {
+  const wave = reportWaveOver(adapter);
+  const start = await startAdversarialReviewWave(wave, {
     angles: TWO_ANGLES,
     pr: 42,
     worktree: "/abs/wt",
@@ -271,7 +273,10 @@ test("startAdversarialReviewWave: spawn params pin the module contract, the sche
   });
   assert.equal(start.ok, true);
   if (!start.ok) return;
-  const result = await start.result;
+  const collected = await wave.collect(start.ref);
+  assert.equal(collected.kind, "settled");
+  if (collected.kind !== "settled") return;
+  const result = collected.result;
   assert.equal(result.complete, true);
   assert.deepEqual(
     result.reports.map((r) => r.key),
@@ -295,7 +300,8 @@ test("startAdversarialReviewWave: failed Ponytail preflight omits only that chil
       value: [okEntry("claimed-intent"), okEntry("correctness")],
     },
   });
-  const start = await startAdversarialReviewWave(adapter, {
+  const wave = reportWaveOver(adapter);
+  const start = await startAdversarialReviewWave(wave, {
     angles: TWO_ANGLES,
     pr: 42,
     worktree: "/abs/wt",
@@ -303,7 +309,10 @@ test("startAdversarialReviewWave: failed Ponytail preflight omits only that chil
   });
   assert.equal(start.ok, true, "ordinary lanes still launch");
   if (!start.ok) return;
-  const result = await start.result;
+  const collected = await wave.collect(start.ref);
+  assert.equal(collected.kind, "settled");
+  if (collected.kind !== "settled") return;
+  const result = collected.result;
   assert.equal(result.complete, false);
   assert.deepEqual(
     result.reports.map((report) => report.key),
@@ -334,7 +343,8 @@ test("startAdversarialReviewWave: strict completeness — a failed lane leaves t
       ],
     },
   });
-  const start = await startAdversarialReviewWave(adapter, {
+  const wave = reportWaveOver(adapter);
+  const start = await startAdversarialReviewWave(wave, {
     angles: TWO_ANGLES,
     pr: 42,
     worktree: "/abs/wt",
@@ -343,7 +353,10 @@ test("startAdversarialReviewWave: strict completeness — a failed lane leaves t
   });
   assert.equal(start.ok, true);
   if (!start.ok) return;
-  const result = await start.result;
+  const collected = await wave.collect(start.ref);
+  assert.equal(collected.kind, "settled");
+  if (collected.kind !== "settled") return;
+  const result = collected.result;
   assert.equal(result.complete, false);
   assert.deepEqual(
     result.reports.map((r) => r.key),
@@ -357,12 +370,15 @@ test("startAdversarialReviewWave: strict completeness — a failed lane leaves t
 });
 
 test("startAdversarialReviewWave: the wave-level launch failure comes back normalized (ok: false)", async () => {
-  const start = await startAdversarialReviewWave(createMemoryWaveAdapter({ ping: null }), {
-    angles: TWO_ANGLES,
-    pr: 42,
-    worktree: "/abs/wt",
-    requiredSkillPreflight: PREFLIGHT_OK,
-  });
+  const start = await startAdversarialReviewWave(
+    reportWaveOver(createMemoryWaveAdapter({ ping: null })),
+    {
+      angles: TWO_ANGLES,
+      pr: 42,
+      worktree: "/abs/wt",
+      requiredSkillPreflight: PREFLIGHT_OK,
+    },
+  );
   assert.equal(start.ok, false);
   if (start.ok) return;
   assert.equal(start.result.complete, false);
@@ -375,7 +391,7 @@ test("startAdversarialReviewWave: the wave-level launch failure comes back norma
 
 test("startAdversarialReviewWave: duplicate angles throw at start time (programmer error via renderWaveScript)", async () => {
   await assert.rejects(
-    startAdversarialReviewWave(createMemoryWaveAdapter({}), {
+    startAdversarialReviewWave(reportWaveOver(createMemoryWaveAdapter({})), {
       angles: ["claimed-intent", "claimed-intent"],
       pr: 42,
       worktree: "/abs/wt",

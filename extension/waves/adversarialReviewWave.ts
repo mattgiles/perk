@@ -1,9 +1,9 @@
-// The adversarial-review `WaveSpec`-building entrypoint over the shared report-wave runner — the
-// human-in-the-loop review doors' (/pr-review-browser, /pr-review-terminal) vocabulary as tested
-// code (sibling of `prReviewWave.ts`): the four door angles, the per-lane completion-report
-// schema, and the lane/task composition are module-owned here, launched NON-BLOCKING via
-// `startReportWave` so the parent can return from the launch and hold the model-held
-// `subagent_wait` relay loop open while the children stream finding batches.
+// The adversarial-review `ReportWaveRequest`-building entrypoint over the shared report-wave
+// module — the human-in-the-loop review doors' (/pr-review-browser, /pr-review-terminal)
+// vocabulary as tested code (sibling of `prReviewWave.ts`): the four door angles, the per-lane
+// completion-report schema, and the lane/task composition are module-owned here, launched
+// NON-BLOCKING via `wave.start` so the parent can return from the launch and hold the
+// model-held `subagent_wait` relay loop open while the children stream finding batches.
 //
 // ZERO retries — deliberate: the doors' contract is honest incompleteness surfaced to the human
 // during triage (an `ok: false` lane is reported, never papered over), so the pr-review
@@ -18,12 +18,11 @@
 // the `structured_output` tool this wave's `outputSchema` injects per lane.
 
 import { PONYTAIL_REVIEW_SKILL } from "./ponytail.ts";
-import {
-  type ReportAssignment,
-  type ReportWaveStart,
-  startReportWave,
-  type WaveAdapter,
-  type WaveSpec,
+import type {
+  ReportAssignment,
+  ReportWave,
+  ReportWaveRequest,
+  StartWaveResult,
 } from "./reportWave.ts";
 
 /** The four-slug adversarial-review angle allowlist (claimed-intent is mandatory at the tool boundary). */
@@ -157,22 +156,20 @@ export interface AdversarialReviewWaveOptions {
   /** Accepted for parity/tests only — the flow tool deliberately never threads its own signal. */
   signal?: AbortSignal;
   /** Test seam; production validates the exact source-bound Ponytail review skill. */
-  requiredSkillPreflight?: WaveSpec["requiredSkillPreflight"];
+  requiredSkillPreflight?: ReportWaveRequest["requiredSkillPreflight"];
 }
 
 /**
- * Start the adversarial-review wave NON-BLOCKING (the streaming sibling): build the assignments
+ * Start the adversarial-review wave NON-BLOCKING (the streaming split): build the assignments
  * from the angle vocabulary and launch under the strict completeness policy — zero retries, so an
- * uncovered angle stays an honest, human-visible incompleteness. Returns the `startReportWave`
- * outcome: the run handle + never-rejecting `result` on success, or the normalized launch
- * failure.
+ * uncovered angle stays an honest, human-visible incompleteness. Returns the `wave.start`
+ * outcome: the opaque ref + identity telemetry on success, or the normalized launch failure.
  */
 export async function startAdversarialReviewWave(
-  adapter: WaveAdapter,
+  wave: ReportWave,
   opts: AdversarialReviewWaveOptions,
-): Promise<ReportWaveStart> {
-  return await startReportWave(
-    adapter,
+): Promise<StartWaveResult> {
+  return await wave.start(
     {
       flow: "adversarial-review",
       assignments: buildAdversarialReviewAssignments({
@@ -190,6 +187,6 @@ export async function startAdversarialReviewWave(
         ? { requiredSkillPreflight: opts.requiredSkillPreflight }
         : {}),
     },
-    opts.signal,
+    { signal: opts.signal },
   );
 }

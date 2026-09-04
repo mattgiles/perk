@@ -22,8 +22,9 @@
 > - `config/` — deferred; see `module-contracts.md` § PerkConfig.
 > - `PromptEvidence` — deferred; see `module-contracts.md` § PromptEvidence.
 > - `StageRunner` — deferred; see `module-contracts.md` § StageRunner.
-> - `ReportWave` — owed by objective #2130 node 2.1, reversing the Node 5.1 recorded
->   supersession; see `module-contracts.md` § ReportWave.
+> - `ReportWave` — realized by objective #2130 node 2.1 (the opaque `start`/`collect`/`run`
+>   lifecycle, reversing the Node 5.1 recorded supersession); see `module-contracts.md`
+>   § ReportWave.
 >
 > What objective #2130 owes (one sentence per phase; the roadmap on issue #2130 is the
 > authority): Phase 1 reconciles these architecture documents, pins the storage-freedom

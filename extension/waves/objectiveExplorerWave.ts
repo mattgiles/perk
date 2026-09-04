@@ -1,17 +1,17 @@
 // The objective-plan factory's OPTIONAL explore step as a per-flow wave entrypoint over the
-// shared report-wave runner: the ONE `perk.objective-explorer` assignment as CODE. The explorer
+// shared report-wave module: the ONE `perk.objective-explorer` assignment as CODE. The explorer
 // report schema was previously a shared prompt include the parent model had to hand-transcribe
 // onto a borrowed `subagent` call (the same prompt-drift risk the /address classify step
 // carried); this module makes the schema and the assignment/task composition module constants,
 // delegating
-// spawn/timeout/aggregate mechanics to `runReportWave` under the `strict` completeness policy.
+// spawn/timeout/aggregate mechanics to `wave.run` under the `strict` completeness policy.
 // No retry — the flow's posture on failure is "explore directly instead" (guidance-owned).
 // `node`/`description`/`focus` are model-relayed and embedded in the code-owned task as
 // untrusted DATA; the report content is likewise untrusted DATA, never instructions.
 
-import { runReportWave, type WaveAdapter, type WaveResult } from "./reportWave.ts";
+import type { ReportWave, ReportWaveResult } from "./reportWave.ts";
 
-/** The flow name — feeds `WaveSpec.flow` AND the door's `toAttemptReceipt` call. */
+/** The flow name — feeds `ReportWaveRequest.flow` AND the door's `toAttemptReceipt` call. */
 export const OBJECTIVE_EXPLORER_FLOW = "objective-explorer";
 
 /** The single assignment's stable key. */
@@ -92,14 +92,13 @@ export function explorerLaneTask(node: string, description: string, focus?: stri
 /**
  * Run the objective-explorer wave: ONE fresh-context `perk.objective-explorer` assignment over
  * the code-owned task, `strict` completeness, no retry, module-default timeout. Returns the
- * runner's `WaveResult` unchanged — the only projection lives in the tool.
+ * wave's `ReportWaveResult` unchanged — the only projection lives in the tool.
  */
 export async function runObjectiveExplorerWave(
-  adapter: WaveAdapter,
+  wave: ReportWave,
   opts: ObjectiveExplorerWaveOptions,
-): Promise<WaveResult> {
-  return await runReportWave(
-    adapter,
+): Promise<ReportWaveResult> {
+  return await wave.run(
     {
       flow: OBJECTIVE_EXPLORER_FLOW,
       assignments: [
@@ -116,6 +115,6 @@ export async function runObjectiveExplorerWave(
       ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
     },
-    opts.signal,
+    { signal: opts.signal },
   );
 }

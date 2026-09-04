@@ -10,7 +10,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
-import { createMemoryWaveAdapter } from "./memoryAdapter.ts";
+import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
 import {
   createRpcWaveAdapter,
   WAVE_RPC_PROTOCOL_VERSION,

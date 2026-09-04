@@ -31,7 +31,8 @@ import { PERK_TOOLS, READ_ONLY_TOOLS, STAGE_TOOLS } from "../../../substrate/too
 import { dreamRepoCommit, initDreamRepo } from "../../../testing/dreamFixtures.ts";
 import { createFakeSubagents, type FakeSubagents } from "../../../testing/fakeSubagents.ts";
 import { loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
-import { createMemoryWaveAdapter } from "../../../waves/memoryAdapter.ts";
+import { createMemoryWaveAdapter } from "../../../testing/memoryAdapter.ts";
+import { createReportWave, reportWaveOver } from "../../../waves/reportWave.ts";
 import { executeDreamWave, installDreamBindings } from "./dream.ts";
 
 const RUN_ID = "01DREAMRUN00";
@@ -355,7 +356,7 @@ test("tool: a branch with no claimed run is bad_state (zero RPC traffic)", async
       on: () => () => {},
     },
   } as unknown as ExtensionAPI;
-  installDreamBindings(pi);
+  installDreamBindings(pi, createReportWave(pi.events));
   const ctx = {
     cwd,
     hasUI: true,
@@ -414,7 +415,7 @@ test("tool: a pre-aborted signal cancels before any launch (zero RPC traffic thr
       on: () => () => {},
     },
   } as unknown as ExtensionAPI;
-  installDreamBindings(pi);
+  installDreamBindings(pi, createReportWave(pi.events));
   const controller = new AbortController();
   controller.abort();
   const ctx = {
@@ -544,7 +545,7 @@ test("executeDreamWave: the incomplete-analysis arm — the FULL rendered text +
       ],
     },
   });
-  const result = await executeDreamWave(adapter, target(), {
+  const result = await executeDreamWave(reportWaveOver(adapter), target(), {
     manifest,
     manifestDigest: MANIFEST_DIGEST,
     ...happyCapabilities(),
@@ -595,7 +596,7 @@ test("executeDreamWave: the drifted-bracket arm — the drift line ACCOMPANIES t
   const adapter = createMemoryWaveAdapter({
     aggregates: [completeAnalystAggregate(), completeReducerAggregate()],
   });
-  const result = await executeDreamWave(adapter, target(), {
+  const result = await executeDreamWave(reportWaveOver(adapter), target(), {
     manifest,
     manifestDigest: MANIFEST_DIGEST,
     ...happyCapabilities(),
@@ -629,7 +630,7 @@ test("executeDreamWave: the drifted-bracket arm — the drift line ACCOMPANIES t
 test("executeDreamWave: the io_failed outcome maps to the io_error fail arm retaining analyses + attempts", async () => {
   const manifest = TWO_LANE_MANIFEST();
   const adapter = createMemoryWaveAdapter({ aggregate: completeAnalystAggregate() });
-  const result = await executeDreamWave(adapter, target(), {
+  const result = await executeDreamWave(reportWaveOver(adapter), target(), {
     manifest,
     manifestDigest: MANIFEST_DIGEST,
     ...happyCapabilities(),

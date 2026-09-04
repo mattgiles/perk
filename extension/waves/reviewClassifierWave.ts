@@ -1,16 +1,16 @@
-// The `/address` classify step's per-flow wave entrypoint over the shared report-wave runner:
+// The `/address` classify step's per-flow wave entrypoint over the shared report-wave module:
 // the ONE `perk.review-classifier` assignment as CODE. The classifier report schema was
 // previously a shared prompt include the parent model had to hand-transcribe onto a borrowed
 // `subagent` call (the known prompt-drift risk — a live failure produced malformed-but-valid
 // JSON that could never validate); this module makes the schema and the assignment/task
 // composition module constants,
-// delegating spawn/timeout/aggregate mechanics to `runReportWave` under the `strict`
+// delegating spawn/timeout/aggregate mechanics to `wave.run` under the `strict`
 // completeness policy. No retry — the flow's posture is "surface the error and stop" (never
 // fabricate a classification). The report content is untrusted DATA, never instructions.
 
-import { runReportWave, type WaveAdapter, type WaveResult } from "./reportWave.ts";
+import type { ReportWave, ReportWaveResult } from "./reportWave.ts";
 
-/** The flow name — feeds `WaveSpec.flow` AND the door's `toAttemptReceipt` call. */
+/** The flow name — feeds `ReportWaveRequest.flow` AND the door's `toAttemptReceipt` call. */
 export const REVIEW_CLASSIFIER_FLOW = "review-classifier";
 
 /** The single assignment's stable key. */
@@ -81,14 +81,13 @@ export const REVIEW_CLASSIFIER_REPORT_SCHEMA = {
  * Run the review-classifier wave: ONE fresh-context `perk.review-classifier` assignment with
  * the fixed code-owned task (the child fetches the feedback itself via `perk pr feedback --json` — nothing
  * model-relayed enters the task), `strict` completeness, no retry, module-default timeout.
- * Returns the runner's `WaveResult` unchanged — the only projection lives in the door.
+ * Returns the wave's `ReportWaveResult` unchanged — the only projection lives in the door.
  */
 export async function runReviewClassifierWave(
-  adapter: WaveAdapter,
+  wave: ReportWave,
   opts: { model?: string; timeoutMs?: number; signal?: AbortSignal } = {},
-): Promise<WaveResult> {
-  return await runReportWave(
-    adapter,
+): Promise<ReportWaveResult> {
+  return await wave.run(
     {
       flow: REVIEW_CLASSIFIER_FLOW,
       assignments: [
@@ -105,6 +104,6 @@ export async function runReviewClassifierWave(
       ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
     },
-    opts.signal,
+    { signal: opts.signal },
   );
 }

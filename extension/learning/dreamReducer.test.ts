@@ -15,8 +15,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
-import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
-import { RUN_KEY_PATTERN } from "../waves/reportWave.ts";
+import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
+import { RUN_KEY_PATTERN, reportWaveOver } from "../waves/reportWave.ts";
 import {
   type DreamDocAssessment,
   type DreamLaneAnalysis,
@@ -640,7 +640,7 @@ async function reducedWith(report: unknown): Promise<DreamReducerOutcome> {
       ],
     },
   });
-  return await runDreamReducerWave(adapter, {
+  return await runDreamReducerWave(reportWaveOver(adapter), {
     manifestPath: MANIFEST_PATH,
     bundlePath: BUNDLE_PATH,
     proposals: PROPOSALS,
@@ -885,7 +885,7 @@ function validAggregate(): { state: string; value: unknown } {
 
 test("runDreamReducerWave: three fixed lanes — key = label = angle slug, the task shape", async () => {
   const adapter = createMemoryWaveAdapter({ aggregate: validAggregate() });
-  const outcome = await runDreamReducerWave(adapter, {
+  const outcome = await runDreamReducerWave(reportWaveOver(adapter), {
     manifestPath: MANIFEST_PATH,
     bundlePath: BUNDLE_PATH,
     proposals: PROPOSALS,
@@ -950,7 +950,7 @@ test("runDreamReducerWave: STRICT — one failed lane ⇒ incomplete, surviving 
       ],
     },
   });
-  const outcome = await runDreamReducerWave(adapter, {
+  const outcome = await runDreamReducerWave(reportWaveOver(adapter), {
     manifestPath: MANIFEST_PATH,
     bundlePath: BUNDLE_PATH,
     proposals: PROPOSALS,
@@ -990,7 +990,7 @@ test("runDreamReducerWave: a schema-valid but re-decode-failing report is malfor
       ],
     },
   });
-  const outcome = await runDreamReducerWave(adapter, {
+  const outcome = await runDreamReducerWave(reportWaveOver(adapter), {
     manifestPath: MANIFEST_PATH,
     bundlePath: BUNDLE_PATH,
     proposals: PROPOSALS,
@@ -1008,7 +1008,7 @@ test("runDreamReducerWave: a schema-valid but re-decode-failing report is malfor
 
 test("runDreamReducerWave: the unavailable arm is a wave-level failure (angle: null)", async () => {
   const adapter = createMemoryWaveAdapter({ ping: null });
-  const outcome = await runDreamReducerWave(adapter, {
+  const outcome = await runDreamReducerWave(reportWaveOver(adapter), {
     manifestPath: MANIFEST_PATH,
     bundlePath: BUNDLE_PATH,
     proposals: PROPOSALS,
@@ -1025,7 +1025,7 @@ test("runDreamReducerWave: a pre-aborted signal cancels before launch, naming th
   const controller = new AbortController();
   controller.abort();
   const outcome = await runDreamReducerWave(
-    adapter,
+    reportWaveOver(adapter),
     { manifestPath: MANIFEST_PATH, bundlePath: BUNDLE_PATH, proposals: PROPOSALS },
     controller.signal,
   );

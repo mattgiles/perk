@@ -143,7 +143,7 @@ test("an incomplete pass records complete: false and derives the loud-warning fi
       covered: ["plan-fidelity"],
       failures: [
         // A keyed failure carries an assignment-level reason by type (the discriminated
-        // WaveFailure union makes a wave-level reason on a keyed lane unrepresentable).
+        // ReportWaveFailure union makes a wave-level reason on a keyed lane unrepresentable).
         { key: "tests", reason: "lane-failed", detail: "no report" },
         { key: null, reason: "run-failed", detail: "boom" },
       ],

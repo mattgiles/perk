@@ -24,7 +24,8 @@ import { runScratchDir } from "../../../substrate/cache.ts";
 import { PERK_TOOLS, READ_ONLY_TOOLS, STAGE_TOOLS } from "../../../substrate/toolGating.ts";
 import { createFakeSubagents, type FakeSubagents } from "../../../testing/fakeSubagents.ts";
 import { loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
-import { createMemoryWaveAdapter } from "../../../waves/memoryAdapter.ts";
+import { createMemoryWaveAdapter } from "../../../testing/memoryAdapter.ts";
+import { createReportWave, reportWaveOver } from "../../../waves/reportWave.ts";
 import { executeHarvestWave, installHarvestBindings } from "./harvest.ts";
 
 const RUN_ID = "01HARVESTRUN";
@@ -331,7 +332,7 @@ test("executeHarvestWave: the ok-arm mapping — the FULL rendered text, stamped
     },
   });
   const exists = (p: string) => p === join("/checkout", "src/x.py");
-  const result = await executeHarvestWave(adapter, target(), {
+  const result = await executeHarvestWave(reportWaveOver(adapter), target(), {
     manifest: TWO_LANE_MANIFEST,
     manifestPath: "/abs/harvest-manifest.json",
     checkoutRoot: "/checkout",
@@ -417,7 +418,7 @@ test("executeHarvestWave: malformed reports degrade the LANE, never the wave", a
       ],
     },
   });
-  const result = await executeHarvestWave(adapter, target(), {
+  const result = await executeHarvestWave(reportWaveOver(adapter), target(), {
     manifest: TWO_LANE_MANIFEST,
     manifestPath: "/abs/harvest-manifest.json",
     checkoutRoot: "/checkout",
@@ -450,7 +451,7 @@ test("executeHarvestWave: malformed reports degrade the LANE, never the wave", a
 
 test("executeHarvestWave: a wave-level failure soft-fails with its reason and keeps the attempts", async () => {
   const adapter = createMemoryWaveAdapter({ ping: null });
-  const result = await executeHarvestWave(adapter, target(), {
+  const result = await executeHarvestWave(reportWaveOver(adapter), target(), {
     manifest: TWO_LANE_MANIFEST,
     manifestPath: "/abs/harvest-manifest.json",
     checkoutRoot: "/checkout",
@@ -505,7 +506,7 @@ test("tool: a pre-aborted signal cancels before any launch (zero RPC traffic)", 
       on: () => () => {},
     },
   } as unknown as ExtensionAPI;
-  installHarvestBindings(pi);
+  installHarvestBindings(pi, createReportWave(pi.events));
   const controller = new AbortController();
   controller.abort();
   const ctx = {

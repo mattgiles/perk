@@ -556,6 +556,19 @@ move code-review policy behind typed operations.
 > is byte-preserved as history (its superseded phrase wraps across two source lines, so a
 > single-line grep for the phrase does not match it — verify with a multiline search).
 >
+> **Update (Objective #2130, Node 2.1):** the reversed disposition is **realized** — the opaque
+> `start`/`collect`/`run` + `ReportWaveRef` lifecycle ships in `waves/reportWave.ts` as one
+> atomic layer: the full `ReportWave*` public rename (`AssignmentReport` excepted), pending
+> execution wave-owned (instance-owned `WeakMap` + delete-as-claim drain-once; `doors/
+> pendingWave.ts` deleted), adapter selection wave-owned (`createReportWave(pi.events)` once at
+> the composition root, a fresh rpc adapter per launch; `reportWaveOver` as the injection seam),
+> `startReportWave`/`runReportWave` + the `WaveAdapter` re-export deleted, the memory adapter
+> moved to `extension/testing/`, and guard Rule G's ten-importer exact-set replaced by the
+> interior ban (`waves/rpcAdapter.ts` joins `waves/transport.ts`) with the
+> `reportWave.ts → rpcAdapter.ts` supplier edge as the non-vacuity floor. Realized-shape detail
+> lives in `module-contracts.md` § ReportWave's Node 2.1 update note. Runtime behavior, tool
+> schemas, and result texts are unchanged.
+>
 > **Status (Objective #2083, Node 5.2):** the code-review half landed — realized-shape notes:
 >
 > - **The code-review flows sit behind typed feature operations** in the Pi-free

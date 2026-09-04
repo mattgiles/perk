@@ -18,8 +18,9 @@ import {
   waveScriptItems,
 } from "../testing/fakeSubagents.ts";
 import { fakePerk, loadPerkSession, type PerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
 import type { DraftReviewAngle } from "../waves/draftReviewWave.ts";
-import { createMemoryWaveAdapter } from "../waves/memoryAdapter.ts";
+import { reportWaveOver } from "../waves/reportWave.ts";
 import {
   clearDraftReviewContext,
   createDraftReviewWaveState,
@@ -158,7 +159,9 @@ test("executeStartDraftReviewWave: unprimed context -> loud no_draft_context (no
   const state = createDraftReviewWaveState(); // no context primed
   const { target, notified } = fakeTarget();
   const adapter = createMemoryWaveAdapter();
-  const result = await executeStartDraftReviewWave(state, adapter, target, { angles: TWO_ANGLES });
+  const result = await executeStartDraftReviewWave(state, reportWaveOver(adapter), target, {
+    angles: TWO_ANGLES,
+  });
   assert.equal(result.details.ok, false);
   assert.equal((result.details as { error_type?: string }).error_type, "no_draft_context");
   assert.match(
@@ -178,7 +181,8 @@ test("executeStartDraftReviewWave: happy path stores the pending wave; the wave 
       value: [okEntry("grounding"), okEntry("risk"), okEntry("ponytail")],
     },
   });
-  const result = await executeStartDraftReviewWave(state, adapter, target, {
+  const wave = reportWaveOver(adapter);
+  const result = await executeStartDraftReviewWave(state, wave, target, {
     angles: TWO_ANGLES,
   });
   assert.equal(result.details.ok, true);
@@ -202,8 +206,8 @@ test("executeStartDraftReviewWave: happy path stores the pending wave; the wave 
   assert.match(script, /# The draft/);
   assert.match(script, /Draft type: plan\./);
 
-  // The pending wave is stored: a second start refuses with wave_active…
-  const second = await executeStartDraftReviewWave(state, adapter, target, {
+  // The pending ref is stored: a second start refuses with wave_active…
+  const second = await executeStartDraftReviewWave(state, wave, target, {
     angles: TWO_ANGLES,
   });
   assert.equal(second.details.ok, false);
@@ -211,9 +215,9 @@ test("executeStartDraftReviewWave: happy path stores the pending wave; the wave 
   assert.match(second.content[0]?.text ?? "", /collect_draft_review_wave first/);
 
   // …and collect drains it (clearing pending — a following collect is no_wave).
-  const collected = await executeCollectDraftReviewWave(state, target);
+  const collected = await executeCollectDraftReviewWave(state, wave, target);
   assert.equal(collected.details.ok, true);
-  const drained = await executeCollectDraftReviewWave(state, target);
+  const drained = await executeCollectDraftReviewWave(state, wave, target);
   assert.equal((drained.details as { error_type?: string }).error_type, "no_wave");
 });
 
@@ -226,7 +230,8 @@ test("executeStartDraftReviewWave: a primed custom lane rides the launch and the
       value: [okEntry("grounding"), okEntry("risk"), okEntry("custom"), okEntry("ponytail")],
     },
   });
-  const result = await executeStartDraftReviewWave(state, adapter, target, {
+  const wave = reportWaveOver(adapter);
+  const result = await executeStartDraftReviewWave(state, wave, target, {
     angles: TWO_ANGLES,
   });
   assert.equal(result.details.ok, true);
@@ -250,7 +255,7 @@ test("executeStartDraftReviewWave: a primed custom lane rides the launch and the
   const script = (adapter.calls.spawn[0]?.workflowScript as string) ?? "";
   assert.match(script, /check the rollback story/, "the primed custom definition reached the lane");
 
-  const collected = await executeCollectDraftReviewWave(state, target);
+  const collected = await executeCollectDraftReviewWave(state, wave, target);
   const details = collected.details as { complete?: boolean; covered?: string[] };
   assert.equal(details.complete, true);
   assert.deepEqual(
@@ -269,15 +274,67 @@ test("primeDraftReviewContext resets the pending wave (a new browser session sup
       value: [okEntry("grounding"), okEntry("risk"), okEntry("ponytail")],
     },
   });
-  await executeStartDraftReviewWave(state, adapter, target, { angles: TWO_ANGLES });
+  const wave = reportWaveOver(adapter);
+  await executeStartDraftReviewWave(state, wave, target, { angles: TWO_ANGLES });
   // Re-prime (a second /plan-review-browser): the pending slot is wiped — a new start launches.
   primeDraftReviewContext(state, { draftType: "plan", draft: "# Draft v2\n" });
-  const second = await executeStartDraftReviewWave(state, adapter, target, {
+  const second = await executeStartDraftReviewWave(state, wave, target, {
     angles: TWO_ANGLES,
   });
   assert.equal(second.details.ok, true, "priming reset the pending wave");
   const script = (adapter.calls.spawn[1]?.workflowScript as string) ?? "";
   assert.match(script, /# Draft v2/, "the new session's draft rides the new wave");
+});
+
+test("a supersede during the collect's await never erases the NEW pending wave", async () => {
+  // The latent-erasure regression (ported from the retired doors/pendingWave.ts suite,
+  // re-expressed against the identity-guarded clear in the collect core): a collect awaits
+  // wave 1; meanwhile a re-prime + new launch stores wave 2's ref. The stale collect must
+  // return wave 1's settled result WITHOUT clearing wave 2's ref, and a following collect
+  // drains wave 2.
+  const state = primePlan();
+  const { target } = fakeTarget();
+  const adapter = createMemoryWaveAdapter({
+    completion: false,
+    aggregates: [
+      {
+        state: "complete",
+        value: [okEntry("grounding"), okEntry("risk"), okEntry("ponytail")],
+      },
+      {
+        state: "complete",
+        value: [okEntry("scope"), okEntry("risk"), okEntry("ponytail")],
+      },
+    ],
+  });
+  const wave = reportWaveOver(adapter);
+  await executeStartDraftReviewWave(state, wave, target, { angles: TWO_ANGLES });
+
+  // The stale collect is in flight, awaiting wave 1's unsettled result…
+  const staleCollect = executeCollectDraftReviewWave(state, wave, target);
+  // …while the supersede lands: a re-prime wipes the slot and a new start stores wave 2's ref.
+  primeDraftReviewContext(state, { draftType: "plan", draft: "# Draft v2\n" });
+  const second = await executeStartDraftReviewWave(state, wave, target, {
+    angles: ["scope", "risk"],
+  });
+  assert.equal(second.details.ok, true, "the superseding start launches");
+
+  adapter.emitCompletion({ asyncId: "wave-async-1", asyncDir: "/memory/wave-async-1" });
+  const stale = await staleCollect;
+  assert.equal(stale.details.ok, true, "the stale collect returns wave 1's settled result");
+  assert.deepEqual((stale.details as { covered?: string[] }).covered, [
+    "grounding",
+    "risk",
+    "ponytail",
+  ]);
+
+  // Wave 2 SURVIVES the stale collect's clear — the following collect drains it.
+  adapter.emitCompletion({ asyncId: "wave-async-2", asyncDir: "/memory/wave-async-2" });
+  const next = await executeCollectDraftReviewWave(state, wave, target);
+  assert.equal(next.details.ok, true, "the NEW pending wave stayed collectable");
+  assert.deepEqual((next.details as { covered?: string[] }).covered, ["scope", "risk", "ponytail"]);
+  const drained = await executeCollectDraftReviewWave(state, wave, target);
+  assert.equal((drained.details as { error_type?: string }).error_type, "no_wave");
 });
 
 test("clearDraftReviewContext leaves an already-launched wave collectable (the early-decision edge)", async () => {
@@ -293,17 +350,18 @@ test("clearDraftReviewContext leaves an already-launched wave collectable (the e
       value: [okEntry("grounding"), okEntry("risk"), okEntry("ponytail")],
     },
   });
-  const start = await executeStartDraftReviewWave(state, adapter, target, {
+  const wave = reportWaveOver(adapter);
+  const start = await executeStartDraftReviewWave(state, wave, target, {
     angles: TWO_ANGLES,
   });
   assert.equal(start.details.ok, true);
   clearDraftReviewContext(state);
   // A late start refuses no_draft_context (the context is gone)…
-  const late = await executeStartDraftReviewWave(state, adapter, target, { angles: TWO_ANGLES });
+  const late = await executeStartDraftReviewWave(state, wave, target, { angles: TWO_ANGLES });
   assert.equal((late.details as { error_type?: string }).error_type, "no_draft_context");
   // …but the launched wave completes and collects normally.
   adapter.emitCompletion({ asyncId: "wave-async-1", asyncDir: "/memory/wave-async-1" });
-  const collected = await executeCollectDraftReviewWave(state, target, { graceMs: 1_000 });
+  const collected = await executeCollectDraftReviewWave(state, wave, target);
   assert.equal(collected.details.ok, true, "the cleared context never orphans the pending wave");
   const details = collected.details as { complete?: boolean; covered?: string[] };
   assert.equal(details.complete, true);
@@ -315,7 +373,7 @@ test("executeStartDraftReviewWave: a launch failure soft-fails with the wave rea
   const { target, notified } = fakeTarget();
   const unavailable = await executeStartDraftReviewWave(
     state,
-    createMemoryWaveAdapter({ ping: null }),
+    reportWaveOver(createMemoryWaveAdapter({ ping: null })),
     target,
     { angles: TWO_ANGLES },
   );
@@ -340,7 +398,7 @@ test("executeStartDraftReviewWave: a launch failure soft-fails with the wave rea
   // A failed launch leaves nothing pending — the next start is not wave_active.
   const spawnFailed = await executeStartDraftReviewWave(
     state,
-    createMemoryWaveAdapter({ spawnError: "no session" }),
+    reportWaveOver(createMemoryWaveAdapter({ spawnError: "no session" })),
     target,
     { angles: TWO_ANGLES },
   );
@@ -351,13 +409,6 @@ test("executeStartDraftReviewWave: a launch failure soft-fails with the wave rea
 test("executeCollectDraftReviewWave: no_wave without a launch; wave_running retains the pending wave", async () => {
   const state = primePlan();
   const { target } = fakeTarget();
-  const none = await executeCollectDraftReviewWave(state, target);
-  assert.equal(none.details.ok, false);
-  assert.equal((none.details as { error_type?: string }).error_type, "no_wave");
-  assert.match(none.content[0]?.text ?? "", /start_draft_review_wave/);
-
-  // Launch a wave that never completes on its own; an early collect (tiny injected grace)
-  // soft-fails wave_running and RETAINS the pending wave.
   const adapter = createMemoryWaveAdapter({
     completion: false,
     aggregate: {
@@ -365,18 +416,32 @@ test("executeCollectDraftReviewWave: no_wave without a launch; wave_running reta
       value: [okEntry("grounding"), okEntry("risk"), okEntry("ponytail")],
     },
   });
-  const start = await executeStartDraftReviewWave(state, adapter, target, {
+  const wave = reportWaveOver(adapter);
+  const none = await executeCollectDraftReviewWave(state, wave, target);
+  assert.equal(none.details.ok, false);
+  assert.equal((none.details as { error_type?: string }).error_type, "no_wave");
+  assert.match(none.content[0]?.text ?? "", /start_draft_review_wave/);
+
+  // Launch a wave that never completes on its own; an early collect (a tiny env-driven grace —
+  // the one grace seam) soft-fails wave_running and RETAINS the pending ref.
+  const start = await executeStartDraftReviewWave(state, wave, target, {
     angles: TWO_ANGLES,
   });
   assert.equal(start.details.ok, true);
-  const running = await executeCollectDraftReviewWave(state, target, { graceMs: 20 });
+  process.env.PERK_WAVE_COLLECT_GRACE_MS = "20";
+  let running: Awaited<ReturnType<typeof executeCollectDraftReviewWave>>;
+  try {
+    running = await executeCollectDraftReviewWave(state, wave, target);
+  } finally {
+    delete process.env.PERK_WAVE_COLLECT_GRACE_MS;
+  }
   assert.equal(running.details.ok, false);
   assert.equal((running.details as { error_type?: string }).error_type, "wave_running");
   assert.match(running.content[0]?.text ?? "", /keep looping subagent_wait/);
 
   // Once the run completes, the retained wave collects normally (attempts in details only).
   adapter.emitCompletion({ asyncId: "wave-async-1", asyncDir: "/memory/wave-async-1" });
-  const collected = await executeCollectDraftReviewWave(state, target, { graceMs: 1_000 });
+  const collected = await executeCollectDraftReviewWave(state, wave, target);
   assert.equal(collected.details.ok, true);
   const details = collected.details as {
     complete?: boolean;
@@ -409,8 +474,9 @@ test("executeCollectDraftReviewWave: an incomplete wave is an ok result with the
       ],
     },
   });
-  await executeStartDraftReviewWave(state, adapter, target, { angles: TWO_ANGLES });
-  const collected = await executeCollectDraftReviewWave(state, target);
+  const wave = reportWaveOver(adapter);
+  await executeStartDraftReviewWave(state, wave, target, { angles: TWO_ANGLES });
+  const collected = await executeCollectDraftReviewWave(state, wave, target);
   assert.equal(collected.details.ok, true, "honest incompleteness is an ok result, never a throw");
   const details = collected.details as {
     complete?: boolean;
@@ -450,11 +516,16 @@ test("registerDraftReviewWaveTools registers exactly the two tools over registra
       value: [okEntry("grounding"), okEntry("risk"), okEntry("ponytail")],
     },
   });
-  await executeStartDraftReviewWave(seeded, adapter, target, { angles: TWO_ANGLES });
+  const seededWave = reportWaveOver(adapter);
+  await executeStartDraftReviewWave(seeded, seededWave, target, { angles: TWO_ANGLES });
 
   // …then a registration owns its OWN fresh state: no wave pending, no context primed.
   const { pi, tools } = fakePi();
-  registerDraftReviewWaveTools(pi, createDraftReviewWaveState());
+  registerDraftReviewWaveTools(
+    pi,
+    createDraftReviewWaveState(),
+    reportWaveOver(createMemoryWaveAdapter({})),
+  );
   assert.deepEqual(
     [...tools.keys()].sort(),
     ["collect_draft_review_wave", "start_draft_review_wave"],
@@ -481,7 +552,7 @@ test("registerDraftReviewWaveTools registers exactly the two tools over registra
     "the registration's own state starts unprimed",
   );
   // …and the seeded state is untouched by the registration (no shared module slot).
-  const collected = await executeCollectDraftReviewWave(seeded, target);
+  const collected = await executeCollectDraftReviewWave(seeded, seededWave, target);
   assert.equal(collected.details.ok, true);
 
   // Both promptGuidelines carry the relay-loop discipline.
@@ -521,7 +592,11 @@ test("the draft-review pair is in the tool census (PERK_TOOLS + the draft-door s
 
 test("registered start_draft_review_wave: a bad selection decodes to bad_input before any spawn", async () => {
   const { pi, tools } = fakePi();
-  registerDraftReviewWaveTools(pi, createDraftReviewWaveState());
+  registerDraftReviewWaveTools(
+    pi,
+    createDraftReviewWaveState(),
+    reportWaveOver(createMemoryWaveAdapter({})),
+  );
   const def = tools.get("start_draft_review_wave");
   assert.ok(def);
   const { target, notified } = fakeTarget();

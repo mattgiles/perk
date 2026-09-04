@@ -94,6 +94,7 @@ import {
 } from "./surfaces/surfaces.ts";
 import { registerBtw } from "./vendor/btw/btw.ts";
 import { registerWhimsical } from "./vendor/whimsical/whimsical.ts";
+import { createReportWave } from "./waves/reportWave.ts";
 
 // Cross-plane proof marker (TS writes via cache.ts; the Python helper reads it — gate check 3).
 const T3_MARKER = "t3-extension-cache-write";
@@ -163,6 +164,13 @@ export default function (pi: ExtensionAPI) {
   // plan/objective review doors (plan mode) — per activation, never per process (the
   // `draftReviewWave` threading pattern).
   const annotations = createAnnotationState();
+
+  // The composition root's ONE per-activation report-wave instance (the `draftReviewWave`
+  // threading pattern): the wave owns adapter selection (a fresh rpc adapter per launch over
+  // pi's event bus) and pending execution (instance-owned refs), and is threaded into every
+  // wave-consuming installer — no installer touches the transport tier. Plain construction, no
+  // Pi registration, order-safe.
+  const reportWave = createReportWave(pi.events);
 
   // The v1 plan installer: perk-owned plan mode (the `/plan` + Ctrl+Alt+P + `--plan` toggle
   // surface over the read-only gate, plus the plan-authoring context injection — this call
@@ -491,7 +499,7 @@ export default function (pi: ExtensionAPI) {
   // Warm bindings: `land` merges + sets pending-learn; the v1 learn installer (the `learn` +
   // `run_learn_wave` tools and the `/learn` command over the `learning/` feature ops) clears it.
   installLandBindings(pi);
-  installLearnBindings(pi);
+  installLearnBindings(pi, reportWave);
 
   // The warm stacked-delivery mutating surface (§8.51): the `/objective-sync`/
   // `/objective-recover`/`/objective-land` drives + the four typed stack tools over the
@@ -509,11 +517,11 @@ export default function (pi: ExtensionAPI) {
   // The warm `/address` review loop: the submit-then-resolve `finalize_address` tool + `/address`
   // command. Classify-then-act (the verbose feedback fetch + classification runs in an isolated
   // spawned child; the parent fixes actionable items and finalizes the committed repairs).
-  installAddressBindings(pi);
+  installAddressBindings(pi, reportWave);
 
   // The warm `/pr-review` door: automated code review in a FRESH, isolated subagent that
   // POSTS its review to the PR (the deliberate departure from /address's read-only-child rule).
-  installAutomatedReviewBindings(pi);
+  installAutomatedReviewBindings(pi, reportWave);
 
   // The warm `submit_pr_review` tool: the human-gated curated-posting surface both review
   // doors ride (contracts §8.4) — neither door registers tools of its own.
@@ -522,15 +530,15 @@ export default function (pi: ExtensionAPI) {
   // The flow-scoped review-wave pair (`start_review_wave`/`collect_review_wave`) both human
   // review doors drive: non-blocking adversarial-review launch + the typed collect, flow-scoped
   // via the session's pending-wave guard.
-  installReviewWaveBindings(pi);
-  installAuditBindings(pi);
-  installHarvestBindings(pi);
-  installDreamBindings(pi);
+  installReviewWaveBindings(pi, reportWave);
+  installAuditBindings(pi, reportWave);
+  installHarvestBindings(pi, reportWave);
+  installDreamBindings(pi, reportWave);
 
   // The flow-scoped draft-review-wave pair (`start_draft_review_wave`/
   // `collect_draft_review_wave`) the draft-review door drives: non-blocking draft-review
   // launch over the door-primed context + the typed collect.
-  registerDraftReviewWaveTools(pi, draftReviewWave);
+  registerDraftReviewWaveTools(pi, draftReviewWave, reportWave);
 
   // The door-primed browser annotation tool (`push_annotations`): the browser door primes the
   // surface handle on open and clears it on settle/degrade — the tool refuses outside a
@@ -583,7 +591,7 @@ export default function (pi: ExtensionAPI) {
   // `/objective-plan` command (select the next node and author a bounded plan). The command now
   // enters the read-only gate on invocation (parity with the cold door's `mode: read-only`
   // handoff; exit stays with plan_save / `/plan` off) — hence `gating`.
-  installObjectivePlanningBindings(pi, gating);
+  installObjectivePlanningBindings(pi, gating, reportWave);
 
   // The two learn plan factories' warm surfaces: `/learn-docs` gathers open perk:learn issues
   // (via the `perk learn docs --gather` cold door) toward a docs/learned consolidation plan;

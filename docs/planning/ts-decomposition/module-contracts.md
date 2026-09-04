@@ -437,6 +437,31 @@ application state.
 > start-vs-run cancellation split, the pending-collect semantics) are enumerated in the
 > #2130 roadmap.
 
+> **Update (Objective #2130, Node 2.1): disposition realized.** The opaque
+> `start`/`collect`/`run` lifecycle ships in `extension/waves/reportWave.ts`; the realized
+> shape deviates from the sketch below only where noted:
+>
+> - The full `ReportWave*` rename landed (`ReportWaveRequest`, `ReportWaveResult`,
+>   `ReportWaveFailure`/`ReportWaveFailureReason`, `ReportWaveLevelFailureReason`,
+>   `ReportWaveCompleteness`, `ReportWaveLaunchManifest`, `ReportWaveAttemptReceipt`), with
+>   `AssignmentReport` as the one stutter-avoiding exception (pairs with
+>   `ReportAssignment`/`AssignmentFailure`).
+> - `WaveControl` carries only `signal`, and `collect(ref)` takes NO control parameter (the
+>   sketch's slot would have carried only a test-only timing knob; the
+>   `PERK_WAVE_COLLECT_GRACE_MS` env knob is the one grace seam). `collect` returns the added
+>   `CollectWaveResult` union (`none`/`running`/`settled`) carrying the grace/retention
+>   semantics — the sketch's `Promise<ReportWaveResult>` had no way to say "still running,
+>   ref retained".
+> - Pending execution is an instance-owned `WeakMap<ReportWaveRef, PendingRecord>` with
+>   `delete(ref)` as the atomic drain claim — drain-once holds even under overlapping
+>   collectors, and a foreign instance's ref collects `none` structurally.
+> - Adapter supply is wave-owned: `createReportWave(bus)` (the production factory,
+>   constructed once at the `index.ts` composition root) builds a fresh rpc adapter per
+>   launch; `reportWaveOver(adapter)` is the injection seam over the same core.
+> - The one-line identity-guarded slot clear (`if (state.pending === ref) …`) remains flow
+>   policy in the two collect cores — which wave is *current* is the flow's own state; every
+>   race/grace/drain mechanic below it is wave-owned.
+
 `ReportWave` is the shared mechanism for asking several named reporters to
 produce reports and then collecting their outcomes. It owns:
 
