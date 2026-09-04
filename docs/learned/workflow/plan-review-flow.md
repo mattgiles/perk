@@ -300,6 +300,9 @@ trigger**.
    default-path results.
 4. **`approvedSaveResult`'s `edited` detail is optional (`edited?: boolean`)**, keeping every
    no-edit call site byte-stable — the additive-details intent decides such signatures.
+5. **Provider-boundary decision parsing ignores malformed payloads** — a malformed decision
+   payload parses to `null` and the wait CONTINUES; it is never coerced into a typed denial. A
+   provider glitch must not manufacture a review verdict (#2170).
 
 ## Testing recipes
 

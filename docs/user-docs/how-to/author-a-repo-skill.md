@@ -25,16 +25,16 @@ uses that origin to resolve committed skill content.
    perk skills scaffold my-skill
    ```
 
-   This writes a manual starter at `.perk/skills/my-skill/SKILL.md`. For a guided, write-capable
+   This writes a manual starter at `.perk/skills/<my-skill>/SKILL.md`. For a guided, write-capable
    authoring session instead, run:
 
    ```bash
    perk skills create my-skill
    ```
 
-   Both commands refuse a name whose `.perk/skills/my-skill/` directory already exists. Use
+   Both commands refuse a name whose `.perk/skills/<my-skill>/` directory already exists. Use
    `perk skills refine my-skill` for an existing skill rather than overwriting it.
-2. **Edit the source file.** Complete `.perk/skills/my-skill/SKILL.md`. Keep its frontmatter `name`
+2. **Edit the source file.** Complete `.perk/skills/<my-skill>/SKILL.md`. Keep its frontmatter `name`
    equal to the directory name and give it a non-empty, task-specific `description`.
 3. **Publish the source.** Commit the skill and push it to the repository's default branch. The
    managed skills source resolves from that branch, so local or merely unpushed content cannot be
@@ -45,7 +45,7 @@ uses that origin to resolve committed skill content.
    perk skills sync
    ```
 
-   Verify that `.agents/skills/my-skill/SKILL.md` now resolves to the committed skill. This is the
+   Verify that `.agents/skills/<my-skill>/SKILL.md` now resolves to the committed skill. This is the
    installed path that Pi and perk binding delivery read.
 5. **Reopen it later.** Run `perk skills refine my-skill` to improve the existing source in another
    guided session. Commit, push, and sync the revision again.

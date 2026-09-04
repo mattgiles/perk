@@ -41,6 +41,21 @@ ordering, intervals rescheduled on fire — then drives arbitrary debounce/poll/
 interleavings with zero sleeps. Anchor: `extension/hunkFeedback/inbox.test.ts` (the `FakeTimers`
 class and the seam-injected inbox under test).
 
+## Pin env-knob timing at the timer seam, never with elapsed time
+
+- Pin env-knob timing config at the timer seam with `t.mock.method` — assert the captured
+  `setTimeout` delay equals the configured value, and pin leak-freedom by comparing allocated vs
+  cleared handles (#2189).
+- Timer-cleanup tests need deterministic timer observation — an elapsed-time assertion cannot
+  detect a deleted `clearTimeout`; only handle bookkeeping can (#2175).
+
+## Process-global env vars are not completion barriers
+
+Process-global env vars cannot serve as completion barriers for concurrent in-process sessions —
+nested save/restore interleaves and restores the wrong value. Use per-session settle barriers
+plus ONE restore point (#2170). And abort paths must settle pending handshakes on every exit — a
+rejected/aborted arm that leaves a handshake pending deadlocks the suite (#2170).
+
 ## Sequential "race" tests are fiction — use test-only race hooks
 
 A test that performs step A, then step B, then asserts "the race is handled" never ran a race —

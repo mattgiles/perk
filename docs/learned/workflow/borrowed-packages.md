@@ -208,9 +208,12 @@ source), actively maintained, license, and the package's pi-version floor vs per
 
 ## Residuals
 
-- SDK in-process children (`SDK_READ_ONLY_TOOLS` in `extension/worker/readOnlySession.ts`) deliberately
-  stay strict — widening them so SDK children can use borrowed tools is an **explicit decision, not
-  drift** (spawned pi-subagents children already inherit the tools via `.pi/settings.json`).
+- *(Dated history.)* While the SDK in-process child existed, its strict `SDK_READ_ONLY_TOOLS`
+  allowlist was never widened for borrowed tools; the child and the list were deleted with the
+  stage-execution confinement (PR #2100), so the rule's live scope is now empty. The conclusion
+  stands: widening an SDK child's tool list for borrowed tools would have been — and for any
+  future SDK child would be — an **explicit decision, not drift** (spawned pi-subagents children
+  already inherit the tools via `.pi/settings.json`).
 - Most string-entry packages cannot filter skills. The Ponytail object is the narrow exception;
   future filtered borrows require an explicit convergence and health-equivalence decision.
 - npm installation remains lazy and the running Pi session must restart before a newly converged

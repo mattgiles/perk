@@ -194,7 +194,7 @@ facts**; single-plane narrative lives in the owning module's header docstring.
 When a prompt fragment must agree **byte-for-byte across planes**, give each plane one exported
 helper (`src/perk/run/launch/prompts.py::_plan_read_instruction` ↔ `extension/substrate/prompts.ts::planReadInstruction`)
 plus a shared literal-fragment substring list (`LINEAR_READ_SUBSTRINGS`) asserted from BOTH suites
-(`tests/test_worker_prompt_parity.py` ↔ `extension/worker/worker.test.ts`). Choose substrings as
+(`tests/test_worker_prompt_parity.py` ↔ `extension/worker/stageExecution.test.ts`). Choose substrings as
 fragments of the *instruction*, not the scaffold — scaffold fragments match every arm and pin
 nothing.
 
@@ -244,6 +244,17 @@ boundary**, not by relaxing the shared validator. Example: `objective_save` trea
 as optional (defaults `pending`), but shared `validate_roadmap` *requires* it (the YAML path relies
 on that) — so the default was applied in the new `parse_structured_roadmap` edge, leaving the shared
 validator strict.
+
+## Contract-edit mechanics — census leads, anchor proofs, atomic edit batches
+
+- **Census/wave prescriptions are leads, never an ownership map** — a §-pointer is written only
+  in the pass that grep-confirms the owner text actually carries the claim (#2044).
+- **Anchor-inventory proofs scan every supported heading level** and compare ordered — a proof
+  scoped to `##` misses `###` anchors, and an unordered set comparison hides duplicates and
+  reorderings (#2030).
+- **Multi-block `edit` batches are atomic** — a partial-failure report means NONE of the blocks
+  applied. Re-read every intended region before proceeding, keep batches per-section, and
+  re-verify locators after any failure (#2030).
 
 ## Cross-references
 

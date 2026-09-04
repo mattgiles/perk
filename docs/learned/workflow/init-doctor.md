@@ -191,7 +191,7 @@ on whether the delivery is **tracked content** or **symlinks**:
   content is byte-stable.
 - **Perk owns the WHOLE subdir: prune inside, never outside.** Such a convergence prunes stray files
   *within* its owned subdir (e.g. stray `*.md` under `.pi/agents/perk/`) but **never** touches
-  sibling user files outside it (a user's `.pi/agents/mine.md`) — and, reaffirming the idempotency
+  sibling user files outside it (a user's `.pi/agents/<mine>.md`) — and, reaffirming the idempotency
   rule above, computes the **same change-list for `apply=True`/`apply=False`**.
 
 See `docs/learned/pi/subagents.md` for the realized instance (the `PERK_AGENTS` /

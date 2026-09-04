@@ -17,24 +17,24 @@ condition that would make an incorrect implementation fail, then assert the full
   "Default-miss fakes hide targeting errors".
 - Fakes never pick the safety posture: keep production fail-closed and repair the fakes — "Fakes
   must not pick the safety posture".
+- Seam conversions re-home every observer: audit each stubbed dependency for orphaned pins and
+  rebuild both threshold sides — "Seam conversions must re-home every observer".
 - Dedup/uniqueness claims need manufactured collisions under the exact contract key —
   "Manufacture collisions for uniqueness and dedup claims".
-- Assert positive membership and full payloads; ordering/abort/byte-identity claims assert the
-  literal sequence, artifact survival, or raw bytes — "Assert payloads, not merely silence".
-- Write failure matrices from the boundary contract; each validation branch and each defensive
-  arm gets a forcing fixture — "Enumerate failure matrices from the contract".
-- Cover the whole declared surface: corrupt each NEW field individually, decode every enum arm,
-  pair cap+1 refusals with at-cap successes — "Parametrize the whole declared surface".
-- Capture the exact request each parity fake receives; discriminant-only assertions prove shape,
-  not routing — "Capture exact requests from parity fakes".
-- Discriminating inputs live inside the measured scope: shuffled order, astral characters,
-  multibyte bytes, distinct worktree roots — "Put discriminating inputs inside the measured
-  scope".
-- Negative-space checks prove a live selector, fail under an injected offender, and
-  mutation-proof by reverting only the temporary mutation — "Negative-space checks need floors
-  and mutation proofs".
-- Keep one real default path through the deepest seam; pin optional-seam composition via the
-  captured registration — "Keep one real default path and verify delegates".
+- Assert positive membership and full payloads; ordered effects flow through ONE recorder with a
+  discriminating order — "Assert payloads" / "Order pins need one recorder".
+- Write failure matrices from the boundary contract; a fixture for check N must be valid for
+  checks 1..N−1 — "Enumerate failure matrices from the contract".
+- Cover the whole declared surface: per-field corruption, every enum arm, precedence per
+  adjacent pair, throwing cases for fail-open reads — "Parametrize the whole declared surface".
+- Capture the exact request each parity fake receives (full argv, staged stdin) — "Capture exact
+  requests from parity fakes".
+- Discriminating inputs live inside the measured scope; de-coincide coinciding fixture
+  identities — "Put discriminating inputs inside the measured scope".
+- Negative-space checks prove a live selector and fail under an injected offender; unobservable
+  invariants pin structurally in source — "Negative-space checks" / "Structural source pins".
+- Keep one real default path through the deepest seam; pin composition via the CAPTURED
+  registration, never a hand rebuild — "Keep one real default path and verify delegates".
 - Assert where values leave the subsystem, reading back through the production reconstruction
   seam — "Assert where values leave the subsystem".
 
@@ -61,6 +61,22 @@ test. `workflow/issue-backend.md` records the backend form; delivery routing exa
   choices via observable behavior, not implementation echo (#2018).
 - Citing this doc doesn't apply it: for each invariant asserted, check the fixture would fail
   the trivial/wrong implementation (#2000).
+
+## Seam conversions must re-home every observer
+
+When a suite converts to a new seam or fixture (a fake replacing an intermediate artifact), every
+property observed through the old path needs a new observer:
+
+- A property observed only through an intermediate artifact the new fixture stubs out silently
+  loses its pin. Audit every stubbed dependency with: "which deleted assertions were the only
+  observer of what this stub now swallows?" (#2192).
+- Boundary tests converted through a fake need BOTH threshold sides — deliberately reconstruct
+  the non-tripping twin (one-below-limit completing with zero aborts), not only the tripping
+  case (#2192).
+- Cap boundaries need the N−1 case — seed CAP−1 and prove the last allowed attempt succeeds
+  (#2155).
+- A contract preserved by doing nothing needs a pin as much as a changed one — "no change"
+  claims regress silently without an assertion (#2183).
 
 ## Manufacture collisions for uniqueness and dedup claims
 
@@ -97,6 +113,14 @@ Four sharper payload rules:
 - "Byte-identical" tests compare bytes (raw stdout vs the exact expected serialization), never
   top-level key sets (#2029).
 
+## Order pins need one recorder and a discriminating order
+
+- All ordered effects must flow through the SAME event trace — split across two recorders, a
+  reordering between them stays green (#2184).
+- Order-pin fixtures must be discriminating: shuffle staged order relative to expected order,
+  and interleave degraded cases between dispatchable ones, so an order bug and a skip bug are
+  separately visible (#2176).
+
 ## Enumerate failure matrices from the contract
 
 A fixture generator usually expresses only valid shapes. Deriving negative cases from it therefore
@@ -117,6 +141,10 @@ route boundaries. `tests/test_prose_review_dto.py`, `tests/test_prose_review_web
 - Enumerate blocked/defensive arms and pin each with a forcing fixture, or prove-then-delete the
   unreachable ones (#2029, #2021). Audit plan-time defensive-check inventories against what
   production can actually pass (#2028).
+- Ordered-validation-chain negatives: a fixture testing check N must be valid for checks 1..N−1,
+  or it pins the wrong refusal (#2182).
+- Per-check corruption matrices: N independent field checks need N fixtures, each corrupting
+  exactly one field, none rejectable by an earlier tier (#2176).
 
 ## Parametrize the whole declared surface
 
@@ -137,6 +165,9 @@ oracle.
 - "Every open X" claims need a more-than-one-page fixture AND negative argv pins on the bounded
   readers (#2003); a single-candidate negative can't prove sweep continuation — follow a closed
   match with an open one (#2004).
+- Precedence chains need a test per adjacent pair; every fail-open read needs its throwing case;
+  byte-stable stderr/warning contracts need captured-stream assertions, not null-return proxies
+  (#2171).
 
 ## Capture exact requests from parity fakes
 
@@ -149,6 +180,13 @@ A validation-shortcut fixture can also bypass the derivation being tested. For e
 verify which production path it reaches; a prefilled "already validated" object cannot prove raw
 input validation. The façade patterns are documented in `workflow/objective-delivery.md` and tested
 in `tests/test_delivery_facade.py` and its operation-specific siblings.
+
+- Routing-key fakes don't pin the wire — assert full argv adjacency and the exact staged stdin
+  rows, not just the routing key (#2184).
+- A fake that ignores its inputs unpins the delegation boundary — record argv, assert exactly
+  (#2180).
+- Compatibility-sensitive false-vs-absent distinctions need both wire forms round-tripped
+  (#2180).
 
 ## Put discriminating inputs inside the measured scope
 
@@ -168,6 +206,9 @@ that fixture design generalizes to every conversion proof.
 - Root-anchoring tests are vacuous when invocation root == main root — use a linked worktree
   with distinct roots plus a main-checkout-only marker asserting where the config was actually
   loaded from (#2028).
+- De-coincide fixture identities: when an output interpolates an identity present in several
+  coinciding fixture sources, thread a divergent alias through one source and pin BOTH the
+  presence of the resolved value AND the absence of the alias (#2154).
 
 ## Negative-space checks need floors and mutation proofs
 
@@ -183,6 +224,13 @@ repository invariant into an empty scan.
 Mutation-proof ordering pins by temporarily reversing the implementation and watching the pin
 fail — but never restore with `git checkout <file>` while carrying uncommitted work (a HEAD
 reset wipes it); snapshot/stash first and revert only the temporary mutation (#1922).
+
+## Structural source pins for unobservable invariants
+
+When an invariant is unobservable at the seam and a test-only seam is forbidden, pin the
+unobservable half **structurally in source** — exact reference-count/placement assertions over
+the source text — and scope the behavioral test's claim to what it can actually falsify. A
+behavioral test whose claim covers the unobservable half is quietly vacuous (#2189).
 
 ## Keep one real default path and verify delegates
 
@@ -200,6 +248,11 @@ migration version of this rule.
 - Optional injected seams need a product-path composition pin — register with a recording fake,
   inject a fake dep, and invoke the CAPTURED tool definition end-to-end; once a pure helper owns
   the interaction matrix, keep integration tests to boundary behavior plus one smoke (#1922).
+- A composition pin that reconstructs the composition by hand pins nothing (optional params make
+  loss silent) — load the actual extension root through the harness and drive the registered
+  surface end-to-end (#2170).
+- Cover the composition point through the registered artifact — a helper-only suite stays green
+  when the execute-callback wiring is deleted (#2155).
 - Built-output progressive-enhancement mounts need an explicit presence assertion (#1993).
 
 ## Assert where values leave the subsystem

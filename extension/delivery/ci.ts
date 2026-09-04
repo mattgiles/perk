@@ -209,8 +209,8 @@ export interface RunCiChecksDeps {
    * treats as data (a throw folds to the check's failure shape). */
   persistOutput: PersistCheckOutput;
   observeChangedFiles: ObserveChangedFiles;
-  /** Optional typed live-progress sink. Failure-owned here: a throwing OR async-rejecting sink
-   * can neither affect the run nor leak an unhandled rejection. */
+  /** Optional typed live-progress sink. Failure-owned here: each call is wrapped in try/catch,
+   * so a throwing sink cannot affect the run (the callback contract is synchronous `void`). */
   onProgress?: (event: CiProgressEvent) => void;
 }
 

@@ -72,15 +72,16 @@ An en-dash (`–`) inside a docstring — e.g. a numeric range like "Nodes 3.2�
 the **em-dash** (`—`) is fine. (Sibling to the RUF043 note above — both bite prose under test/source
 that looks innocuous.)
 
-### Sibling: `RUF003` on a semantic glyph in a `#` comment
+### Sibling: `RUF001`/`RUF003` on a semantic glyph in strings and `#` comments
 
 The same ambiguous-unicode family fires on literal **semantic glyphs** — the leveled-log vocabulary
-`›` (U+203A), `✓`, `⚠` (see `src/perk/substrate/output.py`): a glyph in a `#` comment trips **`RUF003`**
-(ambiguous-unicode-character-comment), and the same glyph in a docstring trips **`RUF002`**. The
-rule: keep semantic glyphs inside **string literals / format strings** (where they belong and are
-not flagged), and **reword prose comments to avoid the literal glyph** — say "step line" /
-"done/warn line", not the glyph itself. (Same family as the RUF002 en-dash note above — the fix is
-rewording the *comment/docstring*, never the string literal that legitimately carries the glyph.)
+`›` (U+203A), `✓`, `⚠` (see `src/perk/substrate/output.py`) — in every carrier: a literal glyph in
+a **string** trips **`RUF001`**, in a **docstring** trips **`RUF002`**, and in a `#` **comment**
+trips **`RUF003`**. The rules: in string literals that legitimately carry the glyph — including
+test literals asserting the `io_step` narration lines — use the **`"\u203a"` escape form** (escapes
+are not flagged; `tests/test_output.py` and `output.py` itself are the worked examples), and
+**reword prose comments/docstrings to avoid the literal glyph** — say "step line" / "done/warn
+line", not the glyph itself. (Same family as the RUF002 en-dash note above.)
 
 ## `RUF022`: keep `__all__` isort-sorted
 

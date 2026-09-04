@@ -361,6 +361,14 @@ command's behavior flips, the surfaces that *describe* it drift together and mus
 same turn: `shared/contracts.md`, the in-session context constant (e.g. `OBJECTIVE_AUTHORING_CONTEXT`
 in `authoring/objective/prose.ts`), and the owning `SKILL.md`.
 
+## The warm/cold stack-door parity shape (`/stack-review-browser`)
+
+The stack review door's warm/cold pairing is the parity template (#2033): the warm command drives
+the cold `--stack` checkout via `runColdDoor` and renders its typed refusals (never re-deriving
+them); the seeded stage uses ONE parameterless handoff-bound opener (the binding carries
+everything the opener needs); and shared guidance text must serve BOTH entry paths — write it
+entry-neutral rather than assuming the warm command's context.
+
 ## Diagnosis meta-lesson
 
 A swallowed warm-door failure *looks* like an unwired feature. The #126 bug looked like

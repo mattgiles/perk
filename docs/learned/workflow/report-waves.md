@@ -32,8 +32,9 @@ session-scoped guard-state patterns, and the wave test machinery worth reusing.
   coverage is per-angle — "Lane semantics — status ≠ validity ≠ coverage".
 - Size-budgeted renderers emit splittable per-line blocks (join-equivalent when unsplit);
   oversize-unreachability claims are cap arithmetic — "Budgeted block-packing renderers".
-- Review posting uses one shared discriminated single-use state across static/dynamic doors, bound
-  to one resolved PR and consumed only after successful mutation — "Session-scoped guard state".
+- Review posting uses one discriminated single-use record in per-activation state
+  (`ReviewPassHolder`), bound to one resolved PR and consumed only after successful mutation —
+  "Session-scoped guard state".
 - Launch manifests preserve requested/runnable/preflight-failed lanes and required Ponytail
   coverage, so instability becomes honest incompleteness — "Session-scoped guard state".
 - "Watch items / residuals" is the flagged-edges register — check it before extending the
@@ -274,8 +275,9 @@ perk-side application.)
 - Keep **ONE workflow-level report schema for fixed lanes** and render a conditional per-lane
   `outputSchema` override only for heterogeneous lanes — the override renders only when present,
   so the fixed-item pins stay byte-identical.
-- The dynamic flow's **custom selector lane is a deliberate untrusted-text exception with a
-  module-owned trust posture**: reserved-lane-key + kebab-slug validation; a
+- *(Historical — the dynamic flow is retired; the posture survives as precedent for any future
+  custom lane.)* The dynamic flow's **custom selector lane was a deliberate untrusted-text
+  exception with a module-owned trust posture**: reserved-lane-key + kebab-slug validation; a
   whitespace-collapsed ≤300-char scope; ONE custom lane rendered through a fixed
   scope-definition-only template; the invariant that a non-null custom selection ⟺ the lane
   launched; custom-aware static retry via the per-lane schema; and fallback only when neither
@@ -283,9 +285,15 @@ perk-side application.)
 - Such an exception warrants an **explicit adversarial containment test** — a hostile scope must
   stay in exactly the one lane — with the expectation spelled literally in the test rather than
   derived from the production helper.
-- Named residual: the per-item `outputSchema` override is proven offline (rendered-script
-  execution + serialized-object pins) but not against live pi-subagents RPC until a live
-  `/pr-review-dynamic` run with a selector-proposed custom angle.
+- The former named residual (the per-item `outputSchema` override proven offline but never
+  against live RPC) was mooted by the dynamic flow's wholesale retirement — no live carrier
+  remains.
+- The adversarial wave's `stack: true` option is a **discriminator, not a member array**
+  (`extension/waves/adversarialReviewWave.ts`): with `stack: true` only the subject/context-fetch
+  sentence of the lane task swaps (the combined diff of the stack topped by the PR; the child
+  fetches context via `perk pr review-context --pr <n> --stack`); single-PR lane tasks stay
+  byte-identical when the option is absent, and stack-membership authority stays with the
+  context worker — the wave never enumerates members.
 
 ## Lane semantics — status ≠ validity ≠ coverage
 
@@ -309,12 +317,20 @@ rather than being treated as terminal.
 
 ### One discriminated, single-use post record
 
-Static and dynamic PR-review doors share one module-scoped state machine: `null`, `pending`, a
-recorded wave outcome, then `consumed`. Decode tool parameters first; immediately after successful
-decode transition to `pending`, before resolving the review target or spawning lanes. Bad input
-preserves the prior usable record, but any valid new pass invalidates it even if target resolution
-or launch later fails. This prevents an old complete result from being posted after a newer attempt.
-Registration resets module state for a fresh session.
+The `/pr-review` pass rides one discriminated, single-use state machine: `null`, `pending`, a
+recorded wave outcome, then `consumed`. Since the door→typed-op migration (PR #2109 — which also
+retired the dynamic door) that state is **per-activation, never module-scoped**: the installer
+creates one `ReviewPassHolder` per activation (`extension/codeReview/automated.ts`, created and
+threaded by `extension/pi/v1/codeReview/automated.ts`), the browser door's annotation state is
+likewise per-activation (`extension/pi/v1/codeReview/browser.ts`), and a fresh session gets fresh
+state by construction — no registration-time module reset exists or is needed. (Historical: the
+static and dynamic doors once shared one module-scoped state machine; the dynamic door is retired
+and module-level flow state is banned.)
+
+Decode tool parameters first; immediately after successful decode transition to `pending`, before
+resolving the review target or spawning lanes. Bad input preserves the prior usable record, but
+any valid new pass invalidates it even if target resolution or launch later fails. This prevents
+an old complete result from being posted after a newer attempt.
 
 A successful post consumes the record exactly once. A `review_target_changed` refusal demotes a recorded
 outcome back to pending because its identity evidence is no longer postable. Other mutation

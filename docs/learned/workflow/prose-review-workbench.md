@@ -34,6 +34,10 @@ adapters, wire protocol, and edit workspace evolve.
   edits to revisions — "EditWorkspace invariants".
 - JSX/component-render coverage remains a named browser-dogfood gap, not an implied unit-test pass —
   "Standing proof gap".
+- The workbench constrains extension topology: registration prose stays inline (the TS adapter
+  cannot follow identifier indirection), inlining changes fragment counts, and the prose suites
+  are an opt-in carve-out run explicitly — "The workbench is a topology constraint on extension
+  moves".
 
 ## Launcher security and the development loop
 
@@ -215,6 +219,22 @@ under `packages/perk-dev/src/perk_dev/prose_review/source_adapter/write.py`.
 Do not pre-author accessors for imagined consumers. A consumer-less getter expands the cache and
 revision contract without proving the shape serves a real flow; add it with the node that owns the
 caller.
+
+## The workbench is a topology constraint on extension moves
+
+Extension refactors must treat the prose-map/workbench tooling as a structural constraint, not an
+afterthought:
+
+- **The TS source adapter cannot follow identifier indirection.** Registration prose (tool
+  descriptions, guidance strings) stays **inline at registration sites**, and `sendUserMessage`
+  call sites stay out of whole-file-validated installers — moving prose behind an identifier
+  removes it from the adapter's fragment view (#2170).
+- **Identifier→literal inlining changes fragment granularity.** An in-place array adds
+  (items − 1) fragments per array — predict the count-pin delta before the move instead of
+  discovering it as test churn (#2173).
+- **The prose suites are an opt-in carve-out from `just ci`.** A slice touching prose-map routes
+  runs `just prose-review-test` / `just prose-review-check` explicitly, and `perk-dev prose-map
+  sync` is an implied deliverable of ANY injection-surface change (#2169, #2172, #2155).
 
 ## Standing proof gap
 

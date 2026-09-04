@@ -46,7 +46,8 @@ Five stages, each a separate node, each owning one module:
    `perk/learn/evidence.py`.
 4. **`--render` session-normalization pass** (node 3.2) — `perk/learn/normalize.py`.
 5. **Warm `/learn` multi-angle orchestrator** (node 4.2) — consumes the bundle; the analyst wave
-   is code on the report-wave module (`extension/waves/learnWave.ts` over
+   is code on the report-wave module (`extension/learning/analystWave.ts` — the feature op,
+   installed by `extension/pi/v1/learning/learn.ts` — over
    `extension/waves/reportWave.ts`) driven by the flow-scoped `run_learn_wave` tool; the
    judgment seed is `prompts/stages/learn-orchestrate.md`.
 
@@ -106,7 +107,7 @@ Four best-effort, **loud-but-non-fatal** (never throw) TS capture sites:
 
 - `savePlan` → `planning/main`,
 - `index.ts` `session_start` → `implementation/main` (claimer-only, first-write-wins),
-- worker `driveStage` → `implementation/worker`,
+- worker `runStage` → `implementation/worker`,
 - the `/submit` warm door (the publish operation, `extension/delivery/submit.ts::publishVerified`
   over `publishDepsFor`) → `implementation/main` at `impl_run_ids`-stamping time
   (first-write-wins) — any run id entering the linkage gets its pointer captured in the same
@@ -300,9 +301,9 @@ The reusable split:
   of the bundle (never a silent fallback to model-authored scripts).
 
 The `[models.subagents]`-key model is resolved by the tool at execute time and applied as the
-wave's **workflow-level `model` default** (flowing onto every lane) because an `agentOverrides`
-entry cannot displace the def's frontmatter-pinned `model:` (the 0.52 custom-agent override path
-is frontmatter-sensitive — see `pi/subagents.md`).
+wave's **workflow-level `model` default** (flowing onto every lane) because that default is
+spawn-time and config-owned — no settings churn, and it wins over the def-level model (see
+`pi/subagents.md` for the `agentOverrides` history).
 
 `decodeEvidence` is **lenient-never-null** (returns defaults, never `null`), so `runColdDoor`'s
 `bad_output` arm is **deliberately unreachable**. The decode-policy criterion: be lenient when a success

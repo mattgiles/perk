@@ -37,9 +37,9 @@ history a future delivery/recovery node should not re-derive.
 - Recovery proves fresh product state in both terminal directions — "Recovery proof is a fresh
   product-state proof, not a ref comparison (§8.51)".
 - "Residual proof bounds" is the register of open proof bounds (dated one-liners).
-- Façade migrations use narrow internal Protocols, complete-or-nothing laziness, bounded error
-  subsets, explicit consent, real-runtime tests, and exact export cuts — "Façade-slice
-  migration pattern".
+- Façade migrations: narrow Protocols, complete-or-nothing laziness, bounded error subsets,
+  explicit consent, exact export cuts; typed slices land net-positive under a named-excess
+  ledger; zero-policy passthroughs are a smell — "Façade-slice migration pattern".
 
 ## The seam map
 
@@ -282,6 +282,26 @@ then retain the real-default lane alongside it.
 Finally, review against the approved plan as authority. A reviewer preference that contradicts a
 settled plan decision is declined with recorded rationale rather than silently redesigning the
 slice during review.
+
+### Slice scope + review economics (the door→typed-op train)
+
+- **Typed-seam introduction lands net-*positive*** — expect +150–250 LOC per slice; the
+  chronically underestimated item is the wire-identical details rebuild. The working acceptance
+  mechanism is a **named-excess ledger** (each excess line class named and justified) with
+  operator PR-approval as the recorded acceptance gesture; review-mandated hardening inside named
+  invariant classes rides outside the size bar (#2186, #2181, #2184, #2180, #2182).
+- **Zero-policy seams die at review.** A typed op that is a pure passthrough over one production
+  adapter is a plan-time smell; a transition step with no decision content is padding; and
+  plan-mandated defensive machinery still faces the YAGNI bar (#2171, #2182, #2181).
+- **The counterpart: seam-proving slices legitimately decline YAGNI findings** when the structure
+  IS the plan-mandated deliverable — pre-arm the decline in the plan and record it at review
+  (#2169, #2180).
+- **Tier fit:** "shared by N adapters" is not the substrate admission test — binding vocabulary
+  can land in a tiny feature-home module instead of the substrate tier (#2181).
+
+(The seam-design rules live in `pi/extension-seams.md` § "Door→typed-op extraction craft"; the
+move/sweep mechanics in `toolchain/ts-module-moves.md`; the parity-pin shapes in
+`workflow/execution-path-parity.md`.)
 
 ## The stacked `/submit` publish operation — five posture traps
 

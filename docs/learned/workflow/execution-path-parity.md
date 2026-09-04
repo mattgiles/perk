@@ -56,7 +56,7 @@ Each shape below is a reusable pattern, with its landed exemplar:
   the `tests/test_prompt_parity.py` precedent.
 - **Lockstep literals.** Where both planes must agree on a frozen shape (`RunOutcome`), pin the
   literal byte-identically in both suites with reciprocal comments pointing at each other —
-  `tests/test_run_report.py` ↔ `extension/worker/worker.test.ts` (see
+  `tests/test_run_report.py` ↔ `extension/worker/stageExecution.test.ts` (see
   `docs/learned/workflow/shared-contracts.md` for the general lockstep-literal pattern).
 - **One physical fixture file consumed by BOTH suites.** The strongest cross-plane invariance pin
   shares the fixture bytes themselves — `tests/parity/dream_report_invariance.json`, with the
@@ -66,6 +66,21 @@ Two-roots-era additions (#1740): `cli/plan_selection.select_plan` joins the
 `reconstruct_plan_ref` convergence sites; §8.38 row 5 covers the shared positioner plus the
 named local-worktree-vs-remote-in-place gesture difference; and the parity suite carries the
 explicit-ref arm.
+
+Door→typed-op migration additions (the seam-design rules live in `pi/extension-seams.md`
+§ "Door→typed-op extraction craft"; the move/sweep mechanics in `toolchain/ts-module-moves.md`):
+
+- **Migration parity pins are complete frozen-baseline deepEquals over the whole registration
+  object** — never sampled strings; a sampled pin survives a dropped field or guideline line
+  (#2169, #2173).
+- **A gate-filtered model-visible list is not a registration census** — bind-only probes
+  enumerate the registered surface; the model-visible set is a policy projection of it (#2169).
+- **Registered-surface-first adapter testing** with one minimal exported translation seam — drive
+  the registered artifact and export only the smallest translation helper the tests need (#2180).
+- **A capturing-fake-pi over an identity-less branch** is how absent-identity adapter arms get
+  pinned — the fake records what the adapter would have sent (#2169).
+- **Adapter-level signal/cancellation proofs run through the production path**, and
+  per-activation isolation tests cover every state facet a second activation could leak (#2174).
 
 ## Name differences instead of forcing identity
 

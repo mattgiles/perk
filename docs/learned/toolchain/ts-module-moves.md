@@ -72,6 +72,28 @@ fix didn't drop nested tests.
 - The justfile's `"extension/**/*.test.ts"` **MUST stay quoted**: Node ≥22 self-expands `**`;
   unquoted, the shell flattens it under non-globstar bash and nested tests silently drop.
 
+## Extraction-migration sweep rules (the door→typed-op train)
+
+Move/sweep mechanics from the door→typed-op extraction train (the seam-design craft lives in
+`pi/extension-seams.md` § "Door→typed-op extraction craft" — one owner each, cross-referenced):
+
+- **Plan the move verbatim, but budget a post-move simplification pass** — extraction surfaces
+  dead branches and coverage overlap that only become visible once the code sits in its new home
+  (#2190).
+- **When a plan says both "move verbatim" AND names a specific delta, the delta is what gets
+  silently swallowed** — verify each plan-specified departure as its own checklist item, separate
+  from the verbatim-move check (#2173).
+- **An API-deletion layer's test migration must delete local shims that reconstruct the old
+  signature** — a helper rebuilding the deleted shape keeps dead-API coverage green (#2189).
+- **Rename sweeps reach comments/doc-comments even in tiers declared behavior-untouched** — a
+  "no changes to X" non-goal covers behavior, not narration (#2189, #2175).
+- **Retirement sweeps cover derived enumerations and counts**, not just identifiers — a retired
+  member's absence changes counts and "one of N" prose elsewhere (#2174).
+- **Grep the whole repo for the doomed path, not the known-anchor list** — the executable grep is
+  the acceptance, the plan's inventory is a floor (#2180).
+- **After a dedupe-into-engine refactor, sweep for exports/test knobs whose last caller was a
+  deleted duplicate** — orphaned seams survive tsc and tests (#2183).
+
 ## Sources
 
 - Issue #440 (plan #435 → PR #436) — the doors/ tranche
@@ -82,3 +104,9 @@ fix didn't drop nested tests.
 - `docs/design/archive/extension-layout.md` — Decision 2 (the layout this recipe executes)
 - `docs/learned/toolchain/biome.md` — the import reorder + the `--write` diff-review discipline
 - `docs/learned/toolchain/worktree-node-modules.md` — fresh-worktree npm ci before tsc/node --test
+- `docs/learned/pi/extension-seams.md` — "Door→typed-op extraction craft" (the seam-design half of
+  the extraction train)
+- `docs/learned/workflow/objective-delivery.md` — the façade-slice migration pattern (scope/review
+  economics of typed-seam slices)
+- `docs/learned/workflow/execution-path-parity.md` — migration parity pins over registration
+  objects

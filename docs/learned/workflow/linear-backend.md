@@ -352,7 +352,7 @@ every request the emitters compose without touching emitter code or the real cli
   (re-exported by the `src/perk/run/launch/` package) ↔
   `extension/substrate/prompts.ts::planReadInstruction`, byte-parity pinned by lockstep
   `LINEAR_READ_SUBSTRINGS` lists asserted from BOTH suites
-  (`tests/test_worker_prompt_parity.py` ↔ `extension/worker/worker.test.ts`).
+  (`tests/test_worker_prompt_parity.py` ↔ `extension/worker/stageExecution.test.ts`).
 - **The linear plan-read arm is prose, not a command** (a `linear_get_issue` /
   `linear_list_comments` tool recipe with an `open <url>` fallback). The prompt scaffold tolerates
   either shape; parity substrings are literal fragments of the *instruction*, not the scaffold, so

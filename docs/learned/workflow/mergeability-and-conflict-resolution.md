@@ -1,6 +1,6 @@
 ---
 title: "/submit mergeability gate + the conflict-resolver subagent"
-read_when: You are touching the merge-tree conflict probe (`src/perk/substrate/git.py`), the `/submit` warm reactive drive, the conflict-resolver subagent, a PR-mergeability gotcha, or a post-rebase prose sweep.
+read_when: /submit mergeability gate, the conflict-resolver agent and its outcome vocabulary, /objective-sync conflict drives, warm-route hints on cold refusals, or stall/rebase analysis.
 cluster: plan-lifecycle
 ---
 
@@ -14,6 +14,27 @@ data-format example).
 
 > **One Code Rule.** Everything below names files + describes behavior. The merge-tree output block
 > and the GraphQL/CLI shapes are **data-format examples**, marked as such — not reproduced logic.
+
+## Distillation
+
+- The merge-tree exit code IS the verdict — carry `mergeable` explicitly, never re-derive it from
+  parsed conflict paths — "The load-bearing bug class".
+- The probe fails open everywhere; conflicts never flip submit's exit code — "Fail-open
+  everywhere".
+- The resolver reports through a closed 5-class outcome vocabulary; a dispatcher gate maps every
+  branch to an emittable class (add a class, never soften a gate); mode dispatch is
+  sentinel-based and fail-closed — "The resolver outcome vocabulary + the sentinel mode
+  dispatch".
+- The conflict loop is a textual-integrity mechanism, not a semantic-consistency one —
+  auto-merges carry base-advance-falsified claims past the resolver; blob-level prediction is a
+  ceiling ("at most N stops"), not a profile — "Live conflict-loop findings".
+- Route advice on a cold refusal has its own truth condition: gate the hint independently,
+  confine interpolated values with a fullmatch allowlist, omit the whole sentence on mismatch —
+  "Warm-route hints on cold refusals".
+- `evaluateTerminal`'s implement bar: only a definitive `mergeable === false` blocks completion —
+  "Worker completion bar".
+- After any rebase adapting to relocated symbols, grep the old dotted path as text — prose lags
+  the functional sweep — "The rebase prose-lag trap".
 
 ## The local conflict probe (`src/perk/substrate/git.py`)
 
@@ -137,15 +158,67 @@ succeeded (and the same explicit-cwd task text succeeded first-try in a later `f
 publish step). Rule: resolver task text opens with the `cd <worktree>` command — a concrete
 command line, not a prose description of where to work. The rule is now plumbed into the dispatch
 itself: `conflictResolutionGuidance` takes the plan worktree path (the session cwd — `/submit`
-runs only in worktree-bound sessions) and `stages/conflict-resolution.md` opens the child
+runs only in worktree-bound sessions) and `prompts/stages/conflict-resolution.md` opens the child
 instruction with the concrete `cd {{ worktree }}` command, so the session no longer has to
 remember to author it.
 
-*Unmet as of 2026-08 (dream audit):* the shipped resolver task text does not implement this rule —
-`prompts/stages/conflict-resolution.md` (rendered by
-`extension/pi/v1/delivery/submit.ts::conflictResolutionGuidance`) contains no `cd` command, and
-`agents/conflict-resolver.md` declares same-worktree execution in prose only. The rule stands as
-the defensive requirement for authored task text.
+## The resolver outcome vocabulary + the sentinel mode dispatch
+
+`agents/conflict-resolver.md` reports through a **closed 5-class outcome vocabulary**:
+`completed` / `verification-failed` / `stopped-before-mutation` / `unresolvable-conflict` /
+`aborted`. The design rule: every gate in a dispatcher that consumes the report must map **every
+branch to an emittable class** — when a new refusal shape appears, **add a class rather than
+soften a gate** (an unclassifiable branch forces downstream consumers into prose-matching).
+
+Mode dispatch is **sentinel-based and fail-closed**: the dispatcher renders an exact marker at
+column zero (a task-text line opening with the retained-continuation sentinel prefix), the agent
+def matches tolerantly (a line's first non-whitespace content), and retained mode additionally
+corroborates against **concrete rebase state** (the rebase-in-progress probe) before mutating
+anything — sentinel absence selects the legacy PR-rebase mode. The shape generalizes: exact
+rendered marker on the producing side, tolerant def-side matching on the consuming side, and a
+concrete state probe as the fail-closed corroborator.
+
+## Live conflict-loop findings (first retained-mode dogfood)
+
+First live evidence from the retained-continuation loop (the `/objective-sync` conflict drive):
+
+- **Blob-level conflict prediction gives a ceiling, not a profile.** Only overlapping-line edits
+  actually stop a rebase, so a blob-overlap census reads as "at most N stops" — budget attempt
+  caps from it as an upper bound, never an expected count.
+- **The loop is a textual-integrity mechanism, not a semantic-consistency one.** Auto-merges
+  carry base-advance-falsified claims (prose the base's advance made wrong) straight past the
+  resolver — nothing conflicts textually. The content workflow owns semantic reconciliation;
+  don't expect the conflict loop to catch it.
+- The fail-closed retained-mode prompt produced **content-correct semantic resolution** on its
+  first live conflict — the first evidence the prompt shape resolves well, not merely refuses
+  safely.
+- Mechanics worth remembering:
+  - Preview and real sync runs each mint **fresh candidate SHAs** — compare *content*, never
+    SHAs, when checking a preview against the real run.
+  - A consumed sync operation deliberately leaves its `…json.resolver-lock` claim dir behind; it
+    self-heals via the lease's reclaimability predicate (`extension/substrate/resolverLease.ts`).
+    Never "clean it up" by hand and never report it as orphaned residue.
+  - Evidence-chain bracketing tolerates timing slips — bracket the window, don't assert exact
+    stamps.
+  - Late supervisor progress echoes arriving after the workflow call returns are expected, not a
+    stuck child.
+
+## Warm-route hints on cold refusals — the hint has its own truth condition
+
+A cold refusal that recommends a warm route is TWO claims: the refusal itself and the route
+advice. Gate the *hint* on its own truth condition — an identity match proving the recommended
+route really applies — independently of the refusal's correctness; a correct refusal with a wrong
+hint sends the operator to a dead end.
+
+- **Copyable-hint confinement** (`src/perk/delivery/sync.py::_warm_route_hint`): a value
+  interpolated into a copyable command hint is confined by an allowlist regex that intersects
+  EVERY downstream constraint (shell, unquoted argv, injected-guidance position) — which means an
+  **alphanumeric first character** (an option-shaped or `.`-segment token can never render) —
+  matched with `fullmatch`; on any mismatch the WHOLE sentence is omitted (fail-closed
+  whole-sentence omission, never a partially-sanitized or value-less hint).
+- **Suffix-tolerant corroboration tokens:** substring-keyed corroboration pins keep the
+  **byte-identical prefix** load-bearing and pinned while tolerating suffix drift — pin the
+  prefix, not the whole formatted token.
 
 ## The rebase prose-lag trap — relocated symbols leave stale prose behind
 
@@ -159,7 +232,7 @@ mid-flight; the rebase fixed every functional reference (CI stayed green) while 
 references — a `seeded_door.py` docstring plus three in `tests/test_seeded_door.py` (including the
 guard's remediation message) — still named `perk.cli.ensure.fail`. Only PR review caught them.
 
-## Worker completion bar (`extension/worker/worker.ts`)
+## Worker completion bar (`extension/worker/stageExecution.ts`)
 
 `evaluateTerminal`'s implement arm now requires `submitDetails.mergeable !== false` **in addition to**
 `ok && pr`: `true` / `null` / absent all allow completion (fail-open); only a definitive `false`
@@ -193,7 +266,7 @@ don't drift" discipline).
 - `src/perk/substrate/git.py` — the `git merge-tree --write-tree` probe, `MergeProbe.mergeable`
 - `extension/delivery/submit.ts` + `pi/v1/delivery/submit.ts` — decide + drive, the re-drive cap
 - `extension/pi/v1/delivery/land.ts` — `driveReconcileAfterLand`, the shape the drive mirrors
-- `extension/worker/worker.ts` — `evaluateTerminal`'s `mergeable !== false` implement bar
+- `extension/worker/stageExecution.ts` — `evaluateTerminal`'s `mergeable !== false` implement bar
 - `agents/conflict-resolver.md` — the write-capable + context-inheriting agent def
 - `docs/learned/workflow/warm-door-commands.md` — the terminate+followUp composition, the
   reactive-sub-result drive, the drive-helper test shape

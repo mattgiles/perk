@@ -136,6 +136,13 @@ rebuild + render, no re-seed.)
 - The checkpoints-specific charter survey is **not** duplicated here — it lives in
   `docs/design/archive/checkpoints-rpiv-todo-comparison.md`.
 
+### `ctx.compact` contains a throwing delegate via `onError`
+
+`ctx.compact` wraps its delegate in its own try/catch: a synchronously-throwing compaction
+delegate surfaces through the `onError` callback (classified as a compaction failure), never as a
+throw in the caller's settle handling — settle-time code around a `ctx.compact` call needs no
+defensive try/catch for the delegate itself.
+
 ## `ctx.ui.editor` facts (pi 0.84.1)
 
 `editor(title, prefill) → Promise<string | undefined>`. Enter submits, Shift+Enter inserts a
