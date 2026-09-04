@@ -392,6 +392,13 @@ registers the worker's terminal tools and claims its run") proves under the offl
 `loadPerkSession` harness that a throwaway `agentDir` still loads + binds the project `@mgiles/perk`
 extension: the `submit` and `finalize_address` tools register, and the `session_start` claim
 engages for a planted handoff + `PERK_RUN_ID` (the rebuilt `perk:workflow-state.run_id` matches).
+*Update (2026-09): the dedicated harness test (whose filename above was already historical) was
+retired as superseded — the pin now lives in the real-factory tier + the named suites:
+`extension/worker/stageExecutionE2e.test.ts` (the implement/address HAPPY scenarios complete only
+if the real extension registered the terminal tools; the NO-EXTENSION-TOOLS scenario pins the
+negative), `extension/sessionLifecycle.test.ts` ("claim: fresh session with PERK_RUN_ID + handoff
+claims the run"), and `extension/pi/v1/delivery/address.test.ts` (registration parity, including
+the `resolve_review_threads` absence).*
 
 **Deferred, as planned:** the live model-driven e2e (Node 4.1), the structured event stream (Node
 1.3, which carries this outcome shape), remote dispatch / the GitHub Actions runner (2.1/2.2), and

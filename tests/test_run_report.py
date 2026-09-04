@@ -228,11 +228,11 @@ def test_format_step_summary_degraded_when_none():
 # ----------------------------------------------------------------- RunOutcome lockstep
 
 # LOCKSTEP LITERALS (contracts.md §8.11/§8.38): these two RunOutcome shapes are pinned
-# byte-identically in extension/worker/stageExecution.test.ts ("assembleOutcome: completed has
-# error:null and the frozen shape" / "assembleOutcome: a failure carries a capped
-# error.summary") — the TS emitter and this Python reporter share no schema, so the shared
-# literal is the tripwire: a TS field rename breaks these tests instead of silently degrading
-# remote run reports. Change BOTH suites together.
+# byte-identically in extension/worker/stageExecution.test.ts ("runStage: the frozen completed
+# RunOutcome (lockstep with tests/test_run_report.py)" / "runStage: the frozen failed RunOutcome
+# (lockstep with tests/test_run_report.py)") — the TS emitter and this Python reporter share no
+# schema, so the shared literal is the tripwire: a TS field rename breaks these tests instead of
+# silently degrading remote run reports. Change BOTH suites together.
 _COMPLETED_OUTCOME_LOCKSTEP = {
     "run_id": "RID123",
     "stage": "implement",
@@ -244,12 +244,16 @@ _COMPLETED_OUTCOME_LOCKSTEP = {
 }
 _FAILED_OUTCOME_LOCKSTEP = {
     "run_id": "RID",
-    "stage": "address",
+    "stage": "implement",
     "status": "failed",
     "terminal_signal": "agent_idle_incomplete",
     "pr": None,
     "budget": {"turns": 1, "tokens": 0, "elapsed_ms": 1},
-    "error": {"type": "incomplete", "message": "went idle", "summary": "went idle"},
+    "error": {
+        "type": "incomplete",
+        "message": "implement drive went idle without an opened PR (no successful submit).",
+        "summary": "implement drive went idle without an opened PR (no successful submit).",
+    },
 }
 
 
@@ -292,13 +296,14 @@ def test_run_outcome_lockstep_failed_renders_failure_arm(tmp_path):
     outcome = run_report.read_outcome(tmp_path, "RID")
     assert outcome == _FAILED_OUTCOME_LOCKSTEP
     body = run_report.format_outcome(
-        run_id="RID", stage="address", plan="5", run_url=None, outcome=outcome, exit_code=1
+        run_id="RID", stage="implement", plan="5", run_url=None, outcome=outcome, exit_code=1
     )
     assert "Status: failed" in body
     assert "terminal_signal: agent_idle_incomplete" in body
     assert "Budget: turns=1, tokens=0, elapsed_ms=1" in body
     assert "Opened PR" not in body
-    assert "**Failure summary:**" in body and "went idle" in body
+    assert "**Failure summary:**" in body
+    assert "implement drive went idle without an opened PR (no successful submit)." in body
 
 
 # ----------------------------------------------------------------- orchestration

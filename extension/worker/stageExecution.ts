@@ -43,14 +43,16 @@ import {
   type WorkerModelSelection,
 } from "./sdkAdapter.ts";
 
+// Re-exports so `workerMain.ts` imports ONLY the seam (guard Rule F), plus the transitive type
+// closure of `runStage`'s signature: the `StageRunDeps.createRuntime` fake-construction types and
+// the type-only `StageRunOptions.model` token (`WorkerModelSelection` minting stays
+// adapter-owned — tests that mint import the class from `sdkAdapter.ts`).
 export type {
   DriveEvent,
   DriveRuntimeLike,
   DriveSessionLike,
-  StageEvent,
   WorkerModelSelection,
 } from "./sdkAdapter.ts";
-// Re-exports so `workerMain.ts` (and the harness tier) import ONLY the seam.
 export { resolveWorkerModel } from "./sdkAdapter.ts";
 
 // --- contract types (additive-stable; §B of docs/design/headless-worker.md) ---------------------
@@ -124,7 +126,7 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K>
 type RunEventInput = DistributiveOmit<RunEvent, "seq" | "t">;
 
 /** Per-event free-text cap (route-don't-relay): events carry the narrative, not raw tool payloads. */
-export const EVENT_SUMMARY_CAP = 2 * 1024;
+const EVENT_SUMMARY_CAP = 2 * 1024;
 
 export interface StageRunOptions {
   /** Absolute path to the already-positioned worktree (Gap 7). */
@@ -158,7 +160,7 @@ export interface StageRunDeps {
 }
 
 /** The natural-idle terminal classification (before watchdog/abort overrides). */
-export interface TerminalVerdict {
+interface TerminalVerdict {
   status: RunStatus;
   terminal_signal: TerminalSignal;
   pr: { number: number; url: string } | null;
@@ -166,10 +168,10 @@ export interface TerminalVerdict {
   errorMessage: string | null;
 }
 
-// --- pure helpers (offline-testable) ------------------------------------------------------------
+// --- pure helpers (module-local policy fold) -----------------------------------------------------
 
 /** Mutable counters/captures the drive's policy fold accumulates over the run. */
-export interface DriveCounters {
+interface DriveCounters {
   turns: number;
   tokens: number;
   /** Latest submit-bearing evidence (standalone submit or the nested finalizer submit). */
@@ -178,7 +180,7 @@ export interface DriveCounters {
   modelError: { message: string } | null;
 }
 
-export function freshCounters(): DriveCounters {
+function freshCounters(): DriveCounters {
   return { turns: 0, tokens: 0, submitDetails: null, finalizeDetails: null, modelError: null };
 }
 
@@ -189,7 +191,7 @@ export function freshCounters(): DriveCounters {
  * captures the `submit`/`finalize_address` terminal tool details, and records a post-acceptance
  * model error.
  */
-export function applyStageEvent(counters: DriveCounters, event: StageEvent): void {
+function applyStageEvent(counters: DriveCounters, event: StageEvent): void {
   if (event.kind === "turn_ended") {
     counters.turns += 1;
     counters.tokens += event.freshTokens;
@@ -216,7 +218,7 @@ export function applyStageEvent(counters: DriveCounters, event: StageEvent): voi
 }
 
 /** True when the budget watchdog should trip from the current counters. */
-export function budgetTripped(counters: DriveCounters, budget: DriveBudget): boolean {
+function budgetTripped(counters: DriveCounters, budget: DriveBudget): boolean {
   return counters.turns >= budget.maxTurns || counters.tokens >= budget.maxTokens;
 }
 
@@ -228,7 +230,7 @@ export function budgetTripped(counters: DriveCounters, budget: DriveBudget): boo
  *    evidence is successful and not definitively unmergeable → completed/address_resolved;
  *  - otherwise the agent went idle without completing the stage → failed/agent_idle_incomplete.
  */
-export function evaluateTerminal(args: {
+function evaluateTerminal(args: {
   stage: DriveStage;
   submitDetails: Record<string, unknown> | null;
   finalizeDetails: Record<string, unknown> | null;
@@ -319,7 +321,7 @@ export function evaluateTerminal(args: {
  * when absent, else `null`. Deliberately does NOT require the `subagent` tool for `address` — the
  * subagent-under-worker live smoke stays the §8.11 carried risk.
  */
-export function missingTerminatingTool(stage: DriveStage, toolNames: string[]): string | null {
+function missingTerminatingTool(stage: DriveStage, toolNames: string[]): string | null {
   const required = stage === "implement" ? "submit" : "finalize_address";
   return toolNames.includes(required) ? null : required;
 }
@@ -341,7 +343,7 @@ function extractPr(
  * positioning, Gap 7), overridable for tests. On a non-completed status the `error` block carries a
  * capped `error.summary` (route-don't-relay discipline); a completed status has `error: null`.
  */
-export function assembleOutcome(args: {
+function assembleOutcome(args: {
   stage: DriveStage;
   verdict: TerminalVerdict;
   budget: { turns: number; tokens: number; elapsed_ms: number };
@@ -372,9 +374,11 @@ export function assembleOutcome(args: {
 /**
  * Compute a `tool_outcome` `{ tool, ok, summary }` from a translated `tool_ended` event (pure).
  * `summary` is `null` on success and, on failure, a capped (route-don't-relay) rendering of the
- * adapter's pre-cap error text — never the raw tool result.
+ * adapter's pre-cap error text — never the raw tool result. The `errorText` nullish fallback
+ * below is defensive only: the adapter always supplies `errorText` for failures (pinned in
+ * `sdkAdapter.test.ts`), so it is unreachable through the production path.
  */
-export function toolOutcomeOf(event: Extract<StageEvent, { kind: "tool_ended" }>): {
+function toolOutcomeOf(event: Extract<StageEvent, { kind: "tool_ended" }>): {
   tool: string;
   ok: boolean;
   summary: string | null;
@@ -390,7 +394,7 @@ export function toolOutcomeOf(event: Extract<StageEvent, { kind: "tool_ended" }>
  * (same basis as `RunOutcome.budget.elapsed_ms`). Fail-soft: a throwing injected sink is caught and
  * swallowed so a broken sink never aborts the drive.
  */
-export function createEventEmitter(sink: RunEventSink, now: () => number, startMs: number) {
+function createEventEmitter(sink: RunEventSink, now: () => number, startMs: number) {
   let seq = 0;
   return {
     emit(event: RunEventInput): void {
@@ -409,7 +413,7 @@ export function createEventEmitter(sink: RunEventSink, now: () => number, startM
  * **no-op when `runId` is empty** (keeps the offline drive tests, which set no `PERK_RUN_ID`,
  * write-free). Each append is wrapped so a write error logs and is swallowed.
  */
-export function defaultEventSink(worktree: string, runId: string): RunEventSink {
+function defaultEventSink(worktree: string, runId: string): RunEventSink {
   if (!runId) return () => {};
   let ensured = false;
   const path = runEventsPath(worktree, runId);
@@ -445,7 +449,7 @@ export function defaultEventSink(worktree: string, runId: string): RunEventSink 
  * the `classify_review_feedback` tool, which reads the configured classifier model at execute
  * time — nothing model-shaped rides the prompt.
  */
-export function initialPromptFor(stage: DriveStage, planRef: PlanRef | null): string | null {
+function initialPromptFor(stage: DriveStage, planRef: PlanRef | null): string | null {
   if (planRef === null) return null;
   const provider = String(planRef.provider ?? "");
   const prId = String(planRef.pr_id ?? "");
