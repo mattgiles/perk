@@ -560,6 +560,31 @@ test("runStage: exactly maxTurns turn_ends trip → budget_exhausted/budget + ab
   assert.equal(session.abortCalls, 1);
 });
 
+test("runStage: one turn below maxTurns never trips → completed", async () => {
+  // The false side of the exact `>=` turn threshold: an off-by-one trip (maxTurns - 1) would
+  // surface here as budget_exhausted instead of completed.
+  const session = new FakeSession((emit) => {
+    emit({ type: "turn_end", message: { role: "assistant" } });
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: true, pr: { number: 7, url: "https://x/pr/7" } } },
+    });
+  });
+  const outcome = await runStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "implement",
+      initialPrompt: "go",
+      budget: { ...baseBudget, maxTurns: 2 },
+    },
+    { createRuntime: async () => fakeRuntime(session) },
+  );
+  assert.equal(outcome.status, "completed");
+  assert.equal(outcome.budget.turns, 1);
+  assert.equal(session.abortCalls, 0, "the watchdog never tripped below the limit");
+});
+
 test("runStage: turns summing exactly maxTokens trip → budget_exhausted", async () => {
   // The exact `>=` threshold: 60 + 40 fresh tokens against maxTokens: 100.
   const session = new FakeSession((emit) => {
@@ -576,6 +601,30 @@ test("runStage: turns summing exactly maxTokens trip → budget_exhausted", asyn
     { createRuntime: async () => fakeRuntime(session) },
   );
   assert.equal(outcome.status, "budget_exhausted");
+});
+
+test("runStage: fresh tokens one below maxTokens never trip → completed", async () => {
+  // The false side of the exact `>=` token threshold: 99 fresh tokens against maxTokens: 100.
+  const session = new FakeSession((emit) => {
+    emit({ type: "turn_end", message: { role: "assistant", usage: { input: 60, output: 39 } } });
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: true, pr: { number: 7, url: "https://x/pr/7" } } },
+    });
+  });
+  const outcome = await runStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "implement",
+      initialPrompt: "go",
+      budget: { ...baseBudget, maxTokens: 100 },
+    },
+    { createRuntime: async () => fakeRuntime(session) },
+  );
+  assert.equal(outcome.status, "completed");
+  assert.equal(outcome.budget.tokens, 99);
+  assert.equal(session.abortCalls, 0, "the watchdog never tripped below the limit");
 });
 
 test("runStage: an external abort signal → aborted/external_abort + abort called", async () => {
@@ -834,6 +883,46 @@ test("runStage: a happy implement run emits run_started → tool_outcome(submit)
   assert.equal(tool.summary, null, "a successful tool_outcome carries no summary");
   const finished = events[2] as Extract<RunEvent, { kind: "run_finished" }>;
   assert.equal(finished.outcome.status, "completed");
+});
+
+test("runStage: run-event t stamps ride the injected clock, relative to the run start", async () => {
+  // The event-clock contract: every RunEvent.t is max(0, now() - startMs) on the SAME injected
+  // clock basis as RunOutcome.budget.elapsed_ms. A regression to constant stamps (all 0) or to
+  // absolute clock values (500/750/900) would fail the exact relative sequence below.
+  const events: RunEvent[] = [];
+  let t = 500; // a non-zero start pins "relative to run start", not absolute clock readings
+  const session = new FakeSession((emit) => {
+    t = 750;
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: true, pr: { number: 7, url: "https://x/pr/7" } } },
+    });
+    t = 900;
+  });
+  const outcome = await runStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "implement",
+      initialPrompt: "go",
+      budget: eventBudget,
+    },
+    {
+      createRuntime: async () => fakeRuntime(session),
+      now: () => t,
+      eventSink: (e) => events.push(e),
+    },
+  );
+  assert.deepEqual(
+    events.map((e) => [e.kind, e.t]),
+    [
+      ["run_started", 0],
+      ["tool_outcome", 250],
+      ["run_finished", 400],
+    ],
+    "t advances with the injected clock from the run start",
+  );
+  assert.equal(outcome.budget.elapsed_ms, 400, "the outcome shares the event clock basis");
 });
 
 test("runStage: a failing tool emits a tool_outcome with ok:false and a capped summary", async () => {
