@@ -6,7 +6,8 @@ cluster: pi-extension
 
 # Headless Pi session construction & driving
 
-The Node 1.2 worker (`extension/worker/worker.ts`, `driveStage`) constructs a headless, read-WRITE Pi
+The stage worker (`extension/worker/stageExecution.ts`, `runStage` — the public drive seam over the
+private SDK adapter `extension/worker/sdkAdapter.ts`) constructs a headless, read-WRITE Pi
 session at the SDK level and drives a single stage to completion with no human in the loop. This doc
 captures the non-obvious shape of that construction — distilled so the next SDK-drive surface starts
 from the right path instead of rediscovering it.
@@ -16,9 +17,9 @@ from the right path instead of rediscovering it.
 
 ## Distillation
 
-- Two SDK construction recipes exist — the isolated read-only child vs the read-WRITE worker with
-  the real extension — start from the closer one and flip ONLY the isolation axis — "Two
-  construction paths — pick by isolation axis".
+- One live SDK construction recipe remains — the read-WRITE worker (`sdkAdapter.ts`) with the
+  real extension; the fully-isolated read-only child was deleted (PR #2100) and survives only as
+  a carrier-less recipe — "Two construction paths — pick by isolation axis".
 - Probe scripts launched from inside a perk session inherit `PERK_RUN_ID` — unset it or the
   probe adopts the parent's run — "Probe scripts … inherit the run-id env — unset it".
 - The drive is a SINGLE `session.prompt(...)` — the SDK owns turn iteration and the await spans
@@ -28,24 +29,28 @@ from the right path instead of rediscovering it.
   leave it undefined — "Never default the model to `getAvailable()[0]`".
 - Offline e2e drives the REAL runtime with a faux pi-ai model at the `PERK_BIN` seam — "Driving
   the real runtime offline with a faux model (the e2e worker tier)".
+- `session.prompt("/command")` resolves when the command settles, but dispose only after a
+  bounded wait for the terminating `tool_execution_end`; `pi --mode json -p` probes are the
+  cheap capturable registered-tool proof — "Headless probe and dogfood-session craft".
 - "Sources" pins the audited pi versions — re-verify on SDK bumps (a pin bump is a
   session-construction migration audit).
 
 ## Two construction paths — pick by isolation axis
 
-There are two SDK-level construction recipes already in the tree, and they differ on **one axis**:
-read-only vs. read-write isolation.
+There were two SDK-level construction recipes in the tree, differing on **one axis**: read-only
+vs. read-write isolation. Only the read-write half has a live carrier today.
 
-- `extension/worker/readOnlySession.ts` (`createReadOnlySession`) is a fully-isolated **read-only** child:
-  bare `createAgentSession` + a **hand-built `DefaultResourceLoader`** with `no*` flags and the
-  stricter `["read","grep","find","ls"]` allowlist (`SDK_READ_ONLY_TOOLS`), and it calls
-  `loader.reload()` manually.
-- `extension/worker/worker.ts` (`driveStage`) is the **read-WRITE inverse**: read-write defaults + the
+- The fully-isolated **read-only** child (`createReadOnlySession`) was **deleted with the
+  stage-execution confinement (PR #2100)** — no successor. Its loader-construction craft is kept
+  here as a recipe with **no live production carrier**: bare `createAgentSession` + a
+  **hand-built `DefaultResourceLoader`** with `no*` flags and a strict
+  `["read","grep","find","ls"]` tool allowlist, calling `loader.reload()` manually.
+- `extension/worker/sdkAdapter.ts` is the live **read-WRITE** recipe: read-write defaults + the
   **real perk extension** loaded from the worktree's `.pi/settings.json` via cwd-discovery, with the
   user-global tier locked out by a **throwaway `agentDir`** (`mkdtemp` under `tmpdir()`).
 
-When building the next SDK-drive surface, start from whichever is closer and **flip only the
-isolation axis** — don't reinvent both.
+When building the next SDK-drive surface, start from the live read-write recipe and flip only the
+isolation axis you need — don't reinvent both halves.
 
 ## Probe scripts launched from inside a perk session inherit the run-id env — unset it
 
@@ -121,7 +126,7 @@ that hard-aborts**. Do not frame the drive as an iterate-until-terminal loop.
 **No settle race after `prompt()` resolves.** `await session.prompt(...)` spans settlement: it
 resolves only after `_runAgentPrompt`'s full post-agent-run continuation loop (auto-retry,
 compaction retry, `agent_end`-queued follow-ups) AND the `finally`-emitted `agent_settled`
-(verified against the 0.80.4/0.80.5 dist `agent-session.js`) — so `driveStage`'s
+(verified against the 0.80.4/0.80.5 dist `agent-session.js`) — so `runStage`'s
 post-`prompt()` classification cannot observe an unsettled run. Belt-and-suspenders, the worker
 disables auto-compaction/auto-retry via `applyOverrides`; 0.80.4's `waitForIdle()` is redundant on
 this path.
@@ -134,7 +139,7 @@ Future worker/runner work must **not** assume the drive self-recovers from a sta
 
 ## The structured run-event stream
 
-`driveStage` emits an **additive** `RunEvent` union (`run_started` / `step_marker` / `tool_outcome`
+`runStage` emits an **additive** `RunEvent` union (`run_started` / `step_marker` / `tool_outcome`
 / `run_finished`) through an injectable `RunEventSink` (default = a fail-soft NDJSON file at
 `runEventsPath`). **Status note:** `step_marker` is since **deprecated/never-emitted** — the
 checkpoints marker protocol died with the checkpoints removal; the variant stays in the
@@ -148,7 +153,7 @@ grammar for historical `events.ndjson` files (contracts §8.12). `RunOutcome`'s 
   **Guard at the seam boundary, not just inside the default implementation.**
 - **The route-don't-relay / double-delivery split generalizes to any emitted stream.** Full ordered
   narrative in the structured channel (the NDJSON file / array sink), bounded model-visible surface
-  (per-event `EVENT_SUMMARY_CAP`, reusing `readOnlySession.ts`'s `capForModel`). Co-locate the
+  (per-event `EVENT_SUMMARY_CAP`, reusing `capForModel` from `extension/substrate/modelVisible.ts`). Co-locate the
   durable artifact under the gitignored `scratch/runs/<runId>/` cache tier, and make the file sink a
   **no-op when `run_id` is empty** so existing offline drive tests (which set no `PERK_RUN_ID`) stay
   write-free with **zero** changes. This confirms the project's established idiom for new run-detail
@@ -175,11 +180,11 @@ per-provider defaults → first available — which picks a current-generation m
 `defaultModelPerProvider`, so deferring via an undefined `model` option remains the only
 sanctioned route to the initial-model chain. The explicit `--model` flag now resolves through
 `resolveCliModel` (fuzzy matching, `provider/pattern`, `:thinking` — parity with interactive
-launch; `resolveWorkerModel` in `extension/worker/worker.ts`); keep the zero-available-models
+launch; `resolveWorkerModel` in `extension/worker/sdkAdapter.ts`); keep the zero-available-models
 fail-fast unchanged — only the *default* defers to the SDK.
 
-Landed shape: `extension/worker/worker.ts` (`resolveAuth` returns `model: undefined` unless
-explicit; `worker.test.ts` pins it). Because the SDK may have picked the model, the worker logs
+Landed shape: `extension/worker/sdkAdapter.ts` (`resolveAuth` returns `model: undefined` unless
+explicit; `sdkAdapter.test.ts` pins it). Because the SDK may have picked the model, the worker logs
 `perk worker: model <provider>/<id>` **post-creation** — read the pick off `session.model`, don't
 recompute it.
 
@@ -204,7 +209,7 @@ extension, `session_start` claim engages) is provable **fully offline** via the 
 
 ## Driving the real runtime offline with a faux model (the e2e worker tier)
 
-The e2e worker tier (`extension/worker/workerE2e.test.ts` + `extension/testing/harness.ts`) drives a full
+The e2e worker tier (`extension/worker/stageExecutionE2e.test.ts` + `extension/testing/harness.ts`) drives a full
 stage through the production `defaultCreateRuntime` against the real `@mgiles/perk` extension and a
 faux pi-ai model, GitHub-free at the `PERK_BIN` seam. Three load-bearing assumptions were wrong;
 the corrections are the durable knowledge.
@@ -255,7 +260,7 @@ the corrections are the durable knowledge.
     `unavailable` without it; before the wave migration the same seed named the borrowed
     `subagent` tool directly and the failure was **silent**: the model idled without its tools
     and burned the whole budget — which is why the worker's post-bind terminating-tool preflight
-    (`extension/worker/worker.ts`) fails fast instead).
+    (`extension/worker/stageExecution.ts`) fails fast instead).
 - **Injected `eventSink` and the default NDJSON file sink are mutually exclusive per drive** — to
   assert both the in-process stream and the on-disk NDJSON, drive the scenario twice.
 
@@ -264,6 +269,19 @@ skills-walk stops there; save/restore every mutated `process.env` key in `finall
 per-run runtime needs no unregistration); real `tool_execution_end` events DO carry
 `result.details` — a "generic tool failed" symptom is usually the missing-extension path, not a
 shape mismatch.
+
+## Headless probe and dogfood-session craft
+
+- `session.prompt("/command")` resolves when the command **settles** — but a follow-up-turn loop
+  that disposes the session as soon as the promise resolves can still clip the command's
+  terminating tool. Bound a wait for the terminating `tool_execution_end` event before disposing.
+- A clone-local `.perk/local.toml` `[workflow] base` overlay pins a sacrificial plan's base onto
+  a stacked train's tip **without committed config** — the cheap way to aim a dogfood drive at a
+  train head.
+- A headless `pi --mode json -p "<prompt>"` session is the cheap **capturable** proof that a
+  registered-tool path works, streamed partials included — the JSON event stream is greppable
+  evidence. Remember: Pi retains the registration graph loaded at session start, so a probe
+  launched before a binding change cannot observe that change (a fresh session is required).
 
 ## `DefaultResourceLoaderOptions` is not exported from the package root
 
@@ -279,12 +297,14 @@ check the root export list before importing a Pi type by name; mirror/derive dee
 
 ## Cross-references
 
-- `extension/worker/worker.ts` — `driveStage`, the runtime-factory construction + budget watchdog
+- `extension/worker/stageExecution.ts` — `runStage` (the public drive seam), stage policy, the
+  budget watchdog
+- `extension/worker/sdkAdapter.ts` — the private SDK adapter: runtime-factory construction +
+  session creation
 - `extension/workerMain.ts` — the worker entrypoint
-- `extension/worker/readOnlySession.ts` — the fully-isolated read-only child this inverts
-- `extension/worker/workerE2e.test.ts` + `extension/testing/harness.ts` — the faux-model e2e tier
+- `extension/worker/stageExecutionE2e.test.ts` + `extension/testing/harness.ts` — the faux-model e2e tier
 - `docs/learned/pi/extension-api.md` — `ctx.mode`/`ctx.hasUI`, the root-export-list rule
-- `docs/learned/pi/context-system.md` — the read-only child it inverts
+- `docs/learned/pi/context-system.md` — context loading + the read-only bash allowlist
 - `docs/learned/toolchain/biome.md` — the TS-stripping / Biome gotchas + the distributive-`Omit` gotcha hit building the emitter
 - `docs/learned/toolchain/worktree-node-modules.md` — worktree SDK resolution + the stale-global smoke trap
 - `docs/design/archive/pi-adoption-audit.md` — the complete 0.80.5-verified adoption inventory + follow-up

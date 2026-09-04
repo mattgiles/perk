@@ -56,7 +56,7 @@ Each shape below is a reusable pattern, with its landed exemplar:
   the `tests/test_prompt_parity.py` precedent.
 - **Lockstep literals.** Where both planes must agree on a frozen shape (`RunOutcome`), pin the
   literal byte-identically in both suites with reciprocal comments pointing at each other —
-  `tests/test_run_report.py` ↔ `extension/worker/worker.test.ts` (see
+  `tests/test_run_report.py` ↔ `extension/worker/stageExecution.test.ts` (see
   `docs/learned/workflow/shared-contracts.md` for the general lockstep-literal pattern).
 - **One physical fixture file consumed by BOTH suites.** The strongest cross-plane invariance pin
   shares the fixture bytes themselves — `tests/parity/dream_report_invariance.json`, with the

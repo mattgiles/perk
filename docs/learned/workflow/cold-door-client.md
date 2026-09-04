@@ -191,7 +191,7 @@ Future doors only test their own decode edges.
   `extension/pi/v1/delivery/submit.test.ts`.
 - **Strictening a formerly-unchecked `JSON.parse … as X` requires grepping the whole tree** for
   every fake/route emitting that door's payload — door test files, `fakePerkRouter` routes, and
-  e2e scenarios (e.g. `extension/worker/workerE2e.test.ts`) — and bringing fixtures up to full contract
+  e2e scenarios (e.g. `extension/worker/stageExecutionE2e.test.ts`) — and bringing fixtures up to full contract
   shape. **Fix the fixture, never loosen the decode** (the real cold door always emits the full
   shape).
 - **The merge-race fixture sweep.** Semantically-green-per-PR ≠ green-after-merge when two

@@ -145,20 +145,20 @@ refine → delete), see [How to author a repo-specific skill](../../how-to/autho
   `.agents/manifest.d/perk.yaml` — re-run `perk init` after editing perk's source set instead), and
   restores the original bytes if `skills sync` fails. Note: the rewrite uses `yaml.safe_dump`, so
   the main manifest's comments/layout are not preserved.
-- **`perk skills scaffold NAME`** — scaffold a repo-authored skill stub at `.perk/skills/NAME/SKILL.md`
+- **`perk skills scaffold NAME`** — scaffold a repo-authored skill stub at `.perk/skills/<NAME>/SKILL.md`
   in the **main checkout** (resolved even when invoked from a linked worktree). Create-only —
-  refuses if `.perk/skills/NAME/` already exists (no overwrite flag; edit the existing `SKILL.md`
+  refuses if `.perk/skills/<NAME>/` already exists (no overwrite flag; edit the existing `SKILL.md`
   directly). Writes a TODO template — including a `stages: all` declaration with a narrowing TODO
   (a stage-id list, `all`, or `[]` for interactive-only) — then reconverges the
   `perk-repo-skills.yaml` fragment, skipping the heavy all-sources sync. `--json` emits a stable report. (The freshly-scaffolded skill is
   uncommitted, so the reconverge surfaces a non-fatal "not committed — commit it" warning; that is
   expected.)
 - **`perk skills create NAME`** — a write-capable authoring cold door: pre-scaffolds
-  `.perk/skills/NAME/SKILL.md` in the **main checkout** (the same write as `scaffold`, including
+  `.perk/skills/<NAME>/SKILL.md` in the **main checkout** (the same write as `scaffold`, including
   the stub's `stages: all` declaration), then launches a
   session seeded to author the skill (following the `perk-skill-author` skill). Refuses if
-  `.perk/skills/NAME/` already exists, pointing at `perk skills refine NAME`. The authoring scope
-  (`.perk/skills/NAME/**` plus any directly-required docs/bindings) is a **soft scope** in the seed
+  `.perk/skills/<NAME>/` already exists, pointing at `perk skills refine NAME`. The authoring scope
+  (`.perk/skills/<NAME>/**` plus any directly-required docs/bindings) is a **soft scope** in the seed
   prompt, not a structural sandbox; committing is left to you. With **`--from <file|url>`** the
   authoring session is seeded from a source document (mirroring `objective author --from`): a **local
   file** (relative/absolute) is read as untrusted seed DATA and materialized into a gitignored
@@ -170,15 +170,15 @@ refine → delete), see [How to author a repo-specific skill](../../how-to/autho
   seed + intended path and scaffolds/launches nothing (the existence-refusal still runs). `--json`
   emits a stable report. Trailing args after `NAME` pass through to `pi`.
 - **`perk skills refine NAME`** — a write-capable cold door that re-opens an **existing**
-  repo-authored skill: it reads `.perk/skills/NAME/SKILL.md` in the **main checkout** and launches a
+  repo-authored skill: it reads `.perk/skills/<NAME>/SKILL.md` in the **main checkout** and launches a
   session seeded to improve it in place (following the `perk-skill-author` skill). Refuses if the
   skill is absent, pointing at `perk skills create NAME`. Never scaffolds and skips sync (the file
   already exists); the door is read-only on the filesystem until the launched session edits. The
-  refine scope (`.perk/skills/NAME/**` plus any directly-required docs/bindings) is a **soft scope**
+  refine scope (`.perk/skills/<NAME>/**` plus any directly-required docs/bindings) is a **soft scope**
   in the seed prompt, not a structural sandbox; committing is left to you. `--dry-run` prints the
   seed + intended path and launches nothing (the absent-skill refusal still runs). `--json` emits a
   stable report. Trailing args after `NAME` pass through to `pi`.
-- **`perk skills delete NAME --yes`** — remove a repo-authored skill (`.perk/skills/NAME/`) in the
+- **`perk skills delete NAME --yes`** — remove a repo-authored skill (`.perk/skills/<NAME>/`) in the
   **main checkout** and reconverge the fragment (skipping the heavy all-sources sync). Without
   `--yes` it prompts interactively when a TTY is present; under `--json`/non-interactive it refuses
   and prints the path that would be removed. Best-effort unlinks a dangling `.agents/skills/NAME`

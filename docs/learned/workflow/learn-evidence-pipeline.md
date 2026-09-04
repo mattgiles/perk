@@ -46,7 +46,8 @@ Five stages, each a separate node, each owning one module:
    `perk/learn/evidence.py`.
 4. **`--render` session-normalization pass** (node 3.2) — `perk/learn/normalize.py`.
 5. **Warm `/learn` multi-angle orchestrator** (node 4.2) — consumes the bundle; the analyst wave
-   is code on the report-wave module (`extension/waves/learnWave.ts` over
+   is code on the report-wave module (`extension/learning/analystWave.ts` — the feature op,
+   installed by `extension/pi/v1/learning/learn.ts` — over
    `extension/waves/reportWave.ts`) driven by the flow-scoped `run_learn_wave` tool; the
    judgment seed is `prompts/stages/learn-orchestrate.md`.
 
@@ -106,7 +107,7 @@ Four best-effort, **loud-but-non-fatal** (never throw) TS capture sites:
 
 - `savePlan` → `planning/main`,
 - `index.ts` `session_start` → `implementation/main` (claimer-only, first-write-wins),
-- worker `driveStage` → `implementation/worker`,
+- worker `runStage` → `implementation/worker`,
 - the `/submit` warm door (the publish operation, `extension/delivery/submit.ts::publishVerified`
   over `publishDepsFor`) → `implementation/main` at `impl_run_ids`-stamping time
   (first-write-wins) — any run id entering the linkage gets its pointer captured in the same

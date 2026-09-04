@@ -23,7 +23,7 @@ existed). The implementer re-runs the grep over test sources for distinctive sub
 text being *removed* before trusting the count. Two hotspot facts: prompt-template **tail text is
 a pin hotspot** — `endsWith(...)` pins target the template's *final line* specifically — and the
 cross-plane parity suites duplicate the same pin, so **expect pins in pairs across planes**
-(`extension/worker/worker.test.ts` + `tests/test_worker_prompt_parity.py`).
+(`extension/worker/stageExecution.test.ts` + `tests/test_worker_prompt_parity.py`).
 
 The prose flavor of the same rule: enumerated comment/phrase-sweep file lists fail **in both
 directions** — a planned file can lack the phrase while an unplanned file carries it (including a

@@ -240,7 +240,7 @@ now three distinct vacating mechanisms plus two limit-case postures:
   (hard-fail on the Python plane, silent-ignore on the TS plane). A DISPATCH seam is therefore
   a **transitional** posture: it exists only while one door must serve N surfaces; when each
   surface earns its own command, the seam dissolves. Full history: the review-seam status note
-  in the retired `shared/contracts-history.md` changelog — git history is the archive.
+  in the retired contracts-history changelog — git history is the archive.
 
 ### footer is the SECOND interface seam (vacate-only, `adapter: null`)
 
@@ -342,10 +342,11 @@ intended owner. See `docs/learned/workflow/borrowed-packages.md`.
   foreign footer/web packages are single-root `./index.ts` extensions, so `package_filter` is
   **omitted** ("load all of that type" — the tombell/juicesharp precedent). The field stays in the
   vocabulary for genuinely multi-extension packages.
-- **`SDK_READ_ONLY_TOOLS` stays strict.** The web seam unions the known web tool names into
-  `READ_ONLY_TOOLS` (so a foreign web tool is allowlisted by shared name), but
-  `SDK_READ_ONLY_TOOLS` (`extension/worker/readOnlySession.ts`) is **deliberately unchanged** —
-  headless children never run foreign web tools.
+- **`SDK_READ_ONLY_TOOLS` stayed strict (dated history).** The web seam unions the known web tool
+  names into `READ_ONLY_TOOLS` (so a foreign web tool is allowlisted by shared name), but the SDK
+  in-process child's `SDK_READ_ONLY_TOOLS` list was **deliberately left unchanged** — headless
+  children never ran foreign web tools. The child and its list were deleted with the
+  stage-execution confinement (PR #2100); the conclusion holds as history.
 - **`docs/planning/` was retired → `docs/design/` (historical — since reversed).** At the time of
   the seam work the planning tree had been folded into `docs/design/`; the docs-tree taxonomy has
   since restored `docs/planning/` as the canonical planning home (the placement rules live in
@@ -593,9 +594,10 @@ widened tuple inside a docstring can push the summary line past 100 cols.)
 `ask_user_question` is in `READ_ONLY_TOOLS` (`extension/substrate/toolGating.ts`), so a
 foreign tool sharing the **exact** name is allowlisted automatically (same "foreign tool names
 inert/allowlisted by shared name" precedent as `plan_review` / `linear_*`). The read-only notice
-interpolates `READ_ONLY_TOOLS`, so it self-updates. `SDK_READ_ONLY_TOOLS`
-(`extension/worker/readOnlySession.ts`) deliberately **omits** it (headless children never prompt a
-human). No code change — state the conclusion explicitly. *(Since Objective #1416 the name is
+interpolates `READ_ONLY_TOOLS`, so it self-updates. The SDK in-process child's
+`SDK_READ_ONLY_TOOLS` deliberately **omitted** it — headless children never prompt a human
+(dated history: the child and its list were deleted with the stage-execution confinement,
+PR #2100). No code change — state the conclusion explicitly. *(Since Objective #1416 the name is
 governed via the borrowed census — `BORROWED_TOOLS`, the foreign questionnaire being the sole
 registrant — but the shared-name allowlisting mechanics above hold unchanged.)*
 
