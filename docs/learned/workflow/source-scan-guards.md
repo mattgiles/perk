@@ -33,6 +33,8 @@ the session-data path guards in both planes.
 - External-SDK policy registries pair compile-time key exhaustiveness with runtime unknown-field
   findings; adoption of a corpus guard includes the normalization sweep — "Compile-time census
   pins" and "Guard-adoption ripple".
+- Import-graph guards fail on unresolvable specifiers, freeze birth censuses, and pin direction
+  prefix arrays to literal contract lists — "Import-graph guard vacuity holes".
 
 ## The node:test-as-grep-guard recipe
 
@@ -230,6 +232,24 @@ that stale-entry arm turns the baseline into a shrink-only ratchet and enforces 
 checked-in constants be the default parameters; tests can pass empty baselines through the same
 seam to stay hermetic without weakening production behavior.
 
+## Import-graph guard vacuity holes
+
+Guards over the module import graph (direction rules, layering bans) have their own vacuity
+holes (#2168):
+
+- **Phantom-node vacuity.** Resolve every relative specifier against the scanned corpus; an
+  unresolvable specifier is a guard *failure* (assert the `unresolved` set is empty), never a
+  silent vertex — a typo'd or moved module otherwise falls out of the graph and its edges go
+  unguarded. Add a discriminating control: a lax (extensionless) specifier and its extensioned
+  twin must resolve to the same corpus member.
+- **Anchor floors are real only when the predicate is corpus membership.** Freeze the birth
+  census, keep a single registration path, and assert anchors are non-empty, in-directory, and
+  corpus members — an anchor list checked only for non-emptiness can rot into names the scan no
+  longer visits.
+- **Direction rules over prefix arrays:** pin the arrays to literal contract lists (deepEqual)
+  and drive the full source×target cross-product — a prefix array that silently gains or loses a
+  member changes the rule without failing any test.
+
 ## Guarding a path family across a phased migration
 
 When a perk-owned dot-directory path root moves in phases (the `.pi/`→`.perk/` arc — see
@@ -251,6 +271,14 @@ a completeness proof** — split-across-variables construction (`d = root / ".pi
 single-string forms (`".pi/workflow"`) escape it, so a manual census is still required. The
 family-scoped guard also doubles as a **consumer-census oracle**: its first run enumerates the
 production consumers a plan census missed.
+
+Two sibling rules from typed-capability migrations:
+
+- **Capability guards must ban the concrete adapters.** Banning abstract interiors while the
+  minting constructor stays importable is green-but-bypassable — enumerate the constructors that
+  mint the capability and ban those (#2185).
+- **Exact-set equality over the live production edge map doubles as the non-vacuity floor** —
+  pair it with a positive floor proving the extractor still sees the guarded vocabulary (#2172).
 
 ## Byte-threshold corpus-gate craft
 
@@ -279,6 +307,12 @@ that generalize to any corpus gate with byte and text semantics:
   innocent docstring prose — a cross-reference reads as a violation though nothing imports.
   Posture: **rephrase the prose, don't allowlist** — a module-path literal in a docstring is
   dispensable provenance, and an allowlist entry would weaken the guard for real imports.
+- **Lexical guards false-match prose generally** — expect to word around them or give them
+  syntax-discriminating fixtures (the "ready"-as-tool and `from "` message-string instances)
+  (#2033).
+- **A prose-vocabulary guard is a narrow lexical sweep**, honestly scoped: compiled
+  (regex, reason) tuples, locatable failure payloads, no allowlist, and explicitly accepted
+  false-negative room (#2044).
 
 ## The binding convention these guards enforce
 
