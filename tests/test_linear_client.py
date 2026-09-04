@@ -221,6 +221,51 @@ class TestGraphQLErrors:
             client.request("q")
         assert str(excinfo.value).endswith("boom")
 
+    def test_enriched_validation_error_is_never_swallowed_as_not_found(self) -> None:
+        # The exact production shape from the 80-char project-name incident, end-to-end through
+        # the request path: not-found detection scans the full enriched text (the decided
+        # contract), and a validation error must never classify as a not-found.
+        client, _ = _client_with_response(
+            status=400,
+            body={
+                "errors": [
+                    {
+                        "message": "Argument Validation Error",
+                        "extensions": {
+                            "code": "INPUT_ERROR",
+                            "userPresentableMessage": (
+                                "name must be shorter than or equal to 80 characters"
+                            ),
+                        },
+                    }
+                ]
+            },
+        )
+        with pytest.raises(LinearGraphQLError) as excinfo:
+            client.request("q")
+        assert not _is_entity_not_found(excinfo.value)
+
+    def test_enriched_not_found_still_matches_the_predicate(self) -> None:
+        # The classic not-found shape with a presentable detail appended still classifies as
+        # not-found — enrichment can only add semantically-correct matches.
+        client, _ = _client_with_response(
+            status=400,
+            body={
+                "errors": [
+                    {
+                        "message": "Entity not found: Project",
+                        "extensions": {
+                            "code": "INPUT_ERROR",
+                            "userPresentableMessage": "Could not find referenced Project.",
+                        },
+                    }
+                ]
+            },
+        )
+        with pytest.raises(LinearGraphQLError) as excinfo:
+            client.request("q")
+        assert _is_entity_not_found(excinfo.value)
+
     def test_malformed_message_still_carries_the_presentable_detail(self) -> None:
         # The decided mixed case: the detail is exactly what makes a malformed entry diagnosable.
         client, _ = _client_with_response(
@@ -259,28 +304,6 @@ class TestGraphQLErrors:
         with pytest.raises(IssueBackendError) as excinfo:
             client.request("q")
         assert isinstance(excinfo.value, LinearGraphQLError)
-
-
-class TestEntityNotFoundPredicate:
-    """Not-found detection scans the full enriched message text (the decided contract) —
-    presentable detail may add semantically-correct matches, and a validation error is never
-    swallowed as not-found."""
-
-    def test_validation_error_with_presentable_detail_is_not_a_not_found(self) -> None:
-        # The exact production shape from the 80-char project-name incident.
-        exc = LinearGraphQLError(
-            "Linear GraphQL error: Argument Validation Error — "
-            "name must be shorter than or equal to 80 characters",
-            codes=("INPUT_ERROR",),
-        )
-        assert not _is_entity_not_found(exc)
-
-    def test_not_found_with_presentable_detail_still_matches(self) -> None:
-        exc = LinearGraphQLError(
-            "Linear GraphQL error: Entity not found: Project — Could not find referenced Project.",
-            codes=("INPUT_ERROR",),
-        )
-        assert _is_entity_not_found(exc)
 
 
 class TestHTTPFailures:

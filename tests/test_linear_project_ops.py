@@ -290,12 +290,20 @@ class TestLinearProjectOps:
         assert payload["name"] == "Phase 3"
         assert payload["content"] == "overview"
 
-    def test_create_project_truncates_over_long_name_with_ellipsis(self) -> None:
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            # A non-whitespace cut keeps the maximal 79-char prefix: exactly 80 chars sent.
+            ("t" * 96, "t" * 79 + "…"),
+            # A whitespace-ending cut is rstripped before the ellipsis: shorter than 80 chars,
+            # never a dangling "<space>…".
+            ("w" * 78 + " tail of the title", "w" * 78 + "…"),
+        ],
+    )
+    def test_create_project_truncates_over_long_name_with_ellipsis(
+        self, name: str, expected: str
+    ) -> None:
         # Linear caps ProjectCreateInput.name at 80 chars; the guard truncates, never rejects.
-        long_name = "An objective title long enough to blow past the Linear project-name cap " + (
-            "x" * 24
-        )
-        assert len(long_name) > 80
         ops, fake = _make_project_ops(
             {
                 "teams(filter": [_TEAM_RESPONSE],
@@ -304,14 +312,10 @@ class TestLinearProjectOps:
                 ],
             }
         )
-        ops.create_project(name=long_name, content="overview")
+        ops.create_project(name=name, content="overview")
         [(_, variables)] = _queries(fake, "projectCreate(")
         payload = _input_payload(variables)
-        sent = payload["name"]
-        assert isinstance(sent, str)
-        assert len(sent) <= 80
-        assert sent.endswith("…")
-        assert long_name.startswith(sent[:-1])
+        assert payload["name"] == expected
         assert payload["content"] == "overview"  # the guard never touches content
 
     def test_create_project_exactly_80_char_name_passes_through(self) -> None:
