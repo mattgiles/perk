@@ -377,6 +377,29 @@ absent, the commit-compact half of this leg reads UNOBSERVED — NOT PASSED. Com
 planned pre-submit commit, so the published record carries the addendum or the honest gap —
 never a placeholder that publication can strand.
 
+**Commit-2 addendum — observed-live (2026-09-04, this implementation session, run
+`01M1PXSA1Y5ECM4MC861NE503Q`):** the operator ran `/commit-and-compact` with the six
+drafted deliverable files as the real dirty tree. Observed sequence, in order:
+
+1. The migrated binding injected the commit-drive instructions into the session — "Commit
+   the work completed so far — perk will compact this session once your commit is in."
+   with the three-step drive (review the working tree; stage exactly the changes that
+   belong — no blanket `git add -A`; commit with a descriptive message, do NOT push) and
+   the nothing-to-commit escape hatch.
+2. The driven commit — this record's own first commit — landed as `5c414364` ("Close
+   objective #2130: acceptance ledger, final measurement, dogfood record"): 6 files
+   changed, 518 insertions(+), exactly the six deliverables staged by path (this record,
+   the four annotated planning docs, the phase-7 reconciliation), not pushed.
+3. Compaction ran automatically once the commit settled, and the continuation resumed the
+   session against plan #2149 with the driven commit presented as evidence — the
+   `<commit-evidence>` block listing `5c414364` as ahead of the invocation-time HEAD, plus
+   the reorient-from-repository-evidence instructions. Post-resume, `git diff
+   cead475a..HEAD -- extension/` re-verified empty (the §2 binding holds).
+
+The commit-compact half of the delivery leg is **closed observed-live**: the migrated
+binding (`pi/v1/delivery/commitCompact.ts`) drove a real commit→compact→resume cycle on
+this record's own first commit.
+
 #### Code review — forward-referenced, self-describing
 
 Completes ONLY when the `## Dogfood legs (Node 5.1)` comment (the schema above, every field
@@ -396,6 +419,38 @@ the operator's curation outcome — is appended here in commit 2 with the real o
 NOT PASSED. Commit 2 is a planned pre-submit commit, so the published record carries the
 addendum or the honest gap — never a placeholder that publication can strand.
 
+**Commit-2 addendum — observed (2026-09-04, post-commit-1 / pre-submit):** the operator
+launched the harvest leg from this worktree with the exact Part A invocation
+(`uv run perk learn harvest --no-sync --from docs/learned/pi/extension-api.md --from
+docs/learned/workflow/report-waves.md`). Evidence, durable artifacts first:
+
+- **Harvest run id:** `01M1PZ31AMDGMJ5H8XEZ7Z1CKB`. **Manifest:**
+  `.perk/workflow/scratch/runs/01M1PZ31AMDGMJ5H8XEZ7Z1CKB/harvest-manifest.json`
+  (`schema_version: "1"`) — **two lanes** (`pi-1` with `docs/learned/pi/extension-api.md`;
+  `workflow-1` with `docs/learned/workflow/report-waves.md`), so the `>= 2` runnability
+  gate **PASSED** exactly as predicted (two top-level corpus groups → two
+  `partition_lanes` keys). The manifest's own `commit_sha` is
+  `5c414364308d88ed6c1dcf3fdff6ee7a80c117f1` — this record's first commit, pinning the
+  session to the protocol's post-commit-1 / pre-submit window.
+- **The wave:** two lane scratch directories were minted beside the run
+  (`…01M1PZ31AMDGMJ5H8XEZ7Z1CKB.1`, `….2`) and the wave's downstream product exists (next
+  bullet). Honest scope note: the launch/coverage manifest itself was rendered inside the
+  operator's harvest session and is not durably persisted; the operator reported the wave
+  completing to plan, and the durable artifacts corroborate (a drafted report whose claims
+  the draft re-verified against this checkout).
+- **Curation outcome — the genuinely-earned saved-objective arm:** the wave's report
+  drafted an improvement objective, the objective `plan_review` round ran with the
+  reviewer wave (verdict: APPROVED), and the operator saved it as **objective #2150**,
+  "Harden the learn-wave identity boundary (harvest/dream/report-wave)" (`perk:objective`,
+  OPEN, created 2026-09-04T19:57:35Z) — whose body itself opens by naming this harvest
+  pass and re-verifying every claim at commit `5c41436`. Draft artifacts:
+  `objective.md` + `data/objective-draft.json` in the harvest run's scratch directory.
+
+Classification: **observed-live** — the migrated harvest pipeline (CLI gather →
+`partition_lanes` → the manifest-bound session → `analyzeHarvest`'s live `run_harvest_wave`
+→ curation through the objective review gate) ran end-to-end against real corpus docs and
+produced a real, kept workflow product.
+
 ## §4 Cleanup / residue
 
 Named per leg:
@@ -412,8 +467,8 @@ Named per leg:
   node.
 - **Learning:** the harvest run's scratch manifest is ordinary run-scoped scratch (not
   authoritative; swept with the run directory); the curation outcome — recorded in the
-  commit-2 addendum — is the operator's, and each arm (zero-opportunity report, declined
-  draft, saved objective) is a legitimate outcome; nothing sacrificial is created by the
+  commit-2 addendum — was the genuinely-earned saved-objective arm (objective #2150, a
+  real kept workflow product, not residue); nothing sacrificial was created by the
   protocol.
 - **Measurement:** no generated baseline was stored; the pipelines are inlined commands over
   the working tree.
