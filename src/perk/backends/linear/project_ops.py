@@ -17,6 +17,10 @@ from perk.backends.linear.client import (
     _require_str,
 )
 
+# Linear caps ``ProjectCreateInput.name`` at 80 characters and rejects longer names with the
+# generic ``"Argument Validation Error"`` — the guard in ``create_project`` truncates to this cap.
+_PROJECT_NAME_MAX_LEN = 80
+
 
 def _attachment_nodes(node: dict[str, object]) -> list[dict[str, object]]:
     """The raw ``{id, url, metadata}`` attachment nodes off a raw issue row (``[]`` when the
@@ -58,7 +62,13 @@ class _LinearProjectOps:
     def create_project(self, *, name: str, content: str) -> dict[str, object]:
         """Create a project with overview ``content`` at create (the 2024 create-then-update
         wrinkle does NOT apply — proven at the spike). ``teamIds`` is a **list**. Returns the
-        parsed ``{id, url}`` project dict; ``id`` is the opaque project UUID."""
+        parsed ``{id, url}`` project dict; ``id`` is the opaque project UUID.
+
+        ``name`` is defensively truncated (with a ``…`` ellipsis) to Linear's 80-character
+        project-name cap — the single bottleneck guarding every name-writing caller; ``content``
+        is never touched by the guard."""
+        if len(name) > _PROJECT_NAME_MAX_LEN:
+            name = name[: _PROJECT_NAME_MAX_LEN - 1].rstrip() + "…"
         mutation = (
             "mutation($input: ProjectCreateInput!) { projectCreate(input: $input) "
             "{ success project { id url } } }"

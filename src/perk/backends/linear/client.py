@@ -96,7 +96,8 @@ class LinearGraphQLError(IssueBackendError):
 
     ``codes`` holds the de-duplicated ``extensions.code`` values (order-preserved; entries
     without a code omitted). Consumers branch on ``.codes``, never on substrings —
-    ``str(exc)`` keeps Linear's verbatim error messages for humans.
+    ``str(exc)`` keeps Linear's verbatim error messages for humans, each enriched with its
+    ``extensions.userPresentableMessage`` detail when Linear supplies one.
     """
 
     def __init__(self, message: str, *, codes: tuple[str, ...]) -> None:
@@ -337,21 +338,31 @@ def client_from_env(
 
 
 def _graphql_error(errors: list[object], *, status: int) -> LinearGraphQLError:
-    """Build a ``LinearGraphQLError`` from a GraphQL ``errors`` array, tolerating junk entries."""
+    """Build a ``LinearGraphQLError`` from a GraphQL ``errors`` array, tolerating junk entries.
+
+    Each entry's text carries Linear's verbatim ``message`` plus its
+    ``extensions.userPresentableMessage`` detail when Linear supplies one — that is where the
+    actionable specifics of the generic top-level messages live (e.g. the length constraint
+    behind an ``"Argument Validation Error"``). The detail is appended even to a
+    malformed-message placeholder entry (it is exactly what makes such an entry diagnosable);
+    absent, non-string, empty, or identical values leave the entry's text unchanged.
+    """
     messages: list[str] = []
     codes: list[str] = []
     for entry in errors:
         entry_dict = _opt_dict(entry)
         if entry_dict is not None:
             raw_message = entry_dict.get("message")
-            messages.append(
-                raw_message if isinstance(raw_message, str) else "(malformed Linear error entry)"
-            )
+            text = raw_message if isinstance(raw_message, str) else "(malformed Linear error entry)"
             extensions = _opt_dict(entry_dict.get("extensions"))
             if extensions is not None:
                 code = extensions.get("code")
                 if isinstance(code, str) and code not in codes:
                     codes.append(code)
+                presentable = extensions.get("userPresentableMessage")
+                if isinstance(presentable, str) and presentable and presentable != text:
+                    text = f"{text} — {presentable}"
+            messages.append(text)
         else:
             messages.append("(malformed Linear error entry)")
     message = "Linear GraphQL error: " + "; ".join(messages)
