@@ -11,10 +11,10 @@
 // runs through the shared review-surface machinery (`pi/v1/review.ts` — the leaf every review
 // arm composes; the review door's stage dispatcher imports this module's arm directly).
 //
-// The gist-authoring injection dedups on the COMPACTION-ACTIVE window
-// (`branchCarries(activeContextWindow(branch), marker)` — the bindingDelivery composition): a
-// live copy suppresses re-injection, and compaction dropping it from model context re-injects
-// on the next turn even though the historical entry still sits on the branch.
+// The gist-authoring injection rides the shared `installInjectedContext` helper
+// (pi/v1/contextInjection.ts — contracts §8.31 semantics): a live copy in the
+// compaction-active window suppresses re-injection, and compaction dropping it from model
+// context re-injects on the next turn.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
@@ -60,13 +60,11 @@ import { failFor, ok, type Result } from "../../substrate/result.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { paramsOf, stringParam } from "../../substrate/toolParams.ts";
 import {
-  activeContextWindow,
   type BranchEntry,
-  branchCarries,
-  branchOf,
   rebuildWorkflowState,
 } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
+import { installInjectedContext } from "./contextInjection.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import { isPlannotatorPlanSelected } from "./providers/selection.ts";
 import {
@@ -233,43 +231,19 @@ function isGistAuthoring(gating: ToolGating, branch: readonly BranchEntry[]): bo
  */
 export function installGistBindings(pi: ExtensionAPI, gating: ToolGating): void {
   // The gist-authoring context injection (display:false), keyed off (read-only gate AND stage
-  // === gist-author). Dedup on the COMPACTION-ACTIVE window: a live copy suppresses
-  // re-injection; compaction dropping it from model context re-injects on the next turn.
-  pi.on("before_agent_start", async (_event, ctx) => {
-    const branch = branchOf(ctx);
-    if (!isGistAuthoring(gating, branch)) return;
-    if (branchCarries(activeContextWindow(branch), GIST_AUTHOR_MARKER)) return;
-    return {
-      message: {
-        customType: GIST_AUTHOR_CONTEXT_TYPE,
-        content: gistAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
-        display: false,
-      },
-    };
-  });
-
-  // Strip the stale gist-authoring marker from context once the session is no longer authoring
-  // (gate off, or the stage moved on) so it never lingers — the same hygiene planMode applies.
-  pi.on("context", async (event, ctx) => {
-    const branch = branchOf(ctx);
-    if (isGistAuthoring(gating, branch)) return;
-    return {
-      messages: event.messages.filter((m) => {
-        const msg = m as { customType?: string; role?: string; content?: unknown };
-        if (msg.customType === GIST_AUTHOR_CONTEXT_TYPE) return false;
-        if (msg.role !== "user") return true;
-        const content = msg.content;
-        if (typeof content === "string") return !content.includes(GIST_AUTHOR_MARKER);
-        if (Array.isArray(content)) {
-          return !content.some(
-            (c) =>
-              (c as { type?: string; text?: string }).type === "text" &&
-              ((c as { text?: string }).text ?? "").includes(GIST_AUTHOR_MARKER),
-          );
-        }
-        return true;
-      }),
-    };
+  // === gist-author); the inject/strip mechanics (active-window dedup, stale-marker strip)
+  // live in the shared helper.
+  installInjectedContext(pi, {
+    customType: GIST_AUTHOR_CONTEXT_TYPE,
+    markers: [GIST_AUTHOR_MARKER],
+    select: (ctx, branch) =>
+      isGistAuthoring(gating, branch)
+        ? {
+            marker: GIST_AUTHOR_MARKER,
+            content: () => gistAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
+          }
+        : null,
+    live: (_ctx, branch) => isGistAuthoring(gating, branch),
   });
 
   pi.registerTool({

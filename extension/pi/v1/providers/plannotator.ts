@@ -63,12 +63,8 @@ import {
   OBJECTIVE_SAVE_STAGE,
 } from "../../../authoring/objective/prose.ts";
 import { render } from "../../../substrate/prompts.ts";
-import {
-  activeContextWindow,
-  branchCarries,
-  branchOf,
-  rebuildWorkflowState,
-} from "../../../substrate/workflowState.ts";
+import { rebuildWorkflowState } from "../../../substrate/workflowState.ts";
+import { installInjectedContext } from "../contextInjection.ts";
 // Type-only (erased at runtime — no cycle): the outcome vocabulary lives with the shared
 // review-surface machinery.
 import type { ReviewOutcome } from "../review.ts";
@@ -383,68 +379,47 @@ export function installPlannotatorPlanAdapter(pi: ExtensionAPI): void {
   // draft), a gist-author session gets the gist flavor (the rendered gist draft); any other
   // gated stage gets the plan flavor. The gate-active check reads the persisted
   // `perk:workflow-state.mode` (the gate's state twin) — never the gate itself.
-  pi.on("before_agent_start", async (_event, ctx) => {
-    if (!isPlannotatorPlanSelected(ctx.cwd)) return;
-    const branch = branchOf(ctx);
-    const state = rebuildWorkflowState(branch);
-    if (state.mode !== "read-only") return;
-    const flavor =
-      state.stage === OBJECTIVE_AUTHOR_STAGE || state.stage === OBJECTIVE_SAVE_STAGE
-        ? "objective"
-        : state.stage === GIST_AUTHOR_STAGE
-          ? "gist"
-          : "plan";
-    const content =
-      flavor === "objective"
-        ? OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT
-        : flavor === "gist"
-          ? GIST_ADAPTER_PLANNOTATOR_CONTEXT
-          : PLAN_ADAPTER_PLANNOTATOR_CONTEXT;
-    // Once-only PER FLAVOR: the dedup key is the flavor's marker (not the shared customType), so
-    // a stage change still delivers the missing flavor while a prior copy of another flavor
-    // sits on the branch. Injected customs persist, so a live copy suppresses re-injection.
-    // ALL flavors scan the COMPACTION-ACTIVE window (each flow re-injects coherently after
-    // compaction, matching its authoring context — contracts §8.31).
-    const marker =
-      flavor === "objective"
-        ? OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER
-        : flavor === "gist"
-          ? GIST_ADAPTER_PLANNOTATOR_MARKER
-          : PLAN_ADAPTER_PLANNOTATOR_MARKER;
-    if (branchCarries(activeContextWindow(branch), marker)) return;
-    return {
-      message: {
-        customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
-        content,
-        display: false,
-      },
-    };
-  });
-
-  // Strip the stale bridge markers (ALL THREE flavors) from context when plannotator-plan is no
-  // longer selected (same hygiene as the tombell shim), so they never linger across a deselect.
-  const hasMarker = (text: string): boolean =>
-    text.includes(PLAN_ADAPTER_PLANNOTATOR_MARKER) ||
-    text.includes(OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER) ||
-    text.includes(GIST_ADAPTER_PLANNOTATOR_MARKER);
-  pi.on("context", async (event, ctx) => {
-    if (isPlannotatorPlanSelected(ctx.cwd)) return;
-    return {
-      messages: event.messages.filter((m) => {
-        const msg = m as { customType?: string; role?: string; content?: unknown };
-        if (msg.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE) return false;
-        if (msg.role !== "user") return true;
-        const content = msg.content;
-        if (typeof content === "string") return !hasMarker(content);
-        if (Array.isArray(content)) {
-          return !content.some(
-            (c) =>
-              (c as { type?: string; text?: string }).type === "text" &&
-              hasMarker((c as { text?: string }).text ?? ""),
-          );
-        }
-        return true;
-      }),
-    };
+  //
+  // Once-only PER FLAVOR: the dedup key is the SELECTED flavor's marker (not the shared
+  // customType), so a stage change still delivers the missing flavor while a prior copy of
+  // another flavor sits on the branch; the strip owns ALL THREE markers, firing when
+  // plannotator-plan is no longer selected (same hygiene as the tombell shim). The inject/strip
+  // mechanics live in the shared helper.
+  installInjectedContext(pi, {
+    customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
+    markers: [
+      PLAN_ADAPTER_PLANNOTATOR_MARKER,
+      OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER,
+      GIST_ADAPTER_PLANNOTATOR_MARKER,
+    ],
+    select: (ctx, branch) => {
+      if (!isPlannotatorPlanSelected(ctx.cwd)) return null;
+      const state = rebuildWorkflowState(branch);
+      if (state.mode !== "read-only") return null;
+      const flavor =
+        state.stage === OBJECTIVE_AUTHOR_STAGE || state.stage === OBJECTIVE_SAVE_STAGE
+          ? "objective"
+          : state.stage === GIST_AUTHOR_STAGE
+            ? "gist"
+            : "plan";
+      switch (flavor) {
+        case "objective":
+          return {
+            marker: OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER,
+            content: () => OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT,
+          };
+        case "gist":
+          return {
+            marker: GIST_ADAPTER_PLANNOTATOR_MARKER,
+            content: () => GIST_ADAPTER_PLANNOTATOR_CONTEXT,
+          };
+        case "plan":
+          return {
+            marker: PLAN_ADAPTER_PLANNOTATOR_MARKER,
+            content: () => PLAN_ADAPTER_PLANNOTATOR_CONTEXT,
+          };
+      }
+    },
+    live: (ctx) => isPlannotatorPlanSelected(ctx.cwd),
   });
 }

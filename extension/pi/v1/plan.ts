@@ -73,12 +73,7 @@ import { failFor, ok } from "../../substrate/result.ts";
 import { captureSessionPointer } from "../../substrate/sessionPointers.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { idArrayParam, paramsOf, stringParam } from "../../substrate/toolParams.ts";
-import {
-  activeContextWindow,
-  branchCarries,
-  branchOf,
-  rebuildWorkflowState,
-} from "../../substrate/workflowState.ts";
+import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
 // `Key` via the surfaces re-export (keybinding vocabulary, not rich UI) — keeps pi-tui imports
 // structurally confined to the surfaces module (the surfacesGuard pi-tui import rule).
@@ -90,6 +85,7 @@ import {
   runImplementHereCommand,
   type SaveResult,
 } from "./planReview.ts";
+import { installInjectedContext } from "./contextInjection.ts";
 import { generatePlanTitle } from "./planTitle.ts";
 import { createPlannotatorBridge } from "./providers/plannotator.ts";
 import { resolvedPlanProviderId } from "./providers/selection.ts";
@@ -766,44 +762,23 @@ function installPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
   // exceptions: objective-author and gist-author sessions are ALSO read-only, but
   // objectiveAuthor.ts / the gist installer inject their own authoring contexts there — so plan
   // mode defers when the launched stage is either (the coupling break: plan-authoring context is
-  // no longer keyed off the bare read-only gate).
-  pi.on("before_agent_start", async (_event, ctx) => {
-    if (!gating.isActive()) return;
-    const branch = branchOf(ctx);
-    const launchedStage = rebuildWorkflowState(branch).stage;
-    if (launchedStage === OBJECTIVE_AUTHOR_STAGE || launchedStage === GIST_AUTHOR_STAGE) return;
-    // Once-only over the COMPACTION-ACTIVE window (contracts §8.31): a live copy suppresses
-    // re-injection; compaction dropping it from model context re-injects on the next turn even
-    // though the historical entry still sits on the branch.
-    if (branchCarries(activeContextWindow(branch), PLAN_MARKER)) return;
-    return {
-      message: {
-        customType: PLAN_CONTEXT_TYPE,
-        content: planAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
-        display: false,
-      },
-    };
-  });
-
-  // Strip the stale plan-authoring marker from context when the gate is off (so it never lingers).
-  pi.on("context", async (event) => {
-    if (gating.isActive()) return;
-    return {
-      messages: event.messages.filter((m) => {
-        const msg = m as { customType?: string; role?: string; content?: unknown };
-        if (msg.customType === PLAN_CONTEXT_TYPE) return false;
-        if (msg.role !== "user") return true;
-        const content = msg.content;
-        if (typeof content === "string") return !content.includes(PLAN_MARKER);
-        if (Array.isArray(content)) {
-          return !content.some(
-            (c) =>
-              (c as { type?: string; text?: string }).type === "text" &&
-              ((c as { text?: string }).text ?? "").includes(PLAN_MARKER),
-          );
-        }
-        return true;
-      }),
-    };
+  // no longer keyed off the bare read-only gate). The inject/strip mechanics (active-window
+  // dedup, stale-marker strip) live in the shared helper; the strip stays stage-blind — it keys
+  // on the gate alone.
+  installInjectedContext(pi, {
+    customType: PLAN_CONTEXT_TYPE,
+    markers: [PLAN_MARKER],
+    select: (ctx, branch) => {
+      if (!gating.isActive()) return null;
+      const launchedStage = rebuildWorkflowState(branch).stage;
+      if (launchedStage === OBJECTIVE_AUTHOR_STAGE || launchedStage === GIST_AUTHOR_STAGE) {
+        return null;
+      }
+      return {
+        marker: PLAN_MARKER,
+        content: () => planAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
+      };
+    },
+    live: () => gating.isActive(),
   });
 }

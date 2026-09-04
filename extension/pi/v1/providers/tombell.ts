@@ -39,12 +39,10 @@ import { GIST_AUTHOR_STAGE } from "../../../authoring/gist/draft.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "../../../authoring/objective/prose.ts";
 import { render } from "../../../substrate/prompts.ts";
 import {
-  activeContextWindow,
   type BranchEntry,
-  branchCarries,
-  branchOf,
   rebuildWorkflowState,
 } from "../../../substrate/workflowState.ts";
+import { installInjectedContext } from "../contextInjection.ts";
 import { isTombellPlanSelected } from "./selection.ts";
 
 /** The tombell plan-adapter bridge customType (distinct from the `perk:plan-context`). */
@@ -87,47 +85,22 @@ export function installTombellPlanAdapter(pi: ExtensionAPI): void {
   // the gate's state twin — never the gate object) OR tombell's own persisted `plan-mode-state`
   // entry (the ad-hoc interactive `/plan` arm). Objective-author and gist-author sessions are
   // excepted (objectiveAuthor/gistAuthor own those sessions; mirrors the plannotator adapter's
-  // recipe — the tombell REPLACE posture covers the plan surface only).
-  pi.on("before_agent_start", async (_event, ctx) => {
-    if (!isTombellPlanSelected(ctx.cwd)) return;
-    const branch = branchOf(ctx);
-    const state = rebuildWorkflowState(branch);
-    if (state.stage === OBJECTIVE_AUTHOR_STAGE || state.stage === GIST_AUTHOR_STAGE) return;
-    if (state.mode !== "read-only" && !isTombellPlanModeEnabled(branch)) return;
-    // Once-only: the dedup scans the COMPACTION-ACTIVE window (contracts §8.31) — a live copy
-    // suppresses re-injection; compaction dropping it from model context re-injects on the next
-    // turn even though the historical entry still sits on the branch.
-    if (branchCarries(activeContextWindow(branch), PLAN_ADAPTER_TOMBELL_MARKER)) return;
-    return {
-      message: {
-        customType: PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE,
-        content: PLAN_ADAPTER_TOMBELL_CONTEXT,
-        display: false,
-      },
-    };
-  });
-
-  // Strip the stale bridge marker from context when tombell-plan is no longer selected (same
-  // hygiene the plan installer/objectiveAuthor/toolGating apply), so it never lingers across a
-  // deselect.
-  pi.on("context", async (event, ctx) => {
-    if (isTombellPlanSelected(ctx.cwd)) return;
-    return {
-      messages: event.messages.filter((m) => {
-        const msg = m as { customType?: string; role?: string; content?: unknown };
-        if (msg.customType === PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE) return false;
-        if (msg.role !== "user") return true;
-        const content = msg.content;
-        if (typeof content === "string") return !content.includes(PLAN_ADAPTER_TOMBELL_MARKER);
-        if (Array.isArray(content)) {
-          return !content.some(
-            (c) =>
-              (c as { type?: string; text?: string }).type === "text" &&
-              ((c as { text?: string }).text ?? "").includes(PLAN_ADAPTER_TOMBELL_MARKER),
-          );
-        }
-        return true;
-      }),
-    };
+  // recipe — the tombell REPLACE posture covers the plan surface only). The strip fires when
+  // tombell-plan is no longer selected, so the marker never lingers across a deselect; the
+  // inject/strip mechanics (active-window dedup, stale-marker strip) live in the shared helper.
+  installInjectedContext(pi, {
+    customType: PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE,
+    markers: [PLAN_ADAPTER_TOMBELL_MARKER],
+    select: (ctx, branch) => {
+      if (!isTombellPlanSelected(ctx.cwd)) return null;
+      const state = rebuildWorkflowState(branch);
+      if (state.stage === OBJECTIVE_AUTHOR_STAGE || state.stage === GIST_AUTHOR_STAGE) return null;
+      if (state.mode !== "read-only" && !isTombellPlanModeEnabled(branch)) return null;
+      return {
+        marker: PLAN_ADAPTER_TOMBELL_MARKER,
+        content: () => PLAN_ADAPTER_TOMBELL_CONTEXT,
+      };
+    },
+    live: (ctx) => isTombellPlanSelected(ctx.cwd),
   });
 }
