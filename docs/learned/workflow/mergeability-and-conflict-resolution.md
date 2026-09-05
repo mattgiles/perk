@@ -232,6 +232,16 @@ mid-flight; the rebase fixed every functional reference (CI stayed green) while 
 references — a `seeded_door.py` docstring plus three in `tests/test_seeded_door.py` (including the
 guard's remediation message) — still named `perk.cli.ensure.fail`. Only PR review caught them.
 
+## Manual rebase-recovery recipes
+
+- **The delete/edit conflict (main edited lines your branch moved).** Keep the deletion, then
+  verify the moved copy already carries main's fix (grep the new file for the fixed shape). When a
+  payload shape changes, grep ALL test fixtures repo-wide, not just the owning module's suite
+  (`workflow/cold-door-client.md`'s merge-race fixture sweep).
+- **Interrupted mid-pick rebase** (e.g. a killed process leaves `.git/rebase-merge` behind):
+  **never start another rebase.** Read `git status` first — it shows the done list and the staged
+  pick's content — then `git commit -C <pick-sha>` the staged step and `git rebase --continue`.
+
 ## Worker completion bar (`extension/worker/stageExecution.ts`)
 
 `evaluateTerminal`'s implement arm now requires `submitDetails.mergeable !== false` **in addition to**
