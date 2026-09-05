@@ -17,7 +17,7 @@ exploration call, and the completion audit. Judgment, user interaction, and dura
 
 ## The loop
 
-1. **Select the node.** The cold door (`perk objective-plan N`) already selected and marked a node
+1. **Select the node.** The cold door (`perk objective plan N`) already selected and marked a node
    `planning`; warm (`/objective-plan N`) hands you the objective. If you need to choose, use
    `perk objective next N` (the next **plannable** node — a pending node, or a resumable `planning`
    claim) or pick an explicit `--node`. Mark it `planning` with the `objective_node` tool
