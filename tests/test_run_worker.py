@@ -120,10 +120,11 @@ def test_positioning_materializes_handoff_plan_ref_and_body(
 
 
 def test_positioning_parity_local_launch_vs_remote_worker(git_repo_with_remote, monkeypatch):
-    """Local launch and remote-worker positioning materialize the SAME `.perk/workflow/`
-    artifacts (contracts.md §8.38) — pinning `position_worktree`'s "mirrors the cold-local
-    positioning in `launch.launch_stage`" docstring as a test. `run_id` is minted per path by
-    design and is the one ignored field."""
+    """Local launch and remote-worker positioning agree on the parity-selected
+    `.perk/workflow/` artifacts (contracts.md §8.38): plan-ref and plan-body bytes plus
+    handoff stage/mode — pinning `position_worktree`'s "mirrors the cold-local positioning
+    in `launch.launch_stage`" docstring as a test. `run_id` is minted per path by design and
+    deliberately unchecked; this is not a full-tree comparison."""
     clone, _remote, _advance = git_repo_with_remote
     ref = plan.PlanRef(
         provider="github",
@@ -177,8 +178,8 @@ def test_positioning_parity_local_launch_vs_remote_worker(git_repo_with_remote, 
 
 def test_positioning_parity_explicit_ref_launch_vs_remote_worker(git_repo_with_remote, monkeypatch):
     """The §8.38 parity holds on the direct-ref arm too: a local launch consuming an explicitly
-    selected ref (no root selector anywhere) materializes the same artifacts as the remote
-    worker — the launch never re-reads mutable cache state after selection."""
+    selected ref (no root selector anywhere) agrees with the remote worker on plan-ref and
+    plan-body bytes — the launch never re-reads mutable cache state after selection."""
     clone, _remote, _advance = git_repo_with_remote
     ref = plan.PlanRef(
         provider="github",

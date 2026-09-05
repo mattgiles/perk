@@ -46,9 +46,10 @@ Each shape below is a reusable pattern, with its landed exemplar:
   through the writer and the reconstructor, and separately pin `dataclasses.fields(PlanRef)` set
   equality — so growing the type forces extending **both** the writer and the reconstructor —
   `tests/test_plan_ref_parity.py`.
-- **Positioning artifact byte parity.** Prepare two roots, run `launch_stage` positioning on one
-  and `position_worktree` on the other, then compare the resulting `.perk/workflow/` bytes with
-  `run_id` excepted —
+- **Positioning parity over selected artifacts.** Prepare two roots, run `launch_stage`
+  positioning on one and `position_worktree` on the other, then assert plan-ref and plan-body
+  byte equality plus handoff stage/mode agreement (`run_id` is minted per path and deliberately
+  unchecked — this is *not* a run_id-normalized comparison of the full `.perk/workflow/` tree) —
   `tests/test_run_worker.py::test_positioning_parity_local_launch_vs_remote_worker`.
 - **Cross-plane render byte parity via a one-shot node script driven from pytest.** pytest renders
   through the Python engine, shells a small TS entry (`extension/testing/renderBindingsLive.ts`)

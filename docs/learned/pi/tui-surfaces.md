@@ -24,7 +24,7 @@ pi API facts, and test recipes those turns established.
 - The footer facts (lifecycle, slot filtering, verified pi versions inline) — "`setFooter`
   adoption facts".
 - Test recipes: `invokeCommand` (never `runCommandHandler`) for status/widget effects,
-  severity-filtered notify asserts, `node --test extension/*.test.ts` — "Harness recipes".
+  severity-filtered notify asserts, the full suite via `just test-js` — "Harness recipes".
 - Vendoring a pi-tui-touching extension hits the dual-copy nominal-class clash + friends —
   "Vendoring a TS extension that touches pi-tui".
 - Display renderers sanitize the display projection (strip CSI/OSC/APC + unsafe controls),
@@ -143,8 +143,9 @@ widget consumer remains; the patterns stand for future bounded surfaces.)*
   assert must become "no *defined* value ever set".
 - **The startup banner lands in `h.notifies` in every headful session** — count-based notify
   assertions are fragile; filter by severity instead (see also `pi/extension-seams.md`).
-- **`node --test extension/` fails** (MODULE_NOT_FOUND on the dir); the suite runs as
-  `node --test extension/*.test.ts` (what the justfile does).
+- The full suite runs via `just test-js` — the justfile's quoted recursive glob picks up nested
+  test files (glob mechanics: `pi/extension-api.md`, `toolchain/ts-module-moves.md`); a flat
+  single-directory glob silently skips them.
 
 ## Width-sweep invariant testing
 
