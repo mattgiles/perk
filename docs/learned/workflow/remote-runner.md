@@ -61,7 +61,7 @@ while workflow-*template* fixes go live only after merging to main (dispatch pin
 + `--legacy-peer-deps` leaves the worker's import set open) and **B8**
 (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` at spawn) — both invisible to the unit pins.
 
-## The `Runner` contract (Node 2.1)
+## The `Runner` contract
 
 `src/perk/run/runner.py` defines a runner-agnostic `Runner` **Protocol** + value types
 (`RunHandle` — with its `RunHandleModel` boundary — and `RunObservation`) + the concrete
@@ -69,9 +69,12 @@ while workflow-*template* fixes go live only after merging to main (dispatch pin
 `src/perk/state/cache.py`'s `Dispatch` (frozen dataclass) + `DispatchModel` (the LenientParseModel
 boundary), written/read via `cache.write_dispatch` / `cache.read_dispatch` (+
 `cache.list_dispatch_records`) from the `--remote` drive in `src/perk/run/launch/remote.py`.
-`observe`/`cancel` are implemented at the **library level (not stubbed)** so the supervisor nodes
-(3.1/3.2) consume settled shapes — only the supervisor *command surfaces* are deferred to those
-nodes. The old `remote_not_driven` error was **retired** in favor of three honest error types:
+`observe`/`cancel` were implemented at the **library level (not stubbed)** so the supervisor
+surfaces that followed consumed settled shapes; the supervisor *command surfaces*, deferred at the
+time, have since landed — `perk workflow run list`/`cancel`/`retry` are registered
+(`src/perk/cli/commands/workflow/run/__init__.py`; their translation pipeline is §"Runner-control
+seam shape" below). The old `remote_not_driven` error was **retired** in favor of three honest
+error types:
 `no_plan_ref` / `dispatch_state_unverified` / `dispatch_failed`. (Scrub *prose* mentions of a retired
 token too — a retired-token guard catches comments, not just code.)
 
