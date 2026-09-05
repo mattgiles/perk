@@ -1,5 +1,6 @@
 import dataclasses
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -88,6 +89,230 @@ def test_pi_agent_dir_env_expanduser(monkeypatch):
 def test_pi_agent_dir_falls_back_to_home(monkeypatch):
     monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
     assert _pi_agent_dir() == Path.home() / ".pi" / "agent"
+
+
+@pytest.mark.parametrize("agent_dir", [None, Path("/configured/agent")])
+def test_build_exec_env_pi_agent_dir(agent_dir):
+    env = _build_exec_env(
+        run_id="01TEST",
+        environ={} if agent_dir is None else {"PI_CODING_AGENT_DIR": "/ignored-at-this-layer"},
+        fallback_linear_api_key=None,
+        pi_agent_dir=agent_dir,
+    )
+    if agent_dir is None:
+        assert "PI_CODING_AGENT_DIR" not in env
+    else:
+        assert env["PI_CODING_AGENT_DIR"] == str(agent_dir)
+
+
+@pytest.mark.parametrize("value", ["", " \t ", "/operator/agent", "  /operator/agent  "])
+def test_build_exec_env_pi_agent_dir_normalizes_only_blank_values(value):
+    environ = {"PI_CODING_AGENT_DIR": value}
+    env = _build_exec_env(
+        run_id="01TEST",
+        environ=environ,
+        fallback_linear_api_key=None,
+        pi_agent_dir=None,
+    )
+    if value.strip():
+        assert env["PI_CODING_AGENT_DIR"] == value
+    else:
+        assert "PI_CODING_AGENT_DIR" not in env
+    assert environ == {"PI_CODING_AGENT_DIR": value}
+
+
+def _write_pi_config(root, text):
+    config_dir = root / ".perk"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.toml").write_text(text, encoding="utf-8")
+
+
+def _launch_agent_dir_plan(root, *, dry_run=False):
+    # A preloaded caller Config without the knob must not hide the effective disk read.
+    launch_stage(
+        repo_root=root,
+        config=_config(root),
+        stage=_stage("plan"),
+        worktree=None,
+        dry_run=dry_run,
+        remote=None,
+        pi_args=[],
+        sync_main=False,
+        run_id_override="01TEST",
+    )
+
+
+@pytest.mark.parametrize("operator_value", [None, "", "  "])
+def test_launch_configured_pi_agent_dir_and_lock_sweep(
+    tmp_path, monkeypatch, launch_exec_recorder, operator_value
+):
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    if operator_value is not None:
+        monkeypatch.setenv("PI_CODING_AGENT_DIR", operator_value)
+    _write_pi_config(tmp_path, '[pi]\nagent_dir = ".pi/agent"\n')
+    agent_dir = tmp_path / ".pi/agent"
+    agent_dir.mkdir(parents=True)
+    stale_lock = agent_dir / "settings.json.lock"
+    stale_lock.touch()
+    _launch_agent_dir_plan(tmp_path)
+    assert launch_exec_recorder.calls[0][2]["PI_CODING_AGENT_DIR"] == str(agent_dir)
+    assert not stale_lock.exists()
+    assert "PI_CODING_AGENT_DIR" not in launch_exec_recorder.calls[0][1]
+
+
+def test_launch_pi_agent_dir_operator_wins_without_config_read(
+    tmp_path, monkeypatch, launch_exec_recorder
+):
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", "/operator/agent")
+
+    def no_read(root):
+        pytest.fail("operator choice must skip the main-root config read")
+
+    monkeypatch.setattr(launch, "effective_pi_agent_dir", no_read)
+    _launch_agent_dir_plan(tmp_path)
+    assert launch_exec_recorder.calls[0][2]["PI_CODING_AGENT_DIR"] == "/operator/agent"
+
+
+def test_remote_launch_never_reads_pi_agent_dir(tmp_path, monkeypatch):
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+
+    def no_read(root):
+        pytest.fail("remote dispatch must not consult the local agent directory")
+
+    calls = []
+    monkeypatch.setattr(launch, "effective_pi_agent_dir", no_read)
+    monkeypatch.setattr(launch, "_drive_remote_target", lambda **kwargs: calls.append(kwargs))
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote="github",
+        pi_args=[],
+    )
+    assert len(calls) == 1
+
+
+def test_launch_pi_agent_dir_unconfigured(tmp_path, monkeypatch, launch_exec_recorder):
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    _launch_agent_dir_plan(tmp_path)
+    assert "PI_CODING_AGENT_DIR" not in launch_exec_recorder.calls[0][2]
+
+
+@pytest.mark.parametrize("value", ["", " \t "])
+@pytest.mark.parametrize("config_text", ["", "[pi", "[pi]\nagent_dir = 7\n"])
+def test_launch_blank_pi_agent_dir_without_config_uses_default_store(
+    tmp_path, monkeypatch, launch_exec_recorder, capsys, value, config_text
+):
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", value)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    # Exercise the real fallback instead of the exec fixture's isolated-directory stub.
+    monkeypatch.setattr(launch, "_pi_agent_dir", _pi_agent_dir)
+    default_dir = tmp_path / "home/.pi/agent"
+    default_dir.mkdir(parents=True)
+    stale_lock = default_dir / "settings.json.lock"
+    stale_lock.touch()
+    _write_pi_config(tmp_path, config_text)
+
+    _launch_agent_dir_plan(tmp_path)
+
+    assert "PI_CODING_AGENT_DIR" not in launch_exec_recorder.calls[0][2]
+    assert not stale_lock.exists()
+    assert os.environ["PI_CODING_AGENT_DIR"] == value
+    if config_text:
+        assert "launching without the redirect" in capsys.readouterr().err
+
+
+def test_launch_pi_agent_dir_main_overlay_from_linked_worktree(
+    git_repo, monkeypatch, launch_exec_recorder
+):
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    _write_pi_config(git_repo, '[pi]\nagent_dir = "committed-agent"\n')
+    (git_repo / ".perk/local.toml").write_text(
+        '[pi]\nagent_dir = "local-agent"\n', encoding="utf-8"
+    )
+    agent_dir = git_repo / "local-agent"
+    agent_dir.mkdir()
+    wt = git_repo / ".worktrees/linked"
+    git_mod.worktree_add(git_repo, wt, branch="linked", create_branch=True)
+    _launch_agent_dir_plan(wt)
+    assert launch_exec_recorder.calls[0][2]["PI_CODING_AGENT_DIR"] == str(agent_dir)
+
+
+def test_launch_missing_pi_agent_dir_warns_and_execs(
+    tmp_path, monkeypatch, capsys, launch_exec_recorder
+):
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    _write_pi_config(tmp_path, '[pi]\nagent_dir = "missing"\n')
+    _launch_agent_dir_plan(tmp_path)
+    assert launch_exec_recorder.calls[0][2]["PI_CODING_AGENT_DIR"] == str(tmp_path / "missing")
+    assert "no auth.json/models.json" in capsys.readouterr().err
+    assert not (tmp_path / "missing").exists()
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_launch_non_directory_pi_agent_dir_refuses(
+    tmp_path, monkeypatch, launch_exec_recorder, dry_run
+):
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    _write_pi_config(tmp_path, '[pi]\nagent_dir = "file"\n')
+    (tmp_path / "file").touch()
+    with pytest.raises(UserFacingCliError, match="not a directory") as exc:
+        _launch_agent_dir_plan(tmp_path, dry_run=dry_run)
+    assert exc.value.error_type == "pi_agent_dir_invalid"
+    assert launch_exec_recorder.calls == []
+
+
+@pytest.mark.parametrize("text", ["[pi", "[pi]\nagent_dir = 7\n"])
+def test_launch_bad_main_pi_config_warns_without_redirect(
+    tmp_path, monkeypatch, capsys, launch_exec_recorder, text
+):
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    _write_pi_config(tmp_path, text)
+    _launch_agent_dir_plan(tmp_path)
+    assert "PI_CODING_AGENT_DIR" not in launch_exec_recorder.calls[0][2]
+    assert "launching without the redirect" in capsys.readouterr().err
+
+
+def test_launch_pi_agent_dir_home_expansion_failure_warns_and_execs(
+    tmp_path, monkeypatch, capsys, launch_exec_recorder
+):
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    value = "~missing-user/agent"
+    _write_pi_config(tmp_path, f'[pi]\nagent_dir = "{value}"\n')
+    expanduser = Path.expanduser
+
+    def fail_configured_home(path):
+        if path == Path(value):
+            raise RuntimeError("Could not determine home directory.")
+        return expanduser(path)
+
+    monkeypatch.setattr(Path, "expanduser", fail_configured_home)
+    _launch_agent_dir_plan(tmp_path)
+    assert "PI_CODING_AGENT_DIR" not in launch_exec_recorder.calls[0][2]
+    err = capsys.readouterr().err
+    assert "launching without the redirect" in err
+    assert "pi.agent_dir: cannot expand home directory" in err
+
+
+def test_launch_pi_agent_dir_dry_run_preview(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    _launch_agent_dir_plan(tmp_path, dry_run=True)
+    baseline = capsys.readouterr()
+    assert "pi_agent_dir" not in json.loads(baseline.out)
+    _write_pi_config(tmp_path, '[pi]\nagent_dir = "missing"\n')
+    _launch_agent_dir_plan(tmp_path, dry_run=True)
+    configured = capsys.readouterr()
+    data = json.loads(configured.out)
+    assert data.pop("pi_agent_dir") == str(tmp_path / "missing")
+    assert data == json.loads(baseline.out)
+    assert f"  PI_CODING_AGENT_DIR={tmp_path / 'missing'}" in configured.err
+    assert "no auth.json/models.json" in configured.err
+    assert not (tmp_path / "missing").exists()
+    (tmp_path / ".perk/config.toml").unlink()
+    _launch_agent_dir_plan(tmp_path, dry_run=True)
+    assert capsys.readouterr().out == baseline.out
 
 
 def test_resolve_worktree_none_is_repo_root(tmp_path):
@@ -1007,6 +1232,7 @@ def test_launch_injects_cli_version_env():
         run_id="01TEST",
         environ={"PERK_CLI_VERSION": "stale", "PERK_RUN_ID": "stale"},
         fallback_linear_api_key=None,
+        pi_agent_dir=None,
     )
     assert captured["PERK_CLI_VERSION"] == __version__
     assert captured["PERK_RUN_ID"] == "01TEST"
@@ -1019,6 +1245,7 @@ def test_launch_injects_fff_override_env_default():
         run_id="01TEST",
         environ={},
         fallback_linear_api_key=None,
+        pi_agent_dir=None,
     )
     assert captured["PI_FFF_MODE"] == "override"
 
@@ -1030,6 +1257,7 @@ def test_launch_operator_env_wins_over_fff_override_default():
         run_id="01TEST",
         environ={"PI_FFF_MODE": "tools-and-ui"},
         fallback_linear_api_key=None,
+        pi_agent_dir=None,
     )
     assert captured["PI_FFF_MODE"] == "tools-and-ui"
 

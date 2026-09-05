@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from perk.cli.context import PerkContext
 from perk.cli.ensure import UserFacingCliError
 from perk.convergence.init import PERK_TOML_TEMPLATE
+from perk.convergence.init.templates import PERK_LOCAL_TOML_TEMPLATE
 from perk.substrate.bindings import Binding
 from perk.substrate.config import (
     Config,
@@ -16,6 +17,7 @@ from perk.substrate.config import (
     ConfigFileModel,
     SkillsPolicy,
     StageModel,
+    effective_pi_agent_dir,
     load_committed_compaction,
     load_committed_issues_backend,
     load_committed_issues_team,
@@ -130,6 +132,102 @@ def test_worktree_setup_seeded_template_is_inert(tmp_path):
     # The seeded template carries a *commented* `setup` example; it must parse to no commands.
     _write(tmp_path, "perk.toml", PERK_TOML_TEMPLATE)
     assert load_config(tmp_path).worktree_setup == []
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("", None),
+        ("[pi]\n", None),
+        ('[pi]\nagent_dir = ".pi/agent"\n', ".pi/agent"),
+        ('[pi]\nagent_dir = "  ~/my-agent  "\n', "~/my-agent"),
+        ('[pi]\nagent_dir = "  "\n', None),
+    ],
+)
+def test_pi_agent_dir_parses_raw_string(tmp_path, text, expected):
+    _write(tmp_path, "config.toml", text)
+    assert load_config(tmp_path).pi_agent_dir == expected
+
+
+def test_pi_agent_dir_template_examples_stay_opt_in(tmp_path):
+    _write(tmp_path, "config.toml", PERK_TOML_TEMPLATE)
+    _write(tmp_path, "local.toml", PERK_LOCAL_TOML_TEMPLATE)
+    assert load_config(tmp_path).pi_agent_dir is None
+    assert '# [pi]\n# agent_dir = ".pi/agent"' in PERK_TOML_TEMPLATE
+    assert '# [pi]\n# agent_dir = "/abs/path"' in PERK_LOCAL_TOML_TEMPLATE
+
+
+def test_pi_agent_dir_ill_typed_raises(tmp_path):
+    _write(tmp_path, "config.toml", "[pi]\nagent_dir = 7\n")
+    with pytest.raises(ConfigError, match=r"pi\.agent_dir"):
+        load_config(tmp_path)
+
+
+@pytest.mark.parametrize(("value", "expected"), [("local-agent", "local-agent"), ("", None)])
+def test_pi_agent_dir_overlay_wins_or_disables(tmp_path, value, expected):
+    _write(tmp_path, "config.toml", '[pi]\nagent_dir = ".pi/agent"\n')
+    _write(tmp_path, "local.toml", f'[pi]\nagent_dir = "{value}"\n')
+    assert load_config(tmp_path).pi_agent_dir == expected
+
+
+@pytest.mark.parametrize("value", [None, ".pi/agent", "/abs/agent", "~/agent"])
+def test_effective_pi_agent_dir_non_repo(tmp_path, monkeypatch, value):
+    from perk.substrate import git
+
+    monkeypatch.setattr(git, "main_worktree_root", lambda root: None)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    if value is not None:
+        _write(tmp_path, "config.toml", f'[pi]\nagent_dir = "{value}"\n')
+    expected = {
+        None: None,
+        ".pi/agent": tmp_path / ".pi/agent",
+        "/abs/agent": Path("/abs/agent"),
+        "~/agent": tmp_path / "home/agent",
+    }
+    assert effective_pi_agent_dir(tmp_path) == expected[value]
+
+
+@pytest.mark.parametrize("local_value", [None, "local-agent", ""])
+def test_effective_pi_agent_dir_main_checkout_owns_both_files(tmp_path, monkeypatch, local_value):
+    from perk.substrate import git
+
+    main = tmp_path / "main"
+    worktree = tmp_path / "worktree"
+    _write(main, "config.toml", '[pi]\nagent_dir = ".pi/agent"\n')
+    _write(worktree, "config.toml", '[pi]\nagent_dir = "wrong-committed"\n')
+    _write(worktree, "local.toml", '[pi]\nagent_dir = "wrong-local"\n')
+    if local_value is not None:
+        _write(main, "local.toml", f'[pi]\nagent_dir = "{local_value}"\n')
+    monkeypatch.setattr(git, "main_worktree_root", lambda root: main)
+    expected = None if local_value == "" else main / (local_value or ".pi/agent")
+    assert effective_pi_agent_dir(worktree) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "error"), [("[pi", tomllib.TOMLDecodeError), ("[pi]\nagent_dir = 7", ConfigError)]
+)
+def test_effective_pi_agent_dir_propagates_config_errors(tmp_path, text, error):
+    _write(tmp_path, "config.toml", text)
+    with pytest.raises(error):
+        effective_pi_agent_dir(tmp_path)
+
+
+@pytest.mark.parametrize("value", ["~/agent", "~missing-user/agent"])
+def test_effective_pi_agent_dir_home_expansion_failure_is_config_error(
+    tmp_path, monkeypatch, value
+):
+    _write(tmp_path, "config.toml", f'[pi]\nagent_dir = "{value}"\n')
+
+    def fail_home(self):
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "expanduser", fail_home)
+    with pytest.raises(ConfigError, match=r"pi\.agent_dir: cannot expand home directory") as exc:
+        effective_pi_agent_dir(tmp_path)
+    assert value in str(exc.value)
+    assert isinstance(exc.value.__cause__, RuntimeError)
+    # Parsing itself remains a raw-string boundary, with no home lookup.
+    assert load_config(tmp_path).pi_agent_dir == value
 
 
 def test_user_bindings_absent_is_empty(tmp_path):

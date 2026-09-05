@@ -54,6 +54,7 @@ import os
 # shared singleton every submodule that imports the same module sees — the explicit-re-export alias
 # form (`import x as x`) marks that intent for the linter (they are not referenced in this file).
 import subprocess as subprocess
+import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -98,7 +99,13 @@ from perk.run.launch.worktree import (
 )
 from perk.state import cache, run_id
 from perk.substrate import git as git
-from perk.substrate.config import Config, StageModel, load_local_linear_api_key
+from perk.substrate.config import (
+    Config,
+    ConfigError,
+    StageModel,
+    effective_pi_agent_dir,
+    load_local_linear_api_key,
+)
 from perk.substrate.output import io_step, log_warn, machine_output, user_output
 from perk.substrate.proc import which_absolute
 from perk.substrate.registry import Stage
@@ -142,13 +149,17 @@ class _LaunchContext:
     resolved: ResolvedWorktree
     rid: str
     argv: tuple[str, ...]
+    pi_agent_dir: Path | None = None
 
 
 def _pi_agent_dir() -> Path:
-    """Mirror pi's ``config.js getAgentDir()``: ``PI_CODING_AGENT_DIR`` env var if set/non-empty,
-    else ``~/.pi/agent``."""
+    """Resolve the cold-local child's agent dir for lock sweeping.
+
+    Blank inherited values are removed by `_build_exec_env`, so treat them as absent here too.
+    Non-blank values retain pi's native expansion semantics; otherwise use `~/.pi/agent`.
+    """
     env = os.environ.get("PI_CODING_AGENT_DIR")
-    if env:
+    if env and env.strip():
         return Path(env).expanduser()
     return Path.home() / ".pi" / "agent"
 
@@ -310,12 +321,36 @@ def launch_stage(
         plan_state=plan_state,
         plan_id=plan_id,
     )
+    # Resolve once for preview/exec parity. Inherited redirects count as operator choices,
+    # including the value injected by a parent session into a nested cold launch.
+    pi_agent_dir = None
+    if not os.environ.get("PI_CODING_AGENT_DIR", "").strip():
+        try:
+            pi_agent_dir = effective_pi_agent_dir(repo_root)
+        except (ConfigError, tomllib.TOMLDecodeError) as exc:
+            log_warn(
+                "could not read [pi] agent_dir from the main checkout config — "
+                f"launching without the redirect ({exc})"
+            )
+        if pi_agent_dir is not None:
+            if not pi_agent_dir.exists():
+                log_warn(
+                    f"pi agent dir {pi_agent_dir} is missing — pi creates an empty agent dir "
+                    "on demand; sessions launch with no auth.json/models.json"
+                )
+            elif not pi_agent_dir.is_dir():
+                raise UserFacingCliError(
+                    f"pi agent dir {pi_agent_dir} is not a directory — pi cannot create its "
+                    "sessions tree under a non-directory. Set [pi] agent_dir to a directory.",
+                    error_type="pi_agent_dir_invalid",
+                )
     ctx = _LaunchContext(
         repo_root=repo_root,
         config=config,
         stage=stage,
         resolved=resolved,
         rid=run_id_override or run_id.mint(),
+        pi_agent_dir=pi_agent_dir,
         argv=_build_argv(
             stage=stage,
             config=config,
@@ -343,6 +378,7 @@ def launch_stage(
             argv=list(ctx.argv),
             setup=config.worktree_setup,
             sync_main=sync_main,
+            pi_agent_dir=ctx.pi_agent_dir,
         )
         return
 
@@ -542,12 +578,14 @@ def _build_exec_env(
     run_id: str,
     environ: Mapping[str, str],
     fallback_linear_api_key: str | None,
+    pi_agent_dir: Path | None,
 ) -> dict[str, str]:
     """Build the environment passed to pi without mutating the operator environment.
 
     Operator npm/FFF choices override perk's defaults. The run identity and CLI version are
     authoritative launch metadata, so they override conflicting inherited values. A non-blank
-    operator ``LINEAR_API_KEY`` wins over the gitignored local-config fallback.
+    operator ``LINEAR_API_KEY`` wins over the gitignored local-config fallback. Agent-dir
+    precedence is already settled by `launch_stage`; a supplied path is assigned verbatim.
     """
     env = {
         **_NPM_QUIET_ENV,
@@ -558,6 +596,11 @@ def _build_exec_env(
     }
     if not env.get("LINEAR_API_KEY", "").strip() and fallback_linear_api_key is not None:
         env["LINEAR_API_KEY"] = fallback_linear_api_key
+    if pi_agent_dir is not None:
+        env["PI_CODING_AGENT_DIR"] = str(pi_agent_dir)
+    elif not env.get("PI_CODING_AGENT_DIR", "").strip():
+        # Pi treats whitespace as a path, but launch precedence treats it as unset.
+        env.pop("PI_CODING_AGENT_DIR", None)
     return env
 
 
@@ -613,8 +656,9 @@ def _exec_pi(ctx: _LaunchContext) -> None:
         run_id=ctx.rid,
         environ=os.environ,
         fallback_linear_api_key=local_linear_key,
+        pi_agent_dir=ctx.pi_agent_dir,
     )
-    _sweep_stale_pi_agent_locks(_pi_agent_dir())  # silence pi's stale-lock startup warning
+    _sweep_stale_pi_agent_locks(ctx.pi_agent_dir or _pi_agent_dir())
     # The presence probe does not eliminate the exec race — a failed chdir/exec is an ordinary
     # OSError arm, not a crash (the watch-seam shape).
     try:
@@ -652,6 +696,7 @@ def _emit_dry_run_preview(
     argv: list[str],
     setup: list[str] | None = None,
     sync_main: bool = True,
+    pi_agent_dir: Path | None = None,
 ) -> None:
     """The side-effect-free ``--dry-run`` preview of a cold-local launch (user lines + the
     machine-readable JSON payload). The remote dispatch preview in :func:`_drive_remote_target`
@@ -678,6 +723,9 @@ def _emit_dry_run_preview(
         "base": resolved.base,
         "disposition": resolved.disposition,
     }
+    if pi_agent_dir is not None:
+        user_output(f"  PI_CODING_AGENT_DIR={pi_agent_dir}")
+        payload["pi_agent_dir"] = str(pi_agent_dir)
     if resolved.plan_ref is not None:
         payload["plan_ref"] = plan.PlanRefOut.from_domain(resolved.plan_ref).model_dump(mode="json")
     would_sync = stage.worktree == "none" and stage.mode == "read-only" and sync_main

@@ -25,6 +25,7 @@ from perk.convergence.doctor import (
     _git_identity_check,
     _issues_check,
     _models_check,
+    _pi_agent_dir_check,
     _ponytail_compat_check,
     _providers_check,
     _repo_skills_check,
@@ -291,6 +292,221 @@ def test_config_check_fails_on_illtyped_value(scaffolded_perk_repo):
     providers_check = _providers_check(scaffolded_perk_repo)
     assert providers_check.status == "warn"
     assert "see the config check" in providers_check.detail
+
+
+def _configure_pi_agent_dir(repo, value):
+    (repo / ".perk/config.toml").write_text(f'[pi]\nagent_dir = "{value}"\n', encoding="utf-8")
+
+
+def test_pi_agent_dir_check_quiet_when_unconfigured(scaffolded_perk_repo):
+    assert _pi_agent_dir_check(scaffolded_perk_repo) is None
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    assert not any(c.name == "pi-agent-dir" for c in report.checks)
+
+
+def test_pi_agent_dir_check_existing_external_dir_ok(scaffolded_perk_repo, tmp_path_factory):
+    external = tmp_path_factory.mktemp("external-agent")
+    _configure_pi_agent_dir(scaffolded_perk_repo, external)
+    check = _pi_agent_dir_check(scaffolded_perk_repo)
+    assert check is not None
+    assert check.status == "ok" and check.group == "repository"
+    assert str(external) in check.message
+
+
+def test_pi_agent_dir_check_missing_warns_and_is_not_verify_gated(scaffolded_perk_repo):
+    _configure_pi_agent_dir(scaffolded_perk_repo, "missing-agent")
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "pi-agent-dir")
+    assert check.status == "warn"
+    assert "empty agent dir on demand" in check.detail
+    assert "no auth.json/models.json" in check.detail
+    assert "copy/symlink auth.json" in check.remediation
+
+
+def test_pi_agent_dir_check_non_directory_warns(scaffolded_perk_repo):
+    _configure_pi_agent_dir(scaffolded_perk_repo, "file")
+    (scaffolded_perk_repo / "file").touch()
+    check = _pi_agent_dir_check(scaffolded_perk_repo)
+    assert check is not None and check.status == "warn"
+    assert "perk refuses to launch" in check.detail
+    assert "non-directory" in check.detail
+
+
+@pytest.mark.parametrize("text", ["[pi", "[pi]\nagent_dir = 7\n"])
+def test_pi_agent_dir_check_defers_bad_config(scaffolded_perk_repo, text):
+    (scaffolded_perk_repo / ".perk/config.toml").write_text(text, encoding="utf-8")
+    check = _pi_agent_dir_check(scaffolded_perk_repo)
+    assert check is not None and check.status == "warn"
+    assert "see the config check" in check.message
+
+
+def test_pi_agent_dir_check_home_expansion_failure_warns(scaffolded_perk_repo, monkeypatch):
+    from pathlib import Path
+
+    _configure_pi_agent_dir(scaffolded_perk_repo, "~missing-user/agent")
+
+    def fail_home(self):
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "expanduser", fail_home)
+    check = _pi_agent_dir_check(scaffolded_perk_repo)
+    assert check is not None and check.status == "warn"
+    assert "pi.agent_dir: cannot expand home directory" in check.detail
+    assert "~missing-user/agent" in check.detail
+    assert "path cannot be resolved" in check.remediation
+
+
+def test_pi_agent_dir_check_main_overlay_from_linked_worktree(scaffolded_perk_repo):
+    root = scaffolded_perk_repo
+    _configure_pi_agent_dir(root, "wrong-committed-agent")
+    (root / ".perk/local.toml").write_text(
+        '[pi]\nagent_dir = "main-local-agent"\n', encoding="utf-8"
+    )
+    worktree = root / ".worktrees/doctor-linked"
+    git.worktree_add(root, worktree, branch="doctor-linked", create_branch=True)
+    assert not (worktree / ".perk/local.toml").exists()
+    check = _pi_agent_dir_check(worktree)
+    assert check is not None and check.status == "warn"
+    assert str(root / "main-local-agent") in check.message
+    assert "missing" in check.message
+
+
+@pytest.mark.parametrize("ignored", [False, True])
+def test_pi_agent_dir_check_in_repo_ignore_coverage(scaffolded_perk_repo, ignored):
+    root = scaffolded_perk_repo
+    _configure_pi_agent_dir(root, "custom-agent")
+    (root / "custom-agent").mkdir()
+    if ignored:
+        with (root / ".gitignore").open("a", encoding="utf-8") as f:
+            f.write("\n/custom-agent/*\n!/custom-agent/models.json\n")
+    check = _pi_agent_dir_check(root)
+    assert check is not None
+    assert check.status == ("ok" if ignored else "warn")
+    if not ignored:
+        assert "not gitignored" in check.detail
+        assert "managed block covers .pi/agent/ only" in check.detail
+        assert "before copying credentials or launching" in check.remediation
+
+
+def test_pi_agent_dir_check_auth_only_ignore_rule_is_not_safe(scaffolded_perk_repo):
+    root = scaffolded_perk_repo
+    _configure_pi_agent_dir(root, "custom-agent")
+    (root / "custom-agent").mkdir()
+    with (root / ".gitignore").open("a", encoding="utf-8") as f:
+        f.write("\n/custom-agent/auth.json\n")
+    check = _pi_agent_dir_check(root)
+    assert check is not None and check.status == "warn"
+    for artifact in ("trust.json", "settings.json", "models-store.json", "sessions/"):
+        assert artifact in check.detail
+
+
+@pytest.mark.parametrize(
+    "unignored",
+    [
+        "auth.json",
+        "trust.json",
+        "settings.json",
+        "models-store.json",
+        "auth.json.lock",
+        "settings.json.lock",
+        "sessions/",
+    ],
+)
+def test_pi_agent_dir_check_every_volatile_class_needs_ignore_coverage(
+    scaffolded_perk_repo, unignored
+):
+    root = scaffolded_perk_repo
+    _configure_pi_agent_dir(root, "custom-agent")
+    (root / "custom-agent").mkdir()
+    ignored = {
+        "auth.json",
+        "trust.json",
+        "settings.json",
+        "models-store.json",
+        "auth.json.lock",
+        "settings.json.lock",
+        "sessions/",
+    } - {unignored}
+    with (root / ".gitignore").open("a", encoding="utf-8") as f:
+        f.write("\n" + "\n".join(f"/custom-agent/{p}" for p in sorted(ignored)) + "\n")
+    check = _pi_agent_dir_check(root)
+    assert check is not None and check.status == "warn"
+    assert unignored in check.detail
+    assert "not gitignored" in check.detail
+    # Rules may cover a whole tree, not just files already present on disk.
+    with (root / ".gitignore").open("a", encoding="utf-8") as f:
+        f.write(f"/custom-agent/{unignored}\n")
+    covered = _pi_agent_dir_check(root)
+    assert covered is not None and covered.status == "ok"
+
+
+@pytest.mark.parametrize("extra", [None, "auth.json", "trust.json", "sessions/session.jsonl"])
+def test_pi_agent_dir_check_tracked_artifacts(scaffolded_perk_repo, extra):
+    root = scaffolded_perk_repo
+    _configure_pi_agent_dir(root, ".pi/agent")
+    agent = root / ".pi/agent"
+    agent.mkdir(parents=True, exist_ok=True)
+    (agent / "models.json").write_text("{}", encoding="utf-8")
+    if extra is not None:
+        target = agent / extra
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}", encoding="utf-8")
+    git._run(["add", "-f", ".pi/agent"], cwd=root)
+    git._run(["commit", "-m", "track agent fixtures"], cwd=root)
+    check = _pi_agent_dir_check(root)
+    assert check is not None
+    assert check.status == ("ok" if extra is None else "warn")
+    if extra is not None:
+        assert f".pi/agent/{extra}" in check.detail
+        assert "git rm --cached <path>" in check.remediation
+        assert "gitignore rules never untrack" in check.remediation
+        assert git.is_tracked(root, f".pi/agent/{extra}")
+    assert "models.json" not in check.detail
+
+
+@pytest.mark.parametrize("dirname", ["agent[1]", "agent*", "agent?", ":(glob)agent*"])
+def test_pi_agent_dir_check_tracks_literal_directory_names(scaffolded_perk_repo, dirname):
+    root = scaffolded_perk_repo
+    _configure_pi_agent_dir(root, dirname)
+    agent = root / dirname
+    agent.mkdir()
+    (agent / "auth.json").write_text("{}", encoding="utf-8")
+    git._run(["add", "-f", "--", f":(literal){dirname}"], cwd=root)
+    git._run(["commit", "-m", "track literal-named agent fixture"], cwd=root)
+    check = _pi_agent_dir_check(root)
+    assert check is not None and check.status == "warn"
+    assert f"already-tracked pi artifacts: {dirname}/auth.json" in check.detail
+    assert "git rm --cached <path>" in check.remediation
+
+
+def test_pi_agent_dir_check_does_not_glob_into_another_directory(scaffolded_perk_repo):
+    root = scaffolded_perk_repo
+    _configure_pi_agent_dir(root, "agent[1]")
+    (root / "agent[1]").mkdir()
+    (root / "agent1").mkdir()
+    (root / "agent1/auth.json").write_text("{}", encoding="utf-8")
+    git._run(["add", "agent1/auth.json"], cwd=root)
+    git._run(["commit", "-m", "track unrelated artifact fixture"], cwd=root)
+    check = _pi_agent_dir_check(root)
+    assert check is not None
+    assert "already-tracked pi artifacts" not in check.detail
+    assert "agent1/auth.json" not in check.detail
+
+
+def test_pi_agent_dir_check_probe_failures_warn(scaffolded_perk_repo, monkeypatch):
+    root = scaffolded_perk_repo
+    _configure_pi_agent_dir(root, "custom-agent")
+    (root / "custom-agent").mkdir()
+
+    def fail(*args):
+        raise git.GitError("probe failed")
+
+    monkeypatch.setattr(git, "is_ignored", fail)
+    monkeypatch.setattr(git, "tracked_paths", fail)
+    check = _pi_agent_dir_check(root)
+    assert check is not None and check.status == "warn"
+    assert "ignore coverage unverifiable" in check.detail
+    assert "tracked pi artifacts unverifiable" in check.detail
 
 
 def test_stage_models_check_absent_when_unconfigured(scaffolded_perk_repo):

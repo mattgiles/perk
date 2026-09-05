@@ -1,6 +1,6 @@
 ---
 title: "Models and compaction"
-description: "The [models] hierarchy and [compaction] keys that choose AI defaults and manage session context."
+description: "AI defaults, session compaction, and the [pi] agent directory for project-specific model configuration."
 sidebar:
   order: 3034
 ---
@@ -9,6 +9,7 @@ sidebar:
 
 The `[models]` hierarchy chooses repository, stage, and perk-agent defaults. `[compaction]`
 combines settings converged into Pi's project settings with the objective runtime threshold.
+`[pi]` optionally redirects Pi's whole agent configuration directory for local launches.
 
 ## `[models]`
 
@@ -171,6 +172,95 @@ reserve_tokens = 16384
 keep_recent_tokens = 20000
 objective_threshold = 0.8
 ```
+
+## `[pi]`
+
+Pi-process launch settings. Use `agent_dir` to load a project `models.json` with custom providers
+or per-model overrides: perk injects `PI_CODING_AGENT_DIR` into every **cold-local Pi launch**.
+It is off by default; perk does not create or copy agent files.
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `agent_dir` | string (path) | _(unset — Pi's normal directory)_ | Relative paths resolve against the **main checkout root**; absolute paths are used as-is; `~` expands. Blank values disable the redirect. |
+
+```toml
+# .perk/config.toml
+[pi]
+agent_dir = ".pi/agent"
+```
+
+**Main-checkout read and precedence:** both `.perk/config.toml` and `.perk/local.toml` are read
+from the **main checkout**, including when a seeded door or another cold-local command is invoked
+from a linked worktree. A worktree-local edit to either file is not consulted. This keeps the
+credential/session store stable across disposable worktrees. The main checkout's `local.toml`
+wins; put per-machine absolute paths there, or set `agent_dir = ""` there to disable a committed
+value. Changes take effect on the next cold launch, without re-running init.
+
+A **non-blank operator `PI_CODING_AGENT_DIR` environment variable always wins**, and perk skips
+its config read for this key. For a one-shot escape hatch:
+`PI_CODING_AGENT_DIR=~/.pi/agent perk plan`. A nested cold launch inherits a parent session's
+injected value like any operator-set variable, so it also wins over subsequent config edits.
+Empty or whitespace-only environment values count as unset: when no configured redirect replaces
+them, perk removes them from the child environment so Pi uses its normal directory.
+
+### Whole-directory redirect
+
+This is not a models-only overlay: Pi's **whole config directory** moves, including
+`models.json`, `auth.json`, `trust.json`, `sessions/`, `models-store.json`, global-tier
+`settings.json`, and other agent-dir resources.
+
+- **Authentication:** existing OAuth credentials do not follow automatically. Copy or symlink
+  `auth.json` from `~/.pi/agent` when needed, or use environment API keys. Protect credentials
+  from git **before** copying them.
+- **Trust:** a new `trust.json` starts empty. Worktree stages already launch with `--approve`;
+  main-checkout stages prompt for trust once.
+- **Sessions:** logs land under `<agent-dir>/sessions/`. `/learn` is unaffected because its
+  session pointers record absolute paths. `perk-dev` session tools retain their
+  `~/.pi/agent/sessions` default; pass `--session-root` for redirected logs.
+- **Settings:** the global settings tier moves too; the repo's `.pi/settings.json` remains the
+  project tier and still overrides global settings.
+
+### Diagnostics and git safety
+
+A **missing directory warns and launches**: Pi creates an empty agent directory on demand, so
+sessions start without `auth.json` or `models.json`. An **existing non-directory refuses the
+launch** with `pi_agent_dir_invalid`, because Pi cannot create its sessions tree under it.
+`perk doctor`'s offline, report-only `pi-agent-dir` check warns on either condition; it has no
+`--fix` arm. It checks the configured directory even when an operator env override is present.
+If the main-root config read is malformed or ill-typed, or a configured `~` home cannot be
+resolved, the launch warns and continues without injecting the redirect. Doctor reports the
+resolution error in its check detail; the config check owns parse/type errors.
+
+`perk init` manages these rules for the conventional in-repo location:
+
+```gitignore
+/.pi/agent/*
+!/.pi/agent/models.json
+```
+
+Only `models.json` is opted into git by default. To commit another file such as `settings.json`
+or a `prompts/` directory, add explicit `!` rules **after** the managed block. For **any other
+in-repo agent directory**, add matching ignore rules before copying credentials or launching.
+Doctor checks representative `auth.json`, `trust.json`, `settings.json`, `models-store.json`,
+auth/settings lock files, and a nested `sessions/` log path, even before those files exist.
+Ignoring only `auth.json` is not sufficient. These probes are a diagnostic, not proof that every
+possible artifact is ignored; prefer a whole-directory contents rule with narrow exceptions.
+Doctor also warns when files other than top-level `models.json` are already tracked. Intentionally
+versioning agent-level settings still triggers a warning for you to assess. Ignore rules never
+untrack files: use
+`git rm --cached <path>` to remove each tracked artifact from the index while retaining it on
+disk (use `-r` for a directory). Never commit auth, trust, or session data.
+
+**Dry-run scope:** generic stage launchers that reach the launch seam (plan, implement, submit,
+address, land, and similar stages) show a `PI_CODING_AGENT_DIR=<path>` line and a `pi_agent_dir`
+string in `--json` output when perk would inject it; missing-directory warnings also appear.
+Command-owned previews that return before that seam — seeded doors, skills create/refine, and
+`plan resume` — do not preview it. Their **real launches** still use the same redirect and
+filesystem checks.
+
+**Scope boundaries:** local launches only. `--remote` dispatch is unaffected, the headless worker
+keeps its throwaway agent directory, and a hand-run `pi` is outside perk's control. Use direnv or
+your shell to set `PI_CODING_AGENT_DIR` for hand-run Pi sessions.
 
 ## Related
 

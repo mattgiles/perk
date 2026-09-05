@@ -47,6 +47,7 @@ from perk.convergence.doctor.checks import (
     _legacy_workflow_check,
     _managed_checks,
     _models_check,
+    _pi_agent_dir_check,
     _ponytail_compat_check,
     _providers_check,
     _registry_check,
@@ -124,6 +125,7 @@ __all__ = [
     "_linear_selected",
     "_managed_checks",
     "_models_check",
+    "_pi_agent_dir_check",
     "_ponytail_compat_check",
     "_providers_check",
     "_registry_check",
@@ -223,6 +225,8 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     # None — and contributes nothing — when no per-stage models are configured (the common case).
     if (sm_check := _stage_models_check(root)) is not None:
         checks.append(sm_check)
+    if (agent_dir_check := _pi_agent_dir_check(root)) is not None:
+        checks.append(agent_dir_check)
     # Same offline/quiet-when-unconfigured posture as _stage_models_check: the model-string
     # thinking-suffix lens over [models]/[models.subagents]/[models.stages.<id>].
     if (models_check := _models_check(root)) is not None:

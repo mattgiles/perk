@@ -219,6 +219,7 @@ def test_launch_exported_linear_key_wins_over_local_config():
         run_id="01TEST",
         environ={"LINEAR_API_KEY": "lin_api_env"},
         fallback_linear_api_key="lin_api_local",
+        pi_agent_dir=None,
     )
     assert env["LINEAR_API_KEY"] == "lin_api_env"
 
@@ -600,6 +601,7 @@ def test_launch_injects_npm_quiet_env():
         run_id="01TEST",
         environ={},
         fallback_linear_api_key=None,
+        pi_agent_dir=None,
     )
     assert env["npm_config_loglevel"] == "error"
     assert env["npm_config_fund"] == "false"
@@ -613,6 +615,7 @@ def test_launch_npm_quiet_env_user_override_wins():
         run_id="01TEST",
         environ={"npm_config_loglevel": "verbose"},
         fallback_linear_api_key=None,
+        pi_agent_dir=None,
     )
     assert env["npm_config_loglevel"] == "verbose"
     assert env["npm_config_fund"] == "false"
