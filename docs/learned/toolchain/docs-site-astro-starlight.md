@@ -12,7 +12,8 @@ the site directory). Source pointers: `docs/site/astro.config.mjs`, the content 
 plugins under `docs/site/src/`, the corpus mirror in `src/perk/learn/docs_scan.py`, and the
 guards `tests/test_docs_site_tokens.py` / `tests/test_user_docs_metadata.py`. The binding design
 records are `docs/design/docs-site-blueprint.md`, `docs-site-visual-blueprint.md`, and
-`docs-site-bridge-spike.md` — point there for the settled decisions; this doc carries the
+the archived `docs/design/archive/docs-site-bridge-spike.md` — point there for the settled
+decisions; this doc carries the
 non-obvious behavioral facts and traps.
 
 ## Distillation
