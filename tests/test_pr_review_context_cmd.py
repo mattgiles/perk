@@ -1,13 +1,14 @@
 import json
 import subprocess
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 
 from perk import github, plan
 from perk.cli.cli import cli
 from perk.state import cache
+from perk.substrate import git as git_mod
 
 _REF = {
     "provider": "github",
@@ -332,6 +333,32 @@ def _member_context(pr_number: int, head: str, base: str) -> github.PrReviewCont
     )
 
 
+def _perk_ref_oids(repo: Path) -> dict[str, str]:
+    """Name→target-OID snapshot of every ref under ``refs/perk/``.
+
+    Mapping equality proves the refs kept their names AND their target OIDs — a name-only
+    set could not detect a retargeted ref. These refs point directly at commits (fetched PR
+    heads and the base branch), so ``resolve_commit`` observes target identity.
+    """
+    oids: dict[str, str] = {}
+    for ref in git_mod.list_refs(repo, "refs/perk/"):
+        sha = git_mod.resolve_commit(repo, ref)
+        assert sha is not None, f"live ref {ref} must resolve to a commit"
+        oids[ref] = sha
+    return oids
+
+
+@dataclass
+class _InterleaveState:
+    """Observations captured by the fetch-seam race hook (typed so ``ty`` narrows cleanly)."""
+
+    calls: int = 0
+    b_result: Result | None = None
+    refs_at_b_start: dict[str, str] | None = None
+    refs_during_b: dict[str, str] | None = None
+    refs_after_b: dict[str, str] | None = None
+
+
 def test_stack_context_sections_and_combined_diff(git_repo_with_remote, monkeypatch):
     import perk.cli.commands.pr.review_context_cmd as review_context_cmd
     from perk.substrate import git as git_mod
@@ -454,6 +481,126 @@ def test_stack_context_topology_broken_refuses(git_repo_with_remote, monkeypatch
         timeout=30,
     )
     assert listed.stdout.strip() == ""
+
+
+def test_stack_context_two_workers_interleaved_ref_isolation(git_repo_with_remote, monkeypatch):
+    # Concurrent reviewer lanes all fetch the SAME top PR while sharing ONE ref store, so the
+    # per-invocation temp-ref namespace is the ONLY thing separating their refs. Worker B's
+    # complete fetch→read→delete lifecycle runs synchronously inside worker A's ref-sensitive
+    # window (between A's fetch and A's first by-name read) via a race hook on the fetch seam —
+    # deterministic, no sleeps or threads. A shared OR target-derived namespace regression
+    # (e.g. refs/perk/review-ctx/<top-pr>) necessarily collides: B's cleanup would delete A's
+    # live refs, A would fail loudly, and the snapshots would diverge.
+    import perk.cli.commands.pr.review_context_cmd as review_context_cmd
+
+    clone, _remote, _advance = git_repo_with_remote
+    # ONE two-member stack in the shared clone/ref store; both workers target it.
+    subprocess.run(["git", "checkout", "-qb", "plan-301"], cwd=clone, check=True, timeout=30)
+    (clone / "a.txt").write_text("a\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=clone, check=True, timeout=30)
+    subprocess.run(["git", "commit", "-qm", "a"], cwd=clone, check=True, timeout=30)
+    subprocess.run(
+        ["git", "push", "-q", "origin", "HEAD:refs/pull/1/head"], cwd=clone, check=True, timeout=30
+    )
+    subprocess.run(["git", "checkout", "-qb", "feat-b"], cwd=clone, check=True, timeout=30)
+    (clone / "b.txt").write_text("b\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=clone, check=True, timeout=30)
+    subprocess.run(["git", "commit", "-qm", "b"], cwd=clone, check=True, timeout=30)
+    subprocess.run(
+        ["git", "push", "-q", "origin", "HEAD:refs/pull/2/head"], cwd=clone, check=True, timeout=30
+    )
+    subprocess.run(["git", "checkout", "-q", "main"], cwd=clone, check=True, timeout=30)
+
+    monkeypatch.setattr(
+        review_context_cmd, "resolve_stack_from_pr", lambda repo_root, pr: _stack_members()
+    )
+    contexts = {
+        1: _member_context(1, "plan-301", "main"),
+        2: _member_context(2, "feat-b", "plan-301"),
+    }
+    monkeypatch.setattr(
+        github, "get_pr_review_context", lambda *, pr_number, **k: contexts[pr_number]
+    )
+
+    class _Backend:
+        def get_plan_body(self, *, issue_id: str) -> str:
+            assert issue_id == "301"
+            return "# Plan 301"
+
+    monkeypatch.setattr(
+        "perk.cli.commands.pr.review_context_cmd.resolve.resolve_issue_backend",
+        lambda _root: _Backend(),
+    )
+    monkeypatch.chdir(clone)
+
+    # Both workers invoke the identical command — the review-wave fan-out shape.
+    args = ["pr", "review-context", "--pr", "2", "--stack", "--json"]
+    state = _InterleaveState()
+    real_fetch = git_mod.fetch_refspecs
+
+    def fetch_then_interleave(*fetch_args, **fetch_kwargs):
+        # fetch_refspecs is called exactly once per invocation, so the call counter is the
+        # reentrancy guard: call 1 is worker A's fetch (open the window, run B to completion
+        # inside it); call 2 is worker B's own nested fetch (the in-lifecycle point where
+        # BOTH namespaces are live).
+        state.calls += 1
+        call = state.calls
+        real_fetch(*fetch_args, **fetch_kwargs)
+        if call == 1:
+            state.refs_at_b_start = _perk_ref_oids(clone)
+            state.b_result = CliRunner().invoke(cli, args)
+            state.refs_after_b = _perk_ref_oids(clone)
+        elif call == 2:
+            state.refs_during_b = _perk_ref_oids(clone)
+
+    monkeypatch.setattr(git_mod, "fetch_refspecs", fetch_then_interleave)
+
+    result = CliRunner().invoke(cli, args)
+
+    # Worker A completed correctly despite B's full lifecycle inside its window.
+    assert result.exit_code == 0, result.output
+    data_a = json.loads(result.stdout)
+    assert data_a["pr"] == 2 and data_a["branch"] == "feat-b"
+    assert [row["pr"] for row in data_a["stack"]] == [1, 2]
+    assert data_a["stack"][0]["plan_body"] == "# Plan 301"
+    assert data_a["stack"][1]["plan_body"] is None
+    assert "a.txt" in data_a["combined_diff"] and "b.txt" in data_a["combined_diff"]
+
+    # Worker B completed independently — the narrowing doubles as the barrier-liveness proof
+    # (the interleave actually fired; a seam rename cannot silently turn this sequential).
+    assert state.b_result is not None
+    assert state.b_result.exit_code == 0, state.b_result.output
+    data_b = json.loads(state.b_result.stdout)
+    assert data_b["pr"] == 2 and data_b["branch"] == "feat-b"
+    assert [row["pr"] for row in data_b["stack"]] == [1, 2]
+    assert data_b["stack"][0]["plan_body"] == "# Plan 301"
+    assert data_b["stack"][1]["plan_body"] is None
+    assert "a.txt" in data_b["combined_diff"] and "b.txt" in data_b["combined_diff"]
+
+    # A's namespace before B started: two member refs + base under ONE namespace prefix.
+    assert state.refs_at_b_start is not None
+    assert len(state.refs_at_b_start) == 3
+    assert all(ref.startswith("refs/perk/review-ctx/") for ref in state.refs_at_b_start)
+    assert len({ref.rsplit("/", 1)[0] for ref in state.refs_at_b_start}) == 1
+
+    # While B was live: BOTH namespaces coexist and A's exact name→OID entries are untouched —
+    # the direct per-invocation-isolation observation, excluding transient clobber-and-restore
+    # (which a before/after pair alone cannot).
+    assert state.refs_during_b is not None
+    assert len(state.refs_during_b) == 6
+    during_namespaces = {ref.rsplit("/", 1)[0] for ref in state.refs_during_b}
+    assert len(during_namespaces) == 2
+    assert all(ns.startswith("refs/perk/review-ctx/") for ns in during_namespaces)
+    assert state.refs_at_b_start.items() <= state.refs_during_b.items()
+
+    # After B's full lifecycle: A's refs kept their names AND target OIDs — B created and
+    # deleted ONLY its own namespace.
+    assert state.refs_after_b is not None
+    assert state.refs_after_b == state.refs_at_b_start
+
+    # The shared-store sweep LAST (so it proves isolation rather than masking a failed
+    # worker): no residual ref from either worker.
+    assert git_mod.list_refs(clone, "refs/perk/") == []
 
 
 def test_stack_requires_pr(git_repo, monkeypatch):
