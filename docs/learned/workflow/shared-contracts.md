@@ -134,9 +134,10 @@ a plan's pre-assigned section id. **Pinned section numbers also race concurrent 
 that pins "the next" number as fact should treat it as *"next free at land time"* — two
 consecutive plans each lost their pinned number to a concurrently-landing plan (a §8.48 landed as
 §8.49; a §8.49 landed as §8.50). A rebase must expect a renumber sweep, and the sweep greps the
-pinned number across **code comments, tests, and prose**, not just `contracts.md`. (Related: `extension/*.ts` modules — minus `*.test.ts`/`testing/` —
-ship in the npm tarball automatically via the `files` glob, and a flat `extension/` layout stays covered
-by `node --test extension/*.test.ts` / `biome check extension` / `tsc` with **no justfile change** —
+pinned number across **code comments, tests, and prose**, not just `contracts.md`. (Related: `extension/` modules — nested or flat, minus the `files` exclusions
+`!extension/**/*.test.ts`/`!extension/testing/` — ship in the npm tarball automatically, and a new
+module anywhere under `extension/` stays covered by `just test-js` / `biome check extension` / `tsc`
+with **no justfile change** (the recipe's quoted recursive glob; mechanics in `pi/extension-api.md`) —
 reinforcing the "bundling is automatic" theme above.)
 
 ### Post-merge objective roadmap reconciliation
