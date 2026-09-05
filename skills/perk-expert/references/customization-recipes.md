@@ -11,14 +11,19 @@ that session.
 
 1. **Pick a trigger** — one `"<kind>:<id>"` string.
    - `stage:<id>` fires at **both** the cold launcher **and** the warm slash-command. Bindable stage
-     ids: `objective-author`, `objective-save`, `objective-plan`, `plan`, `save`, `implement`,
-     `submit`, `address`, `land`, `learn`.
+     ids: `gist-author`, `gist-save`, `objective-author`, `objective-save`, `objective-plan`,
+     `plan`, `save`, `implement`, `submit`, `address`, `land`, `learn`. Two registry stages are
+     deliberately absent: `stack-review` (every door — cold `perk objective stack review`, warm
+     `/stack-review-browser` — overrides the binding trigger to `command:stack-review-browser`, so
+     a `stage:stack-review` binding validates but never fires; bind the command trigger instead)
+     and `audit` (its only door is the dev-only `perk-dev audit judge`, so no consumer-facing door
+     delivers it).
    - `command:<id>` binds a command that is **not** a registry stage. These command targets have
      a delivery surface: `objective-reconcile`, `objective-replan`, `replan`, `learn-docs`,
      `learn-code`, `learn-harvest`, `learn-dream`, `pr-review`, `pr-review-terminal`,
-     `pr-review-browser`, `plan-review-browser`, `objective-review-browser`, `skills-create`,
-     `skills-refine`. A `command:<id>` outside that set validates but **never fires**. When a
-     command is also a registry stage, bind `stage:<id>`.
+     `pr-review-browser`, `stack-review-browser`, `plan-review-browser`,
+     `objective-review-browser`, `skills-create`, `skills-refine`. A `command:<id>` outside that
+     set validates but **never fires**. When a command is also a registry stage, bind `stage:<id>`.
 2. **Choose `nudge` or `transclude`** (`mode`).
    - `nudge` — a short pointer (``Follow the `<skill>` skill (read
      `.agents/skills/<skill>/SKILL.md`).``). The pointer carries the skill's read path, so it works

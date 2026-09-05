@@ -269,9 +269,12 @@ stage. See §11.7 Correction 1 (as amended).
 The taxonomy was enacted in four landed nodes: **1.1** wrote the SSOT (docs-only); **2.1** shipped
 the *dormant* substrate (merge factory + flat-alias + sectioned help, zero live commands); **3.1/
 3.2/3.3** folded the `objective`/`plan`/`pr` groups onto it. The merged (L+W) set is exactly
-**`pr submit`, `pr land`, `plan save`**. `PlanGroup` became the **3rd inline copy** of the hybrid
-default-dispatch pattern (after `LearnGroup`); a shared `HybridDispatchGroup` base stays a
-deliberate deferral (each group keeps its own copy). The `shared/registry.yaml` `command:` field
+**`pr submit`, `pr land`, `plan save`**. `PlanGroup` adopted the hybrid default-dispatch pattern
+with `LearnGroup` as the template; a shared `HybridDispatchGroup` base stays a deliberate deferral
+(each group keeps its own copy). As of this writing only `LearnGroup`
+(`src/perk/cli/commands/learn/__init__.py`) and `PlanGroup` (`src/perk/cli/commands/plan/__init__.py`)
+define a `resolve_command` override — but derive the current roster of hybrid-dispatch groups from
+the `resolve_command` overrides under `src/perk/cli/commands/`, never from this doc. The `shared/registry.yaml` `command:` field
 stayed **informational** through every fold (`_check_shapes` only validates non-empty; launchers key
 off `stage.id`) — reaffirmed by all three folds. The cross-cutting recipe + gotchas:
 
