@@ -7,14 +7,10 @@ cluster: cross-plane-contracts
 # Cross-plane prompt templates
 
 perk's prompts live as canonical templates under top-level `prompts/`, rendered on **both planes** —
-jinja2 in Python, the **vendored zero-dependency `miniJinja`** in the TS extension
-(`extension/substrate/miniJinja.ts`) — from the **same** template bytes. This doc captures the
-seam's load-bearing decisions: which bundling tier a new resource dir joins, the **frozen mini-jinja
-subset** that is the renderer's input contract (and the author-time grammar guard that must match
-the runtime), the exact render config that makes both engines byte-identical, the **two-tier
-render-parity tests** (contract-snapshot goldens + live cross-engine equality), and the
-**prompt-move pattern** (the cornerstone — how to relocate an inline prompt literal onto a template
-without changing output).
+jinja2 in Python, the vendored zero-dependency `miniJinja` in the TS extension
+(`extension/substrate/miniJinja.ts`) — from the **same** template bytes. This doc holds the seam's
+load-bearing decisions: bundling tier, the frozen grammar and its author-time guards, the exact
+byte-parity render config, the two-tier parity tests, and the prompt-move decision rules.
 
 ## Distillation
 
@@ -25,11 +21,12 @@ without changing output).
 - The **frozen mini-jinja subset** is the renderer's INPUT CONTRACT (extend it deliberately,
   never ad hoc) — "The frozen mini-jinja subset"; the byte-parity render settings live in
   "The byte-parity render config (data shape)".
-- Author-time grammar guards must be tightened to MATCH the stricter runtime, or templates pass
-  authoring and fail at render/golden time — "The author-time guard MUST be tightened to match
-  the stricter runtime".
-- CRLF: Python's text-mode read normalizes newlines before jinja2, Node's does not — the TS
-  renderer normalizes first — "The CRLF byte-parity hazard".
+- Author-time grammar guards must be tightened to MATCH the stricter runtime; the Python guard's
+  scanner is the shared `perk_dev.prompt_grammar.scan_template` (also the prose-review Assembly
+  preview gate), the TS guard stays test-local — "The author-time guard MUST be tightened to
+  match the stricter runtime".
+- CRLF: Python's text-mode read normalizes newlines, Node's does not — normalize at every TS
+  read boundary whose bytes must match a Python read — "The CRLF byte-parity hazard".
 - Parity testing is two-tier (contract-snapshot goldens + live cross-engine equality), replacing
   prose-copy goldens — "Two-tier render-parity replaces the prose-copy golden bridge"; flow
   clauses need per-prompt semantic pins — "Seed prompts need their own semantic-contract test".
@@ -43,8 +40,8 @@ without changing output).
 
 ## Which bundling tier a new top-level resource dir joins
 
-There are two precedents, and the deciding question is always: **does the TS extension read this
-directly at runtime, or does Python materialize it for consumers?**
+Two precedents; the deciding question is always: **does the TS extension read this directly at
+runtime, or does Python materialize it for consumers?**
 
 - **The `shared/` tier** — bundled into **all three** artifacts (wheel force-include, sdist
   only-include, **and** npm `files`) — for resources the **TS extension reads at runtime** from the
@@ -52,28 +49,31 @@ directly at runtime, or does Python materialize it for consumers?**
 - **The `agents/` tier** — **Python-plane-only**, **absent** from npm `files` — for resources
   **materialized by `perk init` from the wheel** and never read by the extension at runtime.
 
-`prompts/` joins the **`shared/` tier** because the extension **renders templates at runtime**. The
-cross-plane resolver is proven by a **four-test pattern**: Python editable + Python wheel + npm tarball
-+ TS dev-tree all resolve the templates. And the **durable-README-probe-over-throwaway-placeholder**
-rule: templates load by **explicit name** via the resolver, never by scanning a dir, so the resolver
-test probes a committed `prompts/README.md` rather than a throwaway placeholder file.
+`prompts/` joins the **`shared/` tier** because the extension renders templates at runtime.
+Resolution is proven per plane by `tests/test_resources.py` (`perk._resources.prompts_dir`) +
+`extension/substrate/resources.test.ts` (`promptsDir`), and artifact bundling by
+`tests/test_packaging.py` (`test_wheel_bundles_prompts`,
+`test_npm_pack_lists_shipped_and_excludes_dev`). Templates load by **explicit name** via the
+resolver, never by scanning a dir, so the resolution probe is a committed `prompts/README.md`
+rather than a throwaway placeholder file.
 
 ## The vendored engine — miniJinja replaces nunjucks (the 2nd vendored-engine precedent)
 
-The TS plane renders via `extension/substrate/miniJinja.ts`, the **2nd vendored-engine precedent
-after `miniYaml`**: an **fs-coupled module that OWNS the filesystem** (`readFileSync` + `promptsDir`),
-with a header comment explaining *why it exists* (the zero-runtime-dep / bare-git-clone-loadable
-invariant) and the explicitly-unsupported scope (throw loudly on out-of-subset). Signature
-`render(name, vars, rootDir = promptsDir())`; the optional `rootDir` default makes it unit-testable
-(point it at a `mkdtempSync` dir of throwaway templates — the only way to test a renderer whose
-production input is guarded against the very out-of-subset cases you must test). The frozen render
-config is **baked in — no config object** (the subset is frozen, so a config object would be dead
-flexibility).
+The TS plane renders via `extension/substrate/miniJinja.ts`: an fs-coupled module that OWNS the
+filesystem (`readFileSync` + `promptsDir`), with a header comment explaining *why it exists* (the
+zero-runtime-dep / bare-git-clone-loadable invariant) and the explicitly-unsupported scope (throw
+loudly on out-of-subset input). Signature `render(name, vars, rootDir = promptsDir())`; the
+optional `rootDir` default makes it unit-testable (point it at a `mkdtempSync` dir of throwaway
+templates — the only way to exercise the out-of-subset failures production input is guarded
+against). The frozen render config is **baked in — no config object** (the subset is frozen, so a
+config object would be dead flexibility).
 
-**Removing the runtime dep means dropping the `dependencies` KEY ENTIRELY** (not `{}`) — the
-packaging guard accepts key-absent OR empty. The committed jinja2 goldens are the
-engine-independent byte-parity proof, so the removed engine is **NOT** kept as a dev-dep oracle
-(contrast `miniYaml` keeping `yaml`, where there's no committed golden for YAML parsing).
+The dependency invariant: package.json runtime `dependencies` **absent or empty** — the committed
+package drops the key entirely — guarded by
+`tests/test_packaging.py::test_no_runtime_dependencies` plus the bare-import scan below. The
+committed jinja2 goldens are the engine-independent byte-parity proof, so the removed engine is
+**NOT** kept as a dev-dep oracle (contrast `miniYaml` keeping `yaml`, where there is no committed
+golden for YAML parsing).
 
 ## The byte-parity render config (data shape)
 
@@ -83,23 +83,25 @@ the planes):
 
 - **jinja2:** `autoescape=False`, `trim_blocks=True`, `lstrip_blocks=False`,
   `keep_trailing_newline=True`, `undefined=StrictUndefined`.
-- **miniJinja:** `trimBlocks` on, `lstripBlocks` off, keep-trailing-newline on,
-  `throwOnUndefined` (the config is baked in, not a passed object).
+- **miniJinja:** the corresponding behavior is **baked in** (there is no options object): no
+  escaping, `trimBlocks` on, `lstripBlocks` off, trailing newline kept, referenced absent or
+  non-string values throw.
 
-> **`trim_blocks` / `trimBlocks` is now GLOBAL `True`** (it used to be the default-`False`,
-> conditional-templates-opt-in shape — superseded). The reason the **env flag** does the trimming,
-> not a `{%- -%}` marker, is the whitespace-control gotcha: `{%- -%}` can't trim-newline-only (it
-> also eats the next line's leading indent). `trim_blocks` strips only the single newline after a
-> block tag, preserving indentation. `lstrip_blocks` stays **off** (tags sit at column 0).
+Why each flag matters:
 
-`keep_trailing_newline=True` is **load-bearing**: jinja2 otherwise strips one trailing `\n` while
-miniJinja keeps it, so omitting it diverges the planes on every template that ends in a newline.
-`{% include "<root-relative path>" %}` resolves **root-relative under `prompts/`** on both engines;
-watch the include-trailing-newline-plus-post-tag-newline **blank-line gotcha** (an included fragment's
-trailing newline plus the newline after the `%}` tag yields a blank line). Second include-authoring
-rule: **an `{% include %}` inside an indented fenced block sits at column 0** — neither engine
-reindents included multi-line content, so an indented include tag indents only the *first* rendered
-line; left-flushing the tag keeps the rendered block uniformly flush (markdown fences tolerate it).
+- `trim_blocks`/`trimBlocks` is **global on**: it strips only the single newline after a block
+  tag, preserving indentation. The **env flag** does the trimming — not a `{%- -%}` marker —
+  because `{%- -%}` cannot express "trim newline only" (it also eats the next line's leading
+  indent; see the conditional-templates section). `lstrip_blocks` stays **off** (tags sit at
+  column 0).
+- `keep_trailing_newline=True` is **load-bearing**: jinja2 otherwise strips one trailing `\n`
+  while miniJinja keeps it, diverging the planes on every template that ends in a newline.
+- `{% include "<root-relative path>" %}` resolves **root-relative under `prompts/`** on both
+  engines. Two include-authoring gotchas: an included fragment's trailing newline plus the newline
+  after the `%}` tag yields a **blank line**; and an `{% include %}` inside an indented fenced
+  block sits at **column 0** — neither engine reindents included multi-line content, so an
+  indented include tag indents only the *first* rendered line (markdown fences tolerate the flush
+  tag).
 
 **jinja2 is the reference engine** — the committed golden bytes ARE jinja2 output: generate once with
 jinja2, then assert miniJinja matches byte-for-byte.
@@ -116,12 +118,19 @@ The templates are restricted to a **frozen subset** — exactly four categories,
 4. **plain `{% %}` tags** — `{%- -%}` / `{{- -}}` whitespace-control markers are **OUT** (tag-line
    trimming rides the env `trim_blocks` flag, not a marker).
 
+Everything else is outside the subset: `{# … #}` comments, loops, `set`/`macro`/`block`/
+`extends`/`raw`, filters, dotted access, parentheses, numeric literals, `!=`/`<`/`>`, `in`, `is`,
+and escaped string literals.
+
 ## The author-time guard MUST be tightened to match the stricter runtime (the cross-cutting insight)
 
 A grammar guard MORE PERMISSIVE than the runtime lets a template pass author-time and fail later at
-render/golden time. The author-time guards (`extension/substrate/promptGrammar.test.ts` +
-`tests/test_prompt_grammar.py` — inline test-only validators, allowlist posture) were tightened
-into alignment with the miniJinja runtime:
+render/golden time. Ownership: the Python guard's scanner is
+`perk_dev.prompt_grammar.scan_template` (`packages/perk-dev/src/perk_dev/prompt_grammar.py`) —
+**shared** between `tests/test_prompt_grammar.py` and the prose-review Assembly preview gate
+(`AssemblyRenderer._render_prompt_layer` in `packages/perk-dev/src/perk_dev/prose_review/assembly.py`);
+the TS guard remains local to `extension/substrate/promptGrammar.test.ts`. Both take an allowlist
+posture aligned with the miniJinja runtime:
 
 - **reject escaped string literals** (`[^"\\]*`, not `[^"]*`);
 - **reject out-of-containment include paths** (empty / absolute / `..`-segment);
@@ -129,11 +138,18 @@ into alignment with the miniJinja runtime:
   runtime's precedence (`or < and < not < == < atom`) — catches `a b` adjacent atoms, `a ==` /
   `== a` missing operand, bare `not`.
 
+Guard agreement is construct-membership agreement, **not identical lexical acceptance**: the Python
+whole-source scanner deliberately rejects multiline, unterminated, stray, nested, and partially
+matched delimiter forms, while the TS tokenizer accepts multiline tags and treats stray closers as
+text (`shared/contracts.md §8.31` records the asymmetry). Neither guard checks if/endif nesting
+balance — rendering every real template supplies the structural check.
+
 **The regex char-set gate and the shape validator are complementary**: the regex gates the
 character SET (rejects parens / `!=` / numbers / dots), the validator gates the token SHAPE (rejects
 valid-token-but-malformed sequences the regex's `(token)+` repetition accepts). Neither alone
-suffices. The guard is now a **fourth lockstep surface**: widening the subset later amends
-`§8.31` + the runtime renderer (both planes) + **both** grammar guards.
+suffices. The guard is a **fourth lockstep surface**: widening the subset later amends `§8.31` +
+its authoring documentation (`prompts/README.md`) + the runtime renderer (both planes) + **both**
+grammar guards.
 
 Guard gotchas: `{# … #}` comments contain neither `{{` nor `{%`, so an extractor silently MISSES
 them — add a third regex alternative purely to **REJECT** comments (a synthetic `{# comment #}`
@@ -143,31 +159,36 @@ the admitted keywords are exactly `and`/`or`/`not`, every other bare word is a l
 name). Both guards self-check against a **vacuous scan** (assert non-empty + known anchors) and skip
 `README.md` (it deliberately carries out-of-subset example constructs as prose).
 
+The scanner belongs to dev authoring/preview tooling, never the production render path — and
+sharing it does not give Assembly preview every production feature: `_render_prompt_layer` rejects
+includes before calling `render_text`, while production named/source-text rendering supports
+root-relative includes.
+
 ## The CRLF byte-parity hazard (any cross-plane TS module byte-matching a Python file read)
 
-Python text-mode `open` does universal-newline translation (`\r\n`/`\r`→`\n`) **before** jinja2 sees
-the source; Node `readFileSync(f, "utf8")` does **NOT**. For byte-for-byte parity the TS renderer
-must `src.replace(/\r\n?/g, "\n")` at the top of `render`. Most visible via `trim_blocks` (it
-consumes the single `\n` after `%}` — on a CRLF checkout the next char is `\r`, so the newline isn't
-trimmed and the planes diverge). **A latent platform-specific divergence invisible on an LF dev
-machine** — worth a defensive normalize in any vendored file-reading renderer/parser that must match
-a Python twin.
+Python text-mode reads (`open`, `Path.read_text()`) do universal-newline translation
+(`\r\n`/`\r`→`\n`) **before** jinja2 sees the source; Node `readFileSync(f, "utf8")` does **NOT**.
+For byte-for-byte parity the TS side must normalize `src.replace(/\r\n?/g, "\n")` **at the read
+boundary**, not in each downstream consumer. A latent platform-specific divergence invisible on an
+LF dev machine — two instances so far:
 
-The hazard is **not renderer-only** — it recurs at every TS file-read whose output must byte-match
-a Python read. Python `Path.read_text()` normalizes universal newlines; Node
-`readFileSync(path, "utf8")` preserves `\r\n`. A cross-plane byte-parity test
-(`tests/test_binding_render_parity.py`) exposed a second, latent instance: TS `stripFrontmatter`
-checked `startsWith("---\n")` — false on CRLF — so frontmatter would have leaked into warm/worker
-prompts on a CRLF checkout. Fix pattern: normalize `\r\n?` → `\n` **at the read boundary**
-(`readSkillBody` in `extension/substrate/bindingDelivery.ts`, mirroring the `miniJinja.ts`
-renderer), not in each downstream consumer. Test pattern: the parity test writes one fixture with
-**explicit CRLF bytes** (`write_bytes`) to pin the arm. The rule: **when writing any TS file-read
-whose output must byte-match a Python read, normalize newlines at the read boundary.**
+- **The renderer**: `miniJinja.ts` normalizes at the top of `render`. Most visible via
+  `trim_blocks` (it consumes the single `\n` after `%}` — on a CRLF checkout the next char is
+  `\r`, so the newline isn't trimmed and the planes diverge).
+- **Binding delivery**: TS `stripFrontmatter` checked `startsWith("---\n")` — false on CRLF — so
+  frontmatter would have leaked into warm/worker prompts on a CRLF checkout. The cross-plane
+  byte-parity test (`tests/test_binding_render_parity.py`) exposed it; the fix normalizes in
+  `readSkillBody` (`extension/substrate/bindingDelivery.ts`), mirroring the renderer.
+
+Test pattern: write one fixture with **explicit CRLF bytes** (`write_bytes`, as the parity test's
+`_scaffold` does) to pin the arm. The rule: **when writing any TS file-read whose output must
+byte-match a Python read, normalize newlines at the read boundary.**
 
 ## String-only contract: lazy (TS) vs eager (Python), both planes
 
-The TS renderer throws **lazily** on a *referenced* non-string (at lookup, jinja2 `StrictUndefined`
-parity); Python validates the whole var map **eagerly** (`TypeError` before delegating to jinja2).
+The TS renderer throws **lazily** on a *referenced* absent or non-string value (at lookup, jinja2
+`StrictUndefined` parity); Python validates the whole var map **eagerly** (`TypeError` before
+delegating to jinja2), and a referenced missing variable still fails loudly on both planes.
 "Reference engine unchanged" does NOT mean "skip enforcing the shared contract on that plane" — a
 documented cross-plane contract is mechanically enforced on **both** planes (the *when* may differ —
 lazy vs eager — as long as both forbid the `str(value)`/`String(value)` coercion divergence).
@@ -181,22 +202,21 @@ Do not create a second Environment or expose a loader/config parameter: that sha
 lets includes inside caller-supplied text resolve root-relative to `prompts/` with exactly the same
 policy as named templates.
 
-Source text is rendered through Jinja's `from_string` path. The accepted cost is loss of bytecode
-cache and source name/filename provenance. Accordingly, the stable contract is rendered bytes plus
-exception classes; diagnostic wording and filenames are not API. Validate that every variable value
-is a string *before* loader lookup so bad-data errors have deterministic precedence over a missing
-include or source. Pair that ordering with regressions rather than relying on Jinja's incidental
-lookup sequence.
+Source text renders through Jinja's `from_string` path; the accepted cost is loss of bytecode cache
+and source name/filename provenance. Accordingly, the stable contract is rendered bytes plus
+exception classes — diagnostic wording and filenames are not API. Validate that every variable
+value is a string *before* loader lookup so bad-data errors have deterministic precedence over a
+missing include or source; pin that ordering with regressions rather than relying on Jinja's
+incidental lookup sequence.
 
-This API is a render mechanism, not a sandbox. Grammar restrictions remain author-time policy in the
-prompt guards. The static scanner used by prose-map tests must not migrate into production as a
-security boundary. The TypeScript twin deliberately exposes only named rendering because no TS
-consumer needs source text; cross-plane surface symmetry is not a goal when ownership is single-
-plane.
+`render_text` accepts **trusted repository source** — it is a render mechanism, neither a sandbox
+nor a runtime grammar validator. Grammar restrictions remain author-time policy in the prompt
+guards; the shared `scan_template` scanner stays dev tooling, never a production security boundary.
+The TypeScript twin deliberately exposes only named rendering because no TS consumer needs source
+text; cross-plane surface symmetry is not a goal when ownership is single-plane.
 
-Tier-A golden fixtures exercise both Python entry points against the same committed bytes. That
-keeps named-source and source-text behavior locked without introducing a second set of expected
-outputs.
+Tier-A golden fixtures exercise both Python entry points against the same committed bytes, locking
+named-source and source-text behavior without a second set of expected outputs.
 
 ## Static-union fixture validation
 
@@ -219,60 +239,51 @@ mapping.
 
 ## Two-tier render-parity replaces the prose-copy golden bridge
 
-**The golden file's only load-bearing role was the cross-process parity bridge.** jinja2 (Python)
-and miniJinja (TS) can't call each other in one process, so the committed `_fixtures/golden/*.txt`
-existed *only* so each engine could compare to the same frozen bytes (transitively proving the two
-engines agree). Because those goldens were copies of **real prompt prose**, every prose edit forced
-a paired golden hand-edit — and the golden was never an independent oracle of "correct prose"
-(rendering is mechanical var-substitution; the `.md` source is already reviewed). Recognizing that
-unlocks the split:
+The old prose-copy golden's only load-bearing role was the cross-process parity bridge: jinja2
+(Python) and miniJinja (TS) can't call each other in one process, so committed golden bytes let each
+engine compare to the same frozen output. Because those goldens were copies of **real prompt
+prose**, every prose edit forced a paired golden hand-edit while never independently proving the
+prose "correct" (rendering is mechanical var-substitution; the `.md` source is already reviewed).
+That recognition splits parity into two tiers:
 
 - **Tier A — contract snapshots (golden, sui generis).** Goldens only for **purpose-built** fixture
-  templates that each isolate ONE feature of the frozen render contract (var subst, include,
-  if/else, elif chain, `==`/`and`/`or`/`not`, `trim_blocks` block-tag-on-own-line vs inline,
-  trailing-newline, no-trailing-newline fragment). Stable — change only when the **contract**
-  changes, never when prose changes; generated **by the reference engine** (jinja2) in a throwaway
-  scratch script (so the Python snapshot passes by construction), and the TS side confirms
-  byte-reproduction. Each conditional fixture renders **multiple var arms** so both branches are
-  pinned.
-- **Tier B — live cross-engine equality (NO goldens).** A `live.yaml` manifest lists every **real**
-  template with representative vars (no `golden:` field). A **Python-owned** test renders each
-  natively with jinja2, shells out **once** to a small node renderer
-  (`extension/testing/renderLive.ts`) that renders the same manifest with miniJinja, and asserts
-  byte-equality per template. Editing real prose touches **no** fixture. A coverage guard asserts
-  every real template appears in the manifest (subset check, not equality — multi-arm entries
-  repeat a template) so a new prompt can't silently skip Tier B. **A new `{% include %}` partial
-  is itself a real template file** — it needs its own `vars: {}` entry in `live.yaml`; being
-  rendered via a parent's `{% include %}` does not satisfy the coverage guard (the
-  since-deleted `prompts/common/output-schemas/*.md` partials were the instance; no production
-  template carries `{% include %}` today, but the fixture tier still pins the feature). The rule
-  generalizes:
-  **every new file under `prompts/` needs a `live.yaml` entry** — `vars: {}` for var-free
-  fragments, **even Python-plane-only ones**. `test_live_manifest_covers_every_real_template`
-  coverage-enforces the manifest, and single-plane consumption does not exempt a template from
-  the cross-engine parity suite. No golden is required (goldens are curated per-case, not
-  coverage-enforced).
+  templates (`prompts/_fixtures/cases.yaml` + `_fixtures/golden/`), each isolating ONE feature of
+  the frozen render contract (var subst, include, if/else, elif chain, `==`/`and`/`or`/`not`,
+  `trim_blocks` block-tag-on-own-line vs inline, trailing-newline, no-trailing-newline fragment).
+  Stable — they change only when the **contract** changes, never when prose changes; generated by
+  the reference engine (jinja2) in a throwaway scratch script, byte-reproduced by the TS side.
+  Each conditional fixture renders **multiple var arms** so both branches are pinned.
+- **Tier B — live cross-engine equality (NO goldens).** `prompts/_fixtures/live.yaml` lists every
+  **real** template with representative vars. A Python-owned test
+  (`tests/test_prompt_parity.py::test_live_cross_engine_parity`) renders each natively with
+  jinja2, shells out **once** to a small node renderer (`extension/testing/renderLive.ts`) that
+  renders the same manifest with miniJinja, and asserts byte-equality **positionally** (the node
+  side prints results in manifest order). Editing real prose touches **no** fixture.
+
+The coverage predicate: `test_live_manifest_covers_every_real_template` asserts the real-template
+set — every `*.md` under `prompts/` except `README.md` and `_fixtures/` — is a **subset** of the
+manifest (not equality: multi-arm entries repeat a template). Partials and single-plane templates
+are real templates: an `{% include %}` partial needs its **own** entry (a parent's include does not
+cover it; no production template carries `{% include %}` today, but the Tier-A fixtures still pin
+the feature), and single-plane consumption does not exempt a template. Use `vars: {}` for var-free
+templates. Editing prose alone needs no fixture change; adding a template or changing required
+vars/branches does. Curate conditional-arm coverage in the manifest (provider arms, with-url/no-url,
+empty/populated optional clauses) — representative arms are the only branch evidence Tier B has.
 
 Mechanics:
 
 - **Node renderer placement = tarball exclusion + still typechecked.** `extension/testing/renderLive.ts`
   (NOT a `.test.ts`) is excluded from the npm tarball by the existing `!extension/testing/` rule yet
   is still covered by `tsc --noEmit` + `biome check extension`. It is invoked only by the Python
-  test (never by `node --test "extension/**/*.test.ts"` — wrong suffix); Node 26 runs a bare
-  `node extension/testing/renderLive.ts` via native type-stripping, printing `JSON.stringify(results)`
-  in **manifest order** so the Python side zips positionally.
-- The Python→node subprocess **skips** when `node` is absent (mirrors `test_packaging.py`'s
-  `shutil.which` skip). A `subprocess.run` inside a *test* file needs **no** sanctioned-subprocess-guard
-  entry — `tests/test_tooling.py::_SANCTIONED_SUBPROCESS_WRAPPERS` scans `perk/`, not `tests/`.
+  test (never by the `node --test` glob — wrong suffix); Node 26 runs it bare via native
+  type-stripping, printing `JSON.stringify(results)`.
+- The Python→node subprocess **skips when `node` is absent** — the tier is then *unexercised*, not
+  cross-engine-passed; use the prepared worktree toolchain so both planes actually run. A
+  `subprocess.run` inside a *test* file needs **no** sanctioned-subprocess-guard entry
+  (`tests/test_tooling.py::_SANCTIONED_SUBPROCESS_WRAPPERS` scans `perk/`, not `tests/`).
 - Both `cases.yaml` and `live.yaml` stay in the **miniYaml subset** (block maps/seqs, double-quoted
-  strings, **string-only vars**, the backtick-quoting rule, no `|`/`>` block scalars — empty flow
-  map `vars: {}` parses on both sides). Seed `live.yaml` **verbatim** from the old real-template
-  `vars` blocks (drop each `golden:` line) to preserve curated conditional-arm coverage (provider
-  arms, with-url/no-url, model-clause empty/populated) for free.
-- Selection-guard tests (`test_worker_prompt_parity.py`, `test_objective_prompt_parity.py`,
-  `worker.test.ts`, `objectivePlan.test.ts`) assert *which arm is selected*, never read goldens —
-  unaffected by the split (only their "golden cases" comments needed rewording to "live-parity
-  cases").
+  strings, **string-only vars**, the backtick-quoting rule in the move checklist below, no `|`/`>`
+  block scalars — the empty flow map `vars: {}` parses on both sides).
 
 ## Seed prompts need their own semantic-contract test (#1990)
 
@@ -284,209 +295,145 @@ arm.
 ## The bare-import source-scan guard (the bare-clone invariant)
 
 The vendored modules must stay zero-runtime-dependency so a bare git clone loads them. A source-scan
-guard enforces it:
+guard (`extension/bareImportGuard.test.ts`) enforces it: a specifier is allowed iff it is a
+`node:` builtin, a relative path, or in the guard's host/peer allowlist (`isAllowed` — refer to it
+rather than copying its package roster). Mechanics:
 
-- **Strip block+line comments BEFORE scanning** — the vendored modules' own headers contain
-  explanatory `import … from "nunjucks"` / `"yaml"` text, so a naive scan false-positives on the
-  very module that removed the dep (mirrors `surfacesGuard`).
-- **Scan dynamic forms too**: `import("pkg")` / `require("pkg")` string-literal specifiers (a
-  computed specifier has no literal to scan, acceptably).
-- **Exclude both `*.test.ts` AND `testing/`** (only test-reachable, never in the runtime import
-  graph rooted at `index.ts`; the tarball ships neither).
-- Pair the TS scan with a Python `tests/test_packaging.py::test_no_runtime_dependencies`
-  (package.json runtime `dependencies` absent or empty) — two guards, two planes, one invariant.
+- **Strip block+line comments BEFORE scanning** (`stripComments`) — the vendored modules' own
+  headers contain explanatory `import … from "nunjucks"` / `"yaml"` text, so a naive scan
+  false-positives on the very module that removed the dep (mirrors `surfacesGuard`).
+- **Scan static, side-effect, re-export, and literal dynamic forms** (`specifiersOf`): `from`
+  clauses, bare `import "pkg"`, and `import("pkg")` / `require("pkg")` string-literal specifiers
+  (a computed specifier has no literal to scan, acceptably).
+- **Exclude both `*.test.ts` AND `testing/`** from the scanned production set (`productionFiles`) —
+  only test-reachable, never in the runtime import graph rooted at `index.ts`; the tarball ships
+  neither.
+- Pair the TS scan with `tests/test_packaging.py::test_no_runtime_dependencies` (package.json
+  runtime `dependencies` absent or empty) — two guards, two planes, one invariant.
 
 ## The prompt-move pattern (the cornerstone)
 
 How to relocate an inline prompt string literal onto a canonical template **without changing output**:
 
-- **Single-plane prompts belong in `prompts/` too** (the cross-plane framing was a historical accident
-  of the seam's origin). The directory is the home for **all** externalized prompt prose, not only the
-  prompts both planes render. A **single-plane** template — a warm-door-only guidance prompt
-  (`prReviewGuidance`, `conflictResolutionGuidance`, `reconcileGuidance`, `objectiveSaveGuidance`) or a
-  cold-door-only seed prompt (objective-author / plan-from / replan / objective-replan) — is authored
-  in the same frozen subset and listed in `_fixtures/live.yaml`, where it rides **cross-engine parity
-  for free**: `live.yaml` renders every template on both engines and asserts byte-equality regardless
-  of which plane consumes it in production, so a single-plane move costs nothing extra (the subset is
-  shared). Reframing `prompts/README.md` + `contracts.md §8.31` to say so is a keep-and-annotate edit,
-  not a rewrite.
-
-- **Single inline file vs subdirectory-of-arm-files — the deciding factor is in-code BODY branching,
-  not just var differences.** If the prompt **body** branches in code (a provider arm, preview-vs-action)
-  → a **subdirectory** with one complete-body template per branch (branching is template *selection*
-  in code; conditional templates are the documented exception below). If only an injected **var**
-  differs (computed by an existing helper) → a **single inline file**, no subdirectory.
-
-- **The unify-vs-split decision rule — keyed on WHY the cold/warm bodies differ (the cornerstone of
-  the whole 2.1–2.7 move series).** When relocating a cold/warm (sometimes worker) prompt pair, the
-  unify-vs-split choice is a **plan-time decision driven by the *reason* the bodies differ**, not by
-  surface diffing:
-  - **UNIFY into one flat template (zero `{% if %}`)** when the differences are **superficial
-    house-style** — header wording, a header blank line, step-number indentation, a plane-only
-    qualifier, closing-paragraph phrasing. **Converge them away**: pick one canonical form, both planes
-    emit it. Pattern: implement-2.2, learn-2.4, learn-docs-2.7.
-  - **SPLIT into arm files in a subdirectory** (`prompts/stages/<x>/{seed,guidance}.md`) when the
-    difference is **load-bearing semantics** — the **cold-injects / warm-instructs** asymmetry. The
-    cold session launches a *fresh read-only session* and **injects** data (an `<untrusted_objective>`
-    block; the node already marked `planning` by the cold door before launch); the warm session runs
-    *in-session* and **instructs** the model to *fetch* it (`perk objective show` / `node-engagement`)
-    and to mark state *itself* (the `objective_node` tool). Unifying would change behavior. Pattern:
-    objective-plan-2.6. Keep the arm files separate even when the roadmap node title reads singular.
-  - **The load-bearing caveat: unifying CHANGES output** (a plane gains/loses bytes), so it is a
-    deliberate, user-approved **plan-time** decision — never an implementation default.
-  - **The plane-only-qualifier tell.** A cold-only qualifier (e.g. "from this read-only session") is a
-    tell for **superficial** — but verify its *premise* before deciding it is load-bearing. The warm
-    `/learn-docs` session is **NOT** read-only (it injects via `pi.sendUserMessage`), so the qualifier
-    was only cold-*accurate*; the bare "NEVER write the docs directly" is correct in both planes, so it
-    dropped. **Verify the premise, then drop the qualifier if the bare wording holds on both planes.**
-
-- **No-trailing-newline arm templates for mid-prompt fragments.** Fragments that embed inline are
-  authored — template **and** golden — **without** a trailing newline, so `render()` returns the prior
-  literal **byte-for-byte** (a deliberate departure from the fixture trailing-newline convention).
-  Author with `printf` (**never** `echo`, which appends a newline); verify with `tail -c1 | xxd`. This
-  keeps downstream consumers byte-identical.
-
-- **Branching stays in code; pass the UNION of vars to every arm.** StrictUndefined / throwOnUndefined
-  fire only on a **referenced** missing var, so passing unused vars to an arm is harmless. The render
-  call convention is **`.md`-suffixed, root-relative under `prompts/`** (the objective's no-extension
-  illustration is loose framing — don't copy it).
-
-- **"Reconcile the warm/cold variance" can mean UNIFY, not just parameterize** — the superficial-arm
-  of the decision rule above. When near-copy sites differ only by a house-style omission, unifying (one
-  side *gains* the missing content → all sites byte-identical) is cleaner than a conditional preserving
-  the divergence; it still **changes output**, so it stays a plan-time decision to confirm.
-
-- **The single-arm subdirectory.** A conditional/early-return arm contributes **no template file and no
-  golden** — only the rendering arm(s) do; branching stays in code (objective-read's `backend !=
-  "linear" → ""`: github/other return `""` directly, no `github.md`/`other.md`, no `{% if %}`). Keep the
-  **subdirectory shape** (`prompts/common/objective-read/linear.md`) even with a single arm file, for path-shape
-  consistency across the common-prompt arms — don't collapse to a flat single file.
-
-- **Demote-in-place a substring constant — check for other local consumers before deleting.** When
-  swapping a cross-plane substring lockstep → golden parity, check whether the substring constant has
-  **other local consumers** (retained per-plane selection / `_seed_prompt`-composition tests) before
-  deleting it. `OBJECTIVE_LINEAR_SUBSTRINGS` **survived as a local in both planes** (its composition
-  tests still consume it) — only the cross-plane *lockstep framing/comments* were removed. Contrast the
-  earlier moves where `IMPLEMENT_SUBSTRINGS`/`ADDRESS_SUBSTRINGS` were deleted/"replaced". **Demote in
-  place; don't churn.**
-
-- **The byte-stability de-risker (the reusable workflow for transcription-risk moves).** Before deleting
-  each literal, capture the **pre-change** output of the literal helper (`_seed_prompt(...)` /
-  `factoryGuidance(...)`) for representative arg sets to `/tmp`, then assert the new `render(...)` equals
-  the captured bytes in a **throwaway scratch script (NOT committed)**. This catches exact
-  conditional-template transcription (em-dashes / backticks / `{% %}`) before you touch the committed
-  golden harness — it complements the `printf` / `tail -c1 | xxd` no-trailing-newline mechanics above.
-
-- **Script-generated byte-fidelity (don't hand-transcribe long prose templates).** Generate a long
-  conditional template by **string-replacement on an all-clauses-present pre-change capture** rather
-  than hand-typing it: replace vars (`…` → `{{ var }}`) and each end-of-line clause (`clause\n` →
-  `{% if c %}clause{% endif %}\n\n`, per the end-of-line gotcha above), then assert
-  `render(...) == capture` for **every** conditional arm. **Var-replacement ordering must be
-  longest-first** to avoid substring collisions — a URL like `…/issues/148` *contains* the bare id
-  `148`, so replace the URL before the id or replacing `148` first corrupts the URL.
-
-- **The `cases.yaml` backtick-quoting rule.** For a render var carrying literal backticks **plus**
-  embedded quotes: do **NOT** escape the backtick — only `\"` / `\\` / `\n` / `\t` are escapable in
-  this fixture format. miniYaml's `unescapeDoubleQuoted` leaves `` \` `` as a literal
-  backslash-plus-backtick (golden mismatch) and PyYAML rejects it outright. Use a double-quoted scalar
-  with **literal** backticks and only the inner `"` escaped.
-
-- **Test posture: golden-fixture parity REPLACES substring parity, but keep a thin per-plane selection
-  test** — one in each plane proving the code picks the right arm and `render()` is wired.
-
-- **Warm guidance seeded via `pi.sendUserMessage` → assert on `notifies`, not `seeded`.** The harness's
-  `seeded` only captures messages routed through a replaced `newSession({withSession})` ctx — **NOT** a
-  direct `pi.sendUserMessage` on the real API (what `/address`, `/learn` use). Assert on the
-  `report(...)` info/warning message instead — the canonical way to test a warm command that seeds a
-  turn. The converged warm door also becomes **ref-aware** (resolves the active plan-ref via the same
-  helper the learn door uses, null-guarding with a warning mirroring `/implement`).
+1. **All externalized prompt prose belongs in `prompts/`** — single-plane consumers too. A
+   warm-door-only guidance prompt or a cold-door-only seed prompt is authored in the same frozen
+   subset and listed in `live.yaml`, riding cross-engine parity for free (the subset is shared, so
+   a single-plane move costs nothing extra).
+2. **Flat file vs subdirectory-of-arm-files — the deciding factor is in-code BODY branching, not
+   just var differences.** If the prompt **body** branches in code → a subdirectory with one
+   complete-body template per branch (branching is template *selection* in code). If only an
+   injected **var** differs → a single flat file. Keep a **one-rendering-arm subdirectory** when
+   the other branches return an empty string — `prompts/common/objective-read/linear.md`
+   (github/other return `""` directly): no empty templates, no `{% if %}`, and the subdirectory
+   path shape stays consistent across the common-prompt arms.
+3. **Unify vs split is keyed on WHY the bodies differ, not on surface diffing.** UNIFY into one
+   flat template when the differences are **superficial house-style** (header wording, a blank
+   line, step-number indentation, a plane-only qualifier) — and **verify the qualifier's premise**
+   first: drop it only if the bare wording holds on both planes. SPLIT into arm files
+   (`prompts/stages/objective-plan/{seed,guidance}.md`) when the difference is **load-bearing
+   semantics** — the **cold-injects / warm-instructs** asymmetry (the cold door launches a fresh
+   session and injects data; the warm command instructs the model to fetch it and mark state
+   itself). **Unifying CHANGES output** (a plane gains/loses bytes), so it is a deliberate,
+   user-approved plan-time decision — never an implementation default.
+4. **Semantic selection stays in code; only prose assembly moves.** Pass string values, and the
+   **UNION** of arm vars to every arm (StrictUndefined/throwOnUndefined fire only on a *referenced*
+   missing var, so unused vars are harmless); normalize optional absent values to `""` — do not
+   reach for arbitrary `str()`/`String()` coercion. Names are `.md`-suffixed and root-relative
+   under `prompts/`.
+5. **De-risk transcription with captured bytes, not new goldens.** Before deleting each literal,
+   capture the pre-change output of the literal helper (e.g. `_seed_prompt(...)` /
+   `factoryGuidance(...)`) for representative arg sets, then assert the new `render(...)` equals
+   the captured bytes for **every arm** in a throwaway scratch script — never newly committed
+   real-prose goldens. Generate a long template from the capture by string replacement instead of
+   hand-transcribing it, and **replace vars longest-first** to avoid substring collisions (a URL
+   containing a bare issue id must be replaced before the id, or the shorter substitution corrupts
+   the URL).
+6. **Preserve exact trailing-newline choices for embedded fragments.** Mid-prompt fragments are
+   authored **without** a trailing newline so `render()` returns the prior literal byte-for-byte;
+   author with `printf` (never newline-appending `echo`) and verify actual bytes
+   (`tail -c1 | xxd`). Only Tier-A fixture fragments have committed goldens.
+7. **Keep thin per-plane selection/wiring tests and the semantic-contract pins.** Render parity
+   replaces duplicate prose/substring lockstep, not behavior pins; selection tests assert *which
+   arm* is chosen and never read goldens. Before deleting a substring constant, check for other
+   local consumers — demote it in place if per-plane composition tests still use it.
+8. **Warm guidance seeded via `pi.sendUserMessage`: prove injection with `spyInjections`**
+   (`extension/testing/harness.ts`; see "Asserting `pi.sendUserMessage` injection offline: spy on
+   the session instance" in `docs/learned/pi/extension-api.md`). Offline capture proves
+   *attempted* injection, not persisted delivery. Independent caution: when moving a warm door's
+   prose, preserve its plan-ref resolution and null-guard behavior.
+9. **The `cases.yaml` backtick-quoting rule.** For a render var carrying literal backticks
+   **plus** embedded quotes: do **NOT** escape the backtick — only `\"` / `\\` / `\n` / `\t` are
+   escapable in this fixture format. miniYaml's `unescapeDoubleQuoted` leaves `` \` `` as a
+   literal backslash-plus-backtick and PyYAML rejects it outright. Use a double-quoted scalar with
+   **literal** backticks and only the inner `"` escaped.
 
 ## Conditional templates — whitespace control is the load-bearing gotcha
 
 Most arm templates use `{{ var }}` only and keep branching in code. When branching instead moves
-**into** a template as `{% if %}` (the learn-2.4 / objective-plan-2.6 pattern), whitespace control is
-the gotcha that decides whether the output is byte-stable:
+**into** a template as `{% if %}`, whitespace control decides whether the output is byte-stable
+(the render-config section above records the exact flags):
 
-- **`{%- -%}` whitespace-control markers CANNOT express "trim newline only."** `-%}` strips the
-  following newline **and** the next line's leading indentation — so a `  - ` bullet indent gets eaten,
-  corrupting indented content. There is **no jinja/miniJinja marker for "trim newline only."**
-- **The fix is the env flag `trim_blocks` (jinja2) / `trimBlocks` (miniJinja), now GLOBAL on.** It
-  strips only the single newline immediately after a block tag, **preserving indentation** — so
-  plain `{% %}` tags sit on their own lines and indented bullet content renders intact.
-  `lstrip_blocks` stays **off** (tags at column 0). miniJinja `trimBlocks` matches jinja2
-  `trim_blocks` **byte-for-byte** (the Tier-A contract snapshots are the proof; generate goldens
-  with jinja2, the reference engine, then let the TS test confirm parity).
-- **Bounded blast radius of a render-env flip.** `trim_blocks` only affects templates **containing
-  block tags** — before flipping a shared render env, `grep '{%' across prompts/` to bound the impact.
-  Keep an affected fixture's golden byte-stable by editing the **template** (e.g. add an explicit blank
-  line) rather than regenerating the golden (the `with_include` fixture broke this way — the trim ate
-  the blank line after `{% include %}`).
-- **Coerce raw vars to strings so the `{% if %}` false arm behaves.** When branching moves into the
-  template, helpers pass **raw** vars but must coerce — `model or ""` (Python) / `node ?? ""` (TS). A
-  bare `None`/`undefined` either renders the literal or trips StrictUndefined/throwOnUndefined; the
-  `{% if model %}` false arm only behaves on a string-typed empty value. Two byte-stable conditional
-  shapes: **block-level** tags on their own line (`trim_blocks` swallows the trailing newline) and
-  **inline** mid-line tags (no newline after `%}`, so `trim_blocks` is a no-op — no whitespace shift).
-- **Selection stays in code; only string-ASSEMBLY moves to the template.** Distinguish *which clause to
-  render* (the backend-arm selection — stays in code, e.g.
-  `objective_read_instruction`/`objectiveReadInstruction`) from *how the clause is glued into the
-  surrounding prose* (assembly — moves to the template). The arm logic is untouched; only the intro
-  wrapping / leading space / clause wording moves into the template.
-- **The end-of-line inline-conditional case (the third `trim_blocks` gotcha).** An inline
-  `{% if c %}clause{% endif %}` that is the LAST thing on its line **before a structural `\n`** — e.g.
-  `…obey.{% if has_engagement %} clause{% endif %}\n  2. …` — gets its trailing newline **eaten** by
-  `trim_blocks` (which removes the newline after ANY block tag, including this `{% endif %}`), merging
-  the line with the next one. The fix: author an extra **absorbed blank line** — `{% endif %}\n\n` — so
-  `trim_blocks` eats the first `\n` and leaves the structural one intact. (Contrast: a whole-line
-  conditional where both arms share a label uses **own-line** `{% if %}` / `{% else %}` / `{% endif %}`
-  block tags, each on its own line, mirroring `seed.md`'s `node_engagement` block.)
-- **Adding a SECOND optional free-form `{% if %}` var to a warm command needs no new mechanism.**
-  Thread it exactly like the existing optional `model` var: widen the pure door helper signature
-  (`prReviewGuidance(model?, directive?)`, pass `directive ?? ""`), flip the handler from `_args` to
-  `args` (`const directive = (args ?? "").trim()`) — no new tool/registry/door. The StrictUndefined
-  surface ripple forces the new var into **both** existing `live.yaml` arms **plus one new true-arm**
-  (string-only per the miniYaml subset) or the parity render throws. A runtime value substituted for
-  `{{ directive }}` is **not** re-parsed as grammar, so operator text containing `{% %}` can't inject.
-  **Doc-mirror scope for a command-argument change:** `shared/contracts.md` + the
-  `docs/user-docs/reference/in-session.md` command section + the **bound skill** (`skills/<…>/SKILL.md`
-  source, not the materialized `.agents/skills/` copy) — **NOT** the `perk-expert` references (that
-  mirror is config/provider/backend only).
-- **The stale-claim ripple (cross-ref `doc-reconciliation.md`).** A render-env or grammar change can
-  flip *standing claims* in earlier nodes' LANDED notes ("trim/lstrip off"; "the frozen subset has no
-  conditionals"). Record the **supersession in the node that caused it** — do **not** rewrite the
-  historically-accurate older records — and amend `shared/contracts.md §8.31`. Residual the grammar-freeze
-  spec must carry: `{% if/elif/else/endif %}` + string `==` + `or`/`not` as the frozen conditional subset.
+- **`{%- -%}` cannot mean "trim newline only"** — `-%}` strips the following newline **and** the
+  next line's leading indentation, corrupting indented content; there is no jinja/miniJinja marker
+  for "trim newline only". The env flag `trim_blocks`/`trimBlocks` (global on) strips only the
+  single newline after a block tag, preserving indentation; `lstrip_blocks` stays off. Two
+  byte-stable conditional shapes: **block-level** tags on their own lines (`trim_blocks` swallows
+  the tag line's newline, content indentation survives) and **inline** mid-line tags (no newline
+  directly after `%}`, so a truly mid-line tag does not trim a following non-newline character).
+- **An end-of-line inline `{% endif %}` consumes the structural newline** (`trim_blocks` removes
+  the newline after ANY block tag), merging the line with the next. Author an absorbed extra blank
+  line — `{% endif %}\n\n` — so one newline survives. Include fragments' trailing newlines and
+  column-zero include placement need byte checks too (the render-config section's include
+  gotchas).
+- **Selection stays in code; only string-ASSEMBLY moves into the template.** Distinguish *which
+  clause to render* (the arm selection — stays in code) from *how the clause is glued into the
+  surrounding prose* (assembly — the intro wrapping / leading space / clause wording moves into
+  the template).
+- **Before flipping a shared render-env flag, inventory block-tag templates** (`grep '{%'` across
+  `prompts/`) to bound the blast radius, and keep an affected fixture's golden byte-stable by
+  editing the **template** (e.g. an explicit blank line) — never regenerate goldens to conceal an
+  unintended output change. Preserve optional-variable arm coverage when vars change.
+- **A new optional free-form `{% if %}` var needs no new mechanism** — thread it like the existing
+  optional vars: widen the pure door helper signature, pass `?? ""` / `or ""`, and cover the new
+  var in **both** existing `live.yaml` arms plus one new true-arm entry (string-only per the
+  miniYaml subset) or the parity render throws. A runtime value substituted for `{{ var }}` is
+  **not** re-parsed as template grammar, so operator text containing `{% %}` cannot inject.
+  Doc-mirror scope for a command-argument change: `shared/contracts.md` + the user-docs command
+  section + the **bound skill** source, in the same turn (the `perk-expert` mirror is
+  config/provider/backend changes only).
+- **The stale-claim ripple** (cross-ref `doc-reconciliation.md`): when a real grammar/config change
+  supersedes a historical record, preserve the record's historical status and record the new
+  contract where the change happened — never present obsolete settings as current.
 
 ## Recurring mechanics
 
-- **`npm ci` in a fresh worktree before TS checks** when a recent node added a runtime dep (cross-ref
-  `toolchain/worktree-node-modules.md`).
-- The **`edit`-fails-across-an-em-dash** trap → a Python `str.replace` heredoc escape hatch.
-- **`run_ci` green ≠ committed-format-green** — run the Biome formatter before assuming `lint-js` is
-  clean (cross-ref `toolchain/biome.md`).
-- **`[[ci.checks]]` glob-skips `node:test` on a `prompts/`-only diff — but the TS plane scans `prompts/` at
-  RUNTIME.** A PR touching `prompts/` + Python but **no `.ts`** glob-skips `lint-js` / `typecheck-js` /
-  `test-js`, yet the TS guards read `prompts/` when they run: `promptGrammar.test.ts` validates every
-  template against the frozen grammar and `prompts.test.ts` checks the goldens. So **run
+- **`[[ci.checks]]` glob-skips the TS suites on a `prompts/`-only diff — but the TS plane reads
+  `prompts/` at RUNTIME.** The JS check rows carry code-suffix globs, so a diff touching only
+  templates or `prompts/_fixtures/live.yaml` skips `lint-js`/`typecheck-js`/`test-js` while
+  `promptGrammar.test.ts` (frozen-grammar validation of every template) and `prompts.test.ts`
+  (the Tier-A goldens) never run. Whenever a change adds or edits anything under `prompts/`, run
   `node --test extension/substrate/promptGrammar.test.ts extension/substrate/prompts.test.ts`
-  manually** whenever a change adds/edits `prompts/` templates, even with a zero-`.ts` diff. (Python's
-  `test_prompt_parity` shells to node and DID run under `test-py`, but the TS-only grammar/golden
-  guards did not.) The hole covers fixtures too: a change touching **only**
-  `prompts/_fixtures/live.yaml` (consumed by the prompt-parity path via
-  `extension/testing/renderLive.ts`) green-lights `run_ci` while skipping `test-js` entirely —
-  when a prompt fixture or any non-glob-matching cross-plane artifact changes, run the node suite
-  explicitly (`just test-js`).
+  explicitly (or `just test-js`), even with a zero-`.ts` diff. (Python's `test_prompt_parity`
+  shells to node and does run under `test-py`.)
+- Fresh-worktree TS toolchain and formatter cautions live in their topical docs:
+  `toolchain/worktree-node-modules.md` (`npm ci` before TS checks) and `toolchain/biome.md`
+  (`run_ci` green ≠ committed-format-green).
+- The `edit`-fails-across-an-em-dash trap → a Python `str.replace` heredoc escape hatch for
+  Unicode-safe exact edits.
 - Keep `contracts.md §8.31` references intact through comment-hygiene sweeps.
 
 ## Cross-references
 
 - `docs/learned/workflow/shared-contracts.md` — the cross-plane SSOT prompt-fragment discipline + the
   vendored `miniYaml` reader (why `cases.yaml` must stay in the subset)
-- `docs/learned/workflow/distribution.md` — the npm extension-delivery lifecycle that superseded the
-  git-clone delivery (the vendored `miniJinja`'s nunjucks-dep removal rode the same zero-dep posture)
+- `docs/learned/workflow/distribution.md` — the npm extension-delivery lifecycle the vendored
+  `miniJinja`'s zero-dep posture rides
+- `docs/learned/pi/extension-api.md` — "Asserting `pi.sendUserMessage` injection offline: spy on
+  the session instance" (the injection-proof pattern the move checklist points to)
 - `docs/learned/toolchain/worktree-node-modules.md` — `npm ci` in a fresh worktree
 - `docs/learned/toolchain/biome.md` — `run_ci` green ≠ committed-format-green
 - `extension/substrate/miniJinja.ts` — the vendored TS renderer; `extension/testing/renderLive.ts` —
-  the Tier-B node renderer
+  the Tier-B node renderer; `packages/perk-dev/src/perk_dev/prompt_grammar.py` — the shared Python
+  grammar scanner
 - `prompts/` — the canonical templates; `prompts/_fixtures/cases.yaml` (Tier-A contract snapshots) +
   `prompts/_fixtures/live.yaml` (Tier-B live cross-engine parity manifest)
