@@ -32,7 +32,8 @@ perk reads two files under `.perk/`:
    read from `.perk/config.toml` **only** (keeps the canonical issue store and the converged
    `.pi/settings.json` deterministic). Keys **read at runtime** honor it — `[models.stages.<id>]`,
    `[models.subagents]`, `[ci]`, `[compaction] objective_threshold`, `[workflow]`, `[worktree]`,
-   `[providers]`, `[skills]`, `[[bindings]]`.
+   `[providers]`, `[skills]`, `[pi]`, `[[bindings]]`. `[pi] agent_dir` reads **both files from
+   the main checkout**, even from a linked worktree; worktree-local edits are not consulted.
 4. `[linear] api_key` is **local-only**: perk reads it only from `.perk/local.toml`, and an
    exported `LINEAR_API_KEY` takes precedence.
 
@@ -352,6 +353,67 @@ thinking = "high"
 [models.stages.plan]
 thinking = "xhigh"
 ```
+
+### `[pi]`
+
+Pi-process launch knobs. `agent_dir` loads a project `models.json` for custom providers or
+per-model overrides by injecting **`PI_CODING_AGENT_DIR`** into every **cold-local Pi launch**.
+Off by default; no auth seeding or session-dir pinning.
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `agent_dir` | string (path) | _(unset — Pi's normal directory)_ | Relative → **main checkout root**; absolute as-is; `~` expands. Blank → disabled. |
+
+```toml
+[pi]
+agent_dir = ".pi/agent"
+```
+
+**Effective read:** BOTH `.perk/config.toml` and `.perk/local.toml` come from the **main
+checkout**, not the invocation checkout or a caller's preloaded config. This is uniform across
+all cold-local doors, including seeded/skills/objective doors invoked from linked worktrees;
+worktree-local config edits are not consulted. Local wins: put per-machine absolute paths in the
+main checkout's `local.toml`, or use `agent_dir = ""` there to disable a committed value. No init
+rerun is needed for a runtime config edit.
+
+**Operator env wins:** a non-blank `PI_CODING_AGENT_DIR` skips the config read and is never
+clobbered. Escape hatch: `PI_CODING_AGENT_DIR=~/.pi/agent perk plan`. A nested cold launch inherits
+the parent session's injected value like an operator-set env var, so it wins over later edits too.
+
+**Pure whole-directory redirect**, not a models-only overlay: `auth.json`, `trust.json`,
+`sessions/`, `models-store.json`, global-tier `settings.json`, and other agent resources move
+alongside `models.json`.
+
+- OAuth credentials do not follow automatically: copy/symlink `auth.json` from `~/.pi/agent`
+  if needed, or use env API keys. Protect it from git before copying.
+- New `trust.json` starts empty: worktree stages already use `--approve`; main-checkout stages
+  prompt for trust once.
+- Logs go under `<agent-dir>/sessions/`. `/learn` still works (absolute `session_file` pointers).
+  `perk-dev` session tools retain `~/.pi/agent/sessions`; use their `--session-root` override.
+- Global settings move; the repo's `.pi/settings.json` remains the overriding project tier.
+
+**Diagnostics:** a missing dir warns and launches (Pi creates an empty dir on demand, without
+`auth.json`/`models.json`); an existing non-directory raises **`pi_agent_dir_invalid`**, because Pi
+cannot create its sessions tree there. A malformed/ill-typed main config read warns and launches
+without the redirect. Doctor's offline **`pi-agent-dir`** check is quiet when unconfigured, ok
+when safe, warn for missing/non-directory/hazardous paths, and defers invalid config to the config
+check. No `--fix` arm; it diagnoses the configured directory regardless of operator env.
+
+**Git safety:** init's managed block ignores `/.pi/agent/*` then opts in
+`!/.pi/agent/models.json`. The contents-glob (not a directory exclusion) permits later user `!`
+rules after the block for intentionally committed `settings.json` or `prompts/`. A non-conventional
+in-repo path needs its own matching ignore rules **before copying credentials or launching**.
+Doctor warns if `<agent-dir>/auth.json` is not ignored or if any tracked entry besides top-level
+`models.json` exists. Gitignore never untracks: `git rm --cached <path>` keeps the file on disk
+while removing it from the index (`-r` for directories). Never commit auth/trust/session data.
+
+**Dry-run scope:** only generic stage launchers reaching the launch seam (plan/implement/submit/
+address/land/…) preview the `PI_CODING_AGENT_DIR=<path>` line, `pi_agent_dir` JSON field, and
+missing-dir warning. Seeded-door previews, skills create/refine, and `plan resume` return earlier
+and omit these; their real launches still apply the same checks and injection.
+
+**Non-goals:** `--remote`, the headless worker (throwaway agentDir), and a hand-run `pi` are
+unaffected. Use direnv or your shell for a hand-run Pi redirect.
 
 ### `[compaction]`
 

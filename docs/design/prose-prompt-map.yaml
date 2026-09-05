@@ -377,11 +377,11 @@ routes:
     role: context
     priority: 90
 
-  - id: ts-adapters
-    match: { paths: ["extension/pi/v1/providers/**"] }
-    capability: review.drafts
+  - id: ts-context-injection
+    match: { paths: ["extension/pi/v1/contextInjection.ts"] }
+    capability: foundation.session
     audience: shipped
-    role: adapter
+    role: context
     priority: 80
   - id: ts-gist
     match: { paths: ["extension/authoring/gist/**", "extension/pi/v1/gist.ts"] }

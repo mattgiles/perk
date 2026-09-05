@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from perk.cli.context import PerkContext
 from perk.cli.ensure import UserFacingCliError
 from perk.convergence.init import PERK_TOML_TEMPLATE
+from perk.convergence.init.templates import PERK_LOCAL_TOML_TEMPLATE
 from perk.substrate.bindings import Binding
 from perk.substrate.config import (
     Config,
@@ -146,6 +147,14 @@ def test_worktree_setup_seeded_template_is_inert(tmp_path):
 def test_pi_agent_dir_parses_raw_string(tmp_path, text, expected):
     _write(tmp_path, "config.toml", text)
     assert load_config(tmp_path).pi_agent_dir == expected
+
+
+def test_pi_agent_dir_template_examples_stay_opt_in(tmp_path):
+    _write(tmp_path, "config.toml", PERK_TOML_TEMPLATE)
+    _write(tmp_path, "local.toml", PERK_LOCAL_TOML_TEMPLATE)
+    assert load_config(tmp_path).pi_agent_dir is None
+    assert '# [pi]\n# agent_dir = ".pi/agent"' in PERK_TOML_TEMPLATE
+    assert '# [pi]\n# agent_dir = "/abs/path"' in PERK_LOCAL_TOML_TEMPLATE
 
 
 def test_pi_agent_dir_ill_typed_raises(tmp_path):

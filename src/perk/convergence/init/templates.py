@@ -14,7 +14,8 @@ PERK_TOML_TEMPLATE = """\
 # committed artifacts ([models] default/thinking, [compaction]'s settings keys,
 # [issues]) ignore .perk/local.toml; keys read at runtime honor it
 # ([models.stages.*], [models.subagents], [ci], [compaction]
-# objective_threshold, [workflow], [worktree], [providers], [[bindings]]).
+# objective_threshold, [workflow], [worktree], [providers], [pi], [[bindings]]).
+# [pi] reads BOTH config files from the main checkout, even from a worktree.
 
 # ═══ Which AI runs where (precedence = nesting: flag > stage > default) ═══
 
@@ -69,6 +70,17 @@ PERK_TOML_TEMPLATE = """\
 # harvest-analyst = "openai/gpt-5.6-terra"
 # dream-analyst = "openai/gpt-5.6-terra"
 # dream-reducer = "anthropic/claude-fable-5"
+
+# Project agent dir (optional, cold-local launches only) — redirects pi's WHOLE
+# config dir: models.json, but also auth.json, trust.json, sessions/, and global
+# settings. Relative paths resolve against the main checkout root; ~ expands.
+# BOTH config.toml and local.toml are read from the main checkout. Operator
+# PI_CODING_AGENT_DIR env wins. Put per-machine absolute paths in local.toml;
+# agent_dir = "" there disables this value. Missing dirs start empty; protect
+# credentials with ignore rules (.pi/agent/* is managed, except models.json).
+#
+# [pi]
+# agent_dir = ".pi/agent"
 
 # ═══ How work is verified — and whether it's trusted ═══
 
@@ -210,6 +222,14 @@ PERK_LOCAL_TOML_TEMPLATE = """\
 # Example:
 #   [models.stages.implement]
 #   thinking = "xhigh"
+#
+# Project agent dir (optional, cold-local launches only) — redirects pi's WHOLE
+# config dir, including auth/trust/sessions. Both config files are read from the
+# main checkout; relative paths resolve there, ~ expands. Operator
+# PI_CODING_AGENT_DIR env wins. A blank agent_dir = "" disables a committed value.
+#
+# [pi]
+# agent_dir = "/abs/path"
 #
 # A local [[bindings]] array REPLACES the committed [[bindings]] array wholesale
 # (whole-array override, not element-wise merge — unlike scalar leaf-merge).

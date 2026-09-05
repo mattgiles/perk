@@ -54,7 +54,9 @@ How the two files combine:
    committed `.pi/settings.json` deterministic.
 4. Keys **read at runtime** honor the overlay: `[models.stages.<id>]`, `[models.subagents]`,
    `[ci]`, `[compaction] objective_threshold`, `[workflow]`, `[worktree]`, `[providers]`,
-   `[skills]`, and `[[bindings]]`.
+   `[skills]`, `[pi]`, and `[[bindings]]`. For `[pi] agent_dir`, **both files are read from
+   the main checkout**, even when launching from a linked worktree; worktree-local edits to
+   either file are not consulted.
 5. `[linear] api_key` is the local-only exception: it is read only from `.perk/local.toml`, and
    the `LINEAR_API_KEY` environment variable takes precedence over it.
 
@@ -65,7 +67,7 @@ How the two files combine:
 | [Repository layout](./configuration/repository-layout.md) | The dot-directory ownership and lifecycle contract | Where a perk-relevant path lives, who owns it, whether it is versioned, and how it is materialized. |
 | [Workflow and CI](./configuration/workflow-and-ci.md) | `[worktree]`, `[workflow]`, `[ci]`, `[[ci.checks]]` | Where work is placed, how plans choose a base, and how configured checks run. |
 | [Backends](./configuration/backends.md) | `[providers]`, `[issues]`, `[linear]` | Which provider seams and issue backend are selected and where local Linear credentials resolve. |
-| [Models and compaction](./configuration/models-and-compaction.md) | `[models]`, `[models.stages.<id>]`, `[models.subagents]`, `[compaction]` | Which AI defaults apply at each execution seam and how session context is managed. |
+| [Models and compaction](./configuration/models-and-compaction.md) | `[models]`, `[models.stages.<id>]`, `[models.subagents]`, `[compaction]`, `[pi]` | Which AI defaults apply, where Pi's agent config is stored, and how session context is managed. |
 | [Skills and bindings](./configuration/skills-and-bindings.md) | `[skills]`, `[[bindings]]`, repo-authored `.perk/skills/` | Which skills are exposed, how bindings deliver them, and how repository skills are maintained. |
 
 ## A note on value types

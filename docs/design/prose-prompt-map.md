@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **211** canonical source units
-- **736** logical fragments
+- **207** canonical source units
+- **733** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -73,6 +73,7 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
 | `python-symbol:src/perk/backends/engagement.py:render_node_engagement` | `context` | `shipped` | [`src/perk/backends/engagement.py`](../../src/perk/backends/engagement.py) · `symbol:render_node_engagement` | — |
 | `python-symbol:src/perk/backends/engagement.py:render_objective_engagement` | `context` | `shipped` | [`src/perk/backends/engagement.py`](../../src/perk/backends/engagement.py) · `symbol:render_objective_engagement` | — |
 | `python-symbol:src/perk/backends/engagement.py:render_plan_engagement` | `context` | `shipped` | [`src/perk/backends/engagement.py`](../../src/perk/backends/engagement.py) · `symbol:render_plan_engagement` | — |
+| `typescript-model-call:extension/pi/v1/contextInjection.ts:module:before-agent-start:0` | `context` | `shipped` | [`extension/pi/v1/contextInjection.ts`](../../extension/pi/v1/contextInjection.ts) · `symbol:module/event:before_agent_start/0` | — |
 | `typescript-model-call:extension/pi/v1/delivery/commitCompact.ts:module:sendUserMessage:0` | `context` | `shipped` | [`extension/pi/v1/delivery/commitCompact.ts`](../../extension/pi/v1/delivery/commitCompact.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/delivery/commitCompact.ts:module:sendUserMessage:1` | `context` | `shipped` | [`extension/pi/v1/delivery/commitCompact.ts`](../../extension/pi/v1/delivery/commitCompact.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/pi/v1/lifecycleGates.ts:module:sendUserMessage:0` | `context` | `shipped` | [`extension/pi/v1/lifecycleGates.ts`](../../extension/pi/v1/lifecycleGates.ts) · `symbol:module/call:sendUserMessage/0` | — |
@@ -100,6 +101,8 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
   - `symbol:render_objective_engagement` — Render objective engagement (`symbol:render_objective_engagement`)
 - `python-symbol:src/perk/backends/engagement.py:render_plan_engagement`
   - `symbol:render_plan_engagement` — Render plan engagement (`symbol:render_plan_engagement`)
+- `typescript-model-call:extension/pi/v1/contextInjection.ts:module:before-agent-start:0`
+  - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
 - `typescript-model-call:extension/pi/v1/delivery/commitCompact.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/delivery/commitCompact.ts:module:sendUserMessage:1`
@@ -142,7 +145,6 @@ Draft, review, save, and adopt lightweight statements of intent.
 | `markdown:prompts/contexts/gist-authoring.md` | `launch` | `shipped` | [`prompts/contexts/gist-authoring.md`](../../prompts/contexts/gist-authoring.md) · `file` | gist.cold |
 | `markdown:prompts/stages/gist-author/seed.md` | `launch` | `shipped` | [`prompts/stages/gist-author/seed.md`](../../prompts/stages/gist-author/seed.md) · `file` | gist.cold |
 | `markdown:skills/perk-gist-author/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-gist-author/SKILL.md`](../../skills/perk-gist-author/SKILL.md) · `file` | gist.cold |
-| `typescript-model-call:extension/pi/v1/gist.ts:module:before-agent-start:0` | `control-guidance` | `shipped` | [`extension/pi/v1/gist.ts`](../../extension/pi/v1/gist.ts) · `symbol:module/event:before_agent_start/0` | — |
 | `typescript-model-call:extension/pi/v1/gist.ts:module:sendUserMessage:0` | `control-guidance` | `shipped` | [`extension/pi/v1/gist.ts`](../../extension/pi/v1/gist.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-tool:gist_draft` | `control-guidance` | `shipped` | [`extension/pi/v1/gist.ts`](../../extension/pi/v1/gist.ts) · `tool:gist_draft` | — |
 | `typescript-tool:gist_save` | `control-guidance` | `shipped` | [`extension/pi/v1/gist.ts`](../../extension/pi/v1/gist.ts) · `tool:gist_save` | — |
@@ -163,8 +165,6 @@ Draft, review, save, and adopt lightweight statements of intent.
   - `section:authoring-a-perk-gist-the-gist-author-stage/saving-draft-review-approval-auto-saves` — Saving: draft → review → approval auto-saves (`heading:authoring-a-perk-gist-the-gist-author-stage/saving-draft-review-approval-auto-saves`)
   - `section:authoring-a-perk-gist-the-gist-author-stage/the-consumption-story` — The consumption story (`heading:authoring-a-perk-gist-the-gist-author-stage/the-consumption-story`)
   - `section:authoring-a-perk-gist-the-gist-author-stage/never-delegate-boundaries` — Never-delegate boundaries (`heading:authoring-a-perk-gist-the-gist-author-stage/never-delegate-boundaries`)
-- `typescript-model-call:extension/pi/v1/gist.ts:module:before-agent-start:0`
-  - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
 - `typescript-model-call:extension/pi/v1/gist.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-tool:gist_draft`
@@ -209,7 +209,6 @@ Author and save objectives and their roadmaps.
 | `markdown:prompts/stages/objective-save.md` | `launch` | `shipped` | [`prompts/stages/objective-save.md`](../../prompts/stages/objective-save.md) · `file` | — |
 | `markdown:skills/perk-objective-author/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-objective-author/SKILL.md`](../../skills/perk-objective-author/SKILL.md) · `file` | objective.cold, objective.warm |
 | `python-symbol:src/perk/cli/commands/objective/author_cmd.py:_render_source` | `context` | `shipped` | [`src/perk/cli/commands/objective/author_cmd.py`](../../src/perk/cli/commands/objective/author_cmd.py) · `symbol:_render_source` | — |
-| `typescript-model-call:extension/pi/v1/objectiveAuthoring.ts:module:before-agent-start:0` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveAuthoring.ts`](../../extension/pi/v1/objectiveAuthoring.ts) · `symbol:module/event:before_agent_start/0` | — |
 | `typescript-model-call:extension/pi/v1/objectiveAuthoring.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveAuthoring.ts`](../../extension/pi/v1/objectiveAuthoring.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-tool:objective_draft` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveAuthoring.ts`](../../extension/pi/v1/objectiveAuthoring.ts) · `tool:objective_draft` | objective.cold, objective.warm |
 | `typescript-tool:objective_save` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveAuthoring.ts`](../../extension/pi/v1/objectiveAuthoring.ts) · `tool:objective_save` | — |
@@ -237,8 +236,6 @@ Author and save objectives and their roadmaps.
   - `section:authoring-a-perk-objective-the-objective-author-stage/never-delegate-boundaries` — Never-delegate boundaries (`heading:authoring-a-perk-objective-the-objective-author-stage/never-delegate-boundaries`)
 - `python-symbol:src/perk/cli/commands/objective/author_cmd.py:_render_source`
   - `symbol:_render_source` — Render source (`symbol:_render_source`)
-- `typescript-model-call:extension/pi/v1/objectiveAuthoring.ts:module:before-agent-start:0`
-  - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
 - `typescript-model-call:extension/pi/v1/objectiveAuthoring.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-tool:objective_draft`
@@ -431,7 +428,6 @@ Explore, draft, adopt, review, and save a bounded implementation plan.
 | `markdown:skills/perk-replan/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-replan/SKILL.md`](../../skills/perk-replan/SKILL.md) · `file` | — |
 | `python-symbol:src/perk/cli/commands/plan/from_cmd.py:_render_source_issue` | `context` | `shipped` | [`src/perk/cli/commands/plan/from_cmd.py`](../../src/perk/cli/commands/plan/from_cmd.py) · `symbol:_render_source_issue` | — |
 | `python-symbol:src/perk/cli/seed_file.py:render_seed_file_scratch` | `context` | `shipped` | [`src/perk/cli/seed_file.py`](../../src/perk/cli/seed_file.py) · `symbol:render_seed_file_scratch` | — |
-| `typescript-model-call:extension/pi/v1/plan.ts:module:before-agent-start:0` | `tool-contract` | `shipped` | [`extension/pi/v1/plan.ts`](../../extension/pi/v1/plan.ts) · `symbol:module/event:before_agent_start/0` | — |
 | `typescript-symbol:extension/pi/v1/planTitle.ts:module:complete-structured` | `tool-contract` | `shipped` | [`extension/pi/v1/planTitle.ts`](../../extension/pi/v1/planTitle.ts) · `symbol:module/call:completeStructured` | — |
 | `typescript-tool:plan_draft` | `tool-contract` | `shipped` | [`extension/pi/v1/plan.ts`](../../extension/pi/v1/plan.ts) · `tool:plan_draft` | plan.cold, plan.warm |
 | `typescript-tool:plan_save` | `tool-contract` | `shipped` | [`extension/pi/v1/plan.ts`](../../extension/pi/v1/plan.ts) · `tool:plan_save` | — |
@@ -477,8 +473,6 @@ Explore, draft, adopt, review, and save a bounded implementation plan.
   - `symbol:_render_source_issue` — Render source issue (`symbol:_render_source_issue`)
 - `python-symbol:src/perk/cli/seed_file.py:render_seed_file_scratch`
   - `symbol:render_seed_file_scratch` — Render seed file scratch (`symbol:render_seed_file_scratch`)
-- `typescript-model-call:extension/pi/v1/plan.ts:module:before-agent-start:0`
-  - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
 - `typescript-symbol:extension/pi/v1/planTitle.ts:module:complete-structured`
   - `toolDescription` — completeStructured toolDescription (`symbol:module/call:completeStructured/toolDescription`)
   - `system` — completeStructured system (`symbol:module/call:completeStructured/system`)
@@ -811,12 +805,10 @@ Human and agent review surfaces for gists, objectives, and plans.
 | `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/pi/v1/planReviewBrowser.ts`](../../extension/pi/v1/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/2` | — |
 | `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:3` | `tool-contract` | `shipped` | [`extension/pi/v1/planReviewBrowser.ts`](../../extension/pi/v1/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/3` | — |
 | `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:4` | `tool-contract` | `shipped` | [`extension/pi/v1/planReviewBrowser.ts`](../../extension/pi/v1/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/4` | — |
-| `typescript-model-call:extension/pi/v1/providers/plannotator.ts:module:before-agent-start:0` | `adapter` | `shipped` | [`extension/pi/v1/providers/plannotator.ts`](../../extension/pi/v1/providers/plannotator.ts) · `symbol:module/event:before_agent_start/0` | — |
 | `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/plannotatorHandoff.ts`](../../extension/pi/v1/providers/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/plannotatorHandoff.ts`](../../extension/pi/v1/providers/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/plannotatorHandoff.ts`](../../extension/pi/v1/providers/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/2` | — |
 | `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:3` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/plannotatorHandoff.ts`](../../extension/pi/v1/providers/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/3` | — |
-| `typescript-model-call:extension/pi/v1/providers/tombell.ts:module:before-agent-start:0` | `adapter` | `shipped` | [`extension/pi/v1/providers/tombell.ts`](../../extension/pi/v1/providers/tombell.ts) · `symbol:module/event:before_agent_start/0` | — |
 | `typescript-tool:collect_draft_review_wave` | `tool-contract` | `shipped` | [`extension/pi/v1/draftReviewWaveTools.ts`](../../extension/pi/v1/draftReviewWaveTools.ts) · `tool:collect_draft_review_wave` | — |
 | `typescript-tool:plan_review` | `tool-contract` | `shipped` | [`extension/pi/v1/plan.ts`](../../extension/pi/v1/plan.ts) · `tool:plan_review` | plan.cold, plan.warm |
 | `typescript-tool:start_draft_review_wave` | `tool-contract` | `shipped` | [`extension/pi/v1/draftReviewWaveTools.ts`](../../extension/pi/v1/draftReviewWaveTools.ts) · `tool:start_draft_review_wave` | — |
@@ -860,8 +852,6 @@ Human and agent review surfaces for gists, objectives, and plans.
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/3/argument:0`)
 - `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:4`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/4/argument:0`)
-- `typescript-model-call:extension/pi/v1/providers/plannotator.ts:module:before-agent-start:0`
-  - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
 - `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:1`
@@ -870,8 +860,6 @@ Human and agent review surfaces for gists, objectives, and plans.
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/2/argument:0`)
 - `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:3`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/3/argument:0`)
-- `typescript-model-call:extension/pi/v1/providers/tombell.ts:module:before-agent-start:0`
-  - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
 - `typescript-tool:collect_draft_review_wave`
   - `description` — description (`tool:collect_draft_review_wave.description`)
   - `promptSnippet` — promptSnippet (`tool:collect_draft_review_wave.promptSnippet`)
@@ -1591,6 +1579,7 @@ Expert configuration guidance, structural search, and ancillary model utilities.
   - `section:perk-local-toml-gitignored/models` — `[models]` (`heading:perk-local-toml-gitignored/models`)
   - `section:perk-local-toml-gitignored/models-subagents` — `[models.subagents]` (`heading:perk-local-toml-gitignored/models-subagents`)
   - `section:perk-local-toml-gitignored/models-stages-id` — `[models.stages.<id>]` (`heading:perk-local-toml-gitignored/models-stages-id`)
+  - `section:perk-local-toml-gitignored/pi` — `[pi]` (`heading:perk-local-toml-gitignored/pi`)
   - `section:perk-local-toml-gitignored/compaction` — `[compaction]` (`heading:perk-local-toml-gitignored/compaction`)
   - `section:perk-local-toml-gitignored/skills` — `[skills]` (`heading:perk-local-toml-gitignored/skills`)
   - `section:perk-local-toml-gitignored/bindings` — `[[bindings]]` (`heading:perk-local-toml-gitignored/bindings`)

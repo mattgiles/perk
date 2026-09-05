@@ -733,7 +733,7 @@ def test_typescript_enclosing_symbol_fragment_is_editable_through_source_endpoin
     repo: Path,
 ) -> None:
     unit = snapshot.get_unit(
-        "typescript-model-call:extension/pi/v1/providers/plannotator.ts:module:before-agent-start:0"
+        "typescript-model-call:extension/pi/v1/contextInjection.ts:module:before-agent-start:0"
     )
     assert unit is not None
     fragment = snapshot.get_fragment(unit.candidate.id, "handler")
