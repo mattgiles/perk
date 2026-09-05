@@ -1,8 +1,8 @@
 # Native-wake review streaming: development baseline and live protocol
 
 **Date:** 2026-09-05. **Status: IN PROGRESS — not submission evidence yet.** The repo-local
-background-launch prerequisite and live terminal leg T passed. Required live legs B/D/N/U
-remain **unobserved / not passed**. This record does not certify the remaining streaming routes,
+background-launch prerequisite and live legs T/B passed. Required live legs D/N/U remain
+**unobserved / not passed**. This record does not certify the remaining streaming routes,
 global hosts, or consumer compatibility.
 
 ## Part A — repeatable protocol and preconditions
@@ -221,7 +221,7 @@ not coach the relay mechanism or reviewer output. The normal door/tool/skill car
 | Leg | Exercised SHA | Verdict | Evidence |
 | --- | --- | --- | --- |
 | T | `bdf6dd29a380fbc0b7fe999d1746573318a25555` | PASS | Native supervisor relay → one real hunk comment → one final collect; evidence below |
-| B | — | Unobserved / not passed | Awaiting fresh human-operated interactive session |
+| B | `bdf6dd29a380fbc0b7fe999d1746573318a25555` | PASS | Native browser pushes, global dedupe, and all-covered-angle final replacement; evidence below |
 | D | — | Unobserved / not passed | Awaiting fresh normal plan handoff and browser session |
 | N | — | Unobserved / not passed | Awaiting fresh normal plan handoff and browser session |
 | U | — | Unobserved / not passed | Awaiting isolated driver, bridge-off capture and restoration |
@@ -307,10 +307,75 @@ non-authoritative conveniences; the sanitized decisive observations above surviv
 Per-leg closure receipts are `live/T/hunk-after-close.txt`, `checkout-cleanup.json`,
 `worktrees-after-cleanup.txt`, and `github-after-cleanup.json`.
 
-### Leg B preparation — not yet launched
+### Leg B — PASS: native browser relay and source-scoped final replacement
 
-The one-shot `live/start-B.sh` selects the same code SHA, host, bridge-on configuration and
-branch-bound skill/definition files as T. It requires the prior review checkout to be absent,
-uses fresh logs under `live/B/parent`, and asks the human to invoke `/pr-review-browser 2228`
-once. The installed browser integration is `@plannotator/pi-extension` 0.27.12. Neither the
-wrapper nor the implementation session has launched B; no live browser verdict is claimed.
+The human launched `live/start-B.sh` and invoked `/pr-review-browser 2228` once. The wrapper
+selected the same code SHA, repaired host, bridge-on configuration and branch-bound
+skill/definition files as T, with fresh logs under `live/B/parent`. The installed browser
+integration is `@plannotator/pi-extension` 0.27.12. The human reported successful Pi/browser
+startup, visible annotations, **no messages/nudges after launch**, one final annotation, no
+remaining duplicate/missing annotations, and no errors.
+
+The screenshot `Screenshot 2026-09-05 at 6.06.08 PM.png` was inspected directly: it shows one
+**PERK:QUALITY** annotation at new line 7 of the documentation file, major/high, with the final
+schema-contract-reversal body. The UI's unsubmitted “Post Comments” badge is 1. A retained copy
+is `live/B/browser-final.png`, SHA-256
+`d5c104efaf1c52196ef68f7ad308a7ddf82f4f08e86941a3607e9d46c2cb2d62`.
+The user was unsure whether it appeared before the final summary; JSONL supplies that ordering.
+
+Parent session: `01a07398-f7de-7352-9a76-f2d7985de1c1`, model
+`anthropic/claude-opus-4-8`. One workflow `37613aaa-a2b7-433f-b962-ef6c053e1815`, parent PID
+30150. All three fresh-context children used `openai/gpt-6-astra`, separate background runner
+processes and observed runner exits 0:
+
+| Lane | Child run | Runner PID | Final streamed / findings |
+| --- | --- | --- | --- |
+| claimed-intent | `78cb58b1-b331-48e2-85d1-f149feb00fd7` | 30844 | true / 1 |
+| quality | `35210511-9b8b-4d65-aa07-dbbc16555e1a` | 30845 | true / 1 |
+| ponytail | `50ed5bb4-0e93-45cf-ab89-3d13542fde46` | 30846 | false / 0 |
+
+Ponytail metadata names the exact `ponytail-review` skill; the existing reviewer definitions
+were unchanged. Both nonempty batches successfully used the injected supervisor capability,
+and every lane completed via a successful `structured_output` call.
+
+Decisive order (UTC, 2026-09-05):
+
+| Time | Event |
+| --- | --- |
+| 22:04:15.568 | Single start accepted, requested/runnable = claimed-intent, quality, ponytail, no preflight failures. |
+| 22:04:19.665 | Parent ends the launch turn. |
+| 22:04:50.337 | Quality child receives “Supervisor progress update queued.”, `delivered: true`, request `a449249f-15a0-42e9-83a0-593a64c9f86a`, one nonempty finding. |
+| 22:04:50.462 | Native quality progress message wakes the idle parent without human input. |
+| 22:04:50.922 | Claimed-intent receives the same successful queue result, request `ef9ff898-1604-428f-b17c-fcfe9ba09308`, one nonempty finding. |
+| 22:04:54.341 | Provisional quality `push_annotations`: pushed=1, held=0, deleted=0, id `85d23213-262f-4893-a0e6-7fe69555d46b`. |
+| 22:04:54.345 | Claimed-intent native batch is delivered during the active relay turn. |
+| 22:04:58.791 | Provisional claimed-intent push: pushed=0, one skipped duplicate anchor `line:docs/developers/review-wave-schema-note.md:7`, held=0. |
+| 22:04:58.907 | Workflow terminal status records completion, after both successful batch submissions and the first provisional browser push. |
+| 22:05:02.171 | Parent ends its relay turn with no completion notice yet delivered. |
+| 22:05:02.182 | Matching native `subagent-notify` wakes the parent; its correlation names workflow `37613aaa-a2b7-433f-b962-ef6c053e1815`. |
+| 22:05:04.310 | Single collect succeeds: complete=true, all three covered, failures=[], one attempt. |
+| 22:05:18.471 | Final claimed-intent `replace: true`: pushed=0, same duplicate anchor skipped, deleted=0. |
+| 22:05:18.490 | Final quality `replace: true`: pushed=1, deleted=1, new id `77122f98-0a44-4f98-890e-980492983bea`. |
+| 22:05:18.503 | Final Ponytail `replace: true`, empty findings: pushed=0, deleted=0, no held batches. |
+| 22:05:28.334 | Final summary and parent turn end. |
+
+There is one final replacement call **per covered angle**, including the empty final array.
+The tool's actual results prove global dedupe and source-scoped replacement: only quality's
+existing annotation was cleared/replaced, the same-anchor sibling stayed deduped, and the real
+browser retained one final annotation. No annotation HTTP was composed by the model.
+No artificial waits, manual status-file reconciliation, retries, duplicate collects or late
+provisional replay occurred in the captured session. The native turn boundaries are observed,
+not a requirement that inference outrun child execution.
+
+Collection and the parent both disclosed Ponytail neutrally:
+
+```text
+Review wave complete: covered 3/3 angle(s).
+perk: collect_review_wave — no provisional batches (no findings): ponytail
+```
+
+Read-only GitHub verification showed `{state: OPEN, isDraft: true, review_count: 0}`; no review
+was posted. Browser/Pi are still open pending human-confirmed closure; per-leg cleanup has not
+yet been claimed. Raw parent/child snapshots and status receipts are under
+`live/B/captured-runtime/`; sanitized timeline and extraction are `live/B/parent-timeline.json`
+and `live/B/evidence.json`, with `github-posting-check.json` and the screenshot alongside.
