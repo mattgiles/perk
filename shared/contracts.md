@@ -2222,8 +2222,9 @@ dangling-pointer warning, which stays a last-resort signal).
   required external skills. The managed fragment declares **multiple sources** — perk's own
   (`PERK_SKILL_SOURCE`: `https://github.com/mattgiles/perk`, ref `main`) plus the remaining required
   external sources (`REQUIRED_SKILL_SOURCES`: `astral`, `mattpocock`). `dignified-python` is
-  vendored verbatim under `skills/`, including its upstream license sidecar, and delivered from
-  source `perk`, not Dagster. Its name and required presence in every project are unchanged;
+  vendored under `skills/`, with its unchanged upstream license sidecar and a documented local
+  correction to the Python 3.13 annotation guidance, and delivered from source `perk`, not
+  Dagster. Its name and required presence in every project are unchanged;
   moving source ownership does not change the verification union, force invocation, or add a
   binding. Upgrading perk and running `perk init` or `perk doctor --fix` retargets the managed
   declaration through the existing convergence and skills-CLI link reconciliation.
@@ -5714,7 +5715,7 @@ least one enumerated skill (project or package) declares `stages:`, **or** any `
 content exists (`stages` rows, non-empty `include_dirs`, or `include_packages` explicitly set).
 Otherwise it contributes nothing and the launch argv (and stderr) is **byte-identical** to
 unscoped discovery. Enumeration always runs to detect frontmatter declarations. Perk-authored
-shipped skills declare `stages:` at source; verbatim-vendored exceptions (`ast-grep`,
+shipped skills declare `stages:` at source; vendored exceptions (`ast-grep`,
 `dignified-python`) preserve upstream frontmatter without `stages:` and are scoped by committed
 `[skills.stages]` rows in perk's own repo. Consumers without an override expose those undeclared
 skills to all stages. Any repo whose `.agents/skills/` mirror is synced to current perk is
@@ -9337,8 +9338,8 @@ amending this section.
 regression loud live in `tests/test_prompt_surface_budgets.py` — three constants beside their
 checks: `SKILL_AMBIENT_DESCRIPTION_MAX_BYTES = 896` (gate #2: every `skills/perk-*/SKILL.md`
 frontmatter `description`, measured as UTF-8 bytes of the parsed scalar; membership
-cross-checked against the `perk-*` members of `PERK_SKILLS` — the verbatim-vendored
-`ast-grep` and `dignified-python` frontmatter is outside the gate), `SEED_TEMPLATE_MAX_BYTES = 9_088` and
+cross-checked against the `perk-*` members of `PERK_SKILLS` — the unchanged upstream frontmatter
+of vendored `ast-grep` and `dignified-python` is outside the gate), `SEED_TEMPLATE_MAX_BYTES = 9_088` and
 `INJECTED_CONTEXT_TEMPLATE_MAX_BYTES = 1_984` (gate #3: every `prompts/**/*.md` except
 `prompts/README.md` and `prompts/_fixtures/**`, measured as raw committed file bytes,
 pre-render — `prompts/contexts/**` including adapter blocks is the INJECTED-CONTEXT class;

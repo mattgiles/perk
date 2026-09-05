@@ -12,10 +12,11 @@ commands, and `.perk/skills/` is the committed source for guidance authored by t
 
 ## Required skill installation
 
-`dignified-python` remains required in every perk project. It is vendored unchanged from
-Dagster, with its upstream Apache 2.0 license, and delivered by the skills CLI from perk's
-managed source (`https://github.com/mattgiles/perk`, ref `main`). Dagster is no longer a required
-source; the remaining required external sources are Astral and Matt Pocock.
+`dignified-python` remains required in every perk project. It is vendored from Dagster with its
+upstream Apache 2.0 license and a documented local correction to the Python 3.13 annotation
+guidance. The skills CLI delivers it from perk's managed source
+(`https://github.com/mattgiles/perk`, ref `main`). Dagster is no longer a required source; the
+remaining required external sources are Astral and Matt Pocock.
 
 After upgrading perk, run `perk init` or `perk doctor --fix` to regenerate the managed declaration
 and synchronize delivery. User-owned declarations and existing caches are not cleaned up.
@@ -59,8 +60,8 @@ librarian = []
 
 The model **engages only when in use**: some skill declares `stages:` frontmatter, or any
 `[skills]` content exists — a stages row, a non-empty `include_dirs`, or an explicitly set
-`include_packages`. Perk-authored shipped skills declare `stages:` at source; verbatim-vendored
-skills such as `ast-grep` and `dignified-python` preserve upstream frontmatter without that field.
+`include_packages`. Perk-authored shipped skills declare `stages:` at source; vendored skills
+such as `ast-grep` and `dignified-python` preserve upstream frontmatter without that field.
 The authored declarations make cold stage launches **scoped by default** once `.agents/skills/`
 is synchronized to the current perk with `perk init` or `perk doctor --fix`. A repository whose
 mirror predates those declarations stays unscoped (undeclared means all stages, fail-open) until

@@ -73,7 +73,7 @@ glob = "CHANGELOG.md"
 
 # ═══ How the loop fits this repo ═══
 
-# Stage exposure for borrowed external and verbatim-vendored perk-hosted skills (contracts.md
+# Stage exposure for borrowed external and vendored perk-hosted skills (contracts.md
 # §8.39). These rows scope which cold stage launches see each skill in the model-invocable
 # catalog — frontmatter `stages:` is the preferred lever, but these skills preserve upstream-owned
 # frontmatter, so the config layer scopes them instead. Perk-authored skills (`skills/`,

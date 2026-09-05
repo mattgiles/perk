@@ -3,23 +3,30 @@
 
 # Type Annotations - Python 3.13
 
-This document captures type annotation guidance for Python 3.13.
-Python 3.13 implements PEP 649 (Deferred Evaluation of Annotations), fundamentally changing how
-annotations are evaluated.
+> **Modification notice:** perk corrected this file's Python 3.13 annotation-evaluation,
+> forward-reference, and circular-import guidance and examples. The upstream license remains
+> in `../LICENSE`.
+
+This document captures type annotation guidance for Python 3.13. Function and class annotations
+are still evaluated eagerly by default. PEP 649/749 deferred annotation evaluation arrived in
+**Python 3.14**, not 3.13; see the
+[Python 3.14 release notes](https://docs.python.org/3.14/whatsnew/3.14.html#pep-649-and-pep-749-deferred-evaluation-of-annotations).
 
 ## Overview
 
-**The key change: forward references and circular imports work naturally without
-`from __future__ import annotations`.**
+**On Python 3.13, quote forward references or use `from __future__ import annotations` when
+appropriate for the project. Neither approach fixes a runtime circular import.**
 
 All type features from previous versions (3.10-3.12) continue to work.
 
-**What's new in 3.13:**
+**Annotation evaluation in 3.13:**
 
-- PEP 649 deferred annotation evaluation
-- Forward references work naturally (no quotes, no `from __future__`)
-- Circular imports no longer cause annotation errors
-- **DO NOT use `from __future__ import annotations`**
+- An unquoted name not yet defined can raise `NameError` while defining a function or class.
+- Quote the entire annotation containing a forward reference, such as `"Node | None"`.
+- `from __future__ import annotations` is still valid: it stores annotations as strings,
+  rather than providing Python 3.14's deferred evaluation semantics. Follow project conventions.
+- Use `TYPE_CHECKING` for imports needed only by annotations, or restructure runtime dependencies
+  to break circular imports.
 
 **Available from 3.12:**
 
@@ -252,6 +259,9 @@ def first(items: list[T]) -> T | None:
 ✅ **PREFERRED** - Use PEP 695 class syntax:
 
 ```python
+from typing import Self
+
+
 class Stack[T]:
     """A generic stack data structure."""
 
@@ -356,59 +366,92 @@ Config = dict[str, str | int | bool]  # Still valid
 
 **Note**: `type` statement is more explicit and works better with generics.
 
-## Forward References and Circular Imports (NEW in 3.13)
+## Forward References and Circular Imports
 
-✅ **CORRECT** - Just works naturally with PEP 649:
+### Quoted forward references
+
+✅ **CORRECT** - Quote names that are not bound when the annotation is evaluated:
 
 ```python
-# Forward reference - no quotes needed!
 class Node:
-    def __init__(self, value: int, parent: Node | None = None):
+    def __init__(self, value: int, parent: "Node | None" = None) -> None:
         self.value = value
         self.parent = parent
+```
+
+Quote the whole union (`"Node | None"`), not just the name (`"Node" | None`, which attempts a
+runtime union between a string and `None`). The class name is not bound until its body finishes.
+
+### Optional postponed annotations
+
+🟡 **VALID** - If project conventions permit, the future import stores annotations as strings:
+
+```python
+from __future__ import annotations
 
 
-# Circular imports - just works!
-# a.py
-from b import B
+class Node:
+    def __init__(self, value: int, parent: Node | None = None) -> None:
+        self.value = value
+        self.parent = parent
+```
+
+This import must appear at the beginning of the module, after any module docstring. It does not
+postpone ordinary expressions, base classes, or runtime imports. Runtime consumers such as
+`typing.get_type_hints()` still need referenced names to be resolvable when they evaluate the
+annotations.
+
+### Type-only circular imports
+
+When the dependency is needed only for typing, keep it under `TYPE_CHECKING` and quote the
+annotation. These two modules can then be imported in either order:
+
+#### a.py
+
+```python
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from b import B
 
 
 class A:
-    def method(self) -> B: ...
+    def method(self) -> "B | None":
+        return None
+```
 
+#### b.py
 
-# b.py
-from a import A
+```python
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from a import A
 
 
 class B:
-    def method(self) -> A: ...
+    def method(self) -> "A | None":
+        return None
+```
 
+`TYPE_CHECKING` is false at runtime, so these imported names are absent then. Code that evaluates
+these annotations at runtime must supply the missing names (for example, to
+`typing.get_type_hints()`), or use a design that makes them available without a cycle. If either
+module needs the other class for actual execution, restructure the dependencies instead of
+hiding a required runtime import behind `TYPE_CHECKING`.
 
-# Recursive types - no future needed!
+### Recursive type aliases
+
+The `type` statement already evaluates its alias value lazily in Python 3.12+. This is distinct
+from the eager default for function and class annotations on Python 3.13:
+
+```python
 type JsonValue = dict[str, JsonValue] | list[JsonValue] | str | int | float | bool | None
 ```
 
-❌ **WRONG** - Don't use `from __future__ import annotations`:
-
-```python
-from __future__ import annotations  # DON'T DO THIS in Python 3.13
-
-
-class Node:
-    def __init__(self, value: int, parent: Node | None = None): ...
-```
-
-**Why avoid `from __future__ import annotations` in 3.13:**
-
-- Unnecessary - PEP 649 provides better default behavior
-- Can cause confusion
-- Masks the native 3.13 deferred evaluation
-- Prevents you from leveraging improvements
-
 ## Complete Examples
 
-### Tree Structure with Natural Forward References
+### Tree Structure with Quoted Forward References
 
 ```python
 from typing import Self
@@ -416,25 +459,25 @@ from collections.abc import Callable
 
 
 class Node[T]:
-    """Tree node - forward reference works naturally in 3.13!"""
+    """Tree node with forward references quoted for Python 3.13."""
 
     def __init__(
         self,
         value: T,
-        parent: Node[T] | None = None,  # Forward ref, no quotes!
-        children: list[Node[T]] | None = None,  # Forward ref, no quotes!
+        parent: "Node[T] | None" = None,
+        children: "list[Node[T]] | None" = None,
     ) -> None:
         self.value = value
         self.parent = parent
         self.children = children or []
 
-    def add_child(self, child: Node[T]) -> Self:
+    def add_child(self, child: "Node[T]") -> Self:
         """Add child and return self for chaining."""
         self.children.append(child)
         child.parent = self
         return self
 
-    def find(self, predicate: Callable[[T], bool]) -> Node[T] | None:
+    def find(self, predicate: Callable[[T], bool]) -> "Node[T] | None":
         """Find first node matching predicate."""
         if predicate(self.value):
             return self
@@ -447,7 +490,7 @@ class Node[T]:
         return None
 
 
-# Usage - all type-safe with no __future__ import!
+# Quoted forward references keep this usable without a future import.
 root = Node[int](1)
 root.add_child(Node[int](2)).add_child(Node[int](3))
 ```
@@ -642,14 +685,16 @@ def add_numbers(a: int, b: int) -> int:
 
 If migrating from Python 3.10/3.11:
 
-1. **Remove `from __future__ import annotations`** - No longer needed
+1. **Keep forward references safe** - Retain quotes or an existing future import while 3.13
+   remains supported; upgrading to 3.13 does not make unresolved annotation names safe.
 2. **Consider upgrading to PEP 695 syntax** - Cleaner generics
 3. **Use `type` statement for aliases** - More explicit than assignment
-4. **Remove quoted forward references** - They work naturally now
+4. **Check runtime annotation consumers** - String annotations still need resolvable names when
+   evaluated; neither quoted annotations nor a future import fixes runtime import cycles.
+
+### Python 3.10/3.11
 
 ```python
-# Python 3.10/3.11
-from __future__ import annotations
 from typing import TypeVar, Generic
 
 T = TypeVar("T")
@@ -657,15 +702,17 @@ T = TypeVar("T")
 
 class Node(Generic[T]):
     def __init__(self, value: T, parent: "Node[T] | None" = None): ...
-
-
-# Python 3.13
-from typing import Self
-
-
-class Node[T]:
-    def __init__(self, value: T, parent: Node[T] | None = None): ...
 ```
+
+### Python 3.13
+
+```python
+class Node[T]:
+    def __init__(self, value: T, parent: "Node[T] | None" = None): ...
+```
+
+The generic syntax changes, but the forward reference still needs quotes without a future
+import. Do not remove that protection merely because the project now targets Python 3.13.
 
 ## What typing imports are still needed?
 

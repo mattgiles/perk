@@ -1,7 +1,7 @@
 """Live-corpus guards: every perk-owned skill declares its stage exposure (contracts.md §8.39).
 
 `skills/` (shipped) and `.perk/skills/` (repo-authored) frontmatter must declare a well-formed
-`stages:`; the exemptions are verbatim-vendored third-party skills (`ast-grep`, `dignified-python`),
+`stages:`; the exemptions are vendored third-party skills (`ast-grep`, `dignified-python`),
 whose frontmatter perk does not own — each is scoped by a committed `[skills.stages]` config row.
 The config rows themselves are pinned too: a typo'd skill name or stage id in `[skills.stages]`
 is silently inert at runtime, so CI is the loud surface. The config table is parsed directly from
