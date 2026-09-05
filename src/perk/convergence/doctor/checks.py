@@ -18,6 +18,7 @@ from perk.substrate.config import (
     PI_THINKING_LEVELS,
     ConfigError,
     ModelsTable,
+    effective_pi_agent_dir,
     load_committed_issues_backend,
     load_committed_issues_team,
     load_committed_models,
@@ -389,6 +390,86 @@ def _watch_feedback_asset_check(root: Path) -> Check:
             "Reinstall perk (e.g. 'uv tool install --force perk').",
         )
     return Check("watch-feedback", "providers", "ok", "hunk feedback extension bundled")
+
+
+def _pi_agent_dir_check(root: Path) -> Check | None:
+    """Validate the main-checkout agent store, including in-repo secret/volatile hazards.
+
+    Offline and report-only: config is user-owned, and ignore rules cannot untrack files.
+    The effective reader deliberately matches launch even from a linked worktree; doctor
+    diagnoses the configured store regardless of an operator's transient env override.
+    """
+    try:
+        agent_dir = effective_pi_agent_dir(root)
+    except (tomllib.TOMLDecodeError, ConfigError):
+        return Check(
+            "pi-agent-dir",
+            "repository",
+            "warn",
+            "pi agent dir not evaluated — main checkout config invalid; see the config check",
+        )
+    if agent_dir is None:
+        return None
+    if not agent_dir.exists():
+        return Check(
+            "pi-agent-dir",
+            "repository",
+            "warn",
+            f"pi agent dir {agent_dir} is missing",
+            "pi creates an empty agent dir on demand — "
+            "sessions launch with no auth.json/models.json",
+            "Create it, and copy/symlink auth.json from ~/.pi/agent "
+            "if OAuth credentials are needed.",
+        )
+    if not agent_dir.is_dir():
+        return Check(
+            "pi-agent-dir",
+            "repository",
+            "warn",
+            f"pi agent dir {agent_dir} is not a directory",
+            "perk refuses to launch: pi cannot create its sessions tree under a non-directory",
+            "Set [pi] agent_dir to a directory.",
+        )
+
+    problems: list[str] = []
+    remedies: list[str] = []
+    main_root = (git.main_worktree_root(root) or root).resolve()
+    canonical_dir = agent_dir.resolve()
+    if canonical_dir.is_relative_to(main_root):
+        relative_dir = canonical_dir.relative_to(main_root)
+        try:
+            if not git.is_ignored(main_root, relative_dir / "auth.json"):
+                problems.append(
+                    "volatile/secret pi artifacts under this directory are not gitignored; "
+                    "the managed block covers .pi/agent/ only"
+                )
+                remedies.append(
+                    "Add matching ignore rules before copying credentials or launching."
+                )
+        except git.GitError as exc:
+            problems.append(f"ignore coverage unverifiable: {exc}")
+        try:
+            tracked = [
+                path
+                for path in git.tracked_paths(main_root, [str(relative_dir)])
+                if path != str(relative_dir / "models.json")
+            ]
+            if tracked:
+                problems.append(f"already-tracked pi artifacts: {', '.join(tracked)}")
+                remedies.append(
+                    "Untrack each with git rm --cached <path> (keeps the file on disk); "
+                    "gitignore rules never untrack files."
+                )
+        except git.GitError as exc:
+            problems.append(f"tracked pi artifacts unverifiable: {exc}")
+    return Check(
+        "pi-agent-dir",
+        "repository",
+        "warn" if problems else "ok",
+        f"pi agent dir: {agent_dir}",
+        "; ".join(problems),
+        " ".join(remedies),
+    )
 
 
 def _stage_models_check(root: Path) -> Check | None:

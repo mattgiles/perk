@@ -62,6 +62,12 @@ class StageModel:
     thinking: str | None = None
 
 
+class PiTable(LenientParseModel):
+    """The `[pi]` table: cold-local pi process launch knobs."""
+
+    agent_dir: StrippedStr = None
+
+
 class WorktreeTable(LenientParseModel):
     """The `[worktree]` table: the worktree root + the ordered setup commands."""
 
@@ -383,8 +389,10 @@ class ConfigFileModel(LenientParseModel):
     (``parse_user_bindings``), and the TS-read keys (`[ci]`, `[compaction]
     objective_threshold`) plus the committed-only reads (`[compaction]`, `[issues]`,
     `[linear]`) are absent here and dropped by ``extra="ignore"``. The `[models]` namespace
-    (``default``/``thinking``/``stages``/``subagents``) validates as one table."""
+    (``default``/``thinking``/``stages``/``subagents``) validates as one table. `[pi]` carries
+    Python-only cold-local launch knobs."""
 
+    pi: PiTable = Field(default_factory=PiTable)
     worktree: WorktreeTable = Field(default_factory=WorktreeTable)
     workflow: WorkflowTable = Field(default_factory=WorkflowTable)
     providers: ProvidersTable = Field(default_factory=ProvidersTable)
@@ -473,6 +481,7 @@ class ConfigFileModel(LenientParseModel):
             workflow_base=self.workflow.base,
             stage_models=stage_models,
             skills=self.skills.to_domain(),
+            pi_agent_dir=self.pi.agent_dir,
         )
 
 
@@ -493,6 +502,7 @@ class Config:
     workflow_base: str | None = None
     stage_models: dict[str, StageModel] = field(default_factory=dict)
     skills: SkillsPolicy = field(default_factory=SkillsPolicy)
+    pi_agent_dir: str | None = None
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -526,6 +536,23 @@ def load_config(repo_root: Path) -> Config:
     ):
         parsed = ConfigFileModel.model_validate(merged)
     return parsed.to_domain(repo_root, user_bindings=parse_user_bindings(merged.get("bindings")))
+
+
+def effective_pi_agent_dir(repo_root: Path) -> Path | None:
+    """Read and resolve `[pi] agent_dir` from the main checkout's config + local overlay.
+
+    This selects pi's credential/session store, which must not fork per worktree. Deliberately
+    ignore caller-supplied `Config`: `require_config` callers load the invocation checkout,
+    where the main checkout's gitignored `local.toml` is absent. Resolution stays out of
+    `to_domain` so ordinary config parsing never shells out to git (including under global
+    subprocess fakes). Like `load_config`, malformed TOML / values propagate to the consumer.
+    """
+    main_root = git.main_worktree_root(repo_root) or repo_root
+    value = load_config(main_root).pi_agent_dir
+    if value is None:
+        return None
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else main_root / path
 
 
 def load_committed_compaction(repo_root: Path) -> dict[str, object]:

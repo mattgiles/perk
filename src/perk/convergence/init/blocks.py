@@ -11,11 +11,15 @@ GITIGNORE_END = "# END perk managed"
 # worktrees. The whole `.perk/workflow/` cache tree is gitignored (contracts.md §8.1) —
 # runtime/cache state, not durable source; no committed `.gitkeep`. `.pi-subagents/` is the
 # borrowed `pi-subagents` engine's project-scoped artifact root (debug artifacts + chain runs
-# in the session cwd) — transient, never tracked.
+# in the session cwd) — transient, never tracked. The conventional project agent dir's
+# contents are ignored except models.json: exclude contents, not the directory itself, so
+# negations work. Users can opt more files in with later rules after the managed block.
 GITIGNORE_BODY = "\n".join(
     [
         "/.pi/npm/",
         "/.pi/git/",
+        "/.pi/agent/*",
+        "!/.pi/agent/models.json",
         f"/.perk/{LOCAL_CONFIG_FILENAME}",
         "/.worktrees/",
         "/.perk/workflow/",

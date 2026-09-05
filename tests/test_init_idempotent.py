@@ -11,7 +11,22 @@ from perk.convergence.init.settings import (
     PONYTAIL_PACKAGE,
     _reconcile_ponytail_entry,
 )
-from perk.substrate import paths
+from perk.substrate import git, paths
+
+
+@pytest.mark.parametrize(
+    "artifact",
+    ["auth.json", "trust.json", "models-store.json", "settings.json", "sessions/session.jsonl"],
+)
+def test_init_agent_dir_ignore_rules(scaffolded_perk_repo, artifact):
+    root = scaffolded_perk_repo
+    assert git.is_ignored(root, f".pi/agent/{artifact}")
+    assert not git.is_ignored(root, ".pi/agent/models.json")
+    # A later user-owned exception must still be able to opt additional files into git.
+    with (root / ".gitignore").open("a", encoding="utf-8") as f:
+        f.write("\n!/.pi/agent/settings.json\n")
+    assert not git.is_ignored(root, ".pi/agent/settings.json")
+    assert git.is_ignored(root, ".pi/agent/auth.json")
 
 
 def _seed_cfg(pi_dir: Path) -> Path:
@@ -124,6 +139,7 @@ def test_init_converges_and_is_idempotent(tmp_path):
         assert (tmp_path / ".pi" / "agents" / "perk" / f"{name}.md").is_file()
     gitignore = (tmp_path / ".gitignore").read_text()
     assert "/.pi/npm/" in gitignore
+    assert "/.pi/agent/*\n!/.pi/agent/models.json" in gitignore
     # The whole `.perk/workflow/` cache tree is gitignored wholesale (no per-file entries).
     assert "/.perk/workflow/" in gitignore
     # The borrowed pi-subagents engine's project-scoped run-artifact root is transient.
