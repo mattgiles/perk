@@ -286,14 +286,18 @@ ref is deleted best-effort. The `--json` envelope carries `pr`, `path`, and `rem
 
 ### `perk pr url`
 
-Resolve the active plan's PR number and URL — the read-only active-PR locator. Run from inside
-the plan's worktree: it resolves the worktree's local `cache.plan-ref` to the plan branch and
+Resolve the active plan's PR number, URL, and current base branch — the read-only active-PR
+locator. Run from inside the plan's worktree: it resolves the worktree's local `cache.plan-ref` to the plan branch and
 locates that branch's PR; nothing on GitHub is mutated. The warm `/pr-review-browser` and
 `/pr-review-terminal` doors consume it in their active modes. `--json` emits
-`{success, error_type, message, pr: {number, url}}`. Refusals: no saved plan in the worktree is
+`{success, error_type, message, pr: {number, url, base_ref}}`. `pr.base_ref` is the PR's actual
+base branch (including slash-bearing names), not the plan-ref base or repository default.
+Refusals: no saved plan in the worktree is
 `no_plan_ref` (run `/plan-save` then `perk implement` first); no PR for the plan branch is
-`no_pr` (run `/submit` first); a GitHub read failure is `github_error`. Exit `0` ok · `1`
-refusal/failure · `2` not-a-repo.
+`no_pr` (run `/submit` first); a GitHub read failure or empty/whitespace-only PR base is
+`github_error`. A missing-base refusal names the PR; no fallback branch is substituted. New
+extension readers refuse an older CLI's success output lacking `base_ref` as `bad_output`
+(version skew). Exit `0` ok · `1` refusal/failure · `2` not-a-repo.
 
 ## Related
 

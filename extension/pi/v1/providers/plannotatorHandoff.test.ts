@@ -13,6 +13,7 @@ import type { PlannotatorBus } from "./plannotator.ts";
 import {
   CODE_REVIEW_READINESS_PROBE_PATH,
   type CodeReviewOutcome,
+  decodePrUrl,
   LOCAL_REVIEW_DIFF_TYPE,
   PLAN_REVIEW_READINESS_PROBE_PATH,
   PLANNOTATOR_REVIEW_COMMAND,
@@ -192,12 +193,53 @@ test("bridge: an already-aborted signal short-circuits before emitting", async (
   assert.equal(emitted, false, "no request emitted after an abort");
 });
 
-test("resolveReviewTarget: ok → pr with url + number", () => {
-  const target = resolveReviewTarget(
-    { ok: true, data: { number: 42, url: "https://gh/o/r/pull/42" } },
-    "main",
+test("decodePrUrl: preserves the PR base verbatim and ignores extra fields", () => {
+  assert.deepEqual(
+    decodePrUrl({
+      success: true,
+      extra: true,
+      pr: { number: 42, url: "https://gh/o/r/pull/42", base_ref: "topic/predecessor", extra: 7 },
+    }),
+    { number: 42, url: "https://gh/o/r/pull/42", baseRef: "topic/predecessor" },
   );
-  assert.deepEqual(target, { mode: "pr", prUrl: "https://gh/o/r/pull/42", number: 42 });
+});
+
+test("decodePrUrl: missing, null, wrong-type and blank bases refuse (including legacy CLI)", () => {
+  for (const base_ref of [undefined, null, 7, "", " \t\n"]) {
+    assert.equal(
+      decodePrUrl({ pr: { number: 42, url: "https://gh/o/r/pull/42", base_ref } }),
+      null,
+    );
+  }
+});
+
+test("decodePrUrl: existing number/URL narrowing is retained", () => {
+  for (const pr of [
+    undefined,
+    { number: "42", url: "url", base_ref: "main" },
+    { number: 42, url: null, base_ref: "main" },
+    { number: 42, base_ref: "main" },
+  ]) {
+    assert.equal(decodePrUrl({ pr }), null);
+  }
+});
+
+test("resolveReviewTarget: PR base wins over null and conflicting plan bases", () => {
+  for (const planBase of [null, undefined, "main"]) {
+    const target = resolveReviewTarget(
+      {
+        ok: true,
+        data: { number: 42, url: "https://gh/o/r/pull/42", baseRef: "topic/predecessor" },
+      },
+      planBase,
+    );
+    assert.deepEqual(target, {
+      mode: "pr",
+      prUrl: "https://gh/o/r/pull/42",
+      number: 42,
+      baseRef: "topic/predecessor",
+    });
+  }
 });
 
 test("resolveReviewTarget: no_pr + a pinned base → local with that defaultBranch", () => {

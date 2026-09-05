@@ -251,7 +251,7 @@ const PR_URL_JSON = {
   error_type: null,
   message: null,
   branch: "plan-7",
-  pr: { number: 42, url: "https://github.test/o/r/pull/42" },
+  pr: { number: 42, url: "https://github.test/o/r/pull/42", base_ref: "topic/predecessor" },
 };
 
 const ACTIONABLE_JSON = JSON.stringify({
@@ -444,6 +444,29 @@ test("tool: the execute callback's AbortSignal reaches the real wave (cancellati
     // The cancelled pass still recorded an incomplete outcome — the clean guard holds.
     const clean = await h.invokeTool("post_pr_review", { verdict: "clean", summary: "clean" });
     assert.equal((clean.details as { error_type?: string }).error_type, "incomplete_coverage");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a legacy locator refuses before automated reviewers spawn", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailReviewSkill(cwd);
+  const bin = fakePerkRouter(cwd, {
+    "pr url": {
+      json: { success: true, pr: { number: 42, url: "https://github.test/o/r/pull/42" } },
+    },
+  });
+  const fake = prReviewFake();
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    extraExtensions: [fake.extension],
+  });
+  try {
+    const result = await h.invokeTool("run_pr_review_wave", { angles: ["plan-fidelity", "tests"] });
+    assert.equal((result.details as { error_type?: string }).error_type, "bad_output");
+    assert.equal(fake.spawns.length, 0);
   } finally {
     h.dispose();
   }

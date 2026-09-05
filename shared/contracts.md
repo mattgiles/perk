@@ -1275,9 +1275,13 @@ checkout decode, the `hunk --version` presence probe, and the R7 handoff — liv
   — applies the unchanged check-in posture (ask, wait, degrade only on the human's explicit
   choice).
 - **Active mode (no PR arg):** the shared active-PR resolution ladder — `perk pr url --json` →
-  `resolveReviewTarget` with the plan-ref's pinned base. A resolved PR → the same flow re-homed
-  to the human's own worktree (`active.md`: no checkout and **no cleanup step**; the children
-  still fetch `perk pr review-context` themselves — the raw diff never enters the parent session;
+  `resolveReviewTarget` carrying the PR's required `baseRef`. The PR's current base is authoritative,
+  even when it differs from the plan-ref base or repository default: a published stacked layer is
+  reviewed individually. This reviews local HEAD + working-tree changes (including unpushed or
+  uncommitted work), not a promise of byte identity with the published PR diff. A resolved PR →
+  the same flow re-homed to the human's own worktree (`active.md`: no checkout and **no cleanup
+  step**; the children still fetch `perk pr review-context` themselves — the raw diff never
+  enters the parent session;
   the own-PR authorship check carries over as the common case). Every non-`no_pr` fail arm (incl.
   `no_plan_ref`) errors loudly, appending the "pass a PR number/URL, or run from a plan worktree"
   hint.
@@ -1288,10 +1292,13 @@ checkout decode, the `hunk --version` presence probe, and the R7 handoff — liv
   `hunk session comment list … --type user` and triage the actionable notes in-session).
 - **The since-base sha (active + pre-PR):** `sinceBaseSha(cwd, base)`
   (`extension/substrate/git.ts`, fail-open — null on any failure, never throws): resolve the base
-  branch (the plan-ref's pinned base; null ⇒ the repo default via `origin/HEAD`), **best-effort**
-  `git fetch origin <branch>` (bounded timeout; a failure — offline, no remote — falls back to
-  the stale local ref, keeping the door usable offline), then `merge-base(HEAD, origin/<branch>)`.
-  Null ⇒ a loud error naming the pass-a-PR fallback; nothing launched or injected.
+  branch (active PR: `target.baseRef`; **only pre-PR**: the plan-ref's pinned base, null ⇒ the repo
+  default via `origin/HEAD`), **best-effort** `git fetch origin <branch>` (15-second timeout;
+  a failure — offline, no remote — may use the cached ref for that **same branch**, even if stale),
+  then `merge-base(HEAD, origin/<branch>)`. An unresolvable selected ref or merge-base never falls
+  back to another branch. Null ⇒ a loud error with the explicit-PR retry hint; PR mode also names
+  the PR and selected base branch. Nothing is launched or injected on refusal. Pre-PR stacked-base
+  inference is unchanged: no dynamic predecessor inference is added.
 - **The R7 launch handoff (door-side, fail-soft, non-blocking — `handleHunkLaunch` in
   `extension/pi/v1/codeReview/checkout.ts`, report-scope-parameterized):** every mode hands off
   `hunk diff <sha12> --agent-notes` (agent notes visible in hunk immediately) in the mode's
@@ -1422,9 +1429,12 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
   (structurally unrepresentable in the wave). Once the fan-out turn ends the session is free
   while the human reviews in the browser; the respond arrives later as a message (one shot).
 - **Active mode (no PR arg):** the shared active-PR ladder — `perk pr url --json` →
-  `resolveReviewTarget` with the plan-ref's pinned base. A resolved PR → the same flow re-homed
+  `resolveReviewTarget` requires the PR's base evidence, but the browser payload remains exactly
+  `{cwd, prUrl}` — no `defaultBranch` or local `diffType`. A resolved PR → the same flow re-homed
   to the human's own worktree (`active.md`: no checkout, **no cleanup step**; the browser door
-  never computes a since-base sha — plannotator owns the diff). Every non-`no_pr` fail arm
+  never computes a since-base sha — plannotator owns PR diff selection from the URL, including
+  an individual published stacked layer). Only `no_pr` uses the plan-ref/default fallback;
+  pre-PR stacked-base inference is unchanged. Every non-`no_pr` fail arm
   (incl. `no_plan_ref`) errors loudly, appending the "pass a PR number/URL, or run from a plan
   worktree" hint.
 - **Pre-PR mode (the `no_pr` arm):** the since-base local browser review — the door reports
@@ -1564,10 +1574,20 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
   plan-ref → find PR → `get_pr_body` → `validate_pr_body`) is the supervisor surface (exit 0
   valid / 1 invalid·op-failure / 2 not-a-repo).
 - **`pr url` (the active-PR locator).** A thin read-only `perk pr url --json` worker (active
-  plan-ref → `resolve_plan_worktree_name` → `find_pr_for_branch`) emits `{pr:{number,url}}` (exit
-  0 ok / 1 no-plan·no-PR·op-failure / 2 not-a-repo). It fronts the active modes of the warm
-  `/pr-review-browser` and `/pr-review-terminal` doors
-  (`extension/pi/v1/providers/plannotatorHandoff.ts` owns the envelope + fallback ladder).
+  plan-ref → `resolve_plan_worktree_name` → `find_pr_for_branch`) emits the success envelope
+  `{success: true, error_type: null, message: null, pr: {number, url, base_ref}}` (exit
+  0 ok / 1 no-plan·no-PR·op-failure / 2 not-a-repo). `base_ref` is the already-observed PR's
+  current base branch, preserved verbatim (slashes included); empty/whitespace-only base evidence
+  refuses as `github_error`, naming the PR and missing base branch. No extra GitHub read, fetch,
+  checkout, stored field, or plan/default substitution occurs in this locator. Human URL output
+  is unchanged. It fronts the warm `/pr-review-browser`, `/pr-review-terminal`, and automated
+  review consumers (`extension/pi/v1/providers/plannotatorHandoff.ts` owns `decodePrUrl` and the
+  target ladder). The decoder requires a nonblank string at `pr.base_ref` and maps it to required
+  `baseRef`; number/URL checks are unchanged. Automated review may ignore the decoded base; its
+  number/URL target and posting policy are unchanged. Old readers can ignore the additive field;
+  a new reader paired with an old CLI (missing `base_ref`) or malformed success refuses with the
+  existing `bad_output` version-skew diagnostic, never a legacy fallback. Only `no_pr` selects
+  the local plan-ref/default-base arm; all other failures pass through unchanged.
 - **Draft → ready is a deliberate gesture.** Submit keeps the PR **draft**; perk does **not**
   auto-publish. `perk pr ready` (warm `/ready`) is the explicit review gate — `mark_pr_ready` if
   draft, idempotent. On a **stacked** layer the same gesture is the deliberate post-review human

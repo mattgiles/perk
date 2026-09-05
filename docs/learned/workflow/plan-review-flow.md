@@ -376,8 +376,9 @@ lives in `extension/pi/v1/providers/plannotatorHandoff.ts`) and the reusable cro
   `sendUserMessage` vs `deliverAs: "followUp"`), and a short perk-authored triage suffix is appended
   **only when `annotations.length > 0`** (a platform PR approve/comment action returns an empty
   annotation set — don't tell the agent to "address" a platform action).
-- **Mechanics that held:** a new read-only cold-door worker `perk pr url` (`{pr:{number,url}}`, exit
-  0/1/2) mirrors `pr review-context`'s resolution path; registering a new `pr` worker is the
+- **Mechanics that held:** the read-only cold-door worker `perk pr url` (current locator output:
+  [contracts §8.4](../../../shared/contracts.md#84--the-github-gateway-contract), exit 0/1/2)
+  mirrors `pr review-context`'s resolution path; registering a new `pr` worker is the
   established 3-edit recipe (import + `mark_kind(..., "worker")` + `pr_group.add_command(...)`) plus
   the alphabetically-sorted `EXPECTED_SURFACE` entry. The door is a plain warm command (no
   registry stage, no model tool) → no `shared/registry.yaml` / `READ_ONLY_TOOLS` change; all UI

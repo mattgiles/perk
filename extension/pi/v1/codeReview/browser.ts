@@ -52,6 +52,7 @@ import {
   type CodeReviewOutcome,
   decodePrUrl,
   LOCAL_REVIEW_DIFF_TYPE,
+  type PrUrl,
   plannotatorPresent,
   planRefBaseOf,
   type RespondSink,
@@ -339,12 +340,10 @@ export function installPrReviewBrowserBindings(
       }
 
       // The active arm: resolve the worktree's own PR via the shared ladder.
-      const r = await runColdDoor<{ number: number; url: string }>(
-        pi,
-        ctx,
-        ["pr", "url", "--json"],
-        { label: "perk pr url", decode: decodePrUrl },
-      );
+      const r = await runColdDoor<PrUrl>(pi, ctx, ["pr", "url", "--json"], {
+        label: "perk pr url",
+        decode: decodePrUrl,
+      });
       const target = resolveReviewTarget(r, planRefBaseOf(ctx.cwd));
       if (target.mode === "fail") {
         report(

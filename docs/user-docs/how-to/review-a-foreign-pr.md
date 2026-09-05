@@ -30,6 +30,20 @@ door opens a surface-only **since-base** review — no reviewers (including no P
 nothing posts to GitHub. See the
 [Review and authoring](../reference/in-session/review-and-authoring.md#pr-review-terminal) for the mode details.
 
+For an active PR, **terminal review compares your local working tree against the merge-base of
+local HEAD and the PR's actual current base branch**—not the stored plan base or repository
+default. A published stacked layer is reviewed individually. Unpushed commits and uncommitted edits
+may appear, so it need not match the published PR diff byte-for-byte. **Browser review opens the
+PR URL instead** and leaves published PR diff selection to Plannotator; perk computes no local
+merge-base there. Before a PR exists, both doors still use the plan's pinned base or repository
+default; automatic pre-PR stacked-base inference is unchanged.
+
+Missing PR-base evidence refuses the active route rather than widening the review (an older CLI
+without that field gives a `bad_output` version-skew diagnostic). Terminal review fetches the
+selected branch best-effort and may use its cached ref offline, even if stale. If that branch or
+its merge-base cannot be resolved, it names the PR/base and stops before launch; retry with an
+explicit PR number/URL. It never silently substitutes another branch.
+
 **Prerequisites (per door):**
 
 - **`/pr-review-terminal`:** the `hunk` CLI installed — `perk init` installs it automatically
