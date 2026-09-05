@@ -42,7 +42,7 @@ hash = "sha256:d061a3f376a86c84b5c6c9c2571fa29cfb7ca845660c4d0d1679739903c10aed"
 path = ".agents/manifest.d/perk.yaml"
 kind = "file"
 version = "3.2.0"
-hash = "sha256:edbe99e97411aee9c55d2d7c1ce02c31f9dd9141bb4b044b5bccafce75afe691"
+hash = "sha256:95632c889b65833bbf127737062657c5297aa06729ef0db7f45ae7d9ece4a6be"
 
 [managed.artifacts.subagent-agents]
 path = ".pi/agents/perk/"

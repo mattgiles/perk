@@ -3,9 +3,6 @@ sources:
   astral:
     url: https://github.com/astral-sh/claude-code-plugins
     ref: main
-  dagster:
-    url: https://github.com/dagster-io/skills
-    ref: master
   mattpocock:
     url: https://github.com/mattpocock/skills
     ref: main
@@ -19,12 +16,12 @@ skills:
     name: ty
   - source: astral
     name: uv
-  - source: dagster
-    name: dignified-python
   - source: mattpocock
     name: codebase-design
   - source: perk
     name: ast-grep
+  - source: perk
+    name: dignified-python
   - source: perk
     name: perk-address
   - source: perk

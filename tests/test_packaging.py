@@ -377,6 +377,12 @@ def test_skills_shipped():
         _, reason = validate_skill(d.name, frontmatter)
         assert reason is None, f"{d.name}: {reason}"
 
+    # Keep the upstream license inside the whole-directory Git-source delivery payload.
+    license_text = (skills_dir / "dignified-python" / "LICENSE").read_text(encoding="utf-8")
+    assert "Apache License\n" in license_text
+    assert "Version 2.0, January 2004" in license_text
+    assert "Copyright 2025 Dagster Labs, Inc." in license_text
+
     pkg = _package_json()
     # Skills are delivered by the `skills` CLI from the git repo, not by the Pi package or the
     # npm tarball: the `pi` manifest must not declare skills and the tarball must not ship them.

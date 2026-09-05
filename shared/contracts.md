@@ -2218,25 +2218,31 @@ dangling-pointer warning, which stays a last-resort signal).
   `bindings.is_skill_installed` — a sync that delivers nothing (e.g. an outdated `skills` CLI) is
   the same fatal failure, never a silent pass (`skills_sync_failed` covers sync-invocation and
   post-sync delivery failures alike). `MANAGED_SKILL_NAMES` is the verified set:
-  perk-authored skills (source `perk`) **plus** a set of required external skills. The managed
-  fragment declares **multiple sources** — perk's own (`PERK_SKILL_SOURCE`) plus the required
-  external sources (`REQUIRED_SKILL_SOURCES`: `astral`, `dagster`, `mattpocock`) — promoting those
-  external skills from repo-specific to managed/required.
+  perk-hosted skills, authored or vendored (`PERK_SKILLS`, source `perk`), **plus** a set of
+  required external skills. The managed fragment declares **multiple sources** — perk's own
+  (`PERK_SKILL_SOURCE`: `https://github.com/mattgiles/perk`, ref `main`) plus the remaining required
+  external sources (`REQUIRED_SKILL_SOURCES`: `astral`, `mattpocock`). `dignified-python` is
+  vendored under `skills/`, with its unchanged upstream license sidecar and a documented local
+  correction to the Python 3.13 annotation guidance, and delivered from source `perk`, not
+  Dagster. Its name and required presence in every project are unchanged;
+  moving source ownership does not change the verification union, force invocation, or add a
+  binding. Upgrading perk and running `perk init` or `perk doctor --fix` retargets the managed
+  declaration through the existing convergence and skills-CLI link reconciliation.
 - **`doctor` check:** a fail-level **`skills-delivery`** check (group `skills`, evaluated under
   `verify` only — it shells git + validates external-CLI outcomes). Fail conditions, first match
   wins: (a) tracked content under the managed pathspecs (a `GitError` degrades to `warn`, no
   silent pass); (b) the perk fragment (`.agents/manifest.d/perk.yaml`) exists but
   `.agents/manifest.yaml` does not (`skills init` failed or never ran, so `skills update --sync`
-  can never run); (c) any `MANAGED_SKILL_NAMES` name (perk-authored + the required external
+  can never run); (c) any `MANAGED_SKILL_NAMES` name (perk-hosted + the required external
   skills) not installed per `bindings.is_skill_installed` (strict on `.agents/skills/`).
   Consumers fail (c) plainly. The **self-repo** classifies a missing delivery further — the
   committed `skills/` layout is never an ok-level substitute. The classification applies to
-  **perk-authored names only** (`PERK_SKILLS`); a missing required **external** skill
-  (`REQUIRED_EXTERNAL_SKILLS` — upstream-sourced, never in the committed `skills/` dir) fails
+  **perk-hosted names, authored or vendored** (`PERK_SKILLS`); a missing required **external**
+  skill (`REQUIRED_EXTERNAL_SKILLS` — other hosts, never in the committed `skills/` dir) fails
   plainly ("required external skill(s) not delivered"), never misread as uncommitted. For
-  perk-authored names: committed AND present on the skills
+  perk-hosted names: committed AND present on the skills
   source ref as locally known (`origin/main`, ONE `git ls-tree` probe, shelled only when a
-  perk-authored name is missing-and-committed) → **fail** (delivered set stale — re-sync fixes it
+  perk-hosted name is missing-and-committed) → **fail** (delivered set stale — re-sync fixes it
   now); committed but not on the local
   `origin/main` → **warn** (the documented pre-merge first appearance — deliverable after merge +
   re-sync; the local remote-tracking ref can lag, so a merged-but-unfetched skill degrades to this
@@ -5708,10 +5714,13 @@ dominates; a local `include_dirs` array replaces wholesale, matching `[worktree]
 least one enumerated skill (project or package) declares `stages:`, **or** any `[skills]` config
 content exists (`stages` rows, non-empty `include_dirs`, or `include_packages` explicitly set).
 Otherwise it contributes nothing and the launch argv (and stderr) is **byte-identical** to
-unscoped discovery. Enumeration always runs to detect frontmatter declarations. Shipped skills
-declare `stages:` at source, so any
-repo whose `.agents/skills/` mirror is synced to current perk is **engaged by default** — an
-un-synced mirror stays unengaged (fail-open) until the next `perk init`/`doctor --fix` re-sync.
+unscoped discovery. Enumeration always runs to detect frontmatter declarations. Perk-authored
+shipped skills declare `stages:` at source; vendored exceptions (`ast-grep`,
+`dignified-python`) preserve upstream frontmatter without `stages:` and are scoped by committed
+`[skills.stages]` rows in perk's own repo. Consumers without an override expose those undeclared
+skills to all stages. Any repo whose `.agents/skills/` mirror is synced to current perk is
+**engaged by default** through the authored declarations — an un-synced mirror predating them
+stays unengaged (fail-open) until the next `perk init`/`doctor --fix` re-sync.
 Personal/global skill dirs then need the `include_dirs` whitelist to reach scoped launches. New
 repo-authored skills are **born declared**: the `perk skills scaffold`/`create` stub template
 declares `stages: all` (with a narrowing TODO), and doctor's `repo-skills` check warns on
@@ -9329,8 +9338,8 @@ amending this section.
 regression loud live in `tests/test_prompt_surface_budgets.py` — three constants beside their
 checks: `SKILL_AMBIENT_DESCRIPTION_MAX_BYTES = 896` (gate #2: every `skills/perk-*/SKILL.md`
 frontmatter `description`, measured as UTF-8 bytes of the parsed scalar; membership
-cross-checked against `PERK_SKILLS` — the vendored `ast-grep` skill's upstream-owned
-frontmatter is outside the gate), `SEED_TEMPLATE_MAX_BYTES = 9_088` and
+cross-checked against the `perk-*` members of `PERK_SKILLS` — the unchanged upstream frontmatter
+of vendored `ast-grep` and `dignified-python` is outside the gate), `SEED_TEMPLATE_MAX_BYTES = 9_088` and
 `INJECTED_CONTEXT_TEMPLATE_MAX_BYTES = 1_984` (gate #3: every `prompts/**/*.md` except
 `prompts/README.md` and `prompts/_fixtures/**`, measured as raw committed file bytes,
 pre-render — `prompts/contexts/**` including adapter blocks is the INJECTED-CONTEXT class;

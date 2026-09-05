@@ -1332,12 +1332,12 @@ def _skills_delivery_check(root: Path, self_repo: bool) -> Check:
         a ``GitError`` during the probe degrades to ``warn`` (no silent pass);
     (b) the perk manifest fragment exists but `.agents/manifest.yaml` does not — `skills init`
         failed or never ran (so `skills update --sync` can never run);
-    (c) any ``MANAGED_SKILL_NAMES`` name (perk-authored + the required external skills) is not
-        installed (``bindings.is_skill_installed`` — strict on the `.agents/skills/` delivery
-        read path, the only path warm injection reads). Consumers: a plain ``fail``. The
-        self-repo classifies further (``_classify_self_repo_missing``): the committed ``skills/``
-        layout is never an ok-level substitute — deliverable-but-stale is a ``fail``, the
-        pre-merge first appearance a ``warn`` (visible, not fatal, never silently green).
+    (c) any ``MANAGED_SKILL_NAMES`` name (perk-hosted, authored or vendored, + the required
+        external skills) is not installed (``bindings.is_skill_installed`` — strict on the
+        `.agents/skills/` delivery read path, the only path warm injection reads). Consumers:
+        a plain ``fail``. The self-repo classifies further (``_classify_self_repo_missing``): the
+        committed ``skills/`` layout is never an ok-level substitute — deliverable-but-stale is a
+        ``fail``, the pre-merge first appearance a ``warn`` (visible, non-fatal, never green).
     """
     try:
         conflicts = init.skills_conflict_paths(root)
@@ -1391,15 +1391,14 @@ def _classify_self_repo_missing(root: Path, missing: list[str]) -> Check:
     """Classify the self-repo's undelivered managed skills — never an ok, never silently green.
 
     The `.agents/skills/` delivery read path is the only "delivered" state. The committed
-    ``skills/`` layout classification applies to **perk-authored names only** (``PERK_SKILLS``);
-    a required external skill (``REQUIRED_EXTERNAL_SKILLS`` — upstream sources, never in the
-    committed ``skills/`` dir) can never be "committed" here, so a missing one fails plainly
-    instead of misreading as "not committed anywhere". For the perk-authored names:
+    ``skills/`` layout classification applies to **perk-hosted names, authored or vendored**
+    (``PERK_SKILLS``); a required external skill (``REQUIRED_EXTERNAL_SKILLS`` — other hosts,
+    never in the committed ``skills/`` dir) can never be "committed" here, so a missing one fails
+    plainly instead of misreading as "not committed anywhere". For the perk-hosted names:
 
     - committed AND present on the skills source ref as locally known (``origin/<ref>``, ONE
-      ``git ls-tree`` call — shelled only when a perk-authored name is both missing and
-      committed) → **fail**: the delivered set is stale and a re-sync fixes it now (the
-      dangling-pointer R3 case);
+      ``git ls-tree`` call — shelled only when a perk-hosted name is both missing and
+      committed) → **fail**: the delivered set is stale and a re-sync fixes it now;
     - committed but NOT on the local ``origin/<ref>`` → **warn**: the documented pre-merge first
       appearance — `skills update --sync` resolves against the real remote, so the skill is
       deliverable only after merge + re-sync;
@@ -1411,9 +1410,9 @@ def _classify_self_repo_missing(root: Path, missing: list[str]) -> Check:
     fetch remediation. A ``GitError`` on the probe degrades to ``warn`` naming every missing
     skill (no silent pass).
     """
-    perk_authored = set(init.PERK_SKILLS)
-    external = [n for n in missing if n not in perk_authored]
-    own = [n for n in missing if n in perk_authored]
+    perk_hosted = set(init.PERK_SKILLS)
+    external = [n for n in missing if n not in perk_hosted]
+    own = [n for n in missing if n in perk_hosted]
     committed = [
         n
         for n in own

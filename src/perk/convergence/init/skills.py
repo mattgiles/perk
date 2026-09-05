@@ -7,10 +7,11 @@ from pathlib import Path
 from perk.substrate import bindings, git
 from perk.substrate.proc import ProcFailure, run_captured
 
-# The canonical perk skill names (directory names under `skills/`). This list is the SSOT
-# for the skills-CLI manifest fragment; update it here when perk skills are added/removed.
+# The canonical perk-hosted skill names, authored or vendored (directories under `skills/`).
+# This is the SSOT for their skills-CLI manifest entries; update it when skills are added/removed.
 PERK_SKILLS: tuple[str, ...] = (
     "ast-grep",
+    "dignified-python",
     "perk-address",
     "perk-domain-modeling",
     "perk-expert",
@@ -72,15 +73,14 @@ class SkillSource:
 
 
 # The skills perk delivers split into two SSOTs:
-#   - `PERK_SKILLS` (above): perk-authored skill names, all from source `perk`.
-#   - The external set below: non-perk skills perk *requires*, promoted from repo-specific to
-#     managed/required and declared from their upstream sources.
+#   - `PERK_SKILLS` (above): perk-hosted skills, authored or vendored, all from source `perk`.
+#   - The external set below: skills perk *requires* from other hosts, promoted from repo-specific
+#     to managed/required and declared from their upstream sources.
 # `MANAGED_SKILL_NAMES` is the union — the SSOT for "every skill perk requires delivered" used
 # by the fragment generator's verification consumers (`sync_skills`, `_skills_delivery_check`).
 PERK_SKILL_SOURCE = SkillSource("perk", PERK_GITHUB_URL, "main")
 REQUIRED_SKILL_SOURCES: tuple[SkillSource, ...] = (
     SkillSource("astral", "https://github.com/astral-sh/claude-code-plugins", "main"),
-    SkillSource("dagster", "https://github.com/dagster-io/skills", "master"),
     SkillSource("mattpocock", "https://github.com/mattpocock/skills", "main"),
 )
 # `(source_key, skill_name)` pairs, kept sorted by `(source, name)`.
@@ -88,7 +88,6 @@ REQUIRED_EXTERNAL_SKILLS: tuple[tuple[str, str], ...] = (
     ("astral", "ruff"),
     ("astral", "ty"),
     ("astral", "uv"),
-    ("dagster", "dignified-python"),
     ("mattpocock", "codebase-design"),
 )
 MANAGED_SKILL_NAMES: tuple[str, ...] = tuple(
@@ -213,7 +212,7 @@ def sync_skills(
     **Load-bearing** (supersedes the old best-effort/D3 posture for skills specifically):
     returns ``None`` on success, else a failure message naming the failing command plus its
     stderr (or the ``OSError``/timeout text). After a successful sync, every ``MANAGED_SKILL_NAMES``
-    name (perk-authored + the required external skills) must be installed
+    name (perk-hosted, authored or vendored, + the required external skills) must be installed
     (``bindings.is_skill_installed`` — strict on the ``.agents/skills/`` delivery read path, in
     the self-repo too: a sync that exits 0 without linking a managed skill fails loudly, never a
     silent pass over the committed ``skills/`` layout). ``skills init`` is idempotent
