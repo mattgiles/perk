@@ -308,7 +308,7 @@ text, which was **fiction**:
   merely *observes* terminality (a MERGED PR → `merged_pending_reconcile`).
 - **Never plans.** Planning cannot be dispatched remotely (`objective-plan` is `cold_remote:false`),
   so the supervisor emits a `plan_required` action + remediation string
-  (`perk objective-plan <N> --node <id>`) rather than authoring a non-existent remote-plan path.
+  (`perk objective plan <N> --node <id>`) rather than authoring a non-existent remote-plan path.
 
 Frame both as the **"don't author fiction for an unbuilt path"** discipline applied to a supervisor.
 
