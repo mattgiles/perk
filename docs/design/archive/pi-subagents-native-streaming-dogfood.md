@@ -387,7 +387,7 @@ timeline and extraction are `live/B/parent-timeline.json` and `live/B/evidence.j
 `parent-session-after-close.jsonl`, `checkout-cleanup.json`, `worktrees-after-cleanup.txt`, and
 `github-after-cleanup.json` in the respective capture/leg directories.
 
-### Leg D preparation — no review launched
+### Leg D preparation — fresh handoff and exact draft verified
 
 `live/start-D.sh` is prepared to start a **normal fresh `perk plan` handoff**, using the same
 repaired Pi selected first on PATH and the same inherited agent-home selection. `--no-sync`
@@ -395,12 +395,22 @@ preserves the committed driver SHA rather than advancing the test code. A read-o
 preview succeeded; its preview run id is not an executed handoff. No model session or draft
 review was launched by the implementation session.
 
+The human subsequently launched the normal plan session and reported **“D draft ready”**.
+Its consumed handoff is run `01M1STA1JRNNNB8XGAB6FN92HX`, `mode: read-only`, `stage: plan`,
+bound to parent session `01a073a5-0763-74b6-a472-f2127c729347` (model
+`anthropic/claude-opus-4-8`). The only preparation tools were `read` and `plan_draft`; no review
+or subagent was launched. At 22:16:42.384Z the draft tool returned ok, 1790 bytes, with the exact
+fixture digest below. Independent comparison of the persisted session artifact and fixture
+confirmed byte identity; the driver remains at `bdf6dd29`. Captures are
+`live/D/preparation-handoff.json`, `draft-verification.json`, and `verified-plan-draft.md`.
+
 The supplied `live/D-draft.md` proposes a documentation reference and contains three concrete
 review targets: a nonexistent `collectDraftReportsOnce` helper, an incorrect interpretation of
 no-findings `streamed`, and a retry-policy choice deferred to implementation. SHA-256:
 `618fb3125dc66d716282365c02ab6f816384e1324fb19717b17de4fc9f580bb4`.
 The preparation message asks the parent only to read/register those exact bytes via `plan_draft`
 and pause. It does not prescribe reviewer findings or delivery behavior, and forbids review
-launch/save/post/retry during preparation. The human will receive the custom-lens invocation
-only after working-draft identity and bytes are verified. Reviewers remain ordinary unchanged
+launch/save/post/retry during preparation. With working-draft identity and bytes verified, the human is being handed the custom-lens
+invocation: `/plan-review-browser Check all stated helper names and the meaning of streamed
+against the source; also check whether retry choices are settled.` No review has run yet. Reviewers remain ordinary unchanged
 definitions; the draft is the intentionally flawed input, not a scripted report.
