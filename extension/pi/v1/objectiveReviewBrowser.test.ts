@@ -135,11 +135,7 @@ test("guidance: names the companion tools + objective semantics, no plan_draft, 
   assert.match(text, /start_draft_review_wave/, "the fan-out is the launch tool");
   assert.match(text, /collect_draft_review_wave/, "completion rides the collect tool");
   assert.match(text, /push_annotations/, "annotation delivery rides the push tool");
-  assert.match(
-    text,
-    /subagent_wait\(\{ timeoutMs: 30000 \}\)/,
-    "the wait loop is the streaming cadence",
-  );
+  assert.match(text, /Native-wake relay/, "the objective door relays native batches");
   assert.match(text, /grounding/, "the four angles are named");
   assert.match(text, /decision-completeness/);
   assert.match(text, /byte-exact/, "the phrase discipline is pinned");
@@ -163,7 +159,7 @@ test("guidance: names the companion tools + objective semantics, no plan_draft, 
     /workflowScript/,
     /runs\.all/,
     /outputSchema/,
-    /status\.json/,
+    /subagent_wait|bg_wait|hold your turn open|timeout expiry IS the streaming cadence/,
     /external-annotations/,
     /curl/,
     /127\.0\.0\.1/,

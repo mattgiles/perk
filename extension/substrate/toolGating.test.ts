@@ -75,7 +75,6 @@ test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
     // The child-side carve-in (gated adopt-children keep the engine's injected tools).
     "structured_output",
     "contact_supervisor",
-    "subagent_wait",
     // The draft-review-door carve-in (plan-authoring sessions run gated; the
     // /plan-review-browser companions must stay reachable).
     "push_annotations",

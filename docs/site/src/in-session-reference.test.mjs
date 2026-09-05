@@ -163,6 +163,8 @@ test("marked borrowed and spawned-child censuses equal their exported authoritie
     assert.ok(borrowed.includes(known), `borrowed tool census: known anchor ${known} missing`);
   }
   assert.ok(children.includes("structured_output"), "child tool census: known anchor missing");
+  assert.ok(children.includes("contact_supervisor"), "child tool census: supervisor missing");
+  assert.ok(!children.includes("subagent_wait") && !children.includes("bg_wait"));
   assertSetEqual(borrowed, BORROWED_TOOLS, "documented borrowed tools must equal BORROWED_TOOLS");
   assertSetEqual(
     children,

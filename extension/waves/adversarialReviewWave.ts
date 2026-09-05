@@ -2,8 +2,8 @@
 // module — the human-in-the-loop review doors' (/pr-review-browser, /pr-review-terminal)
 // vocabulary as tested code (sibling of `prReviewWave.ts`): the four door angles, the per-lane
 // completion-report schema, and the lane/task composition are module-owned here, launched
-// NON-BLOCKING via `wave.start` so the parent can return from the launch and hold the
-// model-held `subagent_wait` relay loop open while the children stream finding batches.
+// NON-BLOCKING via `wave.start` so the parent ends its turn after launch and relays batches
+// on native supervisor wakes before collecting on the matching workflow-completion notice.
 //
 // ZERO retries — deliberate: the doors' contract is honest incompleteness surfaced to the human
 // during triage (an `ok: false` lane is reported, never papered over), so the pr-review
@@ -49,7 +49,7 @@ export function isAdversarialReviewAngle(value: string): value is AdversarialRev
  * The per-lane completion-report schema the wave enforces as its `outputSchema` — the engine
  * injects a `structured_output` tool into each lane and fails any lane whose report is missing
  * or schema-invalid. Transcribes the adversarial-reviewer's completion-report contract
- * (contracts.md §8.4): closed shapes, `{angle, summary, findings, fyi}` all required, and
+ * (contracts.md §8.4): closed shapes, `{angle, summary, findings, fyi, streamed}` all required, and
  * DELIBERATELY NO VERDICT FIELD — the human triages every finding, so there is no clean/
  * actionable derivation to make consistent (hence also no if/then conditional). Finding rows
  * anchor candidate GitHub review comments: `line` is required-nullable (a real finding that
@@ -59,12 +59,13 @@ export function isAdversarialReviewAngle(value: string): value is AdversarialRev
 export const ADVERSARIAL_REVIEW_REPORT_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["angle", "summary", "findings", "fyi"],
+  required: ["angle", "summary", "findings", "fyi", "streamed"],
   properties: {
     angle: {
       type: "string",
       enum: ["claimed-intent", "correctness", "tests", "quality", "ponytail"],
     },
+    streamed: { type: "boolean" },
     summary: { type: "string" },
     findings: {
       type: "array",

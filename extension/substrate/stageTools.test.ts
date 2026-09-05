@@ -243,18 +243,18 @@ test("gated adopt-child: the engine's child-side tools survive the inherited gat
     // Load-time registration mirrors the real prompt runtime (registered BEFORE perk's
     // session_start sync — the order that reproduced the strip).
     extraExtensions: [
-      fakeBorrowedPackage(["structured_output", "contact_supervisor", "subagent_wait"]),
+      fakeBorrowedPackage(["structured_output", "contact_supervisor", "subagent_wait", "bg_wait"]),
     ],
   });
   try {
     const active = h.session.getActiveToolNames();
-    for (const name of ["structured_output", "contact_supervisor", "subagent_wait"]) {
+    for (const name of ["structured_output", "contact_supervisor"]) {
       assert.ok(active.includes(name), `child-side engine tool must survive the gate: ${name}`);
     }
     for (const name of ["read", "bash"]) {
       assert.ok(active.includes(name), `read-only tool must stay active: ${name}`);
     }
-    for (const name of ["edit", "write"]) {
+    for (const name of ["edit", "write", "subagent_wait", "bg_wait"]) {
       assert.ok(!active.includes(name), `the gate itself still holds in the child: ${name}`);
     }
   } finally {

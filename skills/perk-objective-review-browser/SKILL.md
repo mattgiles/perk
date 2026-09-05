@@ -42,8 +42,21 @@ end your turn; this skill is the judgment and detail layer behind it.
 - **The reviewer model.** The configured `[models.subagents] draft-reviewer` model is resolved
   by `start_draft_review_wave` at execute time — the door reads no config and the guidance
   carries no model plumbing.
+- **Native delivery.** Launch once, retain workflow identity, and end the turn with Pi open.
+  Relay delivered provisional batches on native supervisor wakes before collecting on matching
+  workflow completion (co-delivered notices need no extra turn). Final reports alone authorize
+  reconciliation, exactly once. Early collection retains pending; expired grace after observed
+  completion requires owner diagnosis, not polling/relaunch. Held annotations retry on native
+  batch/readiness/completion wakes; replace each covered lane at reconcile, even if empty.
+- **Streaming status.** Required `streamed` means the child submitted at least one nonempty batch
+  accepted/queued by the supervisor, not that the human saw it. No findings → false normally;
+  unavailable/failed streaming → complete final report plus factual `fyi` (true remains true after
+  an earlier successful batch). Disclose every false lane (custom/Ponytail included) in-session
+  without changing coverage: neutral “no provisional batches (no findings)” versus warning
+  “completion-only findings; no provisional batches”. Never create status annotations; false
+  alone does not diagnose a broken bridge.
 - **The child report shape (verdict-free).** Each child's completion report is
-  `{angle, summary, findings[{phrase, severity, confidence, body}], fyi[]}` (`phrase` is a
+  `{angle, summary, findings[{phrase, severity, confidence, body}], fyi[], streamed: boolean}` (`phrase` is a
   byte-exact span from the rendered draft or `null` for a global finding; an empty `findings`
   is a legitimate, earned outcome). The streamed fenced-JSON batches carry findings in this same
   shape; `null` phrases land in the browser's sidebar.

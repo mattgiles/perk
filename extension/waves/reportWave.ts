@@ -26,8 +26,8 @@
 // (a foreign instance's ref collects `"none"` structurally), and a settled collect's
 // delete-as-claim makes drain-once exact even under overlapping collectors. The blocking form
 // serves the per-flow entrypoints (`prReviewWave.ts` and the typed feature ops in `learning/`);
-// the streaming split serves flows whose parent must return from the launch and hold a
-// model-held `subagent_wait` relay loop open (`adversarialReviewWave.ts`, `draftReviewWave.ts`).
+// the streaming split serves flows whose parent ends the launch turn and relays provisional
+// batches on native wakes (`adversarialReviewWave.ts`, `draftReviewWave.ts`).
 //
 // The module owns ADAPTER SELECTION: `createReportWave(bus)` (the production factory) constructs
 // a FRESH rpc adapter per launch over the supplied bus; `reportWaveOver(adapter)` is the
@@ -433,8 +433,9 @@ export type StartWaveResult =
 /**
  * A collect's outcome:
  * - `"none"`: unknown ref — never started here, already drained, or a foreign instance's.
- * - `"running"`: unsettled after the grace — the ref stays pending; collect again later (the
- *   wave's bound remains the module-owned timeout).
+ * - `"running"`: unsettled after the grace — the ref stays pending. A premature collector
+ *   yields until matching workflow completion; expiry after observed completion is a lifecycle
+ *   contradiction for owner diagnosis, not a polling cue. The module-owned timeout stays.
  * - `"settled"`: this collector won the drain — `keys` is the launch's frozen requested
  *   manifest snapshot, `result` the normalized outcome. Drain-once is exact even under
  *   overlapping collectors (delete-as-claim).
@@ -447,7 +448,7 @@ export type CollectWaveResult =
 /**
  * The deep seam: callers supply assignments and consume typed outcomes — never adapters, run
  * handles, or result promises. `start`/`collect` are the streaming split (the parent returns
- * from the launch and holds a relay loop open); `run` is the blocking form (start + await, no
+ * from the launch, ends its turn, and resumes on native wakes); `run` is the blocking form (start + await, no
  * ref escapes). The only throws are programmer errors (empty assignments, duplicate keys, keys
  * outside `RUN_KEY_PATTERN`); every operational failure normalizes into `ReportWaveResult`.
  */
@@ -459,8 +460,8 @@ export interface ReportWave {
 
 /**
  * The grace a collect allows a not-yet-settled wave before answering `"running"`: long enough
- * to absorb the completion-event-vs-`subagent_wait` wake race, short enough that an early call
- * never stalls the relay loop. The `PERK_WAVE_COLLECT_GRACE_MS` env knob is the ONE grace seam
+ * to absorb ordering skew between the native completion notice and aggregate resolution,
+ * bounded so a premature call can yield again. The `PERK_WAVE_COLLECT_GRACE_MS` env knob is the ONE grace seam
  * (module-private — there is no per-call grace parameter); invalid values fall back.
  */
 const WAVE_COLLECT_GRACE_MS = 15_000;

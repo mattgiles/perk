@@ -1,5 +1,11 @@
 # Dogfood: the three streaming browser doors (`/pr-review-browser` + `/plan-review-browser` + `/objective-review-browser`)
 
+> **2026-09-05 scope note:** this is historical held-turn evidence, not a current relay
+> prescription or native-wake proof. The turn-yielding replacement, repaired repo-local host
+> baseline, and separate live-leg status are recorded in
+> [native-streaming dogfood](pi-subagents-native-streaming-dogfood.md). Original observations
+> below are preserved.
+
 **Status:** validation record (the `pr-review-doors-dogfood.md` genre) for the three streaming
 plannotator browser doors' **code-owned mechanics** — the flow-scoped wave tool pairs
 (`start_review_wave`/`collect_review_wave` in `extension/doors/reviewWaveTools.ts`;

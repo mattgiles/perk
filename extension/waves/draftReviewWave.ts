@@ -2,8 +2,8 @@
 // the draft-review doors' (/plan-review-browser, /objective-review-browser) vocabulary as tested
 // code (sibling of `adversarialReviewWave.ts`): the four settled angles plus the custom lane,
 // the per-lane completion-report schema, and the lane/task composition are module-owned here,
-// launched NON-BLOCKING via `wave.start` so the parent can return from the launch and hold
-// the model-held `subagent_wait` relay loop open while the children stream finding batches.
+// launched NON-BLOCKING via `wave.start` so the parent ends its turn after launch and relays
+// batches on native supervisor wakes before collecting on matching workflow completion.
 //
 // CONSUMED by the `/plan-review-browser` and `/objective-review-browser` doors via the
 // `start_draft_review_wave` / `collect_draft_review_wave` tool pair
@@ -56,7 +56,7 @@ export function isDraftReviewAngle(value: string): value is DraftReviewAngle {
 /**
  * The per-lane completion-report schema the wave enforces as its `outputSchema` — the engine
  * injects a `structured_output` tool into each lane and fails any lane whose report is missing
- * or schema-invalid. Closed shapes, `{angle, summary, findings, fyi}` all required, and
+ * or schema-invalid. Closed shapes, `{angle, summary, findings, fyi, streamed}` all required, and
  * DELIBERATELY NO VERDICT FIELD — the human adjudicates every finding in the browser, so there
  * is no clean/actionable derivation to make consistent (the `ADVERSARIAL_REVIEW_REPORT_SCHEMA`
  * rationale). The `angle` enum includes `custom` (the custom lane echoes it). Finding rows are
@@ -71,12 +71,13 @@ export function isDraftReviewAngle(value: string): value is DraftReviewAngle {
 export const DRAFT_REVIEW_REPORT_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["angle", "summary", "findings", "fyi"],
+  required: ["angle", "summary", "findings", "fyi", "streamed"],
   properties: {
     angle: {
       type: "string",
       enum: ["grounding", "scope", "decision-completeness", "risk", "custom", "ponytail"],
     },
+    streamed: { type: "boolean" },
     summary: { type: "string" },
     findings: {
       type: "array",

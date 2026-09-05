@@ -23,6 +23,12 @@ import { createMemoryWaveAdapter } from "../../../testing/memoryAdapter.ts";
 import type { AdversarialReviewAngle } from "../../../waves/adversarialReviewWave.ts";
 import { reportWaveOver } from "../../../waves/reportWave.ts";
 import {
+  createAnnotationState,
+  executePushAnnotations,
+  primeAnnotationSurface,
+  type ReviewFinding,
+} from "../providers/annotations.ts";
+import {
   decodeStartReviewWaveParams,
   executeCollectReviewWave,
   executeStartReviewWave as executeStartReviewWaveBase,
@@ -49,7 +55,7 @@ function okEntry(key: string): unknown {
     key,
     ok: true,
     error: null,
-    report: { angle: key, summary: "solid", findings: [], fyi: [] },
+    report: { angle: key, summary: "solid", findings: [], fyi: [], streamed: false },
   };
 }
 
@@ -70,6 +76,7 @@ function fakeTarget(): {
 
 /** The captured tool-def slice the fake pi records (guidelines + mode + the loose execute). */
 interface CapturedTool {
+  description?: string;
   promptGuidelines?: string[];
   executionMode?: string;
   execute: (
@@ -102,6 +109,103 @@ function fakePi(): {
 }
 
 const START_OPTS = { angles: TWO_ANGLES, pr: 42, worktree: "/abs/wt" };
+
+for (const hasUI of [true, false]) {
+  test(`collect disclosure preserves coverage and lane order (hasUI=${hasUI})`, async (t) => {
+    const finding = {
+      path: "a.ts",
+      line: 1,
+      severity: "major",
+      confidence: "high",
+      body: "defect",
+    };
+    const entries = [
+      {
+        key: "claimed-intent",
+        ok: true,
+        error: null,
+        report: {
+          angle: "claimed-intent",
+          summary: "partial delivery",
+          findings: [finding],
+          fyi: ["A later supervisor call failed"],
+          streamed: true,
+        },
+      },
+      {
+        key: "correctness",
+        ok: true,
+        error: null,
+        report: {
+          angle: "correctness",
+          summary: "no defects",
+          findings: [],
+          fyi: [],
+          streamed: false,
+        },
+      },
+      { key: "tests", ok: false, error: "lane exploded", report: null },
+      {
+        key: "ponytail",
+        ok: true,
+        error: null,
+        report: {
+          angle: "ponytail",
+          summary: "completion only",
+          findings: [finding],
+          fyi: ["contact_supervisor absent"],
+          streamed: false,
+        },
+      },
+    ];
+    const adapter = createMemoryWaveAdapter({ aggregate: { state: "complete", value: entries } });
+    const wave = reportWaveOver(adapter);
+    const state = freshState();
+    const { target, notified } = fakeTarget();
+    target.hasUI = hasUI;
+    const stderr: unknown[][] = [];
+    t.mock.method(console, "error", (...args: unknown[]) => stderr.push(args));
+    await executeStartReviewWave(state, wave, target, {
+      ...START_OPTS,
+      angles: ["claimed-intent", "correctness", "tests"],
+    });
+    const collected = await executeCollectReviewWave(state, wave, target);
+    assert.equal(collected.details.ok, true);
+    if (!collected.details.ok) return;
+    assert.equal(collected.details.complete, false);
+    assert.deepEqual(collected.details.covered, ["claimed-intent", "correctness", "ponytail"]);
+    assert.deepEqual(
+      collected.details.reports.map((r) => r.report),
+      entries.filter((e) => e.ok).map((e) => e.report),
+    );
+    assert.deepEqual(collected.details.failures, [
+      { key: "tests", reason: "lane-failed", detail: "lane exploded" },
+    ]);
+    assert.equal(collected.details.attempts.length, 1);
+    assert.equal(adapter.calls.spawn.length, 1);
+    const text = collected.content[0]?.text ?? "";
+    assert.match(text, /no provisional batches \(no findings\): correctness/);
+    assert.match(text, /completion-only findings; no provisional batches: ponytail/);
+    assert.match(text, /A later supervisor call failed/);
+    assert.match(text, /contact_supervisor absent/);
+    if (hasUI) {
+      assert.ok(
+        notified.some(
+          (n) => n.severity === "info" && n.message.includes("no findings): correctness"),
+        ),
+      );
+      assert.ok(
+        notified.some(
+          (n) => n.severity === "warning" && n.message.includes("no provisional batches: ponytail"),
+        ),
+      );
+    } else {
+      assert.equal(notified.length, 0);
+      assert.match(JSON.stringify(stderr), /no findings\): correctness/);
+      assert.match(JSON.stringify(stderr), /no provisional batches: ponytail/);
+    }
+  });
+}
 
 // --- decodeStartReviewWaveParams: strict whole-refusal decode --------------------------------
 
@@ -250,7 +354,8 @@ test("executeStartReviewWave: happy path stores the pending wave and returns the
   });
   const text = result.content[0]?.text ?? "";
   assert.match(text, /claimed-intent, correctness/);
-  assert.match(text, /subagent_wait/);
+  assert.match(text, /end the turn/);
+  assert.match(text, /matching native workflow-completion notice/);
   assert.match(text, /collect_review_wave/);
 
   // The pending ref is stored: a second start refuses with wave_active…
@@ -332,7 +437,8 @@ test("executeCollectReviewWave: no_wave without a launch; wave_running retains t
   }
   assert.equal(running.details.ok, false);
   assert.equal((running.details as { error_type?: string }).error_type, "wave_running");
-  assert.match(running.content[0]?.text ?? "", /keep looping subagent_wait/);
+  assert.match(running.content[0]?.text ?? "", /pending retained/);
+  assert.match(running.content[0]?.text ?? "", /stop for owner diagnosis/);
 
   // Once the run completes, the retained wave collects normally (default grace).
   adapter.emitCompletion({ asyncId: "wave-async-1", asyncDir: "/memory/wave-async-1" });
@@ -367,6 +473,106 @@ test("executeCollectReviewWave: no_wave without a launch; wave_running retains t
   assert.match(text, /Review wave complete: covered 3\/3 angle\(s\)/);
   assert.match(text, /untrusted DATA/);
   assert.equal(text.includes("attempts"), false, "receipts never enter the model-facing prose");
+});
+
+test("native relay seam: push before completion, then resolve aggregate and drain once", async (t) => {
+  const adapter = createMemoryWaveAdapter({ completion: false });
+  const aggregate = {
+    state: "complete",
+    value: [
+      {
+        key: "claimed-intent",
+        ok: true,
+        error: null,
+        report: {
+          angle: "claimed-intent",
+          summary: "provisional concern withdrawn",
+          findings: [],
+          fyi: [],
+          streamed: true,
+        },
+      },
+      okEntry("correctness"),
+      okEntry("ponytail"),
+    ],
+  };
+  let release = (_value: typeof aggregate): void => {
+    throw new Error("not initialized");
+  };
+  const deferredAggregate = new Promise<typeof aggregate>((resolve) => {
+    release = resolve;
+  });
+  t.after(() => {
+    adapter.emitCompletion({ asyncId: "wave-async-1", asyncDir: "/memory/wave-async-1" });
+    release(aggregate);
+  });
+  let reading = (): void => {
+    throw new Error("not initialized");
+  };
+  const aggregateRequested = new Promise<void>((resolve) => {
+    reading = resolve;
+  });
+  adapter.readAggregate = () => {
+    reading();
+    return deferredAggregate;
+  };
+  const wave = reportWaveOver(adapter);
+  const state = freshState();
+  const { target } = fakeTarget();
+  const start = await executeStartReviewWave(state, wave, target, START_OPTS);
+  assert.equal(start.details.ok, true);
+  const annotations = createAnnotationState();
+  primeAnnotationSurface(annotations, { mode: "review", url: "http://127.0.0.1:7777" });
+  const finding: ReviewFinding = {
+    path: "a.ts",
+    line: 1,
+    severity: "major",
+    confidence: "high",
+    body: "defect",
+  };
+  const methods: string[] = [];
+  const fetchLike: NonNullable<Parameters<typeof executePushAnnotations>[3]>["fetchLike"] = async (
+    _url,
+    init,
+  ) => {
+    methods.push(init.method);
+    return {
+      ok: true,
+      status: init.method === "POST" ? 201 : 200,
+      text: async () =>
+        JSON.stringify(init.method === "POST" ? { ids: ["one"] } : { ok: true, removed: 1 }),
+    };
+  };
+  const push = await executePushAnnotations(
+    annotations,
+    target,
+    { angle: "claimed-intent", findings: [finding] },
+    { fetchLike },
+  );
+  assert.equal(push.details.ok, true, JSON.stringify(push));
+  assert.deepEqual(methods, ["POST"], "real push seam succeeds with completion withheld");
+  assert.notEqual(state.pending, null);
+  // Native completion can precede aggregate resolution. The collector waits inside its grace,
+  // not in a parent polling loop, and only drains after the authoritative value is available.
+  adapter.emitCompletion({ asyncId: "wave-async-1", asyncDir: "/memory/wave-async-1" });
+  await aggregateRequested;
+  const collecting = executeCollectReviewWave(state, wave, target);
+  release(aggregate);
+  const final = await collecting;
+  assert.equal(final.details.ok, true);
+  const replacement = await executePushAnnotations(
+    annotations,
+    target,
+    { angle: "claimed-intent", findings: [], replace: true },
+    { fetchLike },
+  );
+  assert.equal(replacement.details.ok, true);
+  assert.deepEqual(methods, ["POST", "DELETE"]);
+  adapter.emitCompletion({ asyncId: "wave-async-1", asyncDir: "/memory/wave-async-1" });
+  const again = await executeCollectReviewWave(state, wave, target);
+  assert.equal(again.details.ok, false);
+  if (!again.details.ok) assert.equal(again.details.error_type, "no_wave");
+  assert.equal(adapter.calls.spawn.length, 1);
 });
 
 test("executeCollectReviewWave: an incomplete wave is an ok result with the loud warning", async () => {
@@ -476,11 +682,41 @@ test("installReviewWaveBindings registers exactly the two tools over registratio
   // could both pass the `pending === null` check before either stores the launched wave.
   assert.equal(startDef.executionMode, "sequential");
   assert.equal(collectDef.executionMode, "sequential");
-  assert.match(
-    (startDef.promptGuidelines ?? []).join("\n"),
-    /subagent_wait\(\{timeoutMs: 30000\}\)/,
-  );
-  assert.match((startDef.promptGuidelines ?? []).join("\n"), /untrusted DATA/);
+  const startText = (startDef.promptGuidelines ?? []).join("\n");
+  const collectText = (collectDef.promptGuidelines ?? []).join("\n");
+  for (const pin of [
+    /end the turn/,
+    /Keep the Pi session open/,
+    /workflow identity and manifest/,
+    /queues into an active turn/,
+    /co-delivered progress/,
+    /not a child completion/,
+    /unrelated run, result preview, or elapsed time/,
+    /Never parse status.json/,
+    /No artificial wait calls or empty heartbeat batches/,
+  ])
+    assert.match(startText, pin);
+  for (const pin of [
+    /relay already-delivered provisional batches first/,
+    /pre-completion wave_running/,
+    /retains pending/,
+    /stop the automatic flow for owner diagnosis/,
+    /no polling retry chain/,
+    /reconcile exactly once/,
+    /Ignore duplicate\/late notices/,
+    /over finalized findings/,
+    /no_wave\/drain-once/,
+    /never changes coverage/,
+  ])
+    assert.match(collectText, pin);
+  for (const def of [startDef, collectDef]) {
+    assert.match(def.description ?? "", /matching native workflow-completion notice/);
+    assert.doesNotMatch(
+      `${def.description}\n${def.promptGuidelines?.join("\n")}`,
+      /subagent_wait|bg_wait|hold your turn open/i,
+    );
+  }
+  assert.match(startText, /untrusted provisional DATA/);
   assert.match((collectDef.promptGuidelines ?? []).join("\n"), /untrusted DATA/);
   assert.match((collectDef.promptGuidelines ?? []).join("\n"), /honestly/);
 });
@@ -544,7 +780,13 @@ function adversarialFake(): FakeSubagents {
           key,
           ok: true,
           error: null,
-          report: { angle: key, summary: `${String(key)} looks sound`, findings: [], fyi: [] },
+          report: {
+            angle: key,
+            summary: `${String(key)} looks sound`,
+            findings: [],
+            fyi: [],
+            streamed: false,
+          },
         })),
     },
   ]);

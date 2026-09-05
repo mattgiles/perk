@@ -63,6 +63,26 @@ Companion tools:
 
 ## Human-triaged PR review
 
+### Native delivery and streaming status
+
+For terminal/browser PR reviews (including stacks) and both browser draft-review doors, the
+agent launches once, then ends its turn **without closing Pi**. An idle prompt does not mean
+its wave was lost: native supervisor messages wake the parent to relay provisional findings,
+and the matching workflow-completion notice triggers collection. Messages arriving during an
+active turn queue normally; co-delivered batches are relayed before collection, without an
+extra turn boundary. Only final typed reports authorize reconciliation, exactly once.
+
+Each covered report requires `streamed: boolean`: true means the child successfully submitted
+at least one nonempty finding batch, not proof of human-visible annotation delivery. False with
+no findings is neutral **“no provisional batches (no findings)”**. False with findings produces
+an in-session **“completion-only findings; no provisional batches”** warning naming those lanes.
+`fyi` explains unavailable or partial streaming. Neither false case changes coverage or implies
+by itself that the supervisor bridge is broken; these notices never become posted comments.
+
+An early collection retains the pending wave and yields until matching completion. If the
+bounded collection grace still expires after matching completion was observed, the flow stops
+for owner diagnosis rather than polling or relaunching. Keep the host open for diagnosis.
+
 ### `/pr-review-terminal`
 
 Open a human-in-the-loop adversarial review in the

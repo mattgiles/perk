@@ -102,28 +102,21 @@ export const SUBAGENT_TOOLS: readonly string[] = [
 
 /**
  * pi-subagents' CHILD-side engine tools. `structured_output` and `contact_supervisor` register
- * only inside spawned child sessions (the env-keyed prompt-runtime registration — never in
- * parents, so those names are inert in every gated parent session; `setActiveTools` ignores
- * unknown names). `subagent_wait` is ALSO registered by the top-level parent extension
- * (pi-subagents 0.45.1's `registerWaitTool`) — the accepted widening: a wait-only,
- * non-repo-mutating tool active in gated parents. A gated ADOPTED child (mode inherited via the
- * `adopt` arm, contracts.md §8.3) must keep them active:
+ * inside spawned child sessions through the engine's prompt runtime / native supervisor bridge.
+ * Absent tools are inert in gated parents (`setActiveTools` ignores unknown names). A gated
+ * ADOPTED child (mode inherited via the `adopt` arm, contracts.md §8.3) must keep them active:
  *  - `structured_output` is the engine-REQUIRED completion call when the launch carries an
  *    `outputSchema` — stripping it makes the child physically unable to finish and fails the
  *    run with `structuredOutputFailed`;
- *  - `contact_supervisor` is the child→parent intercom door;
- *  - `subagent_wait` is the fanout-child wait door.
+ *  - `contact_supervisor` is the child→parent supervisor door.
+ * Native wakes need no wait-tool widening in this census.
  * None mutates the repo (`structured_output` writes only the engine's capture file under
  * `.pi-subagents/` scratch). Census decision, recorded: these names deliberately join NEITHER
  * PERK_TOOLS nor BORROWED_TOOLS — the stage-filter universe never sees them because children
  * are stage-unscoped by design (adopt never impersonates a stage), so gate membership is their
  * only governance surface.
  */
-export const SUBAGENT_CHILD_TOOLS: readonly string[] = [
-  "structured_output",
-  "contact_supervisor",
-  "subagent_wait",
-];
+export const SUBAGENT_CHILD_TOOLS: readonly string[] = ["structured_output", "contact_supervisor"];
 
 /**
  * @ff-labs/pi-fff's search tools. BOTH mode name-sets are enumerated (static names, inert

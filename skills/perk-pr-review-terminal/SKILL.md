@@ -48,8 +48,19 @@ lands before (or without) the comments it summarizes.
   terminal app) — denying or missing it just means they run the printed command themselves; the
   auto-launch is a convenience, never load-bearing. The handshake poll discovers when hunk is
   actually up.
+- **Native delivery.** Launch once, retain workflow identity, and end the turn with Pi open.
+  Relay delivered provisional batches on native supervisor wakes before collecting on matching
+  workflow completion (co-delivered notices need no extra turn). Final reports alone authorize
+  reconciliation, exactly once. Early collection retains pending; expired grace after observed
+  completion requires owner diagnosis, not polling/relaunch.
+- **Streaming status.** Required `streamed` means the child submitted at least one nonempty batch
+  accepted/queued by the supervisor, not that the human saw it. No findings → false normally;
+  unavailable/failed streaming → complete final report plus factual `fyi` (true remains true after
+  an earlier successful batch). Disclose false lanes in-session without changing coverage:
+  neutral “no provisional batches (no findings)” versus warning “completion-only findings; no
+  provisional batches”. Never post these disclosures or treat false alone as a broken bridge.
 - **The child report shape (verdict-free).** Each child's completion report is
-  `{angle, summary, findings[{path, line, side?, severity, confidence, body}], fyi[]}` — `line`
+  `{angle, summary, findings[{path, line, side?, severity, confidence, body}], fyi[], streamed: boolean}` — `line`
   is an int in the diff or `null` for a real-but-unanchorable finding; `side` omitted means
   `RIGHT`; an empty `findings` is a legitimate, earned outcome. The streamed fenced-JSON batches
   carry findings in this same shape.

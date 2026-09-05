@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { Compile } from "typebox/compile";
 import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
 import {
   ADVERSARIAL_REVIEW_ANGLES,
@@ -31,7 +32,7 @@ function okEntry(key: string): unknown {
     key,
     ok: true,
     error: null,
-    report: { angle: key, summary: "solid", findings: [], fyi: [] },
+    report: { angle: key, summary: "solid", findings: [], fyi: [], streamed: false },
   };
 }
 
@@ -155,7 +156,7 @@ test("isAdversarialReviewAngle narrows the four slugs and rejects prototype name
 
 // ------------------------------------------------------------------------- the schema pin
 
-test("ADVERSARIAL_REVIEW_REPORT_SCHEMA pins the verdict-free report shape (closed, all four fields required)", () => {
+test("ADVERSARIAL_REVIEW_REPORT_SCHEMA pins the verdict-free report shape (closed, all fields required)", () => {
   const s = ADVERSARIAL_REVIEW_REPORT_SCHEMA as {
     additionalProperties: boolean;
     required: string[];
@@ -163,7 +164,7 @@ test("ADVERSARIAL_REVIEW_REPORT_SCHEMA pins the verdict-free report shape (close
     if?: unknown;
   };
   assert.equal(s.additionalProperties, false);
-  assert.deepEqual(s.required, ["angle", "summary", "findings", "fyi"]);
+  assert.deepEqual(s.required, ["angle", "summary", "findings", "fyi", "streamed"]);
   assert.deepEqual(s.properties.angle.enum, [
     "claimed-intent",
     "correctness",
@@ -174,7 +175,7 @@ test("ADVERSARIAL_REVIEW_REPORT_SCHEMA pins the verdict-free report shape (close
   // NO verdict field and no if/then conditional — the human triages, nothing derives a verdict.
   assert.equal("verdict" in s.properties, false);
   assert.equal(s.if, undefined);
-  assert.deepEqual(Object.keys(s.properties), ["angle", "summary", "findings", "fyi"]);
+  assert.deepEqual(Object.keys(s.properties), ["angle", "streamed", "summary", "findings", "fyi"]);
 });
 
 test("ADVERSARIAL_REVIEW_REPORT_SCHEMA finding rows: closed, required-nullable line, optional side, the triage enums", () => {
@@ -206,7 +207,7 @@ test("ADVERSARIAL_REVIEW_REPORT_SCHEMA finding rows: closed, required-nullable l
   assert.deepEqual(findings.properties.confidence.enum, ["high", "medium", "low"]);
 });
 
-test("the agent def completes via structured_output with the schema's four fields — no fenced-JSON completion", () => {
+test("the agent def completes via structured_output with the schema's required fields — no fenced-JSON completion", () => {
   // The wave fails any lane without a schema-valid `structured_output` call, so the def and the
   // schema must agree — the fake-responder wave tests never exercise the def, making this pin
   // the one guard against a regression back to the retired fenced-JSON completion form.
@@ -217,7 +218,11 @@ test("the agent def completes via structured_output with the schema's four field
     /calling the engine-injected \*\*`structured_output`\*\* tool exactly once/,
     "the completion step must instruct ONE structured_output call",
   );
-  assert.match(def, /\*\*all four fields required\*\*/);
+  assert.match(def, /\*\*required fields:/);
+  assert.match(def, /send no empty batch and return `streamed: false`/);
+  assert.match(def, /absent or streaming fails/);
+  assert.match(def, /Put a short factual explanation in `fyi`/);
+  assert.doesNotMatch(def, /skip streaming silently/);
   // Def ↔ schema lockstep: every top-level report field the schema requires is named in the def
   // (drift in either direction trips here).
   const schema = ADVERSARIAL_REVIEW_REPORT_SCHEMA as { required: string[] };
@@ -251,6 +256,18 @@ test("the agent def completes via structured_output with the schema's four field
     "adversarial-reviewer.md",
   );
   assert.equal(readFileSync(mirror, "utf8"), def, "the .pi/agents/perk mirror must not drift");
+});
+
+test("streamed is a required boolean, not a truthy default", () => {
+  const validator = Compile(ADVERSARIAL_REVIEW_REPORT_SCHEMA);
+  const base = { angle: "claimed-intent", summary: "solid", findings: [], fyi: [] };
+  for (const streamed of [true, false]) {
+    assert.equal(validator.Check({ ...base, streamed }), true);
+  }
+  assert.equal(validator.Check(base), false);
+  for (const streamed of [null, "false", 0, 1]) {
+    assert.equal(validator.Check({ ...base, streamed }), false);
+  }
 });
 
 // ------------------------------------------------------------------- the non-blocking start
