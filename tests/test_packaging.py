@@ -143,6 +143,9 @@ def test_wheel_bundles_shared(built_wheel):
         # The boundary-model JSON Schema snapshots bundle into the wheel under the
         # `perk/_shared/schemas/` subdir (representative file proves the subdir ships).
         "perk/_shared/schemas/contracts/registry.schema.json",
+        # The representative rendered wave script — the doctor subagent-compat behavior arm
+        # reads it from the bundled shared/ copy at runtime, so it must ship.
+        "perk/_shared/subagents/representative-wave-script.js",
     }
     assert expected <= names, expected - names
 
@@ -276,6 +279,7 @@ def test_npm_pack_lists_shipped_and_excludes_dev():
     assert "shared/contracts.md" in paths
     assert "shared/README.md" in paths
     assert "shared/schemas/contracts/registry.schema.json" in paths
+    assert "shared/subagents/representative-wave-script.js" in paths
     assert "prompts/README.md" in paths
 
     # Dev-only surface must be excluded.

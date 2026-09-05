@@ -10,7 +10,9 @@
 // ONE grace seam), instance-owned pending state, and delete-as-claim drain-once.
 
 import assert from "node:assert/strict";
+import { readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import { createMemoryWaveAdapter, type MemoryWaveAdapter } from "../testing/memoryAdapter.ts";
 import { PONYTAIL_CORE_SKILL } from "./ponytail.ts";
@@ -63,24 +65,56 @@ function okEntry(key: string, report: unknown): unknown {
   return { key, ok: true, error: null, report };
 }
 
-/** The exact rendered script for `ASSIGNMENTS` — the module's headline artifact, byte-pinned. */
-const TWO_ASSIGNMENT_SCRIPT = `const reports = await runs.all([
+/**
+ * The representative wave request behind the shared fixture — the renderer's optional-field
+ * branches in one request: a plain assignment (default label + phase), one with a
+ * per-assignment `outputSchema` override + explicit label, and one with a `skill` opt-in;
+ * the small workflow-level `outputSchema` rides the spawn params (never the script).
+ */
+const REPRESENTATIVE_ASSIGNMENTS: ReportAssignment[] = [
   {
-    "key": "plan-fidelity",
-    "agent": "perk.pr-reviewer",
-    "task": "angle: plan-fidelity — review ONLY plan fidelity & completeness.",
-    "label": "plan-fidelity",
-    "phase": "review"
+    key: "plan-fidelity",
+    agent: "perk.pr-reviewer",
+    task: "angle: plan-fidelity — review ONLY plan fidelity & completeness.",
+    phase: "review",
   },
   {
-    "key": "correctness",
-    "agent": "perk.pr-reviewer",
-    "task": "angle: correctness — review ONLY correctness & regressions.",
-    "label": "correctness-lane",
-    "phase": "review"
-  }
-]);
-return reports.map(({key, ok, error, structuredOutput}) => ({key, ok, error: error ?? null, report: structuredOutput ?? null}));`;
+    key: "custom-scope",
+    agent: "perk.pr-reviewer",
+    task: "angle: custom-scope — review ONLY the requested scope.",
+    label: "custom-scope-lane",
+    outputSchema: { type: "object", properties: { angle: { enum: ["custom-scope"] } } },
+  },
+  {
+    key: "ponytail",
+    agent: "perk.pr-reviewer",
+    task: "angle: ponytail — the standalone simplification pass.",
+    skill: "ponytail-review",
+  },
+];
+
+const REPRESENTATIVE_OUTPUT_SCHEMA = {
+  type: "object",
+  properties: { verdict: { type: "string" } },
+};
+
+/**
+ * The exact rendered script for `REPRESENTATIVE_ASSIGNMENTS` — the module's headline
+ * artifact, byte-pinned as the SHARED fixture `shared/subagents/representative-wave-script.js`:
+ * this suite's exact-render test writes it under `PERK_UPDATE_GOLDEN=1` and asserts against it
+ * otherwise; the doctor `subagent-compat` behavior arm reads it at runtime (the
+ * installed-engine `validateWorkflowScript` probe). Loaded lazily (memoized) so a
+ * regeneration run against a missing file still reaches the writer test.
+ */
+const REPRESENTATIVE_SCRIPT_FIXTURE = fileURLToPath(
+  new URL("../../shared/subagents/representative-wave-script.js", import.meta.url),
+);
+
+let fixtureBytes: string | undefined;
+function representativeWaveScript(): string {
+  fixtureBytes ??= readFileSync(REPRESENTATIVE_SCRIPT_FIXTURE, "utf8");
+  return fixtureBytes;
+}
 
 const PREFLIGHT_OK = async (): Promise<{ ok: true }> => ({ ok: true });
 
@@ -98,8 +132,17 @@ async function renderedScript(overrides: Partial<ReportWaveRequest>): Promise<st
 
 // ---------------------------------------------------- the rendered script (through the seam)
 
-test("the wave renders the exact two-assignment script", async () => {
-  assert.equal(await renderedScript({}), TWO_ASSIGNMENT_SCRIPT);
+test("the wave renders the exact representative script — the shared fixture, byte-pinned", async () => {
+  const rendered = await renderedScript({
+    assignments: REPRESENTATIVE_ASSIGNMENTS,
+    outputSchema: REPRESENTATIVE_OUTPUT_SCHEMA,
+  });
+  if (process.env.PERK_UPDATE_GOLDEN) {
+    writeFileSync(REPRESENTATIVE_SCRIPT_FIXTURE, rendered);
+    fixtureBytes = undefined;
+  }
+  // Always re-read and assert (the tests/_golden.py discipline): a regen run still compares.
+  assert.equal(rendered, representativeWaveScript());
 });
 
 test("the rendered script keeps hostile task text inside the array literal", async () => {
@@ -281,14 +324,19 @@ test("wave.run: happy path yields reports under lane keys and complete", async (
 });
 
 test("wave.run: spawn params carry the fixed module contract + spec fields", async () => {
-  const spec = makeSpec({ model: "anthropic/claude-sonnet-4", timeoutMs: 1_234 });
+  const spec = makeSpec({
+    assignments: REPRESENTATIVE_ASSIGNMENTS,
+    outputSchema: REPRESENTATIVE_OUTPUT_SCHEMA,
+    model: "anthropic/claude-sonnet-4",
+    timeoutMs: 1_234,
+  });
   const adapter = createMemoryWaveAdapter({
     aggregate: { state: "complete", value: [] },
   });
   await reportWaveOver(adapter).run(spec);
   assert.equal(adapter.calls.spawn.length, 1);
   assert.deepEqual(adapter.calls.spawn[0], {
-    workflowScript: TWO_ASSIGNMENT_SCRIPT,
+    workflowScript: representativeWaveScript(),
     async: true,
     mission: false,
     context: "fresh",
@@ -805,7 +853,7 @@ test("receipt data never alters complete/reports/failures (behavior parity)", as
 function makeScriptSpec(overrides: Partial<WaveScriptSpec> = {}): WaveScriptSpec {
   return {
     flow: "adversarial-review",
-    workflowScript: TWO_ASSIGNMENT_SCRIPT,
+    workflowScript: representativeWaveScript(),
     outputSchema: { type: "object", properties: { angle: { type: "string" } } },
     timeoutMs: 5_000,
     ...overrides,

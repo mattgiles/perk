@@ -24,6 +24,12 @@ Contents:
   `.perk/workflow/` layout, the `PERK_RUN_ID` protocol, the `perk:workflow-state`
   schema, and the GitHub gateway contract — were the original seed, not the current
   inventory.
+- **`subagents/representative-wave-script.js`** — the representative rendered wave script:
+  the report-wave renderer's exact-render **golden** (one plain assignment, one per-assignment
+  `outputSchema` override, one `skill` opt-in). Written by the exact-render test in
+  `extension/waves/reportWave.test.ts` under `PERK_UPDATE_GOLDEN=1`; read at runtime by the
+  doctor `subagent-compat` behavior arm, which feeds it to the installed pi-subagents engine's
+  `validateWorkflowScript` (see `contracts.md` §8.6's doctor groups).
 - **`schemas/`** — committed **golden snapshots** of perk's boundary models (the
   shared-YAML parse contracts, the machine batch inputs, and the `--json` output
   envelopes), generated from the Pydantic models in `perk/boundary.py` and grouped by

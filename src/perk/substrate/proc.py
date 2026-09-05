@@ -4,7 +4,11 @@ Every captured ``subprocess.run`` in production code routes through ``run_captur
 ``run_checked`` — the domain facades (``git``, ``npm``, ``github._exec``, perk-dev's
 ``build``/``bump``, and the one-off probes) each stay a thin translation of the structured
 ``ProcFailure`` into their own error type, so error *types* remain per-boundary while the
-spawn/timeout/env/kwargs mechanics live here exactly once. ``tests/test_tooling.py``'s AST
+spawn/timeout/env/kwargs mechanics live here exactly once. Child-env control is two
+keyword-only params: ``env_overlay`` merges over ``os.environ`` (overlay wins) and
+``env_remove`` DELETES inherited names first (removal is not expressible as an overlay — an
+empty-string value is still a set variable); both ``None`` inherits untouched (``env=None``).
+``tests/test_tooling.py``'s AST
 guard pins this: ``run_captured`` holds the only sanctioned captured ``subprocess.run``
 literal (the inherited-stdio streaming sites are a different idiom and keep their own).
 ``run_interactive`` is the one sanctioned **inherited-stdio interactive** primitive (the child
@@ -88,12 +92,31 @@ class ProcFailure(Exception):
         return self.stderr.strip() or f"{self.cmd} failed"
 
 
+def _child_env(
+    env_overlay: Mapping[str, str] | None, env_remove: Sequence[str] | None
+) -> dict[str, str] | None:
+    """Compose the child env: ``os.environ`` minus ``env_remove``, then ``env_overlay`` wins.
+
+    Both ``None`` → ``None`` (inherit untouched — byte-identical to passing no ``env``).
+    Removal happens BEFORE the overlay, so an overlaid name always survives a same-name
+    removal (overlay wins).
+    """
+    if env_overlay is None and env_remove is None:
+        return None
+    env = dict(os.environ)
+    for name in env_remove or ():
+        env.pop(name, None)
+    env.update(env_overlay or {})
+    return env
+
+
 def run_captured(
     argv: Sequence[str],
     *,
     cwd: Path | None = None,
     timeout: int,
     env_overlay: Mapping[str, str] | None = None,
+    env_remove: Sequence[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run ``argv`` capturing text output; spawn/timeout failures raise ``ProcFailure``.
 
@@ -101,9 +124,12 @@ def run_captured(
     callers (gh's caller-owned returncode handling, best-effort batch git ops). ``timeout``
     is keyword-only with no default: each facade owns its domain timeout policy.
     ``env_overlay`` is merged **after** ``os.environ`` (overlay wins — perk-managed
-    semantics); ``None`` passes ``env=None`` (inherit untouched).
+    semantics); ``env_remove`` names are deleted from the inherited env FIRST (the
+    deletion-capable arm — e.g. the documented ``PERK_RUN_ID``/``PI_SESSION_FILE`` env-leak
+    guard for probes launched from inside a perk session; an overlay cannot remove). Both
+    ``None`` passes ``env=None`` (inherit untouched).
     """
-    env = None if env_overlay is None else {**os.environ, **env_overlay}
+    env = _child_env(env_overlay, env_remove)
     try:
         return subprocess.run(
             list(argv),
@@ -143,13 +169,16 @@ def run_checked(
     cwd: Path | None = None,
     timeout: int,
     env_overlay: Mapping[str, str] | None = None,
+    env_remove: Sequence[str] | None = None,
 ) -> str:
     """``run_captured`` + a non-zero exit raises ``ProcFailure`` (kind ``"exit"``); returns stdout.
 
     Named for its *checked* semantics — it passes ``check=False`` internally and raises the
     domain-friendly ``ProcFailure`` instead of ``CalledProcessError``.
     """
-    proc = run_captured(argv, cwd=cwd, timeout=timeout, env_overlay=env_overlay)
+    proc = run_captured(
+        argv, cwd=cwd, timeout=timeout, env_overlay=env_overlay, env_remove=env_remove
+    )
     if proc.returncode != 0:
         raise ProcFailure("exit", tuple(argv), returncode=proc.returncode, stderr=proc.stderr)
     return proc.stdout
