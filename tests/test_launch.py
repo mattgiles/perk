@@ -156,6 +156,27 @@ def test_launch_pi_agent_dir_operator_wins_without_config_read(
     assert launch_exec_recorder.calls[0][2]["PI_CODING_AGENT_DIR"] == "/operator/agent"
 
 
+def test_remote_launch_never_reads_pi_agent_dir(tmp_path, monkeypatch):
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+
+    def no_read(root):
+        pytest.fail("remote dispatch must not consult the local agent directory")
+
+    calls = []
+    monkeypatch.setattr(launch, "effective_pi_agent_dir", no_read)
+    monkeypatch.setattr(launch, "_drive_remote_target", lambda **kwargs: calls.append(kwargs))
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote="github",
+        pi_args=[],
+    )
+    assert len(calls) == 1
+
+
 def test_launch_pi_agent_dir_unconfigured(tmp_path, monkeypatch, launch_exec_recorder):
     monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
     _launch_agent_dir_plan(tmp_path)
