@@ -172,17 +172,48 @@ prerequisite; git status remained clean immediately after the smoke.
   to the existing utility-skill route allowed normal regeneration (no new prose abstraction).
 - Reviewer definitions were reconverged through init's `_converge_subagent_agents`; schema/def
   tests verify the committed `.pi/agents/perk/` copies are byte-identical.
-- **Live skill convergence is blocked in this inherited worktree.** `skills sync --dry-run`
-  reports conflicts for existing skill links (all four changed review skills included).
-  `skills status` reports sources not-synced; the review skill links point into the parent
-  checkout's cache rather than the branch-under-test source. No cached/generated skill was
-  hand-edited, no global settings were changed, and no live door was launched on stale carriers.
-  Normal convergence in a fresh isolated driver or owner-directed repair is required before
-  live acceptance. There are no committed skill-copy mirrors in this worktree.
+- **Inherited-worktree skill conflict resolved for dogfood via an isolated driver.** The
+  original `skills sync --dry-run` found inherited links into the parent checkout's cache.
+  The owner then explicitly approved a disposable checkout whose user-owned skill manifest
+  selects the committed local source. Normal `skills sync` and a following dry-run passed in
+  that checkout; all four review skill files and both reviewer definitions compare byte-identical
+  to the implementation. Generated mirrors were not hand-edited; original driver manifests and
+  Pi settings are retained for restoration. Main/global configuration was untouched.
+  There are no committed skill-copy mirrors in the implementation worktree.
 - Retired-literal census: remaining exact wait-name hits are negative regression guards,
   explicitly historical learned/archive/changelog/dated-assessment passages, or the installed
   upstream source filename pinned by doctor. No positive tool census or executable relay
   prescription remains in the changed live carriers; no replacement wait tool was adopted.
+
+### Prepared interactive environment
+
+The isolated driver is at the implementation worktree's
+`.perk/workflow/scratch/runs/01M1SNZFQ3MCYNS32DQ0MJWQ36/agent/live/driver`, branch
+`dogfood-2226-driver`, code SHA `bdf6dd29a380fbc0b7fe999d1746573318a25555`.
+It loads its own branch-under-test perk package and committed reviewer definitions, using the
+same repaired implementation-worktree Pi executable as the background prerequisite. Installed
+pi-subagents is 0.65.1 and exact Ponytail package is 4.9.0; hashes, source paths and configuration
+are captured in `live/driver-preflight.json`. The launch wrapper selects the existing agent home
+`/Users/mattgiles/dev/github/mattgiles/perk/.pi/agent` without editing it and removes inherited
+`PERK_RUN_ID`/`PI_SESSION_FILE`. Project bridge mode and agent-home subagent overrides are unset.
+
+Read-only doctor confirms the selected Pi executable, skill delivery, converged reviewer defs,
+compatible subagent/Ponytail surfaces, hunk presence, and active bridge. Its **overall result is
+not healthy**: it also reports the deliberately replaced manifest declaration/alias, an empty
+fresh workflow directory, and absent optional local config. No doctor repair was run; it would
+undo the explicit branch-bound skill selection. These setup observations are not a live pass.
+
+Disposable draft PR **#2228**, branch `dogfood/native-wake-2226-01M1SNZF`, head
+`1b48e703` over `dcf051c785f08574cb589d92933bea40c55b4414`, contains only
+`docs/developers/review-wave-schema-note.md`. Its false claim that both review schemas require
+`verdict` is independently checkable against the real source. It must be closed unmerged after
+T/B/U. The target checkout is `live/target`, owned by the isolated driver's worktree list.
+
+The one-shot `live/start-T.sh` is prepared but has **not been run**. It starts an interactive
+session with logs under `live/T/parent`, does not launch a wave itself, and asks the human to
+invoke `/pr-review-terminal 2228` once. Its only added parent instructions are the disposable
+no-post/no-save/no-repository-edit/no-retry boundaries and a pause after reconciliation; it does
+not coach the relay mechanism or reviewer output. The normal door/tool/skill carriers own that.
 
 ### Streaming legs and teardown
 
