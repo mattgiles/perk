@@ -19,6 +19,7 @@ CI-robust; in CI both toolchains are present so they actually run.
 """
 
 import json
+import re
 import shutil
 import subprocess
 import tarfile
@@ -81,14 +82,17 @@ def test_pi_toolchain_pin_lockstep():
     # The pinned pi SDK (`@earendil-works/pi-coding-agent`) resolves its own nested pi-ai; a
     # top-level pi-ai pin that diverges from it puts test code and the session runtime in two
     # different pi-ai module instances (separate api registries — see
-    # docs/learned/pi/headless-session-drive.md). Both devDeps must be exact versions (no range
-    # prefix, so `npm ci` cannot drift them apart) and equal to each other.
+    # docs/learned/pi/headless-session-drive.md). The background runner also needs the server
+    # and client host peers. All five devDeps must be exact, equal versions; this repairs the
+    # repo-local development host, not consumers' global installs.
     dev_deps = _package_json()["devDependencies"]
-    sdk = dev_deps["@earendil-works/pi-coding-agent"]
-    pi_ai = dev_deps["@earendil-works/pi-ai"]
-    for name, pin in (("pi-coding-agent", sdk), ("pi-ai", pi_ai)):
-        assert pin[0].isdigit(), f"@earendil-works/{name} must be an exact version, got {pin!r}"
-    assert sdk == pi_ai, f"pi toolchain pins diverged: pi-coding-agent {sdk} != pi-ai {pi_ai}"
+    names = ("pi-coding-agent", "pi-ai", "pi-tui", "pi-server", "pi-client")
+    pins = {name: dev_deps[f"@earendil-works/{name}"] for name in names}
+    for name, pin in pins.items():
+        assert re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?", pin), (
+            f"@earendil-works/{name} must be an exact version, got {pin!r}"
+        )
+    assert len(set(pins.values())) == 1, f"pi toolchain pins diverged: {pins}"
 
 
 @pytest.fixture(scope="session")
