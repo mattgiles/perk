@@ -1,8 +1,9 @@
 # Native-wake review streaming: development baseline and live protocol
 
-**Date:** 2026-09-05. **Status: IN PROGRESS — not submission evidence yet.** The repo-local
-background-launch prerequisite and live legs T/B passed. Required live legs D/N/U remain
-**unobserved / not passed**. This record does not certify the remaining streaming routes,
+**Date:** 2026-09-05. **Status: BLOCKED — not submission evidence yet.** The repo-local
+background-launch prerequisite and live legs T/B passed. Leg D ran and is **not passed**:
+its custom lane failed final-report completion, and final browser reconciliation retained
+failed-lane provisional annotations. N/U remain **unobserved / not passed**. This record does not certify the remaining streaming routes,
 global hosts, or consumer compatibility.
 
 ## Part A — repeatable protocol and preconditions
@@ -222,7 +223,7 @@ not coach the relay mechanism or reviewer output. The normal door/tool/skill car
 | --- | --- | --- | --- |
 | T | `bdf6dd29a380fbc0b7fe999d1746573318a25555` | PASS | Native supervisor relay → one real hunk comment → one final collect; evidence below |
 | B | `bdf6dd29a380fbc0b7fe999d1746573318a25555` | PASS | Native browser pushes, global dedupe, and all-covered-angle final replacement; evidence below |
-| D | — | Unobserved / not passed | Awaiting fresh normal plan handoff and browser session |
+| D | `bdf6dd29a380fbc0b7fe999d1746573318a25555` | NOT PASSED / owner escalation | Custom lane streamed but produced no required final report; 4/5 covered; provisional-source retention described below |
 | N | — | Unobserved / not passed | Awaiting fresh normal plan handoff and browser session |
 | U | — | Unobserved / not passed | Awaiting isolated driver, bridge-off capture and restoration |
 
@@ -412,5 +413,96 @@ The preparation message asks the parent only to read/register those exact bytes 
 and pause. It does not prescribe reviewer findings or delivery behavior, and forbids review
 launch/save/post/retry during preparation. With working-draft identity and bytes verified, the human is being handed the custom-lens
 invocation: `/plan-review-browser Check all stated helper names and the meaning of streamed
-against the source; also check whether retry choices are settled.` No review has run yet. Reviewers remain ordinary unchanged
-definitions; the draft is the intentionally flawed input, not a scripted report.
+against the source; also check whether retry choices are settled.` Reviewers remain ordinary unchanged definitions; the draft is the intentionally flawed input,
+not a scripted report.
+
+### Leg D — NOT PASSED: custom completion failure and browser authority gap
+
+The human invoked the supplied custom-lens command and reported: browser opened, annotations
+appeared **before** the final summary, no subsequent input/nudges, five final annotations,
+but **no visible custom-lane label**. The inspected screenshot
+`Screenshot 2026-09-05 at 6.27.12 PM.png` shows five generic “Comment” rows, not per-lane badges.
+The first two displayed bodies exactly match the custom lane's provisional findings. Copy:
+`live/D/browser-final.png`, SHA-256
+`8b37674f05debf949115f3909124936f2afa43be260dcda8eb3ce8e85934387b`.
+
+One workflow `8e6c01eb-3b44-421a-b887-29969ed5e86b`, parent PID 32915, at the same driver
+cwd/branch/SHA, repaired Pi host and bridge-on configuration. All five children actually launched
+as separate fresh-context background runner processes using `openai/gpt-5.6-sol`:
+
+| Lane | Child run | PID | Final result |
+| --- | --- | --- | --- |
+| grounding | `0ba91b90-9917-46ad-bb96-0f1f5624c35f` | 33939 | covered, streamed=true, 3 findings |
+| decision-completeness | `6f5503af-e03c-41fd-bbe7-7bb4732bd655` | 33940 | covered, streamed=true, 2 findings |
+| scope | `0ff4bb5c-9a2f-4535-b417-4327cacbba54` | 33941 | covered, streamed=true, 1 finding |
+| custom | `ff2f9459-ec21-4ff6-82ed-a10381d6ebdf` | 33942 | failed: no structured_output call/report |
+| ponytail | `c587db86-60c8-436a-9a20-d62448ed9987` | 33943 | covered, streamed=true, 1 finding |
+
+Ponytail used the exact `ponytail` skill. Each recovery descriptor has the unchanged declared
+read/grep/find/ls/bash allowlist and the required report schema including `streamed`; these
+pre-injection descriptors do **not** by themselves prove each runtime tool was exposed. All
+five lanes successfully used `contact_supervisor`; four successfully used `structured_output`.
+The custom child's final assistant message at 22:23:16.432Z has `stopReason: stop`,
+`rawStopReason: completed`, empty text and no tool calls. No failed structured-output attempt
+is recorded. Its runner exited 0, but the engine correctly marked the step failed for missing
+required output. The reason the model ended without the call is **not established**; this is
+not evidence justifying a capability-list, host-version, or runner-mode change.
+
+Decisive order (UTC, 2026-09-05):
+
+| Time | Event |
+| --- | --- |
+| 22:22:28.779 | Single start accepted all five requested/runnable lanes, custom included; no preflight failures. |
+| 22:22:32.167 | Parent ends the launch turn. |
+| 22:22:47.249 | Decision-completeness nonempty supervisor batch accepted/queued. |
+| 22:22:47.387 | Native progress wakes parent; browser push at 22:22:51.797 creates 2 annotations. |
+| 22:22:53.510 | Parent ends relay turn. |
+| 22:23:03.006 | Custom nonempty 3-finding batch accepted/queued, `delivered: true`, request `d91b7af3-1b46-468c-b54b-61e813ea0ac8`. |
+| 22:23:03.190 | Native custom progress wakes parent. |
+| 22:23:09.975 | Custom provisional browser push creates 2 annotations; skips 1 same-phrase duplicate. |
+| 22:23:13.199 | Scope provisional push creates 1 annotation; later Ponytail/grounding pushes dedupe existing phrases. |
+| 22:23:16.432 | Custom ends with empty assistant completion and no structured_output call. |
+| 22:23:20.558 | Workflow terminal status records completion; all five successful nonempty supervisor submissions preceded it. |
+| 22:23:24.054 | Matching native workflow-completion notice reaches parent after the delivered provisional batches were relayed. |
+| 22:23:26.227 | One collect returns ok but complete=false, 4/5 covered, custom lane-failed, one attempt. |
+| 22:23:47.602 | Grounding final `replace: true` pushes 0: all 3 phrases skipped because existing sources still own those anchors. |
+| 22:23:47.632 | Decision-completeness final replacement clears 2 and pushes 2. |
+| 22:23:47.663 | Scope final replacement clears 1 and pushes 1. |
+| 22:23:47.681 | Ponytail final replacement pushes 0, same-phrase duplicate skipped. |
+| 22:23:57.549 | Parent reports incomplete coverage and ends the turn; no retry. |
+
+The exact collect failure begins:
+
+```text
+Draft-review wave INCOMPLETE: covered 4/5 lane(s).
+custom: lane-failed
+Missing structured_output call; this step has outputSchema and must finish by calling structured_output.
+Required structured output was not produced: …/ff2f9459-ec21-4ff6-82ed-a10381d6ebdf/structured-output/pi-subagent-structured-nUGxUe/output.json
+```
+
+**Defect/disposition log:**
+
+- **D1 — required custom final report absent.** Native launch, custom priming, supervisor
+  submission, idle wakes and completion-triggered single collection worked, but the required
+  custom lane is uncovered. Successful provisional submission is not a report or coverage;
+  D is not passed. No retry, resume, mode change, tool-list change or subsequent leg was run.
+- **D2 — final-report authority gap at the browser sink.** The two custom-created annotations
+  (`26ce4857-8e58-47c8-b77b-7716809fa50d`, `d0341e9c-1d3d-4585-bbd7-71dbbb747a9d`) remain visible
+  despite custom having no authoritative report. Parent replacement ran only for covered lanes;
+  grounding's final findings were skipped against those retained custom anchors. The screenshot
+  therefore contains custom **provisional wording**, not grounding's final wording. Overlapping
+  concerns do not erase that authority distinction. The current covered-only replacement
+  prescription needs owner disposition; no partial-report recovery is silently introduced.
+- **D3 — attribution not visible in the observed plan UI.** The screenshot shows generic
+  “Comment” labels for all five annotations; absence of a `custom` badge is not proof that
+  custom failed to run (it did run and supplied the first two visible bodies). Perk's plan
+  mapping carries `source: perk:<angle>`; the UI-display cause remains unestablished. Do not
+  conflate this visible attribution issue with D1 or paper over the user's observation.
+
+Evidence is preserved in `live/D/captured-runtime/` (parent/child JSONL, workflow/child status,
+recovery descriptors and runner logs), `live/D/evidence.json`, and `parent-timeline.json`, with
+the screenshot alongside. Implementation tree was clean before this evidence-only edit; driver
+HEAD is still `bdf6dd29` with only the explicitly approved manifest relocation/source-selection
+changes. The original read-only plan handoff and draft bytes remain intact. Pi/browser are
+retained pending owner direction; **no approval/save or full teardown is claimed**. Further
+validation or repairs require explicit owner disposition under the plan's escalation rule.
