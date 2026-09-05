@@ -18,7 +18,8 @@ repo-wide archaeology dig.
 - `.perk/` is perk-owned; `.pi/`/`.agents/` are discovery namespaces perk only *contributes*
   materializations into — "The canonical dot-directory contract".
 - One redirectable per-plane path seam, established first, makes each move a localized edit —
-  "The centralized path seam".
+  with one named external-plane exception, the standalone Hunk publisher's parity-pinned
+  `hunkWatchPaths` — "The centralized path seam".
 - The family guard is a regression backstop + consumer-census oracle, never completeness — "The
   source-scan guard is a backstop"; sweeps need three grep forms — "Path-root sweeps".
 - Forward-only idempotent doctor migrations: the move/identical-drop/conflict-retain triad
@@ -54,6 +55,18 @@ seam (`cache.workflow_dir` / `workflowDir`) — it was already centralized there
 guards allowlist BOTH `paths` and `cache`. The Pi-root helpers (`perk_dir`/`perkDir`, returning
 `<root>/.pi`) were deleted as dead code — zero callers on either plane, and the names contradicted
 the ownership contract (`.pi/` is a discovery namespace, not perk-owned).
+
+One intentional **external-plane exception** rides the TS guard's allowlist alongside those two
+seams: `extension/hunkFeedback/perkFeedback.ts::hunkWatchPaths` constructs
+`.perk/workflow/hunk-watch` directly. The bundled Hunk publisher ships **standalone** into the
+wheel and loads under Hunk's runtime, so it cannot import the cache seam (contracts.md §8.58);
+`extension/pathsGuard.test.ts` names the file in its `ALLOWLIST`, and a path-parity test
+(`extension/hunkFeedback/perkFeedback.test.ts` — "path parity: hunkWatchPaths equals the interior
+cache-seam helpers") pins `hunkWatchPaths` to the cache seam's `hunkWatchDir`/`hunkOutboxPath`;
+the cache side carries the mirror comment naming its hunk-plane twin. The generalizable shape: a
+consumer that structurally cannot import the seam gets a NAMED allowlist entry plus a parity test,
+never a silent duplicate. (The Python guard carries no such exception — the publisher is TS-plane
+only.)
 
 Establishing the redirectable seam **first** is what makes each later move-phase a localized edit:
 `config_dir` is the single config-family redirection point, and the file helpers
@@ -221,7 +234,8 @@ skills** at `.perk/skills/` (`REPO_SKILLS_REL`). The doctor migrations are live 
 migrations follow the move/identical-drop/conflict-retain triad above, while
 `_migrate_legacy_workflow_cache` moves its two root mirrors only when the target is absent (a
 present target is kept). Enforcement: `tests/test_paths_guard.py` +
-`extension/pathsGuard.test.ts`; the layout SSOT is
+`extension/pathsGuard.test.ts` (whose `ALLOWLIST` carries the one sanctioned exception,
+`hunkFeedback/perkFeedback.ts`); the layout SSOT is
 `docs/user-docs/reference/configuration/repository-layout.md`.
 
 Objective #878 is GitHub-backed (header + roadmap-only, no Reconcilable prose region) → landed

@@ -20,9 +20,11 @@ reveals.
   widenings audit what becomes reachable, and zero-argument selector-dependent tools are never
   exposed in unbound (main-root) sessions — "The stage-scoping sibling trap" (+ "Plan census: a
   new warm tool must name the toolGating rows").
-- Warm handlers never do the durable work: they DRIVE the session (`pi.sendUserMessage` guidance
-  + the binding suffix) — "Warm commands DRIVE the session; they don't dead-end or do work in
-  the handler".
+- Warm handlers never compose a GitHub mutation themselves: with a validated artifact (or
+  already-committed workflow state) they delegate the durable write directly to the cold door
+  (`runColdDoor` — `/land`, `/plan-save`, `/gist-save`); otherwise they DRIVE the session
+  (`pi.sendUserMessage` guidance + the binding suffix) — "Durable work in a warm handler: direct
+  cold delegation vs session-driving".
 - A warm door must render EVERY cold-door outcome — success / failure / absent; a truthy ternary
   collapsing "failed" into "" is a silent partial failure — "A warm door must render EVERY
   cold-door outcome".
@@ -136,11 +138,28 @@ Present-tense status: today `/objective-save` is the **artifact-first manual fai
 a validated `objective_draft` artifact when one exists; the on-ramp + drive-the-session shapes
 above remain its no-draft arm.
 
-## Warm commands DRIVE the session; they don't dead-end or do work in the handler
+## Durable work in a warm handler: direct cold delegation vs session-driving
 
-The durable pattern shared by **every** warm perk workflow command (`/address`, `/objective-plan`,
-`/objective-reconcile`, `/objective-save` (no-draft arm), `/learn-docs`, `/learn`): the handler
-does **not** do the durable work itself. It **drives the session** —
+Warm handlers split durable work along a three-way boundary — the surviving law is narrower than
+"never do durable work":
+
+- **Direct cold delegation (artifact-first).** When a validated artifact — or already-committed
+  workflow state — carries the full payload, the handler performs the durable step itself by
+  invoking the cold door synchronously: `/plan-save` (`approvalSave` → `coldDoorPlanBackend` →
+  `runColdDoor(["plan", "save", …])`, `extension/pi/v1/plan.ts`), `/gist-save`'s valid-draft arm
+  (`gistApprovalSave` + `coldDoorGistBackend` → `runColdDoor(["gist", "create", …])`,
+  `extension/pi/v1/gist.ts`), and `/land` (`landPr` → `runColdDoor(["pr", "land", …])`,
+  `extension/pi/v1/delivery/land.ts` — keyed off the worktree's plan-ref/submitted PR rather than
+  a draft artifact).
+- **Direct GitHub mutation — never.** In every live shape the mutation itself stays owned by the
+  cold Python door; no warm handler composes a `gh`/API mutation in TS.
+- **Genuine session-driving.** When the payload must be produced by the model, the handler injects
+  guidance and the model does the work through the canonical tool (e.g. `/address`). The rest of
+  this section is that discipline.
+
+The pattern shared by every **session-driving** warm workflow command (`/address`, `/objective-plan`,
+`/objective-reconcile`, `/objective-save` (no-draft arm), `/gist-save` (no-draft arm), `/learn-docs`,
+`/learn`): the handler does **not** do the durable work itself. It **drives the session** —
 
 ```
 pi.sendUserMessage(<pureGuidance>(...) + bindingSuffix(ctx.cwd, "<trigger>"))
@@ -151,7 +170,8 @@ and inject guidance; the **model then performs the work by calling the canonical
 carries the structure. Structured-write integrity is preserved because the durable write still flows
 through the tool, never a scrape — the command performs no GitHub mutation itself. When you find a
 perk command that *prints an instruction to the agent* instead of injecting a driving message,
-that's the bug — convert it to the driving pattern.
+that's the bug — convert it to the driving pattern (or, when a validated artifact already carries
+the payload, to direct cold delegation).
 
 Conventions that generalize:
 
@@ -235,7 +255,7 @@ entering the gate must add **zero** exit logic, or it forks the mode lifecycle.
 
 ## A terminating surface can drive the *next* pass
 
-The section above covers "warm commands DRIVE the session." This adds the case where the driving
+The section above covers the session-driving shape. This adds the case where the driving
 surface is **terminating** (the `land` tool returns `{ terminate: true }`): `/land` (and the `land`
 tool) auto-drives `/objective-reconcile` instead of printing a copy-pasteable nudge.
 
