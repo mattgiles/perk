@@ -1,8 +1,9 @@
 # Native-wake review streaming: development baseline and live protocol
 
 **Date:** 2026-09-05. **Status: IN PROGRESS — not submission evidence yet.** The repo-local
-background-launch prerequisite passed. Required live legs T/B/D/N/U remain **unobserved / not
-passed**. This record does not certify native streaming, global hosts, or consumer compatibility.
+background-launch prerequisite and live terminal leg T passed. Required live legs B/D/N/U
+remain **unobserved / not passed**. This record does not certify the remaining streaming routes,
+global hosts, or consumer compatibility.
 
 ## Part A — repeatable protocol and preconditions
 
@@ -209,9 +210,9 @@ Disposable draft PR **#2228**, branch `dogfood/native-wake-2226-01M1SNZF`, head
 `verdict` is independently checkable against the real source. It must be closed unmerged after
 T/B/U. The target checkout is `live/target`, owned by the isolated driver's worktree list.
 
-The one-shot `live/start-T.sh` is prepared but has **not been run**. It starts an interactive
-session with logs under `live/T/parent`, does not launch a wave itself, and asks the human to
-invoke `/pr-review-terminal 2228` once. Its only added parent instructions are the disposable
+The human ran the one-shot `live/start-T.sh`, starting an interactive session with logs under
+`live/T/parent`, then invoked `/pr-review-terminal 2228` once. The wrapper did not launch a wave
+itself. Its only added parent instructions are the disposable
 no-post/no-save/no-repository-edit/no-retry boundaries and a pause after reconciliation; it does
 not coach the relay mechanism or reviewer output. The normal door/tool/skill carriers own that.
 
@@ -219,12 +220,84 @@ not coach the relay mechanism or reviewer output. The normal door/tool/skill car
 
 | Leg | Exercised SHA | Verdict | Evidence |
 | --- | --- | --- | --- |
-| T | — | Unobserved / not passed | Awaiting fresh human-operated interactive session |
+| T | `bdf6dd29a380fbc0b7fe999d1746573318a25555` | PASS | Native supervisor relay → one real hunk comment → one final collect; evidence below |
 | B | — | Unobserved / not passed | Awaiting fresh human-operated interactive session |
 | D | — | Unobserved / not passed | Awaiting fresh normal plan handoff and browser session |
 | N | — | Unobserved / not passed | Awaiting fresh normal plan handoff and browser session |
 | U | — | Unobserved / not passed | Awaiting isolated driver, bridge-off capture and restoration |
 
-No streaming defect verdict or full teardown verdict is claimed yet. Submission remains blocked
-on these observations and independently verified teardown. The original failing baseline and
-historical held-turn measurements remain unchanged in their respective archive records.
+No full teardown verdict is claimed yet. Submission remains blocked on the remaining legs and
+independently verified teardown. The original failing baseline and historical held-turn
+measurements remain unchanged in their respective archive records.
+
+### Leg T — PASS: native batches reach the real hunk sink
+
+The human reported successful Pi startup, hunk opening after only entering
+`/pr-review-terminal 2228`, visible reviewer comments, **no messages/nudges after launch**, one
+final visible comment, and no errors. The screenshot `Screenshot 2026-09-05 at 5.51.45 PM.png`
+was inspected directly: it shows the new documentation file and one **correctness** note at
+new line 7, titled “Schema reference reverses the actual contract (verdict is forbidden, not
+required)”, with the expected explanatory body. A retained copy is `live/T/hunk-final.png`,
+SHA-256 `f0b0c7870b5983d73530776a73ab99e190d46e21d08fc13aa6a500c97b28267b`.
+The user was unsure of visual timing; the JSONL order below supplies that proof instead.
+
+Parent session: `01a0738c-62e9-7292-8ab0-1282472a1d93`, model
+`anthropic/claude-opus-4-8`, driver cwd/branch/SHA and host exactly as recorded above.
+One workflow: `97f67310-010a-4297-8ea9-d5091d568dc9`, parent process PID 27911.
+Four real fresh-context background children, all model `openai/gpt-6-astra`, with distinct
+runner PIDs and observed runner exits 0:
+
+| Lane | Child run | Runner PID | Final streamed / findings |
+| --- | --- | --- | --- |
+| claimed-intent | `42d40796-fabf-4a41-b154-ed1c2773d3d5` | 28245 | true / 1 |
+| correctness | `92b4f33a-941f-4359-aa33-89b9a2c7bfb2` | 28246 | true / 1 |
+| tests | `03f43690-9873-4f2f-949f-8037097bbb05` | 28247 | false / 0 |
+| ponytail | `c47e274e-bcc5-4406-bba4-97660c588705` | 28248 | false / 0 |
+
+Ponytail metadata names the source-bound `ponytail-review` skill. The unchanged reviewer
+allowlists received working `contact_supervisor` and `structured_output` capabilities; both
+finding-producing lanes used the former and all four used the latter successfully. No
+production launch-mode, capability, or profile override was introduced.
+
+Decisive order (UTC, 2026-09-05; persisted JSONL timestamps):
+
+| Time | Event |
+| --- | --- |
+| 21:50:32.123 | Single start accepted, requested/runnable = claimed-intent, correctness, tests, ponytail; no preflight failures. |
+| 21:50:35.072 | Parent assistant ends its launch turn (`stopReason: stop`). |
+| 21:51:07.176 | Correctness child receives “Supervisor progress update queued.” with `delivered: true`, request `34a2929e-cae8-4e1e-b25a-42dced18ab24`; batch contains one nonempty finding. |
+| 21:51:07.318 | Native `subagent_supervisor_request` is injected into idle parent; next parent action is the hunk handshake, without human input. |
+| 21:51:08.938 | Claimed-intent child receives the same successful queue result for request `36e9a73b-ad3a-4e95-b862-721669947505`, also one finding. |
+| 21:51:12.177 | Hunk handshake succeeds: session `191b55a2-647e-4b15-9817-388192913377`, agent notes visible, 0 live comments. |
+| 21:51:12.178 | Second native batch is delivered while the parent relay turn is active. |
+| 21:51:16.052 | Workflow terminal status records completion; both nonempty submissions precede this. |
+| 21:51:29.919 | Provisional `hunk session comment apply` returns “Applied 1 live comments”, new line 7, id `mcp:7ac89b37-5604-407a-9453-a6a42ee90142:0`. Parent explicitly retains its path+line ledger and dedupes the second same-anchor batch. |
+| 21:51:29.920 | Native `subagent-notify` enters the parent with `Workflow run: 97f67310-010a-4297-8ea9-d5091d568dc9`. |
+| 21:51:32.188 | The single `collect_review_wave` returns ok, complete=true, all four covered, failures=[], one attempt. |
+| 21:51:45.223 | Parent finishes reconciliation and ends the relay turn. One unioned finding, already pushed; no final unpushed remainder or duplicate sink effect. |
+
+The provisional sink push happened **after** workflow settlement but **before** the parent
+received matching completion and before collection/final reconciliation. That satisfies the
+planned ordering contract; it is not a parent-versus-child speed test. Progress queued into the
+active relay turn and matching completion followed a tool return; no artificial extra turn
+boundary was introduced.
+
+The collected tool text includes the neutral disclosure:
+
+```text
+Review wave complete: covered 4/4 angle(s).
+perk: collect_review_wave — no provisional batches (no findings): tests, ponytail
+```
+
+The parent retained tests' factual `fyi` without pushing it. There were exactly one start, one
+hunk comment-apply, and one successful collect, no wait/poll tool, no manual status-file
+reconciliation, no re-collect, and no late provisional replay in the captured parent session.
+A subsequent read-only hunk comment listing still contains exactly the same single comment
+id/anchor; read-only GitHub verification showed `{state: OPEN, isDraft: true, review_count: 0}`.
+No review was posted. Pi/hunk and the checkout remain open pending human-confirmed closure;
+cleanup has not yet been claimed.
+
+Raw parent/child session snapshots and workflow/child status receipts are retained under
+`live/T/captured-runtime/`; compact extracted evidence is in `live/T/evidence.json`, with
+`hunk-session.txt`, `hunk-comments.txt`, and `github-posting-check.json`. These paths are
+non-authoritative conveniences; the sanitized decisive observations above survive their removal.
