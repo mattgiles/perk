@@ -21,9 +21,13 @@ non-obvious rules an agent can't derive from any single file.
 
 > **Version anchoring.** Upstream mechanics in this doc are source-read against the installed
 > pi-subagents at the version pinned by `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`
-> (`src/perk/convergence/doctor/checks.py`) — bumped only on a deliberate guidance re-verify; the
-> doctor `subagent-compat` check warns when installed ≠ verified. Version numbers appearing in
-> this doc name upstream **events** (when a behavior changed), never verification currency.
+> (`src/perk/convergence/doctor/checks.py`) — **0.52.1** at this writing, bumped only on a
+> deliberate guidance re-verify; the doctor `subagent-compat` check warns when installed ≠
+> verified. One exception class: claims marked inline "verified against the installed 0.64.x
+> source" were spot re-verified against pi-subagents 0.64.x (the 2026-09 dream audit) — those
+> markers name verification currency for exactly those claims and run ahead of the 0.52.1
+> baseline, which stays put until a deliberate full re-verify. Every **other** version number in
+> this doc names an upstream **event** (when a behavior changed), never verification currency.
 
 ## Distillation
 
@@ -85,7 +89,7 @@ perk def's model — but perk's sanctioned knob remains `[models.subagents]` + t
 ## Builtins are OFF in every perk repo — and the re-enable precedence
 
 pi-subagents' **builtin** agents are disabled in every perk repo via the managed
-`subagents.disableBuiltins: true`, delivered by `_converge_subagents` (`perk/convergence/init/settings.py`).
+`subagents.disableBuiltins: true`, delivered by `_converge_subagents` (`src/perk/convergence/init/settings.py`).
 perk borrows pi-subagents as the delegation *engine only* and ships its own `perk.*` defs, so the
 builtins are model-facing noise everywhere — this is perk's posture, not a per-repo config knob
 (there is no `.perk/config.toml` involvement; see `borrowed-packages.md` for why a borrowed
@@ -645,7 +649,7 @@ schemas are module constants, nothing prompt-transcribed):
   steering a child into acceptance-report-shaped `structured_output` attempts (schema-rejected,
   run failed). perk's report-wave module therefore passes the explicit disable
   `acceptance: {level: "none", reason}` on EVERY wave spawn (`WAVE_ACCEPTANCE` in
-  `extension/waves/reportWave.ts` — the sanctioned shape: `explicitAcceptanceCanDisable`;
+  `extension/waves/transport.ts` — the sanctioned shape: `explicitAcceptanceCanDisable`;
   `formatAcceptancePrompt` emits nothing at level none); delivery to each lane child rides the
   workflow-defaults spread (`prepareWorkflowLaunchParams`). Module-wide, no opt-out; the doctor
   `subagent-compat` probe row "explicit acceptance disable" is the drift tripwire.
@@ -780,7 +784,7 @@ the `post_pr_review` tool turn + the `last_pr_review` record have existed since 
 ## Cross-references
 
 - `extension/pi/v1/codeReview/automated.ts` — `prReviewGuidance` (judgment-bearing inputs only — the guidance no longer carries wave mechanics), `installAutomatedReviewBindings` (the flow-scoped `run_pr_review_wave` tool + the `post_pr_review` clean guard); defers the review rubric to the agent prompt
-- `extension/waves/reportWave.ts` (+ `rpcAdapter.ts`, `memoryAdapter.ts`) — the Perk-owned report-wave module over the v1 RPC seam; `/pr-review` rides it via `extension/waves/prReviewWave.ts` (`PR_REVIEW_REPORT_SCHEMA`, `runPrReviewWave` — the bounded-retry entrypoint behind `run_pr_review_wave`)
+- `extension/waves/reportWave.ts` (+ `rpcAdapter.ts`; the first-class test double is `extension/testing/memoryAdapter.ts`) — the Perk-owned report-wave module over the v1 RPC seam; `/pr-review` rides it via `extension/waves/prReviewWave.ts` (`PR_REVIEW_REPORT_SCHEMA`, `runPrReviewWave` — the bounded-retry entrypoint behind `run_pr_review_wave`)
 - `docs/learned/workflow/report-waves.md` — the perk-side report-wave module doc (flow migrations, lane semantics, guard state, wave test machinery); this doc keeps the upstream mechanics
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the `/submit` orchestration that drives the `conflict-resolver` agent
 - `agents/*.md` — the SSOT agent-def sources (delivered into `.pi/agents/perk/` by `perk init`); `agents/pr-reviewer.md` carries the entire reviewer rubric
@@ -789,7 +793,7 @@ the `post_pr_review` tool turn + the `last_pr_review` record have existed since 
 - `src/perk/convergence/init/agents.py` — `PERK_AGENTS`, `_converge_subagent_agents` (the committed managed convergence)
 - `docs/learned/workflow/init-doctor.md` — the committed-convergence-vs-symlink-mirror contrast
 - `docs/user-docs/how-to/write-a-custom-subagent.md` — user agents set `model:` in frontmatter (the fixed-key `[models.subagents]` boundary)
-- `perk/cli/commands/pr/review_post_cmd.py` — the canonical Python mutation (D1)
+- `src/perk/cli/commands/pr/review_post_cmd.py` — the canonical Python mutation (D1)
 - `shared/contracts.md` §8.3 — the corrected `agentOverrides` note, the agent-def delivery design, + workflow-state schema
 - `docs/learned/workflow/warm-door-commands.md` — the driving-command shape `/pr-review` departs from
 - `docs/learned/workflow/skill-bindings.md` — the `command:<id>` binding checklist (`/pr-review` is one)
