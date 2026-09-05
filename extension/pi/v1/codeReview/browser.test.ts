@@ -341,7 +341,7 @@ const PR_URL_OK_JSON = JSON.stringify({
   success: true,
   error_type: null,
   message: null,
-  pr: { number: 42, url: "https://github.com/o/r/pull/42" },
+  pr: { number: 42, url: "https://github.com/o/r/pull/42", base_ref: "topic/predecessor" },
 });
 
 /** The plannotator:request envelope the fake browser listener records. */
@@ -564,9 +564,9 @@ test("/pr-review-browser <pr>: foreign success injects ONE URL-free guidance, pr
   }
 });
 
-test("/pr-review-browser (no arg): a resolved PR injects the ACTIVE guidance homed at ctx.cwd", async () => {
+test("/pr-review-browser (no arg): a stacked PR keeps the PR-URL payload despite a conflicting plan base", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  plantPlanRef(cwd, null);
+  plantPlanRef(cwd, "main");
   const bin = fakePerk(cwd, { stdout: PR_URL_OK_JSON });
   const sink: FakeBrowser = { envelopes: [], envAtEmit: [] };
   const h = await loadPerkSession({
@@ -693,6 +693,31 @@ test("/pr-review-browser (no arg, no PR yet): feedback + annotations inject the 
     h.dispose();
   }
 });
+
+for (const base_ref of [undefined, null, 7, "", " \t\n"]) {
+  test(`/pr-review-browser: malformed locator base ${JSON.stringify(base_ref)} refuses before open/guidance`, async () => {
+    const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+    plantPlanRef(cwd, "main");
+    const bin = fakePerk(cwd, {
+      stdout: JSON.stringify({ success: true, pr: { number: 42, url: "url", base_ref } }),
+    });
+    const sink: FakeBrowser = { envelopes: [], envAtEmit: [] };
+    const h = await loadPerkSession({
+      cwd,
+      env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+      extraExtensions: [fakePlannotator(sink)],
+    });
+    const injected = spyInjections(h);
+    try {
+      await h.runCommandHandler("pr-review-browser", "");
+      assert.ok(h.notifies.some((n) => n.includes("bad_output")));
+      assert.equal(injected.length, 0);
+      assert.equal(sink.envelopes.length, 0);
+    } finally {
+      h.dispose();
+    }
+  });
+}
 
 test("/pr-review-browser (no arg): a no_plan_ref fail arm reports the pass-a-PR hint, nothing injected", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });

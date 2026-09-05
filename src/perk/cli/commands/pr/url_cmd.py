@@ -1,7 +1,8 @@
 """`perk pr url` — the read-only active-PR locator.
 
 Resolves the active plan's PR (from the local `cache.plan-ref`, exactly as `pr feedback` /
-`pr review-context` do) and emits its number + URL as `--json`. Read-only — no GitHub mutation.
+`pr review-context` do) and emits its number + URL + base branch as `--json`.
+Read-only — no GitHub mutation.
 The warm `/pr-review-browser` and `/pr-review-terminal` doors consume this in their active
 modes — the browser door fills plannotator's `code-review` `prUrl` implicitly (GitHub
 resolution stays canonical in Python).
@@ -29,6 +30,7 @@ from perk.substrate.output import user_output
 class PrUrlResult:
     number: int
     url: str
+    base_ref: str
     branch: str
 
 
@@ -72,7 +74,11 @@ def _impl(*, repo_root: Path) -> PrUrlResult:
         raise UserFacingCliError(
             f"No PR found for branch {branch!r}\nRun /submit first.", error_type="no_pr"
         )
-    return PrUrlResult(number=pr.number, url=pr.url, branch=branch)
+    if not pr.base_ref.strip():
+        raise UserFacingCliError(
+            f"PR #{pr.number} is missing its base branch", error_type="github_error"
+        )
+    return PrUrlResult(number=pr.number, url=pr.url, base_ref=pr.base_ref, branch=branch)
 
 
 def _result_to_dict(result: PrUrlResult) -> dict[str, object]:
@@ -80,7 +86,7 @@ def _result_to_dict(result: PrUrlResult) -> dict[str, object]:
         "success": True,
         "error_type": None,
         "message": None,
-        "pr": {"number": result.number, "url": result.url},
+        "pr": {"number": result.number, "url": result.url, "base_ref": result.base_ref},
     }
 
 

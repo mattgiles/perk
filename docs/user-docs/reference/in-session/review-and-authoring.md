@@ -78,10 +78,21 @@ source-bound Ponytail reviewer into hunk while they run. `claimed-intent` is man
 outside the 2–3 input cap, uses the same model/directive/report family, and is never selected or
 duplicated. A failed exact-source preflight leaves Ponytail explicitly uncovered with
 `skill-unavailable` while other lanes continue. With no target and an active PR, the same flow
-reviews the current worktree's
-since-base diff in place. Before `/submit`, it becomes a local surface-only review: no reviewers,
-no GitHub posting, and your hunk notes return for in-session triage. A malformed `http(s)://` token
-is a usage error rather than a focus note.
+reviews the current worktree in place against the merge-base of local HEAD and the **PR's current
+base branch**, even if the stored plan base or repository default differs. A published stacked
+layer is reviewed individually, not as the whole train. Local unpushed or uncommitted changes can
+appear: this is not guaranteed byte-identical to the published PR diff.
+
+The selected base is fetched best-effort (15-second timeout); an offline failure may use the cached
+ref for that same branch, even if stale. Missing PR-base metadata or an unresolvable base refuses
+before hunk launches or guidance is injected—never a fallback to a different branch. A merge-base
+failure names the PR and branch and suggests retrying with an explicit PR number/URL. An older CLI
+missing the required base field is a `bad_output` version-skew refusal.
+
+Before `/submit`, it becomes a local surface-only review: no reviewers, no GitHub posting, and your
+hunk notes return for in-session triage. Only this pre-PR mode uses the pinned plan base (or the
+repository default when null); pre-PR stacked-base inference is unchanged. A malformed
+`http(s)://` token is a usage error rather than a focus note.
 
 The door launches hunk through your interactive login shell when possible, prints
 `cd <worktree> && hunk diff <base_sha> --agent-notes`, and copies it when clipboard support is
@@ -116,9 +127,14 @@ Open the same human-in-the-loop review in Plannotator's browser code-review UI:
 /pr-review-browser [pr number|url] [focus note]
 ```
 
-Foreign, own-PR, and pre-submit modes match the terminal door. The browser opens in the background,
-reviewer batches arrive as badged `perk:<angle>` annotations, and the session remains usable while
-you review. Before submit, it is local-only and nothing posts. Malformed URL-shaped targets refuse
+Foreign, own-PR, and pre-submit mode selection matches the terminal door. In PR mode the browser
+opens the **PR URL**: Plannotator selects the published PR diff, including an individual stacked
+layer. Perk sends only `{cwd, prUrl}`, not a local diff type or default branch, and computes no
+merge-base. The shared active-PR locator still requires base metadata; missing/malformed evidence
+refuses before browser open or guidance. The browser opens in the background, reviewer batches
+arrive as badged `perk:<angle>` annotations, and the session remains usable while you review.
+Before submit, it is local-only and nothing posts; it uses the pinned plan base or repository
+default, with no change to pre-PR stacked-base inference. Malformed URL-shaped targets refuse
 rather than becoming focus text. If the local server never becomes ready, the flow degrades loudly
 to the in-session table.
 

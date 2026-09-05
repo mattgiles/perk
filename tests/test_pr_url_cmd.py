@@ -2,6 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from perk import github, plan
@@ -21,25 +22,87 @@ def _git_init(path: str) -> None:
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
 
 
-def _open_pr():
+def _open_pr(base_ref="topic/predecessor"):
     return github.PullRequest(
-        number=42, url="https://gh/o/r/pull/42", is_draft=False, state="OPEN", existed=True
+        number=42,
+        url="https://gh/o/r/pull/42",
+        is_draft=False,
+        state="OPEN",
+        existed=True,
+        base_ref=base_ref,
     )
 
 
-def test_url_success_json(monkeypatch):
-    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+@pytest.mark.parametrize("plan_base", [None, "main"])
+def test_url_success_json(monkeypatch, plan_base):
+    calls = []
+
+    def find_pr(**kwargs):
+        calls.append(kwargs)
+        return _open_pr()
+
+    monkeypatch.setattr(github, "find_pr_for_branch", find_pr)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(
+            Path(d), plan.PlanRefModel.model_validate({**_REF, "base": plan_base}).to_domain()
+        )
+        result = runner.invoke(cli, ["pr", "url", "--json"])
+        assert calls == [{"branch": "plan-7", "repo_root": Path(d).resolve()}]
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["success"] is True
+    assert data["error_type"] is None
+    assert data["pr"] == {
+        "number": 42,
+        "url": "https://gh/o/r/pull/42",
+        "base_ref": "topic/predecessor",
+    }
+
+
+@pytest.mark.parametrize("base_ref", ["", " \t\n"])
+def test_url_missing_base_refuses(monkeypatch, base_ref):
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr(base_ref))
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
         cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
         result = runner.invoke(cli, ["pr", "url", "--json"])
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     data = json.loads(result.output)
-    assert data["success"] is True
-    assert data["error_type"] is None
-    assert data["pr"]["number"] == 42
-    assert data["pr"]["url"] == "https://gh/o/r/pull/42"
+    assert data["success"] is False
+    assert data["error_type"] == "github_error"
+    assert "#42" in data["message"]
+    assert "missing its base branch" in data["message"]
+
+
+def test_url_github_error(monkeypatch):
+    def find_pr(**kwargs):
+        raise github.GitHubError("offline")
+
+    monkeypatch.setattr(github, "find_pr_for_branch", find_pr)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
+        result = runner.invoke(cli, ["pr", "url", "--json"])
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["error_type"] == "github_error"
+    assert "offline" in data["message"]
+
+
+def test_url_human_output_unchanged(monkeypatch):
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
+        result = runner.invoke(cli, ["pr", "url"])
+    assert result.exit_code == 0
+    assert result.stdout == ""
+    assert result.stderr == "PR url #42 (plan-7): https://gh/o/r/pull/42\n"
 
 
 def test_url_no_plan_ref_exits_1():

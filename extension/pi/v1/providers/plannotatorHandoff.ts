@@ -253,9 +253,9 @@ export async function requestPlannotatorCodeReview(
 
 // ------------------------------------------------------------------------ the active-PR ladder
 
-/** Where a no-arg browser review points: the active PR, a local since-base review, or fail. */
+/** Where a no-arg review points: the active PR, a local since-base review, or fail. */
 export type ReviewTarget =
-  | { mode: "pr"; prUrl: string; number: number }
+  | { mode: "pr"; prUrl: string; number: number; baseRef: string }
   | { mode: "local"; defaultBranch: string | undefined }
   | { mode: "fail"; message: string; errorType: string };
 
@@ -268,10 +268,12 @@ export type ReviewTarget =
  * arbitrary local review is plannotator's own `/plannotator-review` territory.
  */
 export function resolveReviewTarget(
-  r: ColdDoorResult<{ number: number; url: string }>,
+  r: ColdDoorResult<PrUrl>,
   planRefBase: string | null | undefined,
 ): ReviewTarget {
-  if (r.ok) return { mode: "pr", prUrl: r.data.url, number: r.data.number };
+  if (r.ok) {
+    return { mode: "pr", prUrl: r.data.url, number: r.data.number, baseRef: r.data.baseRef };
+  }
   if (r.errorType === "no_pr") return { mode: "local", defaultBranch: planRefBase ?? undefined };
   return { mode: "fail", message: r.message, errorType: r.errorType };
 }
@@ -285,14 +287,20 @@ export function planRefBaseOf(cwd: string): string | undefined {
   }
 }
 
-/** Narrow the `perk pr url --json` success payload; strict on `pr.{number,url}`. */
-export function decodePrUrl(payload: ColdJson): { number: number; url: string } | null {
+/** The decoded active-PR locator: base evidence is required, never inferred from the plan. */
+export type PrUrl = { number: number; url: string; baseRef: string };
+
+/** Narrow `pr.{number,url,base_ref}`; an older CLI missing base evidence fails closed. */
+export function decodePrUrl(payload: ColdJson): PrUrl | null {
   const pr = objectField(payload, "pr");
   if (pr === undefined) return null;
   const number = numberField(pr, "number");
   const url = stringField(pr, "url");
-  if (number === undefined || url === undefined) return null;
-  return { number, url };
+  const baseRef = stringField(pr, "base_ref");
+  if (number === undefined || url === undefined || baseRef === undefined || !baseRef.trim()) {
+    return null;
+  }
+  return { number, url, baseRef };
 }
 
 // ------------------------------------------------------------------------ respond routing

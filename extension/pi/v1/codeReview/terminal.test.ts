@@ -20,7 +20,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { writePlanRef } from "../../../substrate/cache.ts";
@@ -253,15 +253,15 @@ function gitScaffold(cwd: string): { baseSha: string } {
   return { baseSha };
 }
 
-/** Plant the plan-ref the active arm reads its pinned base from (`base: null` ⇒ repo default). */
-function plantPlanRef(cwd: string): void {
+/** Plant the plan-ref; its pinned base applies only before a PR exists (null ⇒ repo default). */
+function plantPlanRef(cwd: string, base: string | null = null): void {
   writePlanRef(cwd, {
     provider: "github",
     pr_id: "42",
     url: "https://github.com/o/r/issues/42",
     labels: [],
     objective_id: null,
-    base: null,
+    base,
   });
 }
 
@@ -269,7 +269,7 @@ const PR_URL_OK_JSON = JSON.stringify({
   success: true,
   error_type: null,
   message: null,
-  pr: { number: 42, url: "https://github.com/o/r/pull/42" },
+  pr: { number: 42, url: "https://github.com/o/r/pull/42", base_ref: "main" },
 });
 
 test("/pr-review-terminal: registers; an unparseable PR URL reports usage, no work", async () => {
@@ -401,11 +401,30 @@ test("/pr-review-terminal <pr>: a checkout failure (pr_not_found) is surfaced, n
   }
 });
 
-test("/pr-review-terminal (no arg): a resolved PR injects the ACTIVE guidance homed at ctx.cwd", async () => {
+test("/pr-review-terminal (no arg): PR base wins over plan/default; hunk uses merge-base, not tip", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const { baseSha } = gitScaffold(cwd);
-  plantPlanRef(cwd);
-  const bin = fakePerk(cwd, { stdout: PR_URL_OK_JSON });
+  const g = (...args: string[]): string =>
+    execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  // A → B → C (local layer), B → D (predecessor tip). The repository default stays at A.
+  const { baseSha: defaultSha } = gitScaffold(cwd);
+  const baseSha = g("rev-parse", "HEAD"); // B introduced work.txt (predecessor-only).
+  writeFileSync(join(cwd, "layer.txt"), "layer\n", "utf8");
+  g("add", "layer.txt");
+  g("commit", "-qm", "layer");
+  const head = g("rev-parse", "HEAD");
+  const branch = g("symbolic-ref", "HEAD");
+  const tipSha = g("commit-tree", `${baseSha}^{tree}`, "-p", baseSha, "-m", "sibling");
+  g("update-ref", "refs/remotes/origin/topic/predecessor", tipSha);
+  writeFileSync(join(cwd, "layer.txt"), "layer with local edits\n", "utf8");
+  plantPlanRef(cwd, "main");
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, {
+    stdout: JSON.stringify({
+      success: true,
+      pr: { number: 42, url: "https://github.com/o/r/pull/42", base_ref: "topic/predecessor" },
+    }),
+    argvFile,
+  });
   const hunkDir = fakeHunk(cwd);
   const h = await loadPerkSession({
     cwd,
@@ -429,6 +448,27 @@ test("/pr-review-terminal (no arg): a resolved PR injects the ACTIVE guidance ho
       "the launch line carries the since-base merge-base + --agent-notes",
     );
     assert.doesNotMatch(text, /review cleanup/);
+    assert.ok(!text.includes(defaultSha.slice(0, 12)), "not the repository/plan default A");
+    assert.ok(!text.includes(tipSha.slice(0, 12)), "not the remote predecessor tip D");
+    const entries = h.session.sessionManager.getEntries() as unknown as {
+      customType?: string;
+      data?: { text?: string };
+    }[];
+    const detail =
+      entries.find(
+        (entry) =>
+          entry.customType === REPORT_DETAIL_TYPE && entry.data?.text?.includes("ACTION NEEDED"),
+      )?.data?.text ?? "";
+    assert.ok(detail.includes(`cd ${cwd} && hunk diff ${baseSha.slice(0, 12)} --agent-notes`));
+    assert.ok(!detail.includes(defaultSha.slice(0, 12)));
+    assert.ok(!detail.includes(tipSha.slice(0, 12)));
+    const files = g("diff", "--name-only", baseSha).split("\n");
+    assert.ok(files.includes("layer.txt"), "the layer is in the diff");
+    assert.ok(!files.includes("work.txt"), "the predecessor is excluded");
+    assert.equal(g("rev-parse", "HEAD"), head, "local HEAD preserved");
+    assert.equal(g("symbolic-ref", "HEAD"), branch, "no checkout");
+    assert.equal(readFileSync(join(cwd, "layer.txt"), "utf8"), "layer with local edits\n");
+    assert.deepEqual(readFileSync(argvFile, "utf8").trim().split("\n"), ["pr", "url", "--json"]);
     const marker = pointer("perk-pr-review-terminal");
     assert.equal(text.split(marker).length - 1, 1, "exactly one pointer");
   } finally {
@@ -489,6 +529,80 @@ test("/pr-review-terminal (no arg, no PR yet): the reviewers-skipped note + the 
   }
 });
 
+test("/pr-review-terminal (pre-PR): a nondefault pinned base stays authoritative", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const { baseSha: defaultSha } = gitScaffold(cwd);
+  const baseSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
+  execFileSync("git", ["update-ref", "refs/remotes/origin/release-1.x", baseSha], { cwd });
+  plantPlanRef(cwd, "release-1.x");
+  const bin = fakePerk(cwd, {
+    stdout: JSON.stringify({ success: false, error_type: "no_pr", message: "No PR found" }),
+    code: 1,
+  });
+  const hunkDir = fakeHunk(cwd);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin, PATH: `${hunkDir}:${process.env.PATH ?? ""}` },
+  });
+  const injected = spyInjections(h);
+  try {
+    await h.runCommandHandler("pr-review-terminal", "");
+    assert.equal(injected.length, 1);
+    const text = injected[0] ?? "";
+    assert.match(text, /NO reviewers were spawned/);
+    assert.ok(text.includes(`hunk diff ${baseSha.slice(0, 12)} --agent-notes`));
+    assert.ok(!text.includes(defaultSha.slice(0, 12)));
+  } finally {
+    h.dispose();
+  }
+});
+
+for (const failure of [
+  {
+    name: "legacy success",
+    json: { success: true, pr: { number: 42, url: "url" } },
+    code: 0,
+    error: "bad_output",
+  },
+  {
+    name: "blank-base success",
+    json: { success: true, pr: { number: 42, url: "url", base_ref: "  " } },
+    code: 0,
+    error: "bad_output",
+  },
+  {
+    name: "cold missing-base refusal",
+    json: {
+      success: false,
+      error_type: "github_error",
+      message: "PR #42 is missing its base branch",
+    },
+    code: 1,
+    error: "github_error",
+  },
+]) {
+  test(`/pr-review-terminal: ${failure.name} refuses before launch/guidance`, async () => {
+    const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+    gitScaffold(cwd);
+    plantPlanRef(cwd, "main");
+    const bin = fakePerk(cwd, { stdout: JSON.stringify(failure.json), code: failure.code });
+    const hunkDir = fakeHunk(cwd);
+    const h = await loadPerkSession({
+      cwd,
+      env: { PERK_RUN_ID: "01RID", PERK_BIN: bin, PATH: `${hunkDir}:${process.env.PATH ?? ""}` },
+    });
+    const injected = spyInjections(h);
+    try {
+      await h.runCommandHandler("pr-review-terminal", "");
+      assert.ok(h.notifies.some((n) => n.includes(failure.error)));
+      assert.equal(injected.length, 0);
+      assert.ok(!h.notifyEvents.some((e) => e.message.includes("ACTION NEEDED")));
+    } finally {
+      h.dispose();
+    }
+  });
+}
+
 test("/pr-review-terminal (no arg): a no_plan_ref fail arm reports the pass-a-PR hint, nothing injected", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   gitScaffold(cwd);
@@ -522,16 +636,15 @@ test("/pr-review-terminal (no arg): a no_plan_ref fail arm reports the pass-a-PR
 
 test("/pr-review-terminal (no arg): an unresolvable merge-base errors loudly, nothing launched/injected", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  // A repo WITHOUT origin/main or origin/HEAD: sinceBaseSha resolves null.
-  const g = (...args: string[]) => execFileSync("git", args, { cwd, stdio: "ignore" });
-  g("init", "-q");
-  g("config", "user.email", "t@example.com");
-  g("config", "user.name", "perk tests");
-  writeFileSync(join(cwd, "seed.txt"), "seed\n", "utf8");
-  g("add", "-A");
-  g("commit", "-qm", "base");
-  plantPlanRef(cwd);
-  const bin = fakePerk(cwd, { stdout: PR_URL_OK_JSON });
+  // The default is resolvable, but the selected PR base is absent: never widen to main.
+  gitScaffold(cwd);
+  plantPlanRef(cwd, "main");
+  const bin = fakePerk(cwd, {
+    stdout: JSON.stringify({
+      success: true,
+      pr: { number: 42, url: "https://github.com/o/r/pull/42", base_ref: "topic/missing" },
+    }),
+  });
   const hunkDir = fakeHunk(cwd);
   const h = await loadPerkSession({
     cwd,
@@ -542,7 +655,9 @@ test("/pr-review-terminal (no arg): an unresolvable merge-base errors loudly, no
     await h.runCommandHandler("pr-review-terminal", "");
     assert.ok(
       h.notifies.some((n) =>
-        n.includes("could not resolve the since-base merge-base — pass a PR number/URL instead"),
+        n.includes(
+          "could not resolve the since-base merge-base for PR #42 against base branch 'topic/missing' — pass a PR number/URL instead",
+        ),
       ),
       "the merge-base failure is loud",
     );

@@ -8,7 +8,8 @@
 //             injected guidance holds the `subagent_wait` relay loop and the hunk sink).
 //   active  — `/pr-review-terminal [focus]` from a plan worktree whose branch HAS a PR: the same
 //             flow re-homed to the human's own worktree (no checkout, no cleanup) on the local
-//             since-base diff (`sinceBaseSha` — best-effort fetch, then merge-base).
+//             diff against the PR's current base (`sinceBaseSha` — best-effort fetch, then
+//             merge-base), never the plan-ref or repository default.
 //   local   — no PR yet (`perk pr url` → `no_pr`): a surface-only since-base review — hunk is
 //             launched, NO reviewers are spawned and NOTHING posts to GitHub; the guidance is a
 //             minimal notes read-back loop.
@@ -28,6 +29,7 @@ import { render } from "../../../substrate/prompts.ts";
 import { report } from "../../../surfaces/report.ts";
 import {
   decodePrUrl,
+  type PrUrl,
   planRefBaseOf,
   resolveReviewTarget,
 } from "../providers/plannotatorHandoff.ts";
@@ -191,14 +193,11 @@ export function installPrReviewTerminalBindings(pi: ExtensionAPI): void {
       }
 
       // The active arm: resolve the worktree's own PR via the shared active-PR ladder.
-      const r = await runColdDoor<{ number: number; url: string }>(
-        pi,
-        ctx,
-        ["pr", "url", "--json"],
-        { label: "perk pr url", decode: decodePrUrl },
-      );
-      const planRefBase = planRefBaseOf(ctx.cwd);
-      const target = resolveReviewTarget(r, planRefBase);
+      const r = await runColdDoor<PrUrl>(pi, ctx, ["pr", "url", "--json"], {
+        label: "perk pr url",
+        decode: decodePrUrl,
+      });
+      const target = resolveReviewTarget(r, planRefBaseOf(ctx.cwd));
       if (target.mode === "fail") {
         report(
           ctx,
@@ -211,18 +210,20 @@ export function installPrReviewTerminalBindings(pi: ExtensionAPI): void {
       }
 
       // The since-base merge-base (best-effort fetch first): the sha hunk diffs the working tree
-      // against. On the local arm the target threads the plan-ref's pinned base; on the PR arm
-      // the plan-ref base is read the same way (null ⇒ repo default via origin/HEAD).
+      // against. The PR's current base is authoritative; only the pre-PR local arm uses the
+      // plan-ref's pinned base (null ⇒ repo default via origin/HEAD).
       const fullSha = sinceBaseSha(
         ctx.cwd,
-        target.mode === "local" ? target.defaultBranch : planRefBase,
+        target.mode === "pr" ? target.baseRef : target.defaultBranch,
       );
       if (fullSha === null) {
         report(
           ctx,
           SCOPE,
           "error",
-          "could not resolve the since-base merge-base — pass a PR number/URL instead",
+          target.mode === "pr"
+            ? `could not resolve the since-base merge-base for PR #${target.number} against base branch '${target.baseRef}' — pass a PR number/URL instead`
+            : "could not resolve the since-base merge-base — pass a PR number/URL instead",
         );
         return;
       }

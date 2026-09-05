@@ -288,7 +288,7 @@ function prUrlJson(pr: number): Record<string, unknown> {
     error_type: null,
     message: null,
     branch: `plan-${pr}`,
-    pr: { number: pr, url: `https://github.test/o/r/pull/${pr}` },
+    pr: { number: pr, url: `https://github.test/o/r/pull/${pr}`, base_ref: "main" },
   };
 }
 
