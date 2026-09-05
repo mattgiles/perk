@@ -93,16 +93,22 @@ overrides via `pi config -l`; see
 The `package` group also carries the report-only `subagent-compat` check: it reads the installed
 pi-subagents version and probes the installed source for the orchestration surfaces perk's
 guidance assumes (`workflowScript` orchestration, the `outputSchema` → `structuredOutput`
-results, the `subagent_wait` async wait tool, the supervisor channel, the v1 extension RPC
-events, retained
+results, the async completion-notification wake, the supervisor channel, the supervisor
+request message type, the v1 extension RPC events, retained
 children + the retained-child resume contract, the statement-body explicit-return script
-wrapper, the completion-receipt surfaces — the wait-completion projection,
-`details.completions` on `subagent_wait`, and the serialized workflow child `runId` — and the
-streaming-wave delivery-chain surfaces: session-scoped supervisor delivery, the orchestrator
-session env stamps, the in-process async workflow host, and the foreground default for workflow
-children — plus the explicit acceptance-disable surface and invocation-local skill mechanics the
+wrapper, the completion-receipt surfaces — the wait-completion projection, the wait tool's
+`details.completions`, and the serialized workflow child `runId` — and the
+streaming-wave delivery-chain surfaces: session-scoped supervisor delivery, the typed child
+supervisor-channel config, the in-process async workflow host, and the omitted-async await
+semantics for workflow children — plus the intercom-bridge tool-delivery surface, the explicit
+acceptance-disable surface, and invocation-local skill mechanics the
 report-wave spawn contract relies on: workflow-item `skill`, agent `skillPath`, local-path
-precedence over global name resolution, and async skill injection). When the package is
+precedence over global name resolution, and async skill injection). One **behavior arm** runs
+after the substring probes: the installed engine's own `validateWorkflowScript` is executed
+over perk's bundled representative wave script, so a validator that rejects what perk's
+renderer emits joins the divergences; when the arm cannot evaluate (no `node`, a missing
+fixture, a failed spawn) the detail carries a visible `behavior probe skipped (…)` note and
+the status is unaffected. When the package is
 not installed (pi lazy-installs it at launch) the check is `info` — compatibility is simply not
 evaluated. On any divergence it warns **loudly** but never fails, and there is no `--fix` arm —
 pi-subagents deliberately stays unpinned, so the check is an early-warning surface, not an

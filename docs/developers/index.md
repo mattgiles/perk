@@ -18,5 +18,6 @@ subdirectory per kind.
 | [How to audit recorded sessions](./auditing-sessions.md) | How-to | you want to audit perk's recorded Pi sessions and triage the resulting leads |
 | [Why perk audits sessions](./why-session-audit.md) | Explanation | you want to understand why the audit exists and why it favors honest degradation over enforcement |
 | [Releasing perk](./releasing.md) | How-to | you are cutting a release — the version graph, the two-phase changelog convention, the coordinated dual-plane (PyPI + npm) runbook, and incident handling |
+| [How to re-verify the pi-subagents baseline](./pi-subagents-reverify.md) | How-to | the doctor `subagent-compat` check warns, the installed≠verified note appears, or you are about to build on new engine mechanics — the unpinned-dependency re-verify procedure |
 | [Release checklist](./release-checklist.md) | How-to | you are doing the one-time publishing setup (accounts, npm scope + `NPM_TOKEN`, GitHub environments, trusted publishers) or the TestPyPI rehearsal |
 | [Changelog categorizer instruction](./changelog-categorizer.md) | Reference | you (or a classifying agent) need the canonical rules for turning `perk-dev changelog-commits` facts into a reviewed changelog proposal |

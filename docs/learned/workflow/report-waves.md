@@ -13,8 +13,10 @@ flow's prompt mechanics onto a code-owned wave tool, the lane-normalization sema
 session-scoped guard-state patterns, and the wave test machinery worth reusing.
 
 **Doc boundary:** the *upstream* pi-subagents mechanics — the v1 RPC envelope, `outputSchema` /
-`structured_output`, the supervisor channel, `mission: false`, `subagent_wait` — live in
-`docs/learned/pi/subagents.md`. Cross-link them; don't duplicate them here.
+`structured_output`, the supervisor channel, `mission: false`, the completion-notification wake
+(`"subagent-notify"`) and the `bg_wait` background-wait tool (the renamed `subagent_wait`;
+perk does not adopt it) — live in `docs/learned/pi/subagents.md`. Cross-link them; don't
+duplicate them here.
 
 ## Distillation
 
@@ -382,7 +384,10 @@ Flow state holds only the opaque ref — which wave is *current* is flow policy:
 `extension/authoring/review/draftContext.ts`, created per-activation in `index.ts` and threaded
 to the tool pair AND both browser doors, never module-global. Collect races the pending result
 against a bounded, environment-overridable grace (`PERK_WAVE_COLLECT_GRACE_MS` — wave-owned) to
-absorb the completion-event versus `subagent_wait` wake race. An unsettled result soft-fails
+absorb the completion-event versus wait-wake race (**currency note:** "`subagent_wait` wake"
+was the 0.52-era wording — at the 0.65.1 baseline the wait tool is `bg_wait` and perk's relay
+loop still prescribes the removed name; Phase 2 of the compat objective rewrites the relay onto
+the native wakes, and the grace race description with it). An unsettled result soft-fails
 while retaining pending; the module timeout eventually settles a stuck run and a later collect
 drains it. The flow-side slot clear is identity-guarded: a supersede landing during an in-flight
 collect's await never erases the NEW pending wave (the drain/race pins live in
