@@ -6,9 +6,19 @@ cluster: toolchain-gotchas
 
 # Worktree `node_modules` resolution
 
-A perk worktree under `.worktrees/` has **no `node_modules` of its own**, so `node --test` / `tsc`
-resolve `@earendil-works/*` by walking **up to the parent repo's `node_modules`** (the shared root
-checkout). This is a real trap with two distinct symptoms.
+A perk worktree has **two npm worlds** that never overlap. The **root `node_modules`** is perk's
+own dev-tool tree — what `tsc` / `node --test` resolve — and a linked worktree under `.worktrees/`
+has none of its own until `npm ci`/`npm install` runs there, so those tools walk **up to the
+parent repo's `node_modules`** (the shared root checkout). The **`.pi/npm/` install root** is Pi's
+separately staged extension-install world: `materialize_extensions`
+(`src/perk/run/launch/materialize.py`) clone-copies the converged repo-root `.pi/npm/` into fresh
+worktrees (see `workflow/cold-door-launch.md` §"Launch banner + worktree `.pi/npm` pre-staging";
+drift/repair mechanics in `workflow/distribution.md`). The resolution trap below is entirely a
+**root-world** phenomenon, with two distinct symptoms.
+
+One `.pi/npm`-world rule in passing: an `npm ci --prefix .pi/npm` EUSAGE failure before a live run
+is an environment preflight blocker (the gitignored root drifts) — repair with
+`npm install --prefix .pi/npm`; detail + posture in `workflow/distribution.md`.
 
 ## Symptom 1: pre-existing failures in files you never touched
 
@@ -64,24 +74,10 @@ naming files/tests absent from your branch means *re-check `git log origin/main`
 (the same "red in files I never touched" family, with a moving branch point instead of a stale
 SDK).
 
-Two sibling reaffirmations live in `workflow/pydantic-boundary-models.md` §"Process + toolchain
-reaffirmations" (their corpus home): the SIGTERM/143 no-`FAILED`-line kill (rerun first, don't
-debug) and the change-unscoped whole-tree-`ty` rule (prove a sibling's latent debt pre-existing
-via the git-stash diagnostic).
-
-### The delete/edit rebase-conflict recipe
-
-When main edits lines your branch *moved* to a new file, the rebase surfaces a delete/edit
-conflict. Resolution: **keep the deletion, then verify the moved copy already carries main's fix**
-(grep the new file for the fixed shape). When a payload shape changes, grep ALL test fixtures
-repo-wide, not just the owning module's suite (see `workflow/cold-door-client.md`'s merge-race
-fixture sweep).
-
-### Interrupted-rebase recovery
-
-When a rebase is interrupted mid-pick (e.g. a killed process leaves `.git/rebase-merge` behind),
-**never start another rebase**. Read `git status` first — it shows the done list and the staged
-pick's content — then `git commit -C <pick-sha>` the staged step and `git rebase --continue`.
+Two sibling one-line rules live here (their corpus home): **test exit 143 (SIGTERM) with no
+`FAILED` line is a transient kill — rerun before debugging**; and **whole-tree `typecheck-py`
+(ty) is change-unscoped** — a sibling's latent `tests/` ty debt lands red on `main` and blocks an
+unrelated PR; prove it pre-existing via the git-stash diagnostic above and clear it separately.
 
 ## Commit hygiene after installing in a worktree
 
@@ -94,18 +90,9 @@ annotations on transitive deps (e.g. pi-tui, typebox, marked, get-east-asian-wid
 `git checkout package-lock.json` before committing to keep the PR diff clean — these annotations are
 not part of the change.
 
-A **second lockfile-churn shape**: npm invocations during CI/verification can rewrite
-`package-lock.json` with **no dependency change at all** — e.g. a `bin` path normalization
-(`./dist/cli.js` → `dist/cli.js`) produced by a different npm version. On a dirty-tree submit
-refusal, inspect the lockfile diff for this shape and `git checkout -- package-lock.json` rather
-than investigating a phantom dependency change or committing tooling noise.
-
-## The gitignored `.pi/npm` install root drifts independently of the tracked lockfile
-
-The Pi-owned `.pi/npm` install root is gitignored, so it drifts independently of the tracked root
-lockfile — an `npm ci --prefix .pi/npm` EUSAGE failure before a live run is an **environment
-preflight blocker, not a product defect**: heal with `npm install --prefix .pi/npm`, restart the
-declared preflight without consuming attempt budget, and never commit the ignored install state.
+A second churn shape — `pi-ai` bin-path npm-normalization rewrites with no dependency change —
+has its rule and detail in `workflow/distribution.md` (§the git→npm install mirror):
+`git checkout package-lock.json` before staging when that is the only diff.
 
 ## Stale globally-installed `perk` + accidental self-converge
 
@@ -122,10 +109,9 @@ in a **scratch dir, never the worktree.**
 
 ## The stale-SDK trap generalizes: per-instance module-global registries
 
-The same premise has a sharper variant: **nested vs top-level package instances each carry their
-own module-global registries**. `pi-coding-agent` bundles its own nested copy of
-`@earendil-works/pi-ai`, so anything registered against the top-level instance is invisible to the
-runtime's nested one — see `docs/learned/pi/headless-session-drive.md` for the resolution pattern.
+**Nested vs top-level package instances each carry their own module-global registries**
+(`pi-coding-agent` bundles its own nested `@earendil-works/pi-ai`) — see
+`docs/learned/pi/headless-session-drive.md` for the resolution pattern.
 
 ## Cross-references
 
@@ -134,7 +120,9 @@ runtime's nested one — see `docs/learned/pi/headless-session-drive.md` for the
 - `docs/learned/workflow/provider-seam.md` — the `shared/providers.yaml` seam these smokes exercise
 - `docs/learned/workflow/cold-door-client.md` — the merge-race fixture sweep after a cross-plane
   shape change
-- `docs/learned/workflow/pydantic-boundary-models.md` — the SIGTERM/143 + change-unscoped-ty
-  reaffirmation bullets (§"Process + toolchain reaffirmations")
+- `docs/learned/workflow/cold-door-launch.md` — the worktree `.pi/npm` pre-staging (the two-world
+  home)
+- `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the relocated manual
+  rebase-recovery recipes (delete/edit + interrupted rebase)
 - `docs/learned/workflow/distribution.md` — the `pi-ai` bin-path lockfile churn at the release seam
 - `docs/learned/pi/headless-session-drive.md` — the nested-`pi-ai` per-instance-registry resolution
