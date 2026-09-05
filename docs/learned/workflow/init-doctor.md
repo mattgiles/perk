@@ -12,6 +12,8 @@ cluster: config-and-convergence
   repairs legacy oddities; bare `doctor` is the report-only diagnostic layer — "The split".
 - Doctor checks derive from the managed-convergence declarations — NEVER hand-author a parallel
   check — "Managed convergence is the SSOT for doctor checks".
+- Any new `Check.group` value — managed or report-only — needs `GROUP_ORDER` inclusion plus a
+  render-visibility test — "`doctor`'s human output renders only the `GROUP_ORDER` groups".
 - Growing `managed_artifacts()` requires the three-part eligibility test on the desired content —
   "The managed-artifact set (`managed_artifacts()`) — the eligibility trio".
 - An unreadable config must make destructive reconciliation a NO-OP — substituting an empty
@@ -78,9 +80,13 @@ auto-generated one). A **pure validation with no converge/`--fix` semantics** ha
 mirror, so it legitimately appends to `doctor._build_checks` directly and leaves `_apply_fixes`
 untouched (e.g. the skill-bindings `bindings` check — see `skill-bindings.md`). Doctor group strings
 are free-form (`_MANAGED_GROUP` only governs managed-convergence render grouping), and the coherence
-guard checks *capability* coverage, not an enumerated group set, so a brand-new report-only group
-renders fine. The test to apply: **does this piece have a `--fix`/converge side?** Yes → three-edit
-managed convergence; no → a report-only `_build_checks` entry.
+guard checks *capability* coverage, not groups — but `perk doctor`'s condensed human output renders
+only the `GROUP_ORDER` groups, so **any new `Check.group` value — managed or report-only — needs a
+`GROUP_ORDER` addition in `src/perk/cli/commands/doctor/render.py` plus a render-visibility test**
+(the `test_issues_group_renders` pattern in `tests/test_doctor.py`) in the same change, or the check
+surfaces only in `--json` and the exit code — see "`doctor`'s human output renders only the
+`GROUP_ORDER` groups" below. The test to apply: **does this piece have a `--fix`/converge side?**
+Yes → three-edit managed convergence; no → a report-only `_build_checks` entry.
 
 ## The managed-artifact set (`managed_artifacts()`) — the eligibility trio
 

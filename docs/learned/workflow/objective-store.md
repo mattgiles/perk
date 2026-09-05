@@ -142,15 +142,19 @@ arm needs committed `[issues] team` + `LINEAR_API_KEY`, same hinted errors).
 
 ## `backend_id` literal discipline survives the split (import-cycle avoidance)
 
-`LinearObjectiveStore.backend_id` is the module-level literal `"linear"` — **NOT** imported from the
-resolver, because the resolver module imports the backend module, so importing back would cycle. The
-GitHub store *can* reuse the shared `GITHUB_BACKEND_ID` because `objective_stores.py` imports the
-issue gateway one-directionally. The working import shape, cycle-free:
+**Every** concrete store's `backend_id` is a class-level literal — `"linear"` on both Linear
+stores; `"github"` on `GitHubObjectiveStore`, exactly as `GitHubIssueBackend.backend_id` —
+**never** imported from the resolver: `src/perk/backends/resolve.py` (which owns
+`GITHUB_BACKEND_ID` / `LINEAR_BACKEND_ID`) imports the store modules to construct them, so
+importing the constant back would cycle. An earlier version of this doc said the GitHub store *can*
+reuse the shared `GITHUB_BACKEND_ID` — superseded history: that held only while the resolver and
+the GitHub store shared the single retired module the intro names. The working import shape,
+cycle-free:
 
 ```
-objective_store (contract; imports only perk.objective)
-  ← linear_backend (imports the contract)
-  ← objective_stores (imports issues + linear_backend + the contract)
+objective_store (contract; imports no concrete backend)
+  ← github/objective_store + linear/project_store + linear/objectives (each imports the contract)
+  ← resolve (imports the concrete stores + the contract; owns the backend-id constants)
 ```
 
 ## `close_issue` is issue-tier; `close_objective` was added later onto the store
@@ -165,18 +169,23 @@ both issue-backed stores objective id == issue id, so it was behaviorally identi
   GitHub objective IS an issue), so existing GitHub-path tests that monkeypatch the issue close keep
   passing **transparently via delegation** — proving "via the store, not the issue backend" requires
   injecting a fake store.
-- **Guard asymmetry (know which guard owns which set).** That direct call trips the **issue-tier**
-  source-scan guard's allowed-set (so add `objective_stores.py` to it), NOT the objective-tier
-  guard (whose function set does not include the issue-close primitive). Cross-ref
-  `source-scan-guards.md`.
+- **Guard asymmetry (know which guard owns which set).** Today the direct delegation to the
+  issue-close primitive stays inside `src/perk/backends/github/` (the store delegates to the
+  `plans` substrate), which the consumer-boundary scan in `tests/test_resolve.py` allows
+  wholesale — no allowed-set edit is needed. Dated history: when the guards were per-tier
+  function-set scans, this delegation had to be added to the issue-tier guard's allowed-set —
+  know which guard owns which set. Cross-ref `source-scan-guards.md`.
 
-## The objective-tier source-scan guard mirrors the issue-tier one
+## The consumer-boundary source scan — the resolver is the only door
 
-The new objective-tier guard asserts no production module outside `objective_stores.py` /
-`src/perk/github/` calls the objective gateway functions. When you add it you **MUST move those
-functions OUT of the issue-tier guard's function set**, else the old scan flags the new module.
-Static conformance is one ty-checked annotated binding per store (a protocol-annotated local bound
-to the concrete instance).
+The scan lives in `tests/test_resolve.py::TestConsumerBoundary` — folded in from the retired
+`test_objective_stores.py` (per that test module's own docstring) — asserting no production module
+outside `src/perk/backends/github/` imports the substrate modules
+`perk.backends.github.{plans,objectives}` directly; both tiers now express one rule, **"the
+resolver is the only door"**. Dated history: adding the objective-tier guard (then a separate
+function-set scan) required moving the objective gateway functions OUT of the issue-tier guard's
+function set, else the old scan flagged the new module. Static conformance is one ty-checked
+annotated binding per store (a protocol-annotated local bound to the concrete instance).
 
 ## The node↔plan unification protocol (#595)
 
@@ -341,8 +350,10 @@ snapshot patched by hand.
 
 The objective-keyed engagement reads (`read_comments` / `read_description_edits` /
 `read_agent_session`) on GitHub **reuse the issue-tier honest reads** — a GitHub objective IS a
-single issue, so cross-importing the private `issues.py` mappers into `objective_stores.py` is
-allowed (same backend tier, no import-guard violation).
+single issue, so the GitHub objective store (`src/perk/backends/github/objective_store.py`) reuses
+the sibling engagement substrate (`src/perk/backends/github/engagement.py`) plus the shared private
+mappers from `src/perk/backends/github/backend.py` — same backend package/tier, no import-guard
+violation.
 
 Linear specifics:
 
