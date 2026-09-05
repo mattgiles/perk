@@ -315,12 +315,16 @@ break (the concrete instance is `/pr-review` → `command:pr-review`):
 5. **THREE** binding-count test sites: Python `tests/test_bindings.py` `EXPECTED_DEFAULTS`; TS
    `extension/substrate/bindings.test.ts` `EXPECTED` array **and** the "returns the N shipped default bindings"
    count in the test name.
-6. **TWO prose count sites** move in the same lockstep:
-   `docs/user-docs/how-to/attach-a-skill-to-a-stage.md` and its delivered mirror
-   `skills/perk-expert/references/customization-recipes.md` both enumerate the deliverable
-   command targets **and spell out their count in words** ("Ten command targets have a delivery
-   surface…" today). Both must be bumped in the same turn — they had already drifted once (stuck
-   at "eight") before that was caught. Total: the five-site code/test lockstep + 2 prose sites.
+6. **The public-doc reconciliation sweep.** The SSOT is `DELIVERABLE_COMMAND_TARGETS` in
+   `src/perk/substrate/bindings.py`; the public-prose posture is asymmetric —
+   `docs/user-docs/how-to/attach-a-skill-to-a-stage.md` deliberately does **not** enumerate the
+   targets (it instructs looking the accepted ids up), while the delivered mirror
+   `skills/perk-expert/references/customization-recipes.md` (self-contained by design) **does**
+   enumerate. When the frozenset changes, sweep every public doc that enumerates by **diffing its
+   list against the frozenset members** — never trust or bump an in-prose count. (History: the
+   spelled-out counts drifted twice — stuck at "eight", then at "Ten" against a larger set —
+   before the census prose was dropped.) Total: the five-site code/test lockstep + the public-doc
+   reconciliation sweep.
 7. If configurable: `extension/substrate/config.ts` `PerkConfig` + parser, and `src/perk/substrate/config.py` `Config` for
    forward parity — flag the Python side as possibly-unused until a cold door exists (don't omit it).
    Concretely, `src/perk/substrate/config.py`'s `SubagentsTable.pr_reviewer` (`[models.subagents]
@@ -341,13 +345,18 @@ both planes).
 
 ### A report-only check is not a hand-authored managed check
 
-This `bindings` doctor check is **report-only** (no `--fix`): a brand-new `group="bindings"` string
-renders fine, and a new report-only check just appends to `doctor._build_checks` and leaves
-`_apply_fixes` untouched. This is **not** a contradiction of the "never hand-author a check" rule in
-`init-doctor.md` — that rule forbids hand-writing a check for a piece that *has a managed
-convergence* (which would duplicate the auto-generated one). A pure validation with no converge/`--fix`
-semantics has no convergence to mirror, so it lives in `_build_checks` directly. The coherence guard
-checks *capability* coverage, not an enumerated group set, so a free-form group string is fine.
+This `bindings` doctor check is **report-only** (no `--fix`): a new report-only check just appends
+to `doctor._build_checks` and leaves `_apply_fixes` untouched. This is **not** a contradiction of
+the "never hand-author a check" rule in `init-doctor.md` — that rule forbids hand-writing a check
+for a piece that *has a managed convergence* (which would duplicate the auto-generated one). A pure
+validation with no converge/`--fix` semantics has no convergence to mirror, so it lives in
+`_build_checks` directly. Doctor group strings are free-form and the coherence guard checks
+*capability* coverage, not groups — but `perk doctor`'s condensed human output renders only the
+`GROUP_ORDER` groups, so **any new `Check.group` value — managed or report-only — needs a
+`GROUP_ORDER` addition in `src/perk/cli/commands/doctor/render.py` plus a render-visibility test**
+(the `test_issues_group_renders` pattern in `tests/test_doctor.py`) in the same change, or the
+check surfaces only in `--json`/the exit code. The `bindings` group renders because it **is** in
+`GROUP_ORDER`.
 
 ## Shipped-skill repo-specific routing: generic discovery + a repo-side anchor
 

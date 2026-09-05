@@ -14,11 +14,13 @@ shared posture below are what an agent can't derive from any single file.
 ## Write-capable cold door = borrow the `save` stage (the architectural lever)
 
 A dedicated cold door (a CLI verb, **not** a registry stage) that must WRITE the main checkout
-borrows the **`save` stage descriptor** for launch. `save` is one of three `mode: read-write,
-worktree: none` stages (`objective-save`, `gist-save`, `save` — per `shared/registry.yaml`) — and
-`worktree: none` is the load-bearing property:
-it resolves to `repo_root` (the main checkout). Every *other* read-write stage resolves to a linked
-worktree, which is wrong here (a repo-owned skill lives in the main working tree). This is the
+borrows the **`save` stage descriptor** for launch. `save`'s descriptor pairs `mode: read-write`
+with `worktree: none` — the pairing is not unique to `save` (derive the current roster of stages
+carrying it from `shared/registry.yaml`); `save` is simply **the descriptor borrowed** for
+repo-skill authoring. The positioning rule keys off the `worktree:` field: `worktree: none` is the
+load-bearing property — it resolves to `repo_root` (the main checkout) — while a read-write stage
+with `worktree: create`/`reuse` resolves to a linked worktree, which is wrong here (a repo-owned
+skill lives in the main working tree). This is the
 write-capable sibling of the read-only `plan`-stage borrow the plan factories use (cross-ref
 `plan-factories.md`).
 
