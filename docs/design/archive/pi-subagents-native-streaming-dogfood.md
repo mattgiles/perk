@@ -375,7 +375,32 @@ perk: collect_review_wave — no provisional batches (no findings): ponytail
 ```
 
 Read-only GitHub verification showed `{state: OPEN, isDraft: true, review_count: 0}`; no review
-was posted. Browser/Pi are still open pending human-confirmed closure; per-leg cleanup has not
-yet been claimed. Raw parent/child snapshots and status receipts are under
-`live/B/captured-runtime/`; sanitized timeline and extraction are `live/B/parent-timeline.json`
-and `live/B/evidence.json`, with `github-posting-check.json` and the screenshot alongside.
+was posted. The human then confirmed **“B closed”**. The parent transcript records the native
+browser response “closed … without submitting”, followed only by an in-session question (no
+posting/tool call). Independent verification found parent PID 30150 absent; the browser server
+runs in that same process. Normal `perk pr review cleanup --pr 2228 --json` returned
+`success: true, removed: true`; the checkout is absent on disk and from the driver's worktree
+list. The scratch PR remains open/unmerged with zero reviews, retained for U.
+Raw parent/child snapshots and status receipts are under `live/B/captured-runtime/`; sanitized
+timeline and extraction are `live/B/parent-timeline.json` and `live/B/evidence.json`, with
+`github-posting-check.json` and the screenshot alongside. Closure receipts are
+`parent-session-after-close.jsonl`, `checkout-cleanup.json`, `worktrees-after-cleanup.txt`, and
+`github-after-cleanup.json` in the respective capture/leg directories.
+
+### Leg D preparation — no review launched
+
+`live/start-D.sh` is prepared to start a **normal fresh `perk plan` handoff**, using the same
+repaired Pi selected first on PATH and the same inherited agent-home selection. `--no-sync`
+preserves the committed driver SHA rather than advancing the test code. A read-only launch
+preview succeeded; its preview run id is not an executed handoff. No model session or draft
+review was launched by the implementation session.
+
+The supplied `live/D-draft.md` proposes a documentation reference and contains three concrete
+review targets: a nonexistent `collectDraftReportsOnce` helper, an incorrect interpretation of
+no-findings `streamed`, and a retry-policy choice deferred to implementation. SHA-256:
+`618fb3125dc66d716282365c02ab6f816384e1324fb19717b17de4fc9f580bb4`.
+The preparation message asks the parent only to read/register those exact bytes via `plan_draft`
+and pause. It does not prescribe reviewer findings or delivery behavior, and forbids review
+launch/save/post/retry during preparation. The human will receive the custom-lens invocation
+only after working-draft identity and bytes are verified. Reviewers remain ordinary unchanged
+definitions; the draft is the intentionally flawed input, not a scripted report.
