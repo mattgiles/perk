@@ -104,22 +104,28 @@ its own `perk:binding-context` custom type**, never user turns.
 legitimately appear in a user-authored message (because a cold door seeded the user prompt with it),
 stripping user turns destroys real content.
 
-## Stage-field disambiguation when two stages share a `mode`
+## Stage-field disambiguation when stages share a `mode`
 
-`planMode.ts` originally injected plan-authoring context off **any** read-only gate. Once two
-read-only stages coexist (`plan` vs `objective-author`), the interior must know *which one* — the
-gate alone is ambiguous. The fix: a `stage` field on `perk:workflow-state`, persisted at **cold
-claim** from the handoff blob (the handoff already carried `stage` for plan-ref reconciliation, but
-it was never written into workflow-state). Then context injection keys on `(gate AND stage)`:
-`planMode` defers when `stage === "objective-author"` and `objectiveAuthoring.ts` injects instead —
-exactly one authoring context present.
+`planMode.ts` originally injected plan-authoring context off **any** read-only gate. Once a second
+read-only stage coexisted (`plan` vs `objective-author`), the interior had to know *which one* —
+the gate alone is ambiguous. The fix: a `stage` field on `perk:workflow-state`, persisted at
+**cold claim** from the handoff blob (the handoff already carried `stage` for plan-ref
+reconciliation, but it was never written into workflow-state). Context injection keys on
+`(gate AND stage)`.
+
+The current shape is **three** read-only authoring contexts sharing the gate: plan mode
+(`extension/pi/v1/plan.ts::installPlanBindings`) defers to BOTH authoring stages — its select
+callback returns no marker when the launched stage is `objective-author` OR `gist-author` — while
+`extension/pi/v1/objectiveAuthoring.ts` and `extension/pi/v1/gist.ts` each gate their own injected
+context on `(gate AND stage === <their own stage>)`. Exactly one authoring context present, however
+many stages share the mode.
 
 **Pattern:** when stages share a `mode`, persist the stage id so context injection can be keyed on
 `(gate AND stage)` rather than the mode alone.
 
 ## Cross-references
 
-- `extension/pi/v1/plan.ts` (plan mode), `extension/pi/v1/objectiveAuthoring.ts` — the two read-only authoring injectors
+- `extension/pi/v1/plan.ts` (plan mode), `extension/pi/v1/objectiveAuthoring.ts`, `extension/pi/v1/gist.ts` — the three read-only authoring injectors
 - `extension/substrate/bindingDelivery.ts` — the narrowest strip (own custom type only)
 - `extension/substrate/workflowState.ts` — `branchCarries` plus the compaction-aware `activeContextWindow`
 - `docs/learned/pi/extension-api.md` — the every-call `context` event + injected-message persistence

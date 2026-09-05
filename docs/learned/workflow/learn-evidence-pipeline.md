@@ -13,9 +13,10 @@ session-internals facts the consumers depend on.
 
 ## Distillation
 
-- Five stages, one module each: pointer carrier/resolver → JSONL byte-copy export →
-  bundle-manifest CLI → `--render` normalization → the warm multi-angle orchestrator; each
-  degrades gracefully — "The pipeline spine".
+- Five logical stages: pointer carrier/resolver → JSONL byte-copy export → bundle-manifest CLI →
+  `--render` normalization → the warm multi-angle orchestrator; each stage spans the module(s)
+  that own its seams (stage 1 alone is a carrier + a resolver module), and each degrades
+  gracefully — "The pipeline spine".
 - Cross-run identity rides the plan header (`run_id` + `impl_run_ids`); session POINTERS ride the
   self-keyed run-cache record (each run writes only under its own `run_id`) — "Cross-run
   linkage: header-linkage + self-keyed pointers".
@@ -37,7 +38,8 @@ session-internals facts the consumers depend on.
 
 ## The pipeline spine
 
-Five stages, each a separate node, each owning one module:
+Five logical stages, each a separately-landed node; a stage spans however many modules own its
+seams — the list below names the actual ownership:
 
 1. **Cross-run pointer carrier + resolver** (node 2.1) — `perk/state/session_pointers.py` (the
    `session-pointers.json` store) + `perk/learn/sessions.py` (`resolve_plan_sessions`).

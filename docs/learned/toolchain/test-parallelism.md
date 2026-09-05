@@ -18,6 +18,11 @@ parallel — local, `just test-py`/`just test`, and CI — with **no justfile ch
 
 - **`-n0` on the CLI overrides `addopts`** — the documented serial-debug escape hatch. Extra CLI
   args (`-k <expr>`) coexist with `addopts`.
+- **`-n auto` is capped, not all-cores.** `tests/conftest.py` implements pytest-xdist's
+  auto-resolution hook seam `pytest_xdist_auto_num_workers`, returning
+  `min(os.process_cpu_count() or 1, _XDIST_AUTO_WORKER_CAP)` with the cap at **6** — Git-heavy
+  subprocess contention outweighs more workers beyond that. The hook governs only `auto`
+  resolution: `-n0` and an explicit `-n <k>` bypass it.
 - The suite was already xdist-safe (env mutations are function-scoped `monkeypatch.setenv`, every
   `os.chdir` is a no-op `monkeypatch.setattr`, fixtures use `tmp_path`/`tmp_path_factory`).
   `testpaths` is **hygiene, not a fix** — pytest's default `norecursedirs` `.*` glob already
