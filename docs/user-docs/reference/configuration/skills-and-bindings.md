@@ -10,6 +10,20 @@ sidebar:
 `[skills]` controls cold-launch exposure, `[[bindings]]` delivers named skills to stages and
 commands, and `.perk/skills/` is the committed source for guidance authored by the repository.
 
+## Required skill installation
+
+`dignified-python` remains required in every perk project. It is vendored unchanged from
+Dagster, with its upstream Apache 2.0 license, and delivered by the skills CLI from perk's
+managed source (`https://github.com/mattgiles/perk`, ref `main`). Dagster is no longer a required
+source; the remaining required external sources are Astral and Matt Pocock.
+
+After upgrading perk, run `perk init` or `perk doctor --fix` to regenerate the managed declaration
+and synchronize delivery. User-owned declarations and existing caches are not cleaned up.
+
+Required installation does **not** force invocation or add a binding. The vendored skill's
+frontmatter has no `stages:` declaration, so it remains exposed to all stages unless a
+`[skills.stages]` override scopes it. Installation, exposure, and binding delivery remain separate.
+
 ## `[skills]`
 
 Controls the **layered skills-exposure model**: which skills a cold stage launch (`perk plan`,
@@ -45,10 +59,12 @@ librarian = []
 
 The model **engages only when in use**: some skill declares `stages:` frontmatter, or any
 `[skills]` content exists — a stages row, a non-empty `include_dirs`, or an explicitly set
-`include_packages`. Perk's shipped skills declare `stages:` at source, so cold stage launches are
-**scoped by default** once `.agents/skills/` is synchronized to the current perk with `perk init`
-or `perk doctor --fix`. A repository whose mirror predates those declarations stays unscoped
-(undeclared means all stages, fail-open) until the next synchronization.
+`include_packages`. Perk-authored shipped skills declare `stages:` at source; verbatim-vendored
+skills such as `ast-grep` and `dignified-python` preserve upstream frontmatter without that field.
+The authored declarations make cold stage launches **scoped by default** once `.agents/skills/`
+is synchronized to the current perk with `perk init` or `perk doctor --fix`. A repository whose
+mirror predates those declarations stays unscoped (undeclared means all stages, fail-open) until
+the next synchronization.
 
 > **Migration note — once engaged, global skills stop following you into stage sessions.** A
 > scoped launch drops Pi's global or user skill directories (`~/.pi/agent/skills`,

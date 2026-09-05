@@ -73,10 +73,10 @@ glob = "CHANGELOG.md"
 
 # ═══ How the loop fits this repo ═══
 
-# Stage exposure for borrowed external skills (contracts.md §8.39). These rows scope which cold
-# stage launches see each skill in the model-invocable catalog — frontmatter `stages:` is the
-# preferred lever, but these skills are synced byte-identical from upstream (frontmatter is
-# upstream-owned), so the config layer scopes them instead. Perk-owned skills (`skills/`,
+# Stage exposure for borrowed external and verbatim-vendored perk-hosted skills (contracts.md
+# §8.39). These rows scope which cold stage launches see each skill in the model-invocable
+# catalog — frontmatter `stages:` is the preferred lever, but these skills preserve upstream-owned
+# frontmatter, so the config layer scopes them instead. Perk-authored skills (`skills/`,
 # `.perk/skills/`) declare `stages:` in their own SKILL.md frontmatter. Bound skills are always
 # exposed at their trigger regardless of these rows. An empty list = interactive-only (exposed to
 # no cold stage launch).

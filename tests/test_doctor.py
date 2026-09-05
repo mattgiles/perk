@@ -1820,20 +1820,26 @@ def test_cache_gc_warns_on_prunable_state(scaffolded_perk_repo):
 
 
 def test_skills_manifest_drift_detected_and_fixed(scaffolded_perk_repo):
-    # The committed manifest fragment is a managed convergence: tampering is drift, and `--fix`
-    # re-converges it idempotently (grouped under "skills").
+    # A valid legacy source declaration is still drift; report-only leaves it untouched, and
+    # `--fix` re-converges it idempotently (grouped under "skills").
     fragment = scaffolded_perk_repo / ".agents" / "manifest.d" / "perk.yaml"
     assert fragment.is_file()
     report = run_doctor(scaffolded_perk_repo, verify=False)
     skills_check = next(c for c in report.checks if c.name == "skills-manifest")
     assert skills_check.status == "ok" and skills_check.group == "skills"
 
-    fragment.write_text("# clobbered\n", encoding="utf-8")
+    legacy = (
+        b"sources:\n  dagster:\n    url: https://github.com/dagster-io/skills\n    ref: master\n"
+        b"skills:\n  - source: dagster\n    name: dignified-python\n"
+    )
+    fragment.write_bytes(legacy)
     report = run_doctor(scaffolded_perk_repo, verify=False)
     assert "skills-manifest" in {c.name for c in report.checks if c.status == "fail"}
+    assert fragment.read_bytes() == legacy
 
     fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert fixed.healthy and fixed.fixed
+    assert fragment.read_text(encoding="utf-8") == init._desired_skills_manifest(False)
     again = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert again.healthy and again.fixed == []  # fix is idempotent
 
@@ -2053,9 +2059,9 @@ def test_skills_delivery_fails_on_missing_skills(
     scaffolded_perk_repo, converge_skills_workspace, stub_env
 ):
     converge_skills_workspace(scaffolded_perk_repo)
-    shutil.rmtree(scaffolded_perk_repo / ".agents" / "skills" / "perk-plan")
+    shutil.rmtree(scaffolded_perk_repo / ".agents" / "skills" / "dignified-python")
     check = _delivery_check(run_doctor(scaffolded_perk_repo, verify=True))
-    assert check.status == "fail" and "perk-plan" in check.detail
+    assert check.status == "fail" and "dignified-python" in check.detail
     assert check.remediation == "Run 'perk doctor --fix'."
 
 
@@ -2100,10 +2106,10 @@ def test_skills_delivery_self_repo_ok_when_delivered(git_repo, converge_skills_w
 
 
 def test_skills_delivery_self_repo_stale_fails(git_repo, converge_skills_workspace, stub_env):
-    # The R3 dangling-pointer case: the skill is committed AND on the local origin/main, but
+    # A perk-hosted vendored skill is committed AND on the local origin/main, but
     # .agents/skills/ lacks it — the delivered set is stale, a re-sync fixes it NOW → fail.
     _self_repo_scaffold(git_repo, converge_skills_workspace)
-    _plant_committed_layout_skill(git_repo, "perk-plan")
+    _plant_committed_layout_skill(git_repo, "dignified-python")
     subprocess.run(["git", "add", "skills"], cwd=git_repo, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-qm", "skill"], cwd=git_repo, check=True, capture_output=True)
     subprocess.run(
@@ -2112,10 +2118,10 @@ def test_skills_delivery_self_repo_stale_fails(git_repo, converge_skills_workspa
         check=True,
         capture_output=True,
     )
-    shutil.rmtree(git_repo / ".agents" / "skills" / "perk-plan")
+    shutil.rmtree(git_repo / ".agents" / "skills" / "dignified-python")
     check = _delivery_check(run_doctor(git_repo, verify=True))
     assert check.status == "fail"
-    assert "stale" in check.detail and "perk-plan" in check.detail
+    assert "stale" in check.detail and "dignified-python" in check.detail
     assert "skills update --sync" in check.remediation
 
 

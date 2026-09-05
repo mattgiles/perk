@@ -377,6 +377,20 @@ keep_recent_tokens = 20000
 objective_threshold = 0.8
 ```
 
+### Required skill installation
+
+`dignified-python` remains required in every perk project. It is vendored unchanged from
+Dagster, with its upstream Apache 2.0 license, and delivered by the skills CLI from perk's
+managed source (`https://github.com/mattgiles/perk`, ref `main`). Dagster is no longer a required
+source; the remaining required external sources are Astral and Matt Pocock.
+
+After upgrading perk, run `perk init` or `perk doctor --fix` to regenerate the managed declaration
+and synchronize delivery. User-owned declarations and existing caches are not cleaned up.
+
+Required installation does **not** force invocation or add a binding. The vendored skill's
+frontmatter has no `stages:` declaration, so it remains exposed to all stages unless a
+`[skills.stages]` override scopes it. Installation, exposure, and binding delivery remain separate.
+
 ### `[skills]`
 
 The **layered skills-exposure model**: which skills a cold stage launch exposes to the session.
@@ -407,10 +421,12 @@ librarian = []
 
 The model **engages only when in use**: some skill declares `stages:` frontmatter, or any
 `[skills]` content exists (a `stages` row, a non-empty `include_dirs`, or `include_packages`
-explicitly set). **Perk's own shipped skills declare `stages:` at source**, so once the repo's
-`.agents/skills/` mirror is synced to current perk (`perk init` / `perk doctor --fix`), cold
-stage launches are scoped **by default**; a mirror predating the declarations stays unscoped
-(undeclared → all stages, fail-open) until its next re-sync. **Once engaged, pi's global/user
+explicitly set). **Perk-authored shipped skills declare `stages:` at source**; verbatim-vendored
+skills such as `ast-grep` and `dignified-python` preserve upstream frontmatter without that field.
+The authored declarations make cold stage launches scoped **by default** once the repo's
+`.agents/skills/` mirror is synced to current perk (`perk init` / `perk doctor --fix`); a mirror
+predating the declarations stays unscoped (undeclared → all stages, fail-open) until its next
+re-sync. **Once engaged, pi's global/user
 skill dirs (`~/.pi/agent/skills`, `~/.agents/skills`) and project `.pi/skills` stop following
 into stage sessions** — whitelist a personal collection per-user in the gitignored
 `.perk/local.toml` (the standard migration move):

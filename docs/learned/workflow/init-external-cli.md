@@ -6,9 +6,10 @@ cluster: config-and-convergence
 
 # `perk init` and external CLIs
 
-perk authored skills (`skills/perk-*`) are declared in a committed manifest fragment
-(`.agents/manifest.d/perk.yaml`) and materialized by `perk init` shelling out to the external
-`skills` CLI (plan #51, PR #55). The patterns below generalize to any external CLI perk drives.
+Perk-hosted skills (`skills/<name>/`, authored or vendored) and the required external skills are
+declared in a committed manifest fragment (`.agents/manifest.d/perk.yaml`) and materialized by
+`perk init` shelling out to the external `skills` CLI. The original perk-authored delivery landed
+in plan #51, PR #55; the patterns below generalize to any external CLI perk drives.
 
 ## Distillation
 
@@ -17,11 +18,12 @@ perk authored skills (`skills/perk-*`) are declared in a committed manifest frag
   posture: D3 superseded for the skills CLI".
 - Route the whole external-CLI shell through ONE module-level patchable seam so verified init
   tests stay offline — "A single patchable seam keeps the suite offline".
-- The `skills` CLI is the SINGLE materialization path for `.agents/skills/perk-*` in both
-  self-repo and consumer trees (the pi package contributes only the extension) — "The `skills`
-  CLI is the single delivery path (both trees)".
-- `PERK_SKILLS` is a true SSOT: one alphabetical tuple edit cascades to the manifest fragment,
-  post-sync verification, and the doctor check — "The `PERK_SKILLS` SSOT cascade".
+- The `skills` CLI is the SINGLE materialization path for managed `.agents/skills/<name>` in
+  both self-repo and consumer trees (the pi package contributes only the extension) — "The
+  `skills` CLI is the single delivery path (both trees)".
+- `PERK_SKILLS` owns the perk-hosted names, authored or vendored: one alphabetical tuple edit
+  cascades to the fragment and, through `MANAGED_SKILL_NAMES`, to post-sync verification and
+  doctor — "The `PERK_SKILLS` SSOT cascade".
 - The manifest fragment is a committed declaration, never gitignored; the `skills` CLI owns the
   `.agents/` gitignore boundary — perk's block never touches it — "Committed declaration vs.
   transient state — the gitignore boundary".
@@ -142,8 +144,10 @@ One function = one patch point. Don't scatter `subprocess.run` calls across the 
 
 ## The `skills` CLI is the single delivery path (both trees)
 
-The `skills` CLI materializes `.agents/skills/perk-*` in **both** self-repo and consumer trees via
-`skills update --sync`. The `..`/`git:` Pi package contributes only the **extension** — its `pi`
+The `skills` CLI materializes every managed `.agents/skills/<name>` in **both** self-repo and
+consumer trees via `skills update --sync`. Perk-hosted includes authored and vendored skills;
+required external skills use the same delivery path. The Pi package contributes only the
+**extension** — its `pi`
 manifest no longer lists `skills`, so Pi never discovers the package's top-level `skills/` dir
 (convention auto-discovery applies *only* when no `pi` manifest is present; the manifest stays for
 `extensions`). This kills the double-load that previously emitted a noisy `[Skill conflicts]` block
@@ -161,7 +165,7 @@ Consequently the `run_init` gate dropped its `not self_repo` half (`if verify:` 
 doctor` stays read-only). The `is_self_repo(root)` split still drives install pinning (below).
 
 **Dogfooding caveat:** because the CLI clones the perk git repo at a pinned ref into a content-
-addressed worktree, a perk developer's *uncommitted* edits to `skills/perk-*/SKILL.md` are not
+addressed worktree, a perk developer's *uncommitted* edits to `skills/<name>/SKILL.md` are not
 reflected in the loaded `.agents/skills/` symlink until pushed and re-synced. The committed
 `skills/<name>/` bodies remain the in-repo source; the one-time pre-sync `is_skill_installed`
 fallback is retired — presence is strict on `.agents/skills/` everywhere, and the self-repo
@@ -179,9 +183,10 @@ committed-but-undelivered state is classified by doctor's `_skills_delivery_chec
 > that one surface. The full policy is `distribution.md` §"The three-way install-pin policy".
 
 Historically the committed fragment resolved its source `ref` the same way the Pi package entry
-did: both the self-repo **and** consumers tracked `main`. Still current: `PERK_SKILLS` is
-the SSOT tuple of fragment skill names; `_desired_skills_manifest(self_repo)` renders the YAML
-(the `self_repo` param is retained for signature stability but no longer branches the ref).
+did: both the self-repo **and** consumers tracked `main`. Still current: `PERK_SKILLS` is the
+SSOT tuple of perk-hosted fragment names; `REQUIRED_EXTERNAL_SKILLS` supplies the other required
+names. `_desired_skills_manifest(self_repo)` renders the YAML (the `self_repo` param is retained
+for signature stability but no longer branches the ref).
 
 Why `main`, not a tag — the original motivation: at the time perk had no release cadence. The
 lone `v0.0.1` tag went stale because `__version__` was never bumped and no newer version/tag was
@@ -206,34 +211,44 @@ AGENTS managed-block `perk version:` stamp, never a ref pin.
 
 ## The `PERK_SKILLS` SSOT cascade + the self-converge `missing-skill` expectation (#617)
 
-**`PERK_SKILLS` is a true SSOT — one tuple edit cascades to three mechanisms.** Adding a skill name to
-the `PERK_SKILLS` tuple in `src/perk/convergence/init/skills.py` (kept **alphabetical**) auto-regenerates the committed manifest
-fragment (the `skills-manifest` ManagedConvergence), feeds `sync_skills()`'s post-sync verification,
-and is picked up by the `skills-delivery` doctor check — **no further code change**. The SSOT holds
-even for a **non-`perk-` skill name** (e.g. a bundled upstream skill like `ast-grep`).
+**`PERK_SKILLS` is the perk-hosted SSOT — one tuple edit feeds three mechanisms.** Adding a name
+to `PERK_SKILLS` in `src/perk/convergence/init/skills.py` (kept **alphabetical**) changes the
+manifest renderer and, through the derived `MANAGED_SKILL_NAMES` union, feeds `sync_skills()`'s
+post-sync verification and the `skills-delivery` doctor check — **no bespoke delivery code**.
+Perk-hosted means authored **or vendored**, including non-`perk-` names such as `ast-grep` and
+`dignified-python`. Moving an already-required skill from an external source into `PERK_SKILLS`
+changes its source mapping without changing the verification union.
 
-**The pre-merge `missing-skill` failure is EXPECTED and non-fatal to the artifact write.** Running
-the worktree's `perk init` to regenerate the managed artifacts prints a loud
-`✗ skills delivery failed: ... missing-skill` — because the skills CLI resolves `source: perk →
-ref: main` and the new skill **isn't on `main` yet**. This is the **documented first-appearance
-path**: init **still converges** the managed artifacts (manifest fragment + AGENTS.md), which is
-exactly what you commit — don't try to "fix" the sync failure. The committed **working-tree
-`SKILL.md`** keeps the dev-tree doctor check at **warn** (never green: `is_skill_installed` is
-strict on the `.agents/skills/` delivery read path — the only path warm injection reads — and the
-skills-delivery check classifies a missing self-repo delivery as pre-merge **first appearance →
-warn** vs a **stale delivered set → fail** by probing the local `origin/main` for the committed
-`skills/<name>`), and the test suite runs with **verification disabled** so no real shell runs.
-(`perk init` also writes a gitignored `.perk/local.toml` — never appears in `git status`.)
+Regenerate the committed fragment offline with `_converge_skills_manifest(root, True, apply=True)`
+and refresh its recorded digest with `record_managed_state(root, self_repo=True)`. Compare the
+fragment to `_desired_skills_manifest(True)` and inspect the state-file diff; do not run full
+init merely to regenerate declarations.
+
+**The pre-merge `missing-skill` failure is expected and does not roll back artifact writes.**
+The recorded self-converge ran full `perk init` and printed
+`✗ skills delivery failed: ... missing-skill`: the skills CLI resolved `source: perk → ref: main`
+but the new skill **wasn't on `main` yet**. Init had already converged the managed artifacts before
+its fatal sync failure. That first-appearance posture remains current: do not weaken enforcement
+or point the production source at a feature branch to make a pre-merge sync pass.
+
+Presence is strict on `.agents/skills/`, the delivery read path, even in the self-repo. Doctor
+classifies a missing perk-hosted delivery with a committed `skills/<name>/SKILL.md` as pre-merge
+**first appearance → warn** vs a **stale delivered set → fail**, probing the local `origin/main`.
+The committed layout is never a green substitute for delivery. Offline tests disable verification
+or stub the external shell; they do not need a developer's cache or a live upstream.
 
 ## Promoting external skills into the managed manifest (the three-SSOT split) (#647)
 
 The skills-delivery surface has **three** constants in `src/perk/convergence/init/skills.py`, each with a distinct meaning —
 editing the wrong one is the trap:
 
-- **`PERK_SKILLS`** — perk-authored skill names only, source `perk`. Add a **perk** skill here.
-- **`REQUIRED_EXTERNAL_SKILLS`** — `(source_key, name)` pairs for non-perk skills perk *requires*,
-  declared from upstream `REQUIRED_SKILL_SOURCES` (a frozen `SkillSource` key/url/ref dataclass).
-  Add a **promoted external** skill here, and its source if new.
+- **`PERK_SKILLS`** — perk-hosted skill names, authored **or vendored**, source `perk`. Add a
+  skill hosted under perk's `skills/` here, regardless of authorship.
+- **`REQUIRED_EXTERNAL_SKILLS`** — `(source_key, name)` pairs for skills perk *requires from
+  other hosts*, declared from `REQUIRED_SKILL_SOURCES` (a frozen `SkillSource` key/url/ref
+  dataclass). Add a **promoted external** skill here, and its source if new. The remaining required
+  external sources are Astral and Matt Pocock; `dignified-python` now belongs to `PERK_SKILLS`,
+  and Dagster is no longer a required source.
 - **`MANAGED_SKILL_NAMES = tuple(sorted({*PERK_SKILLS, *external}))`** — the **verification SSOT**
   ("every skill perk requires delivered"). **Both verification consumers iterate
   `MANAGED_SKILL_NAMES`, not `PERK_SKILLS`** (`sync_skills()`'s post-sync missing-loop and
@@ -250,18 +265,22 @@ editing the wrong one is the trap:
   had to switch `PERK_SKILLS → MANAGED_SKILL_NAMES` (`tests/conftest.py::converge_skills_workspace`,
   `tests/test_init_t5.py::_install_perk_skills`). **General rule: when widening the verified set,
   sweep every fixture that plants the "healthy" substrate.**
-- **Gotchas confirmed live:** **dagster tracks `ref: master`** (the one off-default ref — tests
-  assert it). A worktree `perk init` regen can surface a **`conflict`** failure (not the planned
-  first-appearance `missing-skill`) because the worktree's `.agents/skills/` symlinks were already
-  materialized; crucially init reports **"Converged before failure: …perk.yaml: updated"** — the
-  fragment convergence runs **before** the fatal sync, so the regenerated fragment is correct and
-  committable regardless of the sync conflict. **Don't be alarmed by the conflict; check "Converged
-  before failure" and verify the fragment content.**
-- **Posture note:** this is **consumer-visible** — a consumer's `perk init` now clones the new
-  sources (`astral`/`dagster`/`mattpocock`) and fails if any required skill isn't delivered.
-  `mastering-typescript` (source `spillwave`) deliberately stays in the **user-editable**
-  `.agents/manifest.yaml` as the one repo-specific add-on (the skills CLI merges `manifest.yaml` +
-  `manifest.d/*.yaml`).
+- **Historical gotchas confirmed live:** Dagster then tracked `ref: master`, the off-default
+  ref that the original tests asserted. That is now a **legacy-fragment fixture**, not a current
+  source requirement: current tests assert `dignified-python` maps once to `perk` and no Dagster
+  source remains. The recorded worktree `perk init` also hit a **`conflict`** failure because its
+  `.agents/skills/` symlinks were already materialized. Init reported **"Converged before failure:
+  …perk.yaml: updated"** — convergence preceded the fatal sync, so the fragment was committable.
+  The ordering lesson survives; use the offline seams above for declaration-only regeneration.
+- **Current consumer posture:** the managed fragment resolves perk-hosted skills from `perk`
+  (`main`), plus external skills from `astral` and `mattpocock`, and sync fails if any required skill
+  isn't delivered. After upgrading perk, `perk init` or `perk doctor --fix` replaces the old
+  Dagster mapping through normal convergence and skills-CLI link reconciliation; no custom
+  migration, source fallback, or cache cleanup is needed. Required installation does not force
+  invocation: the vendored `dignified-python` frontmatter remains undeclared for `stages:`, so
+  consumers without a config override still expose it to all stages. Repo-specific add-ons such
+  as `mastering-typescript` (source `spillwave`) remain in the **user-editable**
+  `.agents/manifest.yaml` (the skills CLI merges it with `manifest.d/*.yaml`).
 - Cross-ref the recurring **"run_ci green ≠ committable"** rule (pre-commit `ruff-format` can
   collapse a multi-line `"\n".join(...)` after CI passed — re-stage, re-commit) →
   `docs/learned/toolchain/ruff.md`.

@@ -172,12 +172,14 @@ def test_sync_skills_fails_on_subprocess_error(tmp_path, monkeypatch):
 
 
 def test_sync_skills_fails_when_delivery_missing(tmp_path, monkeypatch):
-    # Post-sync presence verification: a sync that links nothing (outdated CLI) is a failure.
+    # Post-sync presence verification must reject even one missing perk-hosted vendored skill.
     monkeypatch.setattr(init_mod.shutil, "which", lambda name: "/usr/bin/skills")
     monkeypatch.setattr(init_mod.subprocess, "run", lambda *a, **k: _Proc())
+    _install_perk_skills(tmp_path)
+    (tmp_path / ".agents" / "skills" / "dignified-python" / "SKILL.md").unlink()
     error = init_mod.sync_skills(tmp_path, [])
     assert error is not None
-    assert "did not deliver" in error and "perk-plan" in error
+    assert "did not deliver: dignified-python\n" in error
 
 
 _REPO_HINT = "If a skill under `.perk/skills/` was just added"

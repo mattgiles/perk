@@ -1,12 +1,12 @@
 """Live-corpus guards: every perk-owned skill declares its stage exposure (contracts.md §8.39).
 
 `skills/` (shipped) and `.perk/skills/` (repo-authored) frontmatter must declare a well-formed
-`stages:`; the one exemption is vendored third-party content (`ast-grep`), whose frontmatter perk
-does not own — it is scoped by a committed `[skills.stages]` config row instead. The config rows
-themselves are pinned too: a typo'd skill name or stage id in `[skills.stages]` is silently inert
-at runtime, so CI is the loud surface. The config table is parsed directly from the committed
-`.perk/config.toml` (never `load_config`) so a developer's gitignored `local.toml` overlay cannot
-perturb these guards.
+`stages:`; the exemptions are verbatim-vendored third-party skills (`ast-grep`, `dignified-python`),
+whose frontmatter perk does not own — each is scoped by a committed `[skills.stages]` config row.
+The config rows themselves are pinned too: a typo'd skill name or stage id in `[skills.stages]`
+is silently inert at runtime, so CI is the loud surface. The config table is parsed directly from
+the committed `.perk/config.toml` (never `load_config`) so a developer's gitignored `local.toml`
+overlay cannot perturb these guards.
 """
 
 import re
@@ -28,7 +28,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # The only `skills/` dirs allowed to leave `stages:` undeclared: vendored third-party content
 # (upstream-owned frontmatter), declared by a `[skills.stages]` config row instead.
-CONFIG_DECLARED_SHIPPED_SKILLS = frozenset({"ast-grep"})
+CONFIG_DECLARED_SHIPPED_SKILLS = frozenset({"ast-grep", "dignified-python"})
 
 # Package-bundled skills sanctioned for `[skills.stages]` rows. The known-name universe must be
 # static — CI cannot enumerate the gitignored `.pi/npm` tier — so package-skill rows are
