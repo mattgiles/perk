@@ -548,7 +548,15 @@ session), never run-scoped. Supporting facts:
   workflow still AWAITS the async child: `asyncOmitted` spreads `workflowAwaitAsync: true` in
   `src/runs/foreground/subagent-executor.ts` (the v0.65.1 repair). The former
   "workflow children default to foreground" rule (`async: params.async ?? false` in
-  `scripted-workflow.ts`) is gone.
+  `scripted-workflow.ts`) is gone. **Pending-repair note (live-verified at the 0.65.1
+  baseline):** because perk's renderer leaves child `async` unset, wave lane children now take
+  the BACKGROUND path — and the v0.65.0 native background runner requires host peer packages
+  (`@earendil-works/chord`, `@earendil-works/pi-server`) resolvable from the running pi's npm
+  package root, which neither the pinned dev Pi 0.84.1 nor Pi 0.85.1 provides — so lane
+  children fail to launch (`lane-failed`, loud) at that pair. Evidence + root cause:
+  `docs/design/archive/pi-subagents-native-baseline-dogfood.md`; the child-mode policy (an
+  explicit `async: false`, or a Pi bump) is the compat objective's Phase 2/3 decision — do
+  not drive-by patch `extension/waves/transport.ts`.
 - **The one silent killer is config**: `subagents.intercomBridge.mode: "off"` — or
   `"fork-only"`, since perk's wave children run fresh-context — suppresses the channel-dir stamp
   and degrades streaming to completion-only **with no error**. Now guarded by the report-only

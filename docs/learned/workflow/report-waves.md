@@ -472,7 +472,12 @@ Instances:
 - The review-wave pair (and the draft pair) HAVE now run against real pi-subagents — the
   2026-08-10 live dogfood of the three streaming browser doors
   (`docs/design/archive/streaming-doors-dogfood.md`: streaming cadence, dedupe, `replace` reshape,
-  typed collect aggregates, all live-confirmed). The dynamic-flow half of the residual was
+  typed collect aggregates, all live-confirmed). **Currency note:** that run predates the
+  v0.65.0 native-session transition; at the 0.65.1 baseline (2026-09,
+  `docs/design/archive/pi-subagents-native-baseline-dogfood.md`) wave lane children fail to
+  LAUNCH on the available pi installs (omitted child `async` now defaults background, and the
+  native background runner needs host peers those pis don't ship) — the failure normalizes
+  loudly as `lane-failed`; the repair is the compat objective's Phase 2/3. The dynamic-flow half of the residual was
   discharged by retirement — `/pr-review-dynamic` was removed wholesale (see the CHANGELOG)
   without ever running against real pi-subagents. The stale-session gotcha stands: a landing
   session predates its own extension code (see `pi/extension-api.md` on dogfooding just-changed
