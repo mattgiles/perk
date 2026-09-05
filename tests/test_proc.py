@@ -39,6 +39,58 @@ def test_run_captured_env_overlay_merged_after_environ(monkeypatch):
     assert env["PERK_TEST_OVERRIDDEN"] == "wins"
 
 
+def test_run_captured_env_remove_deletes_inherited_names(monkeypatch):
+    """env_remove deletes an inherited name (an overlay cannot — empty string is still set);
+    an absent name is a no-op, never an error."""
+    monkeypatch.setenv("PERK_TEST_REMOVED", "leaks")
+    monkeypatch.setenv("PERK_TEST_KEPT", "stays")
+    monkeypatch.delenv("PERK_TEST_ABSENT", raising=False)
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    proc.run_captured(["tool"], timeout=5, env_remove=("PERK_TEST_REMOVED", "PERK_TEST_ABSENT"))
+    env = captured["env"]
+    assert env is not None
+    assert "PERK_TEST_REMOVED" not in env
+    assert env["PERK_TEST_KEPT"] == "stays"
+
+
+def test_run_captured_overlay_wins_over_remove(monkeypatch):
+    """Removal happens BEFORE the overlay: an overlaid name survives a same-name removal."""
+    monkeypatch.setenv("PERK_TEST_BOTH", "inherited")
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    proc.run_captured(
+        ["tool"],
+        timeout=5,
+        env_overlay={"PERK_TEST_BOTH": "overlaid"},
+        env_remove=("PERK_TEST_BOTH",),
+    )
+    assert captured["env"]["PERK_TEST_BOTH"] == "overlaid"
+
+
+def test_run_checked_forwards_env_remove(monkeypatch):
+    monkeypatch.setenv("PERK_TEST_REMOVED", "leaks")
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(args, 0, stdout="out", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert proc.run_checked(["tool"], timeout=5, env_remove=("PERK_TEST_REMOVED",)) == "out"
+    assert "PERK_TEST_REMOVED" not in captured["env"]
+
+
 def test_run_captured_no_overlay_passes_env_none(monkeypatch):
     captured = {}
 

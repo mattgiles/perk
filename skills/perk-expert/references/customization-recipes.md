@@ -201,7 +201,8 @@ Distinct from the fixed `[models.subagents]` model-override table. Author your o
 subdir on every `perk init`). The runtime name comes from the **frontmatter** `name` (+ optional
 `package` — perk reserves `package: perk`), and `model` is set there (not in `[models.subagents]`). Invoke it
 via pi's native `subagent` tool by its runtime name — `subagent({agent: "my-reviewer",
-task: "…"})` (pi-subagents ≥ 0.49 converts a direct one-child call onto the workflow path);
+task: "…"})` (pi-subagents ≥ 0.49 restored native structured single-child execution — a
+direct one-child call runs natively, never converted onto the workflow path);
 use `workflowScript` for multi-child orchestration or a custom result projection;
 `subagent { action: "list" }` still enumerates discovered agents. pi-subagents' **builtin** agents don't appear: perk converges
 the constant `"subagents": {"disableBuiltins": true}` into `.pi/settings.json` in every perk repo (engine-only

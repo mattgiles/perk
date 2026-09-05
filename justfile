@@ -102,6 +102,14 @@ perk *args:
 perk-dev *args:
     uv run perk-dev {{args}}
 
+# OPT-IN dev-only live smoke of the pi-subagents report-wave lifecycle: drives a real headless
+# `pi --mode json -p` session on the installed engine with real model children (live credentials
+# required — the parent session's default model + the `[models.subagents] objective-explorer`
+# child model). NEVER part of `just ci`; run from a clean committed tree so the recorded SHA
+# names the code actually exercised (see docs/developers/pi-subagents-reverify.md).
+subagents-smoke *args:
+    uv run perk-dev subagents-smoke {{args}}
+
 # run the docs-site dev server (Starlight)
 docs-dev:
     npm run docs:dev

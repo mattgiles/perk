@@ -21,13 +21,12 @@ non-obvious rules an agent can't derive from any single file.
 
 > **Version anchoring.** Upstream mechanics in this doc are source-read against the installed
 > pi-subagents at the version pinned by `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`
-> (`src/perk/convergence/doctor/checks.py`) — **0.52.1** at this writing, bumped only on a
-> deliberate guidance re-verify; the doctor `subagent-compat` check warns when installed ≠
-> verified. One exception class: claims marked inline "verified against the installed 0.64.x
-> source" were spot re-verified against pi-subagents 0.64.x (the 2026-09 dream audit) — those
-> markers name verification currency for exactly those claims and run ahead of the 0.52.1
-> baseline, which stays put until a deliberate full re-verify. Every **other** version number in
-> this doc names an upstream **event** (when a behavior changed), never verification currency.
+> (`src/perk/convergence/doctor/checks.py`) — **0.65.1** at this writing (the 2026-09 baseline
+> re-verify; the earlier "verified against the installed 0.64.x source" spot-markers are
+> subsumed by it), bumped only on a deliberate guidance re-verify; the doctor `subagent-compat`
+> check warns when installed ≠ verified, and the re-verify procedure is
+> `docs/developers/pi-subagents-reverify.md`. Every **other** version number in this doc names
+> an upstream **event** (when a behavior changed), never verification currency.
 
 ## Distillation
 
@@ -460,18 +459,25 @@ parent loop shape:
   `reason: "progress_update"` is **non-blocking** (returns "queued" immediately; requests capped
   at 64KB).
 - **Delivery is an injected message, nothing else** (`intercom/native-supervisor-channel.ts`):
-  a parent-side poller (≤500ms) injects each request via `pi.sendMessage({customType:
-  "subagent_supervisor_request"})` with default `deliverAs: "steer"` — delivered **before the next
-  LLM call** (i.e. when the current tool call returns) — with **`triggerTurn: true` on
-  every request**: an idle parent wakes (progress updates included). Progress updates **never
-  enter the `pending` map** — there is no polling surface for them.
-- **The wait tool is `subagent_wait`, and it wakes on completion / needs-attention only** — a
-  progress update does NOT break the wait. **`subagent_wait` expiry IS the streaming cadence**: a
-  `subagent_wait({ timeoutMs })` loop's expiries are what let queued injected messages deliver —
-  each expiry returns the tool call, the queued messages
-  deliver, the parent processes/pushes, then re-waits. The parent
-  **holds its turn open** — an ended turn degrades streaming to churny per-request wake-ups (the
-  `triggerTurn` mechanic) instead of a held relay.
+  a parent-side poller (≤500ms) injects each request via
+  `pi.sendMessage({customType: SUPERVISOR_REQUEST_MESSAGE_TYPE})` — since the v0.65.0
+  native-session transition the `"subagent_supervisor_request"` literal lives in
+  `intercom/supervisor-ui.ts` as that constant, imported by the channel file — with default
+  `deliverAs: "steer"`, delivered **before the next LLM call** (i.e. when the current tool call
+  returns), and **`triggerTurn: true` on every request**: an idle parent wakes (progress
+  updates included). Progress updates **never enter the `pending` map** — there is no polling
+  surface for them.
+- **The `subagent_wait` alias was removed upstream (v0.61)** — the surviving wait tool is
+  `bg_wait`, upstream-scoped to background work WITHOUT native completion notification
+  (ordinary async runs notify natively; window expiry is a non-error `window_elapsed`), and
+  perk does **not** adopt it. The held-turn `subagent_wait({ timeoutMs })` relay loop — wait
+  expiry as the streaming cadence, queued injected messages delivering on each expiry return,
+  the parent holding its turn open — is the **0.52-era characterization**. **Currency note:**
+  perk's streaming guidance (the review-door prompts, the wave tools' relay-loop instructions)
+  still prescribes that loop verbatim; repairing it onto the native wakes (the
+  `triggerTurn: true` supervisor injection per request, the `"subagent-notify"` completion
+  wake in `src/runs/background/notify.ts`) is the objective's Phase 2 — do not read the relay
+  prescription as current engine vocabulary.
 - **The grouped `tasks[]` / `chain[]` execution surfaces were REMOVED upstream (v0.41.0–v0.42.1)**
   — `workflowScript` (constrained JS: `runs.run`/`runs.all`) is the sole multi-agent
   orchestration surface, and combining it with `agent`/`tasks`/`chain`/`action` is rejected. A
@@ -528,13 +534,29 @@ a thin envelope over the same executor with the parent session's context, and pa
 delivery is **session-scoped file polling** (matching `orchestratorSessionId` against the current
 session), never run-scoped. Supporting facts:
 
-- **Async workflows run in-process in the parent pi** — `status.json` carries
-  `pid: process.pid`; only single/chain runs get the detached runner. Consequence: an "async"
-  wave dies with the parent pi process — fine for session-scoped surfaces, disqualifying for
-  anything that must outlive the session.
-- **Workflow children default to foreground**, which is what satisfies the one conditional gate
-  in the env-stamping chain (the supervisor channel dir is set iff orchestrator target +
-  parentSessionId + runId + agent name).
+- **Async workflows run in-process in the parent pi** — the workflow status carries
+  `pid: process.pid` (re-verified at 0.65.1: the literal sits on the `mode: "workflow"` status
+  record in `src/runs/foreground/subagent-executor.ts`); only single/chain runs get the
+  detached runner. Consequence: an "async" wave dies with the parent pi process — fine for
+  session-scoped surfaces, disqualifying for anything that must outlive the session.
+- **The child launch protocol is typed runtime config, not env stamps (since the v0.65.0
+  native-session transition)**: `orchestratorSessionId` + `supervisorChannelDir` are fields of
+  `src/runs/shared/child-runtime-config.ts`, stamped by `src/runs/shared/child-launch.ts` —
+  the old `PI_SUBAGENT_ORCHESTRATOR_SESSION_ID`/`PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR` env
+  stamps and their `pi-args.ts` carrier are deleted.
+- **Omitted child `async` honors the engine defaults** — globally background — while the
+  workflow still AWAITS the async child: `asyncOmitted` spreads `workflowAwaitAsync: true` in
+  `src/runs/foreground/subagent-executor.ts` (the v0.65.1 repair). The former
+  "workflow children default to foreground" rule (`async: params.async ?? false` in
+  `scripted-workflow.ts`) is gone. **Pending-repair note (live-verified at the 0.65.1
+  baseline):** because perk's renderer leaves child `async` unset, wave lane children now take
+  the BACKGROUND path — and the v0.65.0 native background runner requires host peer packages
+  (`@earendil-works/chord`, `@earendil-works/pi-server`) resolvable from the running pi's npm
+  package root, which neither the pinned dev Pi 0.84.1 nor Pi 0.85.1 provides — so lane
+  children fail to launch (`lane-failed`, loud) at that pair. Evidence + root cause:
+  `docs/design/archive/pi-subagents-native-baseline-dogfood.md`; the child-mode policy (an
+  explicit `async: false`, or a Pi bump) is the compat objective's Phase 2/3 decision — do
+  not drive-by patch `extension/waves/transport.ts`.
 - **The one silent killer is config**: `subagents.intercomBridge.mode: "off"` — or
   `"fork-only"`, since perk's wave children run fresh-context — suppresses the channel-dir stamp
   and degrades streaming to completion-only **with no error**. Now guarded by the report-only
@@ -582,18 +604,26 @@ with a ≤500ms poll fallback on watcher failure; darwin uses only a demand-gate
 win32 an always-on ≤500ms poller — delivery semantics and the relay-loop shape unchanged. The
 doctor `subagent-compat` check is now the
 early-warning tripwire for **surface-level** drift: it probes the installed source for marker
-presence (`workflowScript`, `outputSchema`/`structuredOutput`, `"subagent_wait"`, the
-supervisor-channel trio `"contact_supervisor"`/`"subagent_supervisor_request"`/`triggerTurn`,
-the v1 RPC
+presence (`workflowScript`, `outputSchema`/`structuredOutput`, the async completion
+notification wake (`"subagent-notify"`/`triggerTurn`), the supervisor-channel trio
+`"contact_supervisor"`/`SUPERVISOR_REQUEST_MESSAGE_TYPE`/`triggerTurn` plus the
+`"subagent_supervisor_request"` literal's new home in `supervisor-ui.ts`, the v1 RPC
 events (`subagents:rpc:v1:*`), retained children (`listRetainedChildren`) + the retained-child
 resume contract (`resume and agent are mutually exclusive`), the statement-body
-explicit-return vm wrapper (`(async () => {`), and the 0.45.0 completion-receipt surfaces —
-the wait-completion projection (`toWaitCompletion`/`recordWaitCompletion`), `subagent_wait`'s
-`completions` details, and the serialized workflow child `runId: child.runId`) and warns
+explicit-return vm wrapper (`(async () => {`), the 0.45.0 completion-receipt surfaces —
+the wait-completion projection (`toWaitCompletion`/`recordWaitCompletion`), `bg_wait`'s
+`completions` details, and the serialized workflow child `runId: child.runId` — the
+streaming-wave delivery chain (session-scoped delivery, the typed child supervisor-channel
+config `orchestratorSessionId`/`supervisorChannelDir`, the in-process async workflow host,
+the omitted-async await), and the intercom-bridge tool delivery
+(`resolveIntercomBridge`/`applyIntercomBridgeToAgent`/`["contact_supervisor"]`)) and warns
 loudly on divergence; public execution is deliberately unprobed since the 0.49 restoration —
 no stable load-bearing literal distinguishes a compatible surface there. Substring
-presence only — the deeper wait/streaming mechanics remain source-read-derived and still
-warrant a manual re-verify on bumps.
+presence plus ONE behavior arm — doctor also runs the installed engine's
+`validateWorkflowScript` over the shared representative wave script
+(`shared/subagents/representative-wave-script.js`), degrading to a visible skip note when it
+cannot evaluate — the deeper wait/streaming mechanics remain source-read-derived and still
+warrant a manual re-verify on bumps (`docs/developers/pi-subagents-reverify.md`).
 
 **The tripwire-marker pattern (for extending `_SUBAGENT_COMPAT_PROBES`):** choose the literal
 whose *disappearance signals the architectural change you care about*, not just any stable string
@@ -659,7 +689,8 @@ schemas are module constants, nothing prompt-transcribed):
 A spawned child is **stage-unscoped** (adopt never impersonates) yet still **inherits the
 parent's read-only gate** via the consumed-handoff adopt arm (env `PERK_RUN_ID` + a consumed
 handoff → the adopt arm carries `mode: read-only`). pi-subagents injects its child-side engine
-tools (`structured_output`, `contact_supervisor`, `subagent_wait`) at extension **load time** —
+tools (`structured_output`, `contact_supervisor`, `bg_wait` — the wait tool since the v0.61
+`subagent_wait` rename) at extension **load time** —
 before perk's `session_start` gate sync — so a gate sync that omits them deactivates them: an
 `outputSchema` child then runs its full exploration and fails with `structuredOutputFailed`,
 physically unable to make the engine-REQUIRED `structured_output` completion call.
@@ -667,7 +698,10 @@ physically unable to make the engine-REQUIRED `structured_output` completion cal
 - **Landed fix shape:** `SUBAGENT_CHILD_TOOLS` carried in `READ_ONLY_TOOLS`
   (`extension/substrate/toolGating.ts`; the static-name inert-when-unregistered posture),
   deliberately in **neither** `PERK_TOOLS` nor `BORROWED_TOOLS` — children are stage-unscoped,
-  so gate membership is their only governance surface.
+  so gate membership is their only governance surface. **Currency note:** the census still
+  carries the removed `subagent_wait` name (harmless — inert-when-unregistered) and does not
+  yet carry `bg_wait`; retiring the stale name is the objective's Phase 2, not a drive-by
+  edit.
 - **Debugging heuristic:** a "missing `structured_output` tool" in a child is a **composition**
   defect — trace (a) the launch allowlist injection (`resolvePiLaunchToolPlan` unions
   `structured_output` when `outputSchema` is set), (b) ambient-extension loading in the child

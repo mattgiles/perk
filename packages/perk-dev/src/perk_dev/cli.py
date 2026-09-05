@@ -30,7 +30,7 @@ from perk.substrate.config import Config, load_config
 from perk.substrate.git import repo_root
 from perk.substrate.output import io_step, machine_output, user_output
 from perk.substrate.registry import Stage
-from perk_dev import build, bump, changelog, release
+from perk_dev import build, bump, changelog, release, subagents_smoke
 from perk_dev.audit import attribution, bounding, corpus, expectations, fold, runner, vintage
 from perk_dev.prose_map.cli import prose_map
 from perk_dev.prose_review.cli import prose_review
@@ -56,6 +56,45 @@ def smoke() -> None:
     root = repo_root(Path.cwd())
     where = str(root) if root is not None else "(not a git repo)"
     click.echo(f"perk-dev smoke: perk {_perk_version} @ {where}")
+
+
+@cli.command("subagents-smoke")
+@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+@click.pass_context
+def subagents_smoke_cmd(ctx: click.Context, *, as_json: bool) -> None:
+    """Run the opt-in live pi-subagents smoke (a headless report-wave lifecycle probe).
+
+    Dev-only and NEVER part of `just ci`: it drives a real headless `pi --mode json -p`
+    session (live model credentials required — the parent default model plus the
+    `[models.subagents] objective-explorer` child model) and evaluates the captured JSON
+    event stream. Run it from a clean committed tree so the recorded commit identifies the
+    code actually exercised. Exits 1 on a FAIL verdict.
+    """
+    root = repo_root(Path.cwd())
+    if root is None:
+        fail(ctx, as_json=as_json, error_type="not_a_repo", message="not inside a git repository")
+        return
+    try:
+        result = subagents_smoke.run_smoke(root)
+    except UserFacingCliError as exc:
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type=exc.error_type or "smoke_failed",
+            message=exc.format_message(),
+        )
+        return
+    if as_json:
+        machine_output(
+            json.dumps(
+                subagents_smoke.SubagentsSmokeOut.from_domain(result).model_dump(mode="json")
+            )
+        )
+    else:
+        for line in subagents_smoke.summary_lines(result):
+            user_output(line)
+    if not result.evaluation.passed:
+        ctx.exit(1)
 
 
 @cli.command("changelog-commits")
