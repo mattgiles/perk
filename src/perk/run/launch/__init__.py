@@ -153,10 +153,13 @@ class _LaunchContext:
 
 
 def _pi_agent_dir() -> Path:
-    """Mirror pi's ``config.js getAgentDir()``: ``PI_CODING_AGENT_DIR`` env var if set/non-empty,
-    else ``~/.pi/agent``."""
+    """Resolve the cold-local child's agent dir for lock sweeping.
+
+    Blank inherited values are removed by `_build_exec_env`, so treat them as absent here too.
+    Non-blank values retain pi's native expansion semantics; otherwise use `~/.pi/agent`.
+    """
     env = os.environ.get("PI_CODING_AGENT_DIR")
-    if env:
+    if env and env.strip():
         return Path(env).expanduser()
     return Path.home() / ".pi" / "agent"
 
@@ -595,6 +598,9 @@ def _build_exec_env(
         env["LINEAR_API_KEY"] = fallback_linear_api_key
     if pi_agent_dir is not None:
         env["PI_CODING_AGENT_DIR"] = str(pi_agent_dir)
+    elif not env.get("PI_CODING_AGENT_DIR", "").strip():
+        # Pi treats whitespace as a path, but launch precedence treats it as unset.
+        env.pop("PI_CODING_AGENT_DIR", None)
     return env
 
 

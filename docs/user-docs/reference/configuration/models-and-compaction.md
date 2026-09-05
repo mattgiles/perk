@@ -200,6 +200,8 @@ A **non-blank operator `PI_CODING_AGENT_DIR` environment variable always wins**,
 its config read for this key. For a one-shot escape hatch:
 `PI_CODING_AGENT_DIR=~/.pi/agent perk plan`. A nested cold launch inherits a parent session's
 injected value like any operator-set variable, so it also wins over subsequent config edits.
+Empty or whitespace-only environment values count as unset: when no configured redirect replaces
+them, perk removes them from the child environment so Pi uses its normal directory.
 
 ### Whole-directory redirect
 
@@ -225,8 +227,9 @@ sessions start without `auth.json` or `models.json`. An **existing non-directory
 launch** with `pi_agent_dir_invalid`, because Pi cannot create its sessions tree under it.
 `perk doctor`'s offline, report-only `pi-agent-dir` check warns on either condition; it has no
 `--fix` arm. It checks the configured directory even when an operator env override is present.
-If the main-root config read is malformed or ill-typed, the launch warns and continues without
-injecting the redirect; doctor defers to the config check.
+If the main-root config read is malformed or ill-typed, or a configured `~` home cannot be
+resolved, the launch warns and continues without injecting the redirect. Doctor reports the
+resolution error in its check detail; the config check owns parse/type errors.
 
 `perk init` manages these rules for the conventional in-repo location:
 
@@ -238,8 +241,13 @@ injecting the redirect; doctor defers to the config check.
 Only `models.json` is opted into git by default. To commit another file such as `settings.json`
 or a `prompts/` directory, add explicit `!` rules **after** the managed block. For **any other
 in-repo agent directory**, add matching ignore rules before copying credentials or launching.
-Doctor warns when `<agent-dir>/auth.json` is not ignored, and when files other than the top-level
-`models.json` are already tracked. Ignore rules never untrack files: use
+Doctor checks representative `auth.json`, `trust.json`, `settings.json`, `models-store.json`,
+auth/settings lock files, and a nested `sessions/` log path, even before those files exist.
+Ignoring only `auth.json` is not sufficient. These probes are a diagnostic, not proof that every
+possible artifact is ignored; prefer a whole-directory contents rule with narrow exceptions.
+Doctor also warns when files other than top-level `models.json` are already tracked. Intentionally
+versioning agent-level settings still triggers a warning for you to assess. Ignore rules never
+untrack files: use
 `git rm --cached <path>` to remove each tracked artifact from the index while retaining it on
 disk (use `-r` for a directory). Never commit auth, trust, or session data.
 

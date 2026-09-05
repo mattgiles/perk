@@ -212,6 +212,24 @@ def test_effective_pi_agent_dir_propagates_config_errors(tmp_path, text, error):
         effective_pi_agent_dir(tmp_path)
 
 
+@pytest.mark.parametrize("value", ["~/agent", "~missing-user/agent"])
+def test_effective_pi_agent_dir_home_expansion_failure_is_config_error(
+    tmp_path, monkeypatch, value
+):
+    _write(tmp_path, "config.toml", f'[pi]\nagent_dir = "{value}"\n')
+
+    def fail_home(self):
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "expanduser", fail_home)
+    with pytest.raises(ConfigError, match=r"pi\.agent_dir: cannot expand home directory") as exc:
+        effective_pi_agent_dir(tmp_path)
+    assert value in str(exc.value)
+    assert isinstance(exc.value.__cause__, RuntimeError)
+    # Parsing itself remains a raw-string boundary, with no home lookup.
+    assert load_config(tmp_path).pi_agent_dir == value
+
+
 def test_user_bindings_absent_is_empty(tmp_path):
     assert load_config(tmp_path).user_bindings == []
 

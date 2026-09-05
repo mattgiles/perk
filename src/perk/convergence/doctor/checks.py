@@ -401,12 +401,14 @@ def _pi_agent_dir_check(root: Path) -> Check | None:
     """
     try:
         agent_dir = effective_pi_agent_dir(root)
-    except (tomllib.TOMLDecodeError, ConfigError):
+    except (tomllib.TOMLDecodeError, ConfigError) as exc:
         return Check(
             "pi-agent-dir",
             "repository",
             "warn",
             "pi agent dir not evaluated — main checkout config invalid; see the config check",
+            str(exc),
+            "Fix [pi] agent_dir in the main checkout's config if its path cannot be resolved.",
         )
     if agent_dir is None:
         return None
@@ -438,9 +440,24 @@ def _pi_agent_dir_check(root: Path) -> Check | None:
     if canonical_dir.is_relative_to(main_root):
         relative_dir = canonical_dir.relative_to(main_root)
         try:
-            if not git.is_ignored(main_root, relative_dir / "auth.json"):
+            # An auth-only rule does not protect trust/settings or nested session logs.
+            # Probe nonexistent representatives too: warn before pi writes the first file.
+            unignored = [
+                artifact
+                for artifact in (
+                    "auth.json",
+                    "trust.json",
+                    "settings.json",
+                    "models-store.json",
+                    "auth.json.lock",
+                    "settings.json.lock",
+                    "sessions/perk-ignore-probe/session.jsonl",
+                )
+                if not git.is_ignored(main_root, relative_dir / artifact)
+            ]
+            if unignored:
                 problems.append(
-                    "volatile/secret pi artifacts under this directory are not gitignored; "
+                    f"volatile/secret pi artifacts not gitignored: {', '.join(unignored)}; "
                     "the managed block covers .pi/agent/ only"
                 )
                 remedies.append(
@@ -451,7 +468,7 @@ def _pi_agent_dir_check(root: Path) -> Check | None:
         try:
             tracked = [
                 path
-                for path in git.tracked_paths(main_root, [str(relative_dir)])
+                for path in git.tracked_paths(main_root, [f":(literal){relative_dir}"])
                 if path != str(relative_dir / "models.json")
             ]
             if tracked:

@@ -1,5 +1,6 @@
 import dataclasses
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -104,6 +105,22 @@ def test_build_exec_env_pi_agent_dir(agent_dir):
         assert env["PI_CODING_AGENT_DIR"] == str(agent_dir)
 
 
+@pytest.mark.parametrize("value", ["", " \t ", "/operator/agent", "  /operator/agent  "])
+def test_build_exec_env_pi_agent_dir_normalizes_only_blank_values(value):
+    environ = {"PI_CODING_AGENT_DIR": value}
+    env = _build_exec_env(
+        run_id="01TEST",
+        environ=environ,
+        fallback_linear_api_key=None,
+        pi_agent_dir=None,
+    )
+    if value.strip():
+        assert env["PI_CODING_AGENT_DIR"] == value
+    else:
+        assert "PI_CODING_AGENT_DIR" not in env
+    assert environ == {"PI_CODING_AGENT_DIR": value}
+
+
 def _write_pi_config(root, text):
     config_dir = root / ".perk"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -183,6 +200,30 @@ def test_launch_pi_agent_dir_unconfigured(tmp_path, monkeypatch, launch_exec_rec
     assert "PI_CODING_AGENT_DIR" not in launch_exec_recorder.calls[0][2]
 
 
+@pytest.mark.parametrize("value", ["", " \t "])
+@pytest.mark.parametrize("config_text", ["", "[pi", "[pi]\nagent_dir = 7\n"])
+def test_launch_blank_pi_agent_dir_without_config_uses_default_store(
+    tmp_path, monkeypatch, launch_exec_recorder, capsys, value, config_text
+):
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", value)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    # Exercise the real fallback instead of the exec fixture's isolated-directory stub.
+    monkeypatch.setattr(launch, "_pi_agent_dir", _pi_agent_dir)
+    default_dir = tmp_path / "home/.pi/agent"
+    default_dir.mkdir(parents=True)
+    stale_lock = default_dir / "settings.json.lock"
+    stale_lock.touch()
+    _write_pi_config(tmp_path, config_text)
+
+    _launch_agent_dir_plan(tmp_path)
+
+    assert "PI_CODING_AGENT_DIR" not in launch_exec_recorder.calls[0][2]
+    assert not stale_lock.exists()
+    assert os.environ["PI_CODING_AGENT_DIR"] == value
+    if config_text:
+        assert "launching without the redirect" in capsys.readouterr().err
+
+
 def test_launch_pi_agent_dir_main_overlay_from_linked_worktree(
     git_repo, monkeypatch, launch_exec_recorder
 ):
@@ -232,6 +273,27 @@ def test_launch_bad_main_pi_config_warns_without_redirect(
     _launch_agent_dir_plan(tmp_path)
     assert "PI_CODING_AGENT_DIR" not in launch_exec_recorder.calls[0][2]
     assert "launching without the redirect" in capsys.readouterr().err
+
+
+def test_launch_pi_agent_dir_home_expansion_failure_warns_and_execs(
+    tmp_path, monkeypatch, capsys, launch_exec_recorder
+):
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    value = "~missing-user/agent"
+    _write_pi_config(tmp_path, f'[pi]\nagent_dir = "{value}"\n')
+    expanduser = Path.expanduser
+
+    def fail_configured_home(path):
+        if path == Path(value):
+            raise RuntimeError("Could not determine home directory.")
+        return expanduser(path)
+
+    monkeypatch.setattr(Path, "expanduser", fail_configured_home)
+    _launch_agent_dir_plan(tmp_path)
+    assert "PI_CODING_AGENT_DIR" not in launch_exec_recorder.calls[0][2]
+    err = capsys.readouterr().err
+    assert "launching without the redirect" in err
+    assert "pi.agent_dir: cannot expand home directory" in err
 
 
 def test_launch_pi_agent_dir_dry_run_preview(tmp_path, monkeypatch, capsys):

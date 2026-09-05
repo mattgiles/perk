@@ -379,6 +379,8 @@ rerun is needed for a runtime config edit.
 **Operator env wins:** a non-blank `PI_CODING_AGENT_DIR` skips the config read and is never
 clobbered. Escape hatch: `PI_CODING_AGENT_DIR=~/.pi/agent perk plan`. A nested cold launch inherits
 the parent session's injected value like an operator-set env var, so it wins over later edits too.
+Empty/whitespace-only env values count as unset and are removed from the child environment when
+no configured path replaces them, allowing Pi's normal directory fallback.
 
 **Pure whole-directory redirect**, not a models-only overlay: `auth.json`, `trust.json`,
 `sessions/`, `models-store.json`, global-tier `settings.json`, and other agent resources move
@@ -394,18 +396,23 @@ alongside `models.json`.
 
 **Diagnostics:** a missing dir warns and launches (Pi creates an empty dir on demand, without
 `auth.json`/`models.json`); an existing non-directory raises **`pi_agent_dir_invalid`**, because Pi
-cannot create its sessions tree there. A malformed/ill-typed main config read warns and launches
-without the redirect. Doctor's offline **`pi-agent-dir`** check is quiet when unconfigured, ok
-when safe, warn for missing/non-directory/hazardous paths, and defers invalid config to the config
-check. No `--fix` arm; it diagnoses the configured directory regardless of operator env.
+cannot create its sessions tree there. A malformed/ill-typed main config read or unresolvable
+configured `~` home warns and launches without the redirect. Doctor's offline **`pi-agent-dir`**
+check is quiet when unconfigured, ok when its probes pass, and warns for missing/non-directory/
+hazardous paths. It includes path-resolution errors in check detail and defers parse/type errors
+to the config check. No `--fix` arm; it diagnoses the configured directory regardless of operator env.
 
 **Git safety:** init's managed block ignores `/.pi/agent/*` then opts in
 `!/.pi/agent/models.json`. The contents-glob (not a directory exclusion) permits later user `!`
 rules after the block for intentionally committed `settings.json` or `prompts/`. A non-conventional
 in-repo path needs its own matching ignore rules **before copying credentials or launching**.
-Doctor warns if `<agent-dir>/auth.json` is not ignored or if any tracked entry besides top-level
-`models.json` exists. Gitignore never untracks: `git rm --cached <path>` keeps the file on disk
-while removing it from the index (`-r` for directories). Never commit auth/trust/session data.
+Doctor probes `auth.json`, `trust.json`, `settings.json`, `models-store.json`, auth/settings lock
+files, and a nested `sessions/` log path, including nonexistent files; auth-only ignore coverage
+is insufficient. Representative probes are not exhaustive proof: prefer a contents rule plus
+narrow exceptions. It also warns on every tracked entry besides top-level `models.json`;
+intentionally versioned settings still warn for operator assessment. Gitignore never untracks:
+`git rm --cached <path>` keeps the file on disk while removing it from the index (`-r` for
+directories). Never commit auth/trust/session data.
 
 **Dry-run scope:** only generic stage launchers reaching the launch seam (plan/implement/submit/
 address/land/…) preview the `PI_CODING_AGENT_DIR=<path>` line, `pi_agent_dir` JSON field, and

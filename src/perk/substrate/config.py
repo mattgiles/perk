@@ -36,8 +36,9 @@ PI_THINKING_LEVELS: frozenset[str] = frozenset({"off", "minimal", "low", "medium
 class ConfigError(Exception):
     """A `.perk` config value failed validation (the config-domain error).
 
-    Raised only for value-validation failures (via ``translate_validation_errors``, so the
-    message carries the pydantic field path). Malformed TOML stays ``tomllib.TOMLDecodeError``.
+    Raised for value-validation failures, including unresolvable configured paths. Parse-model
+    failures use ``translate_validation_errors`` and carry the pydantic field path.
+    Malformed TOML stays ``tomllib.TOMLDecodeError``.
     """
 
 
@@ -551,7 +552,12 @@ def effective_pi_agent_dir(repo_root: Path) -> Path | None:
     value = load_config(main_root).pi_agent_dir
     if value is None:
         return None
-    path = Path(value).expanduser()
+    try:
+        path = Path(value).expanduser()
+    except RuntimeError as exc:
+        raise ConfigError(
+            f"pi.agent_dir: cannot expand home directory in {value!r}: {exc}"
+        ) from exc
     return path if path.is_absolute() else main_root / path
 
 
