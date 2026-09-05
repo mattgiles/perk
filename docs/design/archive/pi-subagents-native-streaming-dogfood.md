@@ -294,10 +294,23 @@ hunk comment-apply, and one successful collect, no wait/poll tool, no manual sta
 reconciliation, no re-collect, and no late provisional replay in the captured parent session.
 A subsequent read-only hunk comment listing still contains exactly the same single comment
 id/anchor; read-only GitHub verification showed `{state: OPEN, isDraft: true, review_count: 0}`.
-No review was posted. Pi/hunk and the checkout remain open pending human-confirmed closure;
-cleanup has not yet been claimed.
+No review was posted. The human then confirmed **“T closed”**. Independent verification found
+parent PID 27911 absent and `hunk session get` returning “No active session matches repoRoot”.
+The normal `perk pr review cleanup --pr 2228 --json` returned `success: true, removed: true`;
+the review checkout is absent both on disk and from the driver's Git worktree list. The scratch
+PR/branch and fixture checkout are deliberately retained for B/U; full teardown is still pending.
 
 Raw parent/child session snapshots and workflow/child status receipts are retained under
 `live/T/captured-runtime/`; compact extracted evidence is in `live/T/evidence.json`, with
 `hunk-session.txt`, `hunk-comments.txt`, and `github-posting-check.json`. These paths are
 non-authoritative conveniences; the sanitized decisive observations above survive their removal.
+Per-leg closure receipts are `live/T/hunk-after-close.txt`, `checkout-cleanup.json`,
+`worktrees-after-cleanup.txt`, and `github-after-cleanup.json`.
+
+### Leg B preparation — not yet launched
+
+The one-shot `live/start-B.sh` selects the same code SHA, host, bridge-on configuration and
+branch-bound skill/definition files as T. It requires the prior review checkout to be absent,
+uses fresh logs under `live/B/parent`, and asks the human to invoke `/pr-review-browser 2228`
+once. The installed browser integration is `@plannotator/pi-extension` 0.27.12. Neither the
+wrapper nor the implementation session has launched B; no live browser verdict is claimed.
