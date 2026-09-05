@@ -254,7 +254,7 @@ and descriptors are the next thing to nail down.
 |---|---|---|---|
 | `plan` | `/plan` | `perk plan` | objective context → new plan draft |
 | `save` | `/plan-save` | (usually warm) | plan draft → GitHub canonical + plan-ref |
-| `objective-plan` | `/objective-plan` | `perk objective-plan` | objective node → bounded plan (the "factory" step) |
+| `objective-plan` | `/objective-plan` | `perk objective plan` | objective node → bounded plan (the "factory" step) |
 | `prepare` | (implicit in `/implement`) | `perk prepare <plan>` | plan-ref → worktree/branch + impl-context (positioning only) |
 | `implement` | `/implement` | `perk implement <plan>` | prepared worktree → code changes |
 | `submit` | `/pr-submit` | `perk submit <plan>` | branch → PR (draft) |
