@@ -18,6 +18,290 @@ local commit/blob attestation. Historically the owner authorized draft publicati
 not the originally planned pre-submit local approval; publication itself was not approval.
 Neither checkpoint `bfb6a09c` nor `b5dd31ef` is approval.
 
+## 0.66.0 source/offline reconciliation
+
+This is bounded compatibility evidence for the implemented profiles/producer, not a second
+approval attestation or full-baseline certification. No installed source or fingerprint was changed.
+
+### Context
+
+| Field | Value |
+| --- | --- |
+| UTC check time (before → after) | 2026-09-06T17:40:45.346Z → 2026-09-06T17:41:18.126Z |
+| Full checked Perk commit (C1) | `3d1d9bda1fc7229484a7d843e97f6bb9bca3c852` |
+| Real checkout cwd | `/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-2232` |
+| Node version | `v26.3.0` |
+| Real installed engine root (before = after) | `/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-2232/.pi/npm/node_modules/pi-subagents` |
+| Actual package name/version (before = after) | `pi-subagents` / `0.66.0` |
+| git status --short before (C2-before) | clean (empty output) |
+| git status --short after (C2-after) | clean (empty output) |
+| Test reporter environment | `NODE_OPTIONS=--test-reporter=tap` exported for C4–C6 only |
+
+The implementation/code/tests/definitions were committed before C1. This evidence is a trailing
+documentation-only update. Further code/test/definition edits require repeating C1–C6 before final CI.
+
+### Source census
+
+SHA-256 is over raw file bytes, lowercase full hexadecimal (no newline normalization, Git blob
+IDs or truncated digests). The package root was resolved with `realpathSync`. Root, version and
+all nine digests agreed before/after. These are provenance facts, not production allowlist hashes.
+
+| Engine-relative path | SHA-256 before | SHA-256 after |
+| --- | --- | --- |
+| `package.json` | `e9b166c2287a3938206fc1824226ca1cf137eb1b0a3da6f988a2bb9b74e28faf` | `e9b166c2287a3938206fc1824226ca1cf137eb1b0a3da6f988a2bb9b74e28faf` |
+| `src/agents/agents.ts` | `f19b5b33dc24911d932a6ce3135b3d2f0e7733b28aecf4c568062f76b9f51bc5` | `f19b5b33dc24911d932a6ce3135b3d2f0e7733b28aecf4c568062f76b9f51bc5` |
+| `src/runs/foreground/subagent-executor.ts` | `532eb27e4e0977776d7f93cd34c7b6a660ae0f1e0d1eb6452b96eebb89c3b8f4` | `532eb27e4e0977776d7f93cd34c7b6a660ae0f1e0d1eb6452b96eebb89c3b8f4` |
+| `src/runs/foreground/execution.ts` | `5e0f5005cd1fb98d1c31ad8fef08e4e79806bba71c4248ae96d80b16e2428846` | `5e0f5005cd1fb98d1c31ad8fef08e4e79806bba71c4248ae96d80b16e2428846` |
+| `src/runs/shared/child-launch.ts` | `32133511f0969ae279102c4aa20186d79f6466cbb2e0f6b80dec6042f6c0ddc8` | `32133511f0969ae279102c4aa20186d79f6466cbb2e0f6b80dec6042f6c0ddc8` |
+| `src/runs/shared/child-tool-plan.ts` | `54f8dffbfb4c7a82fd89e0e51ff33098e57c58628bdffe4e18b8db00d0dc6415` | `54f8dffbfb4c7a82fd89e0e51ff33098e57c58628bdffe4e18b8db00d0dc6415` |
+| `src/runs/shared/extension-bindings.ts` | `55bf824caa684eb49be04ba3760325b19ee5cee8f01a6082be4ba530fe26c8d2` | `55bf824caa684eb49be04ba3760325b19ee5cee8f01a6082be4ba530fe26c8d2` |
+| `src/runs/shared/child-session.ts` | `5d97d6789395309b6470ecbaa58e4c3ce19c5b570ecbe2aa4dfcac9d77cdc1d7` | `5d97d6789395309b6470ecbaa58e4c3ce19c5b570ecbe2aa4dfcac9d77cdc1d7` |
+| `src/workflows/scripted-workflow.ts` | `b9bd92cba0c71481aab5d611a36f91452b0a7944aeeb444b87a4896896a041c1` | `b9bd92cba0c71481aab5d611a36f91452b0a7944aeeb444b87a4896896a041c1` |
+
+### Semantic checks
+
+| Mechanism | Source symbol/structural anchor | Result | Evidence |
+| --- | --- | --- | --- |
+| Root scheduling / definition default / omitted-async awaiting | `subagent-executor.ts`: root `async: _workflowAsync` / `async: _async` extraction; `prepareWorkflowLaunchParams`, `applySingleAgentLaunchDefaults`, effective `requestedAsync` resolution, `waitForWorkflowAsyncSingleResult` | corroborated | C4: real preparation plus the installed private default function type-stripped/evaluated in memory proves opposing defaults. Source trace establishes awaited background routing; no live child-mode measurement. |
+| Definition context / skill / extension parsing | `agents.ts::loadAgentsFromDefinitionFiles`: `defaultAsync`, `systemPromptMode`, `inheritGlobalContext`, project/skill fields, `skillPath`, `extensions`, `subagentOnlyExtensions` | corroborated | C4 real project discovery/parser on test-owned copies of canonical report/writer definitions; source inspection for explicit skillPath parsing. Closed ten-report/eleven-role census and model/skill exception pins are in ordinary Python tests. |
+| Runner-only binding normalization / delivery | `extension-bindings.ts::normalizeExtensionBindings` / `encodeExtensionBindings`; `child-launch.ts::childProcessEnv` / `buildInProcessChildLaunch`; `child-tool-plan.ts::resolvePiLaunchToolPlan` | corroborated | C4 tests exact true/false normalization, runner processEnv, parent absence and runner-only ambient discovery. Source inspection confirms omitted versus empty/explicit extension selection. |
+| Writer actual cwd / discovery | `subagent-executor.ts`: `discoverWorkflowAgents(childCwd, ...)` and child launch preparation; `execution.ts::runSyncCompletionInner` / `preflightLaunchCwd`; `child-launch.ts::buildInProcessChildLaunch` | corroborated | C4 real discovery/preparation, both actual scripts validated, fake child receives actual cwd; C6 each owning renderer evaluates its own script and callers retain thin trusted-input checks. Not autonomous prompt-following evidence. |
+| Blocking-workflow cancellation | `scripted-workflow.ts::validateWorkflowScript` / `runWorkflowScript` childController and launch signal; blocking executor `workflowSignal` handoff; `execution.ts::runSync` origin forwarding, abortChild/finish; `child-session.ts::ChildSessionFactory` and abort/dispose contract | corroborated | C4 PR-rebase script only: pre-aborted starts no child; in-flight prompt is held until abort, settles non-completed, and disposes. Real workflow/runSync with injected launch adapter and per-call fake factory; native session abort/dispose implementation is source inspection only, not another live writer/root-scheduling PASS. |
+
+### Commands and disposition
+
+Executed from the checkout root in this order: C1, C2-before, C3-before, C4, C5, C6,
+C3-after, C2-after. C3 is the identical read-only inline command shown below (not a checked-in
+command surface). Shell stdout capture redirects used the run-scoped disposable directory
+`.perk/workflow/scratch/runs/01M1VVK0HGGEJEKMZ8MP60054Q/agent/`: C1/C2 to their named `.txt` files, C3 to named `.json` files;
+C4–C6 to named `.tap` files with `2>&1`, with each exit code captured immediately afterward.
+The durable evidence is reproduced here, not delegated to those disposable files.
+
+| ID | Exact command | Exit code | Pass/fail/skip totals | Evidence excerpt |
+| --- | --- | --- | --- | --- |
+| C1 | `git log -1 --format=%H` | 0 | n/a | `3d1d9bda1fc7229484a7d843e97f6bb9bca3c852` |
+| C2-before | `git status --short` | 0 | n/a | empty: clean |
+| C3-before | identical C3 Node snippet below | 0 | n/a | full JSON below |
+| C4 | `node --test extension/waves/childExecutionCompat.test.ts` | 0 | 6 / 0 / 0 | actual installed engine executed; TAP totals below |
+| C5 | `node --test extension/waves/reportWave.test.ts extension/waves/reportWaveRpc.test.ts` | 0 | 73 / 0 / 0 | TAP totals below |
+| C6 | `node --test extension/pi/v1/delivery/submit.test.ts extension/pi/v1/delivery/stackSync.test.ts` | 0 | 77 / 0 / 0 | TAP totals below |
+| C3-after | identical C3 Node snippet below | 0 | n/a | full JSON below; same root/version/digests |
+| C2-after | `git status --short` | 0 | n/a | empty: clean |
+
+**C3 command (both executions):**
+
+```bash
+node --input-type=module <<'JS'
+import { createHash } from 'node:crypto';
+import { readFileSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
+const root = realpathSync('.pi/npm/node_modules/pi-subagents');
+const files = [
+  'package.json',
+  'src/agents/agents.ts',
+  'src/runs/foreground/subagent-executor.ts',
+  'src/runs/foreground/execution.ts',
+  'src/runs/shared/child-launch.ts',
+  'src/runs/shared/child-tool-plan.ts',
+  'src/runs/shared/extension-bindings.ts',
+  'src/runs/shared/child-session.ts',
+  'src/workflows/scripted-workflow.ts',
+];
+const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+console.log(JSON.stringify({
+  checkedAt: new Date().toISOString(), cwd: realpathSync('.'),
+  node: process.version, root, name: manifest.name, version: manifest.version,
+  sources: files.map(path => ({
+    path,
+    sha256: createHash('sha256').update(readFileSync(join(root, path))).digest('hex'),
+  })),
+}, null, 2));
+JS
+```
+
+**C3-before JSON (verbatim):**
+
+```json
+{
+  "checkedAt": "2026-09-06T17:40:45.346Z",
+  "cwd": "/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-2232",
+  "node": "v26.3.0",
+  "root": "/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-2232/.pi/npm/node_modules/pi-subagents",
+  "name": "pi-subagents",
+  "version": "0.66.0",
+  "sources": [
+    {
+      "path": "package.json",
+      "sha256": "e9b166c2287a3938206fc1824226ca1cf137eb1b0a3da6f988a2bb9b74e28faf"
+    },
+    {
+      "path": "src/agents/agents.ts",
+      "sha256": "f19b5b33dc24911d932a6ce3135b3d2f0e7733b28aecf4c568062f76b9f51bc5"
+    },
+    {
+      "path": "src/runs/foreground/subagent-executor.ts",
+      "sha256": "532eb27e4e0977776d7f93cd34c7b6a660ae0f1e0d1eb6452b96eebb89c3b8f4"
+    },
+    {
+      "path": "src/runs/foreground/execution.ts",
+      "sha256": "5e0f5005cd1fb98d1c31ad8fef08e4e79806bba71c4248ae96d80b16e2428846"
+    },
+    {
+      "path": "src/runs/shared/child-launch.ts",
+      "sha256": "32133511f0969ae279102c4aa20186d79f6466cbb2e0f6b80dec6042f6c0ddc8"
+    },
+    {
+      "path": "src/runs/shared/child-tool-plan.ts",
+      "sha256": "54f8dffbfb4c7a82fd89e0e51ff33098e57c58628bdffe4e18b8db00d0dc6415"
+    },
+    {
+      "path": "src/runs/shared/extension-bindings.ts",
+      "sha256": "55bf824caa684eb49be04ba3760325b19ee5cee8f01a6082be4ba530fe26c8d2"
+    },
+    {
+      "path": "src/runs/shared/child-session.ts",
+      "sha256": "5d97d6789395309b6470ecbaa58e4c3ce19c5b570ecbe2aa4dfcac9d77cdc1d7"
+    },
+    {
+      "path": "src/workflows/scripted-workflow.ts",
+      "sha256": "b9bd92cba0c71481aab5d611a36f91452b0a7944aeeb444b87a4896896a041c1"
+    }
+  ]
+}
+```
+
+**C3-after JSON (verbatim):**
+
+```json
+{
+  "checkedAt": "2026-09-06T17:41:18.126Z",
+  "cwd": "/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-2232",
+  "node": "v26.3.0",
+  "root": "/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-2232/.pi/npm/node_modules/pi-subagents",
+  "name": "pi-subagents",
+  "version": "0.66.0",
+  "sources": [
+    {
+      "path": "package.json",
+      "sha256": "e9b166c2287a3938206fc1824226ca1cf137eb1b0a3da6f988a2bb9b74e28faf"
+    },
+    {
+      "path": "src/agents/agents.ts",
+      "sha256": "f19b5b33dc24911d932a6ce3135b3d2f0e7733b28aecf4c568062f76b9f51bc5"
+    },
+    {
+      "path": "src/runs/foreground/subagent-executor.ts",
+      "sha256": "532eb27e4e0977776d7f93cd34c7b6a660ae0f1e0d1eb6452b96eebb89c3b8f4"
+    },
+    {
+      "path": "src/runs/foreground/execution.ts",
+      "sha256": "5e0f5005cd1fb98d1c31ad8fef08e4e79806bba71c4248ae96d80b16e2428846"
+    },
+    {
+      "path": "src/runs/shared/child-launch.ts",
+      "sha256": "32133511f0969ae279102c4aa20186d79f6466cbb2e0f6b80dec6042f6c0ddc8"
+    },
+    {
+      "path": "src/runs/shared/child-tool-plan.ts",
+      "sha256": "54f8dffbfb4c7a82fd89e0e51ff33098e57c58628bdffe4e18b8db00d0dc6415"
+    },
+    {
+      "path": "src/runs/shared/extension-bindings.ts",
+      "sha256": "55bf824caa684eb49be04ba3760325b19ee5cee8f01a6082be4ba530fe26c8d2"
+    },
+    {
+      "path": "src/runs/shared/child-session.ts",
+      "sha256": "5d97d6789395309b6470ecbaa58e4c3ce19c5b570ecbe2aa4dfcac9d77cdc1d7"
+    },
+    {
+      "path": "src/workflows/scripted-workflow.ts",
+      "sha256": "b9bd92cba0c71481aab5d611a36f91452b0a7944aeeb444b87a4896896a041c1"
+    }
+  ]
+}
+```
+
+
+**C4 TAP totals (verbatim):**
+
+```text
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3912.256875
+```
+
+**C5 TAP totals (verbatim):**
+
+```text
+# tests 73
+# suites 0
+# pass 73
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 636.481583
+```
+
+**C6 TAP totals (verbatim):**
+
+```text
+# tests 77
+# suites 0
+# pass 77
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 8716.6665
+```
+
+**Earlier iteration diagnostics (retained, not a failed recorded C1–C6 attempt):**
+
+- The first ordinary C4-suite run used a test-authored interop view `valid` rather than the
+  installed validator's real `ok` field. Exit 1; decisive diagnostic:
+  `AssertionError [ERR_ASSERTION]: []`, `actual: undefined`, `expected: true`.
+  Its verbatim totals were:
+
+```text
+ℹ tests 6
+ℹ suites 0
+ℹ pass 4
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4872.104708
+```
+
+  Corrected the test's field name after rereading the installed return interface. Imports,
+  default preparation, binding construction and both cancellation cases had passed; no engine
+  incompatibility, install, alias repair, execution-mode fallback or source patch was involved.
+- Python live prompt parity initially rejected single-quoted YAML fixture values:
+  `Error: perk miniYaml: single-quoted strings are not supported`; `1 failed, 58 passed`.
+  The fixture was corrected to double-quoted strings with escaped JSON quotes, preserving the
+  frozen grammar. Focused prompt grammar/render/live parity then passed (35 tests).
+- Normal `uv run perk init` converged all ten managed agent mirrors, then exited 2 on
+  `skills update --sync` conflicts in the existing materialized skills. No skills repair or
+  unrelated convergence changes were included. The only managed-state delta is the intended
+  agent-directory digest. Agent/mirror, repo-local, managed-state, init-idempotence and packaging
+  suites passed: 155 tests. This is not a claim that the unrelated skills sync succeeded.
+
+Additional focused validation: all configured JS tests and JS/Python lint passed; configured JS
+typecheck passed. Consumer census suites passed (147 tests), and warm composition plus C4 passed
+(13 tests). Both opt-in prose gates passed (553 Python tests, 364 Node tests and frontend build).
+There are no matching conflict-template scenario variables in the prose-map registry; its generated
+projection stayed current without hand-edited counts.
+
+**Disposition: source/offline corroborated.** Mandatory checks executed and passed with unchanged
+installed sources; C4 did not skip. No new live run; historical native evidence remains
+pi-subagents 0.65.1; full-baseline doctor stamp unchanged; full restriction behavior also requires 3.3.
+
 ## Additional required repair: current-parent read-only restrictions
 
 The cold claimed-parent R/E measurements remain valid, but do not establish warm inheritance.
