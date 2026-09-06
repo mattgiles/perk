@@ -15,6 +15,37 @@ from perk.convergence.init import PERK_AGENTS
 _ANALYST = Path(__file__).parent.parent / ".pi" / "agents" / "perk-dev" / "analyst.md"
 
 
+def test_auditor_is_the_tenth_background_report_outside_delivery():
+    path = _ANALYST.with_name("session-auditor.md")
+    fm = yaml.safe_load(path.read_text(encoding="utf-8").split("---", 2)[1])
+    assert "session-auditor" not in PERK_AGENTS
+    assert fm["name"] == "session-auditor"
+    assert fm["package"] == "perk-dev"
+    assert fm["async"] is True
+    assert fm["inheritGlobalContext"] is False
+    assert fm["inheritProjectContext"] is False
+    assert fm["inheritSkills"] is False
+    assert fm["systemPromptMode"] == "replace"
+    assert [tool.strip() for tool in fm["tools"].split(",")] == [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+    ]
+    assert fm["model"] == "openai/gpt-5.6-luna"
+    assert fm["fallbackModels"] == ["openai/gpt-5.6-terra"]
+    for absent in (
+        "extensions",
+        "subagentOnlyExtensions",
+        "skills",
+        "skillPath",
+        "acceptance",
+        "mission",
+    ):
+        assert absent not in fm
+
+
 def test_analyst_frontmatter_shape():
     text = _ANALYST.read_text(encoding="utf-8")
     frontmatter = yaml.safe_load(text.split("---", 2)[1])

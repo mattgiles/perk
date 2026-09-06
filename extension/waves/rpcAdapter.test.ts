@@ -88,9 +88,12 @@ for (const flow of [
     const fake = createFakeSubagents([{ existingRun: f.handle, delivery: "manual" }]);
     fake.attach(bus);
     let reads = 0;
-    const wave = createReportWave(bus, () => {
-      reads++;
-      return undefined;
+    const wave = createReportWave(bus, {
+      parentReadOnly: () => false,
+      engineEntry: () => {
+        reads++;
+        return undefined;
+      },
     });
     const start = await wave.start({
       flow,

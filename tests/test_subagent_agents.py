@@ -7,10 +7,61 @@ fresh delivery, idempotency, drift rewrite, stray pruning, and `apply=False` dry
 
 import re
 
+import pytest
 import yaml
 
 from perk import _resources
 from perk.convergence.init import PERK_AGENTS, _converge_subagent_agents
+
+# Independent closed census: deriving this from PERK_AGENTS would miss a dropped role.
+_PROFILES = {
+    "adversarial-reviewer": ("anthropic/claude-fable-5", "anthropic/claude-sonnet-4-5"),
+    "conflict-resolver": ("anthropic/claude-sonnet-4-5", "anthropic/claude-haiku-4-5"),
+    "draft-reviewer": ("openai/gpt-5.6-sol", "openai/gpt-5.6-terra"),
+    "dream-analyst": ("openai/gpt-5.6-terra", "openai/gpt-5.6-luna"),
+    "dream-reducer": ("anthropic/claude-fable-5", "anthropic/claude-sonnet-4-5"),
+    "harvest-analyst": ("openai/gpt-5.6-terra", "openai/gpt-5.6-luna"),
+    "learn-analyst": ("anthropic/claude-sonnet-4-5", "anthropic/claude-haiku-4-5"),
+    "objective-explorer": ("anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4-5"),
+    "pr-reviewer": ("anthropic/claude-sonnet-4-5", "anthropic/claude-haiku-4-5"),
+    "review-classifier": ("anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4-5"),
+}
+
+
+def test_closed_delivered_profile_census():
+    assert set(PERK_AGENTS) == set(_PROFILES)
+    assert len(_PROFILES) == 10  # Nine reports; repo-local auditor is checked separately.
+
+
+@pytest.mark.parametrize("name", _PROFILES)
+def test_native_child_profile(name):
+    fm = yaml.safe_load(_source_bytes(name).decode().split("---", 2)[1])
+    writer = name == "conflict-resolver"
+    assert fm["name"] == name
+    assert fm["package"] == "perk"
+    if writer:
+        assert "async" not in fm
+    else:
+        assert fm["async"] is True
+    assert fm["inheritGlobalContext"] is False
+    assert fm["inheritProjectContext"] is writer
+    assert fm["inheritSkills"] is writer
+    assert fm["systemPromptMode"] == "replace"
+    assert [tool.strip() for tool in fm["tools"].split(",")] == [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        *(["edit", "write"] if writer else []),
+    ]
+    model, fallback = _PROFILES[name]
+    assert fm["model"] == model
+    assert fm["fallbackModels"] == [fallback]
+    for absent in ("extensions", "subagentOnlyExtensions", "skills", "acceptance", "mission"):
+        assert absent not in fm
+    if name not in {"pr-reviewer", "adversarial-reviewer", "draft-reviewer"}:
+        assert "skillPath" not in fm
 
 
 def _source_bytes(name):

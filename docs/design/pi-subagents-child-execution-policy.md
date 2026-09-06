@@ -1,20 +1,22 @@
 # Native child execution policy and scratch identity
 
-**Selected policy; implementation belongs to the named consumers.** Approval status is recorded
-only in the pointer below. This is the decision gate for Objective #2209 nodes 3.2 (profile
-encoding/restriction producer) and 3.3 (scratch identity and child restriction enforcement).
-It changes no production behavior itself.
+**Accepted policy; profiles and restriction producer implemented.** Approval status is recorded
+only in the pointer below. The profile encoding/restriction producer is implemented by node 3.2;
+node 3.3 still owns scratch identity and child restriction enforcement. This record distinguishes
+implemented producer behavior from that pending consumer repair and from historical measurements.
 The [characterization archive](archive/pi-subagents-child-capability-characterization.md)
 contains the protocol, native outcomes, historical failures, exact disposable sources and
 independent teardown. Experiment approval is not approval of these selections.
 
 ## Approval pointer
 
-**Pending human PR review.** The owner directed submission of the draft PR for review instead
-of the originally planned pre-submit local approval. Review is against the published PR head;
-submission itself does not approve these decisions. Neither checkpoint `bfb6a09c` nor
-`b5dd31ef` is approval. No implementation consumer may treat this pending record as accepted
-policy until the owner accepts the reviewed content.
+**Accepted by owner merge.** Owner `mattgiles` accepted PR #2231's unchanged published head
+`a45e437c3be3da9f0e57e9caaa2808978bfc4516` by merging it at `2026-09-06T15:03:37Z`,
+merge commit `de133aeb26d74b95f16a699b3a88cd757344251b`, and confirmed acceptance during
+implementation planning. There were no formal PR reviews or discussion comments and no separate
+local commit/blob attestation. Historically the owner authorized draft publication for review,
+not the originally planned pre-submit local approval; publication itself was not approval.
+Neither checkpoint `bfb6a09c` nor `b5dd31ef` is approval.
 
 ## Additional required repair: current-parent read-only restrictions
 
@@ -28,8 +30,8 @@ gap, **not a newly executed case**.
 The owner approved expanding the decision/consumer scope for this gap at
 **2026-09-06T14:36:56.574Z**, session response `44ba3dfb`; canonical plan #2230 records the
 clarification. No additional native probe or production prototype is authorized in this node.
-The following is the exact **source-derived repair design**, still requiring implementation
-and the final Git-bound review—not a measured warm-path PASS.
+The following is the exact **source-derived repair design**, with its producer implemented and its strict consumer still
+requiring 3.3—not a measured warm-path PASS.
 
 ### Separate restriction channel
 
@@ -198,8 +200,8 @@ Explicit child `async: true` instead returns detached-launch semantics and must 
 for the omission. Do not expose that private await flag in Perk payloads or add a collector.
 The release's `workflow-launch-params.test.ts` corroborates this distinction; R/S/E exercised it.
 
-Node 3.2 adds `async: true` to the **nine delivered report definitions and the repo-local
-auditor**, converges their managed copies, and tests the intentional renderer omission. It adds
+Node 3.2 implements `async: true` to the **nine delivered report definitions and the repo-local
+auditor**, converges their managed copies, and tests the intentional renderer omission. It encodes
 `async: false` and the actual `cwd` to the child item in **both** conflict templates. It makes
 `inheritGlobalContext: false` explicit in the eleven definitions; that preserves the selected
 resolved value rather than relying on a future engine default. Global context instructions
@@ -283,7 +285,7 @@ The selected blocking resolver workflow is retained from current behavior; propa
 same foreground child abort/dispose path is source-backed, **not a separately exercised root-
 scheduling variant**. Direct top-level foreground targets are not RPC `stop` targets. Thirty
 seconds is the experiment's observation bound, not a new universal production SLA. Node 3.2
-must pin cancellation propagation in ordinary framework tests without claiming a new live pass.
+pins cancellation propagation in ordinary framework tests without claiming a new live pass.
 
 ## 4. Identity carrier decision
 
@@ -391,7 +393,7 @@ directory or agent-scratch guidance**, not zero lifecycle filesystem activity.
 
 ## 6. Implementation-only responsibilities
 
-### Node 3.2 — encode, do not choose again
+### Node 3.2 — implemented profile/producer responsibilities
 
 - Change the nine delivered report defaults and auditor default to `async: true`; converge
   byte-identical managed copies. Keep writer definition default unchanged and make both
@@ -417,7 +419,7 @@ directory or agent-scratch guidance**, not zero lifecycle filesystem activity.
   acceptance contract. Regenerate `shared/subagents/representative-wave-script.js` for the
   new restriction field; never teach its golden the forbidden child `async: true` flag.
 - Amend `shared/contracts.md` for the implemented behavior and matching user-facing docs.
-  This decision node does not change that cross-plane behavior in advance.
+  The implemented producer/profile behavior is recorded there; the separate consumer remains pending.
 
 ### Node 3.3 — implement identity and the independent restriction floor
 
@@ -461,6 +463,7 @@ Residuals presented for final review are: representative-derived sibling coverag
 model/global-context/reload/root-scheduling claims; foreground writer's absent Perk scratch and
 ambient-provider support; no arbitrary cross-cwd handoff inheritance; advisory spoofable identity
 with the explicit fallback matrix; late background supervisor observation; and the untouched
-Phase-2 streaming waivers. The report-suppression and source-derived warm-restriction repairs
-remain **required, not implemented**; no warm-path native PASS is claimed. No unresolved policy
+Phase-2 streaming waivers. The report-suppression and strict warm-restriction consumer repairs
+remain **required from 3.3, not implemented here**; profiles and the per-attempt producer are
+implemented. No warm-path native PASS is claimed. No unresolved policy
 choice is delegated to the implementation consumers.

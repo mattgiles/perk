@@ -166,10 +166,10 @@ export default function (pi: ExtensionAPI) {
   // pi's event bus) and pending execution (instance-owned refs), and is threaded into every
   // wave-consuming installer — no installer touches the transport tier. Plain construction, no
   // Pi registration, order-safe.
-  const reportWave = createReportWave(
-    pi.events,
-    () => pi.getAllTools().find((tool) => tool.name === "subagent")?.sourceInfo.path,
-  );
+  const reportWave = createReportWave(pi.events, {
+    parentReadOnly: () => gating.isActive(),
+    engineEntry: () => pi.getAllTools().find((tool) => tool.name === "subagent")?.sourceInfo.path,
+  });
 
   // The v1 plan installer: perk-owned plan mode (the `/plan` + Ctrl+Alt+P + `--plan` toggle
   // surface over the read-only gate, plus the plan-authoring context injection — this call

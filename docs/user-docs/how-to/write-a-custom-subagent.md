@@ -14,7 +14,7 @@ Add one project agent and run it directly through the `subagent` tool.
 
 1. **Choose a user-owned path.** Project agents are discovered recursively under `.pi/agents/`, so
    create `.pi/agents/<my-specialist>.md` or place the file in your own nested directory. Do not use
-   `.pi/agents/perk/`: perk owns only that subtree, converges its eleven `perk.*` agents there, and
+   `.pi/agents/perk/`: perk owns only that subtree, converges its managed `perk.*` definitions there, and
    prunes foreign files from it.
 2. **Write a minimal agent definition.** The frontmatter `name` is its runtime name; the body is its
    system prompt.
@@ -45,6 +45,27 @@ Add one project agent and run it directly through the `subagent` tool.
 
    pi-subagents runs a direct one-child call natively (structured single-child execution); use
    `workflowScript` when you need multi-child orchestration or a custom result projection.
+
+## Perk-owned profiles
+
+Perk's code-owned report waves use background children selected by `async: true` in their
+managed definitions (and in the repo-local session auditor). Child calls deliberately omit
+`async` so native workflow awaiting still collects their reports. Reports replace the base
+prompt, inherit neither global/project context nor discovered skills, and omit extension lists
+so runner ambient discovery remains available. Explicit source-bound Ponytail assignment skills
+are separate from discovered-skill inheritance. Models and ordered fallbacks are unchanged.
+
+The conflict resolver instead has an unspecified definition mode and is explicitly launched
+foreground by both owned dispatch templates, at the actual trusted target cwd. It inherits
+project context and skills, not global context; foreground mode does not load ambient extensions.
+Missing directory/profile capabilities stop dispatch, never trigger a mode or extension fallback.
+
+Each code-owned report attempt also captures the parent's current read-only gate after skill
+preflight and serializes it in the private `perk.parent-restrictions/1` binding. A failed capture
+stops before launch. False is not write authority, and full warm-child enforcement requires the
+matching strict consumer/floor repair as well as this producer. This is a spawn-time snapshot,
+not continuous revocation, an OS sandbox, or a configuration channel for user/manual agents.
+Your direct custom calls above are outside that code-owned snapshot guarantee.
 
 ## Builtins in a perk repo
 

@@ -7,6 +7,8 @@ fallbackModels:
   - anthropic/claude-sonnet-4-5
 tools: read, grep, find, ls, bash
 systemPromptMode: replace
+async: true
+inheritGlobalContext: false
 inheritProjectContext: false
 inheritSkills: false
 skillPath:

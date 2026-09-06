@@ -506,7 +506,7 @@ test("tool: a pre-aborted signal cancels before any launch (zero RPC traffic)", 
       on: () => () => {},
     },
   } as unknown as ExtensionAPI;
-  installHarvestBindings(pi, createReportWave(pi.events));
+  installHarvestBindings(pi, createReportWave(pi.events, { parentReadOnly: () => false }));
   const controller = new AbortController();
   controller.abort();
   const ctx = {

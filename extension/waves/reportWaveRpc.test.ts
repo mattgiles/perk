@@ -64,7 +64,7 @@ test("rpc integration: the real spawn envelope + the durable aggregate round-tri
   const fake = createFakeSubagents([{ executeScript: DERIVE_REPORTS }]);
   fake.attach(bus);
   const spec = makeSpec({ model: "anthropic/claude-sonnet-4" });
-  const result = await createReportWave(bus).run(spec);
+  const result = await createReportWave(bus, { parentReadOnly: () => true }).run(spec);
 
   // The spawn crossed the real v1 envelope with the fixed module contract.
   assert.equal(fake.spawns.length, 1);
@@ -90,6 +90,14 @@ test("rpc integration: the real spawn envelope + the durable aggregate round-tri
     ["plan-fidelity", "correctness"],
   );
 
+  assert.deepEqual(
+    waveScriptItems(String(spawn.workflowScript)).map((item) => item.extensionBindings),
+    [
+      { "perk.parent-restrictions/1": { readOnly: true } },
+      { "perk.parent-restrictions/1": { readOnly: true } },
+    ],
+  );
+
   // The aggregate was read from the run's REAL temp status.json through the adapter.
   assert.equal(result.complete, true);
   assert.deepEqual(result.reports, [
@@ -104,7 +112,7 @@ test("rpc integration: a FOREIGN completion is ignored; the matching manual deli
   const bus = createFakeBus();
   const fake = createFakeSubagents([{ executeScript: DERIVE_REPORTS, delivery: "manual" }]);
   fake.attach(bus);
-  const wave = createReportWave(bus);
+  const wave = createReportWave(bus, { parentReadOnly: () => false });
   const start = await wave.start(makeSpec());
   assert.equal(start.ok, true);
   if (!start.ok) return;
@@ -136,7 +144,9 @@ test("rpc integration: timeout stops the real run best-effort (the recorded stop
   const bus = createFakeBus();
   const fake = createFakeSubagents([{ delivery: "never" }]);
   fake.attach(bus);
-  const result = await createReportWave(bus).run(makeSpec({ timeoutMs: 30 }));
+  const result = await createReportWave(bus, { parentReadOnly: () => false }).run(
+    makeSpec({ timeoutMs: 30 }),
+  );
   assert.deepEqual(
     result.failures.map((f) => [f.key, f.reason]),
     [[null, "timeout"]],
@@ -162,7 +172,7 @@ test("rpc integration: adapter construction is per-launch inside the supplier (s
   );
   assert.match(
     source,
-    /waveOver\(\(request\)\s*=>\s*createRpcWaveAdapter\(\s*bus,/,
+    /waveOver\(\s*\(request\)\s*=>\s*createRpcWaveAdapter\(\s*bus,/,
     "the one construction call must sit inside the per-launch supplier arrow",
   );
   assert.match(
@@ -193,7 +203,7 @@ test("rpc integration: two OVERLAPPING waves through one factory correlate out o
   };
   const fake = createFakeSubagents([{ executeScript: DERIVE_REPORTS, delivery: "manual" }]);
   fake.attach(bus);
-  const wave = createReportWave(countingBus);
+  const wave = createReportWave(countingBus, { parentReadOnly: () => false });
   const a = await wave.start(
     makeSpec({
       assignments: [

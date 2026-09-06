@@ -71,8 +71,14 @@ for the background baseline and the five human-operated streaming legs; unobserv
 ## Child execution and scratch-identity decision
 
 The [binding child-policy record](../design/pi-subagents-child-execution-policy.md) defines
-selected behavior for the implementation consumers, **not a claim that the repair is already
-implemented**. Check its Git-bound approval pointer before using it as accepted policy. It
+owner-accepted behavior: its [approval pointer](../design/pi-subagents-child-execution-policy.md#approval-pointer)
+records acceptance by the unchanged PR #2231 owner merge, not a separate formal review or local
+attestation. Profiles and the restriction producer are implemented; identity/floor/scratch still
+require the separate 3.3 repair. The bounded
+[0.66.0 source/offline reconciliation](../design/pi-subagents-child-execution-policy.md#0660-sourceoffline-reconciliation)
+records the exact context, nine-file raw-byte SHA-256 census, semantic anchors and C1–C6 commands.
+It is not a new full compatibility certification: the full-baseline doctor stamp stays unchanged,
+as do the five Pi dev pins, the unpinned engine policy and stale-error fingerprints. It
 closes the eleven-role census, execution-mode encoding, extension/context/cwd boundaries,
 advisory identity and the independent warm-parent read-only restriction channel. Both the
 producer and consumer repairs are required before claiming the full report profile; the warm

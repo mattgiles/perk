@@ -26,12 +26,14 @@ import {
   spyInjections,
 } from "../../../testing/harness.ts";
 import { OK_ENVELOPE } from "../../../testing/objectiveStackFixtures.ts";
+import { evaluateWriterScript } from "../../../testing/writerScript.ts";
 import {
   buildStackAdoptArgs,
   buildStackSyncArgs,
   objectiveSyncGuidance,
   renderSyncOutcome,
   runSyncResolution,
+  syncConflictResolutionGuidance,
 } from "./stackSync.ts";
 
 // --- frozen registration baselines (captured from the pre-migration door) -------------------------
@@ -492,6 +494,49 @@ test("guidance: preview-first, consent-gated, no hardcoded skill pointer", () =>
 
 const DRIVE_OP = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 
+function dispatchAt(cwd: string) {
+  return {
+    operationId: DRIVE_OP,
+    manifestPath: join(cwd, "sync-continuations", "01LIN.json"),
+    objective: "7",
+    node: "2.1",
+    branch: "plan-91",
+    pr: 91,
+    worktree: `/tmp/worktrees/sync-${DRIVE_OP}`,
+  };
+}
+
+for (const model of [undefined, "test-org/resolver-model"]) {
+  test(`retained writer renderer pins child foreground/cwd and compact return: ${model}`, async () => {
+    const dispatch = dispatchAt("/caller");
+    const text = syncConflictResolutionGuidance(dispatch, 1, 2, model);
+    const { calls, result } = await evaluateWriterScript(text);
+    assert.deepEqual(calls, [
+      {
+        key: "resolve",
+        params: {
+          agent: "perk.conflict-resolver",
+          async: false,
+          cwd: dispatch.worktree,
+          task: "<the instruction of step 2>",
+        },
+      },
+    ]);
+    assert.deepEqual(result, { key: "resolve", ok: false, error: "stopped", output: "resolution" });
+    assert.match(text, /top-level `async: false` and `context: "fresh"`/);
+    assert.doesNotMatch(text, /extensionBindings|acceptance:|mission:/);
+    assert.equal(text.includes('model: "test-org/resolver-model"'), model !== undefined);
+    assert.ok(
+      text.includes(
+        `\nRETAINED-CONTINUATION SENTINEL: resume the in-progress rebase in ${dispatch.worktree}\n`,
+      ),
+    );
+    assert.match(text, /ONLY a \*\*completed\*\* rebase \(verification passed\)/);
+    assert.match(text, /Do not install wiring or copy\/mint a parent handoff/);
+    assert.match(text, /Never change execution mode, extension composition, or launch protocol/);
+  });
+}
+
 /** A stack-routing fake perk: routes on the third argv token (sync vs status) and appends each
  * call's full argv as one line — the smoke tests assert the exact cold-door sequence. */
 function fakeStackPerk(
@@ -569,6 +614,7 @@ test("registered tool: a mutating sync refusing rebase_conflict auto-drives ONE 
       "the mutating sync is followed by exactly the corroborating status re-read",
     );
     assert.equal(injected.length, 1, "exactly one dispatch injection");
+    assert.ok(injected[0]?.startsWith(syncConflictResolutionGuidance(dispatchAt(cwd), 1, 2)));
     assert.match(injected[0] ?? "", /RETAINED-CONTINUATION SENTINEL/);
     assert.match(injected[0] ?? "", /perk\.conflict-resolver/);
     assert.match(injected[0] ?? "", /attempt 1 of 2/);

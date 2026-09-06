@@ -241,8 +241,7 @@ export function renderPublishedMessage(change: PublishedChange): string {
 /**
  * The follow-up guidance the warm `/submit` injects to dispatch the conflict-resolver (modeled
  * on `prReviewGuidance`). Pure + exported for offline tests. `worktree` is the plan worktree the
- * child's task text pins with a concrete `cd <worktree>` command — a dispatched child otherwise
- * has no cwd guarantee and can run its commands outside the plan worktree. When `model` is set,
+ * child's actual cwd pins; the shell-escaped `cd` reminder is defensive task prose. When `model` is set,
  * the ONE workflowScript call carries a workflow-level `model` default; otherwise the agent's
  * default model is used.
  */
@@ -258,6 +257,8 @@ export function conflictResolutionGuidance(
     attempt: String(attempt),
     cap: String(cap),
     worktree,
+    worktree_json: JSON.stringify(worktree),
+    worktree_shell: `'${worktree.replaceAll("'", "'\\''")}'`,
     model: model ?? "",
   });
 }

@@ -7,6 +7,7 @@ fallbackModels:
   - anthropic/claude-haiku-4-5
 tools: read, grep, find, ls, bash, edit, write
 systemPromptMode: replace
+inheritGlobalContext: false
 inheritProjectContext: true
 inheritSkills: true
 ---

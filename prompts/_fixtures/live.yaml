@@ -226,6 +226,8 @@
     attempt: "2"
     cap: "3"
     worktree: "/tmp/worktrees/plan-42"
+    worktree_json: "\"/tmp/worktrees/plan-42\""
+    worktree_shell: "'/tmp/worktrees/plan-42'"
     model: ""
 - template: "stages/conflict-resolution.md"
   vars:
@@ -233,6 +235,8 @@
     attempt: "2"
     cap: "3"
     worktree: "/tmp/worktrees/plan-42"
+    worktree_json: "\"/tmp/worktrees/plan-42\""
+    worktree_shell: "'/tmp/worktrees/plan-42'"
     model: "google/gemini-3.5-flash"
 - template: "stages/conflict-resolution-continuation.md"
   vars:
@@ -241,6 +245,7 @@
     branch: "plan-91"
     pr: "91"
     worktree: "/tmp/worktrees/sync-01ABCDEF"
+    worktree_json: "\"/tmp/worktrees/sync-01ABCDEF\""
     attempt: "1"
     cap: "2"
     model: ""
@@ -251,6 +256,7 @@
     branch: "plan-91"
     pr: "91"
     worktree: "/tmp/worktrees/sync-01ABCDEF"
+    worktree_json: "\"/tmp/worktrees/sync-01ABCDEF\""
     attempt: "1"
     cap: "2"
     model: "google/gemini-3.5-flash"
