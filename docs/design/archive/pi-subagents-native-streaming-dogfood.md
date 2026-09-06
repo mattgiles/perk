@@ -842,3 +842,14 @@ state on confirmed retry success without clearing hard run/stop/timeout errors, 
 structured-output completion, failed retry and real termination errors. No production source,
 capability/model setting, dependency version, or live-attempt count changed during this trace.
 D2 remains not passed; N/U and submission remain blocked pending owner disposition.
+
+The owner subsequently **prohibited upstream filing** and requested a local report instead.
+The report was written to `/Users/mattgiles/Desktop/pi-subagents-bugreport.md`; nothing was
+published. The owner asked whether a temporary in-repo `FIXME` compatibility defense is
+reasonable. A narrowly proof-gated adapter correction is being considered, not implemented:
+correlate the exact failed child, require recovered-error → successful structured capture →
+settlement evidence without later failures, validate against the original requested schema,
+and retain the raw engine failure with an explicit recovery diagnostic. Missing or ambiguous
+proof must preserve failure. This would require an explicit narrow amendment to the current
+no-failed-report-recovery boundary; it would not recover original D's missing report, change
+reviewer permissions/models, patch node_modules, or launch another wave.
