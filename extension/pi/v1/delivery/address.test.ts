@@ -24,6 +24,7 @@ import {
 } from "../../../testing/harness.ts";
 import { REVIEW_CLASSIFIER_REPORT_SCHEMA } from "../../../waves/reviewClassifierWave.ts";
 import { addressGuidance, decodeResolveParams } from "./address.ts";
+import { conflictResolutionGuidance } from "./submit.ts";
 
 const REF: PlanRef = {
   provider: "github",
@@ -395,7 +396,7 @@ test("finalize_address re-drives a definitive conflict without parsed paths", as
     });
     assert.equal((result.details as { ok: boolean }).ok, true);
     assert.equal(injected.length, 1);
-    assert.match(injected[0] ?? "", /perk\.conflict-resolver/);
+    assert.ok(injected[0]?.startsWith(conflictResolutionGuidance("main", 1, 2, cwd)));
     assert.equal(h.workflowState().conflict_resolution_attempts, 1);
   } finally {
     h.dispose();

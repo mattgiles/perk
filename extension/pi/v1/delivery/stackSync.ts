@@ -140,6 +140,7 @@ export function syncConflictResolutionGuidance(
     branch: dispatch.branch,
     pr: String(dispatch.pr),
     worktree: dispatch.worktree,
+    worktree_json: JSON.stringify(dispatch.worktree),
     attempt: String(attempt),
     cap: String(cap),
     model: model ?? "",

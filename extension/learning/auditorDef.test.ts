@@ -32,6 +32,9 @@ test("the session-auditor def completes via structured_output with the schema's 
   assert.match(def, /^ {2}- openai\/gpt-5\.6-terra$/m);
   assert.match(def, /^tools: read, grep, find, ls, bash$/m);
   assert.match(def, /^systemPromptMode: replace$/m);
+  assert.match(def, /^async: true$/m);
+  assert.match(def, /^inheritGlobalContext: false$/m);
+  assert.doesNotMatch(def, /^(extensions|subagentOnlyExtensions):/m);
   assert.match(def, /^inheritProjectContext: false$/m);
   assert.match(def, /^inheritSkills: false$/m);
   // The completion contract.

@@ -356,7 +356,7 @@ test("tool: a branch with no claimed run is bad_state (zero RPC traffic)", async
       on: () => () => {},
     },
   } as unknown as ExtensionAPI;
-  installDreamBindings(pi, createReportWave(pi.events));
+  installDreamBindings(pi, createReportWave(pi.events, { parentReadOnly: () => false }));
   const ctx = {
     cwd,
     hasUI: true,
@@ -415,7 +415,7 @@ test("tool: a pre-aborted signal cancels before any launch (zero RPC traffic thr
       on: () => () => {},
     },
   } as unknown as ExtensionAPI;
-  installDreamBindings(pi, createReportWave(pi.events));
+  installDreamBindings(pi, createReportWave(pi.events, { parentReadOnly: () => false }));
   const controller = new AbortController();
   controller.abort();
   const ctx = {

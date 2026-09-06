@@ -30,6 +30,7 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../../../testing/harness.ts";
+import { evaluateWriterScript } from "../../../testing/writerScript.ts";
 import {
   conflictResolutionGuidance,
   driveConflictFollowUp,
@@ -590,6 +591,29 @@ test("planning-stage refusal: the submit tool refuses before any cold door", asy
 
 // --- conflictResolutionGuidance (pure) -----------------------------------------------------------
 
+test("PR writer script selects foreground and the JSON/shell-escaped actual cwd", async () => {
+  const cwd = `/work/space 'quote' "double" \\slash \`tick\` $HOME`;
+  const text = conflictResolutionGuidance("main", 1, 2, cwd);
+  const { calls, result } = await evaluateWriterScript(text);
+  assert.deepEqual(calls, [
+    {
+      key: "resolve",
+      params: {
+        agent: "perk.conflict-resolver",
+        async: false,
+        cwd,
+        task: "<the instruction of step 2>",
+      },
+    },
+  ]);
+  assert.deepEqual(result, { key: "resolve", ok: false, error: "stopped", output: "resolution" });
+  assert.ok(text.includes("`cd '/work/space '\\''quote'\\'' \"double\" \\slash `tick` $HOME'`"));
+  assert.match(text, /top-level `async: false` and `context: "fresh"`/);
+  assert.doesNotMatch(text, /extensionBindings|acceptance:|mission:/);
+  assert.match(text, /missing, ambiguous, or shadowed/);
+  assert.match(text, /Never change execution mode, extension composition, or launch protocol/);
+});
+
 test("conflictResolutionGuidance spawns perk.conflict-resolver with a fresh context", () => {
   const text = conflictResolutionGuidance("main", 1, 2, "/wt/plan-42");
   assert.match(text, /perk\.conflict-resolver/);
@@ -623,7 +647,7 @@ test("conflictResolutionGuidance renders the attempt-of-cap text", () => {
 
 test("conflictResolutionGuidance pins the plan worktree with a concrete cd command", () => {
   const text = conflictResolutionGuidance("main", 1, 2, "/wt/plan-42");
-  assert.match(text, /`cd \/wt\/plan-42`/);
+  assert.match(text, /`cd '\/wt\/plan-42'`/);
 });
 
 test("conflictResolutionGuidance tells the model to re-/submit afterward", () => {
@@ -741,7 +765,7 @@ test("submit tool e2e: a conflicted submit drives the resolver and increments th
     assert.equal((result.details as { ok: boolean }).ok, true);
     assert.equal(result.terminate, true, "the terminating tool stays terminating");
     assert.equal(injected.length, 1);
-    assert.match(injected[0] ?? "", /perk\.conflict-resolver/);
+    assert.ok(injected[0]?.startsWith(conflictResolutionGuidance("main", 1, 2, cwd)));
     assert.equal(h.workflowState().conflict_resolution_attempts, 1);
   } finally {
     h.dispose();

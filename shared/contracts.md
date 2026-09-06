@@ -680,7 +680,30 @@ owns the provider seams); the read-only CI executor
 (`extension/pi/v1/delivery/address.ts` / `extension/pi/v1/codeReview/automated.ts` / `terminal.ts` /
 `browser.ts` / `submit.ts` / `checkout.ts` / `extension/pi/v1/providers/plannotatorHandoff.ts`, `agents/*.md`, `skills/perk-address/` /
 `perk-pr-review/` / `perk-pr-review-terminal/` / `perk-pr-review-browser/`; the gateway op shapes stay in §8.4); the conflict-resolution drive
-(`extension/pi/v1/delivery/submit.ts`; the probe contract stays in §8.4).
+(`extension/pi/v1/delivery/submit.ts`; the probe contract stays in §8.4). Its submit/address
+PR-rebase guidance selects both root and child `async: false`, root `context: "fresh"`, and
+actual child `cwd` from trusted `ctx.cwd` (JSON-stringified, with a separately POSIX-escaped
+`cd` reminder). Native executable/non-disabled profile discovery at that existing absolute
+cwd is required before mutation; ambiguous/shadowed profiles stop. This is model-authored
+one-child dispatch, not a code-owned resolver. Rebase/verification/PR-only abort/force-with-lease
+push authority, the attempt cap, and parent re-submit verification are unchanged. Keep one
+writer per worktree; failures never authorize mode, extension-composition or protocol fallback.
+Blocking cancellation stays native-owned, not a new autonomous resolution guarantee.
+
+**Perk-owned child profiles and delivery.** `src/perk/convergence/init/agents.py::PERK_AGENTS`
+delivers canonical `agents/*.md` byte-identically into `.pi/agents/perk/`. Nine delivered reports
+(`pr-reviewer`, `review-classifier`, `objective-explorer`, `learn-analyst`, `harvest-analyst`,
+`dream-analyst`, `dream-reducer`, `adversarial-reviewer`, `draft-reviewer`) plus the repo-local
+`perk-dev.session-auditor` select definition `async: true`. All ten keep replacement base prompts,
+read-only tools, `inheritProjectContext: false` and `inheritSkills: false`.
+`conflict-resolver` leaves definition async absent, retaining writer tools and project/skill
+inheritance true. All eleven explicitly set `inheritGlobalContext: false` and omit both
+`extensions` and `subagentOnlyExtensions` (empty is not equivalent). Reports use ambient runner
+discovery; foreground writers have no ambient extensions or transported Perk handoff. Canonical
+models and ordered fallbacks stay intact, as do exact-source Ponytail skillPath exceptions
+(pr/adversarial `ponytail-review`, draft `ponytail`). Explicit assignment skills are not discovered
+skill inheritance. The auditor is not added to the delivered set; user/manual agents are outside
+this closed profile policy.
 
 
 ---
@@ -5451,6 +5474,27 @@ text), derives `manifest.json` itself (`bad_input` when absent), and resolves th
 from `[models.subagents] learn-analyst` at execute time (the wave's workflow-level `model`
 default). The manifest write rule above and the DECISION vocabulary are unchanged.
 
+**Report child mode and parent-restriction producer.** Root scheduling stays async/fresh with
+fixed mission/acceptance above. Every runnable child intentionally omits `async`: definition
+background defaults apply while native omitted-async awaiting collects the report. No child cwd,
+extension lists, private `workflowAwaitAsync`, or extra collector is emitted.
+`createReportWave(bus, { parentReadOnly, engineEntry? })` requires a lazy supplier; `index.ts`
+passes `() => gating.isActive()` plus the existing lazy engine source lookup. After required-skill
+preflight and the all-skipped early return, each attempt samples that supplier exactly once,
+immediately before rendering. Every runnable item receives exactly
+`extensionBindings: {"perk.parent-restrictions/1": {"readOnly": boolean}}`, including false,
+without identity/stage/run data or a root binding. Explicit field selection and JSON serialization
+keep task text and extra runtime assignment properties from overriding this channel. Retries sample
+anew; this is not continuous revocation or a handoff read. Capture exceptions return non-retryable
+wave-level `unavailable`, `key: null`, receipt `{state: "unavailable", children: []}`, a
+parent-restriction capture diagnostic, and the normal manifest, preserving keyed preflight failures.
+No adapter construction/ping/spawn or ref mint occurs; best-effort completeness remains false.
+The public `ReportWave` lifecycle, requests, assignments, results and controls are unchanged.
+The test-only `reportWaveOver(adapter, parentReadOnly = () => false)` default is not production
+permission policy. False is not a write grant. This implements the producer only: strict decoding,
+monotone effective-gate floor, advisory identity and scratch suppression require the separate
+3.3 consumer repair; the existing scratch contract is not yet repaired by this channel alone.
+
 **Streaming launch manifests.** The report wave's `start` returns one preflight-derived
 `ReportWaveLaunchManifest = {requested, runnable, preflightFailures}` on both result arms. `requested`
 preserves the declared lane order; `runnable` is the ordered subset eligible for the rendered
@@ -8385,7 +8429,16 @@ EEXIST on mkdir) are contention; every OTHER claim/lease filesystem failure is t
 `state_error` — never a fabricated busy/reclaim judgment. **Dispatch** renders
 `prompts/stages/conflict-resolution-continuation.md` (§8.57's canonical carrier of the
 dispatch procedure AND the completed-only outcome gate) + the binding suffix, idle-immediate
-else followUp. **Resolve-and-stop**: nothing automated publishes — the human's explicit
+else followUp. Both root scheduling and child mode are explicitly `async: false`, with root
+`context: "fresh"` and the existing configured model. Actual child `cwd` comes only from the fresh
+validated `SyncConflictDispatch.worktree`, JSON-stringified; its defensive unquoted `cd` reminder
+retains the narrow shell-inert vocabulary. Native launch-cwd/profile preflight must pass at that
+existing absolute directory; missing/ambiguous/shadowed profiles stop, without installing wiring,
+copying/minting a handoff, or changing mode/extension composition/protocol. Mission/acceptance
+omissions, one-writer policy, containment, lease, cap, sentinel and explicit PR/in-progress-rebase
+checks remain unchanged. Cancellation uses the blocking native workflow's signal/child abort and
+dispose boundary; injected offline propagation tests do not establish live autonomous dispatch.
+**Resolve-and-stop**: nothing automated publishes — the human's explicit
 `continue` stays the only publication gesture. **The pre-existing-continuation offer**:
 `objective_stack_sync {resolve: true}` runs the SAME core minus the freshness token (no
 refusal exists; the explicit human request against the current projection is the trigger) and

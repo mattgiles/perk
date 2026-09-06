@@ -11,6 +11,7 @@
 import assert from "node:assert/strict";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
 import { reportWaveOver } from "../waves/reportWave.ts";
 import { type DreamManifest, decodeDreamManifest } from "./dream.ts";
@@ -534,6 +535,18 @@ test("analyzeDream: the happy path — analyst write, reducers read it, finalize
   assert.equal(adapter.calls.spawn.length, 2);
   assert.equal(adapter.calls.spawn[0]?.model, "faux/analyst");
   assert.equal(adapter.calls.spawn[1]?.model, "faux/reducer");
+  assert.deepEqual(
+    adapter.calls.spawn.map((spawn) =>
+      waveScriptItems(spawn.workflowScript).map(({ key, agent }) => [key, agent]),
+    ),
+    [
+      [
+        ["pi-1.1", "perk.dream-analyst"],
+        ["workflow-1.2", "perk.dream-analyst"],
+      ],
+      DREAM_REDUCER_ANGLES.map((key) => [key, "perk.dream-reducer"]),
+    ],
+  );
   assert.ok(
     adapter.calls.spawn[1]?.workflowScript.includes(BUNDLE_PATH),
     "the reducer lanes read the written bundle path",

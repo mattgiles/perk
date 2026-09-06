@@ -123,7 +123,13 @@ test("runReviewClassifierWave: ONE lane with the fixed flow/key/agent/task, modu
   assert.equal(spawn.timeoutMs, 1_234);
   // The single lane, byte-pinned: the fixed code-owned task carries NOTHING model-relayed
   // (the child fetches the feedback itself via `perk pr feedback --json`).
-  const items = waveScriptItems(spawn.workflowScript);
+  const items = waveScriptItems(spawn.workflowScript).map(({ key, agent, task, label, phase }) => ({
+    key,
+    agent,
+    task,
+    label,
+    phase,
+  }));
   assert.deepEqual(items, [
     {
       key: "classify",

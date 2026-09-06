@@ -85,6 +85,12 @@ and force-pushes; re-run `/submit` to confirm. The re-drive is bounded to two at
 conflicts require manual resolution. If the probe cannot run, submission succeeds with a note that
 mergeability was not determined.
 
+Resolver guidance selects foreground for both the enclosing workflow and its child, with fresh
+context and actual child cwd from the current trusted plan worktree (not a task-supplied PR head).
+The directory and native executable/non-disabled profile must be present and unambiguous there;
+otherwise stop before mutation. There is no execution-mode or extension-composition fallback.
+Native cancellation remains available; one writer owns the worktree.
+
 For a stacked delivery layer, `/submit` publishes onto the parent layer's branch, registers the
 native stack, and records checkpoints only after remote verification. Re-submitting a published
 lower layer transactionally synchronizes the published suffix above it from each successor's
@@ -235,7 +241,11 @@ match it refuses and asks for an explicit objective.
   soft-refuse while read-only because they mutate published branches or PRs. When a mutating
   sync/continue stops on a rebase conflict, `/objective-sync` automatically dispatches the
   `perk.conflict-resolver` subagent into the retained worktree (resolve-and-stop: the agent only
-  resolves — resuming the cascade stays your explicit gesture).
+  resolves — resuming the cascade stays your explicit gesture). Both the workflow and child are
+  foreground; the child's actual cwd is the freshly containment-validated retained worktree,
+  not the calling session's directory. No wiring is installed and no parent handoff is copied
+  there. Only a completed rebase with passing verification may be offered for explicit continue;
+  the child never pushes or aborts the retained rebase.
 
 Paired tools are non-terminating and strictly decoded; malformed or mutually exclusive fields
 refuse before the cold worker runs:

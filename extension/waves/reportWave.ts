@@ -30,7 +30,7 @@
 // the streaming split serves flows whose parent ends the launch turn and relays provisional
 // batches on native wakes (`adversarialReviewWave.ts`, `draftReviewWave.ts`).
 //
-// The module owns ADAPTER SELECTION: `createReportWave(bus, engineEntry)` constructs
+// The module owns ADAPTER SELECTION: `createReportWave(bus, { parentReadOnly, engineEntry })` constructs
 // a FRESH rpc adapter per launch over the supplied bus; `reportWaveOver(adapter)` is the
 // injection seam (tests; the same internal core). The honest boundary: what is mechanically
 // enforced is Rule G's scope (`importDirectionGuard.test.ts`) — no production import edges into
@@ -251,12 +251,13 @@ function validateAssignments(assignments: ReportAssignment[]): void {
  * (quotes, newlines, backticks, `${}`) cannot escape the array literal. Module-private: the
  * script bytes are observable outside `waves/` only through the adapter seam's spawn params.
  */
-function renderWaveScript(assignments: ReportAssignment[]): string {
+function renderWaveScript(assignments: ReportAssignment[], readOnly: boolean): string {
   validateAssignments(assignments);
   const items = assignments.map((assignment) => ({
     key: assignment.key,
     agent: assignment.agent,
     task: assignment.task,
+    extensionBindings: { "perk.parent-restrictions/1": { readOnly } },
     ...(assignment.skill !== undefined ? { skill: assignment.skill } : {}),
     label: assignment.label ?? assignment.key,
     ...(assignment.phase !== undefined ? { phase: assignment.phase } : {}),
@@ -508,6 +509,7 @@ type InternalStart =
  */
 async function startWave(
   supplyAdapter: (request: ReportWaveRequest) => WaveAdapter,
+  parentReadOnly: () => boolean,
   request: ReportWaveRequest,
   signal?: AbortSignal,
 ): Promise<InternalStart> {
@@ -564,7 +566,25 @@ async function startWave(
 
   // Required-skill metadata never reaches the renderer; only runnable assignments spawn.
   const runnableRequest: ReportWaveRequest = { ...request, assignments: runnable };
-  const workflowScript = renderWaveScript(runnable);
+  // Sample only after preflight: every runnable child gets one shared attempt snapshot.
+  // A failed capture must stop before adapter construction, ping, or any child launch.
+  let readOnly: boolean;
+  try {
+    readOnly = parentReadOnly();
+  } catch (error) {
+    return {
+      ok: false,
+      result: settleWithSkillFailures(
+        waveFailure(
+          "unavailable",
+          `parent-restriction capture failed: ${error instanceof Error ? error.message : String(error)}`,
+          { state: "unavailable", children: [] },
+        ),
+      ),
+      launch,
+    };
+  }
+  const workflowScript = renderWaveScript(runnable, readOnly);
 
   const start = await startWaveScript(
     supplyAdapter(runnableRequest),
@@ -607,12 +627,15 @@ const STILL_RUNNING = Symbol("wave-still-running");
  * `"none"` structurally — and the WeakMap plus the settled drain's delete both release retained
  * results promptly.
  */
-function waveOver(supplyAdapter: (request: ReportWaveRequest) => WaveAdapter): ReportWave {
+function waveOver(
+  supplyAdapter: (request: ReportWaveRequest) => WaveAdapter,
+  parentReadOnly: () => boolean,
+): ReportWave {
   const records = new WeakMap<ReportWaveRef, PendingRecord>();
 
   return {
     async start(request, control) {
-      const start = await startWave(supplyAdapter, request, control?.signal);
+      const start = await startWave(supplyAdapter, parentReadOnly, request, control?.signal);
       if (!start.ok) {
         return { ok: false, result: start.result, launch: start.launch };
       }
@@ -658,7 +681,7 @@ function waveOver(supplyAdapter: (request: ReportWaveRequest) => WaveAdapter): R
     },
 
     async run(request, control) {
-      const start = await startWave(supplyAdapter, request, control?.signal);
+      const start = await startWave(supplyAdapter, parentReadOnly, request, control?.signal);
       return start.ok ? await start.result : start.result;
     },
   };
@@ -670,25 +693,39 @@ function waveOver(supplyAdapter: (request: ReportWaveRequest) => WaveAdapter): R
  * One per-activation instance is constructed at the composition root (`extension/index.ts`) and
  * threaded to the installers.
  */
-export function createReportWave(bus: WaveBus, engineEntry?: () => string | undefined): ReportWave {
-  return waveOver((request) =>
-    createRpcWaveAdapter(
-      bus,
-      engineEntry !== undefined && ["adversarial-review", "draft-review"].includes(request.flow)
-        ? {
-            engineEntry,
-            assignments: request.assignments.map((assignment) => ({
-              key: assignment.key,
-              agent: assignment.agent,
-              schema: assignment.outputSchema ?? request.outputSchema,
-            })),
-          }
-        : undefined,
-    ),
+export function createReportWave(
+  bus: WaveBus,
+  {
+    parentReadOnly,
+    engineEntry,
+  }: {
+    parentReadOnly: () => boolean;
+    engineEntry?: () => string | undefined;
+  },
+): ReportWave {
+  return waveOver(
+    (request) =>
+      createRpcWaveAdapter(
+        bus,
+        engineEntry !== undefined && ["adversarial-review", "draft-review"].includes(request.flow)
+          ? {
+              engineEntry,
+              assignments: request.assignments.map((assignment) => ({
+                key: assignment.key,
+                agent: assignment.agent,
+                schema: assignment.outputSchema ?? request.outputSchema,
+              })),
+            }
+          : undefined,
+      ),
+    parentReadOnly,
   );
 }
 
-/** The adapter-injection seam (tests; the production factory rides the same internal core). */
-export function reportWaveOver(adapter: WaveAdapter): ReportWave {
-  return waveOver(() => adapter);
+/** The permissive snapshot default is test-only; production must supply its effective gate. */
+export function reportWaveOver(
+  adapter: WaveAdapter,
+  parentReadOnly: () => boolean = () => false,
+): ReportWave {
+  return waveOver(() => adapter, parentReadOnly);
 }

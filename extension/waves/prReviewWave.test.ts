@@ -81,7 +81,16 @@ test("runPrReviewWave builds selected lanes plus one final Ponytail lane", async
   assert.equal(adapter.calls.spawn.length, 1);
   const spawn = adapter.calls.spawn[0];
   assert.ok(spawn);
-  const items = laneItemsOf(spawn.workflowScript);
+  const items = laneItemsOf(spawn.workflowScript).map(
+    ({ key, agent, task, label, phase, skill }) => ({
+      key,
+      agent,
+      task,
+      label,
+      phase,
+      ...(skill === undefined ? {} : { skill }),
+    }),
+  );
   assert.deepEqual(items, [
     ...TWO_ANGLES.map((angle) => ({
       key: angle,
@@ -244,6 +253,39 @@ test("PR_REVIEW_REPORT_SCHEMA pins the report shape (closed, all four fields req
   // inconsistent lane report is schema-invalid (fails the lane), never reconciled.
   assert.deepEqual(s.if, { properties: { verdict: { const: "clean" } } });
   assert.deepEqual(s.then, { properties: { findings: { maxItems: 0 } } });
+});
+
+test("bounded retry resamples the current parent gate after the failed attempt", async () => {
+  let gate = false;
+  const adapter = createMemoryWaveAdapter({
+    aggregates: [
+      {
+        state: "complete",
+        value: [okEntry("plan-fidelity"), failedEntry("correctness", "retry"), okEntry("ponytail")],
+      },
+      { state: "complete", value: [okEntry("correctness")] },
+    ],
+  });
+  const wave = reportWaveOver(adapter, () => gate);
+  const outcome = await runPrReviewWaveBase(
+    {
+      ...wave,
+      async run(request, control) {
+        const result = await wave.run(request, control);
+        gate = true;
+        return result;
+      },
+    },
+    { pr: 42, angles: TWO_ANGLES, requiredSkillPreflight: PREFLIGHT_OK },
+  );
+  assert.equal(outcome.complete, true);
+  assert.deepEqual(
+    adapter.calls.spawn.map((spawn) => waveScriptItems(spawn.workflowScript)[0]?.extensionBindings),
+    [
+      { "perk.parent-restrictions/1": { readOnly: false } },
+      { "perk.parent-restrictions/1": { readOnly: true } },
+    ],
+  );
 });
 
 // -------------------------------------------------------------------- the bounded-retry matrix

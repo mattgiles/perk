@@ -7,6 +7,8 @@ fallbackModels:
   - openai/gpt-5.6-terra
 tools: read, grep, find, ls, bash
 systemPromptMode: replace
+async: true
+inheritGlobalContext: false
 inheritProjectContext: false
 inheritSkills: false
 skillPath:

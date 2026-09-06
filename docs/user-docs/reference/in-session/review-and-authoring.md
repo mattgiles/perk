@@ -61,6 +61,22 @@ Companion tools:
   The PR comes from the cold-door result; callers never supply one. A standalone call before any
   valid wave uses caller-supplied angles for both fields. *Non-terminating.*
 
+### Shared report execution profile
+
+Perk-owned report children select background mode through their definitions; calls omit child
+`async` so the native workflow awaits each report. Root scheduling remains async/fresh with the
+fixed report-only acceptance contract. Review-head paths are task data, not agent/extension
+discovery roots: reports launch from the trusted calling session cwd.
+
+After exact-source skill preflight, each attempt captures the current parent read-only gate and
+puts the same `perk.parent-restrictions/1` boolean packet on every runnable child, including
+false. Retries sample anew. Capture failure returns non-retryable `unavailable` before launch,
+retaining any skill-preflight failures; all-skipped attempts do not capture. False grants no
+write authority. Full warm-child enforcement requires the matching strict consumer/floor repair;
+this producer alone does not repair scratch suppression. Manual subagent calls are outside this
+channel, which is neither continuous revocation nor an OS sandbox. Streaming and final-report
+coverage rules below are unchanged.
+
 ## Human-triaged PR review
 
 ### Native delivery and streaming status

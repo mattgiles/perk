@@ -8,11 +8,11 @@
 // launch refused or erased the first's.)
 
 import assert from "node:assert/strict";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { runScratchDir } from "../../substrate/cache.ts";
+import { handoffPath, runScratchDir } from "../../substrate/cache.ts";
 import {
   createFakeSubagents,
   type FakeSubagents,
@@ -58,6 +58,69 @@ function installPonytailSkill(cwd: string, skillName: string): void {
     "utf8",
   );
   writeFileSync(join(skillDir, "SKILL.md"), `---\nname: ${skillName}\n---\n`, "utf8");
+}
+
+for (const handoff of [false, true]) {
+  test(`real composition samples the warm gate without rewriting handoff: ${handoff}`, async () => {
+    const cwd = scaffoldRepo(handoff ? { handoff: { runId: "01RID", mode: "read-write" } } : {});
+    installPonytailSkill(cwd, "ponytail-review");
+    const fake = createFakeSubagents(
+      Array.from({ length: 2 }, () => ({
+        executeScript: async (script: string) =>
+          waveScriptItems(script).map(({ key }) => ({
+            key,
+            ok: true,
+            report: { angle: key, summary: "ok", findings: [], fyi: [], streamed: false },
+          })),
+      })),
+    );
+    const h = await loadPerkSession({
+      cwd,
+      env: { PERK_RUN_ID: handoff ? "01RID" : undefined },
+      extraExtensions: [fake.extension],
+    });
+    const siblingCwd = scaffoldRepo({ handoff: { runId: "02RID", mode: "read-write" } });
+    installPonytailSkill(siblingCwd, "ponytail-review");
+    const siblingFake = markedFake("sibling");
+    const sibling = await loadPerkSession({
+      cwd: siblingCwd,
+      env: { PERK_RUN_ID: "02RID" },
+      extraExtensions: [siblingFake.extension],
+    });
+    spyInjections(h);
+    const handoffFile = handoffPath(cwd, h.workflowState().run_id ?? "01RID");
+    const before = handoff ? readFileSync(handoffFile, "utf8") : null;
+    if (!handoff) assert.equal(existsSync(handoffFile), false);
+    const args = { angles: ["claimed-intent", "tests"], pr: 42, worktree: "/task-only/head" };
+    try {
+      await h.invokeTool("start_review_wave", args);
+      await h.invokeTool("collect_review_wave", {});
+      await h.invokeCommand("objective-plan", "7");
+      assert.equal(h.workflowState().mode, "read-only");
+      await h.invokeTool("start_review_wave", args);
+      await h.invokeTool("collect_review_wave", {});
+      await sibling.invokeTool("start_review_wave", args);
+      await sibling.invokeTool("collect_review_wave", {});
+      assert.deepEqual(
+        fake.spawns.map(
+          (spawn) => waveScriptItems(String(spawn.workflowScript))[0]?.extensionBindings,
+        ),
+        [
+          { "perk.parent-restrictions/1": { readOnly: false } },
+          { "perk.parent-restrictions/1": { readOnly: true } },
+        ],
+      );
+      assert.deepEqual(
+        waveScriptItems(String(siblingFake.spawns[0]?.workflowScript))[0]?.extensionBindings,
+        { "perk.parent-restrictions/1": { readOnly: false } },
+      );
+      if (handoff) assert.equal(readFileSync(handoffFile, "utf8"), before);
+      else assert.equal(existsSync(handoffFile), false, "warm entry does not mint a handoff");
+    } finally {
+      sibling.dispose();
+      h.dispose();
+    }
+  });
 }
 
 test("two sessions share no review-wave pending state (launch/collect isolate per session)", async () => {
