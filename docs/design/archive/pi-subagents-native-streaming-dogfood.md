@@ -506,9 +506,10 @@ Evidence is preserved in `live/D/captured-runtime/` (parent/child JSONL, workflo
 recovery descriptors and runner logs), `live/D/evidence.json`, and `parent-timeline.json`, with
 the screenshot alongside. Implementation tree was clean before this evidence-only edit; driver
 HEAD is still `bdf6dd29` with only the explicitly approved manifest relocation/source-selection
-changes. The original read-only plan handoff and draft bytes remain intact. Pi/browser are
-retained pending owner direction; **no approval/save or full teardown is claimed**. Further
-validation or repairs require explicit owner disposition under the plan's escalation rule.
+changes. At that capture, the original read-only plan handoff and draft bytes remained intact and
+Pi/browser were retained pending owner direction; **no approval/save or full teardown was
+claimed**. Further validation or repairs required explicit owner disposition under the plan's
+escalation rule (subsequent approval and closure are recorded below).
 
 ### Read-only investigation and amendment proposal
 
@@ -585,7 +586,24 @@ required report stops validation for owner disposition.
 | N | — | Not launched |
 | U | — | Not launched |
 
-The D Pi/browser session has not yet been confirmed closed. The isolated driver remains at
-`bdf6dd29`; it has intentionally not been advanced or reconverged while that session is open.
-Next: confirm D closure/abandonment, advance and normally reconverge the driver to the repaired
-commit, then hand the human a fresh one-shot B2 launcher. Full teardown/submission remain blocked.
+The human subsequently confirmed **“D closed”**. Parent PID 32915 is absent (its plan server
+runs in-process); the captured session has no approval/save event or call, and the driver's
+plan-ref is absent. No browser-close callback was persisted, so this is recorded as human-
+confirmed close plus process absence, not an observed DENY callback. The exact old working
+`plan-draft.md` matched the preserved fixture and was then removed to abandon that scratch
+draft; snapshots/handoff evidence remain. Receipt: `live/D/abandonment.json`.
+
+The isolated driver was then advanced to **`2ed55c1b`** on `dogfood-2226-driver`, preserving only
+the approved temporary skill-manifest changes. Normal `skills sync` refreshed the branch-bound
+sources; all four review skills and both reviewer definitions compare byte-identical to the
+checked-out sources. Pi settings remain byte-identical to the original bridge-on backup. Host
+versions remain five-package Pi 0.85.1, pi-subagents 0.65.1, Ponytail 4.9.0 and plannotator 0.27.12.
+`live/driver-repair-preflight.json` records source paths and hashes. A diff check confirms the
+reviewer definitions, wave modules, terminal tool/door/prompt and package pins are unchanged
+from T's exercised SHA. The implementation checkout and all global configuration were untouched
+by the isolated driver advance.
+
+`live/start-B2.sh` is prepared, **not launched**. It uses a fresh `live/B2/parent` log directory,
+checks the repaired SHA and unchanged scratch PR head, and asks the human to invoke
+`/pr-review-browser 2228` once. The original B launcher/evidence is preserved. Full teardown
+and submission remain blocked on the amended live results plus N/U.
