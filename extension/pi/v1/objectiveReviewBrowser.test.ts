@@ -242,7 +242,7 @@ function primeBoth(): void {
   primeDraftReviewContext(draftReview, { draftType: "objective", draft: "# The objective\n" });
 }
 
-test("observer: ready → the info note naming the URL, nothing injected, surfaces untouched", async () => {
+test("observer: ready without pending annotation work → info only, surfaces untouched", async () => {
   primeBoth();
   const { notifies, sent } = await observe(fakeStarted("ready"));
   assert.equal(sent.length, 0);
@@ -830,7 +830,11 @@ test("open core: primes BOTH surfaces (plan mode + objective draft type), RETURN
   assert.doesNotMatch(requests[0]?.payload?.planContent ?? "", /schema_version/);
   // The core RETURNS the guidance (template launch line + the binding suffix) and sends nothing
   // itself — delivery belongs to the caller (the door wrapper / plan_review's wave arm).
-  assert.equal(injected.length, 0, "the core never sends — the caller owns delivery");
+  assert.equal(
+    injected.length,
+    0,
+    "the caller owns seed guidance, and no pending annotations need a readiness continuation",
+  );
   assert.match(guidance ?? "", /start_draft_review_wave/, "the template launch line");
   assert.match(
     guidance ?? "",

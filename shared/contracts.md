@@ -1407,8 +1407,16 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
 - **The background open (foreign + active):** the handler starts `startPlannotatorBrowser`,
   injects the mode guidance IMMEDIATELY (the URL is deterministic once the port is picked — no
   blocking readiness poll in the handler), and ends its turn. The readiness promise is observed
-  in a background task: `ready` → an info note ("plannotator is up at <url> — browser opening");
-  `timeout`, or a bridge that settled error/unavailable → a loud error report PLUS a degrade
+  in a background task: `ready` → an info note ("plannotator is up at <url> — browser opening")
+  and, for the still-current surface with held or in-flight annotation work, one model
+  continuation (idle → immediate, streaming → `followUp`). This is shared by PR/stack and
+  plan/objective readiness observers. The continuation requests a pure `push_annotations`
+  flush (`findings: []`, an existing angle, `replace` omitted), including held final replacements
+  and zero-item clears after collection; it never authorizes a re-collect, replacement wave,
+  or repeated reconciliation. Counting in-flight pushes closes the enqueue-after-readiness
+  race; an empty idle queue causes no extra turn. Surface identity suppresses stale readiness
+  continuations after close/re-prime. The observer never writes the queue concurrently with a
+  tool call; `timeout`, or a bridge that settled error/unavailable → a loud error report PLUS a degrade
   notice injected to the model (idle → immediate, streaming → `followUp`): render the findings
   in-session, posting unchanged — and the annotation surface is cleared, so a post-degrade
   `push_annotations` refuses `no_surface` (the notice says so). The bridge respond stays
@@ -1453,9 +1461,10 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
   above: code-owned mapping/dedupe/hold; a held result ≠ degrade), and at reconcile each
   covered angle's disjoint, reconciled final array rides `replace: true`, including empty
   final arrays, after clearing uncovered sources as specified above (source-scoped tool
-  operations only). Held batches retry on the next native
-  batch/readiness/completion wake, never a timer. Children never receive the surface handle — not the URL, not the port
-  (structurally unrepresentable in the wave). Between wakes and after reconciliation the session is free
+  operations only). Held batches retry on the next native batch/completion wake or the door's
+  readiness continuation, never a timer. Readiness therefore still resumes final delivery when
+  collection already drained and no further wave notice is coming. Children never receive the
+  surface handle — not the URL, not the port (structurally unrepresentable in the wave). Between wakes and after reconciliation the session is free
   while the human reviews in the browser; the respond arrives later as a message (one shot).
 - **Active mode (no PR arg):** the shared active-PR ladder — `perk pr url --json` →
   `resolveReviewTarget` with the plan-ref's pinned base. A resolved PR → the same flow re-homed

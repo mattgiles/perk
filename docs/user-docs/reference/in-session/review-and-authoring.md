@@ -87,6 +87,13 @@ PR views display its source badge. A custom lens that overlaps another lane may 
 merged text rather than as a separate custom card. Held clears/replacements remain pending, not
 finalized; no failed lane's provisional output is treated as an authoritative report.
 
+If the browser becomes ready after annotation work was held—or while a push is still in
+flight—the door sends one continuation to finish delivery through the normal annotation tool.
+This also works after wave collection, with no further reviewer message or human nudge needed.
+The continuation flushes held final replacements/clears; it does not rerun the wave, collect
+again, or repeat reconciliation. An empty idle queue causes no extra turn, and a closed or
+superseded review does not trigger a delivery continuation.
+
 An early collection retains the pending wave and yields until matching completion. If the
 bounded collection grace still expires after matching completion was observed, the flow stops
 for owner diagnosis rather than polling or relaunching. Keep the host open for diagnosis.

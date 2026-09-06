@@ -1002,3 +1002,35 @@ and `implementation-worktrees-after-teardown.txt`. The classified census is
 `typecheck-js`, `test-py`, `test-js`, and `docs-check`. `changelog-check` was intentionally skipped
 because this diff does not change `CHANGELOG.md`. No follow-up checks were run after the green
 report; only this evidence result was recorded before commit and draft-PR submission.
+
+### Post-review correction — completion before browser readiness
+
+The automated review of PR #2229 identified one correctness gap: readiness observers only
+reported to the UI. A completion turn could leave final annotation replacements held, then
+receive no further model wake when the browser finally became ready.
+
+The PR/stack, plan and objective readiness observers now request one continuation through the
+existing immediate/`followUp` message path when the still-current surface has held or in-flight
+annotation work. The continuation requests a single pure `push_annotations` flush (`findings:
+[]`, an existing angle, `replace` omitted), including final replacements and zero-item clears.
+It explicitly does not authorize another collection, wave or reconciliation. The observer is
+not a concurrent HTTP/queue writer; normal sequential tool execution still owns delivery.
+An in-flight counter covers failure/enqueue after readiness, with a resettable token so an old
+push cannot decrement the new session's count. Empty queues cause no extra turn, and surface
+identity prevents a stale readiness continuation after close or same-URL re-prime.
+
+A shared deterministic regression covers completion-before-readiness across the real PR/stack,
+plan and objective observers, idle/immediate versus active/`followUp` delivery, held final
+replacement plus empty clear, and duplicate-free flushing. Additional cases cover a pure clear
+with zero findings, a request that fails after readiness, and non-vacuous closed/re-primed
+surface refusals. The tests capture the requested continuation and then drive its prescribed
+tool call; they do not claim autonomous live model behavior. The focused suites passed 134 tests.
+Both opt-in prose gates passed (553 Python tests; the TS selector/workbench suites and build),
+with the two new immediate/followUp message call sites reflected in the generated prose map and
+its exact corpus-count pins. No new live dogfood, configuration change or teardown reversal
+occurred; the owner-approved live waiver remains in force.
+
+**Address-pass CI: PASS.** The final run-all gate passed all applicable Python/TypeScript lint,
+typecheck, test and docs checks; `changelog-check` was intentionally glob-skipped. Only this
+result was recorded after green before committing and publishing the fix; no new live run or
+follow-up verification was performed.

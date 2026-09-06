@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **222** canonical source units
-- **1211** logical fragments
+- **224** canonical source units
+- **1213** logical fragments
 - **16** session shapes and **10** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -912,6 +912,8 @@ Automated, terminal, and browser PR-review families.
 | `typescript-model-call:extension/pi/v1/codeReview/browser.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/browser.ts`](../../extension/pi/v1/codeReview/browser.ts) · `symbol:module/call:sendUserMessage/2` | — |
 | `typescript-model-call:extension/pi/v1/codeReview/terminal.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/terminal.ts`](../../extension/pi/v1/codeReview/terminal.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/codeReview/terminal.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/terminal.ts`](../../extension/pi/v1/codeReview/terminal.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-model-call:extension/pi/v1/providers/annotations.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/annotations.ts`](../../extension/pi/v1/providers/annotations.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/providers/annotations.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/annotations.ts`](../../extension/pi/v1/providers/annotations.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/waves/transport.ts:module:workflow-script:0` | `tool-contract` | `shipped` | [`extension/waves/transport.ts`](../../extension/waves/transport.ts) · `symbol:module/property:workflowScript/0` | — |
 | `typescript-tool:collect_review_wave` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/reviewWave.ts`](../../extension/pi/v1/codeReview/reviewWave.ts) · `tool:collect_review_wave` | — |
 | `typescript-tool:open_stack_review` | `tool-contract` | `shipped` | [`extension/pi/v1/codeReview/stack.ts`](../../extension/pi/v1/codeReview/stack.ts) · `tool:open_stack_review` | — |
@@ -1013,6 +1015,10 @@ Automated, terminal, and browser PR-review families.
 - `typescript-model-call:extension/pi/v1/codeReview/terminal.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/codeReview/terminal.ts:module:sendUserMessage:1`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
+- `typescript-model-call:extension/pi/v1/providers/annotations.ts:module:sendUserMessage:0`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
+- `typescript-model-call:extension/pi/v1/providers/annotations.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-model-call:extension/waves/transport.ts:module:workflow-script:0`
   - `workflowScript` — Subagent workflow script (`symbol:module/property:workflowScript/0`)

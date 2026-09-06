@@ -35,7 +35,7 @@
 // settle AND on the readiness-degrade arm, so `push_annotations` refuses loudly (`no_surface`)
 // outside a door-opened flow.
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { failFor, ok, type Result } from "../../../substrate/result.ts";
 import {
   arrayParam,
@@ -85,11 +85,19 @@ export interface AnnotationState {
   ledger: Map<string, { source: string; id?: string }>;
   held: HeldBatch[];
   alternates: Map<string, MappedAnnotation>;
+  /** Resettable counter token: an old push cannot decrement a newly primed session's count. */
+  inFlight: { count: number };
 }
 
 /** Create one activation's annotation-push state (all-clear — no surface primed). */
 export function createAnnotationState(): AnnotationState {
-  return { surface: null, ledger: new Map(), held: [], alternates: new Map() };
+  return {
+    surface: null,
+    ledger: new Map(),
+    held: [],
+    alternates: new Map(),
+    inFlight: { count: 0 },
+  };
 }
 
 /**
@@ -99,6 +107,7 @@ export function createAnnotationState(): AnnotationState {
  */
 export function primeAnnotationSurface(state: AnnotationState, next: AnnotationSurface): void {
   state.surface = { mode: next.mode, url: next.url.replace(/\/+$/, "") };
+  state.inFlight = { count: 0 };
   state.ledger = new Map();
   state.held = [];
   state.alternates = new Map();
@@ -107,9 +116,38 @@ export function primeAnnotationSurface(state: AnnotationState, next: AnnotationS
 /** Drop the surface (door-owned; called when the bridge settles). Resets all session state. */
 export function clearAnnotationSurface(state: AnnotationState): void {
   state.surface = null;
+  state.inFlight = { count: 0 };
   state.ledger = new Map();
   state.held = [];
   state.alternates = new Map();
+}
+
+const READINESS_NOTICE =
+  "The review browser is ready. If any push_annotations request was held, flush the held " +
+  "queue now with one push_annotations call using an angle from that request, findings: [], " +
+  "and replace omitted. This includes held final replacements or source clears after wave " +
+  "collection. Do not repeat reconciliation or resend final/provisional findings. Readiness " +
+  "is NOT workflow completion and never authorizes collection or a replacement wave. " +
+  "If nothing is held, continue the existing review flow; ignore this notice if the review " +
+  "has closed or been superseded.";
+
+/**
+ * Resume the normal sequential tool path when the door's readiness promise succeeds. Do not
+ * write the queue from the observer: it could race an in-flight push. Nor can this be conditional
+ * only on held.length — a request begun before bind may fail and enqueue AFTER readiness is
+ * observed. No pending work means no extra model turn. The immediate/followUp continuation
+ * runs through the same host delivery seam as door degrade.
+ */
+export function resumeAnnotationDelivery(
+  state: AnnotationState,
+  expected: AnnotationSurface | null,
+  pi: Pick<ExtensionAPI, "sendUserMessage">,
+  ctx: Pick<ExtensionContext, "isIdle">,
+): void {
+  if (expected === null || state.surface !== expected) return;
+  if (state.held.length === 0 && state.inFlight.count === 0) return;
+  if (ctx.isIdle()) pi.sendUserMessage(READINESS_NOTICE);
+  else pi.sendUserMessage(READINESS_NOTICE, { deliverAs: "followUp" });
 }
 
 // ------------------------------------------------------------------------ params + decode
@@ -735,6 +773,24 @@ export async function executePushAnnotations(
   if (decoded === null) {
     return fail(BAD_INPUT_BY_MODE[surface.mode], "bad_input");
   }
+  const activity = state.inFlight;
+  activity.count++;
+  try {
+    return await pushDecodedBatch(state, surface, decoded, target, deps);
+  } finally {
+    activity.count--;
+  }
+}
+
+/** One validated push, scoped by the caller's activity token for readiness observation. */
+async function pushDecodedBatch(
+  state: AnnotationState,
+  surface: AnnotationSurface,
+  decoded: PushAnnotationsParams,
+  target: ReportTarget,
+  deps?: AnnotationPushDeps,
+): Promise<Result<PushAnnotationsOk, PushFailExtras>> {
+  const fail = failFor<PushFailExtras>(target, "push_annotations");
   const fetchLike = deps?.fetchLike ?? defaultFetch;
   const url = surface.url;
   const source = `perk:${decoded.angle}`;
@@ -850,7 +906,7 @@ function holdNewBatch(
 const TOOL_GUIDELINES = [
   "Call push_annotations with each arriving finding batch (one angle per call) — the tool owns the annotation mechanics end to end; never compose annotation HTTP (curl/fetch) yourself.",
   "Dedupe is tool-owned and global across angles: re-pushing a batch is always safe (duplicate anchors are skipped, never refused).",
-  "A held result means the annotation server is not up yet — call push_annotations again on the next native batch/readiness/completion wake, never a timer (findings: [] is the pure retry). A held result is never a degrade; the door reports browser readiness itself.",
+  "A held result means the annotation server is not up yet — call push_annotations again on the next native batch/readiness/completion wake, never a timer (findings: [] is the pure retry). A held result is never a degrade; the door reports browser readiness itself. Its readiness continuation can arrive after collection: flush with findings: [] and replace omitted, without repeating reconciliation.",
   "When reconciling a collected review wave on a browser surface, first clear every uncovered source (launch.requested minus collected.covered) via {angle, findings: [], replace: true}. A held clear is not finalization: retain wake-driven retry/door-owned degrade; never leave failed-lane provisional findings presented as final.",
   "Reconcile only valid final reports into disjoint per-angle arrays, not each lane's raw array. Merge distinct concerns at the same anchor, preserve contributor angle/severity/confidence labels in the merged body, and keep the highest severity with its corresponding confidence. The first contributing lane in collected.covered order owns each anchor; duplicate-only covered lanes have empty final arrays. A custom contributor may appear in merged text rather than as the owning lane label.",
   "Then re-shape each covered angle once with replace: true, including empty arrays — the tool clears that angle's previously pushed annotations and pushes the final batch atomically (findings: [] with replace: true is a pure clear). Other sources' annotations are structurally untouchable; wait until no batches/clears are held before claiming browser finalization.",

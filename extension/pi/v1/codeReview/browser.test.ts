@@ -226,7 +226,7 @@ async function observe(
   return { notifies, sent };
 }
 
-test("observer: ready → the info note naming the URL, nothing injected", async () => {
+test("observer: ready without a primed surface → info only, no stale continuation", async () => {
   const { notifies, sent } = await observe(fakeStarted("ready"));
   assert.equal(sent.length, 0);
   assert.equal(notifies.length, 1);
