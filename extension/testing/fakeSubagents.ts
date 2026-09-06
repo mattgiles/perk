@@ -39,6 +39,8 @@ export interface FakeSpawnPlan {
    * writes a COMPLETE status — runner-level failure states are the memory adapter's job.
    */
   value?: unknown;
+  /** Pre-materialized artifact fixture; return its handle without rewriting its status. */
+  existingRun?: { asyncId: string; asyncDir: string };
   /** Completion delivery mode; default `"auto"` (the post-reply macrotask). */
   delivery?: "auto" | "manual" | "never";
   /**
@@ -128,18 +130,21 @@ export function createFakeSubagents(plans: FakeSpawnPlan[] = []): FakeSubagents 
           plan.executeScript !== undefined
             ? await plan.executeScript(String(params.workflowScript ?? ""))
             : (plan.value ?? ([] as unknown[]));
-        const asyncDir = mkdtempSync(join(tmpdir(), "perk-fake-subagents-"));
-        const asyncId = basename(asyncDir);
-        writeFileSync(
-          join(asyncDir, "status.json"),
-          JSON.stringify({
-            runId: asyncId,
-            mode: "workflow",
-            state: "complete",
-            startedAt: 0,
-            workflow: { value },
-          }),
-        );
+        const asyncDir =
+          plan.existingRun?.asyncDir ?? mkdtempSync(join(tmpdir(), "perk-fake-subagents-"));
+        const asyncId = plan.existingRun?.asyncId ?? basename(asyncDir);
+        if (plan.existingRun === undefined) {
+          writeFileSync(
+            join(asyncDir, "status.json"),
+            JSON.stringify({
+              runId: asyncId,
+              mode: "workflow",
+              state: "complete",
+              startedAt: 0,
+              workflow: { value },
+            }),
+          );
+        }
         launched[index] = { asyncId, asyncDir };
         reply({
           success: true,

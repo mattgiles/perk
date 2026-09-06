@@ -20,7 +20,11 @@ import {
 } from "../../../testing/fakeSubagents.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
 import { createMemoryWaveAdapter } from "../../../testing/memoryAdapter.ts";
-import type { AdversarialReviewAngle } from "../../../waves/adversarialReviewWave.ts";
+import { staleErrorReviewWave } from "../../../testing/staleErrorFixture.ts";
+import {
+  ADVERSARIAL_REVIEW_REPORT_SCHEMA,
+  type AdversarialReviewAngle,
+} from "../../../waves/adversarialReviewWave.ts";
 import { reportWaveOver } from "../../../waves/reportWave.ts";
 import {
   createAnnotationState,
@@ -109,6 +113,56 @@ function fakePi(): {
 }
 
 const START_OPTS = { angles: TWO_ANGLES, pr: 42, worktree: "/abs/wt" };
+
+for (const hasUI of [true, false]) {
+  test(`compatibility recovery is visible and preserves an unproven sibling failure (hasUI=${hasUI})`, async (t) => {
+    const { wave, fake, complete } = staleErrorReviewWave(t, {
+      keys: ["claimed-intent", "correctness", "ponytail"],
+      agent: "perk.adversarial-reviewer",
+      schema: ADVERSARIAL_REVIEW_REPORT_SCHEMA,
+    });
+    const state = freshState();
+    const { target, notified } = fakeTarget();
+    target.hasUI = hasUI;
+    const stderr: unknown[][] = [];
+    t.mock.method(console, "error", (...args: unknown[]) => stderr.push(args));
+    await executeStartReviewWave(state, wave, target, START_OPTS);
+    complete();
+    const result = await executeCollectReviewWave(state, wave, target);
+    assert.equal(result.details.ok, true);
+    if (!result.details.ok) return;
+    assert.equal(result.details.complete, false);
+    assert.deepEqual(result.details.covered, ["claimed-intent", "ponytail"]);
+    assert.deepEqual(result.details.failures, [
+      { key: "correctness", reason: "lane-failed", detail: "Request timed out." },
+    ]);
+    assert.equal(result.details.attempts.length, 1);
+    assert.equal(result.details.attempts[0]?.children[0]?.success, false);
+    assert.equal(result.details.attempts[0]?.recoveries?.[0]?.key, "claimed-intent");
+    assert.match(
+      result.details.attempts[0]?.recoveries?.[0]?.originalError ?? "",
+      /Request timed out/,
+    );
+    assert.match(
+      result.content[0]?.text ?? "",
+      /Compatibility recovery.*claimed-intent.*original engine failure retained.*No new attempt/,
+    );
+    assert.equal(fake.spawns.length, 1);
+    if (hasUI)
+      assert.ok(
+        notified.some(
+          (n) => n.severity === "warning" && n.message.includes("Compatibility recovery"),
+        ),
+      );
+    else {
+      assert.equal(notified.length, 0);
+      assert.match(JSON.stringify(stderr), /Compatibility recovery/);
+    }
+    const second = await executeCollectReviewWave(state, wave, target);
+    assert.equal(second.details.ok, false);
+    if (!second.details.ok) assert.equal(second.details.error_type, "no_wave");
+  });
+}
 
 for (const hasUI of [true, false]) {
   test(`collect disclosure preserves coverage and lane order (hasUI=${hasUI})`, async (t) => {

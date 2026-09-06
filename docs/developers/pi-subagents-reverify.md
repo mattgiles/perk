@@ -66,6 +66,32 @@ open between model turns. The implementing session predates its dependencies/bin
 not a valid live host. See the scoped [native streaming record](../design/archive/pi-subagents-native-streaming-dogfood.md)
 for the background baseline and the five human-operated streaming legs; unobserved legs are not passes.
 
+## Temporary stale-error guard
+
+`extension/waves/staleErrorCompat.ts` is a temporary, fail-closed exception for the two
+human-review report families, not a general failed-lane recovery facility. It attests the
+registered subagent tool's source path, version **0.65.1**, and exact hashes of
+`run-child-session.ts`, `subagent-runner.ts` and `structured-output.ts` at launch and collection.
+Source drift disables it; do not update the hashes merely to make a newer engine pass.
+
+The guard requires correlated completed workflow/child artifacts, a confirmed successful native
+retry, a matching successful capture followed by settlement, and no later/hard failure. It
+validates against Perk's snapshotted requested schema with the host-provided `typebox/compile`,
+not an artifact's substituted schema. Reads are confined and bounded; incomplete evidence leaves
+the original failure. Only the in-memory aggregate changes. Receipt details retain the original
+error plus evidence hashes, and both collect tools disclose recovery. See contracts §8.35 for
+exact proof limits. Non-streaming waves never enable this exception.
+
+For changes here, run the `staleErrorCompat` and `rpcAdapter` node:test suites and both collect-tool
+suites. Their fixtures are offline and do not install/patch the engine; a source-digest injection
+exists only at the interior test seam. The archived D2 replay exercises the real fingerprint and
+captured artifacts, but does **not** retroactively pass that failed live leg. Fresh human-operated
+validation still requires the recorded owner authorization and committed code.
+
+Remove the guard after a source-reviewed upstream fix and the same error→retry→structured-capture
+replay establish correct native settlement. Remove its plumbing, tests and disclosure docs together;
+keep the original failure evidence. Doctor remains report-only and pi-subagents stays unpinned.
+
 ## Steps
 
 1. **Read the installed version.**

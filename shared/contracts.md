@@ -5438,13 +5438,44 @@ logical manifest and is not narrowed by this launch vocabulary.
 projection (pi-subagents ≥ 0.45.0): the child lane key ↔ child `runId` ↔ artifact paths —
 reports, summaries, and structured output NEVER enter a receipt. Retries retain every ordered
 attempt (a failed lane and its relaunch stay distinguishable). `status.json.workflow.value`
-remains the SOLE authority for reports and completeness; receipt absence (an identity-only
-completion) never changes a verdict, completeness, retry selection, or mutation decision —
+remains the report authority except for the exact-source human-review compatibility exception
+below; receipt absence (an identity-only completion) never changes a verdict, completeness,
+retry selection, or mutation decision —
 receipts are write-only correlation telemetry. The flow tools (`run_learn_wave`,
 `run_harvest_wave`, `run_dream_wave`, `run_pr_review_wave`, and the single-lane
 `classify_review_feedback` / `explore_objective_node`) persist `attempts` in their structured
 tool-result details only (never the model-facing prose); a wave-level soft-failure retains any
 receipt known before the failure in its fail details.
+
+**Temporary human-review stale-error exception.** Only `adversarial-review` and `draft-review`
+adapters may correct an in-memory failed row for the pi-subagents **0.65.1** recovered-assistant-error
+bug. The registered `subagent` tool's Pi `SourceInfo.path` must attest that package version and
+all three fixed source hashes in `extension/waves/staleErrorCompat.ts` at launch and collection.
+The original runnable assignments' agents and per-assignment-or-default schemas are snapshotted;
+the host's `typebox/compile` validates the final capture against that snapshot, never against an
+artifact-selected replacement schema. This is not a package pin, config switch, extra attempt,
+new notification channel, or change to the opaque `ReportWave` lifecycle/renderer.
+
+Each correction requires unique parent/step/inventory/child correlation, a single fresh child and
+model attempt, the exact stale `Request timed out.` error, a zero-signal successful runner exit
+before deadline, and no mutation/acceptance/compaction failure. Ordered child events must prove
+historical error → matching successful native retry → successful structured capture execution →
+terminal settlement and complete lifecycle bookkeeping. A capture proposal may precede native
+retry-end, but execution must follow it. The artifact must match the executed call and requested
+schema/angle. Later errors, stops, extra actions, malformed/truncated evidence, missing reports,
+foreign identities, and unsupported fingerprints leave the original failure intact. No prose or
+provisional findings become a report, and missing evidence is never polled for.
+
+Compatibility reads are confined, regular-file, change-checked and byte-bounded: status 2 MiB,
+events 16 MiB (50,000 rows), report/schema 1 MiB, source 512 KiB, package manifest 64 KiB. Engine
+artifacts and original failed receipt children are never rewritten. Successful corrections add
+output-free `recoveries[] = {key, runId, originalError, reason, reportHash, eventsHash, sourceHash}`
+to the attempt receipt (`reason = pi-subagents-0.65.1-stale-assistant-error`; `sourceHash` names the
+run-child-session fingerprint). Both human-review collect tools visibly disclose recovery via
+UI/headless `report()` and model text; this diagnostic is not a finding or posted comment.
+Completeness is still derived normally from the corrected aggregate, independently of receipt
+presence. Non-human-review flows never enable the guard. Remove this temporary boundary after
+the upstream latch fix is verified; do not widen its fingerprint to bless an unverified engine.
 
 **The `learn` tool's classification params.** The warm `learn` tool carries `decision` (a
 JSON-schema enum of the five captured tokens) + `target` (string), threaded to `perk learn

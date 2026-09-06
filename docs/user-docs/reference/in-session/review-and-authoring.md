@@ -91,6 +91,19 @@ An early collection retains the pending wave and yields until matching completio
 bounded collection grace still expires after matching completion was observed, the flow stops
 for owner diagnosis rather than polling or relaunching. Keep the host open for diagnosis.
 
+### Temporary compatibility recovery
+
+The two human-review wave families have a narrowly source-fenced workaround for pi-subagents
+0.65.1's stale `Request timed out.` error after a successful native retry. Perk accepts a final
+capture only when correlated artifacts prove successful retry, capture execution and settlement,
+and the report passes the original requested schema. Collection then displays **“Compatibility
+recovery (pi-subagents 0.65.1)”**, names the lane, and retains the original failure in attempt
+receipt details. This is not a new wave attempt and does not recover provisional findings.
+
+Missing reports, genuine failures, incomplete evidence, and changed or unsupported engine sources
+remain failures. Other wave families, including `/pr-review`, are unchanged. The workaround does
+not pin or modify pi-subagents and does not change the human posting/save gates.
+
 ### `/pr-review-terminal`
 
 Open a human-in-the-loop adversarial review in the

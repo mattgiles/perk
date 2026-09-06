@@ -3,7 +3,15 @@
 // All artifacts remain untrusted DATA. Missing/ambiguous proof preserves the original failure.
 
 import { createHash } from "node:crypto";
-import { closeSync, constants, fstatSync, openSync, readSync, realpathSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  openSync,
+  readSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { Compile } from "typebox/compile";
@@ -60,7 +68,8 @@ function readWithin(root: string, file: string, limit: number): string {
   requireProof(rel !== "" && !isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
   const canonical = join(canonicalRoot, rel);
   requireProof(realpathSync(canonical) === canonical);
-  const fd = openSync(canonical, constants.O_RDONLY | constants.O_NOFOLLOW);
+  // NONBLOCK lets the regular-file check reject FIFOs instead of hanging at open().
+  const fd = openSync(canonical, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = fstatSync(fd);
     requireProof(before.isFile() && before.size > 0 && before.size <= limit);
@@ -78,7 +87,15 @@ function readWithin(root: string, file: string, limit: number): string {
         before.ctimeMs === after.ctimeMs,
     );
     requireProof(realpathSync(canonical) === canonical);
-    return bytes.toString("utf8");
+    const current = statSync(canonical);
+    requireProof(
+      current.dev === before.dev &&
+        current.ino === before.ino &&
+        current.size === before.size &&
+        current.mtimeMs === before.mtimeMs &&
+        current.ctimeMs === before.ctimeMs,
+    );
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } finally {
     closeSync(fd);
   }
@@ -103,7 +120,7 @@ function canonicalChildFile(root: string, candidate: unknown): string {
 }
 
 /** SourceInfo.path comes from the registered subagent tool, not cwd or model-supplied paths. */
-function attest(entry: string | undefined): string {
+function attest(entry: string | undefined, sourceDigest: (source: string) => string): string {
   requireProof(entry !== undefined && isAbsolute(entry));
   const canonicalEntry = realpathSync(entry);
   let root = dirname(canonicalEntry);
@@ -117,7 +134,7 @@ function attest(entry: string | undefined): string {
     if (manifest?.name === "pi-subagents") {
       requireProof(manifest.version === VERSION);
       for (const [file, hash] of Object.entries(SOURCE_HASHES)) {
-        requireProof(digest(readWithin(root, join(root, file), 512 * 1024)) === hash);
+        requireProof(sourceDigest(readWithin(root, join(root, file), 512 * 1024)) === hash);
       }
       return canonicalEntry;
     }
@@ -138,6 +155,16 @@ export interface StaleErrorGuardOptions {
   assignments: ExpectedAssignment[];
 }
 
+/** Interior test seam: tiny source fixtures without vendoring the engine. Never a config knob. */
+export interface StaleErrorGuardDependencies {
+  sourceDigest?: (source: string) => string;
+}
+
+type StaleErrorGuard = (
+  handle: WaveRunHandle,
+  rawStatus: string,
+) => { value: unknown; recoveries: WaveStaleErrorRecovery[] } | undefined;
+
 /** Prove the retry/capture/settlement sequence, including absence of later/hard failures. */
 function proveEvents(raw: string, child: Record<string, unknown>, agent: string) {
   const rows: unknown[] = raw
@@ -146,8 +173,32 @@ function proveEvents(raw: string, child: Record<string, unknown>, agent: string)
     .map((line) => JSON.parse(line));
   requireProof(rows.length > 0 && rows.length <= 50_000);
   let lastTime = 0;
+  let lifecycle = 0;
+  const rootEvents = [
+    "subagent.run.started",
+    "subagent.step.started",
+    "subagent.step.failed",
+    "subagent.run.completed",
+    "subagent.run.process_terminal",
+  ];
+  const childEvents = new Set([
+    "session_info_changed",
+    "agent_start",
+    "turn_start",
+    "message_start",
+    "message_end",
+    "tool_execution_start",
+    "tool_execution_end",
+    "tool_execution_update",
+    "turn_end",
+    "agent_end",
+    "auto_retry_start",
+    "auto_retry_end",
+    "agent_settled",
+  ]);
   let errorSeen = false;
   let retryActive = false;
+  let retryAttempt = 0;
   let recovered = false;
   let call: { id: string; value: unknown } | undefined;
   let executionSucceeded = false;
@@ -162,9 +213,23 @@ function proveEvents(raw: string, child: Record<string, unknown>, agent: string)
       !/timeout|timed_out|stop|interrupt|abort|cancel|extension_error|budget/i.test(kind),
     );
     if (e.subagentSource !== "child") {
-      requireProof(e.runId === child.runId && kind.startsWith("subagent."));
+      requireProof(
+        e.subagentSource === undefined && e.runId === child.runId && kind === rootEvents[lifecycle],
+      );
+      const at = time(e.ts);
+      requireProof(at >= lastTime);
+      lastTime = at;
+      if (lifecycle === 0)
+        requireProof(e.mode === "single" && e.cwd === child.cwd && at === child.startedAt);
+      if (lifecycle === 1 || lifecycle === 2) requireProof(e.agent === agent && e.stepIndex === 0);
+      if (lifecycle === 2) requireProof(settled && e.exitCode === 1);
+      if (lifecycle === 3) requireProof(e.status === "failed");
+      if (lifecycle === 4)
+        requireProof(isDeepStrictEqual(e.processTerminal, child.processTerminal));
+      lifecycle++;
       continue;
     }
+    requireProof(lifecycle === 2 && childEvents.has(kind));
     requireProof(
       e.subagentRunId === child.runId && e.subagentStepIndex === 0 && e.subagentAgent === agent,
     );
@@ -173,28 +238,55 @@ function proveEvents(raw: string, child: Record<string, unknown>, agent: string)
     lastTime = at;
     requireProof(!settled);
     if (kind === "auto_retry_start") {
-      requireProof(errorSeen && !call && e.errorMessage === STALE_ERROR);
+      requireProof(
+        errorSeen && !recovered && !retryActive && !call && e.errorMessage === STALE_ERROR,
+      );
+      retryAttempt = time(e.attempt);
+      requireProof(Number.isInteger(retryAttempt));
       retryActive = true;
     } else if (kind === "auto_retry_end") {
-      requireProof(retryActive && e.success === true && !call);
+      requireProof(
+        retryActive &&
+          e.success === true &&
+          e.attempt === retryAttempt &&
+          !executionSucceeded &&
+          activeTools.size === 0,
+      );
       retryActive = false;
       recovered = true;
     } else if (kind === "message_end") {
       const message = record(e.message);
       if (message.role === "assistant") {
         requireProof(!call);
-        if (message.errorMessage !== undefined) {
-          requireProof(message.errorMessage === STALE_ERROR);
+        requireProof(["error", "stop", "toolUse"].includes(text(message.stopReason)));
+        const content = array(message.content).map(record);
+        if (message.errorMessage !== undefined || message.stopReason === "error") {
+          requireProof(
+            message.stopReason === "error" &&
+              message.errorMessage === STALE_ERROR &&
+              (!errorSeen || recovered) &&
+              !retryActive,
+          );
           errorSeen = true;
           recovered = false;
         }
-        const calls = array(message.content)
-          .map(record)
-          .filter((part) => part.type === "toolCall");
+        const calls = content.filter((part) => part.type === "toolCall");
+        // A clean text stop clears the upstream latch; a later failed result then needs a
+        // different explanation. Do not attribute it to this exact bug.
+        if (errorSeen && message.stopReason === "stop" && calls.length === 0)
+          requireProof(
+            !content.some(
+              (part) => part.type === "text" && typeof part.text === "string" && part.text.trim(),
+            ),
+          );
         const capture = calls.find((part) => part.name === "structured_output");
         if (capture) {
           requireProof(
-            errorSeen && recovered && !retryActive && calls.length === 1 && activeTools.size === 0,
+            message.stopReason === "toolUse" &&
+              errorSeen &&
+              (recovered || retryActive) &&
+              calls.length === 1 &&
+              activeTools.size === 0,
           );
           call = { id: text(capture.id), value: record(capture.arguments).value };
         }
@@ -214,28 +306,59 @@ function proveEvents(raw: string, child: Record<string, unknown>, agent: string)
       requireProof(!activeTools.has(id));
       if (call)
         requireProof(
-          e.toolName === "structured_output" && id === call.id && activeTools.size === 0,
+          e.toolName === "structured_output" &&
+            id === call.id &&
+            recovered &&
+            !retryActive &&
+            activeTools.size === 0 &&
+            !executionSucceeded &&
+            isDeepStrictEqual(record(e.args).value, call.value),
         );
       activeTools.add(id);
     } else if (kind === "tool_execution_end") {
       const id = text(e.toolCallId);
       requireProof(activeTools.delete(id) && e.isError === false);
       if (e.toolName === "structured_output") {
-        requireProof(call && id === call.id && !executionSucceeded);
+        requireProof(
+          call && id === call.id && !executionSucceeded && record(e.result).terminate === true,
+        );
         executionSucceeded = true;
       } else requireProof(!call);
-    } else if (kind === "agent_end" && e.willRetry === false) {
-      requireProof(captureSucceeded && recovered && activeTools.size === 0);
-      ended = true;
+    } else if (kind === "agent_end") {
+      if (e.willRetry === true) requireProof(errorSeen && !recovered && !call);
+      else {
+        requireProof(
+          e.willRetry === false &&
+            captureSucceeded &&
+            recovered &&
+            activeTools.size === 0 &&
+            !ended,
+        );
+        ended = true;
+      }
     } else if (kind === "agent_settled") {
       requireProof(ended && captureSucceeded && recovered);
       settled = true;
     }
-    if (captureSucceeded)
-      requireProof(!["agent_start", "turn_start", "auto_retry_start"].includes(kind));
+    if (call) {
+      requireProof(
+        ![
+          "agent_start",
+          "turn_start",
+          "auto_retry_start",
+          "session_info_changed",
+          "tool_execution_update",
+        ].includes(kind),
+      );
+      if (kind === "message_start")
+        requireProof(
+          record(e.message).role === "toolResult" && record(e.message).toolCallId === call.id,
+        );
+    }
   }
   requireProof(
-    call &&
+    lifecycle === rootEvents.length &&
+      call &&
       errorSeen &&
       recovered &&
       !retryActive &&
@@ -278,6 +401,7 @@ function recoverChild(
   requireProof(
     member.agent === expected.agent && member.runId === runId && member.state === "failed",
   );
+  requireProof(text(inventory.parentToolCallId) === text(parent.toolCallId));
   requireProof(
     array(inventory.children)
       .map(record)
@@ -299,6 +423,8 @@ function recoverChild(
       child.cwd === parent.cwd,
   );
   requireProof(child.error === undefined || child.error === STALE_ERROR);
+  text(child.sessionId);
+  requireProof(isAbsolute(text(child.cwd)));
   requireProof(
     time(child.startedAt) >= time(parent.startedAt) && time(child.endedAt) <= time(parent.endedAt),
   );
@@ -307,13 +433,23 @@ function recoverChild(
       time(child.endedAt) - time(child.startedAt) < time(child.timeoutMs),
   );
   for (const flag of ["timedOut", "stopped", "interrupted", "forcedTermination"])
-    requireProof(child[flag] !== true);
+    requireProof(child[flag] === undefined || child[flag] === false);
   const terminal = record(child.processTerminal);
   requireProof(terminal.state === "observed" && terminal.runId === runId);
   const instances = array(terminal.instances);
   requireProof(instances.length === 1);
   const process = record(instances[0]);
-  requireProof(process.kind === "runner" && process.exitCode === 0 && process.signal === null);
+  requireProof(
+    terminal.version === 1 &&
+      process.kind === "runner" &&
+      process.exitCode === 0 &&
+      process.signal === null,
+  );
+  requireProof(text(process.processInstanceId) === text(terminal.runnerProcessInstanceId));
+  requireProof(
+    time(process.closeObservedAt) >= time(child.endedAt) &&
+      time(process.closeObservedAt) < time(child.deadlineAt),
+  );
   const steps = array(child.steps);
   requireProof(steps.length === 1);
   const result = record(steps[0]);
@@ -325,6 +461,13 @@ function recoverChild(
   requireProof(result.status === "failed" && result.exitCode === 1 && result.error === STALE_ERROR);
   requireProof(
     array(result.attemptedModels).length === 1 && array(result.modelAttempts).length === 1,
+  );
+  const attempt = record(array(result.modelAttempts)[0]);
+  requireProof(
+    text(attempt.model) === text(array(result.attemptedModels)[0]) &&
+      attempt.success === false &&
+      attempt.exitCode === 1 &&
+      attempt.error === STALE_ERROR,
   );
   const diagnostic = record(record(result.effects).settlementDiagnostic);
   requireProof(
@@ -376,13 +519,18 @@ function recoverChild(
 }
 
 /** No guard is enabled unless original schemas and the registered engine source are attested. */
-export function createStaleErrorGuard(options: StaleErrorGuardOptions) {
+export function createStaleErrorGuard(
+  options: StaleErrorGuardOptions,
+  dependencies: StaleErrorGuardDependencies = {},
+): StaleErrorGuard | undefined {
+  const sourceDigest = dependencies.sourceDigest ?? digest;
   let entry: string;
   let expected: { assignment: ExpectedAssignment; validate: (value: unknown) => boolean }[];
   try {
-    entry = attest(options.engineEntry());
+    entry = attest(options.engineEntry(), sourceDigest);
     expected = options.assignments.map((a) => {
       const assignment = { ...a, schema: structuredClone(a.schema) };
+      // Own a snapshot, not a mutable caller object or an artifact-supplied schema.
       const validator = Compile(assignment.schema);
       return { assignment, validate: (value: unknown) => validator.Check(value) };
     });
@@ -390,14 +538,15 @@ export function createStaleErrorGuard(options: StaleErrorGuardOptions) {
     // This optional compatibility boundary never widens a normal failure on unavailable proof.
     return undefined;
   }
-  return (
-    handle: WaveRunHandle,
-    rawStatus: string,
-  ): { value: unknown; recoveries: WaveStaleErrorRecovery[] } | undefined => {
+  return (handle, rawStatus) => {
     try {
       requireProof(
-        Buffer.byteLength(rawStatus) <= STATUS_LIMIT && attest(options.engineEntry()) === entry,
+        Buffer.byteLength(rawStatus) <= STATUS_LIMIT &&
+          attest(options.engineEntry(), sourceDigest) === entry,
       );
+      const root = realpathSync(handle.asyncDir);
+      requireProof(basename(root) === handle.asyncId);
+      requireProof(readWithin(root, join(root, "status.json"), STATUS_LIMIT) === rawStatus);
       const parent = record(JSON.parse(rawStatus));
       requireProof(
         parent.runId === handle.asyncId &&
@@ -422,6 +571,7 @@ export function createStaleErrorGuard(options: StaleErrorGuardOptions) {
         )
           return row;
         try {
+          requireProof(unique(parent.steps, (s) => s.workflowKey === row.key).error === row.error);
           const recovered = recoverChild(handle, parent, spec.assignment, spec.validate);
           recoveries.push({ ...recovered.recovery, originalError: row.error });
           return { ...row, ok: true, error: null, report: recovered.report };

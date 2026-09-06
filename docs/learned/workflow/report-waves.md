@@ -55,7 +55,7 @@ reason on a script-run failure is unrepresentable). Callers consume the opaque `
 lifecycle — `start`/`collect`/`run` over opaque `ReportWaveRef`s: they supply assignments and
 consume typed outcomes, never adapters, run handles, or result promises (the blocking `run` is
 start + await inside the instance; pending execution is instance-owned with drain-once,
-delete-as-claim collection). Adapter selection is wave-owned: `createReportWave(bus)` constructs
+delete-as-claim collection). Adapter selection is wave-owned: `createReportWave(bus, engineEntry)` constructs
 the ONE per-activation production instance at the composition root (`extension/index.ts`);
 `reportWaveOver(adapter)` is the test injection seam. `renderWaveScript` + assignment validation
 are module-private — script text is invisible outside `waves/`, so renderer assertions observe
@@ -63,7 +63,7 @@ the spawned `workflowScript` through the adapter seam. `rpcAdapter.ts` is the li
 v1 RPC adapter (interior — `reportWave.ts` is its one sanctioned production construction site);
 the first-class test double lives in `extension/testing/memoryAdapter.ts`. Guard Rule G
 (`extension/importDirectionGuard.test.ts`) bans production edges into
-`transport.ts`/`rpcAdapter.ts` from outside `waves/` (the old ten-site adapter-construction
+`transport.ts`/`rpcAdapter.ts`/`staleErrorCompat.ts` from outside `waves/` (the old ten-site adapter-construction
 census burned down to zero when `createReportWave` made adapter selection wave-owned) and
 censuses raw `WAVE_RPC_`/channel tokens (tests included). The flow entrypoints:
 
@@ -304,6 +304,13 @@ The normalization distinction lives at the `lane-failed` / `malformed-report` re
 validated — the engine populates `structuredOutput` only on schema-valid lanes), while a
 non-object/non-null report or a non-boolean `ok` is `malformed-report`. Flow code messaging
 skipped lanes must not conflate them.
+
+The source-fenced 0.65.1 stale-error guard is a narrow exception for the two human-review
+families only (contracts §8.35). It proves retry/capture/settlement and validates against the
+original request before correcting an in-memory failed row. Original engine failure receipts
+remain intact; output-free recovery provenance drives a visible collect-time diagnostic, not
+coverage policy. Missing captures and unsupported/incomplete proof remain failures. This does
+not grant a general right to salvage failed-lane reports or change non-streaming wave behavior.
 
 The broader rule (from the session-corpus audit): **a child's harness status is not report
 validity is not wave coverage.** Validate the report artifact separately, retry a failed required

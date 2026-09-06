@@ -37,7 +37,7 @@ export type WaveReceiptState =
 /**
  * One child's identity/artifact trail from the completion payload — OUTPUT-FREE by invariant:
  * reports, summaries, and structured output never enter a receipt (they stay in the durable
- * `status.json.workflow.value`, the sole report authority).
+ * aggregate, with only the proof-gated adapter correction allowed by contracts.md §8.35).
  */
 export interface WaveChildReceipt {
   /** The Perk assignment key (mapped FROM the upstream row's overloaded `agent` field). */

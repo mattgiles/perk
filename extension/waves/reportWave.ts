@@ -7,9 +7,10 @@
 // `workflow.value` aggregate, and normalizes `{complete, reports[], failures[]}` under a
 // flow-specific completeness policy. Each launch additionally records an OUTPUT-FREE
 // `WaveScriptReceipt` (run handle + per-child identity/artifact trail from the completion
-// payload) — write-only telemetry for correlation: `status.json.workflow.value` stays the sole
-// source of reports, and receipt absence never changes a verdict, completeness, or retry
-// selection (contracts.md §8.35).
+// payload) — correlation telemetry, not policy input. The durable aggregate is report authority
+// except for the source-fenced human-review stale-error correction in the adapter. That correction
+// adds output-free provenance for disclosure; receipt absence never changes verdict/completeness
+// or retry selection (contracts.md §8.35).
 //
 // This is the LOGICAL tier: assignments (`ReportAssignment`), preflight partitioning,
 // aggregate normalization, and the completeness policy. The TRANSPORT tier — the adapter seam,
@@ -29,11 +30,11 @@
 // the streaming split serves flows whose parent ends the launch turn and relays provisional
 // batches on native wakes (`adversarialReviewWave.ts`, `draftReviewWave.ts`).
 //
-// The module owns ADAPTER SELECTION: `createReportWave(bus)` (the production factory) constructs
+// The module owns ADAPTER SELECTION: `createReportWave(bus, engineEntry)` constructs
 // a FRESH rpc adapter per launch over the supplied bus; `reportWaveOver(adapter)` is the
 // injection seam (tests; the same internal core). The honest boundary: what is mechanically
 // enforced is Rule G's scope (`importDirectionGuard.test.ts`) — no production import edges into
-// the transport interior (`transport.ts`, `rpcAdapter.ts`) and no raw RPC tokens — so there is
+// the transport interior (`transport.ts`, `rpcAdapter.ts`, `staleErrorCompat.ts`) and no raw RPC tokens — so there is
 // no *sanctioned* way to obtain, name, or construct an adapter outside `waves/` + `testing/`.
 // TypeScript's structural typing means a hand-written object literal satisfying
 // `reportWaveOver`'s parameter is not mechanically preventable; that residue is owned by the

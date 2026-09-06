@@ -30,7 +30,8 @@ import {
   scaffoldRepo,
 } from "../../testing/harness.ts";
 import { createMemoryWaveAdapter } from "../../testing/memoryAdapter.ts";
-import type { DraftReviewAngle } from "../../waves/draftReviewWave.ts";
+import { staleErrorReviewWave } from "../../testing/staleErrorFixture.ts";
+import { DRAFT_REVIEW_REPORT_SCHEMA, type DraftReviewAngle } from "../../waves/draftReviewWave.ts";
 import { reportWaveOver } from "../../waves/reportWave.ts";
 import {
   decodeStartDraftReviewWaveParams,
@@ -216,6 +217,56 @@ for (const hasUI of [true, false]) {
       assert.match(JSON.stringify(stderr), /no findings\): scope, ponytail/);
       assert.match(JSON.stringify(stderr), /no provisional batches: custom/);
     }
+  });
+}
+
+for (const hasUI of [true, false]) {
+  test(`compatibility recovery is visible and does not recover an unproven sibling (hasUI=${hasUI})`, async (t) => {
+    const { wave, fake, complete } = staleErrorReviewWave(t, {
+      keys: ["grounding", "risk", "ponytail"],
+      agent: "perk.draft-reviewer",
+      schema: DRAFT_REVIEW_REPORT_SCHEMA,
+    });
+    const state = primePlan();
+    const { target, notified } = fakeTarget();
+    target.hasUI = hasUI;
+    const stderr: unknown[][] = [];
+    t.mock.method(console, "error", (...args: unknown[]) => stderr.push(args));
+    await executeStartDraftReviewWave(state, wave, target, { angles: TWO_ANGLES });
+    complete();
+    const result = await executeCollectDraftReviewWave(state, wave, target);
+    assert.equal(result.details.ok, true);
+    if (!result.details.ok) return;
+    assert.equal(result.details.complete, false);
+    assert.deepEqual(result.details.covered, ["grounding", "ponytail"]);
+    assert.deepEqual(result.details.failures, [
+      { key: "risk", reason: "lane-failed", detail: "Request timed out." },
+    ]);
+    assert.equal(result.details.attempts.length, 1);
+    assert.equal(result.details.attempts[0]?.children[0]?.success, false);
+    assert.equal(result.details.attempts[0]?.recoveries?.[0]?.key, "grounding");
+    assert.match(
+      result.details.attempts[0]?.recoveries?.[0]?.originalError ?? "",
+      /Request timed out/,
+    );
+    assert.match(
+      result.content[0]?.text ?? "",
+      /Compatibility recovery.*grounding.*original engine failure retained.*No new attempt/,
+    );
+    assert.equal(fake.spawns.length, 1);
+    if (hasUI)
+      assert.ok(
+        notified.some(
+          (n) => n.severity === "warning" && n.message.includes("Compatibility recovery"),
+        ),
+      );
+    else {
+      assert.equal(notified.length, 0);
+      assert.match(JSON.stringify(stderr), /Compatibility recovery/);
+    }
+    const second = await executeCollectDraftReviewWave(state, wave, target);
+    assert.equal(second.details.ok, false);
+    if (!second.details.ok) assert.equal(second.details.error_type, "no_wave");
   });
 }
 
