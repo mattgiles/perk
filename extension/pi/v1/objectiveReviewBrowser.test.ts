@@ -140,6 +140,10 @@ test("guidance: names the companion tools + objective semantics, no plan_draft, 
   assert.match(text, /decision-completeness/);
   assert.match(text, /byte-exact/, "the phrase discipline is pinned");
   assert.match(text, /replace: true/, "the reconcile reshape is the tool's replace");
+  assert.match(text, /First clear every uncovered source/);
+  assert.match(text, /disjoint final per-angle arrays/);
+  assert.match(text, /author label names the owning lane/);
+  assert.match(text, /valid custom contribution may instead appear in merged text/);
   assert.match(text, /NOT a degrade/, "a held result ≠ a degrade");
   assert.match(text, /untrusted DATA/);
   assert.match(text, /\{complete, covered, reports, failures\}/, "the typed aggregate");

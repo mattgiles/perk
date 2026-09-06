@@ -79,6 +79,14 @@ an in-session **“completion-only findings; no provisional batches”** warning
 `fyi` explains unavailable or partial streaming. Neither false case changes coverage or implies
 by itself that the supervisor bridge is broken; these notices never become posted comments.
 
+Browser reconciliation withdraws provisional annotations from uncovered lanes before replacing
+final findings. Shared anchors get one merged annotation from valid final reports, owned by the
+first contributing covered lane; its text retains the other contributors and their severity/
+confidence. The highest severity is preserved. Plan views display the owning lane as the author;
+PR views display its source badge. A custom lens that overlaps another lane may appear in the
+merged text rather than as a separate custom card. Held clears/replacements remain pending, not
+finalized; no failed lane's provisional output is treated as an authoritative report.
+
 An early collection retains the pending wave and yields until matching completion. If the
 bounded collection grace still expires after matching completion was observed, the flow stops
 for owner diagnosis rather than polling or relaunching. Keep the host open for diagnosis.

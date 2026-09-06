@@ -49,6 +49,9 @@ Keep Pi open. The parent ends its turn after launch, then resumes on native supe
 and the matching workflow-completion notice — an idle prompt has not lost the wave. Provisional
 batches are relayed before final reconciliation, even when progress and completion arrive together.
 Final reports are collected and reconciled once; no timer-driven wait loop is needed.
+On the browser surface, provisional findings from uncovered lanes are withdrawn. Findings
+sharing an anchor merge into one final annotation, with the highest severity and each valid
+contributor's labels in the text; the source badge names its owning lane, not every contributor.
 
 A lane with no findings may report **“no provisional batches (no findings)”** normally. If a lane
 has findings but submitted no provisional batches, perk warns **“completion-only findings; no

@@ -121,6 +121,9 @@ test("guidance(both modes): the tool-owned streaming-wave pins", () => {
     assert.match(text, /Subagent progress update/, "progress-update batches are processed");
     assert.match(text, /never compose annotation HTTP/, "the tool owns the mechanics");
     assert.match(text, /replace: true/, "the reconcile reshape is the tool's replace");
+    assert.match(text, /First clear every uncovered source/);
+    assert.match(text, /disjoint final per-angle arrays/);
+    assert.match(text, /visible source names the owning lane/);
     assert.match(text, /NOT a degrade/, "a held result ≠ a degrade");
     assert.match(text, /`findings: \[\]` is the pure retry/);
     assert.match(text, /\{complete, covered, reports, failures\}/, "the typed aggregate");

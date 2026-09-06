@@ -1124,8 +1124,8 @@ direct `perk pr review-submit` calls are forbidden on every door:
 
 **The `push_annotations` findings-delivery tool** (`extension/pi/v1/providers/annotations.ts`;
 perk-registered — census §8.40). The finding→annotation mechanics are CODE, not prompt
-discipline: the model hands the tool finding batches (one angle per call, findings passed
-straight through) and never composes annotation HTTP. FLOW-SCOPED via the door-primed surface
+discipline: the model hands the tool finding batches (one angle per call; provisional findings
+passed straight through, final arrays reconciled as below) and never composes annotation HTTP. FLOW-SCOPED via the door-primed surface
 handle on PER-ACTIVATION state (`createAnnotationState()`, created once per activation and
 threaded to the installer and every priming door — two bound sessions in one process never
 share/clobber a surface or ledger): the browser door primes it on a PR-mode open with the
@@ -1139,7 +1139,10 @@ the `/plan-review-browser` door, §8.23):
 - **Code-owned mapping:** the `[severity/confidence]` text prefix (the one severity carrier),
   LEFT→`old` / RIGHT-or-omitted→`new`, `line: null` + a path → file scope / no path → general
   scope (`line: null` findings ARE pushed on this surface but still fold into the review body
-  for any GitHub posting); the composed `source: "perk:<angle>"` badge.
+  for any GitHub posting); the composed `source: "perk:<angle>"` badge in review mode. Plan
+  mode maps phrases to `COMMENT`/`originalText` (null → `GLOBAL_COMMENT`) and carries both
+  `source` and `author` as `perk:<angle>`: the plan UI displays `author`, while `source` owns
+  replacement. The model cannot supply a different author.
 - **Anchor-keyed dedupe, global across sources** with 201-pinned `ids`: a pushed anchor is never
   re-pushed (skipped, never refused — re-pushing is always safe); a cross-source duplicate
   skipped from a FINAL (replace) batch is retained and promoted when the owning source releases
@@ -1148,7 +1151,20 @@ the `/plan-review-browser` door, §8.23):
   ≠ degrade (the door's readiness observer owns degrading); `findings: []` is the pure retry;
   a zero-item pure clear stays a visible pending operation (`held_batches`).
 - **`replace: true` source-scoped atomic reshape:** delete-then-post supersedes the angle's
-  provisional pushes in one unit — no manual cleanup step exists.
+  provisional pushes in one unit — no model-composed annotation HTTP or broad clear exists.
+- **Browser finalization (parent judgment, existing tool operations):** after typed collection,
+  clear every uncovered source (`launch.requested` minus `collected.covered`) with empty
+  findings and `replace: true`, including failed lanes that streamed before failing. Then
+  reconcile ONLY valid final reports: merge distinct concerns at shared existing anchors,
+  retain contributor angle/severity/confidence labels in merged text, and keep the highest
+  severity with its corresponding confidence. The first contributing lane in covered order
+  owns an anchor. Final per-angle arrays are DISJOINT; duplicate-only covered lanes get empty
+  arrays. Replace each covered source once, including empty arrays; the existing final-alternate
+  promotion preserves the union across replace order. Never recover a report from provisional
+  data or re-send every raw lane array as if that were reconciliation. An owning lane label
+  may differ from a contributing custom lens, which remains attributed in merged text. A held
+  clear/replacement (`held_batches`, even with zero held findings) is not finalization; retain
+  native-wake retry and door-owned degrade, never claim the browser is final while work is held.
 - **Structural delete authority:** the only expressible DELETE is `?source=perk:<angle>`
   composed from the validated slug — the human's and other sources' annotations are untouchable
   by construction.
@@ -1435,8 +1451,9 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
   `/pr-review-terminal` (the wave-tool contract in that door's block) — but each arriving
   fenced-JSON batch is pushed via ONE `push_annotations` call per angle (the tool contract
   above: code-owned mapping/dedupe/hold; a held result ≠ degrade), and at reconcile each
-  covered angle's final findings ride `replace: true`, including empty final arrays (the
-  source-scoped atomic reshape — no manual cleanup step). Held batches retry on the next native
+  covered angle's disjoint, reconciled final array rides `replace: true`, including empty
+  final arrays, after clearing uncovered sources as specified above (source-scoped tool
+  operations only). Held batches retry on the next native
   batch/readiness/completion wake, never a timer. Children never receive the surface handle — not the URL, not the port
   (structurally unrepresentable in the wave). Between wakes and after reconciliation the session is free
   while the human reviews in the browser; the respond arrives later as a message (one shot).
@@ -3920,7 +3937,10 @@ discipline); this section keeps the unique cross-cutting rules.
   findings remain `{phrase, severity, confidence, body}`. The same nonempty accepted-batch
   status, no-empty-batch rule, unavailable/partial-delivery `fyi`, unchanged coverage, and
   neutral versus completion-only disclosures apply to all lanes, including custom/Ponytail.
-  Final browser replacement is per covered lane, including empty arrays; no status annotations.
+  Browser finalization follows §8.4: clear uncovered sources, reconcile valid reports into
+  disjoint final arrays, then replace each covered lane including empty arrays. Plan-mode
+  `author` displays the owning lane; merged-body attribution retains valid custom contributions.
+  No status annotations or provisional-report recovery.
 
 - **Link/`consumed_learn` recovery carriers → §8.3.** Approval-triggered saves carry **no model
   params**; the **cold** `handoff_extra` carrier (→ §8.2) and the **warm**

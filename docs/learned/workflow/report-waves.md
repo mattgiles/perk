@@ -406,6 +406,17 @@ warning with findings, via headless-safe `report()` and model text. Missing/mist
 engine-invalid, never defaulted. Coverage/failure/attempt semantics and receipt-only details are
 unchanged; disclosure is in-session only, never synthetic findings or posted comments.
 
+Browser reconciliation must clear uncovered sources (requested minus covered), including any
+failed lane that already streamed, before replacing covered final arrays. Otherwise failed
+provisional owners can block valid final findings through global dedupe. Parent-reconciled
+arrays must be disjoint: merge supported concerns and contributor tags, preserve maximum
+severity with its corresponding confidence, and assign each anchor to the first contributing
+covered lane. Replacing duplicate-only lanes with empty arrays lets the existing final-alternate
+mechanism converge independent of order. A held pure clear has zero held findings but a nonzero
+`held_batches` count; it is not finalization. Plan-mode source ownership also needs an `author`
+carrier for visible lane attribution (the installed plan UI displays author rather than source).
+Evidence and the failed original draft leg: `docs/design/archive/pi-subagents-native-streaming-dogfood.md`.
+
 ## Deliberate non-behaviors need regression pins
 
 When a design decision is "we do NOT do X", write the test that fails if someone starts doing X.

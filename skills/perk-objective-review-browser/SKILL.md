@@ -67,8 +67,19 @@ end your turn; this skill is the judgment and detail layer behind it.
 - **The door observes readiness itself.** There is no handshake poll for you to run: ready → an
   info note; never-ready → a loud error plus a degrade notice injected to you (degraded mode
   below).
-- **Reconcile judgment.** Keep the severity/confidence/angle tags. `fyi` notes are in-session
-  color, never pushed.
+- **Reconcile judgment.** Clear uncovered sources first (`launch.requested` minus
+  `collected.covered`), using `push_annotations` with empty findings and `replace: true`.
+  Build disjoint final per-angle arrays from valid reports only — never recover failed reports
+  from provisional batches or simply re-send every lane's raw array. Merge distinct concerns
+  at the same phrase; preserve contributor angle/severity/confidence labels in the merged body
+  and the highest severity with its corresponding confidence. The first contributing lane in
+  `collected.covered` order owns that anchor; duplicate-only lanes get empty final arrays.
+  Replace each covered lane once, including empty arrays. A held clear/replacement is not
+  finalization: keep the wake-driven retry/door-owned degrade posture until nothing is held.
+  `fyi` notes remain in-session color, never pushed.
+- **Visible attribution.** Plan annotations carry both `source` (replacement ownership) and
+  `author` (the owning lane label displayed by the plan UI). A valid custom contribution merged
+  under another owner remains labelled in the body; it need not have a separate custom card.
 
 ## The approve/deny loop
 
