@@ -510,7 +510,7 @@ changes. The original read-only plan handoff and draft bytes remain intact. Pi/b
 retained pending owner direction; **no approval/save or full teardown is claimed**. Further
 validation or repairs require explicit owner disposition under the plan's escalation rule.
 
-### Read-only investigation and proposed amendment (not yet approved)
+### Read-only investigation and amendment proposal
 
 The owner chose **“Investigate and propose a fix”**, explicitly before code edits or another
 wave. No production code, reviewer definition, model policy, dependency or live session was
@@ -537,9 +537,55 @@ results are `live/D/replay-annotation-reconciliation.mjs` and
 TypeScript-strip restriction, then the installed engine's jiti loaded the same upstream
 transformer successfully. That local diagnostic loader correction was not another live leg.
 
-The proposed amendment (`live/D/proposed-plan-amendment.md`, **unapproved**) adds plan-mode
-author metadata, makes browser reconciliation clear uncovered sources and use disjoint merged
-final arrays, and adds focused tests/contract/docs. It proposes one explicitly owner-authorized
+The then-unapproved amendment (`live/D/proposed-plan-amendment.md`) proposed plan-mode
+author metadata, browser reconciliation that clears uncovered sources and uses disjoint merged
+final arrays, and focused tests/contract/docs. It proposed one explicitly owner-authorized
 fresh B/D rerun after a committed repair, retaining the original failed D record and unchanged
 T evidence; N/U and final teardown/gate still stand. No automatic retries, provisional-report
-recovery, new wave API/manager, upstream patch, model or capability change is proposed.
+recovery, new wave API/manager, upstream patch, model or capability change was proposed.
+
+### Approved repair — committed; amended live validation pending
+
+The owner explicitly replied **“I approve”** to the bounded amendment. It was appended to the
+canonical plan #2226 body through the existing Python issue-backend update seam, then read back
+and compared; the plan header, selector and objective-node status were unchanged. Copies and
+receipt are `live/D/approved-amendment.md`, `amended-plan.md`, and
+`plan-amendment-receipt.json`. This approval amends the implementation plan; it does **not**
+approve/save the disposable D draft.
+
+Repair commit: **`2ed55c1b6574ff69bdf64d9e6027162fcf0c75e3`**.
+
+- Plan COMMENT/GLOBAL_COMMENT mapping now supplies the owning `author` alongside `source`.
+- Browser guidance clears uncovered sources, builds disjoint merged final arrays from valid
+  reports with preserved contributor labels and maximum severity, and replaces every covered
+  source including empty arrays. Held pure clears/replacements cannot be called finalized.
+- Focused regressions cover both plan/review mapping, both final replacement orders, failed
+  source cleanup, held clears, higher-severity merged concerns, and untouched human/unrelated
+  annotations. Browser guidance pins, contracts, three relevant skill sources and user docs
+  were updated. No reviewer definitions, report schemas, model settings, launch parameters,
+  upstream package files or terminal/hunk flow were changed.
+- The affected node:test suites passed (124 tests). Selected CI checks `lint-js`, `typecheck-js`,
+  `test-js` and `docs-check` passed. `test-py` first found a stack-prompt size regression; the
+  template was shortened to 8954 bytes under its unchanged 9088-byte budget, its targeted
+  budget/render tests passed, and `run_ci(check: test-py)` then passed. Both opt-in prose gates
+  passed; prose-map sync reports the projection current without changes. The final run-all
+  gate is still reserved until live validation and teardown succeed.
+
+The owner authorized **one new B attempt and one new D attempt** at this repaired SHA. Original
+T/B/D evidence above is retained verbatim as historical attempts; D remains failed. T's passing
+result is retained because this repair is browser-only (new annotation guidance explicitly
+scopes reconciliation to a browser surface). N/U retain their original first-attempt requirements.
+No automatic retry or completion-policy/capability workaround was introduced: another missing
+required report stops validation for owner disposition.
+
+| Pending attempt | Code SHA | Status |
+| --- | --- | --- |
+| B2 | `2ed55c1b6574ff69bdf64d9e6027162fcf0c75e3` | Not launched |
+| D2 | `2ed55c1b6574ff69bdf64d9e6027162fcf0c75e3` | Not launched |
+| N | — | Not launched |
+| U | — | Not launched |
+
+The D Pi/browser session has not yet been confirmed closed. The isolated driver remains at
+`bdf6dd29`; it has intentionally not been advanced or reconverged while that session is open.
+Next: confirm D closure/abandonment, advance and normally reconverge the driver to the repaired
+commit, then hand the human a fresh one-shot B2 launcher. Full teardown/submission remain blocked.
