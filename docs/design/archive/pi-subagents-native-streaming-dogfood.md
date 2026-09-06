@@ -496,8 +496,11 @@ Required structured output was not produced: …/ff2f9459-ec21-4ff6-82ed-a10381d
 - **D3 — attribution not visible in the observed plan UI.** The screenshot shows generic
   “Comment” labels for all five annotations; absence of a `custom` badge is not proof that
   custom failed to run (it did run and supplied the first two visible bodies). Perk's plan
-  mapping carries `source: perk:<angle>`; the UI-display cause remains unestablished. Do not
-  conflate this visible attribution issue with D1 or paper over the user's observation.
+  mapping carries `source: perk:<angle>` but no `author`. Subsequent read-only source inspection
+  found the installed plan transformer preserves optional `author`, and the plan UI renders that
+  author value next to “Comment” rather than a source badge. An offline call to the installed
+  transformer accepted `author: perk:custom`. This identifies a metadata-carrier mismatch;
+  live verification of a repair remains required. It is distinct from D1.
 
 Evidence is preserved in `live/D/captured-runtime/` (parent/child JSONL, workflow/child status,
 recovery descriptors and runner logs), `live/D/evidence.json`, and `parent-timeline.json`, with
@@ -506,3 +509,37 @@ HEAD is still `bdf6dd29` with only the explicitly approved manifest relocation/s
 changes. The original read-only plan handoff and draft bytes remain intact. Pi/browser are
 retained pending owner direction; **no approval/save or full teardown is claimed**. Further
 validation or repairs require explicit owner disposition under the plan's escalation rule.
+
+### Read-only investigation and proposed amendment (not yet approved)
+
+The owner chose **“Investigate and propose a fix”**, explicitly before code edits or another
+wave. No production code, reviewer definition, model policy, dependency or live session was
+changed during that investigation.
+
+The missing-output guard in installed pi-subagents (`src/runs/shared/structured-output.ts`)
+returns this error when its capture file is absent; the observed failure is not a rejected
+schema payload. The custom session records no structured-output attempt and no tool rejection,
+timeout or extension error. Its exact runtime tool availability was not persisted, so the
+underlying empty-completion cause remains unproven. The proposal keeps strict failure/coverage
+and does not invent a capability or model fix.
+
+A disposable **offline** replay of D's recorded pushes through the existing annotation core
+and an in-memory endpoint reproduced the final screenshot's source ownership: two custom
+provisional annotations remained, and the shared scope/Ponytail anchor retained the minor
+scope body rather than merging the major Ponytail concern. Clearing the uncovered custom
+source before replacement removed custom contamination. Additionally partitioning the
+reconciled final findings into disjoint source arrays (first contributing covered lane owns
+an anchor; merged text retains contributing angle/severity/confidence labels) preserved the
+final valid concerns and maximum severity using the existing replace/alternate mechanism.
+No real annotation HTTP, model call, or review retry occurred. The diagnostic script and
+results are `live/D/replay-annotation-reconciliation.mjs` and
+`offline-reconciliation-diagnosis.json`; its first loader attempt hit Node's node_modules
+TypeScript-strip restriction, then the installed engine's jiti loaded the same upstream
+transformer successfully. That local diagnostic loader correction was not another live leg.
+
+The proposed amendment (`live/D/proposed-plan-amendment.md`, **unapproved**) adds plan-mode
+author metadata, makes browser reconciliation clear uncovered sources and use disjoint merged
+final arrays, and adds focused tests/contract/docs. It proposes one explicitly owner-authorized
+fresh B/D rerun after a committed repair, retaining the original failed D record and unchanged
+T evidence; N/U and final teardown/gate still stand. No automatic retries, provisional-report
+recovery, new wave API/manager, upstream patch, model or capability change is proposed.
