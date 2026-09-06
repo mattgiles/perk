@@ -149,11 +149,7 @@ test("guidance(foreign+active): the tool-owned streaming-loop pins (hunk mechani
     const text = prReviewTerminalGuidance(opts);
     assert.match(text, /start_review_wave/, "the fan-out is the launch tool");
     assert.match(text, /collect_review_wave/, "completion rides the collect tool");
-    assert.match(
-      text,
-      /subagent_wait\(\{ timeoutMs: 30000 \}\)/,
-      "the wait loop is the streaming cadence",
-    );
+    assert.match(text, /Native-wake relay/, "the door relays native batches to hunk");
     assert.match(text, /Subagent progress update/, "progress-update batches are processed");
     // Hunk sink mechanics are unchanged.
     assert.match(text, /hunk session get --repo/, "the handshake check stays");
@@ -177,7 +173,12 @@ test("guidance(foreign+active): the tool-owned streaming-loop pins (hunk mechani
     assert.match(text, /does not spawn or fall back/);
     assert.match(text, /`skill-unavailable`/);
     // The retired model-authored mechanics are gone.
-    for (const gone of [/workflowScript/, /runs\.all/, /status\.json/, /subagent\(\{\s*action/]) {
+    for (const gone of [
+      /workflowScript/,
+      /runs\.all/,
+      /subagent_wait|bg_wait|hold your turn open|timeout expiry IS the streaming cadence/,
+      /subagent\(\{\s*action/,
+    ]) {
       assert.doesNotMatch(text, gone, `retired mechanics must not appear: ${gone}`);
     }
   }

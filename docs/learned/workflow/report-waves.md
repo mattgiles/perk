@@ -55,7 +55,7 @@ reason on a script-run failure is unrepresentable). Callers consume the opaque `
 lifecycle — `start`/`collect`/`run` over opaque `ReportWaveRef`s: they supply assignments and
 consume typed outcomes, never adapters, run handles, or result promises (the blocking `run` is
 start + await inside the instance; pending execution is instance-owned with drain-once,
-delete-as-claim collection). Adapter selection is wave-owned: `createReportWave(bus)` constructs
+delete-as-claim collection). Adapter selection is wave-owned: `createReportWave(bus, engineEntry)` constructs
 the ONE per-activation production instance at the composition root (`extension/index.ts`);
 `reportWaveOver(adapter)` is the test injection seam. `renderWaveScript` + assignment validation
 are module-private — script text is invisible outside `waves/`, so renderer assertions observe
@@ -63,7 +63,7 @@ the spawned `workflowScript` through the adapter seam. `rpcAdapter.ts` is the li
 v1 RPC adapter (interior — `reportWave.ts` is its one sanctioned production construction site);
 the first-class test double lives in `extension/testing/memoryAdapter.ts`. Guard Rule G
 (`extension/importDirectionGuard.test.ts`) bans production edges into
-`transport.ts`/`rpcAdapter.ts` from outside `waves/` (the old ten-site adapter-construction
+`transport.ts`/`rpcAdapter.ts`/`staleErrorCompat.ts` from outside `waves/` (the old ten-site adapter-construction
 census burned down to zero when `createReportWave` made adapter selection wave-owned) and
 censuses raw `WAVE_RPC_`/channel tokens (tests included). The flow entrypoints:
 
@@ -305,6 +305,13 @@ validated — the engine populates `structuredOutput` only on schema-valid lanes
 non-object/non-null report or a non-boolean `ok` is `malformed-report`. Flow code messaging
 skipped lanes must not conflate them.
 
+The source-fenced 0.65.1 stale-error guard is a narrow exception for the two human-review
+families only (contracts §8.35). It proves retry/capture/settlement and validates against the
+original request before correcting an in-memory failed row. Original engine failure receipts
+remain intact; output-free recovery provenance drives a visible collect-time diagnostic, not
+coverage policy. Missing captures and unsupported/incomplete proof remain failures. This does
+not grant a general right to salvage failed-lane reports or change non-streaming wave behavior.
+
 The broader rule (from the session-corpus audit): **a child's harness status is not report
 validity is not wave coverage.** Validate the report artifact separately, retry a failed required
 lane only within its bounded policy, and persist an uncovered lane rather than upgrading partial
@@ -384,16 +391,38 @@ Flow state holds only the opaque ref — which wave is *current* is flow policy:
 `extension/authoring/review/draftContext.ts`, created per-activation in `index.ts` and threaded
 to the tool pair AND both browser doors, never module-global. Collect races the pending result
 against a bounded, environment-overridable grace (`PERK_WAVE_COLLECT_GRACE_MS` — wave-owned) to
-absorb the completion-event versus wait-wake race (**currency note:** "`subagent_wait` wake"
-was the 0.52-era wording — at the 0.65.1 baseline the wait tool is `bg_wait` and perk's relay
-loop still prescribes the removed name; Phase 2 of the compat objective rewrites the relay onto
-the native wakes, and the grace race description with it). An unsettled result soft-fails
-while retaining pending; the module timeout eventually settles a stuck run and a later collect
-drains it. The flow-side slot clear is identity-guarded: a supersede landing during an in-flight
+absorb ordering skew between native workflow-completion delivery and aggregate resolution.
+The default remains 15 seconds. An early unsettled collect retains pending: end the turn and
+await matching workflow completion. Grace expiry after matching completion was observed is an
+unresolved lifecycle contradiction: report and stop for owner diagnosis, never poll or relaunch.
+The module timeout still owns settlement; pending remains collectable. Parents retain workflow
+identity, yield with Pi open, relay delivered provisional batches before collection (including
+co-delivered progress/completion), and reconcile exactly once from typed reports. Duplicate/late
+notices must not re-collect or replay provisional findings over final reconciliation. The flow-side slot clear is identity-guarded: a supersede landing during an in-flight
 collect's await never erases the NEW pending wave (the drain/race pins live in
 `extension/waves/reportWave.test.ts`, the flow-slot pins in
 `extension/pi/v1/draftReviewWaveTools.test.ts`; two-session isolation in
 `extension/pi/v1/waveIsolation.test.ts`).
+
+Both streaming report schemas require `streamed: boolean`. It reports successful nonempty
+supervisor submission, not human-visible delivery; no findings sends no empty batch and returns
+false normally. Unavailable/failed delivery keeps the complete final report and explains in
+`fyi`; earlier success remains true after partial failure. Both collect cores disclose all
+covered false lanes in order (custom/Ponytail included): neutral no-findings versus completion-only
+warning with findings, via headless-safe `report()` and model text. Missing/mistyped fields are
+engine-invalid, never defaulted. Coverage/failure/attempt semantics and receipt-only details are
+unchanged; disclosure is in-session only, never synthetic findings or posted comments.
+
+Browser reconciliation must clear uncovered sources (requested minus covered), including any
+failed lane that already streamed, before replacing covered final arrays. Otherwise failed
+provisional owners can block valid final findings through global dedupe. Parent-reconciled
+arrays must be disjoint: merge supported concerns and contributor tags, preserve maximum
+severity with its corresponding confidence, and assign each anchor to the first contributing
+covered lane. Replacing duplicate-only lanes with empty arrays lets the existing final-alternate
+mechanism converge independent of order. A held pure clear has zero held findings but a nonzero
+`held_batches` count; it is not finalization. Plan-mode source ownership also needs an `author`
+carrier for visible lane attribution (the installed plan UI displays author rather than source).
+Evidence and the failed original draft leg: `docs/design/archive/pi-subagents-native-streaming-dogfood.md`.
 
 ## Deliberate non-behaviors need regression pins
 
@@ -472,12 +501,13 @@ Instances:
 - The review-wave pair (and the draft pair) HAVE now run against real pi-subagents — the
   2026-08-10 live dogfood of the three streaming browser doors
   (`docs/design/archive/streaming-doors-dogfood.md`: streaming cadence, dedupe, `replace` reshape,
-  typed collect aggregates, all live-confirmed). **Currency note:** that run predates the
-  v0.65.0 native-session transition; at the 0.65.1 baseline (2026-09,
-  `docs/design/archive/pi-subagents-native-baseline-dogfood.md`) wave lane children fail to
-  LAUNCH on the available pi installs (omitted child `async` now defaults background, and the
-  native background runner needs host peers those pis don't ship) — the failure normalizes
-  loudly as `lane-failed`; the repair is the compat objective's Phase 2/3. The dynamic-flow half of the residual was
+  typed collect aggregates, all live-confirmed **for the historical held-turn protocol only**).
+  That run does not prove native-wake streaming. The original 0.65.1 host-peer launch failure
+  (`docs/design/archive/pi-subagents-native-baseline-dogfood.md`) is resolved for the repo-local
+  five-package 0.85.1 dev host: aliases and a real background smoke passed at `52c4fde5` on
+  2026-09-05. See `docs/design/archive/pi-subagents-native-streaming-dogfood.md` for that bounded
+  evidence and the separate five-leg streaming acceptance status; no consumer/global repair is
+  claimed. The dynamic-flow half of the residual was
   discharged by retirement — `/pr-review-dynamic` was removed wholesale (see the CHANGELOG)
   without ever running against real pi-subagents. The stale-session gotcha stands: a landing
   session predates its own extension code (see `pi/extension-api.md` on dogfooding just-changed

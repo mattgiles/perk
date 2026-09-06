@@ -219,7 +219,11 @@ const APPROVED_REGISTRAR_FILES = ["index.ts", "workerMain.ts"];
  * (`createReportWave` owns adapter selection; `reportWave.ts` is the one production
  * construction site).
  */
-const TRANSPORT_INTERIOR = ["waves/rpcAdapter.ts", "waves/transport.ts"];
+const TRANSPORT_INTERIOR = [
+  "waves/rpcAdapter.ts",
+  "waves/transport.ts",
+  "waves/staleErrorCompat.ts",
+];
 
 /**
  * Rule G's raw-transport tokens: the RPC constant prefix — WORD-BOUNDED, so the public
@@ -834,10 +838,13 @@ test("control 13: Rule G mutation fixtures (interior edge; supplier floor; token
 
   // A synthetic interior-transport edge must be flagged.
   const interior = transportConfinement(
-    new Map([["doors/x.ts", ["waves/transport.ts", "waves/rpcAdapter.ts"]]]),
+    new Map([
+      ["doors/x.ts", ["waves/transport.ts", "waves/rpcAdapter.ts", "waves/staleErrorCompat.ts"]],
+    ]),
   );
   assert.deepEqual(interior.interiorEdges, [
     "doors/x.ts → waves/rpcAdapter.ts",
+    "doors/x.ts → waves/staleErrorCompat.ts",
     "doors/x.ts → waves/transport.ts",
   ]);
   // …while waves/-interior edges to the same modules are never flagged (the home is exempt).

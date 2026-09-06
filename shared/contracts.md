@@ -559,10 +559,9 @@ ad-hoc read-write children, a deliberate documented leniency like the arg-blind
 `curl`/`agent-browser` entries, with no agent allowlist) + `explore_objective_node` (the gated
 objective-plan session's OPTIONAL explore step: it spawns the read-only `perk.objective-explorer`
 child over the already-carved-in delegation family and writes nothing to the worktree) + the pi-subagents
-**child-side engine tools** (`structured_output`/`contact_supervisor`/`subagent_wait` — the first
-two register only inside spawned children, so inert in parents; `subagent_wait` is also
-registered by the top-level parent extension, an accepted wait-only non-repo-mutating widening in
-gated parents; kept active so a gated **adopted** child can
+**child-side engine tools** (`structured_output`/`contact_supervisor` — delivered through the
+child prompt runtime/native supervisor bridge, inert when absent in parents; native wakes
+require no wait-tool carve-in; kept active so a gated **adopted** child can
 make the engine-required `structured_output` completion call — stripping it fails an
 `outputSchema` run with `structuredOutputFailed`) — a static union of foreign
 tool names, inert when a package is absent — plus `run_audit_wave` (the gated audit-judge
@@ -1125,8 +1124,8 @@ direct `perk pr review-submit` calls are forbidden on every door:
 
 **The `push_annotations` findings-delivery tool** (`extension/pi/v1/providers/annotations.ts`;
 perk-registered — census §8.40). The finding→annotation mechanics are CODE, not prompt
-discipline: the model hands the tool finding batches (one angle per call, findings passed
-straight through) and never composes annotation HTTP. FLOW-SCOPED via the door-primed surface
+discipline: the model hands the tool finding batches (one angle per call; provisional findings
+passed straight through, final arrays reconciled as below) and never composes annotation HTTP. FLOW-SCOPED via the door-primed surface
 handle on PER-ACTIVATION state (`createAnnotationState()`, created once per activation and
 threaded to the installer and every priming door — two bound sessions in one process never
 share/clobber a surface or ledger): the browser door primes it on a PR-mode open with the
@@ -1140,7 +1139,10 @@ the `/plan-review-browser` door, §8.23):
 - **Code-owned mapping:** the `[severity/confidence]` text prefix (the one severity carrier),
   LEFT→`old` / RIGHT-or-omitted→`new`, `line: null` + a path → file scope / no path → general
   scope (`line: null` findings ARE pushed on this surface but still fold into the review body
-  for any GitHub posting); the composed `source: "perk:<angle>"` badge.
+  for any GitHub posting); the composed `source: "perk:<angle>"` badge in review mode. Plan
+  mode maps phrases to `COMMENT`/`originalText` (null → `GLOBAL_COMMENT`) and carries both
+  `source` and `author` as `perk:<angle>`: the plan UI displays `author`, while `source` owns
+  replacement. The model cannot supply a different author.
 - **Anchor-keyed dedupe, global across sources** with 201-pinned `ids`: a pushed anchor is never
   re-pushed (skipped, never refused — re-pushing is always safe); a cross-source duplicate
   skipped from a FINAL (replace) batch is retained and promoted when the owning source releases
@@ -1149,7 +1151,20 @@ the `/plan-review-browser` door, §8.23):
   ≠ degrade (the door's readiness observer owns degrading); `findings: []` is the pure retry;
   a zero-item pure clear stays a visible pending operation (`held_batches`).
 - **`replace: true` source-scoped atomic reshape:** delete-then-post supersedes the angle's
-  provisional pushes in one unit — no manual cleanup step exists.
+  provisional pushes in one unit — no model-composed annotation HTTP or broad clear exists.
+- **Browser finalization (parent judgment, existing tool operations):** after typed collection,
+  clear every uncovered source (`launch.requested` minus `collected.covered`) with empty
+  findings and `replace: true`, including failed lanes that streamed before failing. Then
+  reconcile ONLY valid final reports: merge distinct concerns at shared existing anchors,
+  retain contributor angle/severity/confidence labels in merged text, and keep the highest
+  severity with its corresponding confidence. The first contributing lane in covered order
+  owns an anchor. Final per-angle arrays are DISJOINT; duplicate-only covered lanes get empty
+  arrays. Replace each covered source once, including empty arrays; the existing final-alternate
+  promotion preserves the union across replace order. Never recover a report from provisional
+  data or re-send every raw lane array as if that were reconciliation. An owning lane label
+  may differ from a contributing custom lens, which remains attributed in merged text. A held
+  clear/replacement (`held_batches`, even with zero held findings) is not finalization; retain
+  native-wake retry and door-owned degrade, never claim the browser is final while work is held.
 - **Structural delete authority:** the only expressible DELETE is `?source=perk:<angle>`
   composed from the validated slug — the human's and other sources' annotations are untouchable
   by construction.
@@ -1193,8 +1208,8 @@ prompt; the contracts pin the output shape, not the judgment rubric.
   `read`/`grep`/`find`/`ls` only (no builds, no tests, no installs); the only command it runs in
   the whole session is `review-context`.
 - **Output (the cross-plane contract).** ONE engine-injected **`structured_output`** call
-  carrying `{angle, summary, findings[], fyi[]}` — the wave's
-  `ADVERSARIAL_REVIEW_REPORT_SCHEMA` (`extension/waves/adversarialReviewWave.ts`); all four
+  carrying `{angle, summary, findings[], fyi[], streamed: boolean}` — the wave's
+  `ADVERSARIAL_REVIEW_REPORT_SCHEMA` (`extension/waves/adversarialReviewWave.ts`); all
   fields required (`fyi` may be `[]`) and **verdict-free** (a human triages downstream; an empty
   `findings` array is the "nothing found" statement, earned by hunting, never manufactured).
   Each finding is `{path, line: <int-in-diff or null>, side?: "LEFT"|"RIGHT" (omitted = RIGHT),
@@ -1211,7 +1226,19 @@ prompt; the contracts pin the output shape, not the judgment rubric.
   findings included) and stays the reconcile source of truth. **Children never receive
   the surface handle** (no hunk/plannotator session, launch, or loopback details in any task) —
   findings travel ONLY via progress updates and the final report. When `contact_supervisor` is
-  absent, streaming is skipped silently — the report-only completion contract is unchanged.
+  absent or a call fails, the child still completes the full report and explains the issue in
+  `fyi`. Required `streamed` starts false and becomes true only after at least one nonempty
+  finding batch is accepted/queued; normal prose, failed calls and empty progress do not count.
+  Earlier success remains true after a later failure (`fyi` records partial delivery). True is
+  child-reported supervisor submission, not proof of human-visible sink delivery. No findings
+  means no empty batch and false normally. Missing/null/mistyped status fails engine schema
+  validation; no default is invented. A valid false report remains covered with no failure or
+  retry. Collect discloses every covered false lane, including custom/Ponytail, in lane order:
+  empty findings → neutral “no provisional batches (no findings)”; nonempty → warning
+  “completion-only findings; no provisional batches”, via `report()` and model-facing text.
+  `fyi` remains the explanation carrier; false alone never diagnoses a broken bridge. These
+  disclosures belong to parent reconciliation on both UI paths, never review comments or
+  synthetic annotations. The aggregate envelope and receipt-only details stay unchanged.
 - **Model** configurable via `[models.subagents] adversarial-reviewer` (both planes; default
   `anthropic/claude-fable-5`, fallback `anthropic/claude-sonnet-4-5` — a deliberately stronger
   tier than `pr-reviewer` for security-sensitive untrusted-code review). A legacy
@@ -1257,18 +1284,25 @@ checkout decode, the `hunk --version` presence probe, and the R7 handoff — liv
   resolves the `[models.subagents] adversarial-reviewer` override at execute time (the doors read
   no config); a pending (launched, uncollected) wave makes a second start refuse `wave_active`; a
   launch failure is a LOUD soft-fail (`error_type` = the wave reason) with no retry — ZERO retries
-  by design, honest incompleteness. The parent then holds the model-held
-  `subagent_wait({ timeoutMs })` relay loop — unchanged as the streaming cadence: progress
-  updates never wake `subagent_wait` and never enter pi-subagents' `pending` map — delivery is
-  an injected (`triggerTurn`-bearing) message when a tool call returns — so the timed wait loop
-  IS the cadence and the parent holds its turn open (an ended turn degrades streaming to churny
-  per-batch wake-ups instead of a held relay). Each arriving fenced-JSON batch is pushed into
-  hunk incrementally with **`path`+`line` dedupe** (an in-conversation ledger; a pushed anchor
-  is never re-pushed; hold-and-accumulate until the handshake connects). On completion the
-  parent calls **`collect_review_wave`** — the typed aggregate
-  `{complete, covered, reports, failures}` (a bounded grace absorbs the
-  completion-event-vs-wait wake race; an early collect soft-fails `wave_running` with the wave
-  RETAINED; no pending wave → `no_wave`) — reconciles from the typed **reports** (union +
+  by design, honest incompleteness. The parent retains the workflow identity/manifest and ends
+  its model turn, keeping the Pi host session open. Native supervisor progress wakes an idle
+  parent or queues into an active turn. Relay all delivered provisional DATA batches to the
+  active sink, then end the turn again unless matching workflow completion is already delivered.
+  Co-delivered progress reaches the sink before collect; no extra turn boundary, timer wait, or
+  empty heartbeat is manufactured. Hunk checks its handshake once per batch wake and pushes
+  new anchors with **`path`+`line` dedupe**; an unconnected sink holds until a later batch wake,
+  human-driven recheck, or completion. Unanchorable findings stay in triage.
+  Only the native WORKFLOW completion matching the launched identity authorizes
+  **`collect_review_wave`** — not child completion, unrelated notices, previews, or elapsed time.
+  Never parse `status.json` or reconcile notification previews. The typed aggregate is
+  `{complete, covered, reports, failures}`; the unchanged 15-second default grace absorbs
+  completion/aggregate ordering skew. Pre-completion `wave_running` RETAINS pending: yield
+  until matching completion. Expiry after matching completion was observed is unresolved
+  collection: report and stop for owner diagnosis, no polling retry chain or wave relaunch.
+  Pending stays collectable; timeout ownership and per-call abort non-propagation are unchanged.
+  Successful collection reconciles exactly once; remember the pass is collected and ignore
+  duplicate/late notices or provisional batches over finalized findings. `no_wave`/delete-as-claim
+  and sequential tool registration remain the structural backstops. Reconcile typed **reports** (union +
   dedupe — the source of truth for triage and posting; streamed batches were provisional; an
   incomplete wave is reported honestly to the human — uncovered angle(s) + failures, never
   papered over), pushes any not-yet-pushed remainder, and — when the handshake never connected
@@ -1380,8 +1414,16 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
 - **The background open (foreign + active):** the handler starts `startPlannotatorBrowser`,
   injects the mode guidance IMMEDIATELY (the URL is deterministic once the port is picked — no
   blocking readiness poll in the handler), and ends its turn. The readiness promise is observed
-  in a background task: `ready` → an info note ("plannotator is up at <url> — browser opening");
-  `timeout`, or a bridge that settled error/unavailable → a loud error report PLUS a degrade
+  in a background task: `ready` → an info note ("plannotator is up at <url> — browser opening")
+  and, for the still-current surface with held or in-flight annotation work, one model
+  continuation (idle → immediate, streaming → `followUp`). This is shared by PR/stack and
+  plan/objective readiness observers. The continuation requests a pure `push_annotations`
+  flush (`findings: []`, an existing angle, `replace` omitted), including held final replacements
+  and zero-item clears after collection; it never authorizes a re-collect, replacement wave,
+  or repeated reconciliation. Counting in-flight pushes closes the enqueue-after-readiness
+  race; an empty idle queue causes no extra turn. Surface identity suppresses stale readiness
+  continuations after close/re-prime. The observer never writes the queue concurrently with a
+  tool call; `timeout`, or a bridge that settled error/unavailable → a loud error report PLUS a degrade
   notice injected to the model (idle → immediate, streaming → `followUp`): render the findings
   in-session, posting unchanged — and the annotation surface is cleared, so a post-degrade
   `push_annotations` refuses `no_surface` (the notice says so). The bridge respond stays
@@ -1420,13 +1462,16 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
   `prompts/stages/pr-review-browser/foreign.md` (the untrusted-foreign-code posture, the
   `perk pr review cleanup` step).
 - **The streaming fan-out (foreign + active; the CODE-owned wave):** ONE `start_review_wave`
-  call and the model-held `subagent_wait({timeoutMs})` relay loop, exactly as on
+  call and the turn-yielding native-wake relay, exactly as on
   `/pr-review-terminal` (the wave-tool contract in that door's block) — but each arriving
   fenced-JSON batch is pushed via ONE `push_annotations` call per angle (the tool contract
   above: code-owned mapping/dedupe/hold; a held result ≠ degrade), and at reconcile each
-  covered angle's final findings ride `replace: true` (the source-scoped atomic reshape — no
-  manual cleanup step). Children never receive the surface handle — not the URL, not the port
-  (structurally unrepresentable in the wave). Once the fan-out turn ends the session is free
+  covered angle's disjoint, reconciled final array rides `replace: true`, including empty
+  final arrays, after clearing uncovered sources as specified above (source-scoped tool
+  operations only). Held batches retry on the next native batch/completion wake or the door's
+  readiness continuation, never a timer. Readiness therefore still resumes final delivery when
+  collection already drained and no further wave notice is coming. Children never receive the
+  surface handle — not the URL, not the port (structurally unrepresentable in the wave). Between wakes and after reconciliation the session is free
   while the human reviews in the browser; the respond arrives later as a message (one shot).
 - **Active mode (no PR arg):** the shared active-PR ladder — `perk pr url --json` →
   `resolveReviewTarget` requires the PR's base evidence, but the browser payload remains exactly
@@ -3913,6 +3958,18 @@ discipline); this section keeps the unique cross-cutting rules.
   `pi/v1/providers/plannotatorHandoff.ts` + `pi/v1/draftReviewWaveTools.ts`). Bindings:
   `command:plan-review-browser` → `perk-plan-review-browser`;
   `command:objective-review-browser` → `perk-objective-review-browser` (nudge, §8.9).
+  Both use §8.4's native-wake lifecycle and disclosure rules with their separate draft tool
+  pair: launch/yield, relay provisional batches before matching workflow-completion collection,
+  reconcile once from final reports; early grace retains pending and post-completion grace
+  expiry escalates without polling/relaunch. `DRAFT_REVIEW_REPORT_SCHEMA` requires
+  `{angle, summary, findings[], fyi[], streamed: boolean}` with closed verdict-free objects;
+  findings remain `{phrase, severity, confidence, body}`. The same nonempty accepted-batch
+  status, no-empty-batch rule, unavailable/partial-delivery `fyi`, unchanged coverage, and
+  neutral versus completion-only disclosures apply to all lanes, including custom/Ponytail.
+  Browser finalization follows §8.4: clear uncovered sources, reconcile valid reports into
+  disjoint final arrays, then replace each covered lane including empty arrays. Plan-mode
+  `author` displays the owning lane; merged-body attribution retains valid custom contributions.
+  No status annotations or provisional-report recovery.
 
 - **Link/`consumed_learn` recovery carriers → §8.3.** Approval-triggered saves carry **no model
   params**; the **cold** `handoff_extra` carrier (→ §8.2) and the **warm**
@@ -5410,13 +5467,44 @@ logical manifest and is not narrowed by this launch vocabulary.
 projection (pi-subagents ≥ 0.45.0): the child lane key ↔ child `runId` ↔ artifact paths —
 reports, summaries, and structured output NEVER enter a receipt. Retries retain every ordered
 attempt (a failed lane and its relaunch stay distinguishable). `status.json.workflow.value`
-remains the SOLE authority for reports and completeness; receipt absence (an identity-only
-completion) never changes a verdict, completeness, retry selection, or mutation decision —
+remains the report authority except for the exact-source human-review compatibility exception
+below; receipt absence (an identity-only completion) never changes a verdict, completeness,
+retry selection, or mutation decision —
 receipts are write-only correlation telemetry. The flow tools (`run_learn_wave`,
 `run_harvest_wave`, `run_dream_wave`, `run_pr_review_wave`, and the single-lane
 `classify_review_feedback` / `explore_objective_node`) persist `attempts` in their structured
 tool-result details only (never the model-facing prose); a wave-level soft-failure retains any
 receipt known before the failure in its fail details.
+
+**Temporary human-review stale-error exception.** Only `adversarial-review` and `draft-review`
+adapters may correct an in-memory failed row for the pi-subagents **0.65.1** recovered-assistant-error
+bug. The registered `subagent` tool's Pi `SourceInfo.path` must attest that package version and
+all three fixed source hashes in `extension/waves/staleErrorCompat.ts` at launch and collection.
+The original runnable assignments' agents and per-assignment-or-default schemas are snapshotted;
+the host's `typebox/compile` validates the final capture against that snapshot, never against an
+artifact-selected replacement schema. This is not a package pin, config switch, extra attempt,
+new notification channel, or change to the opaque `ReportWave` lifecycle/renderer.
+
+Each correction requires unique parent/step/inventory/child correlation, a single fresh child and
+model attempt, the exact stale `Request timed out.` error, a zero-signal successful runner exit
+before deadline, and no mutation/acceptance/compaction failure. Ordered child events must prove
+historical error → matching successful native retry → successful structured capture execution →
+terminal settlement and complete lifecycle bookkeeping. A capture proposal may precede native
+retry-end, but execution must follow it. The artifact must match the executed call and requested
+schema/angle. Later errors, stops, extra actions, malformed/truncated evidence, missing reports,
+foreign identities, and unsupported fingerprints leave the original failure intact. No prose or
+provisional findings become a report, and missing evidence is never polled for.
+
+Compatibility reads are confined, regular-file, change-checked and byte-bounded: status 2 MiB,
+events 16 MiB (50,000 rows), report/schema 1 MiB, source 512 KiB, package manifest 64 KiB. Engine
+artifacts and original failed receipt children are never rewritten. Successful corrections add
+output-free `recoveries[] = {key, runId, originalError, reason, reportHash, eventsHash, sourceHash}`
+to the attempt receipt (`reason = pi-subagents-0.65.1-stale-assistant-error`; `sourceHash` names the
+run-child-session fingerprint). Both human-review collect tools visibly disclose recovery via
+UI/headless `report()` and model text; this diagnostic is not a finding or posted comment.
+Completeness is still derived normally from the corrected aggregate, independently of receipt
+presence. Non-human-review flows never enable the guard. Remove this temporary boundary after
+the upstream latch fix is verified; do not widen its fingerprint to bless an unverified engine.
 
 **The `learn` tool's classification params.** The warm `learn` tool carries `decision` (a
 JSON-schema enum of the five captured tokens) + `target` (string), threaded to `perk learn
@@ -5840,7 +5928,7 @@ stage lists (delegation additionally rides the read-only gate — §8.3);
 `LINEAR_MUTATING_TOOLS` (incl. `linear_configure_auth`, which writes `~/.pi/agent/auth.json`)
 and `plannotator_submit_plan` appear in NO stage list — in the census, so subtracted from every
 stage session; bare/unscoped sessions keep full access. Child-session tools
-(`structured_output`/`contact_supervisor`/`subagent_wait`) live in **neither census**: children
+(`structured_output`/`contact_supervisor`) live in **neither census**: children
 stay **stage**-unscoped by design (adopt-never-impersonates above), so the stage filter never
 sees a child session — but the read-only **gate** IS inherited by adopted children (§8.3), so
 the child-side engine tools live in `READ_ONLY_TOOLS` (`SUBAGENT_CHILD_TOOLS`), gate membership

@@ -42,7 +42,7 @@ function markedFake(marker: string): FakeSubagents {
           key,
           ok: true,
           error: null,
-          report: { angle: key, summary: marker, findings: [], fyi: [] },
+          report: { angle: key, summary: marker, findings: [], fyi: [], streamed: false },
         })),
     },
   ]);

@@ -162,8 +162,13 @@ test("rpc integration: adapter construction is per-launch inside the supplier (s
   );
   assert.match(
     source,
-    /=> createRpcWaveAdapter\(bus\)/,
+    /waveOver\(\(request\)\s*=>\s*createRpcWaveAdapter\(\s*bus,/,
     "the one construction call must sit inside the per-launch supplier arrow",
+  );
+  assert.match(
+    source,
+    /schema: assignment\.outputSchema \?\? request\.outputSchema/,
+    "the guard must receive the originally requested per-assignment schema before the default",
   );
 });
 

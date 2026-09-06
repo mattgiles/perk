@@ -29,6 +29,8 @@ const ALLOWED_PACKAGES = new Set([
   "@earendil-works/pi-coding-agent",
   "@earendil-works/pi-tui",
   "typebox",
+  // The host aliases this peer subpath too; compatibility recovery validates original schemas.
+  "typebox/compile",
 ]);
 
 /**

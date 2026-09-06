@@ -30,7 +30,7 @@ lock:
     uv lock
     npm install --package-lock-only
 
-# The two @earendil-works devDeps move in exact lockstep (nested-registry skew otherwise —
+# The five @earendil-works devDeps move in exact lockstep (host-peer and registry skew otherwise —
 # guarded by tests/test_packaging.py::test_pi_toolchain_pin_lockstep). Settings-delivered pi
 # extension packages (pi-web-access, …) and the remote runner's global pi are deliberately
 # unpinned — they track latest and never need a bump here. If the typecheck fails after a bump,
@@ -39,7 +39,7 @@ lock:
 
 # bump the pinned pi toolchain to VERSION (lockstep devDeps + lock refresh + compat verification)
 bump-pi version:
-    npm install --save-dev --save-exact "@earendil-works/pi-coding-agent@{{version}}" "@earendil-works/pi-ai@{{version}}"
+    npm install --save-dev --save-exact "@earendil-works/pi-coding-agent@{{version}}" "@earendil-works/pi-ai@{{version}}" "@earendil-works/pi-tui@{{version}}" "@earendil-works/pi-server@{{version}}" "@earendil-works/pi-client@{{version}}"
     npm run typecheck
     node --test extension/piAiCompatGuard.test.ts
     uv run pytest tests/test_packaging.py::test_pi_toolchain_pin_lockstep -q

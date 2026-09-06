@@ -134,15 +134,15 @@ test("guidance: names the three companion tools + the relay loop, no fan-out mec
   assert.match(text, /start_draft_review_wave/, "the fan-out is the launch tool");
   assert.match(text, /collect_draft_review_wave/, "completion rides the collect tool");
   assert.match(text, /push_annotations/, "annotation delivery rides the push tool");
-  assert.match(
-    text,
-    /subagent_wait\(\{ timeoutMs: 30000 \}\)/,
-    "the wait loop is the streaming cadence",
-  );
+  assert.match(text, /Native-wake relay/, "the draft door relays native batches");
   assert.match(text, /grounding/, "the four angles are named");
   assert.match(text, /decision-completeness/);
   assert.match(text, /byte-exact/, "the phrase discipline is pinned");
   assert.match(text, /replace: true/, "the reconcile reshape is the tool's replace");
+  assert.match(text, /First clear every uncovered source/);
+  assert.match(text, /disjoint final per-angle arrays/);
+  assert.match(text, /author label names the owning lane/);
+  assert.match(text, /valid custom contribution may instead appear in merged text/);
   assert.match(text, /NOT a degrade/, "a held result ≠ a degrade");
   assert.match(text, /untrusted DATA/);
   assert.match(text, /\{complete, covered, reports, failures\}/, "the typed aggregate");
@@ -155,7 +155,7 @@ test("guidance: names the three companion tools + the relay loop, no fan-out mec
     /workflowScript/,
     /runs\.all/,
     /outputSchema/,
-    /status\.json/,
+    /subagent_wait|bg_wait|hold your turn open|timeout expiry IS the streaming cadence/,
     /external-annotations/,
     /curl/,
     /127\.0\.0\.1/,
@@ -234,7 +234,7 @@ function primeBoth(): void {
   primeDraftReviewContext(draftReview, { draftType: "plan", draft: "# The draft\n" });
 }
 
-test("observer: ready → the info note naming the URL, nothing injected, surfaces untouched", async () => {
+test("observer: ready without pending annotation work → info only, surfaces untouched", async () => {
   primeBoth();
   const { notifies, sent } = await observe(fakeStarted("ready"));
   assert.equal(sent.length, 0);
@@ -743,7 +743,11 @@ test("open core: primes BOTH surfaces with the deterministic URL/plan mode, RETU
   assert.equal(requests[0]?.payload?.planContent, "# The draft\n");
   // The core RETURNS the guidance (template launch line + the binding suffix) and sends nothing
   // itself — delivery belongs to the caller (the door wrapper / plan_review's wave arm).
-  assert.equal(injected.length, 0, "the core never sends — the caller owns delivery");
+  assert.equal(
+    injected.length,
+    0,
+    "the caller owns seed guidance, and no pending annotations need a readiness continuation",
+  );
   assert.match(guidance ?? "", /start_draft_review_wave/, "the template launch line");
   assert.match(
     guidance ?? "",

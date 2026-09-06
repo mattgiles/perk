@@ -7,9 +7,10 @@
 // `workflow.value` aggregate, and normalizes `{complete, reports[], failures[]}` under a
 // flow-specific completeness policy. Each launch additionally records an OUTPUT-FREE
 // `WaveScriptReceipt` (run handle + per-child identity/artifact trail from the completion
-// payload) — write-only telemetry for correlation: `status.json.workflow.value` stays the sole
-// source of reports, and receipt absence never changes a verdict, completeness, or retry
-// selection (contracts.md §8.35).
+// payload) — correlation telemetry, not policy input. The durable aggregate is report authority
+// except for the source-fenced human-review stale-error correction in the adapter. That correction
+// adds output-free provenance for disclosure; receipt absence never changes verdict/completeness
+// or retry selection (contracts.md §8.35).
 //
 // This is the LOGICAL tier: assignments (`ReportAssignment`), preflight partitioning,
 // aggregate normalization, and the completeness policy. The TRANSPORT tier — the adapter seam,
@@ -26,14 +27,14 @@
 // (a foreign instance's ref collects `"none"` structurally), and a settled collect's
 // delete-as-claim makes drain-once exact even under overlapping collectors. The blocking form
 // serves the per-flow entrypoints (`prReviewWave.ts` and the typed feature ops in `learning/`);
-// the streaming split serves flows whose parent must return from the launch and hold a
-// model-held `subagent_wait` relay loop open (`adversarialReviewWave.ts`, `draftReviewWave.ts`).
+// the streaming split serves flows whose parent ends the launch turn and relays provisional
+// batches on native wakes (`adversarialReviewWave.ts`, `draftReviewWave.ts`).
 //
-// The module owns ADAPTER SELECTION: `createReportWave(bus)` (the production factory) constructs
+// The module owns ADAPTER SELECTION: `createReportWave(bus, engineEntry)` constructs
 // a FRESH rpc adapter per launch over the supplied bus; `reportWaveOver(adapter)` is the
 // injection seam (tests; the same internal core). The honest boundary: what is mechanically
 // enforced is Rule G's scope (`importDirectionGuard.test.ts`) — no production import edges into
-// the transport interior (`transport.ts`, `rpcAdapter.ts`) and no raw RPC tokens — so there is
+// the transport interior (`transport.ts`, `rpcAdapter.ts`, `staleErrorCompat.ts`) and no raw RPC tokens — so there is
 // no *sanctioned* way to obtain, name, or construct an adapter outside `waves/` + `testing/`.
 // TypeScript's structural typing means a hand-written object literal satisfying
 // `reportWaveOver`'s parameter is not mechanically preventable; that residue is owned by the
@@ -433,8 +434,9 @@ export type StartWaveResult =
 /**
  * A collect's outcome:
  * - `"none"`: unknown ref — never started here, already drained, or a foreign instance's.
- * - `"running"`: unsettled after the grace — the ref stays pending; collect again later (the
- *   wave's bound remains the module-owned timeout).
+ * - `"running"`: unsettled after the grace — the ref stays pending. A premature collector
+ *   yields until matching workflow completion; expiry after observed completion is a lifecycle
+ *   contradiction for owner diagnosis, not a polling cue. The module-owned timeout stays.
  * - `"settled"`: this collector won the drain — `keys` is the launch's frozen requested
  *   manifest snapshot, `result` the normalized outcome. Drain-once is exact even under
  *   overlapping collectors (delete-as-claim).
@@ -447,7 +449,7 @@ export type CollectWaveResult =
 /**
  * The deep seam: callers supply assignments and consume typed outcomes — never adapters, run
  * handles, or result promises. `start`/`collect` are the streaming split (the parent returns
- * from the launch and holds a relay loop open); `run` is the blocking form (start + await, no
+ * from the launch, ends its turn, and resumes on native wakes); `run` is the blocking form (start + await, no
  * ref escapes). The only throws are programmer errors (empty assignments, duplicate keys, keys
  * outside `RUN_KEY_PATTERN`); every operational failure normalizes into `ReportWaveResult`.
  */
@@ -459,8 +461,8 @@ export interface ReportWave {
 
 /**
  * The grace a collect allows a not-yet-settled wave before answering `"running"`: long enough
- * to absorb the completion-event-vs-`subagent_wait` wake race, short enough that an early call
- * never stalls the relay loop. The `PERK_WAVE_COLLECT_GRACE_MS` env knob is the ONE grace seam
+ * to absorb ordering skew between the native completion notice and aggregate resolution,
+ * bounded so a premature call can yield again. The `PERK_WAVE_COLLECT_GRACE_MS` env knob is the ONE grace seam
  * (module-private — there is no per-call grace parameter); invalid values fall back.
  */
 const WAVE_COLLECT_GRACE_MS = 15_000;
@@ -505,7 +507,7 @@ type InternalStart =
  * an already-settled, normalized `ReportWaveResult`.
  */
 async function startWave(
-  adapter: WaveAdapter,
+  supplyAdapter: (request: ReportWaveRequest) => WaveAdapter,
   request: ReportWaveRequest,
   signal?: AbortSignal,
 ): Promise<InternalStart> {
@@ -565,7 +567,7 @@ async function startWave(
   const workflowScript = renderWaveScript(runnable);
 
   const start = await startWaveScript(
-    adapter,
+    supplyAdapter(runnableRequest),
     {
       flow: request.flow,
       workflowScript,
@@ -605,12 +607,12 @@ const STILL_RUNNING = Symbol("wave-still-running");
  * `"none"` structurally — and the WeakMap plus the settled drain's delete both release retained
  * results promptly.
  */
-function waveOver(supplyAdapter: () => WaveAdapter): ReportWave {
+function waveOver(supplyAdapter: (request: ReportWaveRequest) => WaveAdapter): ReportWave {
   const records = new WeakMap<ReportWaveRef, PendingRecord>();
 
   return {
     async start(request, control) {
-      const start = await startWave(supplyAdapter(), request, control?.signal);
+      const start = await startWave(supplyAdapter, request, control?.signal);
       if (!start.ok) {
         return { ok: false, result: start.result, launch: start.launch };
       }
@@ -656,7 +658,7 @@ function waveOver(supplyAdapter: () => WaveAdapter): ReportWave {
     },
 
     async run(request, control) {
-      const start = await startWave(supplyAdapter(), request, control?.signal);
+      const start = await startWave(supplyAdapter, request, control?.signal);
       return start.ok ? await start.result : start.result;
     },
   };
@@ -668,8 +670,22 @@ function waveOver(supplyAdapter: () => WaveAdapter): ReportWave {
  * One per-activation instance is constructed at the composition root (`extension/index.ts`) and
  * threaded to the installers.
  */
-export function createReportWave(bus: WaveBus): ReportWave {
-  return waveOver(() => createRpcWaveAdapter(bus));
+export function createReportWave(bus: WaveBus, engineEntry?: () => string | undefined): ReportWave {
+  return waveOver((request) =>
+    createRpcWaveAdapter(
+      bus,
+      engineEntry !== undefined && ["adversarial-review", "draft-review"].includes(request.flow)
+        ? {
+            engineEntry,
+            assignments: request.assignments.map((assignment) => ({
+              key: assignment.key,
+              agent: assignment.agent,
+              schema: assignment.outputSchema ?? request.outputSchema,
+            })),
+          }
+        : undefined,
+    ),
+  );
 }
 
 /** The adapter-injection seam (tests; the production factory rides the same internal core). */

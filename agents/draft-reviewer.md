@@ -142,14 +142,20 @@ anywhere, never spawn further subagents** — you review and report.
      cluster as it forms. Don't hold everything for the end, and don't send empty batches.
    - Streamed batches are **provisional**: the final completion report (step 8) is the
      **complete set** — streamed findings included — and stays the reconcile source of truth.
-   - If `contact_supervisor` is unavailable, skip streaming silently — the report-only completion
-     contract below is unchanged.
+   - Track `streamed`, initially false: set it true only after at least one **nonempty finding
+     batch** is successfully accepted/queued by `contact_supervisor`. This is child-reported
+     submission to the supervisor channel, not proof the human saw an annotation. Normal
+     assistant prose, failed calls, and empty progress messages do not count.
+   - If no findings arise, send no empty batch and return `streamed: false` normally.
+   - If `contact_supervisor` is absent or streaming fails, still finish the complete structured
+     report. Return false unless an earlier batch succeeded; after any success, true remains
+     true. Put a short factual explanation in `fyi`, including partial delivery failures.
    - **You never receive or touch the review surface.** No plannotator URL or port ever appears
      in your task; your findings travel ONLY via these progress updates and the final report.
 
 8. **Report — call `structured_output` ONCE and stop.** Output a short human table of what you
    found, then finish by calling the engine-injected **`structured_output`** tool exactly once
-   with your completion report — **all four fields required**:
+   with your completion report — **required fields: `angle`, `summary`, `findings`, `fyi`, `streamed`**:
 
    - `angle` echoes your assigned angle
      (`grounding|scope|decision-completeness|risk|ponytail` — or `custom` for the custom lane).
@@ -161,7 +167,8 @@ anywhere, never spawn further subagents** — you review and report.
      span or `null` for a global finding.
    - There is **no verdict field** — the human adjudicates in the browser; an empty `findings`
      array is the "nothing found along this angle" statement.
-   - `fyi` carries borderline/nit notes (`[]` when there are none) — it is for the parent's
+   - `streamed` is the boolean submission status tracked in step 7; it never changes coverage.
+   - `fyi` carries streaming issues and borderline/nit notes (`[]` when there are none) — it is for the parent's
      in-session color only.
 
    Do NOT emit a fenced-JSON completion block — the `structured_output` call IS the report.

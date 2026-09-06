@@ -57,6 +57,23 @@ explicit PR number/URL. It never silently substitutes another branch.
 - An interactive session on either door, if you want to post a formal verdict
   (`approve`/`request-changes` are refused headless; `comment` is not).
 
+## While the reviewers work
+
+Keep Pi open. The parent ends its turn after launch, then resumes on native supervisor messages
+and the matching workflow-completion notice — an idle prompt has not lost the wave. Provisional
+batches are relayed before final reconciliation, even when progress and completion arrive together.
+Final reports are collected and reconciled once; no timer-driven wait loop is needed.
+On the browser surface, provisional findings from uncovered lanes are withdrawn. Findings
+sharing an anchor merge into one final annotation, with the highest severity and each valid
+contributor's labels in the text; the source badge names its owning lane, not every contributor.
+
+A lane with no findings may report **“no provisional batches (no findings)”** normally. If a lane
+has findings but submitted no provisional batches, perk warns **“completion-only findings; no
+provisional batches”** in-session and retains its `fyi` explanation. Both remain covered reports;
+false streaming status alone does not establish a broken bridge. These disclosures never post.
+If collection remains unsettled after the matching completion notice and bounded grace, the agent
+stops for diagnosis rather than retrying a wave.
+
 ## Steps (`/pr-review-terminal`)
 
 1. **Invoke the door.** In a perk session in the repo, run `/pr-review-terminal <pr number|url>`,

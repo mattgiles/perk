@@ -42,8 +42,21 @@ end your turn; this skill is the judgment and detail layer behind it.
 - **The reviewer model.** The configured `[models.subagents] draft-reviewer` model is resolved
   by `start_draft_review_wave` at execute time — the door reads no config and the guidance
   carries no model plumbing.
+- **Native delivery.** Launch once, retain workflow identity, and end the turn with Pi open.
+  Relay delivered provisional batches on native supervisor wakes before collecting on matching
+  workflow completion (co-delivered notices need no extra turn). Final reports alone authorize
+  reconciliation, exactly once. Early collection retains pending; expired grace after observed
+  completion requires owner diagnosis, not polling/relaunch. Held annotations retry on native
+  batch/readiness/completion wakes; replace each covered lane at reconcile, even if empty.
+- **Streaming status.** Required `streamed` means the child submitted at least one nonempty batch
+  accepted/queued by the supervisor, not that the human saw it. No findings → false normally;
+  unavailable/failed streaming → complete final report plus factual `fyi` (true remains true after
+  an earlier successful batch). Disclose every false lane (custom/Ponytail included) in-session
+  without changing coverage: neutral “no provisional batches (no findings)” versus warning
+  “completion-only findings; no provisional batches”. Never create status annotations; false
+  alone does not diagnose a broken bridge.
 - **The child report shape (verdict-free).** Each child's completion report is
-  `{angle, summary, findings[{phrase, severity, confidence, body}], fyi[]}` (`phrase` is a
+  `{angle, summary, findings[{phrase, severity, confidence, body}], fyi[], streamed: boolean}` (`phrase` is a
   byte-exact span from the rendered draft or `null` for a global finding; an empty `findings`
   is a legitimate, earned outcome). The streamed fenced-JSON batches carry findings in this same
   shape; `null` phrases land in the browser's sidebar.
@@ -54,8 +67,19 @@ end your turn; this skill is the judgment and detail layer behind it.
 - **The door observes readiness itself.** There is no handshake poll for you to run: ready → an
   info note; never-ready → a loud error plus a degrade notice injected to you (degraded mode
   below).
-- **Reconcile judgment.** Keep the severity/confidence/angle tags. `fyi` notes are in-session
-  color, never pushed.
+- **Reconcile judgment.** Clear uncovered sources first (`launch.requested` minus
+  `collected.covered`), using `push_annotations` with empty findings and `replace: true`.
+  Build disjoint final per-angle arrays from valid reports only — never recover failed reports
+  from provisional batches or simply re-send every lane's raw array. Merge distinct concerns
+  at the same phrase; preserve contributor angle/severity/confidence labels in the merged body
+  and the highest severity with its corresponding confidence. The first contributing lane in
+  `collected.covered` order owns that anchor; duplicate-only lanes get empty final arrays.
+  Replace each covered lane once, including empty arrays. A held clear/replacement is not
+  finalization: keep the wake-driven retry/door-owned degrade posture until nothing is held.
+  `fyi` notes remain in-session color, never pushed.
+- **Visible attribution.** Plan annotations carry both `source` (replacement ownership) and
+  `author` (the owning lane label displayed by the plan UI). A valid custom contribution merged
+  under another owner remains labelled in the body; it need not have a separate custom card.
 
 ## The approve/deny loop
 

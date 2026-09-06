@@ -230,7 +230,14 @@ test("guidance: the stack posting protocol — perk-side, dry-run-all-first, bot
   assert.match(text, /collect_review_wave/);
   assert.match(text, /push_annotations/);
   assert.match(text, /submit_pr_review/);
-  assert.match(text, /subagent_wait\(\{ timeoutMs: 30000 \}\)/);
+  assert.match(text, /Native-wake relay/);
+  assert.match(text, /First clear every uncovered source/);
+  assert.match(text, /disjoint final per-angle arrays/);
+  assert.match(text, /visible source names the owning lane/);
+  assert.doesNotMatch(
+    text,
+    /subagent_wait|bg_wait|hold your turn open|timeout expiry IS the streaming cadence/,
+  );
   assert.match(text, /never compose annotation HTTP/);
   assert.match(text, /replace: true/);
 });

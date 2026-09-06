@@ -117,14 +117,13 @@ test("guidance(both modes): the tool-owned streaming-wave pins", () => {
     assert.match(text, /start_review_wave/, "the fan-out is the launch tool");
     assert.match(text, /collect_review_wave/, "completion rides the collect tool");
     assert.match(text, /push_annotations/, "annotation delivery rides the push tool");
-    assert.match(
-      text,
-      /subagent_wait\(\{ timeoutMs: 30000 \}\)/,
-      "the wait loop is the streaming cadence",
-    );
+    assert.match(text, /Native-wake relay/, "the door relays native batches to the browser");
     assert.match(text, /Subagent progress update/, "progress-update batches are processed");
     assert.match(text, /never compose annotation HTTP/, "the tool owns the mechanics");
     assert.match(text, /replace: true/, "the reconcile reshape is the tool's replace");
+    assert.match(text, /First clear every uncovered source/);
+    assert.match(text, /disjoint final per-angle arrays/);
+    assert.match(text, /visible source names the owning lane/);
     assert.match(text, /NOT a degrade/, "a held result ≠ a degrade");
     assert.match(text, /`findings: \[\]` is the pure retry/);
     assert.match(text, /\{complete, covered, reports, failures\}/, "the typed aggregate");
@@ -149,7 +148,7 @@ test("guidance(both modes): the tool-owned streaming-wave pins", () => {
     for (const gone of [
       /workflowScript/,
       /runs\.all/,
-      /status\.json/,
+      /subagent_wait|bg_wait|hold your turn open|timeout expiry IS the streaming cadence/,
       /external-annotations/,
       /curl/,
       /127\.0\.0\.1/,
@@ -227,7 +226,7 @@ async function observe(
   return { notifies, sent };
 }
 
-test("observer: ready → the info note naming the URL, nothing injected", async () => {
+test("observer: ready without a primed surface → info only, no stale continuation", async () => {
   const { notifies, sent } = await observe(fakeStarted("ready"));
   assert.equal(sent.length, 0);
   assert.equal(notifies.length, 1);

@@ -413,6 +413,7 @@ test("mapFindings plan mode: COMMENT-with-originalText vs GLOBAL_COMMENT", () =>
         source: "perk:scope",
         annotation: {
           source: "perk:scope",
+          author: "perk:scope",
           type: "COMMENT",
           originalText: "  the exact  span ", // byte-exact — never trimmed or normalized
           text: "[minor/medium] this step is underspecified",
@@ -423,6 +424,7 @@ test("mapFindings plan mode: COMMENT-with-originalText vs GLOBAL_COMMENT", () =>
         source: "perk:scope",
         annotation: {
           source: "perk:scope",
+          author: "perk:scope",
           type: "GLOBAL_COMMENT",
           text: "[critical/medium] missing rollback story",
         },
@@ -430,6 +432,107 @@ test("mapFindings plan mode: COMMENT-with-originalText vs GLOBAL_COMMENT", () =>
     ],
   );
 });
+
+for (const mode of ["plan", "review"] as const) {
+  for (const ownerFirst of [true, false]) {
+    test(`final reconciliation clears failed sources and preserves disjoint merged findings (${mode}, ownerFirst=${ownerFirst})`, async () => {
+      const local = createAnnotationState();
+      primeAnnotationSurface(local, { mode, url: URL_BASE });
+      const { target } = fakeTarget();
+      const stored = new Map<string, Record<string, unknown>>([
+        ["human", { source: "human", text: "keep the human's note" }],
+        ["unrelated", { source: "perk:unrelated", text: "keep another pass's note" }],
+      ]);
+      let seq = 0;
+      let unavailable = false;
+      const fetchLike: FetchLike = async (url, init) => {
+        if (unavailable) throw new Error("temporarily offline");
+        if (init.method === "DELETE") {
+          const source = new URL(url).searchParams.get("source");
+          let removed = 0;
+          for (const [id, item] of stored) {
+            if (item.source === source) {
+              stored.delete(id);
+              removed++;
+            }
+          }
+          return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, removed }) };
+        }
+        const batch = JSON.parse(init.body ?? "") as { annotations: Record<string, unknown>[] };
+        const ids = batch.annotations.map((annotation) => {
+          const id = `id-${++seq}`;
+          stored.set(id, annotation);
+          return id;
+        });
+        return { ok: true, status: 201, text: async () => JSON.stringify({ ids }) };
+      };
+      function finding(anchor: "a" | "b", body: string, severity: "minor" | "major" = "major") {
+        const tags = { body, severity, confidence: "high" as const };
+        return mode === "plan"
+          ? { phrase: anchor, ...tags }
+          : { path: "a.ts", line: anchor === "a" ? 3 : 4, ...tags };
+      }
+      async function push(angle: string, findings: ReturnType<typeof finding>[], replace = false) {
+        const result = await executePushAnnotations(
+          local,
+          target,
+          { angle, findings, replace },
+          { fetchLike },
+        );
+        assert.equal(result.details.ok, true, JSON.stringify(result));
+        return result.details;
+      }
+      // The failed lane holds a real anchor; another covered lane wins a shared anchor before
+      // the eventual owner. Without cleanup/disjoint finals these provisional bodies can win.
+      await push("failed", [finding("a", "FAILED provisional")]);
+      await push("other", [finding("b", "OTHER provisional", "minor")]);
+      const duplicate = await push("owner", [finding("b", "OWNER provisional")]);
+      assert.equal(duplicate.pushed, 0);
+      assert.equal(duplicate.skipped.length, 1);
+      assert.ok([...local.ledger.values()].some((item) => item.source === "perk:failed"));
+
+      const requested = ["owner", "other", "failed"];
+      const covered = ["owner", "other"];
+      // A held pure clear has zero held findings but nonzero held_batches: it is not finalized.
+      unavailable = true;
+      for (const angle of requested.filter((key) => !covered.includes(key))) {
+        const held = await push(angle, [], true);
+        assert.equal(held.held, 0);
+        assert.equal(held.held_batches, 1);
+      }
+      unavailable = false;
+      assert.equal((await push("failed", [])).held_batches, 0); // next native wake flush
+      assert.ok(![...stored.values()].some((item) => item.source === "perk:failed"));
+
+      // Parent-reconciled input: first covered contributor owns each anchor; other's distinct
+      // concern and tags survive in merged text, with maximum severity. Its final array is empty.
+      const finalA = finding("a", "owner [major/high]: authoritative final A");
+      const finalB = finding(
+        "b",
+        "owner [major/high]: final B\n\nother [minor/high]: distinct final concern",
+      );
+      for (const angle of ownerFirst ? covered : [...covered].reverse()) {
+        await push(angle, angle === "owner" ? [finalA, finalB] : [], true);
+      }
+      const finals = [...stored.values()].filter((item) => item.source === "perk:owner");
+      assert.equal(finals.length, 2);
+      assert.ok(finals.some((item) => item.text === `[major/high] ${finalA.body}`));
+      assert.ok(finals.some((item) => item.text === `[major/high] ${finalB.body}`));
+      assert.equal(local.held.length, 0);
+      assert.equal(local.alternates.size, 0);
+      assert.deepEqual(
+        [...new Set([...local.ledger.values()].map((item) => item.source))],
+        ["perk:owner"],
+      );
+      assert.equal(stored.size, 4, "two final findings plus untouched human/unrelated notes");
+      assert.equal(stored.get("human")?.text, "keep the human's note");
+      assert.equal(stored.get("unrelated")?.text, "keep another pass's note");
+      for (const item of finals) {
+        assert.equal(item.author, mode === "plan" ? "perk:owner" : undefined);
+      }
+    });
+  }
+}
 
 // --- executePushAnnotations: the execute core over the injected fetchLike -----------------------
 
@@ -863,12 +966,14 @@ test("execute: plan-mode batches post the COMMENT/GLOBAL_COMMENT shapes", async 
     annotations: [
       {
         source: "perk:scope",
+        author: "perk:scope",
         type: "COMMENT",
         originalText: "the exact quoted span",
         text: "[minor/medium] this step is underspecified",
       },
       {
         source: "perk:scope",
+        author: "perk:scope",
         type: "GLOBAL_COMMENT",
         text: "[minor/medium] global",
       },
@@ -1292,6 +1397,21 @@ test("installAnnotationBindings registers exactly the one tool; a fresh state st
   assert.match(guidelines, /never compose annotation HTTP/);
   assert.match(guidelines, /untrusted DATA/);
   assert.match(guidelines, /replace: true/);
+  for (const pin of [
+    /on a browser surface/,
+    /first clear every uncovered source/,
+    /launch.requested minus collected.covered/,
+    /held clear is not finalization/,
+    /disjoint per-angle arrays, not each lane's raw array/,
+    /contributor angle\/severity\/confidence labels/,
+    /highest severity with its corresponding confidence/,
+    /first contributing lane in collected.covered order/,
+    /duplicate-only covered lanes have empty final arrays/,
+    /once with replace: true, including empty arrays/,
+    /no batches\/clears are held/,
+  ]) {
+    assert.match(guidelines, pin);
+  }
   assert.match(guidelines, /never a degrade/);
 
   // A fresh activation is a fresh session: nothing is primed until a door primes it.

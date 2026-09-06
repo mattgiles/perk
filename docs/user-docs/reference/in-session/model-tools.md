@@ -136,7 +136,6 @@ kept reachable when a child adopts a read-only gate.
 | --- | --- |
 | Schema-validated completion | `structured_output` |
 | Child-to-parent coordination | `contact_supervisor` |
-| Fan-out waiting | `subagent_wait` |
 <!-- END child tool census -->
 
 ## Gating and stage scoping
@@ -150,7 +149,7 @@ remain available because they write only run-scoped session data, drive local re
 spawn read-only analysis. Research and delegation remain available under the documented posture.
 
 A spawned child that adopts a read-only parent state inherits the gate: worktree edits stay blocked
-and bash stays sub-allowlisted, while the three child-only engine tools remain usable. Children of
+and bash stays sub-allowlisted, while the child-only completion and supervisor tools remain usable; native review wakes need no wait-tool carve-in. Children of
 read-write sessions are not gate-restricted.
 
 ### Stage tool diet

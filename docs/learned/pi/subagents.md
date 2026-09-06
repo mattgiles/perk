@@ -46,7 +46,8 @@ non-obvious rules an agent can't derive from any single file.
   "Isolation knob".
 - perk's agent defs (the sorted `PERK_AGENTS` tuple, the SSOT — never restate counts) are
   delivered to consumer repos by `perk init` — "Agent-def delivery to consumer repos".
-- `contact_supervisor` exists in EVERY child regardless of `tools:`; the live parent relay loop
+- The enabled native bridge supplies `contact_supervisor` without reviewer allowlist edits;
+  bridge-off is a separate unavailable-streaming condition. The turn-yielding parent relay
   shape is pinned in "Supervisor-channel streaming". `outputSchema` injects an engine-validated
   `structured_output` completion call (covered lane ⟺ ok ⟺ schema-valid report), and every wave
   spawn passes the explicit `acceptance: {level: "none"}` disable — "Workflow structured
@@ -451,11 +452,10 @@ Mechanics source-read in `pi-subagents/src/` (currency per the version-anchor co
 while wiring `/pr-review-terminal`'s live findings streaming — they dictate the only workable
 parent loop shape:
 
-- **`contact_supervisor` exists in every child regardless of the agent's `tools:` allowlist** —
-  it is registered by pi-subagents' injected prompt-runtime extension
-  (`runs/shared/subagent-prompt-runtime.ts`); the `--tools` flag restricts builtin tools only. So
-  a read-only agent def can still stream, and `workflowScript` children run through the same
-  in-process `execute()` as direct children — child streaming is preserved by construction.
+- **The native supervisor bridge supplies `contact_supervisor` without widening agent defs** —
+  `intercom/intercom-bridge.ts` appends it to explicit allowlists when the bridge is enabled.
+  Bridge-off does not provide that capability; never infer delivery merely from a tool list.
+  A read-only reviewer can stream without changes to its declared capabilities.
   `reason: "progress_update"` is **non-blocking** (returns "queued" immediately; requests capped
   at 64KB).
 - **Delivery is an injected message, nothing else** (`intercom/native-supervisor-channel.ts`):
@@ -472,12 +472,12 @@ parent loop shape:
   (ordinary async runs notify natively; window expiry is a non-error `window_elapsed`), and
   perk does **not** adopt it. The held-turn `subagent_wait({ timeoutMs })` relay loop — wait
   expiry as the streaming cadence, queued injected messages delivering on each expiry return,
-  the parent holding its turn open — is the **0.52-era characterization**. **Currency note:**
-  perk's streaming guidance (the review-door prompts, the wave tools' relay-loop instructions)
-  still prescribes that loop verbatim; repairing it onto the native wakes (the
-  `triggerTurn: true` supervisor injection per request, the `"subagent-notify"` completion
-  wake in `src/runs/background/notify.ts`) is the objective's Phase 2 — do not read the relay
-  prescription as current engine vocabulary.
+  the parent holding its turn open — is the **historical 0.52-era characterization**, not a
+  current prescription or native-wake proof. Current guidance retains the launched workflow
+  identity, ends the turn with Pi open, relays batches on native supervisor wakes, and collects
+  only on matching native workflow completion (`"subagent-notify"`). Co-delivered progress
+  reaches the sink before collection without a manufactured extra turn boundary. No child
+  completion, unrelated notice, preview, or elapsed time authorizes reconciliation.
 - **The grouped `tasks[]` / `chain[]` execution surfaces were REMOVED upstream (v0.41.0–v0.42.1)**
   — `workflowScript` (constrained JS: `runs.run`/`runs.all`) is the sole multi-agent
   orchestration surface, and combining it with `agent`/`tasks`/`chain`/`action` is rejected. A
@@ -488,9 +488,9 @@ parent loop shape:
   `context`, `model`) default onto every child launch, explicit child fields overriding. A
   workflow child's `output` is the child's **full final message**, and the script's return value
   persists in `<asyncDir>/status.json` under `workflow.value` (the asyncDir survives completion).
-  **The completion notification does NOT carry per-child reports** — its text is a truncated
-  (~1000-char) return preview; retrieve the full return via `subagent({action: "status", id})`
-  (the `Dir:` line) → `read <Dir>/status.json`. **At 0.43 the cut went further: direct
+  **The completion notification does NOT carry authoritative per-child reports** — its text
+  is a truncated return preview. Perk parents use the typed collect tools, never notification
+  previews or manual `status.json` reads; aggregate retrieval is adapter-owned. **At 0.43 the cut went further: direct
   `{agent, task}` single-child execution was also removed** — `src/extension/public-execution.ts`
   rejects it with `Direct execution was removed. Use workflowScript: "return runs.run('main',
   { agent, task })".` — so `workflowScript` became, from 0.43, the **sole public execution
@@ -548,35 +548,40 @@ session), never run-scoped. Supporting facts:
   workflow still AWAITS the async child: `asyncOmitted` spreads `workflowAwaitAsync: true` in
   `src/runs/foreground/subagent-executor.ts` (the v0.65.1 repair). The former
   "workflow children default to foreground" rule (`async: params.async ?? false` in
-  `scripted-workflow.ts`) is gone. **Pending-repair note (live-verified at the 0.65.1
-  baseline):** because perk's renderer leaves child `async` unset, wave lane children now take
-  the BACKGROUND path — and the v0.65.0 native background runner requires host peer packages
-  (`@earendil-works/chord`, `@earendil-works/pi-server`) resolvable from the running pi's npm
-  package root, which neither the pinned dev Pi 0.84.1 nor Pi 0.85.1 provides — so lane
-  children fail to launch (`lane-failed`, loud) at that pair. Evidence + root cause:
-  `docs/design/archive/pi-subagents-native-baseline-dogfood.md`; the child-mode policy (an
-  explicit `async: false`, or a Pi bump) is the compat objective's Phase 2/3 decision — do
-  not drive-by patch `extension/waves/transport.ts`.
+  `scripted-workflow.ts`) is gone. The original 0.65.1 baseline failed background child launch
+  because host peers were missing (`docs/design/archive/pi-subagents-native-baseline-dogfood.md`).
+  The repo-local five-package 0.85.1 dev composition now passes alias resolution and a real
+  background smoke at `52c4fde5` (2026-09-05); see
+  `docs/design/archive/pi-subagents-native-streaming-dogfood.md`. This resolves that tested
+  development-host blocker only, not consumer/global compatibility or streaming acceptance.
+  Production launch parameters and pi-subagents' unpinned policy are unchanged.
 - **The one silent killer is config**: `subagents.intercomBridge.mode: "off"` — or
   `"fork-only"`, since perk's wave children run fresh-context — suppresses the channel-dir stamp
-  and degrades streaming to completion-only **with no error**. Now guarded by the report-only
+  and can leave only final reports. Reviewer protocol now requires `streamed: false` and factual
+  `fyi` on unavailable streaming; collection visibly warns when such a lane has findings. Now guarded by the report-only
   `subagent-bridge-config` doctor check (`src/perk/convergence/doctor/checks.py`; both scopes —
   project `.pi/settings.json` + user-global `~/.pi/agent/settings.json` — warn-never-fail, no
   `--fix`; perk deliberately does NOT reimplement pi's cross-scope merge, so either scope's
   explicit-off warns).
 - **The dead fallback is dead**: code-owned spawn *without* live streaming is not to be built —
-  the binding posture is RPC spawn + a model-held `subagent_wait` relay loop.
+  the binding posture is RPC spawn + native-wake provisional relay, with explicit completion-only
+  disclosure when streaming is unavailable (no replacement scheduler or polling tool).
 
 ### Validation posture: the streaming protocol is still mostly prompt-followed
 
 The fan-out and report retrieval are code now (the `start_review_wave`/`collect_review_wave`
 tool pair over the report-wave module — no model-authored `workflowScript`, no `status.json`
 read-back), but the streaming protocol around them is **model-followed prompt text**: the agent
-def's progress-update step, the `subagent_wait({timeoutMs})` parent loop, the incremental
-path+line dedupe ledger (terminal; the browser's ledger is tool-owned in `push_annotations`),
-hold-until-handshake, and the skip-silently fallback are all guidance — tests pin only
-guidance-string **presence**, never behavior. **The first live run is the integration test.**
-The live-run watch axes — all four **confirmed live** across the three streaming browser doors
+def's progress-update step, the native-wake parent relay, and the incremental path+line dedupe
+ledger (terminal; the browser's ledger is tool-owned in `push_annotations`) still require live
+prompt-following evidence. Required `streamed` is child-reported successful nonempty submission,
+not a sink-delivery acknowledgement. False/no findings is neutral; false/findings is a visible
+completion-only warning without changing coverage. Typed tests cover disclosure, grace/drain and
+mid-flight push capability, not autonomous model behavior. The native protocol's separate live
+record is `docs/design/archive/pi-subagents-native-streaming-dogfood.md`.
+
+**Historical held-turn observations — not a current prescription or native-wake proof.**
+The following four axes were observed across the three streaming browser doors
 (2026-08-10; the per-leg timestamps and verbatim tool results are in
 `docs/design/archive/streaming-doors-dogfood.md`):
 
@@ -589,9 +594,8 @@ The live-run watch axes — all four **confirmed live** across the three streami
 - (c) is the 30s cadence right (too short → chatty loop; too long → stale findings) —
   **confirmed with a characterization**: every wave spent exactly two empty expiries
   (~60–90s of child context-reading) before the first batch, then no stale backlog;
-- (d) the parent must hold its turn open — an ended turn degrades streaming to churny per-batch
-  wake-ups instead of a held relay — **confirmed**: each leg's launch→wait→push→collect ran
-  as one held turn.
+- (d) each leg's launch→wait→push→collect ran as one held turn. That observation did not test
+  turn-yielding native delivery and cannot establish that a parent must hold its turn open.
 
 **Upstream-drift caveat:** the load-bearing delivery mechanics above are **source-read-derived**
 at the constant-pinned version (covering the supervisor-channel delivery chain, the v1 RPC
@@ -601,7 +605,7 @@ pi-subagents bumps (the grouped `tasks[]` removal across upstream v0.41.0–v0.4
 this failure mode: it live-broke both review doors with no test tripping). Since 0.51.0 the transport is platform-split —
 watcher platforms (e.g. linux) use per-request-dir + root fs-watchers plus a 5s safety poller,
 with a ≤500ms poll fallback on watcher failure; darwin uses only a demand-gated ≤500ms poller;
-win32 an always-on ≤500ms poller — delivery semantics and the relay-loop shape unchanged. The
+win32 an always-on ≤500ms poller — these are upstream delivery internals, not parent polling prescriptions. The
 doctor `subagent-compat` check is now the
 early-warning tripwire for **surface-level** drift: it probes the installed source for marker
 presence (`workflowScript`, `outputSchema`/`structuredOutput`, the async completion
@@ -689,8 +693,7 @@ schemas are module constants, nothing prompt-transcribed):
 A spawned child is **stage-unscoped** (adopt never impersonates) yet still **inherits the
 parent's read-only gate** via the consumed-handoff adopt arm (env `PERK_RUN_ID` + a consumed
 handoff → the adopt arm carries `mode: read-only`). pi-subagents injects its child-side engine
-tools (`structured_output`, `contact_supervisor`, `bg_wait` — the wait tool since the v0.61
-`subagent_wait` rename) at extension **load time** —
+tools (`structured_output`, `contact_supervisor`) through the child prompt runtime/bridge at extension **load time** —
 before perk's `session_start` gate sync — so a gate sync that omits them deactivates them: an
 `outputSchema` child then runs its full exploration and fails with `structuredOutputFailed`,
 physically unable to make the engine-REQUIRED `structured_output` completion call.
@@ -698,10 +701,8 @@ physically unable to make the engine-REQUIRED `structured_output` completion cal
 - **Landed fix shape:** `SUBAGENT_CHILD_TOOLS` carried in `READ_ONLY_TOOLS`
   (`extension/substrate/toolGating.ts`; the static-name inert-when-unregistered posture),
   deliberately in **neither** `PERK_TOOLS` nor `BORROWED_TOOLS` — children are stage-unscoped,
-  so gate membership is their only governance surface. **Currency note:** the census still
-  carries the removed `subagent_wait` name (harmless — inert-when-unregistered) and does not
-  yet carry `bg_wait`; retiring the stale name is the objective's Phase 2, not a drive-by
-  edit.
+  so gate membership is their only governance surface. The obsolete wait name is retired and
+  no replacement wait tool is adopted; native review delivery needs neither.
 - **Debugging heuristic:** a "missing `structured_output` tool" in a child is a **composition**
   defect — trace (a) the launch allowlist injection (`resolvePiLaunchToolPlan` unions
   `structured_output` when `outputSchema` is set), (b) ambient-extension loading in the child
@@ -741,8 +742,8 @@ are the drift tripwire):
   `success`, `outputState`, artifact paths — the row's `agent` field carries the workflow LANE
   KEY, not an agent name), which perk's `rpcAdapter` normalizes into output-free receipt
   children (`output`/`summary`/`structuredOutput` never copied; malformed rows dropped). And
-  `subagent_wait` now surfaces slim `details.completions` (identity/artifact trail — never
-  output; full reports still come from `status.json.workflow.value`).
+  the historical `subagent_wait` surfaced slim `details.completions` (identity/artifact trail — never
+  output; that is historical wait-tool behavior, not the current parent collection protocol).
 - **The durable aggregate**: `<asyncDir>/status.json` survives completion; `state` is the
   terminal state (`"complete"`/`"failed"`/…), `error` the failure detail, and `workflow.value`
   the script's explicit return value.

@@ -19,12 +19,85 @@ rests on a *tested baseline* plus this re-verify ritual, never on a version cons
 (`just setup`). The live smoke additionally needs model credentials (the parent session's
 default model and the `[models.subagents] objective-explorer` child model).
 
+## Repo-local development host baseline
+
+The development host pins **five** packages together at `0.85.1`: `@earendil-works/pi-coding-agent`,
+`pi-ai`, `pi-tui`, `pi-server`, and `pi-client` (all with the same scope). Server/client are
+explicit dev dependencies because Pi's published host does not supply the background runner's
+full runtime peer graph. This is a **repo-local workaround**, not certification or automatic
+repair of consumers' global Pi installs. Do not patch node_modules, reinstall globally, change
+child mode, or pin pi-subagents to make a failing baseline pass. `just bump-pi VERSION` maintains
+all five dev pins; published wildcard peers, zero runtime dependencies, and doctor report-only
+behavior are unchanged.
+
+Install **in the worktree under test** (`npm install`), not just its ancestor checkout. Check
+`npm ls @earendil-works/pi-coding-agent @earendil-works/pi-ai @earendil-works/pi-tui @earendil-works/pi-server @earendil-works/pi-client --depth=0`,
+then `npm run typecheck`, `node --test extension/piAiCompatGuard.test.ts`, and
+`uv run pytest tests/test_packaging.py::test_pi_toolchain_pin_lockstep -q`. Commit before live probes.
+
+Probe the installed engine using its own jiti and the absolute **repo-local** Pi package root:
+
+```bash
+node <<'JS'
+const { createRequire } = require('node:module');
+const path = require('node:path');
+const engine = path.resolve('.pi/npm/node_modules/pi-subagents');
+const engineRequire = createRequire(path.join(engine, 'package.json'));
+const { createJiti } = engineRequire('jiti');
+const jiti = createJiti(path.join(engine, 'package.json'));
+const { resolveHostPeerAliases } = jiti(path.join(engine, 'src/runs/background/runner-aliases.ts'));
+const host = path.resolve('node_modules/@earendil-works/pi-coding-agent');
+const result = resolveHostPeerAliases(host);
+console.log(JSON.stringify({ host, ...result }, null, 2));
+if (result.missing.length) process.exitCode = 1;
+JS
+```
+
+Require `missing: []`, record every resolved path and any supplemental aliases, then run the
+existing `just subagents-smoke` from the clean commit. Inspect the child receipt/artifact metadata
+for a real background runner process: a PASS under a foreground override is not this baseline.
+Stop on install, resolution, or launch failure and retain run/status/cwd/ref and clean-state or
+diff evidence; another version or execution protocol requires owner direction.
+
+Use a **fresh process** for live review doors: put `$PWD/node_modules/.bin` first on PATH for
+normal `uv run perk plan` draft handoffs, or launch `$PWD/node_modules/.bin/pi` directly for a
+bare interactive probe after removing inherited `PERK_RUN_ID` and `PI_SESSION_FILE`. Keep Pi
+open between model turns. The implementing session predates its dependencies/bindings and is
+not a valid live host. See the scoped [native streaming record](../design/archive/pi-subagents-native-streaming-dogfood.md)
+for the background baseline and the five human-operated streaming legs; unobserved legs are not passes.
+
+## Temporary stale-error guard
+
+`extension/waves/staleErrorCompat.ts` is a temporary, fail-closed exception for the two
+human-review report families, not a general failed-lane recovery facility. It attests the
+registered subagent tool's source path, version **0.65.1**, and exact hashes of
+`run-child-session.ts`, `subagent-runner.ts` and `structured-output.ts` at launch and collection.
+Source drift disables it; do not update the hashes merely to make a newer engine pass.
+
+The guard requires correlated completed workflow/child artifacts, a confirmed successful native
+retry, a matching successful capture followed by settlement, and no later/hard failure. It
+validates against Perk's snapshotted requested schema with the host-provided `typebox/compile`,
+not an artifact's substituted schema. Reads are confined and bounded; incomplete evidence leaves
+the original failure. Only the in-memory aggregate changes. Receipt details retain the original
+error plus evidence hashes, and both collect tools disclose recovery. See contracts §8.35 for
+exact proof limits. Non-streaming waves never enable this exception.
+
+For changes here, run the `staleErrorCompat` and `rpcAdapter` node:test suites and both collect-tool
+suites. Their fixtures are offline and do not install/patch the engine; a source-digest injection
+exists only at the interior test seam. The archived D2 replay exercises the real fingerprint and
+captured artifacts, but does **not** retroactively pass that failed live leg. Fresh human-operated
+validation still requires the recorded owner authorization and committed code.
+
+Remove the guard after a source-reviewed upstream fix and the same error→retry→structured-capture
+replay establish correct native settlement. Remove its plumbing, tests and disclosure docs together;
+keep the original failure evidence. Doctor remains report-only and pi-subagents stays unpinned.
+
 ## Steps
 
 1. **Read the installed version.**
 
    ```bash
-   python3 -c "import json; print(json.load(open('.pi/npm/node_modules/pi-subagents/package.json'))['version'])"
+   node -p "require('./.pi/npm/node_modules/pi-subagents/package.json').version"
    ```
 
    Compare against `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` in

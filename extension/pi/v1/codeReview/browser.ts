@@ -17,7 +17,8 @@
 // (plannotator reads `PLANNOTATOR_PORT` at bind time — see plannotatorHandoff.ts), so in the PR
 // modes the handler starts `startPlannotatorBrowser`, injects the mode guidance IMMEDIATELY, and
 // ends its turn — no blocking readiness poll in the handler. The readiness promise is observed
-// in a background task: ready → an info note; timeout / an error-or-unavailable bridge settle →
+// in a background task: ready → an info note + a continuation for pending annotation work;
+// timeout / an error-or-unavailable bridge settle →
 // a loud error plus a degrade notice injected to the model (findings render in-session; posting
 // unchanged) AND the annotation surface cleared. `push_annotations` owns the
 // hold-and-accumulate discipline: a held batch before any door failure notice means "not up
@@ -47,6 +48,7 @@ import {
   type AnnotationState,
   clearAnnotationSurface,
   primeAnnotationSurface,
+  resumeAnnotationDelivery,
 } from "../providers/annotations.ts";
 import {
   type CodeReviewOutcome,
@@ -114,8 +116,9 @@ export const DEGRADE_NOTICE =
 
 /**
  * Observe the readiness poll in the background (the handler has already injected the guidance
- * and ended): ready → an info note naming the URL; timeout / an error-or-unavailable bridge
- * settle → a loud error report PLUS the degrade notice injected to the model (idle → immediate,
+ * and ended): ready → an info note + an immediate/followUp annotation-delivery continuation
+ * when the still-current surface has held or in-flight work; timeout / an error-or-unavailable
+ * bridge settle → a loud error report PLUS the degrade notice injected to the model (idle → immediate,
  * streaming → followUp). A bridge that settled `handled` (the human finished before the poll saw
  * the server) or `aborted` routes via the respond routing alone — no degrade. Structural param
  * slices keep it offline-testable; exported for the door tests.
@@ -129,9 +132,11 @@ export async function observeBrowserReadiness(
 ): Promise<void> {
   const scope = opts?.scope ?? SCOPE;
   const degradeNotice = opts?.degradeNotice ?? DEGRADE_NOTICE;
+  const surface = annotations.surface;
   const state = await started.readiness;
   if (state === "ready") {
     report(ctx, scope, "info", `plannotator is up at ${started.url} — browser opening`);
+    resumeAnnotationDelivery(annotations, surface, pi, ctx);
     return;
   }
   if (state === "aborted") return; // the turn was interrupted — no-op

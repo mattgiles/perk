@@ -30,7 +30,8 @@ import {
   scaffoldRepo,
 } from "../../testing/harness.ts";
 import { createMemoryWaveAdapter } from "../../testing/memoryAdapter.ts";
-import type { DraftReviewAngle } from "../../waves/draftReviewWave.ts";
+import { staleErrorReviewWave } from "../../testing/staleErrorFixture.ts";
+import { DRAFT_REVIEW_REPORT_SCHEMA, type DraftReviewAngle } from "../../waves/draftReviewWave.ts";
 import { reportWaveOver } from "../../waves/reportWave.ts";
 import {
   decodeStartDraftReviewWaveParams,
@@ -53,7 +54,7 @@ function okEntry(key: string): unknown {
     key,
     ok: true,
     error: null,
-    report: { angle: key, summary: "solid", findings: [], fyi: [] },
+    report: { angle: key, summary: "solid", findings: [], fyi: [], streamed: false },
   };
 }
 
@@ -74,6 +75,7 @@ function fakeTarget(): {
 
 /** The captured tool-def slice the fake pi records (guidelines + mode + the loose execute). */
 interface CapturedTool {
+  description?: string;
   promptGuidelines?: string[];
   executionMode?: string;
   execute: (
@@ -114,6 +116,158 @@ function primePlan(custom?: string): DraftReviewWaveState {
     ...(custom !== undefined ? { custom } : {}),
   });
   return state;
+}
+
+for (const hasUI of [true, false]) {
+  test(`collect disclosure includes custom and Ponytail (hasUI=${hasUI})`, async (t) => {
+    const finding = { phrase: "Step one.", severity: "major", confidence: "high", body: "defect" };
+    const entries = [
+      {
+        key: "grounding",
+        ok: true,
+        error: null,
+        report: {
+          angle: "grounding",
+          summary: "partial delivery",
+          findings: [finding],
+          fyi: ["A later supervisor call failed"],
+          streamed: true,
+        },
+      },
+      {
+        key: "scope",
+        ok: true,
+        error: null,
+        report: {
+          angle: "scope",
+          summary: "no defects",
+          findings: [],
+          fyi: [],
+          streamed: false,
+        },
+      },
+      { key: "risk", ok: false, error: "lane exploded", report: null },
+      {
+        key: "custom",
+        ok: true,
+        error: null,
+        report: {
+          angle: "custom",
+          summary: "completion only",
+          findings: [finding],
+          fyi: ["contact_supervisor absent"],
+          streamed: false,
+        },
+      },
+      {
+        key: "ponytail",
+        ok: true,
+        error: null,
+        report: {
+          angle: "ponytail",
+          summary: "no defects",
+          findings: [],
+          fyi: [],
+          streamed: false,
+        },
+      },
+    ];
+    const adapter = createMemoryWaveAdapter({ aggregate: { state: "complete", value: entries } });
+    const wave = reportWaveOver(adapter);
+    const state = primePlan("custom lens");
+    const { target, notified } = fakeTarget();
+    target.hasUI = hasUI;
+    const stderr: unknown[][] = [];
+    t.mock.method(console, "error", (...args: unknown[]) => stderr.push(args));
+    await executeStartDraftReviewWave(state, wave, target, {
+      angles: ["grounding", "scope", "risk"],
+    });
+    const collected = await executeCollectDraftReviewWave(state, wave, target);
+    assert.equal(collected.details.ok, true);
+    if (!collected.details.ok) return;
+    assert.equal(collected.details.complete, false);
+    assert.deepEqual(collected.details.covered, ["grounding", "scope", "custom", "ponytail"]);
+    assert.deepEqual(
+      collected.details.reports.map((r) => r.report),
+      entries.filter((e) => e.ok).map((e) => e.report),
+    );
+    assert.deepEqual(collected.details.failures, [
+      { key: "risk", reason: "lane-failed", detail: "lane exploded" },
+    ]);
+    assert.equal(collected.details.attempts.length, 1);
+    assert.equal(adapter.calls.spawn.length, 1);
+    const text = collected.content[0]?.text ?? "";
+    assert.match(text, /no provisional batches \(no findings\): scope, ponytail/);
+    assert.match(text, /completion-only findings; no provisional batches: custom/);
+    assert.match(text, /A later supervisor call failed/);
+    assert.match(text, /contact_supervisor absent/);
+    if (hasUI) {
+      assert.ok(
+        notified.some(
+          (n) => n.severity === "info" && n.message.includes("no findings): scope, ponytail"),
+        ),
+      );
+      assert.ok(
+        notified.some(
+          (n) => n.severity === "warning" && n.message.includes("no provisional batches: custom"),
+        ),
+      );
+    } else {
+      assert.equal(notified.length, 0);
+      assert.match(JSON.stringify(stderr), /no findings\): scope, ponytail/);
+      assert.match(JSON.stringify(stderr), /no provisional batches: custom/);
+    }
+  });
+}
+
+for (const hasUI of [true, false]) {
+  test(`compatibility recovery is visible and does not recover an unproven sibling (hasUI=${hasUI})`, async (t) => {
+    const { wave, fake, complete } = staleErrorReviewWave(t, {
+      keys: ["grounding", "risk", "ponytail"],
+      agent: "perk.draft-reviewer",
+      schema: DRAFT_REVIEW_REPORT_SCHEMA,
+    });
+    const state = primePlan();
+    const { target, notified } = fakeTarget();
+    target.hasUI = hasUI;
+    const stderr: unknown[][] = [];
+    t.mock.method(console, "error", (...args: unknown[]) => stderr.push(args));
+    await executeStartDraftReviewWave(state, wave, target, { angles: TWO_ANGLES });
+    complete();
+    const result = await executeCollectDraftReviewWave(state, wave, target);
+    assert.equal(result.details.ok, true);
+    if (!result.details.ok) return;
+    assert.equal(result.details.complete, false);
+    assert.deepEqual(result.details.covered, ["grounding", "ponytail"]);
+    assert.deepEqual(result.details.failures, [
+      { key: "risk", reason: "lane-failed", detail: "Request timed out." },
+    ]);
+    assert.equal(result.details.attempts.length, 1);
+    assert.equal(result.details.attempts[0]?.children[0]?.success, false);
+    assert.equal(result.details.attempts[0]?.recoveries?.[0]?.key, "grounding");
+    assert.match(
+      result.details.attempts[0]?.recoveries?.[0]?.originalError ?? "",
+      /Request timed out/,
+    );
+    assert.match(
+      result.content[0]?.text ?? "",
+      /Compatibility recovery.*grounding.*original engine failure retained.*No new attempt/,
+    );
+    assert.equal(fake.spawns.length, 1);
+    if (hasUI)
+      assert.ok(
+        notified.some(
+          (n) => n.severity === "warning" && n.message.includes("Compatibility recovery"),
+        ),
+      );
+    else {
+      assert.equal(notified.length, 0);
+      assert.match(JSON.stringify(stderr), /Compatibility recovery/);
+    }
+    const second = await executeCollectDraftReviewWave(state, wave, target);
+    assert.equal(second.details.ok, false);
+    if (!second.details.ok) assert.equal(second.details.error_type, "no_wave");
+  });
 }
 
 // --- decodeStartDraftReviewWaveParams: strict whole-refusal decode ----------------------------
@@ -206,7 +360,8 @@ test("executeStartDraftReviewWave: happy path stores the pending wave; the wave 
   });
   const text = result.content[0]?.text ?? "";
   assert.match(text, /grounding, risk/);
-  assert.match(text, /subagent_wait/);
+  assert.match(text, /end the turn/);
+  assert.match(text, /matching native workflow-completion notice/);
   assert.match(text, /collect_draft_review_wave/);
   // The primed draft (never a tool param) reached the lane tasks.
   const script = (adapter.calls.spawn[0]?.workflowScript as string) ?? "";
@@ -452,7 +607,8 @@ test("executeCollectDraftReviewWave: no_wave without a launch; wave_running reta
   }
   assert.equal(running.details.ok, false);
   assert.equal((running.details as { error_type?: string }).error_type, "wave_running");
-  assert.match(running.content[0]?.text ?? "", /keep looping subagent_wait/);
+  assert.match(running.content[0]?.text ?? "", /pending retained/);
+  assert.match(running.content[0]?.text ?? "", /stop for owner diagnosis/);
 
   // Once the run completes, the retained wave collects normally (attempts in details only).
   adapter.emitCompletion({ asyncId: "wave-async-1", asyncDir: "/memory/wave-async-1" });
@@ -575,11 +731,41 @@ test("registerDraftReviewWaveTools registers exactly the two tools over registra
   // could both pass the `pending === null` check before either stores the launched wave.
   assert.equal(startDef.executionMode, "sequential");
   assert.equal(collectDef.executionMode, "sequential");
-  assert.match(
-    (startDef.promptGuidelines ?? []).join("\n"),
-    /subagent_wait\(\{timeoutMs: 30000\}\)/,
-  );
-  assert.match((startDef.promptGuidelines ?? []).join("\n"), /untrusted DATA/);
+  const startText = (startDef.promptGuidelines ?? []).join("\n");
+  const collectText = (collectDef.promptGuidelines ?? []).join("\n");
+  for (const pin of [
+    /end the turn/,
+    /Keep the Pi session open/,
+    /workflow identity and manifest/,
+    /queues into an active turn/,
+    /co-delivered progress/,
+    /not a child completion/,
+    /unrelated run, result preview, or elapsed time/,
+    /Never parse status.json/,
+    /No artificial wait calls or empty heartbeat batches/,
+  ])
+    assert.match(startText, pin);
+  for (const pin of [
+    /relay already-delivered provisional batches first/,
+    /pre-completion wave_running/,
+    /retains pending/,
+    /stop the automatic flow for owner diagnosis/,
+    /no polling retry chain/,
+    /reconcile exactly once/,
+    /Ignore duplicate\/late notices/,
+    /over finalized findings/,
+    /no_wave\/drain-once/,
+    /never changes coverage/,
+  ])
+    assert.match(collectText, pin);
+  for (const def of [startDef, collectDef]) {
+    assert.match(def.description ?? "", /matching native workflow-completion notice/);
+    assert.doesNotMatch(
+      `${def.description}\n${def.promptGuidelines?.join("\n")}`,
+      /subagent_wait|bg_wait|hold your turn open/i,
+    );
+  }
+  assert.match(startText, /untrusted provisional DATA/);
   assert.match(
     (startDef.promptGuidelines ?? []).join("\n"),
     /required automatic final source-bound Ponytail lane/,
@@ -662,7 +848,13 @@ function draftFake(): FakeSubagents {
           key,
           ok: true,
           error: null,
-          report: { angle: key, summary: `${String(key)} looks sound`, findings: [], fyi: [] },
+          report: {
+            angle: key,
+            summary: `${String(key)} looks sound`,
+            findings: [],
+            fyi: [],
+            streamed: false,
+          },
         })),
     },
   ]);

@@ -5,7 +5,7 @@
 //   foreign — `/pr-review-terminal <pr|url> [focus]`: the detached `perk pr review checkout`,
 //             the R7 handoff, the full adversarial-reviewer flow (the fan-out rides the
 //             globally registered `start_review_wave`/`collect_review_wave` tool pair; the
-//             injected guidance holds the `subagent_wait` relay loop and the hunk sink).
+//             injected guidance yields between native wakes and owns the hunk sink).
 //   active  — `/pr-review-terminal [focus]` from a plan worktree whose branch HAS a PR: the same
 //             flow re-homed to the human's own worktree (no checkout, no cleanup) on the local
 //             diff against the PR's current base (`sinceBaseSha` — best-effort fetch, then

@@ -45,8 +45,21 @@ launch statement's rules:
 
 ## Behind the flow (the detail the launch guidance doesn't state)
 
+- **Native delivery.** Launch once, retain workflow identity, and end the turn with Pi open.
+  Relay delivered provisional batches on native supervisor wakes before collecting on matching
+  workflow completion (co-delivered notices need no extra turn). Final reports alone authorize
+  reconciliation, exactly once. Early collection retains pending; expired grace after observed
+  completion requires owner diagnosis, not polling/relaunch. Held annotations retry on native
+  batch/readiness/completion wakes; replace each covered angle at reconcile, even if empty.
+- **Streaming status.** Required `streamed` means the child submitted at least one nonempty batch
+  accepted/queued by the supervisor, not that the human saw it. No findings → false normally;
+  unavailable/failed streaming → complete final report plus factual `fyi` (true remains true after
+  an earlier successful batch). Disclose false lanes in-session without changing coverage:
+  neutral “no provisional batches (no findings)” versus warning “completion-only findings; no
+  provisional batches”. Never post these disclosures or create status annotations; false alone
+  does not diagnose a broken bridge.
 - **The child report shape (verdict-free).** Each child's completion report is
-  `{angle, summary, findings[{path, line, side?, severity, confidence, body}], fyi[]}` — `line`
+  `{angle, summary, findings[{path, line, side?, severity, confidence, body}], fyi[], streamed: boolean}` — `line`
   is an int in the diff or `null` for a real-but-unanchorable finding; `side` omitted means
   `RIGHT`; an empty `findings` is a legitimate, earned outcome. The streamed fenced-JSON batches
   carry findings in this same shape.
@@ -73,7 +86,17 @@ launch statement's rules:
   info note; never-ready → a loud error plus a degrade notice injected to you (degraded mode
   below).
 - **Reconcile judgment.** A finding worth keeping names a concrete risk the author should act
-  on; drop restatements and style noise. `fyi` notes are in-session color, never posted.
+  on; drop restatements and style noise. Clear uncovered sources first (`launch.requested`
+  minus `collected.covered`) via empty findings with `replace: true`. Build disjoint final
+  per-angle arrays from valid reports only — never recover a failed report from provisional
+  batches or re-send every lane's raw array. Merge distinct concerns at the same path+line,
+  preserving contributor angle/severity/confidence labels in the merged body and the highest
+  severity with its corresponding confidence. The first contributing lane in
+  `collected.covered` order owns the anchor; duplicate-only lanes get empty final arrays.
+  Replace each covered lane once, including empty arrays. A held clear/replacement is not
+  finalization: retain native-wake retry and door-owned degrade until nothing is held. The
+  visible source identifies the owner; merged text preserves other valid contributors.
+  `fyi` notes are in-session color, never posted.
 - **Respond annotations are context, not a posting queue.** Source-less annotations are
   human-authored; `perk:*`-badged ones are your own findings returning. They become candidate
   comments ONLY when the human explicitly asks perk to post — then settle the batch with them

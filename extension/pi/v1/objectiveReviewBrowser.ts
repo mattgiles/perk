@@ -64,6 +64,7 @@ import {
   type AnnotationState,
   clearAnnotationSurface,
   primeAnnotationSurface,
+  resumeAnnotationDelivery,
 } from "./providers/annotations.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import {
@@ -125,7 +126,8 @@ export interface ObjectiveReviewDoorSession {
 /**
  * Observe the readiness poll in the background (the objective flavor of
  * `observePlanReviewReadiness`; the handler has already injected the guidance and ended):
- * `ready` → an info note naming the URL; `aborted` → no-op; `bridge_settled` → await the
+ * `ready` → an info note plus one annotation-delivery continuation if the still-current
+ * surface has held or in-flight work; `aborted` → no-op; `bridge_settled` → await the
  * bridge — a completed/aborted outcome returns silently (the decision task routes them) while
  * `unavailable` falls through to the degrade; `timeout` → degrade. Degrade = a loud error
  * report PLUS the degrade notice injected to the model (idle → immediate, streaming →
@@ -142,9 +144,11 @@ export async function observeObjectiveReviewReadiness(
   annotations: AnnotationState,
   session?: ObjectiveReviewDoorSession,
 ): Promise<void> {
+  const surface = annotations.surface;
   const state = await started.readiness;
   if (state === "ready") {
     report(ctx, SCOPE, "info", `plannotator is up at ${started.url} — browser opening`);
+    resumeAnnotationDelivery(annotations, surface, pi, ctx);
     return;
   }
   if (state === "aborted") return; // the turn was interrupted — no-op

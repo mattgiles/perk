@@ -63,6 +63,54 @@ Companion tools:
 
 ## Human-triaged PR review
 
+### Native delivery and streaming status
+
+For terminal/browser PR reviews (including stacks) and both browser draft-review doors, the
+agent launches once, then ends its turn **without closing Pi**. An idle prompt does not mean
+its wave was lost: native supervisor messages wake the parent to relay provisional findings,
+and the matching workflow-completion notice triggers collection. Messages arriving during an
+active turn queue normally; co-delivered batches are relayed before collection, without an
+extra turn boundary. Only final typed reports authorize reconciliation, exactly once.
+
+Each covered report requires `streamed: boolean`: true means the child successfully submitted
+at least one nonempty finding batch, not proof of human-visible annotation delivery. False with
+no findings is neutral **“no provisional batches (no findings)”**. False with findings produces
+an in-session **“completion-only findings; no provisional batches”** warning naming those lanes.
+`fyi` explains unavailable or partial streaming. Neither false case changes coverage or implies
+by itself that the supervisor bridge is broken; these notices never become posted comments.
+
+Browser reconciliation withdraws provisional annotations from uncovered lanes before replacing
+final findings. Shared anchors get one merged annotation from valid final reports, owned by the
+first contributing covered lane; its text retains the other contributors and their severity/
+confidence. The highest severity is preserved. Plan views display the owning lane as the author;
+PR views display its source badge. A custom lens that overlaps another lane may appear in the
+merged text rather than as a separate custom card. Held clears/replacements remain pending, not
+finalized; no failed lane's provisional output is treated as an authoritative report.
+
+If the browser becomes ready after annotation work was held—or while a push is still in
+flight—the door sends one continuation to finish delivery through the normal annotation tool.
+This also works after wave collection, with no further reviewer message or human nudge needed.
+The continuation flushes held final replacements/clears; it does not rerun the wave, collect
+again, or repeat reconciliation. An empty idle queue causes no extra turn, and a closed or
+superseded review does not trigger a delivery continuation.
+
+An early collection retains the pending wave and yields until matching completion. If the
+bounded collection grace still expires after matching completion was observed, the flow stops
+for owner diagnosis rather than polling or relaunching. Keep the host open for diagnosis.
+
+### Temporary compatibility recovery
+
+The two human-review wave families have a narrowly source-fenced workaround for pi-subagents
+0.65.1's stale `Request timed out.` error after a successful native retry. Perk accepts a final
+capture only when correlated artifacts prove successful retry, capture execution and settlement,
+and the report passes the original requested schema. Collection then displays **“Compatibility
+recovery (pi-subagents 0.65.1)”**, names the lane, and retains the original failure in attempt
+receipt details. This is not a new wave attempt and does not recover provisional findings.
+
+Missing reports, genuine failures, incomplete evidence, and changed or unsupported engine sources
+remain failures. Other wave families, including `/pr-review`, are unchanged. The workaround does
+not pin or modify pi-subagents and does not change the human posting/save gates.
+
 ### `/pr-review-terminal`
 
 Open a human-in-the-loop adversarial review in the

@@ -8,6 +8,10 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { createFakeSubagents } from "../testing/fakeSubagents.ts";
+import { staleErrorFixture, staleErrorReviewWave } from "../testing/staleErrorFixture.ts";
+import { DRAFT_REVIEW_REPORT_SCHEMA } from "./draftReviewWave.ts";
+import { createReportWave } from "./reportWave.ts";
 import {
   createRpcWaveAdapter,
   WAVE_RPC_PING_TIMEOUT_MS,
@@ -38,6 +42,72 @@ function createFakeBus(): WaveBus & { handlerCount(channel: string): number } {
       return channels.get(channel)?.size ?? 0;
     },
   };
+}
+
+test("recovery crosses the real RPC adapter and drain-once lifecycle without retrying", async (t) => {
+  const { f, wave, fake, complete } = staleErrorReviewWave(t, {
+    keys: ["custom"],
+    agent: "perk.draft-reviewer",
+    schema: DRAFT_REVIEW_REPORT_SCHEMA,
+  });
+  const start = await wave.start({
+    flow: "draft-review",
+    assignments: [{ key: "custom", agent: "perk.draft-reviewer", task: "Review." }],
+    outputSchema: f.schema,
+    completeness: "strict",
+  });
+  assert.ok(start.ok);
+  complete();
+  const collected = await wave.collect(start.ref);
+  assert.equal(collected.kind, "settled");
+  if (collected.kind !== "settled") return;
+  assert.equal(collected.result.complete, true);
+  assert.deepEqual(
+    collected.result.reports.map((r) => r.key),
+    ["custom"],
+  );
+  assert.deepEqual(collected.result.failures, []);
+  assert.equal(collected.result.receipt.children[0]?.success, false);
+  assert.equal(collected.result.receipt.recoveries?.length, 1);
+  assert.equal(fake.spawns.length, 1);
+  assert.equal(fake.stops.length, 0);
+  assert.deepEqual(await wave.collect(start.ref), { kind: "none" });
+});
+
+for (const flow of [
+  "adversarial-review",
+  "draft-review",
+  "pr-review",
+  "review-classifier",
+  "learn",
+  "objective-explorer",
+]) {
+  test(`production factory confines source inspection to human-review flows: ${flow}`, async (t) => {
+    const f = staleErrorFixture(t);
+    const bus = createFakeBus();
+    const fake = createFakeSubagents([{ existingRun: f.handle, delivery: "manual" }]);
+    fake.attach(bus);
+    let reads = 0;
+    const wave = createReportWave(bus, () => {
+      reads++;
+      return undefined;
+    });
+    const start = await wave.start({
+      flow,
+      assignments: [{ key: "custom", agent: "perk.draft-reviewer", task: "Review." }],
+      outputSchema: f.schema,
+      completeness: "strict",
+    });
+    assert.ok(start.ok);
+    fake.complete(0);
+    const collected = await wave.collect(start.ref);
+    assert.equal(collected.kind, "settled");
+    if (collected.kind !== "settled") return;
+    assert.equal(collected.result.complete, false);
+    assert.equal(collected.result.receipt.recoveries, undefined);
+    assert.equal(reads, ["adversarial-review", "draft-review"].includes(flow) ? 1 : 0);
+    assert.equal(fake.spawns.length, 1);
+  });
 }
 
 interface CapturedRequest {

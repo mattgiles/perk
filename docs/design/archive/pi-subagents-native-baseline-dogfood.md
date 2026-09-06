@@ -9,6 +9,12 @@ deliberate no-pin decision (owner-affirmed in the objective): pi-subagents stays
 this record + the re-verify procedure (`docs/developers/pi-subagents-reverify.md`) are the
 compensating control.
 
+> **2026-09-05 scoped follow-up:** the repo-local five-package Pi 0.85.1 composition now
+> passes host-alias resolution and a real background smoke. See
+> [native-streaming dogfood](pi-subagents-native-streaming-dogfood.md) for that evidence and the
+> separate live-streaming leg status. This does not rewrite the failing run below or certify
+> global/consumer hosts.
+
 ## The baseline matrix
 
 | Component | Version | Provenance |
