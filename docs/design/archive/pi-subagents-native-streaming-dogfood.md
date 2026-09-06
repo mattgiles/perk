@@ -681,7 +681,7 @@ single owner-authorized B rerun, not an automatic retry; the original B evidence
 Closure receipts are `live/B2/captured-runtime/parent-session-after-close.jsonl`,
 `checkout-cleanup.json`, `worktrees-after-cleanup.txt`, and `github-after-cleanup.json`.
 
-### D2 preparation — not yet launched
+### D2 preparation — fresh draft verified; review not yet launched
 
 The one-shot `live/start-D2.sh` is prepared for a fresh normal `perk plan --no-sync` handoff
 at repair SHA `2ed55c1b`, using the same repaired Pi, agent home, reviewer definitions/model
@@ -691,3 +691,14 @@ The launch preview passed without starting Pi or a review. The human is asked on
 `plan_draft` register the supplied bytes and report **“D2 draft ready”**; handoff/artifact
 verification precedes the same custom-lens review invocation. The original failed D run is
 preserved, and another required-output failure would stop the flow rather than trigger a retry.
+
+The human then launched D2 and reported **“D2 draft ready”**. Verified normal-plan handoff:
+`01M1T4X0CT95HP6SCA3SF8S602`, consumed, read-only, stage plan, bound to parent session
+`01a0744e-8351-733c-8bc0-d6127b60eca2` (model `anthropic/claude-opus-4-8`). At
+2026-09-06T01:22:00.306Z `plan_draft` succeeded with 1790 bytes and the original fixture digest
+`618fb3125dc66d716282365c02ab6f816384e1324fb19717b17de4fc9f580bb4`. Independent byte comparison
+and receipt-digest verification passed; only `read` and `plan_draft` ran, with no review/save/
+delegation attempt. Driver HEAD remains `2ed55c1b`. Captures: `live/D2/draft-verification.json`,
+`preparation-handoff.json`, `verified-plan-draft.md`, and `parent-preparation.jsonl`.
+The same custom-lens invocation is now handed to the human; any final custom attribution may
+appear in an owning author label or in merged contributor text, not necessarily a separate card.
