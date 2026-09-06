@@ -1,12 +1,13 @@
 # Native-wake review streaming: development baseline and live protocol
 
 **Dates:** 2026-09-05–06 (UTC; screenshot names use local time).
-**Status: BLOCKED — not submission evidence yet.** The repo-local background prerequisite,
-original T/B legs, and repaired-code B2 passed. Original D remains **not passed**. The approved
-browser repair worked in D2, but D2 is also **not passed**: two children successfully captured
-reports yet were reported failed with “Request timed out.” N/U remain **unobserved / not passed**;
-the authorized rerun is exhausted and further action requires owner disposition. This record does not certify the remaining streaming routes,
-global hosts, or consumer compatibility.
+**Status: accepted with an explicit live-validation waiver; teardown complete.** The repo-local
+background prerequisite and T/B2 passing evidence are retained at their recorded SHAs. D/D2
+remain **not passed**; the stale-error correction is verified offline at `7db3aa15`, not by a new
+live run. N/U remain **unobserved**. The owner explicitly waived further live attempts and accepted
+these bounded gaps; see the final waiver/teardown ledger below. The final run-all CI gate passed
+before submission. This record does not certify unobserved streaming conditions, global hosts,
+or consumer compatibility.
 
 ## Part A — repeatable protocol and preconditions
 
@@ -935,3 +936,69 @@ change or driver advance occurred. D2 closure is still unconfirmed. The driver r
 boundary (not just browser mapping), prior T/B2 evidence cannot automatically be promoted to
 new-head acceptance. Return to the owner to settle affected-leg reruns and authorize any further
 attempts. N/U, full teardown and the final run-all gate remain submission prerequisites.
+
+### Final acceptance waiver and teardown — 2026-09-06
+
+After being offered further live validation, the owner asked **“Do we really need to do more??”**.
+The recommendation was narrowed to stopping live testing with an explicit waiver, retaining
+T/B2 evidence, preserving D/D2 as failed and N/U as unobserved, then completing teardown and the
+final CI gate. The owner replied **“ok”**. This bounded waiver was appended to the canonical plan
+#2226 and read back byte-for-byte; the plan header and objective-node status were not changed.
+The prior failed attempts are not retroactively passed.
+
+| Acceptance evidence | Final disposition |
+|---|---|
+| Repo-local host resolution and background smoke | PASS at the recorded baseline SHA |
+| T | Prior live PASS retained; no guarded-head rerun required by the waiver |
+| B2 | Prior repaired-browser live PASS retained; no guarded-head rerun required |
+| D / D2 | NOT PASSED; correction accepted on the guard's offline tests and real-artifact replay |
+| N / U | UNOBSERVED; live gates explicitly waived |
+| Fresh-session guard metadata lookup/disclosure | Unobserved live; bounded residual accepted by the owner |
+| Full cross-product / consumer-global compatibility | Not claimed |
+
+**Closure and abandonment.** The owner confirmed both D2 Pi/browser sessions closed with the
+draft unsaved. The final parent transcript contains no approval/save/post call or approval state;
+its only plan artifact is the original 1790-byte draft, digest
+`618fb3125dc66d716282365c02ab6f816384e1324fb19717b17de4fc9f580bb4`. The canonical driver
+`.perk/workflow/plan-ref.json` was absent. No browser-close callback was persisted, so closure
+is human confirmation plus independent process absence, not a claimed DENY event. The exact
+D2 working `plan-draft.md` was hash-checked against the preserved copy and removed; final session
+and handoff copies were retained outside the driver before deletion.
+
+**Verified teardown:**
+
+- Scratch PR **#2228** is **CLOSED, unmerged**, with zero reviews and zero inline review comments.
+  Its remote `dogfood/native-wake-2226-01M1SNZF` ref is absent by a separate `git ls-remote` check.
+- The clean target checkout was removed through the driver's normal `git worktree remove`, then
+  its local scratch branch was deleted. The driver had only its own worktree left and a clean
+  tracked tree before its isolated clone was removed. Driver, target, review checkout and their
+  local branches are absent; unrelated main-repo worktrees remain.
+- Before removing the driver, all three temporary skill manifests were restored byte-for-byte
+  from their backups. Pi settings already matched the original bridge-on backup, SHA-256
+  `5642298586786f30a7c8c7a4e351ea75efab620bd42a55699d6ce67b8c09bf00`; U never changed them.
+  Generated links disappeared with the disposable clone; no global settings or caches were edited.
+- All 25 recorded parent/child PIDs across T/B/B2/D/D2 are absent. The hunk daemon reports
+  **“No active Hunk sessions are registered with the daemon.”** Browser servers were in their
+  absent parent processes. No owned review surface remains active.
+- Implementation status was clean after physical teardown. Shared engine/session stores were
+  not broad-deleted; preserved run-scoped diagnostic evidence remains available.
+
+**Final source census:** 65 broad-pattern hits were classified as historical changelog/archive/
+dated-assessment records, explicitly historical or upstream-only documentation, negative tests,
+doctor's upstream source/receipt probes, or the deliberately unchanged parent delegation census.
+No retired relay prescription or positive child-tool entry remains in committed live carriers.
+Both committed reviewer mirrors compare byte-identical. The inherited implementation-worktree
+skill links still point to the parent cache, as recorded in the earlier approved isolation
+workaround; they were not silently edited or reconverged. Live evidence used the verified
+branch-bound driver copies; canonical skill changes are committed in `skills/`.
+
+Receipts: `live/final-live-waiver.md`, `live-waiver-plan-receipt.json`,
+`D2/closure-inspection.json`, `D2/abandonment.json`, `final-teardown.json`,
+`scratch-pr-after-close.json`, `scratch-remote-ref-after-delete.txt`, `final-hunk-closure.txt`,
+and `implementation-worktrees-after-teardown.txt`. The classified census is
+`agent/final-retired-census-after-teardown.txt` under this record's run-scoped scratch root.
+
+**Final CI gate: PASS.** One final run-all `run_ci` passed `lint-py`, `lint-js`, `typecheck-py`,
+`typecheck-js`, `test-py`, `test-js`, and `docs-check`. `changelog-check` was intentionally skipped
+because this diff does not change `CHANGELOG.md`. No follow-up checks were run after the green
+report; only this evidence result was recorded before commit and draft-PR submission.
