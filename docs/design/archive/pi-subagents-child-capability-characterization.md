@@ -3,14 +3,19 @@
 ## Status and scope
 
 **All eight intended cases observed; W cancellation verified in both modes.
-Eleven matrix launches used, including historical failures. No final measured-decision approval.**
+Eleven matrix launches used, including historical failures. Final policy approval is a separate
+human review of the published PR head, never inferred from experiment approvals or submission.**
 This experiment implements plan #2230, Objective #2209 node 3.1. It is not a production
 repair or a retrospective pass of the Phase-2 streaming cases. Only text survives teardown.
 
-## Checkpoint status (2026-09-06)
+## Record progression (2026-09-06)
 
-This is a **partial evidence checkpoint**, not plan completion, the proposed-decision commit C,
-or approval to resume experimentation. The owner requested a local commit without pushing.
+Checkpoint `bfb6a09c` preserved the partial experiment at the owner's request without pushing;
+`b5dd31ef` preserved the completed matrix and teardown. Neither checkpoint is the proposed-
+decision commit C or final approval. The selected decisions and implementation duties are in
+the [policy record](../pi-subagents-child-execution-policy.md). The owner's subsequent PR-review
+handoff below supersedes the original pre-submit local approval sequence; the policy pointer
+remains pending until the owner accepts the reviewed content.
 
 - B0 passed once on the recorded baseline; it was never re-run.
 - The first live R pair was incomplete (P3). Its two launches remain counted and its evidence
@@ -25,14 +30,31 @@ or approval to resume experimentation. The owner requested a local commit withou
 - **Eleven matrix children have launched**, including the incomplete R pair and failed W-F,
   exactly exhausting the amended cap. B0 remains the one original smoke. No more live attempts
   are authorized.
-- No canonical agent definition, production source, dependency or configuration change is
-  part of this checkpoint. The policy document, closed consumer/identity decisions, final
-  Git-bound measured-decision approval, remaining documentation links and full CI gate remain
-  outstanding. No PR has been opened and no branch push is authorized by this checkpoint.
+- No canonical agent definition, production source, dependency or configuration change lands
+  in this node. The policy includes the closed census, exact advisory identity rules and the
+  separately authorized source-derived warm-restriction repair. None is already implemented.
+  Final review/attestation and the final CI gate remain separate from matrix completion.
 
 The measured R/S/W/E results and P4 failure are recorded below; earlier stops/approvals
-are preserved chronologically rather than rewritten as passes. The final section records
-checkpoint cleanup and the exact latest diagnostic sources for reconstruction.
+are preserved chronologically rather than rewritten as passes. Historical source snapshots
+are labeled separately from the final executed W control and teardown sources.
+
+## Owner-directed draft submission for PR review
+
+At 2026-09-06T14:57:39.817Z, the owner directed in implementing session
+`01a074f6-9c53-76b2-9bea-81a18e23b489` (entry `db27827d`):
+
+> `submit` and I will review the PR
+
+This supersedes the pre-submit local commit-C/question/attestation requirement for publication
+of this draft PR. Submit the completed proposed policy and evidence for human review against
+the published PR head. This is permission to publish the draft, **not approval of the measured
+decisions**; keep the policy approval pointer pending and do not fabricate an approval attestation.
+The final run-all CI gate and the documentation-only scope remain required. Implementation
+consumers still wait for explicit acceptance of the reviewed policy. No further live probes,
+production prototype or policy approval is implied.
+
+Canonical plan read-back matched; header/title were preserved.
 
 ## Protocol frozen before model-backed execution
 
@@ -410,7 +432,7 @@ configuration files and the freeze script itself. It records both lexical and re
 The exact disposable freeze/inspection sources are preserved in the appendix. Their output
 manifests are non-authoritative scratch records, not a new production guard.
 
-## Teardown and current handoff
+## B0 teardown and historical handoff
 
 At **2026-09-06T04:38:16.478Z**, owned-resource teardown completed. Both owned PIDs
 (7249, 7364) were already absent: `ps -p 7249,7364 -o pid=,ppid=,stat=,command=`
@@ -1242,6 +1264,67 @@ inventory found 67 new engine runtime files and 25 session/artifact files, ready
 capture/teardown. Matrix completion does not replace the remaining census, exact policy,
 Git-bound human review, independent final teardown or final CI gate.
 
+## Policy-pass consumer-census evidence
+
+At **2026-09-06T14:51:52.401Z**, the canonical `PERK_AGENTS` tuple, all delivered definitions/managed
+mirrors and the repo-local auditor were re-read. The policy table matched exactly: **10
+delivered roles + 1 auditor = 11; 10 reports + 1 writer**. All ten managed copies were byte-
+identical to their canonical source. Existing in-scope definitions all use replacement prompts;
+report project/skill inheritance is false and writer inheritance is true. Existing execution
+defaults are omitted; the record's explicit encoding is selected work for 3.2, not already code.
+
+| Canonical role | Definition | SHA-256 |
+| --- | --- | --- |
+| `perk.adversarial-reviewer` | `agents/adversarial-reviewer.md` | `6f94fdb04a441194df07779404fb05e8c39e3820d01073812b921d3f537e2a62` |
+| `perk.conflict-resolver` | `agents/conflict-resolver.md` | `2015a6d0f0b817bb84dc1eb82bd55f705f1e1af1f797f971e97252202f6b09e0` |
+| `perk.draft-reviewer` | `agents/draft-reviewer.md` | `70f25da0666c67b1eddafac7a90ad33111a58b14f7f60385040a6972d0dc03fd` |
+| `perk.dream-analyst` | `agents/dream-analyst.md` | `7607465b5a2dc7ca8d28a63ee24fd70f2b019cacc6f88a7948a371613225afc7` |
+| `perk.dream-reducer` | `agents/dream-reducer.md` | `4a2f0094c9734c31a1f176914c9dd9d2be4d4085d0fda977f8420d97c91563ce` |
+| `perk.harvest-analyst` | `agents/harvest-analyst.md` | `0e6fff06f30094306c19e735009e512b3cbbbaada0792e763e258ceb018d80be` |
+| `perk.learn-analyst` | `agents/learn-analyst.md` | `06fea4fd910f0423a188bca4143aa4d5f2a66b6c316c802c943c00117b8beb48` |
+| `perk.objective-explorer` | `agents/objective-explorer.md` | `cba526c9cef8a0a7b071e2476c12ab7182765dcf94a2faba646d0de6c560ab3c` |
+| `perk.pr-reviewer` | `agents/pr-reviewer.md` | `e08fcad9f836070ac196f71e723f016306358f3d25776ca7455698bbce8c6f31` |
+| `perk.review-classifier` | `agents/review-classifier.md` | `dc98a14495ce6dfa68e0cf4677567243cc12adffb667251237f069b4cbc1762c` |
+| `perk-dev.session-auditor` | `.pi/agents/perk-dev/session-auditor.md` | `67241ea8e135ea441fc17762954a6c485a74e7ba3ab72fd88e0c3c7d8aa41440` |
+
+The source-owned launch sites and their tests are enumerated in the policy record. Ponytail/
+custom lanes remain invocation variants; `perk-dev.analyst` and external/user agents are not
+added to the census. The current report-only scratch list has nine names; adding the code-owned
+auditor makes the selected ten-report suppression set. No definition or production file changed.
+
+## Policy-pass source limitation: warm read-only inheritance
+
+The closed consumer audit after the matrix found a separate current-source gate path that the
+claimed-parent protocol did not exercise. `extension/pi/v1/objectivePlanning.ts` supports a
+warm `/objective-plan` by calling `gating.enter(ctx)`. In
+`extension/substrate/toolGating.ts`, that operation appends branch mode and restricts parent
+tools only. In `extension/session/lifecycle.ts::decideClaim`, a fresh env-child inherits the
+**handoff's** mode; without inherited env identity it instead mints with no mode. The report-wave
+renderer/transport carries no snapshot of the current parent's read-only restriction.
+
+Consequently, warming a read-write parent into read-only does not by itself change the mode a
+fresh background child adopts from the old handoff. A warm parent without a handoff has the
+same missing-propagation problem. This is source-derived evidence, **not a newly executed
+case**, and does not alter the R/E cold-claim observations or any matrix result above.
+
+Plan step 4's escalation condition was applied rather than silently assigning an extra repair.
+At **2026-09-06T14:36:56.574Z**, the owner answered **Approve bounded gate repair (Recommended)**
+to this exact question in implementing session `01a074f6-9c53-76b2-9bea-81a18e23b489`, response
+entry `44ba3dfb`:
+
+> Approve expanding the decision record and nodes 3.2/3.3 to cover restriction-only propagation of the current warm parent's read-only mode, with no additional live probes in this node?
+
+The approved scope is a separate current-parent read-only restriction producer in 3.2 and
+monotone child-gate enforcement/regressions in 3.3, without granting write authority, coupling
+gating to advisory identity, rewriting parent handoffs or changing the ReportWave caller
+interface. The parent appended that clarification to canonical plan #2230 at
+**2026-09-06T14:40:18.088956+00:00**, verified read-back and preserved the plan header/title.
+
+The [policy record](../pi-subagents-child-execution-policy.md) specifies the exact
+`perk.parent-restrictions/1` boolean schema and consumer behavior for final Git-bound review.
+This approval expands the decision/implementation scope only. No production repair, identity
+or restriction decoder, additional live probe, or retrospective warm-path PASS was made.
+
 ## Closed matrix classifications
 
 Classifications attach to named capabilities, not blanket production-role certification.
@@ -1307,9 +1390,9 @@ A separate post-cleanup check at **2026-09-06T13:45:01.578Z** returned:
 
 Shared stores and dependency symlink targets were not broadly removed. The owner-provided
 upstream repository stayed clean and unchanged. Earlier B0/P2/P3/checkpoint teardowns remain
-recorded in their historical sections. **The experiment is complete; the plan is not yet
-approved or ready to submit.** The closed consumer policy, exact identity contract, remaining
-documentation and Git-bound final approval still must be completed.
+recorded in their historical sections. **Experiment completion is not submission approval.**
+Readiness also requires the complete policy, Git-bound human attestation and final CI gate;
+none is inferred from this teardown result.
 
 ## B0 resolved aliases and representative definition
 
@@ -1342,9 +1425,10 @@ B0 used the unchanged canonical `.pi/agents/perk/objective-explorer.md`, SHA-256
 
 ## Appendix: exact disposable provenance and teardown sources
 
-These scripts performed only provenance reads, evidence capture, and owned-resource cleanup.
-They are not a replacement child runner. The only model-backed command was B0 above.
-The unfinished driver and observer were never executed and supplied no evidence.
+This is the historical B0/P1 source snapshot: these scripts performed provenance reads,
+evidence capture and owned-resource cleanup, not replacement child execution. At that point
+B0 was the only model-backed command and the initial unfinished driver/observer had not run.
+Later executed revisions and their observations are recorded in the subsequent snapshots.
 
 ### freeze-baseline.cjs
 
@@ -2472,7 +2556,7 @@ console.log(JSON.stringify(report, null, 2));
 
 The disposable replay executable was removed after archival. No new clone, diagnostic child,
 engine runtime artifact or model call was created by this replay. The later bounded P4
-approval is recorded above; no final measured policy has been approved.
+approval is recorded above; it is experiment authorization, not final policy approval.
 
 ## Final W control and teardown sources
 

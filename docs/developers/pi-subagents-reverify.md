@@ -13,7 +13,9 @@ rests on a *tested baseline* plus this re-verify ritual, never on a version cons
   bump with a still-matching surface — mechanics beyond the markers are source-read-derived and
   unverified at the new version);
 - you are about to **build on new engine mechanics** (anything the probes don't cover: wait/wake
-  semantics, the supervisor channel, workflow child launch policy).
+  semantics, the supervisor channel, workflow child launch policy);
+- relevant source bytes, provider/extension composition, or identity-carrier timing differ from
+  the child-policy record below—even when the package still reports the same version.
 
 **Prerequisites:** a checkout of the perk repository with both toolchains installed
 (`just setup`). The live smoke additionally needs model credentials (the parent session's
@@ -65,6 +67,29 @@ bare interactive probe after removing inherited `PERK_RUN_ID` and `PI_SESSION_FI
 open between model turns. The implementing session predates its dependencies/bindings and is
 not a valid live host. See the scoped [native streaming record](../design/archive/pi-subagents-native-streaming-dogfood.md)
 for the background baseline and the five human-operated streaming legs; unobserved legs are not passes.
+
+## Child execution and scratch-identity decision
+
+The [binding child-policy record](../design/pi-subagents-child-execution-policy.md) defines
+selected behavior for the implementation consumers, **not a claim that the repair is already
+implemented**. Check its Git-bound approval pointer before using it as accepted policy. It
+closes the eleven-role census, execution-mode encoding, extension/context/cwd boundaries,
+advisory identity and the independent warm-parent read-only restriction channel. Both the
+producer and consumer repairs are required before claiming the full report profile; the warm
+path is a source-derived repair design, not a native-matrix pass. Later changes must reconcile
+that record rather than choose a new profile implicitly.
+
+The linked [capability characterization](../design/archive/pi-subagents-child-capability-characterization.md)
+records the pi-subagents 0.65.1 / five-package Pi 0.85.1 matrix, actual tool denials and writer
+cancellation, preserved failed attempts, and independent teardown. Its finite launch budget
+is exhausted. Source/prose inspection is not authorization to repeat those runs: another live
+configuration or attempt needs a bounded owner-approved protocol first. A newer upstream HEAD
+can still declare 0.65.1, so compare the actual relevant sources, not the version string alone.
+
+This matrix does not certify every role/model, arbitrary cross-cwd handoff discovery, ambient
+providers in foreground writers, or timely background supervisor delivery. E's explicit-loading
+cases were read-only diagnostics, not admissible read-write profiles. The earlier streaming
+waivers and stale-error exception remain separately scoped; no case is retroactively passed.
 
 ## Temporary stale-error guard
 
