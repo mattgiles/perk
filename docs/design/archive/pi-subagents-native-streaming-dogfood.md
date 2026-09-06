@@ -1,9 +1,10 @@
 # Native-wake review streaming: development baseline and live protocol
 
-**Date:** 2026-09-05. **Status: BLOCKED — not submission evidence yet.** The repo-local
-background-launch prerequisite and live legs T/B passed. Leg D ran and is **not passed**:
-its custom lane failed final-report completion, and final browser reconciliation retained
-failed-lane provisional annotations. N/U remain **unobserved / not passed**. This record does not certify the remaining streaming routes,
+**Dates:** 2026-09-05–06 (UTC; screenshot names use local time).
+**Status: IN PROGRESS — not submission evidence yet.** The repo-local background prerequisite,
+original T/B legs, and repaired-code B2 passed. Original D remains **not passed**: its custom
+lane failed final-report completion and reconciliation retained failed-lane provisional
+annotations. The approved repair is committed; D2/N/U remain **unobserved / not passed**. This record does not certify the remaining streaming routes,
 global hosts, or consumer compatibility.
 
 ## Part A — repeatable protocol and preconditions
@@ -579,9 +580,9 @@ scopes reconciliation to a browser surface). N/U retain their original first-att
 No automatic retry or completion-policy/capability workaround was introduced: another missing
 required report stops validation for owner disposition.
 
-| Pending attempt | Code SHA | Status |
+| Amended attempt | Code SHA | Status |
 | --- | --- | --- |
-| B2 | `2ed55c1b6574ff69bdf64d9e6027162fcf0c75e3` | Not launched |
+| B2 | `2ed55c1b6574ff69bdf64d9e6027162fcf0c75e3` | PASS; closure pending |
 | D2 | `2ed55c1b6574ff69bdf64d9e6027162fcf0c75e3` | Not launched |
 | N | — | Not launched |
 | U | — | Not launched |
@@ -603,7 +604,72 @@ reviewer definitions, wave modules, terminal tool/door/prompt and package pins a
 from T's exercised SHA. The implementation checkout and all global configuration were untouched
 by the isolated driver advance.
 
-`live/start-B2.sh` is prepared, **not launched**. It uses a fresh `live/B2/parent` log directory,
-checks the repaired SHA and unchanged scratch PR head, and asks the human to invoke
-`/pr-review-browser 2228` once. The original B launcher/evidence is preserved. Full teardown
-and submission remain blocked on the amended live results plus N/U.
+The human subsequently ran `live/start-B2.sh` and invoked `/pr-review-browser 2228` once,
+using fresh logs under `live/B2/parent` after the wrapper checked the repaired SHA and unchanged
+scratch PR head. The original B launcher/evidence is preserved. Full teardown and submission
+remain blocked on the remaining amended live results plus N/U.
+
+### Leg B2 — PASS: repaired reconciliation and visible owner/contributors
+
+Exercised code: `2ed55c1b6574ff69bdf64d9e6027162fcf0c75e3`, driver branch
+`dogfood-2226-driver`, same host/package/bridge configuration as `driver-repair-preflight.json`.
+Parent session `01a07443-9f4b-70e9-866c-fc31275d5e94`, model
+`anthropic/claude-opus-4-8`, PID 91241. One workflow
+`ccf915e2-bc98-4b62-a982-53777050f6a2`, with three separate fresh-context background children,
+all `openai/gpt-6-astra` and observed runner exits 0:
+
+| Lane | Child run | PID | Final streamed / findings |
+| --- | --- | --- | --- |
+| claimed-intent | `b437ef9e-fab6-4417-838e-87aadb307c88` | 92212 | true / 1 |
+| quality | `3c0a12e3-95d9-45e1-9f96-43936dcc438e` | 92215 | true / 1 |
+| ponytail | `4122247d-0b21-49b6-9f47-055f63bb4716` | 92216 | false / 0 |
+
+The human reported an opened browser, no input/nudges after launch, one final annotation,
+visible attribution, and no duplicates/missing annotations/errors. The inspected screenshot
+`Screenshot 2026-09-05 at 9.12.43 PM.png` shows one **PERK:CLAIMED-INTENT** annotation at line 7
+with the new merged-body prefix (“flagged independently by two lanes”) and an unsubmitted
+Post Comments badge of 1. Copy: `live/B2/browser-final.png`, SHA-256
+`997b1839bc22918100e025e4b57d6b418751576495d6f0b716dd236093840ae4`.
+Its collapsed preview does not display the entire body; the parent push payload below records
+the contributor labels. The human was unsure about visual timing; JSONL establishes order.
+
+Decisive order (UTC, **2026-09-06**):
+
+| Time | Event |
+| --- | --- |
+| 01:10:23.091 | Single start accepted all three requested/runnable lanes, no preflight failures. |
+| 01:10:26.927 | Parent ends launch turn. |
+| 01:10:53.939 | Native quality progress wakes idle parent; its child queue-ack result is persisted at 01:10:53.950 with `delivered: true`, request `45d8e21b-125b-41aa-b71a-96f36fa649ca`. |
+| 01:10:54.474 | Claimed-intent nonempty batch receives queue-ack `delivered: true`, request `255dd085-dd9f-4f4b-95db-1329c9197cd9`. |
+| 01:10:58.114 | Provisional quality push creates 1 annotation, id `38f30192-0f7a-452b-be0d-47649172d50f`; held=0. |
+| 01:10:58.116 | Claimed-intent progress is delivered during the active relay turn. |
+| 01:11:02.038 | Its provisional push skips the shared line-7 anchor; no duplicate created. |
+| 01:11:02.865 | Workflow terminal status records completion, after both nonempty submissions and the provisional browser push. |
+| 01:11:05.947 | Parent ends relay turn. |
+| 01:11:05.949 | Matching native workflow-completion notice wakes it. |
+| 01:11:07.852 | One collect succeeds: complete=true, 3/3 covered, failures=[], one attempt. |
+| 01:11:23.690 | Final merged claimed-intent replacement is initially skipped against quality's existing anchor; its final candidate is retained by the tool. |
+| 01:11:23.709 | Empty final quality replacement clears its 1 provisional annotation and promotes the retained claimed-intent final: pushed=1, id `9d224dcf-7294-4d85-91b7-f5d17c426fde`. |
+| 01:11:23.726 | Empty final Ponytail replacement: pushed=0, deleted=0, held/held_batches=0. |
+| 01:11:36.527 | Parent reports finalized reconciliation and ends turn. |
+
+All lanes were covered, so uncovered-source clearing was vacuous on this live leg (the failure
+branch remains offline-pinned). The parent explicitly assigned the shared anchor to the first
+covered contributor, claimed-intent, and sent **disjoint** final arrays: one merged finding,
+then empty quality/Ponytail arrays. Its merged body retained `[claimed-intent · major/high]`
+and `[quality · major/high]` segments. The real promotion result reads:
+
+```text
+Annotations — perk:quality: cleared 1; perk:claimed-intent: pushed 1.
+```
+
+The screenshot's changed owner and merged-body prefix corroborate that replacement, not merely
+a child-reported streaming flag. No held work remained. Ponytail received the normal neutral
+no-provisional-batches/no-findings disclosure; its `fyi` stayed in-session. There was no polling,
+manual status-file reconciliation, retry, duplicate collect, annotation HTTP composition or
+late provisional replay. Read-only GitHub verification showed open draft PR #2228 with zero
+reviews; no posting occurred. Browser/Pi remain open pending human-confirmed closure.
+
+Raw captures are under `live/B2/captured-runtime/`; `parent-timeline.json`, `evidence.json`,
+`github-posting-check.json` and the screenshot retain the supporting artifacts. This is the
+single owner-authorized B rerun, not an automatic retry; the original B evidence is unchanged.
