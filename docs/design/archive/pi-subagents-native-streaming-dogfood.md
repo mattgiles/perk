@@ -582,7 +582,7 @@ required report stops validation for owner disposition.
 
 | Amended attempt | Code SHA | Status |
 | --- | --- | --- |
-| B2 | `2ed55c1b6574ff69bdf64d9e6027162fcf0c75e3` | PASS; closure pending |
+| B2 | `2ed55c1b6574ff69bdf64d9e6027162fcf0c75e3` | PASS; per-leg cleanup verified |
 | D2 | `2ed55c1b6574ff69bdf64d9e6027162fcf0c75e3` | Not launched |
 | N | — | Not launched |
 | U | — | Not launched |
@@ -668,8 +668,26 @@ a child-reported streaming flag. No held work remained. Ponytail received the no
 no-provisional-batches/no-findings disclosure; its `fyi` stayed in-session. There was no polling,
 manual status-file reconciliation, retry, duplicate collect, annotation HTTP composition or
 late provisional replay. Read-only GitHub verification showed open draft PR #2228 with zero
-reviews; no posting occurred. Browser/Pi remain open pending human-confirmed closure.
+reviews; no posting occurred. The human then confirmed **“B2 closed”**. At
+2026-09-06T01:18:13.182Z the parent transcript records the browser closing without submitting;
+no subsequent tool call is recorded. Parent PID 91241 is absent, including its in-process
+browser server. Normal review cleanup returned `success: true, removed: true`, and the checkout
+is absent on disk and from the driver's worktree list. PR #2228 remains draft/open with zero
+reviews, retained for U.
 
 Raw captures are under `live/B2/captured-runtime/`; `parent-timeline.json`, `evidence.json`,
 `github-posting-check.json` and the screenshot retain the supporting artifacts. This is the
 single owner-authorized B rerun, not an automatic retry; the original B evidence is unchanged.
+Closure receipts are `live/B2/captured-runtime/parent-session-after-close.jsonl`,
+`checkout-cleanup.json`, `worktrees-after-cleanup.txt`, and `github-after-cleanup.json`.
+
+### D2 preparation — not yet launched
+
+The one-shot `live/start-D2.sh` is prepared for a fresh normal `perk plan --no-sync` handoff
+at repair SHA `2ed55c1b`, using the same repaired Pi, agent home, reviewer definitions/model
+policy and bridge-on configuration. It reuses the **exact original** D fixture and preparation
+message (fixture hash checked by the launcher); no content is changed to force a passing report.
+The launch preview passed without starting Pi or a review. The human is asked only to let
+`plan_draft` register the supplied bytes and report **“D2 draft ready”**; handoff/artifact
+verification precedes the same custom-lens review invocation. The original failed D run is
+preserved, and another required-output failure would stop the flow rather than trigger a retry.
