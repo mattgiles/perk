@@ -52,6 +52,24 @@ export interface WaveChildReceipt {
   artifactPaths?: Record<string, string>;
 }
 
+/** Output-free proof of an in-memory correction for the known upstream stale-error bug. */
+export interface WaveStaleErrorRecovery {
+  key: string;
+  runId: string;
+  originalError: string;
+  reason: "pi-subagents-0.65.1-stale-assistant-error";
+  reportHash: string;
+  eventsHash: string;
+  sourceHash: string;
+}
+
+export interface WaveAggregate {
+  state: string;
+  error?: string;
+  value: unknown;
+  recoveries?: WaveStaleErrorRecovery[];
+}
+
 /** One script launch's receipt: the run handle (where known) + the observed children. */
 export interface WaveScriptReceipt {
   /** The top-level async run id (the spawn handle's asyncId). */
@@ -59,6 +77,8 @@ export interface WaveScriptReceipt {
   asyncDir?: string;
   state: WaveReceiptState;
   children: WaveChildReceipt[];
+  /** Original child failure receipts stay intact; this names separately verified corrections. */
+  recoveries?: WaveStaleErrorRecovery[];
 }
 
 // ------------------------------------------------------------------------- the adapter seam
@@ -137,7 +157,7 @@ export interface WaveAdapter {
   /** Best-effort stop of a live run (timeout/cancel path); never throws. */
   stop(handle: WaveRunHandle): Promise<void>;
   /** Read the run's durable aggregate; throws ⇒ aggregate-unreadable. */
-  readAggregate(handle: WaveRunHandle): Promise<{ state: string; error?: string; value: unknown }>;
+  readAggregate(handle: WaveRunHandle): Promise<WaveAggregate>;
 }
 
 // -------------------------------------------------------------- the wave-level failure tier
@@ -387,7 +407,7 @@ export async function startWaveScript(
       const matched = buffered.find(matchesHandle);
 
       // 5. Read the durable aggregate; surface the terminal-state arms.
-      let aggregate: { state: string; error?: string; value: unknown };
+      let aggregate: WaveAggregate;
       try {
         aggregate = await adapter.readAggregate(spawned);
       } catch (error) {
@@ -408,7 +428,14 @@ export async function startWaveScript(
           receiptOf("failed", spawned, matched),
         );
       }
-      return { ok: true, value: aggregate.value, receipt: receiptOf("complete", spawned, matched) };
+      return {
+        ok: true,
+        value: aggregate.value,
+        receipt: {
+          ...receiptOf("complete", spawned, matched),
+          ...(aggregate.recoveries?.length ? { recoveries: aggregate.recoveries } : {}),
+        },
+      };
     } finally {
       unsubscribe();
     }

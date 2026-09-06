@@ -254,6 +254,16 @@ export async function executeCollectDraftReviewWave(
     (lane.findings.length === 0 ? noFindings : completionOnly).push(key);
   }
   const disclosures: string[] = [];
+  for (const recovery of result.receipt.recoveries ?? []) {
+    disclosures.push(
+      report(
+        target,
+        "collect_draft_review_wave",
+        "warning",
+        `Compatibility recovery (pi-subagents 0.65.1): ${recovery.key} — native retry succeeded and the final report validated; original engine failure retained in the attempt receipt. No new attempt.`,
+      ),
+    );
+  }
   if (noFindings.length > 0) {
     disclosures.push(
       report(

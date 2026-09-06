@@ -25,8 +25,10 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createStaleErrorGuard, type StaleErrorGuardOptions } from "./staleErrorCompat.ts";
 import type {
   WaveAdapter,
+  WaveAggregate,
   WaveBus,
   WaveChildReceipt,
   WaveCompletion,
@@ -181,8 +183,10 @@ function narrowPing(data: unknown): WavePing | null {
  * successful `ping()` must precede `onComplete()` — the completion channel name is taken from
  * ping's advertised `events.asyncComplete`, never pinned.
  */
-export function createRpcWaveAdapter(bus: WaveBus): WaveAdapter {
+export function createRpcWaveAdapter(bus: WaveBus, recovery?: StaleErrorGuardOptions): WaveAdapter {
   let advertised: WavePing | null = null;
+  // Snapshot source/schema proof at launch. Ordinary adapters and non-streaming flows have no shim.
+  const staleErrorGuard = recovery === undefined ? undefined : createStaleErrorGuard(recovery);
 
   return {
     async ping(): Promise<WavePing | null> {
@@ -245,19 +249,19 @@ export function createRpcWaveAdapter(bus: WaveBus): WaveAdapter {
       }
     },
 
-    async readAggregate(
-      handle: WaveRunHandle,
-    ): Promise<{ state: string; error?: string; value: unknown }> {
+    async readAggregate(handle: WaveRunHandle): Promise<WaveAggregate> {
       const raw = readFileSync(join(handle.asyncDir, "status.json"), "utf8");
       const parsed: unknown = JSON.parse(raw);
       if (!isRecord(parsed) || typeof parsed.state !== "string") {
         throw new Error("status.json carries no state field");
       }
       const workflow = isRecord(parsed.workflow) ? parsed.workflow : {};
+      const corrected = staleErrorGuard?.(handle, raw);
       return {
         state: parsed.state,
         ...(typeof parsed.error === "string" ? { error: parsed.error } : {}),
-        value: workflow.value,
+        value: corrected?.value ?? workflow.value,
+        ...(corrected?.recoveries.length ? { recoveries: corrected.recoveries } : {}),
       };
     },
   };

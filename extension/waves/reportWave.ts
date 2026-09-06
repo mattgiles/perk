@@ -506,7 +506,7 @@ type InternalStart =
  * an already-settled, normalized `ReportWaveResult`.
  */
 async function startWave(
-  adapter: WaveAdapter,
+  supplyAdapter: (request: ReportWaveRequest) => WaveAdapter,
   request: ReportWaveRequest,
   signal?: AbortSignal,
 ): Promise<InternalStart> {
@@ -566,7 +566,7 @@ async function startWave(
   const workflowScript = renderWaveScript(runnable);
 
   const start = await startWaveScript(
-    adapter,
+    supplyAdapter(runnableRequest),
     {
       flow: request.flow,
       workflowScript,
@@ -606,12 +606,12 @@ const STILL_RUNNING = Symbol("wave-still-running");
  * `"none"` structurally — and the WeakMap plus the settled drain's delete both release retained
  * results promptly.
  */
-function waveOver(supplyAdapter: () => WaveAdapter): ReportWave {
+function waveOver(supplyAdapter: (request: ReportWaveRequest) => WaveAdapter): ReportWave {
   const records = new WeakMap<ReportWaveRef, PendingRecord>();
 
   return {
     async start(request, control) {
-      const start = await startWave(supplyAdapter(), request, control?.signal);
+      const start = await startWave(supplyAdapter, request, control?.signal);
       if (!start.ok) {
         return { ok: false, result: start.result, launch: start.launch };
       }
@@ -657,7 +657,7 @@ function waveOver(supplyAdapter: () => WaveAdapter): ReportWave {
     },
 
     async run(request, control) {
-      const start = await startWave(supplyAdapter(), request, control?.signal);
+      const start = await startWave(supplyAdapter, request, control?.signal);
       return start.ok ? await start.result : start.result;
     },
   };
@@ -669,8 +669,22 @@ function waveOver(supplyAdapter: () => WaveAdapter): ReportWave {
  * One per-activation instance is constructed at the composition root (`extension/index.ts`) and
  * threaded to the installers.
  */
-export function createReportWave(bus: WaveBus): ReportWave {
-  return waveOver(() => createRpcWaveAdapter(bus));
+export function createReportWave(bus: WaveBus, engineEntry?: () => string | undefined): ReportWave {
+  return waveOver((request) =>
+    createRpcWaveAdapter(
+      bus,
+      engineEntry !== undefined && ["adversarial-review", "draft-review"].includes(request.flow)
+        ? {
+            engineEntry,
+            assignments: request.assignments.map((assignment) => ({
+              key: assignment.key,
+              agent: assignment.agent,
+              schema: assignment.outputSchema ?? request.outputSchema,
+            })),
+          }
+        : undefined,
+    ),
+  );
 }
 
 /** The adapter-injection seam (tests; the production factory rides the same internal core). */
