@@ -98,12 +98,15 @@ test("runner floor survives tree/compaction and original-packet reload over a re
   });
   try {
     assert.equal(h.workflowState().mode, "read-only");
+    delete process.env.PI_SUBAGENT_CHILD;
+    process.env.PI_SUBAGENT_EXTENSION_BINDINGS =
+      '{"perk.parent-restrictions/1":{"readOnly":false}}';
     await h.navigateTo("c0");
     assert.equal(h.workflowState().mode, "read-write");
     await h.emitLifecycle({ type: "session_compact" });
     assert.equal((await h.emitToolCall("foreign_mutator", {}))?.block, true);
     await noScratch(h, cwd);
-    await h.reload();
+    await h.reload(runnerPacket);
     assert.equal(h.workflowState().mode, "read-only", "original packet reflects again on reload");
     assert.equal((await h.emitToolCall("write", {}))?.block, true);
     await noScratch(h, cwd);

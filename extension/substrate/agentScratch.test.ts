@@ -368,9 +368,16 @@ test("read-only/report-only contexts strip guidance; a gate exit and unknown chi
   try {
     assert.equal(scratchMessages(await h.emitBeforeAgentStart()).length, 0);
     assert.equal(existsSync(agentScratchDir(cwd, "RID")), false);
+    const quoted = { role: "compactionSummary", content: `Quoted scratch: ${block.content}` };
     assert.deepEqual(
-      await h.emitContext([{ customType: AGENT_SCRATCH_CONTEXT_TYPE, content: block.content }]),
-      [],
+      await h.emitContext([
+        { customType: AGENT_SCRATCH_CONTEXT_TYPE, content: block.content },
+        { customType: AGENT_SCRATCH_CONTEXT_TYPE, content: block.content },
+        { customType: AGENT_SCRATCH_CONTEXT_TYPE, content: "stale" },
+        quoted,
+      ]),
+      [quoted],
+      "ineligible cleanup is direct-only, including current, duplicate and stale blocks",
     );
 
     const entry = h.session.sessionManager.appendCustomEntry("perk:workflow-state", {

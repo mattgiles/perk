@@ -126,6 +126,10 @@ test("full UUID/path/null keys distinguish sessions; unreadable paths and empty 
   assert.equal(identity.lookup(h.ctx).identity.status, "available");
   h.key("", null);
   assert.deepEqual(readNativeSessionKey(h.ctx), { status: "unreadable" });
+  assert.deepEqual(identity.lookup(h.ctx), {
+    runner: true,
+    identity: { status: "unavailable", reason: "unreadable", provenance },
+  });
   assert.deepEqual(
     readNativeSessionKey({
       sessionManager: {
@@ -144,14 +148,21 @@ test("full UUID/path/null keys distinguish sessions; unreadable paths and empty 
   });
 });
 
-test("capture replaces advice; lookups never read later prompt or environment; activations and shutdown isolate", () => {
+test("capture replaces advice; lookups never read later prompt or environment; activations and shutdown isolate", (t) => {
+  const savedRunner = process.env.PI_SUBAGENT_CHILD;
+  t.after(() => {
+    if (savedRunner === undefined) delete process.env.PI_SUBAGENT_CHILD;
+    else process.env.PI_SUBAGENT_CHILD = savedRunner;
+  });
   const h = context();
   const first = createChildIdentity();
   const second = createChildIdentity();
   first.capture(h.ctx, true);
   h.prompt(tag("custom"));
   second.capture(h.ctx, false);
+  process.env.PI_SUBAGENT_CHILD = "0";
   h.breakPrompt(true);
+  assert.equal(first.lookup(h.ctx).runner, true, "later env cannot replace the captured fallback");
   assert.equal(first.lookup(h.ctx).identity.status, "available");
   assert.deepEqual(second.lookup(h.ctx), {
     runner: false,

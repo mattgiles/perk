@@ -1,9 +1,10 @@
 # Native child execution policy and scratch identity
 
-**Accepted policy; profiles and restriction producer implemented.** Approval status is recorded
-only in the pointer below. The profile encoding/restriction producer is implemented by node 3.2;
-node 3.3 still owns scratch identity and child restriction enforcement. This record distinguishes
-implemented producer behavior from that pending consumer repair and from historical measurements.
+**Accepted policy; profiles, restriction producer and consumer implemented.** Approval status is
+recorded only in the pointer below. The consumer adds bounded advisory scratch identity and an
+independent runner-only read-only floor, including a full-allowlist tool-call backstop. Source and
+ordinary offline regressions corroborate this bounded implementation; they do not extend the
+historical native measurements or certify a universal foreground/background sandbox.
 The [characterization archive](archive/pi-subagents-child-capability-characterization.md)
 contains the protocol, native outcomes, historical failures, exact disposable sources and
 independent teardown. Experiment approval is not approval of these selections.
@@ -18,7 +19,57 @@ local commit/blob attestation. Historically the owner authorized draft publicati
 not the originally planned pre-submit local approval; publication itself was not approval.
 Neither checkpoint `bfb6a09c` nor `b5dd31ef` is approval.
 
+## Consumer source/offline reconciliation
+
+Implementation reference: `9b2613af3177606e9d7313a929e33ed50ca73ddc` (plan #2234).
+This is bounded source/offline corroboration, not new native execution evidence. Normal worktree
+setup (`uv sync --all-packages && npm ci`) succeeded without manifest/lockfile changes. The
+worktree-resolved roots and actual installed versions were:
+
+| Package | Resolved root | Version |
+| --- | --- | --- |
+| Pi coding agent | `/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-2234/node_modules/@earendil-works/pi-coding-agent` | 0.85.1 |
+| Pi AI | `/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-2234/node_modules/@earendil-works/pi-ai` | 0.85.1 |
+| Pi TUI | `/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-2234/node_modules/@earendil-works/pi-tui` | 0.85.1 |
+| Pi server | `/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-2234/node_modules/@earendil-works/pi-server` | 0.85.1 |
+| Pi client | `/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-2234/node_modules/@earendil-works/pi-client` | 0.85.1 |
+| pi-subagents | `/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-2234/.pi/npm/node_modules/pi-subagents` | 0.66.0 |
+
+`npm ls @earendil-works/pi-ai @earendil-works/pi-coding-agent @earendil-works/pi-tui @earendil-works/pi-server @earendil-works/pi-client`
+passed with all five local 0.85.1 pins. Node was 26.3.0. Relevant source—not version equality—was
+checked: Pi's `AgentSession._buildRuntime`/`_refreshToolRegistry`/`setActiveToolsByName` rebuild
+from the loader before startup, `bindExtensions` emits startup, and `reload` tears down the old
+activation and reconstructs the loader prompt before startup. `DefaultResourceLoader` retains
+its replacement prompt source. In pi-subagents, `buildInProcessChildLaunch` retains its first-line
+prefix and four XML escapes, `childProcessEnv` remains runner-only, the background runner stamps
+`SUBAGENT_CHILD_ENV = "PI_SUBAGENT_CHILD"`, and `createDefaultChildSessionFactory` applies the
+packet through loader/startup while retaining the replacement prompt. No private production
+imports or installed-source changes were introduced.
+
+Focused command outcomes (detailed execution belongs to the normal PR validation summary):
+
+- `node --test extension/substrate/childIdentity.test.ts extension/substrate/childRestrictions.test.ts extension/substrate/toolGating.test.ts extension/substrate/agentScratch.test.ts extension/session/lifecycle.test.ts extension/importDirectionGuard.test.ts extension/surfacesGuard.test.ts extension/waves/reportWave.test.ts extension/waves/reportWaveRpc.test.ts`:
+  **166 passed, 0 failed, 0 skipped**.
+- `node --test extension/sessionLifecycle.test.ts extension/pi/v1/waveIsolation.test.ts extension/vendor/btw/btw.test.ts extension/waves/childExecutionCompat.test.ts`:
+  **64 passed, 0 failed, 0 skipped**. The installed compatibility test actually executed, including
+  real escaped-prefix→Perk-parser and true/false binding→Perk-decoder checks; clean CI still has
+  its honest missing-install skip. Mandatory SDK wiring tests do not depend on that optional install.
+- `uv run pytest tests/test_subagent_agents.py tests/test_repo_local_agents.py -q`:
+  **24 passed**; definitions/tool inventories unchanged.
+- Configured `run_ci` checks `lint-js,typecheck-js`: **passed**. Iteration corrected a partial
+  TypeScript test-context assertion and a scratch fixture that navigated to its already-current
+  leaf (which emits no tree event); neither was an installed-engine incompatibility.
+
+The final run-all CI result is recorded in the PR validation summary. No model-backed/native
+probe ran. No new raw-byte hash ledger or transcript archive was created. Full-baseline doctor
+stamp, stale-error fingerprints, historical native failures and Phase-2 waivers remain unchanged.
+
 ## 0.66.0 source/offline reconciliation
+
+**Historical producer record.** The following C1–C6 context, hashes, commands, outcomes and earlier
+iteration diagnostics are retained verbatim. Its pending-consumer statements describe that
+checkpoint, not today's implemented consumer; its trailing-evidence procedure is not a new
+requirement for consumer changes.
 
 This is bounded compatibility evidence for the implemented profiles/producer, not a second
 approval attestation or full-baseline certification. No installed source or fingerprint was changed.
@@ -302,7 +353,7 @@ projection stayed current without hand-edited counts.
 installed sources; C4 did not skip. No new live run; historical native evidence remains
 pi-subagents 0.65.1; full-baseline doctor stamp unchanged; full restriction behavior also requires 3.3.
 
-## Additional required repair: current-parent read-only restrictions
+## Implemented repair: current-parent read-only restrictions
 
 The cold claimed-parent R/E measurements remain valid, but do not establish warm inheritance.
 The in-scope `/objective-plan` warm door calls `gating.enter(ctx)`, which appends parent branch
@@ -314,8 +365,8 @@ gap, **not a newly executed case**.
 The owner approved expanding the decision/consumer scope for this gap at
 **2026-09-06T14:36:56.574Z**, session response `44ba3dfb`; canonical plan #2230 records the
 clarification. No additional native probe or production prototype is authorized in this node.
-The following is the exact **source-derived repair design**, with its producer implemented and its strict consumer still
-requiring 3.3—not a measured warm-path PASS.
+The following is the **source-derived repair**, now implemented in both producer and consumer
+and exercised by ordinary offline regressions—not a measured native warm-path PASS.
 
 ### Separate restriction channel
 
@@ -362,14 +413,61 @@ requiring 3.3—not a measured warm-path PASS.
   including the floor even if a mode append failed. `/btw` retains its existing effective-gate
   check. The restriction reader and identity reader cannot grant authority to one another.
 
+### Consumer failure and lifetime rules
+
+The decoder checks at most 16384 UTF-8 bytes before standard `JSON.parse`. Undefined is legacy
+absence; empty/whitespace, primitive/null/array envelopes, invalid v1 values and unsupported reserved
+family versions are restrictive. Every own `perk.parent-restrictions/` key is inspected, so an
+unsupported version cannot hide beside valid v1. Unrelated namespaces remain opaque. V1 has exactly
+one own boolean `readOnly`, with no extra fields or coercion. Non-runner captures do not even read
+the packet. An unreadable key or envelope in a runner capture also establishes a floor.
+
+Both readers share only the neutral stateless `{sessionId, sessionFile}` key helper and startup's
+runner boolean. Full SDK UUID/path (or null), not persisted basename or Perk run id, distinguishes
+physical sessions. Advisory capture replaces its snapshot; lookup reads only the current key,
+never prompt/env. Key mismatch gives stale advice with captured runner fallback. Restrictions OR
+same-key captures, including changed runner/packet values. A positively different known key starts
+a fresh floor; an unreadable key retains the last known comparison key. A never-keyed anonymous
+floor carries to the first readable key because recovery is not proof of a different session.
+There is no isolation claim while SDK key access is broken.
+
+Known-key finite reason buckets survive same-key retries and reset on positively different-key
+capture. Unreadable-key warnings use a separate anonymous activation-local reason set, retained
+through readable recovery and cleared only on shutdown/discard. Stale advice warns in the captured
+snapshot's scope. Warn only for unavailable runner identity or invalid runner restrictions, with
+fixed `report(..., {alsoLog: true})` messages—never raw prompts/names/bindings or thrown payloads.
+Shutdown clears both controllers. No process-global identity/floor, unbounded key map or durable
+floor field is introduced.
+
+`reflectSessionReadOnlyFloor` follows unchanged identity establishment. Unclaimed/already-read-only
+outcomes append nothing; established non-read-only outcomes get one verified mode-only append
+under `child restriction` scope. Applied changes only resolved mode; rejected/unverified returns
+the honest original outcome and relies on the classified append's loud report. A throw escaping
+`appendVerified` is caught only around that call and returned as `unexpectedFailure: true` with
+the original outcome. The Pi edge reports the fixed error `could not persist child read-only
+restriction; in-memory restriction remains active` once for that operation, with `alsoLog: true`,
+and continues gate sync and remaining startup work. No retry, fabricated linkage problem or
+replacement mint. Keep still does no version backfill; separate mode reflection is its documented
+write-free-startup exception. Neither reader rewrites/consumes the parent handoff.
+
+The deliberate gate hardening applies to **all effective read-only sessions**, including parents:
+`tool_call` rejects every tool outside the existing `READ_ONLY_TOOLS` set even when snapshot or
+toolset installation fails, including save/delivery and unknown/late foreign mutators. `edit` and
+`write` retain their denial wording; listed bash retains its existing argument check; other listed
+tools pass this gate but keep downstream checks. All gate observations OR in the floor; supplier
+exceptions are restrictive. A floor-backed `exit()` skips the read-write append and reapplies the
+gate even after reflection failure. Ordinary no-floor transitions, inventories and bash patterns
+are unchanged. Allowlisted delegation, browser, web and artifact exceptions remain bounded posture
+choices, not an OS sandbox. `/btw` and ReportWave use the same effective `gating.isActive()` supplier.
+
 This is a spawn-time restriction snapshot, not continuous permission revocation. A later parent
 mode change does not reopen a restricted child or retroactively restrict a child launched
 without a floor; normal cancellation remains available. Public/manual subagent calls outside
 Perk's code-owned ReportWave producer are not certified by this channel. It is not an operating-
 system sandbox or authentication between malicious host extensions.
 
-Node 3.2 owns producer wiring/serialization; 3.3 owns strict decoding, the monotone floor in
-`toolGating.ts`, startup wiring and effective-gate scratch checks. Required ordinary regressions:
+Producer wiring/serialization and strict consumer decoding, the monotone floor in `toolGating.ts`,
+startup wiring and effective-gate scratch checks are implemented. Ordinary regressions cover:
 warm parent without `PERK_RUN_ID`/handoff; warm read-only over a stale read-write handoff; each
 retry sampling the current gate; false preserving an inherited read-only mode; true surviving
 exit/tree changes and failed state persistence; malformed/version-skew packets; unchanged
@@ -473,8 +571,9 @@ not discovered-skill inheritance. No other role gains an explicit skill or exten
 | Actual cwd | Trusted calling session's cwd via the native RPC context | Explicit child `cwd` from the validated dispatch worktree |
 
 **Why this split:** background reports preserve required ambient Perk/provider behavior and
-inherited cold-parent enforcement that R-F loses. Complete warm-parent enforcement and named
-scratch suppression **require the specified 3.2/3.3 repairs**, not claimed current passes.
+inherited cold-parent enforcement that R-F loses. Warm-parent restriction and named scratch
+suppression require **both implemented producer and consumer**, not the profile encoding alone.
+The consumer's ordinary offline coverage is not a new native-mode PASS.
 Foreground writers preserve the measured builtins, real cwd and project/skill inheritance while avoiding an unproven cross-cwd Perk handoff.
 This is a fixed policy choice, never a failure-triggered mode fallback.
 
@@ -594,7 +693,7 @@ full SDK session UUID plus session-file path (or null). Never key it solely by P
 `pi_session_id` basename—multiple children use `session.jsonl`. No process-global name stamp,
 new persisted identity entry, public model tool or engine-internal import.
 
-The shape to implement is a typed advisory result: valid name versus unavailable (absent,
+The implemented shape is a typed advisory result: valid name versus unavailable (absent,
 malformed, unreadable or stale), with provenance `native-system-prompt-prefix`. Availability
 is not inferred from task text, session display name, a report's `case`, `PERK_RUN_ID`, stage,
 parent-history content or arbitrary later prompt lines.
@@ -604,7 +703,11 @@ parent-history content or arbitrary later prompt lines.
 - Inspect only the exact first line; cap it at 4 KiB UTF-8. Require the entire line to match
   the one-tag/one-double-quoted-`name`-attribute shape, without leading/trailing whitespace,
   additional attributes, extra tags or literal unescaped XML-significant characters within
-  the attribute value.
+  the attribute value. Scan the prefix without whole-prompt splitting/copying; never trim,
+  remove CR or normalize case. Over 4096 UTF-8 bytes is malformed regardless of content.
+  For a bounded invalid line, malformed means the case-sensitive literal `<active_agent`
+  appears anywhere (including partial/plural/prefixed/doubled tags); otherwise it is absent.
+  A marker only on a later line is absent.
 - Decode only the four producer entities, **once**, and require canonical re-encoding to
   reproduce the attribute bytes. No general XML parser or recursive entity expansion. Require
   a nonempty decoded name, at most 256 UTF-8 bytes and no Unicode General Category Cc
@@ -627,7 +730,8 @@ parent-history content or arbitrary later prompt lines.
 - Reload must discard and recapture, not carry a prior name. Source tracing in Pi 0.85.1 shows
   runtime/tool-registry reconstruction restores the loader's base system prompt before
   `session_start`; the child loader retains its tagged replacement prompt. This reload path
-  is source-backed and must be regression-tested by 3.3, not labeled another native live case.
+  is source-backed and pinned in `extension/sessionLifecycle.test.ts`, not labeled another
+  native live case.
 
 ### Advisory—not authentication
 
@@ -640,7 +744,7 @@ re-consumes a handoff or creates a launched stage. Such host tampering is outsid
 report-only enforcement. This trade-off is selected only for scratch guidance/provisioning,
 not for an authorization principal. New uses require a separate decision.
 
-## 5. Exact scratch behavior for 3.3
+## 5. Implemented exact scratch behavior
 
 These rules apply only when Perk is active. Effective read-only gating—branch-LWW mode **or**
 the separate parent-restriction floor—wins before identity and makes the turn ineligible.
@@ -655,7 +759,7 @@ Preserve the existing claim implementation; the identity resolver never changes 
 | Unavailable name without the runner bit | **Yes**, parent/unidentified-foreground fallback; not proof of foreground report suppression |
 | Legacy-only or bindings-only name claim | Ignore the claim; apply the applicable unavailable row |
 
-The unidentified-background fallback is deliberately narrower than today's unconditional
+The unidentified-background fallback is deliberately narrower than the former unconditional
 unknown-name eligibility. It also covers custom append-mode prompts without an initial marker;
 their definitions are not changed. A well-formed custom name remains eligible. A foreground
 missing/malformed marker cannot reliably distinguish an uninstrumented child from a parent:
@@ -663,9 +767,9 @@ that is an **explicit unsupported negative case**, never a compatible report pro
 selected report roles are background with tagged replacement prompts. Selected foreground
 writers have no Perk activation, so their eligibility is not a promise of scratch provisioning.
 
-Add `perk-dev.session-auditor` to `REPORT_ONLY_CHILD_AGENTS`: the exact set becomes the ten
-reports, excluding conflict-resolver. Do not exclude the auditor merely because init does not
-own its definition. Retain parent and valid writer/custom eligibility subject to read-only mode.
+`REPORT_ONLY_CHILD_AGENTS` contains the ten reports, including `perk-dev.session-auditor` and
+excluding conflict-resolver. The auditor remains included even though init does not own its
+definition. Parent and valid writer/custom eligibility remains subject to effective read-only mode.
 
 For ineligible turns, `registerAgentScratch` must not call the agent-scratch provisioner in
 **either** hook, and its context filter removes all direct `perk:agent-scratch` messages.
@@ -703,35 +807,38 @@ directory or agent-scratch guidance**, not zero lifecycle filesystem activity.
   acceptance contract. Regenerate `shared/subagents/representative-wave-script.js` for the
   new restriction field; never teach its golden the forbidden child `async: true` flag.
 - Amend `shared/contracts.md` for the implemented behavior and matching user-facing docs.
-  The implemented producer/profile behavior is recorded there; the separate consumer remains pending.
+  The implemented producer/profile behavior and the separate consumer are recorded there.
 
-### Node 3.3 — implement identity and the independent restriction floor
+### Node 3.3 — implemented identity and independent restriction floor
 
-- Implement the bounded resolver and activation/session-local capture in
-  `extension/substrate/childIdentity.ts`; wire it before scratch hooks can evaluate eligibility.
-  Replace the removed environment-name dependency in `agentScratch.ts`, add the auditor, and
-  preserve the independent lifecycle/gating authority and `/btw` parent's provisioner behavior.
-- Implement the separate `childRestrictions.ts` decoder/floor and add
-  `extension/substrate/childRestrictions.test.ts`, including the warm-path and monotonicity
-  cases specified above. Wire the floor before gate synchronization; neither identity nor
-  a failed child-state append may weaken it.
-- Add `extension/substrate/childIdentity.test.ts`; extend
-  `extension/substrate/agentScratch.test.ts`, `extension/substrate/toolGating.test.ts`,
-  `extension/session/lifecycle.test.ts`, `extension/sessionLifecycle.test.ts`
-  and the existing `/btw` tests where wiring touches them. Use pytest/node:test, not a retained
-  disposable decoder or a new native-run framework.
-- Cover both active launch modes with valid known-report/writer/custom markers; all ten
-  report names; read-only precedence; malformed/empty/oversized/extra-attribute/double-tag
-  input; single-pass entities; task/history/later-line forgeries; privileged first-line forgery
-  affecting scratch only; ignored conflicting bindings/legacy names; unavailable foreground
-  versus background fallback; independent same-process activations; SDK session/file key
-  changes; reload recapture; compaction and branch navigation; and direct scratch cleanup.
-- Pin no provisioner call for reports/unidentified background children in either hook, but
-  preserve eligible-writer/parent retry and dedup behavior. Prove identity cannot change mode,
-  stage, handoff consumption, gate toolset or sibling/parent state. Keep unsupported foreground
-  activation/carrier cases explicitly negative, not universal compatibility claims.
-- Amend the implemented identity/scratch/restriction contract and corresponding docs. No new
-  write grant, cross-cwd handoff transport, process-global foreground stamp or generic sandbox.
+The consumer is composed inside the extension factory and captured at the start of the main
+startup handler before identity establishment/tool sync. Identity and restrictions classify
+independently. Scratch uses the cached advisory lookup and effective gate, not env-name or
+branch-mode fallbacks. The harness supports the real replacement loader prompt and clears inherited
+run/runner/binding/legacy-name env by default; claim fixtures opt in. Same-process sessions start
+sequentially and dispose in reverse order.
+
+### Owning consumer regression suites
+
+Each property has one primary suite rather than repeated cross-products:
+
+| Boundary | Primary suite | Owned checks |
+| --- | --- | --- |
+| Advisory input | [`childIdentity.test.ts`](../../extension/substrate/childIdentity.test.ts) | Prefix matrix, byte/control/entity boundaries, full keys, stale/unreadable lookup, capture/clear/isolation and private known/anonymous warnings |
+| Restriction input | [`childRestrictions.test.ts`](../../extension/substrate/childRestrictions.test.ts) | Decoder matrix, runner ignorance boundary, monotone same-key floor, unknown→known recovery, reset/isolation and warning buckets |
+| Gate | [`toolGating.test.ts`](../../extension/substrate/toolGating.test.ts) | Floor across mode/snapshot/toolset/append failures, full allowlist denials, positive read/bash/engine tools, parent backstop and ordinary transitions |
+| State reflection | [`session/lifecycle.test.ts`](../../extension/session/lifecycle.test.ts) | Outcome table, mode-only verification, classified/escaping failures and unchanged metadata |
+| Scratch | [`agentScratch.test.ts`](../../extension/substrate/agentScratch.test.ts) | Ten reports × runner/non-runner, unavailable/custom fallback, both-hook provisioning counts, direct-only cleanup, repair/retry and separate auditor census |
+| SDK composition | [`sessionLifecycle.test.ts`](../../extension/sessionLifecycle.test.ts) | Capture before rebuild, original-packet reload, branch-mode inheritance, tree/compaction, unclaimed and escaping-reflection continuation, paired-session authority isolation |
+| Warm producer→consumer | [`waveIsolation.test.ts`](../../extension/pi/v1/waveIsolation.test.ts) | Actual rendered fake-RPC binding into runner-shaped mint/adopt children; unchanged parent handoff/sibling gates |
+| Side session | [`btw.test.ts`](../../extension/vendor/btw/btw.test.ts) | Floor-backed read-only tools/cache and no scratch provisioner calls |
+| Optional installed engine | [`childExecutionCompat.test.ts`](../../extension/waves/childExecutionCompat.test.ts) | Real escaped-prefix/parser and boolean-binding/decoder interop; existing foreground/ambient negatives retained |
+
+The ordinary import-direction/surface guards, `reportWave`/`reportWaveRpc` suites and Python
+agent-definition suites preserve the surrounding authority boundary. Harness instrumentation with
+Perk is not authorization for an explicit-extension production profile; unavailable non-runner
+scratch eligibility, ignored foreground packets and absent foreground ambient discovery remain
+negative boundaries. No new live probe or prose-map/template work is implied.
 
 ## 7. Reconsideration and residuals
 
@@ -747,7 +854,7 @@ Residuals presented for final review are: representative-derived sibling coverag
 model/global-context/reload/root-scheduling claims; foreground writer's absent Perk scratch and
 ambient-provider support; no arbitrary cross-cwd handoff inheritance; advisory spoofable identity
 with the explicit fallback matrix; late background supervisor observation; and the untouched
-Phase-2 streaming waivers. The report-suppression and strict warm-restriction consumer repairs
-remain **required from 3.3, not implemented here**; profiles and the per-attempt producer are
-implemented. No warm-path native PASS is claimed. No unresolved policy
+Phase-2 streaming waivers. Report suppression and the strict warm-restriction consumer are
+implemented alongside the profiles and per-attempt producer, with the exact lifetime/failure
+limits above. No warm-path native PASS is claimed. No unresolved policy
 choice is delegated to the implementation consumers.

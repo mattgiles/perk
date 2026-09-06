@@ -11,6 +11,12 @@ test("runner-only decoder matrix: strict bounded reserved namespace, opaque unre
     ["empty object", "{}", "legacy-absent"],
     ["true", packet(true), "valid", true],
     ["false", packet(false), "valid", false],
+    [
+      "valid beside unrelated",
+      '{"perk.parent-restrictions/1":{"readOnly":true},"opaque/9":[null,{"deep":"data"}]}',
+      "valid",
+      true,
+    ],
     ["empty", "", "invalid", "json"],
     ["whitespace", " \t\n", "invalid", "json"],
     ["bad JSON", "{", "invalid", "json"],

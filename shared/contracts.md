@@ -6100,7 +6100,8 @@ unknown stage id (version skew), or any lookup miss → no filtering. Absent too
 are inert (`setActiveTools` ignores unknown names — e.g. the borrowed `ask_user_question` is
 stripped by its package when `!hasUI`, so the name-keyed entries simply have nothing to enable
 in a headless session). There is no `tool_call` backstop for stage scoping (schema removal is the same structural
-lever the gate's allowlist uses; `edit`/`write`/`bash` blocking remains the gate's job) and no
+lever the gate's allowlist uses; the full read-only tool-call allowlist and bash argument check
+remain the gate's job) and no
 config surface for the map (the §8.39 non-interference posture; fail-open on unknown ids covers
 version skew). **Bare-session zero-change guarantee:** a session that never engages either
 concern gets **zero `setActiveTools` calls** — bare warm sessions stay byte-identical.

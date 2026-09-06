@@ -32,7 +32,9 @@ child mode, or pin pi-subagents to make a failing baseline pass. `just bump-pi V
 all five dev pins; published wildcard peers, zero runtime dependencies, and doctor report-only
 behavior are unchanged.
 
-Install **in the worktree under test** (`npm install`), not just its ancestor checkout. Check
+Run normal setup **in the worktree under test** (`uv sync --all-packages && npm ci`), not just
+its ancestor checkout. Stop if this does not establish the committed toolchain; do not change
+manifests/lockfiles to repair the host. Check
 `npm ls @earendil-works/pi-coding-agent @earendil-works/pi-ai @earendil-works/pi-tui @earendil-works/pi-server @earendil-works/pi-client --depth=0`,
 then `npm run typecheck`, `node --test extension/piAiCompatGuard.test.ts`, and
 `uv run pytest tests/test_packaging.py::test_pi_toolchain_pin_lockstep -q`. Commit before live probes.
@@ -73,17 +75,41 @@ for the background baseline and the five human-operated streaming legs; unobserv
 The [binding child-policy record](../design/pi-subagents-child-execution-policy.md) defines
 owner-accepted behavior: its [approval pointer](../design/pi-subagents-child-execution-policy.md#approval-pointer)
 records acceptance by the unchanged PR #2231 owner merge, not a separate formal review or local
-attestation. Profiles and the restriction producer are implemented; identity/floor/scratch still
-require the separate 3.3 repair. The bounded
-[0.66.0 source/offline reconciliation](../design/pi-subagents-child-execution-policy.md#0660-sourceoffline-reconciliation)
-records the exact context, nine-file raw-byte SHA-256 census, semantic anchors and C1–C6 commands.
-It is not a new full compatibility certification: the full-baseline doctor stamp stays unchanged,
-as do the five Pi dev pins, the unpinned engine policy and stale-error fingerprints. It
-closes the eleven-role census, execution-mode encoding, extension/context/cwd boundaries,
-advisory identity and the independent warm-parent read-only restriction channel. Both the
-producer and consumer repairs are required before claiming the full report profile; the warm
-path is a source-derived repair design, not a native-matrix pass. Later changes must reconcile
-that record rather than choose a new profile implicitly.
+attestation. Profiles, the restriction producer, bounded advisory identity, the independent floor
+consumer and exact ten-report scratch suppression are implemented. Both producer and consumer
+are required for the full selected report profile. The bounded
+[consumer source/offline reconciliation](../design/pi-subagents-child-execution-policy.md#consumer-sourceoffline-reconciliation)
+records resolved roots, actual package versions, implementation commit and concise command outcomes.
+Its [owning regression suites](../design/pi-subagents-child-execution-policy.md#owning-consumer-regression-suites)
+allocate input matrices, lifecycle/gate/scratch checks, SDK wiring, warm producer→consumer, side
+session and optional installed interoperability checks without repeating every cross-product.
+The earlier [0.66.0 producer record](../design/pi-subagents-child-execution-policy.md#0660-sourceoffline-reconciliation)
+retains its C1–C6/hash ledger verbatim as history; that ledger and a trailing evidence-only commit
+are not requirements for this consumer's bounded verification. Use the normal PR validation summary
+for detailed execution. Neither record is a new full compatibility certification: the doctor
+stamp, Pi dev pins, unpinned engine policy and stale-error fingerprints stay unchanged. The warm
+path is source/offline corroborated, not a native-matrix PASS. Later changes must reconcile the
+policy rather than choose a new profile implicitly.
+
+For consumer changes, re-read the worktree-resolved Pi startup/rebuild/reload path and the installed
+engine's prefix escaping, runner stamp, runner-only binding delivery and child loader. Relevant
+source behavior, not version equality, is the compatibility bar. Stop on incompatibility for owner
+disposition—no install, mode or composition fallback. Private imports remain test-only; the optional
+installed test must execute in an implementing checkout, while clean CI may honestly skip a missing
+engine. Mandatory offline SDK harness coverage remains independent of that installation.
+
+The consumer deliberately hardens **every effective read-only session**, parents included, with a
+full `READ_ONLY_TOOLS` tool-call check independent of toolset synchronization. The existing bash
+argument policy and allowlisted carve-outs do not become an OS sandbox. Same-key startup ORs the
+floor; unreadable keys retain the last known comparison key, carrying an anonymous floor into first
+readable recovery. Only shutdown/new activation or positively different known-key capture resets
+it. Known-key warning buckets survive retries; separate anonymous buckets survive recovery until
+shutdown. Invalid runner packets warn with fixed messages; non-runner packets are ignored silently.
+Mode reflection is verified and mode-only, never identity repair. Classified failures keep the
+honest outcome; an escaping append exception reports the fixed persistence failure once and
+continues startup with the in-memory floor. Normal reload uses the original packet plus branch
+mode—loss of both is unsupported. Foreground/manual and arbitrary cross-cwd cases remain outside
+this bounded profile.
 
 The linked [capability characterization](../design/archive/pi-subagents-child-capability-characterization.md)
 records the pi-subagents 0.65.1 / five-package Pi 0.85.1 matrix, actual tool denials and writer
