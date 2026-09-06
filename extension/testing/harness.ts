@@ -533,6 +533,8 @@ export async function loadPerkSession(opts: {
   cwd: string;
   env?: Record<string, string | undefined>;
   sessionManager?: SessionManager;
+  /** Original replacement prompt, retained by the resource loader on reload. */
+  systemPrompt?: string;
   headful?: boolean;
   /** Pi run mode forwarded to `bindExtensions` (drives `ctx.mode`). Defaults to Pi's "print". */
   mode?: ExtensionMode;
@@ -556,6 +558,10 @@ export async function loadPerkSession(opts: {
     {
       PERK_SELFCHECK: "1",
       PERK_NO_LLM: "1",
+      PERK_RUN_ID: undefined,
+      PI_SUBAGENT_CHILD: undefined,
+      PI_SUBAGENT_EXTENSION_BINDINGS: undefined,
+      PI_SUBAGENT_CHILD_AGENT: undefined,
       PERK_CLIPBOARD_CMD: "",
       PERK_TERMINAL_LAUNCH: "",
       ...(opts.env ?? {}),
@@ -572,6 +578,7 @@ export async function loadPerkSession(opts: {
   const loader = new DefaultResourceLoader({
     cwd,
     agentDir,
+    systemPrompt: opts.systemPrompt,
     // Named inline factory: startup/extension-load-error surfaces then say `<inline:perk>`
     // instead of the positional `<inline:1>`.
     extensionFactories: [{ name: "perk", factory: perk }, ...(opts.extraExtensions ?? [])],

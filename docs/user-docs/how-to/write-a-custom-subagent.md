@@ -62,10 +62,27 @@ Missing directory/profile capabilities stop dispatch, never trigger a mode or ex
 
 Each code-owned report attempt also captures the parent's current read-only gate after skill
 preflight and serializes it in the private `perk.parent-restrictions/1` binding. A failed capture
-stops before launch. False is not write authority, and full warm-child enforcement requires the
-matching strict consumer/floor repair as well as this producer. This is a spawn-time snapshot,
-not continuous revocation, an OS sandbox, or a configuration channel for user/manual agents.
-Your direct custom calls above are outside that code-owned snapshot guarantee.
+stops before launch. The matching runner consumer is implemented: true or invalid packets impose
+an in-memory read-only floor before lifecycle work, even if mode persistence fails. False is not
+write authority; existing read-only mode still applies. Both halves are required. This is a
+spawn-time snapshot, not continuous revocation, an OS sandbox, or a configuration channel for
+user/manual agents. Your direct custom calls above are outside that code-owned snapshot guarantee.
+
+## Scratch guidance and custom-agent limits
+
+When Perk is active and the effective gate is off, a valid custom/unknown native startup-prefix
+name remains scratch-eligible. An unavailable prefix (absent, malformed, unreadable or stale) in
+a runner-hosted child suppresses scratch with a bounded warning; without the runner bit it retains
+the parent/unidentified-foreground fallback. Append-mode custom prompts without a first-line
+marker can take the unavailable runner row. Legacy environment names or binding-only name claims
+cannot supply identity. Do not use a forged report/writer prefix as a permission mechanism: the
+claim affects only scratch guidance/provisioning, never tools, workflow mode, stage or handoff.
+
+Foreground mode does not discover ambient Perk extensions. The unavailable non-runner fallback
+is a negative boundary, not proof of foreground enforcement or guaranteed scratch provisioning.
+Do not add an explicit Perk extension list or switch execution modes merely to make a failing
+profile pass. See [Agent scratch](../reference/configuration/repository-layout.md#agent-scratch)
+for the exact report set and directory lifecycle.
 
 ## Builtins in a perk repo
 

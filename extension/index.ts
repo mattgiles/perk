@@ -50,6 +50,7 @@ import { registerSelfcheck } from "./pi/v1/selfcheck.ts";
 import {
   branchSessionStateStore,
   establishSessionIdentity,
+  reflectSessionReadOnlyFloor,
   resolveRunStage,
 } from "./session/lifecycle.ts";
 import { createAgentScratchProvisioner, registerAgentScratch } from "./substrate/agentScratch.ts";
@@ -64,6 +65,8 @@ import {
   setMarker,
   workflowDir,
 } from "./substrate/cache.ts";
+import { createChildIdentity } from "./substrate/childIdentity.ts";
+import { createChildRestrictions } from "./substrate/childRestrictions.ts";
 import { loadRegistry, type Registry, stageConsumesPlanRef } from "./substrate/registry.ts";
 import { perkVersion, sharedDir, versionStamp } from "./substrate/resources.ts";
 import { mintRunId } from "./substrate/runId.ts";
@@ -129,13 +132,15 @@ export default function (pi: ExtensionAPI) {
 
   // The read-only tool-gating primitive. Attaches to perk:workflow-state.mode; synced on
   // both session_start AND session_tree below. enter/exit are the surface the gated stages consume.
-  const gating = registerToolGating(pi);
+  const childIdentity = createChildIdentity();
+  const childRestrictions = createChildRestrictions();
+  const gating = registerToolGating(pi, childRestrictions.hasFloor);
 
   // Run-owned disposable scratch guidance for every eligible write-capable model turn. One
   // activation-scoped provisioner shares retry/warning suppression with the isolated /btw side
   // session; no model tool or process-global temp environment is introduced.
   const agentScratch = createAgentScratchProvisioner();
-  registerAgentScratch(pi, agentScratch);
+  registerAgentScratch(pi, agentScratch, childIdentity.lookup, gating.isActive);
 
   // Vendored `btw`: a `/btw` human-only side-chat popover backed by an isolated in-memory
   // AgentSession. Takes `gating` for the gate-mirror — its side-session toolset + cache key follow
@@ -253,10 +258,18 @@ export default function (pi: ExtensionAPI) {
   // by the lease fencing (fresh token per same-identity reacquire + verify-before-inject).
   const feedbackReceiver = createHunkFeedbackReceiver(pi);
   pi.on("session_shutdown", async () => {
+    childIdentity.clear();
+    childRestrictions.clear();
     feedbackReceiver.close();
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    // Capture the original loader prompt and runner packet before lifecycle work or tool rebuilds.
+    // Neither advisory failure nor a failed workflow claim may prevent the independent floor.
+    const runner = process.env.PI_SUBAGENT_CHILD === "1";
+    childRestrictions.capture(ctx, runner, () => process.env.PI_SUBAGENT_EXTENSION_BINDINGS);
+    childIdentity.capture(ctx, runner);
+
     const branchEntries = () => branchOf(ctx);
     const sessionFile = ctx.sessionManager.getSessionFile();
     const currentSessionId = sessionFile ? basename(sessionFile) : null;
@@ -288,10 +301,24 @@ export default function (pi: ExtensionAPI) {
       mintRunId,
       versionStamp: stamp,
     };
-    const identity = establishSessionIdentity(branchSessionStateStore(pi, ctx), identityPorts, {
+    const stateStore = branchSessionStateStore(pi, ctx);
+    let identity = establishSessionIdentity(stateStore, identityPorts, {
       currentSessionId,
       envRunId: process.env.PERK_RUN_ID ?? null,
     });
+    if (childRestrictions.hasFloor()) {
+      const reflected = reflectSessionReadOnlyFloor(stateStore, identity);
+      identity = reflected.outcome;
+      if (reflected.unexpectedFailure) {
+        report(
+          ctx,
+          "child restriction",
+          "error",
+          "could not persist child read-only restriction; in-memory restriction remains active",
+          { alsoLog: true },
+        );
+      }
+    }
     for (const problem of identity.problems) reportError(problem);
     for (const warning of identity.warnings) {
       report(ctx, "run scratch", "warning", warning, { alsoLog: true });

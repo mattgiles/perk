@@ -20,12 +20,81 @@ import {
   branchSessionStateStore,
   decideClaim,
   deriveForkRunId,
+  type EstablishIdentityOutcome,
   establishSessionIdentity,
+  reflectSessionReadOnlyFloor,
   resolveRunStage,
   type SessionIdentityPorts,
   type SessionIdentityReads,
   type SessionStateStore,
 } from "./lifecycle.ts";
+
+test("floor reflection is mode-only, honest across outcomes, and contains unexpected append failures", () => {
+  const state: WorkflowState = {
+    run_id: "RID",
+    pi_session_id: "session.jsonl",
+    stage: "implement",
+    predecessor: "parent",
+    perk_version: "1.2.3",
+  };
+  const base = { resolved: state, problems: ["original problem"], warnings: ["original warning"] };
+  const outcomes: EstablishIdentityOutcome[] = [
+    { ...base, arm: "claimed", decision: { action: "claim", source: "env", runId: "RID" } },
+    { ...base, arm: "kept", decision: { action: "keep", source: "session", state } },
+    {
+      ...base,
+      arm: "forked",
+      decision: { action: "fork", source: "fork", state, childRunId: "RID", parentRunId: "parent" },
+    },
+    {
+      ...base,
+      arm: "adopted",
+      decision: { action: "adopt", source: "env-child", childRunId: "RID", parentRunId: "parent" },
+    },
+    { ...base, arm: "minted", decision: { action: "none", source: "none", state } },
+    { ...base, arm: "unclaimed", decision: { action: "claim", source: "env", runId: "RID" } },
+    { ...base, arm: "unclaimed", decision: { action: "none", source: "none", state } },
+  ];
+  for (const outcome of outcomes) {
+    for (const mode of [undefined, "read-write", "read-only"]) {
+      const input = { ...outcome, resolved: { ...state, mode } };
+      for (const status of ["applied", "rejected", "unverified", "throws"] as const) {
+        let appends = 0;
+        const store: SessionStateStore = {
+          rebuild: () => {
+            throw new Error("must not rebuild");
+          },
+          append: () => {
+            throw new Error("must not plain append");
+          },
+          appendVerified: (opts) => {
+            appends++;
+            assert.deepEqual(opts.data, { mode: "read-only" });
+            assert.equal(opts.field, "mode");
+            assert.equal(opts.expected, "read-only");
+            assert.equal(opts.scope, "child restriction");
+            if (status === "throws") throw Object.create(null);
+            return status === "applied" ? { status } : { status, problem: "already reported" };
+          },
+        };
+        const result = reflectSessionReadOnlyFloor(store, input);
+        const skipped = outcome.arm === "unclaimed" || mode === "read-only";
+        assert.equal(appends, skipped ? 0 : 1);
+        assert.equal(result.unexpectedFailure, !skipped && status === "throws");
+        if (!skipped && status === "applied") {
+          assert.deepEqual(result.outcome, {
+            ...input,
+            resolved: { ...input.resolved, mode: "read-only" },
+          });
+          assert.equal(result.outcome.decision, input.decision);
+          assert.equal(result.outcome.problems, input.problems);
+          assert.equal(result.outcome.warnings, input.warnings);
+        } else assert.equal(result.outcome, input);
+        assert.equal(input.resolved.mode, mode, "input never mutated");
+      }
+    }
+  }
+});
 
 /** A handoff blob (optionally carrying `stage`/`consumed`/claim fields) for the claim tests. */
 function handoffBlob(

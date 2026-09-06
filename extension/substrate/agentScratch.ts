@@ -7,17 +7,12 @@
 // not a live guidance delivery or authoritative provenance, and is deliberately left intact.
 
 import { relative, sep } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type ReportTarget, report } from "../surfaces/report.ts";
 import { agentScratchDir, ensureAgentScratch } from "./cache.ts";
+import type { ChildIdentitySnapshot } from "./childIdentity.ts";
 import { activeSessionRunId, type SessionDataCtx } from "./sessionData.ts";
-import {
-  activeContextWindow,
-  type BranchEntry,
-  type BranchSource,
-  branchOf,
-  rebuildWorkflowState,
-} from "./workflowState.ts";
+import { activeContextWindow, type BranchEntry, branchOf } from "./workflowState.ts";
 
 export const AGENT_SCRATCH_CONTEXT_TYPE = "perk:agent-scratch";
 
@@ -32,6 +27,7 @@ export const REPORT_ONLY_CHILD_AGENTS = [
   "perk.objective-explorer",
   "perk.pr-reviewer",
   "perk.review-classifier",
+  "perk-dev.session-auditor",
 ] as const;
 
 const REPORT_ONLY_CHILD_SET = new Set<string>(REPORT_ONLY_CHILD_AGENTS);
@@ -58,20 +54,15 @@ export function renderAgentScratchBlock(cwd: string, runId: string): AgentScratc
   return { runId, path, marker, content };
 }
 
-/**
- * Eligibility follows the branch-LWW workflow mode and the locally exposed pi-subagents child
- * identity. Unknown/custom children remain eligible because no generic report-only metadata exists.
- */
+/** Effective restriction wins; unavailable non-runner identity is only a scratch fallback. */
 export function isAgentScratchEligible(
-  ctx: BranchSource,
-  childAgent: string | undefined = process.env.PI_SUBAGENT_CHILD_AGENT,
+  readOnly: boolean,
+  snapshot: ChildIdentitySnapshot,
 ): boolean {
-  try {
-    if (rebuildWorkflowState(branchOf(ctx)).mode === "read-only") return false;
-  } catch {
-    // No rebuilt explicit read-only mode means the parent posture remains the fallback.
-  }
-  return childAgent === undefined || !REPORT_ONLY_CHILD_SET.has(childAgent);
+  if (readOnly) return false;
+  return snapshot.identity.status === "available"
+    ? !REPORT_ONLY_CHILD_SET.has(snapshot.identity.name)
+    : !snapshot.runner;
 }
 
 export interface AgentScratchProvisioner {
@@ -134,10 +125,14 @@ function branchHasBlock(branch: readonly BranchEntry[], block: AgentScratchBlock
 /** Register eligible-turn delivery and direct scratch-custom context hygiene. */
 export function registerAgentScratch(
   pi: ExtensionAPI,
-  provisioner: AgentScratchProvisioner = createAgentScratchProvisioner(),
+  provisioner: AgentScratchProvisioner,
+  identity: (ctx: ExtensionContext) => ChildIdentitySnapshot,
+  isReadOnly: () => boolean,
 ): void {
+  const eligible = (ctx: ExtensionContext) =>
+    !isReadOnly() && isAgentScratchEligible(false, identity(ctx));
   pi.on("before_agent_start", async (_event, ctx) => {
-    if (!isAgentScratchEligible(ctx)) return;
+    if (!eligible(ctx)) return;
 
     // Provision before dedup: an externally deleted directory is repaired even while the live
     // branch still carries this run's exact guidance block.
@@ -154,8 +149,7 @@ export function registerAgentScratch(
   });
 
   pi.on("context", async (event, ctx) => {
-    const eligible = isAgentScratchEligible(ctx);
-    const block = eligible ? provisioner.resolve(ctx) : null;
+    const block = eligible(ctx) ? provisioner.resolve(ctx) : null;
     let keptCurrent = false;
     return {
       messages: event.messages.filter((message) => {

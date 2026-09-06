@@ -731,7 +731,10 @@ function isReadOnlyMode(mode: string | undefined): boolean {
   return mode === "read-only";
 }
 
-export function registerToolGating(pi: ExtensionAPI): ToolGating {
+export function registerToolGating(
+  pi: ExtensionAPI,
+  readOnlyFloor: () => boolean = () => false,
+): ToolGating {
   // In-memory gate (mirrors plan-mode's `planModeEnabled`): the authority `tool_call` consults.
   // Fail-closed — a failed sync never opens this; tool_call blocks on any internal error.
   let active = false;
@@ -741,6 +744,18 @@ export function registerToolGating(pi: ExtensionAPI): ToolGating {
   // Pre-engagement tool snapshot, taken ONCE on the first engagement of either concern (the
   // preset.ts discipline, shared by the gate and stage scoping).
   let snapshot: string[] | null = null;
+
+  function hasFloor(): boolean {
+    try {
+      return readOnlyFloor();
+    } catch {
+      // A broken restriction supplier cannot grant authority for this observation.
+      return true;
+    }
+  }
+
+  const isActive = () => active || hasFloor();
+  const readOnlyToolNames: ReadonlySet<string> = new Set(READ_ONLY_TOOLS);
 
   /**
    * Recompute + install the active tool set from both concerns (contracts.md §8.40):
@@ -762,12 +777,13 @@ export function registerToolGating(pi: ExtensionAPI): ToolGating {
   const SCOPED_TOOL_NAMES: ReadonlySet<string> = new Set([...PERK_TOOLS, ...BORROWED_TOOLS]);
 
   function apply(nextActive: boolean, nextStage: string | null): void {
+    const effective = nextActive || hasFloor();
     const stageList = nextStage === null ? undefined : STAGE_TOOLS[nextStage];
     // First engagement of either concern: take the one snapshot.
-    if ((nextActive || stageList !== undefined) && snapshot === null) {
+    if ((effective || stageList !== undefined) && snapshot === null) {
       snapshot = pi.getActiveTools();
     }
-    if (nextActive) {
+    if (effective) {
       pi.setActiveTools([...READ_ONLY_TOOLS]);
     } else if (stageList !== undefined) {
       // The snapshot-missing fallback mirrors the restore path below: the FULL configured tool
@@ -785,14 +801,20 @@ export function registerToolGating(pi: ExtensionAPI): ToolGating {
     stageId = nextStage;
   }
 
-  // Structural backstop: block writes + non-allowlisted bash while active. Fail-closed on error.
+  // Enforce the whole allowlist even if toolset narrowing failed or foreign tools registered late.
   pi.on("tool_call", async (event) => {
     try {
-      if (!active) return;
+      if (!isActive()) return;
       if (event.toolName === "edit" || event.toolName === "write") {
         return {
           block: true,
           reason: `perk read-only mode: ${event.toolName} is blocked (file modifications disabled).`,
+        };
+      }
+      if (!readOnlyToolNames.has(event.toolName)) {
+        return {
+          block: true,
+          reason: `perk read-only mode: ${event.toolName} is blocked (tool not allowlisted).`,
         };
       }
       if (event.toolName === "bash") {
@@ -813,10 +835,14 @@ export function registerToolGating(pi: ExtensionAPI): ToolGating {
 
   // Inject the hidden read-only mode context while active (display:false → not shown in transcript).
   pi.on("before_agent_start", async (_event, ctx) => {
-    if (!active) return;
+    if (!isActive()) return;
     // Once-only: injected customs persist to the branch, so a live copy suppresses re-injection;
     // compaction dropping it makes the scan come up clean and the next turn re-injects.
-    if (branchCarries(branchOf(ctx), READ_ONLY_MARKER)) return;
+    try {
+      if (branchCarries(branchOf(ctx), READ_ONLY_MARKER)) return;
+    } catch {
+      // An unreadable branch cannot suppress required read-only guidance.
+    }
     return {
       message: { customType: MODE_CONTEXT_TYPE, content: READ_ONLY_CONTEXT, display: false },
     };
@@ -824,7 +850,7 @@ export function registerToolGating(pi: ExtensionAPI): ToolGating {
 
   // Strip the stale read-only marker from context when the gate is off (so it never lingers).
   pi.on("context", async (event) => {
-    if (active) return;
+    if (isActive()) return;
     return {
       messages: event.messages.filter((m) => {
         const msg = m as { customType?: string; role?: string; content?: unknown };
@@ -853,11 +879,13 @@ export function registerToolGating(pi: ExtensionAPI): ToolGating {
       apply(true, stageId);
     },
     exit(_ctx?: ExtensionContext): void {
+      if (hasFloor()) {
+        apply(true, stageId);
+        return;
+      }
       pi.appendEntry(WORKFLOW_STATE_TYPE, { mode: "read-write" });
       apply(false, stageId);
     },
-    isActive(): boolean {
-      return active;
-    },
+    isActive,
   };
 }

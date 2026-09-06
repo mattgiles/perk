@@ -72,10 +72,14 @@ After exact-source skill preflight, each attempt captures the current parent rea
 puts the same `perk.parent-restrictions/1` boolean packet on every runnable child, including
 false. Retries sample anew. Capture failure returns non-retryable `unavailable` before launch,
 retaining any skill-preflight failures; all-skipped attempts do not capture. False grants no
-write authority. Full warm-child enforcement requires the matching strict consumer/floor repair;
-this producer alone does not repair scratch suppression. Manual subagent calls are outside this
-channel, which is neither continuous revocation nor an OS sandbox. Streaming and final-report
-coverage rules below are unchanged.
+write authority. The implemented runner consumer latches true or invalid packets as an effective
+read-only floor before lifecycle work, independent of handoff mode and successful persistence.
+Gate exit and branch navigation cannot clear it; the full tool-call allowlist backstop remains
+active even when toolset narrowing fails. All ten report identities also suppress agent-scratch
+provisioning and direct guidance through the separate advisory startup-prefix reader. Both producer
+and consumer must be present for this profile. Manual subagent calls and uninstrumented foreground
+children are outside this channel, which is neither continuous revocation nor an OS sandbox.
+Streaming and final-report coverage rules below are unchanged.
 
 ## Human-triaged PR review
 

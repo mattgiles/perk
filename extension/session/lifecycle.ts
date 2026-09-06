@@ -235,6 +235,37 @@ export type EstablishIdentityOutcome = {
   | { arm: "unclaimed"; decision: Extract<ClaimDecision, { action: "claim" | "none" }> }
 );
 
+/** Reflect a captured restriction without participating in identity or handoff authority. */
+export function reflectSessionReadOnlyFloor(
+  store: SessionStateStore,
+  outcome: EstablishIdentityOutcome,
+): { outcome: EstablishIdentityOutcome; unexpectedFailure: boolean } {
+  if (outcome.arm === "unclaimed" || outcome.resolved.mode === "read-only") {
+    return { outcome, unexpectedFailure: false };
+  }
+  let appended: ClassifiedAppend;
+  try {
+    appended = store.appendVerified({
+      data: { mode: "read-only" },
+      field: "mode",
+      expected: "read-only",
+      scope: "child restriction",
+      failure:
+        "could not persist child read-only restriction; in-memory restriction remains active",
+    });
+  } catch {
+    // The Pi edge reports this escaped-contract failure once and continues startup with the floor.
+    return { outcome, unexpectedFailure: true };
+  }
+  return {
+    outcome:
+      appended.status === "applied"
+        ? { ...outcome, resolved: { ...outcome.resolved, mode: "read-only" } }
+        : outcome,
+    unexpectedFailure: false,
+  };
+}
+
 /**
  * Establish the session's run identity — the four `session_start` arms as one named operation:
  *
