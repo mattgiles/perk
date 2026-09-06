@@ -1,10 +1,11 @@
 # Native-wake review streaming: development baseline and live protocol
 
 **Dates:** 2026-09-05–06 (UTC; screenshot names use local time).
-**Status: IN PROGRESS — not submission evidence yet.** The repo-local background prerequisite,
-original T/B legs, and repaired-code B2 passed. Original D remains **not passed**: its custom
-lane failed final-report completion and reconciliation retained failed-lane provisional
-annotations. The approved repair is committed; D2/N/U remain **unobserved / not passed**. This record does not certify the remaining streaming routes,
+**Status: BLOCKED — not submission evidence yet.** The repo-local background prerequisite,
+original T/B legs, and repaired-code B2 passed. Original D remains **not passed**. The approved
+browser repair worked in D2, but D2 is also **not passed**: two children successfully captured
+reports yet were reported failed with “Request timed out.” N/U remain **unobserved / not passed**;
+the authorized rerun is exhausted and further action requires owner disposition. This record does not certify the remaining streaming routes,
 global hosts, or consumer compatibility.
 
 ## Part A — repeatable protocol and preconditions
@@ -583,7 +584,7 @@ required report stops validation for owner disposition.
 | Amended attempt | Code SHA | Status |
 | --- | --- | --- |
 | B2 | `2ed55c1b6574ff69bdf64d9e6027162fcf0c75e3` | PASS; per-leg cleanup verified |
-| D2 | `2ed55c1b6574ff69bdf64d9e6027162fcf0c75e3` | Not launched |
+| D2 | `2ed55c1b6574ff69bdf64d9e6027162fcf0c75e3` | NOT PASSED: 3/5 covered; two runtime timeouts despite captured reports |
 | N | — | Not launched |
 | U | — | Not launched |
 
@@ -702,3 +703,87 @@ delegation attempt. Driver HEAD remains `2ed55c1b`. Captures: `live/D2/draft-ver
 `preparation-handoff.json`, `verified-plan-draft.md`, and `parent-preparation.jsonl`.
 The same custom-lens invocation is now handed to the human; any final custom attribution may
 appear in an owning author label or in merged contributor text, not necessarily a separate card.
+
+### D2 — NOT PASSED: runtime failure despite captured structured reports
+
+Exercised SHA `2ed55c1b6574ff69bdf64d9e6027162fcf0c75e3`; normal plan handoff and original
+fixture identity are verified above. Parent session `01a0744e-8351-733c-8bc0-d6127b60eca2`,
+model `anthropic/claude-opus-4-8`, PID 637. One workflow
+`038ec106-32ee-45b2-a855-30a07dbb7eea`; all five selected/automatic lanes were runnable and
+launched as separate fresh-context background runners with unchanged `openai/gpt-5.6-sol`:
+
+| Lane | Child run | PID | Final engine/collect result |
+| --- | --- | --- | --- |
+| grounding | `14c1575f-f024-4171-bb88-ccf932645506` | 5570 | covered; streamed=true, 3 findings |
+| decision-completeness | `b067d3bc-22c9-4490-9622-50cdc8366e06` | 5571 | failed: Request timed out.; structured report captured |
+| scope | `3786172e-8de4-4b41-a1cd-6dac981eb7e5` | 5572 | covered; streamed=false, 0 findings |
+| custom | `cd326746-492e-46e6-aea1-4a0f1a8d2958` | 5575 | failed: Request timed out.; structured report captured |
+| ponytail | `4c0fc2e5-b387-4b05-8803-6c13dc17f000` | 5576 | covered; streamed=true, 1 finding |
+
+All runner processes have observed exits 0; that does not override the failed step statuses.
+Ponytail used the exact `ponytail` skill. **Unlike original D**, both failing children called
+`structured_output` successfully: decision-completeness at 01:30:20.215Z and custom at
+01:30:20.265Z, each returning “Structured output captured.” Their output files exist and were
+preserved, but are **not** accepted as coverage or manually recovered into the aggregate:
+
+| Failed lane | Capture content | SHA-256 of capture |
+| --- | --- | --- |
+| decision-completeness | angle=decision-completeness, streamed=true, 1 finding | `90886adba96550490a74c64ac88001828e0e1d1c07db99dfeb502f3b8f748267` |
+| custom | angle=custom, streamed=true, 3 findings | `1e8b477d23e2ec992c212e9d2075077f2793514c14172feca18fae9299d0c914` |
+
+This is evidence of successful report capture alongside a failed runtime outcome, not a missing
+completion-tool assumption. The timeout's exact runtime origin is unestablished. The collect
+itself settled promptly; no collect-grace expiry or replacement wave occurred.
+
+Decisive order (UTC, 2026-09-06):
+
+| Time | Event |
+| --- | --- |
+| 01:29:26.491 | Single start accepted all five lanes, no preflight failures. |
+| 01:29:29.654 | Parent ends launch turn. |
+| 01:30:08.349 | Decision-completeness nonempty supervisor batch successfully queued; native wake at 01:30:08.363. |
+| 01:30:12.181 | First provisional browser push creates one decision-completeness annotation. |
+| 01:30:15.235 | Custom's nonempty batch is successfully queued; delivered into the active parent turn at 01:30:19.170. |
+| 01:30:19.158 | Grounding push creates two annotations, skipping the shared retry-policy phrase. |
+| 01:30:20.215 / .265 | Both subsequently failed lanes receive successful structured-output capture results. |
+| 01:30:20.786 / .802 | Their terminal step records are failed with `Request timed out.` |
+| 01:30:27.013 | Custom provisional push skips all three already-owned phrases. |
+| 01:30:30.309 | Ponytail provisional push adds one annotation. |
+| 01:30:32.744 | Parent ends relay turn. |
+| 01:30:33.836 | Workflow terminal status records completion. |
+| 01:30:34.075 | Matching native completion notice wakes the parent. |
+| 01:30:36.756 | Single collect: complete=false, covered grounding/scope/ponytail, two lane-failed rows, one attempt. |
+| 01:30:59.758 | Empty `replace:true` for uncovered decision-completeness clears its one provisional annotation. |
+| 01:30:59.795 | Empty replacement for uncovered custom clears zero (its provisional findings had all deduped). |
+| 01:30:59.815 | Grounding final replacement clears 2 and pushes its 3 authoritative findings. |
+| 01:30:59.832 | Empty scope final replacement, no effects. |
+| 01:30:59.856 | Ponytail final replacement clears 1 and pushes 1. All held counts remain zero. |
+| 01:31:13.869 | Parent explicitly reports INCOMPLETE 3/5 and stops; no retry. |
+
+The **browser repair is observed working**, but the **live leg is not passed**. The failed
+source owning the retry-policy phrase was removed before covered final replacement; the final
+screen contains only three grounding findings and one Ponytail finding, not failed-lane
+provisional content. Scope received neutral no-provisional-batches/no-findings disclosure.
+No partial-report recovery, polling, annotation HTTP composition or extra wave was used.
+
+Human observations: browser opened, annotations appeared before final summary, no subsequent
+Pi input/nudges, four final annotations, visible attribution, no duplicate/missing-annotation
+complaint, and INCOMPLETE 3/5 coverage. The inspected screenshot
+`Screenshot 2026-09-05 at 9.31.34 PM.png` visibly labels the final owners **perk:grounding** and
+**perk:ponytail**. It does not show a final custom contribution; custom is correctly uncovered.
+Copy `live/D2/browser-final.png`, SHA-256
+`c3ee40410038b206beb589892708cf1e1e81f59e28207464674d929871ab3601`.
+
+The browser offered **“Draft Recovered — Found 5 annotations from 3 hours ago”** at open. The
+operator asked which option to choose and was told **No**, to avoid restoring original D's
+annotations. Confirmation of the option actually selected remains pending; it is not silently
+assumed. This recovery prompt is a separate freshness observation, not the explanation for the
+engine's timeout statuses.
+
+Captured parent/child JSONL, workflow/child status, recovery descriptors, runner logs and failed
+capture files are under `live/D2/captured-runtime/`. `evidence.json`, `parent-timeline.json` and
+`post-capture-failures.json` index the decisive facts. Implementation tree was clean before this
+evidence-only update; driver remains at `2ed55c1b` with only approved manifest changes. Pi/browser
+remain open for capture; no approval/save or full teardown is claimed. N/U were not launched.
+Further diagnosis, capability/model changes or live attempts require a new explicit owner
+decision; this record does not convert repeated failures into a passing result.
