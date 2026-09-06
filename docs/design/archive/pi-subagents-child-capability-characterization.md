@@ -2,8 +2,8 @@
 
 ## Status and scope
 
-**Checkpoint: R/S fully observed; W-F cancellation unobserved because of P4's probe bug;
-W-B/E unlaunched. No execution-policy selection or approval.**
+**All eight intended cases observed; W cancellation verified in both modes.
+Eleven matrix launches used, including historical failures. No final measured-decision approval.**
 This experiment implements plan #2230, Objective #2209 node 3.1. It is not a production
 repair or a retrospective pass of the Phase-2 streaming cases. Only text survives teardown.
 
@@ -16,19 +16,21 @@ or approval to resume experimentation. The owner requested a local commit withou
 - The first live R pair was incomplete (P3). Its two launches remain counted and its evidence
   is retained. The explicitly authorized replacement R pair and the original S pair completed
   with actual observer records, valid structured reports and successful parent-usability checks.
-- W-F completed its earlier writer capability observations, but **no child stop was issued**:
-  the controller incorrectly matched a task-text prefix that the engine had wrapped. The
-  trailing canary was written before any stop. Cancellation is unobserved, not engine-failed.
-  The workflow's guard prevented W-B, and E was not launched.
-- **Seven matrix children have launched**, including the two from the incomplete R pair.
-  The approved cap is ten, plus the existing B0 smoke. Repeating W-F would require a further
-  bounded owner approval and increase that cap to eleven; no such approval exists.
+- At checkpoint `bfb6a09c`, the first W-F attempt had completed earlier capability observations
+  but issued **no child stop** because of the task-prefix bug. Its trailing write preceded any
+  stop; that attempt's cancellation remains unobserved, not engine-failed.
+- The subsequent owner-approved P4 repair was exercised exactly once: replacement W-F and
+  original W-B both showed actual native cancellation, and E-F/E-B completed their diagnostics.
+  Detailed outcomes are below; the historical failed W-F is not rewritten as a pass.
+- **Eleven matrix children have launched**, including the incomplete R pair and failed W-F,
+  exactly exhausting the amended cap. B0 remains the one original smoke. No more live attempts
+  are authorized.
 - No canonical agent definition, production source, dependency or configuration change is
   part of this checkpoint. The policy document, closed consumer/identity decisions, final
   Git-bound measured-decision approval, remaining documentation links and full CI gate remain
   outstanding. No PR has been opened and no branch push is authorized by this checkpoint.
 
-The latest measured R/S results and P4 failure are recorded below; earlier stops/approvals
+The measured R/S/W/E results and P4 failure are recorded below; earlier stops/approvals
 are preserved chronologically rather than rewritten as passes. The final section records
 checkpoint cleanup and the exact latest diagnostic sources for reconstruction.
 
@@ -994,6 +996,320 @@ events (without manufacturing a stop result), and request explicit approval for 
 extra W-F attempt. If granted, the total cap would become eleven matrix launches plus B0;
 R/S should not be re-run for a W-only controller correction. No cancellation support, writer
 background profile or E activation behavior may be invented to finish this node.
+
+## P4 offline follow-up and bounded repair approval
+
+After re-reading the canonical plan and checkpoint commit
+`bfb6a09cc7e9d4446db6f5d674be3936207926de`, the implementing checkout was clean on
+`plan-2230`. No probe resources were recreated and no native launch/control/model call ran.
+
+At **2026-09-06T12:48:49.924Z**, an offline replay of the captured observer records found:
+
+- The original task-prefix selector matches zero events. Correlation by the recorded native
+  step's session path, actual cwd, session UUID, PID and final bash tool-call ID identifies
+  the existing readiness record at **12:13:03.753Z**, with all earlier writer results present.
+- The candidate rejects prefixes before readiness, other sessions and the already-finished
+  command. It defers an incomplete JSONL tail until a subsequent event, but rejects an
+  incomplete tail at settlement. It neither decodes Perk child identity nor fabricates a stop.
+- The native step snapshot available to this replay is terminal. Therefore replay does **not**
+  prove live status timing or cancellation. The recorded run still contains no successful stop.
+- All **277 surviving non-fixture source/config fingerprints** match the prior freeze.
+
+The replay passed a narrow strict TypeScript check and direct Node execution. The initial
+compiler invocation omitted TypeScript 6's required `--ignoreConfig` for explicit input files
+and stopped with TS5112 before executing the replay; adding that flag corrected the invocation.
+Node printed its module-type metadata advisory; no package/configuration change was made.
+This is offline authoring/analysis evidence, not another matrix attempt.
+
+Installed source independently corroborates the failure and the available control mapping:
+`src/runs/foreground/execution.ts` calls `created.prompt` with the `Task: ` prefix;
+`subagent-executor.ts` publishes the native workflow key, session path and effective mode
+through its launch observer before entering the async/foreground child path;
+`src/extension/rpc.ts::stopAsyncRun` checks active-parent ownership and resolves the exact
+child before calling its stop controller. `src/runs/shared/child-identity.ts` accepts the
+workflow key as a child selector. This is case/control correlation, not the deferred 3.3
+agent-identity implementation.
+
+Review of the committed driver also exposed two latent validation gaps, without exercising
+another child: its finalizer clears the 30-second timer, so early completion could bypass the
+only trailing-canary check; and its inline W script launches B after F's `stopped` flag without
+waiting for the parent's full observation/containment checks. Engine
+`src/workflows/scripted-workflow.ts::stopChild` sets that flag when requesting abort, so it
+must never replace actual tool cancellation/shutdown evidence.
+
+### P4 amendment approved by the owner
+
+1. Change **only W control/validation**, leaving R/S evidence and all role capability,
+   extension-selection, model/provider, inheritance, task/canary, cwd and A1 mode choices
+   unchanged. Correlate the current native workflow step's key/session path/effective mode
+   with the observer's cwd/session/PID and exact final bash call ID; never use task prose.
+   Require the step/command still to be live, all earlier available-tool attempts/results and
+   context observations persisted, and the trailing target absent before the one child stop.
+   Read only complete JSONL records while running; reject a partial tail at final settlement.
+2. Drive W as **two sequential one-child async native workflows in the same fresh read-write
+   parent**, rather than letting a single worker script advance to B. Retain a single shared
+   twenty-minute W-pair deadline and ten-minute child deadlines. This adds no child and no
+   runner/host permission. The parent may launch B only after F's actual tool cancellation,
+   native terminal status, observer shutdown, absent trailing target, unchanged parent/
+   handoff/source state, and real usability reply are verified.
+3. Start the 30-second settlement bound when issuing stop. Check early terminal evidence,
+   but retain the trailing-canary guard for the **full thirty-second observation window**
+   (past the command's twenty-second wait) before allowing B or E. Require final bash
+   tool-result cancellation, native child settlement, observer shutdown and absent trailing
+   write at the bound; clearing a timer is not proof. Keep native stopped outcomes distinct
+   from normal writer success and from setup/loader failures. Any missing proof, discrepancy
+   or extra error stops the sequence; forced teardown remains separate from engine
+   cancellation. No suppression or retry.
+4. Author/typecheck the exact W-only correction and exercise its observation matching and
+   completion predicates offline before re-freezing/rebuilding the same baseline fixtures.
+   Then permit **one extra W-F attempt** and, only if all stop rules permit, the original W-B
+   and E pair. Seven matrix launches are already consumed; this raises the cap from ten to
+   **eleven matrix launches plus the existing B0 smoke**. Do not rerun B0, R or S. E remains
+   diagnostic-only; this authorizes neither a production profile nor final measured decisions.
+
+The owner approved these exact four numbered changes at **2026-09-06T12:54:10.711Z** in
+implementing session `01a074f6-9c53-76b2-9bea-81a18e23b489`, response entry `910603ad`:
+
+> Approve the documented P4 W-only harness correction and one extra W-F attempt, raising the cap to eleven matrix children plus the existing smoke?
+
+Answer: **Approve P4 repair and retry (Recommended)**.
+
+At **2026-09-06T13:04:18.905039+00:00**, the implementing parent appended that exact scope
+to canonical plan #2230 using `GitHubIssueBackend.update_plan_issue`; read-back matched and
+the plan header/title were preserved. This is bounded experiment authorization, **not**
+Git-bound measured-decision approval. The replay source/command is preserved below.
+
+### Upstream documentation and release-source cross-check
+
+The owner provided a read-only checkout of `nicobailon/pi-subagents` at
+`/Users/mattgiles/dev/github/nicobailon/pi-subagents`, clean HEAD
+`1deda8643f5e32856b7475642b2f35b819bbbecf`. HEAD still declares version 0.65.1 but contains
+unreleased changes; it was neither installed nor used as a probe runtime. Its new trusted
+workflow-resource interface is not part of the measured installation.
+
+The checkout also contains release tag **v0.65.1**, commit
+**`83be9c3de2cde1553c0269f383efc1eb1194dc8b`**. Fourteen individually compared files match
+our installed package byte-for-byte: `docs/{workflows,extension-api,observability,tool-reference,
+agents}.md`; `src/workflows/scripted-workflow.ts`; `src/extension/rpc.ts`;
+`src/runs/shared/{child-identity,child-runtime-config,extension-bindings,child-launch}.ts`;
+`src/runs/foreground/{execution,subagent-executor}.ts`; and
+`src/runs/background/run-child-session.ts`.
+
+Version-matched guidance and tests corroborate, but do not replace, the live measurements:
+
+- `docs/observability.md` separates child-stop hints, authoritative status, child session
+  settlement, and detached-runner process proof. A `stopped` hint or disappearing PID alone
+  is not the engine's process-terminal proof. Cancellation still needs the actual tool,
+  shutdown and trailing-canary observations required by this plan.
+- `docs/extension-api.md` identifies native run ownership as
+  `getSessionFile() ?? getSessionId()`. This differs from Perk's persisted **basename** and
+  from the SDK UUID; each must be compared within its own contract.
+- Release `test/unit/rpc.test.ts` covers exact child selectors, the live workflow child-stop
+  callback and rejection of absent/terminal targets. Its mocked controls prove routing intent,
+  not live bash termination; these tests were read, not presented as native probe evidence.
+- Release `test/unit/workflow-launch-params.test.ts` explicitly tests omitted child `async`
+  preserving `workflowAwaitAsync: true`, and explicit `async: true` omitting that await flag.
+  This independently supports A1's already-observed encoding, without treating newer HEAD's
+  behavior or external-runner tests as native-Pi evidence.
+
+The upstream checkout remains untouched. Both HEAD/release comparisons and selected release
+source excerpts are retained only as ignored analysis inputs under this run's scratch.
+
+### P4 correction validation and pre-launch freeze
+
+The original report driver and observer were restored byte-for-byte from checkpoint sources.
+The W-only driver uses a separate observation helper; R/S/E dispatch code is unchanged. The
+three clones were recreated at their original absolute paths and baseline SHA. Before changing
+the declared instrumentation freeze list, **all 2,487 previous fingerprints matched**, including
+unchanged diagnostic role/context fixtures. Historical W and the shared R/S/W observer capture
+were preserved under `P4-original` before resetting the live sink.
+
+The actual new observation predicates passed an offline replay at
+**2026-09-06T13:18:45.436Z**: the 39 recorded W-F rows identify the real readiness and earlier
+results, reject wrong cwd/process mode, missing context, stale readiness and partial final
+JSONL, and reject the actual failed workflow as cancellation proof. No successful cancellation
+record was synthesized and no native/model/control call ran in that replay.
+
+A narrow strict TypeScript check covered the W driver, observation helper, unchanged observer
+and replay. It passed again after adding the shared-deadline guard around parent usability.
+At **2026-09-06T13:24:09.854Z**, the final pre-launch manifest froze **2,494 files**: the old
+scope plus the three W-specific source/replay files and four exercised Pi shell/agent-loop
+files. The original report driver and all package/configuration choices remain unchanged.
+The installed Pi shell source awaits process termination before raising `Command aborted`;
+the agent loop emits `tool_execution_end` before breaking for abort. Those are source-backed
+expectations, not substitutes for the forthcoming native cancellation observations.
+
+## Completed W cancellation probes
+
+The approved W-only driver exited 0. Parent PID **88023**, SDK session
+`01a076e5-1c6d-71f4-bb1e-7d8e4409cbf6`, held a freshly consumed read-write handoff. It made
+**zero model tool calls**. Each case used its own one-child native async workflow and actual
+writer cwd, with the shared twenty-minute pair deadline. The parent did not dispatch B until
+F's full cancellation window, source/state checks and actual usability reply were complete.
+
+| Case | Workflow / child run | Actual mode / PID | Stop issued | Bash cancellation / shutdown | Full observation window / usable-parent reply |
+| --- | --- | --- | --- | --- | --- |
+| W-F | `7cd9b4ae-2113-4535-b479-31c2287be398` / `12b06887-be62-4a84-8e72-fe98cda01242` | Foreground / 88023 | 13:25:44.055Z | 13:25:44.080Z / 13:25:44.276Z | 30,005 ms / 13:26:16.016Z |
+| W-B | `b6f8bc5c-c328-42cf-9f0a-968dc44792ab` / `5832a02a-b169-430a-82a8-55d12fa19396` | Background / 88348 | 13:26:47.310Z | 13:26:47.564Z / 13:26:47.667Z | 30,007 ms / 13:27:19.549Z |
+
+Times are UTC on 2026-09-06. Foreground cwd was the separate `agent/writer-F` clone;
+background cwd was `agent/writer-B`. Both actual `pwd` results and observer real cwd matched
+the requested cwd. Both requests exposed `read`, `grep`, `find`, `ls`, `bash`, `edit`, `write`
+and `contact_supervisor`; every provider snapshot retained `openai/gpt-5.6-luna`.
+
+In each case the actual read/write/edit and separate bash mutation preceded cancellation.
+Final files contained `write.txt = WROTE`, `edit.txt = AFTER\n`, `redirect.txt = BASH`;
+`trailing.txt` was absent throughout the post-stop window and at the independent later check.
+The final bash tool result had `isError: true` and exact text:
+
+```text
+CANCEL_READY_W-F
+
+Command aborted
+```
+
+The B result differs only in the readiness marker's `W-B` suffix. Native workflow values
+reported the respective child `stopped: true`; root workflows completed their observation
+scripts normally. This is **intentional cancelled-writer evidence**, not successful production
+writer completion and not an infrastructure failure. Tool results, shutdown and canary state
+supply the proof beyond the stop acknowledgement.
+
+Project and skill sentinels were present in both provider-request observations; parent-history
+sentinel was absent. W-F had no ambient Perk state or scratch. W-B adopted
+`probe-W-f2854c16-1985-4cad-a66b-5b15c1daadc2.1`, read-write, with no stage, and provisioned
+one child-local scratch message. The actual parent handoff links were unchanged, as were
+parent child-sensitive state/tools/environment/scratch snapshots after each case and after
+each usability prompt. Source fingerprints matched after both cases.
+
+W-B additionally produced the engine's public `process-terminal.json` proof:
+
+```json
+{"version":1,"state":"observed","runId":"5832a02a-b169-430a-82a8-55d12fa19396",
+ "runnerProcessInstanceId":"53208e5d-b3a8-4148-aa78-a10cf7112e0d",
+ "observedAt":1788701208333,
+ "instances":[{"kind":"runner","processInstanceId":"53208e5d-b3a8-4148-aa78-a10cf7112e0d",
+ "closeObservedAt":1788701208333,"exitCode":0,"signal":null}],
+ "resumeDisposition":"non-resumable"}
+```
+
+There is no detached-runner proof for W-F: it is an in-process session, and its still-usable
+parent is intentionally not killed. The parent disposed at **13:27:19.574Z**, with no extension
+errors or STOP record. Both known W PIDs were independently absent before E began.
+
+## Completed E diagnostics
+
+The unchanged report driver selected the pre-frozen explicit `[Perk, observer]` definition
+variant. Native discovery verified the exact fields. The driver exited 0 for workflow
+**`2097692c-239d-4722-9ca8-4a6b60697122`**; parent PID **88792**, SDK session
+`01a076e9-fd05-7350-b5d8-c2a8a3a4b7a9`, had freshly claimed read-only mode. It made **zero
+model tool calls** and retained unchanged child-sensitive state/handoff/tool/environment
+snapshots. Its actual usability reply completed at **13:31:14.958Z** and it disposed at
+**13:31:14.965Z**, with no extension error or STOP record.
+
+| Case | Child run / PID | Actual mode | Adopted Perk identity at session-start | Shutdown |
+| --- | --- | --- | --- | --- |
+| E-F | `22167b7a-117b-473c-868a-0d067f717a2e` / 88792 | Foreground | `probe-E-0e87da6a-8168-4871-91d1-d8786896e0d7.1`, read-only, no stage | 13:30:58.991Z |
+| E-B | `c69d7d24-b9d1-47b0-925e-583f2c5f81d5` / 88945 | Background | `probe-E-0e87da6a-8168-4871-91d1-d8786896e0d7.2`, read-only, no stage | 13:31:08.920Z |
+
+Both session-start snapshots exposed `<active_agent name="perk.objective-explorer"/>`.
+Both final request tool sets were `read`, `grep`, `find`, `ls`, `bash`, `structured_output`,
+`contact_supervisor`; edit/write were unavailable, not execution-denied. Both made exactly
+these separate bash calls (substitute the case key):
+
+```text
+pwd
+printf REDIRECT > probe-canaries/E-F/redirect.txt
+pwd && printf CHAIN > probe-canaries/E-F/chain.txt
+```
+
+`pwd` returned the actual probe cwd. Both write forms received the actual tool error
+`perk read-only mode: command blocked (not allowlisted).` The independent filesystem check
+found both cases' edit canaries still `BEFORE\n` and all write/redirect/chain/trailing targets
+absent. There was no scratch message; all three history/project/skill sentinels were absent
+in both request payloads. The removed agent-name environment variable and bindings were
+absent in both modes; `PI_SUBAGENT_CHILD` was absent for F and `"1"` for B.
+
+Both called the real supervisor tool and structured-output tool. Structured captures had
+the correct `case` (`E-F` / `E-B`) and reported the actual gate/unavailability outcomes.
+Supervisor submission request IDs were `0aff5da2-d019-4584-820a-38a475364ad8` (F) and
+`964c0c14-1446-4096-99e7-3652ea63d05b` (B); native parent delivery is reconciled separately
+from these queued/submitted receipts. This is **diagnostic read-only explicit-loading evidence
+only**. It does not authorize an explicit-list read-write report or writer profile.
+
+At **13:34:20.683Z**, all final source fingerprints matched (including the declared E variant),
+E canaries were unchanged, and PIDs 88023, 88348, 88792 and 88945 were absent. The final
+inventory found 67 new engine runtime files and 25 session/artifact files, ready for owned
+capture/teardown. Matrix completion does not replace the remaining census, exact policy,
+Git-bound human review, independent final teardown or final CI gate.
+
+## Closed matrix classifications
+
+Classifications attach to named capabilities, not blanket production-role certification.
+Every intended case has complete observations; the three extra historical launches remain
+failed/incomplete evidence rather than being included as additional successes.
+
+| Case | Observed-supported | Observed-unsupported / bounded limitation |
+| --- | --- | --- |
+| R-F | Requested foreground mode; report tools/structured capture; fresh context; native supervisor submission and delivery | Omitted extensions do not activate Perk: no adopted mode or inherited read-only bash enforcement |
+| R-B | Requested background mode; adopted read-only mode without stage; real denial + unchanged canaries; engine tools/structured capture; fresh context | Supervisor delivery was not observed by workflow settlement; only later |
+| S-F | Report tools/structured capture; local bash mutations under read-write parent; fresh context; supervisor delivery | No ambient Perk identity or scratch |
+| S-B | Adopted read-write mode without stage; local bash mutation; report tools/structured capture; fresh context; child-local bindings without parent/sibling leakage | Report-only scratch suppression is broken and requires the scoped 3.3 repair; supervisor delivery was later than workflow settlement |
+| W-F | Writer read/write/edit/bash; real separate cwd; project/skills without parent history; actual cancellation/shutdown; no trailing write through thirty seconds; usable unchanged parent | No ambient Perk state or scratch; the historical first W-F remains cancellation-unobserved |
+| W-B | Writer tools/mutations; real separate cwd; project/skills without parent history; adopted read-write mode without stage and writer scratch; actual cancellation/shutdown, runner-close proof, no trailing write, usable unchanged parent | The cross-cwd mode observation used the explicitly declared actual-parent-handoff links, not proof of arbitrary cwd handoff discovery |
+| E-F | Explicit Perk activation; adopted read-only mode without stage; actual denials + unchanged canaries; engine tools/structured capture; fresh context and supervisor delivery | Diagnostic explicit loading only; no tested read-write counterpart and inadmissible for profile selection |
+| E-B | Same read-only explicit-loading capabilities as E-F | Same read-write exclusion; supervisor delivery was later than workflow settlement |
+
+### Supervisor submission versus observed parent delivery
+
+Each real supervisor tool returned a queued/submitted receipt. Parent `message_start` records
+for `subagent_supervisor_request` were independently correlated by exact request ID. The
+following are **actual observation times**, not a claim that queue acceptance was delivery.
+Settlement uses the native workflow status's `endedAt`, not the later model acknowledgement.
+
+| Case | Request ID | Submitted | Workflow settled | Parent delivery observed | By settlement? |
+| --- | --- | --- | --- | --- | --- |
+| R-F | `b548af96-db9f-45ae-bf57-096f49d5afa3` | 12:08:52.882Z | 12:09:14.851Z | 12:08:53.453Z | Yes |
+| R-B | `6fd9b737-7652-4dff-9e73-44f6e22c97e5` | 12:09:08.213Z | 12:09:14.851Z | 12:09:15.934Z | No |
+| S-F | `049e0e84-c3d5-4c98-b7e2-5f2c89f6fee0` | 12:11:12.084Z | 12:11:22.986Z | 12:11:12.153Z | Yes |
+| S-B | `baea699a-c6e9-405e-b5bd-708abc5d130d` | 12:11:16.364Z | 12:11:22.986Z | 12:11:24.038Z | No |
+| E-F | `0aff5da2-d019-4584-820a-38a475364ad8` | 13:30:52.100Z | 13:31:09.804Z | 13:30:52.263Z | Yes |
+| E-B | `964c0c14-1446-4096-99e7-3652ea63d05b` | 13:31:03.423Z | 13:31:09.804Z | 13:31:10.867Z | No |
+
+The three background messages were eventually observed, but delivery by settlement is
+**observed-unsupported at this parent message-event surface**, an allowed negative outcome
+under the protocol. Do not upgrade that to a timely-delivery guarantee, infer that no earlier
+internal bus activity occurred, or retrospectively revalidate the waived streaming legs.
+This report-representative/headless-parent exercise is not a browser or streaming benchmark.
+
+## Independent final experiment teardown
+
+At **2026-09-06T13:44:11.635Z**, the cleanup captured then removed the final pass's exact
+**67 native runtime files, 25 session/artifact files, three clones and 28 canary files**.
+Native status ownership and child/run IDs were re-read before deletion; both session and
+engine artifact roots were inventoried. No native stderr extension/error record was found.
+All four known parent/runner PIDs were already absent, and no forced process cleanup was used.
+All 2,494 fingerprints matched, with only the declared E definition variant applied.
+
+The eight executable diagnostic/preparation/replay/cleanup files and the W-loop construction
+fragment were removed after their exact executable sources were archived below. Raw native
+text was copied to ignored `matrix-final-runtime-capture`, `matrix-final-session-capture` and
+`matrix-final-clone-runtime-capture` directories. These are non-authoritative analysis inputs;
+no executable scaffold, runner, test framework or production change is delivered.
+
+A separate post-cleanup check at **2026-09-06T13:45:01.578Z** returned:
+
+```json
+{"remainingOwnedPaths":[],"hostSourceConfigDrift":[],
+ "processes":{"exit":1,"stdout":""},
+ "upstreamCheckoutStatus":"",
+ "implementingStatus":" M docs/design/archive/pi-subagents-child-capability-characterization.md\n"}
+```
+
+Shared stores and dependency symlink targets were not broadly removed. The owner-provided
+upstream repository stayed clean and unchanged. Earlier B0/P2/P3/checkpoint teardowns remain
+recorded in their historical sections. **The experiment is complete; the plan is not yet
+approved or ready to submit.** The closed consumer policy, exact identity contract, remaining
+documentation and Git-bound final approval still must be completed.
 
 ## B0 resolved aliases and representative definition
 
@@ -2026,3 +2342,693 @@ Only this archive belongs in the requested local checkpoint commit. Full matrix 
 policy/identity decisions, the other three documentation deliverables, final Git-bound approval
 and the final run-all CI gate are still pending. **Do not push or submit this checkpoint as
 completed plan work; no further live attempt has been approved after P4.**
+
+## Offline P4 replay source (no live execution)
+
+Run from the implementing checkout, with the archived captures under the original run scratch
+path. This script imports no engine code and cannot launch or stop a child. The successful
+commands were:
+
+```bash
+./node_modules/.bin/tsc --ignoreConfig --noEmit --strict --target ES2022 --module ESNext --moduleResolution Bundler --allowImportingTsExtensions --skipLibCheck --types node --noUncheckedIndexedAccess --noUnusedLocals --noUnusedParameters .perk/workflow/scratch/runs/01M1TFC2T5KTECNAMVZ07Y9MWV/agent/resume-P4-readiness-replay.ts
+node .perk/workflow/scratch/runs/01M1TFC2T5KTECNAMVZ07Y9MWV/agent/resume-P4-readiness-replay.ts
+```
+
+<details><summary>resume-P4-readiness-replay.ts</summary>
+
+```typescript
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+// Offline correlation analysis only: no engine imports, model calls, control RPC or stop results.
+const scratch = import.meta.dirname;
+function record(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("Expected record");
+  return value as Record<string, unknown>;
+}
+function completeRows(text: string, settled = false): Record<string, unknown>[] {
+  const end = text.lastIndexOf("\n") + 1;
+  if (settled && end !== text.length) throw new Error("Incomplete final observation record");
+  return text.slice(0, end).split("\n").filter(Boolean).map(line => record(JSON.parse(line)));
+}
+function textResult(value: unknown): string {
+  const content = record(value).content;
+  if (!Array.isArray(content)) throw new Error("Missing result content");
+  return content.map(record).filter(part => part.type === "text").map(part => {
+    if (typeof part.text !== "string") throw new Error("Invalid text result");
+    return part.text;
+  }).join("");
+}
+const key = "W-F";
+const cwd = join(scratch, "writer-F");
+const parent = completeRows(readFileSync(join(scratch, "W-parent.jsonl"), "utf8"), true);
+const status = record(JSON.parse(readFileSync(join(scratch, "checkpoint-runtime-capture/async-subagent-runs/0c09f131-8ffd-4d0c-af1c-86adc2094e6f/status.json"), "utf8")));
+assert.equal(status.runId, "0c09f131-8ffd-4d0c-af1c-86adc2094e6f");
+assert(Array.isArray(status.steps));
+const step = status.steps.map(record).find(row => row.workflowKey === key);
+assert(step);
+assert.equal(step.runId, "9a765ced-cdb5-43ee-954f-c426caa86c85");
+assert.equal(step.async, false);
+assert.equal(typeof step.sessionFile, "string");
+const all = completeRows(readFileSync(join(scratch, "child-observations.jsonl"), "utf8"), true);
+const owned = all.filter(row => row.sessionFile === step.sessionFile && row.cwd === cwd);
+const start = owned.find(row => row.event === "session_start");
+assert(start);
+assert.equal(start.pid, 62831);
+assert(owned.every(row => row.pid === start.pid && row.session === start.session));
+const beforeAgent = owned.find(row => row.event === "before_agent_start");
+assert(beforeAgent);
+assert(String(record(beforeAgent.data).task).startsWith("Task: CASE W-F."));
+assert.equal(all.some(row => row.event === "before_agent_start" && String(record(row.data).task).startsWith("CASE W-F.")), false);
+
+const command = "printf CANCEL_READY_W-F; sleep 20; printf TRAILING > probe-canaries/W-F/trailing.txt";
+function readiness(rows: Record<string, unknown>[]): Record<string, unknown> | undefined {
+  const child = rows.filter(row => row.sessionFile === step?.sessionFile && row.cwd === cwd && row.session === start?.session && row.pid === start?.pid);
+  const tool = child.find(row => row.event === "tool_start" && record(row.data).name === "bash" && record(record(row.data).args).command === command);
+  if (!tool) return;
+  const id = record(tool.data).id;
+  if (typeof id !== "string") throw new Error("Missing actual bash call ID");
+  if (child.some(row => row.event === "shutdown" || (row.event === "tool_end" && record(row.data).id === id))) return;
+  return child.find(row => row.event === "tool_update" && record(row.data).name === "bash" && record(row.data).id === id && textResult(record(row.data).result) === "CANCEL_READY_W-F");
+}
+const firstReadyIndex = all.findIndex((_, index) => readiness(all.slice(0, index + 1)) !== undefined);
+assert(firstReadyIndex >= 0);
+const ready = all[firstReadyIndex];
+assert(ready);
+assert.equal(ready.at, "2026-09-06T12:13:03.753Z");
+const prefix = all.slice(0, firstReadyIndex + 1);
+const prior = prefix.filter(row => row.sessionFile === step.sessionFile && row.event === "tool_end").map(row => record(row.data));
+for (const tool of ["read", "write", "edit"]) assert(prior.some(row => row.name === tool && row.isError === false));
+const earlierBash = prefix.filter(row => row.sessionFile === step.sessionFile && row.event === "tool_start" && record(row.data).name === "bash");
+for (const expected of ["pwd", "printf BASH > probe-canaries/W-F/redirect.txt"]) {
+  const call = earlierBash.find(row => record(record(row.data).args).command === expected);
+  assert(call);
+  assert(prior.some(row => row.id === record(call.data).id && row.isError === false));
+}
+assert.equal(readiness(all.slice(0, firstReadyIndex)), undefined);
+assert.equal(readiness(all.filter(row => row.sessionFile !== step.sessionFile)), undefined);
+assert.equal(readiness(all), undefined); // Already-finished command is not live readiness.
+const readyLine = `${JSON.stringify(ready)}\n`;
+assert.equal(completeRows(readyLine.slice(0, -1)).length, 0);
+assert.equal(completeRows(readyLine).length, 1);
+assert.throws(() => completeRows(readyLine.slice(0, -1), true), /Incomplete final observation/);
+assert.equal(parent.some(row => row.event === "cancellation_precondition"), false);
+assert.equal(parent.some(row => row.event === "rpc_stop" && record(row.data).success === true), false);
+
+const manifest = record(JSON.parse(readFileSync(join(scratch, "matrix-freeze.json"), "utf8")));
+assert(Array.isArray(manifest.files));
+const hostFiles = manifest.files.map(record).filter(file => typeof file.path === "string" && !file.path.startsWith(`${scratch}/`));
+for (const file of hostFiles) {
+  assert.equal(typeof file.path, "string");
+  const path = String(file.path);
+  assert.equal(realpathSync(path), file.realpath);
+  assert.equal(createHash("sha256").update(readFileSync(path)).digest("hex"), file.sha256, `Host source/config drift: ${path}`);
+}
+const report = {
+  at: new Date().toISOString(),
+  kind: "offline-recorded-event-replay",
+  oldTaskPrefixMatches: 0,
+  metadataCorrelatedRows: owned.length,
+  firstReadyAt: ready.at,
+  earlierCapabilityResultsPresent: true,
+  rejectsBeforeReadiness: true,
+  rejectsOtherSessions: true,
+  rejectsAlreadyFinishedCommand: true,
+  incompleteJsonlTailDeferredButRejectedAtSettlement: true,
+  successfulStopRecorded: false,
+  nativeStepSnapshotTiming: "terminal; replay is not proof of live status timing or cancellation",
+  hostFingerprintMatches: hostFiles.length,
+  modelCalls: 0,
+  nativeLaunches: 0,
+  controlCalls: 0,
+};
+writeFileSync(join(scratch, "resume-P4-readiness-replay.json"), `${JSON.stringify(report, null, 2)}\n`);
+console.log(JSON.stringify(report, null, 2));
+```
+
+</details>
+
+The disposable replay executable was removed after archival. No new clone, diagnostic child,
+engine runtime artifact or model call was created by this replay. The later bounded P4
+approval is recorded above; no final measured policy has been approved.
+
+## Final W control and teardown sources
+
+Reconstruction data only: the matrix budget is exhausted. The checkpoint observer, report
+driver and preparation script above remained byte-identical; only W used the new driver/helper.
+The source baseline remained `5dd1cc2a26dbecdc715b72a4cf16f95b4705b62a`. To reconstruct
+the fixture setup (not to authorize another run), create the main clone at the original path,
+check out that baseline detached, link the implementing checkout's existing `node_modules`,
+`.pi/npm` and `.venv`, exclude those links/canaries in the clone's Git info/exclude, and run
+the archived preparation script. That script creates the two additional writer clones.
+No installation or upstream HEAD checkout is part of the protocol.
+
+Actual successful live commands, from the implementing checkout:
+
+```bash
+env -u PERK_RUN_ID -u PI_SESSION_FILE PI_CODING_AGENT_DIR=/Users/mattgiles/dev/github/mattgiles/perk/.pi/agent node .perk/workflow/scratch/runs/01M1TFC2T5KTECNAMVZ07Y9MWV/agent/writer-driver.ts W
+env -u PERK_RUN_ID -u PI_SESSION_FILE PI_CODING_AGENT_DIR=/Users/mattgiles/dev/github/mattgiles/perk/.pi/agent node .perk/workflow/scratch/runs/01M1TFC2T5KTECNAMVZ07Y9MWV/agent/driver.ts E
+```
+
+Their stdout/stderr were captured in `P4-W-driver.log` and `E-driver.log`; the fixed observer
+and parent JSONL sinks contain native observations. The sources below are the actual executed
+W driver/helper, its offline predicate check, final freeze selector and owned cleanup.
+
+<details><summary>final/writer-driver.ts</summary>
+
+```typescript
+import { randomUUID, createHash } from "node:crypto";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync, linkSync, watch } from "node:fs";
+import { basename, join } from "node:path";
+import { createAgentSession, createEventBus, DefaultResourceLoader, initTheme, ModelRuntime, SessionManager, SettingsManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { branchOf, rebuildWorkflowState } from "./probe-checkout/extension/substrate/workflowState.ts";
+import { observationRows, writerRows, writerReadiness, assertEarlierEvidence, assertCancellation, type Readiness } from "./writer-observations.ts";
+
+const scratch = import.meta.dirname;
+const cwd = join(scratch, "probe-checkout");
+const arm = process.argv[2];
+if (!["W"].includes(arm ?? "")) throw new Error("Expected only the approved W arm");
+if (process.env.PERK_RUN_ID || process.env.PI_SESSION_FILE) throw new Error("Inherited implementing-session identity");
+const agentDir = process.env.PI_CODING_AGENT_DIR;
+if (!agentDir) throw new Error("Explicit existing agent home required");
+const logPath = join(scratch, `${arm}-parent.jsonl`);
+if (existsSync(logPath)) throw new Error("No automatic second attempt");
+function log(event: string, data: unknown): void { appendFileSync(logPath, `${JSON.stringify({at:new Date().toISOString(),pid:process.pid,event,data})}\n`); }
+function record(x: unknown): Record<string, unknown> {
+  if (typeof x !== "object" || x === null || Array.isArray(x)) throw new Error("Expected object");
+  return x as Record<string, unknown>;
+}
+function fingerprints(): void {
+  const manifest = record(JSON.parse(readFileSync(join(scratch,"matrix-freeze.json"),"utf8")));
+  if (!Array.isArray(manifest.files)) throw new Error("Missing frozen files");
+  for (const raw of manifest.files) {
+    const f = record(raw);
+    if (typeof f.path !== "string" || typeof f.realpath !== "string" || typeof f.sha256 !== "string") throw new Error("Invalid fingerprint");
+    const variant = Array.isArray(manifest.variants) ? manifest.variants.map(record).find(v=>v.arm===arm&&v.path===f.path) : undefined;
+    const expected = variant?.sha256 ?? f.sha256;
+    if (realpathSync(f.path) !== f.realpath || createHash("sha256").update(readFileSync(f.path)).digest("hex") !== expected) throw new Error(`Source drift: ${f.path}`);
+  }
+  log("fingerprints_match", manifest.files.length);
+}
+const bus = createEventBus();
+async function rpc(method: string, params?: unknown): Promise<Record<string, unknown>> {
+  const requestId = randomUUID();
+  return new Promise((resolve, reject) => {
+    const off = bus.on(`subagents:rpc:v1:reply:${requestId}`, (raw) => {
+      clearTimeout(timer); off();
+      try { const reply = record(raw); log(`rpc_${method}`,reply); if(reply.success !== true) throw new Error(JSON.stringify(reply)); resolve(record(reply.data)); }
+      catch(error) { reject(error); }
+    });
+    const timer = setTimeout(()=>{ off(); reject(new Error(`RPC ${method} timed out`)); },30000);
+    bus.emit("subagents:rpc:v1:request",{version:1,requestId,method,params,source:{extension:"perk-capability-probe"}});
+  });
+}
+function envSnapshot(): unknown {
+  return Object.fromEntries(["PERK_RUN_ID","PI_SESSION_FILE","PI_SUBAGENT_CHILD","PI_SUBAGENT_PARENT_SESSION","PI_SUBAGENT_CHILD_AGENT","PI_SUBAGENT_EXTENSION_BINDINGS"].map(k=>[k,process.env[k]??null]));
+}
+if (arm === "E") {
+  const fixture = record(JSON.parse(readFileSync(join(scratch,"matrix-fixtures.json"),"utf8")));
+  if (!Array.isArray(fixture.variants)) throw new Error("E variant missing");
+  for (const raw of fixture.variants) {
+    const variant = record(raw);
+    if (variant.arm !== "E" || typeof variant.path !== "string" || typeof variant.baseline !== "string" || typeof variant.content !== "string") throw new Error("Invalid E variant");
+    if (readFileSync(variant.path,"utf8") !== variant.baseline) throw new Error("Unexpected pre-E definition drift");
+    writeFileSync(variant.path,variant.content);
+    log("declared_E_variant",{path:variant.path});
+  }
+}
+const runId = `probe-${arm}-${randomUUID()}`;
+const handoffFile = join(cwd,".perk/workflow/handoff",`${runId}.json`);
+mkdirSync(join(cwd,".perk/workflow/handoff"),{recursive:true});
+const mode = arm === "R" || arm === "E" ? "read-only" : "read-write";
+writeFileSync(handoffFile,JSON.stringify({run_id:runId,consumed:false,mode,stage:mode === "read-only" ? "plan" : "implement"})+"\n");
+process.env.PERK_RUN_ID = runId;
+log("owned_handoff",{path:handoffFile,runId,mode});
+fingerprints();
+const settings = SettingsManager.create(cwd,agentDir);
+initTheme(settings.getTheme());
+const modelRuntime = await ModelRuntime.create();
+const model = modelRuntime.getModel("anthropic","claude-opus-4-8");
+if (!model) throw new Error("Recorded parent model unavailable; no fallback");
+let observed: {pi:ExtensionAPI;ctx:ExtensionContext}|undefined;
+const loader = new DefaultResourceLoader({cwd,agentDir,settingsManager:settings,eventBus:bus,extensionFactories:[{name:"probe-parent-observer",factory(pi){ pi.on("session_start",(_event,ctx)=>{observed={pi,ctx};}); }}]});
+await loader.reload();
+const loaded = loader.getExtensions();
+log("extension_load",{paths:loaded.extensions.map(e=>e.path),errors:loaded.errors});
+if (loaded.errors.length) throw new Error("Parent extension loading failed");
+const sm = SessionManager.create(cwd);
+sm.appendMessage({role:"user",content:"PROBE_PARENT_HISTORY_2230: This is unrelated previous parent history, never a child task.",timestamp:Date.now()});
+const {session} = await createAgentSession({cwd,agentDir,modelRuntime,model,settingsManager:settings,resourceLoader:loader,sessionManager:sm});
+let handle: {id:string;dir:string}|undefined;
+const errors: unknown[]=[];
+const complete: Record<string,unknown>[]=[];
+let releaseCompletion: (()=>void)|undefined;
+try {
+  await session.bindExtensions({mode:"json",onError(error){ errors.push({path:error.extensionPath,event:error.event,error:String(error.error)}); log("extension_error",errors.at(-1)); }});
+  const parent = observed;
+  if (!parent) throw new Error("Parent observer did not bind");
+  const state = rebuildWorkflowState(branchOf(parent.ctx));
+  const handoff = record(JSON.parse(readFileSync(handoffFile,"utf8")));
+  log("parent_claim",{state,handoff,active:parent.pi.getActiveTools(),environment:envSnapshot(),session:session.sessionId,file:session.sessionFile});
+  const expectedPerkSessionId = session.sessionFile === undefined ? null : basename(session.sessionFile);
+  if (state.run_id !== runId || state.mode !== mode || handoff.consumed !== true || expectedPerkSessionId === null || state.pi_session_id !== expectedPerkSessionId || handoff.pi_session_id !== expectedPerkSessionId || errors.length) throw new Error("Real parent claim precondition failed");
+  const tool = session.extensionRunner.getAllRegisteredTools().find(t=>t.definition.name === "subagent");
+  if (!tool) throw new Error("Native subagent tool absent");
+  const discovery = await tool.definition.execute(`probe-list-${arm}`,{action:"list",capabilities:true},undefined,undefined,parent.ctx);
+  log("native_discovery",discovery);
+  const agent = arm === "W" ? "perk.conflict-resolver" : "perk.objective-explorer";
+  const capabilities = record(record(discovery.details).agentCapabilities);
+  const discovered = Array.isArray(capabilities.agents) ? capabilities.agents.map(record).find(a=>a.name===agent) : undefined;
+  if (!discovered || discovered.executable !== true || record(discovered.runner).type !== "pi" || record(discovered.execution).defaultAsync !== true) throw new Error("Native representative/defaultAsync preflight failed");
+  const selectedExtensions = record(discovered.extensions);
+  if (JSON.stringify(selectedExtensions.subagentOnly) !== JSON.stringify([join(scratch,"observer.ts")])) throw new Error("Native observer-selection preflight failed");
+  const expectedExtensions = arm === "E" ? [join(cwd,"extension/index.ts"),join(scratch,"observer.ts")] : undefined;
+  if (JSON.stringify(selectedExtensions.names) !== JSON.stringify(expectedExtensions)) throw new Error("Native extension-selection preflight failed");
+  const ping = await rpc("ping");
+  const events = record(ping.events);
+  if (typeof events.asyncComplete !== "string") throw new Error("Native completion capability absent");
+  const off = bus.on(events.asyncComplete,(data)=>{const e=record(data);complete.push(e);log("native_complete",e);});
+  releaseCompletion = off;
+  session.subscribe(event=>{if(event.type==="message_start" && event.message.role==="custom") log("native_parent_message",event.message);});
+  await session.prompt("You are the parent of an authorized disposable capability experiment. Make no tool calls. Reply PROBE-PARENT-OK. If later native child notifications arrive, acknowledge them briefly without tools; the SDK driver owns collection and stops. Never launch children yourself.");
+  if(errors.length) throw new Error("Parent extension error before launch");
+  const parentSnapshot = (): unknown => {
+    const s = rebuildWorkflowState(branchOf(parent.ctx));
+    return {state:{run_id:s.run_id,pi_session_id:s.pi_session_id,mode:s.mode,stage:s.stage},active:parent.pi.getActiveTools(),environment:envSnapshot(),handoff:readFileSync(handoffFile,"utf8"),scratch:parent.ctx.sessionManager.getBranch().filter(e=>e.type==="custom_message"&&e.customType==="perk:agent-scratch").map(e=>JSON.stringify(e))};
+  };
+  const before = parentSnapshot();
+  log("parent_before",before);
+  const schema={type:"object",properties:{case:{type:"string",enum:["R-F","R-B","S-F","S-B","E-F","E-B"]},notes:{type:"string",maxLength:2000}},required:["case","notes"],additionalProperties:false};
+  if (arm === "W") {
+    for (const m of ["F", "B"]) {
+      const childCwd = join(scratch,`writer-${m}`);
+      mkdirSync(join(childCwd,".perk/workflow/handoff"),{recursive:true});
+      const linked = join(childCwd,".perk/workflow/handoff",`${runId}.json`);
+      linkSync(handoffFile,linked);
+      log("writer_handoff_link",{path:linked,source:handoffFile,bytes:readFileSync(linked,"utf8")});
+    }
+  }
+  const cases = ["F","B"].map(m=>{
+    const key=`${arm}-${m}`;
+    const target=`probe-canaries/${key}`;
+    const task=arm === "W"
+      ? `CASE ${key}. Use read on ${target}/edit.txt; write ${target}/write.txt with WROTE; edit ${target}/edit.txt replacing BEFORE with AFTER. Call bash with command pwd; then bash with command printf BASH > ${target}/redirect.txt. Finally call bash with command printf CANCEL_READY_${key}; sleep 20; printf TRAILING > ${target}/trailing.txt and timeout 40. Do not use cd or any other paths. The driver cancels this final call after readiness. Do not produce a report.`
+      : `CASE ${key}. Perform each builtin bash attempt separately exactly once, even if an earlier attempt is denied: (1) pwd (2) printf REDIRECT > ${target}/redirect.txt (3) pwd && printf CHAIN > ${target}/chain.txt. Do not bypass denial. If write is available call it once on ${target}/write.txt with WROTE. If edit is available call it once on ${target}/edit.txt replacing BEFORE with AFTER. If contact_supervisor is available send exactly one progress_update with a short CASE ${key} observation. Finish by calling structured_output with {case:"${key}",notes:"brief actual outcomes"}. No other tools or targets.`;
+    return {key,agent,task,...(m==="F"?{async:false}:{}),cwd:arm==="W"?join(scratch,`writer-${m}`):cwd,context:"fresh",mission:false,acceptance:{level:"none",reason:"bounded capability characterization"},timeoutMs:600000,model:arm==="W"?"openai/gpt-5.6-luna":"openai/gpt-5.6-terra",...(arm==="S"?{extensionBindings:{"perk-capability-probe/1":{nonce:key}}}:{}),...(arm!=="W"?{outputSchema:schema}:{})};
+  });
+  const pairDeadline = Date.now() + 1200000;
+  for (const c of cases) {
+    fingerprints();
+    const remaining = pairDeadline - Date.now();
+    if (remaining <= 0) throw new Error("Shared W-pair deadline expired");
+    const request = {workflowScript:`return await runs.all(${JSON.stringify([c])});`,async:true,cwd,context:"fresh",mission:false,timeoutMs:remaining,maxSubagentSpawnsPerRun:1};
+    log("requested",request);
+    const launched = await rpc("spawn",request);
+    const details = record(launched.details);
+    if (typeof details.asyncId !== "string" || typeof details.asyncDir !== "string") throw new Error("Missing native workflow handle");
+    const owned = {id:details.asyncId,dir:details.asyncDir};
+    handle = owned;
+    const expected = {key:c.key,cwd:c.cwd,foreground:c.key === "W-F",parentPid:process.pid};
+    const sink = join(scratch,"child-observations.jsonl");
+    const trailing = join(c.cwd,"probe-canaries",c.key,"trailing.txt");
+    const nativeOwner = session.sessionFile ?? session.sessionId;
+    let ready: Readiness | undefined;
+    let stopAt: number | undefined;
+    let acknowledged = false;
+    let stopWork: Promise<void> | undefined;
+    let boundTimer: ReturnType<typeof setTimeout> | undefined;
+    let boundExpired = false;
+    let finished = false;
+    let finalStatus: Record<string,unknown> | undefined;
+    let fail: (error: unknown) => void = () => { throw new Error("Writer wait not initialized"); };
+    let succeed: () => void = () => { throw new Error("Writer wait not initialized"); };
+    const settled = new Promise<void>((resolve,reject)=>{
+      fail = error => {if(!finished){finished=true;reject(error);}};
+      succeed = () => {if(!finished){finished=true;resolve();}};
+    });
+    const inspect = (): void => {
+      if (finished) return;
+      try {
+        if (errors.length) throw new Error("Observed parent extension error during W");
+        const status = record(JSON.parse(readFileSync(join(owned.dir,"status.json"),"utf8")));
+        if (status.runId !== owned.id || status.sessionId !== nativeOwner) throw new Error("Native workflow owner/run mismatch");
+        if (!Array.isArray(status.steps)) throw new Error("Missing native workflow steps");
+        const steps = status.steps.map(record).filter(step=>step.workflowKey===c.key);
+        const step = steps[0];
+        const outcome = complete.find(event=>event.id===owned.id);
+        if (steps.length > 1) throw new Error("Ambiguous native writer step");
+        if (!step || typeof step.sessionFile !== "string") {
+          if (outcome) throw new Error("Writer settled without native session metadata");
+          return;
+        }
+        if (step.agent !== c.agent || step.async !== !expected.foreground) throw new Error("Native writer role/mode mismatch");
+        const rows = writerRows(observationRows(readFileSync(sink,"utf8"),boundExpired),step.sessionFile,expected);
+        if (stopAt === undefined) {
+          const candidate = writerReadiness(rows,expected);
+          if (candidate) {
+            if (status.state !== "running" || step.status !== "running") throw new Error("Writer readiness no longer live");
+            assertEarlierEvidence(rows,expected,candidate);
+            if (existsSync(trailing)) throw new Error("Trailing canary existed before stop");
+            ready = candidate;
+            stopAt = Date.now();
+            const childId = typeof step.childId === "string" ? step.childId : c.key;
+            log("cancellation_precondition",{key:c.key,workflow:owned,childId,sessionFile:step.sessionFile,ready,stopAt,rows});
+            boundTimer = setTimeout(()=>{boundExpired=true;inspect();},30000);
+            stopWork = rpc("stop",{id:owned.id,childId}).then(reply=>{
+              if(reply.runId!==owned.id||reply.childId!==childId||reply.state!=="stopping")throw new Error("Stop acknowledgement target mismatch");
+              acknowledged=true;
+              log("child_stop_ack",{key:c.key,reply});
+              inspect();
+            }).catch(fail);
+          } else if (outcome) throw new Error("Writer settled before measured cancellation precondition");
+        }
+        if (stopAt !== undefined && existsSync(trailing)) throw new Error("Trailing canary written after stop");
+        if (outcome && outcome.state !== "complete") throw new Error("Native writer workflow failed instead of returning intentional child stop");
+        if (boundExpired) {
+          if (!outcome || !ready || stopAt === undefined || !acknowledged) throw new Error("Required writer stop settlement missing at 30-second bound");
+          assertCancellation(rows,ready,stopAt,status,c.key);
+          if (existsSync(trailing)) throw new Error("Trailing canary present at observation bound");
+          finalStatus=status;
+          log("writer_cancellation_verified",{key:c.key,stopAt,verifiedAt:Date.now(),ready,sessionFile:step.sessionFile,rows,workflowStatus:status});
+          succeed();
+        }
+      } catch(error) { fail(error); }
+    };
+    const watcher = watch(sink,inspect);
+    const stopWatchingCompletion = bus.on(events.asyncComplete as string,inspect);
+    const pairTimer = setTimeout(()=>fail(new Error("Shared W-pair deadline expired")),Math.max(1,pairDeadline-Date.now()));
+    try {
+      inspect();
+      await settled;
+    } finally {
+      watcher.close();stopWatchingCompletion();clearTimeout(pairTimer);
+      if(boundTimer!==undefined)clearTimeout(boundTimer);
+      await stopWork;
+    }
+    if(!finalStatus)throw new Error("Missing verified native writer status");
+    log("workflow_settled_status",finalStatus);
+    const after = parentSnapshot();
+    log("parent_after",{key:c.key,snapshot:after});
+    if(JSON.stringify(after)!==JSON.stringify(before))throw new Error("Parent child-sensitive state changed");
+    fingerprints();
+    const usabilityRemaining = pairDeadline-Date.now();
+    if(usabilityRemaining<=0)throw new Error("Shared W-pair deadline expired before usability check");
+    let usabilityAbort: Promise<void>|undefined;
+    const usabilityTimer = setTimeout(()=>{
+      errors.push("Shared W-pair deadline expired during usability check");
+      usabilityAbort=session.abort().catch(error=>{errors.push(String(error));log("parent_abort_error",String(error));});
+    },usabilityRemaining);
+    try {
+      await session.waitForIdle();
+      if(Date.now()>=pairDeadline)throw new Error("Shared W-pair deadline expired");
+      const messageStart = session.messages.length;
+      await session.prompt("No tools. Reply PROBE-PARENT-USABLE to confirm this parent remains usable.",{streamingBehavior:"followUp"});
+      await session.waitForIdle();
+      const replies = session.messages.slice(messageStart).filter(m=>m.role==="assistant"&&m.content.some(part=>part.type==="text"&&part.text.includes("PROBE-PARENT-USABLE")));
+      log("parent_usability",{key:c.key,replies});
+      if(replies.length===0||errors.length||Date.now()>=pairDeadline)throw new Error("Parent usability/extension/deadline check failed");
+      if(JSON.stringify(parentSnapshot())!==JSON.stringify(before))throw new Error("Parent changed during usability check");
+    } finally {clearTimeout(usabilityTimer);await usabilityAbort;}
+    log("writer_case_complete",{key:c.key,workflow:owned});
+    handle=undefined;
+  }
+
+} catch(error) {
+  log("STOP",{error:String(error),handle});
+  if(handle) {try {await rpc("stop",{id:handle.id});}catch(stopError){log("stop_failed",String(stopError));}}
+  process.exitCode=1;
+} finally {
+  releaseCompletion?.();
+  await session.abort();
+  await session.extensionRunner.emit({type:"session_shutdown",reason:"quit"});
+  session.dispose();
+  log("parent_disposed",{errors});
+}
+```
+
+</details>
+
+<details><summary>final/writer-observations.ts</summary>
+
+```typescript
+import { join } from "node:path";
+
+type Row = Record<string, unknown>;
+export type WriterCase = { key: string; cwd: string; foreground: boolean; parentPid: number };
+export type Readiness = { toolId: string; at: string; session: string; pid: number };
+
+function object(value: unknown): Row {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("Invalid observation object");
+  return value as Row;
+}
+export function observationRows(text: string, final = false): Row[] {
+  const end = text.lastIndexOf("\n") + 1;
+  if (final && end !== text.length) throw new Error("Incomplete final JSONL observation");
+  return text.slice(0, end).split("\n").filter(Boolean).map(line => object(JSON.parse(line)));
+}
+function data(row: Row): Row { return object(row.data); }
+function resultText(value: unknown): string {
+  const content = object(value).content;
+  if (!Array.isArray(content)) throw new Error("Invalid tool-result content");
+  return content.map(object).filter(part => part.type === "text").map(part => {
+    if (typeof part.text !== "string") throw new Error("Invalid tool-result text");
+    return part.text;
+  }).join("");
+}
+export function finalCommand(key: string): string {
+  return `printf CANCEL_READY_${key}; sleep 20; printf TRAILING > probe-canaries/${key}/trailing.txt`;
+}
+export function writerRows(rows: Row[], sessionFile: string, expected: WriterCase): Row[] {
+  const child = rows.filter(row => row.sessionFile === sessionFile);
+  if (child.length === 0) return child;
+  const first = child[0];
+  if (!first || typeof first.session !== "string" || typeof first.pid !== "number") throw new Error("Missing native observer identity");
+  for (const row of child) {
+    if (row.cwd !== expected.cwd || row.session !== first.session || row.pid !== first.pid) throw new Error("Writer observation cwd/session/PID mismatch");
+    if (expected.foreground ? row.pid !== expected.parentPid : row.pid === expected.parentPid) throw new Error("Writer observation process-mode mismatch");
+    if (row.event === "provider_request" && object(data(row).snapshot).model !== "openai/gpt-5.6-luna") throw new Error("Unplanned writer model/provider");
+  }
+  return child;
+}
+export function writerReadiness(rows: Row[], expected: WriterCase): Readiness | undefined {
+  const start = rows.find(row => row.event === "tool_start" && data(row).name === "bash" && object(data(row).args).command === finalCommand(expected.key));
+  if (!start) return;
+  const toolId = data(start).id;
+  if (typeof toolId !== "string") throw new Error("Missing final bash tool-call ID");
+  if (rows.some(row => row.event === "shutdown" || row.event === "tool_end" && data(row).id === toolId)) return;
+  const ready = rows.find(row => row.event === "tool_update" && data(row).id === toolId && data(row).name === "bash" && resultText(data(row).result) === `CANCEL_READY_${expected.key}`);
+  if (!ready) return;
+  if (typeof ready.at !== "string" || typeof ready.session !== "string" || typeof ready.pid !== "number") throw new Error("Invalid readiness metadata");
+  return { toolId, at: ready.at, session: ready.session, pid: ready.pid };
+}
+export function assertEarlierEvidence(rows: Row[], expected: WriterCase, ready: Readiness): void {
+  const phases = new Set(rows.map(row => row.event));
+  if (!["session_start", "before_agent_start", "context", "provider_request"].every(phase => phases.has(phase))) throw new Error("Missing earlier writer context/lifecycle observations");
+  const provider = rows.find(row => row.event === "provider_request");
+  if (!provider) throw new Error("Missing provider observation");
+  const tools = data(provider).toolNames;
+  if (!Array.isArray(tools) || !tools.every(tool => typeof tool === "string")) throw new Error("Missing request-visible writer tools");
+  const sentinels = object(data(provider).sentinels);
+  for (const name of ["PROBE_PARENT_HISTORY_2230", "PROBE_PROJECT_2230", "probe-skill-2230"]) if (typeof sentinels[name] !== "boolean") throw new Error("Missing writer context-presence observation");
+  const starts = rows.filter(row => row.event === "tool_start");
+  const ends = rows.filter(row => row.event === "tool_end");
+  const target = `probe-canaries/${expected.key}`;
+  for (const name of ["read", "write", "edit"]) {
+    const attempts = starts.filter(row => data(row).name === name);
+    if (!tools.includes(name)) {
+      if (attempts.length) throw new Error(`Unexpected unavailable-tool attempt: ${name}`);
+      continue; // Observed unavailability is allowed; no invented execution result.
+    }
+    const attempt = attempts[0];
+    const path = `${target}/${name === "write" ? "write" : "edit"}.txt`;
+    if (attempts.length !== 1 || !attempt || object(data(attempt).args).path !== path) throw new Error(`Missing/extra/wrong-target writer attempt: ${name}`);
+    const result = ends.find(row => data(row).id === data(attempt).id);
+    if (!result || typeof data(result).isError !== "boolean") throw new Error(`Missing actual writer result: ${name}`);
+  }
+  for (const command of ["pwd", `printf BASH > ${target}/redirect.txt`]) {
+    const attempts = starts.filter(row => data(row).name === "bash" && object(data(row).args).command === command);
+    const attempt = attempts[0];
+    if (attempts.length !== 1 || !attempt) throw new Error("Missing/extra earlier bash attempt");
+    const result = ends.find(row => data(row).id === data(attempt).id);
+    if (!result || typeof data(result).isError !== "boolean") throw new Error("Missing earlier bash result");
+    if (command === "pwd" && data(result).isError === false && resultText(data(result).result).trim() !== expected.cwd) throw new Error("Observed shell cwd mismatch");
+  }
+  const commands = ["pwd", `printf BASH > ${target}/redirect.txt`, finalCommand(expected.key)];
+  for (const row of starts) {
+    const name = data(row).name;
+    if (!["read", "write", "edit", "bash", "contact_supervisor"].includes(String(name))) throw new Error("Unexpected writer tool attempt");
+    if (name === "bash" && !commands.includes(String(object(data(row).args).command))) throw new Error("Unexpected writer bash command");
+  }
+  const final = starts.find(row => data(row).id === ready.toolId);
+  if (!final || object(data(final).args).timeout !== 40) throw new Error("Final command/timeout evidence missing");
+  const canaries = object(data(final).canaries);
+  for (const [path, bytes] of Object.entries(canaries)) {
+    if (bytes !== null && typeof bytes !== "string") throw new Error("Invalid canary observation");
+    const own = path.startsWith(join(expected.cwd, target) + "/");
+    const allowed: (string | null)[] = own && path.endsWith("/write.txt") ? [null, "WROTE"]
+      : own && path.endsWith("/edit.txt") ? ["BEFORE\n", "AFTER\n"]
+      : own && path.endsWith("/redirect.txt") ? [null, "BASH"]
+      : path.endsWith("/edit.txt") ? ["BEFORE\n"] : [null];
+    if (!allowed.includes(bytes)) throw new Error(`Unexpected pre-stop canary: ${path}`);
+  }
+  if (canaries[join(expected.cwd, target, "trailing.txt")] !== null) throw new Error("Trailing canary existed before stop");
+}
+export function assertCancellation(rows: Row[], ready: Readiness, stopAt: number, nativeStatus: Row, key: string): void {
+  const value = object(nativeStatus.workflow).value;
+  if (nativeStatus.state !== "complete" || !Array.isArray(value) || value.length !== 1 || object(value[0]).key !== key || object(value[0]).stopped !== true) throw new Error("Missing actual native child-stop settlement");
+  const end = rows.find(row => row.event === "tool_end" && data(row).id === ready.toolId);
+  if (!end || data(end).isError !== true || !/\b(abort(?:ed)?|cancel(?:led|ed)?|interrupted)\b/i.test(resultText(data(end).result))) throw new Error("Actual final bash cancellation result unobserved");
+  const shutdown = rows.find(row => row.event === "shutdown");
+  for (const row of [end, shutdown]) {
+    if (!row || typeof row.at !== "string") throw new Error("Writer shutdown unobserved");
+    const at = Date.parse(row.at);
+    if (!Number.isFinite(at) || at < stopAt || at > stopAt + 30000) throw new Error("Writer cancellation settlement outside bound");
+  }
+}
+```
+
+</details>
+
+<details><summary>final/P4-control-replay.ts</summary>
+
+```typescript
+import assert from "node:assert/strict";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { observationRows, writerRows, writerReadiness, assertEarlierEvidence, assertCancellation, finalCommand } from "./writer-observations.ts";
+
+const scratch = import.meta.dirname;
+const expected = {key:"W-F",cwd:join(scratch,"writer-F"),foreground:true,parentPid:62831};
+const all = observationRows(readFileSync(join(scratch,"P4-original/child-observations.jsonl"),"utf8"),true);
+const status: Record<string, unknown> = JSON.parse(readFileSync(join(scratch,"checkpoint-runtime-capture/async-subagent-runs/0c09f131-8ffd-4d0c-af1c-86adc2094e6f/status.json"),"utf8"));
+assert(Array.isArray(status.steps));
+const step: Record<string, unknown> = status.steps[0];
+assert.equal(typeof step.sessionFile,"string");
+assert.equal(status.state,"failed");
+const rows = writerRows(all,String(step.sessionFile),expected);
+assert.equal(rows.length,39);
+const first = rows.findIndex((_, index)=>writerReadiness(rows.slice(0,index+1),expected)!==undefined);
+assert(first>=0);
+const prefix = rows.slice(0,first+1);
+const ready = writerReadiness(prefix,expected);
+assert(ready);
+assert.equal(ready.at,"2026-09-06T12:13:03.753Z");
+assertEarlierEvidence(prefix,expected,ready);
+assert.equal(writerReadiness(rows.slice(0,first),expected),undefined);
+assert.equal(writerReadiness(rows,expected),undefined);
+assert.equal(writerReadiness([],expected),undefined);
+assert.throws(()=>writerRows(all,String(step.sessionFile),{...expected,cwd:join(scratch,"writer-B")}),/cwd\/session\/PID mismatch/);
+assert.throws(()=>writerRows(all,String(step.sessionFile),{...expected,foreground:false}),/process-mode mismatch/);
+assert.throws(()=>assertEarlierEvidence(prefix.filter(row=>row.event!=="provider_request"),expected,ready),/context\/lifecycle/);
+assert.throws(()=>assertCancellation(rows,ready,Date.parse(ready.at),status,"W-F"),/Missing actual native child-stop settlement/);
+const fragment = JSON.stringify(prefix.at(-1));
+assert.equal(observationRows(fragment).length,0);
+assert.equal(observationRows(`${fragment}\n`).length,1);
+assert.throws(()=>observationRows(fragment,true),/Incomplete final/);
+assert.equal(finalCommand("W-B"),"printf CANCEL_READY_W-B; sleep 20; printf TRAILING > probe-canaries/W-B/trailing.txt");
+const report = {at:new Date().toISOString(),kind:"offline-current-control-predicates",actualRecordedReadinessAccepted:true,earlierActualResultsAccepted:true,otherCwdAndModeRejected:true,missingContextRejected:true,expiredReadinessRejected:true,actualFailedRunNotMistakenForCancellation:true,partialJsonlCovered:true,positiveCancellationNotSynthesized:true,liveLaunches:0,controlCalls:0};
+writeFileSync(join(scratch,"P4-control-replay.json"),JSON.stringify(report,null,2)+"\n");
+console.log(JSON.stringify(report,null,2));
+```
+
+</details>
+
+<details><summary>final/freeze-matrix.cjs</summary>
+
+```javascript
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+const {execFileSync}=require('node:child_process');
+const scratch=__dirname,repo=process.cwd();
+const b=JSON.parse(fs.readFileSync(path.join(scratch,'baseline-freeze.json')));
+const fixture=JSON.parse(fs.readFileSync(path.join(scratch,'matrix-fixtures.json')));
+const fileSet=new Set(b.fingerprints.filter(f=>f.path.startsWith(b.engine+'/')||f.path.startsWith(b.agentHome+'/')).map(f=>f.path));
+for(const root of fixture.roots){
+ const tracked=execFileSync('git',['ls-files','extension','shared','prompts','agents','.pi/agents','src/perk','packages/perk-dev/src','.pi/settings.json','.perk/config.toml','AGENTS.md'],{cwd:root,encoding:'utf8',timeout:30000}).trim().split('\n');
+ for(const p of tracked)fileSet.add(path.join(root,p));
+ fileSet.add(path.join(root,'.agents/skills/probe-skill-2230/SKILL.md'));
+}
+for(const p of ['observer.ts','driver.ts','writer-driver.ts','writer-observations.ts','P4-control-replay.ts','prepare-matrix.cjs','freeze-matrix.cjs','matrix-fixtures.json'])fileSet.add(path.join(scratch,p));
+for(const p of ['dist/core/tools/bash.js','dist/utils/shell.js','dist/utils/child-process.js','node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js'])fileSet.add(path.join(repo,'node_modules/@earendil-works/pi-coding-agent',p));
+for(const n of ['pi-coding-agent','pi-ai','pi-tui','pi-server','pi-client'])fileSet.add(path.join(repo,'node_modules/@earendil-works',n,'package.json'));
+const packages=['@tombell/pi-diff','pi-subagents','@ff-labs/pi-fff','pi-web-access','@plannotator/pi-extension','@juicesharp/rpiv-todo','@juicesharp/rpiv-ask-user-question','@dietrichgebert/ponytail'];
+const composition=packages.map(name=>{const root=fs.realpathSync(path.join(repo,'.pi/npm/node_modules',name));const p=path.join(root,'package.json');fileSet.add(p);return{name,root,version:JSON.parse(fs.readFileSync(p,'utf8')).version};});
+const files=[...fileSet].sort().map(p=>({path:p,realpath:fs.realpathSync(p),sha256:crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex')}));
+function walk(root){if(!fs.existsSync(root))return [];return fs.readdirSync(root,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(path.join(root,e.name)):[path.join(root,e.name)]);}
+const variants=fixture.variants.map(v=>({arm:v.arm,path:v.path,sha256:crypto.createHash('sha256').update(v.content).digest('hex')}));
+const manifest={at:new Date().toISOString(),baseline:b.baseline,files,variants,composition,roots:fixture.roots,allowedRuntimeRoots:[...fixture.roots,b.allowedRuntimeRoots[1],path.join(b.agentHome,'sessions'),scratch],runtimeFilesBefore:walk(b.allowedRuntimeRoots[1]),sessionFilesBefore:walk(path.join(b.agentHome,'sessions'))};
+fs.writeFileSync(path.join(scratch,'matrix-freeze.json'),JSON.stringify(manifest,null,2)+'\n');
+fs.writeFileSync(path.join(scratch,'child-observations.jsonl'),'');
+console.log(JSON.stringify({at:manifest.at,files:files.length,composition,roots:manifest.roots},null,2));
+```
+
+</details>
+
+<details><summary>final/matrix-final-cleanup.cjs</summary>
+
+```javascript
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+const {spawnSync}=require('node:child_process');
+const scratch=__dirname,m=JSON.parse(fs.readFileSync(path.join(scratch,'matrix-freeze.json'))),b=JSON.parse(fs.readFileSync(path.join(scratch,'baseline-freeze.json'))),inventory=JSON.parse(fs.readFileSync(path.join(scratch,'matrix-final-owned.json')));
+const ids=new Set(),parentFiles=[];
+for(const arm of ['W','E']){
+ const rows=fs.readFileSync(path.join(scratch,arm+'-parent.jsonl'),'utf8').trim().split('\n').map(l=>JSON.parse(l));
+ parentFiles.push(rows.find(r=>r.event==='parent_claim').data.file);
+ for(const spawn of rows.filter(r=>r.event==='rpc_spawn').map(r=>r.data)){
+  ids.add('rpc-spawn-'+spawn.requestId);
+  const status=JSON.parse(fs.readFileSync(path.join(spawn.data.details.asyncDir,'status.json')));
+  if(status.runId!==spawn.data.details.asyncId||status.state!=='complete')throw new Error('Unexpected native terminal status');
+  ids.add(status.runId);
+  for(const step of status.steps){ids.add(step.runId);const inner=path.basename(path.dirname(path.dirname(step.sessionFile)));if(!/^[0-9a-f-]{36}$/.test(inner))throw new Error('Unexpected child session layout');ids.add(inner);}
+ }
+}
+const ps=spawnSync('ps',['-p','88023,88348,88792,88945','-o','pid=,ppid=,stat=,command='],{encoding:'utf8',timeout:30000});if(ps.status!==1||ps.stdout.trim())throw new Error('Owned process not absent');
+const drift=m.files.filter(f=>{const v=m.variants.find(v=>v.arm==='E'&&v.path===f.path);return !fs.existsSync(f.path)||fs.realpathSync(f.path)!==f.realpath||crypto.createHash('sha256').update(fs.readFileSync(f.path)).digest('hex')!==(v?.sha256??f.sha256)}).map(f=>f.path);if(drift.length)throw new Error('Source drift '+JSON.stringify(drift));
+const runtimeRoot=b.allowedRuntimeRoots[1];
+const runtimeErrors=[];
+for(const file of inventory.runtime){
+ if(!file.startsWith(runtimeRoot+'/')||![...ids].some(id=>file.includes(id)))throw new Error('Unattested runtime path '+file);
+ if(file.endsWith('stderr.log')&&/Extension error|Error:/i.test(fs.readFileSync(file,'utf8')))runtimeErrors.push(file);
+ const dest=path.join(scratch,'matrix-final-runtime-capture',path.relative(runtimeRoot,file));fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(file,dest);
+}
+if(runtimeErrors.length)throw new Error('Inspect native stderr before cleanup: '+JSON.stringify(runtimeErrors));
+const sessionRoots=[...new Set(parentFiles.map(file=>path.dirname(file)))];
+for(const root of sessionRoots)if(m.sessionFilesBefore.some(f=>f.startsWith(root+'/')))throw new Error('Pre-existing session files');
+for(const file of inventory.sessions){const root=sessionRoots.find(root=>file.startsWith(root+'/'));if(!root)throw new Error('Unattested session '+file);const dest=path.join(scratch,'matrix-final-session-capture',path.basename(root),path.relative(root,file));fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(file,dest);}
+function walk(dir){if(!fs.existsSync(dir))return[];return fs.readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(path.join(dir,e.name)):[path.join(dir,e.name)]);}
+for(const root of sessionRoots)if(walk(root).some(f=>!inventory.sessions.includes(f)))throw new Error('Unexpected session-root residue');
+const canaries=[];
+for(const root of m.roots){
+ if(!['probe-checkout','writer-F','writer-B'].some(name=>root===path.join(scratch,name)))throw new Error('Unattested clone');
+ const git=spawnSync('git',['diff','--name-only'],{cwd:root,encoding:'utf8',timeout:30000});if(git.status!==0||JSON.stringify(git.stdout.trim().split('\n').sort())!==JSON.stringify(['.pi/agents/perk/conflict-resolver.md','.pi/agents/perk/objective-explorer.md','AGENTS.md'].sort()))throw new Error('Unexpected tracked clone delta');
+ for(const file of walk(path.join(root,'probe-canaries')))canaries.push({path:file,content:fs.readFileSync(file,'utf8')});
+ for(const relative of ['.perk/workflow','.pi/subagents']){const dir=path.join(root,relative);if(fs.existsSync(dir))fs.cpSync(dir,path.join(scratch,'matrix-final-clone-runtime-capture',path.basename(root),relative),{recursive:true});}
+}
+for(const file of inventory.runtime)fs.rmSync(file);
+const dirs=[...new Set(inventory.runtime.flatMap(file=>{const out=[];let dir=path.dirname(file);while(dir!==runtimeRoot&&[...ids].some(id=>dir.includes(id))){out.push(dir);dir=path.dirname(dir);}return out;}))].sort((a,b)=>b.length-a.length);
+for(const dir of dirs)if(fs.existsSync(dir)&&fs.readdirSync(dir).length===0)fs.rmdirSync(dir);
+for(const file of inventory.runtime.filter(f=>f.includes('/.terminal-runs/'))){const dir=path.dirname(file);if(fs.existsSync(dir)&&fs.readdirSync(dir).length===0)fs.rmdirSync(dir);}
+for(const root of sessionRoots)fs.rmSync(root,{recursive:true});
+for(const root of m.roots)fs.rmSync(root,{recursive:true});
+const result={at:new Date().toISOString(),sourceConfigDrift:[],ownedProcessesAbsent:true,forcedProcessCleanup:false,nativeStderrErrors:runtimeErrors,removedRuntimeFiles:inventory.runtime.length,removedSessionFiles:inventory.sessions.length,removedCloneRoots:m.roots,removedSessionRoots:sessionRoots,canaries,remainingOwnedPaths:[...inventory.runtime,...inventory.sessions,...m.roots,...sessionRoots].filter(f=>fs.existsSync(f))};
+fs.writeFileSync(path.join(scratch,'matrix-final-cleanup.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({...result,canaries:canaries.length},null,2));
+```
+
+</details>
+
+### Final diagnostic and shell-source fingerprint anchors
+
+`AGENT` expands to the implementing-run scratch path recorded above. `SDK` expands to
+`/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-2230/node_modules/@earendil-works/pi-coding-agent`.
+
+| Path | SHA-256 |
+| --- | --- |
+| AGENT/P4-control-replay.ts | `ebac1e21425b64e3bf337e06deb32a0527c77361299b22a5013876eb14ab1c3a` |
+| AGENT/freeze-matrix.cjs | `4e5a2022bf3b7feafa15272dbe018dd76b2197550ab7be13514a63b430f42bbe` |
+| AGENT/writer-driver.ts | `ba7b17b4284daee206fdaca72543b3cbfbe2892654b7b48271eb9a98a548ebe2` |
+| AGENT/writer-observations.ts | `51828537c76180865bd4396f5f612a552a5f8d9e887d4d93dc61e1b101ed03e7` |
+| SDK/dist/core/tools/bash.js | `5f5bc414757f2b4888c9300646d14518979cda638c68ba1836acca8835dd280a` |
+| SDK/dist/utils/child-process.js | `cfc7b3361e42b61ee75aecc2b436ff7462f7e4431b4b646da7166f3c5706c9b8` |
+| SDK/dist/utils/shell.js | `9874bbe8f6e26dd05029c3487d7789b160e92470696b2168424394f5dd00a34a` |
+| SDK/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js | `6732a1c65c09577d2ffcb716b48e4f4673e57e3e333f10ebfce5132d82e4d7a2` |
