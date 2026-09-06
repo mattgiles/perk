@@ -846,10 +846,92 @@ D2 remains not passed; N/U and submission remain blocked pending owner dispositi
 The owner subsequently **prohibited upstream filing** and requested a local report instead.
 The report was written to `/Users/mattgiles/Desktop/pi-subagents-bugreport.md`; nothing was
 published. The owner asked whether a temporary in-repo `FIXME` compatibility defense is
-reasonable. A narrowly proof-gated adapter correction is being considered, not implemented:
+reasonable. At that checkpoint a narrowly proof-gated adapter correction was being considered,
+not implemented:
 correlate the exact failed child, require recovered-error → successful structured capture →
 settlement evidence without later failures, validate against the original requested schema,
 and retain the raw engine failure with an explicit recovery diagnostic. Missing or ambiguous
 proof must preserve failure. This would require an explicit narrow amendment to the current
 no-failed-report-recovery boundary; it would not recover original D's missing report, change
 reviewer permissions/models, patch node_modules, or launch another wave.
+
+### Proof-gated compatibility guard — offline verification, 2026-09-06
+
+The owner approved the narrow in-repo defense, and the full amendment was written to plan #2226
+and read back before implementation. Upstream filing remains prohibited. The initial checkpoint
+`fa00c7a3` was explicitly unverified. The hardened implementation and regression coverage are
+committed at **`7db3aa15c35785f5d64e1083dfb0fdfe4125ef5d`**.
+
+The exception is confined to the adversarial/draft human-review adapters. It requires the
+registered subagent source path, pi-subagents 0.65.1, and these exact source fingerprints at
+launch and collection:
+
+| Source | SHA-256 |
+|---|---|
+| `src/runs/background/run-child-session.ts` | `86f302832a21afdb0e79446d20d58be242d23c09f3d425bf4db254a09c10c940` |
+| `src/runs/background/subagent-runner.ts` | `0468a7895fce4e7b54c7cb6616abb711c1860c531c103b963869c04072bf3a72` |
+| `src/runs/shared/structured-output.ts` | `b251a8f692e9b8ddaa42692e30b751acb53529f34033c544f909bac9eaf90127` |
+
+It independently correlates the completed workflow, original assignment/schema, child, model
+attempt, process exit, ordered retry/capture/settlement events and capture artifacts. Refusals
+preserve the engine failure, including missing reports, later errors/actions, real termination,
+incomplete or inconsistent evidence, changed files, symlink escapes and byte-limit excesses.
+A retry's successful response may propose the capture before native retry-end; capture
+execution still must follow the confirmed retry. Only an in-memory aggregate row is corrected.
+Original failed receipt children remain failed; an output-free recovery record carries the
+original error and evidence hashes. Both collect tools visibly disclose recovery without a new
+attempt or synthetic finding. Contracts §8.35 and current user/developer guidance document the
+exception and removal condition.
+
+**Validation completed:** `run_ci` subsets `lint-js`, `typecheck-js`, `test-js`, and `docs-check`
+passed. The proof-refusal suite covers both report families, snapshot schema authority,
+identity/ordering/lifecycle failures, missing and malformed artifacts, file changes during read,
+exact byte limits and one-byte excesses, and source attestation at both boundaries. Real adapter
+→ transport → collect tests cover both UI/headless warnings, an independently unrecoverable
+sibling, retained failed receipts, and exactly-once drain with one spawn. Production-factory
+scope tests exclude non-human-review flows; the source pin preserves per-launch construction
+and per-assignment schema precedence. The prose-map sync reported **valid and current**, with
+no projection change.
+
+Two iteration failures were resolved rather than hidden: the lazy-adapter source pin still
+expected the old zero-argument supplier shape; it was updated without weakening the one-call
+invariant. A parallel `typecheck-js`/`docs-check` run hit Astro's documented shared-cache race
+(`ENOENT` renaming `data-store.json.tmp`); `docs-check` passed and a separate `typecheck-js`
+re-run passed. CI configuration was not changed. These were offline check failures, not new
+live-wave attempts. **No final run-all CI gate has run.**
+
+**Recorded-artifact replay:** from the clean committed implementation above, the production
+`createReportWave` factory and real RPC adapter consumed D2's original durable artifacts through
+an offline fake responder. The real installed source fingerprints and default SHA-256 function
+were used (no source-digest injection). Four cases verified:
+
+| Offline request | Effective reports | Recovery records | Result |
+|---|---|---|---|
+| Original draft schema | All five lanes | decision-completeness, custom | Complete |
+| Original schema as per-assignment overrides over an incompatible default | All five lanes | decision-completeness, custom | Complete; overrides take precedence |
+| Deliberately incompatible custom override | Four lanes; custom stays failed | decision-completeness only | Incomplete; artifact schema cannot replace request authority |
+| Same artifacts under non-human `pr-review` flow | Original three lanes | None | Incomplete; both original failures preserved |
+
+Each case emitted one **fake** spawn, launched **zero real children**, retained both original
+failed child receipt rows, and drained once. Hashes of the original workflow/child status,
+events, captures and schema files were unchanged before/after replay. The engine-entry callback
+was supplied the installed path explicitly; this does not claim a fresh Pi session's metadata
+lookup or native wake/sink behavior was live-tested with the new guard.
+
+Recovered evidence hashes (original captures, not synthesized reports):
+
+| Lane | Capture SHA-256 | Events SHA-256 |
+|---|---|---|
+| decision-completeness | `90886adba96550490a74c64ac88001828e0e1d1c07db99dfeb502f3b8f748267` | `18c5cc853fd7b533ae83037576bd54fa6fdfe2fe46982706c2450636ea676984` |
+| custom | `1e8b477d23e2ec992c212e9d2075077f2793514c14172feca18fae9299d0c914` | `9ba8d75fc70dac09c1bba4af878f5b7e8973aac74af5566a3d9f985955256b79` |
+
+Scratch receipts: `live/D2/production-factory-replay.mjs`, `production-factory-replay.json`,
+`production-factory-replay.txt`, and the earlier helper-only `compat-guard-probe.json`.
+
+**Remaining gate:** D/D2 remain NOT PASSED; this replay does not reclassify either live attempt.
+No new live wave, review post, draft save, upstream filing, dependency patch, global setting
+change or driver advance occurred. D2 closure is still unconfirmed. The driver remains on
+`2ed55c1b`; advancing it requires closure first. Because the guard changes the shared wave
+boundary (not just browser mapping), prior T/B2 evidence cannot automatically be promoted to
+new-head acceptance. Return to the owner to settle affected-leg reruns and authorize any further
+attempts. N/U, full teardown and the final run-all gate remain submission prerequisites.
