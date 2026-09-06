@@ -13,16 +13,248 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { handoffPath, runScratchDir, workflowDir } from "./substrate/cache.ts";
+import { AgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
+import { AGENT_SCRATCH_CONTEXT_TYPE } from "./substrate/agentScratch.ts";
+import { agentScratchDir, handoffPath, runScratchDir, workflowDir } from "./substrate/cache.ts";
 import { perkVersion } from "./substrate/resources.ts";
 import {
   readSessionPointers,
   recordSessionPointer,
   type SessionPointer,
 } from "./substrate/sessionPointers.ts";
-import { READ_ONLY_CONTEXT } from "./substrate/toolGating.ts";
+import { READ_ONLY_CONTEXT, READ_ONLY_TOOLS } from "./substrate/toolGating.ts";
 import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
+
+const runnerPacket = {
+  PI_SUBAGENT_CHILD: "1",
+  PI_SUBAGENT_EXTENSION_BINDINGS: '{"perk.parent-restrictions/1":{"readOnly":true}}',
+};
+const reportPrompt = '<active_agent name="perk.pr-reviewer"/>\n\nReport rubric';
+const writerPrompt = '<active_agent name="perk.conflict-resolver"/>\n\nWriter rubric';
+
+async function noScratch(h: Awaited<ReturnType<typeof loadPerkSession>>, cwd: string) {
+  assert.equal(
+    (await h.emitBeforeAgentStart()).some(
+      (message) => message.customType === AGENT_SCRATCH_CONTEXT_TYPE,
+    ),
+    false,
+  );
+  assert.deepEqual(
+    await h.emitContext([{ customType: AGENT_SCRATCH_CONTEXT_TYPE, content: "stale scratch" }]),
+    [],
+  );
+  const runId = h.workflowState().run_id;
+  if (runId) assert.equal(existsSync(agentScratchDir(cwd, runId)), false);
+}
+
+test("startup captures the original prefix before gate tool rebuild; reload recaptures the loader prompt", async (t) => {
+  const original = AgentSession.prototype.setActiveToolsByName;
+  t.mock.method(
+    AgentSession.prototype,
+    "setActiveToolsByName",
+    function (this: AgentSession, names: string[]) {
+      original.call(this, names);
+      if (
+        names.length === READ_ONLY_TOOLS.length &&
+        names.every((name, i) => name === READ_ONLY_TOOLS[i])
+      ) {
+        this.agent.state.systemPrompt = writerPrompt;
+      }
+    },
+  );
+  const cwd = scaffoldRepo();
+  const file = plantSession(cwd, [{ run_id: "RID", mode: "read-write" }, { mode: "read-only" }]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    systemPrompt: reportPrompt,
+  });
+  try {
+    assert.equal(
+      h.session.systemPrompt,
+      writerPrompt,
+      "the tool rebuild deliberately changed the live prompt",
+    );
+    await h.navigateTo("c0");
+    assert.equal((await h.emitToolCall("write", {}))?.block, undefined);
+    await noScratch(h, cwd);
+    h.session.agent.state.systemPrompt = writerPrompt;
+    await h.reload();
+    assert.ok(h.session.systemPrompt.startsWith(reportPrompt));
+    await noScratch(h, cwd);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("runner floor survives tree/compaction and original-packet reload over a read-write branch", async () => {
+  const cwd = scaffoldRepo();
+  const file = plantSession(cwd, [{ run_id: "RID", mode: "read-write" }]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    systemPrompt: writerPrompt,
+    env: runnerPacket,
+  });
+  try {
+    assert.equal(h.workflowState().mode, "read-only");
+    await h.navigateTo("c0");
+    assert.equal(h.workflowState().mode, "read-write");
+    await h.emitLifecycle({ type: "session_compact" });
+    assert.equal((await h.emitToolCall("foreign_mutator", {}))?.block, true);
+    await noScratch(h, cwd);
+    await h.reload();
+    assert.equal(h.workflowState().mode, "read-only", "original packet reflects again on reload");
+    assert.equal((await h.emitToolCall("write", {}))?.block, true);
+    await noScratch(h, cwd);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("existing branch read-only survives reload without a restriction packet", async () => {
+  const cwd = scaffoldRepo();
+  const file = plantSession(cwd, [{ run_id: "RID", mode: "read-only" }]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    systemPrompt: writerPrompt,
+    env: { PI_SUBAGENT_CHILD: "1" },
+  });
+  try {
+    await h.reload();
+    assert.equal(h.workflowState().mode, "read-only");
+    assert.equal((await h.emitToolCall("submit", {}))?.block, true);
+    assert.equal(
+      h.notifies.some((message) => message.includes("child restriction")),
+      false,
+      "legacy absence is silent",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("missing/mismatched env handoff stays loudly unclaimed under true/invalid runner restrictions", async () => {
+  for (const mismatch of [false, true]) {
+    const cwd = scaffoldRepo();
+    if (mismatch)
+      writeFileSync(
+        handoffPath(cwd, "MISSING"),
+        JSON.stringify({ run_id: "WRONG", consumed: true, mode: "read-write" }),
+      );
+    const h = await loadPerkSession({
+      cwd,
+      systemPrompt: writerPrompt,
+      env: {
+        ...runnerPacket,
+        PERK_RUN_ID: "MISSING",
+        PI_SUBAGENT_EXTENSION_BINDINGS: mismatch
+          ? "invalid"
+          : runnerPacket.PI_SUBAGENT_EXTENSION_BINDINGS,
+      },
+    });
+    try {
+      assert.equal(h.workflowState().run_id, undefined, "failed claim must not mint");
+      assert.equal(
+        h.workflowState().mode,
+        undefined,
+        "no invented persisted restriction on unclaimed outcome",
+      );
+      assert.ok(
+        h.notifies.some((message) =>
+          message.includes("handoff missing or mismatched for run MISSING"),
+        ),
+      );
+      assert.equal((await h.emitToolCall("plan_save", {}))?.block, true);
+      assert.ok(h.footerFactory(), "startup continues after honest unclaimed outcome");
+      await noScratch(h, cwd);
+    } finally {
+      h.dispose();
+    }
+  }
+});
+
+test("escaping reflection exception reports safely and continues startup with backstop and scratch suppression", async () => {
+  const cwd = scaffoldRepo();
+  const manager = SessionManager.inMemory(cwd);
+  const append = manager.appendCustomEntry.bind(manager);
+  let reflections = 0;
+  manager.appendCustomEntry = (type, data) => {
+    if (
+      type === "perk:workflow-state" &&
+      typeof data === "object" &&
+      data !== null &&
+      "mode" in data
+    ) {
+      reflections++;
+      // Stringification inside the classified append also throws; exercise its escape contract.
+      throw Object.assign(Object.create(null), { secret: "SENSITIVE_THROW_PAYLOAD" });
+    }
+    return append(type, data);
+  };
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: manager,
+    systemPrompt: writerPrompt,
+    env: runnerPacket,
+  });
+  try {
+    assert.equal(reflections, 1);
+    assert.equal(h.workflowState().mode, undefined);
+    assert.ok(h.workflowState().run_id, "normal mint remains intact");
+    assert.equal(h.sentinel()?.source, "mint", "remaining startup work reached the final sentinel");
+    assert.ok(h.footerFactory());
+    assert.equal(
+      h.notifies.filter((message) =>
+        message.includes(
+          "could not persist child read-only restriction; in-memory restriction remains active",
+        ),
+      ).length,
+      1,
+    );
+    assert.doesNotMatch(h.notifies.join("\n"), /SENSITIVE_THROW_PAYLOAD|linkage error/);
+    assert.equal((await h.emitToolCall("foreign_mutator", {}))?.block, true);
+    await noScratch(h, cwd);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("paired sessions cache identity/floor independently; forged prefixes change scratch only, not authority", async () => {
+  const cwd = scaffoldRepo({
+    handoff: { runId: "PARENT", mode: "read-write", stage: "implement" },
+  });
+  const parent = await loadPerkSession({
+    cwd,
+    systemPrompt: reportPrompt,
+    env: { PERK_RUN_ID: "PARENT" },
+  });
+  const handoff = readFileSync(handoffPath(cwd, "PARENT"), "utf8");
+  const original = parent.workflowState();
+  const child = await loadPerkSession({
+    cwd,
+    systemPrompt: writerPrompt,
+    env: { ...runnerPacket, PERK_RUN_ID: "PARENT", PI_SUBAGENT_CHILD_AGENT: "perk.pr-reviewer" },
+  });
+  try {
+    assert.equal(child.workflowState().predecessor, "PARENT");
+    assert.equal(child.workflowState().stage, undefined);
+    assert.equal(child.workflowState().mode, "read-only", "writer prefix is not a write grant");
+    assert.equal((await parent.emitToolCall("write", {}))?.block, undefined);
+    assert.equal((await child.emitToolCall("write", {}))?.block, true);
+    parent.session.agent.state.systemPrompt = writerPrompt;
+    await parent.emitLifecycle({ type: "session_compact" });
+    await noScratch(parent, cwd);
+    await noScratch(child, cwd);
+    assert.deepEqual(parent.workflowState(), original);
+    assert.equal(parent.workflowState().stage, "implement");
+    assert.equal(readFileSync(handoffPath(cwd, "PARENT"), "utf8"), handoff);
+  } finally {
+    child.dispose();
+    parent.dispose();
+  }
+});
 
 test("claim: fresh session with PERK_RUN_ID + handoff claims the run", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });

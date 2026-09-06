@@ -3,7 +3,11 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import {
+  type ExtensionAPI,
+  type ExtensionContext,
+  SessionManager,
+} from "@earendil-works/pi-coding-agent";
 import {
   loadPerkSession,
   plantRawSession,
@@ -15,8 +19,128 @@ import {
   isReadOnlyBashCommand,
   READ_ONLY_CONTEXT,
   READ_ONLY_TOOLS,
+  registerToolGating,
   SUBAGENT_CHILD_TOOLS,
 } from "./toolGating.ts";
+
+type Hook = (
+  event: { toolName?: string; input?: Record<string, unknown>; messages?: unknown[] },
+  ctx: ExtensionContext,
+) => Promise<{ block?: boolean; message?: { content: string }; messages?: unknown[] } | undefined>;
+
+function gateFixture(floor: () => boolean) {
+  const hooks = new Map<string, Hook>();
+  let fail: "snapshot" | "toolset" | "append" | undefined;
+  const appends: unknown[] = [];
+  const installed: string[][] = [];
+  const pi = {
+    on: (name: string, hook: Hook) => {
+      hooks.set(name, hook);
+    },
+    getActiveTools: () => {
+      if (fail === "snapshot") throw new Error("snapshot");
+      return ["read", "write", "plan_save"];
+    },
+    setActiveTools: (names: string[]) => {
+      if (fail === "toolset") throw new Error("toolset");
+      installed.push(names);
+    },
+    appendEntry: (_type: string, data: unknown) => {
+      if (fail === "append") throw new Error("append");
+      appends.push(data);
+    },
+  } as ExtensionAPI;
+  const gate = registerToolGating(pi, floor);
+  const sessionManager = SessionManager.inMemory("/repo");
+  sessionManager.getBranch = () => {
+    throw new Error("branch unavailable");
+  };
+  const context: Pick<ExtensionContext, "sessionManager"> = { sessionManager };
+  const ctx = context as ExtensionContext;
+  return {
+    gate,
+    appends,
+    installed,
+    fail: (value: typeof fail) => {
+      fail = value;
+    },
+    call: (name: string, event: Parameters<Hook>[0] = {}) => hooks.get(name)?.(event, ctx),
+  };
+}
+
+async function assertBackstop(h: ReturnType<typeof gateFixture>) {
+  assert.equal(h.gate.isActive(), true);
+  for (const toolName of ["edit", "write", "plan_save", "submit", "foreign_mutator"]) {
+    assert.equal((await h.call("tool_call", { toolName, input: {} }))?.block, true, toolName);
+  }
+  assert.equal(
+    (await h.call("tool_call", { toolName: "bash", input: { command: "touch x" } }))?.block,
+    true,
+  );
+  for (const toolName of ["read", ...SUBAGENT_CHILD_TOOLS]) {
+    assert.equal(await h.call("tool_call", { toolName, input: {} }), undefined, toolName);
+  }
+  assert.equal(
+    await h.call("tool_call", { toolName: "bash", input: { command: "git status" } }),
+    undefined,
+  );
+  assert.equal((await h.call("before_agent_start"))?.message?.content, READ_ONLY_CONTEXT);
+  assert.equal(
+    await h.call("context", { messages: [{ customType: "perk:mode-context" }] }),
+    undefined,
+  );
+}
+
+test("floor enforces all observations before sync, despite snapshot/toolset/append failures", async () => {
+  for (const mode of [undefined, "read-write"]) {
+    for (const failure of ["snapshot", "toolset", "append"] as const) {
+      const h = gateFixture(() => true);
+      await assertBackstop(h);
+      h.fail(failure);
+      assert.throws(() =>
+        failure === "append" ? h.gate.enter() : h.gate.syncFromState(mode, undefined),
+      );
+      await assertBackstop(h);
+      h.fail(undefined);
+      h.gate.exit();
+      assert.deepEqual(h.appends, [], "floor exit never appends read-write");
+      h.gate.syncFromState("read-write", undefined);
+      assert.deepEqual(h.installed.at(-1), READ_ONLY_TOOLS);
+      await assertBackstop(h);
+    }
+  }
+});
+
+test("false cannot clear inherited read-only; ordinary parents use the same backstop; read-write is unaffected", async () => {
+  const h = gateFixture(() => false);
+  h.gate.syncFromState("read-only", undefined);
+  await assertBackstop(h);
+  h.fail("toolset");
+  assert.throws(() => h.gate.syncFromState("read-write", undefined));
+  await assertBackstop(h);
+  h.fail(undefined);
+  h.gate.exit();
+  assert.equal(h.gate.isActive(), false);
+  assert.deepEqual(h.appends, [{ mode: "read-write" }]);
+  for (const toolName of ["write", "foreign_mutator", "plan_save", "submit", "bash"]) {
+    assert.equal(await h.call("tool_call", { toolName, input: { command: "touch x" } }), undefined);
+  }
+});
+
+test("a throwing supplier and malformed bash inputs never open the gate", async () => {
+  const h = gateFixture(() => {
+    throw new Error("floor read failed");
+  });
+  h.gate.syncFromState(undefined, undefined);
+  await assertBackstop(h);
+  h.gate.exit();
+  assert.deepEqual(h.appends, []);
+  assert.equal(
+    (await h.call("tool_call", { toolName: "bash", input: { command: Object.create(null) } }))
+      ?.block,
+    true,
+  );
+});
 
 test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
   // The family-constant recomposition is STRUCTURAL: set and order stay byte-identical to the

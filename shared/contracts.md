@@ -196,16 +196,50 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
 
   The extension provisions the directory before every eligible model turn and injects one hidden
   `customType: "perk:agent-scratch"` block naming the repository-relative current-run path. A
-  context is eligible unless branch-LWW workflow mode is explicitly `read-only` or
-  `PI_SUBAGENT_CHILD_AGENT` names one of perk's report-only children (`perk.adversarial-reviewer`,
-  `perk.draft-reviewer`, `perk.dream-analyst`, `perk.dream-reducer`, `perk.harvest-analyst`, `perk.learn-analyst`,
-  `perk.objective-explorer`, `perk.pr-reviewer`,
-  `perk.review-classifier`). Main sessions, `perk.conflict-resolver`, and unknown/custom children
-  remain eligible; absent generic foreign-agent metadata, inherited parent mode is the fallback.
-  Only the current-run direct block counts as live scratch guidance, and durable decisions still
-  re-read the canonical repository/backend source. Provisioning/dedup/repair and side-session
-  delivery mechanics live in the owning modules (`extension/substrate/cache.ts` and the context
-  filter). Because this is a universal pre-turn side effect that can become eligible after an
+  turn first consults effective read-only gating (§8.3), including the runner restriction floor.
+  Otherwise eligibility uses only the activation-local advisory identity captured at `session_start`
+  by `extension/substrate/childIdentity.ts`, before tool activation rebuilds the prompt:
+
+  | Advisory identity | Captured runner bit | Scratch eligible |
+  | --- | --- | --- |
+  | Any of the ten report names below | either | no |
+  | `perk.conflict-resolver` or valid custom/unknown name | either | yes |
+  | Absent/malformed/unreadable/stale | true | no; bounded warning |
+  | Absent/malformed/unreadable/stale | false | yes; parent/unidentified-foreground fallback |
+  | Legacy-only or bindings-only name claim | either | ignored; applicable unavailable row |
+
+  The exact report set is `perk.adversarial-reviewer`, `perk.draft-reviewer`, `perk.dream-analyst`,
+  `perk.dream-reducer`, `perk.harvest-analyst`, `perk.learn-analyst`, `perk.objective-explorer`,
+  `perk.pr-reviewer`, `perk.review-classifier`, and `perk-dev.session-auditor`. The writer,
+  `perk-dev.analyst`, custom agents and builtins are excluded; Ponytail is an invocation variant.
+
+  Advisory identity is a spoofable prompt claim, never authority or Perk run identity. Inspect only
+  the first LF-delimited line of `ctx.getSystemPrompt()` with a bounded scan (4096 UTF-8 bytes;
+  longer is malformed regardless of content). Accept exactly `<active_agent name="VALUE"/>`,
+  without padding, CR removal, extra attributes/tags or literal unescaped `&`, `"`, `<`, `>` in
+  VALUE. Decode only `&amp;`, `&quot;`, `&lt;`, `&gt;`, once; canonical re-encoding must reproduce
+  the attribute bytes. The decoded name is nonempty, at most 256 UTF-8 bytes, has no Unicode Cc
+  controls, and compares case-sensitively. For a within-limit line that is not valid, classify as
+  malformed iff it contains the literal `<active_agent` anywhere, otherwise absent. Later lines,
+  task/history/compaction prose, legacy env names and every binding namespace are not identity.
+
+  Each startup replaces advice; lookup checks the full SDK UUID and full file path (or null),
+  never a basename/cwd/run-id substitute and never a fresh prompt/env read. Unreadable keys/prompts
+  are unavailable; a different lookup key is stale, retaining only the captured runner fallback.
+  Shutdown clears the snapshot. Known-key reason buckets survive same-key captures and reset on
+  positively different known-key capture; unreadable-key reasons use a separate anonymous
+  activation-local set retained through readable recovery, cleared only on shutdown/discard.
+  Stale warnings belong to the captured scope. Warn only on unavailable runner identity, through
+  fixed `report(..., {alsoLog: true})` messages, never raw names/prompts or thrown payloads.
+
+  Neither ineligible hook calls the provisioner: suppression means no `agent/` creation or direct
+  guidance, not zero lifecycle filesystem activity or deletion of existing directories. The context
+  filter removes all direct `perk:agent-scratch` messages when ineligible. Eligible hooks provision
+  before dedup (repairing deleted directories), retain one exact current-run direct block, remove
+  stale/duplicate direct blocks, and visibly warn/retry on provisioning failure. Quoted ordinary
+  messages and compaction summaries remain untouched. Selected foreground writers have no Perk
+  activation and no scratch-provisioning promise. Because this is a universal pre-turn side effect
+  that can become eligible after an
   in-session read-only gate exit, every registry stage declares the existing `cache.scratch` key
   in `writes`.
 
@@ -543,8 +577,51 @@ CLI↔extension version-skew lesson). The objective node→plan link outcome is 
 swallowed**: a failed advance shows a visible `⚠ … NOT advanced — re-run /plan-save` warning
 (the node↔plan link — the objective transition surface below).
 
-**Tool gating.** The `mode` field **structurally gates tools** — enforcement, not prompting. When
-`mode == "read-only"` the interior (`extension/substrate/toolGating.ts`): (1) restricts the
+**Runner restriction floor.** `extension/substrate/childRestrictions.ts` is independent of advisory
+identity and role classification. `index.ts` captures it before lifecycle establishment or gate sync,
+sharing only startup's `PI_SUBAGENT_CHILD === "1"` boolean and the stateless full SDK session-key
+helper with the identity reader. Only runner-hosted captures consume `PI_SUBAGENT_EXTENSION_BINDINGS`;
+non-runners ignore even malformed packets silently. Undefined raw input is legacy absence; empty or
+whitespace input is invalid. Bound to 16384 UTF-8 bytes before standard `JSON.parse` into `unknown`;
+require a non-null, non-array object. Inspect own namespace keys: any reserved-family
+`perk.parent-restrictions/` key except exact v1 is unsupported and restrictive, even beside valid v1.
+Unrelated namespaces stay opaque. V1 must be a non-null non-array object with exactly one own key,
+boolean `readOnly`; no coercion/extra fields. No reserved-family key is silent legacy absence.
+Invalid/oversized JSON or envelope, invalid v1, unsupported version, or unreadable runner capture
+latches a floor. True restricts; false/absence is never a write grant or proof of warm inheritance.
+
+A full known `{sessionId, sessionFile}` identifies this physical session. Same-key capture ORs the
+floor across changed runner/packet values. Only shutdown/new activation or a positively different
+known-key capture resets it. Unreadable keys retain the last known comparison key and a conservative
+runner floor; an anonymous floor carries to the first readable key because recovery is not proof of
+a different session. No isolation guarantee is claimed while SDK key access is broken. Known-key
+finite warning sets reset on positive difference, not same-key retry; a separate anonymous reason
+set survives recovery and resets only on shutdown/discard. Invalid runner restrictions warn with
+fixed `report(..., {alsoLog: true})` messages, never raw bindings/names or arbitrary exceptions.
+No unbounded key map or durable floor field is added.
+
+After unchanged `establishSessionIdentity`, `reflectSessionReadOnlyFloor` runs only for a latched
+floor. Unclaimed/already-read-only outcomes append nothing. Other established outcomes use one
+verified, mode-only `{mode: "read-only"}` append, verifying `mode` under `child restriction` scope.
+Applied reflection changes only resolved mode; rejected/unverified reflection returns the original
+honest outcome (the classified append reports). An unexpected exception is caught only around
+`appendVerified`, returning the original outcome plus `unexpectedFailure: true`; the Pi edge reports
+`could not persist child read-only restriction; in-memory restriction remains active` once for that
+operation with `alsoLog: true` and continues gate synchronization and remaining startup work. No
+retry, thrown-payload stringification, fabricated linkage problem or replacement mint. Claim ordering,
+stages, derivation/version stamps, handoff authority and persisted `pi_session_id` basenames remain
+unchanged. Mode reflection is the separate exception to otherwise write-free keep startup; keep
+still never backfills version. Tree/compaction never recapture packets/advice. Normal reload recaptures
+the original packet and existing branch mode; loss/tampering of both is outside the repaired profile.
+
+**Tool gating.** The existing mode/active restriction **OR** the runner floor structurally gates tools
+— enforcement, not prompting. Every observation (including `isActive`, context, tool calls and toolset
+application) uses the effective restriction; a throwing optional composition-only floor supplier is
+restrictive for that observation. A floor works without successful tool snapshot/installation, branch
+read or persistence. With a floor, `exit()` skips the read-write append and reapplies restriction,
+leaving persisted mode unchanged after failed reflection. Without a floor, ordinary enter/exit and
+stage/snapshot semantics remain. `/btw` and ReportWave's existing `gating.isActive()` suppliers see the
+same restriction. While effectively read-only the interior (`extension/substrate/toolGating.ts`): (1) restricts the
 active tool set to `READ_ONLY_TOOLS` (`read`/`grep`/`find`/`ls`/`bash` + `ask_user_question` +
 `plan_review` + the `plan_draft`/`objective_draft`/`gist_draft` session-data carve-outs + `objective_node`
 (delegates a bounded node transition to the canonical Python plane) + the **`web` seam**
@@ -573,8 +650,14 @@ other path refused; no worktree writes), and `run_dream_wave` (the gated learn-d
 wave call: NO parameters — its manifest read AND its one write, the fixed-name run-scratch
 bundle beside that manifest, are both derived from the claimed run's manifest path, §8.61 —
 the no-aimable-writer posture on both sides)) via `pi.setActiveTools`, **snapshot-then-restore** (the restore
-falls back to the full configured `pi.getAllTools()` set — never a hardcoded list); (2) blocks
-`edit`/`write` and non-allowlisted `bash` at `tool_call`. The bash sub-allowlist covers read-only
+falls back to the full configured `pi.getAllTools()` set — never a hardcoded list); (2) rejects
+**every** tool outside that same `READ_ONLY_TOOLS` set at `tool_call`, including `plan_save`, delivery
+and unknown/late foreign mutators, even when toolset narrowing failed. This backstop applies to all
+effective read-only sessions, parents too. `edit`/`write` keep their file-modification denial wording;
+other excluded tools receive a read-only not-allowlisted denial. Listed non-bash tools pass this gate
+but retain downstream authority checks. Listed `bash` additionally requires its unchanged argument
+check. No inventory or bash-pattern widening, and no OS-sandbox claim for allowlisted delegation,
+web/browser or artifact carve-outs. The bash sub-allowlist covers read-only
 inspection commands (read-only `git` queries, `jq`, `curl`, …), read-only `gh` **query**
 subcommands (view/list/diff/status/checks/search + `gh auth status`; `gh api` and every mutating
 subcommand stay blocked), the read-only `perk objective` queries (`show`/`next` + aliases and
@@ -5491,9 +5574,13 @@ parent-restriction capture diagnostic, and the normal manifest, preserving keyed
 No adapter construction/ping/spawn or ref mint occurs; best-effort completeness remains false.
 The public `ReportWave` lifecycle, requests, assignments, results and controls are unchanged.
 The test-only `reportWaveOver(adapter, parentReadOnly = () => false)` default is not production
-permission policy. False is not a write grant. This implements the producer only: strict decoding,
-monotone effective-gate floor, advisory identity and scratch suppression require the separate
-3.3 consumer repair; the existing scratch contract is not yet repaired by this channel alone.
+permission policy. False is not a write grant. Producer and consumer are both implemented and both
+required for the selected report profile: the independent runner decoder, monotone effective-gate
+floor and verified mode reflection are §8.3; bounded advisory identity and exact ten-role scratch
+suppression are §8.1. This is a spawn-time restriction snapshot for Perk-owned report waves, not
+continuous revocation, certification of manual subagent calls, foreground Perk enforcement, arbitrary
+cross-cwd handoff transport, or a universal OS sandbox. Ordinary offline/source checks do not create
+a native warm-path PASS or update the full-baseline doctor/stale-error compatibility stamp.
 
 **Streaming launch manifests.** The report wave's `start` returns one preflight-derived
 `ReportWaveLaunchManifest = {requested, runnable, preflightFailures}` on both result arms. `requested`

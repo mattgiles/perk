@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import {
+  type ExtensionAPI,
+  type ExtensionContext,
+  SessionManager,
+} from "@earendil-works/pi-coding-agent";
 import { loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   AGENT_SCRATCH_CONTEXT_TYPE,
@@ -10,9 +14,11 @@ import {
   createAgentScratchProvisioner,
   isAgentScratchEligible,
   REPORT_ONLY_CHILD_AGENTS,
+  registerAgentScratch,
   renderAgentScratchBlock,
 } from "./agentScratch.ts";
 import { agentScratchDir, ensureRunScratch } from "./cache.ts";
+import type { ChildIdentity, ChildIdentitySnapshot } from "./childIdentity.ts";
 
 function fakeCtx(cwd: string, entries: unknown[]): AgentScratchContext {
   return {
@@ -38,20 +44,108 @@ test("rendering names the repository-relative current-run path and non-authorita
   assert.match(block.content, /re-read canonical repository or backend sources/);
 });
 
-test("eligibility excludes only explicit read-only mode and known report-only children", () => {
-  const writeCtx = fakeCtx("/repo", [
-    { type: "custom", customType: "perk:workflow-state", data: { mode: "read-write" } },
-  ]);
-  const readOnlyCtx = fakeCtx("/repo", [
-    { type: "custom", customType: "perk:workflow-state", data: { mode: "read-only" } },
-  ]);
-  assert.equal(isAgentScratchEligible(readOnlyCtx), false);
-  assert.equal(isAgentScratchEligible(writeCtx), true);
-  for (const child of REPORT_ONLY_CHILD_AGENTS) {
-    assert.equal(isAgentScratchEligible(writeCtx, child), false, child);
+test("registered scratch hooks implement the ten-report and unavailable fallback matrix, gate first", async () => {
+  const names = [
+    ...REPORT_ONLY_CHILD_AGENTS,
+    "perk.conflict-resolver",
+    "perk-dev.analyst",
+    "custom.reporter",
+    "reader",
+    "PERK.PR-REVIEWER",
+  ];
+  const identities: ChildIdentity[] = [
+    ...names.map((name) => ({
+      status: "available" as const,
+      name,
+      provenance: "native-system-prompt-prefix" as const,
+    })),
+    ...(["absent", "malformed", "unreadable", "stale"] as const).map((reason) => ({
+      status: "unavailable" as const,
+      reason,
+      provenance: "native-system-prompt-prefix" as const,
+    })),
+  ];
+  type Hook = (
+    event: { messages: { customType?: string; content?: unknown }[] },
+    ctx: ExtensionContext,
+  ) => Promise<{ messages?: unknown[]; message?: unknown } | undefined>;
+  const block = renderAgentScratchBlock("/repo", "RID");
+  for (const identity of identities)
+    for (const runner of [false, true])
+      for (const readOnly of [false, true]) {
+        const hooks = new Map<string, Hook>();
+        let provisions = 0;
+        let lookups = 0;
+        const snapshot: ChildIdentitySnapshot = { identity, runner };
+        const expected =
+          !readOnly &&
+          (identity.status === "available"
+            ? !REPORT_ONLY_CHILD_AGENTS.some((name) => name === identity.name)
+            : !runner);
+        assert.equal(isAgentScratchEligible(readOnly, snapshot), expected);
+        registerAgentScratch(
+          {
+            on: (name: string, hook: Hook) => {
+              hooks.set(name, hook);
+            },
+          } as ExtensionAPI,
+          {
+            resolve: () => {
+              provisions++;
+              return block;
+            },
+          },
+          () => {
+            lookups++;
+            return snapshot;
+          },
+          () => readOnly,
+        );
+        const ctx = fakeCtx("/repo", []) as ExtensionContext;
+        const before = await hooks.get("before_agent_start")?.({ messages: [] }, ctx);
+        assert.equal(
+          provisions,
+          expected ? 1 : 0,
+          `before hook ${JSON.stringify(snapshot)} gated=${readOnly}`,
+        );
+        assert.equal(before?.message !== undefined, expected);
+        const context = await hooks.get("context")?.(
+          { messages: [{ customType: AGENT_SCRATCH_CONTEXT_TYPE, content: block.content }] },
+          ctx,
+        );
+        assert.equal(
+          provisions,
+          expected ? 2 : 0,
+          "context hook must not provision ineligible turns",
+        );
+        assert.equal(context?.messages?.length, expected ? 1 : 0);
+        assert.equal(lookups, readOnly ? 0 : 2, "effective gate is consulted before identity");
+      }
+});
+
+test("legacy-only and bindings-only names are ignored; unavailable foreground is not an enforcement claim", async () => {
+  for (const runner of [false, true]) {
+    const cwd = scaffoldRepo();
+    const h = await loadPerkSession({
+      cwd,
+      systemPrompt: "No native prefix here.",
+      env: {
+        PI_SUBAGENT_CHILD: runner ? "1" : undefined,
+        PI_SUBAGENT_CHILD_AGENT: "perk.conflict-resolver",
+        PI_SUBAGENT_EXTENSION_BINDINGS: '{"unrelated.identity/1":{"name":"perk.pr-reviewer"}}',
+      },
+    });
+    try {
+      assert.equal(scratchMessages(await h.emitBeforeAgentStart()).length, runner ? 0 : 1);
+      assert.equal(h.workflowState().mode, undefined, "neither name claim grants authority");
+      assert.equal(
+        h.notifies.filter((message) => message.includes("child identity")).length,
+        runner ? 1 : 0,
+      );
+    } finally {
+      h.dispose();
+    }
   }
-  assert.equal(isAgentScratchEligible(writeCtx, "perk.conflict-resolver"), true);
-  assert.equal(isAgentScratchEligible(writeCtx, "custom.reporter"), true);
 });
 
 test("the report-only classification is pinned to every canonical agents/*.md definition", () => {
@@ -59,7 +153,17 @@ test("the report-only classification is pinned to every canonical agents/*.md de
   const files = readdirSync(agentDir)
     .filter((name) => name.endsWith(".md"))
     .sort();
-  const reportOnlyNames = REPORT_ONLY_CHILD_AGENTS.map((name) => name.slice("perk.".length)).sort();
+  const reportOnlyNames = REPORT_ONLY_CHILD_AGENTS.filter((name) => name.startsWith("perk."))
+    .map((name) => name.slice("perk.".length))
+    .sort();
+  const auditor = readFileSync(
+    join(agentDir, "..", ".pi", "agents", "perk-dev", "session-auditor.md"),
+    "utf8",
+  );
+  assert.ok(REPORT_ONLY_CHILD_AGENTS.includes("perk-dev.session-auditor"));
+  assert.match(auditor, /^name: session-auditor$/m);
+  assert.match(auditor, /^package: perk-dev$/m);
+  assert.match(auditor, /^tools: read, grep, find, ls, bash$/m);
   assert.deepEqual(
     files,
     [...reportOnlyNames, "conflict-resolver"].sort().map((name) => `${name}.md`),
@@ -269,7 +373,16 @@ test("read-only/report-only contexts strip guidance; a gate exit and unknown chi
       [],
     );
 
-    h.session.sessionManager.appendCustomEntry("perk:workflow-state", { mode: "read-write" });
+    const entry = h.session.sessionManager.appendCustomEntry("perk:workflow-state", {
+      mode: "read-write",
+    });
+    await h.navigateTo("c0");
+    await h.navigateTo(entry);
+    assert.equal(
+      (await h.emitToolCall("write", {}))?.block,
+      undefined,
+      "tree rebuild releases the gate",
+    );
     assert.equal(scratchMessages(await h.emitBeforeAgentStart()).length, 1, "gate exit enables it");
   } finally {
     h.dispose();
@@ -280,7 +393,7 @@ test("read-only/report-only contexts strip guidance; a gate exit and unknown chi
   const report = await loadPerkSession({
     cwd: reportCwd,
     sessionManager: SessionManager.open(reportFile),
-    env: { PERK_RUN_ID: undefined, PI_SUBAGENT_CHILD_AGENT: "perk.review-classifier" },
+    systemPrompt: '<active_agent name="perk.review-classifier"/>\n\nReport rubric',
   });
   try {
     assert.equal(scratchMessages(await report.emitBeforeAgentStart()).length, 0);
@@ -293,7 +406,7 @@ test("read-only/report-only contexts strip guidance; a gate exit and unknown chi
   const custom = await loadPerkSession({
     cwd: customCwd,
     sessionManager: SessionManager.open(customFile),
-    env: { PERK_RUN_ID: undefined, PI_SUBAGENT_CHILD_AGENT: "custom.agent" },
+    systemPrompt: '<active_agent name="custom.agent"/>\n\nCustom rubric',
   });
   try {
     assert.equal(scratchMessages(await custom.emitBeforeAgentStart()).length, 1);

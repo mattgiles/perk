@@ -6,12 +6,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type AssistantMessage, fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
-import { ModelRegistry, SessionManager } from "@earendil-works/pi-coding-agent";
+import { AgentSession, ModelRegistry, SessionManager } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import {
   AGENT_SCRATCH_CONTEXT_TYPE,
   renderAgentScratchBlock,
 } from "../../substrate/agentScratch.ts";
+import { registerToolGating } from "../../substrate/toolGating.ts";
 import { fauxModelRuntime, loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
 import { buildSeedMessages, createBtwAgentSession, liveModelRuntime, registerBtw } from "./btw.ts";
 import {
@@ -225,13 +226,24 @@ test("createBtwAgentSession wires one scratch block into the effective side prom
   }
 });
 
-test("read-write btw resolves scratch before every prompt and retries availability changes", async () => {
+test("btw retries scratch availability; a controller floor invalidates the side cache and suppresses provisioning", async (t) => {
+  const observations: { id: string; tools: string[] }[] = [];
+  const prompt = AgentSession.prototype.prompt;
+  t.mock.method(
+    AgentSession.prototype,
+    "prompt",
+    function (this: AgentSession, ...args: Parameters<AgentSession["prompt"]>) {
+      observations.push({ id: this.sessionId, tools: this.getActiveToolNames() });
+      return prompt.apply(this, args);
+    },
+  );
   const reg = await fauxModelRuntime();
   reg.setResponses([
     fauxAssistantMessage([fauxText("first")], { stopReason: "stop" }),
     fauxAssistantMessage([fauxText("second")], { stopReason: "stop" }),
     fauxAssistantMessage([fauxText("third")], { stopReason: "stop" }),
     fauxAssistantMessage([fauxText("read only")], { stopReason: "stop" }),
+    fauxAssistantMessage([fauxText("still read only")], { stopReason: "stop" }),
   ]);
   const block = renderAgentScratchBlock("/repo", "RID");
   let available = false;
@@ -251,6 +263,8 @@ test("read-write btw resolves scratch before every prompt and retries availabili
     | undefined;
   const pi = {
     appendEntry: () => {},
+    getActiveTools: () => ["read", "write"],
+    setActiveTools: () => {},
     getThinkingLevel: () => "off",
     on: () => {},
     registerCommand: (
@@ -262,7 +276,8 @@ test("read-write btw resolves scratch before every prompt and retries availabili
       handler = command.handler;
     },
   } as unknown as Parameters<typeof registerBtw>[0];
-  registerBtw(pi, { isActive: () => readOnly } as Parameters<typeof registerBtw>[1], agentScratch);
+  const gating = registerToolGating(pi, () => readOnly);
+  registerBtw(pi, gating, agentScratch);
   assert.ok(handler);
   const ctx = {
     ...fakeBtwCtx(reg),
@@ -289,7 +304,20 @@ test("read-write btw resolves scratch before every prompt and retries availabili
 
   readOnly = true;
   await handler("read-only question", ctx);
-  assert.equal(resolutions, 3, "read-only side turns never resolve scratch");
+  assert.equal(resolutions, 3, "floor-backed side turns never resolve scratch");
+  assert.deepEqual(observations[3]?.tools, ["read"]);
+  assert.notEqual(observations[3]?.id, observations[2]?.id, "floor changed the cache key");
+  resolutions = 0;
+  gating.exit();
+  gating.syncFromState("read-write", undefined);
+  await handler("still read-only question", ctx);
+  assert.equal(resolutions, 0, "weakening attempts never provision scratch");
+  assert.equal(
+    observations[4]?.id,
+    observations[3]?.id,
+    "effective floor preserves the read-only cache key",
+  );
+  assert.deepEqual(observations[4]?.tools, ["read"]);
 });
 
 test("liveModelRuntime recovers the live runtime from the real ModelRegistry facade", async () => {

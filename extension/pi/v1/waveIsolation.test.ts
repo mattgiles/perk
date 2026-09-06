@@ -114,8 +114,36 @@ for (const handoff of [false, true]) {
         waveScriptItems(String(siblingFake.spawns[0]?.workflowScript))[0]?.extensionBindings,
         { "perk.parent-restrictions/1": { readOnly: false } },
       );
-      if (handoff) assert.equal(readFileSync(handoffFile, "utf8"), before);
-      else assert.equal(existsSync(handoffFile), false, "warm entry does not mint a handoff");
+      const renderedBindings = waveScriptItems(String(fake.spawns[1]?.workflowScript))[0]
+        ?.extensionBindings;
+      assert.ok(renderedBindings, "consume the packet from the actual rendered fake-RPC item");
+      const child = await loadPerkSession({
+        cwd,
+        systemPrompt: '<active_agent name="perk.adversarial-reviewer"/>\n\nReport rubric',
+        env: {
+          PERK_RUN_ID: handoff ? "01RID" : undefined,
+          PI_SUBAGENT_CHILD: "1",
+          PI_SUBAGENT_EXTENSION_BINDINGS: JSON.stringify(renderedBindings),
+        },
+      });
+      try {
+        assert.equal(child.workflowState().mode, "read-only");
+        assert.equal(child.workflowState().stage, undefined);
+        if (handoff) {
+          assert.equal(child.workflowState().predecessor, "01RID");
+          assert.match(child.workflowState().run_id ?? "", /^01RID\./);
+        } else {
+          assert.equal(child.sentinel()?.source, "mint");
+          assert.notEqual(child.workflowState().run_id, h.workflowState().run_id);
+        }
+        assert.equal((await child.emitToolCall("write", {}))?.block, true);
+        assert.equal((await h.emitToolCall("write", {}))?.block, true);
+        assert.equal((await sibling.emitToolCall("write", {}))?.block, undefined);
+        if (handoff) assert.equal(readFileSync(handoffFile, "utf8"), before);
+        else assert.equal(existsSync(handoffFile), false, "warm entry does not mint a handoff");
+      } finally {
+        child.dispose();
+      }
     } finally {
       sibling.dispose();
       h.dispose();
@@ -186,8 +214,8 @@ test("two sessions share no review-wave pending state (launch/collect isolate pe
       assert.equal((drained.details as { error_type?: string }).error_type, "no_wave");
     }
   } finally {
-    a.h.dispose();
     b.h.dispose();
+    a.h.dispose();
   }
 });
 
@@ -323,8 +351,8 @@ test("two sessions share no draft-review context: each wave receives its own pri
     // if a bounded wait broke out early.
     if (priorPort === undefined) delete process.env.PLANNOTATOR_PORT;
     else process.env.PLANNOTATOR_PORT = priorPort;
-    hA.dispose();
     hB.dispose();
+    hA.dispose();
   }
 });
 
@@ -446,8 +474,8 @@ test("two sessions share no review-pass state (record/post/consume isolate per a
       );
     }
   } finally {
-    a.h.dispose();
     b.h.dispose();
+    a.h.dispose();
   }
 });
 
@@ -498,6 +526,7 @@ test("two sessions share no annotation-push state (prime/clear isolate per activ
   });
   const cwdB = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const hB = await loadPerkSession({ cwd: cwdB, env: { PERK_RUN_ID: "01RID" } });
+  spyInjections(hA);
   const priorPort = process.env.PLANNOTATOR_PORT;
   try {
     // A opens the PR browser door (foreign arm) — priming A's surface, and ONLY A's.
@@ -520,8 +549,8 @@ test("two sessions share no annotation-push state (prime/clear isolate per activ
   } finally {
     if (priorPort === undefined) delete process.env.PLANNOTATOR_PORT;
     else process.env.PLANNOTATOR_PORT = priorPort;
-    hA.dispose();
     hB.dispose();
+    hA.dispose();
   }
 });
 

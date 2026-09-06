@@ -48,14 +48,28 @@ command/model intermediates there instead of shared `/tmp`, using descriptive no
 It is guidance only: perk adds no scratch-writing tool, does not set `PERK_SCRATCH_DIR` or `TMPDIR`,
 and does not intercept shell, read, or search paths.
 
-Eligibility follows the current session posture. An explicitly read-only workflow receives no
-block. Neither do perk's report-only children: `perk.adversarial-reviewer`, `perk.draft-reviewer`,
-`perk.dream-analyst`, `perk.dream-reducer`, `perk.harvest-analyst`, `perk.learn-analyst`, `perk.objective-explorer`,
-`perk.pr-reviewer`, and `perk.review-classifier`. Main write-capable sessions, the
-write-capable `perk.conflict-resolver`, remote workers, and unknown/custom children remain eligible.
-A read-write `/btw` side session gets the same current-run guidance and rechecks provisioning
-before every side-model prompt; its read-only and summary shapes do not. Direct SDK-created
-read-only children remain unguided.
+Effective read-only gating wins first: branch mode or the runner's captured parent-restriction
+floor suppresses both provisioning and guidance. Without that restriction, scratch uses advisory
+identity captured from the native first-line system-prompt prefix at startup:
+
+| Identity | Eligibility |
+| --- | --- |
+| Any of the ten report roles below | no |
+| `perk.conflict-resolver` or a valid custom/unknown name | yes |
+| Absent, malformed, unreadable or stale identity in a runner-hosted child | no; bounded warning |
+| Unavailable identity without the runner bit | yes; parent/unidentified-foreground fallback |
+
+The exact report set is `perk.adversarial-reviewer`, `perk.draft-reviewer`, `perk.dream-analyst`,
+`perk.dream-reducer`, `perk.harvest-analyst`, `perk.learn-analyst`, `perk.objective-explorer`,
+`perk.pr-reviewer`, `perk.review-classifier`, and the repo-local `perk-dev.session-auditor`.
+Legacy environment names and binding-only name claims are ignored. The prefix is advisory and
+cannot grant tools, mode or stage. Selected foreground writers have no Perk activation, so this
+eligibility policy is not a promise of scratch provisioning there.
+
+Ineligible hooks never call the scratch provisioner and strip all direct scratch blocks. They do
+not delete existing directories or prevent ordinary lifecycle run-root creation. A read-write
+`/btw` side session gets the same current-run guidance and rechecks provisioning before every
+side-model prompt; its effectively read-only and summary shapes do not.
 
 The `agent/` directory is created as POSIX mode `0700` from the outset and repaired idempotently.
 Existing symlinks, non-directories, or group/world-writable ancestors in the checkout-owned run

@@ -16,6 +16,8 @@ import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { syncConflictResolutionGuidance } from "../pi/v1/delivery/stackSync.ts";
 import { conflictResolutionGuidance } from "../pi/v1/delivery/submit.ts";
+import { parseChildIdentity } from "../substrate/childIdentity.ts";
+import { decodeChildRestrictions } from "../substrate/childRestrictions.ts";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import { writerScript } from "../testing/writerScript.ts";
 
@@ -232,7 +234,7 @@ test("installed engine: native child profile/preparation and injected cancellati
         const { session } = launch.buildInProcessChildLaunch({
           cwd,
           host,
-          childAgentName: report.name,
+          childAgentName: 'custom.&"<>',
           childIndex: 0,
           sessionEnabled: false,
           inheritProjectContext: false,
@@ -245,12 +247,21 @@ test("installed engine: native child profile/preparation and injected cancellati
         });
         assert.equal(session.cwd, cwd);
         assert.equal(session.ambientExtensions, host === "runner");
-        if (host === "runner")
-          assert.equal(
-            (session.processEnv as Record<string, unknown>).PI_SUBAGENT_EXTENSION_BINDINGS,
-            normalized.json,
-          );
-        else assert.equal(session.processEnv, undefined);
+        assert.equal(typeof session.systemPrompt, "string");
+        assert.deepEqual(parseChildIdentity(String(session.systemPrompt)), {
+          status: "available",
+          name: 'custom.&"<>',
+          provenance: "native-system-prompt-prefix",
+        });
+        if (host === "runner") {
+          const raw = (session.processEnv as Record<string, unknown>)
+            .PI_SUBAGENT_EXTENSION_BINDINGS;
+          assert.equal(raw, normalized.json);
+          assert.deepEqual(decodeChildRestrictions(true, String(raw)), {
+            status: "valid",
+            readOnly,
+          });
+        } else assert.equal(session.processEnv, undefined);
       }
     }
   });

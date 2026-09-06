@@ -142,15 +142,24 @@ kept reachable when a child adopts a read-only gate.
 
 ### Structural read-only gate
 
-When read-only mode is active, perk installs `READ_ONLY_TOOLS` as the active set. The gate blocks
-Pi's `edit` and `write` builtins structurally and accepts `bash` only when every command segment is
-on the read-only sub-allowlist. The sanctioned artifact writers and review/exploration companions
-remain available because they write only run-scoped session data, drive local review surfaces, or
-spawn read-only analysis. Research and delegation remain available under the documented posture.
+Effective read-only gating is the existing workflow mode **or** a captured runner restriction
+floor. Perk installs `READ_ONLY_TOOLS` as the active set and independently checks the same full
+allowlist at tool-call time. Every excluded tool is denied, including `edit`, `write`, save/delivery
+tools and unknown or late-registered foreign mutators—even if toolset synchronization failed.
+Allowlisted `bash` also retains its command-segment sub-allowlist. Other listed tools pass this gate
+but still undergo their ordinary authority checks. The sanctioned artifact writers and
+review/exploration companions, research and delegation retain their existing carve-outs; this is
+not an OS sandbox or an argument-level certificate for delegation, browser automation or web tools.
 
-A spawned child that adopts a read-only parent state inherits the gate: worktree edits stay blocked
-and bash stays sub-allowlisted, while the child-only completion and supervisor tools remain usable; native review wakes need no wait-tool carve-in. Children of
-read-write sessions are not gate-restricted.
+Perk-owned report waves deliver a startup parent-restriction packet to native runner children.
+True or invalid packets establish a read-only floor before lifecycle work. A child cannot clear it
+through gate exit, later false/missing input or tree navigation; failed mode persistence is loud
+and leaves the in-memory floor active. False and legacy absence are never write grants: inherited
+branch read-only still applies. The child-only `structured_output` and `contact_supervisor` tools
+remain allowlisted. `/btw` mirrors the effective gate with read-only side tools and no scratch.
+Normal reload recaptures the original packet plus branch mode; losing both is outside this guarantee.
+Foreground/parent activations ignore the runner-only carrier. Manual launches outside Perk's report
+producer and foreground writers without ambient Perk loading are not certified by this channel.
 
 ### Stage tool diet
 
