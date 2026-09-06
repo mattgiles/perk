@@ -732,7 +732,8 @@ preserved, but are **not** accepted as coverage or manually recovered into the a
 | custom | angle=custom, streamed=true, 3 findings | `1e8b477d23e2ec992c212e9d2075077f2793514c14172feca18fae9299d0c914` |
 
 This is evidence of successful report capture alongside a failed runtime outcome, not a missing
-completion-tool assumption. The timeout's exact runtime origin is unestablished. The collect
+completion-tool assumption. The later trace below identifies stale-error accounting after
+successful native retry; the original network timeout's cause remains unknown. The collect
 itself settled promptly; no collect-grace expiry or replacement wave occurred.
 
 Decisive order (UTC, 2026-09-06):
@@ -776,9 +777,9 @@ Copy `live/D2/browser-final.png`, SHA-256
 
 The browser offered **“Draft Recovered — Found 5 annotations from 3 hours ago”** at open. The
 operator asked which option to choose and was told **No**, to avoid restoring original D's
-annotations. Confirmation of the option actually selected remains pending; it is not silently
-assumed. This recovery prompt is a separate freshness observation, not the explanation for the
-engine's timeout statuses.
+annotations. The owner subsequently explicitly confirmed **declining restoration**; old annotations were
+not restored. This recovery prompt is a separate freshness observation, not the explanation
+for the engine's timeout statuses.
 
 Captured parent/child JSONL, workflow/child status, recovery descriptors, runner logs and failed
 capture files are under `live/D2/captured-runtime/`. `evidence.json`, `parent-timeline.json` and
@@ -787,3 +788,57 @@ evidence-only update; driver remains at `2ed55c1b` with only approved manifest c
 remain open for capture; no approval/save or full teardown is claimed. N/U were not launched.
 Further diagnosis, capability/model changes or live attempts require a new explicit owner
 decision; this record does not convert repeated failures into a passing result.
+
+### D2 timeout diagnosis — recovered error remains latched upstream
+
+The owner authorized a **read-only** timeout trace, not another live run or a settings/code
+change. The complete event streams explain the misleading final timeout statuses:
+
+| Event | decision-completeness | custom |
+| --- | --- | --- |
+| Earlier assistant error: Request timed out. | 01:30:00.714Z | 01:30:01.686Z |
+| Native `auto_retry_end`, success=true | 01:30:08.292Z | 01:30:06.712Z |
+| Successful structured-output capture | 01:30:20.215Z | 01:30:20.265Z |
+| `agent_settled` | 01:30:20.239Z | 01:30:20.276Z |
+| Final failed step status repeats old timeout | 01:30:20.786Z | 01:30:20.802Z |
+
+These are upstream Pi **model-request retries within the same child**, not another perk wave
+attempt or a retry policy introduced by this implementation. The session JSONL contains the
+earlier error; `events.jsonl` additionally records successful recovery. Inspecting only final
+messages was insufficient to distinguish a new timeout from a retained historical error.
+
+The installed pi-subagents 0.65.1 source matches the driver's source byte-for-byte.
+`src/runs/background/run-child-session.ts` assigns `assistantError` from an assistant
+`message_end.errorMessage`. It does not clear the latch on successful `auto_retry_end`; its
+clear branch requires a clean **nonempty plain-text terminal stop**. A report-only child ends
+through a structured-output tool-use message/result, so that branch never runs. `settle`
+folds `error ?? assistantError` into exitCode 1. `subagent-runner.ts` in turn requires
+`run.exitCode === 0 && !run.error` before validating/reading the captured report, so the stale
+error blocks the ordinary successful-report path.
+
+An offline replay into the **unmodified installed `runChildSession`** reproduced this for both
+recorded event sequences. The factory was a stub that emits captured events and resolves—no
+model request, child process, real session, upstream patch or live wave:
+
+| Replay | Result for both children |
+| --- | --- |
+| Recorded sequence unchanged | exitCode=1, error=Request timed out., structuredOutputToolInvoked=true, timedOut=false |
+| Control omitting the historical assistant-error message_end | exitCode=0, error=null, structuredOutputToolInvoked=true |
+| Control adding a clean nonempty plain-text final stop | exitCode=0, error=null, structuredOutputToolInvoked=true |
+
+The controls are diagnostic counterfactuals, **not recommended live workarounds**. In particular,
+reviewers must not append prose after their required final tool solely to clear stale engine
+state, and perk must not salvage capture files from failed runs. The initial transient network
+error's cause is not established; the reproduced bug is its persistence after successful native
+recovery. This does not explain original D's separate missing-tool-call failure.
+
+Inspected source SHA-256:
+`86f302832a21afdb0e79446d20d58be242d23c09f3d425bf4db254a09c10c940`.
+Artifacts: `live/D2/retry-event-trace.json`, `replay-stale-assistant-error.mjs`, and
+`stale-assistant-error-replay.json`. A sanitized, **not-posted** upstream bug-report draft is
+`live/D2/upstream-timeout-report.md`, targeting the installed package's declared repository
+`nicobailon/pi-subagents`. Suggested upstream repair: reconcile recoverable assistant-error
+state on confirmed retry success without clearing hard run/stop/timeout errors, with tests for
+structured-output completion, failed retry and real termination errors. No production source,
+capability/model setting, dependency version, or live-attempt count changed during this trace.
+D2 remains not passed; N/U and submission remain blocked pending owner disposition.
