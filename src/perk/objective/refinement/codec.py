@@ -17,8 +17,11 @@ five-field :class:`RefinementIdentity`; the header mapping is exactly
 ``{schema_version, identity, source, source_digest, provenance}`` (it never duplicates the
 Markdown). The Markdown tail has no closing delimiter, so nested fences, pipes, and trailing
 content survive verbatim. The shared Linear backend transcodes the whole rendered body as it
-does every comment (the HTML marker becomes its inline-code form; the JSON line is ASCII-only
-and newline-free, so the transcoder's line splitting cannot damage it).
+does every comment (the HTML marker becomes its inline-code form). The header line is written
+so that transcoding cannot alter it: ASCII-only and newline-free (its line splitting is inert)
+and with every ``<`` spelled as the JSON escape ``\u003c`` (a perk HTML marker quoted inside a
+source field can never form the ``<!-- perk:… -->`` shape its marker rewrite matches). The
+digests are unaffected — they hash the canonical mapping JSON, never the wire line.
 
 Parse discipline: a comment whose first physical line is not a refinement-family marker is
 unrelated (``None``); a family-marked comment MUST be well-formed (marker key, envelope, exact
@@ -74,23 +77,27 @@ _TITLE_LINE = "# Objective node refinement (advisory)"
 _HEADER_PREAMBLE = "\n\n" + _TITLE_LINE + "\n\n```json\n"
 _HEADER_CLOSE = "\n```\n\n"
 
-# A family marker as a whole first line, in either encoding. The key group is captured raw and
-# validated separately (a malformed key in a marked comment is corruption, never a parse miss).
-_FAMILY_HTML_RE = re.compile(r"^<!-- " + re.escape(MARKER_FAMILY) + r":([^\s>]*) -->$")
-_FAMILY_INLINE_RE = re.compile(r"^`" + re.escape(MARKER_FAMILY) + r":([^`\s]*)`$")
-# The lenient ownership predicate's first-line shapes: tolerant whitespace + an optional
-# trailing CR, so a damaged owned record is still recognized as NOT a plan.
+# The exact rendered marker as a whole first line, in either encoding. The key group is captured
+# raw and validated separately (a malformed key in a marked comment is corruption, never a
+# parse miss).
+_FAMILY_HTML_RE = re.compile(r"<!-- " + re.escape(MARKER_FAMILY) + r":([^\s>]*) -->")
+_FAMILY_INLINE_RE = re.compile(r"`" + re.escape(MARKER_FAMILY) + r":([^`\s]*)`")
+# The lenient FAMILY-OWNERSHIP shape of a first line: tolerant whitespace + an optional trailing
+# CR around either encoding. Ownership is decided by this shape; well-formedness by the exact
+# shapes above — a line that is family-owned but not exactly rendered is a damaged owned record
+# (it fails loud, is never a plan, and never reads as absence).
 _FAMILY_LENIENT_RE = re.compile(
-    r"^(?:<!--\s*"
+    r"(?:<!--\s*"
     + re.escape(MARKER_FAMILY)
     + r":\S*\s*-->|`"
     + re.escape(MARKER_FAMILY)
-    + r":[^`]*`)\r?$"
+    + r":[^`]*`)\r?"
 )
 
-_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
-_HEAD_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+# Whole-string scalar shapes (``fullmatch`` — a trailing newline is a noncanonical spelling).
+_HEX64_RE = re.compile(r"[0-9a-f]{64}")
+_HEAD_SHA_RE = re.compile(r"[0-9a-f]{40}")
+_TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 _TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 
@@ -110,7 +117,7 @@ def _sha256_hex(text: str) -> str:
 def is_canonical_timestamp(value: str) -> bool:
     """True for exactly ``YYYY-MM-DDTHH:MM:SSZ`` naming a valid UTC calendar time (whole
     seconds; no fractional part, no numeric offset, no lenient field widths)."""
-    if _TIMESTAMP_RE.match(value) is None:
+    if _TIMESTAMP_RE.fullmatch(value) is None:
         return False
     try:
         datetime.strptime(value, _TIMESTAMP_FORMAT)
@@ -229,7 +236,7 @@ def provenance_findings(provenance: RefinementProvenance) -> list[str]:
     if not is_canonical_timestamp(provenance.authored_at):
         findings.append("provenance.authored_at is not a canonical UTC timestamp")
     basis = provenance.code_basis
-    if _HEAD_SHA_RE.match(basis.head_sha) is None:
+    if _HEAD_SHA_RE.fullmatch(basis.head_sha) is None:
         findings.append("provenance.code_basis.head_sha is not a full lowercase 40-hex commit id")
     if not is_canonical_timestamp(basis.captured_at):
         findings.append("provenance.code_basis.captured_at is not a canonical UTC timestamp")
@@ -281,9 +288,18 @@ def document_for_target(
 # ------------------------------------------------------------------ render
 
 
+def wire_header_json(mapping: dict[str, object]) -> str:
+    """The header line as written to the wire: the canonical JSON with every ``<`` spelled as
+    ``\\u003c``. ``<`` only ever occurs inside JSON string values (structure characters never
+    include it), and canonical JSON never pre-escapes it, so the substitution is a pure
+    JSON-preserving re-spelling — ``json.loads`` yields the identical mapping — that leaves
+    no ``<!--`` for the Linear transcoder's marker rewrite to match."""
+    return canonical_json(mapping).replace("<", "\\u003c")
+
+
 def render_refinement(document: RefinementDocument) -> str:
     """Render the exact comment envelope: marker, blank line, title, blank line, the fenced
-    canonical header JSON, blank line, the Markdown verbatim (no added final newline)."""
+    wire header JSON, blank line, the Markdown verbatim (no added final newline)."""
     header: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "identity": _identity_mapping(document.identity),
@@ -294,7 +310,7 @@ def render_refinement(document: RefinementDocument) -> str:
     return (
         html_marker(target_key(document.identity))
         + _HEADER_PREAMBLE
-        + canonical_json(header)
+        + wire_header_json(header)
         + _HEADER_CLOSE
         + document.markdown
     )
@@ -381,11 +397,18 @@ class _StoredHeader(LenientParseModel):
         )
 
 
+def is_family_marker_line(line: str) -> bool:
+    """Family OWNERSHIP of a first line: the lenient marker shape in either encoding (tolerant
+    whitespace, an optional trailing CR). The one ownership rule behind ``is_refinement_comment``
+    and the parsers, so a line owned here can never read as an unrelated comment there."""
+    return _FAMILY_LENIENT_RE.fullmatch(line) is not None
+
+
 def family_marker_key(line: str) -> str | None:
-    """The raw key of a refinement-family marker occupying ``line`` exactly (HTML or inline
-    form), else ``None``. The key is NOT validated here."""
+    """The raw key of an EXACTLY rendered refinement-family marker occupying ``line`` (HTML or
+    inline form), else ``None``. The key is NOT validated here."""
     for pattern in (_FAMILY_HTML_RE, _FAMILY_INLINE_RE):
-        match = pattern.match(line)
+        match = pattern.fullmatch(line)
         if match is not None:
             return match.group(1)
     return None
@@ -396,7 +419,7 @@ def is_refinement_comment(body: str) -> bool:
     a refinement-family marker (either encoding), regardless of whether the rest is valid. A
     damaged owned record must never be read or overwritten as a plan; a marker mentioned later
     in a real plan does not change the plan's kind."""
-    return _FAMILY_LENIENT_RE.match(first_line(body)) is not None
+    return is_family_marker_line(first_line(body))
 
 
 def _malformed(message: str, comment: EngagementComment) -> RefinementError:
@@ -413,10 +436,13 @@ def parse_refinement_comment(comment: EngagementComment) -> SavedRefinement | No
     defect raises ``RefinementError(malformed_refinement)``. Parses BEFORE any trimming; the
     body digest is over the exact stored bytes."""
     body = comment.body
-    key = family_marker_key(first_line(body))
-    if key is None:
+    line = first_line(body)
+    if not is_family_marker_line(line):
         return None
-    if _HEX64_RE.match(key) is None:
+    key = family_marker_key(line)
+    if key is None:
+        raise _malformed("marker line is not the exact rendered form", comment)
+    if _HEX64_RE.fullmatch(key) is None:
         raise _malformed("marker key is not a 64-char lowercase hex digest", comment)
     if sum(body.count(form) for form in marker_forms(key)) != 1:
         raise _malformed("ownership marker is repeated", comment)
@@ -481,8 +507,16 @@ def find_target_refinement(
     for comment in comments:
         if comment.id in owned_ids:
             continue
-        other_key = family_marker_key(first_line(comment.body))
-        if other_key is not None and _HEX64_RE.match(other_key) is None:
+        # Every other family-OWNED first line must at least be an exactly rendered marker with
+        # a readable key: a damaged family record cannot prove it is foreign, so it fails here
+        # rather than reading as absence. A readable foreign key is ignored, never rebound.
+        line = first_line(comment.body)
+        if not is_family_marker_line(line):
+            continue
+        other_key = family_marker_key(line)
+        if other_key is None:
+            raise _malformed("marker line is not the exact rendered form", comment)
+        if _HEX64_RE.fullmatch(other_key) is None:
             raise _malformed("marker key is not a 64-char lowercase hex digest", comment)
     if not scan.owned:
         return None

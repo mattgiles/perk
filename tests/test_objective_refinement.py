@@ -20,8 +20,10 @@ from perk.backends.issue_backend import (
     IssueBackend,
     MarkedCommentError,
     MarkedCommentExpectation,
+    is_canonical_digest,
     scan_marked_comments,
 )
+from perk.backends.linear._helpers import to_linear_markdown
 from perk.backends.objective_store import ObjectiveStore
 from perk.objective import NodeStatus
 from perk.objective.refinement import codec, service
@@ -197,6 +199,7 @@ class TestCanonicalEncodings:
             "2026-02-30T12:34:56Z",  # invalid calendar date
             "2026-09-07T24:00:00Z",  # invalid time
             "2026-09-07t12:34:56z",  # lowercase
+            "2026-09-07T12:34:56Z\n",  # trailing newline (whole-string matching)
             "",
         ],
     )
@@ -214,13 +217,22 @@ class TestCanonicalEncodings:
 
     @pytest.mark.parametrize(
         "digest",
-        [GOLDEN_TARGET_KEY.upper(), "sha256:" + GOLDEN_TARGET_KEY, GOLDEN_TARGET_KEY[:63], ""],
+        [
+            GOLDEN_TARGET_KEY.upper(),
+            "sha256:" + GOLDEN_TARGET_KEY,
+            GOLDEN_TARGET_KEY[:63],
+            GOLDEN_TARGET_KEY + "\n",
+            "",
+        ],
     )
     def test_source_digest_refusals(self, digest: str) -> None:
         findings = codec.document_findings(_document(source_digest=digest))
         assert any("source_digest" in f for f in findings)
+        assert not is_canonical_digest(digest)
 
-    @pytest.mark.parametrize("sha", ["abc1234", HEAD.upper(), HEAD[:39], HEAD + "a"])
+    @pytest.mark.parametrize(
+        "sha", ["abc1234", HEAD.upper(), HEAD[:39], HEAD + "a", HEAD + "\n", "\n" + HEAD]
+    )
     def test_head_sha_refusals(self, sha: str) -> None:
         basis = RefinementCodeBasis(head_sha=sha, dirty=False, captured_at=TS)
         prov = RefinementProvenance(authoring_run_id="r", authored_at=TS, code_basis=basis)
@@ -273,9 +285,37 @@ class TestRenderAndParse:
                 "code_basis": {"head_sha": HEAD, "dirty": False, "captured_at": TS},
             },
         }
-        # Canonical: sorted keys, no whitespace, single line.
+        # Canonical: sorted keys, no whitespace, single line (no `<` here, so the wire line IS
+        # the canonical spelling).
         assert header_line == codec.canonical_json(header)
         assert "\n" not in header_line
+
+    def test_wire_header_protects_perk_markers_in_source_fields_from_transcoding(self) -> None:
+        # A node description quoting a perk HTML marker (and a <details> wrapper line) must
+        # survive the shared Linear transcoder inside the header: `<` is spelled `\u003c` on
+        # the wire, the digests hash the canonical mapping (unchanged), and the decoded
+        # document is identical after the whole body is transcoded.
+        quoted = "Docs about <!-- perk:metadata-block:plan-body --> and <details> lines"
+        source = _source(description=quoted, comment="<!-- perk:x -->")
+        doc = _document(source=source, markdown="body\n")
+        rendered = codec.render_refinement(doc)
+        header_line = rendered.split("```json\n", 1)[1].split("\n", 1)[0]
+        assert "<" not in header_line and "\\u003c!-- perk:" in header_line
+        header = json.loads(header_line)
+        assert header["source"]["description"] == quoted
+        assert codec.wire_header_json(header) == header_line
+        assert header["source_digest"] == codec.source_digest(source)  # canonical, not wire
+        # The transcoder rewrites the ownership marker only; the header line is untouched.
+        transcoded = to_linear_markdown(rendered)
+        assert transcoded.split("```json\n", 1)[1].split("\n", 1)[0] == header_line
+        for body in (rendered, transcoded):
+            saved = codec.parse_refinement_comment(_comment(body))
+            assert saved is not None and saved.document == doc
+            assert saved.document.source.description == quoted
+        # The stored-body digest still hashes the exact wire bytes.
+        saved_t = codec.parse_refinement_comment(_comment(transcoded))
+        assert saved_t is not None
+        assert saved_t.body_digest == hashlib.sha256(transcoded.encode("utf-8")).hexdigest()
 
     def test_round_trip_html_and_inline_forms_with_full_field_conversion(self) -> None:
         markdown = (
@@ -473,13 +513,60 @@ class TestTargetDiscovery:
         with pytest.raises(RefinementError):
             codec.find_target_refinement([_comment("see " + marker, cid="u")], _identity())
 
-    def test_family_record_with_unreadable_key_is_malformed(self) -> None:
+    @pytest.mark.parametrize(
+        "first_line",
+        [
+            "<!-- perk:objective-refinement:v1:not-a-key -->",  # exact form, unreadable key
+            "<!--perk:objective-refinement:v1:not-a-key-->",  # damaged spacing, unreadable key
+            "<!--perk:objective-refinement:v1:" + GOLDEN_TARGET_KEY + "-->",  # damaged spacing
+            "<!-- perk:objective-refinement:v1:" + GOLDEN_TARGET_KEY + " -->\r",  # trailing CR
+            "`perk:objective-refinement:v1:`",  # inline form, empty key
+            "<!--  perk:objective-refinement:v1:" + GOLDEN_TARGET_KEY + "  -->",  # extra spaces
+        ],
+    )
+    def test_family_owned_but_not_exactly_rendered_fails_never_absence(
+        self, first_line: str
+    ) -> None:
+        # Ownership (`is_refinement_comment`) and discovery share one family rule: whatever the
+        # plan-exclusion predicate owns, discovery must refuse rather than read as absence.
         rendered = codec.render_refinement(_document())
         rest = rendered.split("\n", 1)[1]
-        bad = "<!-- perk:objective-refinement:v1:not-a-key -->\n" + rest
+        bad = first_line + "\n" + rest
+        assert codec.is_refinement_comment(bad)
         with pytest.raises(RefinementError) as info:
             codec.find_target_refinement([_comment(bad, cid="bad")], _identity())
         assert info.value.code is RefinementErrorCode.MALFORMED_REFINEMENT
+        assert info.value.comment_ids == ("bad",)
+        with pytest.raises(RefinementError) as info2:
+            codec.parse_refinement_comment(_comment(bad, cid="bad"))
+        assert info2.value.code is RefinementErrorCode.MALFORMED_REFINEMENT
+
+    def test_unowned_near_misses_agree_between_predicate_and_discovery(self) -> None:
+        # Not family-owned by either rule: a trailing space after the inline form, or the family
+        # name without delimiters. Both the plan-exclusion predicate and discovery say "unrelated".
+        rest = codec.render_refinement(_document()).split("\n", 1)[1]
+        for first_line in (
+            "`perk:objective-refinement:v1:abc` ",
+            "perk:objective-refinement:v1:abc",
+        ):
+            body = first_line + "\n" + rest
+            assert not codec.is_refinement_comment(body)
+            assert codec.find_target_refinement([_comment(body, cid="n")], _identity()) is None
+            assert codec.parse_refinement_comment(_comment(body)) is None
+
+    def test_duplicate_owners_win_over_a_repeated_marker_defect(self) -> None:
+        rendered = codec.render_refinement(_document())
+        marker = rendered.split("\n", 1)[0]
+        clean = _comment(rendered, cid="a")
+        repeated = _comment(rendered + "\n" + marker, cid="b")
+        with pytest.raises(RefinementError) as info:
+            codec.find_target_refinement([clean, repeated], _identity())
+        assert info.value.code is RefinementErrorCode.AMBIGUOUS_REFINEMENT
+        assert info.value.comment_ids == ("a", "b")  # the complete duplicate set
+        # Alone, the repeated-marker owner is malformed (never a valid unique record).
+        with pytest.raises(RefinementError) as info2:
+            codec.find_target_refinement([repeated], _identity())
+        assert info2.value.code is RefinementErrorCode.MALFORMED_REFINEMENT
 
     def test_unique_record_with_mismatched_identity_is_malformed(self) -> None:
         # Marker key matches the target but the header names another identity.
@@ -503,7 +590,9 @@ class TestScanMarkedComments:
         scan = scan_marked_comments(
             [owned_html, owned_inline, prefix, misplaced, repeated, indented], forms=forms
         )
-        assert [c.id for c in scan.owned] == ["a", "b"]
+        # Ownership is the header alone (the repeated-marker owner counts), so the duplicate set
+        # is complete; the placement defects are reported separately.
+        assert [c.id for c in scan.owned] == ["a", "b", "e"]
         assert [c.id for c in scan.malformed] == ["d", "e", "f"]
 
 
@@ -556,6 +645,7 @@ class TestModelProperties:
             (" ", "0" * 64, "blank"),
             ("c", "0" * 63, "canonical"),
             ("c", "A" * 64, "canonical"),
+            ("c", "0" * 64 + "\n", "canonical"),
         ],
     )
     def test_expectation_validation(self, cid: str | None, digest: str | None, problem) -> None:

@@ -16,6 +16,7 @@ unambiguously machine bookkeeping, immune to integration URL-claiming; live-veri
 
 import json
 from dataclasses import dataclass
+from typing import cast
 
 from perk.backends.issue_backend import IssueBackendError
 from perk.boundary import LenientParseModel
@@ -192,24 +193,37 @@ def has_perk_attachment(nodes: list[dict[str, object]], *, kind: str) -> bool:
     return False
 
 
+def is_perk_owned(node: dict[str, object]) -> bool:
+    """Ownership by the raw ``metadata.source == "perk"`` field alone — decided BEFORE any
+    envelope decode, so a foreign attachment with oddly typed fields can never fail a perk
+    read, and a perk-owned envelope with unreadable fields is reported as perk's own defect."""
+    metadata = node.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    return cast("dict[str, object]", metadata).get("source") == "perk"
+
+
+def perk_owned_nodes(nodes: list[dict[str, object]]) -> list[dict[str, object]]:
+    """The perk-owned subset of raw attachment nodes (see :func:`is_perk_owned`), in order."""
+    return [node for node in nodes if is_perk_owned(node)]
+
+
 def perk_attachment_kinds(nodes: list[dict[str, object]]) -> list[str]:
-    """The ``kind`` of every perk-sourced attachment, in node order (duplicates preserved) — the
+    """The ``kind`` of every perk-owned attachment, in node order (duplicates preserved) — the
     counting primitive behind duplicate-identity and presence checks that must see EVERY
-    envelope, not just the first match. Foreign attachments (non-dict metadata or a
-    non-``perk`` source) are skipped; a perk-sourced envelope whose ``kind`` is missing/blank
-    raises a labelled ``IssueBackendError`` — an unreadable perk identity can never prove the
-    absence of any kind."""
+    envelope, not just the first match. Foreign attachments are skipped by the raw ownership
+    check (never decoded); a perk-owned envelope whose ``kind`` is missing, blank, or not a
+    string (``null``, a number, an object) raises a labelled ``IssueBackendError`` — an
+    unreadable perk identity can never prove the absence of any kind."""
     kinds: list[str] = []
-    for node in nodes:
+    for node in perk_owned_nodes(nodes):
         metadata = node.get("metadata")
-        if not isinstance(metadata, dict):
-            continue
-        envelope = _PerkAttachmentEnvelope.model_validate(metadata)
-        if envelope.source != "perk":
-            continue
-        if not envelope.kind.strip():
-            raise IssueBackendError("malformed perk attachment: unreadable kind")
-        kinds.append(envelope.kind)
+        kind: object = None
+        if isinstance(metadata, dict):
+            kind = cast("dict[str, object]", metadata).get("kind")
+        if not isinstance(kind, str) or not kind.strip():
+            raise IssueBackendError(f"malformed perk attachment: unreadable kind {kind!r}")
+        kinds.append(kind)
     return kinds
 
 

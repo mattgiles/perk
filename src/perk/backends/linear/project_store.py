@@ -25,6 +25,7 @@ from perk.backends.linear.client import (
 from perk.backends.linear.issue_ops import _LinearIssueOps
 from perk.backends.linear.project_ops import _attachment_nodes, _LinearProjectOps
 from perk.backends.objective_store import RefinementTargetReadError
+from perk.boundary import ValidationError
 from perk.objective import drift as objective_drift
 from perk.objective.refinement import codec as refinement_codec
 from perk.objective.refinement.models import (
@@ -1148,7 +1149,9 @@ class LinearProjectObjectiveStore:
             return RefinementTargetReadError("ambiguous_target", message)
 
         # First pass: classify every row by its perk envelope kinds (all of them, counted).
-        sentinel_rows: list[dict[str, object]] = []
+        # Ownership is decided by the raw `source` field first, so only perk-owned nodes ever
+        # reach an envelope decode — a foreign attachment's field types can never fail this read.
+        sentinel_rows: list[tuple[dict[str, object], list[dict[str, object]]]] = []
         node_rows: list[tuple[dict[str, object], list[dict[str, object]], bool]] = []
         for row in rows:
             identifier = str(row.get("identifier"))
@@ -1157,7 +1160,7 @@ class LinearProjectObjectiveStore:
                     f"attachment connection on {identifier} is incomplete or unreadable — plan "
                     "metadata absence cannot be proven"
                 )
-            att_nodes = _row_attachment_nodes(row)
+            att_nodes = attachments.perk_owned_nodes(_row_attachment_nodes(row))
             try:
                 kinds = attachments.perk_attachment_kinds(att_nodes)
             except IssueBackendError as exc:
@@ -1166,7 +1169,7 @@ class LinearProjectObjectiveStore:
             if header_count > 1:
                 raise ambiguous(f"{identifier} carries {header_count} objective-header attachments")
             if header_count == 1:
-                sentinel_rows.append(row)
+                sentinel_rows.append((row, att_nodes))
             node_count = kinds.count(attachments.OBJECTIVE_NODE_KIND)
             if node_count > 1:
                 raise ambiguous(f"{identifier} carries {node_count} objective-node attachments")
@@ -1178,13 +1181,13 @@ class LinearProjectObjectiveStore:
         if len(sentinel_rows) > 1:
             raise ambiguous(
                 "objective-header attachments found on "
-                + ", ".join(str(row.get("identifier")) for row in sentinel_rows)
+                + ", ".join(str(row.get("identifier")) for row, _nodes in sentinel_rows)
             )
         try:
             header_att = attachments.find_perk_attachment(
-                _row_attachment_nodes(sentinel_rows[0]), kind=attachments.OBJECTIVE_HEADER_KIND
+                sentinel_rows[0][1], kind=attachments.OBJECTIVE_HEADER_KIND
             )
-        except IssueBackendError as exc:
+        except (IssueBackendError, ValidationError) as exc:
             raise malformed(f"unreadable objective-header attachment: {exc}") from exc
         run_id = header_att.payload.get("run_id") if header_att is not None else None
         if not isinstance(run_id, str) or not run_id.strip():
@@ -1202,7 +1205,7 @@ class LinearProjectObjectiveStore:
                 if node_att is None:  # pragma: no cover - counted present above
                     raise IssueBackendError("objective-node attachment vanished")
                 node = self._node_from_payload(node_att.payload, identifier, has_plan=has_plan)
-            except IssueBackendError as exc:
+            except (IssueBackendError, ValidationError) as exc:
                 raise malformed(
                     f"unreadable objective-node metadata on {identifier}: {exc}"
                 ) from exc

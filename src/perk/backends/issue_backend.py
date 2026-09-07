@@ -91,7 +91,8 @@ class MarkedCommentError(IssueBackendError):
         super().__init__(message)
 
 
-_BODY_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+# Whole-string (``fullmatch``): a trailing newline is a noncanonical spelling, never accepted.
+_BODY_DIGEST_RE = re.compile(r"[0-9a-f]{64}")
 
 
 def body_digest(body: str) -> str:
@@ -102,7 +103,7 @@ def body_digest(body: str) -> str:
 
 def is_canonical_digest(value: str) -> bool:
     """True when ``value`` spells a canonical body digest (exactly 64 lowercase hex chars)."""
-    return _BODY_DIGEST_RE.match(value) is not None
+    return _BODY_DIGEST_RE.fullmatch(value) is not None
 
 
 @dataclass(frozen=True)
@@ -138,9 +139,15 @@ class MarkedCommentExpectation:
 
 @dataclass(frozen=True)
 class MarkedCommentScan:
-    """The outcome of :func:`scan_marked_comments`: the comments that OWN the marker (the exact
-    marker is their first physical line and occurs nowhere else) and the comments where the
-    marker is misplaced (present but not first) or repeated."""
+    """The outcome of :func:`scan_marked_comments`.
+
+    ``owned`` is every comment whose first physical line IS the exact marker (ownership is
+    decided by the header alone, so the duplicate set is always complete); ``malformed`` is every
+    comment carrying a placement defect — the marker misplaced (present but not first) or
+    repeated (an owner whose marker recurs in its body appears in BOTH tuples). Callers apply
+    duplicate-before-malformed precedence: ``len(owned) > 1`` refuses as ambiguous before any
+    ``malformed`` entry is reported.
+    """
 
     owned: tuple[EngagementComment, ...]
     malformed: tuple[EngagementComment, ...]
@@ -157,9 +164,10 @@ def scan_marked_comments(
     """Classify comments against an exact ownership marker given in every accepted encoding
     (``forms``: e.g. the HTML marker and its Linear inline-code rewrite).
 
-    A comment owns the marker when its first physical line IS one of the forms exactly and the
-    forms occur exactly once in the whole body. A comment whose body contains a form anywhere
-    else — not first (misplaced), or more than once (repeated) — is malformed: a damaged owned
+    A comment owns the marker when its first physical line IS one of the forms exactly —
+    counted independently of any other defect, so two owners are always reported as the
+    complete duplicate set. A comment whose body contains a form anywhere else — not first
+    (misplaced), or more than once (repeated, owner included) — is malformed: a damaged owned
     record must be surfaced, never re-created beside or silently adopted. Each form is a
     complete delimited marker string, so a longer key sharing the prefix never matches; a form
     embedded verbatim in an unrelated comment does count (fail-closed).
@@ -171,9 +179,10 @@ def scan_marked_comments(
         occurrences = sum(comment.body.count(form) for form in unique_forms)
         if occurrences == 0:
             continue
-        if first_line(comment.body) in unique_forms and occurrences == 1:
+        owns = first_line(comment.body) in unique_forms
+        if owns:
             owned.append(comment)
-        else:
+        if not owns or occurrences > 1:
             malformed.append(comment)
     return MarkedCommentScan(owned=tuple(owned), malformed=tuple(malformed))
 

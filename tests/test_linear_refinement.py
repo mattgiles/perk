@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from _linear_fakes import _TEAM_KEY, FakeLinearWorkspace
+from _linear_fakes import _TEAM_KEY, FakeLinearWorkspace, selects_attachment_page_info
 
 from perk import objective, plan
 from perk.backends import resolve
@@ -59,6 +59,7 @@ from perk.substrate import git
 
 REPO = Path("/repo")
 OBJ_RUN = "01OBJRUN"
+_ABSENT = object()
 HEAD = "b" * 40
 TS = "2026-09-07T12:00:00Z"
 
@@ -408,23 +409,50 @@ class TestSnapshotRead:
         metadata["payload_json"] = '{"status": "pending", "description": "x"}'
         expect_malformed()
         metadata["payload_json"] = original
-        # An unreadable perk envelope identity on the carrier cannot prove plan absence.
-        ws.attachments[(node_key[0], "https://perk.invalid/mystery")] = {
-            "id": "att-mystery",
-            "title": "?",
-            "subtitle": None,
-            "metadata": {"source": "perk", "payload_json": "{}"},
-        }
-        expect_malformed()
-        del ws.attachments[(node_key[0], "https://perk.invalid/mystery")]
-        # A foreign (non-perk) attachment, e.g. a PR card, is fine.
-        ws.attachments[(node_key[0], "https://github.com/o/r/pull/1")] = {
-            "id": "att-pr",
-            "title": "GitHub PR #1",
-            "subtitle": "OPEN",
-            "metadata": None,
-        }
-        assert store.read_node_refinement_targets(objective_id=obj_id) is not None
+        # An unreadable perk envelope identity on the carrier cannot prove plan absence — a
+        # missing, blank, null, numeric, or object-valued kind is the TYPED refusal, never an
+        # escaped validation exception.
+        mystery_key = (node_key[0], "https://perk.invalid/mystery")
+        for kind in (_ABSENT, "  ", None, 7, {"k": "v"}, ["plan-header"]):
+            metadata: dict[str, object] = {"source": "perk", "payload_json": "{}"}
+            if kind is not _ABSENT:
+                metadata["kind"] = kind
+            ws.attachments[mystery_key] = {
+                "id": "att-mystery",
+                "title": "?",
+                "subtitle": None,
+                "metadata": metadata,
+            }
+            err = expect_malformed()
+            assert "unreadable" in str(err)
+        del ws.attachments[mystery_key]
+        # Foreign (non-perk) attachments never break the read — a PR card without metadata, and
+        # integration cards whose `kind`/`source` carry arbitrary types.
+        foreign_cards: list[dict[str, object]] = [
+            {"id": "att-pr", "title": "GitHub PR #1", "subtitle": "OPEN", "metadata": None},
+            {"id": "att-x1", "title": "x", "subtitle": None, "metadata": {"kind": 5}},
+            {"id": "att-x2", "title": "x", "subtitle": None, "metadata": {"kind": None}},
+            {
+                "id": "att-x3",
+                "title": "x",
+                "subtitle": None,
+                "metadata": {"source": 3, "kind": {"nested": True}},
+            },
+            {
+                "id": "att-x4",
+                "title": "x",
+                "subtitle": None,
+                "metadata": {"source": "other", "kind": "plan-header", "payload_json": 1},
+            },
+        ]
+        for index, card in enumerate(foreign_cards):
+            ws.attachments[(node_key[0], f"https://foreign.example/{index}")] = card
+        snapshot = store.read_node_refinement_targets(objective_id=obj_id)
+        assert snapshot is not None
+        # …and the foreign `kind: "plan-header"` never counted as plan metadata.
+        assert _target(store, obj_id, "1.2").has_plan_metadata is False
+        for index in range(len(foreign_cards)):
+            del ws.attachments[(node_key[0], f"https://foreign.example/{index}")]
         # The objective-header without a readable run id.
         sentinel = _sentinel(ws, obj_id)
         header_key = _attachment_key(ws, sentinel, linear_attachments.OBJECTIVE_HEADER_KIND)
@@ -455,13 +483,17 @@ class TestSnapshotRead:
         ws = _Truncating()
         _ws, store, _issues = _harness(ws)
         obj_id = _seed(store)
-        # The read asks for the completeness signal (a focused safety assertion, not a snapshot).
+        # The read asks for the completeness signal (a focused, structural safety assertion —
+        # never a pin on the selection's exact spelling); the ordinary projection read does not.
+        before = len(ws.requests)
         store.get_objective(objective_id=obj_id)
+        assert not any(selects_attachment_page_info(q) for q, _v in ws.requests[before:])
+        before = len(ws.requests)
         with pytest.raises(RefinementTargetReadError) as info:
             store.read_node_refinement_targets(objective_id=obj_id)
         assert info.value.code == "malformed_target" and "incomplete" in str(info.value)
-        refinement_queries = [q for q, _v in ws.requests if "pageInfo { hasNextPage }" in q]
-        assert refinement_queries and all("attachments(first: 50)" in q for q in refinement_queries)
+        issue_pages = [q for q, _v in ws.requests[before:] if "issues(first" in q]
+        assert issue_pages and all(selects_attachment_page_info(q) for q in issue_pages)
         # No completeness signal at all: refused too (never inferred).
         ws.page_info = None
         with pytest.raises(RefinementTargetReadError) as info2:
@@ -472,6 +504,40 @@ class TestSnapshotRead:
             store.read_node_refinement_targets(objective_id=obj_id)
         # The ordinary projection read never asked for (and never needs) the signal.
         assert store.get_objective(objective_id=obj_id) is not None
+
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [
+            # The production spelling.
+            (
+                "{ nodes { id attachments(first: 50) { nodes { id url metadata } "
+                "pageInfo { hasNextPage } } } pageInfo { hasNextPage endCursor } }",
+                True,
+            ),
+            # Reformatted / reordered / with unrelated extra fields: still credited.
+            (
+                "{nodes{id attachments(first:50){pageInfo{endCursor hasNextPage}"
+                "nodes{id url metadata title}}}}",
+                True,
+            ),
+            (
+                "{ nodes { attachments ( first: 10 ) {\n  nodes { metadata }\n"
+                "  pageInfo {\n    hasNextPage\n  }\n} } }",
+                True,
+            ),
+            # Only the OUTER connection carries pageInfo: never credited to attachments.
+            (
+                "{ nodes { id attachments(first: 50) { nodes { id url metadata } } } "
+                "pageInfo { hasNextPage endCursor } }",
+                False,
+            ),
+            # pageInfo present inside attachments but without hasNextPage: not credited.
+            ("{ nodes { attachments(first: 50) { nodes { id } pageInfo { endCursor } } } }", False),
+            ("{ nodes { id identifier } }", False),
+        ],
+    )
+    def test_fake_completeness_detection_is_structural(self, query: str, expected: bool) -> None:
+        assert selects_attachment_page_info(query) is expected
 
     def test_transport_failure_stays_a_plain_store_error(self) -> None:
         ws, store, _issues = _harness()
@@ -678,6 +744,41 @@ class TestGuardedUpsert:
             ),
             "malformed_comment",
             comment_ids=(first_id,),
+        )
+        assert _mutations(ws, start) == []
+
+    def test_duplicate_owners_report_ambiguous_before_a_repeated_marker_defect(self) -> None:
+        ws, _store, issues = _harness()
+        issue = _bare_issue(ws)
+        iid = str(issue["id"])
+        identifier = str(issue["identifier"])
+        owned = to_linear_markdown(_body("v1"))
+        clean_id = ws.add_foreign_comment(identifier, owned)
+        repeated_id = ws.add_foreign_comment(identifier, owned + "\n" + to_linear_markdown(MARKER))
+        start = len(ws.requests)
+        err = _guard_err(
+            lambda: issues.upsert_marked_comment(
+                issue_id=iid,
+                marker=MARKER,
+                body=_body("v2"),
+                expected=MarkedCommentExpectation(None, None),
+            ),
+            "ambiguous_comment",
+            write_attempted=False,
+        )
+        assert err.comment_ids == (clean_id, repeated_id)  # the complete duplicate set
+        assert _mutations(ws, start) == []
+        # With the clean owner gone, the repeated-marker owner alone is malformed.
+        ws.comments_of(issue).pop(0)
+        _guard_err(
+            lambda: issues.upsert_marked_comment(
+                issue_id=iid,
+                marker=MARKER,
+                body=_body("v2"),
+                expected=MarkedCommentExpectation(None, None),
+            ),
+            "malformed_comment",
+            comment_ids=(repeated_id,),
         )
         assert _mutations(ws, start) == []
 
@@ -1300,6 +1401,40 @@ class TestServiceOverLinear:
             ),
             RefinementErrorCode.NODE_INELIGIBLE,
         )
+
+    def test_source_fields_carrying_perk_html_markers_round_trip_end_to_end(self) -> None:
+        # A node description that quotes a perk HTML marker rides the header unchanged through
+        # the shared transcoder: the save verifies, the read agrees, the retry converges.
+        ws, store, issues = _harness()
+        quoted = "Explains <!-- perk:metadata-block:plan-body --> markers and <details> lines"
+        obj_id = _seed(
+            store,
+            nodes=[_node("1.1", quoted, comment="see <!-- perk:x -->"), _node("1.2", "plain")],
+        )
+        node_issue = _node_issue(ws, obj_id, "1.1")
+        node_issue["description"] = str(node_issue["description"]) + "\n\n<!-- perk:y -->\n"
+        read = service.select_refinement_target(store, issues, objective_id=obj_id, node_id="1.1")
+        assert read.target.source.description == quoted
+        assert "<!-- perk:y -->" in read.target.source.issue_description
+        document = _document(read.target, "## Notes\n")
+        saved = service.save_node_refinement(
+            store,
+            issues,
+            request=RefinementSaveRequest(document=document, expected=read.expected),
+        )
+        assert saved.document == document
+        [comment] = ws.comments_of(node_issue)
+        header_line = str(comment["body"]).split("```json\n", 1)[1].split("\n", 1)[0]
+        assert "<" not in header_line  # nothing left for the marker rewrite to match
+        again = service.read_node_refinement(store, issues, objective_id=obj_id, node_id="1.1")
+        assert again.saved == saved and again.source_changed is False
+        start = len(ws.requests)
+        retried = service.save_node_refinement(
+            store,
+            issues,
+            request=RefinementSaveRequest(document=document, expected=read.expected),
+        )
+        assert retried == saved and _mutations(ws, start) == []
 
     def test_fidelity_is_the_shared_linear_rendering(self) -> None:
         # Markdown carrying perk HTML markers / a <details> wrapper is stored exactly as every

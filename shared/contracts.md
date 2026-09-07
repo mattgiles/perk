@@ -11145,7 +11145,12 @@ canonicalized, or hashed.
 The marker is accepted as that exact HTML line or its exact Linear inline-code rewrite
 (`` `perk:objective-refinement:v1:<key>` ``). The header mapping is exactly
 `{schema_version: "1", identity, source, source_digest, provenance}` and never duplicates the
-Markdown; it is one ASCII line, so the shared transcoder's line splitting cannot damage it. The
+Markdown. On the wire it is the canonical JSON re-spelled with every `<` as the JSON escape
+`\u003c` (`codec.wire_header_json`): one ASCII, newline-free line that the shared transcoder
+cannot alter — its line splitting is inert, and a perk HTML marker quoted inside a source field
+can never form the `<!-- perk:… -->` shape its marker rewrite matches. The re-spelling is
+JSON-preserving (`json.loads` yields the identical mapping); the digests hash the canonical
+mapping JSON, never the wire line. The
 Markdown tail has no closing delimiter (nested fences/pipes/trailing content survive). The
 shared Linear backend transcodes the whole rendered body as it does every comment — **full-content
 fidelity means equality to the complete Linear rendering**, not raw HTML/line-ending identity.
@@ -11163,11 +11168,19 @@ decoded identity, nonblank Markdown) — malformed records **fail**, never disap
 target marker repeated in a document is malformed; well-formed **foreign-identity** records are
 ignored by target discovery, never rebound; two exact target records are **ambiguous even when
 equal**, decided from the marker headers BEFORE any payload parse (duplicate-target precedence);
-no automatic duplicate deletion. `is_refinement_comment` is the ownership-only predicate: a
-first-line family marker (either encoding, tolerant of a trailing CR) without requiring valid
-JSON — a damaged owned record must never become a plan; a marker mentioned later in a real plan
-does not change its kind. Beyond the owned-marker grammar there are NO new Markdown
-restrictions, size caps, transcoders, or storage services.
+no automatic duplicate deletion. **Family ownership is ONE rule** (`is_family_marker_line`: the
+lenient marker shape in either encoding — tolerant whitespace, an optional trailing CR) shared
+by the ownership predicate and both parsers; well-formedness is the exact rendered form plus a
+64-hex key. A first line that is family-owned but not exactly rendered (damaged spacing, a
+trailing CR, an unreadable key) is a damaged owned record everywhere: `is_refinement_comment`
+still owns it, and `parse_refinement_comment` / `find_target_refinement` raise
+`malformed_refinement` — it can never read as absence, so selection never offers its carrier
+and a save never creates a second record beside it. A near-miss that neither rule owns (e.g. a
+trailing space after the inline form, the bare family name) is unrelated to both.
+`is_refinement_comment` is thus the ownership-only predicate without requiring valid JSON — a
+damaged owned record must never become a plan; a marker mentioned later in a real plan does
+not change its kind. Beyond the owned-marker grammar there are NO new Markdown restrictions,
+size caps, transcoders, or storage services.
 
 **The one objective-store read.** `ObjectiveStore.read_node_refinement_targets{objective_id}
 -> RefinementObjectiveSnapshot | None` — the ONE supported read behind reads, default/explicit
@@ -11189,12 +11202,18 @@ payload (multiple plan-header attachments still prove presence and never block h
 reads); observed dependencies come from blocking relations, effective ones from graph inference.
 Typed refusals: a missing project or no objective-header carrier → `None`; duplicate
 sentinel / objective-header / node-identity metadata → `ambiguous_target`; unreadable required
-metadata, a perk-sourced envelope with no readable `kind` (an unreadable identity cannot prove
-plan absence), or a missing/malformed completeness field / `hasNextPage: true` on an attachment
+metadata, a perk-owned envelope with no readable `kind` — missing, blank, `null`, a number, an
+object (an unreadable identity cannot prove plan absence), or a missing/malformed completeness
+field / `hasNextPage: true` on an attachment
 connection → `malformed_target` (plan absence is never inferred from truncation — and no
 general attachment-pagination migration or change to the existing query shapes). Transport /
 GraphQL / malformed outer API shapes stay the translated `ObjectiveStoreError` (→
-`backend_error`); kinds are decided structurally, never by matching error messages. Pure read:
+`backend_error`); kinds are decided structurally, never by matching error messages. Attachment
+**ownership is decided by the raw `metadata.source == "perk"` field BEFORE any envelope decode**
+(`attachments.is_perk_owned` / `perk_owned_nodes` / `perk_attachment_kinds`): only perk-owned
+nodes reach the Pydantic envelope, so a foreign integration card with oddly typed fields can
+never fail the read, and any residual envelope `ValidationError` on a perk-owned node is
+translated to `malformed_target` at this boundary. Pure read:
 no `Delivery.prepare`, readiness check, mutation, repair, or objective-prose hashing.
 
 **The guarded shared upsert** (`issue_backend.py`). Additions: frozen
@@ -11206,8 +11225,13 @@ stale_comment | backend_error | write_unverified`, `comment_ids: tuple[str, ...]
 `write_attempted: bool = False`; ONE defaulted field `CommentResult.verified_comment:
 EngagementComment | None = None` (no scalar proof fields, no second result type — ordinary
 callers keep `None`); the pure helpers `body_digest`, `is_canonical_digest`, `first_line`, and
-`scan_marked_comments(comments, forms) -> MarkedCommentScan{owned, malformed}` (exact
-first-line ownership in every accepted encoding; misplaced or repeated forms are malformed).
+`scan_marked_comments(comments, forms) -> MarkedCommentScan{owned, malformed}` — `owned` is
+every comment whose first physical line IS the exact marker in any accepted encoding, counted
+by the header alone (so the duplicate set is always complete); `malformed` is every placement
+defect (misplaced = present but not first; repeated = an owner whose marker recurs, which
+therefore appears in BOTH tuples); callers apply duplicate-before-malformed precedence. The
+digest/SHA/timestamp scalar checks are whole-string (`fullmatch`) — a trailing newline is a
+noncanonical spelling.
 The signature becomes `upsert_marked_comment{issue_id, marker, body, dry_run=False,
 expected=None}`: `expected=None` keeps today's behavior byte-unchanged (substring, first hit,
 no verification; existing saves are NOT opted in); a non-null `expected` is the guarded path:

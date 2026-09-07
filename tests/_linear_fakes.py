@@ -10,6 +10,7 @@ not collect this module.
 
 import itertools
 import json
+import re
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -201,6 +202,33 @@ def _not_found() -> LinearGraphQLError:
     return LinearGraphQLError(
         "Linear GraphQL error: Entity not found: Issue", codes=("INPUT_ERROR",)
     )
+
+
+_ATTACHMENTS_FIELD_RE = re.compile(r"\battachments\s*(?:\([^)]*\))?\s*\{")
+_PAGE_INFO_HAS_NEXT_RE = re.compile(r"\bpageInfo\s*\{[^{}]*\bhasNextPage\b")
+
+
+def selects_attachment_page_info(query: str) -> bool:
+    """True when a GraphQL selection asks for ``attachments { … pageInfo { … hasNextPage … } }``
+    on an issue — the completeness signal the refinement read requires. Structural, not a
+    substring pin: it walks the braces of the ``attachments`` sub-selection, so whitespace,
+    field order, and unrelated extra fields never change the answer, while a selection that
+    omits ``pageInfo``/``hasNextPage`` inside ``attachments`` is never credited."""
+    for match in _ATTACHMENTS_FIELD_RE.finditer(query):
+        depth = 0
+        start = match.end() - 1
+        for index in range(start, len(query)):
+            char = query[index]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    block = query[start : index + 1]
+                    if _PAGE_INFO_HAS_NEXT_RE.search(block) is not None:
+                        return True
+                    break
+    return False
 
 
 class FakeLinearWorkspace(LinearClient):
@@ -480,8 +508,9 @@ class FakeLinearWorkspace(LinearClient):
                 return {"project": {"externalLinks": self._page_of(list(links), v.get("cursor"))}}
             if "issues(first" in query:
                 with_milestone = "projectMilestone" in query
-                # The refinement read's attachment-completeness selection (the specific needle).
-                with_page_info = "metadata } pageInfo { hasNextPage }" in query
+                # The refinement read's attachment-completeness selection: answered structurally
+                # (never a substring pin on the selection's exact spelling).
+                with_page_info = selects_attachment_page_info(query)
                 nodes = [
                     self._project_issue_node(
                         issue,
