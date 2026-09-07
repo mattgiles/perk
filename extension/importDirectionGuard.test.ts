@@ -725,8 +725,8 @@ test("control 1: corpus + edge-map floors and known anchors", () => {
   // Explicit type-extraction floor: this live edge is a type-only import
   // (`import type { ReviewOutcome }`) — if type edges were dropped, this would match nothing.
   assert.ok(
-    (edges.get("pi/v1/providers/plannotatorHandoff.ts") ?? []).includes("pi/v1/review.ts"),
-    "edge map missed the live type-only edge pi/v1/providers/plannotatorHandoff.ts → pi/v1/review.ts",
+    (edges.get("pi/v1/providers/plannotator.ts") ?? []).includes("pi/v1/reviewOutcome.ts"),
+    "edge map missed the live type-only edge pi/v1/providers/plannotator.ts → pi/v1/reviewOutcome.ts",
   );
 });
 

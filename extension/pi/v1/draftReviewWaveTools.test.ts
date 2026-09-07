@@ -25,6 +25,7 @@ import {
 } from "../../testing/fakeSubagents.ts";
 import {
   fakePerk,
+  gitInit,
   loadPerkSession,
   type PerkSession,
   scaffoldRepo,
@@ -879,7 +880,11 @@ function fakePlannotator(sink: FakePlannotatorSink): (pi: ExtensionAPI) => void 
       handler: async () => {},
     });
     pi.events.on("plannotator:request", (data) => {
-      const envelope = data as FakePlannotatorSink["envelopes"][number];
+      const envelope = data as FakePlannotatorSink["envelopes"][number] & { action: string };
+      if (envelope.action === "review-status") {
+        envelope.respond({ status: "handled", result: { status: "pending" } });
+        return;
+      }
       sink.envelopes.push(envelope);
       envelope.respond({
         status: "handled",
@@ -916,6 +921,7 @@ async function primeThroughDoor(h: PerkSession, custom = ""): Promise<void> {
 test("tools: start_draft_review_wave threads the configured model over the primed context; collect drains", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
   installPonytailCoreSkill(cwd);
+  gitInit(cwd, { dirty: false });
   // The configured draft-reviewer model must reach the wave as its workflow-level default.
   mkdirSync(join(cwd, ".perk"), { recursive: true });
   writeFileSync(
@@ -992,6 +998,7 @@ test("tools: start_draft_review_wave threads the configured model over the prime
 
 test("tools: missing exact Ponytail core skill omits only that child and collects explicit incomplete coverage", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
+  gitInit(cwd, { dirty: false });
   const fake = draftFake();
   const sink = newSink();
   const h = await loadPerkSession({
@@ -1054,6 +1061,7 @@ test("tools: missing exact Ponytail core skill omits only that child and collect
 
 test("tools: start_draft_review_wave ignores an already-aborted per-call signal (the wave outlives the call)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
+  gitInit(cwd, { dirty: false });
   installPonytailCoreSkill(cwd);
   const fake = draftFake();
   const sink = newSink();

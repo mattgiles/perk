@@ -210,7 +210,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   Callers own exclusion and retain their claim on persistence failure; this option is not a
   transaction or an automatic lock. The narrowly typed owned-plan-patch exception (§8.23) may
   retain frozen original-source authority after draft write-back failure, never after review-state
-  or ownership failure. No existing review transport opts into this foundation yet.
+  or ownership failure. Plannotator review transports now use strict opening/attachment registration;
+subject-effect dispatch and authoring-mutation participation remain a separate integration step.
 
   `draft-review.json` is a fixed session artifact, with full replacements and strict current-run
   provenance only. Its codec/transition owner is `session/draftReviewState.ts`; target projection
@@ -4211,12 +4212,14 @@ artifacts + "File-first plan save"), §8.3 (the `approvalSave` seam + the warm c
 §8.57 (review-first carrier ownership), and §8.10 (provider deltas + the interactive save
 discipline); this section keeps the unique cross-cutting rules.
 
-### Bound draft-decision state and orchestration (not yet wired to live entries)
+### Bound draft-decision state and orchestration (transport registration active)
 
 The following storage/capability contract is implemented in `session/draftReviewState.ts`,
-`session/draftReviewBinding.ts`, and `pi/v1/draftReviewDecisions.ts`. Existing live behavior below
-remains unchanged until the provider hooks, subject entry points, and lifecycle observation are
-composed. Construction performs no startup discovery, status query, previous-feedback injection,
+`session/draftReviewBinding.ts`, and `pi/v1/draftReviewDecisions.ts`. The activation-scoped
+`pi/v1/draftReviewActivation.ts` now binds real registration to plan/objective/gist tool reviews
+and both browser doors. Subject-effect dispatch, participating authoring mutations, and delivery
+observation remain uncomposed: this milestone does not yet activate their at-most-once guarantee.
+Construction performs no startup discovery, status query, previous-feedback injection,
 resend, or automatic recovery. Python neither reads nor writes this decision artifact.
 
 The artifact has exactly `{schema_version:1, request_id, correlation, consumption}`.
@@ -4252,7 +4255,7 @@ Closed vocabularies:
   target-changed, subject-changed, superseded, unresolved-dispatch, persistence-failed,
   ownership-lost, io-error.
 - Status diagnostics (no state mutation): pending, missing, unavailable, malformed, timeout,
-  transport-error. Status query transport/catch-up is not yet implemented here.
+  transport-error. Status query diagnostics never manufacture a verdict or mutate pending state.
 
 Every mutation acquires the same run claim and re-reads strict persisted state. Same-record means
 matching request and review ID; dispatch bookkeeping also matches dispatch ID. The closed table:
@@ -4323,7 +4326,7 @@ warm node inputs pass explicitly to save; null keeps the existing Python handoff
 owned plan patch write-back is a narrow exception: save may select only the frozen original
 reviewed bytes, never artifact-first or partially written bytes, and only while review-state,
 ownership, subject/target, and save-started verification remain sound. Subject-policy extraction,
-backend flag threading, gate rendering and all live entry wiring follow separately.
+backend flag threading, guarded effect/gate rendering and delivery observation follow separately.
 
 Delivery marker is dispatch_id in tool `details.draft_review_dispatch`; expectation binds actual
 toolCallId. User marker is exactly `<!-- perk:draft-review-dispatch:<dispatch_id> -->`, authored
@@ -4337,6 +4340,48 @@ explicit lifecycle calls; ordinary missing evidence leaves dispatch waiting with
 guesses. Activation end checks evidence first, then marks remaining sound dispatch uncertain/
 delivery-unconfirmed. No previous-activation consumption, resend, recovery, or resume is implied.
 The production turn_end/shutdown subscriptions and human reconciliation guidance remain unbuilt.
+
+### Mandatory Plannotator registration and subscribe-then-status transport
+
+`requestPlannotatorPlanReview(bus, plan, registration, signal?)`, bridge
+`review(plan, registration, signal?)`, and `startPlannotatorPlanReview` options require
+`DraftReviewRegistration`: synchronous open/attach/invalidateOpening/subscriptionFailed hooks
+and a diagnostic sink. Production callers use the state-bound hooks above; no optional or no-op
+registration path exists. A hook refusal/throw closes local transport and returns provider-specific
+`{status:"refused", code, phase, detail}` (phase open/attach/invalidate/subscribe). Unexpected hook
+throws are persistence-failed. The Pi edge renders a nonterminating stop, not a skipped review,
+denial, save retry, or successful wave launch. Browser start captures the synchronous open outcome
+before probing/priming. `null` from browser-open remains exclusively port-pick failure.
+
+Pre-abort emits nothing and calls no hooks. Mint one UUID and verify open before emitting
+`plannotator:request` with `{requestId, action:"plan-review", payload:{planContent, origin:"perk"},
+respond}`. Abort after open but before request invalidates opening-aborted. Handshake error,
+malformation, timeout or emit failure invalidates handshake-failed; pre-ID abort invalidates
+opening-aborted. Cleanup refusal overrides unavailable/aborted. Valid pending handshake attaches
+its nonblank ID synchronously before observing a newly aborted signal, retaining known pending
+correlation; failed attachment never subscribes. Subscribe to ID-filtered review-result before
+issuing one status query. Subscription failure verifies subscription-failed invalidation.
+
+`queryPlannotatorReviewStatus(bus, reviewId, signal?)` emits a separately minted callback UUID,
+action review-status and payload `{reviewId}`. It accepts handled pending/missing/completed;
+completed requires matching nonblank reviewId, boolean approved and verbatim nonblank feedback
+(blank/nonstring feedback is absent). Unknown/getter payloads are contained. Query results are
+completed/pending/missing/aborted or failed unavailable/malformed/timeout/transport-error. The
+fixed **5-second status deadline** is independently timer-injected for tests; the existing
+handshake override affects only handshake. The live human wait has no deadline. One first-settle
+operation arbitrates synchronous or asynchronous status/live completion, duplicates and abort;
+settlement disposes the listener, query timer/bookkeeping and abort handlers, including synchronous
+callback delivery during subscription. Pending is quiet and proves no health/delivery guarantee;
+missing or failed query warns once but leaves live wait cancellable and eligible for later events.
+No polling, upstream status-file reads, HTTP decision endpoint or automatic reopen is introduced.
+Lost handshake identity or a decision lost from both status and emission remains unrecoverable.
+
+One root-owned activation coordinates tool and browser local waits. Only a verified new opening,
+after the state hook releases exclusion, detaches its predecessor. A refused successor leaves the
+old wait intact. Detachment/shutdown disposes local transport only, never another browser or its
+companion surfaces; old browser teardown is identity-suppressed. Ordinary pending abort leaves
+persisted pending intact. Already-racing candidates require claim-bound consumption revalidation
+when subject effects are composed; transport correlation alone is not dispatch authority.
 
 ### Existing live review surfaces
 

@@ -62,6 +62,12 @@ import { paramsOf, stringParam } from "../../substrate/toolParams.ts";
 import { type BranchEntry, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
 import { installInjectedContext } from "./contextInjection.ts";
+import {
+  captureDraftReviewRefusal,
+  draftReviewRefusalResult,
+  type RegisteredDraftReviewBridge,
+  reviewRegisteredDraft,
+} from "./draftReviewActivation.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import { isPlannotatorPlanSelected } from "./providers/selection.ts";
 import {
@@ -493,12 +499,13 @@ function gistOutcomeOf(outcome: ReviewOutcome): GistReviewOutcome {
 }
 
 /** The plannotator reviewer adapter: the event-bus bridge judges the rendered draft. */
-function plannotatorGistReviewer(bridge: {
-  review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome>;
-}): GistDraftReviewer {
+function plannotatorGistReviewer(
+  bridge: RegisteredDraftReviewBridge,
+  ctx: ExtensionContext,
+): GistDraftReviewer {
   return {
     async review(rendered, signal) {
-      return gistOutcomeOf(await bridge.review(rendered, signal));
+      return gistOutcomeOf(await reviewRegisteredDraft(bridge, ctx, rendered, signal));
     },
   };
 }
@@ -547,7 +554,7 @@ export async function runGistReviewV1(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
-  bridge: { review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome> },
+  bridge: RegisteredDraftReviewBridge,
   signal?: AbortSignal,
 ): Promise<ToolResult> {
   // Headless → soft skip (fail-open; never wedges CI/supervisor runs on an interactive UI).
@@ -557,12 +564,15 @@ export async function runGistReviewV1(
   // `absent`, so `reviewGist` classifies `noDraft` — the same rendered redirect as before.
   const session = openSession(pi, ctx);
   const reviewer = isPlannotatorPlanSelected(ctx.cwd)
-    ? plannotatorGistReviewer(bridge)
+    ? plannotatorGistReviewer(bridge, ctx)
     : firstPartyGistReviewer(ctx);
-  const result = await reviewGist(
-    { session, reviewer, backend: coldDoorGistBackend(pi, ctx), gate: gateFor(gating, ctx) },
-    sig,
+  const result = await captureDraftReviewRefusal(
+    reviewGist(
+      { session, reviewer, backend: coldDoorGistBackend(pi, ctx), gate: gateFor(gating, ctx) },
+      sig,
+    ),
   );
+  if (result.status === "refused") return draftReviewRefusalResult(result);
   switch (result.status) {
     case "noDraft":
       return noGistDraftResult();

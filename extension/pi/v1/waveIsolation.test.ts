@@ -21,6 +21,7 @@ import {
 import {
   fakePerk,
   fakePerkRouter,
+  gitInit,
   loadPerkSession,
   type PerkSession,
   scaffoldRepo,
@@ -234,8 +235,14 @@ function fakePlannotator(sink: FakePlannotatorSink): (pi: ExtensionAPI) => void 
       handler: async () => {},
     });
     pi.events.on("plannotator:request", (data) => {
-      const envelope = data as { respond: (r: unknown) => void };
-      envelope.respond({ status: "handled", result: { status: "pending", reviewId: "r-1" } });
+      const envelope = data as { action: string; respond: (r: unknown) => void };
+      envelope.respond({
+        status: "handled",
+        result:
+          envelope.action === "review-status"
+            ? { status: "pending" }
+            : { status: "pending", reviewId: "r-1" },
+      });
     });
   };
 }
@@ -271,6 +278,7 @@ const OBJECTIVE_PROSE = "# Ship retries\n\nThe gateway needs retries.\n";
 test("two sessions share no draft-review context: each wave receives its own primed bytes", async () => {
   // Session A: a PLAN draft primed through the real /plan-review-browser door.
   const cwdA = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
+  gitInit(cwdA, { dirty: false });
   installPonytailSkill(cwdA, "ponytail");
   const fakeA = markedFake("draft A");
   const sinkA: FakePlannotatorSink = { emitDecision: () => {} };
@@ -283,6 +291,7 @@ test("two sessions share no draft-review context: each wave receives its own pri
   const cwdB = scaffoldRepo({
     handoff: { runId: "01RID", mode: "read-only", stage: "objective-author" },
   });
+  gitInit(cwdB, { dirty: false });
   installPonytailSkill(cwdB, "ponytail");
   const fakeB = markedFake("draft B");
   const sinkB: FakePlannotatorSink = { emitDecision: () => {} };

@@ -29,7 +29,9 @@ import type { ToolGating } from "../../substrate/toolGating.ts";
 import type { EntrySink } from "../../substrate/workflowState.ts";
 import { WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
+import { policyBrowserReviews } from "../../testing/draftReview.ts";
 import {
+  gitInit,
   loadPerkSession,
   type PerkSession,
   plantSession,
@@ -596,6 +598,11 @@ function fakeBus(): {
   const handlers = new Map<string, Set<(data: unknown) => void>>();
   return {
     emit(name, data) {
+      const request = data as { action?: string; respond(value: unknown): void };
+      if (name === "plannotator:request" && request.action === "review-status") {
+        request.respond({ status: "handled", result: { status: "pending" } });
+        return;
+      }
       for (const handler of [...(handlers.get(name) ?? [])]) handler(data);
     },
     on(name, handler) {
@@ -646,6 +653,7 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
     { draft: "# The draft\n" },
     draftReview,
     annotations,
+    policyBrowserReviews("plan", "# The draft\n"),
     {
       pickFreePort: async () => 45002,
       probe: async () => false,
@@ -726,6 +734,7 @@ test("open core: primes BOTH surfaces with the deterministic URL/plan mode, RETU
     { draft: "# The draft\n", custom: "check the rollback story" },
     draftReview,
     annotations,
+    policyBrowserReviews("plan", "# The draft\n"),
     {
       pickFreePort: async () => 45001,
       probe: async () => true,
@@ -734,6 +743,8 @@ test("open core: primes BOTH surfaces with the deterministic URL/plan mode, RETU
       sleep: async () => {},
     },
   );
+  assert.equal(typeof guidance, "string");
+  if (typeof guidance !== "string") throw new Error("expected launch guidance");
   // Both surfaces primed with the deterministic handle the moment the open returns.
   assert.equal(await annotationMode(), "plan", "the annotation surface is primed in plan mode");
   assert.equal(await draftContextPrimed(), true, "the draft-review context is primed");
@@ -820,6 +831,10 @@ function fakePlannotator(sink: FakePlannotatorSink): (pi: ExtensionAPI) => void 
     });
     pi.events.on("plannotator:request", (data) => {
       const envelope = data as PlanReviewEnvelope;
+      if (envelope.action === "review-status") {
+        envelope.respond({ status: "handled", result: { status: "pending" } });
+        return;
+      }
       sink.envelopes.push(envelope);
       sink.envAtEmit.push(process.env.PLANNOTATOR_PORT);
       envelope.respond({
@@ -1009,6 +1024,7 @@ test("/plan-review-browser: a BLANK validated draft → the same refusal (drafts
 
 test("/plan-review-browser: happy path — primes both surfaces, injects URL-free guidance, decision routes + clears", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
+  gitInit(cwd, { dirty: false });
   const sink = newSink();
   const h = await loadPerkSession({
     cwd,

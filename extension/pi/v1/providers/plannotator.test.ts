@@ -15,17 +15,39 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { PLAN_CONTEXT_TYPE } from "../../../authoring/plan/prose.ts";
+import { recordingDraftRegistration } from "../../../testing/draftReview.ts";
 import { loadPerkSession, plantRawSession, scaffoldRepo } from "../../../testing/harness.ts";
 import { reviewOutcomeResult } from "../planReview.ts";
+
+async function requestPlannotatorPlanReview(
+  bus: PlannotatorBus,
+  plan: string,
+  signal?: AbortSignal,
+) {
+  const outcome = await requestRegisteredReview(
+    bus,
+    plan,
+    recordingDraftRegistration().registration,
+    signal,
+  );
+  assert.notEqual(outcome.status, "refused");
+  if (outcome.status === "refused") throw new Error(outcome.detail);
+  return outcome;
+}
+function createPlannotatorBridge(bus: PlannotatorBus) {
+  return {
+    review: (plan: string, signal?: AbortSignal) => requestPlannotatorPlanReview(bus, plan, signal),
+  };
+}
+
 import {
-  createPlannotatorBridge,
   extractDirectEdits,
   GIST_ADAPTER_PLANNOTATOR_CONTEXT,
   hasDirectEditsHeading,
   OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT,
   PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
   type PlannotatorBus,
-  requestPlannotatorPlanReview,
+  requestPlannotatorPlanReview as requestRegisteredReview,
 } from "./plannotator.ts";
 import { isPlannotatorPlanSelected } from "./selection.ts";
 
@@ -44,6 +66,13 @@ function fakeBus(): PlannotatorBus & { handlers: Map<string, ((data: unknown) =>
   return {
     handlers,
     emit(channel, data) {
+      if (
+        channel === "plannotator:request" &&
+        (data as RequestEnvelope).action === "review-status"
+      ) {
+        (data as RequestEnvelope).respond({ status: "handled", result: { status: "pending" } });
+        return;
+      }
       for (const h of handlers.get(channel) ?? []) h(data);
     },
     on(channel, handler) {
@@ -563,7 +592,7 @@ test("bridge: a synchronous emit throw is contained as unavailable (timer actual
   });
   const outcome = await createPlannotatorBridge(bus).review("# A plan");
   assert.equal(outcome.status, "unavailable");
-  assert.match((outcome as { warning: string }).warning, /foreign handler exploded/);
+  assert.match((outcome as { warning: string }).warning, /request failed/);
   const allocated = setSpy.mock.calls.map((c) => c.result);
   assert.equal(allocated.length, 1, "the bridge allocated exactly the handshake timer");
   const clearedHandles = clearSpy.mock.calls.map((c) => c.arguments[0]);

@@ -28,6 +28,7 @@ import {
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
+import { policyDraftReviews } from "../../testing/draftReview.ts";
 import {
   fakePerk,
   loadPerkSession,
@@ -741,12 +742,10 @@ function selectPlanProvider(cwd: string, id: string): void {
 }
 
 /** A recording bridge: captures the reviewed bytes, returns the canned outcome. */
-function cannedBridge(outcome: ReviewOutcome): {
-  review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome>;
-  reviewed: string[];
-} {
+function cannedBridge(outcome: ReviewOutcome) {
   const reviewed: string[] = [];
   return {
+    ...policyDraftReviews,
     reviewed,
     async review(plan: string) {
       reviewed.push(plan);
@@ -1124,6 +1123,7 @@ test("gist arm: approved but the draft corrupted before the save re-read -> the 
   const argvs: string[][] = [];
   const pi = fakeColdDoorPi(branch, { stdout: GIST_JSON, argvs });
   const bridge = {
+    ...policyDraftReviews,
     reviewed: [] as string[],
     async review(plan: string): Promise<ReviewOutcome> {
       // The draft file vanishes between the review read and the save-time re-read — the seam

@@ -290,6 +290,13 @@ The cold twin is [`perk objective stack review`](../cli/objective.md#perk-object
 
 ## Browser draft review
 
+Plannotator draft opens now verify run-local registration before launching. A typed registration
+refusal stops without priming companion surfaces or taking the port-failure fallback. The
+subscribe-then-status catch-up query is bounded to five seconds; the live human wait remains
+open-ended. Pending is not a health guarantee, and missing/query failure is not a denial.
+See [Plannotator draft-review transport](../providers-and-backends.md#plannotator-draft-review-transport)
+for cancellation, retained-state stops, and the current subject-effect integration limit.
+
 Both draft doors review the exact validated artifact primed by the command. They never accept
 pasted draft text from the model. The shared companion tools are:
 

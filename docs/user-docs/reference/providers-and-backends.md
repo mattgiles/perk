@@ -54,6 +54,26 @@ GitHub is the default issue backend; Linear is the other supported choice. Both 
 requests, review, CI, and merge on GitHub. Their storage and operational differences are
 summarized in [Issue backends](./providers-and-backends/issue-backends.md).
 
+## Plannotator draft-review transport
+
+Plan, objective, and gist browser reviews now require verified run-local registration before a
+request is emitted. Registration binds the exact source and conservative local routing inputs;
+changes during the handshake can require a fresh review. Busy, broken-provenance, persistence,
+or unresolved-dispatch stops are **refusals**, not skipped reviews or permission to retry a save.
+They do not launch a reviewer wave or fall back to another review. Preserve retained state and
+seek human reconciliation; do not remove a lock or rewrite provenance to bypass the stop.
+
+After attaching the browser's review ID, Perk subscribes to live decisions, then queries status
+once with a separate five-second deadline. A completed status can supply a decision missed during
+the handshake. Pending is quiet and proves neither browser health nor delivery; missing or failed
+status warns but keeps the live wait open and cancellable. Cancellation closes the local wait,
+not the upstream browser. There is no polling, startup discovery, automatic replay, or resume.
+
+**Integration status:** registration and catch-up are active. Guarded subject effects, competing
+authoring mutations, and persisted delivery acknowledgment are not yet composed in this milestone;
+the transport alone does not establish at-most-once saves or delivery. The existing first-party
+review and subject-specific Direct Edits/save policies remain in place.
+
 ## Known caveats & maturity
 
 - `pi-status-footer` does not render extension statuses, so perk's objective progress is not

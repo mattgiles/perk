@@ -58,6 +58,21 @@ The plan seam must always produce perk's reviewed, canonical plan artifact.
   direct edits do not save: they return one revise round so the agent folds the edits into the
   structured draft and re-reviews. Denial returns feedback to the agent.
 
+Plannotator plan/objective/gist reviews require verified run-local opening and attachment
+registration. Exact source and conservative routing inputs are checked; drift during handshake
+can require rereview. Busy, invalid-state, persistence-failed and unresolved-dispatch are stops,
+not skipped reviews, successful wave launches, or permission to retry a save. Preserve retained
+state for human reconciliation; never remove a lock or forge provenance to bypass a refusal.
+
+After attaching the review ID, Perk subscribes before making one callback status query with a
+separate five-second deadline. Completed status catches missed live decisions; pending proves
+neither health nor delivery. Missing/query failure warns once and keeps the live wait cancellable.
+Cancellation closes only local transport, not the upstream browser. No polling, startup discovery,
+automatic replay or resume exists. **Current integration limit:** transport registration/catch-up
+are active, but guarded subject effects, authoring-mutation participation and persisted delivery
+acknowledgment are not yet composed. Transport correlation alone does not guarantee at-most-once
+save/delivery. First-party and subject-specific Direct Edits/save policies remain unchanged.
+
 The warm `/pr-review-browser` door also uses plannotator when that package is installed. It can
 review a foreign PR, the active worktree's PR, or a local since-base diff before submission. That
 PR-review choice is command-owned, not a provider seam.

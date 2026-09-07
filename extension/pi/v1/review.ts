@@ -24,12 +24,9 @@ import type { Result } from "../../substrate/result.ts";
  * no-save exit — contracts.md §8.23); the plannotator bridge never produces it (its browser
  * envelope returns only approve/deny) and the objective arm never offers it.
  */
-export type ReviewOutcome =
-  | { status: "unavailable"; warning: string }
-  | { status: "aborted" }
-  | { status: "dismissed" }
-  | { status: "implement-here"; reviewId: string }
-  | { status: "completed"; approved: boolean; feedback?: string; reviewId: string };
+export type { ReviewOutcome } from "./reviewOutcome.ts";
+
+import type { ReviewOutcome } from "./reviewOutcome.ts";
 
 export interface ToolResult {
   content: { type: "text"; text: string }[];
@@ -310,13 +307,20 @@ export function approvedSubjectSaveResult(
  * the synchronous port-pick failure (already loudly reported inside the core) — the caller
  * falls open to the plain blocking review.
  */
+export type DraftReviewLaunchResult =
+  | string
+  | import("./providers/plannotator.ts").PlannotatorRefusal
+  | null;
 export interface WaveLaunch {
   present(): boolean;
-  plan(ctx: ExtensionContext, opts: { draft: string; custom?: string }): Promise<string | null>;
+  plan(
+    ctx: ExtensionContext,
+    opts: { draft: string; custom?: string },
+  ): Promise<DraftReviewLaunchResult>;
   objective(
     ctx: ExtensionContext,
     opts: { rendered: string; artifactRaw: string; custom?: string },
-  ): Promise<string | null>;
+  ): Promise<DraftReviewLaunchResult>;
 }
 
 /** The minimal structural `ctx.ui` subset the launch chooser needs (both dialogs signal-aware). */

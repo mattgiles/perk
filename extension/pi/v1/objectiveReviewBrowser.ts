@@ -58,6 +58,7 @@ import { render } from "../../substrate/prompts.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { type ReportTarget, report } from "../../surfaces/report.ts";
+import { type DraftReviewAccess, draftReviewRefusalText } from "./draftReviewActivation.ts";
 import { objectiveApprovalSaveV1 } from "./objectiveAuthoring.ts";
 import { approvedObjectiveSaveResult } from "./objectiveReview.ts";
 import {
@@ -66,6 +67,7 @@ import {
   primeAnnotationSurface,
   resumeAnnotationDelivery,
 } from "./providers/annotations.ts";
+import type { PlannotatorRefusal, PlannotatorReviewOutcome } from "./providers/plannotator.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import {
   plannotatorPresent,
@@ -74,7 +76,7 @@ import {
   type StartedSurface,
   startPlannotatorPlanReview,
 } from "./providers/plannotatorHandoff.ts";
-import type { ReviewOutcome } from "./review.ts";
+import type { DraftReviewLaunchResult, ReviewOutcome } from "./review.ts";
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
 const SCOPE = "objective-review-browser";
@@ -139,13 +141,15 @@ export interface ObjectiveReviewDoorSession {
 export async function observeObjectiveReviewReadiness(
   pi: RespondSink,
   ctx: ReportTarget & Pick<ExtensionContext, "isIdle">,
-  started: StartedSurface<ReviewOutcome>,
+  started: StartedSurface<PlannotatorReviewOutcome>,
   draftReview: DraftReviewWaveState,
   annotations: AnnotationState,
   session?: ObjectiveReviewDoorSession,
+  isCurrent: () => boolean = () => true,
 ): Promise<void> {
   const surface = annotations.surface;
   const state = await started.readiness;
+  if (!isCurrent()) return;
   if (state === "ready") {
     report(ctx, SCOPE, "info", `plannotator is up at ${started.url} — browser opening`);
     resumeAnnotationDelivery(annotations, surface, pi, ctx);
@@ -374,18 +378,36 @@ export async function openObjectiveReviewSurface(
   opts: { rendered: string; artifactRaw: string; custom?: string },
   draftReview: DraftReviewWaveState,
   annotations: AnnotationState,
+  reviews: DraftReviewAccess,
   deps: StartBrowserDeps = {},
-): Promise<string | null> {
-  let started: StartedSurface<ReviewOutcome>;
+): Promise<DraftReviewLaunchResult> {
+  const prepared = reviews.prepare(ctx);
+  if (!prepared.ok) return prepared.refusal;
+  const review = prepared.value;
+  if (
+    review.snapshot.binding.subject !== "objective" ||
+    review.snapshot.markdown !== opts.rendered ||
+    review.snapshot.raw !== opts.artifactRaw
+  ) {
+    review.dispose();
+    return {
+      status: "refused",
+      code: "source-changed",
+      phase: "open",
+      detail: "objective review source changed before opening",
+    };
+  }
+  let started: StartedSurface<PlannotatorReviewOutcome> | PlannotatorRefusal;
   try {
     // The plan-review bridge sends arbitrary string bytes as `planContent` — the rendered
     // objective rides it unchanged (no plan-specific validation).
     started = await startPlannotatorPlanReview(
       pi.events,
-      { plan: opts.rendered, signal: ctx.signal },
+      { plan: opts.rendered, registration: review.registration, signal: review.signal },
       deps,
     );
   } catch (error) {
+    review.dispose();
     const detail = error instanceof Error ? error.message : String(error);
     report(
       ctx,
@@ -396,6 +418,21 @@ export async function openObjectiveReviewSurface(
     );
     return null;
   }
+
+  if ("status" in started) {
+    review.dispose();
+    return started;
+  }
+  if (review.signal.aborted) {
+    review.dispose();
+    return {
+      status: "refused",
+      code: "invalid-state",
+      phase: "open",
+      detail: "review opening aborted",
+    };
+  }
+  const surface = started;
 
   // Prime BOTH companion surfaces the moment the port is picked: push_annotations serves this
   // browser session in plan mode (phrase-anchored — the rendered-objective findings reuse it
@@ -413,7 +450,15 @@ export async function openObjectiveReviewSurface(
   // routes a post-degrade decision through the save path (a readiness false-negative must not
   // let a late approval auto-save after the human followed the fallback).
   const session: ObjectiveReviewDoorSession = { degraded: false };
-  void observeObjectiveReviewReadiness(pi, ctx, started, draftReview, annotations, session);
+  void observeObjectiveReviewReadiness(
+    pi,
+    ctx,
+    surface,
+    draftReview,
+    annotations,
+    session,
+    review.isCurrent,
+  );
 
   // The decision task: the wait is open-ended (exactly the model-called `plan_review` bridge
   // semantics — a turn abort settles `aborted` via the bridge's abort handling).
@@ -423,7 +468,12 @@ export async function openObjectiveReviewSurface(
       quietMs: 6000,
     });
     try {
-      const out = await started.bridgePromise;
+      const out = await surface.bridgePromise;
+      if (!review.isCurrent()) return;
+      if (out.status === "refused") {
+        report(ctx, SCOPE, "error", draftReviewRefusalText(out));
+        return;
+      }
       if (session.degraded) {
         // The review already degraded (surfaces cleared, the fallback announced) — a late
         // decision is ignored LOUDLY, never routed into a stale/duplicate save.
@@ -443,8 +493,11 @@ export async function openObjectiveReviewSurface(
       // The browser session is over — drop both surfaces so a late push refuses (`no_surface`)
       // and a late wave start refuses (`no_draft_context`). Idempotent beside the degrade-arm
       // clears; an early decision mid-wave leaves a still-pending wave collectable.
-      clearAnnotationSurface(annotations);
-      clearDraftReviewContext(draftReview);
+      if (review.isCurrent()) {
+        clearAnnotationSurface(annotations);
+        clearDraftReviewContext(draftReview);
+      }
+      review.dispose();
       interceptor.restore();
     }
   })();
@@ -476,6 +529,7 @@ export async function openObjectiveReviewAndGuide(
   opts: { rendered: string; artifactRaw: string; custom?: string },
   draftReview: DraftReviewWaveState,
   annotations: AnnotationState,
+  reviews: DraftReviewAccess,
   deps: StartBrowserDeps = {},
 ): Promise<void> {
   const guidance = await openObjectiveReviewSurface(
@@ -485,9 +539,11 @@ export async function openObjectiveReviewAndGuide(
     opts,
     draftReview,
     annotations,
+    reviews,
     deps,
   );
-  if (guidance !== null) pi.sendUserMessage(guidance);
+  if (typeof guidance === "string") pi.sendUserMessage(guidance);
+  else if (guidance !== null) report(ctx, SCOPE, "error", draftReviewRefusalText(guidance));
 }
 
 // ------------------------------------------------------------------------ registration
@@ -498,6 +554,7 @@ export function registerObjectiveReviewBrowser(
   gating: ToolGating,
   draftReview: DraftReviewWaveState,
   annotations: AnnotationState,
+  reviews: DraftReviewAccess,
 ): void {
   registerPerkCommand(pi, SCOPE, {
     description:
@@ -594,6 +651,7 @@ export function registerObjectiveReviewBrowser(
         },
         draftReview,
         annotations,
+        reviews,
       );
     },
   });

@@ -79,6 +79,7 @@ import { report, type Severity } from "../../surfaces/report.ts";
 // structurally confined to the surfaces module (the surfacesGuard pi-tui import rule).
 import { Key } from "../../surfaces/surfaces.ts";
 import { installInjectedContext } from "./contextInjection.ts";
+import type { DraftReviewAccess } from "./draftReviewActivation.ts";
 import {
   type ApprovalSaveOutcome,
   executePlanReview,
@@ -404,7 +405,12 @@ export async function approvalSave(
  * (index.ts composes them from the door open cores); absent ⇒ the chooser never appears and
  * every review path is byte-stable.
  */
-export function installPlanBindings(pi: ExtensionAPI, gating: ToolGating, wave?: WaveLaunch): void {
+export function installPlanBindings(
+  pi: ExtensionAPI,
+  gating: ToolGating,
+  reviews: DraftReviewAccess,
+  wave?: WaveLaunch,
+): void {
   installPlanMode(pi, gating);
 
   // ------------------------------------------------------------------- the plan_draft tool
@@ -644,7 +650,7 @@ export function installPlanBindings(pi: ExtensionAPI, gating: ToolGating, wave?:
   // perk's universal review door. In READ_ONLY_TOOLS so it is callable INSIDE plan mode (the
   // whole point — review happens before the gate ever comes off). Fail-open everywhere:
   // headless / dismissed / backend-unavailable all soft-skip so authoring never wedges.
-  const bridge = createPlannotatorBridge(pi.events);
+  const bridge = { ...createPlannotatorBridge(pi.events), prepare: reviews.prepare };
   pi.registerTool({
     name: "plan_review",
     label: "Plan review",

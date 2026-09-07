@@ -32,6 +32,12 @@ import {
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import {
+  captureDraftReviewRefusal,
+  draftReviewRefusalResult,
+  type RegisteredDraftReviewBridge,
+  reviewRegisteredDraft,
+} from "./draftReviewActivation.ts";
+import {
   type ObjectiveApprovalSaveV1Outcome,
   objectiveApprovalSaveV1,
 } from "./objectiveAuthoring.ts";
@@ -205,12 +211,13 @@ function objectiveOutcomeOf(outcome: ReviewOutcome): ObjectiveReviewOutcome {
 }
 
 /** The plannotator reviewer adapter: the event-bus bridge judges the rendered draft. */
-function plannotatorObjectiveReviewer(bridge: {
-  review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome>;
-}): ObjectiveDraftReviewer {
+function plannotatorObjectiveReviewer(
+  bridge: RegisteredDraftReviewBridge,
+  ctx: ExtensionContext,
+): ObjectiveDraftReviewer {
   return {
     async review(rendered, signal) {
-      return objectiveOutcomeOf(await bridge.review(rendered, signal));
+      return objectiveOutcomeOf(await reviewRegisteredDraft(bridge, ctx, rendered, signal));
     },
   };
 }
@@ -243,7 +250,7 @@ export async function executeObjectiveReview(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
-  bridge: { review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome> },
+  bridge: RegisteredDraftReviewBridge,
   signal?: AbortSignal,
   wave?: WaveLaunch,
 ): Promise<ToolResult> {
@@ -289,13 +296,15 @@ export async function executeObjectiveReview(
         // background tasks and clears the primed surfaces).
         if (sig?.aborted) return objectiveReviewOutcomeResult({ status: "aborted" });
         if (guidance !== undefined && guidance !== null) {
-          return waveLaunchedResult(OBJECTIVE_SUBJECT, guidance);
+          return typeof guidance === "string"
+            ? waveLaunchedResult(OBJECTIVE_SUBJECT, guidance)
+            : draftReviewRefusalResult(guidance);
         }
         // null = the synchronous port-pick failure (already loudly reported inside the core) —
         // fall open to the plain blocking review in the same call: the review never wedges.
       }
     }
-    reviewer = plannotatorObjectiveReviewer(bridge);
+    reviewer = plannotatorObjectiveReviewer(bridge, ctx);
   } else {
     reviewer = firstPartyObjectiveReviewer(ctx);
   }
@@ -306,10 +315,13 @@ export async function executeObjectiveReview(
   //    gate exit → terminating result); Direct Edits is the no-save revise round; everything
   //    else maps via objectiveReviewOutcomeResult. Approved-first routing: the completed case
   //    renders DENIED.
-  const result = await reviewObjectiveDraft(
-    { session, reviewer, approvalSave: () => objectiveApprovalSaveV1(pi, ctx, gating) },
-    sig,
+  const result = await captureDraftReviewRefusal(
+    reviewObjectiveDraft(
+      { session, reviewer, approvalSave: () => objectiveApprovalSaveV1(pi, ctx, gating) },
+      sig,
+    ),
   );
+  if (result.status === "refused") return draftReviewRefusalResult(result);
   switch (result.status) {
     case "noDraft":
       return noObjectiveDraftResult();

@@ -79,6 +79,12 @@ import type { ToolGating } from "../../substrate/toolGating.ts";
 import { paramsOf, stringParam } from "../../substrate/toolParams.ts";
 import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report } from "../../surfaces/report.ts";
+import {
+  captureDraftReviewRefusal,
+  draftReviewRefusalResult,
+  type RegisteredDraftReviewBridge,
+  reviewRegisteredDraft,
+} from "./draftReviewActivation.ts";
 import { runGistReviewV1 } from "./gist.ts";
 import { executeObjectiveReview } from "./objectiveReview.ts";
 import { extractDirectEdits, hasDirectEditsHeading } from "./providers/plannotator.ts";
@@ -99,9 +105,7 @@ import {
 } from "./review.ts";
 
 /** The review bridge slice the installer builds over the plannotator event bus. */
-export interface PlanReviewBridge {
-  review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome>;
-}
+export type PlanReviewBridge = RegisteredDraftReviewBridge;
 
 /** The warm-door ok-arm fields — the `details` surface doubles as branch-safe persisted state. */
 export interface PlanSaveOk {
@@ -447,12 +451,19 @@ function planOutcomeOf(outcome: ReviewOutcome): PlanReviewOutcome {
 }
 
 /** The plannotator reviewer adapter: the event-bus bridge judges the resolved bytes verbatim. */
-function plannotatorPlanReviewer(bridge: PlanReviewBridge): PlanDraftReviewer {
+function plannotatorPlanReviewer(
+  bridge: PlanReviewBridge,
+  ctx: ExtensionContext,
+): PlanDraftReviewer {
   return {
     async review(plan, signal) {
       // Browser edits arrive as the Direct Edits diff ON the outcome (applied feature-side);
       // the reviewed bytes ride through unchanged.
-      return { outcome: planOutcomeOf(await bridge.review(plan, signal)), plan, edited: false };
+      return {
+        outcome: planOutcomeOf(await reviewRegisteredDraft(bridge, ctx, plan, signal)),
+        plan,
+        edited: false,
+      };
     },
   };
 }
@@ -567,30 +578,36 @@ export async function runPlanReviewV1(
         // never report a successful launch (the door's own bridge abort handling settles the
         // background tasks and clears the primed surfaces).
         if (sig?.aborted) return reviewOutcomeResult({ status: "aborted" });
-        if (guidance !== null) return waveLaunchedResult(PLAN_SUBJECT, guidance);
+        if (guidance !== null)
+          return typeof guidance === "string"
+            ? waveLaunchedResult(PLAN_SUBJECT, guidance)
+            : draftReviewRefusalResult(guidance);
         // null = the synchronous port-pick failure (already loudly reported inside the core) —
         // fall open to the plain blocking review in the same call: the review never wedges.
       }
     }
-    reviewer = plannotatorPlanReviewer(bridge);
+    reviewer = plannotatorPlanReviewer(bridge, ctx);
   } else {
     reviewer = firstPartyPlanReviewer(ctx, deps.session, nodeClaimed);
   }
   // 4. The feature review operation owns the resolve → review → abort-checkpoint → route
   //    discipline (incl. the Direct-Edits apply ladder and the D1a approval save).
-  const result = await reviewPlanDraft(
-    {
-      session: deps.session,
-      reviewer,
-      backend: deps.backend,
-      gate: deps.gate,
-      generateTitle: deps.generateTitle,
-      capturePlanningPointer: deps.capturePlanningPointer,
-      ...(plan !== undefined ? { explicit: plan } : {}),
-      allowImplementHere: !nodeClaimed,
-    },
-    sig,
+  const result = await captureDraftReviewRefusal(
+    reviewPlanDraft(
+      {
+        session: deps.session,
+        reviewer,
+        backend: deps.backend,
+        gate: deps.gate,
+        generateTitle: deps.generateTitle,
+        capturePlanningPointer: deps.capturePlanningPointer,
+        ...(plan !== undefined ? { explicit: plan } : {}),
+        allowImplementHere: !nodeClaimed,
+      },
+      sig,
+    ),
   );
+  if (result.status === "refused") return draftReviewRefusalResult(result);
   return renderReviewResult(ctx, deps, result);
 }
 

@@ -23,7 +23,8 @@ import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/session
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
-import { loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
+import { policyDraftReviews } from "../../testing/draftReview.ts";
+import { gitInit, loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
 import { executeObjectiveReview } from "./objectiveReview.ts";
 import { installPlanBindings, planSaveDepsFor } from "./plan.ts";
 import {
@@ -79,12 +80,10 @@ const FAIL_ENVELOPE = JSON.stringify({
 });
 
 /** A recording bridge: captures the reviewed bytes, returns the canned outcome. */
-function cannedBridge(outcome: ReviewOutcome): {
-  review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome>;
-  reviewed: string[];
-} {
+function cannedBridge(outcome: ReviewOutcome) {
   const reviewed: string[] = [];
   return {
+    ...policyDraftReviews,
     reviewed,
     async review(plan: string) {
       reviewed.push(plan);
@@ -242,6 +241,7 @@ test("plan_review: headless -> soft skip (fail-open; never wedges a CI/superviso
 
 test("plan_review: no plannotator listener -> handshake timeout -> loud unavailable skip", async () => {
   const cwd = scaffoldRepo();
+  gitInit(cwd, { dirty: false });
   selectPlanProvider(cwd, "plannotator-plan");
   const h = await loadPerkSession({
     cwd,
@@ -1239,8 +1239,8 @@ const LAUNCH_PLAIN = "Browser review only";
 /** A recording WaveLaunch fake: scripted presence + canned opener guidance (null = port fail). */
 function fakeWave(opts: {
   present?: boolean;
-  planGuidance?: string | null;
-  objectiveGuidance?: string | null;
+  planGuidance?: string | import("./providers/plannotator.ts").PlannotatorRefusal | null;
+  objectiveGuidance?: string | import("./providers/plannotator.ts").PlannotatorRefusal | null;
 }): WaveLaunch & {
   planCalls: { draft: string; custom?: string }[];
   objectiveCalls: { rendered: string; artifactRaw: string; custom?: string }[];
@@ -1469,6 +1469,51 @@ function measureArtifactReadCalls(): number {
   return calls;
 }
 
+for (const subject of ["plan", "objective"] as const) {
+  test(`${subject} chooser preserves typed registration refusal (no null fallback or wave success)`, async () => {
+    const s = chooserScaffold({ select: [LAUNCH_WAVE], input: [undefined] });
+    if (subject === "objective") {
+      assert.ok(
+        writeSessionArtifact(
+          s.pi,
+          s.ctx,
+          OBJECTIVE_DRAFT_ARTIFACT,
+          JSON.stringify({ schema_version: 1, prose: "Objective" }),
+        ),
+      );
+    }
+    const refusal = {
+      status: "refused",
+      code: "busy",
+      phase: "open",
+      detail: "retained claim",
+    } as const;
+    const wave = fakeWave({ planGuidance: refusal, objectiveGuidance: refusal });
+    const bridge = cannedBridge(DENIED);
+    const ctx = s.ctx as unknown as ExtensionContext;
+    const result =
+      subject === "plan"
+        ? await executePlanReview(
+            s.pi,
+            ctx,
+            s.gating,
+            bridge,
+            depsFor(s.pi, s.ctx, s.gating),
+            {},
+            undefined,
+            wave,
+          )
+        : await executeObjectiveReview(s.pi, ctx, s.gating, bridge, undefined, wave);
+    assert.equal(result.details.status, "refused");
+    assert.equal(result.details.reason, "busy");
+    assert.equal(result.details.phase, "open");
+    assert.equal(result.terminate, undefined);
+    assert.equal(bridge.reviewed.length, 0);
+    assert.equal(s.gating.exits, 0);
+    assert.doesNotMatch(result.content[0]?.text ?? "", /no review performed|WAVE GUIDANCE/);
+  });
+}
+
 const OBJ_V1 = JSON.stringify({ schema_version: 1, prose: "Baseline prose (v1)." });
 const OBJ_V2 = JSON.stringify({ schema_version: 1, prose: "Newer prose (v2)." });
 
@@ -1685,7 +1730,7 @@ test("installPlanBindings: the injected wave deps thread through the registered 
   const savedCwd = process.cwd();
   process.chdir((s.ctx as { cwd: string }).cwd);
   try {
-    installPlanBindings(recordingPi(defs), fakeGating(true), wave);
+    installPlanBindings(recordingPi(defs), fakeGating(true), policyDraftReviews, wave);
   } finally {
     process.chdir(savedCwd);
   }
@@ -1708,6 +1753,7 @@ test("index.ts composition: the REAL root wiring reaches wave_launched through p
   // port pick included — and every background task (decision routing, readiness observer)
   // settles on its silent arm without a browser or a server.
   const cwd = scaffoldRepo();
+  gitInit(cwd, { dirty: false });
   selectPlanProvider(cwd, "plannotator-plan");
   const selects: { title: string; options: string[] }[] = [];
   const h = await loadPerkSession({
@@ -1721,7 +1767,11 @@ test("index.ts composition: the REAL root wiring reaches wave_launched through p
           handler: async () => {},
         });
         pi.events.on("plannotator:request", (data) => {
-          const req = data as { respond?: (r: unknown) => void };
+          const req = data as { action?: string; respond?: (r: unknown) => void };
+          if (req.action === "review-status") {
+            req.respond?.({ status: "handled", result: { status: "pending" } });
+            return;
+          }
           req.respond?.({ status: "handled", result: { status: "pending", reviewId: "rev-root" } });
           setTimeout(() => {
             pi.events.emit("plannotator:review-result", {
