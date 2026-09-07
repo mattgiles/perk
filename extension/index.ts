@@ -188,7 +188,6 @@ export default function perk(
   // Pi registration, order-safe.
   const reportWave = createReportWave(pi.events, {
     parentReadOnly: () => gating.isActive(),
-    engineEntry: () => pi.getAllTools().find((tool) => tool.name === "subagent")?.sourceInfo.path,
   });
 
   let resolverContext: ExtensionContext | undefined;

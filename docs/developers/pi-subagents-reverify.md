@@ -87,7 +87,7 @@ The earlier [0.66.0 producer record](../design/pi-subagents-child-execution-poli
 retains its C1–C6/hash ledger verbatim as history; that ledger and a trailing evidence-only commit
 are not requirements for this consumer's bounded verification. Use the normal PR validation summary
 for detailed execution. Neither record is a new full compatibility certification: the doctor
-stamp, Pi dev pins, unpinned engine policy and stale-error fingerprints stay unchanged. The warm
+stamp, Pi dev pins and unpinned engine policy stay unchanged. The warm
 path is source/offline corroborated, not a native-matrix PASS. Later changes must reconcile the
 policy rather than choose a new profile implicitly.
 
@@ -121,7 +121,7 @@ can still declare 0.65.1, so compare the actual relevant sources, not the versio
 This matrix does not certify every role/model, arbitrary cross-cwd handoff discovery, ambient
 providers in foreground writers, or timely background supervisor delivery. E's explicit-loading
 cases were read-only diagnostics, not admissible read-write profiles. The earlier streaming
-waivers and stale-error exception remain separately scoped; no case is retroactively passed.
+waivers remain separately scoped; no case is retroactively passed.
 
 ## Foreground resolver delegation (bounded offline compatibility)
 
@@ -166,38 +166,21 @@ use compatibility testing as an unlock gesture. See the
 
 These checks corroborate launch/result plumbing and conservative ownership, not a live resolver,
 independent verification, or remote mergeability certificate. They do **not** advance the full
-compatibility baseline/doctor stamp, change Pi pins or stale-error fingerprints, or change the
+compatibility baseline/doctor stamp, change Pi pins, or change the
 retained-operation session-claim policy. That claim stays held across child completion and cannot
 bypass the execution lock. Post-result render/send failures must preserve explicit resolution or
 the original automatic cold refusal and append one delivery-unconfirmed tool diagnostic; a
 secondary warning failure must not erase that result. Consent tests are scripted actions, not
 autonomous model evidence. Canonical Python continuation is separately approved and revalidated.
 
-## Temporary stale-error guard
+## Retired stale-error guard
 
-`extension/waves/staleErrorCompat.ts` is a temporary, fail-closed exception for the two
-human-review report families, not a general failed-lane recovery facility. It attests the
-registered subagent tool's source path, version **0.65.1**, and exact hashes of
-`run-child-session.ts`, `subagent-runner.ts` and `structured-output.ts` at launch and collection.
-Source drift disables it; do not update the hashes merely to make a newer engine pass.
-
-The guard requires correlated completed workflow/child artifacts, a confirmed successful native
-retry, a matching successful capture followed by settlement, and no later/hard failure. It
-validates against Perk's snapshotted requested schema with the host-provided `typebox/compile`,
-not an artifact's substituted schema. Reads are confined and bounded; incomplete evidence leaves
-the original failure. Only the in-memory aggregate changes. Receipt details retain the original
-error plus evidence hashes, and both collect tools disclose recovery. See contracts §8.35 for
-exact proof limits. Non-streaming waves never enable this exception.
-
-For changes here, run the `staleErrorCompat` and `rpcAdapter` node:test suites and both collect-tool
-suites. Their fixtures are offline and do not install/patch the engine; a source-digest injection
-exists only at the interior test seam. The archived D2 replay exercises the real fingerprint and
-captured artifacts, but does **not** retroactively pass that failed live leg. Fresh human-operated
-validation still requires the recorded owner authorization and committed code.
-
-Remove the guard after a source-reviewed upstream fix and the same error→retry→structured-capture
-replay establish correct native settlement. Remove its plumbing, tests and disclosure docs together;
-keep the original failure evidence. Doctor remains report-only and pi-subagents stays unpinned.
+The temporary 0.65.1 recovery layer was removed after a bounded offline native replay of the
+upstream fix. The [retirement addendum](../design/archive/pi-subagents-native-streaming-dogfood.md#stale-error-guard-retirement--2026-09-07)
+records the successful chain, failed probe preparations and unchanged historical live gaps.
+Failed engine lanes now remain failed without special capture salvage, including on old affected
+engines. This retirement does not advance the guidance-verified baseline: doctor remains
+report-only and pi-subagents stays unpinned.
 
 ## Steps
 

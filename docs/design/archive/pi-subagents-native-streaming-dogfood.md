@@ -1034,3 +1034,218 @@ occurred; the owner-approved live waiver remains in force.
 typecheck, test and docs checks; `changelog-check` was intentionally glob-skipped. Only this
 result was recorded after green before committing and publishing the fix; no new live run or
 follow-up verification was performed.
+
+### Stale-error guard retirement — 2026-09-07
+
+**Bounded offline native verification passed; the temporary recovery layer is retired.**
+This addendum does not replace any observation above: D/D2 remain **NOT PASSED**, N/U remain
+**UNOBSERVED**, and T/B2 retain only their recorded coverage and waivers. It does not certify
+native wakes, autonomous streaming, global installations or the original five-lane D2 workflow.
+Old affected engines no longer receive special capture salvage; failed lanes remain failed.
+The engine remains unpinned, the five Pi development pins/lockfiles are unchanged, and
+`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` remains **0.65.1**. Measurements below are evidence,
+not new production fingerprints or a doctor-stamp refresh.
+
+#### Checked code, roots and bounded attempts
+
+Implementation plan #2245, run `01M1YC2A144YEGWN4VWSM4Y391`, branch `plan-2245`.
+The replay executed with a **clean tracked tree**, before deletion, at
+`1a99405f676ba66dda0f782168a881037229351c`, using production `createReportWave` with
+`parentReadOnly: () => true` and **no `engineEntry`**. The guard was therefore disabled.
+During implementation, `main` advanced through #2246 to
+`55bbc0cbae27cf3070a21810b86ba1ba79404bbd`; the branch fast-forwarded and the deletion reapplied
+without conflicts. That base's caller-read-only profile, blocked-review handling and receipt
+inventory correlation are preserved. The replay's ordinary draft renderer and inventory-absent
+receipt path remain unchanged in behavior; no new native replay is claimed at the advanced base.
+The production delta below is measured against that actual PR base, not inflated by sibling work.
+
+| Component | Actual resolved root/version |
+| --- | --- |
+| Checkout | `/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-2245` |
+| Engine | checkout + `/.pi/npm/node_modules/pi-subagents`, **0.66.0** |
+| Pi host | checkout + `/node_modules/@earendil-works/pi-coding-agent`, **0.85.1** |
+| Pi AI/TUI/server/client | checkout + `/node_modules/@earendil-works/{pi-ai,pi-tui,pi-server,pi-client}`, each **0.85.1** |
+| Node | `/Users/mattgiles/.local/share/mise/installs/node/26.3.0/bin/node`, **26.3.0** |
+| Original input root | `/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-2226/.perk/workflow/scratch/runs/01M1SNZFQ3MCYNS32DQ0MJWQ36/agent/live/D2/captured-runtime` |
+
+Read-only GitHub commit lookup corroborated owner-named upstream commit
+`3e9c36e329d3509a9015eda3e362e1dfa7231b4b`, “fix: clear recovered assistant errors on tool-use
+completion.” Its production diff adds only the clean actual-tool-call/`toolUse` clearing branch
+in background `run-child-session.ts` and foreground `execution.ts`. The installed branches agree.
+Upstream tests were inspected as data, not run or copied into Perk.
+
+Two failed **probe preparations** are retained, not converted into passing observations:
+
+1. The first probe supplied `agent` instead of native acceptance input `agentName`, throwing
+   `Cannot read properties of undefined (reading 'toLowerCase')` before any scripted child ran.
+   The session stopped, retained the guard, and [recorded the blocker](https://github.com/mattgiles/perk/issues/2245#issuecomment-5573639058).
+   The owner explicitly approved correcting the probe and one new same-protocol attempt.
+2. The second emitted all three scripted streams but omitted the native publication `sessionId`.
+   Native `writeAsyncResultFile` refused publication; subsequent reads failed ENOENT. The session
+   again stopped without edits to production, [recorded the blocker](https://github.com/mattgiles/perk/issues/2245#issuecomment-5573745173),
+   and received explicit owner approval to inspect the remaining publication requirements and
+   run one further bounded attempt. No published/awaited/projected success is claimed for it.
+
+The third corrected only test-owned launch plumbing (including a fresh offline parent session id)
+and passed the complete chain. Prior scripts/results were preserved under separate attempt names.
+These failures were harness omissions, not evidence against the upstream latch fix. There was no
+automatic retry, live fallback, installed-source patch or expansion into a compatibility framework.
+
+#### Sandbox and executed authority chain
+
+All three executions used a separate Node process under
+`/usr/bin/sandbox-exec -p '(version 1)(allow default)(deny network*)'`, **60,000ms** workflow
+and **90-second** outer command timeouts. Each execution was preceded by a loopback-bind
+preflight: **EPERM**, not an external request. `env -i` removed inherited session/credentials;
+HOME, `PI_CODING_AGENT_DIR`, `PI_MODEL_EXCLUSIONS_PATH` and TMPDIR pointed inside the attempt's
+owned scratch directory. `JITI_FS_CACHE=false` and both jiti instances' `fsCache:false` disabled
+filesystem caching. PATH allowed the selected Node and local system tools only. Host resolution
+used the engine's own jiti plus `resolveHostPeerAliases` on the absolute checkout-local Pi root:
+**missing=[]**, with no installation or global fallback.
+
+The successful invocation was the following bounded diagnostic, not a standing replay command
+or permission for another attempt (`S` is this checkout's run-scoped `agent` scratch root):
+
+```bash
+env -i PATH="/usr/bin:/bin:/Users/mattgiles/.local/share/mise/installs/node/26.3.0/bin" \
+  HOME="$S/offline-owned-attempt-3/home" TMPDIR="$S/offline-owned-attempt-3/tmp" \
+  PI_CODING_AGENT_DIR="$S/offline-owned-attempt-3/agent" \
+  PI_MODEL_EXCLUSIONS_PATH="$S/offline-owned-attempt-3/model-exclusions.json" \
+  PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT="$PWD/node_modules/@earendil-works/pi-coding-agent" \
+  JITI_FS_CACHE=false /usr/bin/sandbox-exec -p '(version 1)(allow default)(deny network*)' \
+  /Users/mattgiles/.local/share/mise/installs/node/26.3.0/bin/node \
+  "$S/native-integrated-replay-attempt-3.mjs"
+```
+
+One production wave supplied the original two assignment schemas as per-item overrides over a
+deliberately incompatible default, plus the distinct `retry-only-negative` assignment. Original
+workflow/child/descriptor identities and schema equality were checked. On the single fake spawn,
+installed `runWorkflowScript` executed the **actual captured Perk-rendered script**, with
+`globalConcurrencyLimit:1`. Its injected launch called installed `runSubagent` with one report
+step, one original model candidate, acceptance-none/completion-guard-off, no share/worktree, and
+a scripted `ChildSessionFactory`. No real session factory or recorded tool command executed.
+
+For positives the factory emitted all original ordered `subagentSource === "child"` events
+without rewriting their contents. At the successful structured-output tool-end it called the
+runner-provided capture callback with the original report, checked against the original tool-start
+arguments and `terminate:true` result. Native `runSingleStepInner` checked invocation, capture and
+requested schema; `runSubagent` wrote its own result and status. The probe consumed the result at
+native `workflowAwaitedAsyncResultPath` through `waitForWorkflowAsyncSingleResult`, then
+`workflowChildResult`. Only those two private functions were exposed by jiti `evalModule` with
+the original executor filename and this sole appended source text (bodies/imports untouched):
+
+```ts
+export { waitForWorkflowAsyncSingleResult, workflowChildResult };
+```
+
+Native projected children returned to the real script runner; the actual Perk script mapped
+`{key, ok, error, structuredOutput}` to its ordinary aggregate. The fake root host persisted only
+a minimal terminal envelope around **unmodified `workflow.value`**, then emitted matching
+completion. Perk's actual RPC adapter read the file and its normal collection derived failures
+and coverage. The probe fabricated no child verdict/error/report. Its negative was an in-memory
+original-event derivative retaining the historical error and successful retry notification but
+omitting the subsequent successful tool-use response and all capture work.
+
+| Case | Native child id | Events / captures / model attempts | Native state / exit | Projected / Perk outcome |
+| --- | --- | --- | --- | --- |
+| decision-completeness (`b067d3bc-22c9-4490-9622-50cdc8366e06`) | `21b41d4f-002b-49b8-878d-a5330cc21010` | 72 / 1 / 1 | complete / 0; 4735ms | ok=true; covered; schema-valid value equals original |
+| custom (`cd326746-492e-46e6-aea1-4a0f1a8d2958`) | `3b4cc571-6fae-4526-a425-7a6d801aaa00` | 88 / 1 / 1 | complete / 0; 5903ms | ok=true; covered; schema-valid value equals original |
+| retry-only-negative | `9f2a682d-8504-4caf-b4b4-f5a9f6004e63` | 39 / 0 / 1 | failed / 1; 3739ms | ok=false; uncovered; original timeout plus missing required output |
+
+The fake root `54ff87c1-f793-495b-a927-1090591a4c79` produced **complete=false, exactly two covered
+lanes, exactly one lane-failed negative**. Native run/session/workflow/key identities correlated
+through publication/projection/receipt. Each case created and disposed one scripted child and
+one factory; subscriptions were released. No recovery provenance appeared, one fake root spawn
+was recorded, and second collection returned `{kind:"none"}`. The process guard observed nine
+local native-helper Git diff commands and no agent CLI/background-runner process launch or
+blocked launch attempt. **Zero real AgentSession, provider/model, live subagent or review launches.**
+Environment/listener/process wrappers were restored and all owned runtime directories removed.
+
+This executes native child settlement/publication, awaited decoding, workflow projection, real
+script assembly and Perk aggregate reading. It does **not** execute OS child spawning, the root
+executor's live status/notification publisher, native wakes or UI sinks. The test-owned root
+envelope is transport plumbing, not a replacement projection or live certification.
+
+#### Source safety and immutable-input ledger
+
+Source inspection corroborated these branches; no further negative matrix or direct-function
+replay was added:
+
+| Installed anchor | Conclusion |
+| --- | --- |
+| `run-child-session.ts:437–457,487–503` | Invocation is observed; error-bearing responses relatch. Only a clean actual tool call with `toolUse` or existing clean nonempty text stop clears assistantError; retry notification alone does not. |
+| `run-child-session.ts:369–376,530–594` | Hard error precedence is `error ?? assistantError`; timeout/stop force failure, later prompt errors remain errors, interruption stays explicit; cleanup releases timers/subscription/session. |
+| `structured-output.ts:136–193`; `subagent-prompt-runtime.ts:404–440` | Requested schema controls validation; absent/invalid capture fails. Registered tool validates schema/required acceptance before capture and returns terminate:true. Tool body source-inspected; scripted capture is not a real tool session. |
+| `subagent-runner.ts:1228–1254,1310–1345,1509–1545,1621–1623` | Successful exit, observed invocation, valid file and no run/tool errors are required. After validated capture, hidden-error scanning starts at invocation; later errors and missing required output remain fatal. Explicit acceptance failure and timeout/stop after acceptance still fail/suppress output. |
+| `subagent-runner.ts:4535–4544,4824,4886–4988` | Interrupted steps are unsuccessful; paused/failed/partial/stopped are not complete. Native publication owns result fields and identities. |
+| `result-files.ts:164–182,268–293` | Nonempty sessionId is required; native pending/index writes and atomic promotion publish the result. |
+| `chain-root-attachment.ts:114–143,205–280`; `subagent-executor.ts:3135–3200,4207–4307` | Direct or same-session indexed results are decoded; only completed success absent timeout/stop is imported as success. Paused remains failed via isError. Projection separately retains values and derives ok from error/detached/interrupted/stopped/acceptance-recovery classification. |
+
+Raw-byte SHA-256 measurements below agreed **before and after every attempt**, with no installed
+source writes. The manifest and the inspected runner, structured-output, prompt-runtime, awaited
+result, executor and script sources were measured, not substituted with new allowed fingerprints.
+
+| Engine-relative source | SHA-256 (before = after) |
+| --- | --- |
+| `package.json` | `e9b166c2287a3938206fc1824226ca1cf137eb1b0a3da6f988a2bb9b74e28faf` |
+| `src/runs/background/run-child-session.ts` | `201328c4d457c9d44544996ac00d925481cafe7fed88d311a900b7c1ac151696` |
+| `src/runs/background/subagent-runner.ts` | `1720dcff102b11f488a5e1cec495272a11a55462fd107f050869b974f1eaa511` |
+| `src/runs/shared/structured-output.ts` | `b251a8f692e9b8ddaa42692e30b751acb53529f34033c544f909bac9eaf90127` |
+| `src/runs/shared/subagent-prompt-runtime.ts` | `25e7415d9f9942682271eb7cd390f9bf14263a8dc87dab52a90f5a18b273df84` |
+| `src/runs/foreground/execution.ts` | `5e0f5005cd1fb98d1c31ad8fef08e4e79806bba71c4248ae96d80b16e2428846` |
+| `src/runs/foreground/subagent-executor.ts` | `532eb27e4e0977776d7f93cd34c7b6a660ae0f1e0d1eb6452b96eebb89c3b8f4` |
+| `src/runs/background/async-execution.ts` | `5d7d4446ce66d54e324a275b1d649878d0bd4b77d35160caf4ac76c5d0bc534d` |
+| `src/runs/background/chain-root-attachment.ts` | `14a01dade8a80a4284c8e2f1d9695984bf8b1b9244826f83dceed80500504a76` |
+| `src/runs/background/result-files.ts` | `ac49985bd3e99f0cc9a2dab5fd62c92b58c56a260074e6418acda2bbca231344` |
+| `src/runs/background/runner-child-launch.ts` | `aa6d314af7f63b76612c5ec4dba0c7c2936e239927881cb3b1e3bdad6d53b827` |
+| `src/runs/shared/child-launch.ts` | `32133511f0969ae279102c4aa20186d79f6466cbb2e0f6b80dec6042f6c0ddc8` |
+| `src/runs/shared/child-session.ts` | `5d97d6789395309b6470ecbaa58e4c3ce19c5b570ecbe2aa4dfcac9d77cdc1d7` |
+| `src/workflows/scripted-workflow.ts` | `b9bd92cba0c71481aab5d611a36f91452b0a7944aeeb444b87a4896896a041c1` |
+| `src/runs/shared/model-exclusions.ts` | `9f0ca19213cc13bd944bc94e4af6637d4aad06316ac095f7aac8c91c1b80acf3` |
+| `src/shared/utils.ts` | `d7e81e5ea6951d63972eb8f3c3405af0e2f5a8955a8645e15e6e4c5f84c1df66` |
+
+The two event/capture pairs match **Recovered evidence hashes** above byte-for-byte (not
+reconstructed fixtures). Every consumed original status/schema/descriptor below was also hashed
+before/after and unchanged; originals were never written. `b067…` and `cd326…` abbreviate the
+full original child stems in the result table, within the original input root above.
+
+| Original input | SHA-256 (before = after) |
+| --- | --- |
+| `workflow-status.json` | `d0dabdb03c864ba4c9ec492a70fbf1b51c4ac9771035b8b631787bddeccea9b2` |
+| Both `*-output-schema.json` | `e61187a33ff8b1c595e5f643238f57c5c3546e5e7ef5454334369fa7c1a8c35f` |
+| `b067…-status.json` | `ef56359148848e36b4699d4c890362f866a2aae6b8104bb0235521b7f64ead64` |
+| `b067…-recovery-descriptor.json` | `7a04b8c651dbf6224a27b7e470a23d538db10aa31e636731881ff09b74ab61aa` |
+| `cd326…-status.json` | `05591c1e1e869c6f46babc86b9a712c772e51510a32060017f48561cbe428fa8` |
+| `cd326…-recovery-descriptor.json` | `f58b3610533265ea53a25b8009c756feedd26b0d6aa9902b3b4bfc39fa3e291a` |
+
+#### Deletion and ordinary regression boundary
+
+The production guard, schema/source snapshots, wave-only source callback, recovery transport
+fields/propagation, and both collect-time warning loops are deleted together. Dedicated tests and
+artifact-reuse fixtures are deleted, not renamed into a permanent upstream suite. One ordinary
+RPC/ReportWave assertion proves that an engine-failed row stays failed despite a report-like value
+and successful receipt, while its valid sibling remains covered and collection drains once.
+Resolver source lookup/TypeBox validation, effective parent-gate sampling, renderer behavior,
+report profiles, identity/restrictions, model/fallback/skill settings, native wakes/grace/timeout,
+and posting/save authority remain intact.
+
+**Hard production delta:** `git diff --numstat 55bbc0cbae27cf3070a21810b86ba1ba79404bbd -- extension/`,
+counting only production TypeScript (excluding `*.test.ts` and `extension/testing/**`), yields
+**14 added / 680 deleted, net −666 lines**. No new or untracked production file is omitted.
+The same delta held against the original implementation base before integrating #2246.
+The surviving edits only remove recovery behavior or mechanically simplify its wiring/comments;
+no replacement shim, helper, version branch, validator or abstraction was added.
+
+The initial scoped selection passed **240 tests**, including unrelated installed-engine coverage.
+`typecheck-js` passed after removing two unused schema imports; scoped Biome passed after ordinary
+formatting. On the integrated base the same targeted selection passed **276 tests, 0 skipped**,
+including the newly landed ordinary placement/receipt coverage; scoped Biome and `docs-check`
+passed. `uv run perk-dev prose-map sync` reported the projection **valid and current** without
+changes, so no generated census was hand-edited and no opt-in prose gate was required. The single
+final run-all gate is recorded in the PR summary.
+
+Disposable scripts/results remain under this implementation run's `agent/` scratch directory:
+`corroborated-inputs.json`, the separately named `native-integrated-replay` attempts 1–3 and their
+logs/results/captured scripts, `replay-success-summary.json`, `safety-source-ledger.md`, and the
+failed-attempt blocker records. They are non-authoritative diagnostics, not committed code/tests;
+the decisive evidence above survives their removal.
