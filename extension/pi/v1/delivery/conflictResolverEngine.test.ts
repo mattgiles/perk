@@ -339,6 +339,9 @@ test("profile, directory and throwing read-only backstops fail before launch", a
     { systemPromptMode: "append" },
     { agent: { ...w.profile.contract.agent, shadowedCandidates: [{}] } },
     { agent: { ...w.profile.contract.agent, source: "user" } },
+    ...[true, "false", 0, {}].map((disabled) => ({
+      agent: { ...w.profile.contract.agent, disabled },
+    })),
     { tools: { ...w.profile.contract.tools, declaredBuiltin: ["read"] } },
     { tools: { ...w.profile.contract.tools, configuredExtensions: ["extra"] } },
     { tools: { ...w.profile.contract.tools, toolExtensionPaths: ["extra"] } },

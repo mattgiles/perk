@@ -104,6 +104,8 @@ export async function loadResolverPreflight(
               return null;
             if (name === "./preflight") preflightPath = file;
           }
+          // Only preflight is loaded in production. The public delegation export pins these
+          // local event literals in installed compatibility tests, not another runtime loader.
           const require = createRequire(manifestPath);
           const loader: unknown = require("jiti");
           if (
@@ -164,7 +166,7 @@ function profileEvidence(
   if (
     agent.name !== RESOLVER_AGENT ||
     agent.source !== "project" ||
-    agent.disabled === true ||
+    (agent.disabled !== undefined && agent.disabled !== false) ||
     !Array.isArray(agent.shadowedCandidates) ||
     agent.shadowedCandidates.length !== 0 ||
     typeof agent.filePath !== "string" ||
