@@ -4222,6 +4222,14 @@ observation remain uncomposed: this milestone does not yet activate their at-mos
 Construction performs no startup discovery, status query, previous-feedback injection,
 resend, or automatic recovery. Python neither reads nor writes this decision artifact.
 
+The three feature review operations expose subject-specific completion seams. The plan tool
+completion passes an explicit `boundSource` into `planApprovalSave`: only the reviewed original
+or verified patched bytes are selected, including when an unverified patch leaves different disk
+bytes. Ordinary manual saves retain artifact/parameter/transcript tiering and trimming. This
+source selection is not itself claim authorization; browser completion and guarded production
+composition remain pending. Gist checks abort before review and again after the reviewer await,
+before save or actionable revision completion.
+
 The artifact has exactly `{schema_version:1, request_id, correlation, consumption}`.
 `request_id` and `attempt.dispatch_id` are UUIDs. Correlation is exactly
 `{review_id, subject, source, source_digest, target}`: subject is plan/objective/gist; source is

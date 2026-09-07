@@ -319,6 +319,10 @@ pasted draft text from the model. The shared companion tools are:
   the wave asks for an optional custom review angle, opens the same browser flow as the matching
   door below, and returns wave guidance (`wave_launched`) instead of blocking; the browser
   decision then routes back automatically. Gist review has no wave door and stays plain.
+  The plain plan-tool completion saves the reviewed original or verified Direct Edits bytes;
+  a failed patch write cannot select different partial artifact bytes as its fallback. Manual
+  save source tiers are unchanged. Interrupting gist review before its decision is processed
+  saves nothing and returns no actionable revision instructions.
 
 ### `/plan-review-browser`
 

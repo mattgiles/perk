@@ -259,6 +259,34 @@ test("reviewPlanDraft: a failed ladder write-back falls open the same way", asyn
   assert.equal(backend.requests[0]?.plan, PLAN.trim());
 });
 
+test("reviewPlanDraft: unverified patch with different disk bytes saves ONLY the original reviewed source", async (t) => {
+  const session = draftedSession();
+  const backend = fakeBackend();
+  const write = session.writeArtifact.bind(session);
+  t.mock.method(session, "writeArtifact", (name: string) => {
+    write(name, "# Corrupted partial patch");
+    return { status: "unverified", reason: "write_failed" };
+  });
+  const result = await reviewPlanDraft(
+    depsFor(
+      session,
+      scriptedReviewer({
+        status: "approvedDirectEdits",
+        diff: GOOD_DIFF,
+        rawFeedback: "verbatim feedback",
+      }),
+      { backend },
+    ),
+  );
+  assert.equal(result.status, "approvedSaved");
+  assert.ok(result.status === "approvedSaved");
+  assert.equal(result.directEditsFailed, true);
+  assert.equal(result.feedback, "verbatim feedback");
+  assert.equal(backend.requests.length, 1);
+  assert.equal(backend.requests[0]?.plan, PLAN.trim());
+  assert.equal(resumePlanDraft(session), "# Corrupted partial patch");
+});
+
 test("reviewPlanDraft: approvedEditsUnparseable saves verbatim with the FULL raw feedback", async () => {
   const session = draftedSession();
   const backend = fakeBackend();
