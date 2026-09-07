@@ -23,14 +23,14 @@ import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/session
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
-import { policyDraftReviews } from "../../testing/draftReview.ts";
+import { policyDraftReviews, scriptedDraftReviewBridge } from "../../testing/draftReview.ts";
 import { gitInit, loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
-import { executeObjectiveReview } from "./objectiveReview.ts";
+import { executeObjectiveReview as executeObjectiveReviewCore } from "./objectiveReview.ts";
 import { installPlanBindings, planSaveDepsFor } from "./plan.ts";
 import {
   applyPlannotatorDirectEdits,
   approvedSaveResult,
-  executePlanReview,
+  executePlanReview as executePlanReviewCore,
   type PlanReviewV1Deps,
   reviewOutcomeResult,
 } from "./planReview.ts";
@@ -80,17 +80,7 @@ const FAIL_ENVELOPE = JSON.stringify({
 });
 
 /** A recording bridge: captures the reviewed bytes, returns the canned outcome. */
-function cannedBridge(outcome: ReviewOutcome) {
-  const reviewed: string[] = [];
-  return {
-    ...policyDraftReviews,
-    reviewed,
-    async review(plan: string) {
-      reviewed.push(plan);
-      return outcome;
-    },
-  };
-}
+const cannedBridge = scriptedDraftReviewBridge;
 
 /** A ToolGating fake recording exits; `active` is the isActive snapshot. */
 function fakeGating(active: boolean): ToolGating & { exits: number } {
@@ -505,7 +495,7 @@ test("execute: approved (bridge) -> auto-save runs, gate exits, result terminate
   });
 });
 
-test("execute: approved but the save fails -> non-terminating, gate stays on, /plan-save failsafe", async () => {
+test("execute: approved but the backend is unconfirmed -> reconciliation stop, gate stays on", async () => {
   await withNoLlm(async () => {
     const cwd = scaffoldRepo();
     selectPlanProvider(cwd, "plannotator-plan");
@@ -526,16 +516,13 @@ test("execute: approved but the save fails -> non-terminating, gate stays on, /p
       {},
     );
     assert.equal(result.terminate, undefined, "a failed auto-save never terminates");
-    const details = result.details as { ok?: boolean; saved?: boolean; error_type?: string };
+    const details = result.details;
     assert.equal(details.ok, false);
-    assert.equal(details.error_type, "save_failed");
-    assert.equal(details.saved, false);
+    assert.equal(details.status, "refused");
     assert.equal(gating.exits, 0, "the gate stays on");
     const text = String(result.content[0]?.text);
-    assert.match(text, /APPROVED/);
-    assert.match(text, /auto-save FAILED/);
-    assert.match(text, /gh exploded/);
-    assert.match(text, /\/plan-save/);
+    assert.match(text, /Do not retry/);
+    assert.match(text, /reconciliation/);
   });
 });
 
@@ -1076,11 +1063,9 @@ test("plannotator approve + heading but unparseable section -> verbatim save + w
   });
 });
 
-test("plannotator approve + Direct Edits + failed write-back -> verbatim save + warning", async () => {
+test("plannotator parameter approval without identity refuses before transport or patch", async () => {
   await withNoLlm(async () => {
-    // No run_id ⇒ the draft artifact tier is unreadable AND the draft write rejects; the plan
-    // param is the reviewed source, the diff applies cleanly, but the write-back failure must
-    // fall open to the verbatim path (never save bytes the artifact doesn't carry).
+    // Missing identity is not a safe no-record namespace.
     const cwd = scaffoldRepo();
     selectPlanProvider(cwd, "plannotator-plan");
     const branch: unknown[] = [stateEntry({})];
@@ -1102,16 +1087,10 @@ test("plannotator approve + Direct Edits + failed write-back -> verbatim save + 
       depsFor(pi, ctx, gating),
       { plan: DE_BASE },
     );
-    const argv = argvs[0] ?? [];
-    assert.equal(
-      readFileSync(argv[argv.indexOf("--plan-file") + 1] ?? "", "utf8"),
-      DE_BASE.trimEnd(),
-      "the ORIGINAL reviewed bytes were saved verbatim",
-    );
-    const details = result.details as Record<string, unknown>;
-    assert.equal(details.edited, undefined);
-    assert.equal(details.direct_edits_applied, false);
-    assert.match(String(result.content[0]?.text), /Direct Edits could NOT be auto-applied/);
+    assert.equal(argvs.length, 0);
+    assert.equal(gating.exits, 0);
+    assert.equal(result.details.status, "refused");
+    assert.equal(result.details.reason, "no-identity");
   });
 });
 
@@ -1583,7 +1562,9 @@ test("objective wave arm: the stale-guard baseline is captured BEFORE the valida
 test("objective wave arm: a null opener return (port-pick failure) -> falls through to the plain review", async () => {
   const cwd = scaffoldRepo();
   selectPlanProvider(cwd, "plannotator-plan");
-  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const branch: unknown[] = [
+    stateEntry({ run_id: "RID", mode: "read-only", stage: "objective-author" }),
+  ];
   const ui = fakeUI({ select: [LAUNCH_WAVE], input: [undefined] });
   const ctx = headfulCtx(cwd, branch, ui);
   assert.ok(
@@ -1827,3 +1808,13 @@ test("index.ts composition: the REAL root wiring reaches wave_launched through p
     h.dispose();
   }
 });
+
+function executePlanReview(...args: Parameters<typeof executePlanReviewCore>) {
+  args[8] = "policy-tool-id";
+  return executePlanReviewCore(...args);
+}
+
+function executeObjectiveReview(...args: Parameters<typeof executeObjectiveReviewCore>) {
+  args[6] = "policy-tool-id";
+  return executeObjectiveReviewCore(...args);
+}

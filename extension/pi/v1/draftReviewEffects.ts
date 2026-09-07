@@ -1,5 +1,4 @@
-// Subject-specific save composition. Mutation saves are live; Plannotator dispatch completion
-// remains uncomposed. Both use explicit claimed sessions/capabilities, never competing guards.
+// Subject-specific save composition with explicit claimed sessions/capabilities, never competing guards.
 import type { GistBackend } from "../../authoring/gist/save.ts";
 import type { ObjectiveApprovalSaveDeps } from "../../authoring/objective/save.ts";
 import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
@@ -130,10 +129,13 @@ function ownedReviewSession(
 }
 
 function receiptGate(gate: ApprovalGate) {
+  let result: { gateExited: boolean } | undefined;
   return () => {
+    if (result !== undefined) return result;
     const active = gate.isActive();
     if (active) gate.exit();
-    return { gateExited: active };
+    result = { gateExited: active };
+    return result;
   };
 }
 
@@ -142,6 +144,7 @@ export function boundPlanSaveDeps(
   deps: PlanApprovalSaveDeps,
   capability: DraftReviewCapability,
 ): PlanApprovalSaveDeps {
+  const exit = receiptGate(deps.gate);
   return {
     ...deps,
     session: ownedReviewSession(deps.session, capability),
@@ -159,9 +162,9 @@ export function boundPlanSaveDeps(
             value,
             receipt: value.status === "saved" ? { id: value.ref.pr_id, url: value.ref.url } : null,
           };
-        }, receiptGate(deps.gate)),
+        }, exit),
     },
-    gate: { isActive: () => deps.gate.isActive(), exit: receiptGate(deps.gate) },
+    gate: { isActive: () => deps.gate.isActive(), exit },
   };
 }
 
@@ -170,6 +173,7 @@ export function boundObjectiveSaveDeps(
   deps: ObjectiveApprovalSaveDeps,
   capability: DraftReviewCapability,
 ): ObjectiveApprovalSaveDeps {
+  const exit = receiptGate(deps.gate);
   return {
     ...deps,
     session: ownedReviewSession(deps.session, capability),
@@ -181,9 +185,9 @@ export function boundObjectiveSaveDeps(
             value,
             receipt: value.status === "saved" ? { id: value.id, url: value.url } : null,
           };
-        }, receiptGate(deps.gate)),
+        }, exit),
     },
-    gate: { isActive: () => deps.gate.isActive(), exit: receiptGate(deps.gate) },
+    gate: { isActive: () => deps.gate.isActive(), exit },
   };
 }
 
@@ -192,6 +196,7 @@ export function boundGistSaveDeps(
   deps: { session: WorkflowSession; backend: GistBackend; gate: ApprovalGate },
   capability: DraftReviewCapability,
 ) {
+  const exit = receiptGate(deps.gate);
   return {
     ...deps,
     session: ownedReviewSession(deps.session, capability),
@@ -203,8 +208,8 @@ export function boundGistSaveDeps(
             value,
             receipt: value.status === "saved" ? { id: value.id, url: value.url } : null,
           };
-        }, receiptGate(deps.gate)),
+        }, exit),
     },
-    gate: { isActive: () => deps.gate.isActive(), exit: receiptGate(deps.gate) },
+    gate: { isActive: () => deps.gate.isActive(), exit },
   };
 }

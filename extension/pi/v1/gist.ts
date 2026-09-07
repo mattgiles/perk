@@ -37,7 +37,7 @@ import {
   completeGistReview,
   type GistDraftReviewer,
   type GistReviewOutcome,
-  reviewGist,
+  type ReviewGistResult,
 } from "../../authoring/gist/review.ts";
 import {
   type GistBackend,
@@ -69,13 +69,14 @@ import {
   captureDraftReviewRefusal,
   type DraftReviewConfirmedFacts,
   type DraftReviewRuntime,
+  draftReviewCompletionResult,
   draftReviewMutationRefusal,
   draftReviewMutationValue,
   draftReviewRefusalResult,
   type RegisteredDraftReviewBridge,
-  reviewRegisteredDraft,
 } from "./draftReviewActivation.ts";
-import { mutationGistSaveDeps } from "./draftReviewEffects.ts";
+import type { DraftReviewCapability } from "./draftReviewDecisions.ts";
+import { boundGistSaveDeps, mutationGistSaveDeps } from "./draftReviewEffects.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import { isPlannotatorPlanSelected } from "./providers/selection.ts";
 import {
@@ -534,18 +535,6 @@ function gistOutcomeOf(outcome: ReviewOutcome): GistReviewOutcome {
   }
 }
 
-/** The plannotator reviewer adapter: the event-bus bridge judges the rendered draft. */
-function plannotatorGistReviewer(
-  bridge: RegisteredDraftReviewBridge,
-  ctx: ExtensionContext,
-): GistDraftReviewer {
-  return {
-    async review(rendered, signal) {
-      return gistOutcomeOf(await reviewRegisteredDraft(bridge, ctx, rendered, signal));
-    },
-  };
-}
-
 /** The first-party reviewer adapter: the in-TUI editor review, VIEW-ONLY (3 verdicts). */
 function firstPartyGistReviewer(ctx: ExtensionContext): GistDraftReviewer {
   return {
@@ -592,6 +581,7 @@ export async function runGistReviewV1(
   gating: ToolGating,
   bridge: RegisteredDraftReviewBridge,
   signal?: AbortSignal,
+  toolCallId?: string,
 ): Promise<ToolResult> {
   // Headless → soft skip (fail-open; never wedges CI/supervisor runs on an interactive UI).
   if (!ctx.hasUI) return skipResult();
@@ -600,43 +590,86 @@ export async function runGistReviewV1(
   // `absent`, so `reviewGist` classifies `noDraft` — the same rendered redirect as before.
   const session = openSession(pi, ctx);
   const plannotator = isPlannotatorPlanSelected(ctx.cwd);
-  const reviewer = plannotator ? plannotatorGistReviewer(bridge, ctx) : firstPartyGistReviewer(ctx);
+  if (plannotator) {
+    if (sig?.aborted) return subjectReviewOutcomeResult(GIST_SUBJECT, { status: "aborted" });
+    const resumed = resumeGistDraft(session);
+    if (resumed.kind === "absent") return noGistDraftResult();
+    if (resumed.kind === "refused")
+      return renderGistReviewResult(ctx, { status: "refusedDraft", problem: resumed.problem });
+    if (!toolCallId?.trim() || typeof bridge.prepare !== "function")
+      return draftReviewRefusalResult({
+        status: "refused",
+        code: "invalid-state",
+        phase: "open",
+        detail: "required tool identity or review safety dependency unavailable",
+      });
+    const prepared = bridge.prepare(ctx, undefined, sig);
+    if (!prepared.ok) return draftReviewRefusalResult(prepared.refusal);
+    const review = prepared.value;
+    try {
+      const outcome = await bridge.review(
+        review.snapshot.markdown,
+        review.registration,
+        review.signal,
+      );
+      if (outcome.status === "refused") return draftReviewRefusalResult(outcome);
+      if (review.signal.aborted)
+        return subjectReviewOutcomeResult(GIST_SUBJECT, { status: "aborted" });
+      if (outcome.status !== "completed") return subjectReviewOutcomeResult(GIST_SUBJECT, outcome);
+      return draftReviewCompletionResult(
+        await review.complete(outcome, {
+          effect:
+            outcome.approved &&
+            !(outcome.feedback !== undefined && hasDirectEditsHeading(outcome.feedback))
+              ? "save"
+              : "revision",
+          carrier: { kind: "tool", tool_call_id: toolCallId },
+          execute: (capability) => completeGistReviewV1(pi, ctx, gating, outcome, capability),
+        }),
+      );
+    } finally {
+      review.dispose();
+    }
+  }
+  const reviewer = firstPartyGistReviewer(ctx);
   const facts: DraftReviewConfirmedFacts = {};
   const result = await captureDraftReviewRefusal(
-    !plannotator
-      ? (async () => {
-          if (sig?.aborted) return { status: "aborted" as const };
-          const resumed = resumeGistDraft(session);
-          if (resumed.kind === "absent") return { status: "noDraft" as const };
-          if (resumed.kind === "refused")
-            return { status: "refusedDraft" as const, problem: resumed.problem };
-          draftReviewMutationValue(bridge.mutate(ctx, "first-party-review", () => undefined));
-          const outcome = await reviewer.review(renderGistDraft(resumed.draft), sig);
-          if (sig?.aborted) return { status: "aborted" as const };
-          return draftReviewMutationValue(
-            await bridge.mutateAsync(ctx, "first-party-review", (session) =>
-              completeGistReview(outcome, () =>
-                gistApprovalSave(
-                  mutationGistSaveDeps(
-                    {
-                      session,
-                      backend: coldDoorGistBackend(pi, ctx),
-                      gate: gateFor(gating, ctx),
-                    },
-                    facts,
-                    "approval",
-                  ),
-                ),
+    (async () => {
+      if (sig?.aborted) return { status: "aborted" as const };
+      const resumed = resumeGistDraft(session);
+      if (resumed.kind === "absent") return { status: "noDraft" as const };
+      if (resumed.kind === "refused")
+        return { status: "refusedDraft" as const, problem: resumed.problem };
+      draftReviewMutationValue(bridge.mutate(ctx, "first-party-review", () => undefined));
+      const outcome = await reviewer.review(renderGistDraft(resumed.draft), sig);
+      if (sig?.aborted) return { status: "aborted" as const };
+      return draftReviewMutationValue(
+        await bridge.mutateAsync(ctx, "first-party-review", (session) =>
+          completeGistReview(outcome, () =>
+            gistApprovalSave(
+              mutationGistSaveDeps(
+                {
+                  session,
+                  backend: coldDoorGistBackend(pi, ctx),
+                  gate: gateFor(gating, ctx),
+                },
+                facts,
+                "approval",
               ),
             ),
-          );
-        })()
-      : reviewGist(
-          { session, reviewer, backend: coldDoorGistBackend(pi, ctx), gate: gateFor(gating, ctx) },
-          sig,
+          ),
         ),
+      );
+    })(),
   );
   if (result.status === "refused") return draftReviewRefusalResult(result, facts);
+  return renderGistReviewResult(ctx, result);
+}
+
+export function renderGistReviewResult(
+  ctx: ExtensionContext,
+  result: ReviewGistResult,
+): ToolResult {
   switch (result.status) {
     case "noDraft":
       return noGistDraftResult();
@@ -722,4 +755,29 @@ export async function runGistReviewV1(
         warning: result.warning,
       });
   }
+}
+
+/** Subject policy called only within verified dispatch. */
+export async function completeGistReviewV1(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  gating: ToolGating,
+  outcome: Extract<ReviewOutcome, { status: "completed" }>,
+  capability: DraftReviewCapability,
+): Promise<ToolResult> {
+  return renderGistReviewResult(
+    ctx,
+    await completeGistReview(gistOutcomeOf(outcome), () =>
+      gistApprovalSave(
+        boundGistSaveDeps(
+          {
+            session: openSession(pi, ctx),
+            backend: coldDoorGistBackend(pi, ctx),
+            gate: gateFor(gating, ctx),
+          },
+          capability,
+        ),
+      ),
+    ),
+  );
 }

@@ -1,11 +1,16 @@
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   createDraftReviewActivation,
   type DraftReviewAccess,
   type DraftReviewRuntime,
 } from "../pi/v1/draftReviewActivation.ts";
+import type { ReviewOutcome } from "../pi/v1/review.ts";
 import type { DraftReviewRegistration } from "../session/draftReviewState.ts";
 import { digestSessionData } from "../session/workflowSession.ts";
+import { gitInit } from "./harness.ts";
 
 /** Explicit test-only transport hooks. State/claim composition tests use the real coordinator. */
 export function recordingDraftRegistration() {
@@ -109,3 +114,27 @@ export const policyDraftReviews: DraftReviewRuntime = {
     };
   },
 };
+
+/** Legacy policy callers now exercise real state/claims; only the upstream verdict is scripted. */
+export function scriptedDraftReviewBridge(outcome: ReviewOutcome) {
+  const reviewed: string[] = [];
+  return {
+    ...policyDraftReviews,
+    reviewed,
+    prepare(ctx: ExtensionContext, parameter?: string, signal?: AbortSignal) {
+      if (!existsSync(join(ctx.cwd, ".git"))) gitInit(ctx.cwd, { dirty: false });
+      return mutationRuntime(ctx).prepare(ctx, parameter, signal);
+    },
+    async review(markdown: string, registration: DraftReviewRegistration): Promise<ReviewOutcome> {
+      const id = randomUUID();
+      const opened = registration.open(id);
+      if (!opened.ok) throw new Error(`scripted registration refused: ${opened.reason}`);
+      if (outcome.status === "completed") {
+        const attached = registration.attach(id, outcome.reviewId);
+        if (!attached.ok) throw new Error(`scripted attachment refused: ${attached.reason}`);
+      }
+      reviewed.push(markdown);
+      return outcome;
+    },
+  };
+}

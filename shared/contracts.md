@@ -4214,7 +4214,7 @@ artifacts + "File-first plan save"), §8.3 (the `approvalSave` seam + the warm c
 §8.57 (review-first carrier ownership), and §8.10 (provider deltas + the interactive save
 discipline); this section keeps the unique cross-cutting rules.
 
-### Bound draft-decision state and orchestration (registration and eligibility mutations active)
+### Bound draft-decision state and orchestration (blocking tools and eligibility mutations active)
 
 The following storage/capability contract is implemented in `session/draftReviewState.ts`,
 `session/draftReviewBinding.ts`, and `pi/v1/draftReviewDecisions.ts`. The activation-scoped
@@ -4222,8 +4222,15 @@ The following storage/capability contract is implemented in `session/draftReview
 and both browser doors. It also exposes an identity-bound completion and context-bound mutation
 API, with activation-local delivery observation at turn_end and before guarded operations.
 The root injects this single runtime into the production eligibility entries described below.
-**Integration limit:** Plannotator tool/browser/chooser subject-effect dispatch and readiness
-degradation still do not use those APIs. Their end-to-end at-most-once guarantee is not yet active.
+Blocking `plan_review` completion now uses that API for all three subjects: the prepared
+raw/decoded/rendered snapshot is reviewed once, verified dispatch precedes patch/save/actionable
+revision, and the actual registered toolCallId plus exact result content are recorded before return.
+Parameter plans followed by a sound artifact (even identical bytes) yield only stale-reference DATA.
+Structured objective/gist Direct Edits remains revision/no-save. Plan title generation precedes the
+binding/save-started checkpoint; captured warm node argv and frozen original/verified patched bytes
+remain authoritative. Successful receipt/gate facts survive failed later bookkeeping, without replay.
+**Integration limit:** browser/chooser decision routing and readiness degradation still do not use
+those APIs. The overall end-to-end at-most-once guarantee is not yet active.
 Construction performs no startup discovery, status query, previous-feedback injection,
 resend, or automatic recovery. Python neither reads nor writes this decision artifact.
 
@@ -4380,8 +4387,8 @@ warm node inputs pass explicitly to save; null keeps the existing Python handoff
 owned plan patch write-back is a narrow exception: save may select only the frozen original
 reviewed bytes, never artifact-first or partially written bytes, and only while review-state,
 ownership, subject/target, and save-started verification remain sound. Subject-policy extraction
-and bound dependency composition exist; migration of Plannotator tool/browser/chooser completion
-and readiness degradation remains separate. Eligibility mutations and first-party replacement/
+and bound dependency composition are live in the blocking tools; migration of browser/chooser
+completion and readiness degradation remains separate. Eligibility mutations and first-party replacement/
 writeback participate as described above.
 
 Delivery marker is dispatch_id in tool `details.draft_review_dispatch`; expectation binds actual
@@ -4397,8 +4404,8 @@ guesses. Activation end checks evidence first, then marks remaining sound dispat
 delivery-unconfirmed. No previous-activation consumption, resend, recovery, or resume is implied.
 The production activation now subscribes to turn_end/shutdown, but only observes expectations
 created through its new completion API. No startup/reload hook discovers prior records or
-expectations. Human reconciliation guidance and migration of existing completion callers remain
-unbuilt.
+expectations. Blocking tool callers record expectations with the real toolCallId before returning.
+Human reconciliation guidance and migration of browser completion callers remain unbuilt.
 
 ### Mandatory Plannotator registration and subscribe-then-status transport
 

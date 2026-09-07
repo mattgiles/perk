@@ -108,7 +108,16 @@ function fixture() {
       pickFreePort: async () => 45678,
       probe: async () => true,
     });
-  const tool = () => runPlanReviewV1(ctx, bridge, planSaveDepsFor(pi, ctx, gating), undefined);
+  const tool = () =>
+    runPlanReviewV1(
+      ctx,
+      bridge,
+      planSaveDepsFor(pi, ctx, gating),
+      undefined,
+      undefined,
+      undefined,
+      "tool-id",
+    );
   const record = () => {
     const result = readDraftReview(session);
     assert.ok(result.ok && result.record);

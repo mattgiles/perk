@@ -71,10 +71,11 @@ Cancellation closes only local transport, not the upstream browser. No polling, 
 automatic replay or resume exists. **Current integration limit:** transport registration/catch-up
 and authoring-mutation participation are active. Draft/manual-save/node entries and first-party
 replacement/writeback require a verified current-run claim; editor waits release it. Missing
-identity is not an unclaimed save fallback. Plannotator tool/browser/chooser subject effects,
-readiness degradation, and their persisted delivery acknowledgment remain uncomposed: no live
-end-to-end at-most-once save/delivery guarantee is claimed. Subject-specific Direct Edits/save
-source policies remain unchanged.
+identity is not an unclaimed save fallback. Blocking Plannotator tool completions now verify
+intent and bind delivery to the actual toolCallId and exact persisted result. Browser/chooser
+decision routing and readiness degradation remain uncomposed: no overall live end-to-end
+at-most-once save/delivery guarantee is claimed. Subject-specific Direct Edits/save source
+policies remain unchanged.
 
 The warm `/pr-review-browser` door also uses plannotator when that package is installed. It can
 review a foreign PR, the active worktree's PR, or a local since-base diff before submission. That

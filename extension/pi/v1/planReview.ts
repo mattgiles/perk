@@ -63,7 +63,6 @@ import {
   type PlanDraftReviewer,
   type PlanReviewOutcome,
   type ReviewPlanDraftResult,
-  reviewPlanDraft,
 } from "../../authoring/plan/review.ts";
 import type {
   ObjectiveNodeLink,
@@ -83,13 +82,14 @@ import {
   captureDraftReviewRefusal,
   type DraftReviewConfirmedFacts,
   type DraftReviewRuntime,
+  draftReviewCompletionResult,
   draftReviewMutationRefusal,
   draftReviewMutationValue,
   draftReviewRefusalResult,
   type RegisteredDraftReviewBridge,
-  reviewRegisteredDraft,
 } from "./draftReviewActivation.ts";
-import { mutationPlanSaveDeps } from "./draftReviewEffects.ts";
+import type { DraftReviewCapability } from "./draftReviewDecisions.ts";
+import { boundPlanSaveDeps, mutationPlanSaveDeps } from "./draftReviewEffects.ts";
 import { runGistReviewV1 } from "./gist.ts";
 import { executeObjectiveReview } from "./objectiveReview.ts";
 import { extractDirectEdits, hasDirectEditsHeading } from "./providers/plannotator.ts";
@@ -464,24 +464,6 @@ function planOutcomeOf(outcome: ReviewOutcome): PlanReviewOutcome {
   }
 }
 
-/** The plannotator reviewer adapter: the event-bus bridge judges the resolved bytes verbatim. */
-function plannotatorPlanReviewer(
-  bridge: PlanReviewBridge,
-  ctx: ExtensionContext,
-): PlanDraftReviewer {
-  return {
-    async review(plan, signal) {
-      // Browser edits arrive as the Direct Edits diff ON the outcome (applied feature-side);
-      // the reviewed bytes ride through unchanged.
-      return {
-        outcome: planOutcomeOf(await reviewRegisteredDraft(bridge, ctx, plan, signal)),
-        plan,
-        edited: false,
-      };
-    },
-  };
-}
-
 /**
  * The first-party reviewer adapter invalidates and releases before the editor wait, then
  * reacquires for write-back before the verdict. A failed claimed write propagates refusal; no
@@ -550,8 +532,9 @@ function noPlanResult(): ToolResult {
 /**
  * The plan arm: headless skip → file-first resolution skip (`no_plan`) → the launch chooser
  * (plannotator + drafts-only eligibility, abort-outranks-everything ordering) → reviewer
- * construction (the plannotator bridge reviewer or the first-party editor reviewer) → the
- * feature `reviewPlanDraft` (`allowImplementHere` = no node claim) → result rendering.
+ * dispatch: the Plannotator path reviews one prepared snapshot and completes under verified
+ * intent; the first-party path releases before editor wait, then reacquires for completion.
+ * Both reuse the feature's subject policy and Pi result rendering.
  * (No `pi`/`gating` parameters: every effect rides `ctx` or the injected deps bag — the gate
  * is `deps.gate`, composed once in `plan.ts`.)
  */
@@ -562,6 +545,7 @@ export async function runPlanReviewV1(
   plan: string | undefined,
   signal?: AbortSignal,
   wave?: WaveLaunch,
+  toolCallId?: string,
 ): Promise<ToolResult> {
   // 1. Headless → soft skip (fail-open; never wedges CI/supervisor runs on an interactive UI).
   if (!ctx.hasUI) return skipResult();
@@ -608,7 +592,48 @@ export async function runPlanReviewV1(
         // fall open to the plain blocking review in the same call: the review never wedges.
       }
     }
-    reviewer = plannotatorPlanReviewer(bridge, ctx);
+    if (sig?.aborted) return reviewOutcomeResult({ status: "aborted" });
+    if (!toolCallId?.trim() || typeof bridge.prepare !== "function")
+      return draftReviewRefusalResult({
+        status: "refused",
+        code: "invalid-state",
+        phase: "open",
+        detail: "required tool identity or review safety dependency unavailable",
+      });
+    const prepared = bridge.prepare(ctx, plan, sig);
+    if (!prepared.ok) return draftReviewRefusalResult(prepared.refusal);
+    const review = prepared.value;
+    try {
+      const outcome = await bridge.review(
+        review.snapshot.markdown,
+        review.registration,
+        review.signal,
+      );
+      if (outcome.status === "refused") return draftReviewRefusalResult(outcome);
+      if (review.signal.aborted) return reviewOutcomeResult({ status: "aborted" });
+      if (outcome.status === "implement-here") return implementHereRefusedResult();
+      if (outcome.status !== "completed") return reviewOutcomeResult(outcome);
+      return draftReviewCompletionResult(
+        await review.complete(outcome, {
+          effect: outcome.approved ? "save" : "revision",
+          carrier: { kind: "tool", tool_call_id: toolCallId },
+          execute: (capability) =>
+            completePlanReviewV1(
+              ctx,
+              deps,
+              review.snapshot.markdown,
+              outcome,
+              capability,
+              review.snapshot.source.kind === "artifact" &&
+                (plan?.trim().length ?? 0) > 0 &&
+                plan?.trim() !== review.snapshot.markdown.trim(),
+              review.snapshot.source.kind === "artifact" ? "plan-draft" : "param",
+            ),
+        }),
+      );
+    } finally {
+      review.dispose();
+    }
   } else {
     reviewer = firstPartyPlanReviewer(ctx, bridge, nodeClaimed);
     const facts: DraftReviewConfirmedFacts = {};
@@ -639,31 +664,12 @@ export async function runPlanReviewV1(
     );
     return result.status === "refused"
       ? draftReviewRefusalResult(result, facts)
-      : renderReviewResult(ctx, deps, result);
+      : renderPlanReviewResult(ctx, deps, result);
   }
-  // 4. The feature review operation owns the resolve → review → abort-checkpoint → route
-  //    discipline (incl. the Direct-Edits apply ladder and the D1a approval save).
-  const result = await captureDraftReviewRefusal(
-    reviewPlanDraft(
-      {
-        session: deps.session,
-        reviewer,
-        backend: deps.backend,
-        gate: deps.gate,
-        generateTitle: deps.generateTitle,
-        capturePlanningPointer: deps.capturePlanningPointer,
-        ...(plan !== undefined ? { explicit: plan } : {}),
-        allowImplementHere: !nodeClaimed,
-      },
-      sig,
-    ),
-  );
-  if (result.status === "refused") return draftReviewRefusalResult(result);
-  return renderReviewResult(ctx, deps, result);
 }
 
 /** Render the feature's review result as the model-facing tool result (byte-stable texts). */
-function renderReviewResult(
+export function renderPlanReviewResult(
   ctx: ExtensionContext,
   deps: PlanReviewV1Deps,
   result: ReviewPlanDraftResult,
@@ -749,6 +755,7 @@ export async function executePlanReview(
   params: unknown,
   signal?: AbortSignal,
   wave?: WaveLaunch,
+  toolCallId?: string,
 ): Promise<ToolResult> {
   // Tool-boundary decode, in this tool's native fail-open vocabulary: a MISTYPED
   // `plan` (or non-object params) skip-shapes (`reason: "bad_input"`) without reviewing; an
@@ -780,10 +787,28 @@ export async function executePlanReview(
   // the gist arm (the rendered gist draft).
   const launchedStage = rebuildWorkflowState(branchOf(ctx)).stage;
   if (launchedStage === OBJECTIVE_AUTHOR_STAGE || launchedStage === OBJECTIVE_SAVE_STAGE) {
-    return executeObjectiveReview(pi, ctx, gating, bridge, signal ?? ctx.signal, wave);
+    return executeObjectiveReview(pi, ctx, gating, bridge, signal ?? ctx.signal, wave, toolCallId);
   }
   if (launchedStage === GIST_AUTHOR_STAGE) {
-    return runGistReviewV1(pi, ctx, gating, bridge, signal ?? ctx.signal);
+    return runGistReviewV1(pi, ctx, gating, bridge, signal ?? ctx.signal, toolCallId);
   }
-  return runPlanReviewV1(ctx, bridge, deps, plan, signal, wave);
+  return runPlanReviewV1(ctx, bridge, deps, plan, signal, wave, toolCallId);
+}
+
+/** Shared by guarded tool and browser completion; authority is explicit, not reacquired. */
+export async function completePlanReviewV1(
+  ctx: ExtensionContext,
+  deps: PlanReviewV1Deps,
+  markdown: string,
+  outcome: Extract<ReviewOutcome, { status: "completed" }>,
+  capability: DraftReviewCapability,
+  paramMismatch = false,
+  source: "plan-draft" | "param" = "plan-draft",
+): Promise<ToolResult> {
+  const result = await completePlanReview(
+    { ...boundPlanSaveDeps(deps, capability), allowImplementHere: false },
+    { outcome: planOutcomeOf(outcome), plan: markdown, edited: false },
+    { source, paramMismatch },
+  );
+  return renderPlanReviewResult(ctx, deps, result);
 }

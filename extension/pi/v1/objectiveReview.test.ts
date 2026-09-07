@@ -13,16 +13,16 @@ import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/session
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
-import { policyDraftReviews } from "../../testing/draftReview.ts";
+import { scriptedDraftReviewBridge } from "../../testing/draftReview.ts";
 import { scaffoldRepo } from "../../testing/harness.ts";
 import type { ObjectiveApprovalSaveV1Outcome, ObjectiveSaveResult } from "./objectiveAuthoring.ts";
 import {
   approvedObjectiveSaveResult,
-  executeObjectiveReview,
+  executeObjectiveReview as executeObjectiveReviewCore,
   objectiveReviewOutcomeResult,
 } from "./objectiveReview.ts";
 import { planSaveDepsFor } from "./plan.ts";
-import { executePlanReview, type PlanReviewV1Deps } from "./planReview.ts";
+import { executePlanReview as executePlanReviewCore, type PlanReviewV1Deps } from "./planReview.ts";
 import type { PlanReviewUI, ReviewOutcome, WaveLaunch } from "./review.ts";
 
 /** Plant a draft artifact (file + verified pointer) through the branch session seam. */
@@ -77,17 +77,7 @@ const FAIL_ENVELOPE = JSON.stringify({
 });
 
 /** A recording bridge: captures the reviewed bytes, returns the canned outcome. */
-function cannedBridge(outcome: ReviewOutcome) {
-  const reviewed: string[] = [];
-  return {
-    ...policyDraftReviews,
-    reviewed,
-    async review(plan: string) {
-      reviewed.push(plan);
-      return outcome;
-    },
-  };
-}
+const cannedBridge = scriptedDraftReviewBridge;
 
 /** A ToolGating fake recording exits; `active` is the isActive snapshot. */
 function fakeGating(active: boolean): ToolGating & { exits: number } {
@@ -457,7 +447,7 @@ test("objective arm: default selection -> first-party VIEW-ONLY; approval auto-s
   assert.doesNotMatch(String(result.content[0]?.text), /nothing is saved yet/);
 });
 
-test("objective arm: approved but the cold door fails -> non-terminating, gate stays on, failsafe", async () => {
+test("objective arm: approved but the cold door fails -> non-terminating, gate stays on, reconciliation", async () => {
   const cwd = scaffoldRepo();
   const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
   const ui = fakeUI({ editor: ["# whatever was shown"], select: [OBJECTIVE_APPROVE] });
@@ -483,7 +473,7 @@ test("objective arm: approved but the cold door fails -> non-terminating, gate s
   const text = String(result.content[0]?.text);
   assert.match(text, /objective APPROVED by reviewer, but the auto-save FAILED/);
   assert.match(text, /gh exploded/);
-  assert.match(text, /\/objective-save \(the manual failsafe\)/);
+  assert.match(text, /reconcile backend objects and retained review/);
 });
 
 test("objective arm: approved via the plannotator bridge -> the same seam path saves the artifact", async () => {
@@ -694,12 +684,12 @@ test("approvedObjectiveSaveResult: saved -> terminating, feedback as guidance, s
   assert.equal((details.save as { ok?: boolean }).ok, true);
 });
 
-test("approvedObjectiveSaveResult: save-failed -> non-terminating, error surfaced, failsafe directed", () => {
+test("approvedObjectiveSaveResult: save-failed -> non-terminating, error surfaced, reconciliation required", () => {
   const result = approvedObjectiveSaveResult(OBJECTIVE_APPROVED_FB, failedObjectiveSave());
   assert.equal(result.terminate, undefined);
   const text = String(result.content[0]?.text);
   assert.match(text, /auto-save FAILED \(gh exploded\)/);
-  assert.match(text, /\/objective-save \(the manual failsafe\)/);
+  assert.match(text, /reconcile backend objects and retained review/);
   assert.match(text, /phase 3 can shrink/, "feedback still surfaced");
   const details = result.details as Record<string, unknown>;
   assert.equal(details.ok, false);
@@ -790,6 +780,7 @@ test("objective arm: approved via the bridge + Direct Edits -> NO save, non-term
     ok: true,
     status: "revise",
     reason: "direct_edits",
+    draft_review_dispatch: result.details.draft_review_dispatch,
     approved: true,
     feedback: directEditsFeedback,
     reviewId: "rev-ode",
@@ -829,3 +820,13 @@ test("objective arm: approved via the bridge + a heading-only broken section sti
   assert.equal(argvs.length, 0, "no save");
   assert.equal((result.details as { status?: string }).status, "revise");
 });
+
+function executePlanReview(...args: Parameters<typeof executePlanReviewCore>) {
+  args[8] = "policy-tool-id";
+  return executePlanReviewCore(...args);
+}
+
+function executeObjectiveReview(...args: Parameters<typeof executeObjectiveReviewCore>) {
+  args[6] = "policy-tool-id";
+  return executeObjectiveReviewCore(...args);
+}

@@ -297,10 +297,15 @@ open-ended. Pending is not a health guarantee, and missing/query failure is not 
 See [Plannotator draft-review transport](../providers-and-backends.md#plannotator-draft-review-transport)
 for cancellation, retained-state stops, and the current subject-effect integration limit.
 
-**Implementation limit:** the shared activation now guards the eligibility mutations listed below
-and exposes completion plus turn-end delivery observation. Plannotator tool/browser/chooser
-completions and readiness degradation have not yet migrated to it. This is not a claim of live
-end-to-end at-most-once dispatch.
+Blocking Plannotator `plan_review` now guards completion for plan, objective, and gist, as well
+as the eligibility mutations below. Verified intent precedes edits, saves, or actionable revision
+feedback. Plans save frozen reviewed bytes (or verified Direct Edits); structured objective/gist
+Direct Edits requests revision without saving. A new artifact after a parameter review, including
+identical text, can only produce stale diagnostic DATA. Source/target drift during title generation
+stops the save; a backend that already started is never automatically retried.
+
+**Implementation limit:** browser/chooser decision routing and readiness degradation have not yet
+migrated. This is not a claim of overall live end-to-end at-most-once dispatch.
 For results produced through that API, only an exact persisted tool/user entry confirms delivery;
 returning a tool result or queueing a message does not. Abort/shutdown checks evidence first and
 otherwise retains an uncertain stop. Session/run changes do not replay or acknowledge old feedback.
@@ -330,7 +335,7 @@ First-party review invalidates the previous opening/pending review and releases 
 opening the editor. Plan editor writeback and post-verdict completion reacquire it; no claim spans
 a human wait. A competing unresolved dispatch blocks late writeback/save. Plan source tiers and
 trimming, structured objective/gist saves, and the objective-node implement-here refusal remain
-unchanged. This participation does not activate the uncomposed Plannotator completion paths above.
+unchanged. Browser/chooser decision routing remains subject to the implementation limit above.
 
 Both draft doors review the exact validated artifact primed by the command. They never accept
 pasted draft text from the model. The shared companion tools are:

@@ -72,8 +72,9 @@ not the upstream browser. There is no polling, startup discovery, automatic repl
 **Integration status:** registration, catch-up, and participating authoring mutations are active.
 Draft/manual-save/node entries and first-party replacement/writeback require a verified current-run
 claim; first-party editor waits release it. Missing identity is not an unclaimed save fallback.
-Plannotator tool/browser/chooser subject effects, readiness degradation, and their persisted delivery
-acknowledgment remain uncomposed: no live end-to-end at-most-once save/delivery guarantee is claimed.
+Blocking Plannotator tool completions now verify intent and bind delivery to the actual toolCallId
+and exact persisted result. Browser/chooser decision routing and readiness degradation remain
+uncomposed: no overall live end-to-end at-most-once save/delivery guarantee is claimed.
 Subject-specific Direct Edits/save source policies remain in place.
 
 ## Known caveats & maturity

@@ -719,7 +719,7 @@ export function installPlanBindings(
         },
       },
     },
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+    async execute(toolCallId, params, signal, _onUpdate, ctx) {
       return executePlanReview(
         pi,
         ctx,
@@ -729,6 +729,7 @@ export function installPlanBindings(
         params,
         signal,
         wave,
+        toolCallId,
       );
     },
   });

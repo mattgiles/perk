@@ -28,7 +28,7 @@ import {
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
-import { policyDraftReviews } from "../../testing/draftReview.ts";
+import { scriptedDraftReviewBridge } from "../../testing/draftReview.ts";
 import {
   fakePerk,
   loadPerkSession,
@@ -41,7 +41,7 @@ import {
   decodeGistSaveParams,
   gistSaveGuidance,
   installGistBindings,
-  runGistReviewV1,
+  runGistReviewV1 as runGistReviewV1Core,
 } from "./gist.ts";
 import type { PlanReviewUI, ReviewOutcome } from "./review.ts";
 
@@ -738,17 +738,7 @@ function selectPlanProvider(cwd: string, id: string): void {
 }
 
 /** A recording bridge: captures the reviewed bytes, returns the canned outcome. */
-function cannedBridge(outcome: ReviewOutcome) {
-  const reviewed: string[] = [];
-  return {
-    ...policyDraftReviews,
-    reviewed,
-    async review(plan: string) {
-      reviewed.push(plan);
-      return outcome;
-    },
-  };
-}
+const cannedBridge = scriptedDraftReviewBridge;
 
 /** A ToolGating fake recording exits; `active` is the isActive snapshot. */
 function fakeGating(active: boolean): ToolGating & { exits: number } {
@@ -1018,6 +1008,7 @@ test("gist arm: approved via the bridge + Direct Edits -> NO save, non-terminati
     ok: true,
     status: "revise",
     reason: "direct_edits",
+    draft_review_dispatch: result.details.draft_review_dispatch,
     approved: true,
     feedback: directEditsFeedback,
     reviewId: "rev-gde",
@@ -1089,7 +1080,7 @@ test("gist arm: default selection -> first-party VIEW-ONLY, 3 verdicts; approval
   );
 });
 
-test("gist arm: approved but the cold door fails -> non-terminating, gate stays on, failsafe", async () => {
+test("gist arm: approved but the cold door fails -> non-terminating, gate stays on, reconciliation", async () => {
   const cwd = scaffoldRepo();
   const branch: unknown[] = [stateEntry(GIST_STATE)];
   const ui = fakeUI({ editor: ["# whatever was shown"], select: [GIST_APPROVE] });
@@ -1113,7 +1104,7 @@ test("gist arm: approved but the cold door fails -> non-terminating, gate stays 
   const text = String(result.content[0]?.text);
   assert.match(text, /gist APPROVED by reviewer, but the auto-save FAILED/);
   assert.match(text, /gh exploded/);
-  assert.match(text, /\/gist-save \(the manual failsafe\)/);
+  assert.match(text, /reconcile backend objects and retained review/);
 });
 
 test("gist arm: approved but the draft corrupted before the save re-read -> the refused-draft race", async () => {
@@ -1124,15 +1115,15 @@ test("gist arm: approved but the draft corrupted before the save re-read -> the 
   const drafted = plantGistDraft(ctx, branch);
   const argvs: string[][] = [];
   const pi = fakeColdDoorPi(branch, { stdout: GIST_JSON, argvs });
+  const scripted = cannedBridge({ status: "completed", approved: true, reviewId: "rev-gone" });
   const bridge = {
-    ...policyDraftReviews,
-    reviewed: [] as string[],
-    async review(plan: string): Promise<ReviewOutcome> {
+    ...scripted,
+    async review(...args: Parameters<typeof scripted.review>): Promise<ReviewOutcome> {
+      const outcome = await scripted.review(...args);
       // The draft file vanishes between the review read and the save-time re-read — the seam
       // classifies the intact pointer + missing file as invalid, so the save re-read refuses.
-      bridge.reviewed.push(plan);
       rmSync(drafted);
-      return { status: "completed", approved: true, reviewId: "rev-gone" };
+      return outcome;
     },
   };
   const quiet = console.error;
@@ -1148,22 +1139,10 @@ test("gist arm: approved but the draft corrupted before the save re-read -> the 
   } finally {
     console.error = quiet;
   }
-  const problem = "session artifact gist-draft.json has a pointer but no file";
-  assert.equal(result.terminate, undefined, "non-terminating");
-  assert.equal(
-    String(result.content[0]?.text),
-    `gist APPROVED by reviewer, but the working draft was invalid at save time (${problem}) — ` +
-      "NOTHING was saved; the session stays read-only. Rewrite it with gist_draft and request " +
-      "a fresh review — the replacement bytes were never reviewed, so do not use /gist-save to " +
-      "bypass review.",
-  );
-  const details = result.details as Record<string, unknown>;
-  assert.equal(details.ok, false);
-  assert.equal(details.error, problem);
-  assert.equal(details.error_type, "bad_state");
-  assert.equal(details.saved, false);
-  assert.equal(details.save, null);
-  assert.equal(details.subject, "gist");
+  assert.equal(result.terminate, undefined);
+  assert.equal(result.details.status, "refused");
+  assert.equal(result.details.reason, "invalid-state");
+  assert.match(String(result.content[0]?.text), /Do not retry/);
   assert.equal(argvs.length, 0, "the cold door was never invoked");
 });
 
@@ -1278,3 +1257,8 @@ test("gist arm: headless -> the standard skipResult", async () => {
   assert.equal(skipDetails.ok, true, "the sanctioned fail-open skip is ok:true");
   assert.match(String(result.content[0]?.text), /no interactive review surface available/);
 });
+
+function runGistReviewV1(...args: Parameters<typeof runGistReviewV1Core>) {
+  args[5] = "policy-tool-id";
+  return runGistReviewV1Core(...args);
+}

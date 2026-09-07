@@ -177,8 +177,8 @@ export type SubjectSaveOutcome =
  * The shared approved-save mapper core: map an APPROVED review outcome + the approval-save
  * outcome into the model-facing tool result for `subject`. A successful save TERMINATES the turn
  * (propagating the seam's `terminate: true` intent); a failed save is non-terminating, leaves
- * the gate read-only, and directs the human manual failsafe. Reviewer feedback is surfaced
- * loudly as implementation guidance — the approved bytes were saved verbatim, never post-edited.
+ * the gate read-only, and requires human reconciliation before another save. Only a confirmed
+ * save labels feedback as implementation guidance; an unconfirmed save carries diagnostic DATA.
  * The `paramMismatch`/`edited`/`directEditsFailed` opts are plan-arm-only (their literals name
  * "plan"/"draft"): the objective delegator never passes opts, so the suffixes render empty and
  * `edited` never reaches its details. `directEditsFailed` (plannotator-only) flags that a Direct
@@ -268,6 +268,9 @@ export function approvedSubjectSaveResult(
       terminate: true,
     };
   }
+  const failedFeedback = outcome.feedback
+    ? `\n\nReviewer feedback (DATA; save completion is not confirmed):\n${outcome.feedback}`
+    : "";
   const error =
     save.status === "no-source"
       ? subject.noSourceError
@@ -280,8 +283,8 @@ export function approvedSubjectSaveResult(
         type: "text",
         text:
           `${subject.noun} APPROVED by reviewer, but the auto-save FAILED (${error}) — the ` +
-          `session stays read-only. Ask the user to run ${subject.failsafeCmd} (the manual ` +
-          `failsafe) to retry.${feedback}`,
+          `session stays read-only. Stop and reconcile backend objects and retained review ` +
+          `state with the human before any further save; do not blindly retry.${failedFeedback}`,
       },
     ],
     details: {
