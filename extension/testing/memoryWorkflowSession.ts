@@ -125,6 +125,10 @@ export function openMemoryWorkflowSession(opts: {
     load(_runId: string, name: string): string | null {
       return contents.get(name) ?? null;
     },
+    loadStrict(_runId: string, name: string) {
+      const content = contents.get(name);
+      return content === undefined ? { status: "absent" } : { status: "found", content };
+    },
     displayPath(_runId: string, name: string): string {
       return name;
     },

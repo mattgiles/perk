@@ -75,6 +75,37 @@ test("exclusive private record, same-PID contention, release then reacquisition,
   c.finish("release");
 });
 
+test("pre-extraction schema-1 metadata remains readable with identical diagnostic projection", (t) => {
+  const cwd = fixture(t);
+  const path = lockPath(cwd);
+  // Independently authored incumbent: token syntax and extra keys retain the legacy decode policy.
+  const bytes = JSON.stringify({
+    schema: 1,
+    token: "legacy-token",
+    pid: 2147483647,
+    parentSessionId: "legacy-parent",
+    ownerRunId: "legacy-run",
+    requestId: "legacy-request",
+    worktreeIdentity: join(cwd, ".git"),
+    createdAt: "1900-01-01T00:00:00Z",
+    extra: true,
+  });
+  writeFileSync(path, bytes);
+  assert.deepEqual(acquireWorktreeResolverLock(cwd, parent), {
+    kind: "busy",
+    path,
+    owner: {
+      pid: 2147483647,
+      parentSessionId: "legacy-parent",
+      ownerRunId: "legacy-run",
+      requestId: "legacy-request",
+      worktreeIdentity: join(cwd, ".git"),
+      createdAt: "1900-01-01T00:00:00Z",
+    },
+  });
+  assert.equal(readFileSync(path, "utf8"), bytes);
+});
+
 test("retention closes resources and never reclaims on a later acquisition", (t) => {
   const cwd = fixture(t);
   let closes = 0;

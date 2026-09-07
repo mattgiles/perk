@@ -187,6 +187,28 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   digest mismatch — are `invalid` and warn on stderr). Draft-less fallbacks apply only to
   `absent`; the review-style draft consumers (gist/objective) fold `invalid` into their
   classified `refused` resume arm and STOP with a rendered refusal instead of falling back.
+
+  **Opt-in strict provenance.** `WorkflowSession.readArtifact(name, {provenance: "strict"})`
+  keeps the `found`/`absent`/`invalid` vocabulary but never treats unknown provenance as absence.
+  It reads one workflow-state snapshot, requires a safe current run identity, validates the entire
+  pointer map (including siblings), and checks the current run's content even without a matching
+  pointer. Missing/null map is an empty map; a present pointer requires safe `run_id`, matching
+  `name`, nonempty informational `path`/`at`, and `sha256:<64 lowercase hex>` digest. Throwing or
+  malformed state/map/pointer, content I/O failure, orphan bytes, missing file behind a current-run
+  pointer, and digest mismatch are `invalid`. A sound inherited pointer never authorizes a parent
+  read: an empty child namespace is `absent` and usable; bytes in the child without child provenance
+  are an orphan and refuse. Independent stale branch snapshots over advanced disk bytes therefore
+  refuse, rather than authorize replacement. Ordinary readers keep their existing tier behavior.
+
+  The strict content port distinguishes ENOENT from I/O failure and rejects symlink/non-directory/
+  group-world-writable namespace components and nonregular artifact files. Its canonical namespace
+  comes through `cache.ts::canonicalSessionDataDir` / the session-data seam; aliases above the
+  checkout are legal, redirects within checkout-owned components are not. Reads never create dirs.
+  `writeArtifact(name, content, {provenance: "strict"})` first verifies prior strict provenance,
+  refuses invalid reads before effects, and verifies exact read-back content plus the appended
+  pointer. Rejected/unverified writes never authorize effects or speculative repair. Callers own
+  exclusion and retain their claim on persistence failure; this option is not a transaction or an
+  automatic lock. No existing review transport opts into this foundation yet.
 - **Agent scratch.** `.perk/workflow/scratch/runs/<run_id>/agent/` is the run-owned directory for
   disposable command/model intermediates. Interior run-directory creation shares one hardened
   boundary — `extension/substrate/cache.ts::ensureRunScratch` + `ensureAgentScratch` own the
@@ -262,12 +284,15 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `outbox.ndjson`/`delivered.ndjson` (O_APPEND appends cannot truncate-tear; whole-file
   replace would introduce a read-modify-write race) — and **existence-only markers** (Python
   `set_marker`'s `.touch()` carries no content; the TS `setMarker` is routed anyway — uniformity
-  is free). The §8.3 submit-conflict execution lock is a separate **Git-directory** writer,
-  outside `.perk/workflow/`: it writes/fsyncs only a freshly exclusive-created descriptor;
-  replacing an incumbent via atomic rename would violate its mutual-exclusion protocol. A partial
-  record remains busy until identity-fenced initialization cleanup or human recovery.
-  Atomicity is **not** mutual exclusion — whole-file last-writer-wins between
-  concurrent writers is the accepted residual (no locking/versioning). Corruption posture:
+  is free). The shared `extension/substrate/exclusiveFileClaim.ts` primitive is a separate
+  **exclusive-descriptor** exemption: it writes/fsyncs only a freshly `wx`/0600-created descriptor;
+  replacing an incumbent via atomic rename would violate mutual exclusion. The §8.3 resolver
+  wrapper keeps its Git-directory filename outside `.perk/workflow/`; the independent draft-review
+  wrapper selects fixed `draft-review.lock` in the canonical current-run `data/` namespace beside
+  the reserved `draft-review.json` artifact. A partial record remains busy until identity-fenced
+  initialization cleanup or deliberate human reconciliation. No automated reclamation exists.
+  Atomicity is **not** mutual exclusion — whole-file last-writer-wins between ordinary concurrent
+  artifact writers remains the accepted residual; participating claim users must serialize. Corruption posture:
   Python's fail-closed workflow readers translate malformed JSON / invalid UTF-8 into `CacheError` — now
   `(UserFacingCliError, ValueError)`-based with `error_type: "cache_invalid"`, so an uncaught
   corruption presents as a clean actionable CLI error naming the corrupt file and the
@@ -808,6 +833,27 @@ mission, worktree or acceptance keys are sent. Native `worktree` defaults are ca
 file/absent key/false are compatible; true, nonboolean, malformed or unreadable config, or changed
 captured state, refuses with inspection/reload guidance. Configuration/source edits during launch
 are unsupported; preflight is a snapshot, not a source-edit fence.
+
+**Shared exclusive-file mechanics.** `extension/substrate/exclusiveFileClaim.ts` owns token UUID
+minting, the 16 KiB metadata bound, JSON encoding/parsing through a caller-supplied owner codec,
+exclusive `wx`/0600 creation, fsync, read-back through `check()`, device/inode/path/token ownership
+fencing, typed busy/I/O results, and idempotent `finish(release|retain)`. Diagnostic owners exclude
+tokens. The primitive does not discover Git, choose filenames, queue/retry, change workflow state,
+reclaim incumbents, or prove quiescence from PID/age. Wrappers preserve resource-specific identity
+and metadata; ownership must be checked before effects. Metadata stays unchanged while held.
+
+`draftReviewLock.ts` supplies an independent fixed `draft-review.lock`, creating its canonical
+current-run data directory only through the cache/session-data seam and refusing unsafe redirects
+or missing/unsafe identity. Aliases share exclusion; different runs (including forks) do not. Its
+owner record is exactly `{schema:1, token, pid, parentSessionId, ownerRunId, requestId,
+reviewNamespace, createdAt}`, where `reviewNamespace` is the canonical data directory. Owner
+metadata is diagnostic, not evidence of decision/save/delivery. This is storage foundation only:
+no draft-review state machine, transport, effect dispatch, recovery/resume, or startup discovery is
+activated here. Future participating operations must hold one explicit claim through verified
+intent/effects/immediate bookkeeping, not through browser/human/status/delivery waiting. A failed
+or unverified persistence operation retains residue and permits no further effects or speculative
+state writes; lost ownership never permits writes or deleting a replacement. Neither atomic file
+replacement nor fsync claims power-loss durability or exactly-once delivery.
 
 **Shared resolver worktree execution lock (both modes).** `worktreeGitDir` runs shell-free
 `git rev-parse --absolute-git-dir` with a five-second timeout, validates a directory and returns

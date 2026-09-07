@@ -18,8 +18,9 @@
 // — the worker's `events.ndjson` (worker/stageExecution.ts) and the §8.58 hunk-watch `outbox.ndjson` /
 // `delivered.ndjson` (hunkFeedback/perkFeedback.ts / hunkFeedback/store.ts) — where O_APPEND
 // appends cannot truncate-tear and whole-file replace would introduce a read-modify-write race
-// between independent processes. Atomicity is not mutual exclusion — whole-file
-// last-writer-wins between concurrent writers is the accepted residual.
+// between independent processes. The exclusiveFileClaim.ts primitive separately writes/fsyncs
+// only freshly wx-created descriptors: atomic replacement would destroy exclusion. Atomicity
+// alone is not mutual exclusion — ordinary artifact writes remain whole-file last-writer-wins.
 
 import { randomBytes } from "node:crypto";
 import {
@@ -34,7 +35,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 
 /**
  * Atomically replace `path` with `content` (the interior atomic-write seam).
@@ -224,6 +225,44 @@ export function ensureRunScratch(cwd: string, runId: string): string {
   if (realpathSync(dir) !== expected) {
     throw new Error(`refusing a redirected run-scratch dir: ${dir}`);
   }
+  return dir;
+}
+
+/**
+ * Strict current-run data namespace for exclusion and provenance reads. Aliased checkout roots
+ * canonicalize together; redirects within checkout-owned components refuse. Reads never create
+ * directories. A missing component is absent, not an I/O-error sentinel.
+ */
+export function canonicalSessionDataDir(
+  cwd: string,
+  runId: string,
+  opts: { create: boolean },
+): string | null {
+  assertSafeRunId(runId);
+  const root = realpathSync(cwd);
+  const dir = sessionDataDir(root, runId);
+  let component = root;
+  for (const segment of relative(root, dir).split(sep)) {
+    component = join(component, segment);
+    if (opts.create) {
+      ensureUnredirectedDirectory(component, {
+        createMode: 0o755,
+        rejectGroupWorldWrite: true,
+      });
+    } else {
+      let stat: ReturnType<typeof lstatSync>;
+      try {
+        stat = lstatSync(component);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw error;
+      }
+      if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o022) !== 0) {
+        throw new Error(`refusing an unsafe session-data namespace: ${component}`);
+      }
+    }
+  }
+  if (realpathSync(dir) !== dir) throw new Error("refusing redirected session data");
   return dir;
 }
 
