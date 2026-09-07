@@ -4239,8 +4239,14 @@ marker is a separate text block outside untrusted feedback. The complete content
 verified before exactly one idle/followUp send; exclusion is then released without waiting for
 queue persistence. Only later exact persisted user-role evidence completes delivery. Readiness
 degradation uses the review's request/review/run identity and verifies invalidation before
-announcing fallback. If persistence fails, local liveness suppression remains, but no durable
-invalidation or fallback permission is asserted; a consumption winner is never rolled back.
+announcing fallback. The same review's already verified handshake-failed/subscription-failed
+invalidation also satisfies that check without rewriting its reason; no other terminal state does.
+This permits a fallback notice, never decision effects or restored approval eligibility. Readiness
+and unavailable transport outcomes share one local fallback-attempt latch. Unavailable handling
+runs before transport disposal, including when the readiness poll is sleeping or already reported
+ready; a later observer cannot repeat fallback or announce readiness after suppression.
+If persistence fails, local liveness suppression remains, but no durable invalidation or fallback
+permission is asserted; a consumption winner is never rolled back.
 The guarantee is at-most-once participating machine-local dispatch, not exactly-once delivery or
 power-loss durability. Conservative target/config changes can require a new review.
 Construction performs no startup discovery, status query, previous-feedback injection,

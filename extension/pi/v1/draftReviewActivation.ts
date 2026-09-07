@@ -26,7 +26,7 @@ export interface PreparedDraftReview {
   registration: DraftReviewRegistration;
   signal: AbortSignal;
   isCurrent(): boolean;
-  /** Verify this review's degraded invalidation before permitting readiness fallback. */
+  /** Verify this review's readiness/transport invalidation before permitting fallback. */
   degrade(): RegistrationResult;
   /** IDs come only from verified registration and its matching completed transport outcome. */
   complete(
@@ -176,33 +176,6 @@ export async function captureDraftReviewRefusal<T>(work: Promise<T>): Promise<T 
     throw error;
   }
 }
-/** Keep provider refusals at the Pi edge; feature policy never sees a synthetic skip/denial. */
-export async function reviewRegisteredDraft(
-  bridge: RegisteredDraftReviewBridge,
-  ctx: ExtensionContext,
-  markdown: string,
-  signal?: AbortSignal,
-): Promise<ReviewOutcome> {
-  if (signal?.aborted) return { status: "aborted" };
-  const prepared = bridge.prepare(ctx, markdown, signal);
-  if (!prepared.ok) throw new DraftReviewTransportStop(prepared.refusal);
-  const review = prepared.value;
-  try {
-    if (review.snapshot.markdown !== markdown)
-      throw new DraftReviewTransportStop({
-        status: "refused",
-        code: "source-changed",
-        phase: "open",
-        detail: "review source changed before registration",
-      });
-    const outcome = await bridge.review(markdown, review.registration, review.signal);
-    if (outcome.status === "refused") throw new DraftReviewTransportStop(outcome);
-    return outcome;
-  } finally {
-    review.dispose();
-  }
-}
-
 /** One activation, shared by tool and browser entries. No startup discovery or replay. */
 export function createDraftReviewActivation(pi: ExtensionAPI): DraftReviewRuntime {
   let context: ExtensionContext | undefined;

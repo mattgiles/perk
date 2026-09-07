@@ -301,7 +301,10 @@ refusal stops without priming companion surfaces or taking the port-failure fall
 subscribe-then-status catch-up query is bounded to five seconds; the live human wait remains
 open-ended. Pending is not a health guarantee, and missing/query failure is not a denial.
 See [Plannotator draft-review transport](../providers-and-backends.md#plannotator-draft-review-transport)
-for transport cancellation and status-query limits.
+for transport cancellation and status-query limits. A browser handshake or subscription failure
+produces one in-session fallback notice only after its transport invalidation verifies. This also
+works if readiness is still waiting or previously reported ready; failed persistence never grants
+fallback permission, and no review decision is manufactured.
 
 Plannotator `plan_review` guards completion for plan, objective, and gist. Both plan/objective
 browser doors and their chooser delegations use the same guarded completions, as well as the

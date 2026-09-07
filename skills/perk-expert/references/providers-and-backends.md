@@ -91,8 +91,10 @@ delegations verify intent before effects. Actual toolCallId/exact result content
 code-authored browser HTML receipt marker outside untrusted feedback, binds the delivery
 expectation before return/send. Only an exact later persisted entry acknowledges delivery.
 Stale decisions carry only diagnostic DATA, never current-draft apply/fold/save instructions.
-Readiness fallback requires verified degraded invalidation; failed persistence suppresses local
-late decisions but grants no fallback permission. Confirmed receipts and successful gate facts
+Readiness fallback requires verified invalidation: degraded, or the same review's already recorded
+handshake/subscription failure. Transport failures reach one fallback notice before local cleanup,
+even while readiness sleeps or after it reports ready. Failed persistence suppresses local late
+decisions but grants no fallback permission. Confirmed receipts and successful gate facts
 survive later delivery/bookkeeping uncertainty. Preserve state and reconcile rather than retry.
 The guarantee is at-most-once participating machine-local dispatch, not exactly-once delivery or
 power-loss durability. Subject-specific Direct Edits/source policies remain in place.

@@ -135,6 +135,47 @@ function fixture(subject: ReviewSubject = "plan", parameter = false) {
   };
 }
 
+for (const reason of ["handshake-failed", "subscription-failed"] as const) {
+  test(`readiness reuses same-review ${reason} invalidation without rewriting it`, () => {
+    const f = fixture();
+    try {
+      assert.ok(f.registration.open(requestId).ok);
+      const identity = { requestId, reviewId: reason === "handshake-failed" ? null : id.reviewId };
+      if (reason === "handshake-failed")
+        assert.ok(f.registration.invalidateOpening(requestId, reason).ok);
+      else {
+        assert.ok(f.registration.attach(requestId, id.reviewId).ok);
+        assert.ok(f.registration.subscriptionFailed(requestId, id.reviewId).ok);
+      }
+      const prior = f.record();
+      assert.deepEqual(f.decisions.degrade(identity, "RID"), { ok: true });
+      assert.deepEqual(f.record(), prior, "a sound transport invalidation is already proof");
+      assert.equal(existsSync(f.lock), false);
+      assert.ok(f.registration.open(successorId).ok);
+      const successor = f.record();
+      assert.equal(f.decisions.degrade(identity, "RID").ok, false);
+      assert.deepEqual(f.record(), successor, "a predecessor cannot grant successor fallback");
+    } finally {
+      f.dispose();
+    }
+  });
+}
+
+for (const reason of ["source-changed", "manual-save", "first-party-review"] as const) {
+  test(`readiness does not reuse ${reason} invalidation as transport failure`, () => {
+    const f = fixture();
+    try {
+      f.open();
+      assert.ok(f.decisions.mutate(reason, () => {}).ok);
+      const prior = f.record();
+      assert.equal(f.decisions.degrade(id, "RID").ok, false);
+      assert.deepEqual(f.record(), prior);
+    } finally {
+      f.dispose();
+    }
+  });
+}
+
 test("byte-identical draft mutation is proved inside exclusion and the supplied session expires on release", () => {
   const f = fixture();
   try {

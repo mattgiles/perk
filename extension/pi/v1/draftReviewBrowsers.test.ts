@@ -72,6 +72,7 @@ function fixture(subject: Subject) {
   const sends: { content: Blocks; options: unknown }[] = [];
   const notices: string[] = [];
   const fallbacks: string[] = [];
+  const fallbackOptions: unknown[] = [];
   const calls: { args: string[]; body: string | null }[] = [];
   const completed = deferred<void>();
   const queried = deferred<void>();
@@ -86,21 +87,26 @@ function fixture(subject: Subject) {
   let exits = 0;
   let saveSuccess = true;
   let statusHook: ((request: Request) => void) | undefined;
+  let handshakeHook: ((request: Request) => void) | undefined;
+  let subscriptionFails = false;
   const pi = {
     events: {
       emit(_name: string, request: Request) {
         requests.push(request);
-        if (request.action === "plan-review")
-          request.respond({
-            status: "handled",
-            result: { status: "pending", reviewId: request.requestId },
-          });
-        else {
+        if (request.action === "plan-review") {
+          if (handshakeHook !== undefined) handshakeHook(request);
+          else
+            request.respond({
+              status: "handled",
+              result: { status: "pending", reviewId: request.requestId },
+            });
+        } else {
           statusHook?.(request);
           queried.resolve();
         }
       },
       on(_name: string, listener: (value: unknown) => void) {
+        if (subscriptionFails) throw new Error("controlled subscription failure");
         listeners.add(listener);
         return () => listeners.delete(listener);
       },
@@ -140,10 +146,12 @@ function fixture(subject: Subject) {
       if (typeof content === "string") {
         const state = record().consumption;
         assert.ok(
-          state.state === "invalidated" && state.reason === "degraded",
-          "fallback requires verified degradation",
+          state.state === "invalidated" &&
+            ["degraded", "handshake-failed", "subscription-failed"].includes(state.reason),
+          "fallback requires verified readiness or transport invalidation",
         );
         fallbacks.push(content);
+        fallbackOptions.push(options);
         return;
       }
       const state = record().consumption;
@@ -274,6 +282,7 @@ function fixture(subject: Subject) {
     sends,
     notices,
     fallbacks,
+    fallbackOptions,
     calls,
     waves,
     annotations,
@@ -306,6 +315,12 @@ function fixture(subject: Subject) {
     },
     setStatus(work: (request: Request) => void) {
       statusHook = work;
+    },
+    setHandshake(work: (request: Request) => void) {
+      handshakeHook = work;
+    },
+    failSubscription() {
+      subscriptionFails = true;
     },
     setWriteHook(work: () => void) {
       writeHook = work;
@@ -349,6 +364,130 @@ function fixture(subject: Subject) {
 }
 
 for (const subject of ["plan", "objective"] as const) {
+  for (const failure of [
+    "handshake-unavailable",
+    "handshake-timeout",
+    "subscription-failed",
+  ] as const) {
+    for (const readiness of ["sleeping", "ready"] as const) {
+      test(`${subject}: ${failure} reaches fallback once with readiness ${readiness}`, async (t) => {
+        const f = fixture(subject);
+        const requested = deferred<Request>();
+        const probing = deferred<void>();
+        const sleeping = deferred<void>();
+        const releaseSleep = deferred<void>();
+        const disposed = deferred<void>();
+        if (failure === "handshake-timeout") {
+          const previous = process.env.PERK_PLANNOTATOR_HANDSHAKE_MS;
+          delete process.env.PERK_PLANNOTATOR_HANDSHAKE_MS;
+          t.after(() => {
+            if (previous === undefined) delete process.env.PERK_PLANNOTATOR_HANDSHAKE_MS;
+            else process.env.PERK_PLANNOTATOR_HANDSHAKE_MS = previous;
+          });
+          t.mock.timers.enable({ apis: ["setTimeout"] });
+        }
+        try {
+          f.setHandshake(requested.resolve);
+          if (failure === "subscription-failed") f.failSubscription();
+          if (readiness === "sleeping") f.stream();
+          f.deps.probe = async (_url, signal) => {
+            assert.ok(signal);
+            signal.addEventListener("abort", () => disposed.resolve(), { once: true });
+            probing.resolve();
+            return readiness === "ready";
+          };
+          f.deps.sleep = async () => {
+            sleeping.resolve();
+            await releaseSleep.promise;
+          };
+          assert.equal(typeof (await f.open()), "string");
+          await probing.promise;
+          if (readiness === "sleeping") await sleeping.promise;
+          else await new Promise<void>((resolve) => setImmediate(resolve));
+          const request = await requested.promise;
+          if (failure === "handshake-timeout") t.mock.timers.tick(5_000);
+          else
+            request.respond(
+              failure === "subscription-failed"
+                ? { status: "handled", result: { status: "pending", reviewId: request.requestId } }
+                : { status: "unavailable", error: "controlled unavailable bridge" },
+            );
+          await disposed.promise;
+          assert.equal(
+            f.fallbacks.length,
+            1,
+            "fallback is attempted before disposal aborts the poll",
+          );
+          assert.deepEqual(
+            f.fallbackOptions[0],
+            readiness === "sleeping" ? { deliverAs: "followUp" } : undefined,
+          );
+          assert.match(f.fallbacks[0] ?? "", new RegExp(`/${subject}-save`));
+          assert.doesNotMatch(f.fallbacks[0] ?? "", /never became ready/);
+          assert.deepEqual(
+            f.record().consumption,
+            {
+              state: "invalidated",
+              reason:
+                failure === "subscription-failed" ? "subscription-failed" : "handshake-failed",
+            },
+            "fallback reuses the verified invalidation without rewriting its reason",
+          );
+          assert.equal(f.annotations.surface, null);
+          assert.equal(f.waves.context, null);
+          assert.equal(f.calls.length, 0);
+          assert.equal(f.sends.length, 0);
+          assert.equal(f.exits(), 0);
+          assert.equal(f.lock(), false);
+          assert.equal(f.listeners.size, 0);
+          releaseSleep.resolve();
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          assert.equal(f.fallbacks.length, 1, "late readiness cannot repeat the fallback");
+        } finally {
+          releaseSleep.resolve();
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          f.dispose();
+        }
+      });
+    }
+  }
+
+  test(`${subject}: failed transport invalidation never permits fallback`, async () => {
+    const f = fixture(subject);
+    const requested = deferred<Request>();
+    const sleeping = deferred<void>();
+    const releaseSleep = deferred<void>();
+    const disposed = deferred<void>();
+    try {
+      f.setHandshake(requested.resolve);
+      f.deps.probe = async (_url, signal) => {
+        assert.ok(signal);
+        signal.addEventListener("abort", () => disposed.resolve(), { once: true });
+        return false;
+      };
+      f.deps.sleep = async () => {
+        sleeping.resolve();
+        await releaseSleep.promise;
+      };
+      await f.open();
+      await sleeping.promise;
+      f.setFailure("invalidated");
+      (await requested.promise).respond({ status: "unavailable" });
+      await disposed.promise;
+      releaseSleep.resolve();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(f.fallbacks.length, 0);
+      assert.equal(f.calls.length, 0);
+      assert.equal(f.sends.length, 0);
+      assert.equal(f.lock(), true);
+      assert.ok(f.notices.some((text) => text.includes("persistence-failed")));
+    } finally {
+      releaseSleep.resolve();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      f.dispose();
+    }
+  });
+
   for (const order of ["event-first", "status-first"] as const)
     test(`${subject} chooser/browser: ${order}, one save/send, exact later persisted receipt`, async () => {
       const f = fixture(subject);

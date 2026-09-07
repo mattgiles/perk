@@ -537,7 +537,14 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
       const result = sync(
         id.requestId,
         (owned) => {
-          expected(owned, id);
+          const current = expected(owned, id).consumption;
+          // Transport already revoked eligibility before returning unavailable. Reuse that verified
+          // fact without rewriting its reason; other invalidations never grant readiness fallback.
+          if (
+            current.state === "invalidated" &&
+            (current.reason === "handshake-failed" || current.reason === "subscription-failed")
+          )
+            return;
           owned.transition({ kind: "invalidate", id, reason: "degraded" });
         },
         runId,

@@ -71,7 +71,7 @@ export function objectiveReviewBrowserGuidance(opts: { custom?: string }): strin
  * review door) or `/objective-save` (the manual failsafe).
  */
 const DEGRADE_NOTICE =
-  "The plannotator plan-review browser is unavailable (the review server never became ready) — " +
+  "The plannotator plan-review browser is unavailable — " +
   "degrade in-session: surface the draft-review wave's findings in your reply for the human. " +
   "Both door surfaces are cleared — `push_annotations` now refuses (`no_surface`) and the " +
   "draft-review context is gone. The human decides the next step: `plan_review` (the in-session " +
@@ -106,7 +106,7 @@ export async function observeObjectiveReviewReadiness(
 ): Promise<void> {
   const surface = annotations.surface;
   const state = await started.readiness;
-  if (!isCurrent()) return;
+  if (!isCurrent() || session.degraded) return;
   if (state === "ready") {
     report(ctx, SCOPE, "info", `plannotator is up at ${started.url} — browser opening`);
     resumeAnnotationDelivery(annotations, surface, pi, ctx);
@@ -117,6 +117,30 @@ export async function observeObjectiveReviewReadiness(
     const out = await started.bridgePromise;
     if (!isCurrent() || out.status !== "unavailable") return; // the decision task routes the settled outcome
   }
+  fallbackObjectiveReview(
+    pi,
+    ctx,
+    draftReview,
+    annotations,
+    session,
+    isCurrent,
+    degrade,
+    `the plannotator plan-review server did not become ready at ${started.url} — the browser review is unavailable`,
+  );
+}
+
+/** One local fallback attempt, whether readiness or transport failure arrives first. */
+function fallbackObjectiveReview(
+  pi: RespondSink,
+  ctx: ReportTarget & Pick<ExtensionContext, "isIdle">,
+  draftReview: DraftReviewWaveState,
+  annotations: AnnotationState,
+  session: ObjectiveReviewDoorSession,
+  isCurrent: () => boolean,
+  degrade: () => RegistrationResult,
+  detail: string,
+): void {
+  if (!isCurrent() || session.degraded) return;
   // Local suppression survives an unverified invalidation, but grants no fallback permission.
   session.degraded = true;
   clearAnnotationSurface(annotations);
@@ -136,14 +160,7 @@ export async function observeObjectiveReviewReadiness(
     );
     return;
   }
-  report(
-    ctx,
-    SCOPE,
-    "error",
-    `the plannotator plan-review server did not become ready at ${started.url} — the browser ` +
-      "review is unavailable",
-    { alsoLog: true },
-  );
+  report(ctx, SCOPE, "error", detail, { alsoLog: true });
   if (ctx.isIdle()) {
     pi.sendUserMessage(DEGRADE_NOTICE);
   } else {
@@ -316,6 +333,21 @@ export async function openObjectiveReviewSurface(
       if (!review.isCurrent()) return;
       if (out.status === "refused") {
         report(ctx, SCOPE, "error", draftReviewRefusalText(out));
+        return;
+      }
+      if (out.status === "unavailable") {
+        // The poll may be asleep or already ready. Handle the verified transport stop before
+        // dispose aborts observation; the shared local latch prevents a second fallback.
+        fallbackObjectiveReview(
+          pi,
+          ctx,
+          draftReview,
+          annotations,
+          session,
+          review.isCurrent,
+          review.degrade,
+          out.warning,
+        );
         return;
       }
       if (session.degraded) {
