@@ -1,22 +1,15 @@
 // Live warm-surface tests for the stacked-delivery sync bindings (stackSync.ts): the frozen
 // registration baselines (both tools + the driving command), the full-details WIRE baselines
 // captured from the pre-migration door (byte-exact on the JSON round-trip), strict decodes,
-// cold-door argv shapes, the lenient sync render, the §8.51 conflict drive through the
-// REGISTERED tool (auto-fire sequence, explicit resolve, adopt-never-dispatches, the
-// containment fail-closed arm, withheld dispatch, model interpolation), and the counter reset
-// arms. Fully offline (fakePerk via PERK_BIN; a REAL bound AgentSession via the T1 harness).
+// cold-door argv shapes, the lenient sync render and counter reset arms. Native conflict-drive
+// outcomes and exclusions live in stackSyncNative.test.ts. Fully offline (fakePerk via PERK_BIN;
+// a real bound AgentSession via the harness).
 
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import {
-  type ExtensionAPI,
-  type ExtensionContext,
-  SessionManager,
-} from "@earendil-works/pi-coding-agent";
-import { CONFLICT_RESOLUTION_ATTEMPT_CAP } from "../../../delivery/submit.ts";
-import { resolverLockDir } from "../../../substrate/resolverLease.ts";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   fakePerk,
   loadPerkSession,
@@ -26,14 +19,11 @@ import {
   spyInjections,
 } from "../../../testing/harness.ts";
 import { OK_ENVELOPE } from "../../../testing/objectiveStackFixtures.ts";
-import { evaluateWriterScript } from "../../../testing/writerScript.ts";
 import {
   buildStackAdoptArgs,
   buildStackSyncArgs,
   objectiveSyncGuidance,
   renderSyncOutcome,
-  runSyncResolution,
-  syncConflictResolutionGuidance,
 } from "./stackSync.ts";
 
 // --- frozen registration baselines (captured from the pre-migration door) -------------------------
@@ -86,7 +76,7 @@ const BASELINE_SYNC_TOOL = {
   promptGuidelines: [
     "Call objective_stack_sync only inside the /objective-sync flow: preview with dry_run: true, present the cascade to the human, and act (no dry_run) ONLY on explicit human approval.",
     "The modes are mutually exclusive: continue resumes a resolved conflict continuation, abort discards it, resolve dispatches the perk.conflict-resolver subagent into the retained worktree on explicit human request; none composes with base/dry_run.",
-    "A mutating sync/continue that stops on a rebase conflict auto-dispatches the resolver (bounded attempts); follow the injected dispatch instructions — they own the resume gate.",
+    "A mutating objective_stack_sync or continue that stops on a rebase conflict awaits the native resolver (bounded attempts). Its code-classified continuation-ready result permits only an offer; await NEW explicit human approval before a separate continue call. All other results withhold the offer.",
   ],
   executionMode: "sequential",
 };
@@ -490,316 +480,6 @@ test("guidance: preview-first, consent-gated, no hardcoded skill pointer", () =>
   assert.ok(!/perk-objective-sync\b/.test(text), "no hardcoded skill name");
 });
 
-// --- the sync conflict drive through the REGISTERED tool (the execute composition point) -----------
-
-const DRIVE_OP = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
-
-function dispatchAt(cwd: string) {
-  return {
-    operationId: DRIVE_OP,
-    manifestPath: join(cwd, "sync-continuations", "01LIN.json"),
-    objective: "7",
-    node: "2.1",
-    branch: "plan-91",
-    pr: 91,
-    worktree: `/tmp/worktrees/sync-${DRIVE_OP}`,
-  };
-}
-
-for (const model of [undefined, "test-org/resolver-model"]) {
-  test(`retained writer renderer pins child foreground/cwd and compact return: ${model}`, async () => {
-    const dispatch = dispatchAt("/caller");
-    const text = syncConflictResolutionGuidance(dispatch, 1, 2, model);
-    const { calls, result } = await evaluateWriterScript(text);
-    assert.deepEqual(calls, [
-      {
-        key: "resolve",
-        params: {
-          agent: "perk.conflict-resolver",
-          async: false,
-          cwd: dispatch.worktree,
-          task: "<the instruction of step 2>",
-        },
-      },
-    ]);
-    assert.deepEqual(result, { key: "resolve", ok: false, error: "stopped", output: "resolution" });
-    assert.match(text, /top-level `async: false` and `context: "fresh"`/);
-    assert.doesNotMatch(text, /extensionBindings|acceptance:|mission:/);
-    assert.equal(text.includes('model: "test-org/resolver-model"'), model !== undefined);
-    assert.ok(
-      text.includes(
-        `\nRETAINED-CONTINUATION SENTINEL: resume the in-progress rebase in ${dispatch.worktree}\n`,
-      ),
-    );
-    assert.match(text, /ONLY a \*\*completed\*\* rebase \(verification passed\)/);
-    assert.match(text, /Do not install wiring or copy\/mint a parent handoff/);
-    assert.match(text, /Never change execution mode, extension composition, or launch protocol/);
-  });
-}
-
-/** A stack-routing fake perk: routes on the third argv token (sync vs status) and appends each
- * call's full argv as one line — the smoke tests assert the exact cold-door sequence. */
-function fakeStackPerk(
-  cwd: string,
-  opts: { sync?: { json: string; code: number }; status: string; argvFile: string },
-): string {
-  const path = join(cwd, "fake-stack-perk.sh");
-  const q = (value: string) => value.replace(/'/g, "'\\''");
-  const syncArm = opts.sync
-    ? `  sync) printf '%s' '${q(opts.sync.json)}'; exit ${opts.sync.code} ;;\n`
-    : "";
-  writeFileSync(
-    path,
-    `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> '${q(opts.argvFile)}'\ncase "$3" in\n${syncArm}` +
-      `  status) printf '%s' '${q(opts.status)}'; exit 0 ;;\n` +
-      `  *) >&2 echo "unexpected subcommand: $*"; exit 2 ;;\nesac\n`,
-    "utf8",
-  );
-  chmodSync(path, 0o755);
-  return path;
-}
-
-/** A corroborating status projection whose manifest path lives under `cwd`. The continuation
- * carries `targets_contained: true` — the D2 containment verdict the corroboration requires. */
-function driveStatusJson(cwd: string, over: Record<string, unknown> = {}): string {
-  mkdirSync(join(cwd, "sync-continuations"), { recursive: true });
-  return JSON.stringify({
-    success: true,
-    objective: { id: "7", url: "https://x/7", redirected_from: null },
-    train: {
-      base: "main",
-      delivery_lineage: "01LIN",
-      published_prefix_len: 1,
-      layers: [{ node_id: "2.1", branch: "plan-91", pr_number: 91, publication: "published" }],
-    },
-    continuation: {
-      operation_id: DRIVE_OP,
-      conflict_node_id: "2.1",
-      adopted_node: null,
-      created: "2026-01-01",
-      worktree_path: `/tmp/worktrees/sync-${DRIVE_OP}`,
-      manifest_path: join(cwd, "sync-continuations", "01LIN.json"),
-      parseable: true,
-      targets_contained: true,
-      ...over,
-    },
-    orphaned_residue: { observed: true, reason: null, worktrees: [], refs: [] },
-  });
-}
-
-const CONFLICT_JSON = JSON.stringify({
-  success: false,
-  error_type: "rebase_conflict",
-  message: "the candidate rebase for layer 2.1 ('plan-91' onto abc) hit a conflict",
-});
-
-test("registered tool: a mutating sync refusing rebase_conflict auto-drives ONE dispatch", async () => {
-  const cwd = scaffoldRepo();
-  const argvFile = join(cwd, "argv.txt");
-  const bin = fakeStackPerk(cwd, {
-    sync: { json: CONFLICT_JSON, code: 1 },
-    status: driveStatusJson(cwd),
-    argvFile,
-  });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
-  const injected = spyInjections(h);
-  try {
-    const result = await h.invokeTool("objective_stack_sync", { objective: "7" });
-    const details = result.details as { ok: boolean; error_type?: string };
-    assert.equal(details.ok, false, "the tool result still carries the refusal");
-    assert.equal(details.error_type, "rebase_conflict");
-    assert.deepEqual(
-      readFileSync(argvFile, "utf8").trim().split("\n"),
-      ["objective stack sync 7 --yes --json", "objective stack status 7 --json"],
-      "the mutating sync is followed by exactly the corroborating status re-read",
-    );
-    assert.equal(injected.length, 1, "exactly one dispatch injection");
-    assert.ok(injected[0]?.startsWith(syncConflictResolutionGuidance(dispatchAt(cwd), 1, 2)));
-    assert.match(injected[0] ?? "", /RETAINED-CONTINUATION SENTINEL/);
-    assert.match(injected[0] ?? "", /perk\.conflict-resolver/);
-    assert.match(injected[0] ?? "", /attempt 1 of 2/);
-    assert.ok(
-      (injected[0] ?? "").includes(`cd /tmp/worktrees/sync-${DRIVE_OP}`),
-      "the unquoted cd names the retained worktree",
-    );
-    assert.equal(h.workflowState().conflict_resolution_attempts, 1);
-  } finally {
-    h.dispose();
-  }
-});
-
-test("registered tool: an uncontained continuation fails closed — warning, no dispatch", async () => {
-  // The D2 cross-plane arm end-to-end: a projection whose continuation is NOT
-  // containment-validated (targets_contained false — or absent under version skew) never
-  // mints a dispatch; the loud reason names the update/abort remediation.
-  const cwd = scaffoldRepo();
-  const argvFile = join(cwd, "argv.txt");
-  const bin = fakeStackPerk(cwd, {
-    sync: { json: CONFLICT_JSON, code: 1 },
-    status: driveStatusJson(cwd, { targets_contained: false }),
-    argvFile,
-  });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
-  const injected = spyInjections(h);
-  try {
-    await h.invokeTool("objective_stack_sync", { objective: "7" });
-    assert.deepEqual(injected, [], "an uncontained continuation never dispatches");
-    // invokeTool's ctx shares the message-only notify capture (not the severity-tagged array).
-    assert.ok(
-      h.notifies.some((m) => /not containment-validated/.test(m)),
-      "the containment miss is reported as a warning",
-    );
-    assert.equal(h.workflowState().conflict_resolution_attempts, undefined, "no increment");
-  } finally {
-    h.dispose();
-  }
-});
-
-test("registered tool: resolve dispatches without ever reaching the cold sync mutation", async () => {
-  const cwd = scaffoldRepo();
-  const argvFile = join(cwd, "argv.txt");
-  // No sync route at all: reaching the mutation worker would exit 2 and fail the corroboration.
-  const bin = fakeStackPerk(cwd, { status: driveStatusJson(cwd), argvFile });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
-  const injected = spyInjections(h);
-  try {
-    const result = await h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
-    assert.equal((result.details as { ok: boolean }).ok, true);
-    assert.match(result.content[0]?.text ?? "", /dispatch injected \(attempt 1 of 2\)/);
-    assert.deepEqual(
-      readFileSync(argvFile, "utf8").trim().split("\n"),
-      ["objective stack status 7 --json"],
-      "the status re-read is the ONLY cold call",
-    );
-    assert.equal(injected.length, 1, "exactly one dispatch injection");
-    assert.match(injected[0] ?? "", /RETAINED-CONTINUATION SENTINEL/);
-  } finally {
-    h.dispose();
-  }
-});
-
-test("registered tool: a rebase_conflict-refusing ADOPT makes no status call and injects nothing", async () => {
-  // Adopt never enters the dispatch pipeline — pinned at the adapter, not via a widened
-  // predicate: the adopt argv is the ONLY cold call, whatever the refusal says.
-  const cwd = scaffoldRepo();
-  const argvFile = join(cwd, "argv.txt");
-  const bin = fakeStackPerk(cwd, {
-    sync: { json: CONFLICT_JSON, code: 1 },
-    status: driveStatusJson(cwd),
-    argvFile,
-  });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
-  const injected = spyInjections(h);
-  try {
-    const result = await h.invokeTool("objective_stack_adopt", {
-      objective: "7",
-      node: "2.1",
-      confirm: true,
-    });
-    assert.equal((result.details as { ok: boolean }).ok, false);
-    assert.deepEqual(
-      readFileSync(argvFile, "utf8").trim().split("\n"),
-      ["objective stack sync 7 --adopt 2.1 --yes --json"],
-      "no corroborating status re-read for adopt",
-    );
-    assert.deepEqual(injected, []);
-  } finally {
-    h.dispose();
-  }
-});
-
-test("registered tool: at the cap → loud error, no dispatch, counter unchanged", async () => {
-  const cwd = scaffoldRepo();
-  const argvFile = join(cwd, "argv.txt");
-  const bin = fakeStackPerk(cwd, { status: driveStatusJson(cwd), argvFile });
-  const file = plantSession(cwd, [
-    {
-      run_id: "01RID",
-      mode: "read-write",
-      conflict_resolution_attempts: CONFLICT_RESOLUTION_ATTEMPT_CAP,
-    },
-  ]);
-  const h = await loadPerkSession({
-    cwd,
-    env: { PERK_BIN: bin },
-    sessionManager: SessionManager.open(file),
-  });
-  const injected = spyInjections(h);
-  try {
-    const result = await h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
-    const details = result.details as { ok: boolean; error_type?: string; error?: string };
-    assert.equal(details.ok, false);
-    assert.equal(details.error_type, "attempt_cap");
-    assert.match(details.error ?? "", /resolve manually/);
-    assert.deepEqual(injected, []);
-    assert.equal(h.workflowState().conflict_resolution_attempts, CONFLICT_RESOLUTION_ATTEMPT_CAP);
-  } finally {
-    h.dispose();
-  }
-});
-
-test("registered tool: a dropped increment withholds the dispatch and releases this call's claim", async () => {
-  // The verified-increment precondition end-to-end: session appends are silently dropped
-  // (the strict read-back seam observes the miss), so the pipeline withholds + releases.
-  const cwd = scaffoldRepo();
-  const argvFile = join(cwd, "argv.txt");
-  const bin = fakeStackPerk(cwd, { status: driveStatusJson(cwd), argvFile });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
-  const injected = spyInjections(h);
-  const sm = h.session.sessionManager as unknown as {
-    appendCustomEntry: (customType: string, data?: unknown) => string;
-  };
-  const realAppend = sm.appendCustomEntry.bind(sm);
-  sm.appendCustomEntry = (customType: string, data?: unknown) =>
-    customType === "perk:workflow-state" ? "dropped" : realAppend(customType, data);
-  try {
-    const result = await h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
-    const details = result.details as { ok: boolean; error_type?: string; error?: string };
-    assert.equal(details.ok, false);
-    assert.equal(details.error_type, "state_error");
-    assert.match(details.error ?? "", /dispatch withheld/);
-    assert.deepEqual(injected, [], "an unverifiable counter never bypasses the cap");
-    const lock = resolverLockDir(join(cwd, "sync-continuations", "01LIN.json"));
-    assert.equal(existsSync(lock), false, "this call's claim dir was removed");
-  } finally {
-    h.dispose();
-  }
-});
-
-test("registered tool: a dropped reset write warns loudly (the counter may be stale)", async () => {
-  const cwd = scaffoldRepo();
-  const bin = fakePerk(cwd, { stdout: OK_ENVELOPE });
-  const file = plantSession(cwd, [
-    { run_id: "01RID", mode: "read-write", conflict_resolution_attempts: 2 },
-  ]);
-  const h = await loadPerkSession({
-    cwd,
-    env: { PERK_BIN: bin },
-    sessionManager: SessionManager.open(file),
-  });
-  const sm = h.session.sessionManager as unknown as {
-    appendCustomEntry: (customType: string, data?: unknown) => string;
-  };
-  const realAppend = sm.appendCustomEntry.bind(sm);
-  sm.appendCustomEntry = (customType: string, data?: unknown) =>
-    customType === "perk:workflow-state" ? "dropped" : realAppend(customType, data);
-  try {
-    const result = await h.invokeTool("objective_stack_sync", { objective: "7" });
-    assert.equal((result.details as { ok: boolean }).ok, true, "the completion stands");
-    assert.ok(
-      h.notifies.some((m) =>
-        m.includes(
-          "conflict budget reset failed — the persisted counter may be stale (the seam's " +
-            "warning names the details).",
-        ),
-      ),
-      `expected the exact reset-failure warning; got: ${JSON.stringify(h.notifies)}`,
-    );
-  } finally {
-    h.dispose();
-  }
-});
-
 // --- the counter reset arms through the REGISTERED tools --------------------------------------------
 
 async function invokeWithAttempts(opts: {
@@ -885,83 +565,4 @@ test("reset: a clean confirmed adopt resets", async () => {
     }),
     0,
   );
-});
-
-// --- model interpolation through the registered resolve mode ----------------------------------------
-
-test("dispatch: the configured [models.subagents] conflict-resolver model renders; unset omits", async () => {
-  {
-    const cwd = scaffoldRepo();
-    mkdirSync(join(cwd, ".perk"), { recursive: true });
-    writeFileSync(
-      join(cwd, ".perk", "config.toml"),
-      '[models.subagents]\nconflict-resolver = "test-org/resolver-model"\n',
-      "utf8",
-    );
-    const bin = fakeStackPerk(cwd, {
-      status: driveStatusJson(cwd),
-      argvFile: join(cwd, "argv.txt"),
-    });
-    const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
-    const injected = spyInjections(h);
-    try {
-      await h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
-      assert.match(injected[0] ?? "", /model: "test-org\/resolver-model"/);
-    } finally {
-      h.dispose();
-    }
-  }
-  {
-    // An isolated cwd: the dev checkout's own [models.subagents] must not leak in.
-    const cwd = scaffoldRepo();
-    const bin = fakeStackPerk(cwd, {
-      status: driveStatusJson(cwd),
-      argvFile: join(cwd, "argv.txt"),
-    });
-    const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
-    const injected = spyInjections(h);
-    try {
-      await h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
-      assert.doesNotMatch(injected[0] ?? "", /model: "/);
-      assert.match(injected[0] ?? "", /default model/);
-    } finally {
-      h.dispose();
-    }
-  }
-});
-
-// --- the dispatch delivery-mode matrix over the exported adapter core --------------------------------
-// (the idle harness cannot produce the streaming `followUp` arm — the exported-core precedent)
-
-test("runSyncResolution: idle → immediate turn; streaming → followUp", async () => {
-  const cwd = scaffoldRepo();
-  const status = driveStatusJson(cwd);
-  for (const [idle, expected] of [
-    [true, undefined],
-    [false, "followUp"],
-  ] as const) {
-    const calls: { content: string; options?: { deliverAs?: string } }[] = [];
-    const entries: { type: string; customType?: string; data?: unknown }[] = [];
-    const pi = {
-      exec: async () => ({ code: 0, killed: false, stdout: status, stderr: "" }),
-      appendEntry: (customType: string, data?: unknown) => {
-        entries.push({ type: "custom", customType, data });
-      },
-      sendUserMessage: (content: string, options?: { deliverAs?: string }) => {
-        calls.push({ content, options });
-      },
-    } as unknown as ExtensionAPI;
-    const ctx = {
-      cwd,
-      hasUI: true,
-      isIdle: () => idle,
-      sessionManager: { getBranch: () => entries },
-      ui: { notify: () => {} },
-    } as unknown as ExtensionContext;
-    const outcome = await runSyncResolution(pi, ctx, "7", null);
-    assert.equal(outcome.kind, "dispatched");
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0]?.options?.deliverAs, expected);
-    assert.match(calls[0]?.content ?? "", /RETAINED-CONTINUATION SENTINEL/);
-  }
 });

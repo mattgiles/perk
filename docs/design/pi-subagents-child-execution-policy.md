@@ -523,7 +523,7 @@ appears exactly once below. `agents/<stem>.md` is canonical for delivered roles;
 | `perk-dev.session-auditor` | Non-streaming / background | `extension/learning/audit.ts`; definition `.pi/agents/perk-dev/session-auditor.md` | `extension/learning/audit.test.ts`, `extension/learning/auditorDef.test.ts`, `tests/test_repo_local_agents.py` |
 | `perk.adversarial-reviewer` | Streaming / background | `extension/waves/adversarialReviewWave.ts` | `extension/waves/adversarialReviewWave.test.ts` |
 | `perk.draft-reviewer` | Streaming / background | `extension/waves/draftReviewWave.ts` | `extension/waves/draftReviewWave.test.ts` |
-| `perk.conflict-resolver` | Writer / foreground, both subprofiles | Submit/address: `extension/pi/v1/delivery/conflictResolverEngine.ts` through `resolve_submit_conflicts`; retained continuation: `stackSync.ts` + its continuation template | `conflictResolverEngine.test.ts`, `conflictResolverEngineCompat.test.ts`, `submitConflict.test.ts`, submit/address and stackSync suites; `extension/substrate/worktreeResolverLock.test.ts` |
+| `perk.conflict-resolver` | Writer / foreground, both subprofiles | Both modes: `extension/pi/v1/delivery/conflictResolverEngine.ts`; PR via `submitConflict.ts`, retained via `stackConflictResolver.ts` awaited inside `stackSync.ts` | `conflictResolverEngine.test.ts`, `conflictResolverEngineCompat.test.ts`, `submitConflict.test.ts`, submit/address and stackSync suites; `extension/substrate/worktreeResolverLock.test.ts` |
 
 Custom/Ponytail review lanes are invocation variants of the listed reviewers, not new agent
 identities. Excluded: `perk-dev.analyst`, user/custom definitions, upstream builtins and external
@@ -533,8 +533,8 @@ by a name heuristic.
 
 ### Preserved model and skill exceptions
 
-Keep `[models.subagents]` lookup and model selection unchanged (workflow-level for reports and
-retained continuation; native request-level for submit/address), including the
+Keep `[models.subagents]` lookup and model selection unchanged (workflow-level for reports;
+parent-config/native request-level for both resolver modes), including the
 `inherit` sentinel and thinking suffix. Keep every canonical default/fallback list; these are
 source facts, not claims that each model was tested:
 
@@ -558,16 +558,16 @@ not discovered-skill inheritance. No other role gains an explicit skill or exten
 | Dimension | All ten report roles | Conflict resolver, both subprofiles |
 | --- | --- | --- |
 | Child mode | Background | Foreground |
-| Encoding | Canonical definition `async: true`; child-call `async` **absent** | Submit: native foreground-only structured delegation; retained: child-call `async: false`. Definition default remains omitted |
-| Workflow scheduling | Existing `async: true` ReportWave transport | Submit: no workflow wrapper; retained: top-level `async: false` one-child workflow |
-| Conversation | Existing fixed top-level `context: "fresh"` inherited by children | Submit: request `context: "fresh"`; retained: explicit top-level fresh context |
+| Encoding | Canonical definition `async: true`; child-call `async` **absent** | Both modes: native foreground-only structured delegation. Definition default remains omitted |
+| Workflow scheduling | Existing `async: true` ReportWave transport | Both modes: directly awaited, no workflow wrapper |
+| Conversation | Existing fixed top-level `context: "fresh"` inherited by children | Both modes: request `context: "fresh"` |
 | Project context | `inheritProjectContext: false` | `inheritProjectContext: true` |
 | Global context | `inheritGlobalContext: false` | `inheritGlobalContext: false` |
 | Discovered skills | `inheritSkills: false` | `inheritSkills: true` |
 | Base prompt | Preserve `systemPromptMode: replace` and role rubric | Preserve `systemPromptMode: replace` and both resolver rubrics |
 | Extensions | Omit `extensions` and `subagentOnlyExtensions`; use ambient runner discovery | Omit both fields; foreground has no ambient discovery |
-| Mission / acceptance | Fixed `mission: false` and existing `WAVE_ACCEPTANCE` (`level: none`) | Submit request omits both; native bridge disables acceptance. Retained keeps existing omissions/native defaults |
-| Required tools | `read`, `grep`, `find`, `ls`, `bash`, engine `structured_output` | `read`, `grep`, `find`, `ls`, `bash`, `edit`, `write`; submit additionally uses engine-owned `structured_output` |
+| Mission / acceptance | Fixed `mission: false` and existing `WAVE_ACCEPTANCE` (`level: none`) | Both modes omit mission/acceptance keys; native bridge disables acceptance |
+| Required tools | `read`, `grep`, `find`, `ls`, `bash`, engine `structured_output` | `read`, `grep`, `find`, `ls`, `bash`, `edit`, `write`, engine-owned `structured_output` |
 | Supervisor | Optional capability with the rules below | Optional; absence cannot change mode or authority |
 | Actual cwd | Trusted calling session's cwd via the native RPC context | Explicit child `cwd` from the validated dispatch worktree |
 
@@ -584,9 +584,10 @@ Explicit child `async: true` instead returns detached-launch semantics and must 
 for the omission. Do not expose that private await flag in Perk payloads or add a collector.
 The release's `workflow-launch-params.test.ts` corroborates this distinction; R/S/E exercised it.
 
-Node 3.2 implements `async: true` to the **nine delivered report definitions and the repo-local
-auditor**, converges their managed copies, and tests the intentional renderer omission. It encodes
-`async: false` and the actual `cwd` to the child item in **both** conflict templates. It makes
+Report definitions encode `async: true` for the **nine delivered reports and the repo-local
+auditor**, with converged managed copies and tested renderer omission. Both resolver modes now
+use code-owned native foreground delegation at the actual target `cwd`, not conflict-template
+scripts. The definitions make
 `inheritGlobalContext: false` explicit in the eleven definitions; that preserves the selected
 resolved value rather than relying on a future engine default. Global context instructions
 are distinct from skill discovery: writer skill inheritance includes the ordinary global/project
@@ -594,10 +595,13 @@ catalog, subject to the engine's mandatory removal of the orchestration skill. T
 nested-subagent tools. No `ReportAssignment`/`ReportWave` caller-interface expansion or generic
 profile/agent registry is needed; the live restriction supplier is composition-internal.
 
-### Submit foreground dispatch reconciliation
+### Foreground resolver dispatch reconciliation
 
-Submit/address now uses a code-owned domain interface and parameterless single-use authorization,
-not the earlier model-authored workflow script. The loaded subagent tool's real package ancestry
+Both modes use a code-owned, mode-discriminated domain interface, not model-authored scripts.
+Submit/address keeps parameterless single-use authorization; retained execution is directly
+awaited inside `objective_stack_sync` after canonical preparation and verified attempt increment.
+Its activation-local controller binds parent identity/cwd/generation and the exact frozen request;
+context replacement/tree navigation/shutdown cancels it, and overlap refuses before preparation. The loaded subagent tool's real package ancestry
 anchors optional public preflight loading; no private execution import, global lookup, version pin
 or fallback launcher exists. Public preflight checks the canonical unshadowed writer profile,
 context/tool/extension policy and native model snapshot. Native foreground execution still owns
@@ -605,7 +609,7 @@ discovery; its `worktree` allocation default must be absent/false and unchanged 
 otherwise dispatch refuses for inspection/reload. No second worktree is allocated.
 
 A canonical per-worktree Git-directory `perk-submit-conflict.lock` supplies cross-session/process
-exclusion for participating submit/address resolvers. Exclusive creation, private token+inode
+exclusion for participating PR and retained resolvers at the actual target, never parent fallback. Exclusive creation, private token+inode
 ownership, and conservative release/retention replace no other ownership protocol. Only a
 correlated well-formed completed terminal (or a pre-launch refusal without start/update evidence)
 proves release is safe after emission. Cancellation/no-ack/deadline has a bounded grace; uncertainty
@@ -620,9 +624,25 @@ this record does not claim independent test or remote mergeability proof. Receip
 whitelisted identity/status/preflight/lock evidence, never output, ownership secrets or invented
 artifact paths. Summaries remain separately labeled untrusted DATA.
 
-The retained-continuation path keeps its script, sentinel, consent, session claim, and no-push/no-
-abort authority unchanged. The new execution lock neither retrofits that path nor fences arbitrary
-manual Git. Offline characterization, real lock subprocess tests, and the installed bridge/runSync
+Retained input reuses corroborated `SyncConflictDispatch` facts. Its exact schema has mode,
+outcome (completed/verification-failed/stopped-before-mutation/unresolvable-conflict), verification
+and bounded summary, with no push field or aborted outcome. Only native completed + valid
+completed/passed + successful lock release yields `continuation-ready`; this permits an offer,
+not publication. Other outcomes withhold. Code builds the sentinel; the agent still owns the
+context ladder and no-new-rebase/no-push/no-abort policy. The manifest-side session claim remains
+held across every child outcome, independent of execution exclusion; reclamation cannot bypass it.
+A new human approval precedes canonical continuation, whose Python validation remains authoritative.
+
+Post-settlement guidance delivery cannot change a result or the original automatic sync refusal.
+A rendering/send throw appends one tool-content delivery-unconfirmed diagnostic, retaining details,
+first content and lock evidence; a guarded warning is attempted only while current. Secondary
+reporting failure is named without raw error/output. No delivery retry, acknowledgement system or
+permission to continue is invented. The lock does not fence arbitrary manual Git/continuation.
+
+Public integration contracts are manifest-declared `./preflight` and `./delegation`, documented by
+the installed engine's `docs/extension-api.md`. Private parser/bridge/result-adapter inspection and
+fake `runSync` ChildSessionFactory tests are compatibility evidence only, never production imports.
+Offline characterization, real lock subprocess tests, and the both-mode installed bridge/runSync
 fake-child compatibility suite are not live resolver certification. The historical native matrix,
 full-baseline stamp and stale-error fingerprints below remain unchanged.
 
@@ -658,18 +678,19 @@ record; engine/provider errors remain loud.
 2. **Retained continuation:** the source is the fresh, containment-validated
    `SyncConflictDispatch.worktree`, from the Python-owned continuation projection. Pass it as
    child `cwd`; preserve the retained-mode sentinel, explicit PR identity, in-progress-rebase
-   checks, completed-only outcome gate, no push/no abort rule, claim lease and attempt cap.
-   Publication remains the human's `objective_stack_sync {continue: true}` gesture.
+   checks, code-classified continuation-ready offer gate, no push/no abort rule, session claim
+   and attempt cap. Execution uses the shared target-worktree lock; publication remains a NEW
+   human-approved `objective_stack_sync {continue: true}` gesture.
 
 Both require the existing authorized write-capable parent flow and exactly one writer per
 worktree. Missing/ambiguous worktree or agent capability fails before mutation. Discovery occurs
 at the actual target cwd; do not silently accept a conflicting/shadowed definition or install
-new wiring inside an in-progress retained rebase to make discovery pass. Profile changes remain
-in the prompt-authored dispatch; no code-owned dispatcher, rebase helper or authority migration.
+new wiring inside an in-progress retained rebase to make discovery pass. Neither native task
+construction nor result classification migrates rebase/publication authority to the parent.
 
 The retained worktree does **not** automatically carry the caller's
 `.perk/workflow/handoff/<PERK_RUN_ID>.json`. `cache.readHandoff` is cwd-local; `sync.py` creates
-an isolated detached Git worktree, while the warm adapter only validates and injects guidance.
+an isolated detached Git worktree, while the warm adapter validates and awaits native resolution.
 W-B explicitly linked the real consumed parent handoff into its separate fixtures. Selecting
 background there as if that transport already existed would be fiction. **No cross-cwd handoff
 copying, synthetic parent handoff or writer lifecycle transport is assigned to 3.2/3.3.**
@@ -692,15 +713,14 @@ message-event surface. That is an allowed negative observation, **not** a timely
 promise or a revalidation of the waived browser/draft/bridge-off legs.
 
 Cancellation stays with existing owners: ReportWave transport owns its AbortSignal/deadline
-and normal native stop request; the parent/native subagent tool owns the blocking resolver
-workflow's cancellation. Stop acknowledgement, logical `stopped`, tool termination, observer
+and normal native stop request; the resolver controller/native foreground adapter owns its
+composed tool/controller signal, exact-tuple cancellation, bounded grace and shutdown. Stop acknowledgement, logical `stopped`, tool termination, observer
 shutdown and detached-process proof are distinct. No automatic restart or `bg_wait` adoption.
 
 W proved exact-child RPC stop inside an **async** enclosing workflow, including actual bash
 abort, shutdown, a thirty-second no-trailing-write window and continued parent usability.
-The selected blocking resolver workflow is retained from current behavior; propagation to the
-same foreground child abort/dispose path is source-backed, **not a separately exercised root-
-scheduling variant**. Direct top-level foreground targets are not RPC `stop` targets. Thirty
+The current directly awaited resolver adapter propagates to the same foreground child
+abort/dispose path under offline compatibility tests, **not a new live root-scheduling measurement**. Direct top-level foreground targets are not RPC `stop` targets. Thirty
 seconds is the experiment's observation bound, not a new universal production SLA. Node 3.2
 pins cancellation propagation in ordinary framework tests without claiming a new live pass.
 

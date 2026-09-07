@@ -1,8 +1,9 @@
 // The conflict-resolver claim (contracts.md §8.51): a machine-local SESSION CLAIM on a retained
-// sync-continuation operation, taken by the warm dispatcher right before it injects the resolver
-// dispatch. It is honestly NOT a child-lifecycle-bound lock — `pi.sendUserMessage` is
-// fire-and-forget and the extension never observes the dispatched child's start or finish — so
-// there is deliberately NO explicit release on dispatch. The claim self-heals instead, via the
+// sync-continuation operation, taken during preparation before native execution. It is NOT a
+// child-lifecycle-bound execution lock: after a verified dispatch preparation this claim stays
+// held across every resolver outcome, including confirmed completion. Only preparation failure
+// releases this call's token. The separate worktree execution lock cannot be reclaimed here.
+// The session claim self-heals instead, via the
 // reclaimability predicate: the holder pid is dead, the recorded operation was consumed (a fresh
 // conflict minted a new operation id), or the lease is missing/corrupt and the lock dir has aged
 // past `RECLAIM_GRACE_MS`. The accepted residual: a live session's claim on a still-pending SAME

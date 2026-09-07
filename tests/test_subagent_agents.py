@@ -180,8 +180,11 @@ def test_conflict_resolver_def_is_mode_aware():
     assert "sync --abort" in retained
 
     report = _def_section(text, "Report")
-    # The outcome-class vocabulary the dispatching session's gate keys on — and
-    # completed requires *passing* verification, not merely a verification run.
+    # Ad-hoc prose remains available, but owned dispatch uses mode-specific structured output.
+    assert "no push field and no aborted outcome" in report
+    assert "no code-owned dispatch parses it" in " ".join(report.split())
+    assert "Stopped-before-mutation/not-run" in report
+    # Completed requires passing verification, not merely a verification run.
     assert "Open with the terminal outcome class" in report
     assert "the rebase finished and verification **passed**" in report
     for outcome in (
@@ -194,48 +197,28 @@ def test_conflict_resolver_def_is_mode_aware():
         assert f"**{outcome}**" in report
 
 
-def test_continuation_dispatch_template_agrees_on_the_sentinel():
-    template_text = (
-        _resources.prompts_dir() / "stages" / "conflict-resolution-continuation.md"
-    ).read_text(encoding="utf-8")
-    def_text = _source_bytes("conflict-resolver").decode()
-    # Cross-file byte agreement on the sentinel marker prefix.
+def test_continuation_task_owns_sentinel_and_template_only_delivers_classified_result():
+    root = _resources.prompts_dir().parent
+    template = (root / "prompts/stages/conflict-resolution-continuation.md").read_text(
+        encoding="utf-8"
+    )
+    task = (root / "extension/delivery/conflictResolution.ts").read_text(encoding="utf-8")
     marker = "RETAINED-CONTINUATION SENTINEL:"
-    assert marker in template_text
-    assert marker in def_text
-    # The full rendered sentinel line starts a line (column zero), not mere substring presence.
+    assert marker in _source_bytes("conflict-resolver").decode()
     assert re.search(
-        r"^RETAINED-CONTINUATION SENTINEL: resume the in-progress rebase in \{\{ worktree \}\}$",
-        template_text,
+        r"^RETAINED-CONTINUATION SENTINEL: resume the in-progress rebase in "
+        r"\$\{dispatch.worktree\}$",
+        task,
         re.MULTILINE,
     )
-
-    def step(n):
-        # One numbered dispatch step, whitespace-normalized — pinning inside the step that
-        # owns a token keeps the pin honest (the template's opening summary also names the
-        # PR, which must not satisfy the child-task requirement).
-        match = re.search(rf"^{n}\. (.*?)(?=^\d\. |\Z)", template_text, re.MULTILINE | re.DOTALL)
-        assert match, f"missing step {n}"
-        return " ".join(match.group(1).split())
-
-    # Step 2 is the child task: it opens with the worktree cd, carries the sentinel line,
-    # and names the PR number retained mode requires to proceed.
-    task = step(2)
-    assert "`cd {{ worktree }}`" in task
-    assert "RETAINED-CONTINUATION SENTINEL: resume the in-progress rebase in {{ worktree }}" in task
-    assert "PR #{{ pr }}" in task
-
-    # Step 3 gates continuation on explicit human consent, requires passing verification,
-    # and withholds on every non-completed outcome class (the def's vocabulary).
-    gate = step(3)
-    assert "ONLY a **completed** rebase (verification passed)" in gate
-    assert "await the human's explicit consent" in gate
-    assert "{ objective: {{ objective }}, continue: true }" in gate
-    assert "EVERY other outcome" in gate
-    assert "withholds continuation" in gate
-    for withheld in ("stopped-before-mutation", "unresolvable-conflict", "verification-failed"):
-        assert withheld in gate
-    assert "{ objective: {{ objective }}, abort: true }" in gate
+    assert "cd '${dispatch.worktree}'" in task
+    assert "PR #${dispatch.pr}" in task
+    assert marker not in template
+    assert "workflowScript" not in template
+    assert "{{ control }}" in template
+    assert "{{ diagnostic }}" in template
+    assert "untrusted DATA" in template
+    assert "With no new approval or with declined approval" in template
 
 
 def test_second_run_is_idempotent(tmp_path):

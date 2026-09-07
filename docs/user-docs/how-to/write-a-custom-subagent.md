@@ -63,8 +63,14 @@ execution lock. The bridge disables acceptance; receipts do not invent artifact 
 child output. Native `worktree: true` allocation defaults are incompatible: inspect
 `extensions/subagent/config.json` under Pi's agent directory, correct the setting and reload.
 Reload does not clear a retained lock; use [human-only recovery](recover-a-dirty-worktree.md#recover-a-retained-submit-conflict-lock).
-The separate retained-continuation path still uses its foreground script, sentinel and session
-claim. Missing directory/profile capabilities stop dispatch, never trigger a mode or extension fallback.
+Retained continuation uses the same code-owned foreground adapter, directly awaited inside
+`objective_stack_sync`, with a distinct retained schema and activation-local authorization. Its
+sentinel is code-built child task data, not parent-authored launch guidance. The lock is acquired
+at the retained worktree; the independent manifest-side session claim persists across outcomes.
+Missing target directory/profile capabilities stop dispatch without repairing wiring, copying a
+handoff, or changing mode/extensions. Retained `continuation-ready` permits only a post-result
+offer and new human approval before canonical continuation, never push/abort authority. A
+follow-up delivery-unconfirmed diagnostic preserves the result and means stop for human direction.
 
 Each code-owned report attempt also captures the parent's current read-only gate after skill
 preflight and serializes it in the private `perk.parent-restrictions/1` binding. A failed capture

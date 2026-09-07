@@ -24,10 +24,14 @@ import {
 } from "./pi/v1/delivery/conflictResolverEngine.ts";
 import { installLandBindings } from "./pi/v1/delivery/land.ts";
 import { installReadyBindings } from "./pi/v1/delivery/ready.ts";
+import { createStackConflictResolver } from "./pi/v1/delivery/stackConflictResolver.ts";
 import { installStackLandBindings } from "./pi/v1/delivery/stackLand.ts";
 import { installStackRecoverBindings } from "./pi/v1/delivery/stackRecover.ts";
 import { installStackStatusBindings } from "./pi/v1/delivery/stackStatus.ts";
-import { installStackSyncBindings } from "./pi/v1/delivery/stackSync.ts";
+import {
+  installStackSyncBindings,
+  type StackResolutionDelivery,
+} from "./pi/v1/delivery/stackSync.ts";
 import { installSubmitBindings } from "./pi/v1/delivery/submit.ts";
 import { installSubmitConflictBindings } from "./pi/v1/delivery/submitConflict.ts";
 import { registerDraftReviewWaveTools } from "./pi/v1/draftReviewWaveTools.ts";
@@ -136,6 +140,7 @@ export default function perk(
   pi: ExtensionAPI,
   options: {
     resolverEngine?: Pick<ConflictResolverEngineOptions, "preflight" | "configPath" | "acquire">;
+    stackResolutionDelivery?: StackResolutionDelivery;
   } = {},
 ) {
   const version = perkVersion();
@@ -191,7 +196,10 @@ export default function perk(
     events: pi.events,
     engineEntry: () => pi.getAllTools().find((tool) => tool.name === "subagent")?.sourceInfo.path,
     readOnly: () => gating.isActive(),
-    authorized: (request) => submitConflict.authorized(request),
+    authorized: (request) =>
+      request.mode === "pr-rebase"
+        ? submitConflict.authorized(request)
+        : stackConflict.authorized(request),
     availableModels: () =>
       resolverContext?.modelRegistry
         .getAvailable()
@@ -205,6 +213,7 @@ export default function perk(
   const submitConflict = installSubmitConflictBindings(pi, conflictResolver, () =>
     gating.isActive(),
   );
+  const stackConflict = createStackConflictResolver(conflictResolver, () => gating.isActive());
 
   // The v1 plan installer: perk-owned plan mode (the `/plan` + Ctrl+Alt+P + `--plan` toggle
   // surface over the read-only gate, plus the plan-authoring context injection — this call
@@ -289,6 +298,7 @@ export default function perk(
   const feedbackReceiver = createHunkFeedbackReceiver(pi);
   pi.on("session_shutdown", async () => {
     submitConflict.shutdown();
+    stackConflict.shutdown();
     resolverContext = undefined;
     await conflictResolver.shutdown();
     childIdentity.clear();
@@ -304,6 +314,7 @@ export default function perk(
     childIdentity.capture(ctx, runner);
 
     submitConflict.setContext(ctx);
+    stackConflict.setContext(ctx);
     resolverContext = ctx;
     const branchEntries = () => branchOf(ctx);
     const sessionFile = ctx.sessionManager.getSessionFile();
@@ -523,6 +534,8 @@ export default function perk(
 
   // Non-negotiable: rebuild on branch navigation too, or state goes stale after /tree (§8.3).
   pi.on("session_tree", async (_event, ctx) => {
+    stackConflict.setContext(ctx);
+    resolverContext = ctx;
     const state = rebuildWorkflowState(branchOf(ctx));
     // Non-negotiable: re-sync the gate + stage scoping on tree navigation too (mode and stage are
     // per-field LWW — the branch-rebuilt stage is the §8.40 key). Fail-closed on the gate.
@@ -568,7 +581,7 @@ export default function perk(
   // `delivery/stackConflict.ts` + `delivery/stackReconcile.ts` feature ops. Takes `gating` for
   // the driving commands' gate-on soft refusal (stack sync/recovery mutates published
   // branches; the stack tools never join READ_ONLY_TOOLS).
-  installStackSyncBindings(pi, gating);
+  installStackSyncBindings(pi, gating, stackConflict, options.stackResolutionDelivery);
   installStackRecoverBindings(pi, gating);
   installStackLandBindings(pi, gating);
 

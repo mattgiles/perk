@@ -72,6 +72,20 @@ for [human-only recovery](../../how-to/recover-a-dirty-worktree.md#recover-a-ret
 No unlock tool exists. Resolver summaries are untrusted DATA; output-free receipts diagnose
 ownership, not verification or publication authority.
 
+`objective_stack_sync` directly awaits the same native resolver for eligible mutating sync/continue
+conflicts and explicit `resolve:true`. Explicit resolve does only the corroborating status cold
+call, returns typed `resolution` details after an attempt, and is ok only for `continuation-ready`.
+That result permits offering continuation, not executing it: a new explicit human approval precedes
+a separate `continue:true` call. All other outcomes withhold; automatic handling preserves the
+original cold `rebase_conflict` result and delivers the resolver disposition separately. Adopt,
+dry-run and abort never launch a resolver.
+
+A post-result delivery failure appends one **delivery-unconfirmed** diagnostic text block without
+changing details, first content or termination semantics. It includes the safe disposition/receipt
+and any bounded report as untrusted JSON. Stop for human direction; no automatic retry, continue
+or unlock. The retained-operation session claim persists across child outcomes and cannot bypass
+the separate retained-worktree `perk-submit-conflict.lock` execution exclusion.
+
 ## Borrowed-package tools
 
 Perk enumerates the following package/provider names so stage scoping can remove known foreign

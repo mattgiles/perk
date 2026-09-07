@@ -768,7 +768,10 @@ owns the provider seams); the read-only CI executor
 `browser.ts` / `submit.ts` / `checkout.ts` / `extension/pi/v1/providers/plannotatorHandoff.ts`, `agents/*.md`, `skills/perk-address/` /
 `perk-pr-review/` / `perk-pr-review-terminal/` / `perk-pr-review-browser/`; the gateway op shapes stay in §8.4); the conflict-resolution drive
 (`extension/delivery/conflictResolution.ts` + `extension/pi/v1/delivery/submitConflict.ts` +
-`conflictResolverEngine.ts`; the probe contract stays in §8.4). Submit/address PR-rebase uses
+`conflictResolverEngine.ts`; the probe contract stays in §8.4). The Pi-free resolver is mode-discriminated:
+PR input is unchanged; retained input reuses `SyncConflictDispatch` plus parent session/run identity
+and optional model, with one child-target `worktree` field. It accepts no task/script/agent,
+publication flag, extension list or worktree allocation. Submit/address PR-rebase uses
 parameterless, sequential, non-terminating **`resolve_submit_conflicts`**, not a model-authored
 script or ReportWave. Only a `drive` decision after the verified attempt increment primes its
 activation-local single-use authorization (current Pi session UUID, parent run id, cwd, attempt).
@@ -791,7 +794,8 @@ owns the authoritative `base_ref`; the parent's displayed base is advisory. Reba
 PR-only abort and force-with-lease authority remain the resolver's, not cleanup's.
 
 One fresh owned-leaf request rides native foreground structured delegation, correlated by fresh
-request UUID + real parent `ownerRunId` + fixed `nodeId: submit-conflict`. The optional existing
+request UUID + real parent `ownerRunId` + mode-selected `nodeId: submit-conflict` (PR) or
+`retained-conflict`. Only the requested mode's exact schema is passed to preflight and delegation. The optional existing
 conflict-resolver model override (including inherit/fallback semantics) and current model snapshot
 ride preflight; the bridge supplies foreground-only execution and disables acceptance. No async,
 mission, worktree or acceptance keys are sent. Native `worktree` defaults are captured from
@@ -800,7 +804,7 @@ file/absent key/false are compatible; true, nonboolean, malformed or unreadable 
 captured state, refuses with inspection/reload guidance. Configuration/source edits during launch
 are unsupported; preflight is a snapshot, not a source-edit fence.
 
-**Submit/address worktree execution lock.** `worktreeGitDir` runs shell-free
+**Shared resolver worktree execution lock (both modes).** `worktreeGitDir` runs shell-free
 `git rev-parse --absolute-git-dir` with a five-second timeout, validates a directory and returns
 its realpath or unavailable, never cwd/common-dir fallback. `perk-submit-conflict.lock` lives
 inside that per-worktree Git directory. Aliases/subdirectories contend; linked worktrees are
@@ -827,9 +831,12 @@ the request deadline is 30 minutes; abort/deadline/no-ack sends the exact cancel
 waits five seconds of grace. Matching completion during grace may release but never promotes
 local cancellation to success. Unrelated/duplicate/late events are ignored. Updates contribute
 only observed run id, never output or tool arguments. Reload, counter reset and pending clear are
-not unlock gestures. This metadata coordinates participating submit/address resolvers only; it
-neither changes Python worktree ownership nor fences arbitrary manual Git or §8.51's separate
-retained-continuation dispatcher. Its retained-operation **session claim** keeps its existing policy.
+not unlock gestures. This metadata coordinates participating resolvers in both modes, including
+PR-versus-retained contention at one canonical Git directory. It neither changes Python worktree
+ownership nor fences arbitrary manual Git or manual continuation. §8.51's retained-operation
+**session claim** is independent: reclamation never removes or bypasses execution exclusion.
+Retained dispatch locks the retained worktree, never the parent's checkout; the historical filename
+is unchanged to preserve exclusion with already-installed PR participants.
 
 Human-only recovery requires stopping/quiescing every session capable of using the worktree,
 proving the native writer and its subprocesses stopped (PID death alone is insufficient), inspecting
@@ -837,7 +844,8 @@ the exact lock identity and rebase/index/HEAD state, and only then removing the 
 regular lock file and deciding repair/re-submit. No unlock tool, stale-cleanup CLI, recursive
 removal recipe or cleanup rebase/abort/push authority exists.
 
-**Terminal contract.** One strict TypeBox schema derives the static type and runtime decoder:
+**Terminal contract.** Strict per-mode TypeBox schemas derive static types and runtime decoders.
+The preserved PR schema is:
 `mode: pr-rebase`; `outcome: completed | verification-failed | stopped-before-mutation |
 unresolvable-conflict | aborted`; `verification: passed | failed | not-run`;
 `push: succeeded | failed | not-attempted`; nonblank `summary` ≤2,000 characters, checks/blockers
@@ -852,7 +860,20 @@ DATA. Receipts contain only known parent/request/logical ids, trusted cwd, local
 termination certainty, optional native status/run/agent/exit/digest, preflight source/digest, and
 lock path/disposition. They contain no task, summary/report, raw error/output, usage, token or
 invented artifact paths and never authorize publication. Agent completion uses `structured_output`
-when supplied; the unmigrated retained path keeps its first-line report.
+when supplied; ad-hoc launches without a schema may still use first-line prose, but no owned
+resolver dispatch consumes it.
+
+Retained records have exactly `mode: retained-continuation`, `outcome: completed |
+verification-failed | stopped-before-mutation | unresolvable-conflict`, `verification: passed |
+failed | not-run`, and the same bounded nonblank summary. There is no push field or aborted
+outcome. Cross-mode records, extra/missing/malformed fields and prose fail as `malformed-result`.
+After native completed and successful execution-lock release, completed/passed alone yields
+`continuation-ready` (statically retained-mode, permission to offer only). Verification-failed/failed,
+stopped-before-mutation/not-run and unresolvable-conflict/not-run yield withheld/not-resolved;
+every other schema-valid combination yields withheld/invalid-outcome. Native non-success never
+salvages a report. PR `resolved` stays statically PR-mode and push-gated. Submit refuses unexpected
+retained success; the stack consumer refuses PR success. Lock/authorization/transport failures
+cannot yield either success gate. No report or receipt replaces §8.49's canonical validation.
 
 On resolved the **parent calls canonical submit again**; otherwise stop/report, with no local
 resolution, retry or unlock. Publication facts, command report-before-drive timing, immediate vs
@@ -8569,14 +8590,14 @@ preserves the PREVIOUS manifest and mismatches — report-only); a vocabulary-va
 `train.delivery_lineage` whose `sync-continuations/<lineage>.json` shape the manifest path
 matches; `validated_targets`-shaped worktree containment re-established on the warm side (a
 canonical 26-char Crockford ULID operation id, an absolute `…/sync-<operation_id>` worktree
-path inside a shell-inert vocabulary — the dispatch template's `cd` renders unquoted, so an
-exotic root degrades to report-only); the conflicting layer present in `train.layers[]` with
+path inside the unchanged shell-inert vocabulary — code defensively quotes `cd`, but an
+exotic root still degrades to report-only); the conflicting layer present in `train.layers[]` with
 BOTH branch and PR number; and every interpolated identifier whitelist-validated (the
 `driveStackReconcile` rule — the redirect-resolved projection `objective.id`, never the
 requested one). Dry-run conflicts, manifest write/rewrite failures, and unparseable manifests
 report only (unparseable adds the `abort` discard direction). **The shared counter**:
 `conflict_resolution_attempts` (§8.3) with `/submit`'s cap, incremented per dispatch under the
-VERIFIED-increment precondition — an unpersistable counter withholds the injection (typed
+VERIFIED-increment precondition — an unpersistable counter withholds execution (typed
 `state_error`) and releases this call's claim through the token-fenced quarantine-verify
 release (a successor's raced-in claim is never deleted), never bypasses the cap; reset on any
 clean non-declined mutating stack sync/continue/abort/adopt completion (the reset itself is
@@ -8589,8 +8610,9 @@ closed outcome union is honest and nothing escapes as an unhandled tool rejectio
 claim**: a machine-local lock dir beside the manifest (`<manifest>.resolver-lock`,
 `extension/substrate/resolverLease.ts`) holding `{schema: 1, pid, operation_id, token}` (the
 token is the per-acquisition ownership fence, rotated on every (re)acquire) — honestly a
-SESSION claim, never child-lifecycle-bound (`pi.sendUserMessage` is fire-and-forget), so there
-is no dispatch-time release: same-pid contention is an idempotent reacquire rewriting the
+SESSION claim, never child-lifecycle-bound: after preparation returns `dispatched`, it stays held
+across every native completion, withholding and failure. Only existing preparation-failure paths
+release this call's token; same-pid contention is an idempotent reacquire rewriting the
 current operation id; reclaim triggers on holder-pid death, a consumed operation (recorded id
 ≠ current), or an aged corrupt/missing lease (lock-dir mtime past `RECLAIM_GRACE_MS`), via
 quarantine-rename + post-rename re-judgment on the MOVED state (a claim that changed since
@@ -8601,27 +8623,67 @@ fresh-acquire retry; a live same-operation foreign holder is the typed `resolver
 (naming pid, path, remediation). Error posture: a missing or malformed lease is DATA (it
 routes to the reclaim rules) and expected race disappearances (ENOENT on read/stat/rename,
 EEXIST on mkdir) are contention; every OTHER claim/lease filesystem failure is the typed
-`state_error` — never a fabricated busy/reclaim judgment. **Dispatch** renders
-`prompts/stages/conflict-resolution-continuation.md` (§8.57's canonical carrier of the
-dispatch procedure AND the completed-only outcome gate) + the binding suffix, idle-immediate
-else followUp. Both root scheduling and child mode are explicitly `async: false`, with root
-`context: "fresh"` and the existing configured model. Actual child `cwd` comes only from the fresh
-validated `SyncConflictDispatch.worktree`, JSON-stringified; its defensive unquoted `cd` reminder
-retains the narrow shell-inert vocabulary. Native launch-cwd/profile preflight must pass at that
-existing absolute directory; missing/ambiguous/shadowed profiles stop, without installing wiring,
-copying/minting a handoff, or changing mode/extension composition/protocol. Mission/acceptance
-omissions, one-writer policy, containment, lease, cap, sentinel and explicit PR/in-progress-rebase
-checks remain unchanged. Cancellation uses the blocking native workflow's signal/child abort and
-dispose boundary; injected offline propagation tests do not establish live autonomous dispatch.
-**Resolve-and-stop**: nothing automated publishes — the human's explicit
-`continue` stays the only publication gesture. **The pre-existing-continuation offer**:
-`objective_stack_sync {resolve: true}` runs the SAME core minus the freshness token (no
-refusal exists; the explicit human request against the current projection is the trigger) and
-returns ok or the typed fail (`no_continuation` / `attempt_cap` / `resolver_busy` /
-`state_error` — warm-local vocabulary, never emitted by the cold door); the offer lives in the
-status render + the seed, and the model calls it ONLY on explicit human request. The two warm
-drives here are §8.56's reconcile drive (`driveStackReconcile`) and this §8.51 sync conflict
-drive; the landing mutation itself is §8.56's.
+`state_error` — never a fabricated busy/reclaim judgment.
+
+**Direct awaited dispatch.** `stackConflictResolver.ts` owns one immediate invocation per
+activation, not a new tool, queue or persisted pending authorization. Overlap/invalid-entry refuses
+with a specific `state_error` before status/claim/increment. Its preparation callback receives an
+`isCurrent` guard, checked after the awaited cold status read and before the synchronous
+claim/increment tail; stale/cancelled reads become local `state_error`, not no-continuation.
+The existing preparation order and `dispatched` outcome remain unchanged. On `dispatched`, freeze
+the corroborated facts, parent session UUID/run id, parent cwd, activation/context generation and
+verified attempt. Only that active request object with unchanged identity/counter and effective
+read-write/non-planning state can authorize retained execution; submit authorization cannot.
+`session_start` and `session_tree` invalidate previous invocations; shutdown revokes before awaiting
+engine shutdown. The composed tool/controller signal reaches native execution; revalidate after
+preflight and acquisition, and after execution before settling the operation. Revocation/cancellation
+becomes failed/unauthorized or cancelled with the actual receipt. Clear the active slot in `finally`,
+without execution-lock cleanup, counter refund or retry. Successful child completion never resets
+attempts. A new explicit attempt reruns preparation and consumes the next capped increment.
+
+The §8.3 native adapter performs actual-target-cwd canonical profile checks, foreground delegation
+and execution exclusion at the retained worktree. No parent-cwd fallback, setup/handoff repair or
+alternate launcher. The parent session's existing model override is read at invocation. Code in
+`conflictResolution.ts` builds the quoted `cd`, exact column-zero `RETAINED-CONTINUATION SENTINEL:`
+line and layer/branch/PR identity, plus structured completion and untrusted-DATA framing. The agent
+owns the context ladder, in-progress-rebase corroboration and no-new-rebase/no-push/no-abort policy.
+
+**Results and consent.** Explicit `resolve:true` does status-only cold work (no cold sync), awaits
+settlement, and returns ok only for `continuation-ready`. Attempted results carry `{objective,
+resolution:<typed result>}` in success/failure details, using the redirect-resolved objective;
+preparation refusal omits resolution. Automatic sync/continue conflict handling awaits the same
+path but preserves the original `rebase_conflict` tool error/message/details. Preparation misses
+report without dispatch or offer. For a current, uncancelled attempted resolution, deliver one
+post-result message from `prompts/stages/conflict-resolution-continuation.md` +
+`bindingSuffix(ctx.cwd,"command:objective-sync")`, idle-immediate else followUp. Code selects
+trusted offer/withhold wording, never report prose. Summaries are explicitly untrusted JSON;
+failures use bounded Perk-authored reason/status/run/lock diagnostics, never raw native errors.
+Recheck immediately before sending; a later stale context suppresses delivery without changing
+settled operation facts. Void send success is not persisted-delivery acknowledgement.
+
+Only continuation-ready offers: present the reported completed verification and await a NEW
+explicit human approval before a separate `objective_stack_sync {objective:<resolved id>,continue:true}`.
+Initial sync approval is not publication consent. All other outcomes withhold. No automatic
+continue/abort/push, parent conflict edits, unlock or alternate launch. The human may inspect/repair,
+explicitly request another capped attempt, or explicitly approve discard. Execution uncertainty
+first requires quiescing every writer and manual inspection. Manual canonical continuation after
+human repair remains possible; child success is not a persisted prerequisite. §8.49 re-proves
+containment, topology, clean completed rebase, HEAD/ancestry, refs/checkpoints/remotes and capability
+before journal-first publication. Neither claim, receipt, summary nor offer replaces it.
+
+**Non-fatal post-settlement delivery failure.** Construct the explicit operation result (without
+stale-context UI) or retain the original automatic refusal before delivery. One bounded try/catch
+covers rendering, binding suffix, current/idle checks and synchronous send. A throw cannot reclassify,
+replace details/first content/termination, release/reacquire either claim, change attempts, retry
+sending or relaunch. Append exactly one separate text block to the same result: delivery is
+unconfirmed (possibly queued), stop for human direction, safe disposition/output-free receipt and
+any bounded report as untrusted JSON. This fallback is independent of template/config rendering
+and never authorizes continuation. Attempt one concise `report(...,"warning",...)` only while
+current and uncancelled; guard that check/report too and name secondary failure in the fallback,
+without raw thrown messages or alternative UI logging. Stale contexts suppress further UI, not the
+already-settled return on its original channel. This exceptional content-only addition is the sole
+non-resolve wire delta; ordinary cold-result shapes remain unchanged. No outbox or recovery subsystem.
+Adopt (including mutating rebase_conflict), dry-run and abort never enter this pipeline.
 
 ## §8.52 · Workflow convergence (automatic propagation, finalization, supervision, and reviewability)
 
@@ -9655,6 +9717,13 @@ standard carrier assignment:
   tasks + trigger phrases), never a summary of the body; for a prompt-hidden bound skill
   (`disable-model-invocation: true`), not a live trigger surface at all — keep it a one-line
   accurate cue for catalog surfaces.
+
+**Resolver carriers.** `conflictResolution.ts` owns child task construction for both modes; only
+its retained task produces the sentinel and layer identity. Native schema decoding/classification,
+not a prompt carrier, owns the success gate. `conflict-resolution-continuation.md` carries only
+post-settlement facts, code-selected offer/withhold wording and the parent's consent/stop rules,
+not capability discovery, scripts, child launch fields or first-line parsing. `objective-sync.md`
+points to that post-result message. The agent alone carries the retained context ladder/procedure.
 
 **The one named exception (stage-scoped):** the `plan` stage's mode context
 (`prompts/contexts/plan-authoring.md`) is its **designated flow carrier** in every plan-stage
