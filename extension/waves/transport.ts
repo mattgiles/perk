@@ -37,7 +37,7 @@ export type WaveReceiptState =
 /**
  * One child's identity/artifact trail from the completion payload — OUTPUT-FREE by invariant:
  * reports, summaries, and structured output never enter a receipt (they stay in the durable
- * aggregate, with only the proof-gated adapter correction allowed by contracts.md §8.35).
+ * aggregate — the sole report authority, contracts.md §8.35).
  */
 export interface WaveChildReceipt {
   /** The Perk assignment key (native run-correlated childId; legacy overloaded `agent`). */
@@ -52,22 +52,10 @@ export interface WaveChildReceipt {
   artifactPaths?: Record<string, string>;
 }
 
-/** Output-free proof of an in-memory correction for the known upstream stale-error bug. */
-export interface WaveStaleErrorRecovery {
-  key: string;
-  runId: string;
-  originalError: string;
-  reason: "pi-subagents-0.65.1-stale-assistant-error";
-  reportHash: string;
-  eventsHash: string;
-  sourceHash: string;
-}
-
 export interface WaveAggregate {
   state: string;
   error?: string;
   value: unknown;
-  recoveries?: WaveStaleErrorRecovery[];
 }
 
 /** One script launch's receipt: the run handle (where known) + the observed children. */
@@ -77,8 +65,6 @@ export interface WaveScriptReceipt {
   asyncDir?: string;
   state: WaveReceiptState;
   children: WaveChildReceipt[];
-  /** Original child failure receipts stay intact; this names separately verified corrections. */
-  recoveries?: WaveStaleErrorRecovery[];
 }
 
 // ------------------------------------------------------------------------- the adapter seam
@@ -431,10 +417,7 @@ export async function startWaveScript(
       return {
         ok: true,
         value: aggregate.value,
-        receipt: {
-          ...receiptOf("complete", spawned, matched),
-          ...(aggregate.recoveries?.length ? { recoveries: aggregate.recoveries } : {}),
-        },
+        receipt: receiptOf("complete", spawned, matched),
       };
     } finally {
       unsubscribe();

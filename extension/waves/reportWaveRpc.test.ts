@@ -185,6 +185,42 @@ for (const shape of [
   });
 }
 
+test("rpc integration: a failed aggregate row stays failed despite a report and successful receipt", async () => {
+  const bus = createFakeBus();
+  const report = { verdict: "clean" };
+  const fake = createFakeSubagents([
+    {
+      delivery: "manual",
+      value: [
+        { key: "plan-fidelity", ok: false, error: "engine failure", report },
+        { key: "correctness", ok: true, error: null, report },
+      ],
+    },
+  ]);
+  fake.attach(bus);
+  const wave = createReportWave(bus, { parentReadOnly: () => true });
+  const start = await wave.start(makeSpec());
+  assert.ok(start.ok);
+  fake.emit({
+    id: start.runId,
+    asyncDir: start.asyncDir,
+    state: "complete",
+    results: [{ agent: "plan-fidelity", runId: "child", success: true }],
+  });
+  const collected = await wave.collect(start.ref);
+  assert.equal(collected.kind, "settled");
+  if (collected.kind !== "settled") return;
+  assert.equal(collected.result.complete, false);
+  assert.deepEqual(collected.result.reports, [{ key: "correctness", report }]);
+  assert.deepEqual(collected.result.failures, [
+    { key: "plan-fidelity", reason: "lane-failed", detail: "engine failure" },
+  ]);
+  assert.equal(collected.result.receipt.children[0]?.success, true);
+  assert.equal(fake.spawns.length, 1);
+  assert.equal(fake.stops.length, 0);
+  assert.deepEqual(await wave.collect(start.ref), { kind: "none" });
+});
+
 test("rpc integration: a FOREIGN completion is ignored; the matching manual delivery settles", async () => {
   const bus = createFakeBus();
   const fake = createFakeSubagents([{ executeScript: DERIVE_REPORTS, delivery: "manual" }]);
@@ -249,13 +285,8 @@ test("rpc integration: adapter construction is per-launch inside the supplier (s
   );
   assert.match(
     source,
-    /waveOver\(\s*\(request\)\s*=>\s*createRpcWaveAdapter\(\s*bus,/,
+    /waveOver\(\s*\(\)\s*=>\s*createRpcWaveAdapter\(bus\)/,
     "the one construction call must sit inside the per-launch supplier arrow",
-  );
-  assert.match(
-    source,
-    /schema: assignment\.outputSchema \?\? request\.outputSchema/,
-    "the guard must receive the originally requested per-assignment schema before the default",
   );
 });
 

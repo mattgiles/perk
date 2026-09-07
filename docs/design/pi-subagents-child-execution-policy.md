@@ -61,8 +61,9 @@ Focused command outcomes (detailed execution belongs to the normal PR validation
   leaf (which emits no tree event); neither was an installed-engine incompatibility.
 
 The final run-all CI result is recorded in the PR validation summary. No model-backed/native
-probe ran. No new raw-byte hash ledger or transcript archive was created. Full-baseline doctor
-stamp, stale-error fingerprints, historical native failures and Phase-2 waivers remain unchanged.
+probe ran. No new raw-byte hash ledger or transcript archive was created. In that check, the
+full-baseline doctor stamp, stale-error fingerprints, historical native failures and Phase-2
+waivers remained unchanged.
 
 ## 0.66.0 source/offline reconciliation
 
@@ -652,8 +653,8 @@ Public integration contracts are manifest-declared `./preflight` and `./delegati
 the installed engine's `docs/extension-api.md`. Private parser/bridge/result-adapter inspection and
 fake `runSync` ChildSessionFactory tests are compatibility evidence only, never production imports.
 Offline characterization, real lock subprocess tests, and the both-mode installed bridge/runSync
-fake-child compatibility suite are not live resolver certification. The historical native matrix,
-full-baseline stamp and stale-error fingerprints below remain unchanged.
+fake-child compatibility suite are not live resolver certification. The historical native matrix
+and full-baseline stamp remain unchanged.
 
 ### Extension, provider and cwd boundaries
 
