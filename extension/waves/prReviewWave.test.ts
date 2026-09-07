@@ -4,7 +4,9 @@
 // two-wave scenarios), mirroring reportWave.test.ts conventions.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { Compile } from "typebox/compile";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import { createMemoryWaveAdapter } from "../testing/memoryAdapter.ts";
 import {
@@ -18,7 +20,7 @@ import {
   reviewTargetSuffix,
   runPrReviewWave as runPrReviewWaveBase,
 } from "./prReviewWave.ts";
-import { reportWaveOver } from "./reportWave.ts";
+import { type ReportWaveRequest, type ReportWaveResult, reportWaveOver } from "./reportWave.ts";
 import type { WaveAdapter } from "./transport.ts";
 
 const TWO_ANGLES: PrReviewAngle[] = ["plan-fidelity", "correctness"];
@@ -229,8 +231,7 @@ test("PR_REVIEW_REPORT_SCHEMA pins the report shape (closed, all four fields req
       };
       fyi: { items: { type: string } };
     };
-    if: unknown;
-    then: unknown;
+    allOf: unknown[];
   };
   assert.equal(s.additionalProperties, false);
   assert.deepEqual(s.required, ["angle", "verdict", "findings", "fyi"]);
@@ -244,48 +245,320 @@ test("PR_REVIEW_REPORT_SCHEMA pins the report shape (closed, all four fields req
     "idioms",
     "ponytail",
   ]);
-  assert.deepEqual(s.properties.verdict.enum, ["clean", "actionable"]);
+  assert.deepEqual(s.properties.verdict.enum, ["clean", "actionable", "blocked"]);
   assert.equal(s.properties.findings.items.additionalProperties, false);
   assert.deepEqual(s.properties.findings.items.required, ["path", "line", "body"]);
   assert.equal(s.properties.findings.items.properties.line.type, "integer");
   assert.equal(s.properties.fyi.items.type, "string");
-  // The internal-consistency conditional: a clean verdict cannot carry findings — an
-  // inconsistent lane report is schema-invalid (fails the lane), never reconciled.
-  assert.deepEqual(s.if, { properties: { verdict: { const: "clean" } } });
-  assert.deepEqual(s.then, { properties: { findings: { maxItems: 0 } } });
+  assert.equal(s.allOf.length, 2);
+  const validator = Compile(PR_REVIEW_REPORT_SCHEMA);
+  const base = { angle: "plan-fidelity", verdict: "clean", findings: [], fyi: [] };
+  const finding = { path: "a.ts", line: 1, body: "fix" };
+  for (const [overrides, valid] of [
+    [{}, true],
+    [{ findings: [finding] }, false],
+    [{ verdict: "actionable", findings: [finding] }, true],
+    [{ verdict: "blocked", fyi: ["no_plan_ref"] }, true],
+    [{ verdict: "blocked", fyi: ["  missing\n evidence  "] }, true],
+    [{ verdict: "blocked", fyi: [] }, false],
+    [{ verdict: "blocked", fyi: [""] }, false],
+    [{ verdict: "blocked", fyi: [" \n\t"] }, false],
+    [{ verdict: "blocked", fyi: ["blocker", " "] }, false],
+    [{ verdict: "blocked", fyi: ["blocker"], findings: [finding] }, false],
+    [{ verdict: "blocked", fyi: null }, false],
+    [{ verdict: "blocked", fyi: [1] }, false],
+    [{ verdict: "other" }, false],
+  ] as const)
+    assert.equal(validator.Check({ ...base, ...overrides }), valid, JSON.stringify(overrides));
+  assert.equal(validator.Check({ angle: base.angle, verdict: "blocked", findings: [] }), false);
 });
 
-test("bounded retry resamples the current parent gate after the failed attempt", async () => {
-  let gate = false;
-  const adapter = createMemoryWaveAdapter({
-    aggregates: [
-      {
-        state: "complete",
-        value: [okEntry("plan-fidelity"), failedEntry("correctness", "retry"), okEntry("ponytail")],
-      },
-      { state: "complete", value: [okEntry("correctness")] },
-    ],
+for (const parentReadOnly of [false, true]) {
+  test(`all automated lanes and retries stay caller-read-only over parent ${parentReadOnly}`, async () => {
+    let captures = 0;
+    const adapter = createMemoryWaveAdapter({
+      aggregates: [
+        {
+          state: "complete",
+          value: [
+            okEntry("plan-fidelity"),
+            failedEntry("correctness", "retry"),
+            failedEntry("ponytail", "retry"),
+          ],
+        },
+        { state: "complete", value: [okEntry("correctness"), okEntry("ponytail")] },
+      ],
+    });
+    const wave = reportWaveOver(adapter, () => {
+      captures++;
+      return parentReadOnly;
+    });
+    const outcome = await runPrReviewWaveBase(wave, {
+      pr: 42,
+      angles: TWO_ANGLES,
+      requiredSkillPreflight: PREFLIGHT_OK,
+    });
+    assert.equal(outcome.complete, true);
+    assert.equal(captures, 2);
+    for (const spawn of adapter.calls.spawn) {
+      for (const item of waveScriptItems(spawn.workflowScript)) {
+        assert.equal(item.worktree, false);
+        assert.deepEqual(item.extensionBindings, {
+          "perk.parent-restrictions/1": { readOnly: true },
+        });
+        for (const field of ["async", "cwd", "extensions", "workflowAwaitAsync", "execution"])
+          assert.equal(field in item, false);
+      }
+    }
   });
-  const wave = reportWaveOver(adapter, () => gate);
+}
+
+// -------------------------------------------------------------------- blocked assessments
+
+function blockedEntry(key: string, fyi: string[]) {
+  return {
+    key,
+    ok: true,
+    error: null,
+    report: { angle: key, verdict: "blocked", findings: [], fyi },
+  };
+}
+
+for (const notes of [
+  ["no_plan_ref: caller plan reference missing"],
+  ["review_target_changed: expected PR 42"],
+  ["context transport failed: command exited 1"],
+  ["plan_body: null prevents plan-fidelity assessment"],
+  [
+    "mandatory caller check unfinished: missing evidence",
+    "partial, unassessed, diagnostic-only: a.ts:9 possible race",
+  ],
+]) {
+  for (const recovers of [true, false]) {
+    test(`blocked lane ${notes[0]}: retry ${recovers ? "recovers" : "stays uncovered"}`, async () => {
+      const adapter = createMemoryWaveAdapter({
+        aggregates: [
+          {
+            state: "complete",
+            value: [
+              blockedEntry("plan-fidelity", notes),
+              okEntry("correctness"),
+              okEntry("ponytail"),
+            ],
+          },
+          {
+            state: "complete",
+            value: [recovers ? okEntry("plan-fidelity") : blockedEntry("plan-fidelity", notes)],
+          },
+        ],
+      });
+      const outcome = await runPrReviewWave(adapter, { angles: TWO_ANGLES });
+      assert.equal(outcome.complete, recovers);
+      assert.deepEqual(outcome.retried, ["plan-fidelity"]);
+      assert.deepEqual(
+        outcome.covered,
+        recovers ? ["plan-fidelity", "correctness", "ponytail"] : ["correctness", "ponytail"],
+      );
+      assert.deepEqual(
+        outcome.reports.map(({ key }) => key),
+        outcome.covered,
+      );
+      assert.deepEqual(
+        outcome.failures,
+        recovers
+          ? []
+          : [
+              {
+                key: "plan-fidelity",
+                reason: "lane-failed",
+                detail: `reviewer blocked:\n${notes.join("\n")}`,
+              },
+            ],
+      );
+      assert.equal(adapter.calls.spawn.length, 2);
+      const retry = adapter.calls.spawn[1];
+      assert.ok(retry);
+      assert.deepEqual(
+        waveScriptItems(retry.workflowScript).map(({ key }) => key),
+        ["plan-fidelity"],
+      );
+      assert.match(retry.workflowScript, /--expected-pr 42 --json/);
+      assert.equal(outcome.attempts.length, 2);
+    });
+  }
+}
+
+async function injectedOutcome(result: ReportWaveResult) {
+  const requests: ReportWaveRequest[] = [];
+  const wave = reportWaveOver(createMemoryWaveAdapter({}));
   const outcome = await runPrReviewWaveBase(
     {
       ...wave,
-      async run(request, control) {
-        const result = await wave.run(request, control);
-        gate = true;
+      async run(request) {
+        requests.push(request);
         return result;
       },
     },
-    { pr: 42, angles: TWO_ANGLES, requiredSkillPreflight: PREFLIGHT_OK },
+    {
+      pr: 42,
+      angles: ["plan-fidelity", "correctness", "tests", "quality"],
+      requiredSkillPreflight: PREFLIGHT_OK,
+    },
   );
-  assert.equal(outcome.complete, true);
-  assert.deepEqual(
-    adapter.calls.spawn.map((spawn) => waveScriptItems(spawn.workflowScript)[0]?.extensionBindings),
-    [
-      { "perk.parent-restrictions/1": { readOnly: false } },
-      { "perk.parent-restrictions/1": { readOnly: true } },
+  return { outcome, requests };
+}
+
+const RECEIPT: ReportWaveResult["receipt"] = { state: "complete", runId: "attempt", children: [] };
+
+for (const fyi of [undefined, null, "not an array", [null, 4, "", " \n\t"]]) {
+  test(`blocked defensive FYI fallback: ${JSON.stringify(fyi)}`, async () => {
+    const { outcome } = await injectedOutcome({
+      complete: true,
+      reports: [{ key: "plan-fidelity", report: { verdict: "blocked", fyi } }],
+      failures: [],
+      receipt: RECEIPT,
+    });
+    assert.deepEqual(outcome.failures, [
+      {
+        key: "plan-fidelity",
+        reason: "lane-failed",
+        detail: "reviewer blocked:\nrequired review assessment could not complete",
+      },
+    ]);
+    assert.equal(outcome.complete, false);
+    assert.deepEqual(outcome.covered, []);
+    assert.deepEqual(outcome.retried, ["plan-fidelity"]);
+  });
+}
+
+test("normalization preserves diagnostic bytes, report order and existing-failures-first ordering", async () => {
+  const existing: ReportWaveResult["failures"] = [
+    { key: null, reason: "cancelled", detail: "cancelled; no retry" },
+    { key: "quality", reason: "lane-failed", detail: "existing" },
+  ];
+  const surviving = [
+    { key: "correctness", report: { verdict: "clean", fyi: ["blocked is diagnostic text only"] } },
+    { key: "ponytail", report: { verdict: "actionable" } },
+  ] as const;
+  const notes = [
+    "  no_plan_ref\n",
+    "duplicate",
+    "duplicate",
+    "\npartial, unassessed, diagnostic-only: a.ts:1  \n",
+  ];
+  const result: ReportWaveResult = {
+    complete: false,
+    reports: [
+      surviving[0],
+      {
+        key: "tests",
+        report: { angle: "wrong-angle", verdict: "blocked", fyi: [null, ...notes, " \t", 2] },
+      },
+      surviving[1],
+      { key: "plan-fidelity", report: { verdict: "blocked", fyi: ["second blocked"] } },
     ],
+    failures: existing,
+    receipt: RECEIPT,
+  };
+  const { outcome, requests } = await injectedOutcome(result);
+  assert.equal(requests.length, 1, "cancellation stays non-retryable");
+  assert.deepEqual(outcome.reports, surviving);
+  assert.deepEqual(outcome.failures, [
+    ...existing,
+    { key: "tests", reason: "lane-failed", detail: `reviewer blocked:\n${notes.join("\n")}` },
+    { key: "plan-fidelity", reason: "lane-failed", detail: "reviewer blocked:\nsecond blocked" },
+  ]);
+  assert.equal(outcome.failures[0], existing[0]);
+  assert.equal(outcome.failures[1], existing[1]);
+  assert.equal(result.receipt, RECEIPT);
+  assert.equal(outcome.attempts[0]?.children, RECEIPT.children);
+  assert.equal(result.reports.length, 4, "input is not mutated");
+});
+
+test("only non-null non-array objects with exact blocked verdict are reclassified", async () => {
+  const reports = ["plan-fidelity", "correctness", "tests", "quality", "ponytail"].map(
+    (key, i) => ({
+      key,
+      report: [null, [], "blocked", { verdict: "BLOCKED" }, { fyi: ["blocked"] }][i],
+    }),
   );
+  const { outcome, requests } = await injectedOutcome({
+    complete: false,
+    reports,
+    failures: [
+      { key: null, reason: "cancelled", detail: "preserve failure even with all reports" },
+    ],
+    receipt: RECEIPT,
+  });
+  assert.deepEqual(outcome.reports, reports);
+  assert.equal(outcome.complete, false, "all effective reports cannot erase surviving failures");
+  assert.equal(requests.length, 1);
+});
+
+test("reviewer definition and managed mirror pin assessment and exact context acceptance", () => {
+  const def = readFileSync(new URL("../../agents/pr-reviewer.md", import.meta.url), "utf8");
+  assert.equal(
+    readFileSync(new URL("../../.pi/agents/perk/pr-reviewer.md", import.meta.url), "utf8"),
+    def,
+  );
+  for (const field of PR_REVIEW_REPORT_SCHEMA.required)
+    assert.ok(def.includes(`\`${field}\``), field);
+  for (const verdict of PR_REVIEW_REPORT_SCHEMA.properties.verdict.enum)
+    assert.ok(def.includes(`\`${verdict}\``), verdict);
+  for (const field of [
+    "success",
+    "error_type",
+    "message",
+    "pr",
+    "branch",
+    "base_ref",
+    "head_ref",
+    "title",
+    "body",
+    "diff",
+    "plan_body",
+  ])
+    assert.ok(def.includes(`\`${field}\``), field);
+  for (const rule of [
+    /command exits zero and its entire stdout parses as one non-null\s+JSON object, not an array/,
+    /Every field below must be present/,
+    /never coerce\s+strings, numbers, booleans, or nulls/,
+    /`success` \| Exactly `true`/,
+    /`error_type`, `message` \| Both exactly `null`/,
+    /Positive safe integer, exactly equal to the task's expected PR number/,
+    /`branch`, `base_ref`, `head_ref` \| Each a string containing at least one non-whitespace character/,
+    /`title` \| String containing at least one non-whitespace character/,
+    /`body`, `diff` \| Each a string; empty and whitespace-only strings are permitted/,
+    /`plan_body` \| String or `null`; additionally, `plan-fidelity` requires a string containing at least one non-whitespace character/,
+    /Whitespace checks do not rewrite accepted text/,
+    /Ignore unknown extra fields/,
+    /missing `plan_body`\s+is malformed for every lane/,
+    /explicit `null` or blank string is valid optional evidence for\s+non-plan-fidelity lanes/,
+    /No other listed field is optional/,
+    /Do not compare\s+them to the current local branch/,
+    /infer a different PR, add head-SHA binding, or fetch again/,
+    /failure code\/message where available/,
+    /failed field\/check/,
+    /perk pr review-context --expected-pr <n> --json/,
+    /Never weaken or retry without `--expected-pr`/,
+    /applicable mandatory checks/,
+    /evidence necessary to evaluate a material concern/,
+    /partial assessment is not promoted to `actionable`/,
+    /optional supporting file\/caller/,
+    /empty diff is not\s+by itself a block/,
+    /On `clean` or `blocked`, `findings` is \*\*empty\*\*/,
+    /Put the blocker first/,
+    /partial, unassessed, diagnostic-only/,
+    /These are not\s+postable findings/,
+    /at least one string is required and every string must contain a\s+non-whitespace character/,
+    /`structured_output` exactly once as your final action/,
+    /no fenced JSON block/,
+    /is your \*\*first action\*\*, before fetching review context/,
+    /terminate without calling\s+`structured_output`/,
+    /never resolve a same-named\s+project\/user skill/,
+  ])
+    assert.match(def, rule);
+  assert.doesNotMatch(def, /state it in an `fyi` note|plan body not found.*note/);
 });
 
 // -------------------------------------------------------------------- the bounded-retry matrix

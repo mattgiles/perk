@@ -522,7 +522,7 @@ end of the section).
 | `active_plan_ref` | object \| null | the provider-agnostic plan ref (§8.4); null during early `plan` |
 | `active_objective` | string \| null | the active objective id (`/objective <id>` sets it, `/objective clear` nulls it) |
 | `last_review_batch` | object \| null | the last fully processed review batch, appended by `finalize_address` only after publication and thread resolution succeed: `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
-| `last_pr_review` | object \| null | the last `/pr-review` outcome posted via the shared warm `post_pr_review` tool: `{ pr, verdict, angles, covered_angles, comment_count, mode, at:ISO }`; a recorded wave is PR-bound and single-use, and supplies authoritative ordered `angles` / schema-valid `covered_angles`; standalone posting before any valid wave uses caller-supplied angles for both (or `[]`); best-effort tier (the PR review is the canonical record) |
+| `last_pr_review` | object \| null | the last `/pr-review` outcome posted via the shared warm `post_pr_review` tool: `{ pr, verdict, angles, covered_angles, comment_count, mode, at:ISO }`; a recorded wave is PR-bound and single-use, and supplies authoritative ordered `angles` / completed schema-valid assessment `covered_angles` (blocked lanes are uncovered failures); standalone posting before any valid wave uses caller-supplied angles for both (or `[]`); best-effort tier (the PR review is the canonical record) |
 | `last_review` | object \| null | the last review-door outcome posted via the warm `submit_pr_review` tool: `{ pr, event, comment_count, mode, at:ISO }`; best-effort tier (the submitted PR review is the canonical record) |
 | `review_posts` | array | the accumulating per-PR posting ledger of a stacked review: one `{ pr, event, at:ISO }` row per REAL `submit_pr_review` success, in posting order (read-rebuild-append — each write carries the whole list; the append-path pre-read FAILS CLOSED and is STRICT-DECODED: an unrebuildable branch OR a malformed persisted ledger — a non-array, or any row that is not `{pr: integer, event: string, at: string}` — refuses the append rather than LWW-erasing possibly-real earlier rows (an absent field is the normal empty first-append ledger; extra row fields are narrowed out), while the plain ledger READ stays fail-open/tolerant); best-effort tier with an asymmetric trust rule — a row can be MISSING spuriously (append failed after a real post) but never PRESENT spuriously, so `submit_pr_review` enforces skip-on-resume on presence (`already_posted` refusal; `allow_repost: true` is the deliberate override) while a missing row means verify posted-vs-pending against GitHub before re-posting |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (§8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
@@ -659,13 +659,18 @@ falls back to the full configured `pi.getAllTools()` set — never a hardcoded l
 and unknown/late foreign mutators, even when toolset narrowing failed. This backstop applies to all
 effective read-only sessions, parents too. `edit`/`write` keep their file-modification denial wording;
 other excluded tools receive a read-only not-allowlisted denial. Listed non-bash tools pass this gate
-but retain downstream authority checks. Listed `bash` additionally requires its unchanged argument
-check. No inventory or bash-pattern widening, and no OS-sandbox claim for allowlisted delegation,
+but retain downstream authority checks. Listed `bash` additionally requires its argument
+check. Tool inventories are unchanged; there is no OS-sandbox claim for allowlisted delegation,
 web/browser or artifact carve-outs. The bash sub-allowlist covers read-only
 inspection commands (read-only `git` queries, `jq`, `curl`, …), read-only `gh` **query**
 subcommands (view/list/diff/status/checks/search + `gh auth status`; `gh api` and every mutating
 subcommand stay blocked), the read-only `perk objective` queries (`show`/`next` + aliases and
-`node-engagement`; the mutating subcommands stay blocked), and the command-keyed `ast-grep` /
+`node-engagement`; the mutating subcommands stay blocked), and exactly the whitespace-separated
+`perk pr review-context --expected-pr N --json` (N matches `[1-9][0-9]*`) and
+`perk pr feedback --json` forms with optional surrounding whitespace. Anchored query exceptions
+retain segment validation and the destructive veto: `cd … && query` passes, but flagless/foreign/
+stack context forms, extra arguments, lookalike verbs, `review-post`, `gh api`, real-file redirects,
+and chained mutations do not. The sub-allowlist also retains command-keyed `ast-grep` /
 `agent-browser` (+ `npx agent-browser`) entries (an accepted arg-blind leniency, like `curl`);
 (3) injects a hidden `[READ-ONLY MODE]` context at `before_agent_start` — **once-only per live
 copy**: the injection is branch-scan dedup'd on the marker (`branchCarries`), so a session carries
@@ -1131,7 +1136,8 @@ get_pr_review_context{ pr_number, branch, plan_body } -> PrReviewContext{ pr_num
     # no plan/issue state: `plan_body` is resolved backend-neutrally by the consumer
     # (`perk pr review-context`) — the materialized `cache.plan` mirror first, else
     # `IssueBackend.get_plan_body` via the resolver — and passed straight in (best-effort; null
-    # lets the review run from the diff). What the spawned child runs.
+    # permits non-plan-fidelity review from the diff; automated plan-fidelity blocks without
+    # nonblank plan text). What the spawned child runs.
     # CLI arms: `--pr <n>` resolves an arbitrary PR by number (existence + head ref via `get_pr`,
     # `plan_body` null, clean `pr_not_found` arm). `--expected-pr <n>` stays on the active-plan,
     # plan-body-preserving arm and compares the branch-selected target before context fetch;
@@ -1176,9 +1182,11 @@ add_pr_reaction{ pr_number }                        -> ReviewPostResult{ ok, mod
 The static `/pr-review` input is 2–4 selected angles with `plan-fidelity` mandatory; its
 effective manifest appends exactly one **required automatic** final source-bound `ponytail`
 lane outside the input menu/cap. Every reviewer uses only
-`perk pr review-context --expected-pr <bound-number> --json`, so target drift yields no
-schema-valid report; a normalized result records the bound PR plus explicit effective attempted
-and covered arrays for §8.3's single-use post state. Ponytail coverage rides **one parent-side exact-path
+`perk pr review-context --expected-pr <bound-number> --json`. Target drift and other failed
+required assessments produce a typed `blocked` report, normalized into an uncovered `lane-failed`
+failure before retry or posting eligibility; schema validity alone is not completed coverage.
+A normalized result records the bound PR plus explicit effective attempted and covered arrays
+for §8.3's single-use post state. Ponytail coverage rides **one parent-side exact-path
 preflight before dispatch** (package name, `pi.skills`, the exact readable skill file, and its
 frontmatter name): a failed preflight never dispatches/spawns that lane — the keyed
 non-retryable `skill-unavailable` failure leaves it honestly uncovered, with no same-named
@@ -1187,6 +1195,39 @@ uncovered too (the child terminates without a schema-valid report; never accepte
 from another source). The full wave choreography (lane tasks, retry
 policy, attempt receipts) lives in §8.35/§8.57 and the extension wave modules
 (`extension/waves/prReviewWave.ts` / `ponytail.ts`).
+
+Automated-review reports retain the closed four-field `{angle, verdict, findings, fyi}` shape.
+`verdict` is `clean | actionable | blocked`; clean/blocked require empty findings, and blocked
+requires at least one FYI string, each containing a non-whitespace character. Required assessment
+means context acceptance and every applicable mandatory angle check, including the evidence
+needed to evaluate material concerns. Unfinished assessment blocks even with partial issues found;
+optional supporting read failures do not block if available evidence suffices. Empty diff alone
+does not block. Only completed assessments derive actionable from surviving findings, otherwise
+clean. Blockers come first in FYI, followed by explicitly **partial, unassessed, diagnostic-only**
+concerns/anchors; these are in-session diagnostics, never posting input.
+
+The child-only context acceptance policy is in `agents/pr-reviewer.md`, grounded in the unchanged
+`PrReviewContextOut` / `pr-review-context.schema.json` envelope. Exit must be zero and entire stdout
+one non-null JSON object, not an array. All fields are required without coercion: `success: true`,
+`error_type: null`, `message: null`; `pr` a positive safe integer equal to the task target;
+`branch`, `base_ref`, `head_ref`, `title` nonblank strings; `body` and `diff` strings (blank allowed);
+`plan_body` string or null, with nonblank text required for plan-fidelity. Missing `plan_body`
+blocks every lane; explicit null/blank is optional evidence only for other angles. Unknown extras
+are ignored, accepted text is not rewritten, refs are metadata not another authority lookup,
+and no parent parser, fallback PR fetch, local-branch comparison, or head-SHA binding is added.
+
+`prReviewWave.ts` normalizes only non-null non-array report objects with exact `verdict: "blocked"`.
+The enclosing assignment key identifies a `lane-failed` failure, never the report angle or prose.
+FYI retains only strings whose trim is nonempty, preserving retained bytes, duplicates and order.
+Detail is exactly `"reviewer blocked:\n" + (notes.length > 0 ? notes.join("\n") :
+"required review assessment could not complete")`, using newline separators with no added trailing newline. Existing failures precede newly blocked
+failures in report order; surviving report order and the receipt are preserved. Completeness
+requires incoming completeness and no removed block; final outcome additionally requires all
+effective reports and zero failures. Apply before both attempts' retry/merge decisions: a recovered
+retry becomes covered, a persistent block stays uncovered. Other failure, cancellation, skill and
+whole-wave retry budgets are unchanged; no failed native report is salvaged. Classifier schema
+and no-retry failure behavior remain unchanged. `post_pr_review` still accepts only clean/actionable:
+incomplete with actionable siblings may post a coverage-noted advisory; otherwise post nothing.
 
 ### PR-review toolbox ops (checkout / cleanup / review-submit)
 
@@ -5697,19 +5738,30 @@ extension lists, private `workflowAwaitAsync`, or extra collector is emitted.
 `createReportWave(bus, { parentReadOnly, engineEntry? })` requires a lazy supplier; `index.ts`
 passes `() => gating.isActive()` plus the existing lazy engine source lookup. After required-skill
 preflight and the all-skipped early return, each attempt samples that supplier exactly once,
-immediately before rendering. Every runnable item receives exactly
-`extensionBindings: {"perk.parent-restrictions/1": {"readOnly": boolean}}`, including false,
-without identity/stage/run data or a root binding. Explicit field selection and JSON serialization
+immediately before rendering, even when the request itself requires read-only execution.
+`ReportWaveRequest.execution?: "caller-read-only"` is code-owned Perk metadata, not a native
+engine field. Exactly two callers opt in: automated `/pr-review` and `/address` classification,
+both of which need the caller's local plan-ref. For these requests every runnable child (Ponytail
+and retries included) renders `worktree: false` and a true restriction packet. The native RPC
+context supplies the caller cwd; plan authority is never copied into a new worktree. Other
+requests omit worktree and preserve native defaults and the captured parent boolean, including
+false. Every item receives exactly `extensionBindings: {"perk.parent-restrictions/1":
+{"readOnly": boolean}}`, meaning the captured parent restriction **strengthened by the
+caller-read-only request**, not an assertion that the parent itself is read-only. No parent mode,
+handoff, identity/stage/run data, root binding, arbitrary cwd/profile registry or model-tool
+parameter is added. Explicit field selection and JSON serialization
 keep task text and extra runtime assignment properties from overriding this channel. Retries sample
 anew; this is not continuous revocation or a handoff read. Capture exceptions return non-retryable
 wave-level `unavailable`, `key: null`, receipt `{state: "unavailable", children: []}`, a
 parent-restriction capture diagnostic, and the normal manifest, preserving keyed preflight failures.
 No adapter construction/ping/spawn or ref mint occurs; best-effort completeness remains false.
-The public `ReportWave` lifecycle, requests, assignments, results and controls are unchanged.
+The public `ReportWave` lifecycle, assignments, results and controls are unchanged; only the
+optional request policy above is added.
 The test-only `reportWaveOver(adapter, parentReadOnly = () => false)` default is not production
 permission policy. False is not a write grant. Producer and consumer are both implemented and both
-required for the selected report profile: the independent runner decoder, monotone effective-gate
-floor and verified mode reflection are §8.3; bounded advisory identity and exact ten-role scratch
+required with normal background-child Perk loading for the selected report profile. User-shadowed
+definitions, foreground overrides and installations missing the consumer are not certified.
+The independent runner decoder, monotone effective-gate floor and verified mode reflection are §8.3; bounded advisory identity and exact ten-role scratch
 suppression are §8.1. This is a spawn-time restriction snapshot for Perk-owned report waves, not
 continuous revocation, certification of manual subagent calls, foreground Perk enforcement, arbitrary
 cross-cwd handoff transport, or a universal OS sandbox. Ordinary offline/source checks do not create
@@ -5729,7 +5781,11 @@ logical manifest and is not narrowed by this launch vocabulary.
 **Attempt receipts (flow-generic).** Every code-owned wave flow records an **output-free**
 `ReportWaveAttemptReceipt` per top-level workflow launch when the completion payload carries the
 projection (pi-subagents ≥ 0.45.0): the child lane key ↔ child `runId` ↔ artifact paths —
-reports, summaries, and structured output NEVER enter a receipt. Retries retain every ordered
+reports, summaries, and structured output NEVER enter a receipt. With a version-1
+`workflowChildren` inventory bound to the completion's workflow run ID, `results` rows correlate
+by unique child `runId` to `children[].childId`; a present malformed/mismatched/ambiguous inventory
+withholds correlation, never inferring assignment keys from agent names. Inventory-absent legacy
+payloads retain the overloaded `results[].agent` key mapping. Retries retain every ordered
 attempt (a failed lane and its relaunch stay distinguishable). `status.json.workflow.value`
 remains the report authority except for the exact-source human-review compatibility exception
 below; receipt absence (an identity-only completion) never changes a verdict, completeness,

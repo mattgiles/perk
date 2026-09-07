@@ -626,6 +626,9 @@ const SAFE_PATTERNS = [
   // from matching the mutating `node` subcommand; node-engagement allowed; create/node/reconcile
   // stay blocked.
   /^\s*perk\s+(objective|obj)\s+(show|s|next|n|node-engagement)\b/i,
+  // Plan-bound report children need exactly these query forms, not arbitrary PR operations.
+  /^\s*perk\s+pr\s+review-context\s+--expected-pr\s+[1-9][0-9]*\s+--json\s*$/,
+  /^\s*perk\s+pr\s+feedback\s+--json\s*$/,
   // Read-only `gh` queries — the guidance in the managed AGENTS block ("GitHub access goes
   // through gh") must be followable in read-only sessions. Query-shaped subcommands only;
   // `gh api` stays blocked (it can POST/PATCH), as do all mutating subcommands (create/edit/

@@ -16,9 +16,9 @@
 //
 // COMPLETION PAYLOAD (source-read-derived, 0.45.0 `src/runs/background/result-watcher.ts` +
 // `src/runs/foreground/subagent-executor.ts`): the async-complete event spreads the result-file
-// data plus a normalized per-child `results` array; on workflow rows the `agent` field carries
-// the workflow LANE KEY (the overloaded upstream field — mapped to `WaveChildReceipt.key` here,
-// never exposed). Normalization is defensively output-free: `output`/`summary`/
+// data plus a normalized per-child `results` array. Current engines provide workflow childIds
+// separately in `workflowChildren`, correlated by runId; legacy payloads overload `agent` with
+// the lane key. Normalization is defensively output-free: `output`/`summary`/
 // `structuredOutput` never enter a receipt child, unknown fields are ignored, and malformed
 // rows are dropped without failing the wave (receipt absence degrades correlation only).
 
@@ -148,13 +148,21 @@ function narrowArtifactPaths(row: Record<string, unknown>): Record<string, strin
 
 /**
  * Narrow one `results` row into an output-free receipt child; null ⇒ the row is dropped (a
- * malformed row never fails the wave). The upstream `agent` field carries the workflow lane key
- * — it becomes `key`; `agent` is deliberately left unset (enriched from Perk-owned lane specs
- * upstream). `output`/`summary`/`structuredOutput` and unknown fields are NEVER copied.
+ * malformed row never fails the wave). Use run-correlated native childIds when the inventory is
+ * present; only legacy inventory-absent payloads use overloaded `agent`. Agent names are enriched
+ * from Perk-owned specs upstream. Output/summary/structuredOutput are NEVER copied.
  */
-function narrowReceiptChild(row: unknown): WaveChildReceipt | null {
+function narrowReceiptChild(
+  row: unknown,
+  keys: Map<string, string | null> | undefined,
+): WaveChildReceipt | null {
   if (!isRecord(row)) return null;
-  const key = row.agent;
+  const key =
+    keys === undefined
+      ? row.agent
+      : typeof row.runId === "string"
+        ? keys.get(row.runId)
+        : undefined;
   if (typeof key !== "string" || key === "") return null;
   const artifactPaths = narrowArtifactPaths(row);
   return {
@@ -168,6 +176,31 @@ function narrowReceiptChild(row: unknown): WaveChildReceipt | null {
       : {}),
     ...(artifactPaths !== undefined ? { artifactPaths } : {}),
   };
+}
+
+// A present malformed/mismatched inventory withholds correlation rather than inventing keys
+// from agent names. Duplicate run identities are ambiguous, even when their childIds agree.
+function workflowReceiptKeys(
+  data: Record<string, unknown>,
+): Map<string, string | null> | undefined {
+  if (!("workflowChildren" in data)) return undefined;
+  const keys = new Map<string, string | null>();
+  const inventory = data.workflowChildren;
+  const runId = data.id ?? data.runId;
+  if (
+    !isRecord(inventory) ||
+    inventory.version !== 1 ||
+    typeof runId !== "string" ||
+    inventory.workflowRunId !== runId ||
+    !Array.isArray(inventory.children)
+  )
+    return keys;
+  for (const child of inventory.children) {
+    if (!isRecord(child) || typeof child.runId !== "string" || child.runId === "") continue;
+    const key = typeof child.childId === "string" && child.childId !== "" ? child.childId : null;
+    keys.set(child.runId, keys.has(child.runId) ? null : key);
+  }
+  return keys;
 }
 
 /** Narrow a ping reply to the advertised async-complete channel; any miss ⇒ null (unavailable). */
@@ -234,9 +267,10 @@ export function createRpcWaveAdapter(
         // The payload spreads the result-file data: `id` is the async run id; `asyncDir` the
         // durable run directory. At least one is present on real payloads. The observability
         // fields (state/success/results) are optional — identity-only payloads stay valid.
+        const keys = workflowReceiptKeys(data);
         const children = Array.isArray(data.results)
           ? data.results.flatMap((row) => {
-              const child = narrowReceiptChild(row);
+              const child = narrowReceiptChild(row, keys);
               return child === null ? [] : [child];
             })
           : undefined;

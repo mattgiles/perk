@@ -59,54 +59,131 @@ const DERIVE_REPORTS = async (script: string): Promise<unknown> =>
     report: { angle: key, verdict: "clean" },
   }));
 
-test("rpc integration: the real spawn envelope + the durable aggregate round-trip", async () => {
-  const bus = createFakeBus();
-  const fake = createFakeSubagents([{ executeScript: DERIVE_REPORTS }]);
-  fake.attach(bus);
-  const spec = makeSpec({ model: "anthropic/claude-sonnet-4" });
-  const result = await createReportWave(bus, { parentReadOnly: () => true }).run(spec);
+for (const execution of [undefined, "caller-read-only"] as const) {
+  for (const parentReadOnly of [false, true]) {
+    test(`rpc round-trip: ${execution ?? "default"} over parent ${parentReadOnly}`, async () => {
+      const bus = createFakeBus();
+      const fake = createFakeSubagents([{ executeScript: DERIVE_REPORTS }]);
+      fake.attach(bus);
+      const spec = makeSpec({ model: "anthropic/claude-sonnet-4", execution });
+      const result = await createReportWave(bus, { parentReadOnly: () => parentReadOnly }).run(
+        spec,
+      );
 
-  // The spawn crossed the real v1 envelope with the fixed module contract.
-  assert.equal(fake.spawns.length, 1);
-  const spawn = fake.spawns[0] as {
-    workflowScript?: string;
-    async?: boolean;
-    mission?: boolean;
-    context?: string;
-    acceptance?: unknown;
-    outputSchema?: unknown;
-    model?: string;
-    timeoutMs?: number;
-  };
-  assert.equal(spawn.async, true);
-  assert.equal(spawn.mission, false);
-  assert.equal(spawn.context, "fresh");
-  assert.deepEqual(spawn.acceptance, WAVE_ACCEPTANCE);
-  assert.deepEqual(spawn.outputSchema, spec.outputSchema);
-  assert.equal(spawn.model, "anthropic/claude-sonnet-4");
-  assert.equal(spawn.timeoutMs, 5_000);
-  assert.deepEqual(
-    waveScriptItems(String(spawn.workflowScript ?? "")).map(({ key }) => key),
-    ["plan-fidelity", "correctness"],
-  );
+      // The spawn crossed the real v1 envelope with the fixed module contract.
+      assert.equal(fake.spawns.length, 1);
+      const spawn = fake.spawns[0] as {
+        workflowScript?: string;
+        async?: boolean;
+        mission?: boolean;
+        context?: string;
+        acceptance?: unknown;
+        outputSchema?: unknown;
+        model?: string;
+        timeoutMs?: number;
+      };
+      assert.equal(spawn.async, true);
+      assert.equal(spawn.mission, false);
+      assert.equal(spawn.context, "fresh");
+      assert.deepEqual(spawn.acceptance, WAVE_ACCEPTANCE);
+      assert.deepEqual(spawn.outputSchema, spec.outputSchema);
+      assert.equal(spawn.model, "anthropic/claude-sonnet-4");
+      assert.equal(spawn.timeoutMs, 5_000);
+      assert.deepEqual(
+        waveScriptItems(String(spawn.workflowScript ?? "")).map(({ key }) => key),
+        ["plan-fidelity", "correctness"],
+      );
 
-  assert.deepEqual(
-    waveScriptItems(String(spawn.workflowScript)).map((item) => item.extensionBindings),
-    [
-      { "perk.parent-restrictions/1": { readOnly: true } },
-      { "perk.parent-restrictions/1": { readOnly: true } },
-    ],
-  );
+      for (const item of waveScriptItems(String(spawn.workflowScript))) {
+        assert.deepEqual(item.extensionBindings, {
+          "perk.parent-restrictions/1": {
+            readOnly: execution === "caller-read-only" || parentReadOnly,
+          },
+        });
+        if (execution === "caller-read-only") assert.equal(item.worktree, false);
+        else assert.equal("worktree" in item, false);
+      }
 
-  // The aggregate was read from the run's REAL temp status.json through the adapter.
-  assert.equal(result.complete, true);
-  assert.deepEqual(result.reports, [
-    { key: "plan-fidelity", report: { angle: "plan-fidelity", verdict: "clean" } },
-    { key: "correctness", report: { angle: "correctness", verdict: "clean" } },
-  ]);
-  assert.deepEqual(result.failures, []);
-  assert.equal(result.receipt.state, "complete");
-});
+      // The aggregate was read from the run's REAL temp status.json through the adapter.
+      assert.equal(result.complete, true);
+      assert.deepEqual(result.reports, [
+        { key: "plan-fidelity", report: { angle: "plan-fidelity", verdict: "clean" } },
+        { key: "correctness", report: { angle: "correctness", verdict: "clean" } },
+      ]);
+      assert.deepEqual(result.failures, []);
+      assert.equal(result.receipt.state, "complete");
+    });
+  }
+}
+
+for (const shape of [
+  "current",
+  "legacy",
+  "malformed",
+  "foreign",
+  "duplicate",
+  "unmatched",
+] as const) {
+  test(`rpc receipts: ${shape} workflow identities are output-free and do not determine coverage`, async () => {
+    const bus = createFakeBus();
+    const fake = createFakeSubagents([{ executeScript: DERIVE_REPORTS, delivery: "manual" }]);
+    fake.attach(bus);
+    const wave = createReportWave(bus, { parentReadOnly: () => false });
+    const start = await wave.start(makeSpec());
+    assert.ok(start.ok);
+    if (!start.ok) return;
+    const identities = [
+      { childId: "correctness", runId: "child-b", agent: "perk.pr-reviewer" },
+      { childId: "plan-fidelity", runId: "child-a", agent: "perk.pr-reviewer" },
+    ];
+    fake.emit({
+      id: start.runId,
+      asyncDir: start.asyncDir,
+      state: "complete",
+      results: ["a", "b"].map((id, i) => ({
+        agent: shape === "legacy" ? ["plan-fidelity", "correctness"][i] : "perk.pr-reviewer",
+        runId: `child-${id}`,
+        success: true,
+        output: "SECRET",
+        summary: "SECRET",
+        structuredOutput: { SECRET: true },
+      })),
+      ...(shape === "legacy"
+        ? {}
+        : {
+            workflowChildren:
+              shape === "malformed"
+                ? []
+                : {
+                    version: 1,
+                    workflowRunId: shape === "foreign" ? "foreign" : start.runId,
+                    children:
+                      shape === "unmatched"
+                        ? []
+                        : shape === "duplicate"
+                          ? [...identities, ...identities]
+                          : identities,
+                  },
+          }),
+    });
+    const collected = await wave.collect(start.ref);
+    assert.equal(collected.kind, "settled");
+    if (collected.kind !== "settled") return;
+    assert.equal(collected.result.complete, true);
+    assert.equal(collected.result.reports.length, 2);
+    const children = collected.result.receipt.children;
+    assert.deepEqual(
+      children,
+      ["current", "legacy"].includes(shape)
+        ? [
+            { key: "plan-fidelity", runId: "child-a", success: true, agent: "perk.pr-reviewer" },
+            { key: "correctness", runId: "child-b", success: true, agent: "perk.pr-reviewer" },
+          ]
+        : [],
+    );
+    assert.doesNotMatch(JSON.stringify(collected.result.receipt), /SECRET|structuredOutput/);
+  });
+}
 
 test("rpc integration: a FOREIGN completion is ignored; the matching manual delivery settles", async () => {
   const bus = createFakeBus();

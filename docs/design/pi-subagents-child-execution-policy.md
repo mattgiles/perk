@@ -374,12 +374,16 @@ and exercised by ordinary offline regressions—not a measured native warm-path 
   `index.ts` supplies a live `() => gating.isActive()` callback to the wave composition.
   Sample it after asynchronous assignment preflight, immediately before rendering/spawning
   each attempt; never cache the value at extension startup or accept it from assignment/task
-  data. A failed snapshot fails the wave without spawning. The public ReportWave caller
-  interface stays unchanged.
+  data. A failed snapshot fails the wave without spawning, including requests that already
+  require read-only execution. The optional code-owned request policy `execution: "caller-read-only"`
+  is selected only by automated PR review and review classification; it strengthens the captured
+  restriction to true and renders child `worktree: false`. Other requests retain the captured
+  boolean and omit worktree. No parent mode/handoff change or plan-ref copy is involved.
 - **Wire:** child `extensionBindings` has namespace **`perk.parent-restrictions/1`**, whose
   value is exactly **`{"readOnly": boolean}`**, with no additional fields. Always send the
   namespace, including false. No agent name, run id, stage or write grant belongs in it.
-  The native runner exposes the canonical bounded JSON through
+  This is the captured parent restriction strengthened by the caller-read-only request, not a
+  claim that the parent itself is read-only. The native runner exposes the canonical bounded JSON through
   `PI_SUBAGENT_EXTENSION_BINDINGS`; S-B proved this transport generically. This namespace's
   new gate effect was not exercised live.
 - **Consumer:** a separate `extension/substrate/childRestrictions.ts` boundary, composed in
@@ -456,8 +460,12 @@ toolset installation fails, including save/delivery and unknown/late foreign mut
 `write` retain their denial wording; listed bash retains its existing argument check; other listed
 tools pass this gate but keep downstream checks. All gate observations OR in the floor; supplier
 exceptions are restrictive. A floor-backed `exit()` skips the read-write append and reapplies the
-gate even after reflection failure. Ordinary no-floor transitions, inventories and bash patterns
-are unchanged. Allowlisted delegation, browser, web and artifact exceptions remain bounded posture
+gate even after reflection failure. Ordinary no-floor transitions and tool inventories are
+unchanged. Bash additionally admits exactly `perk pr review-context --expected-pr N --json`
+(N matches `[1-9][0-9]*`) and `perk pr feedback --json`, whitespace-separated with optional
+surrounding whitespace. Existing segment validation and destructive veto remain: a `cd` prefix
+can scope a query, not enable extra/foreign/stack arguments, arbitrary PR verbs, `gh api`, real-file
+redirects or chained mutations. Allowlisted delegation, browser, web and artifact exceptions remain bounded posture
 choices, not an OS sandbox. `/btw` and ReportWave use the same effective `gating.isActive()` supplier.
 
 This is a spawn-time restriction snapshot, not continuous permission revocation. A later parent
@@ -569,7 +577,7 @@ not discovered-skill inheritance. No other role gains an explicit skill or exten
 | Mission / acceptance | Fixed `mission: false` and existing `WAVE_ACCEPTANCE` (`level: none`) | Both modes omit mission/acceptance keys; native bridge disables acceptance |
 | Required tools | `read`, `grep`, `find`, `ls`, `bash`, engine `structured_output` | `read`, `grep`, `find`, `ls`, `bash`, `edit`, `write`, engine-owned `structured_output` |
 | Supervisor | Optional capability with the rules below | Optional; absence cannot change mode or authority |
-| Actual cwd | Trusted calling session's cwd via the native RPC context | Explicit child `cwd` from the validated dispatch worktree |
+| Actual cwd | Native RPC caller cwd; automated review/classifier force `worktree: false`, other requests retain native placement defaults | Explicit child `cwd` from the validated dispatch worktree |
 
 **Why this split:** background reports preserve required ambient Perk/provider behavior and
 inherited cold-parent enforcement that R-F loses. Warm-parent restriction and named scratch
@@ -592,8 +600,9 @@ scripts. The definitions make
 resolved value rather than relying on a future engine default. Global context instructions
 are distinct from skill discovery: writer skill inheritance includes the ordinary global/project
 catalog, subject to the engine's mandatory removal of the orchestration skill. This never grants
-nested-subagent tools. No `ReportAssignment`/`ReportWave` caller-interface expansion or generic
-profile/agent registry is needed; the live restriction supplier is composition-internal.
+nested-subagent tools. `ReportWaveRequest` has only the optional `caller-read-only` execution
+policy; no assignment policy, arbitrary cwd, model-tool parameter or generic profile/agent registry
+is added. The live restriction supplier stays composition-internal.
 
 ### Foreground resolver dispatch reconciliation
 
@@ -648,7 +657,12 @@ full-baseline stamp and stale-error fingerprints below remain unchanged.
 
 ### Extension, provider and cwd boundaries
 
-Reports run from the trusted parent project with normal Perk wiring. Cold handoff adoption
+Report requests use the trusted parent project with normal Perk wiring. Automated `/pr-review`
+and `/address` classification require the worktree-local plan-ref and explicitly keep every child
+in that checkout under a read-only floor, including Ponytail and review retries. Other report
+flows do not opt in and preserve native worktree defaults. Production still requires the normal
+background-child Perk loading profile; user-shadowed definitions, foreground overrides, and
+installations missing the consumer are not certified by this change. Cold handoff adoption
 remains unchanged; warm parents use the additional restriction channel above rather than a
 fictional handoff. The existing RPC context supplies the cwd deliberately; review-head worktree
 paths remain **read-only task data**, not a runtime/agent/extension discovery root. No head-provided
@@ -696,6 +710,34 @@ background there as if that transport already existed would be fiction. **No cro
 copying, synthetic parent handoff or writer lifecycle transport is assigned to 3.2/3.3.**
 Foreground is the measured writer profile that needs none of them. Its lack of Perk scratch
 is part of the selected trade-off.
+
+### Required automated-review assessments
+
+Only automated `/pr-review` adds `blocked` to its closed `{angle, verdict, findings, fyi}` schema.
+Clean and blocked have empty findings; blocked requires nonblank diagnostics, blocker first,
+followed by any explicitly partial, unassessed, diagnostic-only concerns. Context failure,
+missing/nonconforming required fields, null/blank plan text for plan-fidelity, or unfinished
+mandatory checks/material evidence block the assessment, even if a partial issue was found.
+Optional supporting read failures do not block when the accessible evidence suffices. Empty diff
+alone does not block. The exact child-local context policy lives in `agents/pr-reviewer.md`, grounded
+in the unchanged CLI envelope: no parent parser, alternate-PR fetch or head-SHA authority is added.
+
+Flow-local normalization turns blocked reports into keyed `lane-failed` failures before the one
+bounded retry and coverage calculation. Coverage means completed schema-valid assessment, not
+just successful engine output. No clean post is allowed over incomplete coverage; completed
+siblings' actionable findings may post with a coverage note, while partial diagnostics never post.
+The classifier retains its existing fail-without-report and no-retry behavior; other schemas and
+execution policies are unchanged. Ponytail's first-action source check still terminates without
+structured output on skill-authority failure.
+
+`planBoundReviewCompat.test.ts` measures placement with exactly two sequential native detached
+children (protected plus unprotected control) and engine-validated observation reports, not review
+verdicts. The scripted child-session factory replaces only model/session behavior; discovery,
+native defaults/worktrees, RPC, structured validation, completion and aggregate reads stay real.
+The separate bound-session regression tests Perk's restriction consumer. Neither test proves
+autonomous review quality or extends historical approval/measurement records. Native receipts
+correlate current workflow childIds by runId; legacy inventory-absent receipts retain their old
+mapping, and missing/malformed correlation never changes coverage or posting.
 
 ### Supervisor and cancellation limits
 

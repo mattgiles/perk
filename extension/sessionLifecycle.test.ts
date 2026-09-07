@@ -23,7 +23,10 @@ import {
   type SessionPointer,
 } from "./substrate/sessionPointers.ts";
 import { READ_ONLY_CONTEXT, READ_ONLY_TOOLS } from "./substrate/toolGating.ts";
+import { waveScriptItems } from "./testing/fakeSubagents.ts";
 import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
+import { createMemoryWaveAdapter } from "./testing/memoryAdapter.ts";
+import { reportWaveOver } from "./waves/reportWave.ts";
 
 const runnerPacket = {
   PI_SUBAGENT_CHILD: "1",
@@ -82,6 +85,64 @@ test("startup captures the original prefix before gate tool rebuild; reload reca
     await h.reload();
     assert.ok(h.session.systemPrompt.startsWith(reportPrompt));
     await noScratch(h, cwd);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("rendered caller-read-only packet strengthens a read-write handoff without changing its parent", async (t) => {
+  const cwd = scaffoldRepo();
+  const file = plantSession(cwd, [{ run_id: "PARENT", mode: "read-write" }]);
+  const parent = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
+  t.after(() => parent.dispose());
+  assert.equal(parent.workflowState().mode, "read-write");
+  const adapter = createMemoryWaveAdapter({ aggregate: { state: "complete", value: [] } });
+  await reportWaveOver(adapter, () => parent.workflowState().mode === "read-only").run({
+    flow: "gate-wiring",
+    execution: "caller-read-only",
+    assignments: [{ key: "review", agent: "perk.pr-reviewer", task: "report" }],
+    outputSchema: { type: "object" },
+    completeness: "strict",
+  });
+  const spawn = adapter.calls.spawn[0];
+  assert.ok(spawn);
+  const [item] = waveScriptItems(spawn.workflowScript);
+  assert.ok(item);
+  assert.equal(item.worktree, false);
+  writeFileSync(
+    handoffPath(cwd, "PARENT"),
+    JSON.stringify({
+      run_id: "PARENT",
+      mode: "read-write",
+      consumed: true,
+    }),
+  );
+  const h = await loadPerkSession({
+    cwd,
+    systemPrompt: reportPrompt,
+    env: {
+      PERK_RUN_ID: "PARENT",
+      PI_SUBAGENT_CHILD: "1",
+      PI_SUBAGENT_EXTENSION_BINDINGS: JSON.stringify(item.extensionBindings),
+    },
+  });
+  try {
+    assert.equal(h.workflowState().mode, "read-only");
+    for (const command of [
+      "perk pr review-context --expected-pr 42 --json",
+      "perk pr feedback --json",
+    ])
+      assert.equal((await h.emitToolCall("bash", { command }))?.block, undefined);
+    assert.equal((await h.emitToolCall("structured_output", { value: {} }))?.block, undefined);
+    for (const tool of ["write", "edit"])
+      assert.equal((await h.emitToolCall(tool, {}))?.block, true);
+    assert.equal(
+      (await h.emitToolCall("bash", { command: "perk pr review-post --json" }))?.block,
+      true,
+    );
+    assert.equal(parent.workflowState().mode, "read-write");
+    assert.equal((await parent.emitToolCall("write", {}))?.block, undefined);
+    assert.equal(JSON.parse(readFileSync(handoffPath(cwd, "PARENT"), "utf8")).mode, "read-write");
   } finally {
     h.dispose();
   }
