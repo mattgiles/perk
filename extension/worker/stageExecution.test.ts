@@ -187,6 +187,33 @@ test("runStage: implement with an unmergeable submit → failed/agent_idle_incom
   assert.match(outcome.error?.message ?? "", /unmergeable PR \(merge conflicts unresolved\)/);
 });
 
+for (const resubmit of ["none", "clean", "conflicted", "failed"]) {
+  test(`scripted resolver success cannot finish the worker without canonical submit: ${resubmit}`, async () => {
+    const session = new FakeSession((emit) => {
+      const conflicted = { ok: true, pr: { number: 7, url: "https://x/pr/7" }, mergeable: false };
+      emit({ type: "tool_execution_end", toolName: "submit", result: { details: conflicted } });
+      emit({
+        type: "tool_execution_end",
+        toolName: "subagent",
+        result: { details: { ok: true, outcome: "completed" } },
+      });
+      if (resubmit !== "none") {
+        emit({
+          type: "tool_execution_end",
+          toolName: "submit",
+          result: {
+            details:
+              resubmit === "failed"
+                ? { ok: false }
+                : { ...conflicted, mergeable: resubmit === "clean" },
+          },
+        });
+      }
+    });
+    assert.equal((await driveFake(session)).status, resubmit === "clean" ? "completed" : "failed");
+  });
+}
+
 test("runStage: implement with mergeable true/null/absent → completed", async () => {
   for (const mergeable of [true, null, undefined]) {
     const details: Record<string, unknown> = {

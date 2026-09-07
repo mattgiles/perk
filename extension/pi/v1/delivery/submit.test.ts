@@ -825,6 +825,85 @@ test("submit tool e2e: at the cap ⇒ loud report, no drive, counter unchanged",
   }
 });
 
+// These parent actions are scripted offline, not evidence of autonomous prompt following.
+for (const childOutcome of [
+  "completed",
+  "launch-failed",
+  "verification-failed",
+  "push-failed",
+  "stopped-before-mutation",
+  "unresolvable-conflict",
+  "aborted",
+]) {
+  test(`scripted submit → resolver → parent action: ${childOutcome}`, async () => {
+    const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+    const bin = fakePerk(cwd, { stdout: submitJson({ mergeable: false }) });
+    const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+    const injected = spyInjections(h);
+    try {
+      const publication = await h.invokeTool("submit", {});
+      const publishedBytes = JSON.stringify(publication);
+      assert.equal(h.workflowState().conflict_resolution_attempts, 1);
+      assert.equal(injected.length, 1);
+      const launch = () =>
+        evaluateWriterScript(injected[0] ?? "", async () => {
+          if (childOutcome === "launch-failed") throw new Error("scripted launch failure");
+          return { key: "resolve", ok: childOutcome === "completed", output: childOutcome };
+        });
+      if (childOutcome === "launch-failed") {
+        await assert.rejects(launch, /scripted launch failure/);
+      } else {
+        const child = await launch();
+        assert.equal(child.calls.length, 1);
+        assert.equal(child.calls[0]?.params.cwd, cwd);
+        assert.equal(child.calls[0]?.params.async, false);
+        assert.match(injected[0] ?? "", /context: "fresh"/);
+      }
+      assert.equal(
+        JSON.stringify(publication),
+        publishedBytes,
+        "resolver never rewrites submit facts",
+      );
+      assert.equal((publication.details as { ok: boolean }).ok, true);
+      assert.equal(publication.terminate, true);
+      assert.equal(h.workflowState().conflict_resolution_attempts, 1, "no child counter authority");
+      if (childOutcome === "completed") {
+        fakePerk(cwd, { stdout: submitJson() });
+        const resubmit = await h.invokeTool("submit", {});
+        assert.equal((resubmit.details as { mergeable: boolean }).mergeable, true);
+        assert.equal(h.workflowState().conflict_resolution_attempts, 0);
+        assert.equal(injected.length, 1, "clean canonical re-submit injects no next attempt");
+      }
+    } finally {
+      h.dispose();
+    }
+  });
+}
+
+test("scripted still-conflicted parent re-submits alone authorize the next attempt, then stop", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: submitJson({ mergeable: false }) });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  const injected = spyInjections(h);
+  try {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const publication = await h.invokeTool("submit", {});
+      assert.equal((publication.details as { ok: boolean }).ok, true);
+      assert.equal(h.workflowState().conflict_resolution_attempts, Math.min(attempt, 2));
+      assert.equal(injected.length, Math.min(attempt, 2));
+      if (attempt <= 2) {
+        await evaluateWriterScript(injected[attempt - 1] ?? "", async () => ({
+          ok: true,
+          output: "completed",
+        }));
+      }
+    }
+    assert.ok(h.notifies.some((message) => /persist after 2/.test(message)));
+  } finally {
+    h.dispose();
+  }
+});
+
 // --- the command order pin: report-before-drive ---------------------------------------------------
 
 test("/submit command: the success info line lands BEFORE the injected drive turn", async (t) => {
