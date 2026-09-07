@@ -58,7 +58,6 @@ import { GIST_AUTHOR_STAGE } from "../../authoring/gist/draft.ts";
 import { OBJECTIVE_AUTHOR_STAGE, OBJECTIVE_SAVE_STAGE } from "../../authoring/objective/prose.ts";
 import { resumePlanDraft, revisePlanDraft } from "../../authoring/plan/draft.ts";
 import {
-  applyReviewerEdits,
   completePlanReview,
   type PlanDraftReviewer,
   type PlanReviewOutcome,
@@ -70,7 +69,6 @@ import type {
   SavePlanOutcome,
 } from "../../authoring/plan/save.ts";
 import { type PlanSource, resolvePlanSource } from "../../authoring/plan/source.ts";
-import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
 import type { PlanRef } from "../../substrate/cache.ts";
 import type { Result } from "../../substrate/result.ts";
@@ -342,60 +340,6 @@ function implementHereRefusedResult(): ToolResult {
       reason: "implement_here_refused",
     },
   };
-}
-
-// ------------------------------------------------------ the plannotator Direct-Edits apply
-
-/**
- * The shared plannotator APPROVE mechanical-apply path (contracts.md §8.23): inspect an
- * APPROVED outcome's feedback for a `# Direct Edits` section and mechanically apply the
- * reviewer's diff to the exact bytes reviewed (`basePlan`), writing the patched bytes back to
- * the draft (reviewed bytes == artifact bytes == saved bytes). Consumed by the
- * `/plan-review-browser` door's decision routing — one apply path, byte-identical semantics
- * with the feature routing the in-tool plannotator arm rides:
- *
- * - only an `approved` outcome WITH feedback is inspected (anything else passes through
- *   verbatim);
- * - a clean extract + apply + write-back swaps `reviewedPlan` to the patched bytes, sets
- *   `edited: true`, and strips the applied section from the returned outcome's feedback (only
- *   the annotation remainder survives — the applied diff must never render as "apply these
- *   exact changes" guidance);
- * - a seen-but-unhonorable heading (or a failed apply / write-back) sets
- *   `directEditsFailed: true` with the plan left verbatim (the caller renders the loud warning;
- *   the diff stays in the surfaced feedback for a manual follow-up).
- */
-export function applyPlannotatorDirectEdits(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  outcome: Extract<ReviewOutcome, { status: "completed" }>,
-  basePlan: string,
-): {
-  outcome: Extract<ReviewOutcome, { status: "completed" }>;
-  reviewedPlan: string;
-  edited: boolean;
-  directEditsFailed: boolean;
-} {
-  if (!outcome.approved || outcome.feedback === undefined) {
-    return { outcome, reviewedPlan: basePlan, edited: false, directEditsFailed: false };
-  }
-  const section = extractDirectEdits(outcome.feedback);
-  if (section !== null) {
-    const session = openBranchWorkflowSession(pi, ctx);
-    const applied = applyReviewerEdits(session, basePlan, { diff: section.diff });
-    if (applied.status === "applied") {
-      return {
-        outcome: { ...outcome, feedback: section.remainder },
-        reviewedPlan: applied.plan,
-        edited: true,
-        directEditsFailed: false,
-      };
-    }
-    return { outcome, reviewedPlan: basePlan, edited: false, directEditsFailed: true };
-  }
-  if (hasDirectEditsHeading(outcome.feedback)) {
-    return { outcome, reviewedPlan: basePlan, edited: false, directEditsFailed: true };
-  }
-  return { outcome, reviewedPlan: basePlan, edited: false, directEditsFailed: false };
 }
 
 // -------------------------------------------------------------------- the reviewer adapters

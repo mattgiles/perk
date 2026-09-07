@@ -295,18 +295,20 @@ refusal stops without priming companion surfaces or taking the port-failure fall
 subscribe-then-status catch-up query is bounded to five seconds; the live human wait remains
 open-ended. Pending is not a health guarantee, and missing/query failure is not a denial.
 See [Plannotator draft-review transport](../providers-and-backends.md#plannotator-draft-review-transport)
-for cancellation, retained-state stops, and the current subject-effect integration limit.
+for transport cancellation and status-query limits.
 
-Blocking Plannotator `plan_review` now guards completion for plan, objective, and gist, as well
-as the eligibility mutations below. Verified intent precedes edits, saves, or actionable revision
+Plannotator `plan_review` guards completion for plan, objective, and gist. Both plan/objective
+browser doors and their chooser delegations use the same guarded completions, as well as the
+eligibility mutations below. Verified intent precedes edits, saves, or actionable revision
 feedback. Plans save frozen reviewed bytes (or verified Direct Edits); structured objective/gist
 Direct Edits requests revision without saving. A new artifact after a parameter review, including
 identical text, can only produce stale diagnostic DATA. Source/target drift during title generation
 stops the save; a backend that already started is never automatically retried.
 
-**Implementation limit:** browser/chooser decision routing and readiness degradation have not yet
-migrated. This is not a claim of overall live end-to-end at-most-once dispatch.
-For results produced through that API, only an exact persisted tool/user entry confirms delivery;
+The guarantee is at-most-once participating machine-local dispatch, not exactly-once delivery or
+power-loss durability. Browser feedback carries a code-authored HTML receipt marker outside the
+untrusted feedback. Its full content expectation is recorded before one idle/followUp send, then
+the claim is released. Only an exact persisted tool/user entry confirms delivery;
 returning a tool result or queueing a message does not. Abort/shutdown checks evidence first and
 otherwise retains an uncertain stop. Session/run changes do not replay or acknowledge old feedback.
 Its stale-result format preserves the reviewed digest and verbatim feedback as diagnostic DATA,
@@ -335,7 +337,9 @@ First-party review invalidates the previous opening/pending review and releases 
 opening the editor. Plan editor writeback and post-verdict completion reacquire it; no claim spans
 a human wait. A competing unresolved dispatch blocks late writeback/save. Plan source tiers and
 trimming, structured objective/gist saves, and the objective-node implement-here refusal remain
-unchanged. Browser/chooser decision routing remains subject to the implementation limit above.
+unchanged. Readiness failure suppresses late local decisions immediately, but fallback is announced
+only after verified degraded invalidation. A failed invalidation retains the claim and grants no
+fallback permission; a decision already dispatching cannot be rolled back by readiness failure.
 
 Both draft doors review the exact validated artifact primed by the command. They never accept
 pasted draft text from the model. The shared companion tools are:
@@ -378,9 +382,11 @@ custom-angle input on the wave choice. `/plan-review-browser <angle text>` remai
 door for plans and `/objective-review-browser <angle text>` for objectives — the
 subject-appropriate doors (the plan door refuses objective stages).
 
-**APPROVE** applies Direct Edits to the plan artifact, then auto-saves. If the artifact changed
-while the browser was open, approval refuses as stale and saves nothing; re-run the door. A failed
-save is loud, keeps the session read-only, and falls back to `/plan-save`. **DENY** returns feedback
+**APPROVE** applies verified Direct Edits to the plan artifact, then auto-saves the bound bytes.
+If the artifact changed while the browser was open, approval or denial can only produce stale
+reference DATA, never current-draft edit/save instructions. Unconfirmed saves stop for human
+reconciliation, not a blind `/plan-save` retry. A confirmed save and successful gate exit remain
+confirmed even if later delivery/bookkeeping fails. **DENY** on a matching draft returns feedback
 and any Direct Edits for a `plan_draft` revision round.
 
 The door refuses when Plannotator is missing, the session is headless, the current stage is not a
@@ -395,9 +401,10 @@ like plan review, including the optional custom lane and automatic final core-Po
 
 **APPROVE** normally auto-saves and exits read-only, but Direct Edits never auto-apply to an
 objective: the browser edited rendered Markdown while save re-reads structured fields. An approval
-with Direct Edits therefore saves nothing and becomes a revise round; fold the diff into
-`objective_draft`, then re-review. A stale artifact also saves nothing. Failed save falls back to
-`/objective-save`. **DENY** returns feedback for an `objective_draft` revision.
+with Direct Edits on a matching draft therefore saves nothing and becomes a revise round; fold
+the diff into `objective_draft`, then re-review. On a changed draft, both Direct Edits and denial
+are stale diagnostic DATA only. An unconfirmed save stops for human reconciliation, never a blind
+`/objective-save` retry. **DENY** on a matching draft returns feedback for an `objective_draft` revision.
 
 The door refuses when Plannotator is missing, the session is headless, the stage is not objective
 authoring, or the structured draft is missing or invalid. It never reviews raw JSON, a pasted

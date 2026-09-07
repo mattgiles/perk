@@ -8,6 +8,7 @@ import {
   type DraftReviewRuntime,
 } from "../pi/v1/draftReviewActivation.ts";
 import type { ReviewOutcome } from "../pi/v1/review.ts";
+import { openBranchWorkflowSession } from "../session/branchWorkflowSession.ts";
 import type { DraftReviewRegistration } from "../session/draftReviewState.ts";
 import { digestSessionData } from "../session/workflowSession.ts";
 import { gitInit } from "./harness.ts";
@@ -39,22 +40,41 @@ export function recordingDraftRegistration() {
   return { registration, calls };
 }
 
-/** Policy-only fixtures deliberately isolate source/save policies from production Git/claims. */
-export function policyBrowserReviews(
+/** Browser resource tests use real activation/state/claims with explicit fake session storage. */
+export function seedBrowserReviews(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
   subject: "plan" | "objective",
   markdown: string,
   raw = markdown,
 ): DraftReviewAccess {
-  return {
-    prepare(ctx, _parameter, signal) {
-      const prepared = policyDraftReviews.prepare(ctx, markdown, signal);
-      if (prepared.ok) {
-        prepared.value.snapshot.raw = raw;
-        prepared.value.snapshot.binding.subject = subject;
-      }
-      return prepared;
+  gitInit(ctx.cwd, { dirty: false });
+  const branch: unknown[] = [
+    {
+      type: "custom",
+      customType: "perk:workflow-state",
+      data: {
+        run_id: "RID",
+        stage: subject === "plan" ? "plan" : "objective-author",
+        mode: "read-only",
+      },
     },
-  };
+  ];
+  Object.assign(ctx, {
+    sessionManager: { getBranch: () => branch, getSessionId: () => "browser-fixture" },
+  });
+  Object.assign(pi, {
+    on() {},
+    appendEntry(customType: string, data: unknown) {
+      branch.push({ type: "custom", customType, data });
+    },
+  });
+  const written = openBranchWorkflowSession(pi, ctx).writeArtifact(
+    subject === "plan" ? "plan-draft.md" : "objective-draft.json",
+    raw,
+  );
+  if (written.status !== "applied") throw new Error("browser fixture draft write failed");
+  return createDraftReviewActivation(pi);
 }
 const mutationRuntimes = new WeakMap<ExtensionContext, DraftReviewRuntime>();
 function mutationRuntime(ctx: ExtensionContext): DraftReviewRuntime {
@@ -102,6 +122,9 @@ export const policyDraftReviews: DraftReviewRuntime = {
         registration: recordingDraftRegistration().registration,
         signal: signal ?? abort.signal,
         isCurrent: () => true,
+        degrade() {
+          throw new Error("Policy fixture cannot authorize degradation");
+        },
         async complete() {
           throw new Error(
             "Policy-only fixture cannot authorize production completion; use real activation/state/claims",

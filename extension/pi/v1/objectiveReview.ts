@@ -59,6 +59,7 @@ import {
   skipResult,
   subjectReviewOutcomeResult,
   type ToolResult,
+  untrustedReviewFeedback,
   verdictsFor,
   type WaveLaunch,
   waveLaunchedResult,
@@ -150,7 +151,7 @@ function directEditsReviseResult(feedback: string, reviewId: string | undefined)
           "the structured draft, so nothing was saved. Fold the Direct Edits diff below into " +
           "the working draft with objective_draft (prose hunks → the prose; roadmap-table " +
           "hunks → the matching node fields), then call plan_review again to confirm.\n\n" +
-          `Reviewer feedback:\n${feedback}`,
+          `Reviewer feedback:\n${untrustedReviewFeedback(feedback)}`,
       },
     ],
     details: {

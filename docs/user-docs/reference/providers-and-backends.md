@@ -69,13 +69,18 @@ the handshake. Pending is quiet and proves neither browser health nor delivery; 
 status warns but keeps the live wait open and cancellable. Cancellation closes the local wait,
 not the upstream browser. There is no polling, startup discovery, automatic replay, or resume.
 
-**Integration status:** registration, catch-up, and participating authoring mutations are active.
 Draft/manual-save/node entries and first-party replacement/writeback require a verified current-run
 claim; first-party editor waits release it. Missing identity is not an unclaimed save fallback.
-Blocking Plannotator tool completions now verify intent and bind delivery to the actual toolCallId
-and exact persisted result. Browser/chooser decision routing and readiness degradation remain
-uncomposed: no overall live end-to-end at-most-once save/delivery guarantee is claimed.
-Subject-specific Direct Edits/save source policies remain in place.
+All Plannotator tool/browser completions and chooser delegations verify intent before effects.
+They share subject-specific bound saves and delivery expectations: actual toolCallId plus exact
+result content, or a code-authored browser HTML receipt marker outside untrusted feedback.
+Only an exact later persisted entry acknowledges delivery; send/return is not acknowledgment.
+Stale decisions carry only diagnostic DATA, never current-draft apply/fold/save instructions.
+Readiness fallback requires verified degraded invalidation; failed persistence suppresses local
+late decisions but grants no fallback permission. Confirmed receipts and successful gate facts
+survive later delivery/bookkeeping uncertainty. Preserve state and reconcile rather than retry.
+These are at-most-once participating machine-local dispatch guarantees, not exactly-once delivery
+or power-loss durability. Subject-specific Direct Edits/source policies remain in place.
 
 ## Known caveats & maturity
 

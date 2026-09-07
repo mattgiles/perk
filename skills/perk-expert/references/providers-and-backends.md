@@ -68,14 +68,18 @@ After attaching the review ID, Perk subscribes before making one callback status
 separate five-second deadline. Completed status catches missed live decisions; pending proves
 neither health nor delivery. Missing/query failure warns once and keeps the live wait cancellable.
 Cancellation closes only local transport, not the upstream browser. No polling, startup discovery,
-automatic replay or resume exists. **Current integration limit:** transport registration/catch-up
-and authoring-mutation participation are active. Draft/manual-save/node entries and first-party
+automatic replay or resume exists. Draft/manual-save/node entries and first-party
 replacement/writeback require a verified current-run claim; editor waits release it. Missing
-identity is not an unclaimed save fallback. Blocking Plannotator tool completions now verify
-intent and bind delivery to the actual toolCallId and exact persisted result. Browser/chooser
-decision routing and readiness degradation remain uncomposed: no overall live end-to-end
-at-most-once save/delivery guarantee is claimed. Subject-specific Direct Edits/save source
-policies remain unchanged.
+identity is not an unclaimed save fallback. All Plannotator tool/browser completions and chooser
+delegations verify intent before effects. Actual toolCallId/exact result content, or a
+code-authored browser HTML receipt marker outside untrusted feedback, binds the delivery
+expectation before return/send. Only an exact later persisted entry acknowledges delivery.
+Stale decisions carry only diagnostic DATA, never current-draft apply/fold/save instructions.
+Readiness fallback requires verified degraded invalidation; failed persistence suppresses local
+late decisions but grants no fallback permission. Confirmed receipts and successful gate facts
+survive later delivery/bookkeeping uncertainty. Preserve state and reconcile rather than retry.
+The guarantee is at-most-once participating machine-local dispatch, not exactly-once delivery or
+power-loss durability. Subject-specific Direct Edits/source policies remain in place.
 
 The warm `/pr-review-browser` door also uses plannotator when that package is installed. It can
 review a foreign PR, the active worktree's PR, or a local since-base diff before submission. That

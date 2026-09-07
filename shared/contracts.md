@@ -211,8 +211,9 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   transaction or an automatic lock. The narrowly typed owned-plan-patch exception (§8.23) may
   retain frozen original-source authority after draft write-back failure, never after review-state
   or ownership failure. Plannotator review transports now use strict opening/attachment registration;
-production eligibility mutations now use that claim (§8.23); Plannotator subject-effect dispatch
-remains a separate integration step, so no end-to-end live dispatch guarantee is claimed.
+  production eligibility mutations and Plannotator tool/browser subject-effect dispatch use that
+  same claim (§8.23). This guarantees at-most-once participating local dispatch, not exactly-once
+  delivery or power-loss durability.
 
   `draft-review.json` is a fixed session artifact, with full replacements and strict current-run
   provenance only. Its codec/transition owner is `session/draftReviewState.ts`; target projection
@@ -4214,7 +4215,7 @@ artifacts + "File-first plan save"), §8.3 (the `approvalSave` seam + the warm c
 §8.57 (review-first carrier ownership), and §8.10 (provider deltas + the interactive save
 discipline); this section keeps the unique cross-cutting rules.
 
-### Bound draft-decision state and orchestration (blocking tools and eligibility mutations active)
+### Bound draft-decision state and orchestration
 
 The following storage/capability contract is implemented in `session/draftReviewState.ts`,
 `session/draftReviewBinding.ts`, and `pi/v1/draftReviewDecisions.ts`. The activation-scoped
@@ -4229,8 +4230,16 @@ Parameter plans followed by a sound artifact (even identical bytes) yield only s
 Structured objective/gist Direct Edits remains revision/no-save. Plan title generation precedes the
 binding/save-started checkpoint; captured warm node argv and frozen original/verified patched bytes
 remain authoritative. Successful receipt/gate facts survive failed later bookkeeping, without replay.
-**Integration limit:** browser/chooser decision routing and readiness degradation still do not use
-those APIs. The overall end-to-end at-most-once guarantee is not yet active.
+Both browser cores and chooser delegations use the same subject-specific completions and
+claim-bound capabilities. Their code-authored `<!-- perk:draft-review-dispatch:<dispatch_id> -->`
+marker is a separate text block outside untrusted feedback. The complete content expectation is
+verified before exactly one idle/followUp send; exclusion is then released without waiting for
+queue persistence. Only later exact persisted user-role evidence completes delivery. Readiness
+degradation uses the review's request/review/run identity and verifies invalidation before
+announcing fallback. If persistence fails, local liveness suppression remains, but no durable
+invalidation or fallback permission is asserted; a consumption winner is never rolled back.
+The guarantee is at-most-once participating machine-local dispatch, not exactly-once delivery or
+power-loss durability. Conservative target/config changes can require a new review.
 Construction performs no startup discovery, status query, previous-feedback injection,
 resend, or automatic recovery. Python neither reads nor writes this decision artifact.
 
@@ -4238,12 +4247,13 @@ The three feature review operations expose subject-specific completion seams. Th
 completion passes an explicit `boundSource` into `planApprovalSave`: only the reviewed original
 or verified patched bytes are selected, including when an unverified patch leaves different disk
 bytes. Ordinary manual saves retain artifact/parameter/transcript tiering and trimming. This
-source selection is not itself claim authorization; browser completion and guarded production
-composition remain pending. Gist checks abort before review and again after the reviewer await,
+source selection is not itself claim authorization; every Plannotator tool/browser completion
+uses the verified dispatch capability. Gist checks abort before review and again after the reviewer await,
 before save or actionable revision completion.
 
 `pi/v1/draftReviewEffects.ts` provides claim-bound save dependency adapters for those completion
-seams. Its Plannotator dispatch adapters are tested but not yet live. Their backend ports enter `capability.save` after feature validation
+seams. All Plannotator subject completions use these adapters. Their backend ports enter
+`capability.save` after feature validation
 and title awaits, bind the captured warm plan node inputs explicitly (absent leaves the cold
 handoff fallback), and confirm the subject's typed ID/URL receipt. A receipt callback preserves
 definitive gate exit before fallible receipt-state bookkeeping; subsequent errors retain the
@@ -4546,9 +4556,11 @@ Editor waits occur only after synchronous invalidation has returned and released
   - **DENY (all arms):** model-mediated — the feedback (diff included) passes through verbatim
     for the `plan_draft`/`objective_draft`/`gist_draft` rewrite.
 
-  The plan arm's mechanical apply is the exported `applyPlannotatorDirectEdits` helper
-  (`extension/pi/v1/planReview.ts`) — ONE apply path shared byte-identically by
-  `executePlanReview`'s plannotator arm and the `/plan-review-browser` door.
+  The plan arm's mechanical apply belongs to `completePlanReview` in
+  `extension/authoring/plan/review.ts`. Tool and browser adapters both call
+  `completePlanReviewV1` with an explicit dispatch capability; no duplicate browser save/apply
+  policy remains. The rules above require matching current source/target authority; stale denials
+  and structured Direct Edits emit only diagnostic DATA with the reviewed digest.
 
 - **The two draft-review browser doors** (`/plan-review-browser` /
   `/objective-review-browser`): the summonable streaming draft reviews — a plannotator
@@ -4558,8 +4570,8 @@ Editor waits occur only after synchronous invalidation has returned and released
   `extension/waves/draftReviewWave.ts`) streaming phrase-anchored findings into it via
   `push_annotations` (plan mode), and the browser decision routed through the existing
   approval seams — the objective APPROVE arm applies the Direct-Edits carve-out above (a
-  revise round, nothing saved), and both doors save only when the live artifact still carries
-  the exact bytes captured at open (the stale guard). Door mechanics — the launch chooser,
+  revise round, nothing saved). Both doors verify dispatch intent and bind the save checkpoint
+  to reviewed source and target; changed source permits only stale diagnostic DATA. Door mechanics — the launch chooser,
   port/readiness handling, wave lifecycle, abort ordering, stale guards, prime/clear
   lifecycle, and the accepted concurrency behavior — live in the owning modules:
   `extension/pi/v1/planReviewBrowser.ts` + `extension/pi/v1/objectiveReviewBrowser.ts` (over

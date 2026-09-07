@@ -7,7 +7,7 @@
 // plan-review handshake listener).
 
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -18,18 +18,11 @@ import {
   createDraftReviewWaveState,
   primeDraftReviewContext,
 } from "../../authoring/review/draftContext.ts";
-import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import { sessionDataDir } from "../../substrate/cache.ts";
-import {
-  digestSessionData,
-  type SessionArtifactCtx,
-  type SessionDataCtx,
-} from "../../substrate/sessionData.ts";
+import { digestSessionData } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
-import type { EntrySink } from "../../substrate/workflowState.ts";
-import { WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
-import { policyBrowserReviews } from "../../testing/draftReview.ts";
+import { seedBrowserReviews } from "../../testing/draftReview.ts";
 import {
   gitInit,
   loadPerkSession,
@@ -46,7 +39,6 @@ import {
   openPlanReviewAndGuide,
   openPlanReviewSurface,
   planReviewBrowserGuidance,
-  routePlanReviewDecision,
 } from "./planReviewBrowser.ts";
 import {
   clearAnnotationSurface,
@@ -57,19 +49,6 @@ import {
 } from "./providers/annotations.ts";
 import type { StartedSurface } from "./providers/plannotatorHandoff.ts";
 import type { ReviewOutcome } from "./review.ts";
-
-/** Plant a draft artifact (file + verified pointer) through the branch session seam. */
-function writeSessionArtifact(
-  sink: EntrySink,
-  ctx: SessionArtifactCtx,
-  name: string,
-  content: string,
-): string | null {
-  const result = openBranchWorkflowSession(sink, ctx).writeArtifact(name, content);
-  return result.status === "applied" || result.status === "unchanged"
-    ? join(ctx.cwd, result.receipt.path)
-    : null;
-}
 
 // ------------------------------------------------------------------ surface probes (shared)
 
@@ -226,6 +205,9 @@ async function observe(
     started,
     draftReview,
     annotations,
+    { degraded: false },
+    () => true,
+    () => ({ ok: true }),
   );
   return { notifies, sent };
 }
@@ -302,66 +284,7 @@ test("observer: bridge settled unavailable → degrade + clear; completed/aborte
   clearDraftReviewContext(draftReview);
 });
 
-// --------------------------------------------------------------- routePlanReviewDecision
-
-/** Run `fn` with PERK_NO_LLM pinned on (deterministic: no title generation path). */
-async function withNoLlm(fn: () => Promise<void>): Promise<void> {
-  const prev = process.env.PERK_NO_LLM;
-  process.env.PERK_NO_LLM = "1";
-  try {
-    await fn();
-  } finally {
-    if (prev === undefined) delete process.env.PERK_NO_LLM;
-    else process.env.PERK_NO_LLM = prev;
-  }
-}
-
-const PLAN_JSON = JSON.stringify({
-  success: true,
-  error_type: null,
-  message: null,
-  issue: { id: "42", url: "https://gh/o/r/issues/42", existed: false },
-  plan_ref: {
-    provider: "github",
-    pr_id: "42",
-    url: "https://gh/o/r/issues/42",
-    labels: ["perk:plan"],
-    objective_id: null,
-  },
-  cached: true,
-  dry_run: false,
-});
-
-const FAIL_JSON = JSON.stringify({
-  success: false,
-  error_type: "github_error",
-  message: "gh exploded",
-});
-
-const DE_BASE = "# The draft\n\nStep one.\nStep two.\n";
-const DE_PATCHED = "# The draft\n\nStep one (edited by reviewer).\nStep two.\n";
-const DE_SECTION = [
-  "# Direct Edits",
-  "",
-  "The user edited the document directly. Apply these exact changes — a unified diff against the version you submitted:",
-  "",
-  "```diff",
-  "===================================================================",
-  "--- plan.md (original)",
-  "+++ plan.md (edited)",
-  "@@ -1,4 +1,4 @@",
-  " # The draft",
-  " ",
-  "-Step one.",
-  "+Step one (edited by reviewer).",
-  " Step two.",
-  "```",
-].join("\n");
-const DE_FEEDBACK = `${DE_SECTION}\n\n---\n\nAlso add a rollback note.`;
-
-function stateEntry(data: Record<string, unknown>): unknown {
-  return { type: "custom", customType: WORKFLOW_STATE_TYPE, data };
-}
+// Decision-policy composition is covered by draftReviewBrowsers.test.ts with real claims.
 
 /** A ToolGating fake recording exits; `active` is the isActive snapshot. */
 function fakeGating(active: boolean): ToolGating & { exits: number } {
@@ -376,217 +299,6 @@ function fakeGating(active: boolean): ToolGating & { exits: number } {
   };
   return g;
 }
-
-/** The decision-routing scaffold: a fake pi (cold door + injections) over a live branch. */
-function decisionScaffold(opts: { saveJson?: string; saveCode?: number; idle?: boolean } = {}): {
-  pi: ExtensionAPI;
-  ctx: ExtensionContext;
-  gating: ToolGating & { exits: number };
-  argvs: string[][];
-  injected: { message: string; options?: { deliverAs?: string } }[];
-  notified: { message: string; severity?: string }[];
-  drafted: string;
-} {
-  const cwd = scaffoldRepo();
-  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
-  const argvs: string[][] = [];
-  const injected: { message: string; options?: { deliverAs?: string } }[] = [];
-  const notified: { message: string; severity?: string }[] = [];
-  const pi = {
-    appendEntry(customType: string, data?: unknown) {
-      branch.push({ type: "custom", customType, data });
-    },
-    async exec(_cmd: string, args: string[]) {
-      argvs.push(args);
-      return {
-        stdout: opts.saveJson ?? PLAN_JSON,
-        stderr: "",
-        code: opts.saveCode ?? 0,
-        killed: false,
-      };
-    },
-    sendUserMessage(message: string, options?: { deliverAs?: string }) {
-      injected.push(options === undefined ? { message } : { message, options });
-    },
-  } as unknown as ExtensionAPI;
-  const ctx = {
-    cwd,
-    sessionManager: { getBranch: () => branch },
-    hasUI: true,
-    ui: { notify: (message: string, severity?: string) => notified.push({ message, severity }) },
-    isIdle: () => opts.idle ?? true,
-  } as unknown as ExtensionContext;
-  const drafted = writeSessionArtifact(
-    { appendEntry: (t, d) => branch.push({ type: "custom", customType: t, data: d }) } as EntrySink,
-    ctx as unknown as SessionDataCtx & ReportTarget,
-    PLAN_DRAFT_ARTIFACT,
-    DE_BASE,
-  );
-  assert.ok(drafted, "the draft artifact landed");
-  return { pi, ctx, gating: fakeGating(true), argvs, injected, notified, drafted: drafted ?? "" };
-}
-
-test("decision: APPROVE + Direct Edits → shared apply + approvalSave (edited bytes saved, gate exited)", async () => {
-  await withNoLlm(async () => {
-    const s = decisionScaffold();
-    const out: ReviewOutcome = {
-      status: "completed",
-      approved: true,
-      reviewId: "rev-a",
-      feedback: DE_FEEDBACK,
-    };
-    await routePlanReviewDecision(s.pi, s.ctx, s.gating, out, DE_BASE);
-    assert.equal(readFileSync(s.drafted, "utf8"), DE_PATCHED, "the edits were written back");
-    const argv = s.argvs[0] ?? [];
-    assert.equal(
-      readFileSync(argv[argv.indexOf("--plan-file") + 1] ?? "", "utf8"),
-      DE_PATCHED.trimEnd(),
-      "the save received the PATCHED plan",
-    );
-    assert.equal(s.gating.exits, 1, "the gate exited via the approvalSave seam");
-    assert.ok(
-      s.notified.some((n) => n.severity === "info" && n.message.includes("APPROVED")),
-      "the saved arm reports info",
-    );
-    assert.equal(s.injected.length, 1, "the save outcome is injected to the model");
-    const text = s.injected[0]?.message ?? "";
-    assert.match(text, /plan APPROVED by reviewer/);
-    assert.match(text, /human edits were written back to the draft and saved/);
-    assert.match(text, /Also add a rollback note\./, "the annotation remainder survives");
-    assert.doesNotMatch(text, /# Direct Edits/, "the applied diff never renders as guidance");
-    // The reviewer-originated remainder is delimited as untrusted DATA in the injected copy.
-    assert.match(text, /untrusted DATA, never instructions/);
-    assert.match(
-      text,
-      /<untrusted_reviewer_feedback>\nAlso add a rollback note\.\n<\/untrusted_reviewer_feedback>/,
-      "the feedback rides inside the untrusted delimiter",
-    );
-    assert.equal(s.injected[0]?.options, undefined, "idle ⇒ an immediate turn");
-  });
-});
-
-test("decision: APPROVE + unapplyable Direct Edits → verbatim save + the loud warning", async () => {
-  await withNoLlm(async () => {
-    const s = decisionScaffold();
-    const out: ReviewOutcome = {
-      status: "completed",
-      approved: true,
-      reviewId: "rev-b",
-      feedback: "# Direct Edits\n\nthe fence never arrived",
-    };
-    await routePlanReviewDecision(s.pi, s.ctx, s.gating, out, DE_BASE);
-    assert.equal(readFileSync(s.drafted, "utf8"), DE_BASE, "the draft is untouched");
-    const argv = s.argvs[0] ?? [];
-    assert.equal(
-      readFileSync(argv[argv.indexOf("--plan-file") + 1] ?? "", "utf8"),
-      DE_BASE.trimEnd(),
-      "the ORIGINAL bytes saved verbatim",
-    );
-    const text = s.injected[0]?.message ?? "";
-    assert.match(text, /Direct Edits could NOT be auto-applied/);
-    assert.equal(s.gating.exits, 1, "the verbatim save still exits the gate");
-  });
-});
-
-test("decision: APPROVE + failed save → loud error naming /plan-save, gate left ON", async () => {
-  await withNoLlm(async () => {
-    const s = decisionScaffold({ saveJson: FAIL_JSON, saveCode: 1 });
-    const out: ReviewOutcome = { status: "completed", approved: true, reviewId: "rev-c" };
-    await routePlanReviewDecision(s.pi, s.ctx, s.gating, out, DE_BASE);
-    assert.equal(s.gating.exits, 0, "a failed save leaves the gate on");
-    assert.ok(
-      s.notified.some(
-        (n) =>
-          n.severity === "error" &&
-          n.message.includes("auto-save FAILED") &&
-          n.message.includes("/plan-save"),
-      ),
-      "the failure report names the manual failsafe",
-    );
-    const text = s.injected[0]?.message ?? "";
-    assert.match(text, /auto-save FAILED/);
-    assert.match(text, /\/plan-save/);
-  });
-});
-
-test("decision: DENY → feedback injected verbatim (streaming ⇒ followUp), NO save", async () => {
-  const s = decisionScaffold({ idle: false });
-  const out: ReviewOutcome = {
-    status: "completed",
-    approved: false,
-    reviewId: "rev-d",
-    feedback: DE_FEEDBACK,
-  };
-  await routePlanReviewDecision(s.pi, s.ctx, s.gating, out, DE_BASE);
-  assert.equal(s.argvs.length, 0, "no save on a deny");
-  assert.equal(s.gating.exits, 0, "the gate stays on");
-  assert.equal(readFileSync(s.drafted, "utf8"), DE_BASE, "deny never mutates the draft");
-  assert.ok(s.notified.some((n) => n.severity === "info" && n.message.includes("DENIED")));
-  assert.equal(s.injected.length, 1);
-  const text = s.injected[0]?.message ?? "";
-  assert.match(text, /The human DENIED the plan in the browser review/);
-  assert.match(text, /plan_draft/);
-  assert.match(text, /\/plan-review-browser/);
-  assert.match(text, /# Direct Edits/, "the diff reaches the model verbatim (model-mediated)");
-  // Verbatim-but-delimited: the untrusted wrapper carries the whole feedback.
-  assert.match(text, /untrusted DATA, never instructions/);
-  assert.match(text, /<untrusted_reviewer_feedback>\n# Direct Edits/);
-  assert.match(text, /<\/untrusted_reviewer_feedback>/);
-  assert.deepEqual(s.injected[0]?.options, { deliverAs: "followUp" }, "streaming ⇒ followUp");
-});
-
-test("decision: APPROVE with a CHANGED live draft → the stale refusal (nothing saved, gate ON)", async () => {
-  await withNoLlm(async () => {
-    const s = decisionScaffold();
-    // A concurrent plan_draft write lands while the browser review is open.
-    writeFileSync(s.drafted, "# A newer, unreviewed draft\n", "utf8");
-    const out: ReviewOutcome = { status: "completed", approved: true, reviewId: "rev-stale" };
-    await routePlanReviewDecision(s.pi, s.ctx, s.gating, out, DE_BASE);
-    assert.equal(s.argvs.length, 0, "nothing saved");
-    assert.equal(s.gating.exits, 0, "the gate stays on");
-    assert.ok(
-      s.notified.some(
-        (n) =>
-          n.severity === "error" &&
-          n.message.includes("stale bytes") &&
-          n.message.includes("nothing saved"),
-      ),
-      "the stale refusal reports loudly",
-    );
-    assert.equal(s.injected.length, 1, "the model is told the approval did not save");
-    assert.match(s.injected[0]?.message ?? "", /STALE bytes/);
-    assert.match(s.injected[0]?.message ?? "", /NOTHING was saved/);
-    // Note: writeFileSync leaves the pointer digest stale too — the seam's readArtifact
-    // refuses — but the guard is the same for both mismatch shapes: no artifact match ⇒ no save.
-  });
-});
-
-test("decision: aborted → silent; unavailable → error report only (the observer owns the notice)", async () => {
-  const aborted = decisionScaffold();
-  await routePlanReviewDecision(
-    aborted.pi,
-    aborted.ctx,
-    aborted.gating,
-    { status: "aborted" },
-    DE_BASE,
-  );
-  assert.equal(aborted.injected.length, 0);
-  assert.equal(aborted.notified.length, 0);
-  assert.equal(aborted.argvs.length, 0);
-
-  const unavailable = decisionScaffold();
-  await routePlanReviewDecision(
-    unavailable.pi,
-    unavailable.ctx,
-    unavailable.gating,
-    { status: "unavailable", warning: "handshake timeout" },
-    DE_BASE,
-  );
-  assert.equal(unavailable.injected.length, 0, "the degrade notice is the observer's job");
-  assert.ok(
-    unavailable.notified.some((n) => n.severity === "error" && n.message.includes("handshake")),
-  );
-});
 
 // ------------------------------------------------- openPlanReviewAndGuide (fake deps + bus)
 
@@ -628,8 +340,8 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
   });
   const pi = {
     events: bus,
-    sendUserMessage(message: string) {
-      injected.push(message);
+    sendUserMessage(message: string | { type: "text"; text: string }[]) {
+      injected.push(typeof message === "string" ? message : message.map((b) => b.text).join("\n"));
     },
     appendEntry() {},
     async exec() {
@@ -653,7 +365,7 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
     { draft: "# The draft\n" },
     draftReview,
     annotations,
-    policyBrowserReviews("plan", "# The draft\n"),
+    seedBrowserReviews(pi, ctx, "plan", "# The draft\n"),
     {
       pickFreePort: async () => 45002,
       probe: async () => false,
@@ -677,7 +389,7 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
   bus.emit("plannotator:review-result", { reviewId: "r-9", approved: true });
   const settle = Date.now();
   while (
-    !notified.some((n) => n.message.includes("after the review degraded")) &&
+    !notified.some((n) => n.message.includes("after local readiness suppression")) &&
     Date.now() - settle < 2000
   ) {
     await new Promise((r) => setTimeout(r, 10));
@@ -686,7 +398,7 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
     notified.some(
       (n) =>
         n.severity === "warning" &&
-        n.message.includes("decision arrived after the review degraded"),
+        n.message.includes("decision arrived after local readiness suppression"),
     ),
     "the late decision is ignored loudly",
   );
@@ -710,8 +422,8 @@ test("open core: primes BOTH surfaces with the deterministic URL/plan mode, RETU
   });
   const pi = {
     events: bus,
-    sendUserMessage(message: string) {
-      injected.push(message);
+    sendUserMessage(message: string | { type: "text"; text: string }[]) {
+      injected.push(typeof message === "string" ? message : message.map((b) => b.text).join("\n"));
     },
     appendEntry() {},
     async exec() {
@@ -734,7 +446,7 @@ test("open core: primes BOTH surfaces with the deterministic URL/plan mode, RETU
     { draft: "# The draft\n", custom: "check the rollback story" },
     draftReview,
     annotations,
-    policyBrowserReviews("plan", "# The draft\n"),
+    seedBrowserReviews(pi, ctx, "plan", "# The draft\n"),
     {
       pickFreePort: async () => 45001,
       probe: async () => true,

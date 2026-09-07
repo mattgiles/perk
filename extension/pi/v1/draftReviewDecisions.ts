@@ -515,6 +515,20 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
         return reviewRefused("io-error");
       }
     },
+    /** Readiness belongs to this review, not whichever successor is now on disk. */
+    degrade(id: ReviewIdentity, runId: string): RegistrationResult {
+      const observed = observeCurrent();
+      if (!observed.ok) return observed;
+      const result = sync(
+        id.requestId,
+        (owned) => {
+          expected(owned, id);
+          owned.transition({ kind: "invalidate", id, reason: "degraded" });
+        },
+        runId,
+      );
+      return result.ok ? { ok: true } : result;
+    },
     /** Exclusion + verified invalidation through a synchronous participating mutation. */
     mutate<T>(
       reason: Extract<ReviewEvent, { kind: "mutation" }>["reason"],

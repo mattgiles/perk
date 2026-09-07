@@ -28,7 +28,6 @@ import { gitInit, loadPerkSession, scaffoldRepo } from "../../testing/harness.ts
 import { executeObjectiveReview as executeObjectiveReviewCore } from "./objectiveReview.ts";
 import { installPlanBindings, planSaveDepsFor } from "./plan.ts";
 import {
-  applyPlannotatorDirectEdits,
   approvedSaveResult,
   executePlanReview as executePlanReviewCore,
   type PlanReviewV1Deps,
@@ -1153,63 +1152,6 @@ test("plannotator deny + Direct Edits -> feedback passes through untouched (mode
   assert.match(text, /Also add a rollback note\./);
 });
 
-// -------------------------------------- applyPlannotatorDirectEdits (the shared apply helper)
-
-test("applyPlannotatorDirectEdits: approved + section -> patched/edited/remainder; bad section -> failed verbatim; non-approved -> pass-through", () => {
-  const { ctx, pi, drafted } = directEditsScaffold();
-  // approved + a clean section: the patched bytes come back, the draft is written back, and
-  // only the annotation remainder survives as feedback.
-  const approved: Extract<ReviewOutcome, { status: "completed" }> = {
-    status: "completed",
-    approved: true,
-    reviewId: "rev-h1",
-    feedback: DE_FEEDBACK_WITH_ANNOTATIONS,
-  };
-  const applied = applyPlannotatorDirectEdits(
-    pi,
-    ctx as unknown as ExtensionContext,
-    approved,
-    DE_BASE,
-  );
-  assert.equal(applied.reviewedPlan, DE_PATCHED);
-  assert.equal(applied.edited, true);
-  assert.equal(applied.directEditsFailed, false);
-  assert.equal(applied.outcome.feedback, DE_ANNOTATIONS, "only the remainder survives");
-  assert.equal(readFileSync(drafted, "utf8"), DE_PATCHED, "the patched bytes were written back");
-
-  // approved + a seen-but-unhonorable heading: verbatim plan, the failure flag set, feedback
-  // untouched (the diff stays surfaced for the manual follow-up).
-  const bad: Extract<ReviewOutcome, { status: "completed" }> = {
-    status: "completed",
-    approved: true,
-    reviewId: "rev-h2",
-    feedback: "# Direct Edits\n\nthe fence never arrived",
-  };
-  const failed = applyPlannotatorDirectEdits(pi, ctx as unknown as ExtensionContext, bad, DE_BASE);
-  assert.equal(failed.reviewedPlan, DE_BASE, "the plan stays verbatim");
-  assert.equal(failed.edited, false);
-  assert.equal(failed.directEditsFailed, true);
-  assert.equal(failed.outcome, bad, "the outcome passes through untouched");
-
-  // non-approved (DENY): the helper never inspects the feedback — everything passes through.
-  const denied: Extract<ReviewOutcome, { status: "completed" }> = {
-    status: "completed",
-    approved: false,
-    reviewId: "rev-h3",
-    feedback: DE_FEEDBACK_WITH_ANNOTATIONS,
-  };
-  const passed = applyPlannotatorDirectEdits(
-    pi,
-    ctx as unknown as ExtensionContext,
-    denied,
-    DE_BASE,
-  );
-  assert.equal(passed.reviewedPlan, DE_BASE);
-  assert.equal(passed.edited, false);
-  assert.equal(passed.directEditsFailed, false);
-  assert.equal(passed.outcome, denied);
-});
-
 // ------------------------------------------------- the launch chooser (the plannotator wave arm)
 
 const LAUNCH_WAVE = "Browser review + reviewer wave";
@@ -1797,11 +1739,11 @@ test("index.ts composition: the REAL root wiring reaches wave_launched through p
     );
     // The real door's background decision task routes the deny — wait for its info report so no
     // task touches the disposed session after the test ends.
-    for (let i = 0; i < 40 && !h.notifies.some((n) => /DENIED/.test(n)); i++) {
+    for (let i = 0; i < 40 && !h.notifies.some((n) => /browser decision dispatched/.test(n)); i++) {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     assert.ok(
-      h.notifies.some((n) => /DENIED/.test(n)),
+      h.notifies.some((n) => /browser decision dispatched/.test(n)),
       "the browser decision routed through the real door's background task",
     );
   } finally {

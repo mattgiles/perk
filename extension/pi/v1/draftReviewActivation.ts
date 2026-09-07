@@ -25,6 +25,8 @@ export interface PreparedDraftReview {
   registration: DraftReviewRegistration;
   signal: AbortSignal;
   isCurrent(): boolean;
+  /** Verify this review's degraded invalidation before permitting readiness fallback. */
+  degrade(): RegistrationResult;
   /** IDs come only from verified registration and its matching completed transport outcome. */
   complete(
     outcome: Extract<ReviewOutcome, { status: "completed" }>,
@@ -396,6 +398,12 @@ export function createDraftReviewActivation(pi: ExtensionAPI): DraftReviewRuntim
             } catch {
               return false;
             }
+          },
+          degrade() {
+            const checked = check();
+            if (!checked.ok) return checked;
+            if (id === undefined) return reviewRefused("invalid-state");
+            return coordinator.degrade(id, runId);
           },
           async complete(outcome, options) {
             outcome = { ...outcome };
