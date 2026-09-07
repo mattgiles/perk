@@ -81,9 +81,13 @@ same user.
 
 Agent scratch is **disposable and non-authoritative**. It has no provenance pointer or digest, and
 a durable decision must re-read the canonical repository or backend source rather than trust a
-scratch copy. Direct hidden scratch blocks are corrected across fork and compaction, but a
-compaction summary may still quote an older path as ordinary prose; that quote is not live guidance
-or provenance. GitHub Actions diagnostics retain the rest of the hidden `.perk` run directory but
+scratch copy. The hidden guidance block is delivered once per live context and re-delivered when
+Pi's own context projection no longer carries this run's exact block — for example after a
+compaction drops it, or on a session-tree branch that never received it. Only an exact hidden
+copy of the current run's block counts as delivered: a parent run's block, a changed path, or a
+quoted copy in ordinary prose does not. Direct hidden scratch blocks are corrected across fork and
+compaction, but a compaction summary may still quote an older path as ordinary prose; that quote is
+not live guidance or provenance. GitHub Actions diagnostics retain the rest of the hidden `.perk` run directory but
 explicitly exclude `agent/**`, so these files are not uploaded as remote run artifacts. They persist
 across reload/resume locally and are removed only with the enclosing run by the normal
 `perk state prune` policy; there is no session-exit cleanup.

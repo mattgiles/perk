@@ -235,10 +235,19 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   Neither ineligible hook calls the provisioner: suppression means no `agent/` creation or direct
   guidance, not zero lifecycle filesystem activity or deletion of existing directories. The context
   filter removes all direct `perk:agent-scratch` messages when ineligible. Eligible hooks provision
-  before dedup (repairing deleted directories), retain one exact current-run direct block, remove
-  stale/duplicate direct blocks, and visibly warn/retry on provisioning failure. Quoted ordinary
-  messages and compaction summaries remain untouched. Selected foreground writers have no Perk
-  activation and no scratch-provisioning promise. Because this is a universal pre-turn side effect
+  before dedup (repairing deleted directories, and before any projection read), retain one exact
+  current-run direct block, remove stale/duplicate direct blocks, and visibly warn/retry on
+  provisioning failure. Delivery dedup reads **Pi's own live context projection**
+  (`sessionManager.buildContextEntries()` → `sessionEntryToContextMessages`, via
+  `extension/pi/v1/contextEvidence.ts`) and requires **exact identity**: a native `custom`
+  message of this customType whose string `content` equals the current run's rendered block
+  byte-for-byte. Nothing looser deduplicates — not a text-part array, a user quote, a marker-only
+  match, changed bytes, a parent run's block, or plain `custom` state (`data.content` is state,
+  never model delivery). A block Pi has compacted out of context is re-delivered on the next
+  eligible turn even though the historical entry stays on the branch. A projection read failure
+  escapes the hook to Pi's hook-error reporting (no guessed copy); the context filter never reads
+  the projection. Quoted ordinary messages and compaction summaries remain untouched. Selected
+  foreground writers have no Perk activation and no scratch-provisioning promise. Because this is a universal pre-turn side effect
   that can become eligible after an
   in-session read-only gate exit, every registry stage declares the existing `cache.scratch` key
   in `writes`.
@@ -686,10 +695,14 @@ retain segment validation and the destructive veto: `cd … && query` passes, bu
 stack context forms, extra arguments, lookalike verbs, `review-post`, `gh api`, real-file redirects,
 and chained mutations do not. The sub-allowlist also retains command-keyed `ast-grep` /
 `agent-browser` (+ `npx agent-browser`) entries (an accepted arg-blind leniency, like `curl`);
-(3) injects a hidden `[READ-ONLY MODE]` context at `before_agent_start` — **once-only per live
-copy**: the injection is branch-scan dedup'd on the marker (`branchCarries`), so a session carries
-one live copy; compaction dropping the copy makes the scan come up clean and the next
-`before_agent_start` naturally re-injects — and **strips** it from `context` when off. The allowlist is restored on both `session_start` and `session_tree` (re-sync
+(3) injects a hidden `[READ-ONLY MODE]` context at `before_agent_start` — **once-only per
+selected branch**: the injection is FULL-branch-scan dedup'd on the marker (`branchCarries` over
+`branchOf(ctx)` — selected-branch history across compaction, not live model context and not a
+process-global latch), so a branch that has ever carried the copy does not receive it again even
+after compaction summarizes it out of context (the gate enforces structurally regardless of what
+the model can still read; there is no compaction-triggered re-delivery), while navigating onto a
+branch that never carried it injects again; an unreadable branch cannot suppress the injection —
+and **strips** it from `context` when off. The allowlist is restored on both `session_start` and `session_tree` (re-sync
 from the rebuilt `mode`). **Fail-closed:** a failed state-rebuild never opens the gate, and
 `tool_call` blocks on any internal error. The `enter(ctx?)`/`exit(ctx?)` surface is the API the
 interior consumers (plan mode, the authoring installers, the CI executor) compose — the gate is the single
@@ -2527,22 +2540,30 @@ The **cross-plane dedup marker is the render header itself** — `BINDING_HEADER
 byte-for-byte to the cold `_HEADER` (Python) by a literal test in **both** planes. The cold door
 already puts `stage:<id>` bindings in a cold-launched session's **initial prompt**, and
 `before_agent_start` fires for that same session, so Mechanism A injects **iff** a launched `stage`
-exists, the resolved render is non-empty, no entry in the branch's **compaction-active window**
-already carries `BINDING_HEADER` (the cold prompt OR a prior warm inject), **and** the submitting
-turn's prompt (`event.prompt`) does not carry it either. Before compaction the active window is the
-full branch; after compaction it begins at the latest compaction's `firstKeptEntryId`, excludes
-compaction entries themselves, and includes later entries. This distinction is load-bearing because
-Pi's branch is append-only: historical entries remain readable after they leave model context, and a
-compaction summary quoting the header is not a live delivery. The prompt scan is load-bearing on the
-launch turn: at `before_agent_start` the just-submitted prompt is **not yet** on the branch, so the
-branch scan alone missed the cold seed on that turn and double-delivered (the fixed hole). The
-injected custom and the cold prompt both carry the header → idempotent across turns/reloads; after
-compaction drops the original from the active window it **re-delivers** (its ongoing value — later
-prompts don't carry the header, so the prompt scan stays inert there). Mechanism B is a one-shot
-`sendUserMessage` suffix at an invocation distinct from any cold launch, so it cannot auto-double. A
-narrower-than-plan-mode `context` strip removes a **stale** `perk:binding-context` custom (stage
-changed / overlay removed) while **never** stripping a user message that carries the header (a cold
-prompt legitimately does). Resolver shape `issues` are **not** surfaced warm (the cold launch + doctor
+exists (read from the **full branch** — eligibility survives compaction), the resolved render is
+non-empty (render-before-dedup: an inert stage reads no projection), the submitting turn's prompt
+(`event.prompt`) does not carry `BINDING_HEADER`, **and** Pi's **live context projection** does
+not already deliver it. Live evidence is Pi-owned and typed (`extension/pi/v1/contextEvidence.ts`):
+`sessionManager.buildContextEntries()` — the current leaf's compaction-aware entry list —
+flattened through Pi's package-root `sessionEntryToContextMessages`, then asked whether the header
+rides **user content** (the persisted cold prompt) or a **`perk:binding-context` custom** (a prior
+warm inject). Perk reconstructs no compaction cutoff and inspects no storage fields; assistant/
+tool/bash output, other customs, plain `custom` state, and compaction/branch summaries quoting the
+header are never evidence. This distinction is load-bearing because Pi's branch is append-only:
+historical entries remain readable after they leave model context, and a summary quoting the
+header is not a live delivery. The prompt scan is load-bearing on the launch turn and runs
+**before** the projection read: at `before_agent_start` the just-submitted prompt is **not yet**
+persisted, so the projection alone would miss the cold seed on that turn and double-deliver (the
+fixed hole). The injected custom and the cold prompt both carry the header → idempotent across
+turns/reloads; after compaction drops the original from Pi's projection it **re-delivers** (its
+ongoing value — later prompts don't carry the header, so the prompt scan stays inert there). A
+projection read failure **escapes the hook** to Pi's hook-error reporting — no guessed copy is
+injected, and no retry/warning-dedup state exists. Mechanism B is a one-shot `sendUserMessage`
+suffix at an invocation distinct from any cold launch, so it cannot auto-double. A
+narrower-than-plan-mode `context` strip (which never reads the projection) removes a **stale**
+`perk:binding-context` custom (stage changed / overlay removed) while **never** stripping a user
+message that carries the header (a cold prompt legitimately does — even after the stage stops
+binding). Resolver shape `issues` are **not** surfaced warm (the cold launch + doctor
 own them); only the delivery `warnings` are loud-but-non-fatal: Mechanism A and
 `bindingSuffix` (Mechanism B) both `console.error` them.
 The injection-time mirror is **skill-presence only** (the trigger is fixed at
@@ -2963,7 +2984,7 @@ over that union, and `workerMain.ts` imports **no SDK** — it consumes only the
 | `stage` | `"implement" \| "address"` | the only `doors.cold_remote: true` read-write stages (`shared/registry.yaml`) |
 | `run_id` | ULID, present as `PERK_RUN_ID` in env | minted by positioning; the worker **inherits** it and never re-mints |
 | handoff / plan-ref / plan-body | files under `<worktree>/.perk/workflow/` | materialized by positioning; the worker does not re-write them |
-| `initialPrompt` | string | re-derived by `initialPromptFor(stage, planRef)` — the TS twin of `perk/run/launch/prompts.py._implement_prompt`/`_address_prompt` (parity asserted reciprocally in `extension/worker/stageExecution.test.ts` + `tests/test_worker_prompt_parity.py`); the prompt carries **no skill-binding suffix** — the worker's bindings arrive via §8.9 Mechanism A (the extension's `before_agent_start` injection, which fires because the handoff records the stage and no branch entry carries `BINDING_HEADER`); the injected content is byte-identical to the cold door's prompt suffix (`tests/test_binding_render_parity.py`; the named mechanism difference is §8.38 row 2) |
+| `initialPrompt` | string | re-derived by `initialPromptFor(stage, planRef)` — the TS twin of `perk/run/launch/prompts.py._implement_prompt`/`_address_prompt` (parity asserted reciprocally in `extension/worker/stageExecution.test.ts` + `tests/test_worker_prompt_parity.py`); the prompt carries **no skill-binding suffix** — the worker's bindings arrive via §8.9 Mechanism A (the extension's `before_agent_start` injection, which fires because the handoff records the stage and neither the prompt nor Pi's live context projection carries `BINDING_HEADER`); the injected content is byte-identical to the cold door's prompt suffix (`tests/test_binding_render_parity.py`; the named mechanism difference is §8.38 row 2) |
 | `model` | optional `WorkerModelSelection` — an **opaque nominal token** (`#private` fields; structurally unforgeable) minted only by `resolveWorkerModel` in the **private SDK adapter** (`worker/sdkAdapter.ts`); it carries the `ModelRuntime` (default-created when the flag is absent) plus the optional explicit model and parsed thinking level | explicit worker input (`stageExecution.ts::StageRunOptions`); **no available model ⇒ a fail-soft `failed`/`no_model` outcome, never a throw** (same semantics as before). The workerMain shim resolves an explicit `--model` flag through pi's `resolveCliModel` (CLI parity: fuzzy matching, `provider/pattern`, a `:thinking` suffix — `resolveWorkerModel`, re-exported through the seam); a parsed thinking level rides the selection, applied at session creation (absent ⇒ the settings default) |
 | `budget` | `{ maxTurns, maxTokens, wallClockMs }` | worker input; the watchdog that drives abort |
 | `signal` | `AbortSignal` | external cancellation; OR'd with the budget watchdog |
@@ -5223,19 +5244,39 @@ nothing, the subset being shared).
   provider adapters (`tombell` / `plannotator` — `extension/pi/v1/providers/`; `juicesharp` is a
   borrowed-tool package, not an adapter), and the Python cold doors. The seven injected mode/bridge
   contexts (the persistent `before_agent_start` injections stripped on `context`, each injection
-  **dedup-guarded by a marker scan** — `branchCarries` in
-  `extension/substrate/workflowState.ts`. Every flow-owned injection — the gist-authoring
-  context and plannotator's gist flavor, the plan-authoring context, plannotator's plan flavor,
-  the tombell bridge context, the objective-authoring context, and plannotator's objective
-  flavor — scans the **compaction-active window** (`activeContextWindow`), so the session
-  carries ONE live copy and a compaction that drops it naturally re-injects) live under
-  `prompts/contexts/` — the mode contexts at the top level, the adapter bridges under
-  `prompts/contexts/adapters/` — with each module's identity marker passed as the `{{ marker }}`
-  render var (never a template literal), so the marker the strip handler scans for cannot drift
-  from the injected prose; the marker-as-render-var invariant now serves both the strip **and**
-  the dedup key (plannotator's three flavors — plan / objective / gist, the objective flavor
-  serving both objective stages — share one customType but dedup per-flavor on their distinct
-  markers).
+  **dedup-guarded on its marker**) live under `prompts/contexts/` — the mode contexts at the top
+  level, the adapter bridges under `prompts/contexts/adapters/` — with each module's identity
+  marker passed as the `{{ marker }}` render var (never a template literal), so the marker the
+  strip handler scans for cannot drift from the injected prose; the marker-as-render-var
+  invariant serves both the strip **and** the dedup key (plannotator's three flavors — plan /
+  objective / gist, the objective flavor serving both objective stages — share one customType
+  but dedup per-flavor on their distinct markers). Two dedup authorities, deliberately distinct:
+  the read-only mode context (`substrate/toolGating.ts`) dedups on **full selected-branch
+  history** (`branchCarries` over `branchOf(ctx)` — once per branch, compaction notwithstanding);
+  every flow-owned injection — the gist-authoring context and plannotator's gist flavor, the
+  plan-authoring context, plannotator's plan flavor, the tombell bridge context, the
+  objective-authoring context, and plannotator's objective flavor — rides the shared
+  `extension/pi/v1/contextInjection.ts::installInjectedContext` and dedups on **Pi's own live
+  context projection** (`extension/pi/v1/contextEvidence.ts`: `sessionManager.buildContextEntries()`
+  → `sessionEntryToContextMessages`, native messages unchanged — no perk message union, no
+  compaction-cutoff reconstruction). The typed predicate accepts the selected flavor's marker only
+  as **user content** or as the **owned customType's custom content** (string, or one whole
+  `{type:"text"}` part — parts are never joined; non-text/malformed parts are ignored); assistant/
+  tool/bash output, other customs, plain `custom` state, `details`, and compaction/branch
+  summaries quoting the marker never count. So the session carries ONE live copy per flavor, a
+  compaction that drops the copy from Pi's projection naturally re-injects, and another flavor's
+  live copy under a shared customType never suppresses the selected flavor. Installer order:
+  guarded full-branch read (failure → return, `select` never called) → `select` (eligibility +
+  flavor from full-branch state) → off-table key refused → the submitting `event.prompt` carrying
+  the **selected** marker suppresses (cold delivery before persistence; another flavor's marker
+  does not) → guarded projection read (failure → return, nothing constructed) → the typed live
+  check → the content thunk runs only on a miss. Stale stripping stays separate from projection:
+  its guarded branch read degrades to `[]` for `spec.live`, and when no longer live it strips the
+  owned customType and user messages carrying any owned flavor marker (non-user quotes and
+  unrelated content survive); each caller's selection/liveness policy is unchanged (plan defers to
+  the objective/gist authors with gate-only liveness; objective/gist are gate-and-stage; plannotator
+  keeps three markers under one customType with provider-selection liveness; tombell keeps its
+  persisted foreign-mode fallback and authoring-stage exclusions).
 
 **Fail loudly on a missing var.** jinja2 uses `StrictUndefined` (raises `jinja2.UndefinedError`);
 the vendored `miniJinja` renderer matches it — a referenced name that is **absent OR non-string**
@@ -6091,7 +6132,11 @@ asymmetry). Selection precedence + the two roots are §8.1. The rest of the post
 2. **Binding delivery mechanism differs; content does not.** Cold-local launches append the
    rendered bindings as a prompt suffix (`render_cold_bindings`); warm sessions and the remote
    worker receive the same render via §8.9 Mechanism A (in-session injection), dedup'd by
-   `BINDING_HEADER`. Content byte-parity is enforced (`tests/test_binding_render_parity.py`).
+   `BINDING_HEADER` — on the launch turn via the submitting prompt, thereafter via Pi's own
+   live context projection (the persisted cold prompt as user content or the owned
+   `perk:binding-context` custom; §8.9), so neither path double-delivers and a compaction that
+   drops the delivery from Pi's projection re-delivers on either path. Content byte-parity is
+   enforced (`tests/test_binding_render_parity.py`).
    Skill *installation* also differs by path: cold-local mirrors `repo_root/.agents/skills/`
    into the worktree (`materialize_skills`, loud-but-non-fatal); the remote worker populates the
    checkout's `.agents/skills/` via the skills-CLI sync during positioning (**fatal**,

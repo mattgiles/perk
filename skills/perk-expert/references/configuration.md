@@ -538,6 +538,16 @@ A row at a trigger perk already binds overrides perk's default there; a row at a
 added. See the binding recipe in
 [customization-recipes.md](./customization-recipes.md).
 
+**Delivery semantics.** A `stage:` binding reaches the model once per live context: a cold launch
+carries the render in its initial prompt; a warm or remote-worker session receives the same render
+as a hidden context message on the first turn that lacks it. The stage is read from the full
+session history (eligibility survives compaction); whether the render is still present is Pi's
+decision — perk asks Pi's own context projection whether the header is live as the user's prompt or
+as perk's hidden message. A compaction that drops the render re-delivers it next turn; a summary
+quoting the header is not delivery. User prompts are never stripped, even after the stage stops
+binding — only perk's stale hidden binding message is. Delivery, not enforcement: bindings grant no
+tools.
+
 ```toml
 [[bindings]]
 trigger = "stage:implement"

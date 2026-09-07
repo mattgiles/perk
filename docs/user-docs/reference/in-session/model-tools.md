@@ -184,6 +184,15 @@ but still undergo their ordinary authority checks. The sanctioned artifact write
 review/exploration companions, research and delegation retain their existing carve-outs; this is
 not an OS sandbox or an argument-level certificate for delegation, browser automation or web tools.
 
+**Guidance lifetime versus the structural gate.** While the gate is on, perk also injects a hidden
+`[READ-ONLY MODE]` guidance message once per session-tree branch: the whole branch history decides,
+so a copy that compaction has summarized out of the model's context is not re-injected, while a
+branch that never carried it receives one. That is deliberate — the guidance is advisory prose, and
+the tool-call gate above enforces regardless of whether the model can still read it. The other
+hidden guidance perk injects (authoring and provider contexts, stage bindings, agent scratch) has
+the opposite lifetime: it is re-delivered whenever Pi's own context projection no longer carries
+it, because those messages exist to be read, not to enforce.
+
 The bash gate admits these two exact whitespace-separated plan-context query forms (optional
 surrounding whitespace): `perk pr review-context --expected-pr N --json`, with N matching
 `[1-9][0-9]*`, and `perk pr feedback --json`. `cd … && query` works because every segment is
