@@ -58,6 +58,16 @@ operator-facing; each entry links to the page that owns the detail.
   interior on the same provider name, package, tools, and fallback posture. It is the mechanism;
   a **provider** is one selectable catalog entry. See
   [Provider seam — the supported set](./providers-and-backends.md#provider-seam-the-supported-set).
+- **Refined.** A roadmap node whose carrier holds a valid saved **refinement** record. Derived from
+  the carrier comment alone — never a node status, header, manifest, or plan-ref field — and
+  neither a claim, readiness, nor a freshness proof: a refined node is exactly as selectable for
+  planning as before, and a changed node source reads as advisory drift, not absence. See
+  [Node refinements](./objectives.md#node-refinements-linear-project-objectives-only).
+- **Refinement.** A dated, reviewed, advisory elaboration of one existing roadmap node, persisted
+  as a single marked comment on the node's carrier with its authoring provenance and the node
+  source it was written against. Content only: not an executable plan, node status, claim,
+  readiness, or freshness proof; stored metadata never authenticates human approval. See
+  [Node refinements](./objectives.md#node-refinements-linear-project-objectives-only).
 - **Roadmap node.** One bounded unit of objective work, with status, dependencies, and an optional
   plan/PR backlink. See [The roadmap node schema](./objectives.md#the-roadmap-node-schema).
 - **Run.** One identified workflow execution attempt, minted by a cold launch and used to correlate

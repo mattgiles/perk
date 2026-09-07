@@ -1259,6 +1259,78 @@ class TestServiceOverLinear:
         assert len(ws.comments_of(node_issue)) == 3
         assert "perk impl" in str(node_issue["description"])  # the plan callout is intact
 
+    def test_reads_survive_done_and_skipped_while_authoring_refuses(self) -> None:
+        ws, store, issues = _harness()
+        obj_id = _seed(store)
+        read = service.select_refinement_target(store, issues, objective_id=obj_id, node_id="1.10")
+        saved = service.save_node_refinement(
+            store,
+            issues,
+            request=RefinementSaveRequest(document=_document(read.target), expected=read.expected),
+        )
+        for status in (objective.NodeStatus.DONE, objective.NodeStatus.SKIPPED):
+            store.update_objective_node(objective_id=obj_id, node_id="1.10", status=status)
+            after = service.read_node_refinement(store, issues, objective_id=obj_id, node_id="1.10")
+            assert after.saved == saved and after.target.status is status
+            start = len(ws.requests)
+            _err(
+                lambda a=after: service.save_node_refinement(
+                    store,
+                    issues,
+                    request=RefinementSaveRequest(
+                        document=_document(a.target, "## again\n"), expected=a.expected
+                    ),
+                ),
+                RefinementErrorCode.NODE_INELIGIBLE,
+            )
+            assert _mutations(ws, start) == []
+            # Default selection never offers it either.
+            picked = service.select_refinement_target(store, issues, objective_id=obj_id)
+            assert picked.target.identity.node_id != "1.10"
+        # Native cancellation alone (persisted status still pending) reads skipped + refuses.
+        store.update_objective_node(
+            objective_id=obj_id, node_id="1.10", status=objective.NodeStatus.PENDING
+        )
+        _node_issue(ws, obj_id, "1.10")["state_id"] = "st-canceled"
+        after = service.read_node_refinement(store, issues, objective_id=obj_id, node_id="1.10")
+        assert after.saved == saved and after.target.status is objective.NodeStatus.SKIPPED
+        _err(
+            lambda: service.select_refinement_target(
+                store, issues, objective_id=obj_id, node_id="1.10"
+            ),
+            RefinementErrorCode.NODE_INELIGIBLE,
+        )
+
+    def test_fidelity_is_the_shared_linear_rendering(self) -> None:
+        # Markdown carrying perk HTML markers / a <details> wrapper is stored exactly as every
+        # other Linear comment (transcoded), and reads back in that stored form.
+        ws, store, issues = _harness()
+        obj_id = _seed(store)
+        read = service.select_refinement_target(store, issues, objective_id=obj_id, node_id="1.2")
+        markdown = plan.render_plan_body("# Example\n\ncontent", style="html") + "\n"
+        assert "<details>" in markdown and "<!-- perk:metadata-block:plan-body -->" in markdown
+        document = _document(read.target, markdown)
+        saved = service.save_node_refinement(
+            store,
+            issues,
+            request=RefinementSaveRequest(document=document, expected=read.expected),
+        )
+        node_issue = _node_issue(ws, obj_id, "1.2")
+        [comment] = ws.comments_of(node_issue)
+        assert comment["body"] == to_linear_markdown(codec.render_refinement(document))
+        assert saved.document.markdown == to_linear_markdown(markdown)
+        assert "`perk:metadata-block:plan-body`" in saved.document.markdown
+        assert "<details>" not in saved.document.markdown
+        # The stored form is never the plan, and a retry with the same document converges.
+        assert issues.get_plan_body(issue_id=str(node_issue["identifier"])) is None
+        start = len(ws.requests)
+        again = service.save_node_refinement(
+            store,
+            issues,
+            request=RefinementSaveRequest(document=document, expected=read.expected),
+        )
+        assert again == saved and _mutations(ws, start) == []
+
     def test_adoption_never_overwrites_a_refinement_carrying_a_plan_example(self) -> None:
         ws, _store, issues = _harness()
         issue = _bare_issue(ws)
