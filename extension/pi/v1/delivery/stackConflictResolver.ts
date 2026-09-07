@@ -60,10 +60,11 @@ export function createStackConflictResolver(
   function identity(ctx: ExtensionContext): Identity | null {
     const state = rebuildWorkflowState(branchOf(ctx));
     const sessionId = ctx.sessionManager.getSessionId();
+    // Ordinary warm sessions omit mode and are writable; the effective gate is checked separately.
     if (
       !state.run_id ||
       !sessionId ||
-      state.mode !== "read-write" ||
+      state.mode === "read-only" ||
       planningStageRefusal(ctx, "objective-sync") !== null
     )
       return null;

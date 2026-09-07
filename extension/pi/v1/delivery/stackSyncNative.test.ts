@@ -26,6 +26,7 @@ async function setup(
   options: {
     value?: unknown;
     status?: string;
+    warm?: boolean;
     continuation?: object;
     model?: string;
     delivery?: StackResolutionDelivery;
@@ -33,7 +34,9 @@ async function setup(
     script?: Parameters<typeof fakeConflictResolver>[1];
   } = {},
 ) {
-  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const cwd = options.warm
+    ? scaffoldRepo()
+    : scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   gitInit(cwd, { dirty: false });
   const worktree = join(cwd, `sync-${RETAINED_OPERATION}`);
   execFileSync("git", ["-C", cwd, "worktree", "add", "--detach", worktree], {
@@ -105,7 +108,7 @@ async function setup(
   };
   const h = await loadPerkSession({
     cwd,
-    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    env: { PERK_RUN_ID: options.warm ? undefined : "01RID", PERK_BIN: bin },
     resolverEngine: engine.resolverEngine,
     stackResolutionDelivery: options.delivery,
     extraExtensions: [engine.extension],
@@ -141,6 +144,56 @@ function details(result: { details: unknown }) {
     objective?: string;
     resolution?: ConflictResolutionResult;
   };
+}
+
+for (const resolve of [false, true]) {
+  test(`ordinary warm session's undefined mode remains writable: resolve=${resolve}`, async () => {
+    const w = await setup({ warm: true });
+    try {
+      assert.equal(w.h.workflowState().mode, undefined);
+      assert.ok(w.h.workflowState().run_id);
+      const r = await w.h.invokeTool("objective_stack_sync", { objective: "7", resolve });
+      assert.equal(w.engine.requests.length, 1);
+      assert.equal(w.engine.requests[0]?.ownerRunId, w.h.workflowState().run_id);
+      assert.equal(details(r).ok, resolve);
+      if (resolve) assert.equal(details(r).resolution?.kind, "continuation-ready");
+      else
+        assert.deepEqual(r.details, {
+          ok: false,
+          error: conflict.message,
+          error_type: "rebase_conflict",
+        });
+      assert.equal(
+        w.h.workflowState().mode,
+        undefined,
+        "resolution must not manufacture a mode entry",
+      );
+      assert.equal(w.h.workflowState().conflict_resolution_attempts, 1);
+      assert.equal(w.injected.length, 1);
+      assert.match(w.injected[0] ?? "", /NEW explicit human approval/);
+      assert.equal(existsSync(w.lock), false);
+      assert.equal(existsSync(resolverLockDir(w.manifest)), true);
+    } finally {
+      w.h.dispose();
+    }
+  });
+}
+
+for (const restriction of [{ mode: "read-only" }, { stage: "plan" }]) {
+  test(`ordinary warm session still refuses explicit restrictions: ${JSON.stringify(restriction)}`, async () => {
+    const w = await setup({ warm: true });
+    try {
+      w.append(restriction);
+      const r = await w.h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
+      assert.equal(details(r).error_type, "state_error");
+      assert.deepEqual(w.calls(), []);
+      assert.deepEqual(w.engine.preflights, []);
+      assert.equal(existsSync(resolverLockDir(w.manifest)), false);
+      assert.equal(w.h.workflowState().conflict_resolution_attempts, undefined);
+    } finally {
+      w.h.dispose();
+    }
+  });
 }
 
 for (const params of [

@@ -8628,12 +8628,18 @@ EEXIST on mkdir) are contention; every OTHER claim/lease filesystem failure is t
 **Direct awaited dispatch.** `stackConflictResolver.ts` owns one immediate invocation per
 activation, not a new tool, queue or persisted pending authorization. Overlap/invalid-entry refuses
 with a specific `state_error` before status/claim/increment. Its preparation callback receives an
-`isCurrent` guard, checked after the awaited cold status read and before the synchronous
-claim/increment tail; stale/cancelled reads become local `state_error`, not no-continuation.
+`isCurrent` guard, checked after the awaited cold status read and again synchronously at both
+claim acquisition and counter write. The additional promise continuation after `readProjection`
+returns cannot cross the write fence: revoked preparation acquires no claim or increment; revocation
+observed at counter write releases only this call's acquired claim. Stale/cancelled preparation
+becomes local `state_error`, not no-continuation.
 The existing preparation order and `dispatched` outcome remain unchanged. On `dispatched`, freeze
 the corroborated facts, parent session UUID/run id, parent cwd, activation/context generation and
 verified attempt. Only that active request object with unchanged identity/counter and effective
-read-write/non-planning state can authorize retained execution; submit authorization cannot.
+writable/non-planning state can authorize retained execution; submit authorization cannot.
+An omitted workflow mode in an ordinary warm session preserves toolGating's writable default,
+without manufacturing a mode entry. Explicit read-only mode, the effective read-only floor and
+planning-stage restrictions still refuse.
 `session_start` and `session_tree` invalidate previous invocations; shutdown revokes before awaiting
 engine shutdown. The composed tool/controller signal reaches native execution; revalidate after
 preflight and acquisition, and after execution before settling the operation. Revocation/cancellation

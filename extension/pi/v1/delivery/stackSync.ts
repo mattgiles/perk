@@ -320,8 +320,15 @@ export async function runSyncResolution(
 ): Promise<StackResolutionOutcome> {
   return resolver.run(
     ctx,
-    (isCurrent) =>
-      decideSyncResolution(
+    (isCurrent) => {
+      const requireCurrent = () => {
+        if (!isCurrent())
+          throw new Error(
+            `retained resolver preparation ${signal?.aborted ? "cancelled" : "unauthorized"}`,
+          );
+      };
+      const attempts = conflictAttemptsFor(pi, ctx);
+      return decideSyncResolution(
         {
           readProjection: async () => {
             const r = await runColdDoor<ColdJson>(
@@ -330,21 +337,29 @@ export async function runSyncResolution(
               ["objective", "stack", "status", objective, "--json"],
               { label: "perk objective stack status", decode: (payload) => payload },
             );
-            // The total preparation boundary translates this local refusal, before claim/increment.
-            if (!isCurrent())
-              throw new Error(
-                `retained resolver preparation ${signal?.aborted ? "cancelled" : "unauthorized"}`,
-              );
+            requireCurrent();
             return r.ok ? { ok: true, payload: r.data } : { ok: false, message: r.message };
           },
           claim: {
-            acquire: (manifestPath, operationId) => acquireResolverLease(manifestPath, operationId),
+            acquire: (manifestPath, operationId) => {
+              // Awaiting readProjection adds another continuation: fence the actual write too.
+              requireCurrent();
+              return acquireResolverLease(manifestPath, operationId);
+            },
             release: (manifestPath, token) => releaseResolverClaim(manifestPath, token),
           },
-          attempts: conflictAttemptsFor(pi, ctx),
+          attempts: {
+            read: attempts.read,
+            write: (next) => {
+              // A revoked write throws into the preparation boundary, releasing this call's claim.
+              requireCurrent();
+              return attempts.write(next);
+            },
+          },
         },
         refusalMessage,
-      ),
+      );
+    },
     signal,
   );
 }

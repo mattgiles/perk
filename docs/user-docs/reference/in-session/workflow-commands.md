@@ -259,6 +259,9 @@ match it refuses and asks for an explicit objective.
   Only the code-classified `continuation-ready` result permits an offer: approve continuation
   anew before a separate `continue:true` call. Initial sync approval is not publication consent.
   The child never starts a new rebase, pushes or aborts; every other result withholds the offer.
+  Ordinary writable Pi sessions work without an explicit workflow-mode entry; read-only and
+  planning restrictions still apply. Cancellation or session-tree navigation is rechecked at
+  claim acquisition and attempt increment, so revoked preparation cannot spend a new attempt.
 
 Paired tools are non-terminating and strictly decoded; malformed or mutually exclusive fields
 refuse before the cold worker runs:
