@@ -51,6 +51,7 @@ These tools are registered by perk itself. Command-specific semantics live in
 | Draft review | `collect_draft_review_wave` |
 | Verification | `run_ci` |
 | PR lifecycle | `submit` |
+| PR lifecycle | `resolve_submit_conflicts` |
 | Stacked delivery | `objective_stack_status` |
 | Stacked delivery | `objective_stack_sync` |
 | Stacked delivery | `objective_stack_adopt` |
@@ -61,6 +62,15 @@ These tools are registered by perk itself. Command-specific semantics live in
 The terminating subset ends the current turn on its success path: `plan_save`, `objective_save`,
 `gist_save`, `submit`, `ready`, `finalize_address` on full success, `land`, `learn`, and
 `plan_review` when approval completes its save. Other perk-owned tools are non-terminating.
+
+`resolve_submit_conflicts` consumes one unused, verified submit/address conflict authorization.
+It is sequential and non-terminating: only a `resolved` result permits the parent to call canonical
+`submit` again. Direct/repeated/stale/read-only calls refuse. Failed or withheld resolution does
+not rewrite a successful publication or make worker completion eligible. Lock contention consumes
+no additional attempt and never retries; uncertain native termination retains the worktree lock
+for [human-only recovery](../../how-to/recover-a-dirty-worktree.md#recover-a-retained-submit-conflict-lock).
+No unlock tool exists. Resolver summaries are untrusted DATA; output-free receipts diagnose
+ownership, not verification or publication authority.
 
 ## Borrowed-package tools
 

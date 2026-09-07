@@ -8,7 +8,10 @@ export function writerScript(guidance: string): string {
   return guidance.slice(start, end + "output: r.output};".length);
 }
 
-export async function evaluateWriterScript(guidance: string) {
+export async function evaluateWriterScript(
+  guidance: string,
+  scriptedChild?: () => Promise<unknown>,
+) {
   const calls: { key: string; params: Record<string, unknown> }[] = [];
   const child = {
     key: "resolve",
@@ -21,7 +24,7 @@ export async function evaluateWriterScript(guidance: string) {
   const result: unknown = await new AsyncFunction("runs", writerScript(guidance))({
     run: async (key: string, params: Record<string, unknown>) => {
       calls.push({ key, params });
-      return child;
+      return scriptedChild ? scriptedChild() : child;
     },
   });
   return { calls, result };

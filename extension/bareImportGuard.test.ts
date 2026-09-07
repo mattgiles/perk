@@ -8,7 +8,7 @@
 // dependency. This source-scan test fails CI on any drift (e.g. re-introducing `nunjucks`/`yaml`).
 // It covers static `import … from`, bare side-effect `import "…"`, and the string-literal form of
 // dynamic `import(…)` / `require(…)` (a computed specifier has no literal to scan, but the bundled
-// extension uses none).
+// extension uses none, except the confined source-bound optional preflight loader described below).
 //
 // Paired with `tests/test_packaging.py::test_no_runtime_dependencies` (package.json has no runtime
 // `dependencies`); together they durably pin the invariant the vendored miniYaml/miniJinja readers
@@ -74,6 +74,14 @@ function specifiersOf(strippedSource: string): string[] {
   return specs;
 }
 
+// This one optional loader resolves jiti from the REGISTERED engine's manifest, not perk's
+// package/dependencies. It cannot generalize to another caller or import; compatibility tests
+// exercise the real public export and unavailable/escaping cases.
+const PUBLIC_PREFLIGHT_LOADER = "pi/v1/delivery/conflictResolverEngine.ts";
+function allowedAt(file: string, spec: string): boolean {
+  return isAllowed(spec) || (file === PUBLIC_PREFLIGHT_LOADER && spec === "jiti");
+}
+
 /** A specifier is allowed iff it is a Node builtin, a relative path, or a host/peer package. */
 function isAllowed(spec: string): boolean {
   return spec.startsWith("node:") || spec.startsWith(".") || ALLOWED_PACKAGES.has(spec);
@@ -89,7 +97,7 @@ test("production extension sources import only node:/relative/host specifiers (z
   for (const file of files) {
     const stripped = stripComments(readFileSync(path.join(import.meta.dirname, file), "utf8"));
     for (const spec of specifiersOf(stripped)) {
-      if (!isAllowed(spec)) violations.push(`${file}: import "${spec}"`);
+      if (!allowedAt(file, spec)) violations.push(`${file}: import "${spec}"`);
     }
   }
   assert.deepEqual(
@@ -99,6 +107,18 @@ test("production extension sources import only node:/relative/host specifiers (z
       "Vendor the dependency with Node builtins only (see substrate/miniYaml.ts / substrate/miniJinja.ts) " +
       "or add it to package.json peerDependencies + this guard's ALLOWED_PACKAGES if pi resolves it as a host alias.",
   );
+});
+
+test("source-bound public loader exception is exact, live, and cannot widen other imports", () => {
+  const source = stripComments(
+    readFileSync(path.join(import.meta.dirname, PUBLIC_PREFLIGHT_LOADER), "utf8"),
+  );
+  assert.ok(specifiersOf(source).includes("jiti"));
+  assert.match(source, /createRequire\(manifestPath\)/);
+  assert.match(source, /manifest\?\.name === "pi-subagents"/);
+  assert.match(source, /realpathSync\(resolve\(root, target\)\)/);
+  assert.equal(allowedAt("delivery/rogue.ts", "jiti"), false);
+  assert.equal(allowedAt(PUBLIC_PREFLIGHT_LOADER, "pi-subagents/private"), false);
 });
 
 test("synthetic positive: fabricated bare imports (static, side-effect, dynamic, require) are flagged", () => {

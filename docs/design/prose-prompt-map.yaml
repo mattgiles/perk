@@ -446,7 +446,7 @@ routes:
     role: tool-contract
     priority: 90
   - id: ts-submit
-    match: { paths: ["extension/pi/v1/delivery/submit.ts", "extension/pi/v1/delivery/ready.ts", "extension/pi/v1/delivery/ci.ts"] }
+    match: { paths: ["extension/pi/v1/delivery/submit.ts", "extension/pi/v1/delivery/submitConflict.ts", "extension/pi/v1/delivery/ready.ts", "extension/pi/v1/delivery/ci.ts"] }
     capability: delivery.submit
     audience: shipped
     role: tool-contract
@@ -549,6 +549,12 @@ assemblies:
       - { unit: "markdown:skills/perk-implement/SKILL.md", label: Bound implementation skill }
       - { boundary: runtime-state, label: Active plan and worktree state }
       - { boundary: user-content, label: Human steering }
+  - id: submit-conflict
+    layers:
+      - { boundary: runtime-state, label: Verified parent attempt and trusted worktree }
+      - { unit: "markdown:prompts/stages/conflict-resolution.md", label: Single-use resolver drive }
+      - { unit: "typescript-tool:resolve_submit_conflicts", label: Foreground dispatch and re-submit contract }
+      - { boundary: runtime-state, label: Code-built task and native terminal plus worktree-lock evidence }
   - id: address
     layers:
       - { boundary: pi-system, label: Pi system and host policy }
@@ -653,6 +659,15 @@ scenarios:
       read_cmd: "gh issue view 42 --comments"
     include_ambient: false
     include_tools: true
+  - id: submit-conflict-authorized
+    assembly: submit-conflict
+    label: Verified conflict attempt
+    variables:
+      base: "main"
+      attempt: "1"
+      cap: "2"
+    include_ambient: false
+    include_tools: true
   - id: address-actionable
     assembly: address
     label: Actionable feedback
@@ -729,6 +744,7 @@ concerns:
     summary: Parent workflows assign bounded work and consume typed reports without hand-transcribing child prompts.
     canonical_unit: "markdown:skills/perk-learn/SKILL.md"
     related:
+      - { unit: "typescript-tool:resolve_submit_conflicts", relation: Code-owned foreground resolver with output-free ownership receipt. }
       - { unit: "typescript-tool:run_learn_wave", relation: Code-owned analyst wave. }
       - { unit: "typescript-tool:run_pr_review_wave", relation: Code-owned reviewer wave. }
       - { unit: "markdown:agents/learn-analyst.md", relation: Bounded child contract. }

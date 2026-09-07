@@ -304,7 +304,7 @@ default.
 | `pr-reviewer` | string (model id) | _(frontmatter default)_ |
 | `review-classifier` | string (model id) | _(frontmatter default)_ — consumed by the `classify_review_feedback` tool at execute time |
 | `objective-explorer` | string (model id) | _(frontmatter default)_ — consumed by the `explore_objective_node` tool at execute time |
-| `conflict-resolver` | string (model id) | _(frontmatter default)_ |
+| `conflict-resolver` | string (model id) | _(frontmatter default)_ — read at `resolve_submit_conflicts` execution for submit/address; retained continuation still uses its script |
 | `learn-analyst` | string (model id) | _(frontmatter default)_ |
 | `adversarial-reviewer` | string (model id) | _(frontmatter default)_ |
 | `draft-reviewer` | string (model id) | _(frontmatter default)_ |
@@ -324,6 +324,15 @@ suspicious suffix (an alphabetic last-colon segment that is not a pi thinking le
 pr-reviewer = "anthropic/claude-sonnet-4-5:high"
 review-classifier = "anthropic/claude-haiku-4-5"
 ```
+
+Submit/address conflict resolution consumes this existing override through native foreground
+structured delegation (including `inherit` and native ordered fallbacks), not model-authored
+launch text. No new config key is added. The native engine setting `worktree` in
+`join(getAgentDir(), "extensions/subagent/config.json")` must be absent/false (or the file missing).
+True, nonboolean, malformed/unreadable or activation-changed settings refuse; inspect/correct and
+reload rather than allocating a second worktree or switching mode. Reload does not clear retained
+`perk-submit-conflict.lock` files in the canonical per-worktree Git directory. Recovery is human-
+only after all sessions/writers/subprocesses are quiescent; PID death alone is insufficient.
 
 ### `[models.stages.<id>]`
 

@@ -545,6 +545,8 @@ export async function loadPerkSession(opts: {
    * `plannotator-review` command so presence probes see it). Offline like everything here.
    */
   extraExtensions?: ((pi: Parameters<typeof perk>[0]) => void | Promise<void>)[];
+  /** Construction-only fake public preflight/lock/config inputs for foreground resolver tests. */
+  resolverEngine?: NonNullable<Parameters<typeof perk>[1]>["resolverEngine"];
 }): Promise<PerkSession> {
   const { cwd, headful = true } = opts;
   const agentDir = mkdtempSync(join(tmpdir(), "perk-agent-"));
@@ -581,7 +583,10 @@ export async function loadPerkSession(opts: {
     systemPrompt: opts.systemPrompt,
     // Named inline factory: startup/extension-load-error surfaces then say `<inline:perk>`
     // instead of the positional `<inline:1>`.
-    extensionFactories: [{ name: "perk", factory: perk }, ...(opts.extraExtensions ?? [])],
+    extensionFactories: [
+      { name: "perk", factory: (pi) => perk(pi, { resolverEngine: opts.resolverEngine }) },
+      ...(opts.extraExtensions ?? []),
+    ],
   });
   await loader.reload();
   const model =

@@ -41,6 +41,37 @@ for the boundary definition.
    that worktree, or [`perk worktree wipe --force`](../reference/cli/remote-and-utility.md#perk-worktree-wipe) to clean
    up all merged plan worktrees.
 
+## Recover a retained submit-conflict lock
+
+`resolve_submit_conflicts` reports the exact `perk-submit-conflict.lock` path inside the canonical
+**per-worktree Git directory** (`git rev-parse --absolute-git-dir`). A busy lock excludes another
+participating submit/address resolver, even when it is old, empty, malformed, or records a dead
+PID. A retained lock means termination was uncertain; an ownership/I/O error also requires
+inspection. Reload, process exit, resetting an attempt counter, or clearing pending authorization
+never unlocks it. Separate linked worktrees have separate locks.
+
+Recovery is **human-only**, in this order:
+
+1. Stop or quiesce **every session** capable of using this worktree. Establish that the native
+   writer **and its subprocesses** are stopped. PID death alone is not enough; do not race a live
+   owner or rely on elapsed time.
+2. Inspect the exact reported path without following a symlink. Confirm it is the expected
+   regular lock file, and inspect its device/inode identity and schema-1 owner metadata (PID,
+   session/run/request ids, canonical worktree identity and creation time).
+3. Inspect `git status`, the rebase-in-progress state, index and HEAD in that worktree. Preserve
+   any valuable unresolved work. A cancellation may have happened after a rebase or push; it did
+   not roll those operations back.
+4. **Only after quiescence and inspection**, remove that exact regular lock file. Do not use
+   recursive removal or replace it while a participant is active. If its identity changed, stop
+   and investigate rather than removing the replacement.
+5. Decide whether the worktree needs repair, verification, or canonical `/submit`. Lock cleanup
+   itself is not permission to abort, rebase or push. If uncertainty remains, leave the lock.
+
+There is no model-callable unlock, automatic stale cleanup or recovery CLI. This file coordinates
+Perk's code-owned submit/address resolver launches only; it does not fence arbitrary manual Git
+commands. The stacked retained-continuation session claim is a different mechanism and keeps its
+own consent/continuation rules.
+
 ## Watch out
 
 - `--force` is **destructive** — it removes the worktree (and its uncommitted changes) for good.

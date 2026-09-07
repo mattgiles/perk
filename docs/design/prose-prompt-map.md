@@ -5,9 +5,9 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **224** canonical source units
-- **1213** logical fragments
-- **16** session shapes and **10** assemblies
+- **225** canonical source units
+- **1218** logical fragments
+- **16** session shapes and **11** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
 
@@ -627,6 +627,7 @@ Validate, publish, and prepare changes for review and landing.
 | `typescript-model-call:extension/pi/v1/delivery/submit.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/submit.ts`](../../extension/pi/v1/delivery/submit.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/delivery/submit.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/submit.ts`](../../extension/pi/v1/delivery/submit.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-tool:ready` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/ready.ts`](../../extension/pi/v1/delivery/ready.ts) · `tool:ready` | — |
+| `typescript-tool:resolve_submit_conflicts` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/submitConflict.ts`](../../extension/pi/v1/delivery/submitConflict.ts) · `tool:resolve_submit_conflicts` | — |
 | `typescript-tool:run_ci` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/ci.ts`](../../extension/pi/v1/delivery/ci.ts) · `tool:run_ci` | — |
 | `typescript-tool:submit` | `tool-contract` | `shipped` | [`extension/pi/v1/delivery/submit.ts`](../../extension/pi/v1/delivery/submit.ts) · `tool:submit` | — |
 
@@ -645,6 +646,12 @@ Validate, publish, and prepare changes for review and landing.
   - `description` — description (`tool:ready.description`)
   - `promptSnippet` — promptSnippet (`tool:ready.promptSnippet`)
   - `promptGuidelines` — promptGuidelines (`tool:ready.promptGuidelines`)
+- `typescript-tool:resolve_submit_conflicts`
+  - `description` — description (`tool:resolve_submit_conflicts.description`)
+  - `promptSnippet` — promptSnippet (`tool:resolve_submit_conflicts.promptSnippet`)
+  - `promptGuidelines.0` — promptGuidelines item 1 (`tool:resolve_submit_conflicts.promptGuidelines.0`)
+  - `promptGuidelines.1` — promptGuidelines item 2 (`tool:resolve_submit_conflicts.promptGuidelines.1`)
+  - `promptGuidelines.2` — promptGuidelines item 3 (`tool:resolve_submit_conflicts.promptGuidelines.2`)
 - `typescript-tool:run_ci`
   - `description` — description (`tool:run_ci.description`)
   - `promptSnippet` — promptSnippet (`tool:run_ci.promptSnippet`)
@@ -2195,6 +2202,7 @@ Parent workflows assign bounded work and consume typed reports without hand-tran
 
 Canonical carrier: `markdown:skills/perk-learn/SKILL.md`
 
+- `typescript-tool:resolve_submit_conflicts` — Code-owned foreground resolver with output-free ownership receipt.
 - `typescript-tool:run_learn_wave` — Code-owned analyst wave.
 - `typescript-tool:run_pr_review_wave` — Code-owned reviewer wave.
 - `markdown:agents/learn-analyst.md` — Bounded child contract.

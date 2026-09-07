@@ -79,17 +79,29 @@ Push the active plan's branch and open a draft PR linking the plan. Paired tool:
 
 - **`submit`** — publish the branch and open the draft PR. *Terminating.*
 
-After opening the PR, `/submit` probes mergeability with `git merge-tree`. On conflict it launches
-a fresh write-capable `perk.conflict-resolver`, which rebases onto the target, resolves conflicts,
-and force-pushes; re-run `/submit` to confirm. The re-drive is bounded to two attempts. Persistent
-conflicts require manual resolution. If the probe cannot run, submission succeeds with a note that
-mergeability was not determined.
+After opening the PR, `/submit` probes mergeability with `git merge-tree`. A conflict persists one
+of at most two attempts and primes **`resolve_submit_conflicts`**, a parameterless, single-use,
+non-terminating tool. Its code-owned fresh foreground `perk.conflict-resolver` reads authoritative
+PR context, rebases, resolves, verifies and pushes with `--force-with-lease`. Only on `resolved`
+does the parent call canonical `submit` again to confirm mergeability. A child report cannot itself
+finish the work. Withholding/failure means stop and report, not local conflict edits or another
+launch. Mechanical publication remains successful even if resolution fails. If the probe cannot
+run, submission succeeds with mergeability undetermined.
 
-Resolver guidance selects foreground for both the enclosing workflow and its child, with fresh
-context and actual child cwd from the current trusted plan worktree (not a task-supplied PR head).
-The directory and native executable/non-disabled profile must be present and unambiguous there;
-otherwise stop before mutation. There is no execution-mode or extension-composition fallback.
-Native cancellation remains available; one writer owns the worktree.
+Authorization is bound to this session, run, worktree and unchanged attempt counter; direct,
+repeated, stale or read-only calls refuse. Full address finalization uses the same tool and cap,
+only after publication and thread resolution succeed. Missing/disabled/ambiguous/shadowed native
+profiles stop before mutation. Native `worktree: true` allocation defaults are incompatible with
+Perk's Python-owned worktree; inspect the native setting and reload after correction, rather than
+switching execution mode or adding extensions. No new Perk config key is involved.
+
+A persistent `perk-submit-conflict.lock` in the worktree's canonical Git directory excludes other
+participating submit/address resolvers across sessions/processes. Contention does not refund an
+attempt or retry. Confirmed native completion releases the lock; uncertain termination retains it.
+Cancellation does not undo Git work; reload and PID death do not unlock. Follow the
+[human-only lock recovery procedure](../../how-to/recover-a-dirty-worktree.md#recover-a-retained-submit-conflict-lock)
+when a safe diagnostic reports a retained lock. This does not fence manual Git commands or change
+retained-continuation dispatch.
 
 For a stacked delivery layer, `/submit` publishes onto the parent layer's branch, registers the
 native stack, and records checkpoints only after remote verification. Re-submitting a published

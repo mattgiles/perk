@@ -15,7 +15,6 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { syncConflictResolutionGuidance } from "../pi/v1/delivery/stackSync.ts";
-import { conflictResolutionGuidance } from "../pi/v1/delivery/submit.ts";
 import { parseChildIdentity } from "../substrate/childIdentity.ts";
 import { decodeChildRestrictions } from "../substrate/childRestrictions.ts";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
@@ -266,7 +265,6 @@ test("installed engine: native child profile/preparation and injected cancellati
     }
   });
 
-  const prScript = writerScript(conflictResolutionGuidance("main", 1, 2, cwd));
   const retainedScript = writerScript(
     syncConflictResolutionGuidance(
       {
@@ -282,23 +280,26 @@ test("installed engine: native child profile/preparation and injected cancellati
       2,
     ),
   );
-  await t.test("installed validator accepts actual report golden and both writer scripts", () => {
-    const golden = readFileSync(
-      resolve(import.meta.dirname, "../../shared/subagents/representative-wave-script.js"),
-      "utf8",
-    );
-    assert.deepEqual(waveScriptItems(golden)[0]?.extensionBindings, {
-      "perk.parent-restrictions/1": { readOnly: false },
-    });
-    for (const script of [golden, prScript, retainedScript]) {
-      const result = workflow.validateWorkflowScript(script);
-      assert.equal(result.ok, true, JSON.stringify(result.errors));
-    }
-  });
+  await t.test(
+    "installed validator accepts actual report golden and the retained writer script",
+    () => {
+      const golden = readFileSync(
+        resolve(import.meta.dirname, "../../shared/subagents/representative-wave-script.js"),
+        "utf8",
+      );
+      assert.deepEqual(waveScriptItems(golden)[0]?.extensionBindings, {
+        "perk.parent-restrictions/1": { readOnly: false },
+      });
+      for (const script of [golden, retainedScript]) {
+        const result = workflow.validateWorkflowScript(script);
+        assert.equal(result.ok, true, JSON.stringify(result.errors));
+      }
+    },
+  );
 
   for (const preAborted of [true, false]) {
     await t.test(
-      `PR writer workflow → runSync injected child cancellation: pre-aborted=${preAborted}`,
+      `Retained writer workflow → runSync injected child cancellation: pre-aborted=${preAborted}`,
       async () => {
         const controller = new AbortController();
         const prompted = deferred<void>();
@@ -341,7 +342,7 @@ test("installed engine: native child profile/preparation and injected cancellati
         };
         if (preAborted) controller.abort();
         const running = workflow.runWorkflowScript({
-          script: prScript,
+          script: retainedScript,
           signal: controller.signal,
           timeoutMs: 10_000,
           async status() {

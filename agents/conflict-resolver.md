@@ -131,7 +131,16 @@ nothing more.
 
 ## Report
 
-**Open with the terminal outcome class**, exactly one of:
+When the engine supplies **`structured_output`**, complete through that tool using the requested
+schema, not a first-line prose report. For PR-rebase mode the record has exactly `mode`
+(`pr-rebase`), `outcome` (the classes below), `verification` (`passed`, `failed`, `not-run`),
+`push` (`succeeded`, `failed`, `not-attempted`), and `summary` (nonblank, at most 2,000 characters).
+The summary names checks/blockers, not raw diff or transcript. Report the actual verification
+and push results separately; a completed rebase is not proof of a successful push. PR-mode
+verification failure still remedies or aborts as instructed above; retained-only outcomes never
+claim PR success.
+
+Otherwise retain the first-line protocol: **Open with the terminal outcome class**, exactly one of:
 
 - **completed** — the rebase finished and verification **passed** (name the checks you ran);
 - **verification-failed** — (retained mode) the rebase finished but verification failed (state
