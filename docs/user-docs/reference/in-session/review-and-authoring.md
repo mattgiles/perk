@@ -29,7 +29,13 @@ returns an engine-validated report and never posts.
 The parent unions and deduplicates findings, derives one verdict, then posts once. Actionable work
 becomes an advisory COMMENT review; a clean result becomes a 👍 reaction. Coverage is strict: the
 wave applies one bounded retry, reports any remaining failure as incomplete, and
-`post_pr_review` refuses a clean verdict with `incomplete_coverage`. Exact Ponytail package/skill
+`post_pr_review` refuses a clean verdict with `incomplete_coverage`. Complete coverage is
+necessary but insufficient for clean: the recorded pass also snapshots a minimum verdict from the
+effective post-retry reports (a retry's replacement reports supersede the attempt they replace),
+and a clean verdict over any effective actionable assessment — even one with empty findings — or
+surviving finding is refused with `review_verdict_conflict` before anything is posted. The recorded
+outcome survives that refusal, so the parent may post a reconciled actionable review against it or
+post nothing; there is no override, and FYI notes never change the floor. Exact Ponytail package/skill
 preflight failure is non-retryable: the child does not spawn or fall back to a same-named skill,
 and the attempted `ponytail` lane remains explicitly uncovered with `skill-unavailable` while the
 other lanes continue. Package files are expected to stay stable for the short pass; the child
@@ -67,7 +73,10 @@ Companion tools:
   bounded retry to retryable failures, and return `{ complete, covered, retried, reports,
   failures }`. *Non-terminating.*
 - **`post_pr_review`** — post the reconciled result through `perk pr review-post` and record
-  `last_pr_review`; it enforces incomplete-clean, pending, consumed, and stale-target refusals.
+  `last_pr_review`; it enforces pending, consumed, incomplete-clean, and verdict-conflict
+  refusals (in that order, before the cold door runs) plus the stale-target refusal at mutation
+  time. A refused post records nothing; the verdict-conflict refusal keeps the recorded outcome
+  for a reconciled actionable post.
   After a recorded wave, `last_pr_review.angles` is the authoritative attempted manifest
   (including Ponytail), while `covered_angles` contains only completed schema-valid assessments.
   The PR comes from the cold-door result; callers never supply one. A standalone call before any

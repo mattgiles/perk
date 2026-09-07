@@ -72,6 +72,18 @@ test("prReviewGuidance instructs reconcile/union/dedupe and verdict derivation o
   assert.match(text, /`clean` only when coverage is complete/);
 });
 
+test("prReviewGuidance binds clean to the recorded minimum verdict (and names the refusal + remediation)", () => {
+  const text = prReviewGuidance();
+  assert.match(text, /even with an empty `findings` array/);
+  assert.match(text, /Complete coverage is necessary but insufficient for `clean`/);
+  assert.match(text, /snapshots a minimum verdict from the effective post-retry reports/);
+  assert.match(text, /never lowers that floor/);
+  assert.match(text, /refused with `review_verdict_conflict` before anything is posted/);
+  assert.match(text, /recorded outcome SURVIVES/);
+  assert.match(text, /post a reconciled actionable review against it .* or post nothing/);
+  assert.match(text, /never rerun the wave merely to obtain a favorable verdict/);
+});
+
 test("prReviewGuidance tells the parent to post via the post_pr_review tool", () => {
   const text = prReviewGuidance();
   assert.match(text, /post_pr_review/);

@@ -535,11 +535,25 @@ Automated PR-review postability is PER-ACTIVATION interior state (one holder per
 activation — two bound sessions in one process never share/clobber it), not an appended
 workflow-state field: `null` permits the backwards-compatible standalone post; valid wave input
 moves immediately to `pending` before target resolution (`review_wave_unavailable` on either
-verdict); every normalized outcome records `{pr, complete, attempted, covered}`; one successful
-post consumes it (`review_wave_consumed` thereafter). Bad wave input preserves the prior state.
-A mutation-time PR mismatch returns `stale_review_wave` and moves back to `pending`; other post
-failures keep the recorded outcome retryable. `last_pr_review` is appended only after the
-mutation succeeds.
+verdict); every normalized outcome records `{pr, complete, attempted, covered, minimumVerdict}` —
+`minimumVerdict` (`"clean" | "actionable"`) is the code-owned floor projected ONCE from the
+reviewer's effective post-retry reports (`actionable` iff any effective report is a non-null,
+non-array object whose exact `verdict` is `"actionable"` or whose `findings` is a nonempty
+array), stored as a primitive alongside the copied manifests (never report references; later
+mutation of the returned outcome cannot alter it); one successful post consumes the record
+(`review_wave_consumed` thereafter). Bad wave input preserves the prior state. The pre-publication
+refusal ladder is ordered: (1) `pending` refuses both verdicts (`review_wave_unavailable`);
+(2) `consumed` refuses both (`review_wave_consumed`); (3) a clean verdict over an incomplete
+recorded outcome refuses with `incomplete_coverage` even when its minimum is actionable; (4) a
+clean verdict over a complete recorded outcome whose minimum is `actionable` refuses with
+`review_verdict_conflict`; (5) otherwise the publisher runs. Every refusal happens before batch
+construction and the cold door, changes no state, and appends no `last_pr_review`; the record
+survives a `review_verdict_conflict` for a reconciled actionable post (no coercion, override
+parameter, automatic post, or extra retry). A mutation-time PR mismatch returns
+`stale_review_wave` and moves back to `pending`; other post failures keep the recorded outcome
+(minimum included) retryable. `last_pr_review` is appended only after the mutation succeeds and
+never carries `minimumVerdict` or raw reports — the private floor is distinct from both the
+durable record and the §8.35 attempt receipts.
 
 **Persistence channel:** `pi.appendEntry("perk:workflow-state", data)`. (The *other* Pi
 channel — tool-result `details` — is for state that *is* a tool's output; this is not that.)
@@ -1186,7 +1200,21 @@ lane outside the input menu/cap. Every reviewer uses only
 required assessments produce a typed `blocked` report, normalized into an uncovered `lane-failed`
 failure before retry or posting eligibility; schema validity alone is not completed coverage.
 A normalized result records the bound PR plus explicit effective attempted and covered arrays
-for §8.3's single-use post state. Ponytail coverage rides **one parent-side exact-path
+for §8.3's single-use post state, plus the code-owned **minimum verdict** derived AFTER the one
+bounded retry from exactly the effective report set (`runPrReviewWave`'s ordered post-merge
+reports — a retried key's replacement report supersedes its earlier attempt; attempt receipts,
+superseded attempts, FYI/summary prose, notification previews, and artifact files are never
+inputs). The snapshot is isolated: only the primitive verdict is stored, so mutating the returned
+outcome or its reports after recording cannot lower or raise it, and it is not an ever-actionable
+latch across attempts or passes. Complete coverage is necessary but insufficient for a clean post:
+`post_pr_review` refuses a contradictory clean verdict (`review_verdict_conflict`, ladder in §8.3)
+with no override parameter, coercion to actionable, automatic post, or extra retry — the parent
+posts a reconciled actionable review against the surviving record (its own summary/comments/FYI;
+finding membership is not enforced and no findings are manufactured) or posts nothing. The
+projection is not a second schema validator (the engine owns report validation; its findings arm
+is a conservative safeguard against a contradictory injected report object), and Python retains
+sole GitHub mutation authority unchanged — `perk pr review-post` still compares `expected_pr` and
+accepts an actionable batch without inline comments. Ponytail coverage rides **one parent-side exact-path
 preflight before dispatch** (package name, `pi.skills`, the exact readable skill file, and its
 frontmatter name): a failed preflight never dispatches/spawns that lane — the keyed
 non-retryable `skill-unavailable` failure leaves it honestly uncovered, with no same-named
