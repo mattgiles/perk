@@ -192,6 +192,27 @@ def has_perk_attachment(nodes: list[dict[str, object]], *, kind: str) -> bool:
     return False
 
 
+def perk_attachment_kinds(nodes: list[dict[str, object]]) -> list[str]:
+    """The ``kind`` of every perk-sourced attachment, in node order (duplicates preserved) — the
+    counting primitive behind duplicate-identity and presence checks that must see EVERY
+    envelope, not just the first match. Foreign attachments (non-dict metadata or a
+    non-``perk`` source) are skipped; a perk-sourced envelope whose ``kind`` is missing/blank
+    raises a labelled ``IssueBackendError`` — an unreadable perk identity can never prove the
+    absence of any kind."""
+    kinds: list[str] = []
+    for node in nodes:
+        metadata = node.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        envelope = _PerkAttachmentEnvelope.model_validate(metadata)
+        if envelope.source != "perk":
+            continue
+        if not envelope.kind.strip():
+            raise IssueBackendError("malformed perk attachment: unreadable kind")
+        kinds.append(envelope.kind)
+    return kinds
+
+
 def find_perk_attachment(nodes: list[dict[str, object]], *, kind: str) -> PerkAttachment | None:
     """Find the perk attachment of ``kind`` among raw ``{id, url, metadata}`` attachment nodes.
 

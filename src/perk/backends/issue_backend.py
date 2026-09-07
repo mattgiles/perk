@@ -30,8 +30,11 @@ Contract disciplines (every concrete backend MUST honor these):
   must never interpret.
 """
 
+import hashlib
+import re
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 from perk import plan
 from perk.backends.engagement import (
@@ -48,6 +51,131 @@ class IssueBackendError(Exception):
     Backend-neutral: concrete backends map their native errors (``GitHubError``, Linear HTTP
     errors) into this at the boundary.
     """
+
+
+# The guarded marked-comment error vocabulary (contracts.md §8.67). ``unsupported_backend`` is
+# raised before any operation by a backend without the guarded arm; ``invalid_input`` covers a
+# malformed expectation / a body that does not own its marker; the remaining codes are the
+# observed-state outcomes of the guarded state machine.
+MarkedCommentErrorCode = Literal[
+    "unsupported_backend",
+    "invalid_input",
+    "malformed_comment",
+    "ambiguous_comment",
+    "stale_comment",
+    "backend_error",
+    "write_unverified",
+]
+
+
+class MarkedCommentError(IssueBackendError):
+    """A guarded ``upsert_marked_comment`` (``expected`` supplied) refused or could not verify.
+
+    ``comment_ids`` names the observed comments the outcome rests on (the duplicate set, the
+    stale/malformed comment); ``write_attempted`` is True for every error raised AFTER the one
+    mutation attempt (the caller must read back before deciding anything) and False for
+    validation/preflight refusals (nothing was written).
+    """
+
+    def __init__(
+        self,
+        code: MarkedCommentErrorCode,
+        message: str,
+        *,
+        comment_ids: tuple[str, ...] = (),
+        write_attempted: bool = False,
+    ) -> None:
+        self.code: MarkedCommentErrorCode = code
+        self.comment_ids = comment_ids
+        self.write_attempted = write_attempted
+        super().__init__(message)
+
+
+_BODY_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def body_digest(body: str) -> str:
+    """The canonical digest of an exact comment body: SHA-256 of its UTF-8 bytes, lowercase
+    hexadecimal, no prefix — hashed as stored (no trimming or transcoding first)."""
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def is_canonical_digest(value: str) -> bool:
+    """True when ``value`` spells a canonical body digest (exactly 64 lowercase hex chars)."""
+    return _BODY_DIGEST_RE.match(value) is not None
+
+
+@dataclass(frozen=True)
+class MarkedCommentExpectation:
+    """What a guarded ``upsert_marked_comment`` caller expects to observe before writing.
+
+    Both fields ``None`` ⇒ the marker-owned comment is expected ABSENT; both present ⇒ the
+    exact observed comment (its backend id + the :func:`body_digest` of its stored body) is
+    expected. A partial pair, a blank id, or a non-canonical digest is invalid input (see
+    :meth:`validation_problem`). There is no remote compare-and-swap behind this: it is an
+    observed-conflict check, never synchronization.
+    """
+
+    comment_id: str | None
+    body_digest: str | None
+
+    @property
+    def expects_absence(self) -> bool:
+        return self.comment_id is None and self.body_digest is None
+
+    def validation_problem(self) -> str | None:
+        """The reason this expectation is invalid input, or ``None`` when well-formed."""
+        if self.expects_absence:
+            return None
+        if self.comment_id is None or self.body_digest is None:
+            return "expectation must carry both comment_id and body_digest, or neither"
+        if not self.comment_id.strip():
+            return "expectation comment_id is blank"
+        if not is_canonical_digest(self.body_digest):
+            return "expectation body_digest is not a canonical 64-char lowercase hex digest"
+        return None
+
+
+@dataclass(frozen=True)
+class MarkedCommentScan:
+    """The outcome of :func:`scan_marked_comments`: the comments that OWN the marker (the exact
+    marker is their first physical line and occurs nowhere else) and the comments where the
+    marker is misplaced (present but not first) or repeated."""
+
+    owned: tuple[EngagementComment, ...]
+    malformed: tuple[EngagementComment, ...]
+
+
+def first_line(body: str) -> str:
+    """The first physical line of a body (everything before the first ``\\n``, untrimmed)."""
+    return body.split("\n", 1)[0]
+
+
+def scan_marked_comments(
+    comments: Sequence[EngagementComment], *, forms: Collection[str]
+) -> MarkedCommentScan:
+    """Classify comments against an exact ownership marker given in every accepted encoding
+    (``forms``: e.g. the HTML marker and its Linear inline-code rewrite).
+
+    A comment owns the marker when its first physical line IS one of the forms exactly and the
+    forms occur exactly once in the whole body. A comment whose body contains a form anywhere
+    else — not first (misplaced), or more than once (repeated) — is malformed: a damaged owned
+    record must be surfaced, never re-created beside or silently adopted. Each form is a
+    complete delimited marker string, so a longer key sharing the prefix never matches; a form
+    embedded verbatim in an unrelated comment does count (fail-closed).
+    """
+    unique_forms = tuple(dict.fromkeys(forms))
+    owned: list[EngagementComment] = []
+    malformed: list[EngagementComment] = []
+    for comment in comments:
+        occurrences = sum(comment.body.count(form) for form in unique_forms)
+        if occurrences == 0:
+            continue
+        if first_line(comment.body) in unique_forms and occurrences == 1:
+            owned.append(comment)
+        else:
+            malformed.append(comment)
+    return MarkedCommentScan(owned=tuple(owned), malformed=tuple(malformed))
 
 
 @dataclass(frozen=True)
@@ -70,9 +198,16 @@ class IssueRef:
 
 @dataclass(frozen=True)
 class CommentResult:
-    """An issue comment. ``posted`` is False only for a dry run."""
+    """An issue comment. ``posted`` is False only for a dry run.
+
+    ``verified_comment`` is populated ONLY by a successful non-dry guarded
+    ``upsert_marked_comment`` (``expected`` supplied): the comment as actually observed by the
+    post-write verification scan (id / stored body / author / native timestamps) — never
+    reconstructed from the request. Ordinary callers always see ``None``.
+    """
 
     posted: bool
+    verified_comment: EngagementComment | None = None
 
 
 @dataclass(frozen=True)
@@ -468,13 +603,32 @@ class IssueBackend(Protocol):
         ...
 
     def upsert_marked_comment(
-        self, *, issue_id: str, marker: str, body: str, dry_run: bool = False
+        self,
+        *,
+        issue_id: str,
+        marker: str,
+        body: str,
+        dry_run: bool = False,
+        expected: MarkedCommentExpectation | None = None,
     ) -> CommentResult:
         """Post-or-patch a single marker-keyed comment (idempotent on ``marker``): patch the
         existing comment when found, else post a fresh one. ``body`` MUST already embed
         ``marker`` (the caller's responsibility) so the next upsert can find it — lets a single
         comment evolve in place rather than spamming the issue. ``posted=False`` on a dry run;
-        raises on an infra failure."""
+        raises on an infra failure.
+
+        ``expected=None`` is the ordinary path above (substring match, first hit, no
+        verification — byte-unchanged). A non-``None`` ``expected`` opts into the **guarded**
+        path (contracts.md §8.67): exact first-line marker ownership over ALL comment pages,
+        duplicate/misplaced detection, an expected-state check (absence, or the exact observed
+        id + body digest), convergence without a write when the unique observed body already
+        equals the backend-rendered ``body``, at most ONE create/update attempt, and a
+        post-write verification scan whose observed comment is returned as
+        ``CommentResult.verified_comment``. Refusals raise :class:`MarkedCommentError` (typed
+        ``code``; ``write_attempted`` after the attempt). A guarded ``dry_run`` validates the
+        cheap inputs only and returns ``posted=False`` with no network. A backend without the
+        guarded arm raises ``MarkedCommentError("unsupported_backend")`` before any operation
+        (dry run included)."""
         ...
 
     # --- human-engagement reads ---

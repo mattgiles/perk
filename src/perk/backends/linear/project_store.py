@@ -24,7 +24,15 @@ from perk.backends.linear.client import (
 )
 from perk.backends.linear.issue_ops import _LinearIssueOps
 from perk.backends.linear.project_ops import _attachment_nodes, _LinearProjectOps
+from perk.backends.objective_store import RefinementTargetReadError
 from perk.objective import drift as objective_drift
+from perk.objective.refinement import codec as refinement_codec
+from perk.objective.refinement.models import (
+    RefinementIdentity,
+    RefinementObjectiveSnapshot,
+    RefinementSource,
+    RefinementTarget,
+)
 
 
 def _row_attachment_nodes(row: dict[str, object]) -> list[dict[str, object]]:
@@ -1108,6 +1116,172 @@ class LinearProjectObjectiveStore:
                 ),
                 state="closed" if project_state in ("completed", "canceled") else "open",
             )
+
+    def read_node_refinement_targets(
+        self, *, objective_id: str
+    ) -> RefinementObjectiveSnapshot | None:
+        """The refinement target read over the project's node-issues (contracts.md §8.67).
+
+        Carriers resolve by ``objective-node`` metadata only (never title, backlink, guessed id,
+        or the sentinel); the objective identity comes from the actual project id/URL and the
+        sentinel's ``objective-header`` run id; every project-issue page is enumerated. Typed
+        refusals: duplicate sentinel/header/node-identity metadata → ``ambiguous_target``;
+        unreadable required metadata, an unreadable perk envelope identity, or an attachment
+        connection that cannot be proven complete → ``malformed_target`` (plan absence is never
+        inferred from truncation). Transport / malformed outer API shapes stay the translated
+        ``ObjectiveStoreError``. Observed dependencies come from blocking relations (the
+        existing empty→``None`` reconstruction loss retained); effective dependencies from
+        ``objective.build_graph`` over the whole roadmap. Pure read.
+        """
+        with _translate_objective():
+            project = self._projects.project_or_none(objective_id, "id url name")
+            if project is None:
+                return None
+            project_id = _require_str(project.get("id"), "project id")
+            project_url = _require_str(project.get("url"), "project url")
+            rows = self._projects.project_issues_for_refinement(objective_id)
+
+        def malformed(message: str) -> RefinementTargetReadError:
+            return RefinementTargetReadError("malformed_target", message)
+
+        def ambiguous(message: str) -> RefinementTargetReadError:
+            return RefinementTargetReadError("ambiguous_target", message)
+
+        # First pass: classify every row by its perk envelope kinds (all of them, counted).
+        sentinel_rows: list[dict[str, object]] = []
+        node_rows: list[tuple[dict[str, object], list[dict[str, object]], bool]] = []
+        for row in rows:
+            identifier = str(row.get("identifier"))
+            if row.get("attachments_has_next") is not False:
+                raise malformed(
+                    f"attachment connection on {identifier} is incomplete or unreadable — plan "
+                    "metadata absence cannot be proven"
+                )
+            att_nodes = _row_attachment_nodes(row)
+            try:
+                kinds = attachments.perk_attachment_kinds(att_nodes)
+            except IssueBackendError as exc:
+                raise malformed(f"unreadable perk attachment on {identifier}: {exc}") from exc
+            header_count = kinds.count(attachments.OBJECTIVE_HEADER_KIND)
+            if header_count > 1:
+                raise ambiguous(f"{identifier} carries {header_count} objective-header attachments")
+            if header_count == 1:
+                sentinel_rows.append(row)
+            node_count = kinds.count(attachments.OBJECTIVE_NODE_KIND)
+            if node_count > 1:
+                raise ambiguous(f"{identifier} carries {node_count} objective-node attachments")
+            if node_count == 1:
+                has_plan = attachments.PLAN_HEADER_KIND in kinds
+                node_rows.append((row, att_nodes, has_plan))
+        if not sentinel_rows:
+            return None  # no objective-header carrier: not a perk objective
+        if len(sentinel_rows) > 1:
+            raise ambiguous(
+                "objective-header attachments found on "
+                + ", ".join(str(row.get("identifier")) for row in sentinel_rows)
+            )
+        try:
+            header_att = attachments.find_perk_attachment(
+                _row_attachment_nodes(sentinel_rows[0]), kind=attachments.OBJECTIVE_HEADER_KIND
+            )
+        except IssueBackendError as exc:
+            raise malformed(f"unreadable objective-header attachment: {exc}") from exc
+        run_id = header_att.payload.get("run_id") if header_att is not None else None
+        if not isinstance(run_id, str) or not run_id.strip():
+            raise malformed("objective-header carries no readable run_id")
+
+        # Second pass: decode each node payload; native canceled projects effective skipped.
+        decoded: list[tuple[objective.ObjectiveNode, dict[str, object], bool]] = []
+        seen_ids: dict[str, str] = {}
+        for row, att_nodes, has_plan in node_rows:
+            identifier = _require_str(row.get("identifier"), "issue identifier")
+            try:
+                node_att = attachments.find_perk_attachment(
+                    att_nodes, kind=attachments.OBJECTIVE_NODE_KIND
+                )
+                if node_att is None:  # pragma: no cover - counted present above
+                    raise IssueBackendError("objective-node attachment vanished")
+                node = self._node_from_payload(node_att.payload, identifier, has_plan=has_plan)
+            except IssueBackendError as exc:
+                raise malformed(
+                    f"unreadable objective-node metadata on {identifier}: {exc}"
+                ) from exc
+            if row.get("state_type") == "canceled":
+                node = replace(node, status=objective.NodeStatus.SKIPPED)
+            if node.id in seen_ids:
+                raise ambiguous(
+                    f"node {node.id!r} is carried by both {seen_ids[node.id]} and {identifier}"
+                )
+            seen_ids[node.id] = identifier
+            decoded.append((node, row, has_plan))
+
+        # Observed dependencies from blocking relations (roadmap carriers only), then the
+        # effective dependencies via the shared graph inference over the whole roadmap.
+        uuid_by_identifier = {
+            _require_str(row.get("identifier"), "issue identifier"): _require_str(
+                row.get("id"), "issue id"
+            )
+            for _node, row, _has_plan in decoded
+        }
+        node_by_identifier = {
+            _require_str(row.get("identifier"), "issue identifier"): node.id
+            for node, row, _has_plan in decoded
+        }
+        observed: list[tuple[objective.ObjectiveNode, dict[str, object], bool]] = []
+        with _translate_objective():
+            for node, row, has_plan in decoded:
+                identifier = _require_str(row.get("identifier"), "issue identifier")
+                blockers = self._projects.issue_blocked_by(uuid_by_identifier[identifier])
+                dep_ids = sorted(
+                    {node_by_identifier[b] for b in blockers if b in node_by_identifier},
+                    key=objective.node_sort_key,
+                )
+                observed.append(
+                    (replace(node, depends_on=tuple(dep_ids) if dep_ids else None), row, has_plan)
+                )
+        observed.sort(key=lambda item: objective.node_sort_key(item[0].id))
+        graph = objective.build_graph([node for node, _row, _has_plan in observed])
+        effective = {
+            resolved.id: tuple(sorted(set(resolved.depends_on or ()), key=objective.node_sort_key))
+            for resolved in graph.nodes
+        }
+
+        targets: list[RefinementTarget] = []
+        for node, row, has_plan in observed:
+            identity = RefinementIdentity(
+                backend=self.backend_id,
+                objective_id=project_id,
+                objective_run_id=run_id,
+                node_id=node.id,
+                carrier_id=_require_str(row.get("id"), "issue id"),
+            )
+            source = RefinementSource(
+                description=node.description,
+                slug=node.slug,
+                comment=node.comment,
+                depends_on=node.depends_on,
+                effective_depends_on=effective[node.id],
+                issue_description=_opt_str(row.get("description")) or "",
+            )
+            targets.append(
+                RefinementTarget(
+                    identity=identity,
+                    source=source,
+                    source_digest=refinement_codec.source_digest(source),
+                    carrier_identifier=_require_str(row.get("identifier"), "issue identifier"),
+                    carrier_url=_require_str(row.get("url"), "issue url"),
+                    status=node.status,
+                    plan_ref=node.pr,
+                    has_plan_metadata=has_plan,
+                )
+            )
+        return RefinementObjectiveSnapshot(
+            backend=self.backend_id,
+            objective_id=project_id,
+            objective_run_id=run_id,
+            objective_url=project_url,
+            targets=tuple(targets),
+        )
 
     def _find_node_issue(self, objective_id: str, node_id: str) -> _NodeIssueHit | None:
         """Locate the project's node-issue whose ``objective-node`` attachment carries
@@ -2377,7 +2551,13 @@ class LinearProjectObjectiveStore:
             existing_comment_id: str | None = None
             for comment in self._issue_ops._comments(uuid):
                 comment_body = comment.get("body")
-                if isinstance(comment_body, str) and plan.extract_plan_body(comment_body):
+                # A refinement-owned comment is never the plan-body comment, even when its
+                # advisory Markdown embeds a complete plan-body example (§8.67 coexistence).
+                if (
+                    isinstance(comment_body, str)
+                    and not refinement_codec.is_refinement_comment(comment_body)
+                    and plan.extract_plan_body(comment_body)
+                ):
                     existing_comment_id = _require_str(comment.get("id"), "comment id")
                     break
             if existing_comment_id is not None:

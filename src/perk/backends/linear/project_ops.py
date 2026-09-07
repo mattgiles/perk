@@ -253,6 +253,50 @@ class _LinearProjectOps:
             )
         return result
 
+    def project_issues_for_refinement(self, project_id: str) -> list[dict[str, object]]:
+        """All issues attached to a project for the refinement target read (contracts.md §8.67),
+        as ``[{id, identifier, url, description, state_type, attachments,
+        attachments_has_next}, …]`` (paginated). A narrow **sibling** of
+        :meth:`project_issues_for_objective_projection`: the same native-state observation plus
+        the FULL description and the attachment connection's ``pageInfo`` completeness signal.
+        ``attachments_has_next`` is the connection's ``hasNextPage`` when readable, else
+        ``None`` (missing/malformed ``pageInfo``) — surfaced, never guessed, so the store can
+        refuse to infer plan absence from a possibly-truncated selection. The other
+        ``project_issues*`` query shapes are deliberately untouched.
+
+        **Flagged (live gate):** this selection is NOT yet live-proven — covered offline here;
+        verify live before relying on it (mirrors the other sibling queries).
+        """
+        query = (
+            "query($id: String!, $cursor: String) { project(id: $id) "
+            f"{{ issues(first: {_PAGE_SIZE}, after: $cursor) "
+            "{ nodes { id identifier url description state { type } "
+            "attachments(first: 50) { nodes { id url metadata } pageInfo { hasNextPage } } } "
+            "pageInfo { hasNextPage endCursor } } } }"
+        )
+        nodes = self._client.paginate(query, {"id": project_id}, "project", "issues")
+        result: list[dict[str, object]] = []
+        for node in nodes:
+            description = node.get("description")
+            state = _opt_dict(node.get("state"))
+            raw_type = _opt_str(state.get("type")) if state is not None else None
+            state_type = raw_type.strip().lower() if raw_type is not None and raw_type else None
+            connection = _opt_dict(node.get("attachments"))
+            page_info = _opt_dict(connection.get("pageInfo")) if connection is not None else None
+            has_next = page_info.get("hasNextPage") if page_info is not None else None
+            result.append(
+                {
+                    "id": _require_str(node.get("id"), "issue id"),
+                    "identifier": _require_str(node.get("identifier"), "issue identifier"),
+                    "url": _require_str(node.get("url"), "issue url"),
+                    "description": _opt_str(description) or "",
+                    "state_type": state_type,
+                    "attachments": _attachment_nodes(node),
+                    "attachments_has_next": has_next if isinstance(has_next, bool) else None,
+                }
+            )
+        return result
+
     def project_issues_for_materialization_recovery(
         self, project_id: str
     ) -> list[dict[str, object]]:

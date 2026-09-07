@@ -15,6 +15,7 @@ from perk.backends.linear.client import (
     _require_str,
 )
 from perk.backends.linear.issue_ops import _LinearIssueOps
+from perk.objective.refinement.models import RefinementObjectiveSnapshot
 
 # ===========================================================================
 # The objective-storage tier: `LinearObjectiveStore`.
@@ -559,3 +560,13 @@ class LinearObjectiveStore:
     def read_node_engagement(self, *, objective_id: str, node_id: str) -> engagement.NodeEngagement:
         # Dormant issue-backed store: the roadmap lives in one issue body, no per-node issues.
         return engagement.EMPTY_NODE_ENGAGEMENT
+
+    def read_node_refinement_targets(
+        self, *, objective_id: str
+    ) -> RefinementObjectiveSnapshot | None:
+        # Dormant issue-backed store: no per-node carrier — a typed refusal before any network
+        # call (contracts.md §8.67).
+        raise objective_store.RefinementTargetReadError(
+            "unsupported_backend",
+            "objective-node refinement is not supported on the issue-backed Linear store",
+        )

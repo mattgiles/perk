@@ -403,8 +403,21 @@ class GitHubIssueBackend:
         return None if comment_id is None else str(comment_id)
 
     def upsert_marked_comment(
-        self, *, issue_id: str, marker: str, body: str, dry_run: bool = False
+        self,
+        *,
+        issue_id: str,
+        marker: str,
+        body: str,
+        dry_run: bool = False,
+        expected: issue_backend.MarkedCommentExpectation | None = None,
     ) -> issue_backend.CommentResult:
+        if expected is not None:
+            # No guarded arm on GitHub yet (contracts.md §8.67): a typed refusal before any
+            # operation, dry run included. Ordinary forwarding below is unchanged.
+            raise issue_backend.MarkedCommentError(
+                "unsupported_backend",
+                "guarded marked-comment upserts are not supported on the GitHub issue backend",
+            )
         number = _number(issue_id)
         with _translate():
             result = plans.upsert_marked_comment(

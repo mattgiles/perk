@@ -14,6 +14,8 @@ import pytest
 
 from perk import objective
 from perk.backends import engagement, issue_backend, objective_store
+from perk.objective.refinement import codec as refinement_codec
+from perk.objective.refinement import models as refinement_models
 
 
 @dataclasses.dataclass
@@ -288,6 +290,56 @@ class _FakeObjectiveStore:
 
     def read_node_engagement(self, *, objective_id: str, node_id: str) -> engagement.NodeEngagement:
         return engagement.EMPTY_NODE_ENGAGEMENT
+
+    # --- objective-node refinement ---
+
+    def read_node_refinement_targets(
+        self, *, objective_id: str
+    ) -> refinement_models.RefinementObjectiveSnapshot | None:
+        # A real conformer: every node becomes a target (the node id doubles as the carrier id;
+        # the `pr` backlink doubles as plan metadata) so the supported-read semantics — all
+        # statuses present, empty roadmap = supported — are exercisable in-memory.
+        obj = self._objectives.get(objective_id)
+        if obj is None:
+            return None
+        graph = objective.build_graph(list(obj.nodes))
+        effective = {n.id: tuple(n.depends_on or ()) for n in graph.nodes}
+        targets: list[refinement_models.RefinementTarget] = []
+        for node in sorted(obj.nodes, key=lambda n: objective.node_sort_key(n.id)):
+            identity = refinement_models.RefinementIdentity(
+                backend=self.backend_id,
+                objective_id=objective_id,
+                objective_run_id=obj.run_id,
+                node_id=node.id,
+                carrier_id=f"{objective_id}:{node.id}",
+            )
+            source = refinement_models.RefinementSource(
+                description=node.description,
+                slug=node.slug,
+                comment=node.comment,
+                depends_on=node.depends_on,
+                effective_depends_on=effective[node.id],
+                issue_description=node.description,
+            )
+            targets.append(
+                refinement_models.RefinementTarget(
+                    identity=identity,
+                    source=source,
+                    source_digest=refinement_codec.source_digest(source),
+                    carrier_identifier=node.id,
+                    carrier_url=f"fake://objective/{objective_id}/{node.id}",
+                    status=node.status,
+                    plan_ref=node.pr,
+                    has_plan_metadata=node.pr is not None,
+                )
+            )
+        return refinement_models.RefinementObjectiveSnapshot(
+            backend=self.backend_id,
+            objective_id=objective_id,
+            objective_run_id=obj.run_id,
+            objective_url=f"fake://objective/{objective_id}",
+            targets=tuple(targets),
+        )
 
 
 def _make_store() -> objective_store.ObjectiveStore:
