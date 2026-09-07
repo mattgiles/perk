@@ -35,7 +35,19 @@ and the attempted `ponytail` lane remains explicitly uncovered with `skill-unava
 other lanes continue. Package files are expected to stay stable for the short pass; the child
 rechecks the exact file/frontmatter as its first action, so post-preflight changes produce no
 schema-valid report and remain incomplete rather than counting another source. Actionable findings
-may still post with the incomplete-coverage note. An optional free-form focus note follows the
+may still post with the incomplete-coverage note; without surviving actionable findings, nothing
+posts and the parent reports failures in-session.
+
+A schema-valid report is not necessarily a completed assessment. Reviewers return `blocked` when
+context is invalid/unavailable or mandatory checks/material evidence cannot be completed. Missing,
+null, or blank plan text blocks the required plan-fidelity lane; missing `plan_body` is malformed
+for all lanes, while explicit null/blank is valid optional evidence for other angles. Blocked
+reports become uncovered `lane-failed` failures before the one bounded retry. Partial concerns in
+blocker diagnostics stay in-session and are never posted as findings. Optional supporting-file
+read failures do not automatically block a review that has enough evidence to finish. An empty
+diff is not itself a block. `blocked` is not a postable verdict.
+
+An optional free-form focus note follows the
 command and steers emphasis without removing plan fidelity or changing the 2–4 selected-angle
 limit.
 
@@ -57,7 +69,7 @@ Companion tools:
 - **`post_pr_review`** — post the reconciled result through `perk pr review-post` and record
   `last_pr_review`; it enforces incomplete-clean, pending, consumed, and stale-target refusals.
   After a recorded wave, `last_pr_review.angles` is the authoritative attempted manifest
-  (including Ponytail), while `covered_angles` contains only successful schema-valid coverage.
+  (including Ponytail), while `covered_angles` contains only completed schema-valid assessments.
   The PR comes from the cold-door result; callers never supply one. A standalone call before any
   valid wave uses caller-supplied angles for both fields. *Non-terminating.*
 
@@ -66,18 +78,26 @@ Companion tools:
 Perk-owned report children select background mode through their definitions; calls omit child
 `async` so the native workflow awaits each report. Root scheduling remains async/fresh with the
 fixed report-only acceptance contract. Review-head paths are task data, not agent/extension
-discovery roots: reports launch from the trusted calling session cwd.
+discovery roots: the native RPC context supplies the trusted calling session cwd, subject to
+native worktree defaults for requests that do not opt into caller placement.
 
 After exact-source skill preflight, each attempt captures the current parent read-only gate and
-puts the same `perk.parent-restrictions/1` boolean packet on every runnable child, including
-false. Retries sample anew. Capture failure returns non-retryable `unavailable` before launch,
+puts a `perk.parent-restrictions/1` boolean packet on every runnable child. Automated `/pr-review`
+and `/address` classification opt into the code-owned `caller-read-only` policy: every child
+(including Ponytail and review retries) gets `worktree: false` and a true restriction, strengthening
+the captured parent value without changing the parent or handoff. Both read the actual caller's
+local plan reference; Perk never copies plan authority into an allocated worktree. The classifier
+still has no retry and stops on failure. Other report requests retain native placement defaults
+and the captured boolean, including false; their schemas are unchanged. There is no new user
+configuration key. Retries still sample the parent anew even under the stronger policy. Capture failure returns non-retryable `unavailable` before launch,
 retaining any skill-preflight failures; all-skipped attempts do not capture. False grants no
 write authority. The implemented runner consumer latches true or invalid packets as an effective
 read-only floor before lifecycle work, independent of handoff mode and successful persistence.
 Gate exit and branch navigation cannot clear it; the full tool-call allowlist backstop remains
 active even when toolset narrowing fails. All ten report identities also suppress agent-scratch
 provisioning and direct guidance through the separate advisory startup-prefix reader. Both producer
-and consumer must be present for this profile. Manual subagent calls and uninstrumented foreground
+and consumer must be present with normal background-child Perk loading for this profile. It does
+not certify user-shadowed definitions, foreground overrides, or missing consumer installations. Manual subagent calls and uninstrumented foreground
 children are outside this channel, which is neither continuous revocation nor an OS sandbox.
 Streaming and final-report coverage rules below are unchanged.
 

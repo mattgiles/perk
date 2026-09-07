@@ -114,6 +114,8 @@ export interface ReportWaveRequest {
   /** Workflow-level default → the engine injects a `structured_output` tool into each child. */
   outputSchema: object;
   completeness: ReportWaveCompleteness;
+  /** Keep plan-bound readers in the caller checkout and strengthen the child restriction. */
+  execution?: "caller-read-only";
   /** Workflow-level model default (flows read their configured subagent model). */
   model?: string;
   /** Module default (`WAVE_TIMEOUT_MS`) when omitted. */
@@ -251,13 +253,20 @@ function validateAssignments(assignments: ReportAssignment[]): void {
  * (quotes, newlines, backticks, `${}`) cannot escape the array literal. Module-private: the
  * script bytes are observable outside `waves/` only through the adapter seam's spawn params.
  */
-function renderWaveScript(assignments: ReportAssignment[], readOnly: boolean): string {
+function renderWaveScript(
+  assignments: ReportAssignment[],
+  readOnly: boolean,
+  execution: ReportWaveRequest["execution"],
+): string {
   validateAssignments(assignments);
   const items = assignments.map((assignment) => ({
     key: assignment.key,
     agent: assignment.agent,
     task: assignment.task,
-    extensionBindings: { "perk.parent-restrictions/1": { readOnly } },
+    extensionBindings: {
+      "perk.parent-restrictions/1": { readOnly: execution === "caller-read-only" || readOnly },
+    },
+    ...(execution === "caller-read-only" ? { worktree: false } : {}),
     ...(assignment.skill !== undefined ? { skill: assignment.skill } : {}),
     label: assignment.label ?? assignment.key,
     ...(assignment.phase !== undefined ? { phase: assignment.phase } : {}),
@@ -584,7 +593,7 @@ async function startWave(
       launch,
     };
   }
-  const workflowScript = renderWaveScript(runnable, readOnly);
+  const workflowScript = renderWaveScript(runnable, readOnly, request.execution);
 
   const start = await startWaveScript(
     supplyAdapter(runnableRequest),

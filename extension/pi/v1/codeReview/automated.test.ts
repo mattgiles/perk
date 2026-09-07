@@ -57,13 +57,19 @@ test("prReviewGuidance never derives clean from partial coverage (and names the 
   const text = prReviewGuidance();
   assert.match(text, /NEVER derive or post a `clean` verdict from partial coverage/);
   assert.match(text, /`post_pr_review` refuses it/);
+  assert.match(text, /`covered` means a completed schema-valid assessment/);
+  assert.match(text, /`blocked` report is normalized into `failures`, not coverage/);
+  assert.match(text, /missing\/null\/blank plan text for plan-fidelity/);
+  assert.match(text, /partial, unassessed, diagnostic-only\*\*, never postable findings/);
+  assert.match(text, /with zero surviving actionable findings, post NOTHING/);
 });
 
 test("prReviewGuidance instructs reconcile/union/dedupe and verdict derivation over typed reports", () => {
   const text = prReviewGuidance();
   assert.match(text, /union/i);
   assert.match(text, /dedupe/i);
-  assert.match(text, /if ANY report is actionable/i);
+  assert.match(text, /if ANY surviving report is actionable/i);
+  assert.match(text, /`clean` only when coverage is complete/);
 });
 
 test("prReviewGuidance tells the parent to post via the post_pr_review tool", () => {

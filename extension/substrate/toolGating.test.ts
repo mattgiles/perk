@@ -350,6 +350,47 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
   }
 });
 
+test("plan-bound review queries allow only the exact argument forms", () => {
+  const queries = ["perk pr review-context --expected-pr 42 --json", "perk pr feedback --json"];
+  for (const query of queries) {
+    for (const command of [
+      query,
+      `  ${query}  `,
+      query.replaceAll(" ", "\t"),
+      `cd repo && ${query}`,
+    ])
+      assert.equal(isReadOnlyBashCommand(command), true, command);
+    for (const command of [
+      `${query} --extra`,
+      `${query} > report.json`,
+      `${query} >> report.json`,
+      `${query} && perk pr review-post`,
+      `${query}; rm file`,
+      `${query} | gh api user`,
+    ])
+      assert.equal(isReadOnlyBashCommand(command), false, command);
+  }
+  for (const command of [
+    "perk pr review-context",
+    "perk pr review-context --json",
+    "perk pr review-context --pr 42 --json",
+    "perk pr review-context --pr 42 --stack --json",
+    "perk pr review-context --expected-pr 42",
+    "perk pr review-context --json --expected-pr 42",
+    "perk pr review-context --expected-pr 42 --json --stack",
+    "perk pr review-contextual --expected-pr 42 --json",
+    "perk pr feedback",
+    "perk pr feedback --pr 42 --json",
+    "perk pr feedback-extra --json",
+    "perk pr review-post --json",
+    "gh api user",
+    ...["0", "01", "-1", "1.5", "+1", "N", "42x"].map(
+      (n) => `perk pr review-context --expected-pr ${n} --json`,
+    ),
+  ])
+    assert.equal(isReadOnlyBashCommand(command), false, command);
+});
+
 test("isReadOnlyBashCommand: blocks destructive / non-allowlisted commands", () => {
   for (const cmd of [
     "rm -rf /tmp/x",

@@ -40,7 +40,7 @@ export type WaveReceiptState =
  * aggregate, with only the proof-gated adapter correction allowed by contracts.md §8.35).
  */
 export interface WaveChildReceipt {
-  /** The Perk assignment key (mapped FROM the upstream row's overloaded `agent` field). */
+  /** The Perk assignment key (native run-correlated childId; legacy overloaded `agent`). */
   key: string;
   /** The child agent name, enriched from the Perk-owned assignment spec where known. */
   agent?: string;

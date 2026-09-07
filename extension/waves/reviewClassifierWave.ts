@@ -90,6 +90,7 @@ export async function runReviewClassifierWave(
   return await wave.run(
     {
       flow: REVIEW_CLASSIFIER_FLOW,
+      execution: "caller-read-only",
       assignments: [
         {
           key: CLASSIFY_ASSIGNMENT_KEY,

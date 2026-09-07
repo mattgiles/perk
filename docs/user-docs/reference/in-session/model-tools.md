@@ -175,7 +175,16 @@ but still undergo their ordinary authority checks. The sanctioned artifact write
 review/exploration companions, research and delegation retain their existing carve-outs; this is
 not an OS sandbox or an argument-level certificate for delegation, browser automation or web tools.
 
-Perk-owned report waves deliver a startup parent-restriction packet to native runner children.
+The bash gate admits these two exact whitespace-separated plan-context query forms (optional
+surrounding whitespace): `perk pr review-context --expected-pr N --json`, with N matching
+`[1-9][0-9]*`, and `perk pr feedback --json`. `cd … && query` works because every segment is
+checked. This does not admit flagless/foreign/stack context forms, extra arguments, lookalike
+verbs, `review-post`, `gh api`, real-file redirects, or a mutation chained after a query.
+
+Perk-owned report waves deliver a startup restriction packet to native runner children: the
+captured parent gate, strengthened to true for automated review and `/address` classification.
+Those plan-bound callers also force `worktree: false`, reading the caller checkout under the
+child-only floor without changing the parent's mode. Other report requests are unchanged.
 True or invalid packets establish a read-only floor before lifecycle work. A child cannot clear it
 through gate exit, later false/missing input or tree navigation; failed mode persistence is loud
 and leaves the in-memory floor active. False and legacy absence are never write grants: inherited

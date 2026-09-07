@@ -68,13 +68,9 @@ export function isPrReviewAngle(value: string): value is PrReviewAngle {
 /**
  * The per-lane report schema the review wave enforces as its `outputSchema` — the engine injects
  * a `structured_output` tool into each lane and fails any lane whose report is missing or
- * schema-invalid (covered angle ⟺ ok lane + schema-valid report). Same vocabulary as the
- * reviewer's report contract: {angle, verdict, findings, fyi}, all required, closed shapes
- * (required-with-empty beats optional under strict structured output). The if/then conditional
- * makes an internally inconsistent report (a `clean` verdict carrying findings) schema-INVALID,
- * so it fails its lane instead of reaching reconciliation — the engine's validator (TypeBox
- * `Compile`) enforces JSON-Schema conditionals (verified against the installed pi-subagents
- * 0.43.0 toolchain).
+ * schema-invalid. A valid blocked report is still an incomplete assessment, normalized into
+ * a lane failure before coverage/retry. The closed four-field contract forbids findings on
+ * clean/blocked reports and requires a nonblank diagnosis on blocked reports.
  */
 export const PR_REVIEW_REPORT_SCHEMA = {
   type: "object",
@@ -96,7 +92,7 @@ export const PR_REVIEW_REPORT_SCHEMA = {
     },
     verdict: {
       type: "string",
-      enum: ["clean", "actionable"],
+      enum: ["clean", "actionable", "blocked"],
     },
     findings: {
       type: "array",
@@ -116,13 +112,20 @@ export const PR_REVIEW_REPORT_SCHEMA = {
       items: { type: "string" },
     },
   },
-  if: {
-    properties: { verdict: { const: "clean" } },
-  },
-  // biome-ignore lint/suspicious/noThenProperty: `then` is the JSON-Schema conditional keyword, not a thenable.
-  then: {
-    properties: { findings: { maxItems: 0 } },
-  },
+  allOf: [
+    {
+      if: { properties: { verdict: { enum: ["clean", "blocked"] } } },
+      // biome-ignore lint/suspicious/noThenProperty: JSON-Schema conditional, not a thenable.
+      then: { properties: { findings: { maxItems: 0 } } },
+    },
+    {
+      if: { properties: { verdict: { const: "blocked" } } },
+      // biome-ignore lint/suspicious/noThenProperty: JSON-Schema conditional, not a thenable.
+      then: {
+        properties: { fyi: { minItems: 1, items: { type: "string", pattern: "\\S" } } },
+      },
+    },
+  ],
 };
 
 type EffectivePrReviewAngle = PrReviewAngle | "ponytail";
@@ -147,7 +150,7 @@ export interface PrReviewWaveOptions {
 export interface PrReviewWaveOutcome {
   /** True ⟺ every effective lane (selected angles + final Ponytail) is covered after retry. */
   complete: boolean;
-  /** Effective lane keys with schema-valid reports after retry (selected order + Ponytail). */
+  /** Effective keys with completed schema-valid assessments after retry (selected order + Ponytail). */
   covered: string[];
   /** Lane keys sent in the retry wave (empty when none ran). */
   retried: string[];
@@ -251,6 +254,7 @@ function buildRequest(
 ): ReportWaveRequest {
   return {
     flow: "pr-review",
+    execution: "caller-read-only",
     assignments,
     outputSchema: PR_REVIEW_REPORT_SCHEMA,
     completeness: "strict",
@@ -289,6 +293,45 @@ function retrySelection(
   return angles.filter((angle) => failed.has(angle));
 }
 
+// Assessment completion is domain policy, not engine success. Only the typed verdict classifies;
+// diagnostic prose is untrusted data preserved verbatim for the parent's in-session diagnosis.
+function reclassifyBlocked(result: ReportWaveResult): ReportWaveResult {
+  const reports: AssignmentReport[] = [];
+  const blocked: ReportWaveFailure[] = [];
+  for (const assignment of result.reports) {
+    const report = assignment.report;
+    if (
+      typeof report !== "object" ||
+      report === null ||
+      Array.isArray(report) ||
+      !("verdict" in report) ||
+      report.verdict !== "blocked"
+    ) {
+      reports.push(assignment);
+      continue;
+    }
+    const notes =
+      "fyi" in report && Array.isArray(report.fyi)
+        ? report.fyi.filter(
+            (entry): entry is string => typeof entry === "string" && entry.trim().length > 0,
+          )
+        : [];
+    blocked.push({
+      key: assignment.key,
+      reason: "lane-failed",
+      detail:
+        "reviewer blocked:\n" +
+        (notes.length > 0 ? notes.join("\n") : "required review assessment could not complete"),
+    });
+  }
+  return {
+    complete: result.complete && blocked.length === 0,
+    reports,
+    failures: [...result.failures, ...blocked],
+    receipt: result.receipt,
+  };
+}
+
 function outcomeOf(
   angles: EffectivePrReviewAngle[],
   reports: AssignmentReport[],
@@ -302,7 +345,7 @@ function outcomeOf(
     return report === undefined ? [] : [report];
   });
   return {
-    complete: ordered.length === angles.length,
+    complete: ordered.length === angles.length && failures.length === 0,
     covered: ordered.map((report) => report.key),
     retried,
     reports: ordered,
@@ -336,13 +379,15 @@ export async function runPrReviewWave(
     }
     return check;
   };
-  const first: ReportWaveResult = await wave.run(
-    buildRequest(
-      buildEffectivePrReviewAssignments(angles, opts.pr, opts.directive),
-      opts,
-      requiredSkillPreflight,
+  const first = reclassifyBlocked(
+    await wave.run(
+      buildRequest(
+        buildEffectivePrReviewAssignments(angles, opts.pr, opts.directive),
+        opts,
+        requiredSkillPreflight,
+      ),
+      { signal: opts.signal },
     ),
-    { signal: opts.signal },
   );
   // The first attempt's receipt is preserved VERBATIM even when a retry runs — ordered
   // attempts keep a failed lane and its relaunch distinguishable (distinct child runIds).
@@ -356,13 +401,15 @@ export async function runPrReviewWave(
     return outcomeOf(angles, first.reports, first.failures, [], attempts);
   }
 
-  const second = await wave.run(
-    buildRequest(
-      buildEffectivePrReviewAssignments(retried, opts.pr, opts.directive),
-      opts,
-      requiredSkillPreflight,
+  const second = reclassifyBlocked(
+    await wave.run(
+      buildRequest(
+        buildEffectivePrReviewAssignments(retried, opts.pr, opts.directive),
+        opts,
+        requiredSkillPreflight,
+      ),
+      { signal: opts.signal },
     ),
-    { signal: opts.signal },
   );
   attempts.push(toAttemptReceipt("pr-review", 2, retried, second.receipt));
   const retriedSet = new Set<string>(retried);

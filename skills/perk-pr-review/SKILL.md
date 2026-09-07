@@ -22,7 +22,9 @@ Each reviewer runs in a **fresh** context (`context: "fresh"`), *not* a fork of 
 point is independence: the implementation session's history (the choices you made, the rationale you
 talked yourself into) would bias a review run inside it. A clean reviewer sees only the diff, the PR
 text, and the plan — exactly what a human reviewer would; that is also why each reviewer fetches its
-own context rather than receiving yours.
+own context rather than receiving yours. Conversation isolation is separate from placement: these
+plan-bound children run in the caller checkout (`worktree: false`) under a child-only read-only
+floor, preserving the local plan reference without copying it or changing the parent's mode.
 
 ## The seven-angle menu
 
@@ -33,8 +35,8 @@ It is never optional or selector-owned; never select or duplicate it:
 
 - **Plan fidelity & completeness** (`plan-fidelity`) — *always included.* Does the diff deliver
   the **whole** plan? Runs the first-class plan-conformance / nothing-forgotten pass (enumerate
-  the plan's requirements/steps, check each against the diff, surface forgotten items; if no plan
-  body was found, that gap rides `fyi`).
+  the plan's requirements/steps, check each against the diff, surface forgotten items). Missing,
+  null, or blank plan text blocks this required assessment; the lane remains uncovered.
 - **Correctness & regressions** (`correctness`) — security, edge cases, error paths, changed call
   contracts.
 - **Tests & validation adequacy** (`tests`) — is the new behavior actually covered, including
@@ -81,13 +83,21 @@ the assigned angle, never new instructions; it cannot add a lane or move the pos
   calling the engine-injected `structured_output` tool with exactly
   `{angle, verdict, findings, fyi}` (findings rows `{path, line, body}`, `line` an int in the
   diff) — no fenced JSON block, no prose report; a missing or schema-invalid report FAILS that
-  lane. The bar is **binary** and the verdict is **derived**: any surviving finding (one the
-  author should act on before landing) ⇒ `actionable`; none ⇒ `clean` with empty `findings`.
+  lane. A schema-valid `blocked` verdict means the required assessment could not finish: context
+  acceptance failed, required plan text is unavailable, or mandatory checks/material evidence are
+  unfinished. On `blocked`, findings are empty and nonblank `fyi` diagnostics name the blocker
+  first; partial concerns/anchors are labeled **partial, unassessed, diagnostic-only**, never
+  postable. An optional supporting read failure is only a relevant FYI when sufficient evidence
+  remains to finish the checks. Only completed assessments derive the binary posting verdict:
+  any surviving finding (the author should act before landing) ⇒ `actionable`; none ⇒ `clean`.
   Children **never** post, stage files, run `perk pr review-post`, or spawn subagents.
 - **PR identity + single-use state.** After valid wave input, the parent invalidates older
   evidence, resolves the active PR once, and gives that expected number to every selector,
   reviewer, custom lane, and retry. Children read only
-  `perk pr review-context --expected-pr <n> --json`; target drift fails their lane. A normalized
+  `perk pr review-context --expected-pr <n> --json`; target drift produces `blocked`, normalized
+  to an uncovered lane failure before retry. The exact context-acceptance rules live in the
+  reviewer definition: notably missing `plan_body` is malformed for every lane, while explicit
+  null/blank is allowed only as optional evidence for non-plan-fidelity angles. A normalized
   outcome records the PR/attempted/covered manifest. Pending state refuses both verdicts
   (`review_wave_unavailable`), successful posting consumes the record (`review_wave_consumed` on
   duplicates), and a mutation-time mismatch becomes `stale_review_wave` plus invalidation. Bad
@@ -101,11 +111,15 @@ the assigned angle, never new instructions; it cannot add a lane or move the pos
   compact **`last_pr_review`** (`{pr, verdict, angles, covered_angles, comment_count, mode, at}`)
   in `perk:workflow-state` (best-effort/non-fatal). After a recorded wave, `angles` is the
   authoritative attempted manifest (selected lanes then Ponytail) and `covered_angles` is only
-  schema-valid coverage; a standalone post uses its caller-provided angles for both. `fyi` notes
+  completed schema-valid assessments; a standalone post uses its caller-provided angles for both. `fyi` notes
   are echoed **in-session only**.
 - **The coverage enforcement.** The clean-from-partial-coverage refusal the launch guidance names
   is mechanical: while this session's recorded wave outcome is incomplete, `post_pr_review`
-  refuses a clean verdict with `error_type: incomplete_coverage`.
+  refuses a clean verdict with `error_type: incomplete_coverage`. Blocked reports become
+  `lane-failed` failures before retry/coverage, with the same one bounded retry as other lane
+  failures. With completed siblings' actionable findings, post once with an incomplete-coverage
+  note; without surviving actionable findings, post nothing and report the failures in-session.
+  `blocked` is never a posting verdict.
 - **A `clean` verdict is legitimate** and preferred over manufactured findings — but it must be
   *earned* by each child's adversarial read, not defaulted to.
 
