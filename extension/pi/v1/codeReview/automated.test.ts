@@ -10,7 +10,7 @@
 // feature op cannot receive malformed input by construction).
 
 import assert from "node:assert/strict";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { runScratchDir } from "../../../substrate/cache.ts";
@@ -286,14 +286,49 @@ const CLEAN_JSON = JSON.stringify({
   comment_count: 0,
 });
 
-function latestReviewBatch(cwd: string): Record<string, unknown> {
+/** The staged `review-post-*.json` cold-door batches, oldest first (empty when none staged). */
+function stagedReviewBatches(cwd: string): string[] {
   const dir = runScratchDir(cwd, "01RID");
-  const files = readdirSync(dir)
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
     .filter((name) => name.startsWith("review-post-") && name.endsWith(".json"))
     .sort();
-  const latest = files.at(-1);
+}
+
+function latestReviewBatch(cwd: string): Record<string, unknown> {
+  const latest = stagedReviewBatches(cwd).at(-1);
   assert.ok(latest, "review-post staged a cold-door batch");
-  return JSON.parse(readFileSync(join(dir, latest), "utf8")) as Record<string, unknown>;
+  return JSON.parse(readFileSync(join(runScratchDir(cwd, "01RID"), latest), "utf8")) as Record<
+    string,
+    unknown
+  >;
+}
+
+/** The routing keys the fake `perk` recorded, one per invocation (absent file ⇒ none). */
+function recordedPerkCalls(argvFile: string): string[] {
+  if (!existsSync(argvFile)) return [];
+  return readFileSync(argvFile, "utf8")
+    .split("\n")
+    .filter((line) => line.length > 0);
+}
+
+const FINDING = { path: "a.ts", line: 12, body: "fix this" };
+
+/** A fake responder answering the module-rendered lanes with per-key scripted reports. */
+function prReviewFakeWith(
+  reportFor: (key: string) => { verdict: string; findings: unknown[] },
+): FakeSubagents {
+  return createFakeSubagents([
+    {
+      executeScript: async (script) =>
+        waveScriptItems(script).map(({ key }) => ({
+          key,
+          ok: true,
+          error: null,
+          report: { angle: key, ...reportFor(String(key)), fyi: [] },
+        })),
+    },
+  ]);
 }
 
 test("tool: run_pr_review_wave end-to-end happy path; a following clean post is single-use", async () => {
@@ -681,6 +716,203 @@ test("tool: an unavailable wave degrades loud; the clean guard refuses; an actio
   }
 });
 
+// --- post_pr_review: the recorded minimum-verdict floor through the REAL registration ---------
+
+for (const [label, findings] of [
+  ["nonempty findings", [FINDING]],
+  ["EMPTY findings", []],
+] as const) {
+  test(`tool: complete actionable evidence (${label}) refuses clean with review_verdict_conflict; a reconciled actionable post lands once`, async () => {
+    const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+    installPonytailReviewSkill(cwd);
+    // A SUCCESSFUL post route + an argv recorder: an accidental review-post invocation is
+    // observable (a recorded key), never hidden behind a missing route.
+    const argvFile = join(cwd, "perk-calls.log");
+    const bin = fakePerkRouter(
+      cwd,
+      {
+        "pr url": { json: PR_URL_JSON },
+        "pr review-post": { json: JSON.parse(ACTIONABLE_JSON) },
+      },
+      { argvFile },
+    );
+    const fake = prReviewFakeWith((key) =>
+      key === "tests"
+        ? { verdict: "actionable", findings: [...findings] }
+        : { verdict: "clean", findings: [] },
+    );
+    const h = await loadPerkSession({
+      cwd,
+      env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+      extraExtensions: [fake.extension],
+    });
+    try {
+      const wave = await h.invokeTool("run_pr_review_wave", { angles: ["plan-fidelity", "tests"] });
+      const waveDetails = wave.details as {
+        ok: boolean;
+        complete?: boolean;
+        reports?: { key: string; report: { verdict: string; findings: unknown[] } }[];
+      };
+      assert.equal(waveDetails.ok, true);
+      assert.equal(
+        waveDetails.complete,
+        true,
+        "the evidence is complete — coverage is not the gate",
+      );
+      assert.equal(waveDetails.reports?.[1]?.report.verdict, "actionable");
+      assert.deepEqual(waveDetails.reports?.[1]?.report.findings, findings);
+      assert.equal(fake.spawns.length, 1);
+      assert.deepEqual(recordedPerkCalls(argvFile), ["pr url"]);
+
+      // A syntactically valid clean batch (no comments) is refused BEFORE the cold door.
+      const clean = await h.invokeTool("post_pr_review", { verdict: "clean", summary: "clean" });
+      const cleanDetails = clean.details as { ok: boolean; error_type?: string };
+      assert.equal(cleanDetails.ok, false);
+      assert.equal(cleanDetails.error_type, "review_verdict_conflict");
+      assert.match(
+        clean.content[0]?.text ?? "",
+        /post a reconciled actionable review or post nothing/,
+      );
+      assert.deepEqual(recordedPerkCalls(argvFile), ["pr url"], "no review-post invocation");
+      assert.deepEqual(stagedReviewBatches(cwd), [], "no staged review-post batch");
+      assert.equal(h.workflowState().last_pr_review, undefined, "a refused post records nothing");
+
+      // The record survives: the parent's reconciled actionable post lands with its exact batch.
+      const actionable = await h.invokeTool("post_pr_review", {
+        verdict: "actionable",
+        summary: "one issue",
+        comments: [FINDING],
+        fyi: ["a nit"],
+        angles: ["caller-supplied-is-ignored"],
+      });
+      assert.equal((actionable.details as { ok: boolean }).ok, true);
+      assert.deepEqual(recordedPerkCalls(argvFile), ["pr url", "pr review-post"]);
+      assert.deepEqual(latestReviewBatch(cwd), {
+        verdict: "actionable",
+        summary: "one issue",
+        comments: [FINDING],
+        fyi: ["a nit"],
+        expected_pr: 42,
+      });
+      const record = h.workflowState().last_pr_review as Record<string, unknown>;
+      assert.deepEqual(record.angles, ["plan-fidelity", "tests", "ponytail"]);
+      assert.deepEqual(record.covered_angles, ["plan-fidelity", "tests", "ponytail"]);
+      assert.equal(record.verdict, "actionable");
+      assert.equal(Object.hasOwn(record, "minimumVerdict"), false);
+      assert.equal(Object.hasOwn(record, "reports"), false);
+      const duplicate = await h.invokeTool("post_pr_review", {
+        verdict: "actionable",
+        summary: "dup",
+      });
+      assert.equal(
+        (duplicate.details as { error_type?: string }).error_type,
+        "review_wave_consumed",
+      );
+      assert.equal(stagedReviewBatches(cwd).length, 1, "consumed exactly once");
+    } finally {
+      h.dispose();
+    }
+  });
+}
+
+test("tool: a native partial actionable first attempt replaced by an all-clean retry permits a clean post", async () => {
+  // Final-merge-to-posting composition: the recorded minimum is projected from the EFFECTIVE
+  // post-retry reports, never latched from a superseded attempt.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailReviewSkill(cwd);
+  const bin = fakePerkRouter(cwd, {
+    "pr url": { json: PR_URL_JSON },
+    "pr review-post": { json: JSON.parse(CLEAN_JSON) },
+  });
+  const fake = createFakeSubagents([
+    {
+      // Attempt 1: the native run ends partial; its retained plan-fidelity report is actionable.
+      executeSettlement: async () => ({
+        aggregate: { state: "failed", error: "native failure", value: undefined },
+        completion: {
+          state: "failed",
+          success: false,
+          terminalOutcome: { state: "partial", reason: "timeout" },
+          results: [
+            {
+              workflowKey: "plan-fidelity",
+              runId: "child-a",
+              success: true,
+              structuredOutput: {
+                angle: "plan-fidelity",
+                verdict: "actionable",
+                findings: [FINDING],
+                fyi: [],
+              },
+            },
+          ],
+        },
+      }),
+    },
+    {
+      // Attempt 2 (the whole-selection retry): every lane answers clean.
+      executeScript: async (script) =>
+        waveScriptItems(script).map(({ key }) => ({
+          key,
+          ok: true,
+          error: null,
+          report: { angle: key, verdict: "clean", findings: [], fyi: [] },
+        })),
+    },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    extraExtensions: [fake.extension],
+  });
+  try {
+    const wave = await h.invokeTool("run_pr_review_wave", { angles: ["plan-fidelity", "tests"] });
+    const details = wave.details as {
+      ok: boolean;
+      complete?: boolean;
+      covered?: string[];
+      retried?: string[];
+      reports?: { key: string; report: { verdict: string; findings: unknown[] } }[];
+      failures?: unknown[];
+      attempts?: { attempt: number; state: string }[];
+    };
+    assert.equal(details.ok, true);
+    assert.equal(fake.spawns.length, 2, "exactly one bounded retry");
+    assert.deepEqual(details.retried, ["plan-fidelity", "tests", "ponytail"]);
+    assert.equal(details.complete, true);
+    assert.deepEqual(details.covered, ["plan-fidelity", "tests", "ponytail"]);
+    assert.deepEqual(details.failures, []);
+    assert.deepEqual(
+      details.reports?.map(({ key, report }) => [key, report.verdict, report.findings.length]),
+      [
+        ["plan-fidelity", "clean", 0],
+        ["tests", "clean", 0],
+        ["ponytail", "clean", 0],
+      ],
+      "the superseded actionable report is absent from the final aggregate",
+    );
+    assert.deepEqual(
+      details.attempts?.map((a) => [a.attempt, a.state]),
+      [
+        [1, "failed"],
+        [2, "complete"],
+      ],
+    );
+    // The effective evidence is all clean → clean is postable, PR-bound, and single-use.
+    const clean = await h.invokeTool("post_pr_review", { verdict: "clean", summary: "clean" });
+    assert.equal((clean.details as { ok: boolean }).ok, true);
+    assert.deepEqual(latestReviewBatch(cwd), {
+      verdict: "clean",
+      summary: "clean",
+      expected_pr: 42,
+    });
+    const duplicate = await h.invokeTool("post_pr_review", { verdict: "clean", summary: "dup" });
+    assert.equal((duplicate.details as { error_type?: string }).error_type, "review_wave_consumed");
+  } finally {
+    h.dispose();
+  }
+});
+
 // --- post_pr_review: end-to-end delegation (offline fake perk) ------------------------------
 
 test("tool: post_pr_review delegates an actionable batch, records last_pr_review", async () => {
@@ -810,14 +1042,38 @@ test("/pr-review, run_pr_review_wave and post_pr_review register and are headles
       "idioms",
     ]);
     assert.match(tool.description ?? "", /multi-angle \/pr-review reviewer wave/);
+    assert.equal(tool.executionMode, "sequential");
     assert.ok(
       tool.promptGuidelines?.some((g) => g.includes("2–4 unique slugs")),
       "the tool guidelines carry the widened 2–4 window",
     );
+    assert.ok(
+      tool.promptGuidelines?.some(
+        (g) =>
+          g.includes("never lowers the recorded minimum") && g.includes("review_verdict_conflict"),
+      ),
+      "the wave guidelines name the recorded minimum and its refusal",
+    );
     const postTool = h.registeredTool("post_pr_review");
     assert.ok(postTool);
-    const postParams = postTool.parameters as { properties: Record<string, unknown> };
+    assert.equal(postTool.executionMode, "sequential");
+    const postParams = postTool.parameters as {
+      properties: Record<string, unknown> & { verdict: { description: string } };
+    };
     assert.equal(Object.hasOwn(postParams.properties, "pr"), false);
+    // The enforcement + remediation ride the captured tool metadata: complete coverage is
+    // necessary but insufficient; the record survives the refusal for a reconciled actionable post.
+    assert.match(postTool.description, /review_verdict_conflict/);
+    assert.match(postTool.description, /record survives/);
+    assert.match(postParams.properties.verdict.description, /even with empty findings/);
+    assert.match(postParams.properties.verdict.description, /review_verdict_conflict/);
+    const floor = postTool.promptGuidelines?.find((g) => g.includes("review_verdict_conflict"));
+    assert.ok(floor, "the post guidelines name the review_verdict_conflict refusal");
+    assert.match(floor, /necessary but insufficient/);
+    assert.match(floor, /even with empty findings/);
+    assert.match(floor, /record survives/);
+    assert.match(floor, /post nothing/);
+    assert.match(floor, /never rerun the wave merely to obtain a favorable verdict/);
   } finally {
     h.dispose();
   }

@@ -2,10 +2,17 @@
 // warm `/pr-review` door's `run_pr_review_wave` + `post_pr_review` tools. This module owns the
 // POLICY: the per-activation review-pass state machine (`null` permits the backwards-compatible
 // standalone post; a valid new pass moves to `pending` BEFORE target resolution; a normalized
-// outcome records `{pr, complete, attempted, covered}` PR-bound and single-use; one successful
-// post consumes it; incomplete coverage refuses a clean verdict; a mutation-time PR mismatch
-// demotes back to `pending`), plus the `last_pr_review` record a real post applies through the
-// session seam (classification ignored — the seam owns loudness).
+// outcome records `{pr, complete, attempted, covered, minimumVerdict}` PR-bound and single-use;
+// one successful post consumes it; incomplete coverage refuses a clean verdict; effective
+// actionable evidence refuses a clean verdict; a mutation-time PR mismatch demotes back to
+// `pending`), plus the `last_pr_review` record a real post applies through the session seam
+// (classification ignored — the seam owns loudness).
+//
+// The recorded `minimumVerdict` is a code-owned floor projected ONCE from the reviewer's final
+// effective reports (post-retry, post-blocked-reclassification): parent reconciliation can raise
+// a verdict to actionable but never lower it below the evidence. It is private activation state
+// — never part of the durable `last_pr_review` record, the tool aggregate, or the attempt
+// receipts (§8.35), and never a second schema validator (the engine owns report validation).
 //
 // Pi-free by construction (importDirectionGuard Rule D): the Pi adapter
 // (`pi/v1/codeReview/automated.ts`) owns registration, tool-boundary decode, the cold-door and
@@ -106,6 +113,12 @@ export type ReviewPassState =
       complete: boolean;
       attempted: readonly string[];
       covered: readonly string[];
+      /**
+       * The lowest verdict the effective evidence admits: `actionable` iff any effective report
+       * is actionable or carries surviving findings. A primitive snapshot — mutating the source
+       * outcome after recording never changes it.
+       */
+      minimumVerdict: AutomatedReviewBatch["verdict"];
     }
   | { state: "consumed" };
 
@@ -138,10 +151,34 @@ export type RunAutomatedReviewOutcome =
     };
 
 /**
+ * Project the minimum postable verdict from the reviewer's EFFECTIVE reports (the final
+ * post-retry set — `outcomeOf`'s ordered reports, never attempt receipts or superseded attempts).
+ * `actionable` iff any assignment's report is a non-null, non-array object whose exact
+ * `verdict` is `"actionable"` OR whose `findings` is a nonempty array; otherwise `clean`.
+ * The findings arm is a conservative safeguard against a contradictory report object reaching
+ * the feature below schema validation — not permission for the engine schema to accept one.
+ * FYI/summary prose is never consulted: diagnostics are DATA, not a verdict.
+ */
+function minimumVerdictOf(
+  reports: ChangeReviewOutcome["reports"],
+): AutomatedReviewBatch["verdict"] {
+  for (const assignment of reports) {
+    const report: unknown = assignment.report;
+    if (typeof report !== "object" || report === null || Array.isArray(report)) continue;
+    if ("verdict" in report && report.verdict === "actionable") return "actionable";
+    if ("findings" in report && Array.isArray(report.findings) && report.findings.length > 0) {
+      return "actionable";
+    }
+  }
+  return "clean";
+}
+
+/**
  * Run one automated review pass: invalidate old evidence (`pending`) → resolve the target
  * (failure leaves the state pending) → run the reviewer → record the PR-bound manifest with
- * `attempted = [...angles, "ponytail"]`. Recording COPIES the arrays — the holder owns its
- * evidence, never aliasing the outcome returned to the adapter.
+ * `attempted = [...angles, "ponytail"]` plus the minimum verdict projected from the effective
+ * reports. Recording COPIES the arrays and stores only the primitive verdict — the holder owns
+ * its evidence, never aliasing the outcome (or its reports) returned to the adapter.
  */
 export async function runAutomatedReview(
   selection: ReviewSelection,
@@ -167,6 +204,7 @@ export async function runAutomatedReview(
     complete: outcome.complete,
     attempted: [...attempted],
     covered: [...outcome.covered],
+    minimumVerdict: minimumVerdictOf(outcome.reports),
   };
   // Loud degrade — the `unavailable` arm surfaces here too, never a silent fallback.
   const incompleteWarning = outcome.complete
@@ -195,7 +233,11 @@ export interface AutomatedPost {
 export type PublishAutomatedReviewOutcome =
   | {
       kind: "ineligible";
-      errorType: "review_wave_unavailable" | "review_wave_consumed" | "incomplete_coverage";
+      errorType:
+        | "review_wave_unavailable"
+        | "review_wave_consumed"
+        | "incomplete_coverage"
+        | "review_verdict_conflict";
       message: string;
     }
   | { kind: "stale"; errorType: "stale_review_wave"; message: string }
@@ -205,7 +247,9 @@ export type PublishAutomatedReviewOutcome =
 /**
  * Publish the reconciled outcome to the PR: the eligibility ladder (pending ⇒
  * `review_wave_unavailable`; consumed ⇒ `review_wave_consumed`; a clean verdict over an
- * incomplete recorded wave ⇒ `incomplete_coverage` — state untouched on all three) → the
+ * incomplete recorded wave ⇒ `incomplete_coverage`; a clean verdict over a complete recorded
+ * wave whose minimum is actionable ⇒ `review_verdict_conflict` — state untouched and nothing
+ * recorded on all four; the record survives for a reconciled actionable post) → the
  * publisher (a `review_target_changed` failure while a recorded state exists demotes to
  * `pending`; any other failure passes through verbatim, state untouched) → on success apply
  * `record-pr-review` (classification ignored — the seam owns loudness) and consume iff
@@ -242,6 +286,25 @@ export async function publishAutomatedReview(
         "incomplete coverage is never a clean review — the recorded review wave left angle(s) " +
         "uncovered; post the actionable findings with a coverage note, or post nothing and " +
         "suggest re-running /pr-review",
+    };
+  }
+
+  // Complete coverage is necessary but insufficient for clean: the recorded floor (any effective
+  // actionable assessment — even with empty findings — or surviving finding) contradicts a clean
+  // post. No coercion, no override, no automatic post: the parent posts a reconciled actionable
+  // review against the same record or posts nothing.
+  if (
+    post.verdict === "clean" &&
+    current?.state === "recorded" &&
+    current.minimumVerdict === "actionable"
+  ) {
+    return {
+      kind: "ineligible",
+      errorType: "review_verdict_conflict",
+      message:
+        "the recorded review outcome contains an actionable assessment or surviving findings; a " +
+        "clean verdict would contradict that evidence — post a reconciled actionable review or " +
+        "post nothing",
     };
   }
 
