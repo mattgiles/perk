@@ -8,8 +8,8 @@ workspace's deterministic ``before_request`` / ``after_request`` hooks — never
 
 Assertions are semantic (complete pagination, correct mutation identity, full replacement,
 typed outcomes, zero forbidden effects, at-most-one mutation attempt) — never frozen GraphQL
-documents or total read counts. The **Phase-1 gate** at the bottom is an ordinary pytest case
-over a temp repo + the actual resolvers.
+documents or total read counts. The **offline persistence gate** at the bottom is an ordinary
+pytest case over a temp repo + the actual resolvers.
 """
 
 import copy
@@ -1403,7 +1403,7 @@ def _standalone_source() -> RefinementSource:
     )
 
 
-# --------------------------------------------------------------------------- the Phase-1 gate
+# --------------------------------------------------------------------------- the persistence gate
 
 
 def _scaffold_repo(root: Path) -> None:
@@ -1426,7 +1426,7 @@ def _scaffold_repo(root: Path) -> None:
 def test_phase1_gate_linear_refinement_persistence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, delivery: objective.DeliveryPolicy | None
 ) -> None:
-    """The named offline Phase-1 persistence gate (contracts.md §8.67): real resolvers, real
+    """The named offline persistence gate (contracts.md §8.67): real resolvers, real
     store + adapter + service over ONE fake workspace, a real temp checkout as the code basis."""
     root = tmp_path / "repo"
     root.mkdir()
