@@ -11,6 +11,7 @@ not collect this module.
 import itertools
 import json
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -229,6 +230,13 @@ class FakeLinearWorkspace(LinearClient):
         # httpx PUT, overridden below to record in-memory).
         self.uploaded_assets: list[dict[str, object]] = []
         self.requests: list[tuple[str, dict[str, object]]] = []
+        # Deterministic fault/race injection for the guarded-write suites: every hook in
+        # ``before_request`` runs with (query, variables) BEFORE routing (raise to fail the
+        # request outright, or mutate state to simulate a competing writer); every hook in
+        # ``after_request`` runs AFTER the routed response is computed (raise to simulate
+        # "landed, then the response failed"; mutate state to simulate server alteration).
+        self.before_request: list[Callable[[str, dict[str, object]], None]] = []
+        self.after_request: list[Callable[[str, dict[str, object]], None]] = []
         self._seq = itertools.count(1)
         self._clock = itertools.count(1)
         # Subclasses LinearClient (no super().__init__) to inherit the shared team_id/paginate
@@ -307,12 +315,39 @@ class FakeLinearWorkspace(LinearClient):
         )
         return asset_url
 
-    def add_foreign_comment(self, identifier: str, body: str) -> None:
-        """Simulate a Linear GitHub-integration linkback comment (a foreign writer)."""
+    def add_foreign_comment(self, identifier: str, body: str) -> str:
+        """Simulate a Linear GitHub-integration linkback comment (a foreign writer). Returns the
+        minted comment id."""
         issue = self.issue_by_identifier(identifier)
-        self.comments_of(issue).append(
-            {"id": f"cmt-{uuid.uuid4().hex[:8]}", "body": body, "createdAt": self._now()}
-        )
+        comment = self._new_comment(body)
+        self.comments_of(issue).append(comment)
+        return str(comment["id"])
+
+    def add_human_comment(self, identifier: str, body: str) -> str:
+        """Append a comment authored by a human user (no bot actor). Returns the comment id."""
+        issue = self.issue_by_identifier(identifier)
+        comment = self._new_comment(body)
+        comment["user"] = {"id": "u-human", "name": "Pat", "displayName": "Pat Human"}
+        self.comments_of(issue).append(comment)
+        return str(comment["id"])
+
+    def _new_comment(self, body: object) -> dict[str, object]:
+        """A wire-shaped comment node (the author-aware selection's fields included)."""
+        return {
+            "id": f"cmt-{uuid.uuid4().hex[:8]}",
+            "body": body,
+            "createdAt": self._now(),
+            "editedAt": None,
+            "user": {"id": "u1", "name": "Fake User", "displayName": "Fake User"},
+            "botActor": None,
+        }
+
+    def comment_by_id(self, comment_id: str) -> dict[str, object]:
+        for issue in self.issues.values():
+            for comment in self.comments_of(issue):
+                if comment["id"] == comment_id:
+                    return comment
+        raise AssertionError(f"no workspace comment {comment_id!r}")
 
     def _now(self) -> str:
         return f"2026-06-12T00:00:{next(self._clock):02d}Z"
@@ -356,18 +391,28 @@ class FakeLinearWorkspace(LinearClient):
         return None if milestone is None else {"id": milestone["id"], "name": milestone["name"]}
 
     def _project_issue_node(
-        self, issue: dict[str, object], *, with_milestone: bool = False
+        self,
+        issue: dict[str, object],
+        *,
+        with_milestone: bool = False,
+        with_attachment_page_info: bool = False,
     ) -> dict[str, object]:
+        attachments: dict[str, object] = {"nodes": self.attachment_nodes_of(issue)}
+        if with_attachment_page_info:
+            # Only when the selection asked for it: a fake must never manufacture a
+            # completeness signal the real query did not request.
+            attachments["pageInfo"] = {"hasNextPage": False}
         node: dict[str, object] = {
             "id": issue["id"],
             "identifier": issue["identifier"],
             "url": issue["url"],
             "title": issue["title"],
             "description": issue["description"],
+            "state": {"type": self.state_type(issue)},
             "labels": {
                 "nodes": [{"id": label_id} for label_id in cast("list[str]", issue["label_ids"])]
             },
-            "attachments": {"nodes": self.attachment_nodes_of(issue)},
+            "attachments": attachments,
         }
         if with_milestone:
             node["projectMilestone"] = self._milestone_node_of(issue)
@@ -402,6 +447,14 @@ class FakeLinearWorkspace(LinearClient):
     def request(self, query: str, variables: dict[str, object] | None = None) -> dict[str, object]:
         v = variables or {}
         self.requests.append((query, v))
+        for hook in list(self.before_request):
+            hook(query, v)
+        response = self._route(query, v)
+        for hook in list(self.after_request):
+            hook(query, v)
+        return response
+
+    def _route(self, query: str, v: dict[str, object]) -> dict[str, object]:
         if "viewer" in query:
             return {"viewer": {"id": "u1", "name": "Fake User", "email": "f@x.io"}}
         if "teams(filter" in query:
@@ -427,8 +480,14 @@ class FakeLinearWorkspace(LinearClient):
                 return {"project": {"externalLinks": self._page_of(list(links), v.get("cursor"))}}
             if "issues(first" in query:
                 with_milestone = "projectMilestone" in query
+                # The refinement read's attachment-completeness selection (the specific needle).
+                with_page_info = "metadata } pageInfo { hasNextPage }" in query
                 nodes = [
-                    self._project_issue_node(issue, with_milestone=with_milestone)
+                    self._project_issue_node(
+                        issue,
+                        with_milestone=with_milestone,
+                        with_attachment_page_info=with_page_info,
+                    )
                     for issue in self.issues.values()
                     if issue.get("project_id") == project["id"]
                 ]
@@ -540,11 +599,7 @@ class FakeLinearWorkspace(LinearClient):
         if "commentCreate(" in query:
             payload = cast("dict[str, object]", v["input"])
             issue = self._issue_for_mutation(str(payload.get("issueId", "")))
-            comment = {
-                "id": f"cmt-{uuid.uuid4().hex[:8]}",
-                "body": payload["body"],
-                "createdAt": self._now(),
-            }
+            comment = self._new_comment(payload["body"])
             self.comments_of(issue).append(comment)
             return {"commentCreate": {"success": True, "comment": {"id": comment["id"]}}}
         if "commentUpdate(" in query:
@@ -553,6 +608,7 @@ class FakeLinearWorkspace(LinearClient):
                     if comment["id"] == v.get("id"):
                         payload = cast("dict[str, object]", v["input"])
                         comment["body"] = payload["body"]
+                        comment["editedAt"] = self._now()
                         return {"commentUpdate": {"success": True}}
             raise _not_found()
         if "projectCreate(" in query:
