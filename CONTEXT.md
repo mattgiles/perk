@@ -43,6 +43,13 @@ A run-owned, disposable directory for non-authoritative command and model interm
 distinct from pointer-validated session data and host-global temporary space.
 _Avoid_: session data, evidence store, temp directory
 
+### Review
+
+**Approval guidance**:
+Nonblocking advice accompanying an approval. It neither changes the verdict into a request for
+changes nor establishes that a platform review was posted.
+_Avoid_: change request, posting confirmation
+
 ### Objective delivery
 
 **Incremental delivery**:

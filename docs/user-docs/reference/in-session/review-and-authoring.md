@@ -208,9 +208,18 @@ to the in-session table.
 
 You normally post APPROVE or COMMENT, with inline comments, directly from the browser. Perk uses
 `submit_pr_review` only for REQUEST CHANGES (unsupported by the UI) or when you explicitly ask it
-to post. Own-PR formal verdict limits still apply. The door fails fast in a headless session or
-when the Plannotator extension is absent; select `[providers] plan = "plannotator-plan"`, run
-`perk init`, and restart Pi.
+to post. Own-PR formal verdict limits still apply.
+
+In PR mode, an approval with no decoded annotations completes the review. If it includes a
+nonblank note, the session retains that note verbatim as **nonblocking approval guidance**, inside
+an explicitly untrusted DATA block. The approval stands; the note is optional advice, not a request
+for changes, an edit/posting mandate, or confirmation that a platform review was posted. Missing or
+blank notes keep the bare approval message. Closing without submitting takes precedence over any
+approval or note; responses with annotations keep their existing triage behavior. Perk still posts
+nothing by default.
+
+The door fails fast in a headless session or when the Plannotator extension is absent; select
+`[providers] plan = "plannotator-plan"`, run `perk init`, and restart Pi.
 
 It shares `start_review_wave`, `collect_review_wave`, and `submit_pr_review` with the terminal door,
 and adds:
@@ -238,9 +247,17 @@ checkout), checks out the **top** head detached at `review-<top>`, and opens pla
 combined diff. One adversarial wave reviews the combined diff (`stack: true` — reviewer children
 fetch per-member context with `perk pr review-context --pr <top> --stack`).
 
+An approval with no decoded annotations completes the review and may return a nonblank note as
+**nonblocking approval guidance**: the exact note is retained inside an explicitly untrusted DATA
+block. The note is optional follow-up, not a request for changes or authority to edit or post.
+Missing or blank notes keep the bare approval; closing without submitting takes precedence, and
+annotation-bearing responses keep their existing triage behavior. Neither approval nor guidance
+means a platform review was posted: this browser has no attached PR and posts nothing. You choose
+separately whether to post per-PR COMMENT reviews or nothing.
+
 **Posting is perk-side on this door** (the local-diff session has no attached PR, so there is no
-browser platform-posting): after triage, perk routes each finding to the PR that introduced it
-— body-level by default, inline only where straightforward — dry-run-validates **all** per-PR
+browser platform-posting): if you choose to post after triage, perk routes each finding to the PR
+that introduced it — body-level by default, inline only where straightforward — dry-run-validates **all** per-PR
 batches, then posts one review per member PR bottom→top through `submit_pr_review` (the gate
 ladder applies per call). Every real post appends a `{pr, event, at}` row to the `review_posts`
 ledger; a mid-sequence failure stops and surfaces posted-vs-pending, and a resume skips confirmed

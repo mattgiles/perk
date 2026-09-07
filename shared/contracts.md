@@ -1658,13 +1658,24 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
 - **Respond routing (the PR modes — `respondMessage` /
   `routeBrowserRespond` in `plannotatorHandoff.ts`):** the bridge's single respond routes back
   into the session via the pure `respondMessage(outcome)` mapping — `handled`+`exit` → the
-  closed-without-submitting ask; `handled`+approved+no annotations → the review-is-complete note
-  (perk posts nothing; `submit_pr_review` offered only on explicit ask); `handled` otherwise →
-  the feedback text + (when annotations exist) a fenced JSON block of the decoded annotations +
-  the browser-posting triage pointer (source-less = human-authored; `perk:*`-badged = perk's own
-  findings returning; perk composes nothing by default — `submit_pr_review` ONLY for
-  request-changes or on explicit request); `unavailable`/`error` → `report()` error, the flow
-  continues in-session. Injection is idle → immediate, streaming → `followUp`. The decoded
+  closed-without-submitting ask, taking precedence even over simultaneous approval, feedback,
+  and annotations. `handled`+approved+zero **decoded** annotations → the complete existing
+  review-is-complete message (Perk posts nothing; `submit_pr_review` offered only on explicit
+  ask). Missing, empty, or whitespace-only feedback keeps this bare approval byte-for-byte.
+  Nonblank feedback appends **nonblocking approval guidance** after two separating newlines:
+  the approval stands, the note is optional follow-up, not a request for changes, and it does
+  not itself authorize edits or posting. The original feedback is inserted verbatim inside
+  `<untrusted_reviewer_feedback>` delimiters with an explicit untrusted DATA, never instructions
+  note; trimming checks presence only. The flow-specific posting paragraph stays outside that
+  block. A note neither reopens the completed review nor proves a platform post occurred.
+  Branch selection uses `annotations.length`, not raw `annotationCount`, so skipped malformed
+  annotations cannot hide a note. Annotation-bearing responses (including approvals) remain
+  unchanged: feedback text + fenced JSON of decoded annotations + the browser-posting triage
+  pointer (source-less = human-authored; `perk:*`-badged = perk's own findings returning; perk
+  composes nothing by default — `submit_pr_review` ONLY for request-changes or on explicit
+  request). Non-approved feedback without annotations remains just the feedback text, including
+  platform-post confirmations. `unavailable`/`error` → `report()` error, the flow continues
+  in-session; aborted → no-op. Injection is idle → immediate, streaming → `followUp`. The decoded
   annotation shape (`CodeReviewAnnotation`: `{filePath, lineStart, lineEnd, side: "old"|"new"}`
   + optional `text`/`suggestedCode`/`type`/`scope`/`source`/`severity`) and the `exit` flag ride
   the shared bridge decode — the pre-PR local mode routes separately
@@ -1740,11 +1751,9 @@ parallel rebuild.
   `stack-review-browser`): a thin door over the SAME extracted browser-lifecycle core as
   `/pr-review-browser` (`openReviewBrowserCore`: open → prime → readiness observation → respond
   routing → surface clear → guidance injection), with the stack respond mapper
-  (`stackRespondMessage`: exit → the closed note; approved-with-no-annotations → ask the human
-  whether to post per-PR COMMENT reviews or nothing; annotations → inject with the
-  combined-diff-coordinates framing + the routing/posting protocol) and the stack degrade
-  notice (browser never ready → render findings in-session; the posting protocol never depended
-  on the browser). **Explicit, non-probing target grammar:** `[target] [focus note]` where a
+  (`stackRespondMessage`, below) and the stack degrade notice (browser never ready → render
+  findings in-session; the posting protocol never depended on the browser).
+  **Explicit, non-probing target grammar:** `[target] [focus note]` where a
   bare number / `#n` / issue URL is an OBJECTIVE id by definition, `pr:<n>` / a PR URL is the
   chain arm, and no target runs the ladder — the session's rebuilt `active_objective`, else the
   worker's own `cache.plan-ref` arm, else the `no_objective` usage refusal naming the explicit
@@ -1757,6 +1766,22 @@ parallel rebuild.
   COMBINED-DIFF coordinates; routing is the parent's job; without `stack`, lane tasks are
   byte-identical to the single-PR wave). Streaming/`push_annotations`/collect/reconcile are the
   browser door's contract unchanged. Cleanup: `perk pr review cleanup --pr <top>`.
+- **Respond routing (`stackRespondMessage`):** exit takes precedence over simultaneous
+  approval, feedback, and annotations, returning the closed-without-submitting ask. Approval
+  with zero decoded annotations retains the complete existing approval/posting message: the
+  review is complete, the local-diff browser has no attached PR and posted nothing, and the
+  human chooses per-PR COMMENT reviews or no post. Missing, empty, or whitespace-only feedback
+  leaves that bare approval byte-for-byte; a nonblank note appends the same verbatim
+  **nonblocking approval guidance** and untrusted DATA framing as the PR mapper, with the
+  posting paragraph outside the `<untrusted_reviewer_feedback>` block. Selection uses decoded
+  `annotations.length`, not raw `annotationCount`. The note is optional advice, neither a
+  request for changes nor posting confirmation; it grants no edit/posting authority and does
+  not reopen the review. Annotation-bearing responses, with either approval value, retain
+  their feedback, JSON, attribution, combined-diff framing, and routing/posting protocol;
+  non-approved feedback-only responses retain the stack posting framing. The shared route's
+  unavailable/error reporting, aborted no-op, and idle/busy delivery are unchanged. Any chosen
+  posting still follows human-approved routing, all-batches dry-run, bottom→top order, and
+  per-PR gates — no automatic posting or note-addressing loop.
 - **The cold launcher `perk objective stack review [OBJECTIVE] [--pr <n|url>] [--focus]`**
   (seeded-door family, minus the `--worktree`/`--no-sync` knobs — both would be no-ops on this
   `worktree: none` read-write stage): positional objective (default: the plan-ref-linked

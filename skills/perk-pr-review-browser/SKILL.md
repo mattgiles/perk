@@ -101,6 +101,10 @@ launch statement's rules:
   human-authored; `perk:*`-badged ones are your own findings returning. They become candidate
   comments ONLY when the human explicitly asks perk to post — then settle the batch with them
   first (the mapping below).
+- **Approval guidance.** For a PR or stack approval with no decoded annotations, follow the
+  returned message's approval-guidance framing. An accompanying note is optional advice, not
+  an annotation or posting queue: the approval stands, and whether a platform review was posted
+  is a separate fact.
 
 ## The annotation mechanics are tool-owned
 
