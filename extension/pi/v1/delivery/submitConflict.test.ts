@@ -37,10 +37,21 @@ function details(result: { details: unknown }) {
     receipt?: { lock: { disposition: string; path: string } };
   };
 }
-async function setup(script?: Parameters<typeof fakeConflictResolver>[1]) {
+async function setup(
+  script?: Parameters<typeof fakeConflictResolver>[1],
+  pausePreflight?: () => Promise<void>,
+) {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   gitInit(cwd, { dirty: false });
   const engine = fakeConflictResolver(cwd, script);
+  if (pausePreflight) {
+    const preflight = engine.resolverEngine.preflight;
+    engine.resolverEngine.preflight = async (input) => {
+      const profile = await preflight(input);
+      await pausePreflight();
+      return profile;
+    };
+  }
   const bin = fakePerkRouter(cwd, {
     "pr submit": { json: publication },
     "pr resolve-threads": { json: threads },
@@ -106,6 +117,57 @@ for (const change of ["counter", "identity", "read-only", "planning", "clean-sub
       assert.equal(details(await w.h.invokeTool("resolve_submit_conflicts", {})).ok, false);
       assert.equal(w.engine.requests.length, 0);
     } finally {
+      w.h.dispose();
+    }
+  });
+}
+
+for (const change of ["counter", "identity"]) {
+  test(`registered dispatch revalidates ${change} changed during awaited preflight`, async () => {
+    const entered = deferred<void>();
+    const resume = deferred<void>();
+    const w = await setup(undefined, async () => {
+      entered.resolve();
+      await resume.promise;
+    });
+    let running: ReturnType<typeof w.h.invokeTool> | undefined;
+    try {
+      const submitted = await w.h.invokeTool("submit", {});
+      assert.equal(submitted.terminate, true);
+      assert.equal(w.h.workflowState().conflict_resolution_attempts, 1);
+      running = w.h.invokeTool("resolve_submit_conflicts", {});
+      await entered.promise;
+      assert.equal(w.engine.preflights.length, 1, "the primed tool reached awaited preflight");
+      assert.equal(w.engine.requests.length, 0);
+      w.h.session.sessionManager.appendCustomEntry(
+        "perk:workflow-state",
+        change === "counter" ? { conflict_resolution_attempts: 0 } : { run_id: "different" },
+      );
+      assert.equal(
+        w.h.workflowState().mode,
+        "read-write",
+        "the read-only guard is not the refusal",
+      );
+      resume.resolve();
+      const result = await running;
+      const outcome = details(result);
+      assert.equal(outcome.ok, false);
+      assert.equal(outcome.kind, "failed");
+      assert.equal(outcome.reason, "unauthorized");
+      assert.equal(outcome.receipt?.lock.disposition, "not-acquired");
+      assert.notEqual(result.terminate, true);
+      assert.equal(
+        w.engine.requests.length,
+        0,
+        "controller-to-adapter revalidation prevents launch",
+      );
+      assert.equal(existsSync(join(w.cwd, ".git/perk-submit-conflict.lock")), false);
+      assert.equal(w.h.workflowState().conflict_resolution_attempts, change === "counter" ? 0 : 1);
+      assert.equal(w.h.workflowState().run_id, change === "identity" ? "different" : "01RID");
+      assert.equal(details(submitted).ok, true, "the successful publication stands");
+    } finally {
+      resume.resolve();
+      await running;
       w.h.dispose();
     }
   });

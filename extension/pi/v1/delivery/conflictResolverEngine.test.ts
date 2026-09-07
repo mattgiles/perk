@@ -285,7 +285,7 @@ test("pre-aborted and cancellation during awaited preflight emit nothing, includ
 });
 
 for (const where of ["preflight", "acquisition"]) {
-  test(`read-only/authorization changes after ${where} prevent emission`, async (t) => {
+  test(`read-only changes after ${where} prevent emission`, async (t) => {
     let readonly = false;
     const w = world(t, { readOnly: () => readonly });
     const options = {
@@ -305,6 +305,68 @@ for (const where of ["preflight", "acquisition"]) {
     assert.equal(result.kind, "failed");
     assert.equal(w.bus.sent.length, 0);
     assert.equal(existsSync(w.lockPath), false);
+  });
+}
+
+for (const where of ["preflight", "acquisition"]) {
+  test(`authorization revoked during ${where} refuses without requesting a writer`, async (t) => {
+    let authorized = true;
+    let acquisitions = 0;
+    const observations: boolean[] = [];
+    const entered = deferred<void>();
+    const resume = deferred<void>();
+    const w = world(t, {
+      // Keep read-only state unchanged so only parent-authorization revalidation can refuse.
+      readOnly: () => false,
+      authorized: () => {
+        observations.push(authorized);
+        return authorized;
+      },
+    });
+    const engine = createConflictResolverEngine({
+      ...w.options,
+      preflight: async () => {
+        entered.resolve();
+        await resume.promise;
+        return w.profile;
+      },
+      acquire: (...args) => {
+        const acquisition = acquireWorktreeResolverLock(...args);
+        assert.equal(acquisition.kind, "acquired");
+        assert.ok(existsSync(w.lockPath), "revocation happens while a real claim is held");
+        acquisitions++;
+        if (where === "acquisition") authorized = false;
+        return acquisition;
+      },
+    });
+    // If a regression emits, settle the fake child immediately so the assertions fail without
+    // waiting for a production timeout. This responder must remain unused on the correct path.
+    w.bus.on(DELEGATION_EVENTS.request, (r) => respond(w, r as Record<string, unknown>));
+    const running = engine.resolve(w.request);
+    try {
+      await entered.promise;
+      assert.deepEqual(observations, [true], "dispatch began with valid authorization");
+      assert.equal(acquisitions, 0);
+      assert.equal(existsSync(w.lockPath), false);
+      if (where === "preflight") authorized = false;
+      resume.resolve();
+      const result = await running;
+      assert.ok(result.kind === "failed" && result.reason === "unauthorized");
+      assert.ok(observations.includes(false), "authorization was read again after revocation");
+      assert.equal(acquisitions, where === "preflight" ? 0 : 1);
+      assert.equal(
+        result.receipt.lock.disposition,
+        where === "preflight" ? "not-acquired" : "released",
+      );
+      assert.equal(result.receipt.termination, "not-requested");
+      assert.deepEqual(w.bus.sent, [], "neither a writer request nor cancellation was emitted");
+      assert.equal(existsSync(w.lockPath), false, "any never-emitted claim was released");
+      assert.equal(w.bus.count(), 2, "only test observers remain");
+    } finally {
+      resume.resolve();
+      await running;
+      await engine.shutdown();
+    }
   });
 }
 
