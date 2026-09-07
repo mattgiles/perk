@@ -14,7 +14,11 @@ import {
 } from "../pi/v1/delivery/commitCompact.ts";
 import { objectiveLandGuidance } from "../pi/v1/delivery/stackLand.ts";
 import { objectiveRecoverGuidance } from "../pi/v1/delivery/stackRecover.ts";
-import { objectiveSyncGuidance } from "../pi/v1/delivery/stackSync.ts";
+import {
+  objectiveSyncGuidance,
+  syncConflictResolutionGuidance,
+} from "../pi/v1/delivery/stackSync.ts";
+import { retainedDispatch } from "../testing/fakeConflictResolver.ts";
 import {
   loadPerkSession,
   type PerkSession,
@@ -572,16 +576,21 @@ const DRIVE_COVERAGE: readonly {
     drive: "stages/conflict-resolution-continuation.md (sync conflict drive + resolve mode)",
     stages: WORKTREE_STAGES,
     text: () =>
-      render("stages/conflict-resolution-continuation.md", {
-        objective: "5",
-        node: "2.1",
-        branch: "plan-42",
-        pr: "42",
-        worktree: "/tmp/wt",
-        worktree_json: JSON.stringify("/tmp/wt"),
-        attempt: "1",
-        cap: "2",
-        model: "test-model",
+      syncConflictResolutionGuidance(retainedDispatch("/tmp/wt"), 1, 2, {
+        kind: "continuation-ready",
+        report: {
+          mode: "retained-continuation",
+          outcome: "completed",
+          verification: "passed",
+          summary: "Checks passed.",
+        },
+        receipt: {
+          nodeId: "retained-conflict",
+          cwd: "/tmp/wt",
+          disposition: "terminal",
+          termination: "confirmed",
+          lock: { disposition: "released" },
+        },
       }),
   },
   {

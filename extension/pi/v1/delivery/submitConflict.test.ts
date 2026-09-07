@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   completedResolution,
+  completedRetainedResolution,
   deferred,
   fakeConflictResolver,
 } from "../../../testing/fakeConflictResolver.ts";
@@ -65,6 +66,27 @@ async function setup(
   spyInjections(h);
   return { cwd, engine, bin, h };
 }
+
+test("submit cannot consume a retained structured success as PR resolution", async () => {
+  const w = await setup((bus, r) =>
+    bus.emit(DELEGATION_EVENTS.response, {
+      requestId: r.requestId,
+      ownerRunId: r.ownerRunId,
+      nodeId: r.nodeId,
+      status: "completed",
+      result: { kind: "structured", value: completedRetainedResolution },
+    }),
+  );
+  try {
+    await w.h.invokeTool("submit", {});
+    const r = await w.h.invokeTool("resolve_submit_conflicts", {});
+    assert.equal(details(r).kind, "failed");
+    assert.equal(details(r).reason, "malformed-result");
+    assert.equal(details(r).receipt?.lock.disposition, "released");
+  } finally {
+    w.h.dispose();
+  }
+});
 
 test("registration is parameterless/sequential; direct/repeated calls refuse; configured model stays code-owned", async () => {
   const w = await setup();

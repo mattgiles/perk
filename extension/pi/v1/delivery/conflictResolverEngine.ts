@@ -6,14 +6,16 @@ import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
-  CONFLICT_RESOLUTION_SCHEMA,
+  type CONFLICT_RESOLUTION_SCHEMA,
   type ConflictResolutionFailure,
   type ConflictResolutionReceipt,
   type ConflictResolutionRequest,
   type ConflictResolutionResult,
   type ConflictResolver,
   classifyConflictResolution,
+  conflictResolutionSchema,
   conflictResolutionTask,
+  retainedConflictResolutionTask,
 } from "../../../delivery/conflictResolution.ts";
 import {
   acquireWorktreeResolverLock,
@@ -321,7 +323,7 @@ export function createConflictResolverEngine(
       parentSessionId: request.parent.sessionId,
       ownerRunId: request.parent.runId,
       requestId: randomUUID(),
-      nodeId: "submit-conflict",
+      nodeId: request.mode === "pr-rebase" ? "submit-conflict" : "retained-conflict",
       cwd: request.worktree,
       disposition: "preflight",
       termination: "not-requested",
@@ -333,7 +335,10 @@ export function createConflictResolverEngine(
     }
     if (signal.aborted) return failed("cancelled");
     if (!allowed(request)) return failed("unauthorized");
-    const task = conflictResolutionTask(request.worktree);
+    const task =
+      request.mode === "pr-rebase"
+        ? conflictResolutionTask(request.worktree)
+        : retainedConflictResolutionTask(request);
     try {
       if (!task || !isAbsolute(request.worktree) || !statSync(request.worktree).isDirectory())
         return failed("invalid-worktree");
@@ -358,7 +363,7 @@ export function createConflictResolverEngine(
               cwd: request.worktree,
               task,
               context: "fresh",
-              outputSchema: CONFLICT_RESOLUTION_SCHEMA,
+              outputSchema: conflictResolutionSchema(request.mode),
               availableModels: options.availableModels(),
               ...(parentModel ? { parentModel } : {}),
               ...(request.model !== undefined ? { model: request.model } : {}),
@@ -427,7 +432,12 @@ export function createConflictResolverEngine(
     if (result.failure) return failed(result.failure);
     if (!result.terminal) return failed("termination-unconfirmed");
     receipt.disposition = "terminal";
-    return classifyConflictResolution(result.terminal.status, result.terminal.value, receipt);
+    return classifyConflictResolution(
+      request.mode,
+      result.terminal.status,
+      result.terminal.value,
+      receipt,
+    );
   }
   return {
     resolve(request, signal) {
@@ -579,7 +589,7 @@ function waitForTerminal(
           cwd: request.worktree,
           context: "fresh",
           timeoutMs: REQUEST_TIMEOUT_MS,
-          result: { kind: "structured", schema: CONFLICT_RESOLUTION_SCHEMA },
+          result: { kind: "structured", schema: conflictResolutionSchema(request.mode) },
           ...(request.model !== undefined ? { model: request.model } : {}),
         });
         emitting = false;

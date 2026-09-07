@@ -7,7 +7,7 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 - **225** canonical source units
 - **1218** logical fragments
-- **16** session shapes and **11** assemblies
+- **16** session shapes and **12** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
 
@@ -699,7 +699,7 @@ Synchronize, recover, land, and reconcile multi-plan objective delivery.
 
 | Unit | Role | Audience | Canonical source | Consumed by |
 | --- | --- | --- | --- | --- |
-| `markdown:prompts/stages/conflict-resolution-continuation.md` | `launch` | `shipped` | [`prompts/stages/conflict-resolution-continuation.md`](../../prompts/stages/conflict-resolution-continuation.md) · `file` | — |
+| `markdown:prompts/stages/conflict-resolution-continuation.md` | `control-guidance` | `shipped` | [`prompts/stages/conflict-resolution-continuation.md`](../../prompts/stages/conflict-resolution-continuation.md) · `file` | — |
 | `markdown:prompts/stages/objective-land.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-land.md`](../../prompts/stages/objective-land.md) · `file` | — |
 | `markdown:prompts/stages/objective-reconcile-ready.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-reconcile-ready.md`](../../prompts/stages/objective-reconcile-ready.md) · `file` | — |
 | `markdown:prompts/stages/objective-reconcile.md` | `control-guidance` | `shipped` | [`prompts/stages/objective-reconcile.md`](../../prompts/stages/objective-reconcile.md) · `file` | — |
@@ -2203,6 +2203,7 @@ Parent workflows assign bounded work and consume typed reports without hand-tran
 Canonical carrier: `markdown:skills/perk-learn/SKILL.md`
 
 - `typescript-tool:resolve_submit_conflicts` — Code-owned foreground resolver with output-free ownership receipt.
+- `typescript-tool:objective_stack_sync` — Awaited retained resolution; typed offer-only result and independent delivery diagnostics.
 - `typescript-tool:run_learn_wave` — Code-owned analyst wave.
 - `typescript-tool:run_pr_review_wave` — Code-owned reviewer wave.
 - `markdown:agents/learn-analyst.md` — Bounded child contract.

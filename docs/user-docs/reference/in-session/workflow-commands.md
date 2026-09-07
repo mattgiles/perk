@@ -100,8 +100,8 @@ participating submit/address resolvers across sessions/processes. Contention doe
 attempt or retry. Confirmed native completion releases the lock; uncertain termination retains it.
 Cancellation does not undo Git work; reload and PID death do not unlock. Follow the
 [human-only lock recovery procedure](../../how-to/recover-a-dirty-worktree.md#recover-a-retained-submit-conflict-lock)
-when a safe diagnostic reports a retained lock. This does not fence manual Git commands or change
-retained-continuation dispatch.
+when a safe diagnostic reports a retained lock. The same execution-lock filename now protects
+retained-continuation resolvers at their target worktrees; it does not fence manual Git commands.
 
 For a stacked delivery layer, `/submit` publishes onto the parent layer's branch, registers the
 native stack, and records checkpoints only after remote verification. Re-submitting a published
@@ -253,11 +253,15 @@ match it refuses and asks for an explicit objective.
   soft-refuse while read-only because they mutate published branches or PRs. When a mutating
   sync/continue stops on a rebase conflict, `/objective-sync` automatically dispatches the
   `perk.conflict-resolver` subagent into the retained worktree (resolve-and-stop: the agent only
-  resolves — resuming the cascade stays your explicit gesture). Both the workflow and child are
-  foreground; the child's actual cwd is the freshly containment-validated retained worktree,
-  not the calling session's directory. No wiring is installed and no parent handoff is copied
-  there. Only a completed rebase with passing verification may be offered for explicit continue;
-  the child never pushes or aborts the retained rebase.
+  finishes the existing rebase and verifies — resuming the cascade stays your explicit gesture).
+  The tool blocks while the native foreground child runs at the freshly containment-validated
+  retained worktree, not the parent's checkout. No wiring or handoff is installed there.
+  Only the code-classified `continuation-ready` result permits an offer: approve continuation
+  anew before a separate `continue:true` call. Initial sync approval is not publication consent.
+  The child never starts a new rebase, pushes or aborts; every other result withholds the offer.
+  Ordinary writable Pi sessions work without an explicit workflow-mode entry; read-only and
+  planning restrictions still apply. Cancellation or session-tree navigation is rechecked at
+  claim acquisition and attempt increment, so revoked preparation cannot spend a new attempt.
 
 Paired tools are non-terminating and strictly decoded; malformed or mutually exclusive fields
 refuse before the cold worker runs:
@@ -268,9 +272,19 @@ refuse before the cold worker runs:
   dispatch the conflict-resolver subagent into the retained worktree. `continue`/`abort` are
   mutually exclusive and cannot combine with `base`/`dry_run`; `resolve` composes with nothing and
   never reaches the cold sync mutation (its only cold call is the corroborating status re-read). A mutating sync/continue that stops on a rebase conflict
-  auto-dispatches the resolver (bounded attempts, guarded by a machine-local resolver claim beside
-  the manifest); publication stays your explicit `continue`. Warnings include cleanup leftovers
-  and their recovery command.
+  awaits the resolver (bounded attempts). The session claim beside the manifest stays held even
+  after child completion; a separate execution lock in the retained worktree's canonical Git
+  directory excludes concurrent resolvers. Explicit resolve returns typed `resolution` details
+  after an attempt and succeeds only on `continuation-ready`; automatic handling preserves the
+  original `rebase_conflict` refusal and sends the resolver disposition separately. No approval
+  or declined approval leaves everything retained. Manual continuation after human repair is
+  still possible; Python revalidates before publication.
+
+  If post-result rendering or sending fails, the original result stands and an extra tool text
+  block says **follow-up delivery is unconfirmed** (it may already have queued), with safe receipt
+  diagnostics and any report labeled untrusted JSON. Stop for human direction; there is no
+  automatic delivery retry or continuation. See [lock recovery](../../how-to/recover-a-dirty-worktree.md#recover-a-retained-submit-conflict-lock)
+  for uncertain execution; session-claim cleanup never recovers an execution lock.
 - **`objective_stack_adopt`** `{objective?, node, dry_run?, confirm?}` — adopt one manually pushed
   node head and cascade successors. Mutation requires `confirm: true` after preview.
 - **`objective_stack_recover`** `{objective?, operation?, dry_run?, abandon?, accept_prefix?,

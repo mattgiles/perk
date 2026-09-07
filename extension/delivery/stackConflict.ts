@@ -17,10 +17,10 @@
 // | SYNC cascade (§8.49) | Journal SYNC prepared/completed/abandoned; checkpoints; continuation manifest on conflict (Python-written) | `objective_stack_sync {}`/`{base}` → `sync --yes`; `{dry_run}` → no consent, no journal | human gesture = `--yes` | no-op (± base-advanced hint) / declined / synchronized N / dry-run preview; failure: `rebase_conflict` (continuation retained) et al. | `/objective-recover` classifies; conflict → continue/abort/resolve |
 // | SYNC continue/abort (§8.49/§8.51) | Continuation manifest + temp refs + retained worktree | `{continue}`/`{abort}` → `--continue/--abort --yes` | human gesture | continued N / continuation declined / aborted-discarded | abandoned continuations self-clean; recover sweeps residue |
 // | ADOPT (§8.49) | Same journal; adopted node's remote head | `objective_stack_adopt {node, confirm}`; dry-run previews | `confirm: true` + dry-run-first | adopted + cascade rendered | never enters this dispatch pipeline (adapter-pinned) |
-// | Conflict dispatch (§8.51, warm-only) | Continuation manifest (containment-validated by the cold projection — `targets_contained`); fresh status projection; `conflict_resolution_attempts`; resolver lock dir | auto-fire on eligible refusal, or `{resolve: true}` | auto: the human's mutating gesture; resolve: explicit request | `dispatched(attempt/cap)` / `no_continuation` / `attempt_cap` / `resolver_busy` / `state_error` (total boundary) | increment verified BEFORE injection; unpersisted/thrown → withhold + release this call's claim |
+// | Conflict dispatch (§8.51, warm-only) | Continuation manifest (containment-validated by the cold projection — `targets_contained`); fresh status projection; `conflict_resolution_attempts`; resolver lock dir | auto-fire on eligible refusal, or `{resolve: true}` | auto: the human's mutating gesture; resolve: explicit request | `dispatched(attempt/cap)` / `no_continuation` / `attempt_cap` / `resolver_busy` / `state_error` (total boundary) | increment verified BEFORE execution; unpersisted/thrown → withhold + release this call's claim |
 //
 // Progress is recorded only after verified effects: the counter reset fires only on a clean
-// cold completion; the increment is persisted-and-verified before any dispatch injection.
+// cold completion; the increment is persisted-and-verified before native execution.
 
 import { basename, dirname } from "node:path";
 import {
@@ -42,23 +42,21 @@ export type SyncMode = "sync" | "continue" | "abort";
 
 // --- the interpolation vocabularies (module-private, fail-closed) --------------------------------
 // Containment (`targets_contained`) is the cold plane's filesystem-truth validation; these
-// lexical vocabularies guard the UNQUOTED template interpolations — which containment alone
-// does not.
+// lexical vocabularies confine task/guidance facts independently of filesystem containment.
+// Defensive shell quoting does not widen this deliberately narrow accepted vocabulary.
 
 /** The identifier vocabulary for node/objective ids — whitelist validation doubles as
  * control-character/line-break exclusion, so a poisoned projection string can never break out
- * of the injected dispatch. Alphanumeric-first: ids reach unquoted CLI-argument positions in
- * the dispatch template, so an option-shaped `-`-leading id never passes. */
+ * of task/guidance data. Alphanumeric-first excludes option-shaped identifiers. */
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 /** The ONE lineage predicate — the exact warm twin of the Python `_SAFE_LINEAGE_RE` vocabulary. */
 const LINEAGE_RE = /^[0-9A-Za-z][0-9A-Za-z_-]{0,63}$/;
 /** A canonical 26-char Crockford ULID operation id (`validated_targets`' shape, warm side). */
 const OPERATION_ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 /**
- * The shell-inert absolute-path vocabulary: no space, no shell metacharacter — the dispatch
- * template renders an UNQUOTED `cd {{ worktree }}`, so containment here is what keeps the
- * interpolation from ever becoming shell syntax. A legitimate-but-exotic worktree root (e.g.
- * containing spaces) degrades to report-only — an accepted, recorded degradation.
+ * The shell-inert absolute-path vocabulary: no space or shell metacharacter. Task construction
+ * quotes defensively but does not relax this policy. Legitimate exotic roots (e.g. spaces)
+ * still degrade to report-only.
  */
 const SHELL_INERT_ABS_PATH_RE = /^\/[A-Za-z0-9._/-]+$/;
 /** Branch names interpolate as unquoted git arguments — alphanumeric-first (option-shaped
@@ -294,8 +292,8 @@ function releaseQuietly(claim: ResolverClaim, held: { manifestPath: string; toke
  * shared bounded budget → take the resolver claim → persist the verified increment (a
  * precondition for dispatch — an unverifiable counter must never bypass the cap; a `false`
  * commit withholds and releases THIS call's claim, token-fenced) → `dispatched`. Rendering and
- * injection stay adapter-side. Resolve-and-stop: nothing here publishes — the injected template
- * owns the outcome gate and the human's `continue` stays the only publication gesture.
+ * execution/delivery stay adapter-side. Resolve-and-stop: nothing here publishes — the native
+ * classifier owns the outcome gate and the human's `continue` stays the publication gesture.
  *
  * Total boundary: every thrown port failure — a throwing projection read, claim port, or
  * counter read/write — is caught and translated to the typed `state_error` arm (reason prefixed

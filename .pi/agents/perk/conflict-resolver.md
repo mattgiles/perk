@@ -140,6 +140,16 @@ and push results separately; a completed rebase is not proof of a successful pus
 verification failure still remedies or aborts as instructed above; retained-only outcomes never
 claim PR success.
 
+For retained-continuation mode the structured record has exactly `mode`
+(`retained-continuation`), `outcome` (`completed`, `verification-failed`,
+`stopped-before-mutation`, `unresolvable-conflict`), `verification` (`passed`, `failed`,
+`not-run`), and `summary` (nonblank, at most 2,000 characters; checks/blockers, not raw diff or
+transcript). There is **no push field and no aborted outcome**. Report completed/passed only
+after the existing rebase finishes and checks pass; verification-failed/failed leaves the finished
+worktree untouched. Stopped-before-mutation/not-run names missing worktree, no live rebase,
+ambiguous task or context-fetch failure. Unresolvable-conflict/not-run preserves the in-progress
+worktree. Neither structured completion nor its summary authorizes publication.
+
 Otherwise retain the first-line protocol: **Open with the terminal outcome class**, exactly one of:
 
 - **completed** — the rebase finished and verification **passed** (name the checks you ran);
@@ -155,5 +165,6 @@ Otherwise retain the first-line protocol: **Open with the terminal outcome class
 Then report: the mode selected, the files resolved (and how many resolve→add→continue rounds),
 the verification run and its result, and the terminal action — PR mode → the push outcome;
 retained mode → an explicit statement that **no push was performed** and the human resumes with
-`sync --continue`. The explicit outcome class is what the dispatching session gates on. Never
+`sync --continue`. This prose protocol is for ad-hoc launches without an engine schema; no
+code-owned dispatch parses it. Never
 resolve threads, open/merge PRs, or spawn further subagents.

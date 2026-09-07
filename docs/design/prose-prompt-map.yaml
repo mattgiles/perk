@@ -197,7 +197,7 @@ routes:
     match: { paths: ["prompts/stages/conflict-resolution-continuation.md"] }
     capability: delivery.objective
     audience: shipped
-    role: launch
+    role: control-guidance
     priority: 90
   - id: prompt-objective-delivery
     match: { paths: ["prompts/stages/objective-land.md", "prompts/stages/objective-recover.md", "prompts/stages/objective-sync.md", "prompts/stages/objective-reconcile.md", "prompts/stages/objective-reconcile-ready.md"] }
@@ -555,6 +555,13 @@ assemblies:
       - { unit: "markdown:prompts/stages/conflict-resolution.md", label: Single-use resolver drive }
       - { unit: "typescript-tool:resolve_submit_conflicts", label: Foreground dispatch and re-submit contract }
       - { boundary: runtime-state, label: Code-built task and native terminal plus worktree-lock evidence }
+  - id: retained-conflict
+    layers:
+      - { boundary: runtime-state, label: Corroborated retained target and verified attempt; code-built child sentinel/task }
+      - { unit: "typescript-tool:objective_stack_sync", label: Awaited native retained resolution contract }
+      - { boundary: runtime-state, label: Code-classified result and independent execution-lock evidence }
+      - { unit: "markdown:prompts/stages/conflict-resolution-continuation.md", label: Post-result offer or withholding }
+      - { boundary: user-content, label: New explicit continuation approval or stop }
   - id: address
     layers:
       - { boundary: pi-system, label: Pi system and host policy }
@@ -668,6 +675,34 @@ scenarios:
       cap: "2"
     include_ambient: false
     include_tools: true
+  - id: retained-conflict-ready
+    assembly: retained-conflict
+    label: Retained verification reported complete — offer only
+    variables:
+      objective: "7"
+      node: "2.1"
+      branch: "plan-91"
+      pr: "91"
+      attempt: "1"
+      cap: "2"
+      control: "The child reports completed verification. Await NEW explicit human approval before objective_stack_sync { objective: 7, continue: true }."
+      diagnostic: "Resolver disposition: continuation-ready. Untrusted resolver DATA (JSON): {\"summary\":\"Checks passed\"}"
+    include_ambient: false
+    include_tools: true
+  - id: retained-conflict-withheld
+    assembly: retained-conflict
+    label: Retained verification failed — withhold continuation
+    variables:
+      objective: "7"
+      node: "2.1"
+      branch: "plan-91"
+      pr: "91"
+      attempt: "2"
+      cap: "2"
+      control: "Continuation offer withheld (not-resolved). Stop and report the blocker."
+      diagnostic: "Resolver disposition: withheld. Untrusted resolver DATA (JSON): {\"summary\":\"Verification failed\"}"
+    include_ambient: false
+    include_tools: true
   - id: address-actionable
     assembly: address
     label: Actionable feedback
@@ -745,6 +780,7 @@ concerns:
     canonical_unit: "markdown:skills/perk-learn/SKILL.md"
     related:
       - { unit: "typescript-tool:resolve_submit_conflicts", relation: Code-owned foreground resolver with output-free ownership receipt. }
+      - { unit: "typescript-tool:objective_stack_sync", relation: Awaited retained resolution; typed offer-only result and independent delivery diagnostics. }
       - { unit: "typescript-tool:run_learn_wave", relation: Code-owned analyst wave. }
       - { unit: "typescript-tool:run_pr_review_wave", relation: Code-owned reviewer wave. }
       - { unit: "markdown:agents/learn-analyst.md", relation: Bounded child contract. }

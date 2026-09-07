@@ -649,6 +649,9 @@ test("Rule I: foreground delegation/public loading is confined, conflicts never 
     "delivery/conflictResolution.ts",
     CONFLICT_ENGINE,
     "pi/v1/delivery/submitConflict.ts",
+    "pi/v1/delivery/stackConflictResolver.ts",
+    "pi/v1/delivery/stackSync.ts",
+    "delivery/stackConflict.ts",
   ];
   for (const file of conflicts) {
     assert.ok(files.includes(file), `missing conflict anchor ${file}`);

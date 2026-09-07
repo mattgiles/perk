@@ -14,6 +14,24 @@ export const completedResolution = {
   push: "succeeded",
   summary: "Offline checks passed.",
 };
+export const RETAINED_OPERATION = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+export const completedRetainedResolution = {
+  mode: "retained-continuation",
+  outcome: "completed",
+  verification: "passed",
+  summary: "Offline checks passed.",
+};
+export function retainedDispatch(worktree: string) {
+  return {
+    operationId: RETAINED_OPERATION,
+    worktree,
+    manifestPath: join(worktree, "sync-continuations/01LIN.json"),
+    objective: "7",
+    node: "2.1",
+    branch: "plan-91",
+    pr: 91,
+  };
+}
 export function fakeResolverProfile(cwd: string) {
   const path = join(cwd, ".pi/agents/perk/conflict-resolver.md");
   mkdirSync(join(cwd, ".pi/agents/perk"), { recursive: true });
@@ -115,7 +133,13 @@ export function fakeConflictResolver(
             ownerRunId: r.ownerRunId,
             nodeId: r.nodeId,
             status: "completed",
-            result: { kind: "structured", value: completedResolution },
+            result: {
+              kind: "structured",
+              value:
+                r.nodeId === "retained-conflict"
+                  ? completedRetainedResolution
+                  : completedResolution,
+            },
           });
       });
     },

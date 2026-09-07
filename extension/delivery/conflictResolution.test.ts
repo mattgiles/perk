@@ -55,6 +55,7 @@ test("all outcome/verification/push combinations: only one authorizes re-submit"
     for (const verification of ["passed", "failed", "not-run"]) {
       for (const push of ["succeeded", "failed", "not-attempted"]) {
         const r = classifyConflictResolution(
+          "pr-rebase",
           "completed",
           { ...record, outcome, verification, push },
           receipt,
@@ -78,13 +79,16 @@ test("all outcome/verification/push combinations: only one authorizes re-submit"
 
 test("native failure cannot salvage a valid report; lock failure cannot authorize re-submit", () => {
   for (const status of ["failed", "timed_out", "cancelled", "interrupted", "unknown"]) {
-    const r = classifyConflictResolution(status, record, receipt);
+    const r = classifyConflictResolution("pr-rebase", status, record, receipt);
     assert.equal(r.kind, "failed");
     assert.equal("report" in r, false);
   }
   for (const disposition of ["not-acquired", "busy", "retained", "ownership-error"] as const) {
     assert.equal(
-      classifyConflictResolution("completed", record, { ...receipt, lock: { disposition } }).kind,
+      classifyConflictResolution("pr-rebase", "completed", record, {
+        ...receipt,
+        lock: { disposition },
+      }).kind,
       "failed",
     );
   }
