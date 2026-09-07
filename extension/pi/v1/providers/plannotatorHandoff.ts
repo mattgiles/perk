@@ -56,6 +56,9 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+// Type-only (erased at runtime — no cycle): the outcome vocabulary lives with the shared
+// review-surface machinery.
+import type { DraftReviewRegistration } from "../../../session/draftReviewState.ts";
 import { readPlanRef } from "../../../substrate/cache.ts";
 import {
   type ColdDoorResult,
@@ -65,10 +68,21 @@ import {
   stringField,
 } from "../../../substrate/coldDoor.ts";
 import { type ReportTarget, report } from "../../../surfaces/report.ts";
-// Type-only (erased at runtime — no cycle): the outcome vocabulary lives with the shared
-// review-surface machinery.
-import type { ReviewOutcome } from "../review.ts";
-import { type PlannotatorBus, requestPlannotatorPlanReview } from "./plannotator.ts";
+import {
+  type PlannotatorBus,
+  type PlannotatorRefusal,
+  type PlannotatorReviewOutcome,
+  registrationHook,
+  requestPlannotatorPlanReview,
+} from "./plannotator.ts";
+
+class OpeningRefused extends Error {
+  readonly refusal: PlannotatorRefusal;
+  constructor(refusal: PlannotatorRefusal) {
+    super(refusal.detail);
+    this.refusal = refusal;
+  }
+}
 
 /** Plannotator's code-review slash command — its presence detects the extension is loaded. */
 export const PLANNOTATOR_REVIEW_COMMAND = "plannotator-review";
@@ -583,7 +597,14 @@ async function startPlannotatorSurface<T>(
   // Launch the bridge request while PLANNOTATOR_PORT is preset — plannotator's `listenOnPort`
   // reads it at bind time.
   let bridgeSettled = false;
-  const bridgePromise = launch(signal);
+  let bridgePromise: Promise<T>;
+  try {
+    bridgePromise = launch(signal);
+  } catch (error) {
+    if (priorPort === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = priorPort;
+    throw error;
+  }
   void bridgePromise.then(() => {
     bridgeSettled = true;
   });
@@ -660,13 +681,34 @@ export async function startPlannotatorBrowser(
  */
 export async function startPlannotatorPlanReview(
   bus: PlannotatorBus,
-  opts: { plan: string; signal?: AbortSignal },
+  opts: { plan: string; registration: DraftReviewRegistration; signal?: AbortSignal },
   deps: StartBrowserDeps = {},
-): Promise<StartedSurface<ReviewOutcome>> {
-  return await startPlannotatorSurface(
-    (signal) => requestPlannotatorPlanReview(bus, opts.plan, signal),
-    PLAN_REVIEW_READINESS_PROBE_PATH,
-    opts.signal,
-    deps,
-  );
+): Promise<StartedSurface<PlannotatorReviewOutcome> | PlannotatorRefusal> {
+  try {
+    return await startPlannotatorSurface(
+      (signal) => {
+        let refused: PlannotatorRefusal | null = null;
+        const registration: DraftReviewRegistration = {
+          ...opts.registration,
+          open(requestId) {
+            refused = registrationHook("open", () => opts.registration.open(requestId));
+            return refused === null
+              ? { ok: true }
+              : { ok: false, reason: refused.code, detail: refused.detail };
+          },
+        };
+        const pending = requestPlannotatorPlanReview(bus, opts.plan, registration, signal);
+        // async request() executes open synchronously, before its first await. Refusal must
+        // never look like a launched browser or start a readiness probe.
+        if (refused !== null) throw new OpeningRefused(refused);
+        return pending;
+      },
+      PLAN_REVIEW_READINESS_PROBE_PATH,
+      opts.signal,
+      deps,
+    );
+  } catch (error) {
+    if (error instanceof OpeningRefused) return error.refusal;
+    throw error;
+  }
 }

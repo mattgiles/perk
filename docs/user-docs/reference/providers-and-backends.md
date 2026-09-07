@@ -54,6 +54,40 @@ GitHub is the default issue backend; Linear is the other supported choice. Both 
 requests, review, CI, and merge on GitHub. Their storage and operational differences are
 summarized in [Issue backends](./providers-and-backends/issue-backends.md).
 
+## Plannotator draft-review transport
+
+Plan, objective, and gist Plannotator reviews require verified run-local registration before a
+request is emitted. Registration binds the exact source and conservative local routing inputs;
+changes during the handshake can require a fresh review. Busy, broken-provenance, persistence,
+or unresolved-dispatch stops are **refusals**, not skipped reviews or permission to retry a save.
+They do not launch a reviewer wave or fall back to another review. Preserve retained state and
+follow [Reconcile a draft-review stop](../how-to/reconcile-a-draft-review-stop.md); do not remove
+a lock or rewrite provenance to bypass the stop. It requires subprocess quiescence, evidence
+preservation, and human resolution of existing saves/delivery. An orphan alone proves no absence
+of effects; unresolved effects forbid even a fresh-run retry. After resolution, carry only checked
+content into a distinct fresh run, never intent, provenance, or approval.
+
+After attaching the browser's review ID, Perk subscribes to live decisions, then queries status
+once with a separate five-second deadline. A completed status can supply a decision missed during
+the handshake. Pending is quiet and proves neither browser health nor delivery; missing or failed
+status warns but keeps the live wait open and cancellable. Cancellation closes the local wait,
+not the upstream browser. There is no polling, startup discovery, automatic replay, or resume.
+
+Draft/manual-save/node entries and first-party replacement/writeback require a verified current-run
+claim; first-party editor waits release it. Missing identity is not an unclaimed save fallback.
+All Plannotator tool/browser completions and chooser delegations verify intent before effects.
+They share subject-specific bound saves and delivery expectations: actual toolCallId plus exact
+result content, or a code-authored browser HTML receipt marker outside untrusted feedback.
+Only an exact later persisted entry acknowledges delivery; send/return is not acknowledgment.
+Stale decisions carry only diagnostic DATA, never current-draft apply/fold/save instructions.
+Readiness fallback requires verified invalidation: degraded, or the same review's already recorded
+handshake/subscription failure. Transport failures reach one fallback notice before local cleanup,
+even while readiness sleeps or after it reports ready. Failed persistence suppresses local late
+decisions but grants no fallback permission. Confirmed receipts and successful gate facts
+survive later delivery/bookkeeping uncertainty. Preserve state and reconcile rather than retry.
+These are at-most-once participating machine-local dispatch guarantees, not exactly-once delivery
+or power-loss durability. Subject-specific Direct Edits/source policies remain in place.
+
 ## Known caveats & maturity
 
 - `pi-status-footer` does not render extension statuses, so perk's objective progress is not

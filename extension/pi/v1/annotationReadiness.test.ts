@@ -100,6 +100,9 @@ const observers: { name: string; mode: AnnotationMode; observe(f: Fixture): Prom
         f.started,
         createDraftReviewWaveState(),
         f.annotations,
+        { degraded: false },
+        () => true,
+        () => ({ ok: true }),
       ),
   },
   {
@@ -112,6 +115,9 @@ const observers: { name: string; mode: AnnotationMode; observe(f: Fixture): Prom
         f.started,
         createDraftReviewWaveState(),
         f.annotations,
+        { degraded: false },
+        () => true,
+        () => ({ ok: true }),
       ),
   },
 ];
@@ -218,6 +224,9 @@ test("a held final pure clear wakes on readiness even with zero held findings", 
     f.started,
     createDraftReviewWaveState(),
     f.annotations,
+    { degraded: false },
+    () => true,
+    () => ({ ok: true }),
   );
   const held = await executePushAnnotations(
     f.annotations,

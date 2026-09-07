@@ -218,24 +218,31 @@ export interface PlanApprovalSaveDeps extends PlanSaveDeps {
 /**
  * The shared APPROVED-review → save orchestration (an APPROVED `plan_review` outcome and the
  * manual `/plan-save` failsafe both run THIS — contracts §8.23 pins the name). Flow:
- * artifact-first resolution (`resolvePlanSource` — `reviewedPlan` is the explicit fallback, the
- * transcript scrape last) → `savePlan` (warm node-claim recovery happens inside) through
+ * explicit `boundSource` for review completion, otherwise artifact-first resolution
+ * (`resolvePlanSource` — `reviewedPlan` is the explicit fallback, the transcript scrape last) → `savePlan` (warm node-claim recovery happens inside) through
  * `saveThroughApprovalGate` (the D1a invariant: snapshot before the save; exit only after a
  * successful save while read-only; a failed save leaves the gate ON). No resolvable plan
  * source → `no-plan` (nothing saved, the gate untouched); callers render their own fallback.
  */
 export async function planApprovalSave(
   deps: PlanApprovalSaveDeps,
-  opts: { reviewedPlan?: string; title?: string } = {},
+  opts: {
+    reviewedPlan?: string;
+    title?: string;
+    /** Explicit reviewed bytes; never re-resolve a partially written patch from the artifact. */
+    boundSource?: { plan: string; source: "plan-draft" | "param"; paramMismatch: boolean };
+  } = {},
 ): Promise<PlanApprovalSaveOutcome> {
-  const src = resolvePlanSource(
-    {
-      draft: resumePlanDraft(deps.session),
-      ...(opts.reviewedPlan !== undefined ? { explicit: opts.reviewedPlan } : {}),
-      ...(deps.transcript !== undefined ? { transcript: deps.transcript } : {}),
-    },
-    "save",
-  );
+  const src =
+    opts.boundSource ??
+    resolvePlanSource(
+      {
+        draft: resumePlanDraft(deps.session),
+        ...(opts.reviewedPlan !== undefined ? { explicit: opts.reviewedPlan } : {}),
+        ...(deps.transcript !== undefined ? { transcript: deps.transcript } : {}),
+      },
+      "save",
+    );
   if (src === null) return { status: "no-plan" };
   const { outcome: result, gateExited } = await saveThroughApprovalGate(deps.gate, () =>
     savePlan(

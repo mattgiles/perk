@@ -22,10 +22,10 @@ const RULES: { api: string; pattern: RegExp; allowed: string[] }[] = [
   {
     api: "writeFileSync(",
     pattern: /\bwriteFileSync\(/,
-    // The worktree execution lock writes only its exclusively created descriptor (wx, 0600),
+    // The shared file-claim primitive writes only its exclusively created descriptor (wx, 0600),
     // then fsyncs before dispatch. Atomic rename would replace an incumbent and break exclusion.
     // Partial initialization is itself busy until identity-fenced cleanup or human recovery.
-    allowed: ["substrate/cache.ts", "substrate/clipboard.ts", "substrate/worktreeResolverLock.ts"],
+    allowed: ["substrate/cache.ts", "substrate/clipboard.ts", "substrate/exclusiveFileClaim.ts"],
   },
   {
     api: "appendFileSync(",
@@ -114,7 +114,7 @@ test("file writes go through the atomic seam (atomicWriteFileSync in substrate/c
   );
 
   const lockSource = stripComments(
-    readFileSync(path.join(import.meta.dirname, "substrate/worktreeResolverLock.ts"), "utf8"),
+    readFileSync(path.join(import.meta.dirname, "substrate/exclusiveFileClaim.ts"), "utf8"),
   );
   assert.match(lockSource, /writeFileSync\(fd, data, "utf8"\)/);
   assert.match(lockSource, /fs\.open\(path, "wx", 0o600\)/);

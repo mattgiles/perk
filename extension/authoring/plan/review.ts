@@ -157,17 +157,28 @@ export async function reviewPlanDraft(
   // The abort checkpoint: a turn interrupted while the reviewer ran must produce NO effect —
   // no apply ladder, no save, no gate exit (the aborted arm wins over any verdict).
   if (signal?.aborted) return { status: "aborted" };
-  const outcome = result.outcome;
+  return completePlanReview(deps, result, {
+    source: src.source === "plan-draft" ? "plan-draft" : "param",
+    paramMismatch: src.paramMismatch,
+  });
+}
 
+/** Subject policy only: callers authorize effects before entering this completion seam. */
+export async function completePlanReview(
+  deps: Omit<ReviewPlanDraftDeps, "reviewer" | "explicit">,
+  result: PlanDraftReviewResult,
+  source: { source: "plan-draft" | "param"; paramMismatch: boolean },
+): Promise<ReviewPlanDraftResult> {
+  const outcome = result.outcome;
   const approvalSave = (reviewedPlan: string): Promise<PlanApprovalSaveOutcome> =>
-    planApprovalSave(deps, { reviewedPlan });
+    planApprovalSave(deps, { boundSource: { plan: reviewedPlan, ...source } });
   const flags = (
     partial: Pick<ApprovedFlags, "feedback" | "reviewId"> &
       Partial<Pick<ApprovedFlags, "edited" | "directEditsFailed">>,
   ): ApprovedFlags => ({
     ...(partial.feedback !== undefined ? { feedback: partial.feedback } : {}),
     ...(partial.reviewId !== undefined ? { reviewId: partial.reviewId } : {}),
-    paramMismatch: src.paramMismatch,
+    paramMismatch: source.paramMismatch,
     edited: partial.edited ?? false,
     directEditsFailed: partial.directEditsFailed ?? false,
   });

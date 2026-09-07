@@ -72,6 +72,49 @@ const APPROVED: GistReviewOutcome = {
   reviewId: "rev-a",
 };
 
+test("pre-abort never reviews or saves a gist", async () => {
+  const reviewer = scriptedReviewer(APPROVED);
+  const backend = fakeBackend();
+  const gate = fakeGate();
+  const result = await reviewGist(
+    { session: draftedSession(), reviewer, backend, gate },
+    AbortSignal.abort(),
+  );
+  assert.deepEqual(result, { status: "aborted" });
+  assert.equal(reviewer.reviewed.length, 0);
+  assert.equal(backend.calls, 0);
+  assert.equal(gate.exits, 0);
+});
+
+for (const outcome of [
+  APPROVED,
+  { status: "approvedDirectEdits", feedback: "raw diff" },
+  { status: "denied", feedback: "raw feedback" },
+] satisfies GistReviewOutcome[]) {
+  test(`abort during gist review outranks ${outcome.status}`, async () => {
+    const abort = new AbortController();
+    const backend = fakeBackend();
+    const gate = fakeGate();
+    const result = await reviewGist(
+      {
+        session: draftedSession(),
+        backend,
+        gate,
+        reviewer: {
+          async review() {
+            abort.abort();
+            return outcome;
+          },
+        },
+      },
+      abort.signal,
+    );
+    assert.deepEqual(result, { status: "aborted" });
+    assert.equal(backend.calls, 0);
+    assert.equal(gate.exits, 0);
+  });
+}
+
 test("no draft → noDraft; the reviewer is never invoked", async () => {
   const reviewer = scriptedReviewer(APPROVED);
   const result = await reviewGist({

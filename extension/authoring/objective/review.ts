@@ -87,11 +87,19 @@ export async function reviewObjectiveDraft<A extends ObjectiveApprovalSaveShape>
   // no save, no gate exit (the aborted arm wins over any verdict).
   if (signal?.aborted) return { status: "aborted" };
 
+  return completeObjectiveReview(outcome, deps.approvalSave);
+}
+
+/** Subject policy only: callers authorize effects before entering this completion seam. */
+export async function completeObjectiveReview<A extends ObjectiveApprovalSaveShape>(
+  outcome: ObjectiveReviewOutcome,
+  approvalSave: () => Promise<A>,
+): Promise<ReviewObjectiveDraftResult<A>> {
   switch (outcome.status) {
     case "approved":
       return {
         status: "approvedSave",
-        save: await deps.approvalSave(),
+        save: await approvalSave(),
         ...(outcome.feedback !== undefined ? { feedback: outcome.feedback } : {}),
         ...(outcome.reviewId !== undefined ? { reviewId: outcome.reviewId } : {}),
       };

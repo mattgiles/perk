@@ -63,8 +63,8 @@ end your turn; this skill is the judgment and detail layer behind it.
   the dedupe ledger, the hold-and-accumulate retry, and the source-scoped `replace: true`
   reshape (the human's and other lanes' annotations are structurally untouchable).
 - **The door observes readiness itself.** There is no handshake poll for you to run: ready → an
-  info note; never-ready → a loud error plus a degrade notice injected to you (degraded mode
-  below).
+  info note; never-ready → a loud error, with fallback only after verified invalidation (degraded
+  mode below).
 - **Reconcile judgment.** Clear uncovered sources first (`launch.requested` minus
   `collected.covered`), using `push_annotations` with empty findings and `replace: true`.
   Build disjoint final per-angle arrays from valid reports only — never recover failed reports
@@ -81,23 +81,26 @@ end your turn; this skill is the judgment and detail layer behind it.
 
 ## The approve/deny loop
 
-- **On APPROVE** (the auto-save the launch statement names): browser Direct Edits are mechanically
-  applied and written back to the draft first, then the save runs exactly as a `plan_review`
-  approval would (the session exits read-only on success). The never-rewrite exclusion is a
-  STALE guard: the approval saves only when the live draft still matches the reviewed bytes — a
-  `plan_draft` call while the browser review is open makes the approval refuse as STALE (nothing
-  saved; the human re-runs the door). You relay the save outcome; if the save FAILED the session
-  stays read-only and the human runs `/plan-save` (the manual failsafe).
-- **On DENY**: the feedback arrives verbatim (any Direct Edits diff included) for the
-  `plan_draft` revision round. Deny is model-mediated by design — nothing is saved and nothing
-  re-opens automatically; the human re-runs `/plan-review-browser` (or you call `plan_review`)
-  for the next round.
+- **Eligible matching APPROVE:** verified Direct Edits save edited bytes; patch failure may save
+  only frozen original reviewed bytes with a warning. A definitive successful save exits read-only.
+- **Eligible matching DENY:** verbatim feedback (including Direct Edits) requests a `plan_draft`
+  revision round, then new human review. Nothing reopens automatically.
+- **Stale decision:** changed source permits only diagnostic DATA, never current-draft
+  apply/fold/save instructions. Identical sound draft bytes need no invalidation. Conservative
+  routing changes can require rereview. Follow the decision-specific runtime result, not an
+  unconditional approve/deny promise.
+- **Refusal or uncertainty:** preserve known save receipts and successful gate facts; never blindly
+  retry `/plan-save`. Follow `docs/user-docs/how-to/reconcile-a-draft-review-stop.md` with the human:
+  prove all Pi/save subprocesses quiescent, preserve evidence, and resolve possible effects first.
+  An orphan alone is not proof of no effects. No in-place repair; unresolved effects forbid even
+  a fresh-run retry. After human resolution, carry checked content into a distinct fresh run,
+  never correlation, intent, provenance, or approvals. Leave abandoned residue intact.
 
-## Degraded mode (loud, never lossy)
+## Degraded mode
 
-If the browser never comes up, the door says so plainly and clears both surfaces —
-`push_annotations` refuses (`no_surface`) and `start_draft_review_wave` refuses
-(`no_draft_context`) from then on. Surface the wave's findings in-session for the human instead;
-the human decides the next step via `plan_review` (the in-session review door) or `/plan-save`.
-A completed review is never lost to a surface failure, and every degradation is announced,
-never silent.
+The door suppresses late local decisions when readiness fails, but fallback requires verified
+`degraded` invalidation. A failed state write retains the claim and grants no fallback permission;
+a decision already dispatching cannot be rolled back. Surface wave findings in-session only on the
+door's confirmed degrade notice. Pending proves neither health nor delivery; missing status cannot
+reconstruct a lost decision. Tool return/message send is not delivery proof. There is no
+startup/reload discovery, replay, or resume, nor a guarantee that upstream never loses a decision.

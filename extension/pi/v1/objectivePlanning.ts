@@ -54,6 +54,7 @@ import {
   type ReportWaveAttemptReceipt,
   toAttemptReceipt,
 } from "../../waves/reportWave.ts";
+import { type DraftReviewRuntime, draftReviewMutationRefusal } from "./draftReviewActivation.ts";
 import { fetchObjectiveUrl } from "./objective.ts";
 
 // ------------------------------------------------------------------- the tool-boundary decode
@@ -449,6 +450,7 @@ export function installObjectivePlanningBindings(
   pi: ExtensionAPI,
   gating: ToolGating,
   wave: ReportWave,
+  reviews: DraftReviewRuntime,
 ): void {
   pi.registerTool({
     name: "objective_node",
@@ -501,10 +503,14 @@ export function installObjectivePlanningBindings(
         )("objective_node needs { objective: <id>, node: <id> }", "bad_input");
       }
       const fail = failFor(ctx, "objective-plan", "objective_node");
-      const outcome = await transitionObjectiveNode(decoded, {
-        backend: coldDoorObjectiveNodeBackend(pi, ctx),
-        session: openBranchWorkflowSession(pi, ctx),
-      });
+      const mutation = await reviews.mutateAsync(ctx, "target-changed", (session) =>
+        transitionObjectiveNode(decoded, {
+          backend: coldDoorObjectiveNodeBackend(pi, ctx),
+          session,
+        }),
+      );
+      if (!mutation.ok) return draftReviewMutationRefusal(mutation);
+      const outcome = mutation.value;
       if (outcome.status === "failed") return fail(outcome.message, outcome.errorType);
       const detail = decoded.status
         ? `node ${decoded.node} → ${decoded.status}`

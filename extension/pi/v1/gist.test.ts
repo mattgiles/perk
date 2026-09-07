@@ -28,6 +28,7 @@ import {
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
+import { scriptedDraftReviewBridge } from "../../testing/draftReview.ts";
 import {
   fakePerk,
   loadPerkSession,
@@ -35,11 +36,12 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../../testing/harness.ts";
+import { createDraftReviewActivation } from "./draftReviewActivation.ts";
 import {
   decodeGistSaveParams,
   gistSaveGuidance,
   installGistBindings,
-  runGistReviewV1,
+  runGistReviewV1 as runGistReviewV1Core,
 } from "./gist.ts";
 import type { PlanReviewUI, ReviewOutcome } from "./review.ts";
 
@@ -555,11 +557,11 @@ function installOffline(opts: { stdout: string; argvs: string[][]; sent: string[
       return { stdout: opts.stdout, stderr: "", code: 0, killed: false };
     },
   } as unknown as Parameters<typeof installGistBindings>[0];
-  installGistBindings(pi, gating);
+  installGistBindings(pi, gating, createDraftReviewActivation(pi));
   return { tools, commands, gating };
 }
 
-test("absent identity: gist_draft refuses blank prose BEFORE missing identity (the adapter mapping)", async () => {
+test("absent identity: production gist_draft refuses before feature validation", async () => {
   const cwd = scaffoldRepo();
   const { tools } = installOffline({ stdout: CREATE_JSON, argvs: [], sent: [] });
   const draftTool = tools.get("gist_draft");
@@ -568,19 +570,16 @@ test("absent identity: gist_draft refuses blank prose BEFORE missing identity (t
 
   const blank = await draftTool.execute("t1", { prose: "  \n" }, undefined, undefined, ctx);
   assert.equal(blank.details.ok, false);
-  assert.equal(blank.details.error_type, "invalid_input", "blank prose wins the precedence");
-  assert.equal(blank.details.error, "no gist prose to write (pass the full working draft)");
+  assert.equal(blank.details.reason, "no-identity");
+  assert.equal(blank.details.status, "refused");
 
   const noIdentity = await draftTool.execute("t2", { prose: "# X" }, undefined, undefined, ctx);
   assert.equal(noIdentity.details.ok, false);
-  assert.equal(noIdentity.details.error_type, "no_run_id", "the no_identity → no_run_id mapping");
-  assert.equal(
-    noIdentity.details.error,
-    "session has no run_id — cannot write the gist-draft artifact",
-  );
+  assert.equal(noIdentity.details.reason, "no-identity");
+  assert.equal(noIdentity.details.status, "refused");
 });
 
-test("absent identity: gist_save still saves — the cold door argv simply omits --run-id", async () => {
+test("absent identity: production gist_save refuses without invoking the cold door", async () => {
   const cwd = scaffoldRepo();
   const argvs: string[][] = [];
   const { tools } = installOffline({ stdout: CREATE_JSON, argvs, sent: [] });
@@ -593,12 +592,12 @@ test("absent identity: gist_save still saves — the cold door argv simply omits
     undefined,
     headfulCtx(cwd, []),
   );
-  assert.equal(result.details.ok, true, "an identity-less save keeps working");
-  assert.equal(argvs.length, 1, "the cold door ran once");
-  assert.equal(argvs[0]?.includes("--run-id"), false, "no --run-id without identity");
+  assert.equal(result.details.ok, false);
+  assert.equal(result.details.reason, "no-identity");
+  assert.equal(argvs.length, 0, "no unclaimed cold-door invocation");
 });
 
-test("absent identity: /gist-save falls to the drive fallback (openSession absent)", async () => {
+test("absent identity: /gist-save refuses rather than treating missing identity as no draft", async () => {
   const cwd = scaffoldRepo();
   const argvs: string[][] = [];
   const sent: string[] = [];
@@ -607,10 +606,8 @@ test("absent identity: /gist-save falls to the drive fallback (openSession absen
   assert.ok(handler, "/gist-save captured");
   await handler("Driven title", headfulCtx(cwd, []));
   assert.equal(argvs.length, 0, "no cold-door save was attempted (no session to re-read)");
-  assert.equal(gating.exits, 1, "the gate exits for the driven turn");
-  assert.equal(sent.length, 1, "exactly one drive injection");
-  assert.match(String(sent[0]), /gist_save/);
-  assert.match(String(sent[0]), /title: "Driven title"/, "the title override rides the drive");
+  assert.equal(gating.exits, 0, "the gate stays active");
+  assert.equal(sent.length, 0, "no drive injection without verified identity");
 });
 
 // --- pure helpers -------------------------------------------------------------------------------
@@ -741,19 +738,7 @@ function selectPlanProvider(cwd: string, id: string): void {
 }
 
 /** A recording bridge: captures the reviewed bytes, returns the canned outcome. */
-function cannedBridge(outcome: ReviewOutcome): {
-  review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome>;
-  reviewed: string[];
-} {
-  const reviewed: string[] = [];
-  return {
-    reviewed,
-    async review(plan: string) {
-      reviewed.push(plan);
-      return outcome;
-    },
-  };
-}
+const cannedBridge = scriptedDraftReviewBridge;
 
 /** A ToolGating fake recording exits; `active` is the isActive snapshot. */
 function fakeGating(active: boolean): ToolGating & { exits: number } {
@@ -818,7 +803,13 @@ function headfulCtx(
 ): SessionDataCtx & ReportTarget {
   return {
     cwd,
-    sessionManager: { getBranch: () => branch },
+    sessionManager: {
+      getBranch: () => branch,
+      getSessionId: () => "policy-session",
+      appendCustomEntry(customType: string, data: unknown) {
+        branch.push({ type: "custom", customType, data });
+      },
+    },
     hasUI: true,
     ui: { notify() {}, ...(ui as object) },
   } as SessionDataCtx & ReportTarget;
@@ -1017,6 +1008,7 @@ test("gist arm: approved via the bridge + Direct Edits -> NO save, non-terminati
     ok: true,
     status: "revise",
     reason: "direct_edits",
+    draft_review_dispatch: result.details.draft_review_dispatch,
     approved: true,
     feedback: directEditsFeedback,
     reviewId: "rev-gde",
@@ -1088,7 +1080,7 @@ test("gist arm: default selection -> first-party VIEW-ONLY, 3 verdicts; approval
   );
 });
 
-test("gist arm: approved but the cold door fails -> non-terminating, gate stays on, failsafe", async () => {
+test("gist arm: approved but the cold door fails -> non-terminating, gate stays on, reconciliation", async () => {
   const cwd = scaffoldRepo();
   const branch: unknown[] = [stateEntry(GIST_STATE)];
   const ui = fakeUI({ editor: ["# whatever was shown"], select: [GIST_APPROVE] });
@@ -1112,7 +1104,7 @@ test("gist arm: approved but the cold door fails -> non-terminating, gate stays 
   const text = String(result.content[0]?.text);
   assert.match(text, /gist APPROVED by reviewer, but the auto-save FAILED/);
   assert.match(text, /gh exploded/);
-  assert.match(text, /\/gist-save \(the manual failsafe\)/);
+  assert.match(text, /reconcile backend objects and retained review/);
 });
 
 test("gist arm: approved but the draft corrupted before the save re-read -> the refused-draft race", async () => {
@@ -1123,14 +1115,15 @@ test("gist arm: approved but the draft corrupted before the save re-read -> the 
   const drafted = plantGistDraft(ctx, branch);
   const argvs: string[][] = [];
   const pi = fakeColdDoorPi(branch, { stdout: GIST_JSON, argvs });
+  const scripted = cannedBridge({ status: "completed", approved: true, reviewId: "rev-gone" });
   const bridge = {
-    reviewed: [] as string[],
-    async review(plan: string): Promise<ReviewOutcome> {
+    ...scripted,
+    async review(...args: Parameters<typeof scripted.review>): Promise<ReviewOutcome> {
+      const outcome = await scripted.review(...args);
       // The draft file vanishes between the review read and the save-time re-read — the seam
       // classifies the intact pointer + missing file as invalid, so the save re-read refuses.
-      bridge.reviewed.push(plan);
       rmSync(drafted);
-      return { status: "completed", approved: true, reviewId: "rev-gone" };
+      return outcome;
     },
   };
   const quiet = console.error;
@@ -1146,22 +1139,10 @@ test("gist arm: approved but the draft corrupted before the save re-read -> the 
   } finally {
     console.error = quiet;
   }
-  const problem = "session artifact gist-draft.json has a pointer but no file";
-  assert.equal(result.terminate, undefined, "non-terminating");
-  assert.equal(
-    String(result.content[0]?.text),
-    `gist APPROVED by reviewer, but the working draft was invalid at save time (${problem}) — ` +
-      "NOTHING was saved; the session stays read-only. Rewrite it with gist_draft and request " +
-      "a fresh review — the replacement bytes were never reviewed, so do not use /gist-save to " +
-      "bypass review.",
-  );
-  const details = result.details as Record<string, unknown>;
-  assert.equal(details.ok, false);
-  assert.equal(details.error, problem);
-  assert.equal(details.error_type, "bad_state");
-  assert.equal(details.saved, false);
-  assert.equal(details.save, null);
-  assert.equal(details.subject, "gist");
+  assert.equal(result.terminate, undefined);
+  assert.equal(result.details.status, "refused");
+  assert.equal(result.details.reason, "invalid-state");
+  assert.match(String(result.content[0]?.text), /Do not retry/);
   assert.equal(argvs.length, 0, "the cold door was never invoked");
 });
 
@@ -1276,3 +1257,8 @@ test("gist arm: headless -> the standard skipResult", async () => {
   assert.equal(skipDetails.ok, true, "the sanctioned fail-open skip is ok:true");
   assert.match(String(result.content[0]?.text), /no interactive review surface available/);
 });
+
+function runGistReviewV1(...args: Parameters<typeof runGistReviewV1Core>) {
+  args[5] = "policy-tool-id";
+  return runGistReviewV1Core(...args);
+}

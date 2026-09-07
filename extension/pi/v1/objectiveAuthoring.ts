@@ -67,6 +67,12 @@ import { arrayParam, objectParam, paramsOf, stringParam } from "../../substrate/
 import { type BranchEntry, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
 import { installInjectedContext } from "./contextInjection.ts";
+import {
+  type DraftReviewConfirmedFacts,
+  type DraftReviewRuntime,
+  draftReviewMutationRefusal,
+} from "./draftReviewActivation.ts";
+import { mutationObjectiveSaveDeps } from "./draftReviewEffects.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { productionDreamGateRecovery } from "./objectiveDreamGate.ts";
 
@@ -290,7 +296,7 @@ function dreamGateFor(
  * branch backing, the cold-door backend, the gate slice, and the ctx-bound dream-gate resolver.
  * The review arm + the browser door consume the composed `objectiveApprovalSaveV1` instead.
  */
-function objectiveSaveDepsFor(
+export function objectiveSaveDepsFor(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
@@ -365,7 +371,19 @@ export async function objectiveApprovalSaveV1(
   gating: ToolGating,
   opts: { title?: string } = {},
 ): Promise<ObjectiveApprovalSaveV1Outcome> {
-  const outcome = await objectiveApprovalSave(objectiveSaveDepsFor(pi, ctx, gating), opts);
+  return renderObjectiveApprovalSave(
+    pi,
+    ctx,
+    await objectiveApprovalSave(objectiveSaveDepsFor(pi, ctx, gating), opts),
+  );
+}
+
+/** Preserve the subject's linkage-budget and rendered save policy for explicit owned sessions. */
+export function renderObjectiveApprovalSave(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  outcome: Awaited<ReturnType<typeof objectiveApprovalSave>>,
+): ObjectiveApprovalSaveV1Outcome {
   if (outcome.status === "no-draft") return { status: "no-draft" };
   if (outcome.status === "refused-draft") {
     return { status: "refused-draft", problem: outcome.problem };
@@ -412,7 +430,11 @@ const SAVE_TOOL_GUIDELINES = [
  * `objective_save` tools, and the `/objective-save` command — registration metadata pinned by
  * the registration-parity tests. Inert outside objective sessions; never throws.
  */
-export function installObjectiveAuthoringBindings(pi: ExtensionAPI, gating: ToolGating): void {
+export function installObjectiveAuthoringBindings(
+  pi: ExtensionAPI,
+  gating: ToolGating,
+  reviews: DraftReviewRuntime,
+): void {
   // The objective-authoring context injection (display:false), keyed off (read-only gate AND
   // stage === objective-author); the inject/strip mechanics (active-window dedup, stale-marker
   // strip) live in the shared helper.
@@ -484,10 +506,18 @@ export function installObjectiveAuthoringBindings(pi: ExtensionAPI, gating: Tool
         );
       }
       const fail = failFor(ctx, "objective-draft");
-      const revised = reviseObjectiveDraft(decoded, {
-        session: openSession(pi, ctx),
-        resolveDreamGate: dreamGateFor(ctx),
-      });
+      const mutation = reviews.mutate(
+        ctx,
+        "source-changed",
+        (session) =>
+          reviseObjectiveDraft(decoded, {
+            session,
+            resolveDreamGate: dreamGateFor(ctx),
+          }),
+        { draft: { subject: "objective" } },
+      );
+      if (!mutation.ok) return draftReviewMutationRefusal(mutation);
+      const revised = mutation.value;
       switch (revised.status) {
         case "revised":
         case "unchanged":
@@ -566,17 +596,26 @@ export function installObjectiveAuthoringBindings(pi: ExtensionAPI, gating: Tool
       // The direct tool path wraps ONLY a present decoded value as the union's `direct` arm
       // (the save stamps generated_at); no stored parts, so no byte-compare on this path.
       const { dream_report, ...rest } = decoded;
-      const save = await saveObjective(
-        {
-          ...rest,
-          ...(dream_report !== undefined
-            ? { dream_report: { source: "direct" as const, input: dream_report } }
-            : {}),
-        },
-        objectiveSaveDepsFor(pi, ctx, gating),
-      );
-      activateBudgetIfLinked(pi, save);
-      return objectiveSaveResultOf(ctx, save);
+      const facts: DraftReviewConfirmedFacts = {};
+      const mutation = await reviews.mutateAsync(ctx, "manual-save", async (session) => {
+        const save = await saveObjective(
+          {
+            ...rest,
+            ...(dream_report !== undefined
+              ? { dream_report: { source: "direct" as const, input: dream_report } }
+              : {}),
+          },
+          mutationObjectiveSaveDeps(
+            objectiveSaveDepsFor(pi, ctx, gating),
+            session,
+            facts,
+            "manual",
+          ),
+        );
+        activateBudgetIfLinked(pi, save);
+        return objectiveSaveResultOf(ctx, save);
+      });
+      return mutation.ok ? mutation.value : draftReviewMutationRefusal(mutation, facts);
     },
   });
 
@@ -590,39 +629,61 @@ export function installObjectiveAuthoringBindings(pi: ExtensionAPI, gating: Tool
       // seam (the D1a gate exit lives in the seam). The drive-the-session fallback covers
       // draft-LESS sessions — objectives have no transcript scrape by design, so a draftless
       // session still needs a working save path.
-      const outcome = await objectiveApprovalSaveV1(pi, ctx, gating, { title });
-      if (outcome.status === "refused-draft") {
-        // Fail-closed stop: the command's own precondition is a VALID draft — no gate exit,
-        // no driven turn (those fallbacks are for draft-LESS sessions; driving a fresh
-        // model-authored save over a corrupted artifact would silently abandon its bytes).
+      const facts: DraftReviewConfirmedFacts = {};
+      const mutation = await reviews.mutateAsync(ctx, "manual-save", async (session) => {
+        const outcome = renderObjectiveApprovalSave(
+          pi,
+          ctx,
+          await objectiveApprovalSave(
+            mutationObjectiveSaveDeps(
+              objectiveSaveDepsFor(pi, ctx, gating),
+              session,
+              facts,
+              "approval",
+            ),
+            { title },
+          ),
+        );
+        if (outcome.status === "refused-draft") {
+          // Fail-closed stop: the command's own precondition is a VALID draft — no gate exit,
+          // no driven turn (those fallbacks are for draft-LESS sessions; driving a fresh
+          // model-authored save over a corrupted artifact would silently abandon its bytes).
+          report(
+            ctx,
+            "objective-save",
+            "error",
+            `the working objective draft is invalid: ${outcome.problem} — rewrite it with ` +
+              "objective_draft, then re-run /objective-save",
+          );
+          return;
+        }
+        if (outcome.status === "no-draft") {
+          // Exit the read-only gate so the objective_save tool (excluded from READ_ONLY_TOOLS)
+          // becomes reachable on the driven turn, then drive the turn (mirrors /address and
+          // /objective-plan).
+          if (gating.isActive()) gating.exit(ctx);
+          report(ctx, "objective-save", "info", "handing the structured save to the session");
+          // The perk-objective-author pointer rides the skill-binding suffix (D5) since a
+          // warm /objective-save outside a stage:objective-author session gets none from Mechanism A.
+          pi.sendUserMessage(
+            objectiveSaveGuidance(title) + bindingSuffix(ctx.cwd, "stage:objective-author"),
+          );
+          return;
+        }
+        // Saved or save-failed: relay the save message. No node-link sub-step on the objective path,
+        // so the severity ladder is simpler than /plan-save's (no warning tier).
+        const result = outcome.result;
+        const message = result.content[0]?.text ?? "objective-save done";
+        const severity: Severity = result.details.ok ? "info" : "error";
+        report(ctx, "objective-save", severity, message);
+      });
+      if (!mutation.ok)
         report(
           ctx,
           "objective-save",
-          "error",
-          `the working objective draft is invalid: ${outcome.problem} — rewrite it with ` +
-            "objective_draft, then re-run /objective-save",
+          "warning",
+          draftReviewMutationRefusal(mutation, facts).content[0]?.text ?? "Draft review stopped",
         );
-        return;
-      }
-      if (outcome.status === "no-draft") {
-        // Exit the read-only gate so the objective_save tool (excluded from READ_ONLY_TOOLS)
-        // becomes reachable on the driven turn, then drive the turn (mirrors /address and
-        // /objective-plan).
-        if (gating.isActive()) gating.exit(ctx);
-        report(ctx, "objective-save", "info", "handing the structured save to the session");
-        // The perk-objective-author pointer rides the skill-binding suffix (D5) since a
-        // warm /objective-save outside a stage:objective-author session gets none from Mechanism A.
-        pi.sendUserMessage(
-          objectiveSaveGuidance(title) + bindingSuffix(ctx.cwd, "stage:objective-author"),
-        );
-        return;
-      }
-      // Saved or save-failed: relay the save message. No node-link sub-step on the objective path,
-      // so the severity ladder is simpler than /plan-save's (no warning tier).
-      const result = outcome.result;
-      const message = result.content[0]?.text ?? "objective-save done";
-      const severity: Severity = result.details.ok ? "info" : "error";
-      report(ctx, "objective-save", severity, message);
     },
   });
 }

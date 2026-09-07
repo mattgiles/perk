@@ -187,6 +187,46 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   digest mismatch — are `invalid` and warn on stderr). Draft-less fallbacks apply only to
   `absent`; the review-style draft consumers (gist/objective) fold `invalid` into their
   classified `refused` resume arm and STOP with a rendered refusal instead of falling back.
+
+  **Opt-in strict provenance.** `WorkflowSession.readArtifact(name, {provenance: "strict"})`
+  keeps the `found`/`absent`/`invalid` vocabulary but never treats unknown provenance as absence.
+  It reads one workflow-state snapshot, requires a safe current run identity, validates the entire
+  pointer map (including siblings), and checks the current run's content even without a matching
+  pointer. Missing/null map is an empty map; a present pointer requires safe `run_id`, matching
+  `name`, nonempty informational `path`/`at`, and `sha256:<64 lowercase hex>` digest. Throwing or
+  malformed state/map/pointer, content I/O failure, orphan bytes, missing file behind a current-run
+  pointer, and digest mismatch are `invalid`. A sound inherited pointer never authorizes a parent
+  read: an empty child namespace is `absent` and usable; bytes in the child without child provenance
+  are an orphan and refuse. Independent stale branch snapshots over advanced disk bytes therefore
+  refuse, rather than authorize replacement. Ordinary readers keep their existing tier behavior.
+
+  The strict content port distinguishes ENOENT from I/O failure and rejects symlink/non-directory/
+  group-world-writable namespace components and nonregular artifact files. Its canonical namespace
+  comes through `cache.ts::canonicalSessionDataDir` / the session-data seam; aliases above the
+  checkout are legal, redirects within checkout-owned components are not. Reads never create dirs.
+  `writeArtifact(name, content, {provenance: "strict"})` first verifies prior strict provenance,
+  refuses invalid reads before effects, and verifies exact read-back content plus the appended
+  pointer. Rejected/unverified review-state writes never authorize effects or speculative repair.
+  Callers own exclusion and retain their claim on persistence failure; this option is not a
+  transaction or an automatic lock. The narrowly typed owned-plan-patch exception (§8.23) may
+  retain frozen original-source authority after draft write-back failure, never after review-state
+  or ownership failure. Plannotator review transports now use strict opening/attachment registration;
+  production eligibility mutations and Plannotator tool/browser subject-effect dispatch use that
+  same claim (§8.23). This guarantees at-most-once participating local dispatch, not exactly-once
+  delivery or power-loss durability. Retained locks and orphan artifacts have no in-place repair
+  path: the human-only reconciliation procedure in §8.23 preserves the old namespace and permits
+  no new attempt while save/delivery effects remain unresolved.
+
+  `draft-review.json` is a fixed session artifact, with full replacements and strict current-run
+  provenance only. Its codec/transition owner is `session/draftReviewState.ts`; target projection
+  assembly is `session/draftReviewBinding.ts`. Digest consumers use `digestSessionData` through
+  the session boundary (exact UTF-8 strings or exact byte arrays, the same unprefixed artifact
+  digest meaning). `WorkflowSession.draftReviewContext()` reads one strict routing snapshot:
+  safe run ID, existing review-stage subject routing, and an owned nonblank objective/node claim
+  for plans only. Missing/null plan claim is null; malformed relevant claim/state refuses.
+  Non-plans bind no warm claim. `currentRunIdentity()` is the separate strict live identity-only
+  read used for claim fencing/completion, so acknowledging delivery never revalidates source or
+  target inputs. Ordinary `nodeClaim()` and artifact readers remain unchanged.
 - **Agent scratch.** `.perk/workflow/scratch/runs/<run_id>/agent/` is the run-owned directory for
   disposable command/model intermediates. Interior run-directory creation shares one hardened
   boundary — `extension/substrate/cache.ts::ensureRunScratch` + `ensureAgentScratch` own the
@@ -262,12 +302,15 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `outbox.ndjson`/`delivered.ndjson` (O_APPEND appends cannot truncate-tear; whole-file
   replace would introduce a read-modify-write race) — and **existence-only markers** (Python
   `set_marker`'s `.touch()` carries no content; the TS `setMarker` is routed anyway — uniformity
-  is free). The §8.3 submit-conflict execution lock is a separate **Git-directory** writer,
-  outside `.perk/workflow/`: it writes/fsyncs only a freshly exclusive-created descriptor;
-  replacing an incumbent via atomic rename would violate its mutual-exclusion protocol. A partial
-  record remains busy until identity-fenced initialization cleanup or human recovery.
-  Atomicity is **not** mutual exclusion — whole-file last-writer-wins between
-  concurrent writers is the accepted residual (no locking/versioning). Corruption posture:
+  is free). The shared `extension/substrate/exclusiveFileClaim.ts` primitive is a separate
+  **exclusive-descriptor** exemption: it writes/fsyncs only a freshly `wx`/0600-created descriptor;
+  replacing an incumbent via atomic rename would violate mutual exclusion. The §8.3 resolver
+  wrapper keeps its Git-directory filename outside `.perk/workflow/`; the independent draft-review
+  wrapper selects fixed `draft-review.lock` in the canonical current-run `data/` namespace beside
+  the reserved `draft-review.json` artifact. A partial record remains busy until identity-fenced
+  initialization cleanup or deliberate human reconciliation. No automated reclamation exists.
+  Atomicity is **not** mutual exclusion — whole-file last-writer-wins between ordinary concurrent
+  artifact writers remains the accepted residual; participating claim users must serialize. Corruption posture:
   Python's fail-closed workflow readers translate malformed JSON / invalid UTF-8 into `CacheError` — now
   `(UserFacingCliError, ValueError)`-based with `error_type: "cache_invalid"`, so an uncaught
   corruption presents as a clean actionable CLI error naming the corrupt file and the
@@ -822,6 +865,30 @@ mission, worktree or acceptance keys are sent. Native `worktree` defaults are ca
 file/absent key/false are compatible; true, nonboolean, malformed or unreadable config, or changed
 captured state, refuses with inspection/reload guidance. Configuration/source edits during launch
 are unsupported; preflight is a snapshot, not a source-edit fence.
+
+**Shared exclusive-file mechanics.** `extension/substrate/exclusiveFileClaim.ts` owns token UUID
+minting, the 16 KiB metadata bound, JSON encoding/parsing through a caller-supplied owner codec,
+exclusive `wx`/0600 creation, fsync, read-back through `check()`, device/inode/path/token ownership
+fencing, typed busy/I/O results, and idempotent `finish(release|retain)`. Diagnostic owners exclude
+tokens. The primitive does not discover Git, choose filenames, queue/retry, change workflow state,
+reclaim incumbents, or prove quiescence from PID/age. Wrappers preserve resource-specific identity
+and metadata; ownership must be checked before effects. Metadata stays unchanged while held.
+
+`draftReviewLock.ts` supplies an independent fixed `draft-review.lock`, creating its canonical
+current-run data directory only through the cache/session-data seam and refusing unsafe redirects
+or missing/unsafe identity. Aliases share exclusion; different runs (including forks) do not. Its
+owner record is exactly `{schema:1, token, pid, parentSessionId, ownerRunId, requestId,
+reviewNamespace, createdAt}`, where `reviewNamespace` is the canonical data directory. Owner
+metadata is diagnostic, not evidence of decision/save/delivery. The closed state machine and
+claim-bound orchestration capability, live transport registration, and participating authoring
+entries and Plannotator subject-effect dispatch are implemented (§8.23). Recovery/resume and startup
+discovery are not activated. Human reconciliation never treats owner metadata, PID death, or lock
+age as proof of effects or subprocess quiescence. Participating operations hold one
+explicit claim through verified intent/effects/immediate bookkeeping, not through browser/human/
+status/delivery waiting. A failed
+or unverified persistence operation retains residue and permits no further effects or speculative
+state writes; lost ownership never permits writes or deleting a replacement. Neither atomic file
+replacement nor fsync claims power-loss durability or exactly-once delivery.
 
 **Shared resolver worktree execution lock (both modes).** `worktreeGitDir` runs shell-free
 `git rev-parse --absolute-git-dir` with a five-second timeout, validates a directory and returns
@@ -4181,15 +4248,331 @@ artifacts + "File-first plan save"), §8.3 (the `approvalSave` seam + the warm c
 §8.57 (review-first carrier ownership), and §8.10 (provider deltas + the interactive save
 discipline); this section keeps the unique cross-cutting rules.
 
+### Bound draft-decision state and orchestration
+
+The following storage/capability contract is implemented in `session/draftReviewState.ts`,
+`session/draftReviewBinding.ts`, and `pi/v1/draftReviewDecisions.ts`. The activation-scoped
+`pi/v1/draftReviewActivation.ts` now binds real registration to plan/objective/gist tool reviews
+and both browser doors. It also exposes an identity-bound completion and context-bound mutation
+API, with activation-local delivery observation at turn_end and before guarded operations.
+The root injects this single runtime into the production eligibility entries described below.
+Blocking `plan_review` completion now uses that API for all three subjects: the prepared
+raw/decoded/rendered snapshot is reviewed once, verified dispatch precedes patch/save/actionable
+revision, and the actual registered toolCallId plus exact result content are recorded before return.
+Parameter plans followed by a sound artifact (even identical bytes) yield only stale-reference DATA.
+Structured objective/gist Direct Edits remains revision/no-save. Plan title generation precedes the
+binding/save-started checkpoint; captured warm node argv and frozen original/verified patched bytes
+remain authoritative. Successful receipt/gate facts survive failed later bookkeeping, without replay.
+Both browser cores and chooser delegations use the same subject-specific completions and
+claim-bound capabilities. Their code-authored `<!-- perk:draft-review-dispatch:<dispatch_id> -->`
+marker is a separate text block outside untrusted feedback. The complete content expectation is
+verified before exactly one idle/followUp send; exclusion is then released without waiting for
+queue persistence. Only later exact persisted user-role evidence completes delivery. Readiness
+degradation uses the review's request/review/run identity and verifies invalidation before
+announcing fallback. The same review's already verified handshake-failed/subscription-failed
+invalidation also satisfies that check without rewriting its reason; no other terminal state does.
+This permits a fallback notice, never decision effects or restored approval eligibility. Readiness
+and unavailable transport outcomes share one local fallback-attempt latch. Unavailable handling
+runs before transport disposal, including when the readiness poll is sleeping or already reported
+ready; a later observer cannot repeat fallback or announce readiness after suppression.
+If persistence fails, local liveness suppression remains, but no durable invalidation or fallback
+permission is asserted; a consumption winner is never rolled back.
+The guarantee is at-most-once participating machine-local dispatch, not exactly-once delivery or
+power-loss durability. Conservative target/config changes can require a new review.
+Construction performs no startup discovery, status query, previous-feedback injection,
+resend, or automatic recovery. Python neither reads nor writes this decision artifact.
+
+The three feature review operations expose subject-specific completion seams. The plan tool
+completion passes an explicit `boundSource` into `planApprovalSave`: only the reviewed original
+or verified patched bytes are selected, including when an unverified patch leaves different disk
+bytes. Ordinary manual saves retain artifact/parameter/transcript tiering and trimming. This
+source selection is not itself claim authorization; every Plannotator tool/browser completion
+uses the verified dispatch capability. Gist checks abort before review and again after the reviewer await,
+before save or actionable revision completion.
+
+`pi/v1/draftReviewEffects.ts` provides claim-bound save dependency adapters for those completion
+seams. All Plannotator subject completions use these adapters. Their backend ports enter
+`capability.save` after feature validation
+and title awaits, bind the captured warm plan node inputs explicitly (absent leaves the cold
+handoff fallback), and confirm the subject's typed ID/URL receipt. A receipt callback preserves
+definitive gate exit before fallible receipt-state bookkeeping. If that callback throws, the
+first save-confirmed checkpoint still records the proven receipt while ownership verifies, then
+the later error becomes effect-failed uncertainty retaining that receipt. Ownership/persistence
+failure overrides this checkpoint and forbids speculative repair. Subsequent errors retain the
+known save receipt and explicit confirmed gate-exit fact and never re-enter the gate. These are subject-specific adapters, not a new
+universal save protocol. The coordinator also exposes `mutateAsync` for bounded manual-save/node
+operations: it verifies invalidation before invoking the callback and holds exclusion through
+its awaited work; its explicit session capability expires on release. Editor/human waits must
+not use that method. Both mutation methods require a safe current-run identity even when the
+record is absent; missing/unsafe/unreadable identity is not an unclaimed ordinary-operation
+bypass. Production `plan_draft`, `objective_draft`, and `gist_draft` now use the synchronous
+mutation session. Feature-owned serialization/validation (including the objective dream gate)
+runs under exclusion; when bytes are supplied only by the feature's write, the capability checks
+unresolved state on entry and verifies source-changed invalidation immediately before that write.
+It permits only the named subject artifact, not linkage changes. Identical existing sound bytes
+preserve opening/pending eligibility; failed invalidation prevents the draft write and retains the
+claim. No parallel serializer, coordinator, reentrant lock, or ownership exemption is introduced.
+
+Production `plan_save`, `objective_save`, `gist_save`, their slash-command counterparts, and
+`objective_node` use bounded async mutation sessions through source selection, backend await,
+and immediate linkage/gate work. Small subject-specific backend wrappers retain a typed successful
+receipt before fallible linkage; approval paths perform their already-authorized successful gate
+exit while ownership still verifies, before that bookkeeping. Manual tool paths gain no gate exit.
+A failed linkage poisons/retains exclusion, stops later writes, and returns reconciliation refusal
+with the known receipt and applicable definitive gate fact. Ownership loss preserves the receipt
+but authorizes no gate effect. No dispatch/consumption record is manufactured for these saves.
+Manual saves invalidate manual-save; node updates conservatively
+invalidate target-changed before backend invocation and warm claim maintenance. A strict absent
+record permits normal feature behavior under the claim and terminal records remain unchanged.
+Decode-first tool refusals remain before acquisition. `/implement-here` uses synchronous mutation
+with implement-here invalidation, retaining the objective-node refusal and no-save gate policy.
+
+First-party plan/objective/gist reviews invalidate first-party-review synchronously and release
+before their editor/verdict waits. Plan editor writeback reacquires through the draft mutation
+seam; it never holds a claim spanning a human wait. First-party completion reacquires the bounded
+mutation seam and supplies its explicit session to existing subject completions and saves, so
+owned linkage does not contend with itself. A dispatch/uncertain successor blocks late writeback,
+save, and actionable completion. These first-party replacements do not introduce Plannotator
+consumption intent, automatic cancellation, or recovery.
+
+The artifact has exactly `{schema_version:1, request_id, correlation, consumption}`.
+`request_id` and `attempt.dispatch_id` are UUIDs. Correlation is exactly
+`{review_id, subject, source, source_digest, target}`: subject is plan/objective/gist; source is
+`{kind:"artifact"}` or plan-only `{kind:"parameter", plan, artifact_at_open:"absent"}` retaining
+exact nonblank selected text; target is `{operation, digest}`, with subject-matched operation
+plan-save/objective-create/gist-create. Artifact sources persist no snapshot. Digests are strictly
+`sha256:<64 lowercase hex>`. Parameter text must match its source digest. Review ID is a nonblank
+opaque upstream string, null in opening and allowed in pre-handshake invalidation; pending and
+all dispatch-derived states require it. Opening-aborted/handshake-failed carry no review ID;
+subscription-failed requires one. Unknown versions/keys and missing/state-incompatible fields
+refuse. Decode reconstructs owned objects rather than retaining caller references.
+
+Consumption is a closed union: `{state:"opening"}`, `{state:"pending"}`,
+`{state:"invalidated", reason}`, `{state:"dispatch", attempt}`,
+`{state:"consumed", attempt, delivery_entry_id}`, or `{state:"uncertain", reason, attempt}`.
+Attempt has exactly `{dispatch_id, decision_digest, effect, save, delivery}`. Revision and
+stale-reference effects require `{state:"not-required"}` save. Save effects carry
+`{state:"not-started"}`, `{state:"started"}`, or `{state:"confirmed", id, url}` with nonblank
+returned ID/URL. Delivery is null until recorded; otherwise exactly
+`{carrier, marker, content_digest}`. Carrier is `{kind:"tool", tool_call_id}` or `{kind:"user"}`.
+Tool name is fixed `plan_review`, not persisted. A save's delivery requires confirmed save;
+consumed requires non-null delivery and confirmed/not-required save. Uncertainty preserves all
+proven facts; it never means nothing happened.
+
+Closed vocabularies:
+
+- Invalidation: opening-aborted, handshake-failed, subscription-failed, source-changed,
+  target-changed, subject-changed, degraded, manual-save, implement-here, first-party-review.
+- Uncertainty: aborted-after-intent, backend-unconfirmed, delivery-unconfirmed, effect-failed.
+- Operation refusals (not persisted verdicts): no-identity, busy, invalid-state, source-changed,
+  target-changed, subject-changed, superseded, unresolved-dispatch, persistence-failed,
+  ownership-lost, io-error.
+- Status diagnostics (no state mutation): pending, missing, unavailable, malformed, timeout,
+  transport-error. Status query diagnostics never manufacture a verdict or mutate pending state.
+
+Every mutation acquires the same run claim and re-reads strict persisted state. Same-record means
+matching request and review ID; dispatch bookkeeping also matches dispatch ID. The closed table:
+
+| Event / prior | Verified next state / permission |
+|---|---|
+| Explicit new review / absent, opening, pending, invalidated, consumed | Verify new source and target, replace with new request ID/opening before emit. No history retained. |
+| New review or ordinary mutation / dispatch, uncertain | Refuse unresolved-dispatch; current-activation evidence may first complete dispatch. Uncertainty never auto-clears. |
+| Same opening / attach | Unchanged binding attaches ID and writes pending. Source/target/subject drift invalidates with corresponding reason, without attaching. |
+| Same opening / pre-ID abort or failed handshake | Invalidate opening-aborted or handshake-failed. Known-ID attach wins before newly observed abort; local pending abort writes nothing. |
+| Same pending / failed subscription | Invalidate subscription-failed. Non-completed status/query failure and local pre-intent abort leave pending. |
+| Same pending / valid decision, matching source/target/subject | Write dispatch/save or revision before effects; denial cannot save. Approved structured Direct Edits remains revision subject policy. |
+| Same pending / changed or missing source, sound target/subject | Dispatch/stale-reference, diagnostic DATA only. Broken provenance refuses, never parameter fallback. |
+| Same opening/pending / participating source/target mutation, replacement, fallback, degradation | Verify corresponding invalidation before mutation; byte-identical draft writes need no invalidation. |
+| Same pending / target or subject drift at consumption | Invalidate target-changed/subject-changed; no effects. |
+| Same invalidated/source-changed, known review ID / valid candidate, matching target/subject | Dispatch/stale-reference once, even if original source bytes returned. Never restore approval eligibility. |
+| Other invalidated / late candidate | Refuse without effects. Different request/review ID always refuses superseded. |
+| Same dispatch/save / backend invocation | Recheck ownership and subject/target/source after awaits, verify save-started, invoke once. Typed receipt confirms save; no second invocation. |
+| Same dispatch / delivery | Verify expectation before tool return or synchronous user send; release immediately, never hold for queued delivery or caller return. |
+| Same dispatch / exact persisted evidence, confirmed/not-required save | Write consumed with entry ID. Check record/attempt/evidence, not original source/target, which legitimate owned work may change. |
+| Same dispatch / post-intent abort, unconfirmed backend, thrown effect/send, activation end without proof | Write corresponding uncertain if ownership/state still verify. Send throws are delivery-unconfirmed; backend throw/undecodable output is backend-unconfirmed. |
+| Consumed / duplicate candidate | Status/no-op, no second save/message. |
+| Absent, consumed, invalidated / ordinary non-review mutation | Strict-read under exclusion, preserve terminal record and permit normal work. |
+
+**Failure overrides every row.** Rejected/unverified review-artifact or checkpoint writes return
+persistence-failed, retain the claim, and allow no further effects or speculative uncertain write.
+Disk can be ahead of its pointer: an orphan or stale snapshot is a stop, not repair authority.
+Invalid strict review reads also stop and retain. Ownership loss never writes consumption and
+never deletes a replacement. Contention performs no write/retry. Save receipts established before
+a later persistence failure remain in the operation result; a failed checkpoint must not erase
+known save/gate facts. At-most-once local dispatch is not exactly-once delivery or power-loss
+durability; external changes after dispatch, credentials, and owner removal remain outside the
+cooperative guarantee.
+
+Fingerprint assembly constructs these keys in order:
+`worktree_root, git_dir, git_common_dir, run_id, subject, warm_node_claim, handoff, files,
+git_config_digest, environment`. Nested warm claim order is objective/node. Paths come from
+bounded local strict Git discovery plus realpath; no mainCheckoutRoot fallback. Main root follows
+the common-directory parent convention. Handoff is read strictly from the calling root's derived
+run handoff path: ENOENT is null; malformed/unreadable/wrong-run/mistyped relevant values refuse.
+Unrelated keys are ignored. Plan projection order is objective_id/node_id/adopt_from/consumed_learn;
+objective is adopt_from/supersedes; gist is gist_scope (plan/objective/null). Optional omitted/null
+IDs normalize to null; nonblank strings stay untrimmed. Omitted consumed_learn is [], otherwise an
+array of nonblank strings retaining order and duplicates. Present empty routing differs from no
+handoff. `files` is main_config/worktree_config/worktree_local, each `{state:"absent"}` on ENOENT
+only or `{state:"present", digest}` hashing exact bytes. Empty files are present; duplicate main/
+worktree paths retain both fields. No TOML parser. Git config digest hashes exact successful stdout
+bytes of bounded `git config --null --list --show-origin`, without trimming, including successful
+empty output. No raw config is persisted/logged. `environment` is GH_REPO/GH_HOST, null when unset,
+otherwise exact UTF-8 value digests, including empty strings; credential variables are excluded.
+
+Fingerprint encoding is UTF-8 `"perk/draft-review-target/v1\n" + JSON.stringify(projection)` with
+fixed constructed key order, no trailing newline/whitespace. Decision encoding is UTF-8
+`"perk/draft-review-decision/v1\n" + JSON.stringify({approved, feedback})` in that order, feedback
+null when absent and otherwise the parser's verbatim nonblank string. Source digests hash exact
+plan Markdown or the entire serialized objective/gist artifact (including invisible fields), using
+one validated raw→decoded→rendered snapshot. A new artifact removes parameter-plan approval and
+current-draft revision eligibility even when byte-identical. Before attachment this invalidates
+source-changed without an ID; after attachment the table permits only stale-reference DATA.
+
+`createDraftReviewDecisions` supplies synchronous registration hooks
+`open`, `attach`, `invalidateOpening`, `subscriptionFailed`, and diagnostic reporting, plus
+claim-bound mutation/dispatch and current-activation delivery observation. Hooks finish release/
+retain before returning. The adapter supplies live sessions and persisted branch entries; no raw
+storage/Pi dependency is added to features. The dispatch capability fences every call, owns one
+plan patch, permits save linkage, checkpoints backend invocation, and records delivery. Captured
+warm node inputs pass explicitly to save; null keeps the existing Python handoff fallback. Failed
+owned plan patch write-back is a narrow exception: save may select only the frozen original
+reviewed bytes, never artifact-first or partially written bytes, and only while review-state,
+ownership, subject/target, and save-started verification remain sound. Subject-policy extraction
+and bound dependency composition are live in the blocking tools; migration of browser/chooser
+completion and readiness degradation remains separate. Eligibility mutations and first-party replacement/
+writeback participate as described above.
+
+Delivery marker is dispatch_id in tool `details.draft_review_dispatch`; expectation binds actual
+toolCallId. User marker is exactly `<!-- perk:draft-review-dispatch:<dispatch_id> -->`, authored
+outside untrusted feedback by `pi/v1/draftReviewRendering.ts`. Delivery encoding is UTF-8
+`"perk/draft-review-delivery/v1\n" + JSON.stringify(blocks)`: a string becomes one text block;
+text arrays reconstruct type/text keys, preserving block order/bytes; nontext cannot acknowledge.
+Evidence requires a persisted matching-role message entry with exact whole-content digest and
+marker; tools also require plan_review and toolCallId. message_end/send spies/assistant quotes do
+not count. Observe only this activation's expectations, before guarded operations and through
+explicit lifecycle calls; ordinary missing evidence leaves dispatch waiting without timeout
+guesses. Activation end checks evidence first, then marks remaining sound dispatch uncertain/
+delivery-unconfirmed. No previous-activation consumption, resend, recovery, or resume is implied.
+The production activation now subscribes to turn_end/shutdown, but only observes expectations
+created through its new completion API. No startup/reload hook discovers prior records or
+expectations. Blocking tool callers record expectations with the real toolCallId before returning.
+Human reconciliation guidance and migration of browser completion callers remain unbuilt.
+
+### Human-only retained-state reconciliation
+
+`docs/user-docs/how-to/reconcile-a-draft-review-stop.md` is the operator exit procedure, not a
+recovery command. Busy/invalid-state/persistence-failed/unresolved-dispatch diagnostics link it and
+carry the verified canonical run, known request/review IDs, exact artifact/lock locations when
+verifiable, phase/checkpoint, source digest when sound, and known save receipt. Unknown remains
+unknown. Diagnostic strict reads perform no writes or repair and grant no authority; malformed
+provenance is never mined as an authoritative record. Confirmed typed receipts and definitive gate
+facts survive a later bookkeeping failure. No raw config or feedback is included, and lock owner
+metadata makes no effect claim.
+
+The procedure is binding: (1) stop every Pi participant and child save subprocess, establish
+quiescence, then close the old browser and prevent interaction; if unproven, stop; (2) preserve lock,
+review/draft artifacts, handoff, transcript, IDs/digests and receipts privately, without JSONL edits,
+forged pointers, prune, deletion or lock removal; (3) classify this and prior attempts using
+corroboration, not an opening-looking orphan alone, missing pointer/message, dead PID or absent
+search result; (4) inspect existing backend objects/linkage and persisted messages with normal
+read-only tools and IDs/URLs, staying stopped if effects remain unresolved; (5) continue existing
+saved work rather than duplicate it, or only after human resolution choose a fresh run preserving
+factory/adoption/replan/node/scope intent (never blindly reset an in-progress node); (6) verify a
+different run ID, re-enter checked content through draft tools retaining structured fields, request
+new review, and never copy correlation, consumption, provenance, locks, request/review IDs, intent
+or approval. Leave abandoned residue intact for investigation and later deliberate cleanup.
+
+A validated pending/invalidated record plus complete no-dispatch evidence, or a positively
+identified opening-write failure before emit, may prove this attempt pre-dispatch; neither excludes
+an earlier saved subject in the run. Both retained pre-dispatch locks and initial pointer-dropped
+orphans require this procedure. There is no guaranteed escape, automatic rollback/quarantine/cleanup,
+startup/reload query/save/prior-feedback injection, explicit resume, or automatic consumption of a
+previous activation's delivery evidence.
+
+### Mandatory Plannotator registration and subscribe-then-status transport
+
+`requestPlannotatorPlanReview(bus, plan, registration, signal?)`, bridge
+`review(plan, registration, signal?)`, and `startPlannotatorPlanReview` options require
+`DraftReviewRegistration`: synchronous open/attach/invalidateOpening/subscriptionFailed hooks
+and a diagnostic sink. Production callers use the state-bound hooks above; no optional or no-op
+registration path exists. A hook refusal/throw closes local transport and returns provider-specific
+`{status:"refused", code, phase, detail}` (phase open/attach/invalidate/subscribe). Unexpected hook
+throws are persistence-failed. The Pi edge renders a nonterminating stop, not a skipped review,
+denial, save retry, or successful wave launch. Browser start captures the synchronous open outcome
+before probing/priming. `null` from browser-open remains exclusively port-pick failure.
+
+Pre-abort emits nothing and calls no hooks. Mint one UUID and verify open before emitting
+`plannotator:request` with `{requestId, action:"plan-review", payload:{planContent, origin:"perk"},
+respond}`. Abort after open but before request invalidates opening-aborted. Handshake error,
+malformation, timeout or emit failure invalidates handshake-failed; pre-ID abort invalidates
+opening-aborted. Cleanup refusal overrides unavailable/aborted. Valid pending handshake attaches
+its nonblank ID synchronously before observing a newly aborted signal, retaining known pending
+correlation; failed attachment never subscribes. Subscribe to ID-filtered review-result before
+issuing one status query. Subscription failure verifies subscription-failed invalidation.
+
+`queryPlannotatorReviewStatus(bus, reviewId, signal?)` emits a separately minted callback UUID,
+action review-status and payload `{reviewId}`. It accepts handled pending/missing/completed;
+completed requires matching nonblank reviewId, boolean approved and verbatim nonblank feedback
+(blank/nonstring feedback is absent). Unknown/getter payloads are contained. Query results are
+completed/pending/missing/aborted or failed unavailable/malformed/timeout/transport-error. The
+fixed **5-second status deadline** is independently timer-injected for tests; the existing
+handshake override affects only handshake. The live human wait has no deadline. One first-settle
+operation arbitrates synchronous or asynchronous status/live completion, duplicates and abort;
+settlement disposes the listener, query timer/bookkeeping and abort handlers, including synchronous
+callback delivery during subscription. Pending is quiet and proves no health/delivery guarantee;
+missing or failed query warns once but leaves live wait cancellable and eligible for later events.
+No polling, upstream status-file reads, HTTP decision endpoint or automatic reopen is introduced.
+Lost handshake identity or a decision lost from both status and emission remains unrecoverable.
+
+One root-owned activation coordinates tool and browser local waits. Only a verified new opening,
+after the state hook releases exclusion, detaches its predecessor. A refused successor leaves the
+old wait intact. Detachment/shutdown disposes local transport only, never another browser or its
+companion surfaces; old browser teardown is identity-suppressed. Ordinary pending abort leaves
+persisted pending intact. Already-racing candidates require claim-bound consumption revalidation
+when subject effects are composed; transport correlation alone is not dispatch authority.
+
+`DraftReviewRuntime` extends the transport-only `DraftReviewAccess` with required context-bound
+synchronous and bounded async mutation methods. `PreparedDraftReview.complete` captures request ID
+only after verified open, review ID only after verified attachment, and requires the completed
+transport outcome to match that ID. Callers cannot supply request/run/dispatch identity. It passes
+only a claim-bound effect capability to subject completion, records delivery before tool return
+or one synchronous user-send attempt, and retains normal idle/followUp delivery policy. Tool
+callers must pass their actual Pi toolCallId. The result retains typed save receipt, confirmed
+gate-exit fact, and any definitive feature result if later delivery/bookkeeping fails; the shared
+refusal renderer preserves those facts and prohibits blind save retry.
+
+Stale-reference bypasses the subject completion callback entirely. The shared renderer includes
+the exact reviewed source digest and verbatim `<untrusted_reviewer_feedback>` delimiters, labels
+feedback diagnostic-only DATA, and explicitly prohibits apply/patch/fold/save against the current
+draft. The user marker is a separate code-authored text block outside that DATA. This includes
+attached parameter reviews followed by a sound artifact, even with identical bytes.
+
+The activation binds the first verified cwd/session ID/current run; later contexts must match
+before any observation or guarded operation. Switch/fork/unavailable identity ends local liveness,
+closes transports, and forgets local expectations without touching unprovable old durable intent.
+Returning to the old namespace cannot revive this activation. Ordinary transport disposal does
+not acknowledge delivery; abort observation remains until its local expectation settles. Abort
+checks existing persisted evidence first, then marks remaining sound local dispatch uncertain/
+delivery-unconfirmed. Shutdown does the same, including an in-flight dispatch through its already
+owned capability rather than reentrant acquisition. A late backend receipt remains a fact but
+cannot authorize new effects after shutdown. Failed state writes poison further effects and
+retain the claim; no lifecycle cleanup repairs state, reclaims locks, or grants retry permission.
+Editor waits occur only after synchronous invalidation has returned and released exclusion.
+
+### Existing live review surfaces
+
 - **The artifact + save resolution → §8.1.** The working plan lives in the session data dir as
   `plan-draft.md`, written only by `plan_draft` through the accessor seam and consumable only
   via its validated provenance pointer.
-- **The two resolution chains + the asymmetry law.** **Save** surfaces resolve
+- **The two resolution chains + the asymmetry law.** **Manual save** surfaces resolve
   artifact → `plan` param → transcript scrape (the universal fail-open last resort)
   (`resolvePlanSource`, → §8.1 "File-first plan save"). **Review** surfaces resolve
   artifact → param **only** — the transcript tier is excluded because an approval auto-saves the
-  reviewed bytes, and scraped conversation bytes must never be what gets approved. The browser
-  review doors tighten further to **validated artifact only**.
+  reviewed bytes, and scraped conversation bytes must never be what gets approved. Guarded
+  Plannotator approval saves use only the frozen original or verified owned patched source, never
+  artifact-first fallback after patch failure. The browser doors tighten further to **validated
+  artifact only**.
 - **The review door + the approval seam.** `plan_review` (in `READ_ONLY_TOOLS`; backend-neutral,
   `extension/pi/v1/planReview.ts`; the objective arm's home is `extension/pi/v1/objectiveReview.ts`)
   dispatches: plannotator-selected → the event-bus bridge; **any**
@@ -4197,8 +4580,9 @@ discipline); this section keeps the unique cross-cutting rules.
   shared approval→save orchestration — the feature op `planApprovalSave`
   (`extension/authoring/plan/save.ts`), adapter-composed as `approvalSave`
   (`extension/pi/v1/plan.ts`): save → D1a gate exit on success (→ §8.3). The
-  `/plan-save` command is the **manual failsafe** invocation of the same seam, taking only an
-  optional title argument. Every `plan_review` arm carries the universal `details.ok` discriminant
+  `/plan-save` command is a manual invocation of the same seam, taking only an optional title
+  argument; it is not a retry after unconfirmed dispatch or failed persistence. Those states require
+  human reconciliation. Every `plan_review` arm carries the universal `details.ok` discriminant
   (`ok:false` + `error`/`error_type` on unavailable / save-failed / bad_input / no_plan /
   no_objective_draft; `ok:true` on verdicts and the sanctioned fail-open skips), so `tool_outcome`
   run events classify it via `details.ok` rather than the `!isError` fallback. On an eligible
@@ -4210,7 +4594,7 @@ discipline); this section keeps the unique cross-cutting rules.
   | provider id | authoring context | review surface | fail-open arm |
   |---|---|---|---|
   | `perk-plan` | `PLAN_AUTHORING_CONTEXT` | first-party in-TUI review | present + `/plan-save` |
-  | `plannotator-plan` | `PLAN_ADAPTER_PLANNOTATOR_CONTEXT` | browser bridge | present + `/plan-save` |
+  | `plannotator-plan` | `PLAN_ADAPTER_PLANNOTATOR_CONTEXT` | browser bridge | unavailable-before-intent only; guarded fallback, never a retained-state bypass |
   | `tombell-plan` | `PLAN_ADAPTER_TOMBELL_CONTEXT` (conditioned injection) | first-party in-TUI review | present + `/plan-save` (incl. tombell's own interactive `/plan` `setActiveTools` restriction arm) |
 
   Under the plannotator selection the authoring context is **flavor-dispatched per stage** (one
@@ -4248,9 +4632,11 @@ discipline); this section keeps the unique cross-cutting rules.
   - **DENY (all arms):** model-mediated — the feedback (diff included) passes through verbatim
     for the `plan_draft`/`objective_draft`/`gist_draft` rewrite.
 
-  The plan arm's mechanical apply is the exported `applyPlannotatorDirectEdits` helper
-  (`extension/pi/v1/planReview.ts`) — ONE apply path shared byte-identically by
-  `executePlanReview`'s plannotator arm and the `/plan-review-browser` door.
+  The plan arm's mechanical apply belongs to `completePlanReview` in
+  `extension/authoring/plan/review.ts`. Tool and browser adapters both call
+  `completePlanReviewV1` with an explicit dispatch capability; no duplicate browser save/apply
+  policy remains. The rules above require matching current source/target authority; stale denials
+  and structured Direct Edits emit only diagnostic DATA with the reviewed digest.
 
 - **The two draft-review browser doors** (`/plan-review-browser` /
   `/objective-review-browser`): the summonable streaming draft reviews — a plannotator
@@ -4260,8 +4646,8 @@ discipline); this section keeps the unique cross-cutting rules.
   `extension/waves/draftReviewWave.ts`) streaming phrase-anchored findings into it via
   `push_annotations` (plan mode), and the browser decision routed through the existing
   approval seams — the objective APPROVE arm applies the Direct-Edits carve-out above (a
-  revise round, nothing saved), and both doors save only when the live artifact still carries
-  the exact bytes captured at open (the stale guard). Door mechanics — the launch chooser,
+  revise round, nothing saved). Both doors verify dispatch intent and bind the save checkpoint
+  to reviewed source and target; changed source permits only stale diagnostic DATA. Door mechanics — the launch chooser,
   port/readiness handling, wave lifecycle, abort ordering, stale guards, prime/clear
   lifecycle, and the accepted concurrency behavior — live in the owning modules:
   `extension/pi/v1/planReviewBrowser.ts` + `extension/pi/v1/objectiveReviewBrowser.ts` (over
@@ -4285,7 +4671,9 @@ discipline); this section keeps the unique cross-cutting rules.
   params**; the **cold** `handoff_extra` carrier (→ §8.2) and the **warm**
   `objective_node_claim` carrier (→ §8.3) recover `objective_id`/`node_id` with identical
   semantics — fill both-or-neither, explicit values win outright (even one — never mixed),
-  fail-open (a malformed carrier never blocks a save). `consumed_learn` rides the cold handoff
+  the cold fallback's malformed-carrier handling is unchanged. Guarded Plannotator fingerprinting
+  is stricter: malformed relevant handoff/claim fields refuse before backend invocation; a present
+  warm claim is passed explicitly. `consumed_learn` rides the cold handoff
   (`_consumed_learn_from_handoff`).
 
 - **The implement-here exit (the no-save path).** A sanctioned, HUMAN-ONLY exit from plan

@@ -13,6 +13,7 @@ import { join, relative } from "node:path";
 import { sessionDataDir } from "../substrate/cache.ts";
 import {
   readSessionData,
+  readSessionDataStrict,
   type SessionArtifactCtx,
   writeSessionData,
 } from "../substrate/sessionData.ts";
@@ -33,6 +34,9 @@ function fsArtifactStore(source: SessionArtifactCtx): ArtifactContentStore {
     },
     load(runId: string, name: string): string | null {
       return readSessionData(source.cwd, runId, name);
+    },
+    loadStrict(runId: string, name: string) {
+      return readSessionDataStrict(source.cwd, runId, name);
     },
     displayPath(runId: string, name: string): string {
       return relative(source.cwd, join(sessionDataDir(source.cwd, runId), name));

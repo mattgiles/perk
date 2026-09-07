@@ -77,11 +77,21 @@ export async function reviewGist(
   },
   signal?: AbortSignal,
 ): Promise<ReviewGistResult> {
+  if (signal?.aborted) return { status: "aborted" };
   const resumed = resumeGistDraft(deps.session);
   if (resumed.kind === "absent") return { status: "noDraft" };
   if (resumed.kind === "refused") return { status: "refusedDraft", problem: resumed.problem };
   const rendered = renderGistDraft(resumed.draft);
   const outcome = await deps.reviewer.review(rendered, signal);
+  if (signal?.aborted) return { status: "aborted" };
+  return completeGistReview(outcome, () => gistApprovalSave(deps));
+}
+
+/** Subject policy only: callers authorize effects before entering this completion seam. */
+export async function completeGistReview(
+  outcome: GistReviewOutcome,
+  approvalSave: () => Promise<GistApprovalSaveOutcome>,
+): Promise<ReviewGistResult> {
   if (outcome.status === "approvedDirectEdits") {
     return {
       status: "directEditsRevise",
@@ -94,11 +104,7 @@ export async function reviewGist(
       ...(outcome.feedback !== undefined ? { feedback: outcome.feedback } : {}),
       ...(outcome.reviewId !== undefined ? { reviewId: outcome.reviewId } : {}),
     };
-    const save = await gistApprovalSave({
-      session: deps.session,
-      backend: deps.backend,
-      gate: deps.gate,
-    });
+    const save = await approvalSave();
     switch (save.status) {
       case "saved":
         return { status: "approvedSaved", save, ...carried };

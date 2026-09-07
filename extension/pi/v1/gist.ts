@@ -22,6 +22,8 @@ import {
   GIST_DRAFT_ARTIFACT,
   GIST_SCOPES,
   type GistScope,
+  renderGistDraft,
+  resumeGistDraft,
   reviseGistDraft,
 } from "../../authoring/gist/draft.ts";
 import {
@@ -32,9 +34,10 @@ import {
   gistAuthoringContextContent,
 } from "../../authoring/gist/prose.ts";
 import {
+  completeGistReview,
   type GistDraftReviewer,
   type GistReviewOutcome,
-  reviewGist,
+  type ReviewGistResult,
 } from "../../authoring/gist/review.ts";
 import {
   type GistBackend,
@@ -62,6 +65,18 @@ import { paramsOf, stringParam } from "../../substrate/toolParams.ts";
 import { type BranchEntry, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
 import { installInjectedContext } from "./contextInjection.ts";
+import {
+  captureDraftReviewRefusal,
+  type DraftReviewConfirmedFacts,
+  type DraftReviewRuntime,
+  draftReviewCompletionResult,
+  draftReviewMutationRefusal,
+  draftReviewMutationValue,
+  draftReviewRefusalResult,
+  type RegisteredDraftReviewBridge,
+} from "./draftReviewActivation.ts";
+import type { DraftReviewCapability } from "./draftReviewDecisions.ts";
+import { boundGistSaveDeps, mutationGistSaveDeps } from "./draftReviewEffects.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import { isPlannotatorPlanSelected } from "./providers/selection.ts";
 import {
@@ -227,7 +242,11 @@ function isGistAuthoring(gating: ToolGating, branch: readonly BranchEntry[]): bo
  * command — registration metadata pinned by the registration-parity tests. Inert outside gist
  * sessions; never throws.
  */
-export function installGistBindings(pi: ExtensionAPI, gating: ToolGating): void {
+export function installGistBindings(
+  pi: ExtensionAPI,
+  gating: ToolGating,
+  reviews: DraftReviewRuntime,
+): void {
   // The gist-authoring context injection (display:false), keyed off (read-only gate AND stage
   // === gist-author); the inject/strip mechanics (active-window dedup, stale-marker strip)
   // live in the shared helper.
@@ -290,7 +309,14 @@ export function installGistBindings(pi: ExtensionAPI, gating: ToolGating): void 
         );
       }
       const fail = failFor(ctx, "gist-draft");
-      const revised = reviseGistDraft(decoded, openSession(pi, ctx));
+      const mutation = reviews.mutate(
+        ctx,
+        "source-changed",
+        (session) => reviseGistDraft(decoded, session),
+        { draft: { subject: "gist" } },
+      );
+      if (!mutation.ok) return draftReviewMutationRefusal(mutation);
+      const revised = mutation.value;
       switch (revised.status) {
         case "revised":
         case "unchanged":
@@ -363,11 +389,17 @@ export function installGistBindings(pi: ExtensionAPI, gating: ToolGating): void 
           "bad_input",
         );
       }
-      const save = await saveGist(decoded, {
-        backend: coldDoorGistBackend(pi, ctx),
-        runId: openSession(pi, ctx).runId,
+      const facts: DraftReviewConfirmedFacts = {};
+      const mutation = await reviews.mutateAsync(ctx, "manual-save", async (session) => {
+        const deps = mutationGistSaveDeps(
+          { session, backend: coldDoorGistBackend(pi, ctx), gate: gateFor(gating, ctx) },
+          facts,
+          "manual",
+        );
+        const save = await saveGist(decoded, { backend: deps.backend, runId: session.runId });
+        return gistSaveResultOf(ctx, save);
       });
-      return gistSaveResultOf(ctx, save);
+      return mutation.ok ? mutation.value : draftReviewMutationRefusal(mutation, facts);
     },
   });
 
@@ -381,41 +413,52 @@ export function installGistBindings(pi: ExtensionAPI, gating: ToolGating): void 
       // gate exit lives in the seam). The drive-the-session fallback covers draft-LESS
       // sessions — gists have no transcript scrape by design, so a draftless session still
       // needs a working save path.
-      // The session always opens (identity-optional): an identity-less session reads the
-      // draft `absent` → the no-draft fallback below, exactly the open-absent branch.
-      const session = openSession(pi, ctx);
-      const outcome = await gistApprovalSave(
-        { session, backend: coldDoorGistBackend(pi, ctx), gate: gateFor(gating, ctx) },
-        { title },
-      );
-      if (outcome.status === "refused-draft") {
-        // Fail-closed stop: the command's own precondition is a VALID draft — no gate exit,
-        // no driven turn (those fallbacks are for draft-LESS sessions; driving a fresh
-        // model-authored save over a corrupted artifact would silently abandon its bytes).
+      const facts: DraftReviewConfirmedFacts = {};
+      const mutation = await reviews.mutateAsync(ctx, "manual-save", async (session) => {
+        const outcome = await gistApprovalSave(
+          mutationGistSaveDeps(
+            { session, backend: coldDoorGistBackend(pi, ctx), gate: gateFor(gating, ctx) },
+            facts,
+            "approval",
+          ),
+          { title },
+        );
+        if (outcome.status === "refused-draft") {
+          // Fail-closed stop: the command's own precondition is a VALID draft — no gate exit,
+          // no driven turn (those fallbacks are for draft-LESS sessions; driving a fresh
+          // model-authored save over a corrupted artifact would silently abandon its bytes).
+          report(
+            ctx,
+            "gist-save",
+            "error",
+            `the working gist draft is invalid: ${outcome.problem} — rewrite it with gist_draft, ` +
+              "then re-run /gist-save",
+          );
+          return;
+        }
+        if (outcome.status !== "no-draft") {
+          // Saved or save-failed: relay the save message (which carries the consumption hint).
+          const result = gistSaveResultOf(ctx, outcome.save);
+          const message = result.content[0]?.text ?? "gist-save done";
+          const severity: Severity = result.details.ok ? "info" : "error";
+          report(ctx, "gist-save", severity, message);
+          return;
+        }
+        // Exit the read-only gate so the gist_save tool (excluded from READ_ONLY_TOOLS) becomes
+        // reachable on the driven turn, then drive the turn (mirrors /objective-save).
+        if (gating.isActive()) gating.exit(ctx);
+        report(ctx, "gist-save", "info", "handing the save to the session");
+        // The perk-gist-author pointer rides the skill-binding suffix (D5) since a warm
+        // /gist-save outside a stage:gist-author session gets none from Mechanism A.
+        pi.sendUserMessage(gistSaveGuidance(title) + bindingSuffix(ctx.cwd, "stage:gist-author"));
+      });
+      if (!mutation.ok)
         report(
           ctx,
           "gist-save",
-          "error",
-          `the working gist draft is invalid: ${outcome.problem} — rewrite it with gist_draft, ` +
-            "then re-run /gist-save",
+          "warning",
+          draftReviewMutationRefusal(mutation, facts).content[0]?.text ?? "Draft review stopped",
         );
-        return;
-      }
-      if (outcome.status !== "no-draft") {
-        // Saved or save-failed: relay the save message (which carries the consumption hint).
-        const result = gistSaveResultOf(ctx, outcome.save);
-        const message = result.content[0]?.text ?? "gist-save done";
-        const severity: Severity = result.details.ok ? "info" : "error";
-        report(ctx, "gist-save", severity, message);
-        return;
-      }
-      // Exit the read-only gate so the gist_save tool (excluded from READ_ONLY_TOOLS) becomes
-      // reachable on the driven turn, then drive the turn (mirrors /objective-save).
-      if (gating.isActive()) gating.exit(ctx);
-      report(ctx, "gist-save", "info", "handing the save to the session");
-      // The perk-gist-author pointer rides the skill-binding suffix (D5) since a warm
-      // /gist-save outside a stage:gist-author session gets none from Mechanism A.
-      pi.sendUserMessage(gistSaveGuidance(title) + bindingSuffix(ctx.cwd, "stage:gist-author"));
     },
   });
 }
@@ -492,17 +535,6 @@ function gistOutcomeOf(outcome: ReviewOutcome): GistReviewOutcome {
   }
 }
 
-/** The plannotator reviewer adapter: the event-bus bridge judges the rendered draft. */
-function plannotatorGistReviewer(bridge: {
-  review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome>;
-}): GistDraftReviewer {
-  return {
-    async review(rendered, signal) {
-      return gistOutcomeOf(await bridge.review(rendered, signal));
-    },
-  };
-}
-
 /** The first-party reviewer adapter: the in-TUI editor review, VIEW-ONLY (3 verdicts). */
 function firstPartyGistReviewer(ctx: ExtensionContext): GistDraftReviewer {
   return {
@@ -547,8 +579,9 @@ export async function runGistReviewV1(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
-  bridge: { review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome> },
+  bridge: RegisteredDraftReviewBridge,
   signal?: AbortSignal,
+  toolCallId?: string,
 ): Promise<ToolResult> {
   // Headless → soft skip (fail-open; never wedges CI/supervisor runs on an interactive UI).
   if (!ctx.hasUI) return skipResult();
@@ -556,13 +589,87 @@ export async function runGistReviewV1(
   // The session always opens (identity-optional): an identity-less session reads the draft
   // `absent`, so `reviewGist` classifies `noDraft` — the same rendered redirect as before.
   const session = openSession(pi, ctx);
-  const reviewer = isPlannotatorPlanSelected(ctx.cwd)
-    ? plannotatorGistReviewer(bridge)
-    : firstPartyGistReviewer(ctx);
-  const result = await reviewGist(
-    { session, reviewer, backend: coldDoorGistBackend(pi, ctx), gate: gateFor(gating, ctx) },
-    sig,
+  const plannotator = isPlannotatorPlanSelected(ctx.cwd);
+  if (plannotator) {
+    if (sig?.aborted) return subjectReviewOutcomeResult(GIST_SUBJECT, { status: "aborted" });
+    const resumed = resumeGistDraft(session);
+    if (resumed.kind === "absent") return noGistDraftResult();
+    if (resumed.kind === "refused")
+      return renderGistReviewResult(ctx, { status: "refusedDraft", problem: resumed.problem });
+    if (!toolCallId?.trim() || typeof bridge.prepare !== "function")
+      return draftReviewRefusalResult({
+        status: "refused",
+        code: "invalid-state",
+        phase: "open",
+        detail: "required tool identity or review safety dependency unavailable",
+      });
+    const prepared = bridge.prepare(ctx, undefined, sig);
+    if (!prepared.ok) return draftReviewRefusalResult(prepared.refusal);
+    const review = prepared.value;
+    try {
+      const outcome = await bridge.review(
+        review.snapshot.markdown,
+        review.registration,
+        review.signal,
+      );
+      if (outcome.status === "refused") return draftReviewRefusalResult(outcome);
+      if (review.signal.aborted)
+        return subjectReviewOutcomeResult(GIST_SUBJECT, { status: "aborted" });
+      if (outcome.status !== "completed") return subjectReviewOutcomeResult(GIST_SUBJECT, outcome);
+      return draftReviewCompletionResult(
+        await review.complete(outcome, {
+          effect:
+            outcome.approved &&
+            !(outcome.feedback !== undefined && hasDirectEditsHeading(outcome.feedback))
+              ? "save"
+              : "revision",
+          carrier: { kind: "tool", tool_call_id: toolCallId },
+          execute: (capability) => completeGistReviewV1(pi, ctx, gating, outcome, capability),
+        }),
+      );
+    } finally {
+      review.dispose();
+    }
+  }
+  const reviewer = firstPartyGistReviewer(ctx);
+  const facts: DraftReviewConfirmedFacts = {};
+  const result = await captureDraftReviewRefusal(
+    (async () => {
+      if (sig?.aborted) return { status: "aborted" as const };
+      const resumed = resumeGistDraft(session);
+      if (resumed.kind === "absent") return { status: "noDraft" as const };
+      if (resumed.kind === "refused")
+        return { status: "refusedDraft" as const, problem: resumed.problem };
+      draftReviewMutationValue(bridge.mutate(ctx, "first-party-review", () => undefined));
+      const outcome = await reviewer.review(renderGistDraft(resumed.draft), sig);
+      if (sig?.aborted) return { status: "aborted" as const };
+      return draftReviewMutationValue(
+        await bridge.mutateAsync(ctx, "first-party-review", (session) =>
+          completeGistReview(outcome, () =>
+            gistApprovalSave(
+              mutationGistSaveDeps(
+                {
+                  session,
+                  backend: coldDoorGistBackend(pi, ctx),
+                  gate: gateFor(gating, ctx),
+                },
+                facts,
+                "approval",
+              ),
+            ),
+          ),
+        ),
+      );
+    })(),
   );
+  if (result.status === "refused") return draftReviewRefusalResult(result, facts);
+  return renderGistReviewResult(ctx, result);
+}
+
+export function renderGistReviewResult(
+  ctx: ExtensionContext,
+  result: ReviewGistResult,
+): ToolResult {
   switch (result.status) {
     case "noDraft":
       return noGistDraftResult();
@@ -648,4 +755,29 @@ export async function runGistReviewV1(
         warning: result.warning,
       });
   }
+}
+
+/** Subject policy called only within verified dispatch. */
+export async function completeGistReviewV1(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  gating: ToolGating,
+  outcome: Extract<ReviewOutcome, { status: "completed" }>,
+  capability: DraftReviewCapability,
+): Promise<ToolResult> {
+  return renderGistReviewResult(
+    ctx,
+    await completeGistReview(gistOutcomeOf(outcome), () =>
+      gistApprovalSave(
+        boundGistSaveDeps(
+          {
+            session: openSession(pi, ctx),
+            backend: coldDoorGistBackend(pi, ctx),
+            gate: gateFor(gating, ctx),
+          },
+          capability,
+        ),
+      ),
+    ),
+  );
 }

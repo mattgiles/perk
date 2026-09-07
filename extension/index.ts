@@ -34,6 +34,7 @@ import {
 } from "./pi/v1/delivery/stackSync.ts";
 import { installSubmitBindings } from "./pi/v1/delivery/submit.ts";
 import { installSubmitConflictBindings } from "./pi/v1/delivery/submitConflict.ts";
+import { createDraftReviewActivation } from "./pi/v1/draftReviewActivation.ts";
 import { registerDraftReviewWaveTools } from "./pi/v1/draftReviewWaveTools.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installAuditBindings } from "./pi/v1/learning/audit.ts";
@@ -226,11 +227,13 @@ export default function perk(
   // cores are composed HERE so plan.ts/planReview.ts import nothing from the browser modules
   // (planReviewBrowser.ts/objectiveReviewBrowser.ts — the value-import cycle break:
   // planReviewBrowser.ts value-imports the review arms).
-  installPlanBindings(pi, gating, {
+  const draftReviews = createDraftReviewActivation(pi);
+  installPlanBindings(pi, gating, draftReviews, {
     present: () => plannotatorPresent(pi),
-    plan: (ctx, opts) => openPlanReviewSurface(pi, ctx, gating, opts, draftReviewWave, annotations),
+    plan: (ctx, opts) =>
+      openPlanReviewSurface(pi, ctx, gating, opts, draftReviewWave, annotations, draftReviews),
     objective: (ctx, opts) =>
-      openObjectiveReviewSurface(pi, ctx, gating, opts, draftReviewWave, annotations),
+      openObjectiveReviewSurface(pi, ctx, gating, opts, draftReviewWave, annotations, draftReviews),
   });
 
   // The first 3rd-party plan adapter: a perk-owned, injection-only bridge that re-enables
@@ -253,13 +256,13 @@ export default function perk(
   // gate AND stage === objective-author); planMode defers to it), plus the
   // `objective_draft`/`objective_save` tools and the `/objective-save` command (registration is
   // name-keyed — only the hooks ordering is frozen).
-  installObjectiveAuthoringBindings(pi, gating);
+  installObjectiveAuthoringBindings(pi, gating, draftReviews);
 
   // The v1 gist installer: the gist-authoring context hook pair (this call sits at the frozen
   // hooks-ordering slot the injection always held; planMode defers to it too), plus the
   // `gist_draft`/`gist_save` tools and the `/gist-save` command (registration is name-keyed —
   // only the hooks ordering is frozen).
-  installGistBindings(pi, gating);
+  installGistBindings(pi, gating, draftReviews);
   let sharedOk = false;
   try {
     sharedDir();
@@ -637,13 +640,13 @@ export default function perk(
   // plannotator plan-review browser on the working plan draft, draft reviewers streaming
   // phrase-anchored findings in; APPROVE auto-saves via the approvalSave seam, DENY returns a
   // model-mediated revision round.
-  registerPlanReviewBrowser(pi, gating, draftReviewWave, annotations);
+  registerPlanReviewBrowser(pi, gating, draftReviewWave, annotations, draftReviews);
 
   // The warm `/objective-review-browser` door: the summonable streaming objective-draft review
   // — the plannotator plan-review browser on the RENDERED working objective draft, draft
   // reviewers streaming phrase-anchored findings in; APPROVE auto-saves via the
   // objectiveApprovalSave seam, Direct Edits = a model-mediated revise round (never auto-saved).
-  registerObjectiveReviewBrowser(pi, gating, draftReviewWave, annotations);
+  registerObjectiveReviewBrowser(pi, gating, draftReviewWave, annotations, draftReviews);
 
   // The read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).
@@ -665,7 +668,7 @@ export default function perk(
   // `/objective-plan` command (select the next node and author a bounded plan). The command now
   // enters the read-only gate on invocation (parity with the cold door's `mode: read-only`
   // handoff; exit stays with plan_save / `/plan` off) — hence `gating`.
-  installObjectivePlanningBindings(pi, gating, reportWave);
+  installObjectivePlanningBindings(pi, gating, reportWave, draftReviews);
 
   // The two learn plan factories' warm surfaces: `/learn-docs` gathers open perk:learn issues
   // (via the `perk learn docs --gather` cold door) toward a docs/learned consolidation plan;

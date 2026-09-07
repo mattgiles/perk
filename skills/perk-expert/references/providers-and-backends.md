@@ -52,11 +52,52 @@ The plan seam must always produce perk's reviewed, canonical plan artifact.
   with or without the streamed reviewer wave (Esc = without; the review always proceeds); the
   wave choice takes an optional custom angle, opens the `/plan-review-browser` /
   `/objective-review-browser` flow, and returns non-blocking `wave_launched` guidance while the
-  browser decision routes back automatically. Approval without direct edits uses the
+  browser decision routes back through eligibility checks. On matching reviews, approval without direct edits uses the
   ordinary approval/save seam. Approved plan direct edits are applied and the edited bytes saved;
   an unapplyable diff falls back to the original bytes with a warning. Approved objective or gist
   direct edits do not save: they return one revise round so the agent folds the edits into the
-  structured draft and re-reviews. Denial returns feedback to the agent.
+  structured draft and re-reviews. Matching denial returns actionable feedback to the agent;
+  stale decisions retain only diagnostic DATA.
+
+Plannotator plan/objective/gist reviews require verified run-local opening and attachment
+registration. Exact source and conservative routing inputs are checked; drift during handshake
+can require rereview. Busy, invalid-state, persistence-failed and unresolved-dispatch are stops,
+not skipped reviews, successful wave launches, or permission to retry a save. Preserve retained
+state for human reconciliation; never remove a lock or forge provenance to bypass a refusal.
+The canonical operator procedure is `docs/user-docs/how-to/reconcile-a-draft-review-stop.md`.
+In a consuming repository without that page, the same human-only rules apply: stop all Pi
+participants and child save subprocesses and prove quiescence; close the old browser; preserve
+lock, review/draft artifacts, handoff, transcript, IDs/digests and receipts privately. Do not edit
+JSONL, forge pointers, prune, remove locks, or repair state in place. Classify this and prior
+attempts with corroborated transcript/backend evidence: an opening-looking orphan alone, missing
+pointer/message, dead PID, or absent search result proves no absence of effects. Resolve existing
+objects, node linkage and persisted messages with normal read-only tools and returned IDs/URLs.
+Unresolved effects mean stay stopped: neither a new review nor a new run is a safe retry.
+Continue existing saved work instead of duplicating it. Only after human resolution may a deliberate
+fresh run preserve original factory/adoption/replan/node/scope intent. Verify a different run ID;
+re-enter checked content through draft tools, retaining structured fields, and request new review.
+Never copy correlation, consumption, provenance, locks, request/review IDs, intent or approvals.
+Leave abandoned residue intact for investigation and later deliberate cleanup. No automatic repair,
+rollback, quarantine or guaranteed escape is promised.
+
+After attaching the review ID, Perk subscribes before making one callback status query with a
+separate five-second deadline. Completed status catches missed live decisions; pending proves
+neither health nor delivery. Missing/query failure warns once and keeps the live wait cancellable.
+Cancellation closes only local transport, not the upstream browser. No polling, startup discovery,
+automatic replay or resume exists. Draft/manual-save/node entries and first-party
+replacement/writeback require a verified current-run claim; editor waits release it. Missing
+identity is not an unclaimed save fallback. All Plannotator tool/browser completions and chooser
+delegations verify intent before effects. Actual toolCallId/exact result content, or a
+code-authored browser HTML receipt marker outside untrusted feedback, binds the delivery
+expectation before return/send. Only an exact later persisted entry acknowledges delivery.
+Stale decisions carry only diagnostic DATA, never current-draft apply/fold/save instructions.
+Readiness fallback requires verified invalidation: degraded, or the same review's already recorded
+handshake/subscription failure. Transport failures reach one fallback notice before local cleanup,
+even while readiness sleeps or after it reports ready. Failed persistence suppresses local late
+decisions but grants no fallback permission. Confirmed receipts and successful gate facts
+survive later delivery/bookkeeping uncertainty. Preserve state and reconcile rather than retry.
+The guarantee is at-most-once participating machine-local dispatch, not exactly-once delivery or
+power-loss durability. Subject-specific Direct Edits/source policies remain in place.
 
 The warm `/pr-review-browser` door also uses plannotator when that package is installed. It can
 review a foreign PR, the active worktree's PR, or a local since-base diff before submission. That

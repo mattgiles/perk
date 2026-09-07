@@ -12,9 +12,10 @@
 //   CONTRAST with `coldDoor.activeRunId`, which falls back to a `cold-door-<ts>` stamp for
 //   stdin-staging debuggability: a stamp here would orphan data dirs and break run_id-keyed
 //   provenance, so this seam never stamps.
-// - Reads return `null` on absence (normal, branchable) and on I/O errors (with a loud stderr
-//   warning); writes return the written path or `null` on failure (with a warning). Never
-//   throws — a broken disk must not wedge a session.
+// - Ordinary reads return `null` on absence and I/O errors (with a loud stderr warning);
+//   opt-in strict reads classify ENOENT separately and refuse unsafe namespaces. Writes return
+//   the written path or `null` on failure (with a warning). Content operations never throw —
+//   a broken disk must not wedge a session.
 // - The file primitives (`readSessionData`/`writeSessionData`/`ensureSessionDataDir`) take an
 //   EXPLICIT run id — identity is resolved ONCE (by the session engine, or here via
 //   `activeSessionRunId`) and passed down, so two independent identity reads can never
@@ -30,11 +31,19 @@
 // loadable under `node --test`; accepts a minimal structural ctx (`BranchSource & { cwd }`).
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ReportTarget } from "../surfaces/report.ts";
-import { atomicWriteFileSync, ensureRunScratch, isSafeRunId, sessionDataDir } from "./cache.ts";
+import {
+  atomicWriteFileSync,
+  canonicalSessionDataDir,
+  ensureRunScratch,
+  isSafeRunId,
+  sessionDataDir,
+} from "./cache.ts";
 import { type BranchSource, branchOf, rebuildWorkflowState } from "./workflowState.ts";
+
+export { canonicalSessionDataDir } from "./cache.ts";
 
 /** Minimal context slice — `ExtensionContext` satisfies it (the `BranchSource` precedent). */
 export interface SessionDataCtx extends BranchSource {
@@ -105,6 +114,28 @@ export function readSessionData(cwd: string, runId: string, name: string): strin
   }
 }
 
+export type SessionDataRead =
+  | { status: "found"; content: string }
+  | { status: "absent" }
+  | { status: "io-error" };
+
+/** Strict content port: only ENOENT is absent; unsafe redirects and non-files are I/O refusals. */
+export function readSessionDataStrict(cwd: string, runId: string, name: string): SessionDataRead {
+  try {
+    if (!isSafeRunId(name)) return { status: "io-error" };
+    const dir = canonicalSessionDataDir(cwd, runId, { create: false });
+    if (dir === null) return { status: "absent" };
+    const path = join(dir, name);
+    if (!lstatSync(path).isFile()) return { status: "io-error" };
+    return { status: "found", content: readFileSync(path, "utf8") };
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+      return { status: "absent" };
+    }
+    return { status: "io-error" };
+  }
+}
+
 /**
  * Write a run's session-data file (creating the data dir lazily); returns the absolute path,
  * or `null` + a stderr warning on any failure. Never throws.
@@ -128,6 +159,6 @@ export function writeSessionData(
 }
 
 /** The session-artifact digest convention: `sha256:` + lowercase hex of the UTF-8 bytes. */
-export function digestSessionData(content: string): string {
-  return `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
+export function digestSessionData(content: string | Uint8Array): string {
+  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }
