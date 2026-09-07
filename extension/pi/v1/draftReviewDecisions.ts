@@ -151,6 +151,8 @@ export interface DraftReviewCapability {
       source: string;
       warmNodeClaim: DraftReviewBinding["warmNodeClaim"];
     }) => Promise<{ receipt: SaveReceipt | null; value: T }>,
+    /** Preserve definitive gate facts before fallible receipt bookkeeping. Never invokes the backend. */
+    onReceipt?: (receipt: SaveReceipt) => void,
   ): Promise<T>;
   /** Checkpoint before tool return/user send. The optional send must be synchronous and attempted once. */
   deliver(carrier: DeliveryCarrier, content: unknown, send?: () => void): void;
@@ -403,6 +405,52 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
       return reviewRefused("io-error");
     }
   }
+  function mutationSession(
+    owned: Held,
+    reason: Extract<ReviewEvent, { kind: "mutation" }>["reason"],
+    draft?: { subject: ReviewSubject; content: string },
+  ): WorkflowSession {
+    let identical = false;
+    if (draft !== undefined && reason === "source-changed") {
+      const current = owned
+        .check()
+        .readArtifact(artifactNames[draft.subject], { provenance: "strict" });
+      if (current.status === "invalid") owned.poison("invalid-state");
+      identical = current.status === "found" && current.content === draft.content;
+    }
+    owned.transition({ kind: "mutation", reason, identical });
+    return {
+      get runId() {
+        return owned.check().runId;
+      },
+      currentRunIdentity: () => owned.check().currentRunIdentity(),
+      draftReviewContext: () => owned.check().draftReviewContext(),
+      readArtifact: (name) => owned.check().readArtifact(name, { provenance: "strict" }),
+      writeArtifact(name, content) {
+        if (
+          name === DRAFT_REVIEW_ARTIFACT ||
+          (draft !== undefined &&
+            (name !== artifactNames[draft.subject] || content !== draft.content))
+        )
+          stop("invalid-state");
+        const result = owned.check().writeArtifact(name, content, { provenance: "strict" });
+        owned.check();
+        if (result.status !== "applied" && result.status !== "unchanged")
+          owned.poison("persistence-failed");
+        return result;
+      },
+      nodeClaim: () => owned.check().nodeClaim(),
+      activeObjective: () => owned.check().activeObjective(),
+      reviewPosts: () => owned.check().reviewPosts(),
+      apply(change) {
+        const result = owned.check().apply(change);
+        owned.check();
+        if (result.status !== "applied" && result.status !== "unchanged")
+          owned.poison("persistence-failed");
+        return result;
+      },
+    };
+  }
   return {
     /** Capture exactly one raw→decode→render source snapshot. open() checks it again under claim. */
     prepare(
@@ -433,54 +481,40 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
       const observed = options.entries === undefined ? observeCurrent() : observe(options.entries);
       if (!observed.ok) return observed;
       return sync(randomUUID(), (owned) => {
-        let identical = false;
-        const draft = options.draft;
-        if (draft !== undefined && reason === "source-changed") {
-          const current = owned
-            .check()
-            .readArtifact(artifactNames[draft.subject], { provenance: "strict" });
-          if (current.status === "invalid") owned.poison("invalid-state");
-          identical = current.status === "found" && current.content === draft.content;
-        }
-        owned.transition({ kind: "mutation", reason, identical });
-        // Every method checks lifetime/ownership; a retained reference cannot write after release.
-        const session: WorkflowSession = {
-          get runId() {
-            return owned.check().runId;
-          },
-          currentRunIdentity: () => owned.check().currentRunIdentity(),
-          draftReviewContext: () => owned.check().draftReviewContext(),
-          readArtifact: (name) => owned.check().readArtifact(name, { provenance: "strict" }),
-          writeArtifact(name, content) {
-            if (
-              name === DRAFT_REVIEW_ARTIFACT ||
-              (draft !== undefined &&
-                (name !== artifactNames[draft.subject] || content !== draft.content))
-            )
-              stop("invalid-state");
-            const result = owned.check().writeArtifact(name, content, { provenance: "strict" });
-            owned.check();
-            if (result.status !== "applied" && result.status !== "unchanged")
-              owned.poison("persistence-failed");
-            return result;
-          },
-          nodeClaim: () => owned.check().nodeClaim(),
-          activeObjective: () => owned.check().activeObjective(),
-          reviewPosts: () => owned.check().reviewPosts(),
-          apply(change) {
-            const result = owned.check().apply(change);
-            owned.check();
-            if (result.status !== "applied" && result.status !== "unchanged")
-              owned.poison("persistence-failed");
-            return result;
-          },
-        };
+        const session = mutationSession(owned, reason, options.draft);
         const value = work(session);
         if (typeof value === "object" && value !== null && "then" in value)
           owned.poison("invalid-state");
         owned.check();
         return value;
       });
+    },
+    /** Manual saves/node transitions hold exclusion through their awaited effects, not editor waits. */
+    async mutateAsync<T>(
+      reason: Extract<ReviewEvent, { kind: "mutation" }>["reason"],
+      work: (session: WorkflowSession) => Promise<T>,
+    ): Promise<Outcome<T>> {
+      const observed = observeCurrent();
+      if (!observed.ok) return observed;
+      let owned: Held | undefined;
+      let outcome: Outcome<T>;
+      try {
+        owned = acquire(randomUUID());
+        const value = await work(mutationSession(owned, reason));
+        owned.check();
+        outcome = { ok: true, value };
+      } catch (error) {
+        outcome = caught(error);
+      } finally {
+        if (owned !== undefined) {
+          try {
+            owned.finish();
+          } catch (error) {
+            outcome = caught(error);
+          }
+        }
+      }
+      return outcome;
     },
     observe,
     async dispatch<T>(options: {
@@ -585,7 +619,7 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
                 owner.poison("persistence-failed");
               return result;
             },
-            async save(invoke) {
+            async save(invoke, onReceipt) {
               abortCheck();
               if (effect !== "save") stop("invalid-state");
               const captured = binding(owner.check());
@@ -633,6 +667,10 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
                 stop("unresolved-dispatch");
               }
               saveReceipt = receipt;
+              // Backend awaits may lose the claim. Receipt facts survive, but no gate effect
+              // is permitted until ownership and the same dispatch are verified again.
+              attempt(owner, id);
+              onReceipt?.(receipt);
               owner.transition({ kind: "save-confirmed", id, receipt: saveReceipt });
               return result.value;
             },

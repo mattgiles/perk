@@ -4230,6 +4230,19 @@ source selection is not itself claim authorization; browser completion and guard
 composition remain pending. Gist checks abort before review and again after the reviewer await,
 before save or actionable revision completion.
 
+`pi/v1/draftReviewEffects.ts` provides tested, not-yet-live claim-bound save dependency adapters
+for those completion seams. Their backend ports enter `capability.save` after feature validation
+and title awaits, bind the captured warm plan node inputs explicitly (absent leaves the cold
+handoff fallback), and confirm the subject's typed ID/URL receipt. A receipt callback preserves
+definitive gate exit before fallible receipt-state bookkeeping; subsequent errors retain the
+known save receipt and never re-enter the gate. These are subject-specific adapters, not a new
+universal save protocol. The coordinator also exposes `mutateAsync` for bounded manual-save/node
+operations: it verifies invalidation before invoking the callback and holds exclusion through
+its awaited work; its explicit session capability expires on release. Editor/human waits must
+not use that method. Both mutation methods require a safe current-run identity even when the
+record is absent; missing/unsafe/unreadable identity is not an unclaimed ordinary-operation
+bypass. Production eligibility entry wiring is still pending.
+
 The artifact has exactly `{schema_version:1, request_id, correlation, consumption}`.
 `request_id` and `attempt.dispatch_id` are UUIDs. Correlation is exactly
 `{review_id, subject, source, source_digest, target}`: subject is plan/objective/gist; source is

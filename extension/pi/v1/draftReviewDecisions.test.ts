@@ -11,8 +11,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { GIST_DRAFT_ARTIFACT } from "../../authoring/gist/draft.ts";
+import { completeGistReview } from "../../authoring/gist/review.ts";
+import { type GistBackend, gistApprovalSave } from "../../authoring/gist/save.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "../../authoring/objective/draft.ts";
+import { completeObjectiveReview } from "../../authoring/objective/review.ts";
+import { type ObjectiveBackend, objectiveApprovalSave } from "../../authoring/objective/save.ts";
 import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
+import { completePlanReview } from "../../authoring/plan/review.ts";
+import type { PlanApprovalSaveDeps, PlanBackendSaveResult } from "../../authoring/plan/save.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { DraftReviewBinding } from "../../session/draftReviewBinding.ts";
 import {
@@ -26,6 +32,11 @@ import { acquireDraftReviewLock, DRAFT_REVIEW_LOCK } from "../../substrate/draft
 import { type BranchEntry, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import { openMemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
 import { createDraftReviewDecisions, type DraftReviewCapability } from "./draftReviewDecisions.ts";
+import {
+  boundGistSaveDeps,
+  boundObjectiveSaveDeps,
+  boundPlanSaveDeps,
+} from "./draftReviewEffects.ts";
 
 const requestId = "11111111-1111-4111-8111-111111111111";
 const successorId = "22222222-2222-4222-8222-222222222222";
@@ -855,3 +866,482 @@ test("independent real branch snapshots refuse advanced review bytes rather than
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+function deferredVoid() {
+  let settle: (() => void) | undefined;
+  const promise = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  return {
+    promise,
+    resolve() {
+      assert.ok(settle);
+      settle();
+    },
+  };
+}
+
+function planEffects(f: ReturnType<typeof fixture>) {
+  let active = true;
+  let exits = 0;
+  const requests: Parameters<PlanApprovalSaveDeps["backend"]["save"]>[0][] = [];
+  const saved: PlanBackendSaveResult = {
+    status: "saved",
+    ref: {
+      provider: "github",
+      pr_id: "42",
+      url: "https://example.test/42",
+      labels: [],
+      objective_id: "objective",
+      base: null,
+    },
+    existed: false,
+    updated: false,
+    cached: true,
+    nodeLink: { linked: true, node: "1.1", status: "in_progress", error: null },
+  };
+  const deps: PlanApprovalSaveDeps = {
+    session: f.session,
+    backend: {
+      async save(request) {
+        requests.push(request);
+        return saved;
+      },
+    },
+    gate: {
+      isActive: () => active,
+      exit() {
+        active = false;
+        exits += 1;
+      },
+    },
+    async generateTitle() {
+      return "Bound title";
+    },
+    capturePlanningPointer() {},
+  };
+  const complete = (cap: DraftReviewCapability) =>
+    completePlanReview(
+      { ...boundPlanSaveDeps(deps, cap), allowImplementHere: true },
+      { outcome: { status: "approved", reviewId: id.reviewId }, plan: f.raw, edited: false },
+      { source: "plan-draft", paramMismatch: false },
+    );
+  return { deps, requests, saved, complete, exits: () => exits };
+}
+
+for (const changed of ["source", "target"] as const) {
+  test(`bound plan completion revalidates ${changed} AFTER title generation and before backend`, async () => {
+    const f = fixture();
+    try {
+      f.open();
+      const effects = planEffects(f);
+      effects.deps.generateTitle = async () => {
+        assert.equal(f.record().consumption.state, "dispatch", "intent precedes the title await");
+        if (changed === "source") f.session.writeArtifact(f.name, "different source");
+        else f.target({ digest: `sha256:${"b".repeat(64)}` });
+        return "title";
+      };
+      const result = await f.decisions.dispatch({
+        id,
+        runId: "RID",
+        approved: true,
+        effect: "save",
+        execute: effects.complete,
+      });
+      assert.ok(!result.ok);
+      assert.equal(result.reason, `${changed}-changed`);
+      assert.equal(effects.requests.length, 0);
+      assert.equal(effects.exits(), 0);
+      const c = f.record().consumption;
+      assert.ok(c.state === "uncertain");
+      assert.equal(c.reason, "effect-failed");
+      assert.deepEqual(c.attempt.save, { state: "not-started" });
+    } finally {
+      f.dispose();
+    }
+  });
+}
+
+test("bound plan backend pause retains exclusion, binds node inputs, and releases only after delivery expectation", async () => {
+  const f = fixture();
+  try {
+    f.target({ warmNodeClaim: { objective: "objective", node: "1.1" } });
+    // Capture a new registration with the claim projection before opening.
+    const prepared = f.prepare();
+    assert.ok(prepared.registration.open(requestId).ok);
+    assert.ok(prepared.registration.attach(requestId, id.reviewId).ok);
+    f.session.apply({ kind: "record-node-claim", claim: { objective: "objective", node: "1.1" } });
+    const effects = planEffects(f);
+    const entered = deferredVoid();
+    const release = deferredVoid();
+    const save = effects.deps.backend.save;
+    effects.deps.backend.save = async (request) => {
+      const c = f.record().consumption;
+      assert.ok(c.state === "dispatch");
+      assert.deepEqual(c.attempt.save, { state: "started" });
+      entered.resolve();
+      await release.promise;
+      return save(request);
+    };
+    let entry: unknown;
+    const pending = f.decisions.dispatch({
+      id,
+      runId: "RID",
+      approved: true,
+      effect: "save",
+      async execute(cap) {
+        const result = await effects.complete(cap);
+        assert.equal(result.status, "approvedSaved");
+        assert.ok(result.status === "approvedSaved");
+        assert.equal(result.save.gateExited, true);
+        entry = f.tool(cap);
+        return result;
+      },
+    });
+    await entered.promise;
+    const competing = f.decisions.mutate("manual-save", () =>
+      assert.fail("competitor must not run"),
+    );
+    assert.ok(!competing.ok);
+    assert.equal(competing.reason, "busy");
+    assert.equal(effects.exits(), 0);
+    release.resolve();
+    const result = await pending;
+    assert.ok(result.ok);
+    assert.deepEqual(result.saveReceipt, { id: "42", url: "https://example.test/42" });
+    assert.equal(effects.requests.length, 1);
+    assert.equal(effects.requests[0]?.objectiveId, "objective");
+    assert.equal(effects.requests[0]?.nodeId, "1.1");
+    assert.equal(effects.requests[0]?.title, "Bound title");
+    assert.equal(effects.requests[0]?.plan, f.raw.trim());
+    assert.equal(effects.exits(), 1);
+    assert.equal(f.session.nodeClaim(), null);
+    assert.equal(existsSync(f.lock), false);
+    f.persisted([entry]);
+    const rewrite = f.decisions.mutate(
+      "source-changed",
+      (session) => session.writeArtifact(f.name, "next revision"),
+      { draft: { subject: "plan", content: "next revision" } },
+    );
+    assert.ok(rewrite.ok, "the next mutation first observes persisted delivery");
+    assert.equal(f.record().consumption.state, "consumed");
+  } finally {
+    f.dispose();
+  }
+});
+
+test("a save receipt cannot authorize a gate effect after ownership is replaced during backend await", async () => {
+  const f = fixture();
+  try {
+    f.open();
+    const effects = planEffects(f);
+    const save = effects.deps.backend.save;
+    effects.deps.backend.save = async (request) => {
+      const result = await save(request);
+      rmSync(f.lock);
+      const replacement = acquireDraftReviewLock(f.root, {
+        sessionId: "other",
+        runId: "RID",
+        requestId: successorId,
+      });
+      assert.ok(replacement.kind === "acquired");
+      replacement.claim.finish("retain");
+      return result;
+    };
+    const result = await f.decisions.dispatch({
+      id,
+      runId: "RID",
+      approved: true,
+      effect: "save",
+      execute: effects.complete,
+    });
+    assert.ok(!result.ok);
+    assert.equal(result.reason, "ownership-lost");
+    assert.deepEqual(result.saveReceipt, { id: "42", url: "https://example.test/42" });
+    assert.equal(effects.exits(), 0);
+    assert.equal(effects.requests.length, 1);
+    assert.equal(f.record().consumption.state, "dispatch");
+    assert.equal(existsSync(f.lock), true);
+  } finally {
+    f.dispose();
+  }
+});
+
+for (const failure of ["receipt-write", "pointer-capture"] as const) {
+  test(`confirmed plan save/gate survives ${failure} failure without replay`, async () => {
+    const f = fixture();
+    try {
+      f.open();
+      const effects = planEffects(f);
+      if (failure === "receipt-write") {
+        const save = effects.deps.backend.save;
+        effects.deps.backend.save = async (request) => {
+          const result = await save(request);
+          f.session.failNextWrite();
+          return result;
+        };
+      } else {
+        effects.deps.capturePlanningPointer = () => {
+          throw new Error("pointer capture unavailable");
+        };
+      }
+      const result = await f.decisions.dispatch({
+        id,
+        runId: "RID",
+        approved: true,
+        effect: "save",
+        execute: effects.complete,
+      });
+      assert.ok(!result.ok);
+      assert.equal(result.reason, failure === "receipt-write" ? "persistence-failed" : "io-error");
+      assert.deepEqual(result.saveReceipt, { id: "42", url: "https://example.test/42" });
+      assert.equal(effects.requests.length, 1);
+      assert.equal(effects.exits(), 1, "definitive save exits before fallible bookkeeping");
+      const c = f.record().consumption;
+      if (failure === "receipt-write") {
+        assert.ok(c.state === "dispatch");
+        assert.deepEqual(c.attempt.save, { state: "started" });
+        assert.equal(
+          existsSync(f.lock),
+          true,
+          "failed state write retains claim with no speculative uncertainty write",
+        );
+      } else {
+        assert.ok(c.state === "uncertain");
+        assert.equal(c.reason, "effect-failed");
+        assert.deepEqual(c.attempt.save, {
+          state: "confirmed",
+          id: "42",
+          url: "https://example.test/42",
+        });
+      }
+      const retry = await f.decisions.mutateAsync("manual-save", async () =>
+        assert.fail("no blind retry"),
+      );
+      assert.ok(!retry.ok);
+    } finally {
+      f.dispose();
+    }
+  });
+}
+
+for (const subject of ["objective", "gist"] as const) {
+  test(`bound ${subject} completion preserves structured policy and confirms one typed receipt`, async () => {
+    const f = fixture(subject);
+    try {
+      const raw = JSON.stringify({
+        schema_version: 1,
+        prose: "Reviewed",
+        title: "Title",
+        ...(subject === "objective"
+          ? {
+              roadmap: [{ id: "1.1", description: "node", slug: "invisible" }],
+              base: "develop",
+              delivery: "stacked",
+            }
+          : { scope: "objective" }),
+      });
+      f.session.writeArtifact(f.name, raw);
+      const prepared = f.prepare();
+      assert.ok(prepared.registration.open(requestId).ok);
+      assert.ok(prepared.registration.attach(requestId, id.reviewId).ok);
+      let active = true;
+      let exits = 0;
+      const gate = {
+        isActive: () => active,
+        exit() {
+          active = false;
+          exits++;
+        },
+      };
+      const requests: unknown[] = [];
+      const receipt = {
+        status: "saved" as const,
+        id: "7",
+        url: "https://example.test/7",
+        existed: false,
+      };
+      const objective: ObjectiveBackend = {
+        async create(request) {
+          requests.push(request);
+          return receipt;
+        },
+      };
+      const gist: GistBackend = {
+        async save(request) {
+          requests.push(request);
+          return { ...receipt, scope: "objective" };
+        },
+      };
+      const result = await f.decisions.dispatch({
+        id,
+        runId: "RID",
+        approved: true,
+        effect: "save",
+        async execute(cap) {
+          if (subject === "objective") {
+            const deps = boundObjectiveSaveDeps(
+              {
+                session: f.session,
+                backend: objective,
+                gate,
+                resolveDreamGate: () => ({ kind: "absent" }),
+              },
+              cap,
+            );
+            const saved = await completeObjectiveReview({ status: "approved" }, () =>
+              objectiveApprovalSave(deps),
+            );
+            assert.equal(saved.status, "approvedSave");
+          } else {
+            const deps = boundGistSaveDeps({ session: f.session, backend: gist, gate }, cap);
+            const saved = await completeGistReview({ status: "approved" }, () =>
+              gistApprovalSave(deps),
+            );
+            assert.equal(saved.status, "approvedSaved");
+          }
+          f.tool(cap);
+        },
+      });
+      assert.ok(result.ok);
+      assert.deepEqual(result.saveReceipt, { id: "7", url: "https://example.test/7" });
+      assert.equal(exits, 1);
+      assert.deepEqual(requests, [
+        subject === "objective"
+          ? {
+              prose: "Reviewed",
+              title: "Title",
+              roadmap: [{ id: "1.1", description: "node", slug: "invisible" }],
+              base: "develop",
+              delivery: "stacked",
+              runId: "RID",
+            }
+          : { prose: "Reviewed", title: "Title", scope: "objective", runId: "RID" },
+      ]);
+    } finally {
+      f.dispose();
+    }
+  });
+}
+
+test("async eligibility mutation invalidates before awaiting and expires its explicit session capability", async () => {
+  const f = fixture();
+  try {
+    f.open();
+    const entered = deferredVoid();
+    const release = deferredVoid();
+    const operation = f.decisions.mutateAsync("manual-save", async (session) => {
+      assert.deepEqual(f.record().consumption, { state: "invalidated", reason: "manual-save" });
+      entered.resolve();
+      await release.promise;
+      session.apply({ kind: "clear-node-claim", claim: { objective: "objective", node: "1.1" } });
+      // Store only the structural session slice, not a global exemption.
+      return session;
+    });
+    await entered.promise;
+    const refusal = f.registration.open(successorId);
+    assert.ok(!refusal.ok);
+    assert.equal(refusal.reason, "busy");
+    release.resolve();
+    const result = await operation;
+    assert.ok(result.ok);
+    assert.throws(() => result.value.writeArtifact(f.name, "late"));
+    assert.equal(existsSync(f.lock), false);
+  } finally {
+    f.dispose();
+  }
+});
+
+test("throwing current identity refuses ordinary mutation before acquisition or effects", async () => {
+  const f = fixture();
+  try {
+    f.session.currentRunIdentity = () => {
+      throw new Error("state unavailable");
+    };
+    const result = await f.decisions.mutateAsync("manual-save", async () =>
+      assert.fail("no effects"),
+    );
+    assert.ok(!result.ok);
+    assert.equal(result.reason, "io-error");
+    assert.equal(existsSync(f.lock), false);
+  } finally {
+    f.dispose();
+  }
+});
+
+test("bound completion with an unverified corrupted patch invokes backend once with original bytes only", async (t) => {
+  const f = fixture();
+  try {
+    f.open();
+    const effects = planEffects(f);
+    const write = f.session.writeArtifact.bind(f.session);
+    t.mock.method(
+      f.session,
+      "writeArtifact",
+      (name: string, content: string, options?: { provenance: "strict" }) => {
+        if (name !== PLAN_DRAFT_ARTIFACT) return write(name, content, options);
+        const result = write(name, "# Partial corrupted patch", options);
+        assert.ok(result.status === "applied" || result.status === "unchanged");
+        return { status: "unverified", reason: "write_failed" };
+      },
+    );
+    const result = await f.decisions.dispatch({
+      id,
+      runId: "RID",
+      approved: true,
+      effect: "save",
+      async execute(cap) {
+        const completed = await completePlanReview(
+          { ...boundPlanSaveDeps(effects.deps, cap), allowImplementHere: true },
+          {
+            plan: f.raw,
+            edited: false,
+            outcome: {
+              status: "approvedDirectEdits",
+              diff: "@@ -2,1 +2,1 @@\n-# Reviewed 雪\n+# Edited 雪\n",
+              rawFeedback: "FULL direct edits",
+            },
+          },
+          { source: "plan-draft", paramMismatch: false },
+        );
+        assert.ok(completed.status === "approvedSaved");
+        assert.equal(completed.directEditsFailed, true);
+        assert.equal(completed.feedback, "FULL direct edits");
+        f.tool(cap);
+      },
+    });
+    assert.ok(result.ok);
+    assert.equal(effects.requests.length, 1);
+    assert.equal(effects.requests[0]?.plan, f.raw.trim());
+    assert.equal(effects.exits(), 1);
+    const artifact = f.session.readArtifact(f.name);
+    assert.ok(artifact.status === "found");
+    assert.equal(artifact.content, "# Partial corrupted patch");
+  } finally {
+    f.dispose();
+  }
+});
+
+for (const runId of [null, "../unsafe", "RID"] as const) {
+  test(`ordinary mutation requires a safe current-run namespace (${runId})`, async () => {
+    const f = fixture();
+    try {
+      const session = openMemoryWorkflowSession({ runId });
+      const decisions = createDraftReviewDecisions({
+        cwd: f.root,
+        sessionId: "test",
+        session: () => session,
+        entries: () => [],
+      });
+      let calls = 0;
+      const outcome = await decisions.mutateAsync("manual-save", async () => {
+        calls++;
+      });
+      assert.equal(outcome.ok, runId === "RID");
+      assert.equal(calls, runId === "RID" ? 1 : 0);
+      if (!outcome.ok) assert.equal(outcome.reason, "no-identity");
+    } finally {
+      f.dispose();
+    }
+  });
+}
