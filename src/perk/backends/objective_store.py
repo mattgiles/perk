@@ -41,6 +41,7 @@ from perk.backends.engagement import (
 )
 from perk.backends.issue_backend import GistSummary
 from perk.objective.drift import DriftCode, DriftCondition, DriftReport
+from perk.objective.refinement.models import RefinementObjectiveSnapshot
 
 
 class ObjectiveStoreError(Exception):
@@ -49,6 +50,26 @@ class ObjectiveStoreError(Exception):
     Backend-neutral: concrete stores map their native errors (``GitHubError``, Linear HTTP errors)
     into this at the boundary.
     """
+
+
+# The typed refusals of ``read_node_refinement_targets`` (contracts.md §8.67). Transport/GraphQL
+# and malformed OUTER API responses stay plain ``ObjectiveStoreError``; these name the payload,
+# schema, and completeness conditions the read deliberately classifies.
+RefinementTargetReadCode = Literal["unsupported_backend", "malformed_target", "ambiguous_target"]
+
+
+class RefinementTargetReadError(ObjectiveStoreError):
+    """``read_node_refinement_targets`` cannot answer for this store or this objective.
+
+    ``unsupported_backend`` — the store has no refinement read (raised immediately, no network);
+    ``malformed_target`` — required node/objective metadata is unreadable, or an attachment
+    connection is incomplete so plan absence cannot be proven; ``ambiguous_target`` —
+    duplicate sentinel / objective-header / node-identity metadata.
+    """
+
+    def __init__(self, code: RefinementTargetReadCode, message: str) -> None:
+        self.code: RefinementTargetReadCode = code
+        super().__init__(message)
 
 
 class StackedAppendRefused(ObjectiveStoreError):
@@ -729,4 +750,32 @@ class ObjectiveStore(Protocol):
         no per-node-issue surface (GitHub single-issue objectives; the dormant issue-backed Linear
         store) or a node-issue that cannot be resolved; **raises** ``ObjectiveStoreError`` on an
         infra/auth failure (never masks infra as empty)."""
+        ...
+
+    # --- objective-node refinement (§8.67) ---
+
+    def read_node_refinement_targets(
+        self, *, objective_id: str
+    ) -> RefinementObjectiveSnapshot | None:
+        """Read every roadmap node of an objective as a refinement target — the ONE supported
+        read behind refinement reads, default/explicit selection, and saves (no capability flag,
+        no dummy-node probe).
+
+        ``None`` means a genuinely missing / non-perk objective. A returned snapshot is a
+        supported objective: ALL nodes appear (every status, plan-bearing nodes included —
+        there is no eligibility restriction on the read), sorted naturally; an empty ``targets``
+        tuple is a supported objective with no nodes. Each target carries the node's stable
+        identity (carrier = the store's node carrier id), its current fenced source + digest
+        (description/slug/comment/observed + effective dependencies/carrier description), the
+        effective status (native cancellation projects ``skipped``), the plan backlink under the
+        store's usual semantics, and presence-only plan-metadata evidence (a corrupt plan payload
+        still counts as present).
+
+        Raises :class:`RefinementTargetReadError` — ``unsupported_backend`` immediately and
+        without network for a store with no refinement read (GitHub; the dormant issue-backed
+        Linear store), ``ambiguous_target`` on duplicate identity metadata, ``malformed_target``
+        on unreadable required metadata or an attachment connection whose completeness cannot
+        be proven (plan absence is never inferred from truncation). Transport / malformed outer
+        API responses raise plain ``ObjectiveStoreError``. Pure read: no readiness check,
+        mutation, repair, or objective-prose hashing."""
         ...

@@ -275,6 +275,24 @@ and Reconcilable markers use Linear-safe inline-code sentinels where they must r
 This attachment model is a clean break. Inline metadata from earlier perk versions is not read;
 those Linear artifacts must be re-created or re-saved.
 
+### Node refinements
+
+A roadmap node's **refinement** (a dated, reviewed, advisory elaboration authored ahead of its
+planning turn) is one marked comment on the node-issue: the exact
+`perk:objective-refinement:v1:<key>` marker as the first line (the key hashes the node's
+identity, including the node-issue UUID), a one-line JSON header (the node source it was
+written against + authoring provenance: run id, UTC timestamp, full `HEAD` sha, dirty flag),
+then the Markdown. "Refined" is only the presence of that valid comment — no node status,
+header, manifest, plan-header, or plan-ref field changes, and the node stays exactly as
+plannable as before. Only `pending`/`blocked` nodes without a plan can be refined; after a
+claim or plan save the historical refinement stays readable while new saves refuse. Saves are
+guarded (one write attempt, read-back verification; concurrent edits, duplicates, and damaged
+records refuse rather than retry or overwrite), and a refinement comment is never selected as
+the plan comment even when it quotes a plan-body example. Internal Linear persistence only in
+this release: no public `perk objective refine` command or `/objective-refine` door, no
+planning-time consumption, and GitHub objectives are unsupported until their carrier lands.
+Contract: `shared/contracts.md` §8.67.
+
 ### The dream-report companion
 
 A `perk learn dream` session's objective persists the reviewed
@@ -361,6 +379,8 @@ a live workspace, so this is not part of ordinary Linear readiness.
 - Linear `RATELIMITED` GraphQL failures are loud and have no retry/backoff. Low-volume validation
   has not exercised rate limiting.
 - AgentSession emission is off by default and not live-verified.
+- Node-refinement persistence is proven offline only (real store/adapter over a fake Linear
+  workspace); authenticated refine-to-plan evidence is not yet claimed.
 - GitHub Issues Sync interactions are outside coverage; prefer a team without that two-way sync
   unless separately validated.
 - `pi-status-footer` hides extension status; non-default web providers have local credential or

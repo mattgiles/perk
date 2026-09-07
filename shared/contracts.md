@@ -4351,10 +4351,11 @@ GitHub issue **or** a Linear Project.
 **The contract module** (`perk/backends/objective_store.py`):
 
 - The `ObjectiveStore` `Protocol`: `backend_id: str` plus the keyword-only method inventory
-  (26 methods, incl. `reopen_objective` — `objective_store.py::ObjectiveStore` is the census),
+  (27 methods, incl. `reopen_objective` and the §8.67 `read_node_refinement_targets` —
+  `objective_store.py::ObjectiveStore` is the census),
   grouped: lookup/read (`find_objective`, `find_open_objective_by_origin`, `get_objective`,
   `read_objective_source`, `list_gist_sources`, `list_objective_completion_candidates`, the
-  §8.25 engagement reads), creation/adoption/supersession (`create_objective`,
+  §8.25 engagement reads, the §8.67 refinement target read), creation/adoption/supersession (`create_objective`,
   `create_gist_source`, `adopt_source_as_objective`, `supersede_objective`,
   `finalize_supersession`), mutation (`update_objective_header`, `update_objective_node`,
   `update_objective_body`, `save_node_plan`, `add_objective_node`, `close_objective`,
@@ -4382,7 +4383,9 @@ GitHub issue **or** a Linear Project.
   transitions, not idempotent-write guesses; §8.51/§8.56's state-aware close consumes it);
   and the per-mutation result records (`ObjectiveHeaderUpdate`, `ObjectiveNodeUpdate`,
   `ObjectiveBodyUpdate`, `ObjectiveNodeAdd`, …).
-- One backend-neutral error type: `ObjectiveStoreError`.
+- One backend-neutral error type: `ObjectiveStoreError` — plus its typed subclasses
+  `StackedAppendRefused` (§8.66) and `RefinementTargetReadError` (§8.67; `code ∈
+  unsupported_backend | malformed_target | ambiguous_target`).
 
 **The state-ownership invariants** (the four contract disciplines every concrete store MUST honor):
 
@@ -4793,9 +4796,12 @@ instructions**:
 
 - Comments — `_comments_with_authors` selecting `{ id body createdAt editedAt
   user { id name displayName } botActor { id name type } }` (same asc-by-`createdAt` sort). The
-  existing `_comments` is **left byte-stable** — it feeds the marker-matching path
-  (`find_comment_id_by_marker`/`upsert_marked_comment`), whose offline tests pin the
-  `{ id body createdAt }` selection.
+  existing `_comments` is **left byte-stable** — it feeds the ordinary marker-matching path
+  (`find_comment_id_by_marker`/`upsert_marked_comment` with `expected=None`), whose offline
+  tests pin the `{ id body createdAt }` selection. The **guarded** `upsert_marked_comment`
+  arm (§8.67) scans through `_comments_with_authors` + this same mapper instead, so the
+  `EngagementComment` it verifies and returns is the observed value (id / stored body /
+  author / native timestamps), never a reconstruction.
 - Description edits — `_description_edits`: `issue(id){ history(...) { nodes { id createdAt
   actor descriptionUpdatedBy } } }`, filtered to nodes carrying a `descriptionUpdatedBy`, mapped to
   `DescriptionEdit` (`diff=None`; author keyed on the editing `actor`). Fields selected explicitly
@@ -11082,3 +11088,292 @@ ready/land re-entry gesture: re-entry guidance lives on the human-facing surface
 tail, the drive warnings, the launch stderr), so the §8.40 objective-stage lists stay
 unwidened — the zero-argument `ready` tool must never ride an unbound main-root session where
 it could act on the cached selector's plan instead of the continuation's.
+
+## §8.67 · Objective-node refinement persistence (the Linear marked-comment carrier)
+
+A **refinement** is a dated, reviewed, advisory elaboration of one EXISTING roadmap node,
+persisted as a single marked comment on the node's carrier. It is content, never state: no
+`planning` claim, no `pr` backlink, no node status, no readiness or freshness proof, no plan.
+"**Refined**" is derivable only from the presence of a valid saved record — never a node
+state, header, manifest, plan-header, or plan-ref field (none is added). This section fixes the
+**implemented Python slice only**: the domain types + wire format, one objective-store read, the
+guarded shared comment upsert, the backend-neutral service, plan/refinement coexistence, and the
+offline persistence gate. The public authoring/review doors (`perk objective refine` /
+`/objective-refine`), planning-seed consumption, authenticated Linear evidence, and the GitHub
+carrier are **explicitly deferred** to later slices — this slice adds no CLI command, stage,
+tool, transfer artifact, or review bypass, and no facade re-export.
+
+**Modules.** `perk/objective/refinement/{models,codec,service}.py` (`__init__` empty).
+`models.py` is the pure type leaf (frozen dataclasses + `RefinementError`; no Pydantic / Click /
+concrete backend / I/O; it imports the existing `NodeStatus`, `EngagementComment`, and
+`MarkedCommentExpectation`). `codec.py` owns the envelope, digests, the lenient stored-parse
+models (`LenientParseModel`, unknown header keys ignored), and the ONE content validator that
+serves both the stored read and caller input. `service.py` imports the two tier contracts only
+(`ObjectiveStore`, `IssueBackend`), never a concrete implementation. `issue_backend.py` never
+imports refinement types; `objective_store.py` imports the neutral snapshot type only.
+
+**Frozen shapes** (all fields required unless defaulted):
+
+| Type | Fields |
+|---|---|
+| `RefinementIdentity` | `backend`, `objective_id`, `objective_run_id`, `node_id`, `carrier_id` (all nonblank `str`) |
+| `RefinementSource` | `description: str`, `slug: str\|None`, `comment: str\|None`, `depends_on: tuple[str,...]\|None`, `effective_depends_on: tuple[str,...]`, `issue_description: str` |
+| `RefinementCodeBasis` | `head_sha: str`, `dirty: bool`, `captured_at: str` |
+| `RefinementProvenance` | `authoring_run_id: str`, `authored_at: str`, `code_basis` |
+| `RefinementDocument` | `identity`, `source`, `source_digest: str`, `provenance`, `markdown: str` |
+| `RefinementTarget` | `identity`, `source`, `source_digest`, `carrier_identifier`, `carrier_url`, `status: NodeStatus`, `plan_ref: str\|None`, `has_plan_metadata: bool` |
+| `RefinementObjectiveSnapshot` | `backend`, `objective_id`, `objective_run_id`, `objective_url`, `targets: tuple[RefinementTarget,...]` |
+| `SavedRefinement` | `document`, `comment: EngagementComment`, `body_digest: str` |
+| `RefinementRead` | `target`, `saved: SavedRefinement\|None` |
+| `RefinementSaveRequest` | `document`, `expected: MarkedCommentExpectation` |
+
+Derived properties, never duplicated fields: `RefinementTarget.eligible` (status ∈
+{pending, blocked} ∧ `plan_ref is None` ∧ `has_plan_metadata is False`);
+`SavedRefinement.saved_at` (`comment.edited_at` when set, else `created_at`);
+`RefinementRead.source_changed` (False when absent, else stored `source_digest` ≠ current
+target digest — advisory, staleness never makes a record absent); `RefinementRead.expected`
+(`MarkedCommentExpectation(None, None)` when absent, else the saved comment id + body digest).
+Selection returns this same `RefinementRead`. The carrier identity is the Linear issue **UUID**;
+the human identifier/URL are addressing data outside the identity hash. Dependency tuples are
+unique + `node_sort_key`-sorted; Linear keeps its existing empty-relations→`None`
+reconstruction loss; effective dependencies come from `objective.build_graph` (graph inference,
+never readiness). Source hashes exclude statuses, backlinks, timestamps, display URLs,
+objective prose, and sibling progress (the **target-only source fence**). Provenance comes from
+real authoring inputs (`plan.now_iso()`, `git.resolve_commit(repo_root, "HEAD")`,
+`git.is_dirty(repo_root)`), is preserved verbatim across retries, and never proves human
+approval — neither does author classification.
+
+**v1 scalar encodings.** Canonical JSON = `json.dumps(mapping, sort_keys=True,
+separators=(",", ":"), ensure_ascii=True)` → UTF-8; explicit field mapping only (tuples → JSON
+arrays; every named nullable field serialized as `null`, never omitted). Every digest is SHA-256
+**lowercase hex, exactly 64 chars, no prefix**: `target-key` hashes precisely the five-field
+identity mapping; `source_digest` the six-field source mapping; `body_digest` the exact stored
+comment body's UTF-8 bytes (no trimming/transcoding first). `authored_at`/`captured_at` are
+exactly `YYYY-MM-DDTHH:MM:SSZ` (valid UTC calendar time, whole seconds; writers use
+`plan.now_iso()`; an aware datetime converts to UTC and drops microseconds via
+`codec.format_timestamp`, a naive one is refused; stored reads reject noncanonical spellings
+rather than normalizing). `head_sha` is a full lowercase 40-hex commit id. Native
+`EngagementComment` timestamps stay the backend's observed strings — never put in the header,
+canonicalized, or hashed.
+
+**The exact comment envelope** (LF separators; no added final newline beyond the Markdown):
+
+```
+<!-- perk:objective-refinement:v1:<target-key> -->
+
+# Objective node refinement (advisory)
+
+```json
+{"identity":{…},"provenance":{…},"schema_version":"1","source":{…},"source_digest":"…"}
+```
+
+<markdown>
+```
+
+The marker is accepted as that exact HTML line or its exact Linear inline-code rewrite
+(`` `perk:objective-refinement:v1:<key>` ``). The header mapping is exactly
+`{schema_version: "1", identity, source, source_digest, provenance}` and never duplicates the
+Markdown. On the wire it is the canonical JSON re-spelled with every `<` as the JSON escape
+`\u003c` (`codec.wire_header_json`): one ASCII, newline-free line that the shared transcoder
+cannot alter — its line splitting is inert, and a perk HTML marker quoted inside a source field
+can never form the `<!-- perk:… -->` shape its marker rewrite matches. The re-spelling is
+JSON-preserving (`json.loads` yields the identical mapping); the digests hash the canonical
+mapping JSON, never the wire line. The
+Markdown tail has no closing delimiter (nested fences/pipes/trailing content survive). The
+shared Linear backend transcodes the whole rendered body as it does every comment — **full-content
+fidelity means equality to the complete Linear rendering**, not raw HTML/line-ending identity.
+
+**Codec functions** (`codec.py`, pure): `render_refinement(document) -> str`;
+`parse_refinement_comment(comment) -> SavedRefinement | None`; `is_refinement_comment(body)
+-> bool`; `source_digest(source)`; `target_key(identity)`; plus
+`find_target_refinement(comments, identity)` (target discovery), `document_for_target(target,
+*, markdown, provenance)`, `validate_save_request(request)`, `html_marker`/`inline_marker`/
+`marker_forms`, `format_timestamp`. Parse discipline: parse BEFORE trimming; a comment whose
+first physical line is not a family marker is unrelated (`None`) — ordinary mentions of the
+family name are not markers; a family-marked comment MUST be well-formed (64-hex key, envelope,
+exact `schema_version`, every named field present, canonical scalars, digest, marker-key ↔
+decoded identity, nonblank Markdown) — malformed records **fail**, never disappear; the exact
+target marker repeated in a document is malformed; well-formed **foreign-identity** records are
+ignored by target discovery, never rebound; two exact target records are **ambiguous even when
+equal**, decided from the marker headers BEFORE any payload parse (duplicate-target precedence);
+no automatic duplicate deletion. **Family ownership is ONE rule** (`is_family_marker_line`: the
+lenient marker shape in either encoding — tolerant whitespace, an optional trailing CR) shared
+by the ownership predicate and both parsers; well-formedness is the exact rendered form plus a
+64-hex key. A first line that is family-owned but not exactly rendered (damaged spacing, a
+trailing CR, an unreadable key) is a damaged owned record everywhere: `is_refinement_comment`
+still owns it, and `parse_refinement_comment` / `find_target_refinement` raise
+`malformed_refinement` — it can never read as absence, so selection never offers its carrier
+and a save never creates a second record beside it. A near-miss that neither rule owns (e.g. a
+trailing space after the inline form, the bare family name) is unrelated to both.
+`is_refinement_comment` is thus the ownership-only predicate without requiring valid JSON — a
+damaged owned record must never become a plan; a marker mentioned later in a real plan does
+not change its kind. Beyond the owned-marker grammar there are NO new Markdown restrictions,
+size caps, transcoders, or storage services.
+
+**The one objective-store read.** `ObjectiveStore.read_node_refinement_targets{objective_id}
+-> RefinementObjectiveSnapshot | None` — the ONE supported read behind reads, default/explicit
+selection, and saves (no capability flag, no dummy-node probe, no second capability source).
+`None` = a genuinely missing/non-perk objective; a snapshot = a supported objective with ALL
+nodes (every status, plan-bearing nodes included — no eligibility restriction on the read),
+sorted naturally; an empty `targets` tuple = a supported objective with no nodes.
+`RefinementTargetReadError(ObjectiveStoreError)` carries `code ∈ unsupported_backend |
+malformed_target | ambiguous_target`. `GitHubObjectiveStore` and the dormant issue-backed
+`LinearObjectiveStore` raise `unsupported_backend` immediately, without network, even for an
+empty or invalidly addressed objective. `LinearProjectObjectiveStore`: reads the actual project
+id/URL and the sentinel's `objective-header` run id; enumerates every project-issue page through
+the narrow state-bearing sibling `_LinearProjectOps.project_issues_for_refinement` (full
+descriptions + native state + the attachment connection's `pageInfo { hasNextPage }`); resolves
+carriers by `objective-node` metadata only (never title/backlink/guessed id/sentinel); native
+canceled projects effective `skipped`; `plan_ref` follows the self-reference semantics;
+recognizable `plan-header` **presence** sets `has_plan_metadata=True` even with a corrupt
+payload (multiple plan-header attachments still prove presence and never block historical
+reads); observed dependencies come from blocking relations, effective ones from graph inference.
+Typed refusals: a missing project or no objective-header carrier → `None`; duplicate
+sentinel / objective-header / node-identity metadata → `ambiguous_target`; unreadable required
+metadata, a perk-owned envelope with no readable `kind` — missing, blank, `null`, a number, an
+object (an unreadable identity cannot prove plan absence), or a missing/malformed completeness
+field / `hasNextPage: true` on an attachment
+connection → `malformed_target` (plan absence is never inferred from truncation — and no
+general attachment-pagination migration or change to the existing query shapes). Transport /
+GraphQL / malformed outer API shapes stay the translated `ObjectiveStoreError` (→
+`backend_error`); kinds are decided structurally, never by matching error messages. Attachment
+**ownership is decided by the raw `metadata.source == "perk"` field BEFORE any envelope decode**
+(`attachments.is_perk_owned` / `perk_owned_nodes` / `perk_attachment_kinds`): only perk-owned
+nodes reach the Pydantic envelope, so a foreign integration card with oddly typed fields can
+never fail the read, and any residual envelope `ValidationError` on a perk-owned node is
+translated to `malformed_target` at this boundary. Pure read:
+no `Delivery.prepare`, readiness check, mutation, repair, or objective-prose hashing.
+
+**The guarded shared upsert** (`issue_backend.py`). Additions: frozen
+`MarkedCommentExpectation(comment_id: str|None, body_digest: str|None)` (both null = expected
+absence; both present = the exact observed comment; partial pairs, blank ids, and noncanonical
+digests are invalid input — `validation_problem()`); `MarkedCommentError(IssueBackendError)` with
+`code ∈ unsupported_backend | invalid_input | malformed_comment | ambiguous_comment |
+stale_comment | backend_error | write_unverified`, `comment_ids: tuple[str, ...] = ()`, and
+`write_attempted: bool = False`; ONE defaulted field `CommentResult.verified_comment:
+EngagementComment | None = None` (no scalar proof fields, no second result type — ordinary
+callers keep `None`); the pure helpers `body_digest`, `is_canonical_digest`, `first_line`, and
+`scan_marked_comments(comments, forms) -> MarkedCommentScan{owned, malformed}` — `owned` is
+every comment whose first physical line IS the exact marker in any accepted encoding, counted
+by the header alone (so the duplicate set is always complete); `malformed` is every placement
+defect (misplaced = present but not first; repeated = an owner whose marker recurs, which
+therefore appears in BOTH tuples); callers apply duplicate-before-malformed precedence. The
+digest/SHA/timestamp scalar checks are whole-string (`fullmatch`) — a trailing newline is a
+noncanonical spelling.
+The signature becomes `upsert_marked_comment{issue_id, marker, body, dry_run=False,
+expected=None}`: `expected=None` keeps today's behavior byte-unchanged (substring, first hit,
+no verification; existing saves are NOT opted in); a non-null `expected` is the guarded path:
+
+1. Validate the expectation and the desired exact first-line ownership (`body`'s first line IS
+   `marker`, occurring once). A guarded **dry run** validates these cheap inputs only and returns
+   `posted=False`/`verified_comment=None` with no network. Scan ALL comment pages through
+   `_comments_with_authors` + the shared mapper; accept the exact marker in HTML or native
+   inline form — never prefixes or substring mentions; multiple owning comments →
+   `ambiguous_comment` (identical duplicates included); a misplaced/repeated marker →
+   `malformed_comment` (ambiguity refuses before malformed placement, at preflight and at
+   verification alike).
+2. If the unique observed body equals the complete desired Linear-rendered body →
+   `CommentResult(posted=True, verified_comment=observed)` with NO write, even when the original
+   expectation predates that convergent save. Otherwise the expectation must hold exactly
+   (absence, or the expected id + body digest); mismatch → `stale_comment`.
+3. At most ONE create or update attempt (update by the observed comment UUID; create on the
+   resolved issue id; the whole body replaced; the same `to_linear_markdown` +
+   `_create_comment`/`_update_comment` primitives). A mutation exception is captured and ONE
+   full verification scan follows — never a retry, never polling.
+4. Verification precedence: unreadable scan → `write_unverified`; duplicate ownership →
+   `ambiguous_comment`; malformed ownership → `malformed_comment`; one exact candidate →
+   success with that `EngagementComment` (including when the mutation raised after landing);
+   mutation raised AND the scan proves the preflight baseline (same id + body, or still absent)
+   → `backend_error` chaining the original diagnostic; a unique target with different
+   id/content versus preflight → `stale_comment` (different owned bytes are stale even when a
+   competing edit cannot be told from server alteration — never success); otherwise (absent
+   after the attempt, or the unchanged baseline after a nominal success) → `write_unverified`.
+
+Every error after the attempt sets `write_attempted=True`; validation/preflight errors keep
+`False`. Native size/auth/rate-limit errors keep their diagnostics; no content is shortened and
+no size limit is introduced. `posted=False` only on a dry run; `posted=True` on verified
+convergence (no-write success included). `GitHubIssueBackend`'s non-null-`expected` arm raises
+`unsupported_backend` before any operation (dry run included) until the GitHub carrier lands;
+ordinary GitHub forwarding is unchanged.
+
+**The service** (`service.py`) — callers resolve store + issues through the existing resolvers
+and supply the same backend (mismatch → `invalid_input`); one private target-discovery /
+comment-discovery implementation serves all three:
+
+- `read_node_refinement(store, issues, *, objective_id, node_id) -> RefinementRead` — the
+  snapshot read (the support decision), missing objective vs missing node, then ALL carrier
+  comments via `IssueBackend.read_comments`; `RefinementRead(target, None)` for genuine absence
+  or the full record; all statuses readable; a changed source is advisory `source_changed=True`,
+  never absence or a requeue; no bounded engagement renderer.
+- `select_refinement_target(store, issues, *, objective_id, node_id=None) -> RefinementRead` —
+  explicit node: must be eligible before its prior record is read (valid presence permits
+  re-refinement); default: walk natural order **ignoring dependency readiness**, skip ineligible
+  nodes and valid saved records (stale ones included), select the first eligible absence; a
+  malformed/ambiguous/unreadable record on an eligible node STOPS the walk; an empty/exhausted
+  population → `no_unrefined_node`. No claim, no delivery call.
+- `save_node_refinement(store, issues, *, request) -> SavedRefinement` — validate the frozen
+  request (content rules + expectation; the identity's backend must match the store) → fresh
+  snapshot → node lookup → exact identity → current eligibility → source digest, in that order
+  → discovery (record validity/uniqueness; the request's ORIGINAL expectation is retained, never
+  refreshed) → the guarded upsert (which owns backend-rendered convergence and the
+  expected-content comparison) → the returned `verified_comment` decoded through the same codec
+  and returned — **no second comment read**. A missing verified comment or a codec/identity
+  failure on it is `write_unverified` (attempted-write True). Never refreshes the expectation,
+  rebuilds provenance, follows supersession, or rebinds reused/moved identities; a node that
+  became ineligible refuses even an idempotent save.
+
+`RefinementError` carries `code: RefinementErrorCode` (a `StrEnum`), the message,
+`comment_ids: tuple[str, ...] = ()`, `write_attempted: bool = False`; causes are chained, never
+relabelled. The complete mapping:
+
+| Condition | `code` |
+|---|---|
+| Invalid request/domain fields, partial expectation, backend mismatch | `invalid_input` |
+| Store or guarded upsert says unsupported | `unsupported_backend` |
+| Store snapshot is `None` | `objective_not_found` |
+| Supported snapshot lacks the requested node | `node_not_found` |
+| Explicit/save target fails the pending/blocked/no-plan predicate | `node_ineligible` |
+| Default selection exhausts eligible unrefined nodes | `no_unrefined_node` |
+| `RefinementTargetReadError.malformed_target` | `malformed_target` |
+| `RefinementTargetReadError.ambiguous_target` | `ambiguous_target` |
+| Codec marker/envelope/version/scalar/digest failure on read/discovery; guarded `malformed_comment` | `malformed_refinement` |
+| Multiple exact target records; guarded `ambiguous_comment` | `ambiguous_refinement` |
+| Fresh identity differs from the request; eligible target's source digest changed | `stale_source` |
+| Guarded `stale_comment` (conflicting post-write bytes included) | `stale_refinement` |
+| Transport/GraphQL/outer API failure before mutation; guarded `backend_error` after a proven unchanged baseline | `backend_error` |
+| Guarded `write_unverified`; missing/invalid verified result at the service boundary | `write_unverified` |
+
+Codec errors on ordinary reads carry `write_attempted=False`; a verified-result validation
+failure conservatively reports `True`.
+
+**Coexistence with plans.** `is_refinement_comment` is applied BEFORE `plan.extract_plan_body`
+at the four Linear plan-comment selection sites — `LinearProjectObjectiveStore.save_node_plan`,
+`LinearIssueBackend.get_plan_body`, `update_plan_issue`, `adopt_issue_as_plan` — so an advisory
+plan-body example inside a refinement (even under a damaged header) is never read or overwritten
+as the plan; a real plan with later refinement-marker discussion stays the plan; refinement's
+exact target matcher can never select the separate plan comment. Normal plan rendering, the
+mutation sequence, description/callout behavior, and the ordinary marker API defaults are
+unchanged. Refinement's ONLY remote mutation is creating or replacing its own comment: no claim,
+plan creation/linkage, issue-description or attachment write, native-state change,
+milestone/relation mutation, objective-lifecycle update, or delivery operation.
+
+**Residual races (observed conflict detection, not synchronization).** There is no remote CAS
+or lock: a writer may win AFTER the final verification (the returned record is an honest
+observation, surfaced as `stale_refinement` on the next guarded save); the fresh target read is
+not atomic with the guarded comment check/write, so planning may start after the last
+eligibility check and leave a **late, inert** refinement (no rollback, no already-open-plan
+update, never a reversed claim); concurrent first saves can leave two records, which every later
+operation refuses as ambiguous until a human resolves them. Explicit retries converge on the
+same candidate; nothing retries a POST/PATCH automatically (existing no-retry-on-rate-limit
+behavior kept).
+
+**The offline persistence gate.** `tests/test_linear_refinement.py::test_phase1_gate_linear_refinement_persistence`
+(parameterized incremental/stacked): a temp git repo, the actual resolvers, the real
+`LinearProjectObjectiveStore` + `LinearIssueBackend` + service over ONE `FakeLinearWorkspace`
+(external transport faked, never the service); an objective with a claimed+planned predecessor
+and a blocked future node; the real temp-checkout code basis; select → save a long refinement →
+read → replace (same comment id, provenance preserved, old tail gone) → retry (no mutation);
+unchanged roadmap/manifest and every non-comment surface; the refinement mutation log is
+comment-only; then a real claim + plan save proves historical reads stay available while new
+saves refuse `node_ineligible`, with no delivery operation. Authenticated refine-to-plan
+evidence is NOT claimed here — it belongs to the planning-consumption slice's live Linear gate.

@@ -270,6 +270,33 @@ the authored plan comprehends your feedback. You can inspect it directly with
 GitHub single-issue objectives have no per-node issues, so this is a Linear-first behavior (empty on
 GitHub).
 
+### Node refinements (Linear-Project objectives only)
+
+A **refinement** is a dated, reviewed, advisory elaboration of one roadmap node, written ahead
+of its turn and stored as **one marked comment on the node-issue**
+(`perk:objective-refinement:v1:<key>` on the comment's first line, followed by a JSON header and
+the Markdown). The header records the node source it was written against (description, slug,
+comment, observed and effective dependencies, the node-issue description) and its provenance
+(authoring run, UTC timestamp, the full `HEAD` commit and whether the tree was dirty). Nothing
+else changes: the node-issue description, its attachments (node and plan metadata), the roadmap,
+the manifest, statuses, dependencies, milestones, and the objective lifecycle are untouched, and
+re-refining replaces the same comment in place.
+
+"Refined" is only the presence of a valid saved comment — never a node status or header field. A
+refined node stays exactly as plannable as before; a refinement never claims, unblocks, or
+fast-tracks anything, and a later change to the node's source reads as advisory drift, not as a
+missing refinement. Only `pending` and `blocked` nodes without a plan can be refined (blocked,
+far-future nodes included); once a node is claimed or planned, its historical refinement stays
+readable but new saves are refused. Saves are guarded: one write attempt, verified by reading the
+comment back, refusing on a concurrent change, duplicate records, or a damaged record rather than
+retrying or overwriting. A refinement comment is never mistaken for the node's plan comment,
+even when it quotes a complete plan-body example.
+
+This release ships the **internal Linear persistence only** — there is no public
+`perk objective refine` command or `/objective-refine` door yet, planning sessions do not yet
+read refinements, and GitHub objectives are unsupported until their carrier lands. The wire
+format and guarantees are pinned in `shared/contracts.md` §8.67.
+
 ### Reconcile is no longer post-land-only
 
 The reconcile pass has **two invocations**: post-land (a node's PR merged — judge the merged

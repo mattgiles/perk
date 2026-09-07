@@ -14,6 +14,7 @@ import pytest
 
 from perk import objective
 from perk.backends import engagement, issue_backend, objective_store
+from perk.objective.refinement import models as refinement_models
 
 
 @dataclasses.dataclass
@@ -288,6 +289,17 @@ class _FakeObjectiveStore:
 
     def read_node_engagement(self, *, objective_id: str, node_id: str) -> engagement.NodeEngagement:
         return engagement.EMPTY_NODE_ENGAGEMENT
+
+    # --- objective-node refinement ---
+
+    def read_node_refinement_targets(
+        self, *, objective_id: str
+    ) -> refinement_models.RefinementObjectiveSnapshot | None:
+        # The minimal fake has no refinement carrier: the typed refusal, before any lookup (the
+        # GitHub / dormant-Linear posture; the refinement suites bring their own stores).
+        raise objective_store.RefinementTargetReadError(
+            "unsupported_backend", "the minimal fake store has no refinement carrier"
+        )
 
 
 def _make_store() -> objective_store.ObjectiveStore:

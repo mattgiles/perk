@@ -24,6 +24,7 @@ from perk.backends.linear.client import (
 from perk.backends.linear.issue_ops import _LinearIssueOps
 from perk.boundary import ValidationError, translate_validation_errors
 from perk.github import GitHubError
+from perk.objective.refinement.codec import is_refinement_comment
 
 # The recurring issue selection (`get_plan` / `read_issue`): the 6-field node + the raw
 # attachment nodes the perk-metadata decode reads. No attachment cursor loop (perk writes ≤2
@@ -184,7 +185,11 @@ class LinearIssueBackend:
         comment_id: str | None = None
         for comment in self._ops._comments(issue_id):
             comment_body = comment.get("body")
-            if isinstance(comment_body, str) and plan.extract_plan_body(comment_body) is not None:
+            if (
+                isinstance(comment_body, str)
+                and not is_refinement_comment(comment_body)
+                and plan.extract_plan_body(comment_body) is not None
+            ):
                 comment_id = _require_str(comment.get("id"), "comment id")
                 break
         if comment_id is not None:
@@ -312,10 +317,13 @@ class LinearIssueBackend:
             return None
         description = issue.get("description")
         candidates = [_opt_str(description) or ""]
+        # A refinement-owned comment is never a plan-body candidate, even when it embeds a
+        # complete plan-body example (contracts.md §8.67 coexistence).
         candidates.extend(
             comment_body
             for comment in self._ops._comments(issue_id)
             if isinstance(comment_body := comment.get("body"), str)
+            and not is_refinement_comment(comment_body)
         )
         for text in candidates:
             body = plan.extract_plan_body(text)
@@ -412,7 +420,11 @@ class LinearIssueBackend:
         existing_comment_id: str | None = None
         for comment in self._ops._comments(issue_id):
             comment_body = comment.get("body")
-            if isinstance(comment_body, str) and plan.extract_plan_body(comment_body):
+            if (
+                isinstance(comment_body, str)
+                and not is_refinement_comment(comment_body)
+                and plan.extract_plan_body(comment_body)
+            ):
                 existing_comment_id = _require_str(comment.get("id"), "comment id")
                 break
         if existing_comment_id is not None:
@@ -693,8 +705,18 @@ class LinearIssueBackend:
         return None
 
     def upsert_marked_comment(
-        self, *, issue_id: str, marker: str, body: str, dry_run: bool = False
+        self,
+        *,
+        issue_id: str,
+        marker: str,
+        body: str,
+        dry_run: bool = False,
+        expected: issue_backend.MarkedCommentExpectation | None = None,
     ) -> issue_backend.CommentResult:
+        if expected is not None:
+            return self._guarded_upsert_marked_comment(
+                issue_id=issue_id, marker=marker, body=body, dry_run=dry_run, expected=expected
+            )
         if dry_run:
             return issue_backend.CommentResult(posted=False)
         transcoded = to_linear_markdown(body)
@@ -704,6 +726,151 @@ class LinearIssueBackend:
         else:
             self._ops._create_comment(issue_id, transcoded)
         return issue_backend.CommentResult(posted=True)
+
+    # ------------------------------------------------------------------ guarded marked comment
+    # The exact-ownership, one-attempt, read-back-verified arm of `upsert_marked_comment`
+    # (contracts.md §8.67). Shares the transcoder and the create/update primitives with the
+    # ordinary path; scans through `_comments_with_authors` so every observed value is the real
+    # `EngagementComment` (id / stored body / author / native timestamps).
+
+    def _scan_marked(
+        self, issue_id: str, forms: tuple[str, ...]
+    ) -> issue_backend.MarkedCommentScan:
+        comments = [
+            _engagement_comment(node) for node in self._ops._comments_with_authors(issue_id)
+        ]
+        return issue_backend.scan_marked_comments(comments, forms=forms)
+
+    def _guarded_upsert_marked_comment(
+        self,
+        *,
+        issue_id: str,
+        marker: str,
+        body: str,
+        dry_run: bool,
+        expected: issue_backend.MarkedCommentExpectation,
+    ) -> issue_backend.CommentResult:
+        problem = expected.validation_problem()
+        if problem is not None:
+            raise issue_backend.MarkedCommentError("invalid_input", problem)
+        if not marker.strip() or "\n" in marker:
+            raise issue_backend.MarkedCommentError(
+                "invalid_input", "marker must be one nonblank line"
+            )
+        if issue_backend.first_line(body) != marker or body.count(marker) != 1:
+            raise issue_backend.MarkedCommentError(
+                "invalid_input",
+                "body must own its marker: the exact marker as the first line, occurring once",
+            )
+        if dry_run:
+            return issue_backend.CommentResult(posted=False)
+        # The accepted encodings: the marker as given (HTML) and its stored inline-code rewrite.
+        forms = (marker, to_linear_markdown(marker))
+        desired = to_linear_markdown(body)
+
+        # 1. Preflight: the complete scan; duplicates before malformed placement.
+        try:
+            scan = self._scan_marked(issue_id, forms)
+        except IssueBackendError as exc:
+            raise issue_backend.MarkedCommentError(
+                "backend_error", f"marked-comment preflight scan failed: {exc}"
+            ) from exc
+        self._refuse_unowned(scan, write_attempted=False)
+        observed = scan.owned[0] if scan.owned else None
+
+        # 2. Convergence without a write beats any expectation; otherwise the observed state
+        #    must match exactly what the caller expected.
+        if observed is not None and observed.body == desired:
+            return issue_backend.CommentResult(posted=True, verified_comment=observed)
+        if expected.expects_absence:
+            if observed is not None:
+                raise issue_backend.MarkedCommentError(
+                    "stale_comment",
+                    f"expected no marked comment but observed {observed.id}",
+                    comment_ids=(observed.id,),
+                )
+        elif (
+            observed is None
+            or observed.id != expected.comment_id
+            or issue_backend.body_digest(observed.body) != expected.body_digest
+        ):
+            raise issue_backend.MarkedCommentError(
+                "stale_comment",
+                "the marked comment changed since it was read"
+                + (f" (observed {observed.id})" if observed is not None else " (now absent)"),
+                comment_ids=(observed.id,) if observed is not None else (),
+            )
+
+        # 3. Exactly one mutation attempt; a raise is ambiguous until the read-back decides.
+        mutation_error: IssueBackendError | None = None
+        try:
+            if observed is not None:
+                self._ops._update_comment(observed.id, desired)
+            else:
+                self._ops._create_comment(issue_id, desired)
+        except IssueBackendError as exc:
+            mutation_error = exc
+
+        # 4. Verification: one full scan, precedence fixed by the contract.
+        try:
+            after = self._scan_marked(issue_id, forms)
+        except IssueBackendError as exc:
+            raise issue_backend.MarkedCommentError(
+                "write_unverified",
+                f"marked-comment write could not be verified: {exc}",
+                write_attempted=True,
+            ) from exc
+        self._refuse_unowned(after, write_attempted=True)
+        now = after.owned[0] if after.owned else None
+        if now is not None and now.body == desired:
+            return issue_backend.CommentResult(posted=True, verified_comment=now)
+        baseline_unchanged = (now is None and observed is None) or (
+            now is not None
+            and observed is not None
+            and now.id == observed.id
+            and now.body == observed.body
+        )
+        if mutation_error is not None and baseline_unchanged:
+            raise issue_backend.MarkedCommentError(
+                "backend_error",
+                f"marked-comment write failed and did not land: {mutation_error}",
+                comment_ids=(now.id,) if now is not None else (),
+                write_attempted=True,
+            ) from mutation_error
+        if now is not None and not baseline_unchanged:
+            raise issue_backend.MarkedCommentError(
+                "stale_comment",
+                f"the marked comment {now.id} carries different bytes than were written",
+                comment_ids=(now.id,),
+                write_attempted=True,
+            )
+        raise issue_backend.MarkedCommentError(
+            "write_unverified",
+            "marked comment is absent or unchanged after the write attempt"
+            + (f": {mutation_error}" if mutation_error is not None else ""),
+            comment_ids=(now.id,) if now is not None else (),
+            write_attempted=True,
+        )
+
+    @staticmethod
+    def _refuse_unowned(scan: issue_backend.MarkedCommentScan, *, write_attempted: bool) -> None:
+        """Duplicate ownership refuses before malformed placement (identical duplicates
+        included) — the same precedence at preflight and at verification."""
+        if len(scan.owned) > 1:
+            raise issue_backend.MarkedCommentError(
+                "ambiguous_comment",
+                f"{len(scan.owned)} comments own the marker",
+                comment_ids=tuple(comment.id for comment in scan.owned),
+                write_attempted=write_attempted,
+            )
+        if scan.malformed:
+            raise issue_backend.MarkedCommentError(
+                "malformed_comment",
+                "marker misplaced or repeated in comment(s) "
+                + ", ".join(comment.id for comment in scan.malformed),
+                comment_ids=tuple(comment.id for comment in scan.malformed),
+                write_attempted=write_attempted,
+            )
 
     # ------------------------------------------------------------------ human-engagement reads
     # The honest READ surface. All returned `body`/`diff`/activity

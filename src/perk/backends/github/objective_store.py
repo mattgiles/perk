@@ -43,6 +43,7 @@ from perk.backends.github.backend import (
 )
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.github import GitHubError
+from perk.objective.refinement.models import RefinementObjectiveSnapshot
 
 
 @contextmanager
@@ -442,3 +443,13 @@ class GitHubObjectiveStore:
     def read_node_engagement(self, *, objective_id: str, node_id: str) -> engagement.NodeEngagement:
         # GitHub objectives are one issue with no per-node issues — honest no-op (Linear-first).
         return engagement.EMPTY_NODE_ENGAGEMENT
+
+    def read_node_refinement_targets(
+        self, *, objective_id: str
+    ) -> RefinementObjectiveSnapshot | None:
+        # No GitHub refinement carrier yet (contracts.md §8.67): a typed refusal before any
+        # network call — even for an empty or invalidly addressed objective.
+        raise objective_store.RefinementTargetReadError(
+            "unsupported_backend",
+            "objective-node refinement is not supported on the GitHub objective store",
+        )

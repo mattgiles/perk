@@ -196,6 +196,20 @@ they must live in prose.
 This attachment model is a clean break from earlier inline metadata: older Linear artifacts must be
 re-created or re-saved before current perk can manage them.
 
+### Node refinements
+
+A roadmap node's **refinement** (a dated advisory elaboration written ahead of planning) is stored
+as a single marked comment on the node-issue: the first line is the exact
+`perk:objective-refinement:v1:<key>` marker (keyed on the node's identity, including the
+node-issue's UUID), then a one-line JSON header with the node source and authoring provenance,
+then the Markdown. The node-issue description, its attachments, the roadmap, the manifest, and
+the Project are never written by a refinement; re-refining replaces the same comment. Saves make
+one write attempt and verify it by reading the comment back, refusing on concurrent edits,
+duplicate records, or a damaged record instead of retrying. A refinement comment is never read
+as the node's plan comment. This is internal Linear persistence only for now — no public refine
+command, no planning-time consumption yet, and GitHub objectives are unsupported until their
+carrier lands. See [Objectives — Node refinements](../objectives.md#node-refinements-linear-project-objectives-only).
+
 ### The dream-report companion
 
 An objective saved by a `perk learn dream` session durably persists the reviewed dream report as

@@ -291,8 +291,17 @@ class _FakeBackend:
         return None
 
     def upsert_marked_comment(
-        self, *, issue_id: str, marker: str, body: str, dry_run: bool = False
+        self,
+        *,
+        issue_id: str,
+        marker: str,
+        body: str,
+        dry_run: bool = False,
+        expected: issue_backend.MarkedCommentExpectation | None = None,
     ) -> issue_backend.CommentResult:
+        if expected is not None:
+            # The minimal fake has no guarded arm (the GitHub posture): typed, before any op.
+            raise issue_backend.MarkedCommentError("unsupported_backend", "no guarded arm")
         if dry_run:
             return issue_backend.CommentResult(posted=False)
         comment_id = self.find_comment_id_by_marker(issue_id=issue_id, marker=marker)

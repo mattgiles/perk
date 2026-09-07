@@ -149,6 +149,22 @@ completed record covering only the merged prefix (`external_prefix: true` + the 
 proof).
 _Avoid_: partial land, broken stack
 
+### Objective refinement
+
+**Refinement** (of a roadmap node):
+A dated, reviewed, advisory elaboration of one existing roadmap node, persisted as a single
+marked comment on the node's carrier (the Linear node-issue) with its authoring provenance and
+the node source it was written against. Content only: neither an executable plan, a node
+status, a claim, nor a readiness or freshness proof; stored metadata never authenticates human
+approval.
+_Avoid_: pre-plan, draft plan, node body, elaboration
+
+**Refined** (a roadmap node):
+The presence of a valid saved refinement record for the node — derived from the carrier's
+comment, never a node state, header, manifest, or plan-ref field. A refined node stays exactly
+as selectable for planning as before; a changed source reads as advisory drift, not absence.
+_Avoid_: pre-planned, unblocked, ready
+
 ### Learned-corpus curation
 
 **Learned corpus**:
