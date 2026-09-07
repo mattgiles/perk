@@ -159,6 +159,6 @@ export function writeSessionData(
 }
 
 /** The session-artifact digest convention: `sha256:` + lowercase hex of the UTF-8 bytes. */
-export function digestSessionData(content: string): string {
-  return `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
+export function digestSessionData(content: string | Uint8Array): string {
+  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }

@@ -46,6 +46,8 @@ import type { SessionStateStore } from "./lifecycle.ts";
 
 /** Session-owned vocabulary: features import the plan-ref shape through the session seam. */
 export type { PlanRef };
+/** One digest convention, exposed through the session boundary for bound review consumers. */
+export { digestSessionData };
 
 /** A human-readable problem description (the backing has already warned where its tier is loud). */
 export type SessionProblem = string;
@@ -256,6 +258,19 @@ export type WorkflowChangeResult =
  */
 export interface WorkflowSession {
   readonly runId: string | null;
+  /** Strict live identity only; completion must not revalidate source or routing inputs. */
+  currentRunIdentity():
+    | { ok: true; runId: string }
+    | { ok: false; reason: "no-identity" | "invalid-state" };
+  /** Strict single-snapshot routing read; malformed relevant claims refuse, never disappear. */
+  draftReviewContext():
+    | {
+        ok: true;
+        runId: string;
+        subject: "plan" | "objective" | "gist";
+        warmNodeClaim: { objective: string; node: string } | null;
+      }
+    | { ok: false; reason: "no-identity" | "invalid-state" };
   readArtifact(name: string, options?: { provenance: "strict" }): ReadArtifactResult;
   /** Strict writes refuse broken prior provenance; callers still own exclusion and failure residue. */
   writeArtifact(
@@ -492,6 +507,55 @@ export function openWorkflowSession(deps: WorkflowSessionDeps): WorkflowSession 
 
   return {
     runId: activeRunId(state),
+    currentRunIdentity() {
+      try {
+        const snapshot = state.rebuild();
+        if (typeof snapshot !== "object" || snapshot === null || Array.isArray(snapshot))
+          return { ok: false, reason: "invalid-state" };
+        const runId = snapshot.run_id;
+        return typeof runId === "string" && isSafeRunId(runId)
+          ? { ok: true, runId }
+          : { ok: false, reason: "no-identity" };
+      } catch {
+        return { ok: false, reason: "invalid-state" };
+      }
+    },
+    draftReviewContext() {
+      try {
+        const snapshot = state.rebuild();
+        const runId = snapshot.run_id;
+        if (typeof runId !== "string" || !isSafeRunId(runId))
+          return { ok: false, reason: "no-identity" };
+        const stage = snapshot.stage;
+        if (stage != null && (typeof stage !== "string" || !stage.trim()))
+          return { ok: false, reason: "invalid-state" };
+        const subject =
+          stage === "objective-author" || stage === "objective-save"
+            ? "objective"
+            : stage === "gist-author"
+              ? "gist"
+              : "plan";
+        const raw: unknown = subject === "plan" ? snapshot.objective_node_claim : null;
+        let warmNodeClaim: { objective: string; node: string } | null = null;
+        if (raw != null) {
+          if (typeof raw !== "object" || Array.isArray(raw))
+            return { ok: false, reason: "invalid-state" };
+          const claim = raw as Record<string, unknown>;
+          if (
+            Object.keys(claim).length !== 2 ||
+            typeof claim.objective !== "string" ||
+            !claim.objective.trim() ||
+            typeof claim.node !== "string" ||
+            !claim.node.trim()
+          )
+            return { ok: false, reason: "invalid-state" };
+          warmNodeClaim = { objective: claim.objective, node: claim.node };
+        }
+        return { ok: true, runId, subject, warmNodeClaim };
+      } catch {
+        return { ok: false, reason: "invalid-state" };
+      }
+    },
     readArtifact(name: string, options): ReadArtifactResult {
       if (options?.provenance === "strict") return strictArtifactRead(deps, name);
       const runId = activeRunId(state);

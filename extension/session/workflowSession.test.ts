@@ -37,6 +37,84 @@ import {
   type WorkflowSession,
 } from "./workflowSession.ts";
 
+test("draft-review context strictly reads one routing snapshot and owns claim values", () => {
+  let snapshot: Record<string, unknown> = { run_id: "RID" };
+  let throws = false;
+  let reads = 0;
+  const session = openBranchWorkflowSession(
+    { appendEntry() {} },
+    {
+      cwd: "unused",
+      hasUI: false,
+      ui: { notify() {} },
+      sessionManager: {
+        getBranch() {
+          reads++;
+          if (throws) throw new Error("state failure");
+          return [{ type: "custom", customType: WORKFLOW_STATE_TYPE, data: snapshot }];
+        },
+      },
+    },
+  );
+  reads = 0;
+  assert.deepEqual(session.draftReviewContext(), {
+    ok: true,
+    runId: "RID",
+    subject: "plan",
+    warmNodeClaim: null,
+  });
+  assert.equal(reads, 1);
+  for (const claim of [undefined, null]) {
+    snapshot.objective_node_claim = claim;
+    const result = session.draftReviewContext();
+    assert.ok(result.ok);
+    assert.equal(result.warmNodeClaim, null);
+  }
+  const claim = { objective: " 雪 ", node: " 1.1 " };
+  snapshot.objective_node_claim = claim;
+  const owned = session.draftReviewContext();
+  assert.ok(owned.ok);
+  assert.deepEqual(owned.warmNodeClaim, claim);
+  assert.notEqual(owned.warmNodeClaim, claim);
+  for (const malformed of [
+    false,
+    [],
+    {},
+    { objective: "x" },
+    { objective: "x", node: " " },
+    { objective: "x", node: "1", extra: true },
+  ]) {
+    snapshot.objective_node_claim = malformed;
+    assert.deepEqual(session.draftReviewContext(), { ok: false, reason: "invalid-state" });
+  }
+  for (const [stage, subject] of [
+    ["plan", "plan"],
+    ["objective-plan", "plan"],
+    ["plan-save", "plan"],
+    ["objective-author", "objective"],
+    ["objective-save", "objective"],
+    ["gist-author", "gist"],
+  ]) {
+    snapshot = { run_id: "RID", stage, objective_node_claim: subject === "plan" ? claim : false };
+    const result = session.draftReviewContext();
+    assert.ok(result.ok);
+    assert.equal(result.subject, subject);
+    assert.deepEqual(result.warmNodeClaim, subject === "plan" ? claim : null);
+  }
+  for (const run_id of [null, "../other", ""]) {
+    snapshot = { run_id };
+    assert.deepEqual(session.draftReviewContext(), { ok: false, reason: "no-identity" });
+  }
+  snapshot = { run_id: "RID", stage: false };
+  assert.deepEqual(session.draftReviewContext(), { ok: false, reason: "invalid-state" });
+  assert.deepEqual(session.currentRunIdentity(), { ok: true, runId: "RID" });
+  snapshot.run_id = "RID.1";
+  assert.deepEqual(session.currentRunIdentity(), { ok: true, runId: "RID.1" });
+  throws = true;
+  assert.deepEqual(session.currentRunIdentity(), { ok: false, reason: "invalid-state" });
+  assert.deepEqual(session.draftReviewContext(), { ok: false, reason: "invalid-state" });
+});
+
 function planRef(prId: string): PlanRef {
   return {
     provider: "github",

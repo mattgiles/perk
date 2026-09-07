@@ -206,9 +206,22 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   checkout are legal, redirects within checkout-owned components are not. Reads never create dirs.
   `writeArtifact(name, content, {provenance: "strict"})` first verifies prior strict provenance,
   refuses invalid reads before effects, and verifies exact read-back content plus the appended
-  pointer. Rejected/unverified writes never authorize effects or speculative repair. Callers own
-  exclusion and retain their claim on persistence failure; this option is not a transaction or an
-  automatic lock. No existing review transport opts into this foundation yet.
+  pointer. Rejected/unverified review-state writes never authorize effects or speculative repair.
+  Callers own exclusion and retain their claim on persistence failure; this option is not a
+  transaction or an automatic lock. The narrowly typed owned-plan-patch exception (§8.23) may
+  retain frozen original-source authority after draft write-back failure, never after review-state
+  or ownership failure. No existing review transport opts into this foundation yet.
+
+  `draft-review.json` is a fixed session artifact, with full replacements and strict current-run
+  provenance only. Its codec/transition owner is `session/draftReviewState.ts`; target projection
+  assembly is `session/draftReviewBinding.ts`. Digest consumers use `digestSessionData` through
+  the session boundary (exact UTF-8 strings or exact byte arrays, the same unprefixed artifact
+  digest meaning). `WorkflowSession.draftReviewContext()` reads one strict routing snapshot:
+  safe run ID, existing review-stage subject routing, and an owned nonblank objective/node claim
+  for plans only. Missing/null plan claim is null; malformed relevant claim/state refuses.
+  Non-plans bind no warm claim. `currentRunIdentity()` is the separate strict live identity-only
+  read used for claim fencing/completion, so acknowledging delivery never revalidates source or
+  target inputs. Ordinary `nodeClaim()` and artifact readers remain unchanged.
 - **Agent scratch.** `.perk/workflow/scratch/runs/<run_id>/agent/` is the run-owned directory for
   disposable command/model intermediates. Interior run-directory creation shares one hardened
   boundary — `extension/substrate/cache.ts::ensureRunScratch` + `ensureAgentScratch` own the
@@ -847,10 +860,11 @@ current-run data directory only through the cache/session-data seam and refusing
 or missing/unsafe identity. Aliases share exclusion; different runs (including forks) do not. Its
 owner record is exactly `{schema:1, token, pid, parentSessionId, ownerRunId, requestId,
 reviewNamespace, createdAt}`, where `reviewNamespace` is the canonical data directory. Owner
-metadata is diagnostic, not evidence of decision/save/delivery. This is storage foundation only:
-no draft-review state machine, transport, effect dispatch, recovery/resume, or startup discovery is
-activated here. Future participating operations must hold one explicit claim through verified
-intent/effects/immediate bookkeeping, not through browser/human/status/delivery waiting. A failed
+metadata is diagnostic, not evidence of decision/save/delivery. The closed state machine and
+claim-bound orchestration capability are implemented (§8.23), but no live transport, authoring
+entry, recovery/resume, or startup discovery is activated here. Participating operations hold one
+explicit claim through verified intent/effects/immediate bookkeeping, not through browser/human/
+status/delivery waiting. A failed
 or unverified persistence operation retains residue and permits no further effects or speculative
 state writes; lost ownership never permits writes or deleting a replacement. Neither atomic file
 replacement nor fsync claims power-loss durability or exactly-once delivery.
@@ -4196,6 +4210,135 @@ A compact index of the file-first plan pipeline. The normative detail lives in �
 artifacts + "File-first plan save"), §8.3 (the `approvalSave` seam + the warm claim carrier),
 §8.57 (review-first carrier ownership), and §8.10 (provider deltas + the interactive save
 discipline); this section keeps the unique cross-cutting rules.
+
+### Bound draft-decision state and orchestration (not yet wired to live entries)
+
+The following storage/capability contract is implemented in `session/draftReviewState.ts`,
+`session/draftReviewBinding.ts`, and `pi/v1/draftReviewDecisions.ts`. Existing live behavior below
+remains unchanged until the provider hooks, subject entry points, and lifecycle observation are
+composed. Construction performs no startup discovery, status query, previous-feedback injection,
+resend, or automatic recovery. Python neither reads nor writes this decision artifact.
+
+The artifact has exactly `{schema_version:1, request_id, correlation, consumption}`.
+`request_id` and `attempt.dispatch_id` are UUIDs. Correlation is exactly
+`{review_id, subject, source, source_digest, target}`: subject is plan/objective/gist; source is
+`{kind:"artifact"}` or plan-only `{kind:"parameter", plan, artifact_at_open:"absent"}` retaining
+exact nonblank selected text; target is `{operation, digest}`, with subject-matched operation
+plan-save/objective-create/gist-create. Artifact sources persist no snapshot. Digests are strictly
+`sha256:<64 lowercase hex>`. Parameter text must match its source digest. Review ID is a nonblank
+opaque upstream string, null in opening and allowed in pre-handshake invalidation; pending and
+all dispatch-derived states require it. Opening-aborted/handshake-failed carry no review ID;
+subscription-failed requires one. Unknown versions/keys and missing/state-incompatible fields
+refuse. Decode reconstructs owned objects rather than retaining caller references.
+
+Consumption is a closed union: `{state:"opening"}`, `{state:"pending"}`,
+`{state:"invalidated", reason}`, `{state:"dispatch", attempt}`,
+`{state:"consumed", attempt, delivery_entry_id}`, or `{state:"uncertain", reason, attempt}`.
+Attempt has exactly `{dispatch_id, decision_digest, effect, save, delivery}`. Revision and
+stale-reference effects require `{state:"not-required"}` save. Save effects carry
+`{state:"not-started"}`, `{state:"started"}`, or `{state:"confirmed", id, url}` with nonblank
+returned ID/URL. Delivery is null until recorded; otherwise exactly
+`{carrier, marker, content_digest}`. Carrier is `{kind:"tool", tool_call_id}` or `{kind:"user"}`.
+Tool name is fixed `plan_review`, not persisted. A save's delivery requires confirmed save;
+consumed requires non-null delivery and confirmed/not-required save. Uncertainty preserves all
+proven facts; it never means nothing happened.
+
+Closed vocabularies:
+
+- Invalidation: opening-aborted, handshake-failed, subscription-failed, source-changed,
+  target-changed, subject-changed, degraded, manual-save, implement-here, first-party-review.
+- Uncertainty: aborted-after-intent, backend-unconfirmed, delivery-unconfirmed, effect-failed.
+- Operation refusals (not persisted verdicts): no-identity, busy, invalid-state, source-changed,
+  target-changed, subject-changed, superseded, unresolved-dispatch, persistence-failed,
+  ownership-lost, io-error.
+- Status diagnostics (no state mutation): pending, missing, unavailable, malformed, timeout,
+  transport-error. Status query transport/catch-up is not yet implemented here.
+
+Every mutation acquires the same run claim and re-reads strict persisted state. Same-record means
+matching request and review ID; dispatch bookkeeping also matches dispatch ID. The closed table:
+
+| Event / prior | Verified next state / permission |
+|---|---|
+| Explicit new review / absent, opening, pending, invalidated, consumed | Verify new source and target, replace with new request ID/opening before emit. No history retained. |
+| New review or ordinary mutation / dispatch, uncertain | Refuse unresolved-dispatch; current-activation evidence may first complete dispatch. Uncertainty never auto-clears. |
+| Same opening / attach | Unchanged binding attaches ID and writes pending. Source/target/subject drift invalidates with corresponding reason, without attaching. |
+| Same opening / pre-ID abort or failed handshake | Invalidate opening-aborted or handshake-failed. Known-ID attach wins before newly observed abort; local pending abort writes nothing. |
+| Same pending / failed subscription | Invalidate subscription-failed. Non-completed status/query failure and local pre-intent abort leave pending. |
+| Same pending / valid decision, matching source/target/subject | Write dispatch/save or revision before effects; denial cannot save. Approved structured Direct Edits remains revision subject policy. |
+| Same pending / changed or missing source, sound target/subject | Dispatch/stale-reference, diagnostic DATA only. Broken provenance refuses, never parameter fallback. |
+| Same opening/pending / participating source/target mutation, replacement, fallback, degradation | Verify corresponding invalidation before mutation; byte-identical draft writes need no invalidation. |
+| Same pending / target or subject drift at consumption | Invalidate target-changed/subject-changed; no effects. |
+| Same invalidated/source-changed, known review ID / valid candidate, matching target/subject | Dispatch/stale-reference once, even if original source bytes returned. Never restore approval eligibility. |
+| Other invalidated / late candidate | Refuse without effects. Different request/review ID always refuses superseded. |
+| Same dispatch/save / backend invocation | Recheck ownership and subject/target/source after awaits, verify save-started, invoke once. Typed receipt confirms save; no second invocation. |
+| Same dispatch / delivery | Verify expectation before tool return or synchronous user send; release immediately, never hold for queued delivery or caller return. |
+| Same dispatch / exact persisted evidence, confirmed/not-required save | Write consumed with entry ID. Check record/attempt/evidence, not original source/target, which legitimate owned work may change. |
+| Same dispatch / post-intent abort, unconfirmed backend, thrown effect/send, activation end without proof | Write corresponding uncertain if ownership/state still verify. Send throws are delivery-unconfirmed; backend throw/undecodable output is backend-unconfirmed. |
+| Consumed / duplicate candidate | Status/no-op, no second save/message. |
+| Absent, consumed, invalidated / ordinary non-review mutation | Strict-read under exclusion, preserve terminal record and permit normal work. |
+
+**Failure overrides every row.** Rejected/unverified review-artifact or checkpoint writes return
+persistence-failed, retain the claim, and allow no further effects or speculative uncertain write.
+Disk can be ahead of its pointer: an orphan or stale snapshot is a stop, not repair authority.
+Invalid strict review reads also stop and retain. Ownership loss never writes consumption and
+never deletes a replacement. Contention performs no write/retry. Save receipts established before
+a later persistence failure remain in the operation result; a failed checkpoint must not erase
+known save/gate facts. At-most-once local dispatch is not exactly-once delivery or power-loss
+durability; external changes after dispatch, credentials, and owner removal remain outside the
+cooperative guarantee.
+
+Fingerprint assembly constructs these keys in order:
+`worktree_root, git_dir, git_common_dir, run_id, subject, warm_node_claim, handoff, files,
+git_config_digest, environment`. Nested warm claim order is objective/node. Paths come from
+bounded local strict Git discovery plus realpath; no mainCheckoutRoot fallback. Main root follows
+the common-directory parent convention. Handoff is read strictly from the calling root's derived
+run handoff path: ENOENT is null; malformed/unreadable/wrong-run/mistyped relevant values refuse.
+Unrelated keys are ignored. Plan projection order is objective_id/node_id/adopt_from/consumed_learn;
+objective is adopt_from/supersedes; gist is gist_scope (plan/objective/null). Optional omitted/null
+IDs normalize to null; nonblank strings stay untrimmed. Omitted consumed_learn is [], otherwise an
+array of nonblank strings retaining order and duplicates. Present empty routing differs from no
+handoff. `files` is main_config/worktree_config/worktree_local, each `{state:"absent"}` on ENOENT
+only or `{state:"present", digest}` hashing exact bytes. Empty files are present; duplicate main/
+worktree paths retain both fields. No TOML parser. Git config digest hashes exact successful stdout
+bytes of bounded `git config --null --list --show-origin`, without trimming, including successful
+empty output. No raw config is persisted/logged. `environment` is GH_REPO/GH_HOST, null when unset,
+otherwise exact UTF-8 value digests, including empty strings; credential variables are excluded.
+
+Fingerprint encoding is UTF-8 `"perk/draft-review-target/v1\n" + JSON.stringify(projection)` with
+fixed constructed key order, no trailing newline/whitespace. Decision encoding is UTF-8
+`"perk/draft-review-decision/v1\n" + JSON.stringify({approved, feedback})` in that order, feedback
+null when absent and otherwise the parser's verbatim nonblank string. Source digests hash exact
+plan Markdown or the entire serialized objective/gist artifact (including invisible fields), using
+one validated raw→decoded→rendered snapshot. A new artifact removes parameter-plan approval and
+current-draft revision eligibility even when byte-identical. Before attachment this invalidates
+source-changed without an ID; after attachment the table permits only stale-reference DATA.
+
+`createDraftReviewDecisions` supplies synchronous registration hooks
+`open`, `attach`, `invalidateOpening`, `subscriptionFailed`, and diagnostic reporting, plus
+claim-bound mutation/dispatch and current-activation delivery observation. Hooks finish release/
+retain before returning. The adapter supplies live sessions and persisted branch entries; no raw
+storage/Pi dependency is added to features. The dispatch capability fences every call, owns one
+plan patch, permits save linkage, checkpoints backend invocation, and records delivery. Captured
+warm node inputs pass explicitly to save; null keeps the existing Python handoff fallback. Failed
+owned plan patch write-back is a narrow exception: save may select only the frozen original
+reviewed bytes, never artifact-first or partially written bytes, and only while review-state,
+ownership, subject/target, and save-started verification remain sound. Subject-policy extraction,
+backend flag threading, gate rendering and all live entry wiring follow separately.
+
+Delivery marker is dispatch_id in tool `details.draft_review_dispatch`; expectation binds actual
+toolCallId. User marker is exactly `<!-- perk:draft-review-dispatch:<dispatch_id> -->`, authored
+outside untrusted feedback by the future delivery renderer. Delivery encoding is UTF-8
+`"perk/draft-review-delivery/v1\n" + JSON.stringify(blocks)`: a string becomes one text block;
+text arrays reconstruct type/text keys, preserving block order/bytes; nontext cannot acknowledge.
+Evidence requires a persisted matching-role message entry with exact whole-content digest and
+marker; tools also require plan_review and toolCallId. message_end/send spies/assistant quotes do
+not count. Observe only this activation's expectations, before guarded operations and through
+explicit lifecycle calls; ordinary missing evidence leaves dispatch waiting without timeout
+guesses. Activation end checks evidence first, then marks remaining sound dispatch uncertain/
+delivery-unconfirmed. No previous-activation consumption, resend, recovery, or resume is implied.
+The production turn_end/shutdown subscriptions and human reconciliation guidance remain unbuilt.
+
+### Existing live review surfaces
 
 - **The artifact + save resolution → §8.1.** The working plan lives in the session data dir as
   `plan-draft.md`, written only by `plan_draft` through the accessor seam and consumable only

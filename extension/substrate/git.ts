@@ -52,6 +52,41 @@ export function worktreeGitDir(cwd: string): string | null {
   }
 }
 
+/** Strict bounded local routing discovery. No main-checkout fallback or decoded config stdout. */
+export function draftReviewGitContext(cwd: string): {
+  worktreeRoot: string;
+  gitDir: string;
+  gitCommonDir: string;
+  configBytes: Uint8Array;
+} | null {
+  try {
+    const path = (flag: string): string => {
+      const out = execFileSync("git", ["rev-parse", "--path-format=absolute", flag], {
+        cwd,
+        encoding: "utf8",
+        timeout: 5_000,
+        maxBuffer: 1024 * 1024,
+        stdio: ["ignore", "pipe", "ignore"],
+      }).replace(/\r?\n$/, "");
+      if (!isAbsolute(out) || /[\0\r\n]/.test(out) || !statSync(out).isDirectory())
+        throw new Error("invalid Git directory");
+      return realpathSync(out);
+    };
+    const worktreeRoot = path("--show-toplevel");
+    const gitDir = path("--absolute-git-dir");
+    const gitCommonDir = path("--git-common-dir");
+    const configBytes = execFileSync("git", ["config", "--null", "--list", "--show-origin"], {
+      cwd: worktreeRoot,
+      timeout: 5_000,
+      maxBuffer: 16 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return { worktreeRoot, gitDir, gitCommonDir, configBytes };
+  } catch {
+    return null;
+  }
+}
+
 /** Run one git command; trimmed stdout, or null on any failure (the module's fail-open style). */
 function git(cwd: string, args: string[], timeout?: number): string | null {
   try {
