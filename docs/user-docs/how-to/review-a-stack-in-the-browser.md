@@ -49,11 +49,18 @@ whose commits don't actually stack is `stack_topology_broken` (sync the stack fi
    annotations in the browser while the session stays free.
 3. **Triage in the browser, then close it.** Annotate, edit, or dismiss findings as usual.
    This is a **local-diff session with no attached PR**, so there is no posting from the UI —
-   closing the browser returns your annotations to the session for the posting step.
-4. **perk routes findings to their PRs.** Each finding is attributed to the member PR that
-   introduced it (judgment over the per-PR diffs): folded into that PR's review body by
-   default, anchored inline only where the location is unambiguous in that PR's own diff.
-5. **Approve the per-PR posting.** perk dry-run-validates **all** per-PR batches first, then —
+   submitting your decision returns it and any annotations to the session. An approval with
+   no annotations can include a nonblank note: perk preserves it verbatim as **nonblocking
+   approval guidance**, framed as untrusted DATA. The approval stands; the note is optional
+   follow-up, not a request for changes or an instruction to edit or post. Closing without
+   submitting returns no approval or guidance.
+4. **Choose separately whether to post.** Approval and guidance do not confirm a platform
+   post; the browser posted nothing. You can choose per-PR COMMENT reviews or no post (go
+   straight to cleanup). A note is not an annotation or posting queue. If you choose to post,
+   perk routes each finding to the member PR that introduced it (judgment over the per-PR
+   diffs): folded into that PR's review body by default, anchored inline only where the
+   location is unambiguous in that PR's own diff.
+5. **Approve any per-PR posting.** perk dry-run-validates **all** per-PR batches first, then —
    with your explicit go-ahead — posts one review per member PR, bottom→top, through the gated
    `submit_pr_review` tool (formal verdicts confirm per PR). Every real post is recorded in the
    `review_posts` ledger; if anything fails mid-sequence the flow stops, shows
