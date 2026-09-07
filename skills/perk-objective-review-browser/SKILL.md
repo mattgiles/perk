@@ -65,8 +65,8 @@ end your turn; this skill is the judgment and detail layer behind it.
   the dedupe ledger, the hold-and-accumulate retry, and the source-scoped `replace: true`
   reshape (the human's and other lanes' annotations are structurally untouchable).
 - **The door observes readiness itself.** There is no handshake poll for you to run: ready → an
-  info note; never-ready → a loud error plus a degrade notice injected to you (degraded mode
-  below).
+  info note; never-ready → a loud error, with fallback only after verified invalidation (degraded
+  mode below).
 - **Reconcile judgment.** Clear uncovered sources first (`launch.requested` minus
   `collected.covered`), using `push_annotations` with empty findings and `replace: true`.
   Build disjoint final per-angle arrays from valid reports only — never recover failed reports
@@ -83,29 +83,27 @@ end your turn; this skill is the judgment and detail layer behind it.
 
 ## The approve/deny loop
 
-- **On APPROVE** (the auto-save through the objective approval→save seam the launch statement
-  names): the save re-reads the STRUCTURED artifact and the session exits read-only on success.
-  The rendered-vs-structured asymmetry is why browser Direct Edits are NEVER auto-applied to an
-  objective: the browser edits the rendered markdown, while the save re-reads the structured
-  `{prose, roadmap}` artifact — rendered edits cannot be folded back mechanically, so an
-  approval whose feedback opens a Direct Edits section saves NOTHING and returns as the revise
-  round the launch statement describes (prose hunks → the prose; roadmap-table hunks → the
-  matching node fields; then re-review to confirm). The never-rewrite exclusion is a STALE guard
-  on the raw artifact bytes: the approval saves only when the live artifact still carries the
-  exact bytes captured at open — an `objective_draft` call while the browser review is open
-  makes the approval refuse as STALE (nothing saved; the human re-runs the door). You relay the
-  save outcome; if the save FAILED the session stays read-only and the human runs
-  `/objective-save` (the manual failsafe).
-- **On DENY**: the feedback arrives verbatim (any Direct Edits diff included) for the
-  `objective_draft` revision round. Deny is model-mediated by design — nothing is saved and
-  nothing re-opens automatically; the human re-runs `/objective-review-browser` (or you call
-  `plan_review`) for the next round.
+- **Eligible matching APPROVE:** plain approval saves the bound structured artifact and exits
+  read-only on success. Browser Direct Edits are NEVER auto-applied: matching approval with edits
+  saves nothing and requests an `objective_draft` revision (prose hunks → prose, roadmap hunks →
+  matching node fields), then new review.
+- **Eligible matching DENY:** verbatim feedback requests an `objective_draft` revision round,
+  then new human review. Nothing reopens automatically.
+- **Stale decision:** changed full artifact bytes, even render-invisible fields, permit only
+  diagnostic DATA, never current-draft apply/fold/save instructions. Identical sound bytes need no
+  invalidation. Conservative routing changes can require rereview. Follow the runtime result.
+- **Refusal or uncertainty:** preserve known save receipts and successful gate facts; never blindly
+  retry `/objective-save`. Follow `docs/user-docs/how-to/reconcile-a-draft-review-stop.md` with the
+  human: prove all Pi/save subprocesses quiescent, preserve evidence, and resolve possible effects
+  first. An orphan alone is not proof of no effects. No in-place repair; unresolved effects forbid
+  even a fresh-run retry. After human resolution, carry checked structured content into a distinct
+  fresh run, never correlation, intent, provenance, or approvals. Leave abandoned residue intact.
 
-## Degraded mode (loud, never lossy)
+## Degraded mode
 
-If the browser never comes up, the door says so plainly and clears both surfaces —
-`push_annotations` refuses (`no_surface`) and `start_draft_review_wave` refuses
-(`no_draft_context`) from then on. Surface the wave's findings in-session for the human
-instead; the human decides the next step via `plan_review` (the in-session review door) or
-`/objective-save` (the manual failsafe). A completed review is never lost to a surface failure,
-and every degradation is announced, never silent.
+The door suppresses late local decisions when readiness fails, but fallback requires verified
+`degraded` invalidation. A failed state write retains the claim and grants no fallback permission;
+a decision already dispatching cannot be rolled back. Surface wave findings in-session only on the
+door's confirmed degrade notice. Pending proves neither health nor delivery; missing status cannot
+reconstruct a lost decision. Tool return/message send is not delivery proof. There is no
+startup/reload discovery, replay, or resume, nor a guarantee that upstream never loses a decision.

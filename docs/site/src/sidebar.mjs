@@ -52,6 +52,7 @@ export const sidebar = [
           "how-to/run-a-worktree-setup-hook",
           "how-to/track-implement-progress",
           "how-to/send-feedback-from-hunk-watch",
+          "how-to/reconcile-a-draft-review-stop",
         ],
       },
       {

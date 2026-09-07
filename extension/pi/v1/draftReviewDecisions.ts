@@ -175,7 +175,17 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
     const acquired =
       deps.acquire?.(runId, requestId) ??
       acquireDraftReviewLock(deps.cwd, { sessionId: deps.sessionId, runId, requestId });
-    if (acquired.kind === "busy") stop("busy");
+    if (acquired.kind === "busy") {
+      const refusal = reviewRefused("busy");
+      const owner = acquired.owner;
+      throw new ReviewStop({
+        ...refusal,
+        detail:
+          owner === undefined
+            ? refusal.detail
+            : `${refusal.detail}; incumbent metadata only: run ${JSON.stringify(owner.ownerRunId)}, request ${JSON.stringify(owner.requestId)} (not proof of effects)`,
+      });
+    }
     if (acquired.kind === "io-error") stop("io-error");
     if (acquired.kind === "unavailable")
       stop(acquired.reason === "no-identity" ? "no-identity" : "io-error");
@@ -184,8 +194,12 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
   function held(claim: ExclusiveFileClaim, runId: string) {
     let failure: Refused | null = null;
     let closed = false;
+    let phase = "strict-read";
     const poison = (reason: Refused["reason"]): never => {
-      failure ??= reviewRefused(reason);
+      failure ??= {
+        ...reviewRefused(reason),
+        detail: `${reviewRefused(reason).detail}; checkpoint: ${phase}`,
+      };
       throw new ReviewStop(failure);
     };
     const check = (): WorkflowSession => {
@@ -211,6 +225,7 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
       return loaded.record;
     };
     const transition = (event: ReviewEvent) => {
+      phase = event.kind;
       const prior = read();
       const next = transitionDraftReview(prior, event);
       if (!next.ok) throw new ReviewStop(next);

@@ -290,6 +290,12 @@ The cold twin is [`perk objective stack review`](../cli/objective.md#perk-object
 
 ## Browser draft review
 
+For `busy`, `invalid-state`, `persistence-failed`, or `unresolved-dispatch`, follow
+[Reconcile a draft-review stop](../../how-to/reconcile-a-draft-review-stop.md).
+It is human-only, with no in-place repair: prove all participants and save subprocesses quiescent,
+preserve evidence, reconcile existing saves/delivery, and only then consider a distinct fresh run.
+An orphan alone is not proof of no effects. Never copy intent or approvals into that run.
+
 Plannotator draft opens now verify run-local registration before launching. A typed registration
 refusal stops without priming companion surfaces or taking the port-failure fallback. The
 subscribe-then-status catch-up query is bounded to five seconds; the live human wait remains
@@ -356,7 +362,7 @@ pasted draft text from the model. The shared companion tools are:
   *Non-terminating.*
 - **`plan_review`** — process the human decision through the normal approval/denial/save seams.
   It terminates on a successful approval-driven save and otherwise leaves the session available
-  for revision or recovery. On the Plannotator provider, an eligible call — the Plannotator
+  for revision or human reconciliation. On the Plannotator provider, an eligible call — the Plannotator
   extension actually loaded (the presence probe) plus a validated plan or objective draft
   artifact — first opens an in-TUI launch chooser — browser review **with** the
   reviewer wave or **without** it (Esc chooses without; the review always proceeds). Choosing

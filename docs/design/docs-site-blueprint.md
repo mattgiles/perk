@@ -44,6 +44,12 @@ selector (**77** total sources counting the four `.mdx` pages; `_authoring.md` s
 excluded source), **76** routed pages, **76** sidebar entries (Home, the four section
 landings, and the 71 enumerated in §3).
 
+*Draft-review operator amendment:* `how-to/reconcile-a-draft-review-stop.md` adds the human-only
+retained-state procedure to Core workflow. The route table, sidebar and inventory below include
+it. Current tree totals are **79** Markdown/MDX sources (**75** `.md`, four `.mdx`), **78** routed
+pages and sidebar entries; `_authoring.md` remains excluded. Earlier dated totals above describe
+their respective snapshots, not the current corpus.
+
 ## §1 Purpose & binding scope
 
 ### What this blueprint binds
@@ -135,6 +141,7 @@ node that creates them.
 | Source path | Route | Sidebar owner |
 |---|---|---|
 | `docs/user-docs/how-to/index.md` | `/how-to/` | How-to guides (landing) |
+| `docs/user-docs/how-to/reconcile-a-draft-review-stop.md` | `/how-to/reconcile-a-draft-review-stop/` | How-to › Core workflow |
 | `docs/user-docs/how-to/drive-the-full-spine.md` | `/how-to/drive-the-full-spine/` | How-to › Core workflow |
 | `docs/user-docs/how-to/resume-a-plan.md` | `/how-to/resume-a-plan/` | How-to › Core workflow |
 | `docs/user-docs/how-to/address-review-feedback.md` | `/how-to/address-review-feedback/` | How-to › Core workflow |
@@ -317,6 +324,9 @@ index order.
 4. Headless and remote
 5. perk in Zed
 
+Core workflow additionally ends with `reconcile-a-draft-review-stop`, the human-only retained-state
+procedure (after `send-feedback-from-hunk-watch`, matching its frontmatter order).
+
 ## §4 Page-by-page migration inventory
 
 ### Editorial-intent vocabulary (binding)
@@ -391,6 +401,7 @@ batch node.
 | `docs/user-docs/tutorials/get-started.md` | Tutorials | keep-and-polish | `/tutorials/get-started/` | checklist + inventory outcomes completed at 3.2 with live-run evidence per the §7 walkthrough matrix (Get-started row) | 3.2 |
 | `docs/user-docs/tutorials/drive-an-objective.md` | Tutorials | keep-and-polish | `/tutorials/drive-an-objective/` | checklist + inventory outcomes completed at 3.2 with live-run evidence per the §7 walkthrough matrix (Objective-tutorial row) | 3.2 |
 | `docs/user-docs/tutorials/drive-a-stacked-objective.md` *(added 2026-08-13)* | Tutorials | keep-and-polish | `/tutorials/drive-a-stacked-objective/` | checklist (satisfied at creation) + live-run accuracy gate executed by the creating node | 2.1 (obj. #1698) |
+| `docs/user-docs/how-to/reconcile-a-draft-review-stop.md` | How-to | keep | `/how-to/reconcile-a-draft-review-stop/` | human-only checklist; no in-place repair | — |
 | `docs/user-docs/how-to/drive-the-full-spine.md` | How-to | keep-and-polish | `/how-to/drive-the-full-spine/` | checklist | 3.3 |
 | `docs/user-docs/how-to/resume-a-plan.md` | How-to | keep-and-polish | `/how-to/resume-a-plan/` | checklist | 3.3 |
 | `docs/user-docs/how-to/address-review-feedback.md` | How-to | keep-and-polish | `/how-to/address-review-feedback/` | checklist | 3.3 |

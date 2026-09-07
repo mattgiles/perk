@@ -32,7 +32,7 @@ Toggle perk plan mode — a read-only exploration and plan-authoring session. Pa
   decision. Approval auto-saves and ends the turn. *Terminating on approval.* Before review, the
   authoring skills direct a one-question-at-a-time pre-review grill.
 
-The Plannotator browser can return a `# Direct Edits` unified diff. On the **plan** arm, approval
+On an eligible matching review, the Plannotator browser can return a `# Direct Edits` unified diff. On the **plan** arm, approval
 applies the diff to the draft and saves the edited bytes; if application fails, perk saves the
 original draft with a loud warning and leaves the diff in feedback. Denial returns the diff for a
 `plan_draft` rewrite. On the **objective** and **gist** arms, approval with Direct Edits does not
@@ -45,13 +45,18 @@ dispatch/uncertainty, invalid review state, or failed invalidation stops the ope
 effects. A genuinely absent review record permits normal behavior under exclusion. First-party
 review releases the claim before editor waits and reacquires for edits/completion. See
 [Participating authoring and first-party review](./review-and-authoring.md#participating-authoring-and-first-party-review)
-for invalidation rules and the still-incomplete Plannotator activation limit. A review-state stop
-is not an instruction to retry a save or delete retained state.
+for guarded completion and invalidation rules. Stale decisions are diagnostic DATA only, never
+current-draft apply/fold/save instructions. Conservative routing drift can require rereview.
+Pending proves neither health nor delivery; missing status does not reconstruct a lost decision.
+A review-state stop is not an instruction to retry a save or delete retained state: follow
+[Reconcile a draft-review stop](../../how-to/reconcile-a-draft-review-stop.md).
+There is no startup/reload discovery, automatic replay, or resume.
 
 ### `/plan-save`
 
 Persist the plan to the issue backend, link the session to it, and cross the read-only → read-write
-boundary. `/plan-save` is the manual failsafe for approval → save. Paired tool:
+boundary. `/plan-save` is a manual save entry, not a retry for an unconfirmed review save.
+A retained review-state stop requires human reconciliation first. Paired tool:
 
 - **`plan_save`** — save the validated `plan-draft.md` artifact when present, otherwise an explicit
   plan parameter, otherwise the latest assistant-message fallback. *Terminating.*

@@ -213,7 +213,9 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   or ownership failure. Plannotator review transports now use strict opening/attachment registration;
   production eligibility mutations and Plannotator tool/browser subject-effect dispatch use that
   same claim (§8.23). This guarantees at-most-once participating local dispatch, not exactly-once
-  delivery or power-loss durability.
+  delivery or power-loss durability. Retained locks and orphan artifacts have no in-place repair
+  path: the human-only reconciliation procedure in §8.23 preserves the old namespace and permits
+  no new attempt while save/delivery effects remain unresolved.
 
   `draft-review.json` is a fixed session artifact, with full replacements and strict current-run
   provenance only. Its codec/transition owner is `session/draftReviewState.ts`; target projection
@@ -865,8 +867,9 @@ owner record is exactly `{schema:1, token, pid, parentSessionId, ownerRunId, req
 reviewNamespace, createdAt}`, where `reviewNamespace` is the canonical data directory. Owner
 metadata is diagnostic, not evidence of decision/save/delivery. The closed state machine and
 claim-bound orchestration capability, live transport registration, and participating authoring
-entries are implemented (§8.23). Plannotator subject-effect dispatch, recovery/resume, and startup
-discovery are not activated. Participating operations hold one
+entries and Plannotator subject-effect dispatch are implemented (§8.23). Recovery/resume and startup
+discovery are not activated. Human reconciliation never treats owner metadata, PID death, or lock
+age as proof of effects or subprocess quiescence. Participating operations hold one
 explicit claim through verified intent/effects/immediate bookkeeping, not through browser/human/
 status/delivery waiting. A failed
 or unverified persistence operation retains residue and permits no further effects or speculative
@@ -4417,6 +4420,37 @@ created through its new completion API. No startup/reload hook discovers prior r
 expectations. Blocking tool callers record expectations with the real toolCallId before returning.
 Human reconciliation guidance and migration of browser completion callers remain unbuilt.
 
+### Human-only retained-state reconciliation
+
+`docs/user-docs/how-to/reconcile-a-draft-review-stop.md` is the operator exit procedure, not a
+recovery command. Busy/invalid-state/persistence-failed/unresolved-dispatch diagnostics link it and
+carry the verified canonical run, known request/review IDs, exact artifact/lock locations when
+verifiable, phase/checkpoint, source digest when sound, and known save receipt. Unknown remains
+unknown. Diagnostic strict reads perform no writes or repair and grant no authority; malformed
+provenance is never mined as an authoritative record. Confirmed typed receipts and definitive gate
+facts survive a later bookkeeping failure. No raw config or feedback is included, and lock owner
+metadata makes no effect claim.
+
+The procedure is binding: (1) stop every Pi participant and child save subprocess, establish
+quiescence, then close the old browser and prevent interaction; if unproven, stop; (2) preserve lock,
+review/draft artifacts, handoff, transcript, IDs/digests and receipts privately, without JSONL edits,
+forged pointers, prune, deletion or lock removal; (3) classify this and prior attempts using
+corroboration, not an opening-looking orphan alone, missing pointer/message, dead PID or absent
+search result; (4) inspect existing backend objects/linkage and persisted messages with normal
+read-only tools and IDs/URLs, staying stopped if effects remain unresolved; (5) continue existing
+saved work rather than duplicate it, or only after human resolution choose a fresh run preserving
+factory/adoption/replan/node/scope intent (never blindly reset an in-progress node); (6) verify a
+different run ID, re-enter checked content through draft tools retaining structured fields, request
+new review, and never copy correlation, consumption, provenance, locks, request/review IDs, intent
+or approval. Leave abandoned residue intact for investigation and later deliberate cleanup.
+
+A validated pending/invalidated record plus complete no-dispatch evidence, or a positively
+identified opening-write failure before emit, may prove this attempt pre-dispatch; neither excludes
+an earlier saved subject in the run. Both retained pre-dispatch locks and initial pointer-dropped
+orphans require this procedure. There is no guaranteed escape, automatic rollback/quarantine/cleanup,
+startup/reload query/save/prior-feedback injection, explicit resume, or automatic consumption of a
+previous activation's delivery evidence.
+
 ### Mandatory Plannotator registration and subscribe-then-status transport
 
 `requestPlannotatorPlanReview(bus, plan, registration, signal?)`, bridge
@@ -4492,12 +4526,14 @@ Editor waits occur only after synchronous invalidation has returned and released
 - **The artifact + save resolution → §8.1.** The working plan lives in the session data dir as
   `plan-draft.md`, written only by `plan_draft` through the accessor seam and consumable only
   via its validated provenance pointer.
-- **The two resolution chains + the asymmetry law.** **Save** surfaces resolve
+- **The two resolution chains + the asymmetry law.** **Manual save** surfaces resolve
   artifact → `plan` param → transcript scrape (the universal fail-open last resort)
   (`resolvePlanSource`, → §8.1 "File-first plan save"). **Review** surfaces resolve
   artifact → param **only** — the transcript tier is excluded because an approval auto-saves the
-  reviewed bytes, and scraped conversation bytes must never be what gets approved. The browser
-  review doors tighten further to **validated artifact only**.
+  reviewed bytes, and scraped conversation bytes must never be what gets approved. Guarded
+  Plannotator approval saves use only the frozen original or verified owned patched source, never
+  artifact-first fallback after patch failure. The browser doors tighten further to **validated
+  artifact only**.
 - **The review door + the approval seam.** `plan_review` (in `READ_ONLY_TOOLS`; backend-neutral,
   `extension/pi/v1/planReview.ts`; the objective arm's home is `extension/pi/v1/objectiveReview.ts`)
   dispatches: plannotator-selected → the event-bus bridge; **any**
@@ -4505,8 +4541,9 @@ Editor waits occur only after synchronous invalidation has returned and released
   shared approval→save orchestration — the feature op `planApprovalSave`
   (`extension/authoring/plan/save.ts`), adapter-composed as `approvalSave`
   (`extension/pi/v1/plan.ts`): save → D1a gate exit on success (→ §8.3). The
-  `/plan-save` command is the **manual failsafe** invocation of the same seam, taking only an
-  optional title argument. Every `plan_review` arm carries the universal `details.ok` discriminant
+  `/plan-save` command is a manual invocation of the same seam, taking only an optional title
+  argument; it is not a retry after unconfirmed dispatch or failed persistence. Those states require
+  human reconciliation. Every `plan_review` arm carries the universal `details.ok` discriminant
   (`ok:false` + `error`/`error_type` on unavailable / save-failed / bad_input / no_plan /
   no_objective_draft; `ok:true` on verdicts and the sanctioned fail-open skips), so `tool_outcome`
   run events classify it via `details.ok` rather than the `!isError` fallback. On an eligible
@@ -4518,7 +4555,7 @@ Editor waits occur only after synchronous invalidation has returned and released
   | provider id | authoring context | review surface | fail-open arm |
   |---|---|---|---|
   | `perk-plan` | `PLAN_AUTHORING_CONTEXT` | first-party in-TUI review | present + `/plan-save` |
-  | `plannotator-plan` | `PLAN_ADAPTER_PLANNOTATOR_CONTEXT` | browser bridge | present + `/plan-save` |
+  | `plannotator-plan` | `PLAN_ADAPTER_PLANNOTATOR_CONTEXT` | browser bridge | unavailable-before-intent only; guarded fallback, never a retained-state bypass |
   | `tombell-plan` | `PLAN_ADAPTER_TOMBELL_CONTEXT` (conditioned injection) | first-party in-TUI review | present + `/plan-save` (incl. tombell's own interactive `/plan` `setActiveTools` restriction arm) |
 
   Under the plannotator selection the authoring context is **flavor-dispatched per stage** (one
@@ -4595,7 +4632,9 @@ Editor waits occur only after synchronous invalidation has returned and released
   params**; the **cold** `handoff_extra` carrier (→ §8.2) and the **warm**
   `objective_node_claim` carrier (→ §8.3) recover `objective_id`/`node_id` with identical
   semantics — fill both-or-neither, explicit values win outright (even one — never mixed),
-  fail-open (a malformed carrier never blocks a save). `consumed_learn` rides the cold handoff
+  the cold fallback's malformed-carrier handling is unchanged. Guarded Plannotator fingerprinting
+  is stricter: malformed relevant handoff/claim fields refuse before backend invocation; a present
+  warm claim is passed explicitly. `consumed_learn` rides the cold handoff
   (`_consumed_learn_from_handoff`).
 
 - **The implement-here exit (the no-save path).** A sanctioned, HUMAN-ONLY exit from plan

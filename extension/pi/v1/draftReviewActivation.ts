@@ -16,6 +16,7 @@ import {
   type DraftReviewOperation,
   type DraftReviewSnapshot,
 } from "./draftReviewDecisions.ts";
+import { DRAFT_REVIEW_RECONCILIATION, draftReviewDiagnostic } from "./draftReviewDiagnostics.ts";
 import { draftReviewDeliveryResult, staleDraftReviewResult } from "./draftReviewRendering.ts";
 import type { PlannotatorRefusal, PlannotatorReviewOutcome } from "./providers/plannotator.ts";
 import type { ReviewOutcome, ToolResult } from "./review.ts";
@@ -101,7 +102,7 @@ export function draftReviewRefusalText(
       : ` Confirmed save: ${facts.saveReceipt.id} (${facts.saveReceipt.url}).`;
   const gate =
     facts.gateExited === true ? " The successful save already exited the read-only gate." : "";
-  return `Draft review stopped (${refusal.code}, ${refusal.phase}): ${refusal.detail}.${receipt}${gate} Do not retry a save or discard retained review state; human reconciliation is required.`;
+  return `Draft review stopped (${refusal.code}, ${refusal.phase}): ${refusal.detail}.${receipt}${gate} Do not retry a save or discard retained review state; human reconciliation is required. Follow ${DRAFT_REVIEW_RECONCILIATION} (human-only; no in-place repair).`;
 }
 export function draftReviewRefusalResult(
   refusal: DraftReviewStop,
@@ -271,6 +272,30 @@ export function createDraftReviewActivation(pi: ExtensionAPI): DraftReviewRuntim
       return reviewRefused("io-error");
     }
   }
+  function annotated<T extends RegistrationResult>(
+    result: T,
+    ctx: ExtensionContext,
+    known?: ReviewIdentity,
+  ): T {
+    if (result.ok) return result;
+    try {
+      return {
+        ...result,
+        detail: draftReviewDiagnostic(
+          result,
+          identity?.cwd ?? ctx.cwd,
+          openBranchWorkflowSession(pi, ctx),
+          known,
+          identity?.runId,
+        ).detail,
+      };
+    } catch {
+      return {
+        ...result,
+        detail: `${result.detail}. Diagnostic identity/namespace unavailable; no absence or no-effect claim`,
+      };
+    }
+  }
   function diagnostic(result: RegistrationResult) {
     if (result.ok) return;
     // A failed notice cannot change a refusal into delivery or escape lifecycle cleanup.
@@ -280,7 +305,12 @@ export function createDraftReviewActivation(pi: ExtensionAPI): DraftReviewRuntim
           context,
           "draft-review",
           "warning",
-          `Draft review stopped (${result.reason}): ${result.detail}. Do not retry saved work or discard retained state.`,
+          draftReviewRefusalText({
+            status: "refused",
+            code: result.reason,
+            phase: "observation",
+            detail: annotated(result, context).detail,
+          }),
         );
     } catch {
       console.error("perk: draft review lifecycle diagnostic unavailable");
@@ -319,11 +349,11 @@ export function createDraftReviewActivation(pi: ExtensionAPI): DraftReviewRuntim
   return {
     mutate(ctx, reason, work, options) {
       const current = use(ctx);
-      return current.ok ? current.value.mutate(reason, work, options) : current;
+      return annotated(current.ok ? current.value.mutate(reason, work, options) : current, ctx);
     },
     async mutateAsync(ctx, reason, work) {
       const current = use(ctx);
-      return current.ok ? current.value.mutateAsync(reason, work) : current;
+      return annotated(current.ok ? await current.value.mutateAsync(reason, work) : current, ctx);
     },
     prepare(ctx, parameter, signal) {
       const current = use(ctx);
@@ -333,7 +363,7 @@ export function createDraftReviewActivation(pi: ExtensionAPI): DraftReviewRuntim
           status: "refused" as const,
           code: result.reason,
           phase: "open" as const,
-          detail: result.detail,
+          detail: annotated(result, ctx).detail,
         },
       });
       if (!current.ok) return refused(current);
@@ -377,7 +407,7 @@ export function createDraftReviewActivation(pi: ExtensionAPI): DraftReviewRuntim
       transports.add(token);
       const registration = prepared.value.registration;
       const check = (): RegistrationResult => {
-        if (ended || disposed) return reviewRefused("invalid-state");
+        if (ended || disposed) return annotated(reviewRefused("invalid-state"), ctx, id);
         try {
           live();
           return { ok: true };
@@ -402,8 +432,8 @@ export function createDraftReviewActivation(pi: ExtensionAPI): DraftReviewRuntim
           degrade() {
             const checked = check();
             if (!checked.ok) return checked;
-            if (id === undefined) return reviewRefused("invalid-state");
-            return coordinator.degrade(id, runId);
+            if (id === undefined) return annotated(reviewRefused("invalid-state"), ctx);
+            return annotated(coordinator.degrade(id, runId), ctx, id);
           },
           async complete(outcome, options) {
             outcome = { ...outcome };
@@ -457,7 +487,7 @@ export function createDraftReviewActivation(pi: ExtensionAPI): DraftReviewRuntim
                 return delivery;
               },
             });
-            return { ...result, completedResult };
+            return { ...annotated(result, ctx, id), completedResult };
           },
           dispose() {
             disposed = true;
@@ -471,8 +501,11 @@ export function createDraftReviewActivation(pi: ExtensionAPI): DraftReviewRuntim
             open(requestId) {
               const checked = check();
               if (!checked.ok) return checked;
-              if (id !== undefined) return reviewRefused("invalid-state");
-              const result = registration.open(requestId);
+              if (id !== undefined) return annotated(reviewRefused("invalid-state"), ctx, id);
+              const result = annotated(registration.open(requestId), ctx, {
+                requestId,
+                reviewId: null,
+              });
               if (result.ok) {
                 id = { requestId, reviewId: null };
                 // The state hook released exclusion before predecessor transport teardown.
@@ -486,7 +519,10 @@ export function createDraftReviewActivation(pi: ExtensionAPI): DraftReviewRuntim
               const checked = check();
               if (!checked.ok) return checked;
               if (id?.requestId !== requestId) return reviewRefused("superseded");
-              const result = registration.attach(requestId, reviewId);
+              const result = annotated(registration.attach(requestId, reviewId), ctx, {
+                requestId,
+                reviewId,
+              });
               if (result.ok) id = { requestId, reviewId };
               return result;
             },
@@ -494,14 +530,14 @@ export function createDraftReviewActivation(pi: ExtensionAPI): DraftReviewRuntim
               const checked = check();
               if (!checked.ok) return checked;
               return id?.requestId === requestId
-                ? registration.invalidateOpening(requestId, reason)
+                ? annotated(registration.invalidateOpening(requestId, reason), ctx, id)
                 : reviewRefused("superseded");
             },
             subscriptionFailed(requestId, reviewId) {
               const checked = check();
               if (!checked.ok) return checked;
               return id?.requestId === requestId && id.reviewId === reviewId
-                ? registration.subscriptionFailed(requestId, reviewId)
+                ? annotated(registration.subscriptionFailed(requestId, reviewId), ctx, id)
                 : reviewRefused("superseded");
             },
           },

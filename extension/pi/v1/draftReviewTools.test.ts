@@ -18,7 +18,14 @@ import type { ToolGating } from "../../substrate/toolGating.ts";
 import { WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import { report } from "../../surfaces/report.ts";
 import { dreamReportInput, plantDreamFiles } from "../../testing/dreamFixtures.ts";
-import { fauxModelRuntime, gitInit, scaffoldRepo } from "../../testing/harness.ts";
+import {
+  fakePerkRouter,
+  fauxModelRuntime,
+  gitInit,
+  loadPerkSession,
+  scaffoldRepo,
+  spyInjections,
+} from "../../testing/harness.ts";
 import { createDraftReviewActivation } from "./draftReviewActivation.ts";
 import { installGistBindings } from "./gist.ts";
 import { installObjectiveAuthoringBindings } from "./objectiveAuthoring.ts";
@@ -107,6 +114,7 @@ function fixture(subject: Subject = "plan", runId: string | null = "RID") {
   let dropLinkage = false;
   let failSaveNotice = false;
   let backendWait: (() => Promise<void>) | undefined;
+  let backendResult: { code: number; stdout: string; stderr: string; killed: boolean } | undefined;
   let editor: (text: string) => Promise<string | undefined> = async (text) => text;
   let verdict = "Skip — decide later (manual /plan-save)";
   let exits = 0;
@@ -172,6 +180,7 @@ function fixture(subject: Subject = "plan", runId: string | null = "RID") {
     async exec(_cmd: string, args: string[]) {
       calls.push(args);
       await backendWait?.();
+      if (backendResult !== undefined) return backendResult;
       const payload = args.includes("node")
         ? { comment_updated: true }
         : args.includes("objective")
@@ -325,6 +334,9 @@ function fixture(subject: Subject = "plan", runId: string | null = "RID") {
     },
     set failSaveNotice(value: boolean) {
       failSaveNotice = value;
+    },
+    set backendResult(value: typeof backendResult) {
+      backendResult = value;
     },
     set backendWait(value: (() => Promise<void>) | undefined) {
       backendWait = value;
@@ -902,7 +914,15 @@ test("plan completion: throwing real notification after saved rendering retains 
     assert.equal(f.calls.length, 1);
     assert.equal(f.exits, 1);
     assert.equal(f.record().consumption.state, "uncertain");
-    assert.equal((await f.invoke("plan_review")).details.reason, "unresolved-dispatch");
+    const stopped = await f.invoke("plan_review");
+    assert.equal(stopped.details.reason, "unresolved-dispatch");
+    const diagnostic = stopped.content[0]?.text ?? "";
+    assert.ok(diagnostic.includes(f.record().request_id));
+    assert.ok(diagnostic.includes("review-id"));
+    assert.match(diagnostic, /known save receipt: "42"/);
+    assert.match(diagnostic, /https:\/\/example\.test\/42/);
+    assert.match(diagnostic, /uncertain\/effect-failed/);
+    assert.match(diagnostic, /reconcile-a-draft-review-stop\.md/);
     assert.equal(f.calls.length, 1);
   } finally {
     f.dispose();
@@ -951,6 +971,284 @@ test("registered parameter review: broken artifact provenance never falls back t
     f.dispose();
   }
 });
+
+for (const subject of ["plan", "objective", "gist"] as const) {
+  const key = subject === "plan" ? "plan_ref" : subject;
+  for (const [name, response] of [
+    ["nonzero exit", { code: 1, stdout: "", stderr: "backend failed", killed: false }],
+    ["killed", { code: 0, stdout: "{}", stderr: "", killed: true }],
+    ["malformed JSON", { code: 0, stdout: "{", stderr: "", killed: false }],
+    ["missing payload", { code: 0, stdout: '{"success":true}', stderr: "", killed: false }],
+    ...(
+      [
+        ["null", null],
+        ["missing ID", { url: "https://example.test/42", existed: false }],
+        ["blank ID", { id: " ", url: "https://example.test/42", existed: false }],
+        ["mistyped ID", { id: 42, url: "https://example.test/42", existed: false }],
+        ["missing URL", { id: "42", existed: false }],
+        ["blank URL", { id: "42", url: " ", existed: false }],
+        ["mistyped URL", { id: "42", url: false, existed: false }],
+      ] as const
+    ).map(
+      ([name, receipt]) =>
+        [
+          name,
+          {
+            code: 0,
+            stdout: JSON.stringify({
+              success: true,
+              issue: { id: "42", url: "https://example.test/42", existed: false },
+              scope: "plan",
+              [key]:
+                subject !== "plan" || receipt === null
+                  ? receipt
+                  : {
+                      provider: "github",
+                      labels: ["perk:plan"],
+                      objective_id: null,
+                      ...("id" in receipt ? { pr_id: receipt.id } : {}),
+                      ...("url" in receipt ? { url: receipt.url } : {}),
+                    },
+            }),
+            stderr: "",
+            killed: false,
+          },
+        ] as const,
+    ),
+  ] as const) {
+    test(`registered ${subject}: post-backend ${name} is unconfirmed, never retryable`, async () => {
+      const f = fixture(subject);
+      try {
+        await f.draft();
+        f.backendResult = response;
+        const pending = f.invoke("plan_review");
+        await f.ready;
+        f.event(true);
+        const result = await pending;
+        assert.equal(result.details.reason, "unresolved-dispatch", result.content[0]?.text);
+        assert.equal(result.details.save_receipt, undefined);
+        assert.equal(f.calls.length, 1);
+        assert.equal(f.exits, 0);
+        const state = f.record().consumption;
+        assert.equal(state.state, "uncertain");
+        if (state.state !== "uncertain") assert.fail();
+        assert.equal(state.reason, "backend-unconfirmed");
+        assert.deepEqual(state.attempt.save, { state: "started" });
+        assert.equal(state.attempt.delivery, null);
+        assert.match(result.content[0]?.text ?? "", /reconcile-a-draft-review-stop\.md/);
+        assert.equal((await f.invoke("plan_review")).details.reason, "unresolved-dispatch");
+        assert.equal((await f.draft(true)).details.reason, "unresolved-dispatch");
+        assert.equal(f.calls.length, 1);
+        assert.equal(f.messages.length, 0);
+      } finally {
+        f.dispose();
+      }
+    });
+  }
+}
+
+for (const residue of ["retained opening lock", "opening orphan"] as const) {
+  test(`operator fixture: ${residue} leaves old run refused; fresh run inherits no authority`, async () => {
+    const f = fixture();
+    try {
+      await f.draft();
+      const prepared = f.reviews.prepare(f.ctx);
+      assert.ok(prepared.ok);
+      if (!prepared.ok) assert.fail();
+      const request = "11111111-1111-4111-8111-111111111111";
+      if (residue === "retained opening lock") {
+        f.failReviewState = "opening";
+        const failed = prepared.value.registration.open(request);
+        assert.ok(!failed.ok && failed.reason === "persistence-failed");
+        assert.match(failed.detail, /checkpoint: open/);
+        assert.ok(failed.detail.includes(request));
+      } else {
+        const snapshot = prepared.value.snapshot;
+        writeFileSync(
+          join(sessionDataDir(f.cwd, "RID"), "draft-review.json"),
+          JSON.stringify({
+            schema_version: 1,
+            request_id: request,
+            correlation: {
+              review_id: null,
+              subject: "plan",
+              source: snapshot.source,
+              source_digest: snapshot.sourceDigest,
+              target: { operation: "plan-save", digest: snapshot.binding.digest },
+            },
+            consumption: { state: "opening" },
+          }),
+        );
+      }
+      const original = readFileSync(
+        join(sessionDataDir(f.cwd, "RID"), "draft-review.json"),
+        "utf8",
+      );
+      const stopped = await f.invoke("plan_review");
+      assert.equal(
+        stopped.details.reason,
+        residue === "retained opening lock" ? "busy" : "invalid-state",
+      );
+      const text = stopped.content[0]?.text ?? "";
+      assert.ok(text.includes(join(sessionDataDir(f.cwd, "RID"), "draft-review.json")));
+      assert.ok(text.includes(join(sessionDataDir(f.cwd, "RID"), "draft-review.lock")));
+      assert.match(text, /Run: "RID"/);
+      assert.match(text, /owner metadata is not proof of effects/);
+      assert.match(text, /reconcile-a-draft-review-stop\.md/);
+      assert.doesNotMatch(text, /# Original|plannotator-plan/);
+      assert.equal(f.requests.length, 0);
+      assert.equal(f.calls.length, 0);
+      f.failReviewState = undefined;
+      f.branch.push({
+        type: "custom",
+        customType: WORKFLOW_STATE_TYPE,
+        data: { run_id: "FRESH", session_artifacts: {} },
+      });
+      const fresh = createDraftReviewActivation(f.pi);
+      installPlanBindings(f.pi, f.gating, fresh);
+      assert.equal((await f.draft()).details.ok, true);
+      const freshRecord = readDraftReview(f.session);
+      assert.deepEqual(freshRecord, { ok: true, record: null });
+      const abandoned = f.reviews.mutate(f.ctx, "manual-save", () =>
+        assert.fail("old activation cannot act in fresh run"),
+      );
+      assert.ok(!abandoned.ok);
+      if (abandoned.ok) assert.fail();
+      assert.ok(
+        abandoned.detail.includes(join(sessionDataDir(f.cwd, "RID"), "draft-review.lock")),
+        "diagnostics locate retained old namespace, never replacement run",
+      );
+      assert.equal(f.requests.length, 0, "fresh content does not copy approval or dispatch");
+      assert.equal(f.calls.length, 0);
+      assert.equal(
+        readFileSync(join(sessionDataDir(f.cwd, "RID"), "draft-review.json"), "utf8"),
+        original,
+      );
+      assert.equal(existsSync(join(sessionDataDir(f.cwd, "RID"), "draft-review.lock")), true);
+      prepared.value.dispose();
+    } finally {
+      f.dispose();
+    }
+  });
+}
+
+for (const retained of [
+  "opening",
+  "pending",
+  "invalidated",
+  "dispatch",
+  "uncertain",
+  "consumed",
+] as const) {
+  test(`full extension startup/reload: ${retained} never queries, saves, injects prior feedback or consumes old delivery`, async () => {
+    const f = fixture();
+    const previousCwd = process.cwd();
+    try {
+      await f.draft();
+      const pending = f.invoke("plan_review");
+      await f.ready;
+      f.event(false, "PRIOR_FEEDBACK_MUST_NOT_REPLAY");
+      const result = await pending;
+      f.persist(result);
+      const record = f.record();
+      assert.equal(record.consumption.state, "dispatch");
+      if (record.consumption.state !== "dispatch") assert.fail();
+      const attempt = record.consumption.attempt;
+      if (retained === "opening") {
+        record.correlation.review_id = null;
+        record.consumption = { state: "opening" };
+      } else if (retained === "pending") record.consumption = { state: "pending" };
+      else if (retained === "invalidated")
+        record.consumption = { state: "invalidated", reason: "degraded" };
+      else if (retained === "uncertain")
+        record.consumption = { state: "uncertain", reason: "delivery-unconfirmed", attempt };
+      else if (retained === "consumed")
+        record.consumption = { state: "consumed", attempt, delivery_entry_id: "prior-entry" };
+      f.session.writeArtifact("draft-review.json", JSON.stringify(record));
+      assert.equal(f.record().consumption.state, retained);
+      const before = readFileSync(join(sessionDataDir(f.cwd, "RID"), "draft-review.json"), "utf8");
+      const manager = SessionManager.inMemory(f.cwd);
+      for (const entry of f.branch) {
+        assert.ok(typeof entry === "object" && entry !== null && "type" in entry);
+        if (entry.type === "custom") {
+          assert.ok(
+            "customType" in entry && typeof entry.customType === "string" && "data" in entry,
+          );
+          manager.appendCustomEntry(entry.customType, entry.data);
+        }
+      }
+      manager.appendMessage({
+        role: "toolResult",
+        toolCallId: "actual-tool-id",
+        toolName: "plan_review",
+        content: result.content,
+        details: result.details,
+        isError: false,
+        timestamp: 1,
+      });
+      const requests: unknown[] = [];
+      process.chdir(f.cwd);
+      const argvFile = join(f.cwd, "cold-door-calls");
+      const bin = fakePerkRouter(f.cwd, {}, { argvFile });
+      const h = await loadPerkSession({
+        cwd: f.cwd,
+        headful: false,
+        sessionManager: manager,
+        env: { PERK_BIN: bin },
+        extraExtensions: [
+          (pi) => {
+            pi.events.on("plannotator:request", (value) => {
+              requests.push(value);
+            });
+          },
+        ],
+      });
+      try {
+        const injections = spyInjections(h);
+        for (const name of ["plan_review", "plan_draft", "objective_draft", "gist_draft"])
+          assert.ok(h.registeredTool(name), `production root registers ${name}`);
+        assert.ok(h.registeredCommands().includes("plan-review-browser"));
+        assert.ok(h.registeredCommands().includes("objective-review-browser"));
+        for (const name of h.registeredCommands())
+          assert.doesNotMatch(name, /draft.*resume|resume.*review/);
+        await h.emitSessionStart();
+        await h.reload();
+        await h.session.extensionRunner?.emit({
+          type: "turn_end",
+          turnIndex: 0,
+          message: fauxAssistantMessage("No recovery"),
+          toolResults: [],
+        });
+        assert.deepEqual(requests, []);
+        const coldCalls = existsSync(argvFile) ? readFileSync(argvFile, "utf8") : "";
+        assert.doesNotMatch(coldCalls, /plan save|objective create|gist create/);
+        const context = await h.emitBeforeAgentStart("No recovery requested");
+        assert.ok(
+          [...injections, ...context].every(
+            (entry) => !JSON.stringify(entry).includes("PRIOR_FEEDBACK_MUST_NOT_REPLAY"),
+          ),
+        );
+        assert.equal(
+          manager
+            .getBranch()
+            .filter((entry) => entry.type === "message" && entry.message.role === "user").length,
+          0,
+        );
+        for (const tool of h.session.getActiveToolNames())
+          assert.doesNotMatch(tool, /draft.*resume|resume.*review/);
+        assert.equal(
+          readFileSync(join(sessionDataDir(f.cwd, "RID"), "draft-review.json"), "utf8"),
+          before,
+        );
+      } finally {
+        h.dispose();
+      }
+    } finally {
+      process.chdir(previousCwd);
+      f.dispose();
+    }
+  });
+}
 
 test("plan completion without actual caller identity refuses rather than minting a replacement", async () => {
   const f = fixture();

@@ -68,6 +68,9 @@ for exactly one goal.
 - [How to send feedback from a hunk watch](./send-feedback-from-hunk-watch.md) — save notes on
   the live `perk plan watch` diff and steer the implementing agent in place.
 
+- [How to reconcile a draft-review stop](./reconcile-a-draft-review-stop.md) — preserve evidence,
+  resolve possible saves/delivery, and continue existing work or deliberately choose a fresh run.
+
 ## Objectives & learnings
 
 - [How to author an objective roadmap](./author-a-roadmap.md) — stand up a new objective + roadmap

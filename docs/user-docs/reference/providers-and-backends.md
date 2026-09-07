@@ -56,12 +56,16 @@ summarized in [Issue backends](./providers-and-backends/issue-backends.md).
 
 ## Plannotator draft-review transport
 
-Plan, objective, and gist browser reviews now require verified run-local registration before a
+Plan, objective, and gist Plannotator reviews require verified run-local registration before a
 request is emitted. Registration binds the exact source and conservative local routing inputs;
 changes during the handshake can require a fresh review. Busy, broken-provenance, persistence,
 or unresolved-dispatch stops are **refusals**, not skipped reviews or permission to retry a save.
 They do not launch a reviewer wave or fall back to another review. Preserve retained state and
-seek human reconciliation; do not remove a lock or rewrite provenance to bypass the stop.
+follow [Reconcile a draft-review stop](../how-to/reconcile-a-draft-review-stop.md); do not remove
+a lock or rewrite provenance to bypass the stop. It requires subprocess quiescence, evidence
+preservation, and human resolution of existing saves/delivery. An orphan alone proves no absence
+of effects; unresolved effects forbid even a fresh-run retry. After resolution, carry only checked
+content into a distinct fresh run, never intent, provenance, or approval.
 
 After attaching the browser's review ID, Perk subscribes to live decisions, then queries status
 once with a separate five-second deadline. A completed status can supply a decision missed during
