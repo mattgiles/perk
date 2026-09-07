@@ -16,7 +16,12 @@ import {
   WAVE_RPC_REPLY_TIMEOUT_MS,
   WAVE_RPC_REQUEST_EVENT,
 } from "./rpcAdapter.ts";
-import { WAVE_ACCEPTANCE, type WaveBus, type WaveSpawnParams } from "./transport.ts";
+import {
+  WAVE_ACCEPTANCE,
+  type WaveBus,
+  type WaveCompletion,
+  type WaveSpawnParams,
+} from "./transport.ts";
 
 /** A synchronous fake bus that additionally exposes live handler counts per channel. */
 function createFakeBus(): WaveBus & { handlerCount(channel: string): number } {
@@ -91,6 +96,114 @@ function spawnParams(): WaveSpawnParams {
     timeoutMs: 60_000,
   };
 }
+
+test("partial carrier requires exact terminal vocabulary and a failed/partial event", async () => {
+  const bus = createFakeBus();
+  respond(bus, () => ({ success: true, data: pingData() }));
+  const adapter = createRpcWaveAdapter(bus);
+  await adapter.ping();
+  const received: WaveCompletion[] = [];
+  const unsubscribe = adapter.onComplete((completion) => received.push(completion));
+  try {
+    for (const state of [
+      "complete",
+      "failed",
+      "partial",
+      "running",
+      "paused",
+      "stopped",
+      undefined,
+    ]) {
+      for (const terminalOutcome of [
+        undefined,
+        null,
+        [],
+        "timeout",
+        {},
+        { state: "partial" },
+        { state: "failed", reason: "timeout" },
+        { state: "partial", reason: true },
+        { state: "partial", reason: "unknown" },
+        { state: "partial", reason: "timeout" },
+        { state: "partial", reason: "budget_exhausted" },
+      ]) {
+        bus.emit("subagent:async-complete", {
+          id: "run",
+          state,
+          terminalOutcome,
+          output: "SECRET",
+          summary: "timeout partial",
+          results: [
+            { workflowKey: "a", success: true, structuredOutput: { answer: 1 }, output: "SECRET" },
+          ],
+        });
+        const completion = received.pop();
+        assert.ok(completion);
+        const admitted =
+          (state === "failed" || state === "partial") &&
+          typeof terminalOutcome === "object" &&
+          terminalOutcome !== null &&
+          "reason" in terminalOutcome &&
+          "state" in terminalOutcome &&
+          terminalOutcome.state === "partial" &&
+          (terminalOutcome.reason === "timeout" || terminalOutcome.reason === "budget_exhausted");
+        assert.equal("retainedEntries" in completion, admitted);
+        assert.equal("terminalOutcome" in completion, admitted);
+        if (admitted)
+          assert.deepEqual(completion.retainedEntries, [
+            { key: "a", ok: true, error: null, report: { answer: 1 } },
+          ]);
+        assert.doesNotMatch(JSON.stringify(completion), /SECRET|summary|structuredOutput/);
+      }
+    }
+  } finally {
+    unsubscribe();
+  }
+  assert.equal(bus.handlerCount("subagent:async-complete"), 0);
+});
+
+test("partial projection withholds ambiguous keys/identities and never guesses keys", async () => {
+  const bus = createFakeBus();
+  respond(bus, () => ({ success: true, data: pingData() }));
+  const adapter = createRpcWaveAdapter(bus);
+  await adapter.ping();
+  const received: WaveCompletion[] = [];
+  const unsubscribe = adapter.onComplete((completion) => received.push(completion));
+  const row = (workflowKey: string, runId: string) => ({
+    workflowKey,
+    runId,
+    success: true,
+    structuredOutput: { answer: workflowKey },
+  });
+  bus.emit("subagent:async-complete", {
+    state: "failed",
+    terminalOutcome: { state: "partial", reason: "timeout", extra: "SECRET" },
+    results: [
+      row("dup", "d1"),
+      row("dup", "d2"),
+      row("x", "same"),
+      row("y", "same"),
+      row("valid", "v"),
+      { agent: "legacy", structuredOutput: { SECRET: true } },
+      { workflowKey: "", success: true },
+      null,
+      [],
+      "row",
+      { workflowKey: "absent" },
+      { workflowKey: "false", success: false, error: "failed", structuredOutput: { answer: 2 } },
+      { workflowKey: "malformed", success: "true", error: 42, structuredOutput: [] },
+    ],
+  });
+  unsubscribe();
+  assert.deepEqual(received[0]?.retainedEntries, [
+    ...["dup", "x", "y"].map((key) => ({ key, ok: null, error: null, report: null })),
+    { key: "valid", ok: true, error: null, report: { answer: "valid" } },
+    { key: "absent", ok: null, error: null, report: null },
+    { key: "false", ok: false, error: "failed", report: { answer: 2 } },
+    { key: "malformed", ok: "true", error: null, report: [] },
+  ]);
+  assert.doesNotMatch(JSON.stringify(received[0]?.retainedEntries), /SECRET/);
+});
 
 test("requests carry the v1 envelope: version, requestId, method, params, source.extension", async () => {
   const bus = createFakeBus();

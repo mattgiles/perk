@@ -7,9 +7,9 @@
 // `workflow.value` aggregate, and normalizes `{complete, reports[], failures[]}` under a
 // flow-specific completeness policy. Each launch additionally records an OUTPUT-FREE
 // `WaveScriptReceipt` (run handle + per-child identity/artifact trail from the completion
-// payload) — correlation telemetry, not policy input. The durable aggregate is sole report
-// authority; receipt absence never changes verdict/completeness or retry selection
-// (contracts.md §8.35).
+// payload) — correlation telemetry, not policy input. Complete runs use the durable aggregate;
+// explicit native partial settlement may retain keyed child reports, always beside its wave
+// failure. Receipt absence never changes verdict/completeness or retry selection (§8.35).
 //
 // This is the LOGICAL tier: assignments (`ReportAssignment`), preflight partitioning,
 // aggregate normalization, and the completeness policy. The TRANSPORT tier — the adapter seam,
@@ -381,7 +381,7 @@ function enrichReceipt(
  */
 function settleReportWave(run: WaveScriptResult, request: ReportWaveRequest): ReportWaveResult {
   const receipt = enrichReceipt(run.receipt, request.assignments);
-  if (!run.ok) {
+  if (!run.ok && !Array.isArray(run.value)) {
     return { complete: false, reports: [], failures: [run.failure], receipt };
   }
   if (!Array.isArray(run.value)) {
@@ -392,10 +392,14 @@ function settleReportWave(run: WaveScriptResult, request: ReportWaveRequest): Re
     );
   }
 
-  const { reports, failures } = normalizeAssignments(
+  const normalized = normalizeAssignments(
     request.assignments.map((assignment) => assignment.key),
     run.value,
   );
+  const { reports } = normalized;
+  // Retained evidence does not imply completion under either policy. Keep the transport
+  // failure first, followed by keyed normalization failures in request order.
+  const failures = run.ok ? normalized.failures : [run.failure, ...normalized.failures];
   const complete =
     request.completeness === "strict"
       ? failures.length === 0
@@ -485,7 +489,8 @@ function collectGraceMs(): number {
  * One pending (started, uncollected) wave: the frozen pre-launch key manifest snapshot (copied
  * from the launch manifest at start — caller mutation of the returned `StartWaveResult.launch`
  * can never change a later collect's keys) plus the never-rejecting result promise. NO drained
- * flag: presence in the instance's map IS pending.
+ * flag: presence in the instance's map IS pending. After settlement the normalized promise
+ * owns retained partial reports until collection; no later artifact read or resume recovers them.
  */
 interface PendingRecord {
   keys: readonly string[];

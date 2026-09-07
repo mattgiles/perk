@@ -103,7 +103,13 @@ supervisor-channel config, the in-process async workflow host, and the omitted-a
 semantics for workflow children — plus the intercom-bridge tool-delivery surface, the explicit
 acceptance-disable surface, and invocation-local skill mechanics the
 report-wave spawn contract relies on: workflow-item `skill`, agent `skillPath`, local-path
-precedence over global name resolution, and async skill injection). One **behavior arm** runs
+precedence over global name resolution, and async skill injection). Three additional source
+surfaces cover partial report settlement: the native partial terminal vocabulary (`partial`,
+`timeout`, `budget_exhausted`), the keyed structured-result projection from partial children,
+and async-completion forwarding of that projection. These are file-scoped presence-only
+tripwires, not semantic proof of live retention. They run even when the optional behavior arm
+cannot evaluate; additive probe maintenance does not advance the full guidance-verified baseline.
+One **behavior arm** runs
 after the substring probes: the installed engine's own `validateWorkflowScript` is executed
 over perk's bundled representative wave script, so a validator that rejects what perk's
 renderer emits joins the divergences; when the arm cannot evaluate (no `node`, a missing
@@ -112,7 +118,13 @@ the status is unaffected. When the package is
 not installed (pi lazy-installs it at launch) the check is `info` — compatibility is simply not
 evaluated. On any divergence it warns **loudly** but never fails, and there is no `--fix` arm —
 pi-subagents deliberately stays unpinned, so the check is an early-warning surface, not an
-enforcement gate.
+enforcement gate. The controlled offline installed-engine test is
+`node --test extension/waves/partialSettlementCompat.test.ts` in the Perk developer checkout;
+it exercises native timeout/partial children and settlement projection through Perk collection,
+not the entire live executor/watcher or a model. A missing optional installation explicitly skips;
+a present incompatible engine fails. The source tree's `docs/developers/pi-subagents-reverify.md`
+describes its limits and the separate full-baseline process. A clean marker result is not a
+live-retention certificate.
 The package group also carries a report-only `ponytail-compat` check for the managed internal
 review dependency. A lazy install that is not present yet is `info`. When installed, doctor verifies
 package identity, the `./skills` export, both exact `SKILL.md` files, and their `ponytail` /

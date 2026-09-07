@@ -265,10 +265,9 @@ function buildRequest(
 }
 
 /**
- * Pick the retry keys from the first wave's failures. A `ReportWaveResult` carries either ONE
- * wave-level failure (`key: null`, no reports) or per-assignment failures — the wave-level
- * reason decides whole-selection vs none; assignment-level failures retry exactly the failed
- * keys.
+ * Pick retry keys from failures, never report availability. A retryable wave-level failure
+ * (`key: null`) retries the whole runnable selection even when partial reports survived;
+ * otherwise assignment-level failures retry exactly the failed keys.
  */
 function retrySelection(
   angles: EffectivePrReviewAngle[],

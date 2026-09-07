@@ -66,6 +66,286 @@ function okEntry(key: string, report: unknown): unknown {
   return { key, ok: true, error: null, report };
 }
 
+// Native partial evidence keeps the existing failure vocabulary and completeness denominator.
+for (const reason of ["timeout", "budget_exhausted"] as const) {
+  for (const completeness of ["strict", "best-effort"] as const) {
+    for (const sibling of ["failed", "missing", "successful"] as const) {
+      test(`native ${reason}: ${completeness} retains reports with ${sibling} sibling, never complete`, async () => {
+        const report = { verdict: "clean" };
+        const value = [
+          okEntry("plan-fidelity", report),
+          ...(sibling === "missing"
+            ? []
+            : [
+                sibling === "successful"
+                  ? okEntry("correctness", report)
+                  : { key: "correctness", ok: false, error: "child failed", report },
+              ]),
+        ];
+        const adapter = createMemoryWaveAdapter({
+          aggregate: { state: "failed", value: undefined, error: "engine detail" },
+          completionDetail: {
+            state: "failed",
+            terminalOutcome: { state: "partial", reason },
+            retainedEntries: value,
+          },
+        });
+        const result = await reportWaveOver(adapter).run(makeSpec({ completeness }));
+        assert.equal(result.complete, false);
+        assert.deepEqual(
+          result.reports,
+          (sibling === "successful" ? ["plan-fidelity", "correctness"] : ["plan-fidelity"]).map(
+            (key) => ({ key, report }),
+          ),
+        );
+        assert.deepEqual(
+          result.failures.map(({ key, reason }) => [key, reason]),
+          [
+            [null, "run-failed"],
+            ...(sibling === "successful"
+              ? []
+              : [["correctness", sibling === "missing" ? "missing-lane" : "lane-failed"]]),
+          ],
+        );
+        assert.match(
+          result.failures[0]?.detail ?? "",
+          new RegExp(`native partial: ${reason}.*engine detail`),
+        );
+        assert.equal(result.receipt.state, "failed");
+        assert.doesNotMatch(
+          JSON.stringify(
+            toAttemptReceipt("test", 1, ["plan-fidelity", "correctness"], result.receipt),
+          ),
+          /report|verdict|retainedEntries|terminalOutcome/,
+        );
+        assert.equal(adapter.calls.spawn.length, 1);
+        assert.equal(adapter.calls.stop.length, 0);
+      });
+    }
+  }
+}
+
+test("durable partial arrays take precedence in full: no event promotion or hole filling", async () => {
+  for (const state of ["failed", "partial", "complete"]) {
+    const result = await reportWaveOver(
+      createMemoryWaveAdapter({
+        aggregate: {
+          state,
+          value: [
+            {
+              key: "plan-fidelity",
+              ok: false,
+              error: "durable failure",
+              report: { verdict: "clean" },
+            },
+          ],
+        },
+        completionDetail: {
+          state: "failed",
+          terminalOutcome: { state: "partial", reason: "timeout" },
+          retainedEntries: ASSIGNMENTS.map(({ key }) => okEntry(key, { verdict: "clean" })),
+        },
+      }),
+    ).run(makeSpec());
+    assert.deepEqual(result.reports, []);
+    assert.deepEqual(
+      result.failures.map(({ key, reason }) => [key, reason]),
+      [
+        ...(state === "complete" ? [] : [[null, "run-failed"]]),
+        ["plan-fidelity", "lane-failed"],
+        ["correctness", "missing-lane"],
+      ],
+    );
+  }
+});
+
+test("partial carrier cannot bypass unreadable status, nonterminal states, or generic failure", async () => {
+  for (const state of ["failed", "partial", "running", "paused", "stopped"]) {
+    for (const marked of [false, true]) {
+      for (const aggregateError of [false, true]) {
+        const result = await reportWaveOver(
+          createMemoryWaveAdapter({
+            aggregate: { state, value: undefined },
+            aggregateError,
+            completionDetail: {
+              state,
+              ...(marked
+                ? { terminalOutcome: { state: "partial", reason: "timeout" } as const }
+                : {}),
+              retainedEntries: [okEntry("plan-fidelity", { verdict: "clean" })],
+            },
+          }),
+        ).run(makeSpec());
+        const admitted = !aggregateError && marked && ["failed", "partial"].includes(state);
+        assert.equal(result.complete, false);
+        assert.equal(result.reports.length, admitted ? 1 : 0);
+        assert.equal(
+          result.failures[0]?.reason,
+          aggregateError ? "aggregate-unreadable" : "run-failed",
+        );
+      }
+    }
+  }
+});
+
+test("partial normalization keeps absent, malformed and failed reports distinct", async () => {
+  for (const [ok, report, reason] of [
+    [true, undefined, "lane-failed"],
+    [true, null, "lane-failed"],
+    [false, {}, "lane-failed"],
+    [undefined, {}, "malformed-report"],
+    ["true", {}, "malformed-report"],
+    [true, [], "malformed-report"],
+    [true, 1, "malformed-report"],
+  ]) {
+    const result = await reportWaveOver(
+      createMemoryWaveAdapter({
+        aggregate: { state: "failed", value: undefined },
+        completionDetail: {
+          terminalOutcome: { state: "partial", reason: "timeout" },
+          retainedEntries: [{ key: "plan-fidelity", ok, report }],
+        },
+      }),
+    ).run(makeSpec());
+    assert.deepEqual(result.reports, []);
+    assert.deepEqual(
+      result.failures.map((f) => f.reason),
+      ["run-failed", reason, "missing-lane"],
+    );
+  }
+});
+
+test("completion-before-reply retains the first match, discarding foreign and duplicate evidence", async () => {
+  const memory = createMemoryWaveAdapter({ completion: false });
+  const start = await startWaveScript(
+    {
+      ...memory,
+      async spawn(params) {
+        const handle = await memory.spawn(params);
+        memory.emitCompletion({ asyncId: "foreign", children: [{ key: "foreign" }] });
+        memory.emitCompletion({ ...handle, children: [{ key: "first" }] });
+        memory.emitCompletion({ ...handle, children: [{ key: "duplicate" }] });
+        return handle;
+      },
+    },
+    { flow: "race", workflowScript: "return [];", outputSchema: {} },
+  );
+  assert.ok(start.ok);
+  memory.emitCompletion({ ...start.handle, children: [{ key: "late" }] });
+  assert.deepEqual((await start.result).receipt.children, [{ key: "first" }]);
+});
+
+for (const outcome of ["timeout", "cancelled"] as const) {
+  test(`${outcome} closes completion acceptance before an awaited stop; no late salvage or reads`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const memory = createMemoryWaveAdapter({ completion: false });
+    const controller = new AbortController();
+    let notifyStopping = () => {};
+    let finishStop = () => {};
+    const stopping = new Promise<void>((resolve) => {
+      notifyStopping = resolve;
+    });
+    const stopped = new Promise<void>((resolve) => {
+      finishStop = resolve;
+    });
+    let reads = 0;
+    let unsubscribed = 0;
+    const start = await startWaveScript(
+      {
+        ...memory,
+        onComplete(handler) {
+          const unsubscribe = memory.onComplete(handler);
+          return () => {
+            unsubscribed++;
+            unsubscribe();
+          };
+        },
+        async stop() {
+          notifyStopping();
+          await stopped;
+        },
+        async readAggregate(handle) {
+          reads++;
+          return memory.readAggregate(handle);
+        },
+      },
+      { flow: "stop", workflowScript: "return [];", outputSchema: {}, timeoutMs: 30 },
+      controller.signal,
+    );
+    assert.ok(start.ok);
+    if (outcome === "cancelled") controller.abort();
+    else t.mock.timers.tick(30);
+    await stopping;
+    memory.emitCompletion({
+      ...start.handle,
+      state: "failed",
+      terminalOutcome: { state: "partial", reason: "timeout" },
+      retainedEntries: [okEntry("plan-fidelity", { secret: "late" })],
+      children: [{ key: "late" }],
+    });
+    finishStop();
+    const result = await start.result;
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.failure.reason, outcome);
+    assert.equal("value" in result, false);
+    assert.equal(reads, 0);
+    assert.equal(unsubscribed, 1);
+    assert.deepEqual(result.receipt.children, []);
+  });
+}
+
+test("partial collection preserves requested/runnable/preflight denominator and failure order", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregate: { state: "failed", value: undefined },
+    completionDetail: {
+      state: "failed",
+      terminalOutcome: { state: "partial", reason: "timeout" },
+      retainedEntries: [
+        okEntry("plan-fidelity", { verdict: "clean" }),
+        okEntry("ponytail", { verdict: "unlaunched" }),
+        okEntry("unknown", {}),
+      ],
+    },
+  });
+  const wave = reportWaveOver(adapter);
+  const start = await wave.start(
+    makeSpec({
+      assignments: [
+        ...ASSIGNMENTS,
+        {
+          key: "ponytail",
+          agent: "perk.pr-reviewer",
+          task: "review",
+          requiredSkill: PONYTAIL_CORE_SKILL,
+        },
+      ],
+      requiredSkillPreflight: async () => ({ ok: false, detail: "skill absent" }),
+    }),
+  );
+  assert.ok(start.ok);
+  assert.deepEqual(start.launch.requested, ["plan-fidelity", "correctness", "ponytail"]);
+  assert.deepEqual(start.launch.runnable, ["plan-fidelity", "correctness"]);
+  assert.deepEqual(
+    start.launch.preflightFailures.map((failure) => failure.key),
+    ["ponytail"],
+  );
+  const collected = await wave.collect(start.ref);
+  assert.equal(collected.kind, "settled");
+  if (collected.kind !== "settled") return;
+  assert.deepEqual(collected.keys, ["plan-fidelity", "correctness", "ponytail"]);
+  assert.deepEqual(collected.result.reports, [
+    { key: "plan-fidelity", report: { verdict: "clean" } },
+  ]);
+  assert.deepEqual(
+    collected.result.failures.map(({ key, reason }) => [key, reason]),
+    [
+      [null, "run-failed"],
+      ["correctness", "missing-lane"],
+      ["ponytail", "skill-unavailable"],
+    ],
+  );
+});
+
 /**
  * The representative wave request behind the shared fixture — the renderer's optional-field
  * branches in one request: a plain assignment (default label + phase), one with a

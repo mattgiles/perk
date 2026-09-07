@@ -36,8 +36,8 @@ export type WaveReceiptState =
 
 /**
  * One child's identity/artifact trail from the completion payload — OUTPUT-FREE by invariant:
- * reports, summaries, and structured output never enter a receipt (they stay in the durable
- * aggregate — the sole report authority, contracts.md §8.35).
+ * reports, summaries, and structured output never enter a receipt. Report authority is separate:
+ * durable aggregates, or the explicit native partial carrier (contracts.md §8.35).
  */
 export interface WaveChildReceipt {
   /** The Perk assignment key (native run-correlated childId; legacy overloaded `agent`). */
@@ -89,8 +89,9 @@ export interface WaveRunHandle {
 /**
  * An async-complete notification; at least one identifier is present on real payloads. The
  * observability fields are optional — an identity-only completion stays valid (receipt absence
- * degrades correlation, never behavior). The adapter normalizes them output-free and leaves
- * each child's `agent` unset (enrichment happens against Perk-owned assignment specs).
+ * degrades correlation, never behavior). Receipt children stay output-free, with `agent` unset
+ * until enrichment against Perk-owned specs. Only explicitly marked native partial settlement
+ * carries compact report DATA separately; the runner owns its short retention lifetime.
  */
 export interface WaveCompletion {
   asyncId?: string;
@@ -99,6 +100,8 @@ export interface WaveCompletion {
   state?: string;
   success?: boolean;
   children?: WaveChildReceipt[];
+  terminalOutcome?: { state: "partial"; reason: "timeout" | "budget_exhausted" };
+  retainedEntries?: unknown[];
 }
 
 /**
@@ -201,10 +204,10 @@ export interface WaveScriptSpec {
   timeoutMs?: number;
 }
 
-/** A script run's outcome: the raw `workflow.value` on success, one wave-level failure otherwise. */
+/** A script outcome: durable value on success; explicit partial evidence never erases failure. */
 export type WaveScriptResult =
   | { ok: true; value: unknown; receipt: WaveScriptReceipt }
-  | { ok: false; failure: WaveRunFailure; receipt: WaveScriptReceipt };
+  | { ok: false; failure: WaveRunFailure; receipt: WaveScriptReceipt; value?: unknown[] };
 
 /**
  * A launched (or launch-refused) script run. On `ok: true` the run is LIVE: `handle` is the
@@ -296,18 +299,26 @@ export async function startWaveScript(
   if (aborted()) return cancelledBeforeLaunch();
 
   // 2. Subscribe BEFORE spawn: a completion can arrive before the spawn reply resolves (the
-  //    completion-before-reply race) — every completion is buffered and re-checked once the
-  //    handle is known.
+  //    completion-before-reply race). Buffer only while identity is unknown; afterward retain
+  //    the first match only, never foreign reports or duplicate completions.
   let handle: WaveRunHandle | null = null;
   let notifyMatch: (() => void) | null = null;
+  let matched: WaveCompletion | undefined;
+  let accepting = true;
   const buffered: WaveCompletion[] = [];
   const matchesHandle = (completion: WaveCompletion): boolean =>
     handle !== null &&
     ((completion.asyncDir !== undefined && completion.asyncDir === handle.asyncDir) ||
       (completion.asyncId !== undefined && completion.asyncId === handle.asyncId));
   const unsubscribe = adapter.onComplete((completion) => {
-    buffered.push(completion);
-    if (matchesHandle(completion) && notifyMatch !== null) notifyMatch();
+    if (!accepting) return;
+    if (handle === null) {
+      buffered.push(completion);
+      return;
+    }
+    if (!matchesHandle(completion) || matched !== undefined) return;
+    matched = completion;
+    notifyMatch?.();
   });
 
   // 3. Spawn: async-only, ephemeral, fresh-context — the module fixes those; the flow's spec
@@ -324,8 +335,14 @@ export async function startWaveScript(
       ...(spec.model !== undefined ? { model: spec.model } : {}),
       timeoutMs,
     });
+    matched = buffered.find(matchesHandle);
+    buffered.length = 0;
   } catch (error) {
+    accepting = false;
     unsubscribe();
+    buffered.length = 0;
+    matched = undefined;
+    notifyMatch = null;
     return startFailure(
       "spawn-failed",
       `wave spawn failed: ${errorDetail(error)}`,
@@ -350,11 +367,13 @@ export async function startWaveScript(
     try {
       // 4. Block on completion with the module-owned timeout; honor the caller's AbortSignal.
       const outcome = await new Promise<"complete" | "timeout" | "cancelled">((resolve) => {
-        if (buffered.some(matchesHandle)) {
+        if (matched !== undefined) {
+          accepting = false;
           resolve("complete");
           return;
         }
         const settleOutcome = (value: "complete" | "timeout" | "cancelled"): void => {
+          accepting = false;
           clearTimeout(timer);
           signal?.removeEventListener("abort", onAbort);
           notifyMatch = null;
@@ -388,10 +407,6 @@ export async function startWaveScript(
             );
       }
 
-      // The MATCHED completion (retained for the receipt — its normalized children are the
-      // per-child identity/artifact trail; an identity-only completion yields empty children).
-      const matched = buffered.find(matchesHandle);
-
       // 5. Read the durable aggregate; surface the terminal-state arms.
       let aggregate: WaveAggregate;
       try {
@@ -408,6 +423,25 @@ export async function startWaveScript(
       }
       if (aggregate.state !== "complete") {
         const detail = aggregate.error !== undefined ? `: ${aggregate.error}` : "";
+        if (
+          (aggregate.state === "failed" || aggregate.state === "partial") &&
+          matched?.terminalOutcome !== undefined
+        ) {
+          // A durable array is authoritative in full, including failed rows and holes. Only
+          // its absence admits the public child projection; never merge or promote evidence.
+          return {
+            ok: false,
+            failure: {
+              key: null,
+              reason: "run-failed",
+              detail: `wave run ended '${aggregate.state}' (native partial: ${matched.terminalOutcome.reason})${detail}`,
+            },
+            value: Array.isArray(aggregate.value)
+              ? aggregate.value
+              : (matched.retainedEntries ?? []),
+            receipt: receiptOf("failed", spawned, matched),
+          };
+        }
         return scriptFailure(
           "run-failed",
           `wave run ended '${aggregate.state}'${detail}`,
@@ -420,7 +454,11 @@ export async function startWaveScript(
         receipt: receiptOf("complete", spawned, matched),
       };
     } finally {
+      accepting = false;
       unsubscribe();
+      buffered.length = 0;
+      matched = undefined;
+      notifyMatch = null;
     }
   };
   return { ok: true, handle: spawned, result: settle() };

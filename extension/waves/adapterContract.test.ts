@@ -44,6 +44,7 @@ interface WaveAdapterHarness {
    * fields, and malformed rows — the adapter must strip/drop them without failing the wave.
    */
   completeRunDetailed(handle: WaveRunHandle): void;
+  completeRunPartial(handle: WaveRunHandle): void;
   /** Arrange the durable aggregate `readAggregate(handle)` will see. */
   stageAggregate(handle: WaveRunHandle, aggregate: StagedAggregate): void;
 }
@@ -159,6 +160,30 @@ export function assertWaveAdapterContract(
     }
   });
 
+  test(`${name}: partial report carrier is separate from output-free receipts`, async () => {
+    const harness = makeHarness();
+    await harness.adapter.ping();
+    const received: WaveCompletion[] = [];
+    const unsubscribe = harness.adapter.onComplete((completion) => received.push(completion));
+    const handle = await harness.adapter.spawn(minimalSpawnParams());
+    harness.completeRunPartial(handle);
+    unsubscribe();
+    assert.deepEqual(received, [
+      {
+        asyncId: handle.asyncId,
+        asyncDir: handle.asyncDir,
+        state: "failed",
+        success: false,
+        children: [{ key: "a", runId: "child", success: true }],
+        terminalOutcome: { state: "partial", reason: "budget_exhausted" },
+        retainedEntries: [{ key: "a", ok: true, error: null, report: { answer: 1 } }],
+      },
+    ]);
+    for (const child of received[0]?.children ?? []) {
+      assert.ok(Object.keys(child).every((key) => CHILD_KEYS.includes(key)));
+    }
+  });
+
   test(`${name}: onComplete before a successful ping throws`, () => {
     const { adapter } = makeHarness();
     assert.throws(() => adapter.onComplete(() => {}), /ping/);
@@ -210,6 +235,17 @@ function makeMemoryHarness(): WaveAdapterHarness {
         state: "complete",
         success: true,
         children: RECEIPT_CHILDREN.map((child) => ({ ...child })),
+      });
+    },
+    completeRunPartial(handle) {
+      adapter.emitCompletion({
+        asyncId: handle.asyncId,
+        asyncDir: handle.asyncDir,
+        state: "failed",
+        success: false,
+        children: [{ key: "a", runId: "child", success: true }],
+        terminalOutcome: { state: "partial", reason: "budget_exhausted" },
+        retainedEntries: [{ key: "a", ok: true, error: null, report: { answer: 1 } }],
       });
     },
     stageAggregate(_handle, aggregate) {
@@ -353,6 +389,26 @@ function makeRpcHarness(): WaveAdapterHarness {
         workflow: { value: [] },
         timestamp: 1,
         durationMs: 2,
+      });
+    },
+    completeRunPartial(handle) {
+      bus.emit(FAKE_ASYNC_COMPLETE_EVENT, {
+        id: handle.asyncId,
+        asyncDir: handle.asyncDir,
+        state: "failed",
+        success: false,
+        terminalOutcome: { state: "partial", reason: "budget_exhausted" },
+        results: [
+          {
+            workflowKey: "a",
+            agent: "a",
+            runId: "child",
+            success: true,
+            structuredOutput: { answer: 1 },
+            output: "SECRET",
+            summary: "SECRET",
+          },
+        ],
       });
     },
     stageAggregate(handle, aggregate) {

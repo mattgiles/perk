@@ -31,22 +31,35 @@ import {
   WAVE_RPC_REPLY_EVENT_PREFIX,
   WAVE_RPC_REQUEST_EVENT,
 } from "../waves/rpcAdapter.ts";
+import type { WaveAggregate, WaveRunHandle } from "../waves/transport.ts";
+
+export interface FakeSettlement {
+  aggregate: WaveAggregate;
+  /** Raw engine DATA, deliberately permitting malformed fields for negative tests. */
+  completion: Record<string, unknown>;
+}
 
 /** One spawn's scripted behavior (FIFO across spawns; the last entry repeats). */
-export interface FakeSpawnPlan {
-  /**
-   * The `workflow.value` written to the run's `status.json` (default: `[]`). The fake always
-   * writes a COMPLETE status — runner-level failure states are the memory adapter's job.
-   */
-  value?: unknown;
+export type FakeSpawnPlan = {
   /** Completion delivery mode; default `"auto"` (the post-reply macrotask). */
   delivery?: "auto" | "manual" | "never";
-  /**
-   * Dynamic mode: the test-supplied script evaluator (the AsyncFunction-over-fake-`runs`
-   * idiom); the returned value becomes the aggregate's `workflow.value`, superseding `value`.
-   */
-  executeScript?: (script: string) => Promise<unknown>;
-}
+} & (
+  | {
+      /** Bare `workflow.value` on an ordinary complete run (default: `[]`). */
+      value?: unknown;
+      /** The legacy one-argument evaluator supersedes `value`; its return is still bare. */
+      executeScript?: (script: string) => Promise<unknown>;
+      executeSettlement?: never;
+    }
+  | {
+      value?: never;
+      executeScript?: never;
+      executeSettlement: (
+        script: string,
+        handle: Readonly<WaveRunHandle>,
+      ) => Promise<FakeSettlement>;
+    }
+);
 
 /** The minimal bus surface the fake binds to (pi's EventBus / the adapter's `WaveBus`). */
 interface FakeBus {
@@ -72,10 +85,18 @@ export interface FakeSubagents {
 const ASYNC_COMPLETE_EVENT = "subagent:async-complete";
 
 export function createFakeSubagents(plans: FakeSpawnPlan[] = []): FakeSubagents {
+  for (const plan of plans) {
+    if (
+      plan.executeSettlement !== undefined &&
+      (Object.hasOwn(plan, "value") || Object.hasOwn(plan, "executeScript"))
+    ) {
+      throw new Error("fakeSubagents: executeSettlement cannot mix with value/executeScript");
+    }
+  }
   const spawns: Array<Record<string, unknown>> = [];
   const stops: Array<{ id: string }> = [];
   let bound: FakeBus | null = null;
-  const launched: ({ asyncId: string; asyncDir: string } | undefined)[] = [];
+  const launched: (Record<string, unknown> | undefined)[] = [];
 
   const emit = (payload: Record<string, unknown>): void => {
     bound?.emit(ASYNC_COMPLETE_EVENT, payload);
@@ -86,7 +107,7 @@ export function createFakeSubagents(plans: FakeSpawnPlan[] = []): FakeSubagents 
     if (run === undefined) {
       throw new Error(`fakeSubagents: spawn ${index} has not launched (no completion to deliver)`);
     }
-    emit({ id: run.asyncId, asyncDir: run.asyncDir, state: "complete" });
+    emit(run);
   };
 
   const handleRequest = (bus: FakeBus, raw: unknown): void => {
@@ -121,36 +142,63 @@ export function createFakeSubagents(plans: FakeSpawnPlan[] = []): FakeSubagents 
       const index = spawns.length;
       spawns.push(params);
       const plan = plans[Math.min(index, plans.length - 1)] ?? {};
-      // Async on purpose: the dynamic mode awaits the evaluator, and the reply must follow the
-      // durable status.json write (the real responder's ordering).
-      void (async () => {
-        const value =
-          plan.executeScript !== undefined
-            ? await plan.executeScript(String(params.workflowScript ?? ""))
-            : (plan.value ?? ([] as unknown[]));
+      // Preparation owns a single rejection boundary. A failed assertion/evaluator is a
+      // failed RPC reply, never invented settlement data or an unhandled detached rejection.
+      const prepare = async (): Promise<WaveRunHandle> => {
         const asyncDir = mkdtempSync(join(tmpdir(), "perk-fake-subagents-"));
         const asyncId = basename(asyncDir);
+        const handle = Object.freeze({ asyncId, asyncDir });
+        const script = String(params.workflowScript ?? "");
+        let aggregate: WaveAggregate;
+        let completion: Record<string, unknown>;
+        if (plan.executeSettlement !== undefined) {
+          const settlement = await plan.executeSettlement(script, handle);
+          aggregate = settlement.aggregate;
+          completion = { ...settlement.completion, id: asyncId, runId: asyncId, asyncDir };
+        } else {
+          const value =
+            plan.executeScript !== undefined
+              ? await plan.executeScript(script)
+              : (plan.value ?? ([] as unknown[]));
+          aggregate = { state: "complete", value };
+          completion = { id: asyncId, asyncDir, state: "complete" };
+        }
         writeFileSync(
           join(asyncDir, "status.json"),
           JSON.stringify({
             runId: asyncId,
             mode: "workflow",
-            state: "complete",
+            state: aggregate.state,
+            ...(aggregate.error !== undefined ? { error: aggregate.error } : {}),
             startedAt: 0,
-            workflow: { value },
+            ...(aggregate.value !== undefined ? { workflow: { value: aggregate.value } } : {}),
           }),
         );
-        launched[index] = { asyncId, asyncDir };
-        reply({
-          success: true,
-          data: { text: "Started async run.", details: { asyncId, asyncDir } },
-        });
-        if ((plan.delivery ?? "auto") === "auto") {
-          // Deliver strictly after the caller's awaited spawn continuation (a macrotask) — the
-          // subscribed-before-spawn runner observes an ordinary post-reply completion.
-          setTimeout(() => complete(index), 0);
-        }
-      })();
+        launched[index] = completion;
+        return handle;
+      };
+      void prepare().then(
+        ({ asyncId, asyncDir }) => {
+          reply({
+            success: true,
+            data: { text: "Started async run.", details: { asyncId, asyncDir } },
+          });
+          if ((plan.delivery ?? "auto") === "auto") {
+            // Deliver strictly after the caller's awaited spawn continuation (a macrotask) — the
+            // subscribed-before-spawn runner observes an ordinary post-reply completion.
+            setTimeout(() => complete(index), 0);
+          }
+        },
+        (error: unknown) => {
+          reply({
+            success: false,
+            error: {
+              code: "fake_settlement_failed",
+              message: error instanceof Error ? error.message : String(error),
+            },
+          });
+        },
+      );
       return;
     }
     if (request.method === "stop") {

@@ -2189,7 +2189,9 @@ second `--fix` at `fixed == []`).
   `required-perk-version` managed check, and the report-only probes `cli-version`
   (CLI-vs-repo-pin warn), `resource-overrides` (pi overrides touching perk's own resources),
   `subagent-compat` (the pi-subagents orchestration surfaces perk's guidance assumes —
-  substring probes plus one behavior arm: the installed engine's `validateWorkflowScript`
+  file-scoped presence-only substring probes, including native partial terminal vocabulary,
+  keyed structured-result projection and async-completion forwarding, plus one behavior arm:
+  the installed engine's `validateWorkflowScript`
   run over the shared representative-script fixture
   `shared/subagents/representative-wave-script.js`, an `ok: false` joining the divergences
   while an unevaluable probe degrades to a visible `behavior probe skipped (…)` note in the
@@ -5767,6 +5769,40 @@ continuous revocation, certification of manual subagent calls, foreground Perk e
 cross-cwd handoff transport, or a universal OS sandbox. Ordinary offline/source checks do not create
 a native warm-path PASS or update the full-baseline doctor compatibility stamp.
 
+**Report authority and native partial settlement.** Ordinary durable `state: "complete"`
+uses only `status.json.workflow.value`; completion metadata never supplements or replaces it.
+A matched completion with top-level `state: "failed" | "partial"` and an explicit native
+`terminalOutcome: {state: "partial", reason: "timeout" | "budget_exhausted"}`, corroborated by
+one readable durable aggregate in `failed` or `partial` state, may retain successful sibling
+reports. An array-valued durable `workflow.value` takes precedence **in full**, including failed
+rows and missing lanes. Only when it is not an array does the transport use the completion's
+compact public child-result projection (`workflowKey`, `success`, optional string `error`,
+`structuredOutput` → `{key, ok, error, report}`). The sources are never merged or hole-filled.
+Keys must be nonempty `workflowKey` strings, not agent names, receipt identities, array order or
+artifact paths. Duplicate keys or a child run ID shared across keys withhold those reports as
+keyed malformed entries. Unknown keys are ignored by the expected-assignment normalizer.
+
+Partial evidence reuses that normalizer, with the wave-level `run-failed` first (naming the
+native reason), then assignment failures in request order, then preflight failures as before.
+Both strict and best-effort remain `complete: false`, even if every report survived. Failed
+children, missing structured output and malformed reports are never promoted. Receipt state
+stays `failed`; native timeout is not Perk's local `timeout` failure. Existing caller retry,
+reconciliation and strict-withholding policies are unchanged: a retryable wave-level failure
+still causes `/pr-review`'s bounded whole-selection retry even with retained reports.
+
+The runner subscribes before spawn and buffers completions **only until the spawn handle is
+known**. It then selects the first matching buffered completion and immediately clears the
+whole pre-reply buffer; afterward only the first matching completion occupies one slot, with
+foreign and duplicate events ignored before storage. Completion/timeout/cancellation settlement
+closes acceptance before any awaited stop. Spawn failure and final settlement unsubscribe and
+clear the buffer, matched slot and waiter callback. The instance-owned normalized result promise
+retains admitted reports until drain-once collection, not a later read of an engine artifact.
+No adapter/global report cache, new persisted report artifact, status/resume query or second
+collection channel exists. Generic failures, arbitrary partial strings, nonterminal/stopped
+states and invalid markers expose no reports; unreadable status remains `aggregate-unreadable`.
+Perk's own timeout/cancellation still stop best-effort without retained reports or post-stop
+reads. Timeout without completion, interrupted sessions and cross-reload recovery are unsupported.
+
 **Streaming launch manifests.** The report wave's `start` returns one preflight-derived
 `ReportWaveLaunchManifest = {requested, runnable, preflightFailures}` on both result arms. `requested`
 preserves the declared lane order; `runnable` is the ordered subset eligible for the rendered
@@ -5786,9 +5822,11 @@ reports, summaries, and structured output NEVER enter a receipt. With a version-
 by unique child `runId` to `children[].childId`; a present malformed/mismatched/ambiguous inventory
 withholds correlation, never inferring assignment keys from agent names. Inventory-absent legacy
 payloads retain the overloaded `results[].agent` key mapping. Retries retain every ordered
-attempt (a failed lane and its relaunch stay distinguishable). `status.json.workflow.value`
-is the sole report authority: an engine-failed row stays failed even with a report-like value
-or successful receipt metadata. Receipt absence (an identity-only completion) never changes a
+attempt (a failed lane and its relaunch stay distinguishable). Report authority is separate:
+ordinary complete runs use durable `workflow.value`; explicitly marked native partial settlement
+can retain the public keyed child projection only when that durable array is unavailable, always
+with its wave failure as specified above. An engine-failed row stays failed even with a report-like
+value or successful receipt metadata. Receipt absence (an identity-only completion) never changes a
 verdict, completeness, retry selection, or mutation decision —
 receipts are write-only correlation telemetry. The flow tools (`run_learn_wave`,
 `run_harvest_wave`, `run_dream_wave`, `run_pr_review_wave`, and the single-lane

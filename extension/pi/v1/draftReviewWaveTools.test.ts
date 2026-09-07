@@ -117,6 +117,43 @@ function primePlan(custom?: string): DraftReviewWaveState {
   return state;
 }
 
+test("strict draft collection exposes only retained successful lanes while partial stays incomplete", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregate: { state: "failed", value: undefined },
+    completionDetail: {
+      state: "failed",
+      terminalOutcome: { state: "partial", reason: "timeout" },
+      retainedEntries: [
+        okEntry("grounding"),
+        { key: "risk", ok: false, report: { summary: "not evidence" } },
+      ],
+    },
+  });
+  const wave = reportWaveOver(adapter);
+  const state = primePlan();
+  const { target } = fakeTarget();
+  await executeStartDraftReviewWave(state, wave, target, { angles: TWO_ANGLES });
+  const collected = await executeCollectDraftReviewWave(state, wave, target);
+  assert.ok(collected.details.ok);
+  assert.equal(collected.details.complete, false);
+  assert.deepEqual(collected.details.covered, ["grounding"]);
+  assert.equal(collected.details.reports.length, 1);
+  assert.deepEqual(
+    collected.details.failures.map(({ key, reason }) => [key, reason]),
+    [
+      [null, "run-failed"],
+      ["risk", "lane-failed"],
+      ["ponytail", "missing-lane"],
+    ],
+  );
+  assert.equal(adapter.calls.spawn.length, 1);
+  assert.equal(adapter.calls.stop.length, 0);
+  assert.doesNotMatch(
+    JSON.stringify(collected.details.attempts),
+    /summary|retainedEntries|terminalOutcome/,
+  );
+});
+
 for (const hasUI of [true, false]) {
   test(`collect disclosure includes custom and Ponytail (hasUI=${hasUI})`, async (t) => {
     const finding = { phrase: "Step one.", severity: "major", confidence: "high", body: "defect" };

@@ -1043,6 +1043,7 @@ def test_subagent_compat_probe_table_covers_verified_surfaces():
         "src/runs/foreground/subagent-executor.ts",
         # The async completion-wake surface (the native wake the streaming relay rides).
         "src/runs/background/notify.ts",
+        "src/runs/background/result-watcher.ts",
         # The streaming-wave delivery-chain surfaces (typed child config since v0.65.0).
         "src/runs/shared/child-runtime-config.ts",
         "src/intercom/native-supervisor-channel.ts",
@@ -1106,6 +1107,94 @@ def test_subagent_compat_exact_skill_injection_probes_are_pinned():
         ),
     }
     assert expected <= set(_SUBAGENT_COMPAT_PROBES)
+
+
+# Literal full-row pins are independent of the table-derived synthetic installation. Removing
+# a production row must fail even if the remaining table plants a superficially healthy tree.
+_PARTIAL_COMPAT_ROWS = (
+    (
+        "partial workflow terminal vocabulary",
+        "src/shared/types.ts",
+        ("WorkflowTerminalOutcome", 'state: "partial"', '"budget_exhausted"', '"timeout"'),
+    ),
+    (
+        "partial workflow result projection",
+        "src/runs/foreground/subagent-executor.ts",
+        (
+            "workflowFailureTerminalOutcome",
+            "terminalOutcome",
+            "results: partial.children.map",
+            "workflowKey: child.key",
+            "structuredOutput: child.structuredOutput",
+            "success: child.ok",
+        ),
+    ),
+    (
+        "partial workflow completion forwarding",
+        "src/runs/background/result-watcher.ts",
+        ("SUBAGENT_ASYNC_COMPLETE_EVENT", "...data", "...data.results![index]"),
+    ),
+)
+
+
+def test_subagent_compat_partial_rows_are_pinned_in_full():
+    assert set(_PARTIAL_COMPAT_ROWS) <= set(_SUBAGENT_COMPAT_PROBES)
+
+
+def test_subagent_compat_partial_ok_detail_without_node(scaffolded_perk_repo, monkeypatch):
+    _plant_subagents_tree(scaffolded_perk_repo)
+    monkeypatch.setattr(doctor_checks.proc, "which_absolute", lambda binary: None)
+    compat = _subagent_compat_check(scaffolded_perk_repo)
+    assert compat.status == "ok" and compat.group == "package"
+    for surface in (
+        "partial terminal vocabulary",
+        "keyed structured-result projection",
+        "completion forwarding",
+    ):
+        assert surface in compat.detail
+    assert "behavior probe skipped (node not on PATH)" in compat.detail
+    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.65.1"
+
+
+@pytest.mark.parametrize(
+    ("label", "relpath", "dropped"),
+    [(label, path, marker) for label, path, markers in _PARTIAL_COMPAT_ROWS for marker in markers],
+)
+def test_subagent_compat_partial_missing_marker_warns_without_node(
+    scaffolded_perk_repo, monkeypatch, label, relpath, dropped
+):
+    pkg = _plant_subagents_tree(scaffolded_perk_repo)
+    path = pkg / relpath
+    original = path.read_text(encoding="utf-8")
+    assert dropped in original
+    # Shared files contain several rows' markers: remove EVERY occurrence, including substrings.
+    path.write_text(original.replace(dropped, ""), encoding="utf-8")
+    assert dropped not in path.read_text(encoding="utf-8")
+    monkeypatch.setattr(doctor_checks.proc, "which_absolute", lambda binary: None)
+    compat = _subagent_compat_check(scaffolded_perk_repo)
+    assert compat.status == "warn" and compat.group == "package"
+    assert label in compat.detail and dropped in compat.detail
+    assert "behavior probe skipped (node not on PATH)" in compat.detail
+    assert compat.remediation
+    report = DoctorReport(checks=[compat], fixed=[], self_repo=False)
+    assert report.healthy and report.exit_code == 0
+
+
+@pytest.mark.parametrize(("label", "relpath", "_markers"), _PARTIAL_COMPAT_ROWS)
+def test_subagent_compat_partial_missing_file_warns_without_fix(
+    scaffolded_perk_repo, monkeypatch, label, relpath, _markers
+):
+    pkg = _plant_subagents_tree(scaffolded_perk_repo)
+    path = pkg / relpath
+    path.unlink()
+    monkeypatch.setattr(doctor_checks.proc, "which_absolute", lambda binary: None)
+    report = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    compat = next(check for check in report.checks if check.name == "subagent-compat")
+    assert compat.status == "warn" and compat.group == "package"
+    assert f"{label}: {relpath} missing" in compat.detail
+    assert compat.remediation
+    assert not path.exists()
+    assert "subagent-compat" not in report.fixed
 
 
 def test_subagent_compat_ok_detail_names_the_acceptance_surface(scaffolded_perk_repo):

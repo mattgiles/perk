@@ -72,6 +72,42 @@ function laneItemsOf(script: string): Array<{
 
 // -------------------------------------------------------------------------- lane construction
 
+test("native partial evidence still retries the whole selection and uses the retry's evidence", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregates: [
+      { state: "failed", value: undefined },
+      {
+        state: "complete",
+        value: [
+          failedEntry("plan-fidelity", "retry failed"),
+          okEntry("correctness"),
+          okEntry("ponytail"),
+        ],
+      },
+    ],
+    completionDetails: [
+      {
+        state: "failed",
+        terminalOutcome: { state: "partial", reason: "budget_exhausted" },
+        retainedEntries: [okEntry("plan-fidelity")],
+      },
+      { state: "complete" },
+    ],
+  });
+  const result = await runPrReviewWave(adapter, { angles: TWO_ANGLES, timeoutMs: 5_000 });
+  assert.deepEqual(result.retried, ["plan-fidelity", "correctness", "ponytail"]);
+  assert.deepEqual(result.covered, ["correctness", "ponytail"]);
+  assert.equal(result.complete, false);
+  assert.equal(adapter.calls.spawn.length, 2);
+  assert.deepEqual(
+    laneItemsOf(adapter.calls.spawn[1]?.workflowScript ?? "").map((row) => row.key),
+    ["plan-fidelity", "correctness", "ponytail"],
+  );
+  assert.equal(result.attempts.length, 2);
+  assert.equal(result.attempts[0]?.state, "failed");
+  assert.doesNotMatch(JSON.stringify(result.attempts), /verdict|retainedEntries|terminalOutcome/);
+});
+
 test("runPrReviewWave builds selected lanes plus one final Ponytail lane", async () => {
   const adapter = createMemoryWaveAdapter({
     aggregate: {
