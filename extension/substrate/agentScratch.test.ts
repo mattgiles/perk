@@ -533,8 +533,19 @@ test("dedup requires the exact owned custom string in Pi's projection — nothin
       dedups: false,
     },
     {
-      name: "plain custom state (`data.content`) — never projected by Pi",
-      entries: [],
+      // Pi's `buildContextEntries()` returns custom STATE entries too; its converter projects
+      // no message for them — `data.content` is state, never model delivery.
+      name: "plain custom state (`data.content`) selected by Pi but never projected",
+      entries: [
+        {
+          type: "custom",
+          id: "st",
+          parentId: null,
+          timestamp: at,
+          customType: AGENT_SCRATCH_CONTEXT_TYPE,
+          data: { content: block.content },
+        },
+      ],
       dedups: false,
     },
   ];
