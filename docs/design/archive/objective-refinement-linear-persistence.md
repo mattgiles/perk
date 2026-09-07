@@ -48,6 +48,21 @@ $ uv run pytest tests/test_linear_refinement.py tests/test_objective_refinement.
 Whole-repo `uv run ty check` (the conformance oracle over every store/backend fake) and the
 full `run_ci` gate were green at submission.
 
+**Re-run after review** (commit `a78212ef1aee4519e558c18111e126505b1f067d` — the address pass
+that unified family ownership between the plan-exclusion predicate and discovery, moved
+attachment ownership ahead of any envelope decode, made the scalar checks whole-string, escaped
+`<` in the wire header so quoted perk markers survive the transcoder, and made the duplicate
+set independent of repeated-marker defects):
+
+```
+$ uv run pytest "tests/test_linear_refinement.py::test_phase1_gate_linear_refinement_persistence" -v -n0
+tests/test_linear_refinement.py::test_phase1_gate_linear_refinement_persistence[incremental] PASSED
+tests/test_linear_refinement.py::test_phase1_gate_linear_refinement_persistence[stacked] PASSED
+============================== 2 passed in 0.61s ===============================
+$ uv run pytest tests/test_linear_refinement.py tests/test_objective_refinement.py -q
+141 passed in 1.22s
+```
+
 ## What the gate case does (`test_phase1_gate_linear_refinement_persistence`)
 
 1. **A real temp checkout** (`git init` + one commit + `.perk/config.toml` selecting
@@ -96,11 +111,13 @@ full `run_ci` gate were green at submission.
   natural order, identity/source/eligibility fields, observed vs effective dependencies,
   plan-header presence with a corrupt payload and with duplicates, native cancellation →
   `skipped`, missing / non-perk / empty objectives, every duplicate-identity `ambiguous_target`
-  arm, every `malformed_target` arm (corrupt node payload, bad status, missing id, unreadable
-  perk envelope kind, missing header run id, `hasNextPage: true`, a missing or non-boolean
-  completeness field — with a focused check that the read requests the signal and the ordinary
-  projection read does not), transport failures staying plain `ObjectiveStoreError`, and the
-  GitHub / dormant-Linear stores refusing `unsupported_backend` with zero requests.
+  arm, every `malformed_target` arm (corrupt node payload, bad status, missing id, a perk-owned
+  envelope whose `kind` is missing / blank / `null` / numeric / an object / a list, missing
+  header run id, `hasNextPage: true`, a missing or non-boolean completeness field — with a
+  focused structural check that the read requests the signal and the ordinary projection read
+  does not), foreign cards with arbitrary `kind`/`source` types never breaking the read,
+  transport failures staying plain `ObjectiveStoreError`, and the GitHub / dormant-Linear
+  stores refusing `unsupported_backend` with zero requests.
 - **The guarded upsert** (`TestGuardedUpsert`): first save / shorter replacement / no-write
   convergence, stale expectations (present-vs-absent, wrong digest, vanished comment),
   duplicates and misplaced/repeated markers across a later page, dry run and input validation
