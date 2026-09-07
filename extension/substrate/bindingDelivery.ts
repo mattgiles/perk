@@ -25,9 +25,10 @@
 // Pi's. A projection read failure escapes the hook to Pi's hook-error reporting rather than
 // injecting a guessed copy.
 //
-// LBYL throughout: a missing/unreadable transclude target degrades to the nudge pointer with a
-// loud-but-non-fatal warning, never throws, never blocks a turn. Resolver shape `issues` are NOT
-// surfaced warm (the cold launch + doctor own them); only the transclude `warnings` are.
+// LBYL on the render path: a missing/unreadable transclude target degrades to the nudge pointer
+// with a loud-but-non-fatal warning, never throws, never blocks a turn (only a session read
+// failure — branch or projection — escapes the hooks). Resolver shape `issues` are NOT surfaced
+// warm (the cold launch + doctor own them); only the transclude `warnings` are.
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -177,8 +178,9 @@ function activeStageRender(cwd: string, branch: readonly BranchEntry[]): Binding
 /**
  * Register warm-door binding delivery: Mechanism A's dedup-guarded `before_agent_start` injection
  * plus a `context` strip mirroring planMode.ts / objectiveAuthor.ts (keep while the stage's
- * bindings are live; strip the stale custom otherwise). Inert when nothing matches the stage;
- * never throws. Mechanism B (`bindingSuffix`) is wired by the command modules themselves.
+ * bindings are live; strip the stale custom otherwise). Inert when nothing matches the stage; the
+ * render path never throws (only a failed session read escapes to Pi's hook-error reporting).
+ * Mechanism B (`bindingSuffix`) is wired by the command modules themselves.
  */
 export function registerBindingDelivery(pi: ExtensionAPI): void {
   // Mechanism A — inject the launched stage's resolved bindings as a hidden context message,
