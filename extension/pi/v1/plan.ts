@@ -79,7 +79,12 @@ import { report, type Severity } from "../../surfaces/report.ts";
 // structurally confined to the surfaces module (the surfacesGuard pi-tui import rule).
 import { Key } from "../../surfaces/surfaces.ts";
 import { installInjectedContext } from "./contextInjection.ts";
-import type { DraftReviewAccess } from "./draftReviewActivation.ts";
+import {
+  type DraftReviewConfirmedFacts,
+  type DraftReviewRuntime,
+  draftReviewMutationRefusal,
+} from "./draftReviewActivation.ts";
+import { mutationPlanSaveDeps } from "./draftReviewEffects.ts";
 import {
   type ApprovalSaveOutcome,
   executePlanReview,
@@ -408,7 +413,7 @@ export async function approvalSave(
 export function installPlanBindings(
   pi: ExtensionAPI,
   gating: ToolGating,
-  reviews: DraftReviewAccess,
+  reviews: DraftReviewRuntime,
   wave?: WaveLaunch,
 ): void {
   installPlanMode(pi, gating);
@@ -455,7 +460,16 @@ export function installPlanBindings(
         )("plan_draft needs { plan: string } per the tool schema", "bad_input");
       }
       const fail = failFor(ctx, "plan-draft");
-      const revised = revisePlanDraft(decoded, openBranchWorkflowSession(pi, ctx));
+      const mutation = reviews.mutate(
+        ctx,
+        "source-changed",
+        (session) => revisePlanDraft(decoded, session),
+        {
+          draft: { subject: "plan" },
+        },
+      );
+      if (!mutation.ok) return draftReviewMutationRefusal(mutation);
+      const revised = mutation.value;
       switch (revised.status) {
         case "revised":
         case "unchanged":
@@ -546,47 +560,52 @@ export function installPlanBindings(
           "plan_save",
         )("plan_save needs { plan: string, … } per the tool schema", "bad_input");
       }
-      const deps = planSaveDepsFor(pi, ctx, gating);
-      // No read-only fail-fast here (D1a): the `plan_save` TOOL is structurally unreachable
-      // while read-only (the read-only allowlist excludes it), so reaching this handler means
-      // the gate is already off; the `/plan-save` COMMAND is allowed to run while read-only and
-      // exits the gate on a successful save (the read-only → read-write boundary in one gesture).
-      const src = resolvePlanSource(
-        {
-          draft: (() => {
-            const read = deps.session.readArtifact(PLAN_DRAFT_ARTIFACT);
-            return read.status === "found" ? read.content : null;
-          })(),
-          ...(decoded.plan !== undefined ? { explicit: decoded.plan } : {}),
-          transcript: deps.transcript,
-        },
-        "save",
-      );
-      if (src === null) {
-        return failFor(
-          ctx,
-          "plan-save",
-          "plan_save",
-        )(
-          "no plan to save — write the working draft with plan_draft, or pass the plan parameter",
-          "invalid_input",
+      const facts: DraftReviewConfirmedFacts = {};
+      const mutation = await reviews.mutateAsync(ctx, "manual-save", async (session) => {
+        const original = planSaveDepsFor(pi, ctx, gating);
+        const deps = { ...original, ...mutationPlanSaveDeps(original, session, facts, "manual") };
+        // No read-only fail-fast here (D1a): the `plan_save` TOOL is structurally unreachable
+        // while read-only (the read-only allowlist excludes it), so reaching this handler means
+        // the gate is already off; the `/plan-save` COMMAND is allowed to run while read-only and
+        // exits the gate on a successful save (the read-only → read-write boundary in one gesture).
+        const src = resolvePlanSource(
+          {
+            draft: (() => {
+              const read = deps.session.readArtifact(PLAN_DRAFT_ARTIFACT);
+              return read.status === "found" ? read.content : null;
+            })(),
+            ...(decoded.plan !== undefined ? { explicit: decoded.plan } : {}),
+            transcript: deps.transcript,
+          },
+          "save",
         );
-      }
-      const outcome = await savePlan(
-        {
-          plan: src.plan,
-          source: src.source,
-          paramMismatch: src.paramMismatch,
-          ...(decoded.title !== undefined ? { title: decoded.title } : {}),
-          ...(decoded.objective_id !== undefined ? { objectiveId: decoded.objective_id } : {}),
-          ...(decoded.node_id !== undefined ? { nodeId: decoded.node_id } : {}),
-          ...(decoded.consumed_learn !== undefined
-            ? { consumedLearn: decoded.consumed_learn }
-            : {}),
-        },
-        deps,
-      );
-      return deps.renderSave(outcome);
+        if (src === null) {
+          return failFor(
+            ctx,
+            "plan-save",
+            "plan_save",
+          )(
+            "no plan to save — write the working draft with plan_draft, or pass the plan parameter",
+            "invalid_input",
+          );
+        }
+        const outcome = await savePlan(
+          {
+            plan: src.plan,
+            source: src.source,
+            paramMismatch: src.paramMismatch,
+            ...(decoded.title !== undefined ? { title: decoded.title } : {}),
+            ...(decoded.objective_id !== undefined ? { objectiveId: decoded.objective_id } : {}),
+            ...(decoded.node_id !== undefined ? { nodeId: decoded.node_id } : {}),
+            ...(decoded.consumed_learn !== undefined
+              ? { consumedLearn: decoded.consumed_learn }
+              : {}),
+          },
+          deps,
+        );
+        return deps.renderSave(outcome);
+      });
+      return mutation.ok ? mutation.value : draftReviewMutationRefusal(mutation, facts);
     },
   });
 
@@ -600,31 +619,45 @@ export function installPlanBindings(
       // (no explicit param on the command path ⇒ paramMismatch is always false); the D1a gate exit
       // lives in the seam. (The tool path never exits the gate — it is structurally unreachable
       // while read-only.)
-      const outcome = await approvalSave(pi, ctx, gating, { title });
-      if (outcome.status === "no-plan") {
+      const facts: DraftReviewConfirmedFacts = {};
+      const mutation = await reviews.mutateAsync(ctx, "manual-save", async (session) => {
+        const original = planSaveDepsFor(pi, ctx, gating);
+        const deps = { ...original, ...mutationPlanSaveDeps(original, session, facts, "approval") };
+        const saved = await planApprovalSave(deps, { title });
+        const outcome =
+          saved.status === "no-plan" ? saved : { ...saved, result: deps.renderSave(saved.result) };
+        if (outcome.status === "no-plan") {
+          report(
+            ctx,
+            "plan-save",
+            "warning",
+            "no plan to save; write a draft with plan_draft, propose a plan, or call the plan_save tool.",
+            { alsoLog: true },
+          );
+          return;
+        }
+        // Severity reflects a failed objective-node advance: not-ok → error; saved-but-link-failed →
+        // warning; otherwise info. A failed node-link never blocks the gate exit above (the plan was
+        // saved) — but it MUST surface (the silent-partial-failure fix), in headless runs too.
+        const result = outcome.result;
+        const message = result.content[0]?.text ?? "plan-save done";
+        // `SaveResult` flows through `approvalSave` concretely — `details.ok` narrows the union,
+        // so the node-link severity read is typed (no assertion).
+        const details = result.details;
+        const severity: Severity = !details.ok
+          ? "error"
+          : details.objective_node?.linked === false
+            ? "warning"
+            : "info";
+        report(ctx, "plan-save", severity, message);
+      });
+      if (!mutation.ok)
         report(
           ctx,
           "plan-save",
           "warning",
-          "no plan to save; write a draft with plan_draft, propose a plan, or call the plan_save tool.",
-          { alsoLog: true },
+          draftReviewMutationRefusal(mutation, facts).content[0]?.text ?? "Draft review stopped",
         );
-        return;
-      }
-      // Severity reflects a failed objective-node advance: not-ok → error; saved-but-link-failed →
-      // warning; otherwise info. A failed node-link never blocks the gate exit above (the plan was
-      // saved) — but it MUST surface (the silent-partial-failure fix), in headless runs too.
-      const result = outcome.result;
-      const message = result.content[0]?.text ?? "plan-save done";
-      // `SaveResult` flows through `approvalSave` concretely — `details.ok` narrows the union,
-      // so the node-link severity read is typed (no assertion).
-      const details = result.details;
-      const severity: Severity = !details.ok
-        ? "error"
-        : details.objective_node?.linked === false
-          ? "warning"
-          : "info";
-      report(ctx, "plan-save", severity, message);
     },
   });
 
@@ -643,14 +676,14 @@ export function installPlanBindings(
     // The handler body lives in planReview.ts (next to the seam it composes — and so the
     // sendUserMessage call sites stay out of this installer file, whose registration prose the
     // prose-review workbench edits through the whole-file-validating TypeScript adapter).
-    handler: async (_args, ctx) => runImplementHereCommand(pi, ctx, gating),
+    handler: async (_args, ctx) => runImplementHereCommand(pi, ctx, gating, reviews),
   });
 
   // ---------------------------------------------------------------- the plan_review tool
   // perk's universal review door. In READ_ONLY_TOOLS so it is callable INSIDE plan mode (the
   // whole point — review happens before the gate ever comes off). Fail-open everywhere:
   // headless / dismissed / backend-unavailable all soft-skip so authoring never wedges.
-  const bridge = { ...createPlannotatorBridge(pi.events), prepare: reviews.prepare };
+  const bridge = { ...createPlannotatorBridge(pi.events), ...reviews };
   pi.registerTool({
     name: "plan_review",
     label: "Plan review",

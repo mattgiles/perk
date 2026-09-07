@@ -257,13 +257,13 @@ export default function perk(
   // gate AND stage === objective-author); planMode defers to it), plus the
   // `objective_draft`/`objective_save` tools and the `/objective-save` command (registration is
   // name-keyed — only the hooks ordering is frozen).
-  installObjectiveAuthoringBindings(pi, gating);
+  installObjectiveAuthoringBindings(pi, gating, draftReviews);
 
   // The v1 gist installer: the gist-authoring context hook pair (this call sits at the frozen
   // hooks-ordering slot the injection always held; planMode defers to it too), plus the
   // `gist_draft`/`gist_save` tools and the `/gist-save` command (registration is name-keyed —
   // only the hooks ordering is frozen).
-  installGistBindings(pi, gating);
+  installGistBindings(pi, gating, draftReviews);
   let sharedOk = false;
   try {
     sharedDir();
@@ -669,7 +669,7 @@ export default function perk(
   // `/objective-plan` command (select the next node and author a bounded plan). The command now
   // enters the read-only gate on invocation (parity with the cold door's `mode: read-only`
   // handoff; exit stays with plan_save / `/plan` off) — hence `gating`.
-  installObjectivePlanningBindings(pi, gating, reportWave);
+  installObjectivePlanningBindings(pi, gating, reportWave, draftReviews);
 
   // The two learn plan factories' warm surfaces: `/learn-docs` gathers open perk:learn issues
   // (via the `perk learn docs --gather` cold door) toward a docs/learned consolidation plan;

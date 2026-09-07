@@ -1,4 +1,9 @@
-import type { DraftReviewAccess } from "../pi/v1/draftReviewActivation.ts";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  createDraftReviewActivation,
+  type DraftReviewAccess,
+  type DraftReviewRuntime,
+} from "../pi/v1/draftReviewActivation.ts";
 import type { DraftReviewRegistration } from "../session/draftReviewState.ts";
 import { digestSessionData } from "../session/workflowSession.ts";
 
@@ -46,7 +51,32 @@ export function policyBrowserReviews(
     },
   };
 }
-export const policyDraftReviews: DraftReviewAccess = {
+const mutationRuntimes = new WeakMap<ExtensionContext, DraftReviewRuntime>();
+function mutationRuntime(ctx: ExtensionContext): DraftReviewRuntime {
+  let runtime = mutationRuntimes.get(ctx);
+  if (runtime === undefined) {
+    // Policy tests fake only Pi's storage carrier; mutation identity/state/claims remain real.
+    const pi = {
+      on() {},
+      appendEntry(type: string, data: unknown) {
+        const manager = ctx.sessionManager;
+        if (!("appendCustomEntry" in manager) || typeof manager.appendCustomEntry !== "function")
+          throw new Error("Policy fixture needs a writable session manager");
+        manager.appendCustomEntry(type, data);
+      },
+    } as unknown as ExtensionAPI;
+    runtime = createDraftReviewActivation(pi);
+    mutationRuntimes.set(ctx, runtime);
+  }
+  return runtime;
+}
+export const policyDraftReviews: DraftReviewRuntime = {
+  mutate(ctx, reason, work, options) {
+    return mutationRuntime(ctx).mutate(ctx, reason, work, options);
+  },
+  mutateAsync(ctx, reason, work) {
+    return mutationRuntime(ctx).mutateAsync(ctx, reason, work);
+  },
   prepare(_ctx, markdown = "", signal) {
     const abort = new AbortController();
     return {

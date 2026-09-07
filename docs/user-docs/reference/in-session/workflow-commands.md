@@ -39,6 +39,15 @@ original draft with a loud warning and leaves the diff in feedback. Denial retur
 save: the agent must fold the rendered-markdown diff into `objective_draft` or the matching
 `gist_draft` fields and request a confirming review.
 
+The draft tools, manual plan/objective/gist saves, `objective_node`, and `/implement-here`
+now share a verified current-run review claim. Missing/unsafe identity, contention, unresolved
+dispatch/uncertainty, invalid review state, or failed invalidation stops the operation before its
+effects. A genuinely absent review record permits normal behavior under exclusion. First-party
+review releases the claim before editor waits and reacquires for edits/completion. See
+[Participating authoring and first-party review](./review-and-authoring.md#participating-authoring-and-first-party-review)
+for invalidation rules and the still-incomplete Plannotator activation limit. A review-state stop
+is not an instruction to retry a save or delete retained state.
+
 ### `/plan-save`
 
 Persist the plan to the issue backend, link the session to it, and cross the read-only → read-write

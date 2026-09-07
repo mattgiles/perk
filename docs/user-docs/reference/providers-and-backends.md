@@ -69,10 +69,12 @@ the handshake. Pending is quiet and proves neither browser health nor delivery; 
 status warns but keeps the live wait open and cancellable. Cancellation closes the local wait,
 not the upstream browser. There is no polling, startup discovery, automatic replay, or resume.
 
-**Integration status:** registration and catch-up are active. Guarded subject effects, competing
-authoring mutations, and persisted delivery acknowledgment are not yet composed in this milestone;
-the transport alone does not establish at-most-once saves or delivery. The existing first-party
-review and subject-specific Direct Edits/save policies remain in place.
+**Integration status:** registration, catch-up, and participating authoring mutations are active.
+Draft/manual-save/node entries and first-party replacement/writeback require a verified current-run
+claim; first-party editor waits release it. Missing identity is not an unclaimed save fallback.
+Plannotator tool/browser/chooser subject effects, readiness degradation, and their persisted delivery
+acknowledgment remain uncomposed: no live end-to-end at-most-once save/delivery guarantee is claimed.
+Subject-specific Direct Edits/save source policies remain in place.
 
 ## Known caveats & maturity
 

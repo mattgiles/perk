@@ -8,8 +8,8 @@
 // (perk-plan, tombell, unknown ids) → the FIRST-PARTY in-TUI editor review
 // (`runFirstPartyReview`, pi/v1/review.ts): display the draft in pi's built-in `ctx.ui.editor`
 // dialog (scrollable, Ctrl+G opens the user's external $EDITOR), write optional human edits
-// back to the draft via the session seam BEFORE the verdict (reviewed bytes == artifact bytes
-// == saved bytes — a failed write-back ABORTS the review fail-open, nothing saved), then an
+// back to the draft via the claimed mutation seam BEFORE the verdict (a failed write-back
+// refuses further effects and retains residue), then an
 // approve/deny/skip `ctx.ui.select` verdict — on the plan arm with a 4th "Implement here — no
 // issue saved" option (§8.23; suppressed in objective-node planning sessions) — with deny
 // feedback via a second editor dialog.
@@ -59,6 +59,7 @@ import { OBJECTIVE_AUTHOR_STAGE, OBJECTIVE_SAVE_STAGE } from "../../authoring/ob
 import { resumePlanDraft, revisePlanDraft } from "../../authoring/plan/draft.ts";
 import {
   applyReviewerEdits,
+  completePlanReview,
   type PlanDraftReviewer,
   type PlanReviewOutcome,
   type ReviewPlanDraftResult,
@@ -71,7 +72,6 @@ import type {
 } from "../../authoring/plan/save.ts";
 import { type PlanSource, resolvePlanSource } from "../../authoring/plan/source.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
-import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
 import type { PlanRef } from "../../substrate/cache.ts";
 import type { Result } from "../../substrate/result.ts";
@@ -81,10 +81,15 @@ import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts
 import { report } from "../../surfaces/report.ts";
 import {
   captureDraftReviewRefusal,
+  type DraftReviewConfirmedFacts,
+  type DraftReviewRuntime,
+  draftReviewMutationRefusal,
+  draftReviewMutationValue,
   draftReviewRefusalResult,
   type RegisteredDraftReviewBridge,
   reviewRegisteredDraft,
 } from "./draftReviewActivation.ts";
+import { mutationPlanSaveDeps } from "./draftReviewEffects.ts";
 import { runGistReviewV1 } from "./gist.ts";
 import { executeObjectiveReview } from "./objectiveReview.ts";
 import { extractDirectEdits, hasDirectEditsHeading } from "./providers/plannotator.ts";
@@ -270,35 +275,44 @@ export async function runImplementHereCommand(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
+  reviews: DraftReviewRuntime,
 ): Promise<void> {
-  // The claim read rides the session seam (the one workflow-state owner) — the command has no
-  // injected deps bag, so it opens the branch-backed session the production composition uses.
-  if (openBranchWorkflowSession(pi, ctx).nodeClaim() !== null) {
+  const mutation = reviews.mutate(ctx, "implement-here", (session) => {
+    // The explicit mutation capability owns both node-claim reads and the no-save gate effect.
+    if (session.nodeClaim() !== null) {
+      report(
+        ctx,
+        "implement-here",
+        "warning",
+        "this is an objective-node planning session — a node-linked plan must be saved " +
+          "(the node advance and backlink depend on it). Use plan_review / /plan-save instead.",
+      );
+      return;
+    }
+    if (!gating.isActive()) {
+      report(
+        ctx,
+        "implement-here",
+        "warning",
+        "not in plan mode — nothing to exit; just ask the model to implement.",
+      );
+      return;
+    }
+    implementHereExit(ctx, gating);
+    const message = implementHereGuidance(ctx.cwd, {});
+    if (ctx.isIdle()) {
+      pi.sendUserMessage(message);
+    } else {
+      pi.sendUserMessage(message, { deliverAs: "followUp" });
+    }
+  });
+  if (!mutation.ok)
     report(
       ctx,
       "implement-here",
       "warning",
-      "this is an objective-node planning session — a node-linked plan must be saved " +
-        "(the node advance and backlink depend on it). Use plan_review / /plan-save instead.",
+      draftReviewMutationRefusal(mutation).content[0]?.text ?? "Draft review stopped",
     );
-    return;
-  }
-  if (!gating.isActive()) {
-    report(
-      ctx,
-      "implement-here",
-      "warning",
-      "not in plan mode — nothing to exit; just ask the model to implement.",
-    );
-    return;
-  }
-  implementHereExit(ctx, gating);
-  const message = implementHereGuidance(ctx.cwd, {});
-  if (ctx.isIdle()) {
-    pi.sendUserMessage(message);
-  } else {
-    pi.sendUserMessage(message, { deliverAs: "followUp" });
-  }
 }
 
 /**
@@ -469,25 +483,33 @@ function plannotatorPlanReviewer(
 }
 
 /**
- * The first-party reviewer adapter: the in-TUI editor review with the draft write-back bound to
- * the session seam (edits land BEFORE the verdict — a failed write-back is the `unavailable`
- * abort inside the core). The 4th verdict (implement-here, the no-save exit) is offered UNLESS
+ * The first-party reviewer adapter invalidates and releases before the editor wait, then
+ * reacquires for write-back before the verdict. A failed claimed write propagates refusal; no
+ * cached session or claim survives the human wait. The 4th verdict (implement-here, the no-save exit) is offered UNLESS
  * this is an objective-node planning session — a node-linked plan must save (the node advance
  * and backlink depend on it), so the claim suppresses it back to the 3-option select (the UX
  * layer; the feature's `allowImplementHere` refusal is the structural backstop).
  */
 function firstPartyPlanReviewer(
   ctx: ExtensionContext,
-  session: WorkflowSession,
+  reviews: DraftReviewRuntime,
   nodeClaimed: boolean,
 ): PlanDraftReviewer {
   return {
     async review(plan, signal) {
+      draftReviewMutationValue(reviews.mutate(ctx, "first-party-review", () => undefined));
       const fp = await runFirstPartyReview({
         ui: ctx.ui,
         plan,
         writeDraft: (text) => {
-          const written = revisePlanDraft({ plan: text }, session);
+          const written = draftReviewMutationValue(
+            reviews.mutate(
+              ctx,
+              "source-changed",
+              (session) => revisePlanDraft({ plan: text }, session),
+              { draft: { subject: "plan" } },
+            ),
+          );
           return written.status === "revised" || written.status === "unchanged";
         },
         ...(signal !== undefined ? { signal } : {}),
@@ -588,7 +610,36 @@ export async function runPlanReviewV1(
     }
     reviewer = plannotatorPlanReviewer(bridge, ctx);
   } else {
-    reviewer = firstPartyPlanReviewer(ctx, deps.session, nodeClaimed);
+    reviewer = firstPartyPlanReviewer(ctx, bridge, nodeClaimed);
+    const facts: DraftReviewConfirmedFacts = {};
+    const result = await captureDraftReviewRefusal(
+      (async () => {
+        if (sig?.aborted) return { status: "aborted" as const };
+        const reviewed = await reviewer.review(src.plan, sig);
+        if (sig?.aborted) return { status: "aborted" as const };
+        return draftReviewMutationValue(
+          await bridge.mutateAsync(
+            ctx,
+            reviewed.outcome.status === "implementHere" ? "implement-here" : "first-party-review",
+            (session) =>
+              completePlanReview(
+                {
+                  ...mutationPlanSaveDeps(deps, session, facts, "approval"),
+                  allowImplementHere: session.nodeClaim() === null,
+                },
+                reviewed,
+                {
+                  source: src.source === "plan-draft" ? "plan-draft" : "param",
+                  paramMismatch: src.paramMismatch,
+                },
+              ),
+          ),
+        );
+      })(),
+    );
+    return result.status === "refused"
+      ? draftReviewRefusalResult(result, facts)
+      : renderReviewResult(ctx, deps, result);
   }
   // 4. The feature review operation owns the resolve → review → abort-checkpoint → route
   //    discipline (incl. the Direct-Edits apply ladder and the D1a approval save).

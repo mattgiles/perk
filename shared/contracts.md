@@ -211,7 +211,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   transaction or an automatic lock. The narrowly typed owned-plan-patch exception (§8.23) may
   retain frozen original-source authority after draft write-back failure, never after review-state
   or ownership failure. Plannotator review transports now use strict opening/attachment registration;
-subject-effect dispatch and authoring-mutation participation remain a separate integration step.
+production eligibility mutations now use that claim (§8.23); Plannotator subject-effect dispatch
+remains a separate integration step, so no end-to-end live dispatch guarantee is claimed.
 
   `draft-review.json` is a fixed session artifact, with full replacements and strict current-run
   provenance only. Its codec/transition owner is `session/draftReviewState.ts`; target projection
@@ -862,8 +863,9 @@ or missing/unsafe identity. Aliases share exclusion; different runs (including f
 owner record is exactly `{schema:1, token, pid, parentSessionId, ownerRunId, requestId,
 reviewNamespace, createdAt}`, where `reviewNamespace` is the canonical data directory. Owner
 metadata is diagnostic, not evidence of decision/save/delivery. The closed state machine and
-claim-bound orchestration capability are implemented (§8.23), but no live transport, authoring
-entry, recovery/resume, or startup discovery is activated here. Participating operations hold one
+claim-bound orchestration capability, live transport registration, and participating authoring
+entries are implemented (§8.23). Plannotator subject-effect dispatch, recovery/resume, and startup
+discovery are not activated. Participating operations hold one
 explicit claim through verified intent/effects/immediate bookkeeping, not through browser/human/
 status/delivery waiting. A failed
 or unverified persistence operation retains residue and permits no further effects or speculative
@@ -4212,15 +4214,16 @@ artifacts + "File-first plan save"), §8.3 (the `approvalSave` seam + the warm c
 §8.57 (review-first carrier ownership), and §8.10 (provider deltas + the interactive save
 discipline); this section keeps the unique cross-cutting rules.
 
-### Bound draft-decision state and orchestration (transport registration active)
+### Bound draft-decision state and orchestration (registration and eligibility mutations active)
 
 The following storage/capability contract is implemented in `session/draftReviewState.ts`,
 `session/draftReviewBinding.ts`, and `pi/v1/draftReviewDecisions.ts`. The activation-scoped
 `pi/v1/draftReviewActivation.ts` now binds real registration to plan/objective/gist tool reviews
 and both browser doors. It also exposes an identity-bound completion and context-bound mutation
 API, with activation-local delivery observation at turn_end and before guarded operations.
-**Integration limit:** tool/browser/chooser subject-effect dispatch and participating authoring
-callers still do not use those APIs. Their end-to-end at-most-once guarantee is not yet active.
+The root injects this single runtime into the production eligibility entries described below.
+**Integration limit:** Plannotator tool/browser/chooser subject-effect dispatch and readiness
+degradation still do not use those APIs. Their end-to-end at-most-once guarantee is not yet active.
 Construction performs no startup discovery, status query, previous-feedback injection,
 resend, or automatic recovery. Python neither reads nor writes this decision artifact.
 
@@ -4232,8 +4235,8 @@ source selection is not itself claim authorization; browser completion and guard
 composition remain pending. Gist checks abort before review and again after the reviewer await,
 before save or actionable revision completion.
 
-`pi/v1/draftReviewEffects.ts` provides tested, not-yet-live claim-bound save dependency adapters
-for those completion seams. Their backend ports enter `capability.save` after feature validation
+`pi/v1/draftReviewEffects.ts` provides claim-bound save dependency adapters for those completion
+seams. Its Plannotator dispatch adapters are tested but not yet live. Their backend ports enter `capability.save` after feature validation
 and title awaits, bind the captured warm plan node inputs explicitly (absent leaves the cold
 handoff fallback), and confirm the subject's typed ID/URL receipt. A receipt callback preserves
 definitive gate exit before fallible receipt-state bookkeeping; subsequent errors retain the
@@ -4243,7 +4246,35 @@ operations: it verifies invalidation before invoking the callback and holds excl
 its awaited work; its explicit session capability expires on release. Editor/human waits must
 not use that method. Both mutation methods require a safe current-run identity even when the
 record is absent; missing/unsafe/unreadable identity is not an unclaimed ordinary-operation
-bypass. Production eligibility entry wiring is still pending.
+bypass. Production `plan_draft`, `objective_draft`, and `gist_draft` now use the synchronous
+mutation session. Feature-owned serialization/validation (including the objective dream gate)
+runs under exclusion; when bytes are supplied only by the feature's write, the capability checks
+unresolved state on entry and verifies source-changed invalidation immediately before that write.
+It permits only the named subject artifact, not linkage changes. Identical existing sound bytes
+preserve opening/pending eligibility; failed invalidation prevents the draft write and retains the
+claim. No parallel serializer, coordinator, reentrant lock, or ownership exemption is introduced.
+
+Production `plan_save`, `objective_save`, `gist_save`, their slash-command counterparts, and
+`objective_node` use bounded async mutation sessions through source selection, backend await,
+and immediate linkage/gate work. Small subject-specific backend wrappers retain a typed successful
+receipt before fallible linkage; approval paths perform their already-authorized successful gate
+exit while ownership still verifies, before that bookkeeping. Manual tool paths gain no gate exit.
+A failed linkage poisons/retains exclusion, stops later writes, and returns reconciliation refusal
+with the known receipt and applicable definitive gate fact. Ownership loss preserves the receipt
+but authorizes no gate effect. No dispatch/consumption record is manufactured for these saves.
+Manual saves invalidate manual-save; node updates conservatively
+invalidate target-changed before backend invocation and warm claim maintenance. A strict absent
+record permits normal feature behavior under the claim and terminal records remain unchanged.
+Decode-first tool refusals remain before acquisition. `/implement-here` uses synchronous mutation
+with implement-here invalidation, retaining the objective-node refusal and no-save gate policy.
+
+First-party plan/objective/gist reviews invalidate first-party-review synchronously and release
+before their editor/verdict waits. Plan editor writeback reacquires through the draft mutation
+seam; it never holds a claim spanning a human wait. First-party completion reacquires the bounded
+mutation seam and supplies its explicit session to existing subject completions and saves, so
+owned linkage does not contend with itself. A dispatch/uncertain successor blocks late writeback,
+save, and actionable completion. These first-party replacements do not introduce Plannotator
+consumption intent, automatic cancellation, or recovery.
 
 The artifact has exactly `{schema_version:1, request_id, correlation, consumption}`.
 `request_id` and `attempt.dispatch_id` are UUIDs. Correlation is exactly
@@ -4349,8 +4380,9 @@ warm node inputs pass explicitly to save; null keeps the existing Python handoff
 owned plan patch write-back is a narrow exception: save may select only the frozen original
 reviewed bytes, never artifact-first or partially written bytes, and only while review-state,
 ownership, subject/target, and save-started verification remain sound. Subject-policy extraction
-and bound dependency composition exist; migration of the tool/browser/chooser completion and
-participating mutation callers remains separate.
+and bound dependency composition exist; migration of Plannotator tool/browser/chooser completion
+and readiness degradation remains separate. Eligibility mutations and first-party replacement/
+writeback participate as described above.
 
 Delivery marker is dispatch_id in tool `details.draft_review_dispatch`; expectation binds actual
 toolCallId. User marker is exactly `<!-- perk:draft-review-dispatch:<dispatch_id> -->`, authored

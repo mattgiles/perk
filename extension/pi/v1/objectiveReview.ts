@@ -25,21 +25,28 @@ import {
   resumeObjectiveDraft,
 } from "../../authoring/objective/draft.ts";
 import {
+  completeObjectiveReview,
   type ObjectiveDraftReviewer,
   type ObjectiveReviewOutcome,
   reviewObjectiveDraft,
 } from "../../authoring/objective/review.ts";
+import { objectiveApprovalSave } from "../../authoring/objective/save.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import {
   captureDraftReviewRefusal,
+  type DraftReviewConfirmedFacts,
+  draftReviewMutationValue,
   draftReviewRefusalResult,
   type RegisteredDraftReviewBridge,
   reviewRegisteredDraft,
 } from "./draftReviewActivation.ts";
+import { mutationObjectiveSaveDeps } from "./draftReviewEffects.ts";
 import {
   type ObjectiveApprovalSaveV1Outcome,
   objectiveApprovalSaveV1,
+  objectiveSaveDepsFor,
+  renderObjectiveApprovalSave,
 } from "./objectiveAuthoring.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import { isPlannotatorPlanSelected } from "./providers/selection.ts";
@@ -270,7 +277,8 @@ export async function executeObjectiveReview(
   //    selection → the first-party editor, view-only. The draft resume/render is owned by the
   //    feature op (step 4) — only the wave arm needs the rendered bytes up front.
   let reviewer: ObjectiveDraftReviewer;
-  if (isPlannotatorPlanSelected(ctx.cwd)) {
+  const plannotator = isPlannotatorPlanSelected(ctx.cwd);
+  if (plannotator) {
     // The launch chooser (contracts.md §8.23): every eligible round the human picks with/without
     // the streamed reviewer wave BEFORE anything launches. Eligibility is drafts-only — the wave
     // door stale-guards the raw artifact baseline, so a null baseline keeps the plain path
@@ -315,13 +323,43 @@ export async function executeObjectiveReview(
   //    gate exit → terminating result); Direct Edits is the no-save revise round; everything
   //    else maps via objectiveReviewOutcomeResult. Approved-first routing: the completed case
   //    renders DENIED.
+  const facts: DraftReviewConfirmedFacts = {};
   const result = await captureDraftReviewRefusal(
-    reviewObjectiveDraft(
-      { session, reviewer, approvalSave: () => objectiveApprovalSaveV1(pi, ctx, gating) },
-      sig,
-    ),
+    !plannotator
+      ? (async () => {
+          if (sig?.aborted) return { status: "aborted" as const };
+          const resumed = resumeObjectiveDraft(session);
+          if (resumed.kind === "absent") return { status: "noDraft" as const };
+          if (resumed.kind === "refused")
+            return { status: "refusedDraft" as const, problem: resumed.problem };
+          draftReviewMutationValue(bridge.mutate(ctx, "first-party-review", () => undefined));
+          const outcome = await reviewer.review(renderObjectiveDraft(resumed.draft), sig);
+          if (sig?.aborted) return { status: "aborted" as const };
+          return draftReviewMutationValue(
+            await bridge.mutateAsync(ctx, "first-party-review", (session) =>
+              completeObjectiveReview(outcome, async () =>
+                renderObjectiveApprovalSave(
+                  pi,
+                  ctx,
+                  await objectiveApprovalSave(
+                    mutationObjectiveSaveDeps(
+                      objectiveSaveDepsFor(pi, ctx, gating),
+                      session,
+                      facts,
+                      "approval",
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        })()
+      : reviewObjectiveDraft(
+          { session, reviewer, approvalSave: () => objectiveApprovalSaveV1(pi, ctx, gating) },
+          sig,
+        ),
   );
-  if (result.status === "refused") return draftReviewRefusalResult(result);
+  if (result.status === "refused") return draftReviewRefusalResult(result, facts);
   switch (result.status) {
     case "noDraft":
       return noObjectiveDraftResult();

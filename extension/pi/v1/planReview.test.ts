@@ -178,7 +178,13 @@ function headfulCtx(
 ): SessionDataCtx & ReportTarget {
   return {
     cwd,
-    sessionManager: { getBranch: () => branch },
+    sessionManager: {
+      getBranch: () => branch,
+      getSessionId: () => "policy-session",
+      appendCustomEntry(customType: string, data: unknown) {
+        branch.push({ type: "custom", customType, data });
+      },
+    },
     hasUI: true,
     ui: { notify() {}, ...(ui as object) },
   } as SessionDataCtx & ReportTarget;
@@ -626,10 +632,7 @@ test("first-party approve with edits -> write-back to the draft, edited bytes sa
   });
 });
 
-test("first-party: a failed edit write-back aborts the review fail-open, nothing saved", async () => {
-  // No run_id ⇒ the draft write rejects (no identity); the plan param is the reviewed source (no
-  // artifact needs a run_id to resolve), so the review reaches the editor — then the edit
-  // write-back fails and the review aborts BEFORE any verdict.
+test("first-party: missing identity refuses replacement BEFORE the editor, nothing saved", async () => {
   const cwd = scaffoldRepo();
   const branch: unknown[] = [stateEntry({})];
   const ui = fakeUI({ editor: ["# Edited\n"], select: [APPROVE] });
@@ -645,13 +648,10 @@ test("first-party: a failed edit write-back aborts the review fail-open, nothing
     depsFor(pi, ctx, gating),
     { plan: "# Param plan" },
   );
-  const wbDetails = result.details as { ok?: boolean; status?: string; error_type?: string };
-  assert.equal(wbDetails.status, "unavailable");
-  assert.equal(wbDetails.ok, false);
-  assert.equal(wbDetails.error_type, "unavailable");
-  const text = String(result.content[0]?.text);
-  assert.match(text, /WARNING/);
-  assert.match(text, /could not write the edited draft back/);
+  assert.equal(result.details.status, "refused");
+  assert.equal(result.details.ok, false);
+  assert.equal(result.details.reason, "no-identity");
+  assert.equal(ui.editors.length, 0, "no editor wait before verified replacement");
   assert.equal(ui.selects.length, 0, "the verdict prompt never opened");
   assert.equal(argvs.length, 0, "the approval save was never called");
 });

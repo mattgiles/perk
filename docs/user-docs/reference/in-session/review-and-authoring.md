@@ -297,15 +297,40 @@ open-ended. Pending is not a health guarantee, and missing/query failure is not 
 See [Plannotator draft-review transport](../providers-and-backends.md#plannotator-draft-review-transport)
 for cancellation, retained-state stops, and the current subject-effect integration limit.
 
-**Implementation limit:** the shared activation now has a guarded completion/mutation API and
-turn-end delivery observation, but the existing tool/browser/chooser completions and authoring
-writers have not yet migrated to it. This is not a claim of live end-to-end at-most-once dispatch.
+**Implementation limit:** the shared activation now guards the eligibility mutations listed below
+and exposes completion plus turn-end delivery observation. Plannotator tool/browser/chooser
+completions and readiness degradation have not yet migrated to it. This is not a claim of live
+end-to-end at-most-once dispatch.
 For results produced through that API, only an exact persisted tool/user entry confirms delivery;
 returning a tool result or queueing a message does not. Abort/shutdown checks evidence first and
 otherwise retains an uncertain stop. Session/run changes do not replay or acknowledge old feedback.
 Its stale-result format preserves the reviewed digest and verbatim feedback as diagnostic DATA,
 not approval or instructions to apply changes to the current draft. Refusals preserve confirmed
 save/gate facts and prohibit blind save retry. No startup/reload discovery or recovery door is added.
+
+### Participating authoring and first-party review
+
+The three draft tools, three manual save tools and slash commands, `objective_node`, and
+`/implement-here` share one current-run claim. They require verified safe run identity: missing or
+unsafe identity is a refusal, not permission to save or start a fallback turn without a claim.
+A genuinely absent review record still permits ordinary authoring and save behavior under that
+claim; terminal records are preserved.
+
+Changed draft bytes invalidate an opening/pending review before writing. Identical sound bytes do
+not invalidate it, including structured objective/gist bytes. Manual saves invalidate with
+`manual-save`; node updates conservatively invalidate with `target-changed`. A busy claim,
+unresolved dispatch/uncertainty, invalid state, or failed invalidation blocks the competing
+operation. Failed invalidation retains the claim; do not discard state or blindly retry a save.
+If a save succeeds but later linkage or notification bookkeeping fails, the stop preserves its
+known ID/URL and any definitive successful gate exit. This does not mean nothing saved. A failed
+linkage retains exclusion; reconcile the existing object rather than creating it again. Manual
+save tools that did not previously exit the gate still do not exit it.
+
+First-party review invalidates the previous opening/pending review and releases the claim before
+opening the editor. Plan editor writeback and post-verdict completion reacquire it; no claim spans
+a human wait. A competing unresolved dispatch blocks late writeback/save. Plan source tiers and
+trimming, structured objective/gist saves, and the objective-node implement-here refusal remain
+unchanged. This participation does not activate the uncomposed Plannotator completion paths above.
 
 Both draft doors review the exact validated artifact primed by the command. They never accept
 pasted draft text from the model. The shared companion tools are:

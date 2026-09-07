@@ -441,10 +441,12 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
   function mutationSession(
     owned: Held,
     reason: Extract<ReviewEvent, { kind: "mutation" }>["reason"],
-    draft?: { subject: ReviewSubject; content: string },
+    draft?: { subject: ReviewSubject; content?: string },
   ): WorkflowSession {
-    let identical = false;
-    if (draft !== undefined && reason === "source-changed") {
+    // Structured writers own serialization (including the dream gate). When bytes are not
+    // supplied yet, admit only the bounded callback; invalidate at its actual write below.
+    let identical = draft !== undefined && draft.content === undefined;
+    if (draft?.content !== undefined && reason === "source-changed") {
       const current = owned
         .check()
         .readArtifact(artifactNames[draft.subject], { provenance: "strict" });
@@ -463,9 +465,19 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
         if (
           name === DRAFT_REVIEW_ARTIFACT ||
           (draft !== undefined &&
-            (name !== artifactNames[draft.subject] || content !== draft.content))
+            (name !== artifactNames[draft.subject] ||
+              (draft.content !== undefined && content !== draft.content)))
         )
           stop("invalid-state");
+        if (draft !== undefined && reason === "source-changed") {
+          const current = owned.check().readArtifact(name, { provenance: "strict" });
+          if (current.status === "invalid") owned.poison("invalid-state");
+          owned.transition({
+            kind: "mutation",
+            reason,
+            identical: current.status === "found" && current.content === content,
+          });
+        }
         const result = owned.check().writeArtifact(name, content, { provenance: "strict" });
         owned.check();
         if (result.status !== "applied" && result.status !== "unchanged")
@@ -476,6 +488,7 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
       activeObjective: () => owned.check().activeObjective(),
       reviewPosts: () => owned.check().reviewPosts(),
       apply(change) {
+        if (draft !== undefined) stop("invalid-state");
         const result = owned.check().apply(change);
         owned.check();
         if (result.status !== "applied" && result.status !== "unchanged")
@@ -507,7 +520,7 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
       reason: Extract<ReviewEvent, { kind: "mutation" }>["reason"],
       work: (session: WorkflowSession) => T,
       options: {
-        draft?: { subject: ReviewSubject; content: string };
+        draft?: { subject: ReviewSubject; content?: string };
         entries?: readonly unknown[];
       } = {},
     ): Outcome<T> {

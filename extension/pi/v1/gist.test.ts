@@ -36,6 +36,7 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../../testing/harness.ts";
+import { createDraftReviewActivation } from "./draftReviewActivation.ts";
 import {
   decodeGistSaveParams,
   gistSaveGuidance,
@@ -556,11 +557,11 @@ function installOffline(opts: { stdout: string; argvs: string[][]; sent: string[
       return { stdout: opts.stdout, stderr: "", code: 0, killed: false };
     },
   } as unknown as Parameters<typeof installGistBindings>[0];
-  installGistBindings(pi, gating);
+  installGistBindings(pi, gating, createDraftReviewActivation(pi));
   return { tools, commands, gating };
 }
 
-test("absent identity: gist_draft refuses blank prose BEFORE missing identity (the adapter mapping)", async () => {
+test("absent identity: production gist_draft refuses before feature validation", async () => {
   const cwd = scaffoldRepo();
   const { tools } = installOffline({ stdout: CREATE_JSON, argvs: [], sent: [] });
   const draftTool = tools.get("gist_draft");
@@ -569,19 +570,16 @@ test("absent identity: gist_draft refuses blank prose BEFORE missing identity (t
 
   const blank = await draftTool.execute("t1", { prose: "  \n" }, undefined, undefined, ctx);
   assert.equal(blank.details.ok, false);
-  assert.equal(blank.details.error_type, "invalid_input", "blank prose wins the precedence");
-  assert.equal(blank.details.error, "no gist prose to write (pass the full working draft)");
+  assert.equal(blank.details.reason, "no-identity");
+  assert.equal(blank.details.status, "refused");
 
   const noIdentity = await draftTool.execute("t2", { prose: "# X" }, undefined, undefined, ctx);
   assert.equal(noIdentity.details.ok, false);
-  assert.equal(noIdentity.details.error_type, "no_run_id", "the no_identity → no_run_id mapping");
-  assert.equal(
-    noIdentity.details.error,
-    "session has no run_id — cannot write the gist-draft artifact",
-  );
+  assert.equal(noIdentity.details.reason, "no-identity");
+  assert.equal(noIdentity.details.status, "refused");
 });
 
-test("absent identity: gist_save still saves — the cold door argv simply omits --run-id", async () => {
+test("absent identity: production gist_save refuses without invoking the cold door", async () => {
   const cwd = scaffoldRepo();
   const argvs: string[][] = [];
   const { tools } = installOffline({ stdout: CREATE_JSON, argvs, sent: [] });
@@ -594,12 +592,12 @@ test("absent identity: gist_save still saves — the cold door argv simply omits
     undefined,
     headfulCtx(cwd, []),
   );
-  assert.equal(result.details.ok, true, "an identity-less save keeps working");
-  assert.equal(argvs.length, 1, "the cold door ran once");
-  assert.equal(argvs[0]?.includes("--run-id"), false, "no --run-id without identity");
+  assert.equal(result.details.ok, false);
+  assert.equal(result.details.reason, "no-identity");
+  assert.equal(argvs.length, 0, "no unclaimed cold-door invocation");
 });
 
-test("absent identity: /gist-save falls to the drive fallback (openSession absent)", async () => {
+test("absent identity: /gist-save refuses rather than treating missing identity as no draft", async () => {
   const cwd = scaffoldRepo();
   const argvs: string[][] = [];
   const sent: string[] = [];
@@ -608,10 +606,8 @@ test("absent identity: /gist-save falls to the drive fallback (openSession absen
   assert.ok(handler, "/gist-save captured");
   await handler("Driven title", headfulCtx(cwd, []));
   assert.equal(argvs.length, 0, "no cold-door save was attempted (no session to re-read)");
-  assert.equal(gating.exits, 1, "the gate exits for the driven turn");
-  assert.equal(sent.length, 1, "exactly one drive injection");
-  assert.match(String(sent[0]), /gist_save/);
-  assert.match(String(sent[0]), /title: "Driven title"/, "the title override rides the drive");
+  assert.equal(gating.exits, 0, "the gate stays active");
+  assert.equal(sent.length, 0, "no drive injection without verified identity");
 });
 
 // --- pure helpers -------------------------------------------------------------------------------
@@ -817,7 +813,13 @@ function headfulCtx(
 ): SessionDataCtx & ReportTarget {
   return {
     cwd,
-    sessionManager: { getBranch: () => branch },
+    sessionManager: {
+      getBranch: () => branch,
+      getSessionId: () => "policy-session",
+      appendCustomEntry(customType: string, data: unknown) {
+        branch.push({ type: "custom", customType, data });
+      },
+    },
     hasUI: true,
     ui: { notify() {}, ...(ui as object) },
   } as SessionDataCtx & ReportTarget;

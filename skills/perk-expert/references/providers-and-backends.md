@@ -69,9 +69,12 @@ separate five-second deadline. Completed status catches missed live decisions; p
 neither health nor delivery. Missing/query failure warns once and keeps the live wait cancellable.
 Cancellation closes only local transport, not the upstream browser. No polling, startup discovery,
 automatic replay or resume exists. **Current integration limit:** transport registration/catch-up
-are active, but guarded subject effects, authoring-mutation participation and persisted delivery
-acknowledgment are not yet composed. Transport correlation alone does not guarantee at-most-once
-save/delivery. First-party and subject-specific Direct Edits/save policies remain unchanged.
+and authoring-mutation participation are active. Draft/manual-save/node entries and first-party
+replacement/writeback require a verified current-run claim; editor waits release it. Missing
+identity is not an unclaimed save fallback. Plannotator tool/browser/chooser subject effects,
+readiness degradation, and their persisted delivery acknowledgment remain uncomposed: no live
+end-to-end at-most-once save/delivery guarantee is claimed. Subject-specific Direct Edits/save
+source policies remain unchanged.
 
 The warm `/pr-review-browser` door also uses plannotator when that package is installed. It can
 review a foreign PR, the active worktree's PR, or a local since-base diff before submission. That

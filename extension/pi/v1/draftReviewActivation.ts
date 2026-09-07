@@ -68,7 +68,7 @@ export interface DraftReviewRuntime extends DraftReviewAccess {
   ): Promise<DraftReviewOperation<T>>;
 }
 
-export interface RegisteredDraftReviewBridge extends DraftReviewAccess {
+export interface RegisteredDraftReviewBridge extends DraftReviewRuntime {
   review(
     plan: string,
     registration: DraftReviewRegistration,
@@ -76,8 +76,8 @@ export interface RegisteredDraftReviewBridge extends DraftReviewAccess {
   ): Promise<PlannotatorReviewOutcome>;
 }
 class DraftReviewTransportStop extends Error {
-  readonly refusal: PlannotatorRefusal;
-  constructor(refusal: PlannotatorRefusal) {
+  readonly refusal: DraftReviewStop;
+  constructor(refusal: DraftReviewStop) {
     super(refusal.detail);
     this.refusal = refusal;
   }
@@ -122,6 +122,30 @@ export function draftReviewRefusalResult(
     },
   };
 }
+export function draftReviewMutationValue<T>(result: DraftReviewOperation<T>): T {
+  if (!result.ok)
+    throw new DraftReviewTransportStop({
+      status: "refused",
+      code: result.reason,
+      phase: "mutation",
+      detail: result.detail,
+    });
+  return result.value;
+}
+export function draftReviewMutationRefusal(
+  result: Extract<RegistrationResult, { ok: false }>,
+  facts: DraftReviewConfirmedFacts = {},
+): ToolResult {
+  return draftReviewRefusalResult(
+    {
+      status: "refused",
+      code: result.reason,
+      phase: "mutation",
+      detail: result.detail,
+    },
+    facts,
+  );
+}
 export function draftReviewCompletionResult(result: DraftReviewCompletion): ToolResult {
   if (!result.ok)
     return draftReviewRefusalResult(
@@ -141,9 +165,7 @@ export function draftReviewCompletionResult(result: DraftReviewCompletion): Tool
     details: { ok: true, status: "consumed" },
   };
 }
-export async function captureDraftReviewRefusal<T>(
-  work: Promise<T>,
-): Promise<T | PlannotatorRefusal> {
+export async function captureDraftReviewRefusal<T>(work: Promise<T>): Promise<T | DraftReviewStop> {
   try {
     return await work;
   } catch (error) {

@@ -152,7 +152,13 @@ function headfulCtx(
 ): SessionDataCtx & ReportTarget {
   return {
     cwd,
-    sessionManager: { getBranch: () => branch },
+    sessionManager: {
+      getBranch: () => branch,
+      getSessionId: () => "policy-session",
+      appendCustomEntry(customType: string, data: unknown) {
+        branch.push({ type: "custom", customType, data });
+      },
+    },
     hasUI: true,
     ui: { notify() {}, ...(ui as object) },
   } as SessionDataCtx & ReportTarget;
