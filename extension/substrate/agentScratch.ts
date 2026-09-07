@@ -5,14 +5,21 @@
 // path after the confined directory has been established. The context filter removes inherited or
 // stale direct scratch custom blocks. A compaction summary may quote old prose/path text; that is
 // not a live guidance delivery or authoritative provenance, and is deliberately left intact.
+//
+// Delivery dedup reads Pi's OWN live context projection (`pi/v1/contextEvidence.ts`) and requires
+// EXACT identity: a `custom` message of this customType whose string content equals the current
+// run's rendered block byte-for-byte. Nothing looser counts — not a text-part array, a user quote,
+// a marker-only match, changed bytes, a parent run's block, or plain `custom` state (`data.content`
+// is state, never model delivery). A projection read failure escapes the hook to Pi's hook-error
+// reporting; no guessed copy is injected.
 
 import { relative, sep } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { activeContextMessages, type ContextMessage } from "../pi/v1/contextEvidence.ts";
 import { type ReportTarget, report } from "../surfaces/report.ts";
 import { agentScratchDir, ensureAgentScratch } from "./cache.ts";
 import type { ChildIdentitySnapshot } from "./childIdentity.ts";
 import { activeSessionRunId, type SessionDataCtx } from "./sessionData.ts";
-import { activeContextWindow, type BranchEntry, branchOf } from "./workflowState.ts";
 
 export const AGENT_SCRATCH_CONTEXT_TYPE = "perk:agent-scratch";
 
@@ -112,13 +119,13 @@ export function createAgentScratchProvisioner(
   };
 }
 
-/** Whether this exact current-run block remains directly represented after compaction. */
-function branchHasBlock(branch: readonly BranchEntry[], block: AgentScratchBlock): boolean {
-  return activeContextWindow(branch).some(
-    (entry) =>
-      entry.customType === AGENT_SCRATCH_CONTEXT_TYPE &&
-      ((entry.type === "custom_message" && entry.content === block.content) ||
-        (entry.type === "custom" && entry.data?.content === block.content)),
+/** Whether this exact current-run block is still directly delivered in Pi's live projection. */
+function contextHasBlock(messages: readonly ContextMessage[], block: AgentScratchBlock): boolean {
+  return messages.some(
+    (message) =>
+      message.role === "custom" &&
+      message.customType === AGENT_SCRATCH_CONTEXT_TYPE &&
+      message.content === block.content,
   );
 }
 
@@ -134,11 +141,11 @@ export function registerAgentScratch(
   pi.on("before_agent_start", async (_event, ctx) => {
     if (!eligible(ctx)) return;
 
-    // Provision before dedup: an externally deleted directory is repaired even while the live
-    // branch still carries this run's exact guidance block.
+    // Provision before dedup: an externally deleted directory is repaired even while live
+    // context still carries this run's exact guidance block (and before any projection read).
     const block = provisioner.resolve(ctx);
     if (block === null) return;
-    if (branchHasBlock(branchOf(ctx), block)) return;
+    if (contextHasBlock(activeContextMessages(ctx), block)) return;
     return {
       message: {
         customType: AGENT_SCRATCH_CONTEXT_TYPE,

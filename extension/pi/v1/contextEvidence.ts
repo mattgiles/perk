@@ -2,8 +2,9 @@
 // session entries are still represented in model context (`sessionManager.buildContextEntries()`
 // — the current leaf's compaction-aware entry list) and how each projects into a runtime message
 // (`sessionEntryToContextMessages`); perk owns only the typed predicates over those native
-// messages. There is no second traversal here: no compaction lookup, no `firstKeptEntryId`
-// cutoff, no retained-tail storage inspection — and no cache, registration, or persistent state.
+// messages. There is no second traversal here: no compaction lookup, no kept-entry cutoff
+// reconstruction, no retained-tail storage inspection — and no cache, registration, or
+// persistent state.
 //
 // Evidence is TYPED, never serialized: a marker counts only when it rides user content (a cold
 // launch's prompt) or the owning customType's custom content (a prior hidden injection). A

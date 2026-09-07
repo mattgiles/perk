@@ -1,8 +1,9 @@
 // The tool-gating primitive (the keystone). Structural read-only enforcement, NOT
 // prompting. Mirrors pi's authoritative `examples/extensions/plan-mode/` recipe (the
 // `setActiveTools` allowlist + `tool_call` bash sub-allowlist + `before_agent_start` injection
-// (once-only: branch-scan dedup'd on the marker, so a session carries ONE live copy) +
-// `context` strip-when-off) and `preset.ts`'s snapshot-then-restore. The gate attaches to the
+// (once-only per SELECTED BRANCH: full-branch-scan dedup'd on the marker — historical, so a
+// copy compaction has summarized out of model context still suppresses; enforcement never rode
+// the prose) + `context` strip-when-off) and `preset.ts`'s snapshot-then-restore. The gate attaches to the
 // existing `perk:workflow-state.mode` field (`read-only`/`read-write`) — no new registry stage.
 // Beside the gate lives STAGE_TOOLS: per-stage active-tool scoping for the scoped universe
 // (perk's OWN registered tools + the enumerated borrowed-package census), keyed off the
@@ -841,8 +842,11 @@ export function registerToolGating(
   // Inject the hidden read-only mode context while active (display:false → not shown in transcript).
   pi.on("before_agent_start", async (_event, ctx) => {
     if (!isActive()) return;
-    // Once-only: injected customs persist to the branch, so a live copy suppresses re-injection;
-    // compaction dropping it makes the scan come up clean and the next turn re-injects.
+    // Once-only per selected branch: injected customs persist to the branch, and the FULL-branch
+    // scan (not live model context) dedups — a copy compaction summarized away still counts as
+    // delivered on this branch history and is NOT re-injected; navigating to a branch that never
+    // carried it injects again. Deliberate: this is the structural gate's guidance, and the gate
+    // itself (tool_call) enforces regardless of what the model can still read.
     try {
       if (branchCarries(branchOf(ctx), READ_ONLY_MARKER)) return;
     } catch {

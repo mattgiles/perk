@@ -1,34 +1,42 @@
 // The one marker-dedup'd context-injection mechanism (contracts §8.31 semantics) behind the
 // five injected authoring/adapter contexts: gist, plan, objective-authoring, and the
 // plannotator/tombell plan adapters all register the same `before_agent_start` + `context` hook
-// pair around one injected, marker-dedup'd context. The MECHANICS live here — the active-window
-// dedup scan, the stale-strip filter, the guarded branch read; feature POLICY (eligibility,
-// flavor selection, content construction, the customType/marker vocabulary) stays with each
-// caller's `InjectedContextSpec` closures.
+// pair around one injected, marker-dedup'd context. The MECHANICS live here — the live-evidence
+// dedup, the stale-strip filter, the guarded reads; feature POLICY (eligibility, flavor
+// selection, content construction, the customType/marker vocabulary) stays with each caller's
+// `InjectedContextSpec` closures.
 //
-// The dedup scans the COMPACTION-ACTIVE window (`branchCarries(activeContextWindow(branch),
-// marker)` — the bindingDelivery composition): a live copy suppresses re-injection, and
-// compaction dropping it from model context re-injects on the next turn even though the
-// historical entry still sits on the branch.
+// Two authorities, deliberately distinct: `spec.select`/`spec.live` read the FULL branch
+// (`branchOf` — eligibility/state survive compaction), while the dedup reads Pi's OWN live
+// projection (`contextEvidence.ts`: `buildContextEntries()` → native messages) and asks the typed
+// predicate whether the selected flavor's marker is still delivered — as user content (a cold
+// prompt) or as the owned customType's content (a prior hidden copy). A copy Pi has compacted
+// out of context re-injects on the next turn even though the historical entry still sits on the
+// branch; a summary quoting the marker never counts. The submitting `event.prompt` is checked
+// BEFORE the projection read: at `before_agent_start` a cold launch's prompt is not yet
+// persisted, so only that check sees a cold seed on the launch turn.
 //
 // Failure semantics are asymmetric BY DESIGN: a failed branch read short-circuits INJECTION
 // (no `select` call — an empty-branch fallback would wrongly inject for exclusion-based
-// selectors like plan's, whose stage check passes on `undefined`) but the STRIP proceeds over
-// `[]` (a throwing read must still remove a stale marker; every `live` closure is either
-// branch-independent or fails closed to "not live" on `[]`).
+// selectors like plan's, whose stage check passes on `undefined`); a failed projection read also
+// returns without constructing or injecting content (a guessed copy could double-deliver); but
+// the STRIP proceeds over `[]` (a throwing branch read must still remove a stale marker; every
+// `live` closure is either branch-independent or fails closed to "not live" on `[]`). The strip
+// never reads the projection.
 //
 // Deliberate NON-callers keep their own scan/strip semantics: `substrate/bindingDelivery.ts`
-// (strips only its own customType — never user turns), `substrate/agentScratch.ts` (requires
-// the exact current custom block, not a marker scan), `substrate/toolGating.ts` (full-branch
-// scan — the strict once-per-session read-only marker), and `hunkFeedback/receiver.ts`.
+// (strips only its own customType — never user turns; projection errors escape its hook),
+// `substrate/agentScratch.ts` (requires the exact current custom block, not a marker scan),
+// `substrate/toolGating.ts` (full-branch scan — the strict once-per-selected-branch read-only
+// marker), and `hunkFeedback/receiver.ts`.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { type BranchEntry, branchOf } from "../../substrate/workflowState.ts";
 import {
-  activeContextWindow,
-  type BranchEntry,
-  branchCarries,
-  branchOf,
-} from "../../substrate/workflowState.ts";
+  activeContextMessages,
+  type ContextMessage,
+  contextCarriesMarker,
+} from "./contextEvidence.ts";
 
 /**
  * One marker-dedup'd injected context: the owned customType + the flavor table. Each flavor is
@@ -91,8 +99,10 @@ function stripStaleMessages<T>(messages: T[], customType: string, markers: reado
  * ordering is frozen by each installer's internal sequence.
  *
  * - `before_agent_start`: guarded branch read (a failed read short-circuits — no `select` call,
- *   no injection) → `spec.select` (null → no injection) → dedup on the SELECTED flavor's marker
- *   over the compaction-active window (a live copy suppresses; the content thunk is never
+ *   no injection) → `spec.select` (null → no injection) → the submitting prompt carrying the
+ *   SELECTED marker suppresses (cold delivery before persistence; another flavor's marker does
+ *   not) → guarded projection read (a failed read returns — nothing constructed, nothing
+ *   injected) → a live owned copy of the selected marker suppresses (the content thunk is never
  *   invoked) → inject `{ customType, content, display: false }`.
  * - `context`: guarded branch read (a failed read degrades to `[]` and proceeds) → keep
  *   everything while `spec.live`; otherwise strip the owned customType and any user turn
@@ -103,7 +113,7 @@ export function installInjectedContext<K extends string>(
   spec: InjectedContextSpec<K>,
 ): void {
   const markers = Object.keys(spec.flavors);
-  pi.on("before_agent_start", async (_event, ctx) => {
+  pi.on("before_agent_start", async (event, ctx) => {
     let branch: readonly BranchEntry[];
     try {
       branch = branchOf(ctx);
@@ -115,7 +125,14 @@ export function installInjectedContext<K extends string>(
     // Defensive over a widened K (string): an off-table key names no flavor — never inject.
     const content: ((ctx: ExtensionContext) => string) | undefined = spec.flavors[marker];
     if (content === undefined) return;
-    if (branchCarries(activeContextWindow(branch), marker)) return;
+    if (event.prompt.includes(marker)) return;
+    let live: readonly ContextMessage[];
+    try {
+      live = activeContextMessages(ctx);
+    } catch {
+      return;
+    }
+    if (contextCarriesMarker(live, { customType: spec.customType, marker })) return;
     return {
       message: {
         customType: spec.customType,

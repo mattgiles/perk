@@ -23,6 +23,7 @@ import {
   GIST_ADAPTER_PLANNOTATOR_CONTEXT,
   hasDirectEditsHeading,
   OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT,
+  PLAN_ADAPTER_PLANNOTATOR_CONTEXT,
   PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
   type PlannotatorBus,
   requestPlannotatorPlanReview,
@@ -218,7 +219,7 @@ test("gist-author session: the GIST-flavored bridge context is injected", async 
   }
 });
 
-test("bridge context dedups against a prior plan-flavor copy on the branch (once-only per live copy)", async () => {
+test("bridge context dedups against a prior plan-flavor copy live in context (once-only per live copy)", async () => {
   const cwd = scaffoldRepo();
   selectPlannotator(cwd);
   const file = plantRawSession(cwd, [
@@ -229,9 +230,9 @@ test("bridge context dedups against a prior plan-flavor copy on the branch (once
       },
     },
     {
-      custom: {
+      customMessage: {
         type: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
-        data: { content: "[PLAN ADAPTER: PLANNOTATOR]\nprior copy" },
+        content: "[PLAN ADAPTER: PLANNOTATOR]\nprior copy",
       },
     },
   ]);
@@ -252,37 +253,65 @@ test("bridge context dedups against a prior plan-flavor copy on the branch (once
   }
 });
 
-test("per-flavor dedup: a prior PLAN-flavor copy does not suppress the OBJECTIVE flavor", async () => {
-  const cwd = scaffoldRepo();
-  selectPlannotator(cwd);
+test("per-flavor dedup: a live copy of ANOTHER flavor under the shared customType never suppresses the selected flavor", async () => {
   // The dedup key is the flavor's MARKER, not the shared customType: a stage change must still
-  // deliver the missing flavor while a prior copy of the other flavor sits on the branch.
-  const file = plantRawSession(cwd, [
+  // deliver the missing flavor while a live copy of another flavor sits in context. All three
+  // markers ride one customType, so every selected/other pairing is pinned here.
+  const flavors = [
     {
-      custom: {
-        type: "perk:workflow-state",
-        data: { run_id: "01RID", mode: "read-only", stage: "objective-author" },
-      },
+      stage: "plan",
+      marker: "[PLAN ADAPTER: PLANNOTATOR]",
+      content: PLAN_ADAPTER_PLANNOTATOR_CONTEXT,
     },
     {
-      custom: {
-        type: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
-        data: { content: "[PLAN ADAPTER: PLANNOTATOR]\nprior plan-flavor copy" },
-      },
+      stage: "objective-author",
+      marker: "[OBJECTIVE ADAPTER: PLANNOTATOR]",
+      content: OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT,
     },
-  ]);
-  const h = await loadPerkSession({
-    cwd,
-    sessionManager: SessionManager.open(file),
-    env: { PERK_RUN_ID: undefined },
-  });
-  try {
-    const injected = await h.emitBeforeAgentStart();
-    const bridge = injected.filter((m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE);
-    assert.equal(bridge.length, 1, "the objective flavor still injects");
-    assert.equal(String(bridge[0]?.content), OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT);
-  } finally {
-    h.dispose();
+    {
+      stage: "gist-author",
+      marker: "[GIST ADAPTER: PLANNOTATOR]",
+      content: GIST_ADAPTER_PLANNOTATOR_CONTEXT,
+    },
+  ];
+  for (const selected of flavors) {
+    for (const other of flavors) {
+      if (other === selected) continue;
+      const cwd = scaffoldRepo();
+      selectPlannotator(cwd);
+      const file = plantRawSession(cwd, [
+        {
+          custom: {
+            type: "perk:workflow-state",
+            data: { run_id: "01RID", mode: "read-only", stage: selected.stage },
+          },
+        },
+        {
+          customMessage: {
+            type: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
+            content: `${other.marker}\nprior copy of another flavor`,
+          },
+        },
+      ]);
+      const h = await loadPerkSession({
+        cwd,
+        sessionManager: SessionManager.open(file),
+        env: { PERK_RUN_ID: undefined },
+      });
+      try {
+        const injected = await h.emitBeforeAgentStart();
+        const bridge = injected.filter(
+          (m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
+        );
+        assert.deepEqual(
+          bridge.map((m) => String(m.content)),
+          [selected.content],
+          `${selected.stage}: the selected flavor injects over a live ${other.marker} copy`,
+        );
+      } finally {
+        h.dispose();
+      }
+    }
   }
 });
 

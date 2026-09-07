@@ -1,14 +1,26 @@
-// The shared context-injection mechanism matrix — owned ONCE here, for every
+// The shared context-injection mechanism's DISTINCT policies — owned ONCE here, for every
 // `installInjectedContext` caller (gist, plan, objective-authoring, plannotator, tombell): the
-// active-window dedup scan, the scan-before-construct content thunk, the guarded branch read's
-// asymmetric failure semantics, and the stale-strip filter shape. Drives the installer through a
-// `pi.on`-recorder fake + structural ctx (no harness); feature policy (eligibility, flavor
-// selection, content identity) stays pinned in each feature's own suite.
+// scan-before-construct content thunk, the two guarded reads' asymmetric failure semantics, the
+// submitting-prompt check, the stale-strip filter shape, and one registered-extension composition
+// smoke. Drives the installer through a `pi.on`-recorder fake over REAL `SessionManager` sources
+// (no second reconstruction of Pi's selection); the exhaustive carrier/compaction/branch matrix
+// lives in `contextEvidence.test.ts`, and feature policy (eligibility, flavor selection, content
+// identity) stays pinned in each feature's own suite.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  type ExtensionAPI,
+  type ExtensionContext,
+  SessionManager,
+} from "@earendil-works/pi-coding-agent";
+import {
+  PLAN_CONTEXT_TYPE,
+  PLAN_MARKER,
+  planAuthoringContextContent,
+} from "../../authoring/plan/prose.ts";
 import type { BranchEntry } from "../../substrate/workflowState.ts";
+import { loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
 import { type InjectedContextSpec, installInjectedContext } from "./contextInjection.ts";
 
 const CONTEXT_TYPE = "perk:test-context";
@@ -32,9 +44,17 @@ function hooksFor(spec: InjectedContextSpec): { inject: Hook; strip: Hook } {
   return { inject, strip };
 }
 
-/** A structural ctx whose branch read returns (or throws) as directed. */
-function ctxOver(getBranch: () => unknown[]): ExtensionContext {
-  return { cwd: "/nowhere", sessionManager: { getBranch } } as unknown as ExtensionContext;
+/** A structural ctx over a REAL session (both the full branch and Pi's projection are live). */
+function ctxOver(manager: SessionManager = SessionManager.inMemory("/nowhere")): ExtensionContext {
+  return { cwd: "/nowhere", sessionManager: manager } as unknown as ExtensionContext;
+}
+
+/** A structural ctx whose two reads are independently scripted (recording or throwing). */
+function ctxFrom(reads: {
+  getBranch: () => unknown[];
+  buildContextEntries: () => unknown[];
+}): ExtensionContext {
+  return { cwd: "/nowhere", sessionManager: reads } as unknown as ExtensionContext;
 }
 
 /** A minimal always-eligible spec with an invocation-counting content thunk. */
@@ -61,17 +81,30 @@ function countingSpec(overrides: Partial<InjectedContextSpec> = {}): {
   return { spec, counts };
 }
 
-function priorCopy(): BranchEntry {
-  return { type: "custom", customType: CONTEXT_TYPE, data: { content: `${MARKER}\nprior copy` } };
+/** Persist a prior hidden copy the way Pi persists a `before_agent_start` injection. */
+function priorCopy(manager: SessionManager, marker = MARKER): string {
+  return manager.appendCustomMessageEntry(CONTEXT_TYPE, `${marker}\nprior copy`, false);
 }
+
+function assistantTurn(manager: SessionManager, text: string): string {
+  return manager.appendMessage({
+    role: "assistant",
+    content: [{ type: "text", text }],
+    api: "test",
+    provider: "test",
+    model: "test",
+    usage: {},
+    stopReason: "stop",
+    timestamp: 1,
+  } as never);
+}
+
+const EMPTY_EVENT = { prompt: "" };
 
 test("injects when eligible and no live marker (display:false, the owned customType)", async () => {
   const { spec, counts } = countingSpec();
   const { inject } = hooksFor(spec);
-  const result = (await inject(
-    {},
-    ctxOver(() => []),
-  )) as {
+  const result = (await inject(EMPTY_EVENT, ctxOver())) as {
     message: { customType: string; content: string; display: boolean };
   };
   assert.equal(result.message.customType, CONTEXT_TYPE);
@@ -80,87 +113,110 @@ test("injects when eligible and no live marker (display:false, the owned customT
   assert.equal(counts.content, 1, "the content thunk ran exactly once");
 });
 
-test("a live marker in the active window suppresses — the content thunk is never invoked", async () => {
+test("a live owned copy in Pi's projection suppresses — the content thunk is never invoked", async () => {
   const { spec, counts } = countingSpec();
   const { inject } = hooksFor(spec);
-  const result = await inject(
-    {},
-    ctxOver(() => [priorCopy()]),
-  );
+  const manager = SessionManager.inMemory("/nowhere");
+  priorCopy(manager);
+  const result = await inject(EMPTY_EVENT, ctxOver(manager));
   assert.equal(result, undefined, "no re-injection over a live copy");
   assert.equal(counts.select, 1, "eligibility still consulted");
   assert.equal(counts.content, 0, "the content thunk never ran on the dedup-suppressed turn");
 });
 
-test("re-injects when the marker sits only BEFORE the compaction cutoff", async () => {
+test("re-injects when compaction summarized the prior copy out of context", async () => {
   const { spec } = countingSpec();
   const { inject } = hooksFor(spec);
-  const branch = [
-    priorCopy(),
-    { type: "compaction" } as BranchEntry,
-    { type: "assistant" } as BranchEntry,
-  ];
-  const result = (await inject(
-    {},
-    ctxOver(() => branch),
-  )) as { message?: unknown } | undefined;
-  assert.ok(result?.message !== undefined, "a copy outside the active window must not suppress");
+  const manager = SessionManager.inMemory("/nowhere");
+  priorCopy(manager);
+  const kept = assistantTurn(manager, "recent work");
+  manager.appendCompaction("summary without the marker", kept, 100);
+  const result = (await inject(EMPTY_EVENT, ctxOver(manager))) as { message?: unknown } | undefined;
+  assert.ok(result?.message !== undefined, "a copy outside live context must not suppress");
 });
 
 test("a compaction summary QUOTING the marker does not suppress", async () => {
   const { spec } = countingSpec();
   const { inject } = hooksFor(spec);
-  const branch = [
-    {
-      type: "compaction",
-      data: { summary: `quoting ${MARKER} is not a live copy` },
-    } as BranchEntry,
-  ];
-  const result = (await inject(
-    {},
-    ctxOver(() => branch),
-  )) as { message?: unknown } | undefined;
+  const manager = SessionManager.inMemory("/nowhere");
+  const kept = assistantTurn(manager, "recent work");
+  manager.appendCompaction(`quoting ${MARKER} is not a live copy`, kept, 100);
+  const result = (await inject(EMPTY_EVENT, ctxOver(manager))) as { message?: unknown } | undefined;
   assert.ok(result?.message !== undefined, "a quoting summary is not a live custom block");
 });
 
-test("a live retained copy (kept across compaction via firstKeptEntryId) still dedups", async () => {
+test("a live retained copy (kept across compaction) still dedups", async () => {
   const { spec, counts } = countingSpec();
   const { inject } = hooksFor(spec);
-  const branch = [
-    { ...priorCopy(), id: "e1" } as BranchEntry,
-    { type: "assistant", id: "e2" } as BranchEntry,
-    { type: "compaction", firstKeptEntryId: "e1" } as BranchEntry,
-  ];
-  const result = await inject(
-    {},
-    ctxOver(() => branch),
-  );
+  const manager = SessionManager.inMemory("/nowhere");
+  const copy = priorCopy(manager);
+  assistantTurn(manager, "recent work");
+  manager.appendCompaction("summary", copy, 100);
+  const result = await inject(EMPTY_EVENT, ctxOver(manager));
   assert.equal(result, undefined, "a retained live copy still suppresses");
   assert.equal(counts.content, 0);
 });
 
-test("no injection when select returns null (ineligible/defer)", async () => {
+test("no injection when select returns null (ineligible/defer) — and no projection read", async () => {
   const { spec, counts } = countingSpec({ select: () => null });
   const { inject } = hooksFor(spec);
-  const result = await inject(
-    {},
-    ctxOver(() => []),
-  );
-  assert.equal(result, undefined);
+  const reads: string[] = [];
+  const ctx = ctxFrom({
+    getBranch: () => [],
+    buildContextEntries: () => {
+      reads.push("projection");
+      return [];
+    },
+  });
+  assert.equal(await inject(EMPTY_EVENT, ctx), undefined);
   assert.equal(counts.content, 0);
+  assert.deepEqual(reads, [], "an ineligible turn never reads Pi's projection");
 });
 
 test("an off-table select key (a widened K) names no flavor — never injects", async () => {
   const { spec, counts } = countingSpec({ select: () => "[NOT A FLAVOR]" });
   const { inject } = hooksFor(spec);
-  assert.equal(
-    await inject(
-      {},
-      ctxOver(() => []),
-    ),
-    undefined,
-  );
+  assert.equal(await inject(EMPTY_EVENT, ctxOver()), undefined);
   assert.equal(counts.content, 0);
+});
+
+test("the submitting prompt carrying the SELECTED marker suppresses (cold delivery before persistence) without a projection read", async () => {
+  const { spec, counts } = countingSpec();
+  const { inject } = hooksFor(spec);
+  const reads: string[] = [];
+  const ctx = ctxFrom({
+    getBranch: () => [],
+    buildContextEntries: () => {
+      reads.push("projection");
+      return [];
+    },
+  });
+  const result = await inject(
+    { prompt: `Do the work.\n\n${MARKER}\nseeded by the cold door` },
+    ctx,
+  );
+  assert.equal(result, undefined, "the cold seed is the delivery on the launch turn");
+  assert.equal(counts.content, 0);
+  assert.deepEqual(reads, [], "the prompt check settles the turn before any projection read");
+});
+
+test("the submitting prompt carrying ANOTHER flavor's marker does not suppress the selected flavor", async () => {
+  const { spec, counts } = countingSpec({
+    flavors: {
+      [MARKER]: () => {
+        counts.content += 1;
+        return `${MARKER}\nselected flavor`;
+      },
+      [SECOND_MARKER]: () => `${SECOND_MARKER}\nsecond flavor`,
+    },
+  });
+  const { inject } = hooksFor(spec);
+  const result = (await inject({ prompt: `${SECOND_MARKER} rides the prompt` }, ctxOver())) as {
+    message?: { content: string };
+  };
+  assert.ok(result?.message !== undefined, "the selected flavor still injects");
+  assert.ok(result.message.content.includes(MARKER));
+  assert.equal(counts.content, 1);
 });
 
 test("a THROWING branch read: injection short-circuits (no select call, no throw); the strip still fires over []", async () => {
@@ -171,12 +227,20 @@ test("a THROWING branch read: injection short-circuits (no select call, no throw
     return false;
   };
   const { inject, strip } = hooksFor(spec);
-  const ctx = ctxOver(() => {
-    throw new Error("adversarial branch read");
+  const reads: string[] = [];
+  const ctx = ctxFrom({
+    getBranch: () => {
+      throw new Error("adversarial branch read");
+    },
+    buildContextEntries: () => {
+      reads.push("projection");
+      return [];
+    },
   });
 
-  assert.equal(await inject({}, ctx), undefined, "the injection stays inert — no throw");
+  assert.equal(await inject(EMPTY_EVENT, ctx), undefined, "the injection stays inert — no throw");
   assert.equal(counts.select, 0, "select is never consulted on a failed read");
+  assert.deepEqual(reads, [], "the projection is never read after a failed branch read");
 
   const result = (await strip(
     {
@@ -194,6 +258,21 @@ test("a THROWING branch read: injection short-circuits (no select call, no throw
     "the stale custom message is still stripped",
   );
   assert.equal(result.messages.length, 1, "the normal message survives");
+  assert.deepEqual(reads, [], "the strip never reads the projection either");
+});
+
+test("a THROWING projection read: guarded return — nothing constructed, nothing injected, no throw", async () => {
+  const { spec, counts } = countingSpec();
+  const { inject } = hooksFor(spec);
+  const ctx = ctxFrom({
+    getBranch: () => [],
+    buildContextEntries: () => {
+      throw new Error("adversarial projection read");
+    },
+  });
+  assert.equal(await inject(EMPTY_EVENT, ctx), undefined, "no guessed copy on a failed read");
+  assert.equal(counts.select, 1, "eligibility was consulted (the failure is downstream)");
+  assert.equal(counts.content, 0, "the content thunk never ran");
 });
 
 test("strip: drops the owned customType and any user turn carrying ANY owned marker", async () => {
@@ -215,7 +294,7 @@ test("strip: drops the owned customType and any user turn carrying ANY owned mar
         { role: "user", content: "a normal message" },
       ],
     },
-    ctxOver(() => []),
+    ctxOver(),
   )) as { messages: { role?: string; customType?: string; content?: unknown }[] };
   assert.equal(result.messages.length, 2, "only the unrelated user turns survive");
   assert.ok(result.messages.every((m) => m.customType !== CONTEXT_TYPE));
@@ -235,7 +314,7 @@ test("strip: keeps non-user roles even when they quote a marker", async () => {
         { role: "toolResult", content: [{ type: "text", text: `tool output with ${MARKER}` }] },
       ],
     },
-    ctxOver(() => []),
+    ctxOver(),
   )) as { messages: unknown[] };
   assert.equal(result.messages.length, 2, "non-user roles are never marker-stripped");
 });
@@ -245,7 +324,73 @@ test("strip: keeps everything while live (the hook yields no filter)", async () 
   const { strip } = hooksFor(spec);
   const result = await strip(
     { messages: [{ customType: CONTEXT_TYPE, content: `${MARKER}\nstill relevant` }] },
-    ctxOver(() => []),
+    ctxOver(),
   );
   assert.equal(result, undefined, "a live context is never stripped");
+});
+
+// --- composition smoke: the REAL registered extension rides the projection leaf -----------------
+
+test("composition: the bound extension injects, dedups on the live copy, re-injects off it, and keeps it on reload", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.inMemory(cwd),
+    env: { PERK_RUN_ID: "01RID" },
+  });
+  try {
+    const manager = h.session.sessionManager;
+    const expected = planAuthoringContextContent(undefined);
+    const planContexts = (injected: { customType?: string; content?: unknown }[]) =>
+      injected.filter((m) => m.customType === PLAN_CONTEXT_TYPE).map((m) => m.content);
+
+    // A non-user checkpoint BEFORE any delivery (the last claim-time state entry): navigating
+    // here later lands on a leaf with no plan context in Pi's projection.
+    const beforeDelivery = manager.getLeafId();
+    assert.ok(beforeDelivery !== null);
+
+    // Turn 1: the plan-authoring context is injected with the exact rendered bytes.
+    assert.deepEqual(planContexts(await h.emitBeforeAgentStart()), [expected]);
+    // The harness does not persist the returned custom — append it the way Pi would.
+    manager.appendCustomMessageEntry(PLAN_CONTEXT_TYPE, expected, false);
+    const afterDelivery = h.session.sessionManager.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "planning work after the delivery" }],
+      api: "test",
+      provider: "test",
+      model: "test",
+      usage: {},
+      stopReason: "stop",
+      timestamp: 1,
+    } as never);
+
+    // Turn 2: the live copy suppresses.
+    assert.deepEqual(planContexts(await h.emitBeforeAgentStart()), []);
+
+    // Navigate to the pre-delivery checkpoint (the guidance is MISSING there): re-inject.
+    await h.navigateTo(beforeDelivery);
+    assert.equal(h.workflowState().mode, "read-only", "the rebuilt gate still holds here");
+    assert.deepEqual(planContexts(await h.emitBeforeAgentStart()), [expected]);
+
+    // Back onto the live copy's branch: suppressed again.
+    await h.navigateTo(afterDelivery);
+    assert.deepEqual(planContexts(await h.emitBeforeAgentStart()), []);
+
+    // Reload onto the same leaf: still suppressed (no process-global latch involved either way).
+    await h.reload();
+    assert.deepEqual(planContexts(await h.emitBeforeAgentStart()), []);
+
+    // The `context` payload survives intact while live: the hidden copy AND the user turn.
+    const surviving = await h.emitContext([
+      { customType: PLAN_CONTEXT_TYPE, content: expected },
+      { role: "user", content: "keep drafting" },
+    ]);
+    assert.deepEqual(surviving, [
+      { customType: PLAN_CONTEXT_TYPE, content: expected },
+      { role: "user", content: "keep drafting" },
+    ]);
+    assert.ok(expected.includes(PLAN_MARKER), "the rendered bytes carry the dedup key");
+  } finally {
+    h.dispose();
+  }
 });

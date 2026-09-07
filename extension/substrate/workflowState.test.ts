@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { type PlanRef, writePlanRef } from "./cache.ts";
 import {
   activePlanRef,
@@ -123,6 +124,43 @@ test("rebuild: session_artifacts participates in per-field LWW like any field", 
     ws({ session_artifacts: { "draft.md": v2 } }),
   ]);
   assert.deepEqual(state.session_artifacts, { "draft.md": v2 });
+});
+
+test("rebuild: earlier mode/stage patches survive a compaction that omits them from projected context", () => {
+  // Full-branch authority vs live-context authority: Pi's projection after this compaction
+  // carries only the summary + the kept tail (no workflow-state entry at all), yet the rebuild
+  // still reads the whole selected branch, so eligibility/gating state is never lost to
+  // compaction. The projection side is `pi/v1/contextEvidence.ts`'s concern, not this rebuild's.
+  const manager = SessionManager.inMemory("/nowhere");
+  manager.appendCustomEntry(WORKFLOW_STATE_TYPE, { run_id: "R", mode: "read-only", stage: "plan" });
+  manager.appendCustomEntry(WORKFLOW_STATE_TYPE, { stage: "save" });
+  const kept = manager.appendMessage({
+    role: "assistant",
+    content: [{ type: "text", text: "recent work" }],
+    api: "t",
+    provider: "t",
+    model: "t",
+    usage: {},
+    stopReason: "stop",
+    timestamp: 1,
+  } as never);
+  manager.appendCompaction("summary that never mentions mode or stage", kept, 100);
+
+  assert.deepEqual(
+    manager.buildContextEntries().map((entry) => entry.type),
+    ["compaction", "message"],
+    "the patches are gone from Pi's projected context",
+  );
+  assert.deepEqual(rebuildWorkflowState(branchOf({ sessionManager: manager })), {
+    run_id: "R",
+    mode: "read-only",
+    stage: "save",
+  });
+  assert.equal(
+    branchCarries(branchOf({ sessionManager: manager }), "read-only"),
+    true,
+    "the full-branch scan still sees the compacted-away history",
+  );
 });
 
 test("rebuild: /tree re-scan reflects a newly added entry", () => {
