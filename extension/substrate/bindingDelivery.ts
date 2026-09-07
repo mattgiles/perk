@@ -14,29 +14,29 @@
 //
 // This is the SINGLE delivery path for perk's own nudges. Delivery NEVER double-delivers: the
 // cold↔warm dedup marker is `BINDING_HEADER` itself — the cold door's initial prompt and every warm
-// injection carry it, so Mechanism A injects ONLY when neither the compaction-active branch window
-// NOR the submitting turn's prompt already carries the header (idempotent across turns/reloads;
-// after compaction drops the original from model context it re-delivers). The prompt scan is
-// load-bearing on the launch turn: at
-// `before_agent_start` the just-submitted prompt is NOT yet on the branch, so the branch scan
-// alone would miss a cold seed's binding suffix and double-deliver.
+// injection carry it, so Mechanism A injects ONLY when neither the submitting turn's prompt NOR
+// Pi's live context projection (`pi/v1/contextEvidence.ts` — the header as persisted USER content
+// or as an owned `perk:binding-context` custom) already carries the header (idempotent across
+// turns/reloads; after compaction drops the original from model context it re-delivers, and a
+// summary quoting the header never suppresses). The prompt scan is load-bearing on the launch
+// turn: at `before_agent_start` the just-submitted prompt is NOT yet persisted, so the projection
+// alone would miss a cold seed's binding suffix and double-deliver. The full branch is read only
+// for the stage (`activeStageRender`) — eligibility survives compaction; delivery evidence is
+// Pi's. A projection read failure escapes the hook to Pi's hook-error reporting rather than
+// injecting a guessed copy.
 //
-// LBYL throughout: a missing/unreadable transclude target degrades to the nudge pointer with a
-// loud-but-non-fatal warning, never throws, never blocks a turn. Resolver shape `issues` are NOT
-// surfaced warm (the cold launch + doctor own them); only the transclude `warnings` are.
+// LBYL on the render path: a missing/unreadable transclude target degrades to the nudge pointer
+// with a loud-but-non-fatal warning, never throws, never blocks a turn (only a session read
+// failure — branch or projection — escapes the hooks). Resolver shape `issues` are NOT surfaced
+// warm (the cold launch + doctor own them); only the transclude `warnings` are.
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { activeContextMessages, contextCarriesMarker } from "../pi/v1/contextEvidence.ts";
 import { loadDefaultBindings, resolveBindings, type SkillBinding } from "./bindings.ts";
 import { loadPerkConfig } from "./config.ts";
-import {
-  activeContextWindow,
-  type BranchEntry,
-  branchCarries,
-  branchOf,
-  rebuildWorkflowState,
-} from "./workflowState.ts";
+import { type BranchEntry, branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /**
  * The cross-plane dedup marker AND render header. MUST stay byte-identical to the Python cold
@@ -156,9 +156,16 @@ function stripFrontmatter(text: string): string {
   return text; // no closing delimiter — leave the text unchanged
 }
 
-/** Whether a cold prompt or warm injection still active in model context carries the marker. */
-function branchHasHeader(branch: readonly BranchEntry[]): boolean {
-  return branchCarries(activeContextWindow(branch), BINDING_HEADER);
+/**
+ * Whether a persisted cold prompt (user content) or a prior warm injection (the owned custom)
+ * still live in Pi's context projection carries the header. Throws when the projection read
+ * fails — the hook boundary owns that.
+ */
+function contextHasHeader(ctx: ExtensionContext): boolean {
+  return contextCarriesMarker(activeContextMessages(ctx), {
+    customType: BINDING_CONTEXT_TYPE,
+    marker: BINDING_HEADER,
+  });
 }
 
 /** The launched stage's `stage:<id>` render, or `null` when there is no stage / nothing matches. */
@@ -171,22 +178,22 @@ function activeStageRender(cwd: string, branch: readonly BranchEntry[]): Binding
 /**
  * Register warm-door binding delivery: Mechanism A's dedup-guarded `before_agent_start` injection
  * plus a `context` strip mirroring planMode.ts / objectiveAuthor.ts (keep while the stage's
- * bindings are live; strip the stale custom otherwise). Inert when nothing matches the stage;
- * never throws. Mechanism B (`bindingSuffix`) is wired by the command modules themselves.
+ * bindings are live; strip the stale custom otherwise). Inert when nothing matches the stage; the
+ * render path never throws (only a failed session read escapes to Pi's hook-error reporting).
+ * Mechanism B (`bindingSuffix`) is wired by the command modules themselves.
  */
 export function registerBindingDelivery(pi: ExtensionAPI): void {
   // Mechanism A — inject the launched stage's resolved bindings as a hidden context message,
-  // but ONLY when no entry in the compaction-active branch window AND not the submitting turn's
-  // prompt already carries BINDING_HEADER (the cold door's initial prompt or a prior warm inject) — the cold↔warm
+  // but ONLY when neither the submitting turn's prompt NOR Pi's live context projection already
+  // carries BINDING_HEADER (the cold door's initial prompt or a prior warm inject) — the cold↔warm
   // idempotency guard. The `event.prompt` scan covers the launch turn, where the just-submitted
-  // prompt is not yet on the branch; a worker prompt carries no header, so Mechanism A still
-  // fires there (contracts.md §8.38).
+  // prompt is not yet persisted; a worker prompt carries no header, so Mechanism A still fires
+  // there (contracts.md §8.38). Render-before-dedup: an inert stage never reads the projection.
   pi.on("before_agent_start", async (event, ctx) => {
-    const branch = branchOf(ctx);
-    const rendered = activeStageRender(ctx.cwd, branch);
+    const rendered = activeStageRender(ctx.cwd, branchOf(ctx));
     if (rendered === null || rendered.text === null) return;
-    if (branchHasHeader(branch)) return;
     if (event.prompt.includes(BINDING_HEADER)) return;
+    if (contextHasHeader(ctx)) return;
     for (const warning of rendered.warnings) console.error(`perk: ${warning}`);
     return {
       message: {
@@ -204,7 +211,8 @@ export function registerBindingDelivery(pi: ExtensionAPI): void {
   //
   // Deliberately NARROWER than planMode: it strips ONLY the BINDING_CONTEXT_TYPE custom, never a
   // user message carrying the header — a cold launch's initial prompt legitimately carries
-  // BINDING_HEADER and must survive in context.
+  // BINDING_HEADER and must survive in context, even after the stage stops binding. The strip
+  // never reads the projection (it filters the messages Pi hands it).
   pi.on("context", async (event, ctx) => {
     const branch = branchOf(ctx);
     const rendered = activeStageRender(ctx.cwd, branch);

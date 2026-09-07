@@ -129,43 +129,17 @@ export function branchOf(source: BranchSource): BranchEntry[] {
 }
 
 /**
- * Whether any entry on the branch already carries `needle` — the once-only injection dedup guard
- * (the bindingDelivery `branchHasHeader` form). Serializing each entry is the robust,
- * shape-agnostic scan; safe while the needle is a distinctive literal that other entries' data
- * can't casually contain (known accepted false positive: a tool result quoting perk's own source;
- * the typed customType scan is the escalation if that bites — docs/learned/pi/context-injection.md).
+ * Whether any entry on the FULL selected branch already carries `needle` — the historical
+ * once-per-selected-branch guard (the toolGating read-only marker form): history across
+ * compaction, not live model context. Serializing each entry is the robust, shape-agnostic scan;
+ * safe while the needle is a distinctive literal that other entries' data can't casually contain
+ * (known accepted false positive: a tool result quoting perk's own source; the typed customType
+ * scan is the escalation if that bites — docs/learned/pi/context-injection.md). Live-delivery
+ * evidence ("is the copy still in model context?") is a different authority — Pi's own projection
+ * via `pi/v1/contextEvidence.ts` — never reconstructed from branch entries here.
  */
 export function branchCarries(branch: readonly BranchEntry[], needle: string): boolean {
   return branch.some((entry) => JSON.stringify(entry).includes(needle));
-}
-
-/**
- * The branch entries still represented directly in model context. Before compaction that is the
- * full branch. After compaction, Pi keeps entries from `firstKeptEntryId` onward plus anything
- * appended later; historical entries before that cutoff survive only through the summary.
- * Compaction entries are excluded because text quoted by a summary is not a live custom block.
- */
-export function activeContextWindow(branch: readonly BranchEntry[]): BranchEntry[] {
-  let latestCompaction = -1;
-  for (let i = branch.length - 1; i >= 0; i--) {
-    if (branch[i]?.type === "compaction") {
-      latestCompaction = i;
-      break;
-    }
-  }
-  if (latestCompaction === -1) return [...branch];
-
-  const firstKeptEntryId = (branch[latestCompaction] as { firstKeptEntryId?: unknown })
-    .firstKeptEntryId;
-  const firstKept =
-    typeof firstKeptEntryId === "string"
-      ? branch.findIndex(
-          (entry, index) =>
-            index < latestCompaction && (entry as { id?: unknown }).id === firstKeptEntryId,
-        )
-      : -1;
-  const start = firstKept === -1 ? latestCompaction + 1 : firstKept;
-  return branch.slice(start).filter((entry) => entry.type !== "compaction");
 }
 
 /**

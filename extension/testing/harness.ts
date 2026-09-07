@@ -276,14 +276,22 @@ export function plantSession(
   return path;
 }
 
+/** One planted raw entry: state (`custom`), a hidden injection (`customMessage`), or a turn. */
+export type RawEntrySpec =
+  | { custom: { type: string; data: unknown } }
+  | { customMessage: { type: string; content: string } }
+  | { user: string }
+  | { assistant: string };
+
 /**
- * Plant a session `.jsonl` from a flat list of entry specs (custom entries + assistant messages,
- * in order). Lets tests build interleaved sequences (e.g. a `perk:workflow-state` seed followed
- * by assistant turns). Returns the file path; basename is the session id.
+ * Plant a session `.jsonl` from a flat list of entry specs (custom state entries, hidden
+ * `custom_message` injections, user prompts, assistant messages — in order). Lets tests build
+ * interleaved sequences (e.g. a `perk:workflow-state` seed followed by a cold user prompt).
+ * Returns the file path; basename is the session id.
  */
 export function plantRawSession(
   cwd: string,
-  specs: ({ custom: { type: string; data: unknown } } | { assistant: string })[],
+  specs: RawEntrySpec[],
   opts: { fileName?: string } = {},
 ): string {
   const fileName = opts.fileName ?? "planted-raw.jsonl";
@@ -294,6 +302,22 @@ export function plantRawSession(
     const base = { id: `e${i}`, parentId: i === 0 ? null : `e${i - 1}`, timestamp: now };
     if ("custom" in spec) {
       return { ...base, type: "custom", customType: spec.custom.type, data: spec.custom.data };
+    }
+    if ("customMessage" in spec) {
+      return {
+        ...base,
+        type: "custom_message",
+        customType: spec.customMessage.type,
+        content: spec.customMessage.content,
+        display: false,
+      };
+    }
+    if ("user" in spec) {
+      return {
+        ...base,
+        type: "message",
+        message: { role: "user", content: spec.user, timestamp: Date.parse(now) },
+      };
     }
     return {
       ...base,

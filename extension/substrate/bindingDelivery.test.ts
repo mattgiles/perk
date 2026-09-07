@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   loadPerkSession,
   plantRawSession,
@@ -17,6 +17,7 @@ import {
   BINDING_CONTEXT_TYPE,
   BINDING_HEADER,
   bindingSuffix,
+  registerBindingDelivery,
   renderBindings,
   resolvedBindings,
 } from "./bindingDelivery.ts";
@@ -226,10 +227,11 @@ test("Mechanism A is a no-op when no stage is launched", async () => {
   }
 });
 
-test("Mechanism A dedups against a cold-prompt header already on the branch", async () => {
+test("Mechanism A dedups against a persisted cold-prompt header (a USER turn in live context)", async () => {
   const cwd = scaffoldRepo();
   writeBindings(cwd, [{ trigger: "stage:save", skill: "my-skill", mode: "nudge" }]);
-  // Simulate the cold door: a prior message on the branch already carries BINDING_HEADER.
+  // Simulate the cold door after its launch turn persisted: the USER prompt on the branch
+  // carries BINDING_HEADER (user content is delivery evidence; assistant text never is).
   const file = plantRawSession(cwd, [
     {
       custom: {
@@ -237,7 +239,7 @@ test("Mechanism A dedups against a cold-prompt header already on the branch", as
         data: { run_id: "01RID", mode: "read-write", stage: "save" },
       },
     },
-    { assistant: `${BINDING_HEADER}\n\n${pointer("my-skill")}` },
+    { user: `Implement the plan.\n\n${BINDING_HEADER}\n\n${pointer("my-skill")}` },
   ]);
   const h = await loadPerkSession({
     cwd,
@@ -317,9 +319,9 @@ test("Mechanism A dedups against a prior warm binding-context custom (idempotent
       },
     },
     {
-      custom: {
+      customMessage: {
         type: BINDING_CONTEXT_TYPE,
-        data: { content: `${BINDING_HEADER}\n\n${pointer("my-skill")}` },
+        content: `${BINDING_HEADER}\n\n${pointer("my-skill")}`,
       },
     },
   ]);
@@ -333,7 +335,7 @@ test("Mechanism A dedups against a prior warm binding-context custom (idempotent
     assert.equal(
       injected.some((m) => m.customType === BINDING_CONTEXT_TYPE),
       false,
-      "prior warm injection on branch → no re-injection",
+      "prior warm injection (the owned custom, as Pi persists it) → no re-injection",
     );
   } finally {
     h.dispose();
@@ -350,7 +352,7 @@ test("Mechanism A re-injects when compaction drops the historical binding header
         data: { run_id: "01RID", mode: "read-write", stage: "save" },
       },
     },
-    { assistant: `${BINDING_HEADER}\n\n${pointer("my-skill")}` },
+    { user: `Implement the plan.\n\n${BINDING_HEADER}\n\n${pointer("my-skill")}` },
     { assistant: "recent work that survives compaction" },
   ]);
   const sessionManager = SessionManager.open(file);
@@ -386,7 +388,7 @@ test("Mechanism A keeps dedup when compaction retains the binding header", async
         data: { run_id: "01RID", mode: "read-write", stage: "save" },
       },
     },
-    { assistant: `${BINDING_HEADER}\n\n${pointer("my-skill")}` },
+    { user: `Implement the plan.\n\n${BINDING_HEADER}\n\n${pointer("my-skill")}` },
   ]);
   const sessionManager = SessionManager.open(file);
   const keptId = sessionManager.getEntries().at(-1)?.id;
@@ -460,4 +462,83 @@ test("the context strip KEEPS the binding-context (and the cold user prompt) whi
   } finally {
     h.dispose();
   }
+});
+
+test("the context strip KEEPS a cold user prompt carrying the header even after the stage stops binding", async () => {
+  const cwd = scaffoldRepo();
+  // NO user overlay → stage:save renders nothing → the binding custom is stale, but the cold
+  // prompt is the human's own turn: user messages are never stripped, in any stage state.
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-write", stage: "save" }]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    const coldPrompt = {
+      role: "user",
+      content: `Implement.\n\n${BINDING_HEADER}\n\ncold bindings`,
+    };
+    const surviving = await h.emitContext([
+      { customType: BINDING_CONTEXT_TYPE, content: `${BINDING_HEADER}\n\nstale` },
+      coldPrompt,
+      { role: "user", content: [{ type: "text", text: `${BINDING_HEADER} as a text part` }] },
+    ]);
+    assert.deepEqual(surviving, [
+      coldPrompt,
+      { role: "user", content: [{ type: "text", text: `${BINDING_HEADER} as a text part` }] },
+    ]);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("Mechanism A: a failed projection read escapes the hook (no guessed copy); an inert stage never reads it", async () => {
+  type Hook = (
+    event: { prompt: string },
+    ctx: unknown,
+  ) => Promise<{ message?: { customType?: string } } | undefined>;
+  const hooks = new Map<string, Hook>();
+  registerBindingDelivery({
+    on: (name: string, hook: Hook) => {
+      hooks.set(name, hook);
+    },
+  } as unknown as ExtensionAPI);
+  const inject = hooks.get("before_agent_start");
+  assert.ok(inject !== undefined);
+
+  const cwd = scaffoldRepo();
+  writeBindings(cwd, [{ trigger: "stage:save", skill: "my-skill", mode: "nudge" }]);
+  writeSkill(cwd, "my-skill", "# my-skill\n");
+  const reads: string[] = [];
+  const ctxFor = (stage: string | undefined) => ({
+    cwd,
+    sessionManager: {
+      getBranch: () => [
+        { type: "custom", customType: "perk:workflow-state", data: { run_id: "01RID", stage } },
+      ],
+      buildContextEntries: () => {
+        reads.push("projection");
+        throw new Error("adversarial projection read");
+      },
+    },
+  });
+
+  // A binding stage: the render succeeds, the prompt carries no header, the projection throws —
+  // the exception reaches the hook boundary (Pi's hook-error reporter), nothing is injected.
+  await assert.rejects(inject({ prompt: "" }, ctxFor("save")), /adversarial projection read/);
+  assert.deepEqual(reads, ["projection"]);
+
+  // The prompt check settles a cold launch turn BEFORE any projection read.
+  reads.length = 0;
+  assert.equal(
+    await inject({ prompt: `${BINDING_HEADER}\n\ncold seed` }, ctxFor("save")),
+    undefined,
+  );
+  assert.deepEqual(reads, [], "a cold-seed prompt never reads the projection");
+
+  // No stage / nothing rendered: render-before-dedup means the projection is never touched.
+  assert.equal(await inject({ prompt: "" }, ctxFor(undefined)), undefined);
+  assert.equal(await inject({ prompt: "" }, ctxFor("implement-nothing-binds")), undefined);
+  assert.deepEqual(reads, [], "an inert stage never reads the projection");
 });

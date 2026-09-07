@@ -496,3 +496,52 @@ test("mode-context dedups against a prior copy on the branch (once-only per live
     h.dispose();
   }
 });
+
+test("mode-context is once-only per SELECTED BRANCH: a copy compaction summarized out of context does not re-inject", async () => {
+  // The read-only guidance is history-scoped, not live-context-scoped: the full-branch scan is
+  // the authority, so a hidden copy Pi has compacted away (it stays on the branch) still
+  // suppresses. Enforcement (tool_call) never depended on the prose being readable.
+  const cwd = scaffoldRepo();
+  const manager = SessionManager.inMemory(cwd);
+  manager.appendCustomEntry("perk:workflow-state", { run_id: "01RID", mode: "read-only" });
+  manager.appendCustomMessageEntry("perk:mode-context", "[READ-ONLY MODE]\nprior copy", false);
+  const kept = manager.appendMessage({
+    role: "assistant",
+    content: [{ type: "text", text: "recent work" }],
+    api: "t",
+    provider: "t",
+    model: "t",
+    usage: {},
+    stopReason: "stop",
+    timestamp: 1,
+  } as never);
+  manager.appendCompaction("a summary that never mentions the marker", kept, 100);
+  assert.equal(
+    manager
+      .buildContextEntries()
+      .some((entry) => entry.type === "custom_message" && entry.customType === "perk:mode-context"),
+    false,
+    "the copy is out of Pi's projected context",
+  );
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: manager,
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    assert.equal(h.workflowState().mode, "read-only");
+    const injected = await h.emitBeforeAgentStart();
+    assert.equal(
+      injected.some((m) => m.customType === "perk:mode-context"),
+      false,
+      "the historical copy on the full branch still suppresses",
+    );
+    assert.equal(
+      (await h.emitToolCall("write", { path: "x", content: "y" }))?.block,
+      true,
+      "enforcement holds regardless",
+    );
+  } finally {
+    h.dispose();
+  }
+});

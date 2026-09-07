@@ -20,13 +20,55 @@ import {
 import { agentScratchDir, ensureRunScratch } from "./cache.ts";
 import type { ChildIdentity, ChildIdentitySnapshot } from "./childIdentity.ts";
 
-function fakeCtx(cwd: string, entries: unknown[]): AgentScratchContext {
+/** A structural hook ctx: the full branch (identity/eligibility) + Pi's projection (dedup). */
+function fakeCtx(
+  cwd: string,
+  entries: unknown[],
+  projection: () => unknown[] = () => [],
+): AgentScratchContext & { sessionManager: { buildContextEntries(): unknown[] } } {
   return {
     cwd,
     hasUI: false,
     ui: { notify: () => {} },
-    sessionManager: { getBranch: () => entries },
+    sessionManager: { getBranch: () => entries, buildContextEntries: projection },
   };
+}
+
+type ScratchHook = (
+  event: { prompt?: string; messages?: { customType?: string; content?: unknown }[] },
+  ctx: ExtensionContext,
+) => Promise<{ messages?: unknown[]; message?: { content?: unknown } } | undefined>;
+
+/** Register the scratch hooks through a `pi.on` recorder with a scripted provisioner. */
+function scratchHooks(resolve: () => ReturnType<typeof renderAgentScratchBlock> | null): {
+  hooks: Map<string, ScratchHook>;
+  provisions: () => number;
+} {
+  const hooks = new Map<string, ScratchHook>();
+  let provisions = 0;
+  registerAgentScratch(
+    {
+      on: (name: string, hook: ScratchHook) => {
+        hooks.set(name, hook);
+      },
+    } as unknown as ExtensionAPI,
+    {
+      resolve: () => {
+        provisions++;
+        return resolve();
+      },
+    },
+    () => ({
+      identity: {
+        status: "available",
+        name: "custom.agent",
+        provenance: "native-system-prompt-prefix",
+      },
+      runner: false,
+    }),
+    () => false,
+  );
+  return { hooks, provisions: () => provisions };
 }
 
 function scratchMessages(messages: { customType?: string; content?: unknown }[]) {
@@ -447,4 +489,124 @@ test("a filesystem failure warns and continues, then a later turn recovers", asy
   } finally {
     h.dispose();
   }
+});
+
+test("dedup requires the exact owned custom string in Pi's projection — nothing looser", async () => {
+  const cwd = "/repo";
+  const block = renderAgentScratchBlock(cwd, "RID");
+  const changed = renderAgentScratchBlock(cwd, "RID.1");
+  const at = "2025-01-01T00:00:00.000Z";
+  const customMessage = (content: unknown, customType = AGENT_SCRATCH_CONTEXT_TYPE) => ({
+    type: "custom_message",
+    id: "cm",
+    parentId: null,
+    timestamp: at,
+    customType,
+    content,
+    display: false,
+  });
+  const userMessage = (content: unknown) => ({
+    type: "message",
+    id: "u",
+    parentId: null,
+    timestamp: at,
+    message: { role: "user", content, timestamp: 1 },
+  });
+  const cases: { name: string; entries: unknown[]; dedups: boolean }[] = [
+    { name: "owned exact string", entries: [customMessage(block.content)], dedups: true },
+    {
+      name: "same marker, changed bytes",
+      entries: [customMessage(`${block.content} `)],
+      dedups: false,
+    },
+    { name: "a parent run's block", entries: [customMessage(changed.content)], dedups: false },
+    { name: "marker-only match", entries: [customMessage(block.marker)], dedups: false },
+    {
+      name: "the exact bytes as a text-part array",
+      entries: [customMessage([{ type: "text", text: block.content }])],
+      dedups: false,
+    },
+    { name: "an exact USER quote", entries: [userMessage(block.content)], dedups: false },
+    {
+      name: "the exact bytes under another customType",
+      entries: [customMessage(block.content, "perk:other")],
+      dedups: false,
+    },
+    {
+      // Pi's `buildContextEntries()` returns custom STATE entries too; its converter projects
+      // no message for them — `data.content` is state, never model delivery.
+      name: "plain custom state (`data.content`) selected by Pi but never projected",
+      entries: [
+        {
+          type: "custom",
+          id: "st",
+          parentId: null,
+          timestamp: at,
+          customType: AGENT_SCRATCH_CONTEXT_TYPE,
+          data: { content: block.content },
+        },
+      ],
+      dedups: false,
+    },
+  ];
+  for (const { name, entries, dedups } of cases) {
+    const { hooks } = scratchHooks(() => block);
+    const ctx = fakeCtx(
+      cwd,
+      [
+        { type: "custom", customType: "perk:workflow-state", data: { run_id: "RID" } },
+        {
+          type: "custom",
+          customType: AGENT_SCRATCH_CONTEXT_TYPE,
+          data: { content: block.content },
+        },
+      ],
+      () => entries,
+    ) as unknown as ExtensionContext;
+    const result = await hooks.get("before_agent_start")?.({ prompt: "" }, ctx);
+    assert.equal(result?.message === undefined, dedups, name);
+    if (!dedups) assert.equal(result?.message?.content, block.content, name);
+  }
+});
+
+test("provisioning runs before dedup AND before a projection read; a projection failure escapes the hook", async () => {
+  const block = renderAgentScratchBlock("/repo", "RID");
+  const order: string[] = [];
+  const { hooks, provisions } = scratchHooks(() => {
+    order.push("provision");
+    return block;
+  });
+  const throwing = fakeCtx("/repo", [], () => {
+    order.push("projection");
+    throw new Error("adversarial projection read");
+  }) as unknown as ExtensionContext;
+  await assert.rejects(
+    hooks.get("before_agent_start")?.({ prompt: "" }, throwing) ?? Promise.resolve(),
+    /adversarial projection read/,
+    "the read failure reaches the hook boundary — no guessed copy",
+  );
+  assert.deepEqual(order, ["provision", "projection"], "the directory is repaired first");
+  assert.equal(provisions(), 1);
+
+  // A provisioning failure (null block) settles the turn before any projection read.
+  order.length = 0;
+  const { hooks: failing } = scratchHooks(() => {
+    order.push("provision");
+    return null;
+  });
+  assert.equal(await failing.get("before_agent_start")?.({ prompt: "" }, throwing), undefined);
+  assert.deepEqual(order, ["provision"], "no block → no projection read");
+
+  // The context filter never reads the projection (it filters what Pi hands it).
+  order.length = 0;
+  const { hooks: filtering } = scratchHooks(() => {
+    order.push("provision");
+    return block;
+  });
+  const kept = await filtering.get("context")?.(
+    { messages: [{ customType: AGENT_SCRATCH_CONTEXT_TYPE, content: block.content }] },
+    throwing,
+  );
+  assert.equal(kept?.messages?.length, 1);
+  assert.deepEqual(order, ["provision"], "the strip provisions but never projects");
 });

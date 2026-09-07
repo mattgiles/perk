@@ -99,6 +99,17 @@ a row at a new trigger is added. The trigger overlay operates by trigger, not by
 binding recipe covers trigger selection, the nudge-versus-transclude decision, and the
 model-deliverable command constraint.
 
+**Delivery semantics.** A `stage:` binding reaches the model once per live context: a cold launch
+carries the render in its initial prompt, and a warm or remote-worker session receives the same
+render as a hidden context message on the first turn that lacks it. The stage is read from the
+session's full history, so eligibility survives compaction; whether the render is still present is
+Pi's decision — perk asks Pi's own context projection whether the header is live as your prompt or
+as its own hidden message. A compaction that drops the render from context re-delivers it on the
+next turn; a summary that merely quotes the header does not count as delivery. Your own prompt
+turns are never removed, even after the stage stops binding; only perk's hidden binding message is
+stripped when it goes stale. This is delivery, not enforcement: bindings nudge or inline guidance
+and grant no tools.
+
 ```toml
 [[bindings]]
 trigger = "stage:implement"
