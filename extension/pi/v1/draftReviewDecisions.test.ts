@@ -1067,6 +1067,81 @@ test("a save receipt cannot authorize a gate effect after ownership is replaced 
   }
 });
 
+for (const failure of ["gate-callback", "receipt-write", "ownership-loss"] as const) {
+  test(`throwing receipt callback (${failure}) retains verified save facts and fences writes`, async () => {
+    const f = fixture();
+    try {
+      f.open();
+      const receipt = { id: "42", url: "https://example.test/42" };
+      let saves = 0;
+      let callbacks = 0;
+      const result = await f.decisions.dispatch({
+        id,
+        runId: "RID",
+        approved: true,
+        effect: "save",
+        async execute(capability) {
+          await capability.save(
+            async () => {
+              saves++;
+              return { receipt, value: "saved" };
+            },
+            () => {
+              callbacks++;
+              if (failure === "receipt-write") f.session.failNextWrite();
+              if (failure === "ownership-loss") {
+                rmSync(f.lock);
+                writeFileSync(f.lock, "replacement owner");
+              }
+              throw new Error("controlled gate callback failure");
+            },
+          );
+          assert.fail("a failed callback cannot continue to delivery");
+        },
+      });
+      assert.ok(!result.ok);
+      assert.equal(
+        result.reason,
+        failure === "receipt-write"
+          ? "persistence-failed"
+          : failure === "ownership-loss"
+            ? "ownership-lost"
+            : "io-error",
+      );
+      assert.deepEqual(result.saveReceipt, receipt);
+      assert.equal(result.gateExited, false, "a throwing callback proves no gate exit");
+      assert.equal(saves, 1);
+      assert.equal(callbacks, 1);
+      const c = f.record().consumption;
+      if (failure === "gate-callback") {
+        assert.ok(c.state === "uncertain");
+        assert.equal(c.reason, "effect-failed", "the backend receipt was confirmed");
+        assert.deepEqual(c.attempt.save, { state: "confirmed", ...receipt });
+        assert.equal(c.attempt.delivery, null);
+        assert.equal(existsSync(f.lock), false);
+      } else {
+        assert.ok(c.state === "dispatch");
+        assert.deepEqual(c.attempt.save, { state: "started" });
+        assert.equal(c.attempt.delivery, null);
+        assert.equal(
+          existsSync(f.lock),
+          true,
+          "no speculative write after persistence/ownership failure",
+        );
+        if (failure === "ownership-loss")
+          assert.equal(readFileSync(f.lock, "utf8"), "replacement owner");
+      }
+      const retry = await f.decisions.mutateAsync("manual-save", async () =>
+        assert.fail("no automatic save retry"),
+      );
+      assert.ok(!retry.ok);
+      assert.equal(saves, 1);
+    } finally {
+      f.dispose();
+    }
+  });
+}
+
 for (const failure of ["receipt-write", "pointer-capture"] as const) {
   test(`confirmed plan save/gate survives ${failure} failure without replay`, async () => {
     const f = fixture();

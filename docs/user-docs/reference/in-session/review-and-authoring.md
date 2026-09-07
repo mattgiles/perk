@@ -334,8 +334,9 @@ not invalidate it, including structured objective/gist bytes. Manual saves inval
 `manual-save`; node updates conservatively invalidate with `target-changed`. A busy claim,
 unresolved dispatch/uncertainty, invalid state, or failed invalidation blocks the competing
 operation. Failed invalidation retains the claim; do not discard state or blindly retry a save.
-If a save succeeds but later linkage or notification bookkeeping fails, the stop preserves its
-known ID/URL and any definitive successful gate exit. This does not mean nothing saved. A failed
+If a save succeeds but later gate, linkage, or notification bookkeeping fails, the stop preserves
+its known ID/URL and any definitive successful gate exit. A gate failure does not make the backend
+receipt unconfirmed; recording that receipt still requires verified ownership and persistence. This does not mean nothing saved. A failed
 linkage retains exclusion; reconcile the existing object rather than creating it again. Manual
 save tools that did not previously exit the gate still do not exit it.
 

@@ -229,6 +229,7 @@ function fixture(subject: Subject = "plan", runId: string | null = "RID") {
     reviews,
     branch,
     session,
+    gating,
     invoke,
     command,
     draft,
@@ -715,6 +716,57 @@ for (const subject of ["plan", "objective"] as const) {
         f.dispose();
       }
     });
+}
+
+for (const subject of ["plan", "objective", "gist"] as const) {
+  for (const surface of ["command", "first-party"] as const) {
+    test(`${subject} ${surface}: throwing approval gate preserves the typed save receipt`, async () => {
+      const f = fixture(subject);
+      try {
+        await f.draft();
+        f.open();
+        f.verdict = "Approve — auto-save to GitHub";
+        f.gating.exit = () => {
+          throw new Error("controlled gate bookkeeping failure");
+        };
+        const result =
+          surface === "command"
+            ? await f.command(`${subject}-save`)
+            : await f.invoke("plan_review");
+        const savedId = subject === "plan" ? "42" : subject === "objective" ? "7" : "8";
+        if (result !== undefined) {
+          assert.equal(result.details.ok, false);
+          assert.deepEqual(result.details.save_receipt, {
+            id: savedId,
+            url: `https://example.test/${savedId}`,
+          });
+          assert.notEqual(result.details.gate_exited, true);
+          assert.match(result.content[0]?.text ?? "", /Confirmed save:.*Do not retry/s);
+        } else {
+          assert.ok(
+            f.notices.some(
+              (text) =>
+                text.includes(`Confirmed save: ${savedId}`) &&
+                text.includes("Do not retry") &&
+                !text.includes("already exited"),
+            ),
+          );
+        }
+        assert.equal(f.calls.length, 1);
+        assert.equal(f.exits, 0);
+        assert.deepEqual(
+          f.record().consumption,
+          {
+            state: "invalidated",
+            reason: surface === "command" ? "manual-save" : "first-party-review",
+          },
+          "ordinary saves must not manufacture dispatch/consumption records",
+        );
+      } finally {
+        f.dispose();
+      }
+    });
+  }
 }
 
 test("gist slash-save: post-save notice failure preserves receipt and definitive gate outcome", async () => {

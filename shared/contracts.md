@@ -4259,7 +4259,10 @@ seams. All Plannotator subject completions use these adapters. Their backend por
 `capability.save` after feature validation
 and title awaits, bind the captured warm plan node inputs explicitly (absent leaves the cold
 handoff fallback), and confirm the subject's typed ID/URL receipt. A receipt callback preserves
-definitive gate exit before fallible receipt-state bookkeeping; subsequent errors retain the
+definitive gate exit before fallible receipt-state bookkeeping. If that callback throws, the
+first save-confirmed checkpoint still records the proven receipt while ownership verifies, then
+the later error becomes effect-failed uncertainty retaining that receipt. Ownership/persistence
+failure overrides this checkpoint and forbids speculative repair. Subsequent errors retain the
 known save receipt and explicit confirmed gate-exit fact and never re-enter the gate. These are subject-specific adapters, not a new
 universal save protocol. The coordinator also exposes `mutateAsync` for bounded manual-save/node
 operations: it verifies invalidation before invoking the callback and holds exclusion through

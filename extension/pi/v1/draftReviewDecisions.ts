@@ -761,9 +761,15 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
               // Backend awaits may lose the claim. Receipt facts survive, but no gate effect
               // is permitted until ownership and the same dispatch are verified again.
               attempt(owner, id);
-              const gate = onReceipt?.(receipt);
-              gateExited = gate?.gateExited === true;
-              owner.transition({ kind: "save-confirmed", id, receipt: saveReceipt });
+              try {
+                const gate = onReceipt?.(receipt);
+                gateExited = gate?.gateExited === true;
+              } finally {
+                // A gate failure cannot erase the proven backend receipt. This first confirmation
+                // still fences ownership; a failed write overrides the callback error and forbids
+                // speculative uncertainty writes. Keep successful gate effects before that write.
+                owner.transition({ kind: "save-confirmed", id, receipt: saveReceipt });
+              }
               return result.value;
             },
             deliver(carrier, content, send) {
