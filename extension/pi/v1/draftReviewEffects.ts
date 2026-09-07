@@ -41,7 +41,9 @@ function ownedReviewSession(
 
 function receiptGate(gate: ApprovalGate) {
   return () => {
-    if (gate.isActive()) gate.exit();
+    const active = gate.isActive();
+    if (active) gate.exit();
+    return { gateExited: active };
   };
 }
 

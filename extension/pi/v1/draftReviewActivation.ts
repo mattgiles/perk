@@ -1,8 +1,22 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
-import type { DraftReviewRegistration } from "../../session/draftReviewState.ts";
+import {
+  type DeliveryCarrier,
+  type DraftReviewRegistration,
+  type RegistrationResult,
+  type ReviewIdentity,
+  reviewRefused,
+  type SaveReceipt,
+} from "../../session/draftReviewState.ts";
+import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { report } from "../../surfaces/report.ts";
-import { createDraftReviewDecisions, type DraftReviewSnapshot } from "./draftReviewDecisions.ts";
+import {
+  createDraftReviewDecisions,
+  type DraftReviewCapability,
+  type DraftReviewOperation,
+  type DraftReviewSnapshot,
+} from "./draftReviewDecisions.ts";
+import { draftReviewDeliveryResult, staleDraftReviewResult } from "./draftReviewRendering.ts";
 import type { PlannotatorRefusal, PlannotatorReviewOutcome } from "./providers/plannotator.ts";
 import type { ReviewOutcome, ToolResult } from "./review.ts";
 
@@ -11,6 +25,16 @@ export interface PreparedDraftReview {
   registration: DraftReviewRegistration;
   signal: AbortSignal;
   isCurrent(): boolean;
+  /** IDs come only from verified registration and its matching completed transport outcome. */
+  complete(
+    outcome: Extract<ReviewOutcome, { status: "completed" }>,
+    options: {
+      effect: "save" | "revision";
+      carrier: DeliveryCarrier;
+      execute(capability: DraftReviewCapability): Promise<ToolResult>;
+    },
+  ): Promise<DraftReviewCompletion>;
+  /** Transport cleanup does not assert that a queued result was delivered. */
   dispose(): void;
 }
 export interface DraftReviewAccess {
@@ -19,6 +43,29 @@ export interface DraftReviewAccess {
     parameter?: string,
     signal?: AbortSignal,
   ): { ok: true; value: PreparedDraftReview } | { ok: false; refusal: PlannotatorRefusal };
+}
+
+type Decisions = ReturnType<typeof createDraftReviewDecisions>;
+export type DraftReviewCompletion = DraftReviewOperation<ToolResult | { status: "consumed" }> & {
+  saveReceipt: SaveReceipt | null;
+  gateExited: boolean;
+  /** A definitive feature result survives later delivery/bookkeeping failure. */
+  completedResult: ToolResult | null;
+};
+/** Required guarded APIs for migrating consumers; no optional production safety hooks. */
+export interface DraftReviewRuntime extends DraftReviewAccess {
+  mutate<T>(
+    ctx: ExtensionContext,
+    reason: Parameters<Decisions["mutate"]>[0],
+    work: (session: WorkflowSession) => T,
+    options?: Pick<NonNullable<Parameters<Decisions["mutate"]>[2]>, "draft">,
+  ): DraftReviewOperation<T>;
+  /** Bounded effects only. Invalidate synchronously and release BEFORE opening an editor. */
+  mutateAsync<T>(
+    ctx: ExtensionContext,
+    reason: Parameters<Decisions["mutateAsync"]>[0],
+    work: (session: WorkflowSession) => Promise<T>,
+  ): Promise<DraftReviewOperation<T>>;
 }
 
 export interface RegisteredDraftReviewBridge extends DraftReviewAccess {
@@ -35,18 +82,63 @@ class DraftReviewTransportStop extends Error {
     this.refusal = refusal;
   }
 }
-export function draftReviewRefusalText(refusal: PlannotatorRefusal): string {
-  return `Draft review stopped (${refusal.code}, ${refusal.phase}): ${refusal.detail}. Do not retry a save or discard retained review state; human reconciliation is required.`;
+type DraftReviewStop = Omit<PlannotatorRefusal, "phase"> & {
+  phase: PlannotatorRefusal["phase"] | "dispatch" | "mutation" | "observation";
+};
+export type DraftReviewConfirmedFacts = {
+  saveReceipt?: SaveReceipt | null;
+  gateExited?: boolean;
+};
+export function draftReviewRefusalText(
+  refusal: DraftReviewStop,
+  facts: DraftReviewConfirmedFacts = {},
+): string {
+  const receipt =
+    facts.saveReceipt === undefined || facts.saveReceipt === null
+      ? ""
+      : ` Confirmed save: ${facts.saveReceipt.id} (${facts.saveReceipt.url}).`;
+  const gate =
+    facts.gateExited === true ? " The successful save already exited the read-only gate." : "";
+  return `Draft review stopped (${refusal.code}, ${refusal.phase}): ${refusal.detail}.${receipt}${gate} Do not retry a save or discard retained review state; human reconciliation is required.`;
 }
-export function draftReviewRefusalResult(refusal: PlannotatorRefusal): ToolResult {
+export function draftReviewRefusalResult(
+  refusal: DraftReviewStop,
+  facts: DraftReviewConfirmedFacts = {},
+): ToolResult {
   return {
     content: [
       {
         type: "text",
-        text: draftReviewRefusalText(refusal),
+        text: draftReviewRefusalText(refusal, facts),
       },
     ],
-    details: { ok: false, status: "refused", reason: refusal.code, phase: refusal.phase },
+    details: {
+      ok: false,
+      status: "refused",
+      reason: refusal.code,
+      phase: refusal.phase,
+      ...(facts.saveReceipt == null ? {} : { save_receipt: facts.saveReceipt }),
+      ...(facts.gateExited === true ? { gate_exited: true } : {}),
+    },
+  };
+}
+export function draftReviewCompletionResult(result: DraftReviewCompletion): ToolResult {
+  if (!result.ok)
+    return draftReviewRefusalResult(
+      {
+        status: "refused",
+        code: result.reason,
+        phase: "dispatch",
+        detail: result.detail,
+      },
+      result,
+    );
+  if ("content" in result.value) return result.value;
+  return {
+    content: [
+      { type: "text", text: "Draft review delivery was already confirmed; no effects repeated." },
+    ],
+    details: { ok: true, status: "consumed" },
   };
 }
 export async function captureDraftReviewRefusal<T>(
@@ -87,80 +179,300 @@ export async function reviewRegisteredDraft(
 }
 
 /** One activation, shared by tool and browser entries. No startup discovery or replay. */
-export function createDraftReviewActivation(pi: ExtensionAPI): DraftReviewAccess {
+export function createDraftReviewActivation(pi: ExtensionAPI): DraftReviewRuntime {
   let context: ExtensionContext | undefined;
-  let decisions: ReturnType<typeof createDraftReviewDecisions> | undefined;
-  let active: { abort: AbortController } | undefined;
+  let decisions: Decisions | undefined;
+  let identity: { cwd: string; sessionId: string; runId: string } | undefined;
   let ended = false;
-  pi.on("session_shutdown", () => {
+  const transports = new Set<{ close(): void; prune(): void }>();
+  let active: { close(): void } | undefined;
+
+  function abandon() {
     ended = true;
-    active?.abort.abort();
-  });
-  return {
-    prepare(ctx, parameter, signal) {
-      if (ended)
-        return {
-          ok: false,
-          refusal: {
-            status: "refused",
-            code: "invalid-state",
-            phase: "open",
-            detail: "draft review activation ended",
-          },
-        };
+    // Forgetting local expectations never clears durable intent or grants retry permission.
+    decisions?.abandon();
+    for (const transport of transports) transport.close();
+    transports.clear();
+  }
+  function live(): ExtensionContext {
+    if (ended || context === undefined || identity === undefined)
+      throw new Error("draft review activation unavailable");
+    try {
+      const current = openBranchWorkflowSession(pi, context).currentRunIdentity();
+      if (
+        context.cwd !== identity.cwd ||
+        context.sessionManager.getSessionId() !== identity.sessionId ||
+        !current.ok ||
+        current.runId !== identity.runId
+      )
+        throw new Error("draft review activation identity changed");
+      return context;
+    } catch {
+      abandon();
+      throw new Error("draft review activation identity unavailable or changed");
+    }
+  }
+  function use(ctx: ExtensionContext): DraftReviewOperation<Decisions> {
+    if (ended) return reviewRefused("invalid-state");
+    try {
+      const run = openBranchWorkflowSession(pi, ctx).currentRunIdentity();
+      if (!run.ok) {
+        if (identity !== undefined) abandon();
+        return reviewRefused(run.reason);
+      }
+      const sessionId = ctx.sessionManager.getSessionId();
+      if (
+        identity !== undefined &&
+        (ctx.cwd !== identity.cwd ||
+          sessionId !== identity.sessionId ||
+          run.runId !== identity.runId)
+      ) {
+        abandon();
+        return reviewRefused("superseded");
+      }
+      identity ??= { cwd: ctx.cwd, sessionId, runId: run.runId };
       context = ctx;
-      const live = () => {
-        if (context === undefined) throw new Error("draft review context unavailable");
-        return context;
-      };
       decisions ??= createDraftReviewDecisions({
-        cwd: ctx.cwd,
-        sessionId: ctx.sessionManager.getSessionId(),
+        cwd: identity.cwd,
+        sessionId: identity.sessionId,
         session: () => openBranchWorkflowSession(pi, live()),
         entries: () => live().sessionManager.getBranch(),
         diagnostic: (code, detail) => {
           if (code !== "pending") report(live(), "draft-review", "warning", detail);
         },
       });
-      const prepared = decisions.prepare(parameter);
-      if (!prepared.ok)
-        return {
-          ok: false,
-          refusal: {
-            status: "refused",
-            code: prepared.reason,
-            phase: "open",
-            detail: prepared.detail,
-          },
-        };
+      return { ok: true, value: decisions };
+    } catch {
+      abandon();
+      return reviewRefused("io-error");
+    }
+  }
+  function diagnostic(result: RegistrationResult) {
+    if (result.ok) return;
+    // A failed notice cannot change a refusal into delivery or escape lifecycle cleanup.
+    try {
+      if (context !== undefined)
+        report(
+          context,
+          "draft-review",
+          "warning",
+          `Draft review stopped (${result.reason}): ${result.detail}. Do not retry saved work or discard retained state.`,
+        );
+    } catch {
+      console.error("perk: draft review lifecycle diagnostic unavailable");
+    }
+  }
+  function observe(coordinator: Decisions): RegistrationResult {
+    try {
+      const result = coordinator.observe(live().sessionManager.getBranch());
+      for (const transport of transports) transport.prune();
+      return result;
+    } catch {
+      abandon();
+      return reviewRefused("io-error");
+    }
+  }
+  pi.on("turn_end", (_event, ctx) => {
+    // No preparation means no locally expected delivery to discover.
+    if (decisions === undefined || ended) return;
+    const current = use(ctx);
+    diagnostic(current.ok ? observe(current.value) : current);
+  });
+  pi.on("session_shutdown", (_event, ctx) => {
+    if (ended) return;
+    try {
+      if (decisions !== undefined) {
+        const current = use(ctx);
+        if (current.ok) diagnostic(current.value.end(ctx.sessionManager.getBranch()));
+        else diagnostic(current);
+      }
+    } catch {
+      diagnostic(reviewRefused("io-error"));
+    } finally {
+      abandon();
+    }
+  });
+  return {
+    mutate(ctx, reason, work, options) {
+      const current = use(ctx);
+      return current.ok ? current.value.mutate(reason, work, options) : current;
+    },
+    async mutateAsync(ctx, reason, work) {
+      const current = use(ctx);
+      return current.ok ? current.value.mutateAsync(reason, work) : current;
+    },
+    prepare(ctx, parameter, signal) {
+      const current = use(ctx);
+      const refused = (result: Extract<RegistrationResult, { ok: false }>) => ({
+        ok: false as const,
+        refusal: {
+          status: "refused" as const,
+          code: result.reason,
+          phase: "open" as const,
+          detail: result.detail,
+        },
+      });
+      if (!current.ok) return refused(current);
+      const coordinator = current.value;
+      const observed = observe(coordinator);
+      if (!observed.ok) return refused(observed);
+      const prepared = coordinator.prepare(parameter);
+      if (!prepared.ok) return refused(prepared);
+      const snapshot = structuredClone(prepared.value.snapshot);
+      const runId = snapshot.binding.runId;
       const abort = new AbortController();
-      const stop = () => abort.abort();
       const parent = signal ?? ctx.signal;
+      let id: ReviewIdentity | undefined;
+      let disposed = false;
+      const token = {
+        prune() {
+          if (disposed && (id === undefined || !coordinator.hasExpectation(id))) token.close();
+        },
+        close() {
+          parent?.removeEventListener("abort", stop);
+          abort.abort();
+          transports.delete(token);
+        },
+      };
+      const stop = () => {
+        abort.abort();
+        // An in-flight dispatch owns its claim and handles its own post-intent abort.
+        // Released expectations can be settled now, using evidence before uncertainty.
+        if (!ended && id !== undefined) {
+          try {
+            live();
+            diagnostic(coordinator.interrupt(id));
+            token.prune();
+          } catch {
+            abandon();
+          }
+        }
+      };
       parent?.addEventListener("abort", stop, { once: true });
       if (parent?.aborted) stop();
-      const token = { abort };
+      transports.add(token);
       const registration = prepared.value.registration;
+      const check = (): RegistrationResult => {
+        if (ended || disposed) return reviewRefused("invalid-state");
+        try {
+          live();
+          return { ok: true };
+        } catch {
+          return reviewRefused("superseded");
+        }
+      };
       return {
         ok: true,
         value: {
           snapshot: prepared.value.snapshot,
           signal: abort.signal,
-          isCurrent: () => active === token,
+          isCurrent() {
+            if (ended || active !== token) return false;
+            try {
+              live();
+              return true;
+            } catch {
+              return false;
+            }
+          },
+          async complete(outcome, options) {
+            outcome = { ...outcome };
+            options = { ...options, carrier: { ...options.carrier } };
+            let completedResult: ToolResult | null = null;
+            const checked = check();
+            if (!checked.ok)
+              return { ...checked, saveReceipt: null, gateExited: false, completedResult };
+            if (id === undefined || id.reviewId === null || outcome.reviewId !== id.reviewId)
+              return {
+                ...reviewRefused("superseded"),
+                saveReceipt: null,
+                gateExited: false,
+                completedResult,
+              };
+            const result = await coordinator.dispatch({
+              id,
+              runId,
+              approved: outcome.approved,
+              feedback: outcome.feedback,
+              effect: options.effect,
+              signal: abort.signal,
+              async execute(capability) {
+                const result =
+                  capability.effect === "stale-reference"
+                    ? staleDraftReviewResult(
+                        snapshot.binding.subject,
+                        snapshot.sourceDigest,
+                        outcome.feedback,
+                      )
+                    : await options.execute(capability);
+                completedResult = result;
+                const delivery = draftReviewDeliveryResult(
+                  result,
+                  options.carrier,
+                  capability.dispatchId,
+                );
+                capability.deliver(
+                  options.carrier,
+                  delivery.content,
+                  options.carrier.kind === "user"
+                    ? () => {
+                        const ctx = live();
+                        pi.sendUserMessage(
+                          delivery.content,
+                          ctx.isIdle() ? undefined : { deliverAs: "followUp" },
+                        );
+                      }
+                    : undefined,
+                );
+                return delivery;
+              },
+            });
+            return { ...result, completedResult };
+          },
           dispose() {
-            parent?.removeEventListener("abort", stop);
-            abort.abort();
+            disposed = true;
+            // Tool results persist after return. Retain abort observation until the expectation
+            // is settled or this activation ends, but never keep a transport listener alive.
+            if (id === undefined || !coordinator.hasExpectation(id)) token.close();
+            else abort.abort();
           },
           registration: {
-            ...registration,
+            diagnostic: registration.diagnostic,
             open(requestId) {
+              const checked = check();
+              if (!checked.ok) return checked;
+              if (id !== undefined) return reviewRefused("invalid-state");
               const result = registration.open(requestId);
               if (result.ok) {
-                // The synchronous state hook has released exclusion before predecessor teardown.
+                id = { requestId, reviewId: null };
+                // The state hook released exclusion before predecessor transport teardown.
                 const prior = active;
                 active = token;
-                prior?.abort.abort();
+                prior?.close();
               }
               return result;
+            },
+            attach(requestId, reviewId) {
+              const checked = check();
+              if (!checked.ok) return checked;
+              if (id?.requestId !== requestId) return reviewRefused("superseded");
+              const result = registration.attach(requestId, reviewId);
+              if (result.ok) id = { requestId, reviewId };
+              return result;
+            },
+            invalidateOpening(requestId, reason) {
+              const checked = check();
+              if (!checked.ok) return checked;
+              return id?.requestId === requestId
+                ? registration.invalidateOpening(requestId, reason)
+                : reviewRefused("superseded");
+            },
+            subscriptionFailed(requestId, reviewId) {
+              const checked = check();
+              if (!checked.ok) return checked;
+              return id?.requestId === requestId && id.reviewId === reviewId
+                ? registration.subscriptionFailed(requestId, reviewId)
+                : reviewRefused("superseded");
             },
           },
         },

@@ -67,6 +67,11 @@ export const policyDraftReviews: DraftReviewAccess = {
         registration: recordingDraftRegistration().registration,
         signal: signal ?? abort.signal,
         isCurrent: () => true,
+        async complete() {
+          throw new Error(
+            "Policy-only fixture cannot authorize production completion; use real activation/state/claims",
+          );
+        },
         dispose() {
           abort.abort();
         },

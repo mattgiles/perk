@@ -57,7 +57,8 @@ import {
 import type { ExclusiveFileClaim } from "../../substrate/exclusiveFileClaim.ts";
 
 type Refused = Extract<RegistrationResult, { ok: false }>;
-type Outcome<T> = { ok: true; value: T } | Refused;
+export type DraftReviewOperation<T> = { ok: true; value: T } | Refused;
+type Outcome<T> = DraftReviewOperation<T>;
 const artifactNames = {
   plan: PLAN_DRAFT_ARTIFACT,
   objective: OBJECTIVE_DRAFT_ARTIFACT,
@@ -152,7 +153,7 @@ export interface DraftReviewCapability {
       warmNodeClaim: DraftReviewBinding["warmNodeClaim"];
     }) => Promise<{ receipt: SaveReceipt | null; value: T }>,
     /** Preserve definitive gate facts before fallible receipt bookkeeping. Never invokes the backend. */
-    onReceipt?: (receipt: SaveReceipt) => void,
+    onReceipt?: (receipt: SaveReceipt) => { gateExited: boolean } | undefined,
   ): Promise<T>;
   /** Checkpoint before tool return/user send. The optional send must be synchronous and attempted once. */
   deliver(carrier: DeliveryCarrier, content: unknown, send?: () => void): void;
@@ -189,14 +190,20 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
     };
     const check = (): WorkflowSession => {
       if (failure !== null) throw new ReviewStop(failure);
+      if (ended) return poison("ownership-lost");
       if (closed) stop("ownership-lost");
       const ownership = claim.check();
       if (ownership !== "owned")
         return poison(ownership === "ownership-error" ? "ownership-lost" : "io-error");
-      const session = deps.session();
-      const current = session.currentRunIdentity();
-      if (!current.ok || current.runId !== runId) return poison("ownership-lost");
-      return session;
+      try {
+        const session = deps.session();
+        const current = session.currentRunIdentity();
+        if (!current.ok || current.runId !== runId) return poison("ownership-lost");
+        return session;
+      } catch (error) {
+        if (error instanceof ReviewStop) throw error;
+        return poison("ownership-lost");
+      }
     };
     const read = (): DraftReviewRecord | null => {
       const loaded = readDraftReview(check());
@@ -257,6 +264,8 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
     };
   }
   type Held = ReturnType<typeof held>;
+  // A lifecycle stop uses this existing claim-bound capability, never reentrant acquisition.
+  let activeDispatch: { owned: Held; id: AttemptIdentity } | undefined;
   function caught(error: unknown): Refused {
     return error instanceof ReviewStop ? error.refusal : reviewRefused("io-error");
   }
@@ -405,6 +414,30 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
       return reviewRefused("io-error");
     }
   }
+  function interrupt(id?: ReviewIdentity, entries?: readonly unknown[]): RegistrationResult {
+    const observed = entries === undefined ? observeCurrent() : observe(entries);
+    if (!observed.ok) return observed;
+    for (const [dispatchId, expectation] of expectations) {
+      if (
+        id !== undefined &&
+        (id.requestId !== expectation.id.requestId || id.reviewId !== expectation.id.reviewId)
+      )
+        continue;
+      const result = sync(
+        expectation.id.requestId,
+        (owned) =>
+          owned.transition({
+            kind: "uncertain",
+            id: expectation.id,
+            reason: "delivery-unconfirmed",
+          }),
+        expectation.runId,
+      );
+      if (!result.ok) return result;
+      expectations.delete(dispatchId);
+    }
+    return { ok: true };
+  }
   function mutationSession(
     owned: Held,
     reason: Extract<ReviewEvent, { kind: "mutation" }>["reason"],
@@ -517,6 +550,18 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
       return outcome;
     },
     observe,
+    interrupt,
+    /** Context replacement cannot use even cached expectations against the replacement branch. */
+    abandon() {
+      expectations.clear();
+      ended = true;
+    },
+    hasExpectation(id: ReviewIdentity): boolean {
+      return [...expectations.values()].some(
+        (expectation) =>
+          expectation.id.requestId === id.requestId && expectation.id.reviewId === id.reviewId,
+      );
+    },
     async dispatch<T>(options: {
       id: ReviewIdentity;
       runId: string;
@@ -525,9 +570,12 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
       effect: "save" | "revision";
       signal?: AbortSignal;
       execute: (capability: DraftReviewCapability) => Promise<T>;
-    }): Promise<Outcome<T | { status: "consumed" }> & { saveReceipt: SaveReceipt | null }> {
+    }): Promise<
+      Outcome<T | { status: "consumed" }> & { saveReceipt: SaveReceipt | null; gateExited: boolean }
+    > {
       options = { ...options, id: { ...options.id } };
       let saveReceipt: SaveReceipt | null = null;
+      let gateExited = false;
       let owned: Held | undefined;
       let intent: AttemptIdentity | undefined;
       let delivered = false;
@@ -563,6 +611,7 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
             stop(match === "matching" ? "invalid-state" : match);
           const id = { ...options.id, dispatchId };
           intent = id;
+          activeDispatch = { owned: owner, id };
           const effect = next.consumption.attempt.effect;
           const original =
             effect === "stale-reference"
@@ -670,7 +719,8 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
               // Backend awaits may lose the claim. Receipt facts survive, but no gate effect
               // is permitted until ownership and the same dispatch are verified again.
               attempt(owner, id);
-              onReceipt?.(receipt);
+              const gate = onReceipt?.(receipt);
+              gateExited = gate?.gateExited === true;
               owner.transition({ kind: "save-confirmed", id, receipt: saveReceipt });
               return result.value;
             },
@@ -719,7 +769,12 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
                 const pending = intent;
                 const marked = sync(
                   pending.requestId,
-                  (current) => current.transition({ kind: "uncertain", id: pending, reason }),
+                  (current) =>
+                    current.transition({
+                      kind: "uncertain",
+                      id: pending,
+                      reason: options.signal?.aborted ? "delivery-unconfirmed" : reason,
+                    }),
                   options.runId,
                 );
                 if (!marked.ok) throw new ReviewStop(marked);
@@ -743,35 +798,33 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
           }
         }
       }
-      return { ...outcome, saveReceipt };
+      if (activeDispatch?.id === intent) activeDispatch = undefined;
+      return { ...outcome, saveReceipt, gateExited };
     },
     /** Call at abort/shutdown with existing branch evidence; never query, resend, or auto-clear. */
     end(entries: readonly unknown[]): RegistrationResult {
-      const observed = observe(entries);
-      if (!observed.ok) {
-        ended = true;
-        return observed;
-      }
-      for (const expectation of expectations.values()) {
-        const result = sync(
-          expectation.id.requestId,
-          (owned) => {
-            owned.transition({
-              kind: "uncertain",
-              id: expectation.id,
-              reason: "delivery-unconfirmed",
-            });
-          },
-          expectation.runId,
-        );
-        if (!result.ok) {
+      if (ended) return reviewRefused("invalid-state");
+      if (activeDispatch !== undefined && !activeDispatch.owned.released) {
+        const { owned, id } = activeDispatch;
+        try {
+          const record = attempt(owned, id);
+          if (record.consumption.state === "dispatch") {
+            const entryId = deliveryEvidence(record.consumption.attempt, entries);
+            owned.transition(
+              entryId === null
+                ? { kind: "uncertain", id, reason: "delivery-unconfirmed" }
+                : { kind: "complete", id, entryId },
+            );
+            expectations.delete(id.dispatchId);
+          }
+        } catch (error) {
           ended = true;
-          return result;
+          return caught(error);
         }
       }
-      expectations.clear();
+      const result = interrupt(undefined, entries);
       ended = true;
-      return { ok: true };
+      return result;
     },
   };
 }

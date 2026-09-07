@@ -297,6 +297,16 @@ open-ended. Pending is not a health guarantee, and missing/query failure is not 
 See [Plannotator draft-review transport](../providers-and-backends.md#plannotator-draft-review-transport)
 for cancellation, retained-state stops, and the current subject-effect integration limit.
 
+**Implementation limit:** the shared activation now has a guarded completion/mutation API and
+turn-end delivery observation, but the existing tool/browser/chooser completions and authoring
+writers have not yet migrated to it. This is not a claim of live end-to-end at-most-once dispatch.
+For results produced through that API, only an exact persisted tool/user entry confirms delivery;
+returning a tool result or queueing a message does not. Abort/shutdown checks evidence first and
+otherwise retains an uncertain stop. Session/run changes do not replay or acknowledge old feedback.
+Its stale-result format preserves the reviewed digest and verbatim feedback as diagnostic DATA,
+not approval or instructions to apply changes to the current draft. Refusals preserve confirmed
+save/gate facts and prohibit blind save retry. No startup/reload discovery or recovery door is added.
+
 Both draft doors review the exact validated artifact primed by the command. They never accept
 pasted draft text from the model. The shared companion tools are:
 

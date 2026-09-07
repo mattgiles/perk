@@ -4217,8 +4217,10 @@ discipline); this section keeps the unique cross-cutting rules.
 The following storage/capability contract is implemented in `session/draftReviewState.ts`,
 `session/draftReviewBinding.ts`, and `pi/v1/draftReviewDecisions.ts`. The activation-scoped
 `pi/v1/draftReviewActivation.ts` now binds real registration to plan/objective/gist tool reviews
-and both browser doors. Subject-effect dispatch, participating authoring mutations, and delivery
-observation remain uncomposed: this milestone does not yet activate their at-most-once guarantee.
+and both browser doors. It also exposes an identity-bound completion and context-bound mutation
+API, with activation-local delivery observation at turn_end and before guarded operations.
+**Integration limit:** tool/browser/chooser subject-effect dispatch and participating authoring
+callers still do not use those APIs. Their end-to-end at-most-once guarantee is not yet active.
 Construction performs no startup discovery, status query, previous-feedback injection,
 resend, or automatic recovery. Python neither reads nor writes this decision artifact.
 
@@ -4235,7 +4237,7 @@ for those completion seams. Their backend ports enter `capability.save` after fe
 and title awaits, bind the captured warm plan node inputs explicitly (absent leaves the cold
 handoff fallback), and confirm the subject's typed ID/URL receipt. A receipt callback preserves
 definitive gate exit before fallible receipt-state bookkeeping; subsequent errors retain the
-known save receipt and never re-enter the gate. These are subject-specific adapters, not a new
+known save receipt and explicit confirmed gate-exit fact and never re-enter the gate. These are subject-specific adapters, not a new
 universal save protocol. The coordinator also exposes `mutateAsync` for bounded manual-save/node
 operations: it verifies invalidation before invoking the callback and holds exclusion through
 its awaited work; its explicit session capability expires on release. Editor/human waits must
@@ -4346,12 +4348,13 @@ plan patch, permits save linkage, checkpoints backend invocation, and records de
 warm node inputs pass explicitly to save; null keeps the existing Python handoff fallback. Failed
 owned plan patch write-back is a narrow exception: save may select only the frozen original
 reviewed bytes, never artifact-first or partially written bytes, and only while review-state,
-ownership, subject/target, and save-started verification remain sound. Subject-policy extraction,
-backend flag threading, guarded effect/gate rendering and delivery observation follow separately.
+ownership, subject/target, and save-started verification remain sound. Subject-policy extraction
+and bound dependency composition exist; migration of the tool/browser/chooser completion and
+participating mutation callers remains separate.
 
 Delivery marker is dispatch_id in tool `details.draft_review_dispatch`; expectation binds actual
 toolCallId. User marker is exactly `<!-- perk:draft-review-dispatch:<dispatch_id> -->`, authored
-outside untrusted feedback by the future delivery renderer. Delivery encoding is UTF-8
+outside untrusted feedback by `pi/v1/draftReviewRendering.ts`. Delivery encoding is UTF-8
 `"perk/draft-review-delivery/v1\n" + JSON.stringify(blocks)`: a string becomes one text block;
 text arrays reconstruct type/text keys, preserving block order/bytes; nontext cannot acknowledge.
 Evidence requires a persisted matching-role message entry with exact whole-content digest and
@@ -4360,7 +4363,10 @@ not count. Observe only this activation's expectations, before guarded operation
 explicit lifecycle calls; ordinary missing evidence leaves dispatch waiting without timeout
 guesses. Activation end checks evidence first, then marks remaining sound dispatch uncertain/
 delivery-unconfirmed. No previous-activation consumption, resend, recovery, or resume is implied.
-The production turn_end/shutdown subscriptions and human reconciliation guidance remain unbuilt.
+The production activation now subscribes to turn_end/shutdown, but only observes expectations
+created through its new completion API. No startup/reload hook discovers prior records or
+expectations. Human reconciliation guidance and migration of existing completion callers remain
+unbuilt.
 
 ### Mandatory Plannotator registration and subscribe-then-status transport
 
@@ -4403,6 +4409,34 @@ old wait intact. Detachment/shutdown disposes local transport only, never anothe
 companion surfaces; old browser teardown is identity-suppressed. Ordinary pending abort leaves
 persisted pending intact. Already-racing candidates require claim-bound consumption revalidation
 when subject effects are composed; transport correlation alone is not dispatch authority.
+
+`DraftReviewRuntime` extends the transport-only `DraftReviewAccess` with required context-bound
+synchronous and bounded async mutation methods. `PreparedDraftReview.complete` captures request ID
+only after verified open, review ID only after verified attachment, and requires the completed
+transport outcome to match that ID. Callers cannot supply request/run/dispatch identity. It passes
+only a claim-bound effect capability to subject completion, records delivery before tool return
+or one synchronous user-send attempt, and retains normal idle/followUp delivery policy. Tool
+callers must pass their actual Pi toolCallId. The result retains typed save receipt, confirmed
+gate-exit fact, and any definitive feature result if later delivery/bookkeeping fails; the shared
+refusal renderer preserves those facts and prohibits blind save retry.
+
+Stale-reference bypasses the subject completion callback entirely. The shared renderer includes
+the exact reviewed source digest and verbatim `<untrusted_reviewer_feedback>` delimiters, labels
+feedback diagnostic-only DATA, and explicitly prohibits apply/patch/fold/save against the current
+draft. The user marker is a separate code-authored text block outside that DATA. This includes
+attached parameter reviews followed by a sound artifact, even with identical bytes.
+
+The activation binds the first verified cwd/session ID/current run; later contexts must match
+before any observation or guarded operation. Switch/fork/unavailable identity ends local liveness,
+closes transports, and forgets local expectations without touching unprovable old durable intent.
+Returning to the old namespace cannot revive this activation. Ordinary transport disposal does
+not acknowledge delivery; abort observation remains until its local expectation settles. Abort
+checks existing persisted evidence first, then marks remaining sound local dispatch uncertain/
+delivery-unconfirmed. Shutdown does the same, including an in-flight dispatch through its already
+owned capability rather than reentrant acquisition. A late backend receipt remains a fact but
+cannot authorize new effects after shutdown. Failed state writes poison further effects and
+retain the claim; no lifecycle cleanup repairs state, reclaims locks, or grants retry permission.
+Editor waits occur only after synchronous invalidation has returned and released exclusion.
 
 ### Existing live review surfaces
 

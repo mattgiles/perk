@@ -1097,6 +1097,7 @@ for (const failure of ["receipt-write", "pointer-capture"] as const) {
       assert.deepEqual(result.saveReceipt, { id: "42", url: "https://example.test/42" });
       assert.equal(effects.requests.length, 1);
       assert.equal(effects.exits(), 1, "definitive save exits before fallible bookkeeping");
+      assert.equal(result.gateExited, true, "gate fact survives even a failed receipt write");
       const c = f.record().consumption;
       if (failure === "receipt-write") {
         assert.ok(c.state === "dispatch");
