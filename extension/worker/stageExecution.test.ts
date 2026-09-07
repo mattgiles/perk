@@ -194,8 +194,8 @@ for (const resubmit of ["none", "clean", "conflicted", "failed"]) {
       emit({ type: "tool_execution_end", toolName: "submit", result: { details: conflicted } });
       emit({
         type: "tool_execution_end",
-        toolName: "subagent",
-        result: { details: { ok: true, outcome: "completed" } },
+        toolName: "resolve_submit_conflicts",
+        result: { details: { ok: true, kind: "resolved" } },
       });
       if (resubmit !== "none") {
         emit({

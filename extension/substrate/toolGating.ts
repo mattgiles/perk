@@ -304,6 +304,7 @@ export const PERK_TOOLS: readonly string[] = [
   "collect_draft_review_wave",
   "run_ci",
   "submit",
+  "resolve_submit_conflicts",
   // The stack-review launch-recovery tool (contracts.md §8.4): parameterless — the snapshot
   // comes only from the `perk objective stack review` launch handoff.
   "open_stack_review",
@@ -345,6 +346,7 @@ const RESEARCH_TOOLS: readonly string[] = [
 const WORKTREE_STAGE_TOOLS: readonly string[] = [
   "ask_user_question",
   "submit",
+  "resolve_submit_conflicts",
   "ready",
   "run_ci",
   "land",

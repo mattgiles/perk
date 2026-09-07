@@ -134,6 +134,14 @@ test("marked command and perk-tool censuses equal a default perk-only harness se
       "documented perk tools must equal the live perk-only non-builtin registrations",
     );
     assertSetEqual(documentedPerkTools, PERK_TOOLS, "documented perk tools must equal PERK_TOOLS");
+    assert.ok(
+      documentedPerkTools.includes("resolve_submit_conflicts"),
+      "single-use foreground tool must be documented",
+    );
+    assert.ok(
+      !documentedPerkTools.some((name) => name.includes("unlock")),
+      "recovery remains human-only",
+    );
   } finally {
     harness.dispose();
   }

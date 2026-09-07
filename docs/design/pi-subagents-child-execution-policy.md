@@ -523,7 +523,7 @@ appears exactly once below. `agents/<stem>.md` is canonical for delivered roles;
 | `perk-dev.session-auditor` | Non-streaming / background | `extension/learning/audit.ts`; definition `.pi/agents/perk-dev/session-auditor.md` | `extension/learning/audit.test.ts`, `extension/learning/auditorDef.test.ts`, `tests/test_repo_local_agents.py` |
 | `perk.adversarial-reviewer` | Streaming / background | `extension/waves/adversarialReviewWave.ts` | `extension/waves/adversarialReviewWave.test.ts` |
 | `perk.draft-reviewer` | Streaming / background | `extension/waves/draftReviewWave.ts` | `extension/waves/draftReviewWave.test.ts` |
-| `perk.conflict-resolver` | Writer / foreground, both subprofiles | Both `prompts/stages/conflict-resolution*.md` templates; injected by `extension/pi/v1/delivery/submit.ts` and `extension/pi/v1/delivery/stackSync.ts` | `extension/pi/v1/delivery/submit.test.ts`, `extension/pi/v1/delivery/address.test.ts`, `extension/pi/v1/delivery/stackSync.test.ts`; `extension/substrate/stageTools.test.ts` |
+| `perk.conflict-resolver` | Writer / foreground, both subprofiles | Submit/address: `extension/pi/v1/delivery/conflictResolverEngine.ts` through `resolve_submit_conflicts`; retained continuation: `stackSync.ts` + its continuation template | `conflictResolverEngine.test.ts`, `conflictResolverEngineCompat.test.ts`, `submitConflict.test.ts`, submit/address and stackSync suites; `extension/substrate/worktreeResolverLock.test.ts` |
 
 Custom/Ponytail review lanes are invocation variants of the listed reviewers, not new agent
 identities. Excluded: `perk-dev.analyst`, user/custom definitions, upstream builtins and external
@@ -533,7 +533,8 @@ by a name heuristic.
 
 ### Preserved model and skill exceptions
 
-Keep `[models.subagents]` lookup and workflow-level model injection unchanged, including the
+Keep `[models.subagents]` lookup and model selection unchanged (workflow-level for reports and
+retained continuation; native request-level for submit/address), including the
 `inherit` sentinel and thinking suffix. Keep every canonical default/fallback list; these are
 source facts, not claims that each model was tested:
 
@@ -557,16 +558,16 @@ not discovered-skill inheritance. No other role gains an explicit skill or exten
 | Dimension | All ten report roles | Conflict resolver, both subprofiles |
 | --- | --- | --- |
 | Child mode | Background | Foreground |
-| Encoding | Canonical definition `async: true`; child-call `async` **absent** | Child-call `async: false`; do not change the definition's existing omitted execution default |
-| Workflow scheduling | Existing `async: true` ReportWave transport | Existing top-level `async: false` one-child workflow |
-| Conversation | Existing fixed top-level `context: "fresh"` inherited by children | Existing explicit top-level `context: "fresh"` inherited by the one child |
+| Encoding | Canonical definition `async: true`; child-call `async` **absent** | Submit: native foreground-only structured delegation; retained: child-call `async: false`. Definition default remains omitted |
+| Workflow scheduling | Existing `async: true` ReportWave transport | Submit: no workflow wrapper; retained: top-level `async: false` one-child workflow |
+| Conversation | Existing fixed top-level `context: "fresh"` inherited by children | Submit: request `context: "fresh"`; retained: explicit top-level fresh context |
 | Project context | `inheritProjectContext: false` | `inheritProjectContext: true` |
 | Global context | `inheritGlobalContext: false` | `inheritGlobalContext: false` |
 | Discovered skills | `inheritSkills: false` | `inheritSkills: true` |
 | Base prompt | Preserve `systemPromptMode: replace` and role rubric | Preserve `systemPromptMode: replace` and both resolver rubrics |
 | Extensions | Omit `extensions` and `subagentOnlyExtensions`; use ambient runner discovery | Omit both fields; foreground has no ambient discovery |
-| Mission / acceptance | Fixed `mission: false` and existing `WAVE_ACCEPTANCE` (`level: none`) | Preserve existing omissions/native defaults; do not add a new acceptance or mission contract |
-| Required tools | `read`, `grep`, `find`, `ls`, `bash`, engine `structured_output` | `read`, `grep`, `find`, `ls`, `bash`, `edit`, `write` |
+| Mission / acceptance | Fixed `mission: false` and existing `WAVE_ACCEPTANCE` (`level: none`) | Submit request omits both; native bridge disables acceptance. Retained keeps existing omissions/native defaults |
+| Required tools | `read`, `grep`, `find`, `ls`, `bash`, engine `structured_output` | `read`, `grep`, `find`, `ls`, `bash`, `edit`, `write`; submit additionally uses engine-owned `structured_output` |
 | Supervisor | Optional capability with the rules below | Optional; absence cannot change mode or authority |
 | Actual cwd | Trusted calling session's cwd via the native RPC context | Explicit child `cwd` from the validated dispatch worktree |
 
@@ -592,6 +593,38 @@ are distinct from skill discovery: writer skill inheritance includes the ordinar
 catalog, subject to the engine's mandatory removal of the orchestration skill. This never grants
 nested-subagent tools. No `ReportAssignment`/`ReportWave` caller-interface expansion or generic
 profile/agent registry is needed; the live restriction supplier is composition-internal.
+
+### Submit foreground dispatch reconciliation
+
+Submit/address now uses a code-owned domain interface and parameterless single-use authorization,
+not the earlier model-authored workflow script. The loaded subagent tool's real package ancestry
+anchors optional public preflight loading; no private execution import, global lookup, version pin
+or fallback launcher exists. Public preflight checks the canonical unshadowed writer profile,
+context/tool/extension policy and native model snapshot. Native foreground execution still owns
+discovery; its `worktree` allocation default must be absent/false and unchanged since activation,
+otherwise dispatch refuses for inspection/reload. No second worktree is allocated.
+
+A canonical per-worktree Git-directory `perk-submit-conflict.lock` supplies cross-session/process
+exclusion for participating submit/address resolvers. Exclusive creation, private token+inode
+ownership, and conservative release/retention replace no other ownership protocol. Only a
+correlated well-formed completed terminal (or a pre-launch refusal without start/update evidence)
+proves release is safe after emission. Cancellation/no-ack/deadline has a bounded grace; uncertainty
+retains the lock, including across exit/reload. Human recovery requires all writers and subprocesses
+to be stopped, exact lock and rebase/index/HEAD inspection, then exact regular-file removal.
+There is no automatic reclaim, model-callable unlock, retry, or late cleanup watcher.
+
+The strict PR-mode terminal schema separates domain outcome, verification and push. Native
+non-success never salvages a report. Only completed + passed + succeeded + successful lock release
+returns resolved; the parent still calls canonical submit. Native bridge acceptance is disabled;
+this record does not claim independent test or remote mergeability proof. Receipts expose only
+whitelisted identity/status/preflight/lock evidence, never output, ownership secrets or invented
+artifact paths. Summaries remain separately labeled untrusted DATA.
+
+The retained-continuation path keeps its script, sentinel, consent, session claim, and no-push/no-
+abort authority unchanged. The new execution lock neither retrofits that path nor fences arbitrary
+manual Git. Offline characterization, real lock subprocess tests, and the installed bridge/runSync
+fake-child compatibility suite are not live resolver certification. The historical native matrix,
+full-baseline stamp and stale-error fingerprints below remain unchanged.
 
 ### Extension, provider and cwd boundaries
 
@@ -620,7 +653,8 @@ record; engine/provider errors remain loud.
 1. **PR rebase:** the source is `ctx.cwd` in the worktree-bound submit/address flow. Pass that
    absolute validated path as child `cwd`, not just `cd` prose. The existing resolver owns
    context fetch, rebase, verification and force-with-lease push; its PR-only abort behavior
-   stays unchanged. Parent re-submission still re-verifies mergeability.
+   stays unchanged. `resolve_submit_conflicts` owns native foreground request/result handling and
+   the worktree execution lock; parent re-submission still re-verifies mergeability.
 2. **Retained continuation:** the source is the fresh, containment-validated
    `SyncConflictDispatch.worktree`, from the Python-owned continuation projection. Pass it as
    child `cwd`; preserve the retained-mode sentinel, explicit PR identity, in-progress-rebase

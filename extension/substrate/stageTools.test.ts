@@ -171,7 +171,15 @@ test("implement claim: PR-loop family active, the 5 authoring tools scoped off",
   const h = await loadAt(cwd, { env: { PERK_RUN_ID: runId } });
   try {
     const active = h.session.getActiveToolNames();
-    for (const name of ["submit", "ready", "run_ci", "land", "learn", "finalize_address"]) {
+    for (const name of [
+      "submit",
+      "resolve_submit_conflicts",
+      "ready",
+      "run_ci",
+      "land",
+      "learn",
+      "finalize_address",
+    ]) {
       assert.ok(active.includes(name), `PR-loop tool must stay active: ${name}`);
     }
     // The reconcile trio rides the worktree family (the post-land reconcile drive).
@@ -558,10 +566,6 @@ const DRIVE_COVERAGE: readonly {
         base: "main",
         attempt: "1",
         cap: "2",
-        worktree: "/tmp/wt",
-        worktree_json: JSON.stringify("/tmp/wt"),
-        worktree_shell: "'/tmp/wt'",
-        model: "test-model",
       }),
   },
   {

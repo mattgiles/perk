@@ -6,7 +6,7 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createDraftReviewWaveState } from "./authoring/review/draftContext.ts";
 import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
 import { installAutomatedReviewBindings } from "./pi/v1/codeReview/automated.ts";
@@ -18,6 +18,10 @@ import { installPrReviewTerminalBindings } from "./pi/v1/codeReview/terminal.ts"
 import { installAddressBindings } from "./pi/v1/delivery/address.ts";
 import { installCiBindings } from "./pi/v1/delivery/ci.ts";
 import { installCommitCompactBindings } from "./pi/v1/delivery/commitCompact.ts";
+import {
+  type ConflictResolverEngineOptions,
+  createConflictResolverEngine,
+} from "./pi/v1/delivery/conflictResolverEngine.ts";
 import { installLandBindings } from "./pi/v1/delivery/land.ts";
 import { installReadyBindings } from "./pi/v1/delivery/ready.ts";
 import { installStackLandBindings } from "./pi/v1/delivery/stackLand.ts";
@@ -25,6 +29,7 @@ import { installStackRecoverBindings } from "./pi/v1/delivery/stackRecover.ts";
 import { installStackStatusBindings } from "./pi/v1/delivery/stackStatus.ts";
 import { installStackSyncBindings } from "./pi/v1/delivery/stackSync.ts";
 import { installSubmitBindings } from "./pi/v1/delivery/submit.ts";
+import { installSubmitConflictBindings } from "./pi/v1/delivery/submitConflict.ts";
 import { registerDraftReviewWaveTools } from "./pi/v1/draftReviewWaveTools.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installAuditBindings } from "./pi/v1/learning/audit.ts";
@@ -127,7 +132,12 @@ function writeT3Sentinel(
   }
 }
 
-export default function (pi: ExtensionAPI) {
+export default function perk(
+  pi: ExtensionAPI,
+  options: {
+    resolverEngine?: Pick<ConflictResolverEngineOptions, "preflight" | "configPath" | "acquire">;
+  } = {},
+) {
   const version = perkVersion();
 
   // The read-only tool-gating primitive. Attaches to perk:workflow-state.mode; synced on
@@ -175,6 +185,26 @@ export default function (pi: ExtensionAPI) {
     parentReadOnly: () => gating.isActive(),
     engineEntry: () => pi.getAllTools().find((tool) => tool.name === "subagent")?.sourceInfo.path,
   });
+
+  let resolverContext: ExtensionContext | undefined;
+  const conflictResolver = createConflictResolverEngine({
+    events: pi.events,
+    engineEntry: () => pi.getAllTools().find((tool) => tool.name === "subagent")?.sourceInfo.path,
+    readOnly: () => gating.isActive(),
+    authorized: (request) => submitConflict.authorized(request),
+    availableModels: () =>
+      resolverContext?.modelRegistry
+        .getAvailable()
+        .map(({ provider, id, reasoning }) => ({ provider, id, reasoning })) ?? [],
+    parentModel: () => {
+      const model = resolverContext?.model;
+      return model ? { provider: model.provider, id: model.id } : undefined;
+    },
+    ...options.resolverEngine,
+  });
+  const submitConflict = installSubmitConflictBindings(pi, conflictResolver, () =>
+    gating.isActive(),
+  );
 
   // The v1 plan installer: perk-owned plan mode (the `/plan` + Ctrl+Alt+P + `--plan` toggle
   // surface over the read-only gate, plus the plan-authoring context injection — this call
@@ -258,6 +288,9 @@ export default function (pi: ExtensionAPI) {
   // by the lease fencing (fresh token per same-identity reacquire + verify-before-inject).
   const feedbackReceiver = createHunkFeedbackReceiver(pi);
   pi.on("session_shutdown", async () => {
+    submitConflict.shutdown();
+    resolverContext = undefined;
+    await conflictResolver.shutdown();
     childIdentity.clear();
     childRestrictions.clear();
     feedbackReceiver.close();
@@ -270,6 +303,8 @@ export default function (pi: ExtensionAPI) {
     childRestrictions.capture(ctx, runner, () => process.env.PI_SUBAGENT_EXTENSION_BINDINGS);
     childIdentity.capture(ctx, runner);
 
+    submitConflict.setContext(ctx);
+    resolverContext = ctx;
     const branchEntries = () => branchOf(ctx);
     const sessionFile = ctx.sessionManager.getSessionFile();
     const currentSessionId = sessionFile ? basename(sessionFile) : null;
@@ -516,7 +551,7 @@ export default function (pi: ExtensionAPI) {
   registerLifecycleGates(pi);
 
   // Warm door: the `submit` tool + `/submit` command.
-  installSubmitBindings(pi);
+  installSubmitBindings(pi, submitConflict);
 
   // The warm ready + handoff bindings: the deliberate draft→ready review gate (submit keeps
   // draft). Takes `gating`: the warm ready→reconcile continuation refuses (loudly) to drive
@@ -544,7 +579,7 @@ export default function (pi: ExtensionAPI) {
   // The warm `/address` review loop: the submit-then-resolve `finalize_address` tool + `/address`
   // command. Classify-then-act (the verbose feedback fetch + classification runs in an isolated
   // spawned child; the parent fixes actionable items and finalizes the committed repairs).
-  installAddressBindings(pi, reportWave);
+  installAddressBindings(pi, reportWave, submitConflict);
 
   // The warm `/pr-review` door: automated code review in a FRESH, isolated subagent that
   // POSTS its review to the PR (the deliberate departure from /address's read-only-child rule).

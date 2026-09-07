@@ -24,19 +24,25 @@ import {
 import { rebuildWorkflowState } from "../../../substrate/workflowState.ts";
 import { REPORT_DETAIL_TYPE } from "../../../surfaces/surfaces.ts";
 import {
+  completedResolution,
+  fakeConflictResolver,
+} from "../../../testing/fakeConflictResolver.ts";
+import {
   fakePerk,
+  gitInit,
   loadPerkSession,
   plantSession,
   scaffoldRepo,
   spyInjections,
 } from "../../../testing/harness.ts";
-import { evaluateWriterScript } from "../../../testing/writerScript.ts";
+import { DELEGATION_EVENTS } from "./conflictResolverEngine.ts";
 import {
   conflictResolutionGuidance,
   driveConflictFollowUp,
   publishDepsFor,
   renderPublishedMessage,
 } from "./submit.ts";
+import type { SubmitConflictController } from "./submitConflict.ts";
 
 // --- a shared in-memory world: fake `pi` (exec + appendEntry + sendUserMessage) + fake ctx -------
 
@@ -591,81 +597,25 @@ test("planning-stage refusal: the submit tool refuses before any cold door", asy
 
 // --- conflictResolutionGuidance (pure) -----------------------------------------------------------
 
-test("PR writer script selects foreground and the JSON/shell-escaped actual cwd", async () => {
-  const cwd = `/work/space 'quote' "double" \\slash \`tick\` $HOME`;
-  const text = conflictResolutionGuidance("main", 1, 2, cwd);
-  const { calls, result } = await evaluateWriterScript(text);
-  assert.deepEqual(calls, [
-    {
-      key: "resolve",
-      params: {
-        agent: "perk.conflict-resolver",
-        async: false,
-        cwd,
-        task: "<the instruction of step 2>",
-      },
-    },
-  ]);
-  assert.deepEqual(result, { key: "resolve", ok: false, error: "stopped", output: "resolution" });
-  assert.ok(text.includes("`cd '/work/space '\\''quote'\\'' \"double\" \\slash `tick` $HOME'`"));
-  assert.match(text, /top-level `async: false` and `context: "fresh"`/);
-  assert.doesNotMatch(text, /extensionBindings|acceptance:|mission:/);
-  assert.match(text, /missing, ambiguous, or shadowed/);
-  assert.match(text, /Never change execution mode, extension composition, or launch protocol/);
-});
-
-test("conflictResolutionGuidance spawns perk.conflict-resolver with a fresh context", () => {
-  const text = conflictResolutionGuidance("main", 1, 2, "/wt/plan-42");
-  assert.match(text, /perk\.conflict-resolver/);
-  assert.match(text, /context: "fresh"/);
-});
-
-test("conflictResolutionGuidance dispatches ONE foreground workflowScript one-child run", () => {
-  const text = conflictResolutionGuidance("main", 1, 2, "/wt/plan-42");
-  assert.match(text, /workflowScript/);
-  assert.match(text, /async: false/);
-  assert.match(text, /runs\.run/);
-});
-
-test("conflictResolutionGuidance states the base branch and the clean+correct instruction", () => {
-  const text = conflictResolutionGuidance("develop", 1, 2, "/wt/plan-42");
-  assert.match(text, /`develop`/);
+test("guidance carries judgment and parent authority, not launch mechanics", () => {
+  const text = conflictResolutionGuidance("develop", 2, 3);
+  assert.match(text, /`develop` \(advisory\)/);
+  assert.match(text, /attempt 2 of 3/);
   assert.match(text, /\*\*clean\*\*/);
   assert.match(text, /\*\*correct\*\*/);
+  assert.match(text, /`resolve_submit_conflicts` once/);
+  assert.match(text, /canonical `submit` again/);
+  assert.match(text, /stop and report/);
+  assert.doesNotMatch(text, /workflowScript|runs\.run|context:|model:|cd '/);
 });
 
-test("conflictResolutionGuidance notes the child reads its own plan/PR context", () => {
-  const text = conflictResolutionGuidance("main", 1, 2, "/wt/plan-42");
-  assert.match(text, /perk pr review-context/);
-  assert.match(text, /intent/);
-});
-
-test("conflictResolutionGuidance renders the attempt-of-cap text", () => {
-  const text = conflictResolutionGuidance("main", 2, 3, "/wt/plan-42");
-  assert.match(text, /attempt 2 of 3/);
-});
-
-test("conflictResolutionGuidance pins the plan worktree with a concrete cd command", () => {
-  const text = conflictResolutionGuidance("main", 1, 2, "/wt/plan-42");
-  assert.match(text, /`cd '\/wt\/plan-42'`/);
-});
-
-test("conflictResolutionGuidance tells the model to re-/submit afterward", () => {
-  const text = conflictResolutionGuidance("main", 1, 2, "/wt/plan-42");
-  assert.match(text, /`\/submit` again/);
-});
-
-test("conflictResolutionGuidance injects the configured model when set", () => {
-  const text = conflictResolutionGuidance("main", 1, 2, "/wt/plan-42", "anthropic/claude-opus-4");
-  assert.match(text, /model: "anthropic\/claude-opus-4"/);
-  assert.match(text, /\[models\.subagents\] conflict-resolver model/);
-});
-
-test("conflictResolutionGuidance omits the model override when unset", () => {
-  const text = conflictResolutionGuidance("main", 1, 2, "/wt/plan-42");
-  assert.doesNotMatch(text, /model: "/);
-  assert.match(text, /default model/);
-});
+const controller: SubmitConflictController = {
+  prime: () => true,
+  clear: () => {},
+  setContext: () => {},
+  authorized: () => false,
+  shutdown: () => {},
+};
 
 // --- renderPublishedMessage (pure) ---------------------------------------------------------------
 
@@ -681,26 +631,26 @@ test("renderPublishedMessage: the existing-PR verb", () => {
 
 test("driveConflictFollowUp: none ⇒ nothing", () => {
   const { pi, ctx, messages } = world();
-  driveConflictFollowUp(pi, ctx, { kind: "none" });
+  driveConflictFollowUp(pi, ctx, { kind: "none" }, controller);
   assert.equal(messages.length, 0);
 });
 
 test("driveConflictFollowUp: drive ⇒ the guidance rides one injected message", () => {
   const { pi, ctx, messages } = world();
-  driveConflictFollowUp(pi, ctx, { kind: "drive", base: "main", attempt: 1, cap: 2 });
+  driveConflictFollowUp(pi, ctx, { kind: "drive", base: "main", attempt: 1, cap: 2 }, controller);
   assert.equal(messages.length, 1);
-  assert.match(messages[0]?.content ?? "", /perk\.conflict-resolver/);
+  assert.match(messages[0]?.content ?? "", /resolve_submit_conflicts/);
 });
 
 test("driveConflictFollowUp: idle (/submit command) → immediate turn", () => {
   const { pi, ctx, messages } = world({ idle: true });
-  driveConflictFollowUp(pi, ctx, { kind: "drive", base: "main", attempt: 1, cap: 2 });
+  driveConflictFollowUp(pi, ctx, { kind: "drive", base: "main", attempt: 1, cap: 2 }, controller);
   assert.equal(messages[0]?.options, undefined);
 });
 
 test("driveConflictFollowUp: streaming (submit tool) → followUp", () => {
   const { pi, ctx, messages } = world({ idle: false });
-  driveConflictFollowUp(pi, ctx, { kind: "drive", base: "main", attempt: 1, cap: 2 });
+  driveConflictFollowUp(pi, ctx, { kind: "drive", base: "main", attempt: 1, cap: 2 }, controller);
   assert.equal(messages[0]?.options?.deliverAs, "followUp");
 });
 
@@ -710,11 +660,16 @@ test("driveConflictFollowUp: exhausted ⇒ no drive, loud report", () => {
   const original = console.error;
   console.error = (...args: unknown[]) => lines.push(args.map(String).join(" "));
   try {
-    driveConflictFollowUp(pi, ctx, {
-      kind: "exhausted",
-      base: "main",
-      attempts: CONFLICT_RESOLUTION_ATTEMPT_CAP,
-    });
+    driveConflictFollowUp(
+      pi,
+      ctx,
+      {
+        kind: "exhausted",
+        base: "main",
+        attempts: CONFLICT_RESOLUTION_ATTEMPT_CAP,
+      },
+      controller,
+    );
   } finally {
     console.error = original;
   }
@@ -734,7 +689,7 @@ test("driveConflictFollowUp: withheld ⇒ no drive, loud exact-bytes report", ()
   const original = console.error;
   console.error = (...args: unknown[]) => lines.push(args.map(String).join(" "));
   try {
-    driveConflictFollowUp(pi, ctx, { kind: "withheld", base: "main" });
+    driveConflictFollowUp(pi, ctx, { kind: "withheld", base: "main" }, controller);
   } finally {
     console.error = original;
   }
@@ -749,7 +704,7 @@ test("driveConflictFollowUp: withheld ⇒ no drive, loud exact-bytes report", ()
 test("scaffoldRepo cwd: drive reads config without throwing", () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const { pi, ctx, messages } = world({ cwd });
-  driveConflictFollowUp(pi, ctx, { kind: "drive", base: "main", attempt: 1, cap: 2 });
+  driveConflictFollowUp(pi, ctx, { kind: "drive", base: "main", attempt: 1, cap: 2 }, controller);
   assert.equal(messages.length, 1);
 });
 
@@ -765,7 +720,7 @@ test("submit tool e2e: a conflicted submit drives the resolver and increments th
     assert.equal((result.details as { ok: boolean }).ok, true);
     assert.equal(result.terminate, true, "the terminating tool stays terminating");
     assert.equal(injected.length, 1);
-    assert.ok(injected[0]?.startsWith(conflictResolutionGuidance("main", 1, 2, cwd)));
+    assert.ok(injected[0]?.startsWith(conflictResolutionGuidance("main", 1, 2)));
     assert.equal(h.workflowState().conflict_resolution_attempts, 1);
   } finally {
     h.dispose();
@@ -837,28 +792,60 @@ for (const childOutcome of [
 ]) {
   test(`scripted submit → resolver → parent action: ${childOutcome}`, async () => {
     const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+    gitInit(cwd, { dirty: false });
+    const engine = fakeConflictResolver(cwd, (bus, r) =>
+      bus.emit(DELEGATION_EVENTS.response, {
+        requestId: r.requestId,
+        ownerRunId: r.ownerRunId,
+        nodeId: r.nodeId,
+        status: childOutcome === "launch-failed" ? "invalid_request" : "completed",
+        result: {
+          kind: "structured",
+          value: {
+            ...completedResolution,
+            outcome: childOutcome === "push-failed" ? "completed" : childOutcome,
+            verification: ["completed", "push-failed"].includes(childOutcome)
+              ? "passed"
+              : childOutcome === "verification-failed"
+                ? "failed"
+                : "not-run",
+            push:
+              childOutcome === "completed"
+                ? "succeeded"
+                : childOutcome === "push-failed"
+                  ? "failed"
+                  : "not-attempted",
+          },
+        },
+      }),
+    );
     const bin = fakePerk(cwd, { stdout: submitJson({ mergeable: false }) });
-    const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+    const h = await loadPerkSession({
+      cwd,
+      env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+      resolverEngine: engine.resolverEngine,
+      extraExtensions: [engine.extension],
+    });
     const injected = spyInjections(h);
     try {
       const publication = await h.invokeTool("submit", {});
       const publishedBytes = JSON.stringify(publication);
       assert.equal(h.workflowState().conflict_resolution_attempts, 1);
       assert.equal(injected.length, 1);
-      const launch = () =>
-        evaluateWriterScript(injected[0] ?? "", async () => {
-          if (childOutcome === "launch-failed") throw new Error("scripted launch failure");
-          return { key: "resolve", ok: childOutcome === "completed", output: childOutcome };
-        });
-      if (childOutcome === "launch-failed") {
-        await assert.rejects(launch, /scripted launch failure/);
-      } else {
-        const child = await launch();
-        assert.equal(child.calls.length, 1);
-        assert.equal(child.calls[0]?.params.cwd, cwd);
-        assert.equal(child.calls[0]?.params.async, false);
-        assert.match(injected[0] ?? "", /context: "fresh"/);
-      }
+      const child = await h.invokeTool("resolve_submit_conflicts", {});
+      assert.equal(
+        (child.details as { kind: string }).kind,
+        childOutcome === "completed"
+          ? "resolved"
+          : childOutcome === "launch-failed"
+            ? "failed"
+            : "withheld",
+      );
+      assert.equal(engine.requests.length, 1);
+      assert.equal(engine.requests[0]?.cwd, cwd);
+      assert.equal(engine.requests[0]?.context, "fresh");
+      assert.equal(engine.requests[0]?.async, undefined);
+      assert.notEqual(child.terminate, true);
       assert.equal(
         JSON.stringify(publication),
         publishedBytes,
@@ -882,8 +869,15 @@ for (const childOutcome of [
 
 test("scripted still-conflicted parent re-submits alone authorize the next attempt, then stop", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  gitInit(cwd, { dirty: false });
+  const engine = fakeConflictResolver(cwd);
   const bin = fakePerk(cwd, { stdout: submitJson({ mergeable: false }) });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    resolverEngine: engine.resolverEngine,
+    extraExtensions: [engine.extension],
+  });
   const injected = spyInjections(h);
   try {
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -892,10 +886,8 @@ test("scripted still-conflicted parent re-submits alone authorize the next attem
       assert.equal(h.workflowState().conflict_resolution_attempts, Math.min(attempt, 2));
       assert.equal(injected.length, Math.min(attempt, 2));
       if (attempt <= 2) {
-        await evaluateWriterScript(injected[attempt - 1] ?? "", async () => ({
-          ok: true,
-          output: "completed",
-        }));
+        const child = await h.invokeTool("resolve_submit_conflicts", {});
+        assert.equal((child.details as { kind: string }).kind, "resolved");
       }
     }
     assert.ok(h.notifies.some((message) => /persist after 2/.test(message)));

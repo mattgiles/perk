@@ -55,10 +55,16 @@ prompt, inherit neither global/project context nor discovered skills, and omit e
 so runner ambient discovery remains available. Explicit source-bound Ponytail assignment skills
 are separate from discovered-skill inheritance. Models and ordered fallbacks are unchanged.
 
-The conflict resolver instead has an unspecified definition mode and is explicitly launched
-foreground by both owned dispatch templates, at the actual trusted target cwd. It inherits
-project context and skills, not global context; foreground mode does not load ambient extensions.
-Missing directory/profile capabilities stop dispatch, never trigger a mode or extension fallback.
+The conflict resolver keeps an unspecified definition mode and inherits project context and
+skills, not global context; foreground mode does not load ambient extensions. Submit/address
+uses `resolve_submit_conflicts`: a single-use authorized, code-owned native foreground delegation
+at the trusted worktree cwd, with a strict structured terminal record and a persistent worktree-wide
+execution lock. The bridge disables acceptance; receipts do not invent artifact paths or expose
+child output. Native `worktree: true` allocation defaults are incompatible: inspect
+`extensions/subagent/config.json` under Pi's agent directory, correct the setting and reload.
+Reload does not clear a retained lock; use [human-only recovery](recover-a-dirty-worktree.md#recover-a-retained-submit-conflict-lock).
+The separate retained-continuation path still uses its foreground script, sentinel and session
+claim. Missing directory/profile capabilities stop dispatch, never trigger a mode or extension fallback.
 
 Each code-owned report attempt also captures the parent's current read-only gate after skill
 preflight and serializes it in the private `perk.parent-restrictions/1` binding. A failed capture

@@ -197,6 +197,7 @@ const STORAGE_INTERIOR = [
   "substrate/sessionData.ts",
   "substrate/cache.ts",
   "substrate/git.ts",
+  "substrate/worktreeResolverLock.ts",
   "session/branchWorkflowSession.ts",
 ];
 
@@ -629,6 +630,69 @@ test("Rule H: storage-free feature homes never import the storage interior", () 
       `Rule H visited no files under ${home} — the rule is vacuous for that home`,
     );
   }
+});
+
+// Native foreground conflict dispatch is deliberately independent of the report-wave family.
+const CONFLICT_ENGINE = "pi/v1/delivery/conflictResolverEngine.ts";
+const CONFLICT_TRANSPORT_TOKEN =
+  /prompt-template:subagent:|resolveSubagentLaunchContract|["']\.\/(?:preflight|delegation)["']/;
+const PRIVATE_CONFLICT_EXECUTOR =
+  /src\/runs\/foreground|\brunSync\b|\bexecuteDelegated\b|workflowScript/;
+
+test("Rule I: foreground delegation/public loading is confined, conflicts never use waves or private execution", () => {
+  const { files, edges } = scan();
+  assert.deepEqual(
+    files.filter((file) => CONFLICT_TRANSPORT_TOKEN.test(readProductionFile(file))),
+    [CONFLICT_ENGINE],
+  );
+  const conflicts = [
+    "delivery/conflictResolution.ts",
+    CONFLICT_ENGINE,
+    "pi/v1/delivery/submitConflict.ts",
+  ];
+  for (const file of conflicts) {
+    assert.ok(files.includes(file), `missing conflict anchor ${file}`);
+    assert.doesNotMatch(readProductionFile(file), PRIVATE_CONFLICT_EXECUTOR);
+    assert.deepEqual(
+      (edges.get(file) ?? []).filter((target) => target.startsWith("waves/")),
+      [],
+    );
+  }
+  assert.deepEqual(
+    (edges.get("delivery/conflictResolution.ts") ?? []).filter((target) =>
+      target.startsWith("substrate/"),
+    ),
+    [],
+  );
+  assert.ok(edges.get(CONFLICT_ENGINE)?.includes("substrate/worktreeResolverLock.ts"));
+  assert.deepEqual(
+    files.filter((file) => /loadResolverPreflight\s*\(/.test(readProductionFile(file))),
+    [CONFLICT_ENGINE],
+  );
+});
+
+test("Rule I controls: raw channels/public loader/private execution and conflict→wave edges bite", () => {
+  for (const source of [
+    'events.emit("prompt-template:subagent:request", data)',
+    "module.resolveSubagentLaunchContract(input)",
+    'exports["./preflight"]',
+  ])
+    assert.ok(CONFLICT_TRANSPORT_TOKEN.test(source));
+  for (const source of [
+    "runSync()",
+    "executeDelegated()",
+    'import("src/runs/foreground/execution.ts")',
+    'workflowScript: "child"',
+  ])
+    assert.ok(PRIVATE_CONFLICT_EXECUTOR.test(source));
+  assert.deepEqual(
+    checkDirection(
+      new Map([["delivery/conflictResolution.ts", ["waves/reportWave.ts"]]]),
+      ["delivery/conflictResolution.ts"],
+      ["waves/"],
+    ),
+    [{ from: "delivery/conflictResolution.ts", to: "waves/reportWave.ts" }],
+  );
 });
 
 // ---------------------------------------------------------------------------------------------

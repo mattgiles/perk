@@ -35,7 +35,6 @@ import {
   stringField,
 } from "../../../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../../../substrate/command.ts";
-import { subagentModel } from "../../../substrate/config.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { failFor, ok } from "../../../substrate/result.ts";
 import { captureSessionPointer } from "../../../substrate/sessionPointers.ts";
@@ -46,6 +45,7 @@ import {
   setConflictAttempts,
 } from "../../../substrate/workflowState.ts";
 import { report } from "../../../surfaces/report.ts";
+import type { SubmitConflictController } from "./submitConflict.ts";
 
 /**
  * A tri-state read of the advisory `mergeable` field: `true`/`false`/`null` pass through;
@@ -240,26 +240,14 @@ export function renderPublishedMessage(change: PublishedChange): string {
 
 /**
  * The follow-up guidance the warm `/submit` injects to dispatch the conflict-resolver (modeled
- * on `prReviewGuidance`). Pure + exported for offline tests. `worktree` is the plan worktree the
- * child's actual cwd pins; the shell-escaped `cd` reminder is defensive task prose. When `model` is set,
- * the ONE workflowScript call carries a workflow-level `model` default; otherwise the agent's
- * default model is used.
+ * on `prReviewGuidance`). The parent calls one code-owned tool; no launch mechanics or model
+ * selection are transcribed in this guidance.
  */
-export function conflictResolutionGuidance(
-  base: string,
-  attempt: number,
-  cap: number,
-  worktree: string,
-  model?: string,
-): string {
+export function conflictResolutionGuidance(base: string, attempt: number, cap: number): string {
   return render("stages/conflict-resolution.md", {
     base,
     attempt: String(attempt),
     cap: String(cap),
-    worktree,
-    worktree_json: JSON.stringify(worktree),
-    worktree_shell: `'${worktree.replaceAll("'", "'\\''")}'`,
-    model: model ?? "",
   });
 }
 
@@ -276,7 +264,9 @@ export function driveConflictFollowUp(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   followUp: ConflictFollowUp,
+  controller: SubmitConflictController,
 ): void {
+  controller.clear();
   if (followUp.kind === "none") return;
   if (followUp.kind === "exhausted") {
     report(
@@ -301,11 +291,18 @@ export function driveConflictFollowUp(
     );
     return;
   }
-  const model = subagentModel(ctx.cwd, "conflict-resolver");
+  if (!controller.prime(ctx, followUp)) {
+    report(
+      ctx,
+      "submit",
+      "error",
+      "conflict-resolution dispatch withheld — another writer is active or parent authorization changed; stop and report.",
+      { alsoLog: true },
+    );
+    return;
+  }
   const message =
-    // `/submit` runs only in worktree-bound sessions (planning sessions are refused first), so
-    // the session cwd IS the plan worktree.
-    conflictResolutionGuidance(followUp.base, followUp.attempt, followUp.cap, ctx.cwd, model) +
+    conflictResolutionGuidance(followUp.base, followUp.attempt, followUp.cap) +
     bindingSuffix(ctx.cwd, "command:submit");
   if (ctx.isIdle()) {
     // The `/submit` command path (idle): inject an immediate turn.
@@ -327,9 +324,11 @@ type SubmitSurfaceOutcome = { kind: "refused"; message: string } | SubmitChangeO
 async function performSubmit(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
+  controller: SubmitConflictController,
 ): Promise<SubmitSurfaceOutcome> {
   const planningRefusal = planningStageRefusal(ctx, "submit");
   if (planningRefusal !== null) return { kind: "refused", message: planningRefusal };
+  controller.clear();
   return submitChange(publishDepsFor(pi, ctx));
 }
 
@@ -340,7 +339,10 @@ const TOOL_GUIDELINES = [
 
 /** Install the change-publication bindings: the `submit` terminating tool (canonical) + the
  * `/submit` command twin. */
-export function installSubmitBindings(pi: ExtensionAPI): void {
+export function installSubmitBindings(
+  pi: ExtensionAPI,
+  controller: SubmitConflictController,
+): void {
   pi.registerTool({
     name: "submit",
     label: "Submit PR",
@@ -353,13 +355,13 @@ export function installSubmitBindings(pi: ExtensionAPI): void {
     parameters: { type: "object", additionalProperties: false, properties: {} },
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       const fail = failFor(ctx, "submit");
-      const outcome = await performSubmit(pi, ctx);
+      const outcome = await performSubmit(pi, ctx, controller);
       if (outcome.kind === "refused") return fail(outcome.message, "planning_session");
       if (outcome.kind === "publish_failed") return fail(outcome.message, outcome.errorType);
       const result = ok(renderPublishedMessage(outcome.change), outcome.change, {
         terminate: true,
       });
-      driveConflictFollowUp(pi, ctx, outcome.conflict);
+      driveConflictFollowUp(pi, ctx, outcome.conflict, controller);
       return result;
     },
   });
@@ -368,7 +370,7 @@ export function installSubmitBindings(pi: ExtensionAPI): void {
     description: "Push the branch and open a draft PR for the active plan (implement → submit).",
     handler: async (_args, ctx) => {
       const fail = failFor(ctx, "submit");
-      const outcome = await performSubmit(pi, ctx);
+      const outcome = await performSubmit(pi, ctx, controller);
       // Failure is reported loudly via failFor (the single error surface) — success only.
       if (outcome.kind === "refused") {
         fail(outcome.message, "planning_session");
@@ -381,7 +383,7 @@ export function installSubmitBindings(pi: ExtensionAPI): void {
       // Report-before-drive (load-bearing order): the success line lands before the injected
       // conflict-resolution turn.
       report(ctx, "submit", "info", renderPublishedMessage(outcome.change));
-      driveConflictFollowUp(pi, ctx, outcome.conflict);
+      driveConflictFollowUp(pi, ctx, outcome.conflict, controller);
     },
   });
 }

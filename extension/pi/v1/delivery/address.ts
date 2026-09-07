@@ -58,6 +58,7 @@ import {
   runReviewClassifierWave,
 } from "../../../waves/reviewClassifierWave.ts";
 import { driveConflictFollowUp, publishDepsFor, renderPublishedMessage } from "./submit.ts";
+import type { SubmitConflictController } from "./submitConflict.ts";
 
 /** The four known `counts` keys (recorded into workflow-state — strict-decoded). */
 const COUNT_KEYS = ["actionable", "informational", "praise", "question"] as const;
@@ -193,10 +194,13 @@ async function executeFinalizeAddress(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   input: AddressFinalization,
+  controller: SubmitConflictController,
 ): Promise<FinalizeAddressResult> {
   const fail = failFor<FinalizeAddressFailExtras>(ctx, "address", "finalize_address");
   const planningRefusal = planningStageRefusal(ctx, "address");
   if (planningRefusal !== null) return fail(planningRefusal, "planning_session");
+  // Preserve the feature's empty-batch refusal before counter/run-id reads.
+  if (input.threads.length > 0) controller.clear();
 
   const deps: FinalizeAddressDeps = {
     ...publishDepsFor(pi, ctx),
@@ -224,7 +228,7 @@ async function executeFinalizeAddress(
       report(ctx, "address", "error", outcome.resolveMessage, { alsoLog: true });
       return fail(outcome.message, outcome.errorType, { submit: { ...outcome.change } });
     case "completed": {
-      driveConflictFollowUp(pi, ctx, outcome.conflict);
+      driveConflictFollowUp(pi, ctx, outcome.conflict, controller);
       return ok(
         `Resolved ${outcome.resolvedThreadIds.length} review thread(s) after ` +
           renderPublishedMessage(outcome.change),
@@ -324,7 +328,11 @@ export function addressGuidance(ref: PlanRef, preview: boolean): string {
 
 /** Install the review-feedback bindings: the `classify_review_feedback` + terminating
  * `finalize_address` tools and the `/address` command. */
-export function installAddressBindings(pi: ExtensionAPI, wave: ReportWave): void {
+export function installAddressBindings(
+  pi: ExtensionAPI,
+  wave: ReportWave,
+  controller: SubmitConflictController,
+): void {
   pi.registerTool({
     name: "classify_review_feedback",
     label: "Classify review feedback",
@@ -404,7 +412,7 @@ export function installAddressBindings(pi: ExtensionAPI, wave: ReportWave): void
           "finalize_address",
         )("finalize_address needs { threads: [{thread_id, comment?}] }", "bad_input");
       }
-      return executeFinalizeAddress(pi, ctx, decoded);
+      return executeFinalizeAddress(pi, ctx, decoded, controller);
     },
   });
 

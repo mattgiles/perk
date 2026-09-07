@@ -3,10 +3,11 @@
 // Node builtins only (so it loads cleanly under `node --test`); shells `git` via `execFileSync`,
 // never with a shell. Fail-open by design: every failure degrades to the caller's `cwd` (or null
 // where stated) rather than throwing — the carriers that use this must never wedge a session.
-// The ONE deliberate fail-closed composition is `revalidationBracket` (documented there): a
-// snapshot proof must treat an unprovable probe as drift, never as "unchanged".
+// `revalidationBracket` and `worktreeGitDir` deliberately fail closed: snapshot proofs and
+// writer coordination must never invent identity from a failed probe.
 
 import { execFileSync } from "node:child_process";
+import { realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 
 /**
@@ -33,6 +34,22 @@ export function mainCheckoutRoot(cwd: string): string {
   // (the dir containing `.git` = the main checkout root).
   const common = isAbsolute(out) ? out : resolve(cwd, out);
   return resolve(common, "..");
+}
+
+/** Canonical PER-WORKTREE Git directory for execution exclusion, never a cwd fallback. */
+export function worktreeGitDir(cwd: string): string | null {
+  try {
+    const out = execFileSync("git", ["rev-parse", "--absolute-git-dir"], {
+      cwd,
+      encoding: "utf8",
+      timeout: 5_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).replace(/\r?\n$/, "");
+    if (!isAbsolute(out) || /[\0\r\n]/.test(out) || !statSync(out).isDirectory()) return null;
+    return realpathSync(out);
+  } catch {
+    return null;
+  }
 }
 
 /** Run one git command; trimmed stdout, or null on any failure (the module's fail-open style). */
@@ -164,8 +181,8 @@ function indexHidesChanges(cwd: string): boolean | null {
 }
 
 /**
- * The dream-snapshot revalidation bracket (contracts.md §8.65) — the module's ONE deliberately
- * **fail-closed** composition (a documented exception to the fail-open charter above): it exists
+ * The dream-snapshot revalidation bracket (contracts.md §8.65) — a deliberately
+ * **fail-closed** snapshot composition (an exception to the fail-open probe defaults): it exists
  * to PROVE the repository still matches a stamped snapshot, so an unprovable probe must read as
  * drift, never as "unchanged". The claim is END-STATE equality only — HEAD unchanged, the
  * working tree clean, and no assume-unchanged/skip-worktree index flags (which would hide edits
