@@ -730,12 +730,36 @@ _SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.65.1"
 # file-scoped with NO tree-wide fallback — a moved/renamed file IS a surface change worth a
 # re-verify (the early-warning posture). Each row follows the tripwire-marker pattern: pin
 # the positive literal whose DISAPPEARANCE signals the architectural change worth a
-# re-verify, never just any stable string. Rows verified against the installed 0.65.1
-# source (the v0.65.0 native-session transition).
+# re-verify, never just any stable string. The full guidance baseline is recorded above;
+# additive source-verified probes do not claim a full baseline re-verification.
 _SUBAGENT_COMPAT_PROBES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("workflowScript orchestration", "src/extension/schemas.ts", ("workflowScript",)),
     ("outputSchema param", "src/extension/schemas.ts", ("outputSchema",)),
     ("structuredOutput results", "src/shared/types.ts", ("structuredOutput",)),
+    # Presence-only tripwires for the native partial report carrier, not semantic proof of
+    # delivery/retention. Source-verified on installed 0.66.0 without advancing the baseline.
+    (
+        "partial workflow terminal vocabulary",
+        "src/shared/types.ts",
+        ("WorkflowTerminalOutcome", 'state: "partial"', '"budget_exhausted"', '"timeout"'),
+    ),
+    (
+        "partial workflow result projection",
+        "src/runs/foreground/subagent-executor.ts",
+        (
+            "workflowFailureTerminalOutcome",
+            "terminalOutcome",
+            "results: partial.children.map",
+            "workflowKey: child.key",
+            "structuredOutput: child.structuredOutput",
+            "success: child.ok",
+        ),
+    ),
+    (
+        "partial workflow completion forwarding",
+        "src/runs/background/result-watcher.ts",
+        ("SUBAGENT_ASYNC_COMPLETE_EVENT", "...data", "...data.results![index]"),
+    ),
     # The native completion wake the streaming relay rides: async completion notifications
     # are injected as `customType: "subagent-notify"` messages with per-item `triggerTurn`
     # (default true). If either literal vanishes the completion-wake mechanic moved — re-verify
@@ -1046,6 +1070,8 @@ def _subagent_compat_check(root: Path) -> Check:
 
     detail = (
         "probed surfaces: workflowScript + outputSchema/structuredOutput + "
+        "partial terminal vocabulary, keyed structured-result projection "
+        "and completion forwarding + "
         "async completion notification wake (subagent-notify, triggerTurn) + "
         "supervisor channel (contact_supervisor, SUPERVISOR_REQUEST_MESSAGE_TYPE, "
         "triggerTurn) + supervisor request message type (subagent_supervisor_request) + "

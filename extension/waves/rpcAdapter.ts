@@ -21,6 +21,8 @@
 // the lane key. Normalization is defensively output-free: `output`/`summary`/
 // `structuredOutput` never enter a receipt child, unknown fields are ignored, and malformed
 // rows are dropped without failing the wave (receipt absence degrades correlation only).
+// Explicit native partial settlement additionally carries keyed structured results, independently
+// of receipts. The runner retains only its first matched completion, never a report cache.
 
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -198,6 +200,52 @@ function workflowReceiptKeys(
   return keys;
 }
 
+// This is a narrow native envelope, not an inference from failure/notification prose.
+function narrowPartialOutcome(data: Record<string, unknown>): WaveCompletion["terminalOutcome"] {
+  if (data.state !== "failed" && data.state !== "partial") return undefined;
+  const outcome = data.terminalOutcome;
+  if (
+    !isRecord(outcome) ||
+    outcome.state !== "partial" ||
+    (outcome.reason !== "timeout" && outcome.reason !== "budget_exhausted")
+  )
+    return undefined;
+  return { state: "partial", reason: outcome.reason };
+}
+
+/** Project report DATA only by native workflowKey; ambiguous identities withhold evidence. */
+function narrowRetainedEntries(results: unknown): unknown[] {
+  if (!Array.isArray(results)) return [];
+  const entries = new Map<
+    string,
+    { key: string; ok: unknown; error: string | null; report: unknown }
+  >();
+  const runKeys = new Map<string, string>();
+  const ambiguous = new Set<string>();
+  for (const row of results) {
+    if (!isRecord(row) || typeof row.workflowKey !== "string" || row.workflowKey === "") continue;
+    const key = row.workflowKey;
+    if (entries.has(key)) ambiguous.add(key);
+    if (typeof row.runId === "string" && row.runId !== "") {
+      const previous = runKeys.get(row.runId);
+      if (previous !== undefined && previous !== key) {
+        ambiguous.add(previous);
+        ambiguous.add(key);
+      }
+      runKeys.set(row.runId, key);
+    }
+    entries.set(key, {
+      key,
+      ok: row.success ?? null,
+      error: typeof row.error === "string" ? row.error : null,
+      report: row.structuredOutput ?? null,
+    });
+  }
+  return [...entries.values()].map((entry) =>
+    ambiguous.has(entry.key) ? { key: entry.key, ok: null, error: null, report: null } : entry,
+  );
+}
+
 /** Narrow a ping reply to the advertised async-complete channel; any miss ⇒ null (unavailable). */
 function narrowPing(data: unknown): WavePing | null {
   if (!isRecord(data)) return null;
@@ -255,6 +303,7 @@ export function createRpcWaveAdapter(bus: WaveBus): WaveAdapter {
         // The payload spreads the result-file data: `id` is the async run id; `asyncDir` the
         // durable run directory. At least one is present on real payloads. The observability
         // fields (state/success/results) are optional — identity-only payloads stay valid.
+        const terminalOutcome = narrowPartialOutcome(data);
         const keys = workflowReceiptKeys(data);
         const children = Array.isArray(data.results)
           ? data.results.flatMap((row) => {
@@ -268,6 +317,9 @@ export function createRpcWaveAdapter(bus: WaveBus): WaveAdapter {
           ...(typeof data.state === "string" && data.state !== "" ? { state: data.state } : {}),
           ...(typeof data.success === "boolean" ? { success: data.success } : {}),
           ...(children !== undefined ? { children } : {}),
+          ...(terminalOutcome !== undefined
+            ? { terminalOutcome, retainedEntries: narrowRetainedEntries(data.results) }
+            : {}),
         });
       });
     },

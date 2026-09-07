@@ -173,6 +173,48 @@ the original automatic cold refusal and append one delivery-unconfirmed tool dia
 secondary warning failure must not erase that result. Consent tests are scripted actions, not
 autonomous model evidence. Canonical Python continuation is separately approved and revalidated.
 
+## Native partial report settlement (additive offline compatibility)
+
+Report waves retain independently successful reports after an explicitly marked native partial
+settlement, without treating the workflow as complete. This is retention after settlement, not
+status/resume recovery. The report-only doctor table has three additional **presence-only** probes:
+
+| Surface | Installed source | Required markers |
+| --- | --- | --- |
+| Partial workflow terminal vocabulary | `src/shared/types.ts` | `WorkflowTerminalOutcome`, `state: "partial"`, `"budget_exhausted"`, `"timeout"` |
+| Partial workflow result projection | `src/runs/foreground/subagent-executor.ts` | `workflowFailureTerminalOutcome`, `terminalOutcome`, `results: partial.children.map`, `workflowKey: child.key`, `structuredOutput: child.structuredOutput`, `success: child.ok` |
+| Partial workflow completion forwarding | `src/runs/background/result-watcher.ts` | `SUBAGENT_ASYNC_COMPLETE_EVENT`, `...data`, `...data.results![index]` |
+
+These file-scoped probes run whenever the engine is installed, even if the optional script-validation
+behavior probe cannot run. Missing source/markers warn without a fix or execution gate. They were
+source-verified on an installed package reporting 0.66.0; that is a source snapshot, not a pin or
+full re-verification. A clean marker result is **not a live-retention certificate**.
+
+Run the controlled acceptance and mandatory synthetic regressions offline:
+
+```bash
+node --test extension/waves/partialSettlementCompat.test.ts
+node --test extension/waves/adapterContract.test.ts extension/waves/rpcAdapter.test.ts extension/waves/reportWave.test.ts extension/waves/reportWaveRpc.test.ts
+uv run pytest tests/test_doctor.py -k subagent_compat -q
+```
+
+The installed test executes the actual module-rendered script with native `runWorkflowScript`,
+validates a controlled child report with native `validateStructuredOutputValue`, waits for trace
+and sibling-start barriers, and fires the captured native workflow timer. Actual
+`WorkflowScriptError.partial.children` feed `planWorkflowSettlement`; the explicit
+`executeSettlement` fake writes failed status without `workflow.value` and delivers the public
+projection to production `ReportWave.collect`. Network is blocked; timers/environment are restored
+and the native runner terminates its worker. The test must run in an implementing checkout.
+Only an absent optional installation may skip on clean CI; a present incompatible engine fails.
+It does not run an autonomous model or the entire live executor/watcher chain, prove all profiles,
+or recover Perk-local timeouts without completion, unreadable status or interrupted sessions.
+
+**Additive probe maintenance is not a full baseline re-verify.** Reconcile new source rows,
+literal row pins, synthetic marker/file-removal tests, and compatibility documentation together.
+Do not bump `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`, change historical evidence or update the
+learned-doc version anchors for this bounded work. Only completion of the full baseline procedure
+below advances that stamp; pi-subagents remains unpinned.
+
 ## Retired stale-error guard
 
 The temporary 0.65.1 recovery layer was removed after a bounded offline native replay of the
@@ -182,7 +224,10 @@ Failed engine lanes now remain failed without special capture salvage, including
 engines. This retirement does not advance the guidance-verified baseline: doctor remains
 report-only and pi-subagents stays unpinned.
 
-## Steps
+## Steps (full baseline re-verify)
+
+These steps certify the full baseline, not an additive source-probe update. Only this full process
+advances the guidance-verified stamp and baseline evidence.
 
 1. **Read the installed version.**
 

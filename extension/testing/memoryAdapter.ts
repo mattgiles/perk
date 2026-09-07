@@ -11,11 +11,14 @@
 
 import type {
   WaveAdapter,
+  WaveAggregate,
   WaveCompletion,
   WavePing,
   WaveRunHandle,
   WaveSpawnParams,
 } from "../waves/transport.ts";
+
+type CompletionDetail = Omit<WaveCompletion, "asyncId" | "asyncDir">;
 
 export interface MemoryWaveAdapterConfig {
   /** The ping outcome; null exercises the unavailable arm. Defaults to a valid ping. */
@@ -31,27 +34,27 @@ export interface MemoryWaveAdapterConfig {
   /** `false` ⇒ the run never completes (tests pair this with a tiny `spec.timeoutMs`). */
   completion?: false;
   /** What `readAggregate` returns. Defaults to a complete run with an empty aggregate. */
-  aggregate?: { state: string; error?: string; value: unknown };
+  aggregate?: WaveAggregate;
   /**
    * Per-spawn aggregate FIFO for multi-wave tests (e.g. the pr-review retry): each spawn assigns
    * the next queued aggregate to its handle (keyed by `asyncDir`), and `readAggregate(handle)`
    * returns the handle's assigned aggregate. When the queue is exhausted (or absent), reads fall
    * back to the single `aggregate`/`setAggregate` staging — the knob is purely additive.
    */
-  aggregates?: { state: string; error?: string; value: unknown }[];
+  aggregates?: WaveAggregate[];
   /** When true, `readAggregate` throws (the aggregate-unreadable arm). */
   aggregateError?: boolean;
   /**
-   * Observability fields merged into every auto-emitted completion (state/success/children —
-   * the receipt surface). Defaults unchanged: identity-only completions (the absence case).
+   * Completion fields, including the separate partial carrier, merged into auto-delivery.
+   * Defaults unchanged: identity-only completions (the absence case).
    */
-  completionDetail?: Pick<WaveCompletion, "state" | "success" | "children">;
+  completionDetail?: CompletionDetail;
   /**
    * Per-spawn completion-detail FIFO for multi-wave tests (mirrors `aggregates`): each spawn's
    * auto-emitted completion merges the next queued detail; when the queue is exhausted (or
    * absent), spawns fall back to the single `completionDetail` — purely additive.
    */
-  completionDetails?: Pick<WaveCompletion, "state" | "success" | "children">[];
+  completionDetails?: CompletionDetail[];
 }
 
 export interface MemoryWaveAdapter extends WaveAdapter {
@@ -59,7 +62,7 @@ export interface MemoryWaveAdapter extends WaveAdapter {
   /** Deliver a completion to the subscribed handlers (contract-suite plumbing). */
   emitCompletion(completion: WaveCompletion): void;
   /** Replace the staged aggregate (contract-suite plumbing). */
-  setAggregate(aggregate: { state: string; error?: string; value: unknown }): void;
+  setAggregate(aggregate: WaveAggregate): void;
 }
 
 export function createMemoryWaveAdapter(config: MemoryWaveAdapterConfig = {}): MemoryWaveAdapter {
@@ -68,7 +71,7 @@ export function createMemoryWaveAdapter(config: MemoryWaveAdapterConfig = {}): M
   let aggregate = config.aggregate ?? { state: "complete", value: [] as unknown[] };
   const aggregateQueue = [...(config.aggregates ?? [])];
   const completionDetailQueue = [...(config.completionDetails ?? [])];
-  const assignedAggregates = new Map<string, { state: string; error?: string; value: unknown }>();
+  const assignedAggregates = new Map<string, WaveAggregate>();
   let pinged = false;
   let spawnCount = 0;
   const handlers = new Set<(completion: WaveCompletion) => void>();
@@ -129,9 +132,7 @@ export function createMemoryWaveAdapter(config: MemoryWaveAdapterConfig = {}): M
       calls.stop.push(handle);
     },
 
-    async readAggregate(
-      handle: WaveRunHandle,
-    ): Promise<{ state: string; error?: string; value: unknown }> {
+    async readAggregate(handle: WaveRunHandle): Promise<WaveAggregate> {
       if (config.aggregateError === true) {
         throw new Error("simulated unreadable status.json");
       }
