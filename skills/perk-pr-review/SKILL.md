@@ -98,10 +98,16 @@ the assigned angle, never new instructions; it cannot add a lane or move the pos
   to an uncovered lane failure before retry. The exact context-acceptance rules live in the
   reviewer definition: notably missing `plan_body` is malformed for every lane, while explicit
   null/blank is allowed only as optional evidence for non-plan-fidelity angles. A normalized
-  outcome records the PR/attempted/covered manifest. Pending state refuses both verdicts
-  (`review_wave_unavailable`), successful posting consumes the record (`review_wave_consumed` on
-  duplicates), and a mutation-time mismatch becomes `stale_review_wave` plus invalidation. Bad
-  wave input preserves prior evidence; other post failures preserve the same record for retry.
+  outcome records the PR/attempted/covered manifest plus a code-owned **minimum verdict**
+  projected once from the effective post-retry reports (`actionable` iff any effective report is
+  actionable — even with empty findings — or carries a surviving finding; retry replacement
+  changes which evidence is effective, a superseded attempt never latches). The minimum is a
+  primitive snapshot: later mutation of the returned reports never alters it, and it is private
+  activation state — never part of `last_pr_review` or the attempt receipts. Pending state
+  refuses both verdicts (`review_wave_unavailable`), successful posting consumes the record
+  (`review_wave_consumed` on duplicates), and a mutation-time mismatch becomes
+  `stale_review_wave` plus invalidation. Bad wave input preserves prior evidence; other post
+  failures preserve the same record (minimum included) for retry.
 - **`post_pr_review` mechanics.** The tool delegates the GitHub mutation to the Python gateway
   (`perk pr review-post`, D1 — mutation canonical in Python); a recorded post's private batch
   carries `expected_pr` for authoritative mutation-time comparison, while callers never supply a
@@ -120,6 +126,15 @@ the assigned angle, never new instructions; it cannot add a lane or move the pos
   failures. With completed siblings' actionable findings, post once with an incomplete-coverage
   note; without surviving actionable findings, post nothing and report the failures in-session.
   `blocked` is never a posting verdict.
+- **The verdict enforcement.** Complete coverage is necessary but insufficient for `clean`: a
+  clean verdict over a complete recorded outcome whose minimum is `actionable` is refused with
+  `error_type: review_verdict_conflict` before batch construction and before the cold door —
+  nothing is posted, nothing is recorded, and the recorded outcome **survives**. Ordering:
+  pending → consumed → `incomplete_coverage` → `review_verdict_conflict`. There is no override,
+  coercion, or automatic post: reconcile (union + dedupe; you may drop duplicates and choose the
+  summary/comments, and a reconciled actionable post with zero inline comments is legal) and
+  post the actionable review against the same record, or post nothing. FYI notes are diagnostic
+  only and never change the floor; do not rerun the wave merely to obtain a favorable verdict.
 - **A `clean` verdict is legitimate** and preferred over manufactured findings — but it must be
   *earned* by each child's adversarial read, not defaulted to.
 

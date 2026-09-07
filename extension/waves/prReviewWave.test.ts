@@ -1,7 +1,9 @@
 // The pr-review wave entrypoint's suite: lane construction (the angle vocabulary + the uniform
-// directive suffix), the report-schema pin (the wave's `outputSchema`), and the bounded-retry
-// policy matrix — all driven through the in-memory adapter (per-spawn `aggregates` FIFO for the
-// two-wave scenarios), mirroring reportWave.test.ts conventions.
+// directive suffix), the report-schema pin (the wave's `outputSchema`), the bounded-retry
+// policy matrix, and retry PRECEDENCE (which attempt's report evidence is effective after the
+// merge — the feature's recorded minimum verdict is projected from exactly that set) — all
+// driven through the in-memory adapter (per-spawn `aggregates` FIFO for the two-wave
+// scenarios), mirroring reportWave.test.ts conventions.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -47,6 +49,32 @@ function okEntry(key: string): unknown {
   };
 }
 
+const FINDING = { path: "a.ts", line: 12, body: "fix this" };
+
+/** A schema-valid ACTIONABLE entry — distinguishable from `okEntry` by verdict and findings. */
+function actionableEntry(key: string): unknown {
+  return {
+    key,
+    ok: true,
+    error: null,
+    report: { angle: key, verdict: "actionable", findings: [FINDING], fyi: [] },
+  };
+}
+
+/** The `{key, report}` projection the wave surfaces for an aggregate entry. */
+function reportOf(entry: unknown): unknown {
+  const { key, report } = entry as { key: string; report: unknown };
+  return { key, report };
+}
+
+/** Receipts are observability only: no report/verdict/finding content, no recorded minimum. */
+function assertOutputFreeReceipts(attempts: unknown): void {
+  assert.doesNotMatch(
+    JSON.stringify(attempts),
+    /verdict|findings|actionable|minimumVerdict|retainedEntries|terminalOutcome|fix this/,
+  );
+}
+
 function failedEntry(key: string, error: string): unknown {
   return { key, ok: false, error, report: null };
 }
@@ -73,6 +101,8 @@ function laneItemsOf(script: string): Array<{
 // -------------------------------------------------------------------------- lane construction
 
 test("native partial evidence still retries the whole selection and uses the retry's evidence", async () => {
+  // The retained first-attempt report for the retried key is ACTIONABLE: when that key fails
+  // on retry it is not resurrected — its final report is absent and coverage stays incomplete.
   const adapter = createMemoryWaveAdapter({
     aggregates: [
       { state: "failed", value: undefined },
@@ -89,7 +119,7 @@ test("native partial evidence still retries the whole selection and uses the ret
       {
         state: "failed",
         terminalOutcome: { state: "partial", reason: "budget_exhausted" },
-        retainedEntries: [okEntry("plan-fidelity")],
+        retainedEntries: [actionableEntry("plan-fidelity")],
       },
       { state: "complete" },
     ],
@@ -98,6 +128,13 @@ test("native partial evidence still retries the whole selection and uses the ret
   assert.deepEqual(result.retried, ["plan-fidelity", "correctness", "ponytail"]);
   assert.deepEqual(result.covered, ["correctness", "ponytail"]);
   assert.equal(result.complete, false);
+  assert.deepEqual(result.reports, [
+    reportOf(okEntry("correctness")),
+    reportOf(okEntry("ponytail")),
+  ]);
+  assert.deepEqual(result.failures, [
+    { key: "plan-fidelity", reason: "lane-failed", detail: "retry failed" },
+  ]);
   assert.equal(adapter.calls.spawn.length, 2);
   assert.deepEqual(
     laneItemsOf(adapter.calls.spawn[1]?.workflowScript ?? "").map((row) => row.key),
@@ -105,7 +142,128 @@ test("native partial evidence still retries the whole selection and uses the ret
   );
   assert.equal(result.attempts.length, 2);
   assert.equal(result.attempts[0]?.state, "failed");
-  assert.doesNotMatch(JSON.stringify(result.attempts), /verdict|retainedEntries|terminalOutcome/);
+  assert.equal(result.attempts[1]?.state, "complete");
+  assertOutputFreeReceipts(result.attempts);
+});
+
+// ------------------------------------------------------------------- retry precedence
+
+test("precedence: a first-attempt actionable success is kept while another failed lane recovers clean", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregates: [
+      {
+        state: "complete",
+        value: [
+          actionableEntry("plan-fidelity"),
+          failedEntry("correctness", "lane exploded"),
+          okEntry("ponytail"),
+        ],
+      },
+      { state: "complete", value: [okEntry("correctness")] },
+    ],
+  });
+  const result = await runPrReviewWave(adapter, { angles: TWO_ANGLES, timeoutMs: 5_000 });
+  assert.deepEqual(result.retried, ["correctness"]);
+  assert.equal(adapter.calls.spawn.length, 2);
+  assert.deepEqual(
+    laneItemsOf(adapter.calls.spawn[1]?.workflowScript ?? "").map((row) => row.key),
+    ["correctness"],
+  );
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.covered, ["plan-fidelity", "correctness", "ponytail"]);
+  assert.deepEqual(result.failures, []);
+  assert.deepEqual(result.reports, [
+    reportOf(actionableEntry("plan-fidelity")),
+    reportOf(okEntry("correctness")),
+    reportOf(okEntry("ponytail")),
+  ]);
+  assert.deepEqual(
+    result.attempts.map((a) => [a.attempt, a.state, a.requestedKeys]),
+    [
+      [1, "complete", ["plan-fidelity", "correctness", "ponytail"]],
+      [2, "complete", ["correctness"]],
+    ],
+  );
+  assertOutputFreeReceipts(result.attempts);
+});
+
+test("precedence: native partial actionable evidence is REPLACED by an all-clean whole-selection retry", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregates: [
+      { state: "failed", value: undefined },
+      {
+        state: "complete",
+        value: [okEntry("plan-fidelity"), okEntry("correctness"), okEntry("ponytail")],
+      },
+    ],
+    completionDetails: [
+      {
+        state: "failed",
+        terminalOutcome: { state: "partial", reason: "timeout" },
+        retainedEntries: [actionableEntry("plan-fidelity"), actionableEntry("ponytail")],
+      },
+      { state: "complete" },
+    ],
+  });
+  const result = await runPrReviewWave(adapter, { angles: TWO_ANGLES, timeoutMs: 5_000 });
+  assert.deepEqual(result.retried, ["plan-fidelity", "correctness", "ponytail"]);
+  assert.equal(adapter.calls.spawn.length, 2);
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.covered, ["plan-fidelity", "correctness", "ponytail"]);
+  assert.deepEqual(result.failures, []);
+  // Only the replacement clean reports survive — no ever-actionable latch across attempts.
+  assert.deepEqual(result.reports, [
+    reportOf(okEntry("plan-fidelity")),
+    reportOf(okEntry("correctness")),
+    reportOf(okEntry("ponytail")),
+  ]);
+  assert.deepEqual(
+    result.attempts.map((a) => [a.attempt, a.state, a.requestedKeys]),
+    [
+      [1, "failed", ["plan-fidelity", "correctness", "ponytail"]],
+      [2, "complete", ["plan-fidelity", "correctness", "ponytail"]],
+    ],
+  );
+  assertOutputFreeReceipts(result.attempts);
+});
+
+test("precedence: native partial clean evidence is REPLACED by a whole-selection retry's actionable report", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregates: [
+      { state: "failed", value: undefined },
+      {
+        state: "complete",
+        value: [okEntry("plan-fidelity"), actionableEntry("correctness"), okEntry("ponytail")],
+      },
+    ],
+    completionDetails: [
+      {
+        state: "failed",
+        terminalOutcome: { state: "partial", reason: "budget_exhausted" },
+        retainedEntries: [okEntry("plan-fidelity"), okEntry("correctness")],
+      },
+      { state: "complete" },
+    ],
+  });
+  const result = await runPrReviewWave(adapter, { angles: TWO_ANGLES, timeoutMs: 5_000 });
+  assert.deepEqual(result.retried, ["plan-fidelity", "correctness", "ponytail"]);
+  assert.equal(adapter.calls.spawn.length, 2);
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.covered, ["plan-fidelity", "correctness", "ponytail"]);
+  assert.deepEqual(result.failures, []);
+  assert.deepEqual(result.reports, [
+    reportOf(okEntry("plan-fidelity")),
+    reportOf(actionableEntry("correctness")),
+    reportOf(okEntry("ponytail")),
+  ]);
+  assert.deepEqual(
+    result.attempts.map((a) => [a.attempt, a.state, a.requestedKeys]),
+    [
+      [1, "failed", ["plan-fidelity", "correctness", "ponytail"]],
+      [2, "complete", ["plan-fidelity", "correctness", "ponytail"]],
+    ],
+  );
+  assertOutputFreeReceipts(result.attempts);
 });
 
 test("runPrReviewWave builds selected lanes plus one final Ponytail lane", async () => {
