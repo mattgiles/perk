@@ -27,6 +27,18 @@ An unavailable field stays unknown, not absent. The fixed files are `draft-revie
 reported paths; do not guess a different checkout or run. Lock owner metadata identifies a claimant,
 not whether it saved or delivered anything.
 
+A `target-changed` or `subject-changed` stop additionally names the checkpoint (`open`, `attach`,
+`candidate`, or `save`), the reviewed and current target digests, and the **changed component
+names** — for example `main_config.issues.backend` or `worktree_local.workflow.base`, or
+`git_config` when Git configuration changed — never the values themselves. Unrelated Perk TOML
+edits (compaction, models, CI, skills, providers, comments, formatting) do not produce this stop.
+When the diagnostic reports the components as `unavailable`, only the aggregate comparison is
+known; treat that as unknown, not as "nothing relevant changed". A `target-changed` stop before
+the save checkpoint made no save; a stop *at* the save checkpoint after an await still made no
+backend call, but neither excludes an earlier saved attempt in the run — classify it like any
+other stop below. It grants no permission to repair, replay, or save the old review: open a new
+review under the current configuration after checking the named component was the intended change.
+
 ## 1. Stop all participants and prove quiescence
 
 Stop every Pi session and **every child save subprocess** able to use this namespace. Then close

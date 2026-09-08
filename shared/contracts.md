@@ -4306,7 +4306,9 @@ ready; a later observer cannot repeat fallback or announce readiness after suppr
 If persistence fails, local liveness suppression remains, but no durable invalidation or fallback
 permission is asserted; a consumption winner is never rolled back.
 The guarantee is at-most-once participating machine-local dispatch, not exactly-once delivery or
-power-loss durability. Conservative target/config changes can require a new review.
+power-loss durability. Conservative routing-input changes (a declared `[issues]`/`[workflow]
+base`/`[linear] api_key` field, Git config stdout, `GH_REPO`/`GH_HOST`, the handoff) can require
+a new review; unrelated Perk TOML changes cannot (see "Fingerprint assembly" below).
 Construction performs no startup discovery, status query, previous-feedback injection,
 resend, or automatic recovery. Python neither reads nor writes this decision artifact.
 
@@ -4432,7 +4434,7 @@ durability; external changes after dispatch, credentials, and owner removal rema
 cooperative guarantee.
 
 Fingerprint assembly constructs these keys in order:
-`worktree_root, git_dir, git_common_dir, run_id, subject, warm_node_claim, handoff, files,
+`worktree_root, git_dir, git_common_dir, run_id, subject, warm_node_claim, handoff, config,
 git_config_digest, environment` — plus, for the `refinement` subject ONLY, a trailing
 `context_artifact` key (the strict session-data digest of `objective-refinement-context.json`;
 a missing/invalid context refuses capture `invalid-state`); every other subject's encoding never
@@ -4446,21 +4448,69 @@ namespaced `objective_refinement.context_digest` only (null when the block is ab
 fallthrough, no planning link). Optional omitted/null
 IDs normalize to null; nonblank strings stay untrimmed. Omitted consumed_learn is [], otherwise an
 array of nonblank strings retaining order and duplicates. Present empty routing differs from no
-handoff. `files` is main_config/worktree_config/worktree_local, each `{state:"absent"}` on ENOENT
-only or `{state:"present", digest}` hashing exact bytes. Empty files are present; duplicate main/
-worktree paths retain both fields. No TOML parser. Git config digest hashes exact successful stdout
+handoff.
+
+`config` is the **routing projection** of Perk TOML (`extension/substrate/draftReviewConfig.ts`),
+never file bytes: exactly `{main_issues: {backend, team}, workflow_base: {committed, local} |
+null, linear_credentials: {api_key}}` in that order, each leaf `{state:"absent"}` or
+`{state:"present", digest}` — the digest of the field's **exact decoded string** (whitespace and
+empty strings preserved; no stripping, default selection, overlay precedence, objective-base
+lookup, or credential precedence is reproduced, so a declared input stays conservatively
+significant even while a higher-precedence input shadows it). Role-specific roots: `main_issues`
+reads `[issues] backend`/`team` from the MAIN checkout's `.perk/config.toml` (common-directory
+parent — never the local overlay or a linked worktree's own selection); `workflow_base` reads
+`[workflow] base` from the INVOKING checkout's `.perk/config.toml` (`committed`) and
+`.perk/local.toml` (`local`) for plan and objective, and is `null` (files not read) for gist and
+refinement; `linear_credentials` reads `[linear] api_key` from the MAIN checkout's
+`.perk/local.toml` (hashed, never exposed; never committed config or a linked worktree's local
+file). Each distinct derived path is read and parsed once per capture (aliasing main/worktree
+roles observe one version of the file); nothing is cached across checkpoints. Decoding is fatal
+UTF-8 then the full vendored TOML parser (`extension/vendor/smol-toml`, `integersAsBigInt`); only
+selected string values leave the parser. A missing file, an empty file, comments only, and an
+empty relevant table all project the same absent leaves — file existence, formatting, key/table
+order, and equivalent string spelling are not identity. All unselected fields are ignored
+(`workflow.plan_authoring`, every `[providers]`/`[compaction]`/`[models]`/`[ci]`/`[skills]`
+key, and any `[issues]` selector in a local or linked-worktree file). A read failure other than
+ENOENT, invalid UTF-8, a parser failure, a present non-table where a selected table is expected,
+or a non-string selected value refuses capture `io-error` with a code-owned `routing config
+<role>[/<aliased role>]: <explanation>` detail — never a parser message or config excerpt. The
+Python configuration dialect stays authoritative; the parser certifies nothing about whole-config
+validity. Git config digest hashes exact successful stdout
 bytes of bounded `git config --null --list --show-origin`, without trimming, including successful
-empty output. No raw config is persisted/logged. `environment` is GH_REPO/GH_HOST, null when unset,
+empty output (so unrelated Git-config changes still retarget a review). No raw config is
+persisted/logged. `environment` is GH_REPO/GH_HOST, null when unset,
 otherwise exact UTF-8 value digests, including empty strings; credential variables are excluded.
 
-Fingerprint encoding is UTF-8 `"perk/draft-review-target/v1\n" + JSON.stringify(projection)` with
-fixed constructed key order, no trailing newline/whitespace. Decision encoding is UTF-8
+Fingerprint encoding is UTF-8 `"perk/draft-review-target/v2\n" + JSON.stringify(projection)` with
+fixed constructed key order, no trailing newline/whitespace; the retired v1 encoding (whole-file
+`files` marks) is never equal to it. `draft-review.json` keeps its schema and opaque target digest:
+records opened under v1 are neither migrated, reinterpreted, nor replayed — they stay in their
+existing lifecycle (a v2 capture simply never matches them). Decision encoding is UTF-8
 `"perk/draft-review-decision/v1\n" + JSON.stringify({approved, feedback})` in that order, feedback
 null when absent and otherwise the parser's verbatim nonblank string. Source digests hash exact
 plan Markdown or the entire serialized objective/gist artifact (including invisible fields), using
 one validated raw→decoded→rendered snapshot. A new artifact removes parameter-plan approval and
 current-draft revision eligibility even when byte-identical. Before attachment this invalidates
 source-changed without an ID; after attachment the table permits only stale-reference DATA.
+
+**Drift diagnostics (no authority).** Every captured binding also carries fixed-name component
+digests over the same ordered projection — `identity` (roots, run, subject), `warm_node_claim`,
+`handoff`, `main_config.issues.backend`, `main_config.issues.team`,
+`worktree_config.workflow.base`, `worktree_local.workflow.base`, `main_local.linear.api_key`,
+`git_config`, `environment`, `context_artifact` — each the digest of the component's projected
+value (TOML fields digest their absent/present mark, so no raw value is recoverable). They are
+never persisted. Eligibility is decided by the aggregate digest alone; components only explain a
+`target-changed`/`subject-changed` refusal, whose detail is `checkpoint: <open|attach|candidate|
+save>; reviewed target: <digest>; current target: <digest>; changed components: <ordered names>`
+compared between the two ALREADY captured snapshots (never a second read). Registration hooks
+compare against their frozen snapshot. Dispatch (`candidate`) and the pre-save recheck (`save`)
+use at most one activation-local baseline — the last successfully opened request's components,
+bound to the target digest its record persisted — only when both the request ID and the
+persisted digest match; otherwise the detail says `unavailable (no matching diagnostic baseline)`.
+The baseline is cleared on abandon/end and never reconstructed on startup. The explanation rides
+the existing refusal rendering (`RegistrationResult.detail`, the reconciliation diagnostic);
+transition permissions, retained-state guidance, and the unknown-stays-unknown posture are
+unchanged.
 
 `createDraftReviewDecisions` supplies synchronous registration hooks
 `open`, `attach`, `invalidateOpening`, `subscriptionFailed`, and diagnostic reporting, plus
@@ -12051,8 +12101,9 @@ as a TRAILING, conditional `context_artifact` encoding key (absent for every oth
 their encodings stay byte-identical); a missing/invalid context refuses capture
 (`invalid-state`). `sourceSnapshot` for the subject strict-resumes the (draft, context) pair,
 requires the pair's draft bytes to equal the raw source, and renders from the pair; the raw
-draft bytes stay the authoritative source digest. Context / run / stage / config / raw-draft
-changes invalidate approval even when the rendering is identical — **this fences the reviewed
+draft bytes stay the authoritative source digest. Context / run / stage / routing-config /
+raw-draft changes (routing config = the §8.23 projection's selected fields; a refinement binds no
+`[workflow] base`) invalidate approval even when the rendering is identical — **this fences the reviewed
 artifact and save route, not the checkout contents.** `executePlanReview` routes the stage to
 `runRefinementReviewV1` BEFORE the plan arm (decode-first bad-input behavior preserved; a
 well-typed `plan` param ignored). The rendering (`renderRefinementDraft`): objective/node
@@ -12084,7 +12135,8 @@ verbatim; identity/provenance are immutable review metadata.
   an `open`-phase refusal); competing browser eligibility is invalidated at entry and exclusion
   released for the human wait; after the verdict exclusion is reacquired and, for a plain
   approval, the binding is recaptured under it and compared (`subject-changed` /
-  `target-changed` mutation-phase refusals, nothing saved) before the seam re-resumes the pair
+  `target-changed` mutation-phase refusals carrying the §8.23 checkpoint/changed-components
+  detail, nothing saved) before the seam re-resumes the pair
   and compares it with the reviewed one; abort wins before and after awaits; no replacement
   artifact is ever saved on an old approval. The approve verdict label names the actual
   destination (`ReviewSubject.saveDestination` — "Linear (the node's refinement comment)"; the

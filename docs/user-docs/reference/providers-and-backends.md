@@ -58,8 +58,18 @@ summarized in [Issue backends](./providers-and-backends/issue-backends.md).
 
 Plan, objective, and gist Plannotator reviews require verified run-local registration before a
 request is emitted. Registration binds the exact source and conservative local routing inputs;
-changes during the handshake can require a fresh review. Busy, broken-provenance, persistence,
-or unresolved-dispatch stops are **refusals**, not skipped reviews or permission to retry a save.
+changes to those inputs during the handshake can require a fresh review. The bound routing inputs
+are the fields that select **where** a save goes — the main checkout's committed `[issues]
+backend`/`team`, the invoking checkout's committed and local `[workflow] base` (plan and objective
+only), and the main checkout's local `[linear] api_key` (hashed, never shown) — plus the run
+handoff, `GH_REPO`/`GH_HOST`, and **all `git config --list --show-origin` output**. Unrelated
+valid Perk TOML changes (compaction, models, CI, skills, providers, presentation, comments,
+formatting, key order) no longer invalidate an open review, but an unrelated Git-config change
+still does. Genuine drift refuses `target-changed` naming the checkpoint and the changed
+component (for example `main_config.issues.backend`), never the value; a malformed or
+wrong-shaped routing field refuses `io-error` naming the file role. Busy, broken-provenance,
+persistence, or unresolved-dispatch stops are **refusals**, not skipped reviews or permission to
+retry a save.
 They do not launch a reviewer wave or fall back to another review. Preserve retained state and
 follow [Reconcile a draft-review stop](../how-to/reconcile-a-draft-review-stop.md); do not remove
 a lock or rewrite provenance to bypass the stop. It requires subprocess quiescence, evidence
