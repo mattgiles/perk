@@ -357,7 +357,10 @@ facts that every mirror must reconcile.
 - **Parallel run-all checks race the Astro/Vite caches** — concurrent `typecheck-js` +
   `docs-check` can fail with `UnknownFilesystemError`/`ENOTEMPTY` under contention; a targeted
   re-run of the failed check passes. The parallel gate stays nondeterministic on this axis —
-  treat such a failure as a re-run candidate before debugging the site (#2033).
+  treat such a failure as a re-run candidate before debugging the site (#2033). Another face of
+  the same race: `docs-check` failing with `Failed to load Pagefind metadata: SyntaxError:
+  Unexpected end of JSON input` across the `checks/pagefind.test.mjs` tests, passing on an
+  isolated re-run — the Pagefind bundle was read mid-write. Same disposition: re-run first.
 
 ## Cross-references
 
