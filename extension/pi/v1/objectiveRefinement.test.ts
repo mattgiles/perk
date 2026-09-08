@@ -7,7 +7,6 @@
 // scripted exec / UI; no network.
 
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -24,7 +23,6 @@ import {
   reviseRefinementDraft,
 } from "../../authoring/refinement/draft.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
-import { readDraftReview } from "../../session/draftReviewState.ts";
 import { soundPointer } from "../../session/workflowSession.ts";
 import { runScratchDir, sessionDataDir } from "../../substrate/cache.ts";
 import { digestSessionData } from "../../substrate/sessionData.ts";
@@ -33,7 +31,7 @@ import { type BranchEntry, WORKFLOW_STATE_TYPE } from "../../substrate/workflowS
 import { scriptedDraftReviewBridge } from "../../testing/draftReview.ts";
 import { gitInit, loadPerkSession, scaffoldRepo, spyInjections } from "../../testing/harness.ts";
 import type { ReportWave } from "../../waves/reportWave.ts";
-import { createDraftReviewActivation } from "./draftReviewActivation.ts";
+import { createDraftReviewSlot } from "./draftReview.ts";
 import { installGistBindings } from "./gist.ts";
 import { installObjectiveAuthoringBindings } from "./objectiveAuthoring.ts";
 import { installObjectivePlanningBindings } from "./objectivePlanning.ts";
@@ -235,7 +233,7 @@ type Tool = {
   ): Promise<ToolResult>;
 };
 
-/** A session fixture with the real draft-review activation over a scripted exec + UI. */
+/** A session fixture with a real draft-review slot over a scripted exec + UI. */
 function fixture(
   opts: { stage?: string | null; runId?: string | null; grounded?: boolean; mode?: string } = {},
 ) {
@@ -351,12 +349,12 @@ function fixture(
       synced.push([mode, s]);
     },
   } satisfies ToolGating;
-  const reviews = createDraftReviewActivation(pi);
+  const reviews = createDraftReviewSlot(pi);
   const contextPolicy = { runnerChild: () => false };
   installPlanBindings(pi, gating, reviews, contextPolicy);
   installObjectiveAuthoringBindings(pi, gating, reviews, contextPolicy);
   installGistBindings(pi, gating, reviews, contextPolicy);
-  installObjectivePlanningBindings(pi, gating, {} as ReportWave, reviews);
+  installObjectivePlanningBindings(pi, gating, {} as ReportWave);
   installObjectiveRefinementBindings(pi, gating, reviews, contextPolicy);
   const session = openBranchWorkflowSession(pi, ctx);
   if (opts.grounded !== false && runId !== null) {
@@ -376,21 +374,6 @@ function fixture(
     await handler(args, ctx);
   };
   const draft = (markdown = MARKDOWN) => invoke("objective_refinement_draft", { markdown });
-  const record = () => {
-    const result = readDraftReview(session);
-    assert.ok(result.ok);
-    return result.record;
-  };
-  const open = (pending = true) => {
-    const result = reviews.prepare(ctx);
-    assert.ok(result.ok, JSON.stringify(result));
-    const prepared = result.value;
-    const requestId = randomUUID();
-    assert.deepEqual(prepared.registration.open(requestId), { ok: true });
-    if (pending)
-      assert.deepEqual(prepared.registration.attach(requestId, "review-id"), { ok: true });
-    return prepared;
-  };
   return {
     cwd,
     pi,
@@ -404,8 +387,6 @@ function fixture(
     invoke,
     command,
     draft,
-    record,
-    open,
     calls,
     notices,
     messages,
@@ -561,7 +542,7 @@ test("objective_refinement_draft: refuses outside a refinement session (wrong_st
   const noIdentity = fixture({ runId: null, grounded: false });
   try {
     const result = await noIdentity.draft();
-    assert.equal((result.details as { status?: string }).status, "refused");
+    assert.equal((result.details as { error_type?: string }).error_type, "no_run_id");
   } finally {
     noIdentity.dispose();
   }
@@ -604,7 +585,6 @@ test("plan-graph surfaces refuse inside a refinement session: tools → wrong_st
     assert.equal(f.exits, 0, "the gate never exited");
     assert.equal(f.messages.length, 0, "nothing was driven");
     assert.equal(f.state().nodeClaim(), null);
-    assert.equal(f.record(), null, "no review record was manufactured");
   } finally {
     f.dispose();
   }
@@ -738,67 +718,34 @@ test("/objective-refinement-save: a failed worker keeps the gate ON and relays t
   }
 });
 
-test("/objective-refinement-save state table: absent, pending (invalidated first), invalidated, consumed save; dispatch/uncertain refuse", async () => {
-  // Pending → invalidated(manual-save) BEFORE the worker; the late browser decision cannot save.
-  const pending = fixture();
+test("/objective-refinement-save: the deliberate retry — a failed save latches automatic saves off, the manual command still runs the worker", async () => {
+  const f = fixture();
   try {
-    await pending.draft();
-    pending.open(true);
-    assert.equal(pending.record()?.consumption.state, "pending");
-    await pending.command("objective-refinement-save");
-    assert.equal(pending.calls.length, 1, "the worker ran once");
-    const record = pending.record();
-    assert.ok(
-      record &&
-        record.consumption.state === "invalidated" &&
-        record.consumption.reason === "manual-save",
+    f.routes["objective refinement-save"] = { json: SAVE_FAIL, code: 1 };
+    await f.draft();
+    await f.command("objective-refinement-save");
+    assert.equal(f.calls.length, 1, "the worker ran once");
+    assert.deepEqual(f.reviews.unconfirmed()?.subject, "refinement", "the failed save latched");
+    assert.match(String(f.reviews.unconfirmed()?.detail), /refinement comment changed/);
+    // Automatic (approval-driven) saves are paused: a first-party approval refuses before the
+    // worker, naming the run id and the manual command.
+    f.verdict = APPROVE;
+    const approved = await f.invoke("plan_review", {});
+    assert.equal(approved.details.status, "refused", JSON.stringify(approved.details));
+    assert.equal(approved.details.error_type, "save_unconfirmed");
+    assert.match(String(approved.content[0]?.text), new RegExp(`run id ${GOLDEN_RUN}`));
+    assert.match(
+      String(approved.content[0]?.text),
+      /\/objective-refinement-save \(the deliberate retry\)/,
     );
-    assert.equal(pending.exits, 1);
+    assert.equal(f.calls.length, 1, "no worker call from the paused approval");
+    // The manual command never consults the latch — it IS the retry.
+    f.routes["objective refinement-save"] = { json: SAVE_JSON };
+    await f.command("objective-refinement-save");
+    assert.equal(f.calls.length, 2, "the manual retry ran the worker");
+    assert.equal(f.exits, 1, "the gate exits on the verified manual save");
   } finally {
-    pending.dispose();
-  }
-  // Invalidated → may save (invalidation is not approval; nothing is revived).
-  const invalidated = fixture();
-  try {
-    await invalidated.draft();
-    invalidated.open(false);
-    await invalidated.draft(`${MARKDOWN}\nmore\n`); // source-changed invalidates the opening record
-    assert.equal(invalidated.record()?.consumption.state, "invalidated");
-    await invalidated.command("objective-refinement-save");
-    assert.equal(invalidated.calls.length, 1);
-    assert.equal(invalidated.record()?.consumption.state, "invalidated", "not revived");
-  } finally {
-    invalidated.dispose();
-  }
-  // Dispatch / uncertain → refused unresolved-dispatch, even for the explicit human command.
-  for (const state of ["dispatch", "uncertain"] as const) {
-    const f = fixture();
-    try {
-      await f.draft();
-      const prepared = f.open();
-      await prepared.complete(
-        { status: "completed", approved: false, feedback: "Feedback", reviewId: "review-id" },
-        {
-          effect: "revision",
-          carrier: { kind: "tool", tool_call_id: "previous-tool" },
-          async execute() {
-            if (state === "uncertain") throw new Error("controlled effect failure");
-            return { content: [{ type: "text", text: "Feedback" }], details: { ok: true } };
-          },
-        },
-      );
-      assert.equal(f.record()?.consumption.state, state);
-      await f.command("objective-refinement-save");
-      assert.ok(
-        warnNotices(f).some((m) => m.includes("unresolved-dispatch")),
-        `${state}: ${JSON.stringify(f.notices)}`,
-      );
-      assert.equal(f.calls.length, 0, `${state}: no worker call`);
-      assert.equal(f.exits, 0);
-      assert.equal(f.record()?.consumption.state, state, "facts preserved for reconciliation");
-    } finally {
-      f.dispose();
-    }
+    f.dispose();
   }
 });
 
@@ -910,10 +857,9 @@ test("plan_review first-party: an approval never saves a replacement — draft r
     rewritten.dispose();
   }
 
-  // The grounding context re-prepared (a new pass) with the draft re-bound to it: the routing
-  // binding embeds the context artifact's digest, so the reacquired-exclusion binding check
-  // refuses target-changed BEFORE the seam (whose own context arm is the Pi-free backstop,
-  // pinned in authoring/refinement/save.test.ts).
+  // The grounding context re-prepared (a new pass) with the draft re-bound to it: the
+  // first-party source is `editor` (no artifact compare), so the seam's own `reviewed` pair
+  // check catches the moved context (pinned Pi-free in authoring/refinement/save.test.ts).
   const regrounded = fixture();
   try {
     await regrounded.draft();
@@ -930,18 +876,18 @@ test("plan_review first-party: an approval never saves a replacement — draft r
     };
     const result = await regrounded.invoke("plan_review", {});
     const details = result.details as Record<string, unknown>;
-    assert.equal(details.status, "refused", JSON.stringify(details));
-    assert.equal(details.reason, "target-changed");
-    assert.equal(details.phase, "mutation");
+    assert.equal(details.status, "stale", JSON.stringify(details));
+    assert.equal(details.reason, "source_changed");
+    assert.equal(details.changed, "context");
     assert.equal(regrounded.calls.length, 0);
     assert.equal(regrounded.exits, 0);
   } finally {
     regrounded.dispose();
   }
 
-  // The routing binding changed (the worktree config rewritten during the wait) while the pair
-  // is byte-identical: the reacquired-exclusion comparison refuses target-changed before the
-  // seam, with nothing saved.
+  // The save destination changed (the committed `[issues]` table rewritten during the wait)
+  // while the pair is byte-identical: the destination fence refuses before the seam, naming
+  // the moved components (never their values), with nothing saved.
   const rerouted = fixture();
   try {
     await rerouted.draft();
@@ -952,13 +898,13 @@ test("plan_review first-party: an approval never saves a replacement — draft r
     };
     const result = await rerouted.invoke("plan_review", {});
     const details = result.details as Record<string, unknown>;
-    assert.equal(details.status, "refused", JSON.stringify(details));
-    assert.equal(details.reason, "target-changed");
-    assert.equal(details.phase, "mutation");
-    assert.match(String(result.content[0]?.text), /routing binding .* changed during the review/);
+    assert.equal(details.status, "destination-changed", JSON.stringify(details));
+    assert.equal(details.subject, "refinement");
+    // The backend flipped to Linear: `issues` moved and the GitHub-only `remotes` component vanished.
+    assert.deepEqual(details.changed, ["issues", "remotes"]);
     assert.match(
       String(result.content[0]?.text),
-      /checkpoint: save; reviewed target: sha256:[0-9a-f]{64}; current target: sha256:[0-9a-f]{64}; changed components: main_config\.issues\.backend/,
+      /save destination changed while the review was open \(changed: issues, remotes\)/,
     );
     assert.doesNotMatch(String(result.content[0]?.text), /linear/);
     assert.equal(rerouted.calls.length, 0);
@@ -1090,6 +1036,7 @@ function plannotatorArm(
   };
   const draftBytes = () =>
     readFileSync(join(sessionDataDir(cwd, GOLDEN_RUN), REFINEMENT_DRAFT_ARTIFACT), "utf8");
+  const slot = createDraftReviewSlot(pi);
   return {
     cwd,
     session,
@@ -1099,7 +1046,8 @@ function plannotatorArm(
     get exits() {
       return exits;
     },
-    run: () => runRefinementReviewV1(pi, ctx, gating, bridge, undefined, "plannotator-tool-id"),
+    slot,
+    run: () => runRefinementReviewV1(pi, ctx, gating, bridge, slot, undefined),
     dispose: () => rmSync(cwd, { recursive: true, force: true }),
   };
 }
@@ -1138,14 +1086,7 @@ test("plannotator arm: a plain approval saves the EXACT reviewed draft bytes onc
     );
     assert.equal(argv[argv.indexOf("--run-id") + 1], GOLDEN_RUN);
     assert.equal(arm.exits, 1);
-    // The record: the refinement subject/operation, dispatched against the exact reviewed
-    // source (delivery confirmation is Pi's persisted tool entry, outside this fixture).
-    const record = readDraftReview(arm.session);
-    assert.ok(record.ok && record.record !== null);
-    assert.equal(record.record.correlation.subject, "refinement");
-    assert.equal(record.record.correlation.target.operation, "refinement-save");
-    assert.equal(record.record.correlation.source_digest, digestSessionData(arm.draftBytes()));
-    assert.equal(record.record.consumption.state, "dispatch");
+    assert.equal(arm.slot.unconfirmed(), null, "a confirmed save never latches");
   } finally {
     arm.dispose();
   }
@@ -1193,7 +1134,7 @@ test("plannotator arm: a denial saves nothing and redirects to the draft tool", 
   }
 });
 
-test("plannotator arm: a draft rewritten while the review is pending blocks the late approval — source-changed, worker never invoked", async () => {
+test("plannotator arm: a draft rewritten while the review is pending blocks the late approval — stale-approval, worker never invoked", async () => {
   let arm: ReturnType<typeof plannotatorArm> | undefined;
   let shown = "";
   arm = plannotatorArm(
@@ -1205,7 +1146,7 @@ test("plannotator arm: a draft rewritten while the review is pending blocks the 
           { markdown: "## Replacement while pending\n" },
           arm?.session as NonNullable<typeof arm>["session"],
         );
-        // The pending review is invalidated by the changed bytes; the write itself lands.
+        // The write lands; the reviewed-bytes guard refuses the approval at decision time.
         assert.equal(revised.status, "revised");
       },
     },
@@ -1213,15 +1154,14 @@ test("plannotator arm: a draft rewritten while the review is pending blocks the 
   try {
     const result = await arm.run();
     const details = result.details as Record<string, unknown>;
-    // The changed bytes invalidated the pending review before the verdict arrived: the late
-    // approval is rendered as stale diagnostic DATA over the REVIEWED digest — never an approval
-    // of, or an instruction against, the current draft.
-    assert.equal(details.status, "stale-reference", JSON.stringify(details));
+    // The live draft no longer equals the reviewed bytes: the late approval saves nothing and
+    // names the REVIEWED digest — never an approval of the current draft.
+    assert.equal(details.status, "stale-approval", JSON.stringify(details));
     assert.equal(details.subject, "refinement");
     assert.equal(details.reviewed_digest, digestSessionData(shown));
-    assert.notEqual(digestSessionData(arm.draftBytes()), shown, "the replacement is current");
-    assert.match(String(result.content[0]?.text), /Stale refinement review — diagnostic DATA only/);
-    assert.match(String(result.content[0]?.text), /Do not apply, patch, fold, or save/);
+    assert.notEqual(arm.draftBytes(), shown, "the replacement is current");
+    assert.match(String(result.content[0]?.text), /working draft changed after the review opened/);
+    assert.match(String(result.content[0]?.text), /Nothing was saved/);
     assert.equal(arm.calls.length, 0, "the worker is never invoked on a late approval");
     assert.equal(arm.exits, 0);
   } finally {
@@ -1229,7 +1169,7 @@ test("plannotator arm: a draft rewritten while the review is pending blocks the 
   }
 });
 
-test("plannotator arm: a context re-prepared while the review is pending blocks the late approval — the binding fence, worker never invoked", async () => {
+test("plannotator arm: a context re-prepared while the review is pending blocks the late approval — the context digest, worker never invoked", async () => {
   let arm: ReturnType<typeof plannotatorArm> | undefined;
   arm = plannotatorArm(
     { status: "completed", approved: true, reviewId: "rev-moved" },
@@ -1251,12 +1191,11 @@ test("plannotator arm: a context re-prepared while the review is pending blocks 
   try {
     const result = await arm.run();
     const details = result.details as Record<string, unknown>;
-    // The re-prepared context leaves the draft bytes identical, so the pending review is not
-    // invalidated by a source change; the capability's binding comparison (the context digest
-    // rides the target encoding) refuses under exclusion instead — nothing saved either way.
-    assert.equal(details.status, "refused", JSON.stringify(details));
-    assert.equal(details.reason, "target-changed");
-    assert.match(String(result.content[0]?.text), /Do not retry a save/);
+    // The re-prepared context leaves the draft bytes identical; the reviewed-bytes guard also
+    // compares the grounding context's digest for refinement, so the approval is stale.
+    assert.equal(details.status, "stale-approval", JSON.stringify(details));
+    assert.equal(details.subject, "refinement");
+    assert.match(String(result.content[0]?.text), /Nothing was saved/);
     assert.equal(arm.calls.length, 0);
     assert.equal(arm.exits, 0);
   } finally {
@@ -1305,11 +1244,11 @@ test("plannotator arm: an unrelated TOML edit during the review leaves the appro
   try {
     const result = await rerouted.run();
     const details = result.details as Record<string, unknown>;
-    assert.equal(details.status, "refused", JSON.stringify(details));
-    assert.equal(details.reason, "target-changed");
+    assert.equal(details.status, "destination-changed", JSON.stringify(details));
+    assert.deepEqual(details.changed, ["issues", "remotes"]);
     assert.match(
       String(result.content[0]?.text),
-      /checkpoint: candidate; reviewed target: sha256:[0-9a-f]{64}; current target: sha256:[0-9a-f]{64}; changed components: main_config\.issues\.backend/,
+      /save destination changed while the review was open \(changed: issues, remotes\)/,
     );
     assert.doesNotMatch(String(result.content[0]?.text), /linear/);
     assert.equal(rerouted.calls.length, 0);
@@ -1319,7 +1258,7 @@ test("plannotator arm: an unrelated TOML edit during the review leaves the appro
   }
 });
 
-test("plannotator arm: a failed worker is a conservative unresolved-dispatch stop that RETAINS the worker's typed diagnostics; gate stays ON", async () => {
+test("plannotator arm: a failed worker surfaces the feature's typed save failure, latches automatic saves off, gate stays ON", async () => {
   const arm = plannotatorArm(
     { status: "completed", approved: true, reviewId: "rev-fail" },
     { save: { json: SAVE_FAIL, code: 1 } },
@@ -1334,32 +1273,26 @@ test("plannotator arm: a failed worker is a conservative unresolved-dispatch sto
       console.error = quiet;
     }
     const details = result.details as Record<string, unknown>;
-    assert.equal(details.status, "refused", JSON.stringify(details));
-    assert.equal(details.reason, "unresolved-dispatch");
+    assert.equal(details.ok, false, JSON.stringify(details));
+    assert.equal(details.error_type, "save_failed");
+    assert.equal(details.saved, false);
     assert.equal(result.terminate, undefined);
-    assert.deepEqual(details.worker_failure, {
-      error_type: "stale_refinement",
-      message: "the node's refinement comment changed since the grounding read",
-      write_attempted: false,
-      comment_ids: ["cmt-9", "cmt-11"],
-    });
+    // The worker's typed diagnostics ride the rendered save message.
+    const save = details.save as Record<string, unknown>;
+    assert.equal(save.write_attempted, false);
+    assert.deepEqual(save.comment_ids, ["cmt-9", "cmt-11"]);
     const text = result.content.map((c) => c.text).join("\n");
-    assert.match(text, /Draft review stopped \(unresolved-dispatch/);
-    assert.match(text, /Refinement worker diagnostics \(stale_refinement\)/);
-    assert.match(text, /Write attempted: no; refinement comment ids observed: cmt-9, cmt-11/);
-    assert.match(text, /nothing here authorizes a retry/);
+    assert.match(text, /auto-save FAILED/);
+    assert.match(text, /automatic saves are paused/);
+    assert.match(text, /\/objective-refinement-save \(the deliberate retry\)/);
     assert.equal(arm.calls.length, 1, "one worker invocation, never replayed");
     assert.equal(arm.exits, 0, "the gate stays ON");
-    const record = readDraftReview(arm.session);
-    assert.ok(record.ok && record.record !== null);
-    assert.deepEqual(
-      {
-        state: record.record.consumption.state,
-        reason: (record.record.consumption as { reason?: string }).reason,
-      },
-      { state: "uncertain", reason: "backend-unconfirmed" },
-      "the conservative state is retained",
-    );
+    assert.equal(arm.slot.unconfirmed()?.subject, "refinement", "the latch is set");
+    // A second approval in the same activation is paused before the worker.
+    const again = await arm.run();
+    assert.equal(again.details.status, "refused", JSON.stringify(again.details));
+    assert.equal(again.details.error_type, "save_unconfirmed");
+    assert.equal(arm.calls.length, 1, "no further worker call");
   } finally {
     arm.dispose();
   }
