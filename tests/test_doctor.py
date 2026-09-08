@@ -1436,23 +1436,16 @@ def test_ponytail_compat_divergence_warns(scaffolded_perk_repo, mutate, expected
     assert expected in check.detail
 
 
-def _isolate_home(monkeypatch, tmp_path, *, bridge_mode=None):
-    """Point ``Path.home()`` at a tmp dir (hermetic — the check reads the real user scope
-    otherwise), optionally planting ``.pi/agent/settings.json`` with the given bridge mode.
-    The check must call ``Path.home()`` at check time for this patch to land."""
-    from pathlib import Path
-
-    home = tmp_path / "fake-home"
-    home.mkdir(exist_ok=True)
-    if bridge_mode is not None:
-        settings = home / ".pi" / "agent" / "settings.json"
-        settings.parent.mkdir(parents=True, exist_ok=True)
-        settings.write_text(
-            json.dumps({"subagents": {"intercomBridge": {"mode": bridge_mode}}}),
-            encoding="utf-8",
-        )
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
-    return home
+def _plant_user_bridge_mode(agent_dir, bridge_mode):
+    """Plant the user-scope ``settings.json`` (inside the launch-precedence agent dir — the
+    autouse ``isolated_pi_agent_dir`` in these tests) with the given bridge mode."""
+    settings = agent_dir / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(
+        json.dumps({"subagents": {"intercomBridge": {"mode": bridge_mode}}}),
+        encoding="utf-8",
+    )
+    return settings
 
 
 def _set_project_bridge_mode(repo, mode):
@@ -1465,17 +1458,15 @@ def _set_project_bridge_mode(repo, mode):
     settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
 
 
-def test_subagent_bridge_config_default_is_ok(scaffolded_perk_repo, monkeypatch, tmp_path):
+def test_subagent_bridge_config_default_is_ok(scaffolded_perk_repo):
     # The scaffolded default (mode unset in both scopes) reports the bridge active.
-    _isolate_home(monkeypatch, tmp_path)
     report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
     assert bridge.status == "ok" and bridge.group == "package"
     assert "bridge active" in bridge.message
 
 
-def test_subagent_bridge_config_project_off_is_warn(scaffolded_perk_repo, monkeypatch, tmp_path):
-    _isolate_home(monkeypatch, tmp_path)
+def test_subagent_bridge_config_project_off_is_warn(scaffolded_perk_repo):
     _set_project_bridge_mode(scaffolded_perk_repo, "off")
     report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
@@ -1486,12 +1477,9 @@ def test_subagent_bridge_config_project_off_is_warn(scaffolded_perk_repo, monkey
     assert report.healthy
 
 
-def test_subagent_bridge_config_project_fork_only_is_warn(
-    scaffolded_perk_repo, monkeypatch, tmp_path
-):
+def test_subagent_bridge_config_project_fork_only_is_warn(scaffolded_perk_repo):
     # "fork-only" counts: perk's wave children run fresh-context, which deactivates a
     # fork-only bridge — streaming silently degrades to completion-only.
-    _isolate_home(monkeypatch, tmp_path)
     _set_project_bridge_mode(scaffolded_perk_repo, "fork-only")
     report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
@@ -1500,31 +1488,74 @@ def test_subagent_bridge_config_project_fork_only_is_warn(
     assert report.healthy
 
 
-def test_subagent_bridge_config_explicit_always_is_ok(scaffolded_perk_repo, monkeypatch, tmp_path):
-    _isolate_home(monkeypatch, tmp_path)
+def test_subagent_bridge_config_explicit_always_is_ok(scaffolded_perk_repo):
     _set_project_bridge_mode(scaffolded_perk_repo, "always")
     report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
     assert bridge.status == "ok"
 
 
-def test_subagent_bridge_config_user_scope_off_is_warn(scaffolded_perk_repo, monkeypatch, tmp_path):
-    # The user-global scope (~/.pi/agent/settings.json) warns too — an explicit off in EITHER
-    # scope disables streaming (perk does not reimplement pi's cross-scope merge semantics).
-    _isolate_home(monkeypatch, tmp_path, bridge_mode="off")
+def test_subagent_bridge_config_user_scope_off_is_warn(scaffolded_perk_repo, isolated_pi_agent_dir):
+    # The user scope (settings.json in the launch-precedence agent dir) warns too — an explicit
+    # off in EITHER scope disables streaming (perk does not reimplement pi's cross-scope merge
+    # semantics). The detail names the absolute planted path, not a `~/.pi/agent` assumption.
+    settings = _plant_user_bridge_mode(isolated_pi_agent_dir, "off")
     report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
     assert bridge.status == "warn"
-    assert "~/.pi/agent/settings.json" in bridge.detail
+    assert str(settings) in bridge.detail
     assert report.healthy
 
 
-def test_subagent_bridge_config_invalid_settings_stays_quiet(
-    scaffolded_perk_repo, monkeypatch, tmp_path
+def test_subagent_bridge_config_user_scope_follows_configured_agent_dir(
+    scaffolded_perk_repo, monkeypatch
 ):
+    # With no operator env, the user scope is the main checkout's `[pi] agent_dir` store —
+    # the same launch-precedence resolver as launch_stage, never a hardcoded ~/.pi/agent.
+    from pathlib import Path
+
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    home = scaffolded_perk_repo.parent / "fake-home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    _plant_user_bridge_mode(home / ".pi" / "agent", "off")  # the wrong store: must be ignored
+    _configure_pi_agent_dir(scaffolded_perk_repo, ".pi/agent")
+    settings = _plant_user_bridge_mode(scaffolded_perk_repo / ".pi" / "agent", "off")
+    check = doctor_checks._subagent_bridge_config_check(scaffolded_perk_repo)
+    assert check.status == "warn"
+    assert str(settings) in check.detail and str(home) not in check.detail
+
+
+def test_subagent_bridge_config_unresolvable_agent_dir_skips_user_scope(
+    scaffolded_perk_repo, monkeypatch
+):
+    from pathlib import Path
+
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+
+    def no_home(cls):
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "home", classmethod(no_home))
+    check = doctor_checks._subagent_bridge_config_check(scaffolded_perk_repo)
+    assert check.status == "ok"
+
+
+@pytest.mark.parametrize("text", ["[pi", "[pi]\nagent_dir = 7\n"])
+def test_subagent_bridge_config_bad_config_skips_user_scope(
+    scaffolded_perk_repo, monkeypatch, text
+):
+    # A broken main-checkout config is the `config` check's complaint; the report-only bridge
+    # check skips the user scope rather than crashing.
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    (scaffolded_perk_repo / ".perk/config.toml").write_text(text, encoding="utf-8")
+    check = doctor_checks._subagent_bridge_config_check(scaffolded_perk_repo)
+    assert check.status == "ok"
+
+
+def test_subagent_bridge_config_invalid_settings_stays_quiet(scaffolded_perk_repo):
     # Invalid project settings are the settings-wiring check's complaint, not this one's —
     # the bridge check stays ok/quiet on that scope.
-    _isolate_home(monkeypatch, tmp_path)
     (scaffolded_perk_repo / ".pi" / "settings.json").write_text("not json{", encoding="utf-8")
     report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
