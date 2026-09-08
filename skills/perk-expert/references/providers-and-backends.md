@@ -52,70 +52,48 @@ The plan seam must always produce perk's reviewed, canonical plan artifact.
   with or without the streamed reviewer wave (Esc = without; the review always proceeds); the
   wave choice takes an optional custom angle, opens the `/plan-review-browser` /
   `/objective-review-browser` flow, and returns non-blocking `wave_launched` guidance while the
-  browser decision routes back through eligibility checks. On matching reviews, approval without direct edits uses the
-  ordinary approval/save seam. Approved plan direct edits are applied and the edited bytes saved;
-  an unapplyable diff falls back to the original bytes with a warning. Approved objective or gist
+  browser decision routes back automatically. Approval without direct edits uses the ordinary
+  approval/save seam. Approved plan direct edits are applied and the edited bytes saved; an
+  unapplyable diff falls back to the original bytes with a warning. Approved objective or gist
   direct edits do not save: they return one revise round so the agent folds the edits into the
-  structured draft and re-reviews. Matching denial returns actionable feedback to the agent;
-  stale decisions retain only diagnostic DATA.
+  structured draft and re-reviews. Denial returns actionable feedback to the agent.
 
-Plannotator plan/objective/gist reviews require verified run-local opening and attachment
-registration. Exact source and conservative routing inputs are checked; drift during handshake
-can require rereview. The routing inputs are the save-selecting fields, not whole config files:
-the main checkout's committed `[issues] backend`/`team`, the invoking checkout's committed and
-local `[workflow] base` (plan/objective only), the main checkout's local `[linear] api_key`
-(hashed), the run handoff, `GH_REPO`/`GH_HOST`, and **all `git config --list --show-origin`
-output**. An unrelated valid Perk TOML change (compaction, models, CI, skills, providers,
-presentation, comments, formatting) while a review is open leaves it valid; an unrelated Git-config
-change still invalidates it, and an edit the `perk` CLI cannot parse (TOML 1.1-only syntax) fails
-the save subprocess like any CLI error rather than registering as drift. Genuine drift refuses `target-changed` and the stop names the
-checkpoint (`open`/`attach`/`candidate`/`save`) and the changed component
-(e.g. `main_config.issues.backend`, `worktree_local.workflow.base`, `git_config`), never the
-value; a malformed or wrong-shaped routing field refuses `io-error` naming the file role.
-Retained-state reconciliation is unchanged and no earlier review record is migrated or replayed.
-Busy, invalid-state, persistence-failed and unresolved-dispatch are stops,
-not skipped reviews, successful wave launches, or permission to retry a save. Preserve retained
-state for human reconciliation; never remove a lock or forge provenance to bypass a refusal.
-The canonical operator procedure is `docs/user-docs/how-to/reconcile-a-draft-review-stop.md`.
-In a consuming repository without that page, the same human-only rules apply: stop all Pi
-participants and child save subprocesses and prove quiescence; close the old browser; preserve
-lock, review/draft artifacts, handoff, transcript, IDs/digests and receipts privately. Do not edit
-JSONL, forge pointers, prune, remove locks, or repair state in place. Classify this and prior
-attempts with corroborated transcript/backend evidence: an opening-looking orphan alone, missing
-pointer/message, dead PID, or absent search result proves no absence of effects. Resolve existing
-objects, node linkage and persisted messages with normal read-only tools and returned IDs/URLs.
-Unresolved effects mean stay stopped: neither a new review nor a new run is a safe retry.
-Continue existing saved work instead of duplicating it. Only after human resolution may a deliberate
-fresh run preserve original factory/adoption/replan/node/scope intent. Verify a different run ID;
-re-enter checked content through draft tools, retaining structured fields, and request new review.
-Never copy correlation, consumption, provenance, locks, request/review IDs, intent or approvals.
-Leave abandoned residue intact for investigation and later deliberate cleanup. No automatic repair,
-rollback, quarantine or guaranteed escape is promised.
+Every draft review — the blocking `plan_review` tool (Plannotator or first-party; plan, objective,
+gist, refinement) and both browser doors — runs the same four in-memory guards; nothing is
+persisted (no review record, no lock, no reconciliation procedure), and a browser decision does
+not survive a Pi restart (re-run the door):
 
-After attaching the review ID, Perk subscribes before making one callback status query with a
-separate five-second deadline. Completed status catches missed live decisions; pending proves
-neither health nor delivery. Missing/query failure warns once and keeps the live wait cancellable.
-Cancellation closes only local transport, not the upstream browser. No polling, startup discovery,
-automatic replay or resume exists. Draft/manual-save/node entries and first-party
-replacement/writeback require a verified current-run claim; editor waits release it. Missing
-identity is not an unclaimed save fallback. All Plannotator tool/browser completions and chooser
-delegations verify intent before effects. Actual toolCallId/exact result content, or — for browser
-decisions — one canonical user text block (the feedback plus a code-authored HTML receipt marker
-after the final untrusted-feedback delimiter, the single block Pi persists for a sent user
-message), binds the delivery expectation before return/send; the block is sent unchanged. Only
-exact persisted evidence acknowledges delivery: a later entry whose whole content matches the
-recorded expectation, never send/return or a marker alone. This applies to new dispatches only —
-a review already stuck in `dispatch`/`uncertain` is not migrated or automatically consumed;
-follow `docs/user-docs/how-to/reconcile-a-draft-review-stop.md`, and never retry a confirmed
-approval save merely because delivery confirmation failed.
-Stale decisions carry only diagnostic DATA, never current-draft apply/fold/save instructions.
-Readiness fallback requires verified invalidation: degraded, or the same review's already recorded
-handshake/subscription failure. Transport failures reach one fallback notice before local cleanup,
-even while readiness sleeps or after it reports ready. Failed persistence suppresses local late
-decisions but grants no fallback permission. Confirmed receipts and successful gate facts
-survive later delivery/bookkeeping uncertainty. Preserve state and reconcile rather than retry.
-The guarantee is at-most-once participating machine-local dispatch, not exactly-once delivery or
-power-loss durability. Subject-specific Direct Edits/source policies remain in place.
+1. **Reviewed bytes** — an approval saves only the bytes the human saw; a draft written while the
+   review was open (or, for refinements, a re-prepared grounding context) makes the approval
+   save nothing and ask for `plan_review` on the current draft; a denial keeps its feedback with
+   a one-line "the draft moved" note. Applies to artifact-sourced reviews (doors, the Plannotator
+   tool arm); a first-party editor's own edit write-back is saved as reviewed.
+2. **Save destination** — at approval the main checkout's committed `[issues] backend`/`team`,
+   the git `remote.*.url`/`remote.*.gh-resolved` entries (GitHub backend only; Linear never
+   reads remotes) and, for plans, the objective node claim must equal their open-time values.
+   Nothing else is fenced: landing a PR (`branch.*` git config), `[workflow] base`, credentials,
+   other Perk TOML edits never block an approval. A changed or unverifiable destination saves
+   nothing, names the moved component (never its value) and requires a fresh `plan_review` —
+   a fresh human approval. Denials never check it. `[issues]` is read for `"basic"`, `'literal'`
+   and multi-line spellings; dotted-key/inline-table spellings are not read and not fenced
+   (Python remains the save authority).
+3. **One current review per session** — opening a review on any surface supersedes the previous
+   one (`/implement-here` retires it); a superseded review's decision is ignored loudly (one TUI
+   warning, nothing saved or injected) even when its bytes are still current.
+4. **Unconfirmed-save latch** — a save attempt without a typed receipt (failed/thrown backend
+   call, unavailable port) pauses automatic approval-driven saves for the rest of the session;
+   the next approval is refused (`save_unconfirmed`) before the backend is touched, naming the
+   failure and the run id. Check the backend for an existing object carrying that run id first
+   (on Linear a partially completed create can leave an issue the retry cannot find; GitHub
+   creates are find-then-return on the run id), then the manual save command (`/plan-save`,
+   `/objective-save`, `/gist-save`, `/objective-refinement-save`) is the deliberate retry — it
+   never consults the latch. A restart clears the latch; still check the backend before saving.
+
+A refused approval is never a skipped review, a denial, or permission for the model to retry a
+save. Reviewer feedback reaches the model only inside `<untrusted_reviewer_feedback>` delimiters.
+The bridge subscribes to the browser's decision before emitting the review request (no status
+query, polling, startup discovery, replay or resume); if the browser never becomes ready, findings
+degrade loudly in-session and a later browser decision is ignored.
 
 The warm `/pr-review-browser` door also uses plannotator when that package is installed. It can
 review a foreign PR, the active worktree's PR, or a local since-base diff before submission. That

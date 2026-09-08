@@ -56,55 +56,27 @@ summarized in [Issue backends](./providers-and-backends/issue-backends.md).
 
 ## Plannotator draft-review transport
 
-Plan, objective, and gist Plannotator reviews require verified run-local registration before a
-request is emitted. Registration binds the exact source and conservative local routing inputs;
-changes to those inputs during the handshake can require a fresh review. The bound routing inputs
-are the fields that select **where** a save goes — the main checkout's committed `[issues]
-backend`/`team`, the invoking checkout's committed and local `[workflow] base` (plan and objective
-only), and the main checkout's local `[linear] api_key` (hashed, never shown) — plus the run
-handoff, `GH_REPO`/`GH_HOST`, and **all `git config --list --show-origin` output**. Unrelated
-valid Perk TOML changes (compaction, models, CI, skills, providers, presentation, comments,
-formatting, key order) no longer invalidate an open review, but an unrelated Git-config change
-still does; an edit the `perk` CLI cannot parse (TOML 1.1-only syntax) is not drift either — it
-fails the save subprocess like any CLI error, never saving elsewhere. Genuine drift refuses `target-changed` naming the checkpoint and the changed
-component (for example `main_config.issues.backend`), never the value; a malformed or
-wrong-shaped routing field refuses `io-error` naming the file role. Busy, broken-provenance,
-persistence, or unresolved-dispatch stops are **refusals**, not skipped reviews or permission to
-retry a save.
-They do not launch a reviewer wave or fall back to another review. Preserve retained state and
-follow [Reconcile a draft-review stop](../how-to/reconcile-a-draft-review-stop.md); do not remove
-a lock or rewrite provenance to bypass the stop. It requires subprocess quiescence, evidence
-preservation, and human resolution of existing saves/delivery. An orphan alone proves no absence
-of effects; unresolved effects forbid even a fresh-run retry. After resolution, carry only checked
-content into a distinct fresh run, never intent, provenance, or approval.
+Plan, objective, gist and refinement reviews on the Plannotator provider — the blocking
+`plan_review` tool and both browser doors — share the in-memory guards described in
+[Browser draft review](./in-session/review-and-authoring.md#browser-draft-review): the reviewed
+bytes must still be the live draft at approval; the save destination (the main checkout's
+committed `[issues] backend`/`team`, the git `remote.*.url`/`remote.*.gh-resolved` entries on the
+GitHub backend only, and the plan's objective node claim) must equal what it was when the review
+opened; one review is current per session and a decision from a superseded review is ignored
+loudly; and an unconfirmed save pauses automatic saves until the manual save command (the
+deliberate retry — check the backend for the run id first; on Linear a partially completed
+create can leave an issue the retry cannot find). Nothing else is fenced — an unrelated Perk TOML
+edit, a `[workflow] base` change or any other git-config change (landing a PR rewrites
+`branch.*`) never blocks an approval. A refused approval saves nothing and asks for a fresh
+`plan_review`; it is never a skipped review, a denial, or permission to retry a save yourself.
 
-After attaching the browser's review ID, Perk subscribes to live decisions, then queries status
-once with a separate five-second deadline. A completed status can supply a decision missed during
-the handshake. Pending is quiet and proves neither browser health nor delivery; missing or failed
-status warns but keeps the live wait open and cancellable. Cancellation closes the local wait,
-not the upstream browser. There is no polling, startup discovery, automatic replay, or resume.
-
-Draft/manual-save/node entries and first-party replacement/writeback require a verified current-run
-claim; first-party editor waits release it. Missing identity is not an unclaimed save fallback.
-All Plannotator tool/browser completions and chooser delegations verify intent before effects.
-They share subject-specific bound saves and delivery expectations: actual toolCallId plus exact
-result content, or — for browser decisions — one canonical user text block formed from the
-feedback plus a code-authored HTML receipt marker after the final untrusted-feedback delimiter
-(the single block Pi persists for a sent user message), recorded before the send and sent
-unchanged. Only exact persisted evidence acknowledges delivery — a later entry whose whole
-content matches the recorded expectation; send/return or a marker alone is not acknowledgment.
-This applies to new dispatches only: an earlier review stuck in `dispatch`/`uncertain` is not
-migrated or automatically consumed — follow
-[Reconcile a draft-review stop](../how-to/reconcile-a-draft-review-stop.md), and never retry a
-confirmed approval save merely because delivery confirmation failed.
-Stale decisions carry only diagnostic DATA, never current-draft apply/fold/save instructions.
-Readiness fallback requires verified invalidation: degraded, or the same review's already recorded
-handshake/subscription failure. Transport failures reach one fallback notice before local cleanup,
-even while readiness sleeps or after it reports ready. Failed persistence suppresses local late
-decisions but grants no fallback permission. Confirmed receipts and successful gate facts
-survive later delivery/bookkeeping uncertainty. Preserve state and reconcile rather than retry.
-These are at-most-once participating machine-local dispatch guarantees, not exactly-once delivery
-or power-loss durability. Subject-specific Direct Edits/source policies remain in place.
+The bridge subscribes to the browser's decision before it emits the review request, so a
+decision emitted during the handshake is not lost; there is no status query, polling, startup
+discovery, automatic replay, or resume. Cancellation closes the local wait, not the upstream
+browser. Nothing is persisted: a browser decision does not survive a Pi restart — re-run the
+door. The `[issues]` table is read for every TOML string spelling (`"basic"`, `'literal'`,
+multi-line); dotted-key (`issues.backend = …`) or inline-table spellings are not read by the
+extension and therefore not fenced — Python remains the authority for the save itself.
 
 ## Known caveats & maturity
 

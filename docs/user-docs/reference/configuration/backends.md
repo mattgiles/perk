@@ -65,6 +65,13 @@ backend = "linear"
 team = "ENG"
 ```
 
+The in-session draft-review destination fence reads these two keys too (see
+[Browser draft review](../in-session/review-and-authoring.md#browser-draft-review)): every TOML
+string spelling — `"basic"`, `'literal'`, and their multi-line forms — is read; a dotted-key
+(`issues.backend = …`) or inline-table (`issues = { … }`) spelling is not read by the extension
+and therefore not fenced. The `perk` CLI remains the authority for the save itself and reads any
+valid TOML.
+
 ## `[linear]`
 
 A personal Linear API key used by both perk's Linear issue backend and the in-session `linear_*`
