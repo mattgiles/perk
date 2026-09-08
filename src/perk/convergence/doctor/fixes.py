@@ -8,6 +8,7 @@ from pathlib import Path
 from perk.backends import linear
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import client as linear_client
+from perk.cli.ensure import UserFacingCliError
 from perk.convergence import init
 from perk.convergence.doctor.data import Check
 from perk.convergence.doctor.linear_checks import _linear_selected
@@ -315,12 +316,23 @@ def _fix_linear_labels(root: Path) -> tuple[list[str], list[str]]:
 
 
 def _apply_fixes(root: Path, self_repo: bool, checks: list[Check]) -> tuple[list[str], list[str]]:
+    """Apply every repairable ``fail``: managed re-converge, config re-seed, install, migrations.
+
+    A managed piece the convergence cannot verify (a malformed ``.pi/settings.json`` or
+    pi-subagents ``config.json``) raises ``UserFacingCliError`` from ``converge(True)`` exactly
+    as it did from the ``apply=False`` check; it is recorded on the returned errors (rendered on
+    ``fix_errors``) instead of aborting the whole ``--fix`` — the file is untouched and every
+    other fix still runs.
+    """
     fixed: list[str] = []
     errors: list[str] = []
     mc_by_name = {mc.name: mc for mc in init.managed_convergences(root, self_repo)}
     for check in [c for c in checks if c.status == "fail"]:
         if check.name in mc_by_name:
-            fixed.extend(mc_by_name[check.name].converge(True))
+            try:
+                fixed.extend(mc_by_name[check.name].converge(True))
+            except UserFacingCliError as exc:
+                errors.append(f"{check.name}: {exc.format_message()}")
         elif check.name == "config":
             fixed.extend(_fix_config(root))
         elif check.name == "extension-install":

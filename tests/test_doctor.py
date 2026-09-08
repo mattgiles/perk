@@ -1547,6 +1547,174 @@ def test_edited_delivered_def_reports_drift_and_is_fixed(scaffolded_perk_repo):
     assert delivered.read_bytes() == (_resources.agents_dir() / f"{name}.md").read_bytes()
 
 
+# --- subagent-worktree-default: pi-subagents' native `worktree` default, perk-managed ------
+
+
+def _native_subagent_config(agent_dir):
+    """pi-subagents' config path inside an agent dir (what the engine reads at activation)."""
+    return agent_dir / "extensions" / "subagent" / "config.json"
+
+
+def _plant_native_subagent_config(agent_dir, text):
+    path = _native_subagent_config(agent_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _worktree_default_check(report):
+    return next(c for c in report.checks if c.name == "subagent-worktree-default")
+
+
+@pytest.mark.parametrize("text", [None, "{}", '{"worktree": false, "x": 1}'])
+def test_subagent_worktree_default_compatible_is_ok(
+    scaffolded_perk_repo, isolated_pi_agent_dir, text
+):
+    # An absent file, an absent key, and an explicit `false` are all compatible for the engine
+    # (pi-subagents' own default is no worktree) — nothing to converge, never a file created.
+    if text is not None:
+        _plant_native_subagent_config(isolated_pi_agent_dir, text)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    check = _worktree_default_check(report)
+    assert check.status == "ok" and check.group == "package"
+    if text is None:
+        assert not _native_subagent_config(isolated_pi_agent_dir).exists()
+
+
+def test_subagent_worktree_default_true_is_drift_and_fixed_preserving_siblings(
+    scaffolded_perk_repo, isolated_pi_agent_dir
+):
+    path = _plant_native_subagent_config(isolated_pi_agent_dir, '{"worktree":true,"x":1}')
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    check = _worktree_default_check(report)
+    assert check.status == "fail" and check.remediation == "perk doctor --fix"
+    assert str(path) in check.detail and "worktree=true → false" in check.detail
+    assert path.read_text(encoding="utf-8") == '{"worktree":true,"x":1}'  # dry-run: untouched
+
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert fixed.healthy and fixed.fix_errors == []
+    assert any(str(path) in line for line in fixed.fixed)
+    # pi-subagents' own `saveConfig` shape: tab indent + trailing newline; only `worktree`
+    # rewritten, the sibling key preserved.
+    assert path.read_text(encoding="utf-8") == '{\n\t"worktree": false,\n\t"x": 1\n}\n'
+    assert json.loads(path.read_text(encoding="utf-8")) == {"worktree": False, "x": 1}
+
+    again = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert again.healthy and again.fixed == [] and again.fix_errors == []
+
+
+@pytest.mark.parametrize("value", ['"false"', "0", "null", '"true"'])
+def test_subagent_worktree_default_non_boolean_is_repaired(
+    scaffolded_perk_repo, isolated_pi_agent_dir, value
+):
+    # Only an exact JSON `false` is compatible; any other present value (including the string
+    # "false" or the falsy 0) is drift the engine would classify `incompatible`.
+    path = _plant_native_subagent_config(isolated_pi_agent_dir, f'{{"worktree": {value}}}')
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    check = _worktree_default_check(report)
+    assert check.status == "fail" and f"worktree={value} → false" in check.detail
+    run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert json.loads(path.read_text(encoding="utf-8")) == {"worktree": False}
+
+
+@pytest.mark.parametrize("text", ["{not json", "[true]", '"worktree"'])
+def test_subagent_worktree_default_malformed_is_unverifiable_and_fix_does_not_crash(
+    scaffolded_perk_repo, isolated_pi_agent_dir, text
+):
+    path = _plant_native_subagent_config(isolated_pi_agent_dir, text)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    check = _worktree_default_check(report)
+    assert check.status == "fail" and check.message == "subagent-worktree-default unverifiable"
+    assert str(path) in check.detail
+    # `--fix` records the refusal on fix_errors instead of aborting; the file is never rewritten.
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert any(
+        e.startswith("subagent-worktree-default: ") and str(path) in e for e in fixed.fix_errors
+    )
+    assert path.read_text(encoding="utf-8") == text
+    assert not fixed.healthy
+
+
+def test_subagent_worktree_default_follows_configured_agent_dir(scaffolded_perk_repo, monkeypatch):
+    # With no operator env, the convergence targets the main checkout's `[pi] agent_dir` — the
+    # exact store a perk session launches with (the same resolver as launch_stage).
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    _configure_pi_agent_dir(scaffolded_perk_repo, ".pi/agent")
+    path = _plant_native_subagent_config(
+        scaffolded_perk_repo / ".pi" / "agent", '{"worktree": true}'
+    )
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    check = _worktree_default_check(report)
+    assert check.status == "fail" and str(path) in check.detail
+    run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert json.loads(path.read_text(encoding="utf-8")) == {"worktree": False}
+
+
+def test_subagent_worktree_default_env_wins_over_configured_agent_dir(
+    scaffolded_perk_repo, isolated_pi_agent_dir
+):
+    # PI_CODING_AGENT_DIR (set by the autouse fixture) beats `[pi] agent_dir`: the configured
+    # store's poisoned file is NOT what a launched session reads, so it is left alone.
+    _configure_pi_agent_dir(scaffolded_perk_repo, ".pi/agent")
+    configured = _plant_native_subagent_config(
+        scaffolded_perk_repo / ".pi" / "agent", '{"worktree": true}'
+    )
+    env_path = _plant_native_subagent_config(isolated_pi_agent_dir, '{"worktree": true}')
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    check = _worktree_default_check(report)
+    assert check.status == "fail"
+    assert str(env_path) in check.detail and str(configured) not in check.detail
+    run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert json.loads(env_path.read_text(encoding="utf-8")) == {"worktree": False}
+    assert configured.read_text(encoding="utf-8") == '{"worktree": true}'
+
+
+def test_subagent_worktree_default_unresolvable_agent_dir_converges_nothing(
+    scaffolded_perk_repo, monkeypatch
+):
+    from pathlib import Path
+
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+
+    def no_home(cls):
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "home", classmethod(no_home))
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    assert _worktree_default_check(report).status == "ok"
+
+
+@pytest.mark.parametrize("text", ["[pi", "[pi]\nagent_dir = 7\n"])
+def test_subagent_worktree_default_defers_bad_config(scaffolded_perk_repo, monkeypatch, text):
+    # A broken main-checkout config is the `config` check's complaint; this convergence stays ok.
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    (scaffolded_perk_repo / ".perk/config.toml").write_text(text, encoding="utf-8")
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    assert _worktree_default_check(report).status == "ok"
+    assert next(c for c in report.checks if c.name == "config").status == "fail"
+
+
+def test_subagent_worktree_default_write_failure_leaves_original_bytes(
+    scaffolded_perk_repo, isolated_pi_agent_dir, monkeypatch
+):
+    # The atomic replace fails at the rename: the original file keeps its bytes and no temp
+    # residue is left beside it (a torn/half-written config would break the engine's resolver).
+    from pathlib import Path
+
+    from perk.convergence.init import subagent_config
+
+    path = _plant_native_subagent_config(isolated_pi_agent_dir, '{"worktree": true}')
+
+    def boom(self, target):
+        raise PermissionError("read-only store")
+
+    monkeypatch.setattr(Path, "replace", boom)
+    with pytest.raises(PermissionError):
+        subagent_config._converge_subagent_worktree_default(scaffolded_perk_repo)
+    assert path.read_text(encoding="utf-8") == '{"worktree": true}'
+    assert sorted(p.name for p in path.parent.iterdir()) == ["config.json"]
+
+
 def test_missing_agents_dir_is_fail_only_on_owning_check(scaffolded_perk_repo):
     # Removing `.pi/agents/` fails the owning `subagent-agents` convergence, NOT the
     # informational `subagent-engine` pointer (no duplicate drift). `--fix` re-creates it.

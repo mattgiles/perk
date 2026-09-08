@@ -736,6 +736,41 @@ def test_init_subagents_overwrites_perk_key_preserving_others(tmp_path):
     assert subagents["agentOverrides"] == {"oracle": {"disabled": False}}  # preserved intact
 
 
+def test_init_pins_native_subagent_worktree_default(tmp_path, isolated_pi_agent_dir):
+    # pi-subagents' native `worktree` default lives in the launch-precedence agent dir (the
+    # autouse fixture's PI_CODING_AGENT_DIR here), not the repo: init rewrites a `true` to
+    # `false` in place, reports the change once, and a second run reports nothing.
+    config = isolated_pi_agent_dir / "extensions" / "subagent" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text('{"worktree":true}', encoding="utf-8")
+    report = run_init(tmp_path, verify=False)
+    assert report.ok
+    assert f"{config}: worktree=true → false" in report.changes
+    assert json.loads(config.read_text(encoding="utf-8")) == {"worktree": False}
+    again = run_init(tmp_path, verify=False)
+    assert again.ok and not any(str(config) in change for change in again.changes)
+
+
+def test_init_never_creates_native_subagent_config(tmp_path, isolated_pi_agent_dir):
+    # An absent file is compatible (pi-subagents' default is no worktree) — perk never seeds
+    # a file into the user's store.
+    assert run_init(tmp_path, verify=False).ok
+    assert not isolated_pi_agent_dir.exists()
+
+
+def test_init_malformed_native_subagent_config_fails_loudly(tmp_path, isolated_pi_agent_dir):
+    # Like a malformed `.pi/settings.json`: perk never rewrites a file it cannot parse, and the
+    # same file already breaks the resolver's activation read.
+    config = isolated_pi_agent_dir / "extensions" / "subagent" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text("{not json", encoding="utf-8")
+    with pytest.raises(UserFacingCliError) as exc:
+        run_init(tmp_path, verify=False)
+    assert exc.value.error_type == "invalid_subagent_config"
+    assert str(config) in exc.value.format_message()
+    assert config.read_text(encoding="utf-8") == "{not json"
+
+
 def test_init_seeds_tui_mode_fullscreen(tmp_path):
     # Seed-when-absent: a bare repo gains the fullscreen default once.
     assert run_init(tmp_path, verify=False).ok
