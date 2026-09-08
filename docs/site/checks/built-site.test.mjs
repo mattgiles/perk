@@ -367,7 +367,7 @@ const STAGES_AND_DOORS_DIAGRAM_CONTENT = [
     required: ["Warm", "Cold local", "Cold remote", "dev-only"],
     titleRequired: "Warm and cold door availability by stage",
     descriptionRequired: [
-      "fourteen-row matrix",
+      "fifteen-row matrix",
       "Every stage has a cold-local door",
       "Warm doors",
       "Cold-remote doors",

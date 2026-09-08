@@ -1145,17 +1145,74 @@ test("cold claim: a contaminated objective-refine handoff is refused before clai
 });
 
 test("warm /objective-refine (harness): an idle unbound session with an active objective enters refinement and injects the flavored contexts", async () => {
+  // The session's identity is the golden run under a bare (stage-less, plan-less) launch
+  // handoff — an UNBOUND session that already knows its run — so the worker's golden envelope
+  // is this run's.
+  const cwd = scaffoldRepo({ handoff: { runId: GOLDEN_RUN, mode: "read-write" } });
+  const { fakePerkRouter } = await import("../../testing/harness.ts");
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".perk", "config.toml"),
+    '[providers]\nplan = "plannotator-plan"\n',
+    "utf8",
+  );
+  const bin = fakePerkRouter(cwd, { "objective refine-context": { json: CONTEXT_JSON } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: GOLDEN_RUN, PERK_BIN: bin } });
+  const sent = spyInjections(h);
+  try {
+    assert.equal(h.workflowState().stage, undefined, "unbound: no stage");
+    assert.equal(h.workflowState().mode, "read-write");
+    // No argument and no active objective → objective_required, nothing entered.
+    await h.invokeCommand("objective-refine", "");
+    assert.ok(
+      h.notifies.some((n) => n.includes("(objective_required)")),
+      JSON.stringify(h.notifies),
+    );
+    assert.equal(h.workflowState().stage, undefined);
+    // An explicit objective enters: the worker's bytes land unchanged, the stage is set, the
+    // gate is on with the refinement census, and one flow turn is driven.
+    await h.invokeCommand("objective-refine", "proj-1 --node 2.3");
+    assert.equal(h.workflowState().stage, "objective-refine", h.notifies.join("\n"));
+    assert.equal(h.workflowState().mode, "read-only");
+    assert.equal(h.workflowState().objective_node_claim, undefined, "no claim");
+    assert.equal(
+      readFileSync(join(sessionDataDir(cwd, GOLDEN_RUN), REFINEMENT_CONTEXT_ARTIFACT), "utf8"),
+      GOLDEN_CONTEXT,
+    );
+    assert.equal(sent.length, 1, "one driven flow turn");
+    assert.match(sent[0] ?? "", /perk objective refine flow/);
+    assert.equal(await h.emitToolCall("objective_refinement_draft", { markdown: "m" }), undefined);
+    assert.equal((await h.emitToolCall("plan_draft", { plan: "p" }))?.block, true);
+    assert.equal((await h.emitToolCall("edit", { path: "x" }))?.block, true);
+    // The flavored contexts: the refinement mode flavor, the refinement grounding context, the
+    // plannotator REFINEMENT adapter flavor; plan mode and the plan/objective/gist flavors defer.
+    const injected = await h.emitBeforeAgentStart();
+    const types = injected.map((m) => m.customType);
+    assert.ok(types.includes("perk:objective-refinement-context"), types.join(","));
+    assert.equal(types.includes("perk:plan-context"), false, "plan mode defers");
+    const mode = injected.find((m) => m.customType === "perk:mode-context");
+    assert.ok(String(mode?.content).includes("[READ-ONLY REFINEMENT MODE]"));
+    const bridge = injected.filter((m) => m.customType === "perk:plan-adapter-plannotator");
+    assert.equal(bridge.length, 1, "exactly one plannotator bridge flavor");
+    assert.ok(String(bridge[0]?.content).includes("[REFINEMENT ADAPTER: PLANNOTATOR]"));
+    assert.ok(String(bridge[0]?.content).includes("objective_refinement_draft"));
+    for (const other of ["[PLAN ADAPTER", "[OBJECTIVE ADAPTER", "[GIST ADAPTER"]) {
+      assert.equal(String(bridge[0]?.content).includes(other), false, other);
+    }
+  } finally {
+    h.dispose();
+  }
+});
+
+test("warm /objective-refine (harness): a worker envelope bound to ANOTHER run is refused fail-closed — nothing imported, nothing driven", async () => {
   const cwd = scaffoldRepo();
   const { fakePerkRouter } = await import("../../testing/harness.ts");
   const bin = fakePerkRouter(cwd, { "objective refine-context": { json: CONTEXT_JSON } });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: undefined, PERK_BIN: bin } });
   const sent = spyInjections(h);
   try {
-    // Rebind the minted run id to the golden run: the worker envelope is bound to 01AUTHRUN.
     const minted = h.workflowState().run_id;
-    assert.ok(minted, "a warm session mints an identity");
-    // The golden context names run 01AUTHRUN; a minted id differs → the transfer is refused as
-    // another run's context (fail-closed), nothing imported, nothing driven.
+    assert.ok(minted && minted !== GOLDEN_RUN, "a warm session mints its own identity");
     await h.invokeCommand("objective-refine", "proj-1");
     assert.ok(
       h.notifies.some(
@@ -1164,6 +1221,7 @@ test("warm /objective-refine (harness): an idle unbound session with an active o
     );
     assert.equal(sent.length, 0);
     assert.equal(h.workflowState().stage, undefined);
+    assert.equal(existsSync(join(sessionDataDir(cwd, minted), REFINEMENT_CONTEXT_ARTIFACT)), false);
   } finally {
     h.dispose();
   }

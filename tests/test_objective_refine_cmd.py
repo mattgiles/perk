@@ -715,6 +715,201 @@ def test_refinement_save_worker_refuses_missing_mismatched_and_ineligible_inputs
     assert ws.comments_of(_node_issue(ws, obj_id, "1.1")) == []
 
 
+# --------------------------------------------------------------------------- delivery parity
+
+
+@pytest.mark.parametrize("delivery", [None, objective.DeliveryPolicy.STACKED])
+def test_selection_is_delivery_independent_and_never_reconstructs_the_train(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, delivery: objective.DeliveryPolicy | None
+) -> None:
+    """Entry parity across delivery policies: an incremental and a stacked objective select the
+    same targets by the same eligibility (pending/blocked, no plan) — dependency and
+    build-readiness are never consulted (a node behind a blocked dependency is refinable), and
+    the train is never reconstructed while gathering."""
+    from perk.delivery import train
+
+    root = tmp_path / "repo"
+    _scaffold(root)
+    _ws, store, _issues = _linear(monkeypatch, root)
+    ref = store.create_objective(
+        title="Delivery parity",
+        body="# Objective\n\nProse.\n\n### Phase 1: One\n\n### Phase 2: Two\n",
+        run_id=OBJ_RUN,
+        roadmap_nodes=[
+            _node("1.1", "Blocked head", status=objective.NodeStatus.BLOCKED),
+            _node("2.1", "Behind the blocked head", depends_on=("1.1",)),
+        ],
+        delivery=delivery,
+    )
+    state = store.get_objective(objective_id=ref.id)
+    assert state is not None
+    assert (state.header.get("delivery") == "stacked") is (delivery is not None)
+    monkeypatch.setattr(
+        train, "reconstruct_train", lambda *a, **k: pytest.fail("must not reconstruct")
+    )
+    _forbid(monkeypatch)
+    for node_id, expected in ((None, "1.1"), ("2.1", "2.1")):
+        context = authoring.prepare_refinement_context(
+            root, objective_id=ref.id, node_id=node_id, run_id="01PARITY"
+        )
+        assert context.target.identity.node_id == expected
+        assert context.target.eligible
+    result = _invoke(
+        monkeypatch, root, ["objective", "refine", ref.id, "--node", "2.1", "--dry-run", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    assert _payload(result)["node_id"] == "2.1"
+
+
+# --------------------------------------------------------------------------- end to end
+
+FIXTURES = Path(__file__).parent / "fixtures" / "objective-refinement"
+
+
+def _comment_counts(ws: FakeLinearWorkspace) -> dict[str, int]:
+    return {uuid: len(ws.comments_of(issue)) for uuid, issue in ws.issues.items()}
+
+
+def test_refinement_loop_end_to_end_over_a_fake_linear_objective(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The named ordinary integration proof of the public Linear loop over FRAMEWORK/FAKE
+    transport (a real temp checkout, the real store + adapter + service + resolvers on a
+    ``FakeLinearWorkspace``; `pi` and the network never run — authenticated live evidence is a
+    later dogfood, not this test): a blocked future node → the cold door's preparation and the
+    warm worker's payload are the SAME bytes → the interior's strict import + TS-shaped draft
+    (a denied first round revised, never saved) → the approved save through the canonical worker
+    → the full-content read; and nothing but the node's one refinement comment changed."""
+    from perk.delivery.persistence import TrainPersistence
+    from perk.objective.refinement import service
+
+    root = tmp_path / "repo"
+    _scaffold(root)
+    (root / "wip.txt").write_text("uncommitted\n", encoding="utf-8")  # a dirty checkout
+    ws, store, issues = _linear(monkeypatch, root)
+    obj_id = _seed(store)
+    roadmap_before = store.get_objective(objective_id=obj_id)
+    state_before = _non_comment_state(ws)
+    comments_before = _comment_counts(ws)
+    head = git.resolve_commit(root, "HEAD")
+    assert head is not None
+    monkeypatch.setattr(launch, "_sync_main_checkout", lambda repo_root: None)
+    # One frozen clock: the cold preparation and the warm payload observe the same instant, so
+    # their equivalence is provable byte for byte rather than modulo a timestamp.
+    from perk import plan as plan_module
+
+    monkeypatch.setattr(plan_module, "now_iso", lambda: TS)
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    start = len(ws.requests)
+
+    # 1. Cold preparation (the seeded door; `pi` stubbed at the launch seam).
+    result = _invoke(monkeypatch, root, ["objective", "refine", obj_id, "--node", "1.2", "--json"])
+    assert result.exit_code == 0, result.output
+    rid = launched["run_id_override"]
+    cold_raw = (cache.run_scratch_dir(root, rid) / authoring.CONTEXT_ARTIFACT).read_text(
+        encoding="utf-8"
+    )
+    cold_digest = launched["handoff_extra"]["objective_refinement"]["context_digest"]
+    assert authoring.artifact_digest(cold_raw) == cold_digest
+
+    # 2. The warm-equivalent payload for the same run: identical bytes + digest.
+    result = _invoke(
+        monkeypatch,
+        root,
+        ["objective", "refine-context", obj_id, "--node", "1.2", "--run-id", rid, "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    warm = _payload(result)
+    assert warm["context_json"] == cold_raw and warm["context_digest"] == cold_digest
+
+    # 3. The strict interior import writes the UNCHANGED bytes as the session artifact (the
+    #    TS import is pinned to the same golden in extension/authoring/refinement/context.test.ts).
+    context = authoring.parse_context(cold_raw)
+    assert context.target.identity.node_id == "1.2"
+    assert context.target.status is objective.NodeStatus.BLOCKED
+    assert context.expected.comment_id is None and context.prior is None
+    assert context.provenance.code_basis == authoring.RefinementCodeBasis(
+        head_sha=head, dirty=True, captured_at=TS
+    )
+    assert context.provenance.authored_at == TS
+    assert cache.write_session_data(root, rid, authoring.CONTEXT_ARTIFACT, cold_raw) is not None
+    assert cache.read_session_data(root, rid, authoring.CONTEXT_ARTIFACT) == cold_raw
+
+    # 4. The TS draft serializer's shape (the golden pins `_write_draft` to encodeRefinementDraft):
+    #    a first draft the human DENIES is revised in place — the denial saves nothing.
+    golden = json.loads((FIXTURES / "draft.json").read_text(encoding="utf-8"))
+    probe = tmp_path / "golden-probe.json"
+    _write_draft(
+        probe,
+        run_id=golden["run_id"],
+        digest=golden["context_digest"],
+        markdown=golden["markdown"],
+    )
+    assert probe.read_bytes() == (FIXTURES / "draft.json").read_bytes()
+    draft_path = tmp_path / "objective-refinement-draft.json"
+    _write_draft(draft_path, run_id=rid, digest=cold_digest, markdown="## Too vague\n")
+    assert _mutation_names(ws, start) == []  # the denied round wrote nothing anywhere
+    revised = "## Refinement of 1.2\n\nSharpen the blocked node: ✓ Ünïcode, a tab\t, no final LF"
+    _write_draft(draft_path, run_id=rid, digest=cold_digest, markdown=revised)
+
+    # 5. APPROVE → the canonical worker over the exact draft bytes; exactly one comment write.
+    result = _invoke(
+        monkeypatch,
+        root,
+        [
+            "objective",
+            "refinement-save",
+            "--draft-file",
+            str(draft_path),
+            "--run-id",
+            rid,
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    saved = _payload(result)
+    assert saved["success"] is True and saved["node_id"] == "1.2"
+    assert _mutation_names(ws, start) == ["commentCreate"]
+
+    # 6. The full-content read: byte-exact Markdown, the captured provenance, the bound target.
+    back = service.read_node_refinement(store, issues, objective_id=obj_id, node_id="1.2")
+    assert back.saved is not None
+    assert back.saved.comment.id == saved["comment_id"]
+    assert back.saved.body_digest == saved["body_digest"]
+    assert back.saved.document.markdown == revised
+    assert back.saved.document.provenance == context.provenance
+    assert back.target.identity == context.target.identity
+    # The saved record is what a later grounding pass would carry as the prior (re-refinable).
+    result = _invoke(
+        monkeypatch,
+        root,
+        ["objective", "refine-context", obj_id, "--node", "1.2", "--run-id", "01NEXTRUN", "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    later_json = _payload(result)["context_json"]
+    assert isinstance(later_json, str)
+    later = authoring.parse_context(later_json)
+    assert later.prior is not None and later.prior.markdown == revised
+    assert later.expected.comment_id == saved["comment_id"]
+
+    # 7. Nothing else changed: roadmap (descriptions, statuses, backlinks), manifest, node
+    #    issues, relations, labels, milestones; exactly one new comment, on the 1.2 node issue;
+    #    no plan ref/body/session, no handoff, no delivery-journal event; no claim mutation.
+    assert store.get_objective(objective_id=obj_id) == roadmap_before
+    assert _non_comment_state(ws) == state_before
+    node_uuid = _node_issue(ws, obj_id, "1.2")["id"]
+    assert isinstance(node_uuid, str)
+    assert _comment_counts(ws) == {**comments_before, node_uuid: comments_before[node_uuid] + 1}
+    assert cache.read_plan_ref(root) is None
+    assert not cache.plan_body_path(root).exists()
+    assert cache.read_agent_session(root) is None
+    assert cache.list_handoff_run_ids(root) == []
+    assert TrainPersistence(store, issues).read_journal(obj_id).events == ()
+    assert _scratch_runs(root) == [rid]
+    assert git.resolve_commit(root, "HEAD") == head  # the checkout itself is untouched
+
+
 # --------------------------------------------------------------------------- seeded tail
 
 
