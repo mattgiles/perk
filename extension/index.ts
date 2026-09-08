@@ -38,7 +38,7 @@ import {
 } from "./pi/v1/delivery/stackSync.ts";
 import { installSubmitBindings } from "./pi/v1/delivery/submit.ts";
 import { installSubmitConflictBindings } from "./pi/v1/delivery/submitConflict.ts";
-import { createDraftReviewActivation } from "./pi/v1/draftReviewActivation.ts";
+import { createDraftReviewSlot } from "./pi/v1/draftReview.ts";
 import { registerDraftReviewWaveTools } from "./pi/v1/draftReviewWaveTools.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installAuditBindings } from "./pi/v1/learning/audit.ts";
@@ -246,8 +246,10 @@ export default function perk(
   // deps power the plannotator launch chooser (§8.23): the presence probe + the two door open
   // cores are composed HERE so plan.ts/planReview.ts import nothing from the browser modules
   // (planReviewBrowser.ts/objectiveReviewBrowser.ts — the value-import cycle break:
-  // planReviewBrowser.ts value-imports the review arms).
-  const draftReviews = createDraftReviewActivation(pi);
+  // planReviewBrowser.ts value-imports the review arms). `draftReviews` is the ONE
+  // per-activation current-review slot + unconfirmed-save latch every review surface shares
+  // (§8.23 "Draft-review guards") — in-memory, nothing persisted.
+  const draftReviews = createDraftReviewSlot(pi);
   installPlanBindings(pi, gating, draftReviews, contextPolicy, {
     present: () => plannotatorPresent(pi),
     plan: (ctx, opts) =>
@@ -661,7 +663,7 @@ export default function perk(
   // `/objective-plan` command (select the next node and author a bounded plan). The command now
   // enters the read-only gate on invocation (parity with the cold door's `mode: read-only`
   // handoff; exit stays with plan_save / `/plan` off) — hence `gating`.
-  installObjectivePlanningBindings(pi, gating, reportWave, draftReviews);
+  installObjectivePlanningBindings(pi, gating, reportWave);
 
   // The two learn plan factories' warm surfaces: `/learn-docs` gathers open perk:learn issues
   // (via the `perk learn docs --gather` cold door) toward a docs/learned consolidation plan;

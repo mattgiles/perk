@@ -34,6 +34,11 @@ export interface ToolResult {
   terminate?: boolean;
 }
 
+/** The provider review bridge every subject arm awaits (the plannotator event-bus bridge in production). */
+export interface DraftReviewBridge {
+  review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome>;
+}
+
 /**
  * The subject descriptor parameterizing the shared renderer cores below — the plan and objective
  * review arms and the gist arm (`pi/v1/gist.ts`) render the same outcome shapes, differing only

@@ -334,6 +334,25 @@ export function saveUnconfirmedResult(
   };
 }
 
+/**
+ * A blocking review whose verdict arrived after a newer review superseded it (another surface
+ * opened, or `/implement-here` retired it): ignored; nothing saved.
+ */
+export function supersededReviewResult(subject: DraftReviewSubject): ToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text:
+          `This ${subject} review was superseded by a newer review before its decision arrived — ` +
+          "the decision was ignored and nothing was saved. Call plan_review again if a review is " +
+          "still wanted.",
+      },
+    ],
+    details: { ok: false, error_type: "review_superseded", status: "superseded", subject },
+  };
+}
+
 /** Prepended to a revision result's first text block when the draft moved during the review. */
 export const DRAFT_CHANGED_NOTE =
   "Note: the working draft changed after this review opened — weigh the feedback against the current draft.";
