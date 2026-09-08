@@ -20,10 +20,15 @@ import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
 import { completePlanReview } from "../../authoring/plan/review.ts";
 import type { PlanApprovalSaveDeps, PlanBackendSaveResult } from "../../authoring/plan/save.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
-import type { DraftReviewBinding } from "../../session/draftReviewBinding.ts";
+import {
+  captureDraftReviewBinding,
+  type DraftReviewBinding,
+  type TargetComponent,
+} from "../../session/draftReviewBinding.ts";
 import {
   DRAFT_REVIEW_ARTIFACT,
   deliveryMarker,
+  encodeDraftReview,
   type ReviewSubject,
   readDraftReview,
 } from "../../session/draftReviewState.ts";
@@ -74,6 +79,7 @@ function fixture(subject: ReviewSubject = "plan", parameter = false) {
           ...(subject === "objective" ? { roadmap: [] } : {}),
         });
   if (!parameter) session.writeArtifact(name, raw);
+  let drifts = 0;
   const binding = () => ({ ok: true as const, binding: structuredClone(target) });
   let entries: readonly unknown[] = [];
   const decisions = createDraftReviewDecisions({
@@ -131,11 +137,24 @@ function fixture(subject: ReviewSubject = "plan", parameter = false) {
     target(update: Partial<DraftReviewBinding>) {
       target = { ...target, ...update };
     },
+    /** Stage a genuine routing drift: a new aggregate digest with exactly `changed` components moved. */
+    drift(changed: TargetComponent[], update: Partial<DraftReviewBinding> = {}) {
+      drifts++;
+      target = {
+        ...target,
+        ...update,
+        digest: `sha256:${String(drifts).padStart(64, "0")}`,
+        components: fakeTargetComponents("target", changed),
+      };
+      return target.digest;
+    },
+    binding,
     dispose() {
       rmSync(root, { recursive: true, force: true });
     },
   };
 }
+const reviewedDigest = `sha256:${"a".repeat(64)}`;
 
 for (const reason of ["handshake-failed", "subscription-failed"] as const) {
   test(`readiness reuses same-review ${reason} invalidation without rewriting it`, () => {
@@ -1465,3 +1484,342 @@ for (const runId of [null, "../unsafe", "RID"] as const) {
     }
   });
 }
+
+test("genuine routing drift at attach names the checkpoint and the changed component; the record invalidates without attaching", () => {
+  const f = fixture();
+  try {
+    assert.ok(f.registration.open(requestId).ok);
+    const current = f.drift(["main_config.issues.backend"]);
+    const attached = f.registration.attach(requestId, id.reviewId);
+    assert.ok(!attached.ok);
+    assert.equal(attached.reason, "target-changed");
+    assert.equal(
+      attached.detail,
+      `draft review refused: target-changed; checkpoint: attach; reviewed target: ${reviewedDigest}; current target: ${current}; changed components: main_config.issues.backend`,
+    );
+    assert.deepEqual(f.record().consumption, { state: "invalidated", reason: "target-changed" });
+    assert.equal(f.record().correlation.review_id, null);
+    assert.equal(existsSync(f.lock), false);
+  } finally {
+    f.dispose();
+  }
+});
+
+test("genuine routing drift at open refuses before any record write, explained against the frozen snapshot", () => {
+  const f = fixture();
+  try {
+    const current = f.drift(["worktree_config.workflow.base", "main_local.linear.api_key"]);
+    const opened = f.registration.open(requestId);
+    assert.ok(!opened.ok);
+    assert.equal(opened.reason, "target-changed");
+    assert.match(
+      opened.detail,
+      /^draft review refused: target-changed; checkpoint: open; reviewed target: sha256:a{64}; current target: /,
+    );
+    assert.ok(
+      opened.detail.endsWith(
+        `current target: ${current}; changed components: worktree_config.workflow.base, main_local.linear.api_key`,
+      ),
+    );
+    const read = readDraftReview(f.session);
+    assert.ok(read.ok && read.record === null, "nothing is opened for a drifted target");
+    assert.equal(existsSync(f.lock), false);
+  } finally {
+    f.dispose();
+  }
+});
+
+test("genuine drift at candidate dispatch reports several changed fields in fixed order with zero backend calls", async () => {
+  for (const change of ["target", "subject"] as const) {
+    const f = fixture();
+    try {
+      f.open();
+      const current =
+        change === "target"
+          ? f.drift(["worktree_local.workflow.base", "main_local.linear.api_key"])
+          : f.drift(["identity", "worktree_config.workflow.base", "worktree_local.workflow.base"], {
+              subject: "gist",
+            });
+      let executed = 0;
+      const result = await f.decisions.dispatch({
+        id,
+        runId: "RID",
+        approved: true,
+        effect: "save",
+        execute: async () => {
+          executed++;
+          return "never";
+        },
+      });
+      assert.ok(!result.ok);
+      assert.equal(result.reason, change === "target" ? "target-changed" : "subject-changed");
+      assert.equal(
+        result.detail,
+        `draft review refused: ${result.reason}; checkpoint: candidate; reviewed target: ${reviewedDigest}; current target: ${current}; changed components: ${
+          change === "target"
+            ? "worktree_local.workflow.base, main_local.linear.api_key"
+            : "identity, worktree_config.workflow.base, worktree_local.workflow.base"
+        }`,
+      );
+      assert.equal(executed, 0);
+      assert.equal(result.saveReceipt, null);
+      assert.equal(result.gateExited, false);
+      assert.deepEqual(f.record().consumption, { state: "invalidated", reason: result.reason });
+      assert.equal(existsSync(f.lock), false);
+      // The invalidated record refuses a later candidate WITHOUT effects (unchanged transition table).
+      const late = await f.decisions.dispatch({
+        id,
+        runId: "RID",
+        approved: false,
+        effect: "revision",
+        execute: async () => assert.fail("late effect"),
+      });
+      assert.ok(!late.ok);
+      assert.equal(late.reason, "invalid-state", "other-invalidated refuses without effects");
+      assert.ok(!late.detail.includes("changed components"), "no drift story for a dead record");
+    } finally {
+      f.dispose();
+    }
+  }
+});
+
+test("genuine drift after the title await stops before the backend, explained at the save checkpoint; the dispatch turns uncertain", async () => {
+  const f = fixture();
+  try {
+    f.open();
+    let backend = 0;
+    let current = "";
+    const result = await f.decisions.dispatch({
+      id,
+      runId: "RID",
+      approved: true,
+      effect: "save",
+      execute: async (cap) => {
+        await Promise.resolve();
+        current = f.drift(["main_config.issues.team"]);
+        await cap.save(async () => {
+          backend++;
+          return { receipt: { id: "42", url: "url" }, value: "saved" };
+        });
+        return "unreachable";
+      },
+    });
+    assert.ok(!result.ok);
+    assert.equal(result.reason, "target-changed");
+    assert.equal(
+      result.detail,
+      `draft review refused: target-changed; checkpoint: save; reviewed target: ${reviewedDigest}; current target: ${current}; changed components: main_config.issues.team`,
+    );
+    assert.equal(backend, 0);
+    assert.equal(result.saveReceipt, null);
+    const state = f.record().consumption;
+    assert.equal(state.state, "uncertain");
+    if (state.state === "uncertain") {
+      assert.equal(state.reason, "effect-failed");
+      assert.deepEqual(state.attempt.save, { state: "not-started" });
+    }
+    assert.equal(existsSync(f.lock), false);
+  } finally {
+    f.dispose();
+  }
+});
+
+test("dispatch explanations need a matching activation-local baseline: a foreign coordinator, a rewritten digest, and an ended activation report unavailable", async () => {
+  const f = fixture();
+  try {
+    f.open();
+    // A coordinator that never opened this request has no baseline (never reconstructed from disk).
+    const foreign = createDraftReviewDecisions({
+      cwd: f.root,
+      sessionId: "foreign",
+      session: () => f.session,
+      entries: () => [],
+      binding: f.binding,
+    });
+    const current = f.drift(["main_config.issues.backend"]);
+    const unexplained = await foreign.dispatch({
+      id,
+      runId: "RID",
+      approved: false,
+      effect: "revision",
+      execute: async () => assert.fail("no effect"),
+    });
+    assert.ok(!unexplained.ok);
+    assert.equal(
+      unexplained.detail,
+      `draft review refused: target-changed; checkpoint: candidate; reviewed target: ${reviewedDigest}; current target: ${current}; changed components: unavailable (no matching diagnostic baseline)`,
+    );
+    assert.deepEqual(f.record().consumption, { state: "invalidated", reason: "target-changed" });
+  } finally {
+    f.dispose();
+  }
+  const g = fixture();
+  try {
+    g.open();
+    // Same request ID, but the persisted target digest is not the one this activation opened.
+    const record = g.record();
+    const rewritten = {
+      ...record,
+      correlation: {
+        ...record.correlation,
+        target: { ...record.correlation.target, digest: `sha256:${"e".repeat(64)}` },
+      },
+    };
+    assert.equal(
+      g.session.writeArtifact(DRAFT_REVIEW_ARTIFACT, encodeDraftReview(rewritten)).status,
+      "applied",
+    );
+    const result = await g.decisions.dispatch({
+      id,
+      runId: "RID",
+      approved: false,
+      effect: "revision",
+      execute: async () => assert.fail("no effect"),
+    });
+    assert.ok(!result.ok);
+    assert.equal(result.reason, "target-changed");
+    assert.match(
+      result.detail,
+      /changed components: unavailable \(no matching diagnostic baseline\)$/,
+    );
+    assert.match(
+      result.detail,
+      new RegExp(`reviewed target: sha256:e{64}; current target: ${reviewedDigest}`),
+    );
+  } finally {
+    g.dispose();
+  }
+  const h = fixture();
+  try {
+    h.open();
+    assert.ok(h.decisions.end([]).ok);
+    const current = h.drift(["environment"]);
+    const ended = await h.decisions.dispatch({
+      id,
+      runId: "RID",
+      approved: false,
+      effect: "revision",
+      execute: async () => assert.fail("no effect"),
+    });
+    assert.ok(!ended.ok);
+    assert.equal(ended.reason, "invalid-state", "an ended activation grants nothing");
+    assert.ok(!ended.detail.includes(current));
+  } finally {
+    h.dispose();
+  }
+});
+
+test("a successor opening rebinds the baseline: the successor's drift is explained, the predecessor is merely superseded", async () => {
+  const f = fixture();
+  try {
+    f.open();
+    const successor = f.prepare().registration;
+    assert.ok(successor.open(successorId).ok);
+    assert.ok(successor.attach(successorId, "next").ok);
+    const current = f.drift(["git_config"]);
+    const stale = await f.decisions.dispatch({
+      id,
+      runId: "RID",
+      approved: false,
+      effect: "revision",
+      execute: async () => assert.fail("predecessor effect"),
+    });
+    assert.ok(!stale.ok);
+    assert.equal(stale.reason, "superseded");
+    assert.ok(!stale.detail.includes("changed components"));
+    const explained = await f.decisions.dispatch({
+      id: { requestId: successorId, reviewId: "next" },
+      runId: "RID",
+      approved: false,
+      effect: "revision",
+      execute: async () => assert.fail("successor effect"),
+    });
+    assert.ok(!explained.ok);
+    assert.equal(
+      explained.detail,
+      `draft review refused: target-changed; checkpoint: candidate; reviewed target: ${reviewedDigest}; current target: ${current}; changed components: git_config`,
+    );
+  } finally {
+    f.dispose();
+  }
+});
+
+test("a routing-config file that fails to parse refuses with its file role and never echoes the secret it carries", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "perk-draft-decisions-secret-")));
+  const session = openMemoryWorkflowSession({ runId: "RID" });
+  session.draftReviewContext = () => ({
+    ok: true,
+    runId: "RID",
+    subject: "plan",
+    warmNodeClaim: null,
+  });
+  session.writeArtifact(PLAN_DRAFT_ARTIFACT, "# Reviewed\n");
+  const files = new Map<string, string>();
+  const secret = "lin_api_SECRET_9f8e7d6c";
+  const decisions = createDraftReviewDecisions({
+    cwd: root,
+    sessionId: "parent",
+    session: () => session,
+    entries: () => [],
+    binding: (current) =>
+      captureDraftReviewBinding(root, current, {
+        git: () => ({
+          worktreeRoot: root,
+          gitDir: join(root, ".git"),
+          gitCommonDir: join(root, ".git"),
+          configBytes: new Uint8Array(),
+        }),
+        read: (path) => {
+          const text = files.get(path);
+          return text === undefined ? null : Buffer.from(text);
+        },
+        environment: () => ({}),
+      }),
+  });
+  try {
+    files.set(join(root, ".perk", "local.toml"), `[linear]\napi_key = "${secret}"\n`);
+    const prepared = decisions.prepare();
+    assert.ok(prepared.ok);
+    assert.ok(prepared.value.registration.open(requestId).ok);
+    assert.ok(prepared.value.registration.attach(requestId, id.reviewId).ok);
+    // The secret file becomes unparseable (a bare, unquoted key) while the review is pending.
+    files.set(join(root, ".perk", "local.toml"), `[linear]\napi_key = ${secret}\n`);
+    const result = await decisions.dispatch({
+      id,
+      runId: "RID",
+      approved: true,
+      effect: "save",
+      execute: async () => assert.fail("no effect"),
+    });
+    assert.ok(!result.ok);
+    assert.equal(result.reason, "io-error");
+    assert.equal(
+      result.detail,
+      "draft review refused: io-error; routing config worktree_local/main_local: TOML parse failed",
+    );
+    assert.ok(!result.detail.includes(secret));
+    assert.ok(!JSON.stringify(readDraftReview(session)).includes(secret));
+    const read = readDraftReview(session);
+    assert.ok(read.ok && read.record);
+    assert.equal(read.record.consumption.state, "pending", "a capture refusal is not a verdict");
+    // A well-formed rotation of the same secret IS routing drift, explained by component only.
+    files.set(join(root, ".perk", "local.toml"), `[linear]\napi_key = "${secret}-rotated"\n`);
+    const rotated = await decisions.dispatch({
+      id,
+      runId: "RID",
+      approved: true,
+      effect: "save",
+      execute: async () => assert.fail("no effect"),
+    });
+    assert.ok(!rotated.ok);
+    assert.equal(rotated.reason, "target-changed");
+    assert.match(
+      rotated.detail,
+      /checkpoint: candidate;.*changed components: main_local\.linear\.api_key$/,
+    );
+    assert.ok(!rotated.detail.includes(secret));
+    assert.ok(!JSON.stringify(readDraftReview(session)).includes(secret));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

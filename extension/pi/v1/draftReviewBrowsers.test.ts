@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -913,6 +920,122 @@ for (const subject of ["plan", "objective"] as const) {
     }
   });
 }
+
+// The reported incident: a compaction-only `.perk/config.toml` change landed in the checkout while a
+// browser review was open, and the whole-file target hash rejected the human's decision. The fix is
+// shared by every subject, so the end-to-end regression is split — plan DENY reproduces the
+// incident's no-save path; objective APPROVE proves the save path — rather than cross-producted.
+const COMPACTION_EDIT = "\n[compaction]\nreserve_tokens = 65536\n";
+
+test("plan DENY survives an unrelated compaction change after attachment: one exact delivery, zero saves, gate held, consumed only on persisted evidence", async () => {
+  const f = fixture("plan");
+  try {
+    await f.open();
+    await f.queried;
+    assert.equal(f.record().consumption.state, "pending");
+    const original = f.draft();
+    const before = readFileSync(join(f.cwd, ".perk", "config.toml"), "utf8");
+    appendFileSync(join(f.cwd, ".perk", "config.toml"), COMPACTION_EDIT);
+    assert.notEqual(readFileSync(join(f.cwd, ".perk", "config.toml"), "utf8"), before);
+    f.event(false, denial);
+    await f.completed;
+    assert.equal(f.calls.length, 0, "a denial performs zero saves");
+    assert.equal(f.exits(), 0, "the read-only gate stays active");
+    assert.equal(f.draft(), original, "the draft is untouched");
+    assert.doesNotMatch(f.notices.join("\n"), /target-changed|Draft review stopped/);
+    const state = f.record().consumption;
+    assert.equal(state.state, "dispatch");
+    if (state.state !== "dispatch") assert.fail();
+    assert.equal(state.attempt.effect, "revision");
+    assert.deepEqual(state.attempt.save, { state: "not-required" });
+    const marker = `<!-- perk:draft-review-dispatch:${state.attempt.dispatch_id} -->`;
+    const text = canonical(f.sends, marker);
+    assert.match(text, /DENIED — revise per this feedback/);
+    assert.ok(
+      text.includes(`<untrusted_reviewer_feedback>\n${denial}\n</untrusted_reviewer_feedback>`),
+    );
+    assert.equal(state.attempt.delivery?.content_digest, deliveryDigest(f.sends[0]?.content));
+    // Not consumed on send/return; a marker-only or altered entry is not evidence either.
+    f.observe();
+    assert.equal(f.record().consumption.state, "dispatch");
+    f.persist([{ type: "text", text: marker }], "user", "marker-only");
+    f.persist(
+      [{ type: "text", text: text.replace("rollout step", "other step") }],
+      "user",
+      "altered",
+    );
+    f.observe();
+    assert.equal(f.record().consumption.state, "dispatch");
+    f.persist();
+    f.observe();
+    const consumed = f.record().consumption;
+    assert.equal(consumed.state, "consumed");
+    if (consumed.state !== "consumed") assert.fail();
+    assert.equal(consumed.delivery_entry_id, "entry-1");
+    f.event(false, denial);
+    await Promise.resolve();
+    assert.equal(f.sends.length, 1, "no repeated delivery");
+    assert.equal(f.calls.length, 0);
+    assert.equal(f.exits(), 0);
+    assert.equal(f.lock(), false);
+    assert.ok(
+      !readFileSync(join(sessionDataDir(f.cwd, "RID"), "draft-review.json"), "utf8").includes(
+        "reserve_tokens",
+      ),
+    );
+  } finally {
+    f.dispose();
+  }
+});
+
+test("objective APPROVE survives an unrelated compaction change after attachment: one save, gate exits only on the confirmed receipt, duplicates suppressed", async () => {
+  const f = fixture("objective");
+  try {
+    await f.open();
+    await f.queried;
+    appendFileSync(join(f.cwd, ".perk", "config.toml"), COMPACTION_EDIT);
+    const original = f.draft();
+    f.event(true, "ship it");
+    await f.completed;
+    assert.equal(f.calls.length, 1, "exactly one backend save");
+    const argv = f.calls[0]?.args ?? [];
+    assert.deepEqual(argv.slice(0, 3), ["objective", "create", "--json"]);
+    assert.equal(argv[argv.indexOf("--title") + 1], objective.title);
+    assert.equal(argv[argv.indexOf("--base") + 1], objective.base);
+    assert.equal(argv[argv.indexOf("--delivery") + 1], objective.delivery);
+    assert.deepEqual(JSON.parse(argv[argv.indexOf("--roadmap") + 1] ?? "null"), objective.roadmap);
+    assert.equal(f.exits(), 1, "the gate exits once, on the confirmed save");
+    assert.equal(f.draft(), original, "the reviewed structured draft is what was saved");
+    assert.doesNotMatch(f.notices.join("\n"), /target-changed|Draft review stopped/);
+    assert.match(f.notices.join("\n"), /APPROVED in the browser — saved/);
+    const state = f.record().consumption;
+    assert.equal(state.state, "dispatch");
+    if (state.state !== "dispatch") assert.fail();
+    assert.equal(state.attempt.effect, "save");
+    assert.deepEqual(state.attempt.save, {
+      state: "confirmed",
+      id: "7",
+      url: "https://example.test/7",
+    });
+    const marker = `<!-- perk:draft-review-dispatch:${state.attempt.dispatch_id} -->`;
+    const text = canonical(f.sends, marker);
+    assert.match(text, /APPROVED by reviewer/);
+    assert.match(text, /<untrusted_reviewer_feedback>\nship it\n<\/untrusted_reviewer_feedback>/);
+    // Duplicate decisions and a late approval never save or exit again.
+    f.event(true, "ship it");
+    f.event(true, "again");
+    await Promise.resolve();
+    assert.equal(f.calls.length, 1);
+    assert.equal(f.exits(), 1);
+    assert.equal(f.sends.length, 1);
+    f.persist();
+    f.observe();
+    assert.equal(f.record().consumption.state, "consumed");
+    assert.equal(f.lock(), false);
+  } finally {
+    f.dispose();
+  }
+});
 
 test("plan browser title await fences routing/source drift before actual backend dispatch", async () => {
   for (const drift of ["source", "target"] as const) {

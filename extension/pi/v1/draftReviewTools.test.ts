@@ -445,6 +445,72 @@ for (const subject of ["plan", "objective", "gist"] as const) {
       }
     });
   }
+  for (const approved of [false, true]) {
+    test(`${subject}: an unrelated TOML edit while the blocking review is open leaves ${approved ? "approval saving once" : "denial delivering once"}; a routing edit refuses with its component`, async () => {
+      const f = fixture(subject);
+      try {
+        await f.draft();
+        const pending = f.invoke("plan_review");
+        await f.ready;
+        assert.equal(f.record().consumption.state, "pending");
+        // Compaction + model + CI + comment edits, and an equivalent rewrite of the routing table.
+        writeFileSync(
+          join(f.cwd, ".perk", "config.toml"),
+          '# rewritten while open\n[compaction]\nreserve_tokens = 65536\n\n[providers]\nplan = "plannotator-plan"\n\n[models]\ndefault = "anthropic/claude-sonnet-4-5"\n\n[ci]\ntrusted = true\n',
+        );
+        f.event(approved, approved ? "ship" : "deny verbatim");
+        const result = await pending;
+        if (approved) {
+          assert.equal(result.details.ok, true, JSON.stringify(result.details));
+          assert.equal(f.calls.length, 1);
+          assert.equal(f.exits, 1);
+          const dispatched = f.record().consumption;
+          assert.equal(dispatched.state, "dispatch");
+          if (dispatched.state === "dispatch")
+            assert.equal(dispatched.attempt.save.state, "confirmed");
+        } else {
+          assert.equal(result.details.status, "completed", JSON.stringify(result.details));
+          assert.equal(result.details.approved, false);
+          assert.equal(f.calls.length, 0);
+          assert.equal(f.exits, 0);
+          assert.match(result.content[0]?.text ?? "", /deny verbatim/);
+        }
+        assert.doesNotMatch(result.content[0]?.text ?? "", /target-changed/);
+        f.persist(result);
+        f.turnEnd();
+        assert.equal(f.record().consumption.state, "consumed");
+      } finally {
+        f.dispose();
+      }
+    });
+  }
+  test(`${subject}: a genuine routing edit while the blocking review is open refuses at the candidate checkpoint naming the component, with no effects`, async () => {
+    const f = fixture(subject);
+    try {
+      await f.draft();
+      const pending = f.invoke("plan_review");
+      await f.ready;
+      writeFileSync(
+        join(f.cwd, ".perk", "config.toml"),
+        '[providers]\nplan = "plannotator-plan"\n[issues]\nbackend = "linear"\n',
+      );
+      f.event(true, "ship");
+      const result = await pending;
+      assert.equal(result.details.status, "refused");
+      assert.equal(result.details.reason, "target-changed");
+      assert.match(
+        result.content[0]?.text ?? "",
+        /checkpoint: candidate; reviewed target: sha256:[0-9a-f]{64}; current target: sha256:[0-9a-f]{64}; changed components: main_config\.issues\.backend/,
+      );
+      assert.doesNotMatch(result.content[0]?.text ?? "", /linear/);
+      assert.equal(f.calls.length, 0);
+      assert.equal(f.exits, 0);
+      assert.deepEqual(f.record().consumption, { state: "invalidated", reason: "target-changed" });
+      assert.equal(existsSync(join(sessionDataDir(f.cwd, "RID"), "draft-review.lock")), false);
+    } finally {
+      f.dispose();
+    }
+  });
   test(`${subject}: rejected dispatch pointer poisons effects and retains claim without speculative uncertainty`, async () => {
     const f = fixture(subject);
     try {
