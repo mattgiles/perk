@@ -34,7 +34,9 @@ the session-data path guards in both planes.
   findings; adoption of a corpus guard includes the normalization sweep — "Compile-time census
   pins" and "Guard-adoption ripple".
 - Import-graph guards fail on unresolvable specifiers, freeze birth censuses, and pin direction
-  prefix arrays to literal contract lists — "Import-graph guard vacuity holes".
+  prefix arrays to literal contract lists — "Import-graph guard vacuity holes". Vendored upstream
+  JS = widen the bare-import corpus + declare the closure an opaque leaf + prove the exemption
+  live — "Vendored upstream JS: widen, carve out, prove live".
 
 ## The node:test-as-grep-guard recipe
 
@@ -249,6 +251,25 @@ holes (#2168):
 - **Direction rules over prefix arrays:** pin the arrays to literal contract lists (deepEqual)
   and drive the full source×target cross-product — a prefix array that silently gains or loses a
   member changes the rule without failing any test.
+
+## Vendored upstream JS: widen, carve out, prove live
+
+Vendoring `extension/vendor/smol-toml/` (upstream `.js` + `.d.ts`, byte-identical —
+`workflow/borrowed-packages.md`) tripped two TypeScript-only corpora at once:
+
+- `bareImportGuard.test.ts` scanned only `.ts`, so bare imports in shipped `.js`/`.mjs` were
+  invisible. Widen the production selector to `.ts|.js|.mjs` and add a `VENDORED_TOML_PARSER`
+  census so the widening is non-vacuous (the vendored files must be found AND clean).
+- `importDirectionGuard.test.ts` resolves relative specifiers to corpus `.ts` files; the closure's
+  edges were "unresolved" and it carries an upstream-internal cycle. The carve-out is a
+  `THIRD_PARTY_CLOSURES` **opaque-leaf** predicate threaded into edge building — a leaf is neither
+  an edge nor unresolved and is reported in `leaves` — plus a live-exemption test: the directory
+  exists, is reached by ≥1 production specifier, has exactly one perk entry point, and the
+  closure's `.d.ts` members carry zero edges.
+
+Never weaken the authored-code direction check to admit the vendored code; perk-authored
+`vendor/btw` and `vendor/whimsical` stay fully in the corpus. Recipe: **vendored upstream JS = widen
+the bare-import corpus + declare the closure an opaque leaf + prove the exemption live.**
 
 ## Guarding a path family across a phased migration
 
