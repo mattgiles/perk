@@ -37,6 +37,13 @@ Contents:
   machine-surface shape changes reviewable in PRs: bundled into both artifacts, read at
   runtime by neither, drift-guarded by `tests/test_contract_schemas.py`. See
   `contracts.md` §8.34.
+- **`fixtures/`** — **test-only** cross-plane evidence, read at runtime by neither plane.
+  `draft-review-config.json` pairs Perk TOML documents with the exact strings the TS
+  draft-review routing projection selects (`extension/substrate/draftReviewConfig.test.ts`)
+  and what the existing Python config readers return for the same fields
+  (`tests/test_draft_review_config.py`), so the two planes' readings stay reconciled where
+  they legitimately differ (Python strips/normalizes; TS binds exact bytes). See
+  `contracts.md` §8.23.
 
 Resolution goes through the per-plane resolvers (`src/perk/_resources.py`,
 `extension/substrate/resources.ts`): installed bundle → editable repo-sibling fallback.
