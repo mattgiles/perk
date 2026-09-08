@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `/commit-and-compact` and `/compact` in long single-turn perk sessions no longer fail with `Compaction failed: Turn prefix summarization failed: generation hit the token cap` on adaptive-thinking models at high thinking levels — perk's own repo converges `[compaction] reserve_tokens = 65536` (Pi sizes a split turn's prefix summary at `0.5 ×` that value and, since 0.84.3, rejects a capped summary instead of persisting it truncated), and the `reserve_tokens` user docs, perk-expert reference, and config template now describe the key as the summary output budget with a ceiling relative to the smallest model window, not only response headroom (5779df76)
 - `submit_pr_review`'s `review_posts` ledger append now fails closed when the prior ledger cannot be rebuilt from the session branch — previously a throwing branch read was treated as an empty ledger, so a subsequent successful append could silently erase earlier confirmed stack-review rows and let the resume guard permit duplicate GitHub reviews (eb5740df)
 
 ### Removed
