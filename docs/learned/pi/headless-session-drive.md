@@ -307,7 +307,7 @@ file: `SessionManager.forkFrom(sourcePath, cwd)` (the live file is never written
 across replays proved byte-faithfulness). Dry-run the preparation before spending:
 `prepareCompaction(sessionManager.getBranch(), settingsManager.getCompactionSettings())` is not
 exported from the package root — deep-import `dist/core/compaction/compaction.js` — and assert
-`firstKeptEntryId` / `isSplitTurn` / `tokensBefore` match the original compaction entry, logging the
+the first-kept entry id / `isSplitTurn` / `tokensBefore` match the original compaction entry, logging the
 effective `reserveTokens`, before the first (paid) model call.
 
 Run against the install the failing session actually ran, by absolute path (a worktree's
