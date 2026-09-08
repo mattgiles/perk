@@ -31,7 +31,9 @@ A `target-changed` or `subject-changed` stop additionally names the checkpoint (
 `candidate`, or `save`), the reviewed and current target digests, and the **changed component
 names** — for example `main_config.issues.backend` or `worktree_local.workflow.base`, or
 `git_config` when Git configuration changed — never the values themselves. Unrelated Perk TOML
-edits (compaction, models, CI, skills, providers, comments, formatting) do not produce this stop.
+edits (compaction, models, CI, skills, providers, comments, formatting) do not produce this stop;
+all `git config --list --show-origin` output is still fingerprinted, so an unrelated Git-config
+change can.
 When the diagnostic reports the components as `unavailable`, only the aggregate comparison is
 known; treat that as unknown, not as "nothing relevant changed". A `target-changed` stop before
 the save checkpoint made no save; a stop *at* the save checkpoint after an await still made no
