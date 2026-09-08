@@ -6,8 +6,10 @@
 // as exact `customInstructions` bytes through the deferCompaction seam — no test-only export),
 // scratch-repo arms over the ONE production deps composition (real `agent_settled` emission
 // through the extension runner), the pending-record disciplines (phantom-record regression,
-// one-shot, overwrite), and the plan-ref authority matrix through registered paths. Drives a
-// REAL bound AgentSession via the harness — no LLM / network / Python.
+// one-shot, overwrite), and the plan-ref authority through registered paths (valid session
+// linkage, LWW, cache-only + conflicting cache, throwing/representative-malformed fallback — the
+// exhaustive validator table is owned by `session/workflowSession.test.ts`). Drives a REAL bound
+// AgentSession via the harness — no LLM / network / Python.
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -899,6 +901,35 @@ test("plan authority: a worktree cache ref alone never targets the continuation"
   }
 });
 
+test("plan authority: a conflicting checkout ref never overrides valid session linkage", async () => {
+  // Both authorities present and DISAGREEING: the continuation names the session's own plan.
+  // (A warm-minted session has no launched stage, so startup never folds the checkout ref in.)
+  const cwd = scaffoldRepo();
+  gitInit(cwd, { dirty: false });
+  writePlanRef(cwd, LINEAR_REF);
+  const sessionFile = plantSession(cwd, [{ active_plan_ref: GITHUB_REF }], {
+    fileName: "conflict.jsonl",
+  });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: undefined },
+    sessionManager: SessionManager.open(sessionFile),
+  });
+  const seen = spyInjections(h);
+  const deferred = deferCompaction(h);
+  try {
+    await h.invokeCommand("commit-and-compact");
+    deferred.resolve();
+    await flushCallbacks();
+    assert.equal(seen.length, 1);
+    assert.ok(seen[0]?.includes(`active plan #42 (github: ${GITHUB_REF.url})`));
+    assert.ok(!seen[0]?.includes("uuid-1"), "the checkout selector never wins");
+    assert.ok(!seen[0]?.includes("linear"));
+  } finally {
+    h.dispose();
+  }
+});
+
 test("plan authority: a throwing session-branch read falls open to the generic continuation", async () => {
   const cwd = scaffoldRepo();
   gitInit(cwd, { dirty: false });
@@ -923,18 +954,12 @@ test("plan authority: a throwing session-branch read falls open to the generic c
 });
 
 test("plan authority: malformed session linkage falls open to the generic continuation", async () => {
-  const malformed: unknown[] = [
-    {},
-    { provider: "", pr_id: "42", url: "https://x/42" },
-    { provider: "github", pr_id: "42", url: "https://x/42" }, // labels missing
-    { provider: "github", pr_id: "42", url: "https://x/42", labels: [7], objective_id: null },
-    { provider: "github", pr_id: "42", url: "https://x/42", labels: [], objective_id: 7 },
-  ];
-  for (const active_plan_ref of malformed) {
-    const text = await continuationFor([{ active_plan_ref }]);
-    assert.ok(
-      text.includes("Resume work on the current task."),
-      `malformed linkage must stay generic: ${JSON.stringify(active_plan_ref)}`,
-    );
-  }
+  // ONE representative malformed shape through the registered path; the exhaustive field table
+  // (each field absent/wrong-type/blank, labels, objective_id, base) is owned by the session
+  // seam's suite (`activeSessionPlanRef` in session/workflowSession.test.ts).
+  const text = await continuationFor([
+    { active_plan_ref: { provider: "github", pr_id: "42", url: "https://x/42" } }, // labels missing
+  ]);
+  assert.ok(text.includes("Resume work on the current task."), "malformed linkage stays generic");
+  assert.ok(!text.includes("#42"), "a half-valid ref never names a plan");
 });

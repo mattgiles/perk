@@ -1,6 +1,9 @@
 // Live session-lifecycle tests. These drive a REAL bound AgentSession through
 // the harness and prove the perk:workflow-state wiring end-to-end, OFFLINE (no LLM, no
-// network). Each case has a pure-function twin in workflowState.test.ts; here we prove the wiring.
+// network). Each case has a pure-function twin in `session/lifecycle.test.ts` (the identity arms
+// and the two-phase startup facts); here we prove the wiring and, at the end, the COMPOSITION
+// ORDER of the Pi effects (gate → linkage → capture → receiver; gate → receiver on navigation)
+// through a recording feedback receiver — not another authority matrix.
 
 import assert from "node:assert/strict";
 import {
@@ -14,8 +17,16 @@ import {
 import { join } from "node:path";
 import { test } from "node:test";
 import { AgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
+import type { HunkFeedbackReceiver, ReceiverSyncArgs } from "./hunkFeedback/receiver.ts";
 import { AGENT_SCRATCH_CONTEXT_TYPE } from "./substrate/agentScratch.ts";
-import { agentScratchDir, handoffPath, runScratchDir, workflowDir } from "./substrate/cache.ts";
+import {
+  agentScratchDir,
+  handoffPath,
+  type PlanRef,
+  runScratchDir,
+  workflowDir,
+  writePlanRef,
+} from "./substrate/cache.ts";
 import { perkVersion } from "./substrate/resources.ts";
 import {
   readSessionPointers,
@@ -918,6 +929,294 @@ test("headless fail-safe: a missing handoff is reported, not thrown", async () =
     // Headless installs no footer and never touches the working indicator
     assert.equal(h.footerFactory(), null);
     assert.equal(h.workingIndicators.length, 0);
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- composition order through the real wiring (recording receiver) ------------------------------
+
+function planRef(prId: string): PlanRef {
+  return {
+    provider: "github",
+    pr_id: prId,
+    url: `https://github.com/o/r/issues/${prId}`,
+    labels: ["perk:plan"],
+    objective_id: null,
+  };
+}
+
+/**
+ * A recording `HunkFeedbackReceiver`: the production interface, constructed once per activation
+ * through the `feedbackReceiverFactory` option. Each sync records the args it was handed AND the
+ * implementation pointer already on disk at that moment (the capture-before-receiver proof).
+ */
+function recordingReceiver(events: string[]) {
+  const syncs: { args: ReceiverSyncArgs; pointer: SessionPointer | null }[] = [];
+  let constructed = 0;
+  const factory = (): HunkFeedbackReceiver => {
+    constructed++;
+    return {
+      sync(ctx, args) {
+        events.push("receiver");
+        const pointer =
+          typeof args.runId === "string"
+            ? (readSessionPointers(ctx.cwd, args.runId)?.implementation.main ?? null)
+            : null;
+        syncs.push({ args, pointer });
+      },
+      close() {},
+    };
+  };
+  return { factory, syncs, constructed: () => constructed };
+}
+
+/** Record every `perk:workflow-state` append (by its sorted field names) on a real manager. */
+function recordAppends(manager: SessionManager, events: string[]): void {
+  const append = manager.appendCustomEntry.bind(manager);
+  manager.appendCustomEntry = (type, data) => {
+    if (type === "perk:workflow-state" && typeof data === "object" && data !== null) {
+      events.push(`append:${Object.keys(data).sort().join(",")}`);
+    }
+    return append(type, data);
+  };
+}
+
+test("composition: a consuming cold start orders gate → verified linkage → capture → receiver sync", async (t) => {
+  const events: string[] = [];
+  const toolSets: string[][] = [];
+  const original = AgentSession.prototype.setActiveToolsByName;
+  t.mock.method(
+    AgentSession.prototype,
+    "setActiveToolsByName",
+    function (this: AgentSession, names: string[]) {
+      events.push("tools");
+      toolSets.push([...names]);
+      original.call(this, names);
+    },
+  );
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "implement" } });
+  writePlanRef(cwd, planRef("42"));
+  const manager = SessionManager.open(plantSession(cwd, []));
+  recordAppends(manager, events);
+  const receiver = recordingReceiver(events);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    sessionManager: manager,
+    feedbackReceiverFactory: receiver.factory,
+  });
+  try {
+    // The real effect sequence from the claim on: the ONE combined claim entry, the gate sync
+    // (the stage-scoped tool set), the ONE verified link append, then the receiver — nothing
+    // else touched workflow-state or the tool set in between. (Pi's own initial tool
+    // installation precedes the handler; nothing of perk's does.)
+    const claim = events.indexOf("append:mode,perk_version,pi_session_id,run_id,stage");
+    assert.ok(claim >= 0, JSON.stringify(events));
+    assert.ok(
+      events.slice(0, claim).every((event) => event === "tools"),
+      `no perk append or receiver sync before the claim: ${JSON.stringify(events)}`,
+    );
+    assert.deepEqual(events.slice(claim), [
+      "append:mode,perk_version,pi_session_id,run_id,stage",
+      "tools",
+      "append:active_plan_ref",
+      "receiver",
+    ]);
+    assert.ok(toolSets.at(-1)?.includes("submit"), "implement scoping installed before linkage");
+    assert.equal(receiver.constructed(), 1, "one receiver per activation, like production");
+    assert.equal(receiver.syncs.length, 1);
+    const sync = receiver.syncs[0];
+    assert.ok(sync);
+    // At receiver sync the reconciled ref is the checkout binding just linked…
+    assert.deepEqual(sync.args, {
+      stage: "implement",
+      adopted: false,
+      runId: "01RID",
+      piSessionId: "planted-parent.jsonl",
+      activePlanRef: planRef("42"),
+      mode: "print",
+    });
+    // …and the REAL implementation pointer was already written (capture before receiver).
+    assert.equal(sync.pointer?.pi_session_id, "planted-parent.jsonl");
+    assert.equal(sync.pointer?.parent_pi_session_id, null);
+    assert.deepEqual(h.workflowState().active_plan_ref, planRef("42"));
+    assert.deepEqual(h.sentinel()?.active_plan_ref, planRef("42"));
+    assert.equal(JSON.parse(readFileSync(handoffPath(cwd, "01RID"), "utf8")).consumed, true);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("composition: a post-gate branch-read failure leaves the gate applied and reaches no capture/receiver effect", async (t) => {
+  // The throwing read is armed by the gate sync itself (the read-only tool set install), so the
+  // FIRST branch read after the gate — the post-gate linked-state rebuild — throws. The
+  // exception propagates to Pi's hook error boundary (the harness's onError channel), and the
+  // handler's later effects (capture, receiver, sentinel) are never reached.
+  const errors: string[] = [];
+  t.mock.method(console, "error", (message: unknown) => errors.push(String(message)));
+  let gateSynced = false;
+  const original = AgentSession.prototype.setActiveToolsByName;
+  t.mock.method(
+    AgentSession.prototype,
+    "setActiveToolsByName",
+    function (this: AgentSession, names: string[]) {
+      original.call(this, names);
+      if (
+        names.length === READ_ONLY_TOOLS.length &&
+        names.every((name, i) => name === READ_ONLY_TOOLS[i])
+      ) {
+        gateSynced = true;
+      }
+    },
+  );
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "implement" } });
+  writePlanRef(cwd, planRef("42"));
+  const manager = SessionManager.open(plantSession(cwd, []));
+  const realGetBranch = manager.getBranch.bind(manager);
+  let armed = true;
+  manager.getBranch = () => {
+    if (armed && gateSynced) throw new Error("unreadable session branch (induced)");
+    return realGetBranch();
+  };
+  const receiver = recordingReceiver([]);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    sessionManager: manager,
+    feedbackReceiverFactory: receiver.factory,
+  });
+  armed = false; // heal for the observations below
+  try {
+    assert.ok(gateSynced, "the gate sync ran");
+    assert.ok(
+      errors.some(
+        (line) =>
+          line.includes("extension error in session_start") &&
+          line.includes("unreadable session branch (induced)"),
+      ),
+      `the original exception reaches the harness error channel: ${JSON.stringify(errors)}`,
+    );
+    // The gate is applied (the identity claim + sync happened before the failing read)…
+    assert.equal(h.workflowState().run_id, "01RID");
+    assert.equal((await h.emitToolCall("write", { path: "x", content: "y" }))?.block, true);
+    // …and nothing downstream ran from guessed facts: no linkage, no capture, no receiver sync,
+    // no sentinel.
+    assert.equal(h.workflowState().active_plan_ref, undefined);
+    assert.equal(readSessionPointers(cwd, "01RID"), null, "capture not reached");
+    assert.equal(receiver.syncs.length, 0, "receiver sync not reached");
+    assert.equal(h.sentinel(), null, "the handler aborted before its sentinel");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("composition: reload with conflicting branch/handoff stages and a changed checkout binding keeps the authorities distinct", async (t) => {
+  // Branch (LWW) says `plan` and links #41; the kept run's handoff says `implement`; the
+  // checkout now binds #42. Tool scope follows the BRANCH stage; capture and the receiver's
+  // stage follow the LAUNCHED handoff stage; linkage re-reads the checkout on keep.
+  const toolSets: string[][] = [];
+  const original = AgentSession.prototype.setActiveToolsByName;
+  t.mock.method(
+    AgentSession.prototype,
+    "setActiveToolsByName",
+    function (this: AgentSession, names: string[]) {
+      toolSets.push([...names]);
+      original.call(this, names);
+    },
+  );
+  const cwd = scaffoldRepo({
+    handoff: { runId: "01RID", mode: "read-write", stage: "implement", consumed: true },
+  });
+  writePlanRef(cwd, planRef("42"));
+  // No pi_session_id → the keep arm re-resolves the claimed run from session state.
+  const file = plantSession(cwd, [
+    { run_id: "01RID", mode: "read-write", stage: "plan", active_plan_ref: planRef("41") },
+  ]);
+  const receiver = recordingReceiver([]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    feedbackReceiverFactory: receiver.factory,
+  });
+  try {
+    assert.equal(h.sentinel()?.source, "session");
+    assert.equal(h.workflowState().stage, "plan", "keep appends no stage");
+    const scoped = toolSets.at(-1);
+    assert.ok(scoped);
+    assert.ok(scoped.includes("plan_save") && !scoped.includes("submit"), "branch stage scopes");
+    assert.deepEqual(
+      h.workflowState().active_plan_ref,
+      planRef("42"),
+      "reload re-reads the binding",
+    );
+    const sync = receiver.syncs[0];
+    assert.ok(sync);
+    assert.equal(sync.args.stage, "implement", "the launched handoff stage, not the branch's");
+    assert.deepEqual(sync.args.activePlanRef, planRef("42"));
+    assert.equal(sync.args.piSessionId, "planted-parent.jsonl");
+    assert.equal(
+      sync.pointer?.pi_session_id,
+      "planted-parent.jsonl",
+      "implementation capture followed the launched stage",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("composition: navigation syncs the gate before the receiver from ONE rebuilt state — no capture, no linkage", async (t) => {
+  const events: string[] = [];
+  const original = AgentSession.prototype.setActiveToolsByName;
+  t.mock.method(
+    AgentSession.prototype,
+    "setActiveToolsByName",
+    function (this: AgentSession, names: string[]) {
+      events.push("tools");
+      original.call(this, names);
+    },
+  );
+  const cwd = scaffoldRepo();
+  writePlanRef(cwd, planRef("42")); // present — navigation must never read it
+  const manager = SessionManager.open(
+    plantSession(cwd, [
+      {
+        run_id: "01RID",
+        pi_session_id: "planted-parent.jsonl",
+        mode: "read-write",
+        stage: "implement",
+        active_plan_ref: planRef("41"),
+      },
+    ]),
+  );
+  recordAppends(manager, events);
+  const receiver = recordingReceiver(events);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: manager,
+    feedbackReceiverFactory: receiver.factory,
+  });
+  try {
+    // Startup here is a keep without a handoff: no launched stage, no linkage, no capture.
+    assert.equal(readSessionPointers(cwd, "01RID"), null);
+    events.length = 0;
+    // Navigate to the planted state entry (the current leaf is a no-op for Pi; an earlier
+    // entry re-selects a branch that still carries the same state).
+    await h.navigateTo("c0");
+    assert.deepEqual(events, ["tools", "receiver"], "gate first, then the receiver; no appends");
+    assert.equal(h.sentinel()?.source, "tree");
+    const sync = receiver.syncs.at(-1);
+    assert.ok(sync);
+    assert.deepEqual(sync.args, {
+      stage: "implement",
+      adopted: false,
+      runId: "01RID",
+      piSessionId: "planted-parent.jsonl",
+      activePlanRef: planRef("41"), // the branch's own ref — the checkout #42 was never read
+      mode: "print",
+    });
+    assert.equal(sync.pointer, null, "navigation never captures");
+    assert.deepEqual(h.workflowState().active_plan_ref, planRef("41"));
   } finally {
     h.dispose();
   }

@@ -1,8 +1,10 @@
 // The feature-facing WorkflowSession seam AND its one deep engine (module-contracts.md's
 // `session/` home): run identity + verified session-artifact operations + the named
-// workflow-state reads and the closed change union, sized strictly to the callers that exist.
-// No `stage`/`mode`/pointer-map snapshot — no feature caller consumes them through the seam yet
-// (stage routing and the gate stay adapter-side); the seam grows only from proven callers.
+// workflow-state reads (`nodeClaim`/`activeObjective`/`activeSessionPlanRef`/`reviewPosts`) and
+// the closed change union, sized strictly to the callers that exist. No `stage`/`mode`/pointer-map
+// snapshot — no feature caller consumes them through the seam yet (stage routing and the gate
+// stay adapter-side; startup's lifecycle facts live in `session/lifecycle.ts`); the seam grows
+// only from proven callers.
 //
 // ONE ENGINE, TWO NARROW PORTS. `openWorkflowSession(deps)` implements every WorkflowChange
 // invariant, the full artifact discipline (name policy → identity refusal → unchanged
@@ -298,6 +300,15 @@ export interface WorkflowSession {
   nodeClaim(): { objective: string; node: string } | null;
   /** Snapshot read of the rebuilt `active_objective` (malformed/throwing ⇒ null). */
   activeObjective(): string | null;
+  /**
+   * Shape-validated, fail-open read of the LIVE SESSION's rebuilt `active_plan_ref` — session
+   * linkage ONLY, deliberately with no checkout `cache.plan-ref` fallback (the checkout selector
+   * can name a future plan unrelated to this session; the checkout-first read is
+   * `substrate/workflowState.ts::activePlanRef`, a different authority). Absent, malformed, or
+   * unreadable linkage reads null. For continuation rendering, never permission, verified
+   * linkage, artifact validation, or review routing.
+   */
+  activeSessionPlanRef(): PlanRef | null;
   /** Fail-open read of the rebuilt `review_posts` ledger (malformed rows dropped, never a refusal). */
   reviewPosts(): ReviewPostRow[];
   apply(change: WorkflowChange): WorkflowChangeResult;
@@ -419,6 +430,45 @@ function readActiveObjective(state: SessionStateStore): string | null {
   try {
     const value = state.rebuild().active_objective ?? null;
     return typeof value === "string" && value !== "" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Non-blank string guard for the session plan-ref decode (bytes are preserved, never trimmed). */
+const nonblank = (value: unknown): value is string =>
+  typeof value === "string" && value.trim() !== "";
+
+/**
+ * The ONE session-only plan-ref decode: the rebuilt `active_plan_ref` inspected as `unknown`
+ * (branch data is unvalidated) and accepted only in its persisted shape — non-blank string
+ * `provider`/`pr_id`/`url`, an all-string `labels` list, a REQUIRED `objective_id` that is null
+ * or a string, and `base` absent, null, or a string. The return is a reconstructed `PlanRef`
+ * carrying exactly those fields (extra persisted keys never escape; `base` omission is preserved
+ * versus an explicit null; no trimming, provider constraint, or URL parse). Fail-open: absent,
+ * malformed, or throwing rebuilds read null — the only consumer renders optional continuation
+ * guidance, so unreadability must degrade to "no plan named", never a thrown handler. One fresh
+ * rebuild per call; no checkout, artifact, append, or memoization.
+ */
+function readActiveSessionPlanRef(state: SessionStateStore): PlanRef | null {
+  try {
+    const ref: unknown = state.rebuild().active_plan_ref;
+    if (typeof ref !== "object" || ref === null) return null;
+    const { provider, pr_id, url, labels, objective_id, base } = ref as Record<string, unknown>;
+    if (!nonblank(provider) || !nonblank(pr_id) || !nonblank(url)) return null;
+    if (!Array.isArray(labels) || !labels.every((l): l is string => typeof l === "string")) {
+      return null;
+    }
+    if (objective_id !== null && typeof objective_id !== "string") return null;
+    if (base !== undefined && base !== null && typeof base !== "string") return null;
+    return {
+      provider,
+      pr_id,
+      url,
+      labels: [...labels],
+      objective_id,
+      ...(base !== undefined ? { base } : {}),
+    };
   } catch {
     return null;
   }
@@ -761,6 +811,9 @@ export function openWorkflowSession(deps: WorkflowSessionDeps): WorkflowSession 
     },
     activeObjective() {
       return readActiveObjective(state);
+    },
+    activeSessionPlanRef() {
+      return readActiveSessionPlanRef(state);
     },
     reviewPosts() {
       return readReviewPosts(state);

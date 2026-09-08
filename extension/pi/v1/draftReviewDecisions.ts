@@ -577,6 +577,7 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
       },
       nodeClaim: () => owned.check().nodeClaim(),
       activeObjective: () => owned.check().activeObjective(),
+      activeSessionPlanRef: () => owned.check().activeSessionPlanRef(),
       reviewPosts: () => owned.check().reviewPosts(),
       apply(change) {
         if (draft !== undefined) stop("invalid-state");

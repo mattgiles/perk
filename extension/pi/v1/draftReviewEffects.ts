@@ -158,6 +158,7 @@ function ownedReviewSession(
     readArtifact: (name) => session.readArtifact(name, { provenance: "strict" }),
     nodeClaim: () => session.nodeClaim(),
     activeObjective: () => session.activeObjective(),
+    activeSessionPlanRef: () => session.activeSessionPlanRef(),
     reviewPosts: () => session.reviewPosts(),
     writeArtifact(name, content) {
       if (name !== PLAN_DRAFT_ARTIFACT)

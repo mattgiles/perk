@@ -1,14 +1,18 @@
-// perk Pi extension — the session *interior*.
+// perk Pi extension — the session *interior*: the composition root.
 //
-// The tier-3 session-state mechanics (contracts.md §8.2/§8.3): claim PERK_RUN_ID on
+// The tier-3 session-state mechanics (contracts.md §8.2/§8.3) — claim PERK_RUN_ID on
 // `session_start` (verified-linkage), rebuild `perk:workflow-state` on `session_start` AND
-// `session_tree` (per-field LWW), and derive a child run_id on fork.
+// `session_tree` (per-field LWW), derive a child run_id on fork, reconcile the stage-gated plan
+// linkage — are OWNED by `session/lifecycle.ts` (identity arms + the two-phase startup facts +
+// the navigation facts). This file binds the production ports and keeps the Pi effects visibly
+// ORDERED: gate sync from the pure scope slice → claimed-only refinement import → the post-gate
+// facts → implementation pointer capture → feedback receiver sync → presentation/probe tail.
 
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createDraftReviewWaveState } from "./authoring/review/draftContext.ts";
-import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
+import { createHunkFeedbackReceiver, type HunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
 import { installAutomatedReviewBindings } from "./pi/v1/codeReview/automated.ts";
 import { installPrReviewBrowserBindings } from "./pi/v1/codeReview/browser.ts";
 import { installReviewWaveBindings } from "./pi/v1/codeReview/reviewWave.ts";
@@ -65,7 +69,9 @@ import {
   branchSessionStateStore,
   establishSessionIdentity,
   reflectSessionReadOnlyFloor,
-  resolveRunStage,
+  resolveSessionStartFacts,
+  sessionStartToolScope,
+  sessionTreeFacts,
 } from "./session/lifecycle.ts";
 import { createAgentScratchProvisioner, registerAgentScratch } from "./substrate/agentScratch.ts";
 import { registerBindingDelivery } from "./substrate/bindingDelivery.ts";
@@ -82,15 +88,13 @@ import {
 import { createChildIdentity } from "./substrate/childIdentity.ts";
 import { createChildRestrictions } from "./substrate/childRestrictions.ts";
 import { createContextPolicyInputs } from "./substrate/contextPolicy.ts";
-import { loadRegistry, type Registry, stageConsumesPlanRef } from "./substrate/registry.ts";
+import { loadRegistry, type Registry } from "./substrate/registry.ts";
 import { perkVersion, sharedDir, versionStamp } from "./substrate/resources.ts";
 import { mintRunId } from "./substrate/runId.ts";
 import { captureSessionPointer } from "./substrate/sessionPointers.ts";
 import { registerToolGating } from "./substrate/toolGating.ts";
 import {
-  appendWorkflowState,
   branchOf,
-  planRefsEqual,
   rebuildWorkflowState,
   WORKFLOW_STATE_TYPE,
   type WorkflowState,
@@ -147,6 +151,12 @@ export default function perk(
   options: {
     resolverEngine?: Pick<ConflictResolverEngineOptions, "preflight" | "configPath" | "acquire">;
     stackResolutionDelivery?: StackResolutionDelivery;
+    /**
+     * Construction-only: the hunk feedback receiver factory (default `createHunkFeedbackReceiver`).
+     * Constructed ONCE per activation exactly like production; the registered-path suites bind a
+     * recording receiver to observe the startup/navigation sync order and inputs.
+     */
+    feedbackReceiverFactory?: (pi: ExtensionAPI) => HunkFeedbackReceiver;
   } = {},
 ) {
   const version = perkVersion();
@@ -314,7 +324,7 @@ export default function perk(
   // globals). Synced from session_start/session_tree below; closed on session_shutdown so the
   // consumer lease releases with the session. A stale /reload predecessor instance is retired
   // by the lease fencing (fresh token per same-identity reacquire + verify-before-inject).
-  const feedbackReceiver = createHunkFeedbackReceiver(pi);
+  const feedbackReceiver = (options.feedbackReceiverFactory ?? createHunkFeedbackReceiver)(pi);
   pi.on("session_shutdown", async () => {
     submitConflict.shutdown();
     stackConflict.shutdown();
@@ -337,7 +347,6 @@ export default function perk(
     submitConflict.setContext(ctx);
     stackConflict.setContext(ctx);
     resolverContext = ctx;
-    const branchEntries = () => branchOf(ctx);
     const sessionFile = ctx.sessionManager.getSessionFile();
     const currentSessionId = sessionFile ? basename(sessionFile) : null;
 
@@ -356,7 +365,8 @@ export default function perk(
     // operation (session/lifecycle.ts owns the arms); this handler binds the production ports
     // and renders the outcome's per-arm problems/warnings with the exact report scopes the
     // arms always used. The strict appends keep reporting read-back failures through the
-    // strict-append seam's own loudness channel.
+    // strict-append seam's own loudness channel. The same cwd-bound handoff reader serves the
+    // post-gate facts below (ONE handoff authority).
     const identityPorts = {
       readHandoff: (runId: string) => readHandoff(ctx.cwd, runId),
       listRunIds: () => listRunIds(ctx.cwd),
@@ -392,25 +402,16 @@ export default function perk(
     }
     const decision = identity.decision;
     const minted = identity.arm === "minted";
-    let resolved: WorkflowState = identity.resolved;
 
-    // Reapply the read-only allowlist + stage scoping from the resolved mode/stage — FIRST,
-    // before the plan-ref/stage reconciliation below. `resolved.mode` is final once the
-    // claim/fork/none arms settle (the later blocks only touch `active_plan_ref` / capture
-    // pointers), and ordering the sync ahead of them guarantees no cache read or reconciliation
-    // failure can leave the gate unsynced (defense in depth on top of the total cache readers).
-    // The scope stage is the workflow-state `stage` key (§8.40): claim → the handoff-recorded
-    // stage just appended; keep/none → the branch-LWW stage; fork INHERITS the parent's stage (a
-    // forked implement session is an implement session); adopt NEVER impersonates (subagent
-    // children stay unscoped — their fresh branch carries no stage, so session_tree agrees). A
-    // failed claim leaves `resolved` empty → no stage → unscoped (stage scoping is fail-open).
-    // Fail-closed on the gate: if the sync throws, leave it as-is (a failed sync never opens it).
-    const scopeStage =
-      decision.action === "adopt"
-        ? undefined
-        : (resolved.stage ?? (decision.action === "fork" ? decision.state.stage : undefined));
+    // PHASE 1 — reapply the read-only allowlist + stage scoping from the established identity
+    // FIRST, before the fallible post-gate facts below. The scope derivation is pure (no store,
+    // handoff, registry, or checkout read), so no read failure can leave the gate unsynced
+    // (defense in depth on top of the total cache readers); `resolved.mode` is final once the
+    // arms settle. Fail-closed on the gate: if the sync throws, leave it as-is (a failed sync
+    // never opens it).
+    const toolScope = sessionStartToolScope(identity);
     try {
-      gating.syncFromState(resolved.mode, scopeStage);
+      gating.syncFromState(toolScope.mode, toolScope.stage);
     } catch (error) {
       console.error(`perk: tool-gating sync failed on session_start — ${error}`);
     }
@@ -419,50 +420,27 @@ export default function perk(
     // actual cold claim of an `objective-refine` handoff (never keep/fork/adopt/mint), after the
     // identity settled and the gate synced. A refusal is loud and leaves the session gated
     // without a usable context (no orphan repair, no reimport on reload).
-    if (identity.arm === "claimed" && typeof resolved.run_id === "string") {
-      importRefinementContextOnClaim(pi, ctx, { runId: resolved.run_id, stage: resolved.stage });
+    if (identity.arm === "claimed" && typeof identity.resolved.run_id === "string") {
+      importRefinementContextOnClaim(pi, ctx, {
+        runId: identity.resolved.run_id,
+        stage: identity.resolved.stage,
+      });
     }
 
-    // Plan-ref linkage (stage-gated): reconcile the cache.plan-ref file into
-    // active_plan_ref — but ONLY when the launched stage *consumes* the ref (its registry
-    // `requires`/`reads` list `cache.plan-ref`). That is the worktree binding stages
-    // (implement/submit/address/land/learn); the root `worktree: none` stages
-    // (plan/objective-plan/save) must NOT inherit the root *selector* into a fresh planning
-    // session. Idempotent by (provider, pr_id), strict read-back, headless-safe. Runs after the
-    // run_id claim so the run is settled first; the two append independent LWW fields.
-    // Reload/fork/tree (no launched stage) rely on the LWW rebuild — never re-read the file.
-    const linked = rebuildWorkflowState(branchEntries()).active_plan_ref ?? null;
-    const runStage = resolveRunStage(decision, identityPorts);
-    // Registry-missing is permissive when a stage is present, to preserve implement linkage.
-    const consumesPlanRef =
-      runStage !== null && (registry === null || stageConsumesPlanRef(registry, runStage));
-    if (consumesPlanRef) {
-      const cachedRef = readPlanRef(ctx.cwd);
-      if (cachedRef !== null) {
-        if (planRefsEqual(linked, cachedRef)) {
-          resolved = { ...resolved, active_plan_ref: linked };
-        } else {
-          if (
-            appendWorkflowState(pi, ctx, {
-              data: { active_plan_ref: cachedRef },
-              field: "active_plan_ref",
-              expected: cachedRef,
-              scope: "workflow-state linkage error",
-              failure: `plan-ref read-back failed for ${cachedRef.provider}:${cachedRef.pr_id}`,
-              equals: planRefsEqual,
-            })
-          ) {
-            resolved = { ...resolved, active_plan_ref: cachedRef };
-          }
-        }
-      } else if (linked !== null) {
-        resolved = { ...resolved, active_plan_ref: linked };
-      }
-    } else if (linked !== null) {
-      // Non-consuming stage (or no launched stage): preserve any already-linked ref via LWW,
-      // but NEVER read the cache file — the root selector must not leak in.
-      resolved = { ...resolved, active_plan_ref: linked };
-    }
+    // PHASE 2 — the post-gate facts (session/lifecycle.ts owns the decision tree): the lazy,
+    // stage-gated `cache.plan-ref` → `active_plan_ref` reconciliation (only a launched stage
+    // that *consumes* the ref reads the checkout; claim/keep read the handoff, fork/adopt/none
+    // never do; one strict verified append, idempotent by (provider, pr_id)), plus the derived
+    // implementation-capture and receiver inputs. Called HERE — after the gate and the
+    // refinement import — never while constructing gate inputs. A throwing branch/handoff read
+    // propagates to Pi's hook error boundary with the gate already synced: unreadability is
+    // never turned into confirmed absence, and no later effect runs from guessed facts.
+    const facts = resolveSessionStartFacts(
+      stateStore,
+      { readHandoff: identityPorts.readHandoff, readPlanRef: () => readPlanRef(ctx.cwd) },
+      { identity, registry, currentSessionId },
+    );
+    const resolved: WorkflowState = facts.resolved;
 
     // Implementation session pointer (contracts.md §8.35): an implement session self-keys its own
     // session file into the shared main checkout so a later/other session resolves it cross-run.
@@ -472,16 +450,14 @@ export default function perk(
     // First-write-wins (`preserveForeign`): this is the corroborated shadowing defect site — the
     // claimer's original capture stays authoritative, and any future shadow vector warns loudly
     // instead of silently corrupting /learn evidence.
-    const implStage =
-      runStage ?? (decision.action === "fork" ? (decision.state.stage ?? null) : null);
-    if (resolved.run_id && implStage === "implement") {
+    if (facts.implementationCapture !== null) {
       captureSessionPointer({
         cwd: ctx.cwd,
-        runId: resolved.run_id,
+        runId: facts.implementationCapture.runId,
         klass: "implementation",
         site: "main",
         sessionFile,
-        parentSessionId: decision.action === "fork" ? (decision.state.pi_session_id ?? null) : null,
+        parentSessionId: facts.implementationCapture.parentSessionId,
         preserveForeign: true,
       });
     }
@@ -491,14 +467,7 @@ export default function perk(
     // outbox. Eligibility (interactive TUI + implement stage + non-adopted + settled identity +
     // plan-ref match against one fresh cache read) is evaluated inside sync; every ineligible
     // shape closes any open inbox. Never throws (the controller contains its own failures).
-    feedbackReceiver.sync(ctx, {
-      stage: implStage,
-      adopted: decision.action === "adopt",
-      runId: resolved.run_id ?? null,
-      piSessionId: currentSessionId,
-      activePlanRef: resolved.active_plan_ref ?? null,
-      mode: ctx.mode ?? null,
-    });
+    feedbackReceiver.sync(ctx, { ...facts.feedback, mode: ctx.mode ?? null });
 
     // Soft version-parity drift signal: pi can lazy-install / load a stale `npm:@mgiles/perk`, so the
     // extension actually running may differ from the `perk` CLI that launched it. The local launch
@@ -565,25 +534,22 @@ export default function perk(
   pi.on("session_tree", async (_event, ctx) => {
     stackConflict.setContext(ctx);
     resolverContext = ctx;
+    // ONE fresh full-branch rebuild; the navigation facts derive purely from it (no handoff/
+    // checkout read, claim, linkage, or capture on navigation — session/lifecycle.ts owns the
+    // asymmetry with startup).
     const state = rebuildWorkflowState(branchOf(ctx));
+    const facts = sessionTreeFacts(state);
     // Non-negotiable: re-sync the gate + stage scoping on tree navigation too (mode and stage are
     // per-field LWW — the branch-rebuilt stage is the §8.40 key). Fail-closed on the gate.
     try {
-      gating.syncFromState(state.mode, state.stage);
+      gating.syncFromState(facts.toolScope.mode, facts.toolScope.stage);
     } catch (error) {
       console.error(`perk: tool-gating sync failed on session_tree — ${error}`);
     }
-    // Re-sync the feedback receiver from the LWW-rebuilt state (§8.58). `adopted: false` is
-    // right here: an env-adopted child's fresh branch carries no stage, so the stage gate
-    // alone keeps it inert on tree navigation.
-    feedbackReceiver.sync(ctx, {
-      stage: state.stage ?? null,
-      adopted: false,
-      runId: state.run_id ?? null,
-      piSessionId: state.pi_session_id ?? null,
-      activePlanRef: state.active_plan_ref ?? null,
-      mode: ctx.mode ?? null,
-    });
+    // Re-sync the feedback receiver from the LWW-rebuilt state (§8.58) — gate first, then
+    // receiver; `adopted: false` is right here: an env-adopted child's fresh branch carries no
+    // stage, so the stage gate alone keeps it inert on tree navigation.
+    feedbackReceiver.sync(ctx, { ...facts.feedback, mode: ctx.mode ?? null });
     if (process.env.PERK_SELFCHECK) {
       writeT3Sentinel(ctx.cwd, "tree", state, ctx.mode ?? null);
     }

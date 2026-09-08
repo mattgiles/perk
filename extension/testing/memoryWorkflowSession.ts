@@ -63,7 +63,8 @@ export interface MemoryWorkflowSession extends WorkflowSession {
 export function openMemoryWorkflowSession(opts: {
   runId: string | null;
   nodeClaim?: { objective: string; node: string } | null;
-  activePlanRef?: PlanRef | null;
+  /** Deliberately wide: malformed-linkage fixtures seed persisted shapes the decode must refuse. */
+  activePlanRef?: unknown;
   activeObjective?: string | null;
   reviewPosts?: ReviewPostRow[];
 }): MemoryWorkflowSession {
