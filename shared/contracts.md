@@ -4285,10 +4285,16 @@ Structured objective/gist Direct Edits remains revision/no-save. Plan title gene
 binding/save-started checkpoint; captured warm node argv and frozen original/verified patched bytes
 remain authoritative. Successful receipt/gate facts survive failed later bookkeeping, without replay.
 Both browser cores and chooser delegations use the same subject-specific completions and
-claim-bound capabilities. Their code-authored `<!-- perk:draft-review-dispatch:<dispatch_id> -->`
-marker is a separate text block outside untrusted feedback. The complete content expectation is
-verified before exactly one idle/followUp send; exclusion is then released without waiting for
-queue persistence. Only later exact persisted user-role evidence completes delivery. Readiness
+claim-bound capabilities. Their user-carrier content is ONE canonical text block: every text block
+of the completion result joined in order by `"\n"` (verbatim bytes, no trimming), then the
+code-authored `<!-- perk:draft-review-dispatch:<dispatch_id> -->` marker after the final
+`</untrusted_reviewer_feedback>` delimiter — the same single-block representation Pi's
+`sendUserMessage`/prompt path persists. That block is constructed before the expectation is
+recorded and sent unchanged; the complete content expectation is verified before exactly one
+idle/followUp send; exclusion is then released without waiting for queue persistence. Only later
+exact persisted user-role evidence completes delivery. This construction applies to new
+dispatches only: retained dispatch/uncertain records from earlier representations are never
+migrated, replayed, or automatically consumed (human reconciliation below). Readiness
 degradation uses the review's request/review/run identity and verifies invalidation before
 announcing fallback. The same review's already verified handshake-failed/subscription-failed
 invalidation also satisfies that check without rewriting its reason; no other terminal state does.
@@ -4466,9 +4472,13 @@ writeback participate as described above.
 
 Delivery marker is dispatch_id in tool `details.draft_review_dispatch`; expectation binds actual
 toolCallId. User marker is exactly `<!-- perk:draft-review-dispatch:<dispatch_id> -->`, authored
-outside untrusted feedback by `pi/v1/draftReviewRendering.ts`. Delivery encoding is UTF-8
-`"perk/draft-review-delivery/v1\n" + JSON.stringify(blocks)`: a string becomes one text block;
-text arrays reconstruct type/text keys, preserving block order/bytes; nontext cannot acknowledge.
+outside untrusted feedback by `pi/v1/draftReviewRendering.ts`. User-carrier construction (that
+renderer's concern) canonicalizes the result's text blocks plus the marker into one
+newline-joined text block before the expectation is recorded; the tool carrier keeps the result
+content unchanged. Delivery encoding (the digest's concern) stays block-preserving and is not
+normalized: UTF-8 `"perk/draft-review-delivery/v1\n" + JSON.stringify(blocks)`, where a string
+becomes one text block; text arrays reconstruct type/text keys, preserving block order/bytes;
+nontext cannot acknowledge.
 Evidence requires a persisted matching-role message entry with exact whole-content digest and
 marker; tools also require plan_review and toolCallId. message_end/send spies/assistant quotes do
 not count. Observe only this activation's expectations, before guarded operations and through
@@ -4566,8 +4576,9 @@ refusal renderer preserves those facts and prohibits blind save retry.
 Stale-reference bypasses the subject completion callback entirely. The shared renderer includes
 the exact reviewed source digest and verbatim `<untrusted_reviewer_feedback>` delimiters, labels
 feedback diagnostic-only DATA, and explicitly prohibits apply/patch/fold/save against the current
-draft. The user marker is a separate code-authored text block outside that DATA. This includes
-attached parameter reviews followed by a sound artifact, even with identical bytes.
+draft. On the user carrier the code-authored marker is joined after that DATA's final delimiter
+into the same canonical single text block. This includes attached parameter reviews followed by
+a sound artifact, even with identical bytes.
 
 The activation binds the first verified cwd/session ID/current run; later contexts must match
 before any observation or guarded operation. Switch/fork/unavailable identity ends local liveness,

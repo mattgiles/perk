@@ -87,9 +87,15 @@ Cancellation closes only local transport, not the upstream browser. No polling, 
 automatic replay or resume exists. Draft/manual-save/node entries and first-party
 replacement/writeback require a verified current-run claim; editor waits release it. Missing
 identity is not an unclaimed save fallback. All Plannotator tool/browser completions and chooser
-delegations verify intent before effects. Actual toolCallId/exact result content, or a
-code-authored browser HTML receipt marker outside untrusted feedback, binds the delivery
-expectation before return/send. Only an exact later persisted entry acknowledges delivery.
+delegations verify intent before effects. Actual toolCallId/exact result content, or — for browser
+decisions — one canonical user text block (the feedback plus a code-authored HTML receipt marker
+after the final untrusted-feedback delimiter, the single block Pi persists for a sent user
+message), binds the delivery expectation before return/send; the block is sent unchanged. Only
+exact persisted evidence acknowledges delivery: a later entry whose whole content matches the
+recorded expectation, never send/return or a marker alone. This applies to new dispatches only —
+a review already stuck in `dispatch`/`uncertain` is not migrated or automatically consumed;
+follow `docs/user-docs/how-to/reconcile-a-draft-review-stop.md`, and never retry a confirmed
+approval save merely because delivery confirmation failed.
 Stale decisions carry only diagnostic DATA, never current-draft apply/fold/save instructions.
 Readiness fallback requires verified invalidation: degraded, or the same review's already recorded
 handshake/subscription failure. Transport failures reach one fallback notice before local cleanup,
