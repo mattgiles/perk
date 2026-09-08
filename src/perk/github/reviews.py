@@ -508,7 +508,7 @@ def _local_pr_diff(
         if reason == "too-large"
         else "a local diff was requested (--local)"
     )
-    if not base_ref:
+    if base_ref is None or not base_ref.strip():
         raise _exec.GitHubError(
             f"failed to read the diff for PR #{pr_number}: {cause}, and the PR payload carries "
             "no base branch for the local merge-base diff"

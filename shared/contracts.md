@@ -1302,9 +1302,12 @@ get_pr_review_context{ pr_number, branch, plan_body, local_diff? } -> PrReviewCo
     # + `refs/heads/{base}` into a per-invocation `refs/perk/review-ctx/<uuid>/` namespace →
     # merge-base (GitHub's 3-dot base) → `diff_range`; both refs deleted best-effort in a
     # finally (a failed delete is warned, never masks the result); objects are fetched into
-    # refs, never checked out or executed. The result is stamped `diff_source: "local-git"`
-    # (`"github"` on the default path). A git failure or a PR payload without a base ref is a
-    # `GitHubError` naming the ACTUAL trigger (the 406 vs. the request) — a forced `--local`
+    # refs, never checked out or executed. `fetch_refspecs` passes `--no-write-fetch-head`
+    # (nobody reads FETCH_HEAD; it is the ONE file every worktree's fetch would otherwise
+    # lock), so concurrently falling-back lanes touch nothing shared. The result is stamped
+    # `diff_source: "local-git"` (`"github"` on the default path). A git failure or a PR
+    # payload without a base ref (absent, null, or blank) is a `GitHubError` naming the
+    # ACTUAL trigger (the 406 vs. the request) — a forced `--local`
     # never claims a 406; every other `gh pr diff` failure raises exactly as before. GitHub's
     # diff stays the default; the local path is never routed to unconditionally.
     # `diff_range` is the hardened, config-pinned review diff for every local rendering:

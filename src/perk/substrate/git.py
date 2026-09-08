@@ -403,8 +403,13 @@ def fetch_refspecs(
     or a bare branch name — the bare form also updates the remote-tracking ref
     (``refs/remotes/<remote>/<branch>``), the behavior ``detect_merge_conflicts`` relies on for
     its ``git fetch origin <base>`` step. Uses the generous network ``timeout`` like ``fetch``.
+
+    ``--no-write-fetch-head``: every caller names its destination refs explicitly, and nobody
+    reads ``FETCH_HEAD`` (perk treats it as clobber-racy by design). Writing it would lock the
+    ONE ``FETCH_HEAD`` a repo's worktrees share, so concurrent callers fetching into otherwise
+    private ref namespaces (parallel reviewer lanes) could fail on ``FETCH_HEAD.lock``.
     """
-    _run(["fetch", remote, *refspecs], cwd=repo, timeout=timeout)
+    _run(["fetch", "--no-write-fetch-head", remote, *refspecs], cwd=repo, timeout=timeout)
 
 
 def checkout_branch(repo: Path, name: str) -> None:
@@ -698,18 +703,19 @@ def pr_merge_base_diff(repo: Path, *, pr_number: int, base_ref: str) -> str:
     ``refs/heads/<base_ref>`` from ``origin`` into a per-invocation private ref namespace,
     find their merge-base, and return :func:`diff_range` over it.
 
-    The local twin of GitHub's PR diff, for when GitHub refuses to render one (its diff media
-    type 406s above 20,000 lines / 300 files) or the caller asks for a local rendering. The
-    merge-base is the 3-dot base GitHub's PR diff uses, so the two-dot ``diff_range`` over it
-    equals GitHub's merge-base diff, with ``diff_range``'s config pins holding the rendering
-    to GitHub's. Objects are fetched into refs, never checked out or executed.
+    Pure git mechanics — the forge-side policy (WHEN a locally rendered PR diff replaces the
+    forge's, and how that is disclosed) belongs to the caller (the GitHub gateway). The
+    merge-base is the 3-dot base a PR diff renders against, so the two-dot ``diff_range`` over
+    it equals the forge's merge-base diff, with ``diff_range``'s config pins holding the
+    rendering steady. Objects are fetched into refs, never checked out or executed.
 
     The namespace ``refs/perk/review-ctx/<uuid>`` is private per invocation: worktrees share
     ONE ref store, so concurrent reviewer lanes must never touch a shared ref name (one lane
-    would clobber or delete another's ref mid-read). Both temp refs are deleted best-effort in
-    a ``finally``; a failed delete is reported via ``log_warn`` and never masks the read's
-    result or exception. A network op (the fetch timeout). Raises ``GitError`` when the fetch
-    fails, the fetched head does not resolve, or the histories share no ancestor.
+    would clobber or delete another's ref mid-read); the fetch itself writes no ``FETCH_HEAD``
+    (see :func:`fetch_refspecs`). Both temp refs are deleted best-effort in a ``finally``; a
+    failed delete is reported via ``log_warn`` and never masks the read's result or exception.
+    A network op (the fetch timeout). Raises ``GitError`` when the fetch fails, the fetched head
+    does not resolve, or the histories share no ancestor.
     """
     namespace = f"refs/perk/review-ctx/{uuid.uuid4().hex[:12]}"
     head_ref = f"{namespace}/head"

@@ -917,6 +917,135 @@ def test_diff_range_pins_the_rendering_against_user_config(git_repo):
     assert "@@ -2,7 +2,7 @@" in out  # three context lines either side of line 5
 
 
+# The canonical frame-shift case (Cohen's patience-diff example): Myers pairs the two functions'
+# shared braces line-by-line and reports `// Frobs foo heartily` as deleted-then-re-added, while
+# patience/histogram keep it as unchanged context — so the algorithm is observable in the output.
+_FRAME_SHIFT_V1 = """#include <stdio.h>
+
+// Frobs foo heartily
+int frobnitz(int foo)
+{
+    int i;
+    for(i = 0; i < 10; i++)
+    {
+        printf("Your answer is: ");
+        printf("%d\\n", foo);
+    }
+}
+
+int fact(int n)
+{
+    if(n > 1)
+    {
+        return fact(n-1) * n;
+    }
+    return 1;
+}
+
+int main(int argc, char **argv)
+{
+    frobnitz(fact(10));
+}
+"""
+_FRAME_SHIFT_V2 = """#include <stdio.h>
+
+int fib(int n)
+{
+    if(n > 2)
+    {
+        return fib(n-1) + fib(n-2);
+    }
+    return 1;
+}
+
+// Frobs foo heartily
+int frobnitz(int foo)
+{
+    int i;
+    for(i = 0; i < 10; i++)
+    {
+        printf("%d\\n", foo);
+    }
+}
+
+int main(int argc, char **argv)
+{
+    frobnitz(fib(10));
+}
+"""
+
+
+def test_diff_range_pins_color_algorithm_and_rename_detection(git_repo):
+    """The remaining rendering pins, each proven live by a raw diff first: ``color.ui=always``
+    would inject ANSI escapes into the unified diff, ``diff.algorithm=patience`` moves hunk
+    content, and ``diff.renames=false`` renders a rename as a delete + add."""
+    (git_repo / "h.c").write_text(_FRAME_SHIFT_V1, encoding="utf-8")
+    _git(git_repo, "add", ".")
+    _git(git_repo, "commit", "-qm", "h1")
+    h1 = _sha(git_repo)
+    (git_repo / "h.c").write_text(_FRAME_SHIFT_V2, encoding="utf-8")
+    _git(git_repo, "add", ".")
+    _git(git_repo, "commit", "-qm", "h2")
+    h2 = _sha(git_repo)
+    _git(git_repo, "mv", "h.c", "moved.c")
+    _git(git_repo, "commit", "-qm", "mv")
+    h3 = _sha(git_repo)
+    _git(git_repo, "config", "color.ui", "always")
+    _git(git_repo, "config", "diff.algorithm", "patience")
+    _git(git_repo, "config", "diff.renames", "false")
+
+    # Controls: every knob is live under a raw diff.
+    raw_edit = _git(git_repo, "diff", h1, h2)
+    assert "\x1b[" in raw_edit
+    assert "-// Frobs foo heartily" not in raw_edit  # patience: the comment is context
+    raw_move = _git(git_repo, "diff", h2, h3)
+    assert "deleted file mode" in raw_move and "rename from" not in raw_move
+
+    edit = git.diff_range(git_repo, h1, h2)
+    assert "\x1b[" not in edit
+    assert "-// Frobs foo heartily\n" in edit and "+// Frobs foo heartily\n" in edit  # Myers
+    move = git.diff_range(git_repo, h2, h3)
+    assert "rename from h.c\nrename to moved.c\n" in move
+    assert "deleted file mode" not in move
+
+
+def test_diff_range_and_fetch_refspecs_pin_their_argv(monkeypatch, tmp_path):
+    seen: list[list[str]] = []
+
+    def _record(argv, *, cwd=None, timeout=None, **_kwargs):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _record)
+    git.diff_range(tmp_path, "BASE", "HEAD")
+    git.fetch_refspecs(tmp_path, ["+refs/pull/7/head:refs/perk/x/head", "main"])
+    assert seen == [
+        [
+            "git",
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+            "--unified=3",
+            "--diff-algorithm=myers",
+            "--find-renames",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            "BASE",
+            "HEAD",
+        ],
+        # --no-write-fetch-head: the shared FETCH_HEAD is never locked by a temp-ref fetch.
+        [
+            "git",
+            "fetch",
+            "--no-write-fetch-head",
+            "origin",
+            "+refs/pull/7/head:refs/perk/x/head",
+            "main",
+        ],
+    ]
+
+
 def test_pr_merge_base_diff_renders_the_merge_base_diff_and_cleans_up(git_repo_with_remote):
     clone, _remote, advance_origin = git_repo_with_remote
     _git(clone, "checkout", "-qb", "feature")
@@ -935,6 +1064,8 @@ def test_pr_merge_base_diff_renders_the_merge_base_diff_and_cleans_up(git_repo_w
     assert "+from the pr" in out
     assert "advanced" not in out  # the base-only change is not part of the PR's diff
     assert git.list_refs(clone, "refs/perk/") == []
+    # The fetch touched only the private namespace — never the worktree-shared FETCH_HEAD.
+    assert not (clone / ".git" / "FETCH_HEAD").exists()
 
 
 def test_pr_merge_base_diff_unknown_pr_raises_and_leaves_no_refs(git_repo_with_remote):
