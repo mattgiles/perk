@@ -257,6 +257,80 @@ for (const hasUI of [true, false]) {
   });
 }
 
+test("collect: a failed lane that STREAMED and submitted a nonempty report stays a failure; its sibling successes (including a valid empty lane) stay covered and no failed report is promoted", async () => {
+  // The incident shape at the tool boundary: the risk lane pushed provisional batches
+  // (`streamed: true`) and submitted four concerns, then the supplier failed its completion. The
+  // aggregate exposes the failure with the supplier's detail; the report beside it is never a
+  // covered report, so the parent's reconcile must CLEAR that lane's provisional source (the
+  // annotation seam's `replace: true, findings: []`) rather than finalize it.
+  const finding = { phrase: "Step one.", severity: "major", confidence: "high", body: "defect" };
+  const failedReport = {
+    angle: "risk",
+    summary: "four concerns",
+    findings: [finding, finding, finding, finding],
+    fyi: [],
+    streamed: true,
+  };
+  const supplierDetail =
+    "Subagent completed without making edits for an implementation task.\nIt appears to have returned planning or scratchpad output instead of applying changes.";
+  const entries = [
+    {
+      key: "grounding",
+      ok: true,
+      error: null,
+      report: { angle: "grounding", summary: "one", findings: [finding], fyi: [], streamed: true },
+    },
+    {
+      key: "scope",
+      ok: true,
+      error: null,
+      report: { angle: "scope", summary: "clean", findings: [], fyi: [], streamed: false },
+    },
+    { key: "risk", ok: false, error: supplierDetail, report: failedReport },
+    {
+      key: "ponytail",
+      ok: true,
+      error: null,
+      report: { angle: "ponytail", summary: "clean", findings: [], fyi: [], streamed: true },
+    },
+  ];
+  const adapter = createMemoryWaveAdapter({ aggregate: { state: "complete", value: entries } });
+  const wave = reportWaveOver(adapter);
+  const state = primePlan();
+  const { target, notified } = fakeTarget();
+  await executeStartDraftReviewWave(state, wave, target, {
+    angles: ["grounding", "scope", "risk"],
+  });
+  const collected = await executeCollectDraftReviewWave(state, wave, target);
+  assert.equal(collected.details.ok, true);
+  if (!collected.details.ok) return;
+  assert.equal(collected.details.complete, false, "strict: one failed lane is incomplete");
+  assert.deepEqual(collected.details.covered, ["grounding", "scope", "ponytail"]);
+  assert.deepEqual(
+    collected.details.reports.map((r) => r.key),
+    ["grounding", "scope", "ponytail"],
+    "the valid empty lane is covered; the failed lane's report is never promoted",
+  );
+  assert.equal(JSON.stringify(collected.details.reports).includes("four concerns"), false);
+  assert.deepEqual(collected.details.failures, [
+    { key: "risk", reason: "lane-failed", detail: supplierDetail },
+  ]);
+  const text = collected.content[0]?.text ?? "";
+  assert.match(text, /Draft-review wave INCOMPLETE: covered 3\/4 lane\(s\)\./);
+  assert.match(text, /no provisional batches \(no findings\): scope/);
+  assert.doesNotMatch(text, /completion-only findings/, "no streamed:false nonempty lane");
+  assert.ok(
+    notified.some(
+      (n) =>
+        n.severity === "warning" &&
+        n.message.includes("uncovered lane(s): risk") &&
+        n.message.includes("lane-failed") &&
+        n.message.includes("Subagent completed without making edits"),
+    ),
+    JSON.stringify(notified),
+  );
+});
+
 // --- decodeStartDraftReviewWaveParams: strict whole-refusal decode ----------------------------
 
 test("decodeStartDraftReviewWaveParams accepts valid 2- and 3-angle selections (none mandatory)", () => {

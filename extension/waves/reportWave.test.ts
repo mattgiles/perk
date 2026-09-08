@@ -924,6 +924,69 @@ test("wave.run: a failed lane is incomplete under strict, complete under best-ef
   ]);
 });
 
+test("wave.run: an ok:false lane carrying a schema-shaped NONEMPTY report stays lane-failed — never covered, never a report, strict incomplete", async () => {
+  // The incident shape: a child submitted a valid, nonempty report and the supplier STILL failed
+  // the lane (completion policy). The engine's terminal classification is authoritative — a
+  // report artifact beside a failed lane is diagnostic, never a promotion to coverage.
+  const submitted = {
+    angle: "grounding",
+    streamed: true,
+    summary: "four concerns",
+    findings: [{ phrase: "x", severity: "major", confidence: "high", body: "concern" }],
+    fyi: [],
+  };
+  const aggregate = {
+    state: "complete",
+    value: [
+      okEntry("plan-fidelity", { verdict: "clean" }),
+      {
+        key: "correctness",
+        ok: false,
+        error:
+          "Subagent completed without making edits for an implementation task.\nIt appears to have returned planning or scratchpad output instead of applying changes.",
+        report: submitted,
+      },
+    ],
+  };
+  const strict = await reportWaveOver(createMemoryWaveAdapter({ aggregate })).run(makeSpec());
+  assert.equal(strict.complete, false, "strict coverage is incomplete");
+  assert.deepEqual(strict.reports, [{ key: "plan-fidelity", report: { verdict: "clean" } }]);
+  assert.deepEqual(strict.failures, [
+    {
+      key: "correctness",
+      reason: "lane-failed",
+      detail:
+        "Subagent completed without making edits for an implementation task.\nIt appears to have returned planning or scratchpad output instead of applying changes.",
+    },
+  ]);
+  assert.equal(
+    JSON.stringify(strict.reports).includes("four concerns"),
+    false,
+    "the submitted report never leaks into the covered reports",
+  );
+  // An ok:false lane with NO error detail and a report is still lane-failed (never malformed,
+  // never promoted on the report's presence).
+  const silent = await reportWaveOver(
+    createMemoryWaveAdapter({
+      aggregate: {
+        state: "complete",
+        value: [
+          okEntry("plan-fidelity", { verdict: "clean" }),
+          { key: "correctness", ok: false, error: null, report: submitted },
+        ],
+      },
+    }),
+  ).run(makeSpec());
+  assert.deepEqual(silent.failures, [
+    {
+      key: "correctness",
+      reason: "lane-failed",
+      detail: "lane 'correctness' failed without error detail",
+    },
+  ]);
+  assert.equal(silent.reports.length, 1);
+});
+
 test("wave.run: Ponytail preflight success without a report stays uncovered", async () => {
   const ponytail: ReportAssignment = {
     key: "ponytail",
