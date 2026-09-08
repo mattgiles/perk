@@ -274,12 +274,16 @@ export const READ_ONLY_TOOLS = [
 export const REFINE_STAGE_ID = "objective-refine";
 
 /**
- * The refinement session's gate-ON selection (contracts.md §8.67): read / research / question
+ * The refinement session's gate-ON selection (contracts.md §8.68): read / research / question
  * / local exploration, the backend-neutral review door, and the ONE refinement draft writer.
  * Deliberately NOT READ_ONLY_TOOLS: no `objective_node` (a refinement never claims), no other
  * draft tools (no plan/objective/gist artifact can be authored or routed from here), no save
- * tools, no delegation spawn surface (children are unscoped by design). Same static-name
- * posture as READ_ONLY_TOOLS; `setActiveTools` ignores absent names.
+ * tools, no delegation spawn surface (children are unscoped by design) — and consequently no
+ * SUBAGENT_CHILD_TOOLS either: a child that inherited `stage: objective-refine` would lose
+ * `structured_output`/`contact_supervisor` under this allowlist. Unreachable today (no perk wave
+ * spawns from a refinement session; the lifecycle test pins `gatedToolsFor(stage)`) — revisit
+ * the moment refinement gains any delegation. Same static-name posture as READ_ONLY_TOOLS;
+ * `setActiveTools` ignores absent names.
  */
 export const REFINEMENT_READ_ONLY_TOOLS: readonly string[] = [
   "read",
@@ -448,7 +452,7 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
  *    review arm; the drive-coverage guard forces both the moment the guidance names them).
  */
 export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
-  // The isolated refinement stage (contracts.md §8.67): the gate-OFF (defensive) arm scopes the
+  // The isolated refinement stage (contracts.md §8.68): the gate-OFF (defensive) arm scopes the
   // draft writer + the review door + research only — no PR-loop, save, claim or other draft
   // tools. The session normally runs GATED, where REFINEMENT_READ_ONLY_TOOLS is the set.
   [REFINE_STAGE_ID]: [
