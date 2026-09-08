@@ -490,7 +490,7 @@ def test_get_pr_diff_other_failure_raises(monkeypatch):
 
 # --- the large-PR fallback (GitHub's 406 too_large → the local merge-base diff) ---------------
 
-# The live-observed gh 2.x shape for the line cap (PR #2311: 107 files, ~22k diff lines).
+# The live-observed gh 2.x shape for the line cap (a 107-file, ~22k-line PR).
 _TOO_LARGE_LINES = (
     "could not find pull request diff: HTTP 406: Sorry, the diff exceeded the maximum number "
     "of lines (20000) (https://api.github.com/repos/octo/repo/pulls/42)\n"
