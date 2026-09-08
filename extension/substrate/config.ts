@@ -128,8 +128,8 @@ function unescapeBasic(raw: string): string {
  * Parse the narrow TOML subset perk consumes. Returns `{ tables, arrays }`: `tables` is a
  * `{ section: { key: scalar } }` map (top-level keys under the `""` section); `arrays` is a
  * `{ name: [{ key: scalar }, ...] }` map fed by `[[name]]` array-of-tables. Scalars are quoted
- * strings, native `true`/`false` booleans, and numeric literals; anything else is skipped —
- * this is intentionally NOT a full TOML parser.
+ * strings (basic `"…"`/`"""…"""` and literal `'…'`/`'''…'''`), native `true`/`false` booleans,
+ * and numeric literals; anything else is skipped — this is intentionally NOT a full TOML parser.
  */
 export function parseTomlSubset(text: string): TomlSubset {
   const root: Record<string, TomlScalar> = {};
@@ -171,17 +171,19 @@ export function parseTomlSubset(text: string): TomlSubset {
     const value = line.slice(eq + 1).trim();
     if (key === "") continue;
 
-    // Multi-line basic string: """ ... """ (possibly spanning lines).
-    if (value.startsWith('"""')) {
+    // Multi-line strings: basic `""" ... """` (escapes honoured) or literal `''' ... '''`
+    // (bytes verbatim), possibly spanning lines.
+    const multi = value.startsWith('"""') ? '"""' : value.startsWith("'''") ? "'''" : null;
+    if (multi) {
       let body = value.slice(3);
-      if (body.endsWith('"""') && body.length >= 3) {
+      if (body.endsWith(multi) && body.length >= 3) {
         body = body.slice(0, -3);
       } else {
         const parts: string[] = [body];
         i++;
         for (; i < lines.length; i++) {
           const raw = lines[i] ?? "";
-          const end = raw.indexOf('"""');
+          const end = raw.indexOf(multi);
           if (end !== -1) {
             // A bare closing delimiter on its own line contributes no trailing content (so the
             // newline that precedes it is not appended as an empty segment).
@@ -194,7 +196,7 @@ export function parseTomlSubset(text: string): TomlSubset {
         // A leading newline immediately after the opening delimiter is trimmed (TOML rule).
         if (body.startsWith("\n")) body = body.slice(1);
       }
-      dest[key] = unescapeBasic(body);
+      dest[key] = multi === '"""' ? unescapeBasic(body) : body;
       continue;
     }
 
@@ -202,6 +204,13 @@ export function parseTomlSubset(text: string): TomlSubset {
     const basic = value.match(/^"((?:[^"\\]|\\.)*)"/);
     if (basic) {
       dest[key] = unescapeBasic(basic[1] ?? "");
+      continue;
+    }
+
+    // Single-line literal string: '...' (no escapes; a trailing inline comment is dropped).
+    const literal = value.match(/^'([^']*)'/);
+    if (literal) {
+      dest[key] = literal[1] ?? "";
       continue;
     }
 
@@ -389,12 +398,34 @@ export const GITHUB_ISSUE_BACKEND_ID: IssueBackendId = "github";
  * because the TS plane only renders prompts — it never writes canonical issues.
  */
 export function resolveIssueBackendId(cwd: string): IssueBackendId {
+  const backend = resolveIssueDestination(cwd).backend;
+  if (backend === "github" || backend === "linear") return backend;
+  return GITHUB_ISSUE_BACKEND_ID;
+}
+
+/** The committed `[issues]` routing keys — where a save is written and (Linear) which team owns it. */
+export interface IssueDestination {
+  backend: string | null;
+  team: string | null;
+}
+
+/**
+ * Read the committed main-checkout `[issues] backend`/`team` values verbatim (no validation, no
+ * default): the two keys that decide where the Python save lands (`perk/backends/resolve.py`).
+ * Committed `.perk/config.toml` only (never the `local.toml` overlay), anchored to the MAIN
+ * checkout like `resolveIssueBackendId`. A non-string value → `null` for that key; a read
+ * failure → both `null`. Callers wanting the fail-safe backend id use `resolveIssueBackendId`.
+ */
+export function resolveIssueDestination(cwd: string): IssueDestination {
   try {
-    const committed = readTomlFile(configFile(mainCheckoutRoot(cwd)));
-    const backend = committed.tables.issues?.backend;
-    if (backend === "github" || backend === "linear") return backend;
-    return GITHUB_ISSUE_BACKEND_ID;
+    const issues = readTomlFile(configFile(mainCheckoutRoot(cwd))).tables.issues;
+    const backend = issues?.backend;
+    const team = issues?.team;
+    return {
+      backend: typeof backend === "string" ? backend : null,
+      team: typeof team === "string" ? team : null,
+    };
   } catch {
-    return GITHUB_ISSUE_BACKEND_ID;
+    return { backend: null, team: null };
   }
 }

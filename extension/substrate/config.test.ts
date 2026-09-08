@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -12,6 +12,7 @@ import {
   parseCiChecks,
   parseTomlSubset,
   resolveIssueBackendId,
+  resolveIssueDestination,
   subagentModel,
 } from "./config.ts";
 
@@ -51,6 +52,89 @@ test("parseTomlSubset: multi-line basic string", () => {
   );
   assert.equal(t.tables.workflow?.plan_authoring, "line one\nline two");
 });
+
+test("parseTomlSubset: single-line literal strings (no escapes; inline comment dropped)", () => {
+  const t = parseTomlSubset(
+    [
+      "[issues]",
+      "backend = 'linear'",
+      "team = 'C:\\ENG' # keep the backslash",
+      "quote = 'a \"b\" c'",
+    ].join("\n"),
+  );
+  assert.equal(t.tables.issues?.backend, "linear");
+  assert.equal(t.tables.issues?.team, "C:\\ENG");
+  assert.equal(t.tables.issues?.quote, 'a "b" c');
+});
+
+test("parseTomlSubset: multi-line literal strings (bytes verbatim; leading newline trimmed)", () => {
+  const t = parseTomlSubset(
+    [
+      "[a]",
+      "inline = '''one line'''",
+      "spanning = '''",
+      "first \\n stays",
+      "second",
+      "'''",
+      "after = 1",
+    ].join("\n"),
+  );
+  assert.equal(t.tables.a?.inline, "one line");
+  assert.equal(t.tables.a?.spanning, "first \\n stays\nsecond");
+  assert.equal(t.tables.a?.after, 1);
+});
+
+test("parseTomlSubset: double-quoted behaviour is byte-stable beside the literal forms", () => {
+  const t = parseTomlSubset(
+    ['basic = "tab\\there"', "literal = 'tab\\there'", 'multi = """', 'x"""'].join("\n"),
+  );
+  assert.equal(t.tables[""]?.basic, "tab\there");
+  assert.equal(t.tables[""]?.literal, "tab\\there");
+  assert.equal(t.tables[""]?.multi, "x");
+});
+
+// --- the shared `[issues]` parity fixture (TS half; tests/test_issues_config_parity.py is Python's) ---
+
+const ISSUES_FIXTURE = JSON.parse(
+  readFileSync(
+    join(import.meta.dirname, "..", "..", "shared", "fixtures", "issues-table.json"),
+    "utf8",
+  ),
+) as {
+  cases: {
+    name: string;
+    toml: string;
+    expected: { backend: string | null; team: string | null };
+  }[];
+};
+
+test("issues-table fixture: unique case names, every string spelling covered", () => {
+  const names = ISSUES_FIXTURE.cases.map((c) => c.name);
+  assert.equal(new Set(names).size, names.length);
+  for (const needle of [
+    /basic/,
+    /literal/,
+    /multi-line basic/,
+    /multi-line literal/,
+    /absent/,
+    /non-string/,
+  ])
+    assert.ok(
+      names.some((n) => needle.test(n)),
+      `a case matching ${needle} exists`,
+    );
+});
+
+for (const c of ISSUES_FIXTURE.cases) {
+  test(`issues-table fixture ${c.name}: resolveIssueDestination reads what tomllib reads`, () => {
+    const cwd = repoWith({ "perk.toml": c.toml });
+    assert.deepEqual(resolveIssueDestination(cwd), c.expected);
+    // The same extraction rule over the bare parser (the fixture's stated TS reading).
+    const issues = parseTomlSubset(c.toml).tables.issues;
+    const pick = (v: unknown) => (typeof v === "string" ? v : null);
+    assert.deepEqual({ backend: pick(issues?.backend), team: pick(issues?.team) }, c.expected);
+  });
+}
 
 test("parseTomlSubset: native booleans and numbers", () => {
   const t = parseTomlSubset(
@@ -420,6 +504,55 @@ test("resolveIssueBackendId: a perk.local.toml-only selection is ignored (commit
 test("resolveIssueBackendId: a malformed file falls safe to github", () => {
   const cwd = repoWith({ "perk.toml": "[issues\nbackend = " });
   assert.equal(resolveIssueBackendId(cwd), "github");
+});
+
+test("resolveIssueBackendId: a literal-string 'linear' is read like the basic spelling", () => {
+  const cwd = repoWith({ "perk.toml": "[issues]\nbackend = 'linear'\n" });
+  assert.equal(resolveIssueBackendId(cwd), "linear");
+});
+
+// --- resolveIssueDestination (verbatim committed-only routing keys) ------------
+
+test("resolveIssueDestination: absent config and a local.toml-only table both read null/null", () => {
+  assert.deepEqual(resolveIssueDestination(mkdtempSync(join(tmpdir(), "perk-config-"))), {
+    backend: null,
+    team: null,
+  });
+  const cwd = repoWith({ "perk.local.toml": '[issues]\nbackend = "linear"\nteam = "ENG"\n' });
+  assert.deepEqual(resolveIssueDestination(cwd), { backend: null, team: null });
+});
+
+test("resolveIssueDestination: unknown backends pass through verbatim (no validation here)", () => {
+  const cwd = repoWith({ "perk.toml": '[issues]\nbackend = "jira"\nteam = "  ENG "\n' });
+  assert.deepEqual(resolveIssueDestination(cwd), { backend: "jira", team: "  ENG " });
+});
+
+test("resolveIssueDestination: a linked worktree reads the MAIN checkout's [issues] table", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-config-git-"));
+  const g = (...args: string[]): string =>
+    execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  g("init", "-q");
+  g("config", "user.email", "t@example.com");
+  g("config", "user.name", "perk tests");
+  writeFileSync(join(cwd, "seed.txt"), "seed\n", "utf8");
+  g("add", "-A");
+  g("commit", "-qm", "base");
+  const baseSha = g("rev-parse", "HEAD");
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".perk", "config.toml"),
+    "[issues]\nbackend = 'linear'\nteam = 'ENG'\n",
+    "utf8",
+  );
+  g("add", "-A");
+  g("commit", "-qm", "add linear issues config");
+  const wt = join(cwd, ".worktrees", "wt-issues");
+  g("worktree", "add", "--detach", wt, baseSha);
+  assert.deepEqual(resolveIssueDestination(wt), { backend: "linear", team: "ENG" });
 });
 
 test("resolveIssueBackendId: a linked worktree reads the MAIN checkout's selection", () => {

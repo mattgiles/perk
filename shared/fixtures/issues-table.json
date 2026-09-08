@@ -1,0 +1,55 @@
+{
+  "description": "Perk TOML documents paired with the `[issues] backend`/`team` values both planes must read (TS: extension/substrate/config.ts::resolveIssueDestination via parseTomlSubset; Python: tomllib). A non-string value or an absent key reads as null. contracts.md §8.23.",
+  "cases": [
+    {
+      "name": "basic strings",
+      "toml": "[issues]\nbackend = \"linear\"\nteam = \"ENG\"\n",
+      "expected": { "backend": "linear", "team": "ENG" }
+    },
+    {
+      "name": "literal strings",
+      "toml": "[issues]\nbackend = 'linear'\nteam = 'ENG'\n",
+      "expected": { "backend": "linear", "team": "ENG" }
+    },
+    {
+      "name": "multi-line basic strings",
+      "toml": "[issues]\nbackend = \"\"\"linear\"\"\"\nteam = \"\"\"\nENG\"\"\"\n",
+      "expected": { "backend": "linear", "team": "ENG" }
+    },
+    {
+      "name": "multi-line literal strings",
+      "toml": "[issues]\nbackend = '''linear'''\nteam = '''\nENG'''\n",
+      "expected": { "backend": "linear", "team": "ENG" }
+    },
+    {
+      "name": "literal strings keep backslashes verbatim",
+      "toml": "[issues]\nbackend = 'github'\nteam = 'C:\\ENG'\n",
+      "expected": { "backend": "github", "team": "C:\\ENG" }
+    },
+    {
+      "name": "inline comments after the strings",
+      "toml": "[issues]\nbackend = \"linear\" # committed\nteam = 'ENG' # the team key\n",
+      "expected": { "backend": "linear", "team": "ENG" }
+    },
+    {
+      "name": "absent table",
+      "toml": "[workflow]\nbase = \"main\"\n",
+      "expected": { "backend": null, "team": null }
+    },
+    {
+      "name": "absent key",
+      "toml": "[issues]\nbackend = \"github\"\n",
+      "expected": { "backend": "github", "team": null }
+    },
+    {
+      "name": "non-string values",
+      "toml": "[issues]\nbackend = true\nteam = 42\n",
+      "expected": { "backend": null, "team": null }
+    },
+    {
+      "name": "empty document",
+      "toml": "",
+      "expected": { "backend": null, "team": null }
+    }
+  ]
+}
