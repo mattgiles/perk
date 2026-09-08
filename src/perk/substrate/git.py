@@ -9,10 +9,12 @@ returning ``None`` on failure (the operation is the authoritative test).
 import re
 import shutil
 import subprocess
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from perk.substrate.output import log_warn
 from perk.substrate.proc import ProcFailure, run_captured, run_checked
 
 # GIT_TERMINAL_PROMPT=0: credential prompts fail fast instead of hanging to the timeout.
@@ -649,13 +651,89 @@ def merge_base(repo: Path, a: str, b: str) -> str | None:
 
 
 def diff_range(repo: Path, base: str, head: str) -> str:
-    """The unified two-dot diff ``git diff <base> <head>`` (the combined stack-diff read).
+    """The unified two-dot diff ``git diff <base> <head>`` — the hardened, config-pinned review
+    diff read (the combined stack diff and :func:`pr_merge_base_diff`).
 
     Callers pass an exact already-computed merge-base SHA as ``base``, so the two-dot form
-    equals the three-dot merge-base diff they want. A generous timeout — a many-layer
-    combined diff can be large. Raises ``GitError`` on failure.
+    equals the three-dot merge-base diff they want. The argv pins every rendering knob to
+    Git's default so the user's config never leaks into a review diff (default-configured
+    repos render byte-identically):
+
+    - ``--no-ext-diff`` / ``--no-textconv`` — the never-execute posture: a review read must
+      never run a configured ``diff.external`` / ``diff.<driver>.textconv`` helper against
+      attacker-controlled PR content (attributes come from the invoking working tree, but the
+      helper commands come from the user's config — pin them off regardless).
+    - ``--no-color`` — ``color.ui=always`` would corrupt the unified diff.
+    - ``--unified=3`` / ``--diff-algorithm=myers`` — GitHub's hunk rendering; ``diff.context``
+      / ``diff.algorithm`` would move hunk boundaries and change which lines anchor-validation
+      (``parse_diff_anchors``) accepts.
+    - ``--find-renames`` — explicit rename detection regardless of ``diff.renames``.
+    - ``--src-prefix=a/`` / ``--dst-prefix=b/`` — the anchor parser keys files on the
+      ``a/``/``b/`` header prefixes, which ``diff.noprefix`` / ``diff.mnemonicPrefix`` break.
+
+    A generous timeout — a many-layer combined diff can be large. Raises ``GitError`` on
+    failure.
     """
-    return _run(["diff", base, head], cwd=repo, timeout=60)
+    return _run(
+        [
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+            "--unified=3",
+            "--diff-algorithm=myers",
+            "--find-renames",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            base,
+            head,
+        ],
+        cwd=repo,
+        timeout=60,
+    )
+
+
+def pr_merge_base_diff(repo: Path, *, pr_number: int, base_ref: str) -> str:
+    """Render PR ``pr_number``'s merge-base diff locally: fetch ``refs/pull/<n>/head`` and
+    ``refs/heads/<base_ref>`` from ``origin`` into a per-invocation private ref namespace,
+    find their merge-base, and return :func:`diff_range` over it.
+
+    The local twin of GitHub's PR diff, for when GitHub refuses to render one (its diff media
+    type 406s above 20,000 lines / 300 files) or the caller asks for a local rendering. The
+    merge-base is the 3-dot base GitHub's PR diff uses, so the two-dot ``diff_range`` over it
+    equals GitHub's merge-base diff, with ``diff_range``'s config pins holding the rendering
+    to GitHub's. Objects are fetched into refs, never checked out or executed.
+
+    The namespace ``refs/perk/review-ctx/<uuid>`` is private per invocation: worktrees share
+    ONE ref store, so concurrent reviewer lanes must never touch a shared ref name (one lane
+    would clobber or delete another's ref mid-read). Both temp refs are deleted best-effort in
+    a ``finally``; a failed delete is reported via ``log_warn`` and never masks the read's
+    result or exception. A network op (the fetch timeout). Raises ``GitError`` when the fetch
+    fails, the fetched head does not resolve, or the histories share no ancestor.
+    """
+    namespace = f"refs/perk/review-ctx/{uuid.uuid4().hex[:12]}"
+    head_ref = f"{namespace}/head"
+    base_tmp = f"{namespace}/base"
+    try:
+        fetch_refspecs(
+            repo,
+            [f"+refs/pull/{pr_number}/head:{head_ref}", f"+refs/heads/{base_ref}:{base_tmp}"],
+        )
+        head_sha = resolve_commit(repo, head_ref)
+        if head_sha is None:
+            raise GitError(f"fetched PR #{pr_number} head ref did not resolve to a commit")
+        merge_base_sha = merge_base(repo, base_tmp, head_sha)
+        if merge_base_sha is None:
+            raise GitError(
+                f"PR #{pr_number} head has no common ancestor with base branch {base_ref!r}"
+            )
+        return diff_range(repo, merge_base_sha, head_sha)
+    finally:
+        for ref in (head_ref, base_tmp):
+            try:
+                delete_ref(repo, ref)
+            except GitError as exc:
+                log_warn(f"could not delete temp ref {ref}: {exc}")
 
 
 def is_ancestor(repo: Path, ancestor: str, head: str) -> bool | None:

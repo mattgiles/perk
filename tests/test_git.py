@@ -854,6 +854,109 @@ def test_delete_ref(git_repo):
         git.delete_ref(git_repo, "bad..name")
 
 
+# --- the hardened review diff (`diff_range`) + the local PR merge-base diff composite ------
+
+
+def _two_versions(git_repo) -> tuple[str, str]:
+    """Commit ``a.txt`` twice (10 lines; line 5 changes) and return ``(v1_sha, v2_sha)``."""
+    lines = [f"l{i}" for i in range(1, 11)]
+    (git_repo / "a.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _git(git_repo, "add", ".")
+    _git(git_repo, "commit", "-qm", "v1")
+    v1 = _sha(git_repo)
+    lines[4] = "CHANGED"
+    (git_repo / "a.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _git(git_repo, "add", ".")
+    _git(git_repo, "commit", "-qm", "v2")
+    return v1, _sha(git_repo)
+
+
+def test_diff_range_never_executes_configured_diff_helpers(git_repo, tmp_path):
+    """The never-execute posture: a configured textconv driver / external diff must not run
+    against review content. Each fixture is first proven LIVE with a raw ``git diff`` (the
+    vacuity control — a helper that never fires proves nothing), then ``diff_range`` runs
+    with both configured and creates neither canary."""
+    v1, v2 = _two_versions(git_repo)
+    (git_repo / ".gitattributes").write_text("*.txt diff=evil\n", encoding="utf-8")
+    canary_textconv = tmp_path / "canary-textconv"
+    canary_external = tmp_path / "canary-external"
+
+    # Control 1: the textconv driver fires under a raw diff.
+    _git(git_repo, "config", "diff.evil.textconv", f"touch {canary_textconv} ;cat")
+    _git(git_repo, "diff", v1, v2)
+    assert canary_textconv.exists()
+    # Control 2: the external diff fires under a raw diff (it replaces the builtin diff, so
+    # textconv is bypassed once it is configured — hence two controls, not one).
+    _git(git_repo, "config", "diff.external", f"touch {canary_external} ;true")
+    _git(git_repo, "diff", v1, v2)
+    assert canary_external.exists()
+
+    canary_textconv.unlink()
+    canary_external.unlink()
+    out = git.diff_range(git_repo, v1, v2)
+    assert not canary_textconv.exists()
+    assert not canary_external.exists()
+    assert "-l5\n+CHANGED\n" in out
+
+
+def test_diff_range_pins_the_rendering_against_user_config(git_repo):
+    """``diff.noprefix`` / ``diff.mnemonicPrefix`` / ``diff.context`` would move the headers
+    and hunk boundaries anchor validation keys on; ``diff_range`` renders Git's defaults
+    regardless (the raw diff proves the config is live)."""
+    v1, v2 = _two_versions(git_repo)
+    _git(git_repo, "config", "diff.noprefix", "true")
+    _git(git_repo, "config", "diff.mnemonicPrefix", "true")
+    _git(git_repo, "config", "diff.context", "0")
+
+    raw = _git(git_repo, "diff", v1, v2)
+    assert "--- a.txt\n+++ a.txt\n" in raw
+    assert "@@ -5 +5 @@" in raw
+
+    out = git.diff_range(git_repo, v1, v2)
+    assert "--- a/a.txt\n+++ b/a.txt\n" in out
+    assert "@@ -2,7 +2,7 @@" in out  # three context lines either side of line 5
+
+
+def test_pr_merge_base_diff_renders_the_merge_base_diff_and_cleans_up(git_repo_with_remote):
+    clone, _remote, advance_origin = git_repo_with_remote
+    _git(clone, "checkout", "-qb", "feature")
+    (clone / "pr.txt").write_text("from the pr\n", encoding="utf-8")
+    _git(clone, "add", ".")
+    _git(clone, "commit", "-qm", "pr change")
+    _git(clone, "push", "-q", "origin", "HEAD:refs/pull/7/head")
+    # origin/main moves past the PR's fork point, so the merge-base differs from main's tip.
+    advance_origin()
+    # The composite inherits diff_range's pins (noprefix would drop the a/ b/ headers).
+    _git(clone, "config", "diff.noprefix", "true")
+
+    out = git.pr_merge_base_diff(clone, pr_number=7, base_ref="main")
+
+    assert "+++ b/pr.txt" in out
+    assert "+from the pr" in out
+    assert "advanced" not in out  # the base-only change is not part of the PR's diff
+    assert git.list_refs(clone, "refs/perk/") == []
+
+
+def test_pr_merge_base_diff_unknown_pr_raises_and_leaves_no_refs(git_repo_with_remote):
+    clone, _remote, _advance = git_repo_with_remote
+    with pytest.raises(git.GitError):
+        git.pr_merge_base_diff(clone, pr_number=999, base_ref="main")
+    assert git.list_refs(clone, "refs/perk/") == []
+
+
+def test_pr_merge_base_diff_unrelated_history_raises_and_leaves_no_refs(git_repo_with_remote):
+    clone, _remote, _advance = git_repo_with_remote
+    _git(clone, "checkout", "-q", "--orphan", "orphan")
+    (clone / "o.txt").write_text("o\n", encoding="utf-8")
+    _git(clone, "add", ".")
+    _git(clone, "commit", "-qm", "orphan root")
+    _git(clone, "push", "-q", "origin", "HEAD:refs/pull/8/head")
+
+    with pytest.raises(git.GitError, match="no common ancestor"):
+        git.pr_merge_base_diff(clone, pr_number=8, base_ref="main")
+    assert git.list_refs(clone, "refs/perk/") == []
+
+
 # --- sync substrate primitives (update_ref / list_refs / detach / rebase / atomic push) --
 
 
