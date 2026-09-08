@@ -121,8 +121,9 @@ export function projectReviewHandoff(
 }
 export const TARGET_ENCODING_PREFIX = "perk/draft-review-target/v2\n";
 /**
- * The diagnostic component names, in fingerprint order. Component digests explain WHICH part of
- * a target drifted; eligibility is always the aggregate digest, never a component comparison.
+ * The diagnostic component names, in fingerprint order (every selected TOML field is one; the
+ * binding test pins the census). Component digests explain WHICH part of a target drifted;
+ * eligibility is always the aggregate digest, never a component comparison.
  */
 export const TARGET_COMPONENTS = [
   "identity",
@@ -136,16 +137,18 @@ export const TARGET_COMPONENTS = [
   "git_config",
   "environment",
   "context_artifact",
-] as const satisfies readonly (string | RoutingConfigField)[];
+] as const;
 export type TargetComponent = (typeof TARGET_COMPONENTS)[number];
 export type TargetComponents = Readonly<Record<TargetComponent, string>>;
 
-/** Reconstruct the fixed-shape projection so callers cannot accidentally change digest ordering. */
+/**
+ * Reconstruct the fixed-shape projection — nested typed inputs included — so callers cannot
+ * accidentally change digest ordering.
+ */
 function orderedProjection(projection: TargetProjection): TargetProjection {
   const p = projection;
   const mark = (m: ConfigValue): ConfigValue =>
     m.state === "absent" ? { state: "absent" } : { state: "present", digest: m.digest };
-  // Reconstruct even nested typed inputs, so callers cannot accidentally change digest ordering.
   const h = p.handoff;
   const handoff =
     h === null
