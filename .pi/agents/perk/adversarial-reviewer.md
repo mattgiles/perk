@@ -46,8 +46,10 @@ and report.
    (and `grep -n '^@@'` for hunks) and page it with `read` (`offset`/`limit`) — never dump a
    whole file into your session. **Oversized lines:** when a reference's `max_line_bytes`
    exceeds 51,200, `read` refuses the page containing that line; locate it with `grep -n` and
-   view it in slices with `sed -n '<N>p' <path> | head -c 51200` (Pi's own hint) — a long line
-   is never by itself a reason to block. If the command fails (non-zero exit, unparseable
+   view it in 51,200-byte slices with `sed -n '<N>p' <path> | tail -c +<offset> | head -c 51200`,
+   starting at offset `1` and advancing by 51,200 (`+1`, `+51201`, `+102401`, …) until a slice
+   comes back empty — every byte of the line is reachable, so a long line is never by itself a
+   reason to block. If the command fails (non-zero exit, unparseable
    stdout, missing fields) OR a referenced file cannot be read, finish with `blocked: true`
    (step 8) and stop — never guess or improvise another fetch. The envelope also carries
    `diff_source`: `"github"` (GitHub's rendered PR diff) or `"local-git"` (rendered locally
@@ -82,8 +84,8 @@ and report.
    `package.json` install script is arbitrary code execution, and so is anything the PR added.
    The **only** command you run in the entire session is
    `perk pr review-context --pr <n> --json` (with `--stack` added in stack mode); inspecting the
-   files it materializes with `read`/`grep`/`wc`/`sed -n … | head -c` is inspection, not
-   execution of the head. Reason about tests and builds — don't execute them.
+   files it materializes with `read`/`grep`/`wc`/`sed -n … | tail -c … | head -c` is inspection,
+   not execution of the head. Reason about tests and builds — don't execute them.
 
 4. **Review ONLY your assigned angle.** Your task prompt names exactly one of these four menu
    angles or the automatic `ponytail` angle — review that one and that one only (the parent runs

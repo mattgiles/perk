@@ -61,7 +61,7 @@ Before spawning, the parent resolves the active PR once. Every reviewer lane and
 reads context only through `perk pr review-context --expected-pr <that-number> --json` — a
 pointer envelope whose `body`/`diff`/`plan_body` are `{path, bytes, lines, max_line_bytes}` file
 references the child pages with `read`/`grep` (an unreadable referenced file blocks the lane; a
-long line, byte-sliced via `sed -n | head -c`, never does); target drift fails the lane. The resulting outcome is single-use and mutation-bound: starting any new valid pass
+long line, byte-sliced via `sed -n | tail -c +<offset> | head -c`, never does); target drift fails the lane. The resulting outcome is single-use and mutation-bound: starting any new valid pass
 invalidates older evidence immediately, target-resolution failure leaves posting unavailable, and
 one successful post consumes the record. Duplicate posts fail `review_wave_consumed`; pending
 passes fail `review_wave_unavailable`. At mutation time `perk pr review-post` re-resolves the PR and

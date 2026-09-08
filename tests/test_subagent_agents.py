@@ -140,7 +140,9 @@ def test_reviewer_defs_consume_the_review_context_pointer_envelope():
         compact = " ".join(text.split())
         assert "`context_dir`" in compact, name
         assert "`max_line_bytes`" in compact, name
-        assert "sed -n '<N>p' <path> | head -c 51200" in compact, name
+        # The offset-capable byte-slice recipe: `head -c` alone exposes only the first slice.
+        assert "sed -n '<N>p' <path> | tail -c +<offset> | head -c 51200" in compact, name
+        assert "until a slice" in compact, name
         assert "{path, bytes, lines, max_line_bytes}" in compact, name
     for name in ("pr-reviewer", "adversarial-reviewer"):
         compact = " ".join(_source_bytes(name).decode().split())
@@ -153,6 +155,11 @@ def test_reviewer_defs_consume_the_review_context_pointer_envelope():
     )
     assert "Blocked is **not a verdict**" in adversarial
     assert "An unfinished hunt is a **blocked lane**" in adversarial
+    resolver = " ".join(_source_bytes("conflict-resolver").decode().split())
+    # The envelope permits `plan_body: null`; the resolver must name that arm, never dereference
+    # `plan_body.path` unconditionally.
+    assert "such a reference **or `null`**" in resolver
+    assert "when it is `null`, work from `body` and `diff` alone" in resolver
     pr_reviewer = " ".join(_source_bytes("pr-reviewer").decode().split())
     assert "perk pr review-context --expected-pr <n> --json" in pr_reviewer
     assert "`plan-fidelity` requires a non-null object whose file contains" in pr_reviewer

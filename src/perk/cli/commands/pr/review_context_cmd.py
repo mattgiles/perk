@@ -18,9 +18,10 @@ line-oriented file under the invocation checkout's run scratch dir —
 `/review-context/pr-<n>[-stack]-<token>/` (gitignored, per-invocation unique, pruned by the
 run-dir age GC) — and the envelope carries `{path, bytes, lines, max_line_bytes}` references plus
 `context_dir`. The reviewer pages the files with `read`/`grep`; a line above Pi's per-line `read`
-bound is announced by `max_line_bytes` so the child falls back to a `sed -n 'Np' <path> | head -c`
-byte slice. Inlining the text would put a multi-hundred-KB single line on stdout that no reviewer
-tool can consume. A filesystem or encoding failure while writing is `write_failed`.
+bound is announced by `max_line_bytes` so the child falls back to
+`sed -n 'Np' <path> | tail -c +<offset> | head -c` byte slices. Inlining the text would put a
+multi-hundred-KB single line on stdout that no reviewer tool can consume. A filesystem or encoding
+failure while writing is `write_failed`.
 
 Diff provenance: every per-PR `diff` is GitHub's diff media type by default; on GitHub's 406
 `too_large` refusal (above 20,000 lines / 300 files) the gateway renders it locally (a fetch +

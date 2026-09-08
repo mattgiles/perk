@@ -390,6 +390,26 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
   }
 });
 
+test("the reviewer defs' oversized-line byte-slice recipe passes the gate; its redirect does not", () => {
+  // The agent defs teach `sed -n 'Np' <path> | tail -c +<offset> | head -c 51200` to page a line
+  // over Pi's per-line `read` bound. Every segment must stay allowlisted or the defs' recipe
+  // silently stops working for read-only children; a real-file redirect stays vetoed.
+  const path = "/repo/.perk/workflow/scratch/runs/RUN/review-context/pr-42-0123456789ab/diff.patch";
+  for (const offset of ["+1", "+51201", "+102401"])
+    assert.equal(
+      isReadOnlyBashCommand(`sed -n '12p' ${path} | tail -c ${offset} | head -c 51200`),
+      true,
+      offset,
+    );
+  assert.equal(isReadOnlyBashCommand(`sed -n '12p' ${path} | head -c 51200`), true);
+  assert.equal(isReadOnlyBashCommand(`grep -n '^diff --git' ${path}`), true);
+  assert.equal(isReadOnlyBashCommand(`wc -lc ${path}`), true);
+  assert.equal(
+    isReadOnlyBashCommand(`sed -n '12p' ${path} | tail -c +51201 | head -c 51200 > slice.txt`),
+    false,
+  );
+});
+
 test("plan-bound review queries allow only the exact argument forms", () => {
   // The plan-bound `--expected-pr` form, the human-triage doors' foreign `--pr` / `--pr --stack`
   // forms, and the feedback query — each gets the same whitespace/`cd`-prefix/redirect matrix.

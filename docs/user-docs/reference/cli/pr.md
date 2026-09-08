@@ -206,8 +206,10 @@ text-encoding failure while writing exits 1 with `error_type: write_failed`.
 
 **Oversized lines.** Pi's `read` tool refuses a single line above 50 KiB, so each reference
 reports `max_line_bytes` — the longest line's UTF-8 length. When it exceeds 51,200 the reviewer
-locates the line with `grep -n` and views it in slices with `sed -n '<N>p' <path> | head -c 51200`
-(both commands pass the read-only gate); the file itself is never rewritten.
+locates the line with `grep -n` and views it in 51,200-byte slices with
+`sed -n '<N>p' <path> | tail -c +<offset> | head -c 51200`, starting at offset `1` and advancing
+by 51,200 (`+1`, `+51201`, `+102401`, …) until a slice comes back empty — every byte of the line
+is reachable, and all three commands pass the read-only gate. The file itself is never rewritten.
 
 `--pr <top> --stack` is the **stacked** reviewer-context arm (`--stack` requires `--pr` and
 excludes `--expected-pr`): it re-resolves the whole stack from the given PR via the base-ref

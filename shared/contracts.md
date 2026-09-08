@@ -1362,8 +1362,10 @@ get_pr_review_context{ pr_number, branch, plan_body, local_diff? } -> PrReviewCo
     # reformatted diff would break `line` anchors and hunk headers); `bytes` is the UTF-8
     # length, `lines` the splitlines count, `max_line_bytes` the longest line's UTF-8 length
     # (the number a child compares against Pi's 51,200-byte per-line bound: above it, the
-    # child locates the line with `grep -n` and views it via `sed -n 'Np' <path> | head -c
-    # 51200` — Pi's own hint; both commands pass the read-only gate). The writer's documented
+    # child locates the line with `grep -n` and views it in 51,200-byte slices via
+    # `sed -n 'Np' <path> | tail -c +<offset> | head -c 51200`, offsets +1, +51201, +102401, …
+    # until a slice is empty — every byte reachable; all three commands pass the read-only
+    # gate, and `head -c` alone would expose only the first slice). The writer's documented
     # failure set (`OSError` filesystem arms, `UnicodeError` for text UTF-8 cannot encode) is
     # the CLI's `write_failed` arm (exit 1). Goldens: `pr-review-context.schema.json` +
     # `pr-review-stack-context.schema.json`.
@@ -1446,8 +1448,8 @@ such an object or null, with a non-null reference whose file holds nonblank text
 plan-fidelity. Missing `plan_body` blocks every lane; explicit null (or a blank file) is optional
 evidence only for other angles. The child then reads the referenced files (`read` the body/plan,
 `grep -n`-index and page the diff; a line over Pi's per-line bound is byte-sliced via `sed -n
-'Np' <path> | head -c 51200`): an unreadable/missing referenced file blocks the lane; a long
-line never does. Unknown extras are ignored, accepted text is not rewritten, refs are metadata
+'Np' <path> | tail -c +<offset> | head -c 51200`, advancing the 1-based offset by 51,200 until a
+slice is empty): an unreadable/missing referenced file blocks the lane; a long line never does. Unknown extras are ignored, accepted text is not rewritten, refs are metadata
 not another authority lookup, and no parent parser, fallback PR fetch, local-branch comparison,
 or head-SHA binding is added.
 The trailing `diff_source` ∈ {`github`, `local-git`} is one such unknown extra for the acceptance
@@ -1694,8 +1696,9 @@ prompt; the contracts pin the output shape, not the judgment rubric.
   envelope above (`plan_body` may be null) — and reads the materialized files itself with
   `read`/`grep` (indexing the diff with `grep -n '^diff --git'`, paging with `read`
   `offset`/`limit`, byte-slicing a line over Pi's per-line bound via `sed -n 'Np' <path> |
-  head -c 51200`). A failed/unparseable command or an unreadable referenced file ⇒ `blocked:
-  true` (below); a long line alone never blocks.
+  tail -c +<offset> | head -c 51200`, offsets +1, +51201, … until empty). A failed/unparseable
+  command or an unreadable referenced file ⇒ `blocked: true` (below); a long line alone never
+  blocks.
 - **Angles** (one per spawn; the adversarial selectable menu is exactly these four —
   `pr-reviewer`'s autonomous menu is wider, seven fixed angles): `claimed-intent` (the PR text's claims checked against the diff, plus a first-class hunt
   for **undisclosed scope**; the parent always includes this angle) · `correctness` (incl. the
@@ -1712,7 +1715,7 @@ prompt; the contracts pin the output shape, not the judgment rubric.
   on. **Never-execute-the-head:** inside the head worktree the child uses
   `read`/`grep`/`find`/`ls` only (no builds, no tests, no installs); the only command it runs in
   the whole session is `review-context` — inspecting the files it materializes
-  (`read`/`grep`/`wc`/`sed -n … | head -c`) is inspection, not execution of the head.
+  (`read`/`grep`/`wc`/`sed -n … | tail -c … | head -c`) is inspection, not execution of the head.
 - **Output (the cross-plane contract).** ONE engine-injected **`structured_output`** call
   carrying `{angle, summary, findings[], fyi[], streamed: boolean, blocked: boolean}` — the
   wave's `ADVERSARIAL_REVIEW_REPORT_SCHEMA` (`extension/waves/adversarialReviewWave.ts`); all

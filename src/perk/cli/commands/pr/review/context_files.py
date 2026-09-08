@@ -7,7 +7,7 @@ inlined in the `--json` payload is unreadable by construction. Writing every fre
 (PR body, per-PR diff, plan body, combined diff) to its own line-oriented file — and returning a
 small envelope of file references — lets the child page with `read`/`grep`; each reference also
 carries the longest line's byte length so the child knows up front when a line still exceeds the
-per-line bound and must fall back to a `sed -n 'Np' <path> | head -c` byte slice.
+per-line bound and must fall back to `sed -n 'Np' <path> | tail -c +<offset> | head -c` byte slices.
 
 Layout (under a per-invocation directory — concurrent lanes never share one):
 
