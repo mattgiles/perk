@@ -7,9 +7,7 @@
 // comments and string text correctly ignored) and resolved by plain path join. Every resolved
 // relative target MUST be a scanned production file (repo imports carry explicit `.ts`
 // extensions) — an unresolvable specifier (e.g. extensionless `./b`) is a guard failure, never a
-// silent phantom node. The one carve-out is `THIRD_PARTY_CLOSURES`: a specifier resolving into a
-// vendored upstream plain-JavaScript closure is an opaque leaf (its internal graph is upstream's;
-// a live-exemption test keeps the list honest). TYPE-ONLY EDGES COUNT — a type-only import is still a
+// silent phantom node. TYPE-ONLY EDGES COUNT — a type-only import is still a
 // dependency-direction fact (the config↔bindings cycle this guard was born after was type-only).
 //
 // This file is the POLICY: the rule contracts below, the constants, the corpus selectors, and the
@@ -391,29 +389,12 @@ function liveTopLevelDirs(): string[] {
     .sort();
 }
 
-/**
- * Vendored THIRD-PARTY closures: upstream plain-JavaScript shipped byte-identical (their own
- * tests pin the file set and bytes against the pinned package). Their internal import graph is
- * upstream's — it may even carry cycles — so a relative specifier resolving INTO one of these
- * directories is an opaque leaf here: never an edge, never "unresolved". Perk-authored code
- * (including `vendor/btw`, `vendor/whimsical`) stays fully in the corpus.
- */
-const THIRD_PARTY_CLOSURES = ["vendor/smol-toml/"];
-const isThirdPartyLeaf = (resolved: string): boolean =>
-  THIRD_PARTY_CLOSURES.some((prefix) => resolved.startsWith(prefix));
-
-type Scan = {
-  files: string[];
-  edges: Map<string, string[]>;
-  unresolved: string[];
-  leaves: string[];
-};
 /** One scan shared by the production assertions (the controls build their own inputs). */
-let scanned: Scan | undefined;
-function scan(): Scan {
+let scanned: { files: string[]; edges: Map<string, string[]>; unresolved: string[] } | undefined;
+function scan(): { files: string[]; edges: Map<string, string[]>; unresolved: string[] } {
   if (scanned === undefined) {
     const files = productionFiles();
-    scanned = { files, ...buildEdges(files, readProductionFile, isThirdPartyLeaf) };
+    scanned = { files, ...buildEdges(files, readProductionFile) };
   }
   return scanned;
 }
@@ -425,27 +406,6 @@ function formatCycles(cycles: string[][]): string {
 // ---------------------------------------------------------------------------------------------
 // Production assertions
 // ---------------------------------------------------------------------------------------------
-
-test("third-party closure leaves are live: each declared directory exists, is reached, and its own modules never join the corpus edges", () => {
-  for (const prefix of THIRD_PARTY_CLOSURES) {
-    const dir = path.join(import.meta.dirname, prefix);
-    assert.ok(readdirSync(dir).length > 0, `${prefix} must exist with vendored files`);
-    assert.ok(
-      scan().leaves.some((leaf) => leaf.includes(`→ ${prefix}`)),
-      `${prefix} must be reached by at least one production specifier (a dead exemption)`,
-    );
-  }
-  // The vendored parser closure is consumed by exactly one perk module, at its entry point.
-  assert.deepEqual(
-    scan()
-      .leaves.filter((leaf) => !leaf.startsWith("vendor/smol-toml/"))
-      .sort(),
-    ['substrate/draftReviewConfig.ts: "../vendor/smol-toml/parse.js" → vendor/smol-toml/parse.js'],
-  );
-  // The closure's `.d.ts` files sit in the corpus (they are `.ts`) but carry no corpus edges.
-  for (const [file, targets] of scan().edges)
-    if (file.startsWith("vendor/smol-toml/")) assert.deepEqual(targets, [], file);
-});
 
 test("every relative import resolves to a scanned production file (explicit .ts targets)", () => {
   assert.deepEqual(

@@ -128,8 +128,8 @@ function unescapeBasic(raw: string): string {
  * Parse the narrow TOML subset perk consumes. Returns `{ tables, arrays }`: `tables` is a
  * `{ section: { key: scalar } }` map (top-level keys under the `""` section); `arrays` is a
  * `{ name: [{ key: scalar }, ...] }` map fed by `[[name]]` array-of-tables. Scalars are quoted
- * strings, native `true`/`false` booleans, and numeric literals; anything else is skipped —
- * this is intentionally NOT a full TOML parser.
+ * strings (basic `"…"`/`"""…"""` and literal `'…'`/`'''…'''`), native `true`/`false` booleans,
+ * and numeric literals; anything else is skipped — this is intentionally NOT a full TOML parser.
  */
 export function parseTomlSubset(text: string): TomlSubset {
   const root: Record<string, TomlScalar> = {};
@@ -171,17 +171,19 @@ export function parseTomlSubset(text: string): TomlSubset {
     const value = line.slice(eq + 1).trim();
     if (key === "") continue;
 
-    // Multi-line basic string: """ ... """ (possibly spanning lines).
-    if (value.startsWith('"""')) {
+    // Multi-line strings: basic `""" ... """` (escapes honoured) or literal `''' ... '''`
+    // (bytes verbatim), possibly spanning lines.
+    const multi = value.startsWith('"""') ? '"""' : value.startsWith("'''") ? "'''" : null;
+    if (multi) {
       let body = value.slice(3);
-      if (body.endsWith('"""') && body.length >= 3) {
+      if (body.endsWith(multi) && body.length >= 3) {
         body = body.slice(0, -3);
       } else {
         const parts: string[] = [body];
         i++;
         for (; i < lines.length; i++) {
           const raw = lines[i] ?? "";
-          const end = raw.indexOf('"""');
+          const end = raw.indexOf(multi);
           if (end !== -1) {
             // A bare closing delimiter on its own line contributes no trailing content (so the
             // newline that precedes it is not appended as an empty segment).
@@ -194,7 +196,7 @@ export function parseTomlSubset(text: string): TomlSubset {
         // A leading newline immediately after the opening delimiter is trimmed (TOML rule).
         if (body.startsWith("\n")) body = body.slice(1);
       }
-      dest[key] = unescapeBasic(body);
+      dest[key] = multi === '"""' ? unescapeBasic(body) : body;
       continue;
     }
 
@@ -202,6 +204,13 @@ export function parseTomlSubset(text: string): TomlSubset {
     const basic = value.match(/^"((?:[^"\\]|\\.)*)"/);
     if (basic) {
       dest[key] = unescapeBasic(basic[1] ?? "");
+      continue;
+    }
+
+    // Single-line literal string: '...' (no escapes; a trailing inline comment is dropped).
+    const literal = value.match(/^'([^']*)'/);
+    if (literal) {
+      dest[key] = literal[1] ?? "";
       continue;
     }
 
@@ -389,12 +398,135 @@ export const GITHUB_ISSUE_BACKEND_ID: IssueBackendId = "github";
  * because the TS plane only renders prompts — it never writes canonical issues.
  */
 export function resolveIssueBackendId(cwd: string): IssueBackendId {
-  try {
-    const committed = readTomlFile(configFile(mainCheckoutRoot(cwd)));
-    const backend = committed.tables.issues?.backend;
-    if (backend === "github" || backend === "linear") return backend;
-    return GITHUB_ISSUE_BACKEND_ID;
-  } catch {
-    return GITHUB_ISSUE_BACKEND_ID;
+  const backend = resolveIssueDestination(cwd).backend;
+  if (backend === "github" || backend === "linear") return backend;
+  return GITHUB_ISSUE_BACKEND_ID;
+}
+
+/** The committed `[issues]` routing keys — where a save is written and (Linear) which team owns it. */
+export interface IssueDestination {
+  backend: string | null;
+  team: string | null;
+}
+
+/**
+ * The committed `[issues]` routing as the save-destination fence reads it. `keys` when the
+ * document provably spells the table the way the subset reader parses it — `backend`/`team`
+ * are then exactly what Python's `tomllib` reads; `document` when parity cannot be proven (a
+ * dotted-key / inline-table / quoted-key spelling, an escape, a duplicate header …) — the
+ * verbatim text travels alongside the best-effort keys so the fence can widen to every byte that
+ * might route the save instead of trusting a read the authoritative parser may not share.
+ */
+export type IssueRouting =
+  | ({ kind: "keys" } & IssueDestination)
+  | ({ kind: "document"; text: string } & IssueDestination);
+
+/** `StrippedStr`'s boundary rule: a string is stripped and a blank one reads as absent. */
+function strippedString(value: TomlScalar | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const stripped = value.trim();
+  return stripped === "" ? null : stripped;
+}
+
+/**
+ * Can the fence trust `parseTomlSubset(text).tables.issues` as exactly what Python's `tomllib`
+ * reads for `[issues] backend`/`team`? Proven only when the document spells the table in the one
+ * shape the subset reader handles at parity: a single bare `[issues]` header; `backend`/`team`
+ * (each at most once, undotted) as plain single-line strings with no backslash (the subset's
+ * escape handling is not `tomllib`'s); and no other header or key segment spelling `issues` —
+ * dotted keys, inline tables, quoted keys, `[[issues]]` and super-/sub-tables all reach `tomllib`
+ * unseen here. Every line the scanner cannot classify answers `false` (widen, never guess).
+ */
+function issueKeysProvable(text: string): boolean {
+  const lines = text.split(/\r?\n/);
+  let inIssues = false;
+  let issuesHeaders = 0;
+  const seen = new Set<string>();
+  for (let i = 0; i < lines.length; i++) {
+    const line = (lines[i] ?? "").trim();
+    if (line === "" || line.startsWith("#")) continue;
+
+    if (line.startsWith("[")) {
+      const array = line.match(/^\[\[([^\]]+)\]\]$/);
+      const table = array ? null : line.match(/^\[([^\]]+)\]$/);
+      const inner = (array?.[1] ?? table?.[1])?.trim();
+      // A header shape the subset reader skips (e.g. a trailing comment) would misplace the keys
+      // that follow it; quoted segments can spell any key at all.
+      if (inner === undefined || /["']/.test(inner)) return false;
+      if (table && inner === "issues") {
+        issuesHeaders++;
+        if (issuesHeaders > 1) return false;
+        inIssues = true;
+        continue;
+      }
+      const segments = inner.split(".").map((segment) => segment.trim());
+      if (segments.includes("issues")) return false;
+      inIssues = false;
+      continue;
+    }
+
+    const eq = line.indexOf("=");
+    if (eq === -1) return false;
+    const key = line.slice(0, eq).trim();
+    const value = line.slice(eq + 1).trim();
+    if (key === "" || /["']/.test(key)) return false;
+    const segments = key.split(".").map((segment) => segment.trim());
+    if (segments.includes("issues")) return false;
+    if (inIssues && (segments[0] === "backend" || segments[0] === "team")) {
+      if (segments.length > 1 || seen.has(key)) return false;
+      seen.add(key);
+      if (!/^("[^"\\]*"|'[^']*')\s*(#.*)?$/.test(value)) return false;
+      continue;
+    }
+    // Skip a multi-line string body (the subset reader's rule) so its lines are never mistaken
+    // for headers or keys.
+    const multi = value.startsWith('"""') ? '"""' : value.startsWith("'''") ? "'''" : null;
+    if (multi) {
+      const body = value.slice(3);
+      if (body.endsWith(multi) && body.length >= 3) continue;
+      for (i++; i < lines.length; i++) {
+        if ((lines[i] ?? "").includes(multi)) break;
+      }
+    }
   }
+  return true;
+}
+
+/**
+ * Read the committed main-checkout `[issues]` routing for the save-destination fence: the
+ * `backend`/`team` keys as Python's boundary reads them (stripped, blank → `null`, non-string →
+ * `null`) plus whether that read is provably `tomllib`'s (`kind: "keys"`) or the whole document
+ * must stand in for it (`kind: "document"`, carrying the verbatim text). Committed
+ * `.perk/config.toml` only (never the `local.toml` overlay), anchored to the MAIN checkout like
+ * `resolveIssueBackendId`. A missing file or a read failure is the empty table (`keys`,
+ * both `null`) — Python reads the same absence.
+ */
+export function resolveIssueRouting(cwd: string): IssueRouting {
+  const empty: IssueRouting = { kind: "keys", backend: null, team: null };
+  try {
+    const path = configFile(mainCheckoutRoot(cwd));
+    if (!existsSync(path)) return empty;
+    const text = readFileSync(path, "utf8");
+    const issues = parseTomlSubset(text).tables.issues;
+    const keys: IssueDestination = {
+      backend: strippedString(issues?.backend),
+      team: strippedString(issues?.team),
+    };
+    return issueKeysProvable(text)
+      ? { kind: "keys", ...keys }
+      : { kind: "document", text, ...keys };
+  } catch {
+    return empty;
+  }
+}
+
+/**
+ * Read the committed main-checkout `[issues] backend`/`team` values (no validation, no default):
+ * the two keys that decide where the Python save lands (`perk/backends/resolve.py`). The
+ * `resolveIssueRouting` read without its parity verdict — callers wanting the fail-safe backend
+ * id use `resolveIssueBackendId`.
+ */
+export function resolveIssueDestination(cwd: string): IssueDestination {
+  const { backend, team } = resolveIssueRouting(cwd);
+  return { backend, team };
 }

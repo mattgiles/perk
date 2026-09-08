@@ -39,24 +39,19 @@ original draft with a loud warning and leaves the diff in feedback. Denial retur
 save: the agent must fold the rendered-markdown diff into `objective_draft` or the matching
 `gist_draft` fields and request a confirming review.
 
-The draft tools, manual plan/objective/gist saves, `objective_node`, and `/implement-here`
-now share a verified current-run review claim. Missing/unsafe identity, contention, unresolved
-dispatch/uncertainty, invalid review state, or failed invalidation stops the operation before its
-effects. A genuinely absent review record permits normal behavior under exclusion. First-party
-review releases the claim before editor waits and reacquires for edits/completion. See
-[Participating authoring and first-party review](./review-and-authoring.md#participating-authoring-and-first-party-review)
-for guarded completion and invalidation rules. Stale decisions are diagnostic DATA only, never
-current-draft apply/fold/save instructions. Conservative routing drift can require rereview.
-Pending proves neither health nor delivery; missing status does not reconstruct a lost decision.
-A review-state stop is not an instruction to retry a save or delete retained state: follow
-[Reconcile a draft-review stop](../../how-to/reconcile-a-draft-review-stop.md).
-There is no startup/reload discovery, automatic replay, or resume.
+Every review surface runs the same four in-memory guards — reviewed bytes, save destination,
+one current review, the unconfirmed-save latch; see
+[Browser draft review](./review-and-authoring.md#browser-draft-review). The draft tools, manual
+saves, `objective_node` and `/implement-here` consult no review state; a manual save is the
+deliberate retry once automatic saves are paused. Nothing is persisted — a browser decision does
+not survive a Pi restart (re-run the door).
 
 ### `/plan-save`
 
 Persist the plan to the issue backend, link the session to it, and cross the read-only → read-write
-boundary. `/plan-save` is a manual save entry, not a retry for an unconfirmed review save.
-A retained review-state stop requires human reconciliation first. Paired tool:
+boundary. `/plan-save` is the manual save entry — and the deliberate retry after an unconfirmed
+approval save paused automatic saves (check the backend for an existing plan carrying this run id
+first). Paired tool:
 
 - **`plan_save`** — save the validated `plan-draft.md` artifact when present, otherwise an explicit
   plan parameter, otherwise the latest assistant-message fallback. *Terminating.*
@@ -280,13 +275,12 @@ node's refinement comment. There is **no** model save tool.
 The human failsafe for a refinement: save the current validated refinement draft as the node's
 refinement comment. Takes **no arguments**; refinement sessions only; idle only. Invoking it is
 itself your explicit authorization — no prior review is required, it may follow a denial, and its
-result is labelled a manual human save (never a reviewer approval). A pending browser review is
-invalidated before the save; an unresolved browser decision or an unconfirmed earlier save
-refuses (`unresolved-dispatch`) until reconciled — see
-[Reconcile a draft-review stop](../../how-to/reconcile-a-draft-review-stop.md). A missing, invalid
-or context-mismatched draft stops with rewrite/re-entry guidance and saves nothing. The
-read-only gate exits only after a verified save; a failed save keeps the worker's diagnostics
-(`write_attempted`, comment ids) and asks you to read the node's comments back before retrying.
+result is labelled a manual human save (never a reviewer approval). It is also the deliberate
+retry after an unconfirmed approval save paused automatic saves (read the node's comments back
+first). A missing, invalid or context-mismatched draft stops with rewrite/re-entry guidance and
+saves nothing. The read-only gate exits only after a verified save; a failed save keeps the
+worker's diagnostics (`write_attempted`, comment ids), pauses automatic saves, and asks you to
+read the node's comments back before retrying.
 
 The plan-graph surfaces — `objective_node`, `plan_save`/`/plan-save`, `objective_save`/
 `/objective-save`, `gist_save`/`/gist-save`, `/objective-plan`, `/implement-here`, the browser

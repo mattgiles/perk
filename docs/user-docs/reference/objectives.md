@@ -329,8 +329,9 @@ dismissed or unavailable review saves nothing: the model presents the draft and 
 `/objective-refinement-save` — the human failsafe. Invoking that command (no arguments) is itself
 your explicit authorization to save the current validated draft: it needs no prior review, it
 may follow a denial, and its result is labelled a manual human save, never a reviewer approval. It
-refuses while a browser review's outcome is still unresolved (`unresolved-dispatch`) — reconcile
-first (see [Reconcile a draft-review stop](../how-to/reconcile-a-draft-review-stop.md)).
+is also the deliberate retry once an unconfirmed approval save paused automatic saves (read the
+node's comments back first — see
+[Browser draft review](./in-session/review-and-authoring.md#browser-draft-review)).
 
 A refinement session is deliberately isolated: `objective_node`, `plan_save`, `objective_save`,
 `gist_save`, `/plan-save`, `/objective-plan`, `/implement-here` and the browser review doors all

@@ -235,14 +235,8 @@ function fakePlannotator(sink: FakePlannotatorSink): (pi: ExtensionAPI) => void 
       handler: async () => {},
     });
     pi.events.on("plannotator:request", (data) => {
-      const envelope = data as { action: string; respond: (r: unknown) => void };
-      envelope.respond({
-        status: "handled",
-        result:
-          envelope.action === "review-status"
-            ? { status: "pending" }
-            : { status: "pending", reviewId: "r-1" },
-      });
+      const envelope = data as { respond: (r: unknown) => void };
+      envelope.respond({ status: "handled", result: { status: "pending", reviewId: "r-1" } });
     });
   };
 }

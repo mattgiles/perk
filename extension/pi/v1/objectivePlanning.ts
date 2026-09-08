@@ -59,7 +59,6 @@ import {
   type ReportWaveAttemptReceipt,
   toAttemptReceipt,
 } from "../../waves/reportWave.ts";
-import { type DraftReviewRuntime, draftReviewMutationRefusal } from "./draftReviewActivation.ts";
 import { fetchObjectiveUrl } from "./objective.ts";
 import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
 
@@ -469,7 +468,6 @@ export function installObjectivePlanningBindings(
   pi: ExtensionAPI,
   gating: ToolGating,
   wave: ReportWave,
-  reviews: DraftReviewRuntime,
 ): void {
   pi.registerTool({
     name: "objective_node",
@@ -525,14 +523,13 @@ export function installObjectivePlanningBindings(
       // A refinement session never claims or advances a node — independent of tool visibility.
       if (isRefinementSession(branchOf(ctx)))
         return fail(refinementStageRefusal("objective_node"), "wrong_stage");
-      const mutation = await reviews.mutateAsync(ctx, "target-changed", (session) =>
-        transitionObjectiveNode(decoded, {
-          backend: coldDoorObjectiveNodeBackend(pi, ctx),
-          session,
-        }),
-      );
-      if (!mutation.ok) return draftReviewMutationRefusal(mutation);
-      const outcome = mutation.value;
+      // A node transition moves the plan save destination's `node_claim` component: an open
+      // review's approval is refused by the destination fence (`draftReview.ts`), never saved
+      // against the moved claim.
+      const outcome = await transitionObjectiveNode(decoded, {
+        backend: coldDoorObjectiveNodeBackend(pi, ctx),
+        session: openBranchWorkflowSession(pi, ctx),
+      });
       if (outcome.status === "failed") return fail(outcome.message, outcome.errorType);
       const detail = decoded.status
         ? `node ${decoded.node} → ${decoded.status}`

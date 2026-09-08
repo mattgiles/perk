@@ -38,12 +38,13 @@ Contents:
   runtime by neither, drift-guarded by `tests/test_contract_schemas.py`. See
   `contracts.md` §8.34.
 - **`fixtures/`** — **test-only** cross-plane evidence, read at runtime by neither plane.
-  `draft-review-config.json` pairs Perk TOML documents with the exact strings the TS
-  draft-review routing projection selects (`extension/substrate/draftReviewConfig.test.ts`)
-  and what the existing Python config readers return for the same fields
-  (`tests/test_draft_review_config.py`), so the two planes' readings stay reconciled where
-  they legitimately differ (Python strips/normalizes; TS binds exact bytes). See
-  `contracts.md` §8.23.
+  `issues-table.json` pairs `[issues]` TOML spellings (basic, literal, multi-line, dotted-key,
+  inline-table, quoted, escaped, absent, non-string) with the TS subset reader's `{backend,
+  team}` (`extension/substrate/config.test.ts`), whether that read is provably `tomllib`'s
+  (`provable` — the draft-review destination fence trusts the keys only then, else it widens
+  to the whole document) and, on divergence, `tomllib`'s own reading
+  (`tests/test_issues_config_parity.py` pins "divergent ⇒ unproven"). See `contracts.md` §8.23
+  "Draft-review guards".
 
 Resolution goes through the per-plane resolvers (`src/perk/_resources.py`,
 `extension/substrate/resources.ts`): installed bundle → editable repo-sibling fallback.

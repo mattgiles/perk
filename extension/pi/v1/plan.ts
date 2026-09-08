@@ -79,12 +79,7 @@ import { report, type Severity } from "../../surfaces/report.ts";
 // structurally confined to the surfaces module (the surfacesGuard pi-tui import rule).
 import { Key } from "../../surfaces/surfaces.ts";
 import { installInjectedContext } from "./contextInjection.ts";
-import {
-  type DraftReviewConfirmedFacts,
-  type DraftReviewRuntime,
-  draftReviewMutationRefusal,
-} from "./draftReviewActivation.ts";
-import { mutationPlanSaveDeps } from "./draftReviewEffects.ts";
+import { type DraftReviewSlot, recordSaveOutcome } from "./draftReview.ts";
 import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
 import {
   type ApprovalSaveOutcome,
@@ -414,7 +409,7 @@ export async function approvalSave(
 export function installPlanBindings(
   pi: ExtensionAPI,
   gating: ToolGating,
-  reviews: DraftReviewRuntime,
+  reviews: DraftReviewSlot,
   contextPolicy: ContextPolicyInputs,
   wave?: WaveLaunch,
 ): void {
@@ -462,16 +457,7 @@ export function installPlanBindings(
         )("plan_draft needs { plan: string } per the tool schema", "bad_input");
       }
       const fail = failFor(ctx, "plan-draft");
-      const mutation = reviews.mutate(
-        ctx,
-        "source-changed",
-        (session) => revisePlanDraft(decoded, session),
-        {
-          draft: { subject: "plan" },
-        },
-      );
-      if (!mutation.ok) return draftReviewMutationRefusal(mutation);
-      const revised = mutation.value;
+      const revised = revisePlanDraft(decoded, openBranchWorkflowSession(pi, ctx));
       switch (revised.status) {
         case "revised":
         case "unchanged":
@@ -571,52 +557,52 @@ export function installPlanBindings(
           "plan_save",
         )(refinementStageRefusal("plan_save"), "wrong_stage");
       }
-      const facts: DraftReviewConfirmedFacts = {};
-      const mutation = await reviews.mutateAsync(ctx, "manual-save", async (session) => {
-        const original = planSaveDepsFor(pi, ctx, gating);
-        const deps = { ...original, ...mutationPlanSaveDeps(original, session, facts, "manual") };
-        // No read-only fail-fast here (D1a): the `plan_save` TOOL is structurally unreachable
-        // while read-only (the read-only allowlist excludes it), so reaching this handler means
-        // the gate is already off; the `/plan-save` COMMAND is allowed to run while read-only and
-        // exits the gate on a successful save (the read-only → read-write boundary in one gesture).
-        const src = resolvePlanSource(
-          {
-            draft: (() => {
-              const read = deps.session.readArtifact(PLAN_DRAFT_ARTIFACT);
-              return read.status === "found" ? read.content : null;
-            })(),
-            ...(decoded.plan !== undefined ? { explicit: decoded.plan } : {}),
-            transcript: deps.transcript,
-          },
-          "save",
+      const deps = planSaveDepsFor(pi, ctx, gating);
+      // No read-only fail-fast here (D1a): the `plan_save` TOOL is structurally unreachable
+      // while read-only (the read-only allowlist excludes it), so reaching this handler means
+      // the gate is already off; the `/plan-save` COMMAND is allowed to run while read-only and
+      // exits the gate on a successful save (the read-only → read-write boundary in one gesture).
+      const src = resolvePlanSource(
+        {
+          draft: (() => {
+            const read = deps.session.readArtifact(PLAN_DRAFT_ARTIFACT);
+            return read.status === "found" ? read.content : null;
+          })(),
+          ...(decoded.plan !== undefined ? { explicit: decoded.plan } : {}),
+          transcript: deps.transcript,
+        },
+        "save",
+      );
+      if (src === null) {
+        return failFor(
+          ctx,
+          "plan-save",
+          "plan_save",
+        )(
+          "no plan to save — write the working draft with plan_draft, or pass the plan parameter",
+          "invalid_input",
         );
-        if (src === null) {
-          return failFor(
-            ctx,
-            "plan-save",
-            "plan_save",
-          )(
-            "no plan to save — write the working draft with plan_draft, or pass the plan parameter",
-            "invalid_input",
-          );
-        }
-        const outcome = await savePlan(
-          {
-            plan: src.plan,
-            source: src.source,
-            paramMismatch: src.paramMismatch,
-            ...(decoded.title !== undefined ? { title: decoded.title } : {}),
-            ...(decoded.objective_id !== undefined ? { objectiveId: decoded.objective_id } : {}),
-            ...(decoded.node_id !== undefined ? { nodeId: decoded.node_id } : {}),
-            ...(decoded.consumed_learn !== undefined
-              ? { consumedLearn: decoded.consumed_learn }
-              : {}),
-          },
-          deps,
-        );
-        return deps.renderSave(outcome);
+      }
+      const outcome = await savePlan(
+        {
+          plan: src.plan,
+          source: src.source,
+          paramMismatch: src.paramMismatch,
+          ...(decoded.title !== undefined ? { title: decoded.title } : {}),
+          ...(decoded.objective_id !== undefined ? { objectiveId: decoded.objective_id } : {}),
+          ...(decoded.node_id !== undefined ? { nodeId: decoded.node_id } : {}),
+          ...(decoded.consumed_learn !== undefined
+            ? { consumedLearn: decoded.consumed_learn }
+            : {}),
+        },
+        deps,
+      );
+      // The manual save never consults the latch (it IS the deliberate retry) but reports into it.
+      recordSaveOutcome(reviews, "plan", {
+        confirmed: outcome.status === "saved",
+        ...(outcome.status === "failed" ? { detail: outcome.message } : {}),
       });
-      return mutation.ok ? mutation.value : draftReviewMutationRefusal(mutation, facts);
+      return deps.renderSave(outcome);
     },
   });
 
@@ -634,45 +620,36 @@ export function installPlanBindings(
       // (no explicit param on the command path ⇒ paramMismatch is always false); the D1a gate exit
       // lives in the seam. (The tool path never exits the gate — it is structurally unreachable
       // while read-only.)
-      const facts: DraftReviewConfirmedFacts = {};
-      const mutation = await reviews.mutateAsync(ctx, "manual-save", async (session) => {
-        const original = planSaveDepsFor(pi, ctx, gating);
-        const deps = { ...original, ...mutationPlanSaveDeps(original, session, facts, "approval") };
-        const saved = await planApprovalSave(deps, { title });
-        const outcome =
-          saved.status === "no-plan" ? saved : { ...saved, result: deps.renderSave(saved.result) };
-        if (outcome.status === "no-plan") {
-          report(
-            ctx,
-            "plan-save",
-            "warning",
-            "no plan to save; write a draft with plan_draft, propose a plan, or call the plan_save tool.",
-            { alsoLog: true },
-          );
-          return;
-        }
-        // Severity reflects a failed objective-node advance: not-ok → error; saved-but-link-failed →
-        // warning; otherwise info. A failed node-link never blocks the gate exit above (the plan was
-        // saved) — but it MUST surface (the silent-partial-failure fix), in headless runs too.
-        const result = outcome.result;
-        const message = result.content[0]?.text ?? "plan-save done";
-        // `SaveResult` flows through `approvalSave` concretely — `details.ok` narrows the union,
-        // so the node-link severity read is typed (no assertion).
-        const details = result.details;
-        const severity: Severity = !details.ok
-          ? "error"
-          : details.objective_node?.linked === false
-            ? "warning"
-            : "info";
-        report(ctx, "plan-save", severity, message);
-      });
-      if (!mutation.ok)
+      const outcome = await approvalSave(pi, ctx, gating, { title });
+      if (outcome.status === "no-plan") {
         report(
           ctx,
           "plan-save",
           "warning",
-          draftReviewMutationRefusal(mutation, facts).content[0]?.text ?? "Draft review stopped",
+          "no plan to save; write a draft with plan_draft, propose a plan, or call the plan_save tool.",
+          { alsoLog: true },
         );
+        return;
+      }
+      // The manual save never consults the latch (it IS the deliberate retry) but reports into it.
+      recordSaveOutcome(reviews, "plan", {
+        confirmed: outcome.status === "saved",
+        ...(outcome.result.details.ok ? {} : { detail: outcome.result.details.error }),
+      });
+      // Severity reflects a failed objective-node advance: not-ok → error; saved-but-link-failed →
+      // warning; otherwise info. A failed node-link never blocks the gate exit above (the plan was
+      // saved) — but it MUST surface (the silent-partial-failure fix), in headless runs too.
+      const result = outcome.result;
+      const message = result.content[0]?.text ?? "plan-save done";
+      // `SaveResult` flows through `approvalSave` concretely — `details.ok` narrows the union,
+      // so the node-link severity read is typed (no assertion).
+      const details = result.details;
+      const severity: Severity = !details.ok
+        ? "error"
+        : details.objective_node?.linked === false
+          ? "warning"
+          : "info";
+      report(ctx, "plan-save", severity, message);
     },
   });
 
@@ -698,7 +675,7 @@ export function installPlanBindings(
   // perk's universal review door. In READ_ONLY_TOOLS so it is callable INSIDE plan mode (the
   // whole point — review happens before the gate ever comes off). Fail-open everywhere:
   // headless / dismissed / backend-unavailable all soft-skip so authoring never wedges.
-  const bridge = { ...createPlannotatorBridge(pi.events), ...reviews };
+  const bridge = createPlannotatorBridge(pi.events);
   pi.registerTool({
     name: "plan_review",
     label: "Plan review",
@@ -734,17 +711,17 @@ export function installPlanBindings(
         },
       },
     },
-    async execute(toolCallId, params, signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       return executePlanReview(
         pi,
         ctx,
         gating,
         bridge,
+        reviews,
         planSaveDepsFor(pi, ctx, gating),
         params,
         signal,
         wave,
-        toolCallId,
       );
     },
   });

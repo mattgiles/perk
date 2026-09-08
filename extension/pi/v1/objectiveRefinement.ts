@@ -41,23 +41,19 @@ import {
 } from "../../authoring/refinement/prose.ts";
 import {
   completeRefinementReview,
-  type RefinementDraftReviewer,
   type RefinementReviewOutcome,
   type ReviewRefinementResult,
 } from "../../authoring/refinement/review.ts";
 import {
+  type RefinementApprovalSaveOutcome,
   type RefinementBackend,
   type RefinementBackendSaveResult,
+  type ReviewedRefinementPair,
   refinementApprovalSave,
   reviewedPairOf,
 } from "../../authoring/refinement/save.ts";
 import type { ApprovalGate } from "../../authoring/review/approvalGate.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
-import {
-  captureDraftReviewBinding,
-  changedTargetComponents,
-  targetDriftDetail,
-} from "../../session/draftReviewBinding.ts";
 import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
 import {
@@ -89,26 +85,23 @@ import {
 import { report } from "../../surfaces/report.ts";
 import { installInjectedContext } from "./contextInjection.ts";
 import {
-  captureDraftReviewRefusal,
-  type DraftReviewConfirmedFacts,
-  type DraftReviewRuntime,
-  type DraftReviewStop,
-  draftReviewCompletionResult,
-  draftReviewMutationRefusal,
-  draftReviewMutationValue,
-  draftReviewRefusalResult,
-  type RegisteredDraftReviewBridge,
-} from "./draftReviewActivation.ts";
-import type { DraftReviewCapability } from "./draftReviewDecisions.ts";
-import {
-  boundRefinementSaveDeps,
-  mutationRefinementSaveDeps,
-  type RefinementSaveDiagnostics,
-} from "./draftReviewEffects.ts";
+  checkDraftReviewDecision,
+  type DecisionCheck,
+  type DraftReviewSlot,
+  destinationChangedResult,
+  type OpenDraftReview,
+  openRefusedResult,
+  recordSaveOutcome,
+  saveUnconfirmedResult,
+  staleApprovalResult,
+  supersededReviewResult,
+  withDraftChangedNote,
+} from "./draftReview.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import { isPlannotatorPlanSelected } from "./providers/selection.ts";
 import {
   approvedSubjectSaveResult,
+  type DraftReviewBridge,
   type ReviewOutcome,
   type ReviewSubject,
   runFirstPartyReview,
@@ -595,7 +588,7 @@ export function importRefinementContextOnClaim(
 export function installObjectiveRefinementBindings(
   pi: ExtensionAPI,
   gating: ToolGating,
-  reviews: DraftReviewRuntime,
+  reviews: DraftReviewSlot,
   contextPolicy: ContextPolicyInputs,
 ): void {
   // The refinement context is selected by the shared authoring-context policy's dedicated
@@ -656,14 +649,7 @@ export function installObjectiveRefinementBindings(
             "(enter one with perk objective refine <objective> or /objective-refine)",
           "wrong_stage",
         );
-      const mutation = reviews.mutate(
-        ctx,
-        "source-changed",
-        (session) => reviseRefinementDraft(decoded, session),
-        { draft: { subject: "refinement" } },
-      );
-      if (!mutation.ok) return draftReviewMutationRefusal(mutation);
-      const revised = mutation.value;
+      const revised = reviseRefinementDraft(decoded, openSession(pi, ctx));
       switch (revised.status) {
         case "revised":
         case "unchanged": {
@@ -774,13 +760,13 @@ export function installObjectiveRefinementBindings(
         );
         return;
       }
-      // Under #2256's mutation boundary: recheck the same run/admission against LIVE state,
-      // persist the exact raw context, then the stage-only entry. Outstanding review eligibility
-      // is invalidated by the boundary itself (a new grounding pass is a target change).
+      // Recheck the same run/admission against LIVE state, persist the exact raw context, then
+      // the stage-only entry. A new grounding pass rebinds the reviewed context digest, so any
+      // open review's approval is refused by the reviewed-bytes guard (`draftReview.ts`).
       type Entered =
         | { status: "entered" | "unchanged"; path: string; read: RefinementContextRead }
         | { status: "refused"; problem: string };
-      const mutation = reviews.mutate(ctx, "target-changed", (session): Entered => {
+      const enter = (session: WorkflowSession): Entered => {
         const live = rebuildWorkflowState(branchOf(ctx));
         const runId = typeof live.run_id === "string" ? live.run_id : "";
         const again = decideWarmRefinementAdmission(
@@ -812,12 +798,8 @@ export function installObjectiveRefinementBindings(
           path: imported.receipt.path,
           read: imported.read,
         };
-      });
-      if (!mutation.ok) {
-        warn(draftReviewMutationRefusal(mutation).content[0]?.text ?? "Draft review stopped");
-        return;
-      }
-      const entered = mutation.value;
+      };
+      const entered = enter(openSession(pi, ctx));
       if (entered.status === "refused") {
         report(ctx, SCOPE_REFINE, "error", entered.problem, { alsoLog: true });
         return;
@@ -863,80 +845,102 @@ export function installObjectiveRefinementBindings(
         warn("the model is running (session_busy) — wait for the turn to finish, then re-run");
         return;
       }
-      // The command IS the human authorization: the state table lives in the manual-save
-      // mutation boundary (absent/consumed/invalidated → proceed; opening/pending → invalidated
-      // first; dispatch/uncertain → refused). Inside it, the shared seam strict-resumes both
-      // artifacts and saves the EXACT draft bytes; the gate exits only on a verified save.
-      const facts: DraftReviewConfirmedFacts = {};
-      const mutation = await reviews.mutateAsync(ctx, "manual-save", async (session) => {
-        const outcome = await refinementApprovalSave(
-          mutationRefinementSaveDeps(
-            { session, backend: coldDoorRefinementBackend(pi, ctx), gate: gateFor(gating, ctx) },
-            facts,
-            "approval",
-          ),
-        );
-        switch (outcome.status) {
-          case "no-draft":
-            report(
-              ctx,
-              SCOPE_SAVE,
-              "error",
-              "no working refinement draft — nothing saved. Write it with objective_refinement_draft " +
-                "(the model's tool), then re-run /objective-refinement-save.",
-            );
-            return;
-          case "no-context":
-            report(
-              ctx,
-              SCOPE_SAVE,
-              "error",
-              "no refinement context in this session — nothing saved. Re-enter a grounding pass " +
-                "with /objective-refine, rewrite the draft, then re-run.",
-            );
-            return;
-          case "refused-draft":
-            report(
-              ctx,
-              SCOPE_SAVE,
-              "error",
-              `the working refinement draft is invalid: ${outcome.problem} — nothing saved. ` +
-                "Rewrite it with objective_refinement_draft, then re-run /objective-refinement-save.",
-            );
-            return;
-          case "saved": {
-            const result = refinementSaveResultOf(ctx, outcome.save);
-            // One headline line: the verified facts AND the advisory statement stay visible.
-            report(
-              ctx,
-              SCOPE_SAVE,
-              "info",
-              `manual human save (not a reviewer approval): ${(result.content[0]?.text ?? "saved").replace(/\n/g, " ")}`,
-            );
-            return;
-          }
-          case "save-failed": {
-            const s = outcome.save;
-            const diagnostics =
-              `write_attempted=${s.writeAttempted === null ? "unknown" : String(s.writeAttempted)}` +
-              (s.commentIds.length > 0 ? `; comment_ids=${s.commentIds.join(",")}` : "");
-            report(
-              ctx,
-              SCOPE_SAVE,
-              "error",
-              `manual save FAILED (${s.errorType}): ${s.message} [${diagnostics}] — the session ` +
-                "stays read-only; read the node's comments back and reconcile before another attempt.",
-            );
-            return;
-          }
-        }
+      // The command IS the human authorization — the deliberate retry the unconfirmed-save latch
+      // points at, so it never consults the latch (but reports into it). The shared seam
+      // strict-resumes both artifacts and saves the EXACT draft bytes; the gate exits only on a
+      // verified save.
+      const outcome = await refinementApprovalSave({
+        session: openSession(pi, ctx),
+        backend: coldDoorRefinementBackend(pi, ctx),
+        gate: gateFor(gating, ctx),
       });
-      if (!mutation.ok)
-        warn(
-          draftReviewMutationRefusal(mutation, facts).content[0]?.text ?? "Draft review stopped",
-        );
+      recordRefinementSaveOutcome(reviews, outcome);
+      switch (outcome.status) {
+        case "no-draft":
+          report(
+            ctx,
+            SCOPE_SAVE,
+            "error",
+            "no working refinement draft — nothing saved. Write it with objective_refinement_draft " +
+              "(the model's tool), then re-run /objective-refinement-save.",
+          );
+          return;
+        case "no-context":
+          report(
+            ctx,
+            SCOPE_SAVE,
+            "error",
+            "no refinement context in this session — nothing saved. Re-enter a grounding pass " +
+              "with /objective-refine, rewrite the draft, then re-run.",
+          );
+          return;
+        case "refused-draft":
+          report(
+            ctx,
+            SCOPE_SAVE,
+            "error",
+            `the working refinement draft is invalid: ${outcome.problem} — nothing saved. ` +
+              "Rewrite it with objective_refinement_draft, then re-run /objective-refinement-save.",
+          );
+          return;
+        case "source-changed":
+          // Unreachable without a `reviewed` pair (the manual save reviews nothing) — kept total.
+          report(ctx, SCOPE_SAVE, "error", "the refinement pair changed — nothing saved; re-run");
+          return;
+        case "saved": {
+          const result = refinementSaveResultOf(ctx, outcome.save);
+          // One headline line: the verified facts AND the advisory statement stay visible.
+          report(
+            ctx,
+            SCOPE_SAVE,
+            "info",
+            `manual human save (not a reviewer approval): ${(result.content[0]?.text ?? "saved").replace(/\n/g, " ")}`,
+          );
+          return;
+        }
+        case "save-failed": {
+          const s = outcome.save;
+          const diagnostics =
+            `write_attempted=${s.writeAttempted === null ? "unknown" : String(s.writeAttempted)}` +
+            (s.commentIds.length > 0 ? `; comment_ids=${s.commentIds.join(",")}` : "");
+          report(
+            ctx,
+            SCOPE_SAVE,
+            "error",
+            `manual save FAILED (${s.errorType}): ${s.message} [${diagnostics}] — the session ` +
+              "stays read-only; read the node's comments back and reconcile before another attempt.",
+          );
+          return;
+        }
+      }
     },
   });
+}
+
+/** Report a refinement approval-save outcome into the unconfirmed-save latch. */
+function recordRefinementSaveOutcome(
+  slot: DraftReviewSlot,
+  outcome: RefinementApprovalSaveOutcome,
+): void {
+  switch (outcome.status) {
+    case "saved":
+      recordSaveOutcome(slot, "refinement", { confirmed: true });
+      return;
+    case "save-failed":
+      recordSaveOutcome(slot, "refinement", {
+        confirmed: false,
+        detail: `${outcome.save.message} (write attempted: ${
+          outcome.save.writeAttempted === null ? "unknown" : String(outcome.save.writeAttempted)
+        })`,
+      });
+      return;
+    case "no-draft":
+    case "no-context":
+    case "refused-draft":
+    case "source-changed":
+      // Nothing reached the backend — no attempt to confirm.
+      return;
+  }
 }
 
 // ------------------------------------------------------------------------ the review arm
@@ -1025,21 +1029,53 @@ function refinementOutcomeOf(outcome: ReviewOutcome): RefinementReviewOutcome {
   }
 }
 
-function firstPartyRefinementReviewer(ctx: ExtensionContext): RefinementDraftReviewer {
-  return {
-    async review(rendered, signal) {
-      const fp = await runFirstPartyReview({
-        ui: ctx.ui,
-        plan: rendered,
-        writeDraft: () => true,
-        signal,
-        editorTitle: REFINEMENT_REVIEW_EDITOR_TITLE,
-        verdicts: verdictsFor(REFINEMENT_SUBJECT),
-        viewOnly: true,
-      });
-      return refinementOutcomeOf(fp.outcome);
-    },
-  };
+/**
+ * The first-party reviewer: the in-TUI editor review, VIEW-ONLY (3 verdicts). Returns the door
+ * vocabulary (`ReviewOutcome`) so both arms share one ladder + completion path.
+ */
+async function firstPartyRefinementReview(
+  ctx: ExtensionContext,
+  rendered: string,
+  signal: AbortSignal | undefined,
+): Promise<ReviewOutcome> {
+  const fp = await runFirstPartyReview({
+    ui: ctx.ui,
+    plan: rendered,
+    writeDraft: () => true,
+    signal,
+    editorTitle: REFINEMENT_REVIEW_EDITOR_TITLE,
+    verdicts: verdictsFor(REFINEMENT_SUBJECT),
+    viewOnly: true,
+  });
+  return fp.outcome;
+}
+
+/** Whether a completed bridge outcome's effect is a save (an approval without Direct Edits). */
+function refinementEffectOf(
+  outcome: Extract<ReviewOutcome, { status: "completed" }>,
+): "save" | "revision" {
+  return outcome.approved &&
+    !(outcome.feedback !== undefined && hasDirectEditsHeading(outcome.feedback))
+    ? "save"
+    : "revision";
+}
+
+/** Render a non-`proceed` ladder verdict as the refinement arm's tool result (nothing saved). */
+function refinementGuardResult(
+  check: Exclude<DecisionCheck, { kind: "proceed" }>,
+  review: OpenDraftReview,
+  feedback: string | undefined,
+): ToolResult {
+  switch (check.kind) {
+    case "superseded":
+      return supersededReviewResult("refinement");
+    case "save-unconfirmed":
+      return saveUnconfirmedResult("refinement", review.runId, check.detail, feedback);
+    case "stale-approval":
+      return staleApprovalResult("refinement", check.reviewedDigest, feedback);
+    case "destination-changed":
+      return destinationChangedResult("refinement", check.changed, feedback);
+  }
 }
 
 function completedOutcome(
@@ -1056,203 +1092,56 @@ function completedOutcome(
 
 /**
  * The `plan_review` refinement arm: headless soft-skip; the validated (draft, context) PAIR as
- * the sole review source (a well-typed `plan` param is ignored upstream); reviewer dispatch
- * (plannotator bridge with capability-fenced dispatch, or the first-party view-only editor);
- * outcome mapping through the shared subject machinery. An approval carrying Direct Edits
- * returns the NON-terminating revise round with nothing saved; a plain approval re-resumes the
- * pair through `refinementApprovalSave` (gate released only after the verified save).
- *
- * The first-party path fences its own wait: the reviewed pair (draft bytes + context digest)
- * and the routing binding are captured BEFORE the editor opens; after the verdict, under the
- * reacquired mutation exclusion, an approval saves only when the binding still matches and the
- * seam finds the SAME pair — a replacement written during the wait stops with nothing saved.
- * The plannotator path's capability performs the equivalent comparison itself; a worker
- * failure inside it is a conservative unresolved-dispatch stop whose typed diagnostics are
- * retained beside the stop (never a bypass, never a replay).
+ * the sole review source (a well-typed `plan` param is ignored upstream); the slot open with the
+ * exact pair (`raw` = the draft bytes, `contextDigest` = the grounding context's digest — the
+ * reviewed-bytes guard compares BOTH, so a re-prepared context also refuses the approval);
+ * reviewer dispatch (plannotator bridge or the first-party view-only editor); the decision
+ * ladder; the shared completion. An approval carrying Direct Edits returns the NON-terminating
+ * revise round with nothing saved; a plain approval re-resumes the pair through
+ * `refinementApprovalSave` with the reviewed pair as its content guard (gate released only after
+ * the verified save).
  */
 export async function runRefinementReviewV1(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
-  bridge: RegisteredDraftReviewBridge,
+  bridge: DraftReviewBridge,
+  slot: DraftReviewSlot,
   signal?: AbortSignal,
-  toolCallId?: string,
 ): Promise<ToolResult> {
   if (!ctx.hasUI) return skipResult();
   const sig = signal ?? ctx.signal;
+  if (sig?.aborted) return subjectReviewOutcomeResult(REFINEMENT_SUBJECT, { status: "aborted" });
   const session = openSession(pi, ctx);
-  if (isPlannotatorPlanSelected(ctx.cwd)) {
-    if (sig?.aborted) return subjectReviewOutcomeResult(REFINEMENT_SUBJECT, { status: "aborted" });
-    const resumed = resumeRefinementDraft(session);
-    if (resumed.kind === "absent") return noRefinementDraftResult();
-    if (resumed.kind === "no-context") return noRefinementContextResult();
-    if (resumed.kind === "refused" || resumed.kind === "mismatch")
-      return renderRefinementReviewResult(ctx, {
-        status: "refusedDraft",
-        problem: resumed.problem,
-      });
-    if (!toolCallId?.trim() || typeof bridge.prepare !== "function")
-      return draftReviewRefusalResult({
-        status: "refused",
-        code: "invalid-state",
-        phase: "open",
-        detail: "required tool identity or review safety dependency unavailable",
-      });
-    const prepared = bridge.prepare(ctx, undefined, sig);
-    if (!prepared.ok) return draftReviewRefusalResult(prepared.refusal);
-    const review = prepared.value;
-    const diagnostics: RefinementSaveDiagnostics = {};
-    try {
-      const outcome = await bridge.review(
-        review.snapshot.markdown,
-        review.registration,
-        review.signal,
-      );
-      if (outcome.status === "refused") return draftReviewRefusalResult(outcome);
-      if (review.signal.aborted)
-        return subjectReviewOutcomeResult(REFINEMENT_SUBJECT, { status: "aborted" });
-      if (outcome.status !== "completed")
-        return subjectReviewOutcomeResult(REFINEMENT_SUBJECT, outcome);
-      const completion = await review.complete(outcome, {
-        effect:
-          outcome.approved &&
-          !(outcome.feedback !== undefined && hasDirectEditsHeading(outcome.feedback))
-            ? "save"
-            : "revision",
-        carrier: { kind: "tool", tool_call_id: toolCallId },
-        execute: (capability) =>
-          completeRefinementReviewV1(pi, ctx, gating, outcome, capability, diagnostics),
-      });
-      return withRefinementWorkerDiagnostics(draftReviewCompletionResult(completion), diagnostics);
-    } finally {
-      review.dispose();
-    }
-  }
-  const reviewer = firstPartyRefinementReviewer(ctx);
-  const facts: DraftReviewConfirmedFacts = {};
-  const result = await captureDraftReviewRefusal(
-    (async (): Promise<ReviewRefinementResult | DraftReviewStop> => {
-      if (sig?.aborted) return { status: "aborted" as const };
-      const resumed = resumeRefinementDraft(session);
-      if (resumed.kind === "absent") return { status: "noDraft" as const };
-      if (resumed.kind === "no-context") return { status: "noContext" as const };
-      if (resumed.kind === "refused" || resumed.kind === "mismatch")
-        return { status: "refusedDraft" as const, problem: resumed.problem };
-      // Capture what the human will judge BEFORE display: the exact pair and the routing
-      // binding (run, stage, config, environment, context artifact). A binding that cannot be
-      // captured has no reviewable target.
-      const reviewed = reviewedPairOf(resumed.pair);
-      const bound = captureDraftReviewBinding(ctx.cwd, session);
-      if (!bound.ok)
-        return { status: "refused", code: bound.reason, phase: "open", detail: bound.detail };
-      // Invalidate competing browser eligibility at entry; release exclusion for the human wait.
-      draftReviewMutationValue(bridge.mutate(ctx, "first-party-review", () => undefined));
-      const rendered = renderRefinementDraft(resumed.pair);
-      const outcome = await reviewer.review(rendered, sig);
-      if (sig?.aborted) return { status: "aborted" as const };
-      // Reacquire exclusion. An approval saves only against the reviewed binding (compared
-      // here) and the reviewed pair (compared by the seam) — never a replacement.
-      return draftReviewMutationValue(
-        await bridge.mutateAsync(
-          ctx,
-          "first-party-review",
-          async (mutationSession): Promise<ReviewRefinementResult | DraftReviewStop> => {
-            if (outcome.status === "approved") {
-              const current = captureDraftReviewBinding(ctx.cwd, mutationSession);
-              if (!current.ok)
-                return {
-                  status: "refused",
-                  code: current.reason,
-                  phase: "mutation",
-                  detail: current.detail,
-                };
-              if (current.binding.subject !== bound.binding.subject)
-                return {
-                  status: "refused",
-                  code: "subject-changed",
-                  phase: "mutation",
-                  detail: "the session's review subject changed during the refinement review",
-                };
-              if (current.binding.digest !== bound.binding.digest)
-                return {
-                  status: "refused",
-                  code: "target-changed",
-                  phase: "mutation",
-                  detail:
-                    "the refinement's routing binding (run, stage, config or grounding context) " +
-                    "changed during the review — nothing was saved; call plan_review again; " +
-                    targetDriftDetail({
-                      checkpoint: "save",
-                      reviewed: bound.binding.digest,
-                      current: current.binding.digest,
-                      changed: changedTargetComponents(
-                        bound.binding.components,
-                        current.binding.components,
-                      ),
-                    }),
-                };
-            }
-            return completeRefinementReview(outcome, () =>
-              refinementApprovalSave(
-                mutationRefinementSaveDeps(
-                  {
-                    session: mutationSession,
-                    backend: coldDoorRefinementBackend(pi, ctx),
-                    gate: gateFor(gating, ctx),
-                    reviewed,
-                  },
-                  facts,
-                  "approval",
-                ),
-              ),
-            );
-          },
-        ),
-      );
-    })(),
+  const resumed = resumeRefinementDraft(session);
+  if (resumed.kind === "absent") return noRefinementDraftResult();
+  if (resumed.kind === "no-context") return noRefinementContextResult();
+  if (resumed.kind === "refused" || resumed.kind === "mismatch")
+    return renderRefinementReviewResult(ctx, { status: "refusedDraft", problem: resumed.problem });
+  const reviewed = reviewedPairOf(resumed.pair);
+  const rendered = renderRefinementDraft(resumed.pair);
+  const plannotator = isPlannotatorPlanSelected(ctx.cwd);
+  const opened = slot.open(ctx, {
+    subject: "refinement",
+    source: plannotator ? "artifact" : "editor",
+    raw: reviewed.draftRaw,
+    markdown: rendered,
+    contextDigest: reviewed.contextDigest,
+  });
+  if (!opened.ok) return openRefusedResult(opened);
+  const review = opened.review;
+  const outcome = plannotator
+    ? await bridge.review(rendered, sig)
+    : await firstPartyRefinementReview(ctx, rendered, sig);
+  if (sig?.aborted) return subjectReviewOutcomeResult(REFINEMENT_SUBJECT, { status: "aborted" });
+  if (outcome.status !== "completed")
+    return subjectReviewOutcomeResult(REFINEMENT_SUBJECT, outcome);
+  const check = checkDraftReviewDecision(slot, ctx, review, refinementEffectOf(outcome));
+  if (check.kind !== "proceed") return refinementGuardResult(check, review, outcome.feedback);
+  return withDraftChangedNote(
+    await completeRefinementReviewV1(pi, ctx, gating, slot, outcome, reviewed),
+    check.draftChanged,
   );
-  if (result.status === "refused") return draftReviewRefusalResult(result, facts);
-  return renderRefinementReviewResult(ctx, result);
-}
-
-/**
- * A worker failure inside the capability-fenced save is a conservative unresolved-dispatch stop
- * (the capability saw no receipt); the worker's typed diagnostics are retained beside that stop
- * so the human reconciles from facts — which comment ids were observed and whether a write was
- * attempted — rather than from a bare refusal. They are DATA for reconciliation, never a retry
- * license.
- */
-function withRefinementWorkerDiagnostics(
-  result: ToolResult,
-  diagnostics: RefinementSaveDiagnostics,
-): ToolResult {
-  const failure = diagnostics.failure;
-  if (failure === undefined || result.details.ok !== false) return result;
-  const attempted =
-    failure.writeAttempted === null ? "unknown" : failure.writeAttempted ? "yes" : "no";
-  const ids = failure.commentIds.length === 0 ? "none" : failure.commentIds.join(", ");
-  return {
-    ...result,
-    content: [
-      ...result.content,
-      {
-        type: "text",
-        text:
-          `Refinement worker diagnostics (${failure.errorType}): ${failure.message}. ` +
-          `Write attempted: ${attempted}; refinement comment ids observed: ${ids}. Read the ` +
-          "node's refinement comment back before any reconciliation; nothing here authorizes a retry.",
-      },
-    ],
-    details: {
-      ...result.details,
-      worker_failure: {
-        error_type: failure.errorType,
-        message: failure.message,
-        write_attempted: failure.writeAttempted,
-        comment_ids: failure.commentIds,
-      },
-    },
-  };
 }
 
 export function renderRefinementReviewResult(
@@ -1368,31 +1257,34 @@ export function renderRefinementReviewResult(
   }
 }
 
-/** Subject policy called only within verified dispatch (the bound, capability-fenced save). */
+/**
+ * The refinement completion shared by the tool arm and any door: a completed outcome → the
+ * feature completion (an approval re-resumes the pair through `refinementApprovalSave`, the
+ * `reviewed` pair its content guard — a replacement written during the wait is the
+ * `approvedSourceChanged` arm; Direct Edits is the no-save revise round) → the latch record →
+ * the rendered tool result. A failed worker surfaces as the feature's own `approvedSaveFailed`
+ * (its typed diagnostics ride the rendered save message).
+ */
 export async function completeRefinementReviewV1(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
+  slot: DraftReviewSlot,
   outcome: Extract<ReviewOutcome, { status: "completed" }>,
-  capability: DraftReviewCapability,
-  diagnostics: RefinementSaveDiagnostics = {},
+  reviewed: ReviewedRefinementPair,
 ): Promise<ToolResult> {
-  return renderRefinementReviewResult(
-    ctx,
-    await completeRefinementReview(refinementOutcomeOf(outcome), () =>
-      refinementApprovalSave(
-        boundRefinementSaveDeps(
-          {
-            session: openSession(pi, ctx),
-            backend: coldDoorRefinementBackend(pi, ctx),
-            gate: gateFor(gating, ctx),
-          },
-          capability,
-          diagnostics,
-        ),
-      ),
-    ),
+  const result = await completeRefinementReview(refinementOutcomeOf(outcome), () =>
+    refinementApprovalSave({
+      session: openSession(pi, ctx),
+      backend: coldDoorRefinementBackend(pi, ctx),
+      gate: gateFor(gating, ctx),
+      reviewed,
+    }),
   );
+  // Denials, Direct Edits and the no-draft arm never reach the backend — nothing to confirm.
+  if (result.status === "approvedSaved" || result.status === "approvedSaveFailed")
+    recordRefinementSaveOutcome(slot, result.save);
+  return renderRefinementReviewResult(ctx, result);
 }
 
 /** The refusal text the plan-graph surfaces render inside a refinement session. */

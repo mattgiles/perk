@@ -34,12 +34,12 @@ owns only an interface, so perk yields that interface without bridging an artifa
   For a plan approval with `# Direct Edits`, perk applies the diff and saves the edited bytes; if
   the diff cannot apply, it saves the original bytes and reports the fallback. For objective and
   gist approvals with direct edits, perk does not save: it returns one revise round so the agent
-  folds the edits into the appropriate draft fields and re-reviews. Matching denial returns
-  actionable feedback to the agent. These policies require verified source/routing and dispatch
-  intent; stale decisions carry only diagnostic DATA, never current-draft edit/save instructions.
-  Refusals preserve known save/gate facts and require human reconciliation, not a blind retry.
-  See [Plannotator draft-review transport](../providers-and-backends.md#plannotator-draft-review-transport)
-  and [Reconcile a draft-review stop](../../how-to/reconcile-a-draft-review-stop.md).
+  folds the edits into the appropriate draft fields and re-reviews. Denial returns actionable
+  feedback to the agent. Every approval runs the shared draft-review guards (reviewed bytes, save
+  destination, one current review, the unconfirmed-save latch) — a refused approval saves nothing
+  and asks for a fresh `plan_review`. See
+  [Plannotator draft-review transport](../providers-and-backends.md#plannotator-draft-review-transport)
+  and [Browser draft review](../in-session/review-and-authoring.md#browser-draft-review).
 
 The adapters are selected behavior, not new storage formats. A plan reference's `provider` field
 names the **issue backend**, not the plan-provider id.

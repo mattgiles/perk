@@ -545,16 +545,17 @@ test("approvedSubjectSaveResult: directEditsFailed -> the saved-WITHOUT-them war
   assert.equal((result.details as { direct_edits_applied?: boolean }).direct_edits_applied, false);
 });
 
-test("approvedSubjectSaveResult: save-failed -> non-terminating, error surfaced, reconciliation required", () => {
+test("approvedSubjectSaveResult: save-failed -> non-terminating, error surfaced, the deliberate retry named", () => {
   const result = approvedSubjectSaveResult(PLAN_SUBJECT, APPROVED_FB, failedSave(), {
     paramMismatch: false,
   });
   assert.equal(result.terminate, undefined);
   const text = String(result.content[0]?.text);
   assert.match(text, /plan APPROVED by reviewer, but the auto-save FAILED \(gh exploded\)/);
-  assert.match(text, /the session stays read-only/);
-  assert.match(text, /reconcile backend objects and retained review/);
-  assert.match(text, /do not blindly retry/);
+  assert.match(text, /the session stays read-only and automatic saves are paused for this session/);
+  assert.match(text, /Do not retry yourself/);
+  assert.match(text, /check the issue backend for an existing plan carrying this run id/);
+  assert.match(text, /\/plan-save \(the deliberate retry\)/);
   assert.doesNotMatch(text, /was saved verbatim|implementation guidance/);
   assert.match(text, /ship it; watch the edge case/, "feedback still surfaced");
   const details = result.details as Record<string, unknown>;

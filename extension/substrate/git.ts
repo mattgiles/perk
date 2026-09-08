@@ -52,37 +52,44 @@ export function worktreeGitDir(cwd: string): string | null {
   }
 }
 
-/** Strict bounded local routing discovery. No main-checkout fallback or decoded config stdout. */
-export function draftReviewGitContext(cwd: string): {
-  worktreeRoot: string;
-  gitDir: string;
-  gitCommonDir: string;
-  configBytes: Uint8Array;
-} | null {
+/**
+ * The git-config entries that decide WHERE a GitHub-backed save lands: every `remote.*.url` and
+ * `remote.*.gh-resolved` key (`gh` resolves the target repo from exactly these). Returns the
+ * NUL-separated `key\nvalue` entries sorted lexicographically and re-joined with `\0` (a
+ * canonical form fit for digesting), `""` when the repo has no remotes at all (git exits 1 with
+ * empty stdout), or `null` when the destination cannot be verified (not a repo, git missing,
+ * any other failure). **Fails closed** on purpose: a caller fencing a save must treat `null` as
+ * "unverifiable", never as "unchanged". No other git config participates — `branch.*`,
+ * `user.*`, and friends never route a save, so they must never invalidate a review.
+ *
+ * Repo membership is probed first (`worktreeGitDir`): outside a repo `git config` still reads
+ * the global/system files and reports "no match" — which would masquerade as a verified empty
+ * destination.
+ */
+export function remoteConfig(cwd: string): string | null {
+  if (worktreeGitDir(cwd) === null) return null;
   try {
-    const path = (flag: string): string => {
-      const out = execFileSync("git", ["rev-parse", "--path-format=absolute", flag], {
+    const out = execFileSync(
+      "git",
+      ["config", "--null", "--get-regexp", "^remote\\..*\\.(url|gh-resolved)$"],
+      {
         cwd,
         encoding: "utf8",
         timeout: 5_000,
         maxBuffer: 1024 * 1024,
         stdio: ["ignore", "pipe", "ignore"],
-      }).replace(/\r?\n$/, "");
-      if (!isAbsolute(out) || /[\0\r\n]/.test(out) || !statSync(out).isDirectory())
-        throw new Error("invalid Git directory");
-      return realpathSync(out);
-    };
-    const worktreeRoot = path("--show-toplevel");
-    const gitDir = path("--absolute-git-dir");
-    const gitCommonDir = path("--git-common-dir");
-    const configBytes = execFileSync("git", ["config", "--null", "--list", "--show-origin"], {
-      cwd: worktreeRoot,
-      timeout: 5_000,
-      maxBuffer: 16 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    return { worktreeRoot, gitDir, gitCommonDir, configBytes };
-  } catch {
+      },
+    );
+    return out
+      .split("\0")
+      .filter((entry) => entry !== "")
+      .sort()
+      .join("\0");
+  } catch (error) {
+    // `git config --get-regexp` exits 1 with empty stdout when NO key matches — a repo with no
+    // remotes is a verified (empty) destination, not a failure.
+    const failure = error as { status?: unknown; stdout?: unknown };
+    if (failure.status === 1 && String(failure.stdout ?? "") === "") return "";
     return null;
   }
 }

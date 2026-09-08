@@ -289,95 +289,64 @@ The cold twin is [`perk objective stack review`](../cli/objective.md#perk-object
 
 ## Browser draft review
 
-For `busy`, `invalid-state`, `persistence-failed`, or `unresolved-dispatch`, follow
-[Reconcile a draft-review stop](../../how-to/reconcile-a-draft-review-stop.md).
-It is human-only, with no in-place repair: prove all participants and save subprocesses quiescent,
-preserve evidence, reconcile existing saves/delivery, and only then consider a distinct fresh run.
-An orphan alone is not proof of no effects. Never copy intent or approvals into that run.
+Every draft review — the blocking `plan_review` tool (Plannotator or first-party, for plans,
+objectives, gists and refinements) and both browser doors — runs the same four in-memory guards.
+Nothing is persisted: there is no review record, no lock, no reconciliation procedure. **A browser
+decision does not survive a Pi restart — re-run the door.**
 
-Plannotator draft opens now verify run-local registration before launching. A typed registration
-refusal stops without priming companion surfaces or taking the port-failure fallback. The
-subscribe-then-status catch-up query is bounded to five seconds; the live human wait remains
-open-ended. Pending is not a health guarantee, and missing/query failure is not a denial.
-See [Plannotator draft-review transport](../providers-and-backends.md#plannotator-draft-review-transport)
-for transport cancellation and status-query limits. A browser handshake or subscription failure
-produces one in-session fallback notice only after its transport invalidation verifies. This also
-works if readiness is still waiting or previously reported ready; failed persistence never grants
-fallback permission, and no review decision is manufactured.
+1. **Reviewed bytes.** An approval saves only the bytes the human saw. If the working draft
+   changed after the review opened (a `plan_draft` / `objective_draft` / `gist_draft` /
+   `objective_refinement_draft` write; for refinements also a re-prepared grounding context), the
+   approval saves nothing and the model is told to call `plan_review` on the current draft. A
+   denial still returns its feedback, prefixed with a one-line note that the draft moved. The
+   compare applies to artifact-sourced reviews (the doors and the Plannotator tool arm); a
+   first-party in-TUI review's own edit write-back is the one legitimate draft change during a
+   modal review and is saved as reviewed.
+2. **Save destination.** At approval the destination must equal what it was when the review
+   opened: the main checkout's committed `[issues] backend`/`team`, the git `remote.*.url` /
+   `remote.*.gh-resolved` entries (GitHub backend only — Linear never reads remotes), and — for
+   plans — the objective node claim. Nothing else participates: landing a PR (which rewrites
+   `branch.*` git config), `[workflow] base`, credentials, other Perk TOML edits and comments
+   never block an approval. A changed or unverifiable destination saves nothing; the model is
+   told which component moved (names, never values) and that a fresh `plan_review` — a fresh
+   human approval — is required. Denials never check the destination.
+3. **One current review.** Opening a review on ANY surface supersedes the previous one (a
+   first-party review supersedes an open browser review and vice versa; `/implement-here`
+   retires it). A decision from a superseded review is ignored loudly — one TUI warning, nothing
+   saved, nothing injected — even when its bytes are still current: once a newer review exists,
+   its approval is the only authority.
+4. **Unconfirmed-save latch.** After a save attempt that did not return a typed receipt (a
+   failed backend call, a thrown call, an unavailable port), automatic approval-driven saves are
+   paused for the rest of the session. The next approval on any surface is refused
+   (`save_unconfirmed`) before the backend is touched, naming the earlier failure and the run id.
+   **Check the issue backend for an existing plan/objective/gist carrying that run id before
+   retrying** — on Linear a partially completed create can leave an issue the retry cannot find
+   (GitHub creates are find-then-return on the run id) — then run the manual save command
+   (`/plan-save`, `/objective-save`, `/gist-save`, `/objective-refinement-save`): the manual
+   command IS the deliberate retry and never consults the latch. A Pi restart clears the latch;
+   check the backend before saving again all the same.
 
-Plannotator `plan_review` guards completion for plan, objective, gist, and refinement. Both
-plan/objective browser doors and their chooser delegations use the same guarded completions, as
-well as the eligibility mutations below. Verified intent precedes edits, saves, or actionable
-revision feedback. Plans save frozen reviewed bytes (or verified Direct Edits); structured
-objective/gist/refinement Direct Edits requests revision without saving. A refinement review
-(an `objective-refine` session) reviews the validated (draft, grounding-context) pair — the
-target binding additionally fences the context artifact's digest, so a re-prepared context, a
-changed draft, or a changed run/stage/routing-config invalidates approval even when the rendering
-is identical; this fences the reviewed artifact and save route, not the checkout contents. There is
-no refinement browser door or reviewer wave: `plan_review` uses the plain browser review or the
-first-party view-only editor. A new artifact after a parameter review, including
-identical text, can only produce stale diagnostic DATA. Source/target drift during title generation
-stops the save; a backend that already started is never automatically retried.
+Reviewer feedback reaching the model always rides inside `<untrusted_reviewer_feedback>`
+delimiters as DATA. A refinement review (an `objective-refine` session) reviews the validated
+(draft, grounding-context) pair; there is no refinement browser door or reviewer wave —
+`plan_review` uses the plain browser review or the first-party view-only editor.
 
-The guarantee is at-most-once participating machine-local dispatch, not exactly-once delivery or
-power-loss durability. Browser feedback plus a code-authored HTML receipt marker (after the final
-untrusted-feedback delimiter) forms one canonical user text block — the same single block Pi
-persists for a sent user message. Its full content expectation is recorded against that block
-before one idle/followUp send of the identical content, then the claim is released. Only exact
-persisted evidence confirms delivery — a tool/user entry whose whole content matches the recorded
-expectation; returning a tool result, queueing a message, or a marker alone does not.
-Abort/shutdown checks evidence first and otherwise retains an uncertain stop. Session/run changes
-do not replay or acknowledge old feedback. This applies to new dispatches: a review already stuck
-in `dispatch`/`uncertain` is not migrated or automatically consumed — follow
-[Reconcile a draft-review stop](../../how-to/reconcile-a-draft-review-stop.md), and never retry a
-confirmed approval save merely because delivery confirmation failed.
-Its stale-result format preserves the reviewed digest and verbatim feedback as diagnostic DATA,
-not approval or instructions to apply changes to the current draft. Refusals preserve confirmed
-save/gate facts and prohibit blind save retry. No startup/reload discovery or recovery door is added.
+The Plannotator bridge subscribes to the browser's decision before it emits the review request,
+so a decision emitted during the handshake is not lost; there is no status catch-up query. A
+browser handshake failure produces one in-session fallback notice; if the browser never becomes
+ready, findings degrade loudly to the in-session table and a later browser decision is ignored.
 
-The target binding fingerprints save-routing inputs, not whole configuration files: the main
-checkout's committed `[issues] backend`/`team`, the invoking checkout's committed and local
-`[workflow] base` (plan/objective only; not bound for gist or refinement), the main checkout's local
-`[linear] api_key` (hashed), the run handoff, `GH_REPO`/`GH_HOST`, and **all Git-config output**.
-An unrelated valid Perk TOML change while a review is open — a `[compaction]`, `[models]`, `[ci]`,
-`[skills]`, `[providers]` or comment/formatting edit, including one pulled in by a checkout update —
-leaves the review valid: a denial delivers once with no save, an approval saves once. Changing a
-bound routing field refuses `target-changed` and the stop names the checkpoint (`open`, `attach`,
-`candidate`, `save`) and the changed component (`main_config.issues.backend`,
-`worktree_local.workflow.base`, `git_config`, …) without exposing its value; unrelated Git-config
-changes therefore still invalidate a review. Retained-state reconciliation rules are unchanged, and
-no earlier review record is migrated or replayed under the new fingerprint.
+### Manual saves and first-party review
 
-### Participating authoring and first-party review
+The draft tools, the manual save tools and slash commands (plus the human
+`/objective-refinement-save`), `objective_node`, and `/implement-here` consult no review state:
+they run their feature operation as before. A manual save reports its outcome into the latch (a
+failed manual save pauses automatic saves too) but is never refused by it. If a save succeeds
+but later gate, linkage, or notification bookkeeping fails, the stop preserves its known ID/URL;
+reconcile the existing object rather than creating it again.
 
-The four draft tools, three manual save tools and slash commands (plus the human
-`/objective-refinement-save`), `objective_node`, and `/implement-here` share one current-run
-claim. They require verified safe run identity: missing or
-unsafe identity is a refusal, not permission to save or start a fallback turn without a claim.
-A genuinely absent review record still permits ordinary authoring and save behavior under that
-claim; terminal records are preserved.
-
-Changed draft bytes invalidate an opening/pending review before writing. Identical sound bytes do
-not invalidate it, including structured objective/gist/refinement bytes. Manual saves invalidate
-with `manual-save` (`/objective-refinement-save` included — invoking it is the human's fresh
-authorization: it needs no prior review, is labelled a manual save rather than an approval, and
-still refuses an unresolved dispatch or uncertain record); node updates and a re-entered
-`/objective-refine` grounding pass conservatively invalidate with `target-changed`. A busy claim,
-unresolved dispatch/uncertainty, invalid state, or failed invalidation blocks the competing
-operation. Failed invalidation retains the claim; do not discard state or blindly retry a save.
-If a save succeeds but later gate, linkage, or notification bookkeeping fails, the stop preserves
-its known ID/URL and any definitive successful gate exit. A gate failure does not make the backend
-receipt unconfirmed; recording that receipt still requires verified ownership and persistence. This does not mean nothing saved. A failed
-linkage retains exclusion; reconcile the existing object rather than creating it again. Manual
-save tools that did not previously exit the gate still do not exit it.
-
-First-party review invalidates the previous opening/pending review and releases the claim before
-opening the editor. Plan editor writeback and post-verdict completion reacquire it; no claim spans
-a human wait. A competing unresolved dispatch blocks late writeback/save. Plan source tiers and
-trimming, structured objective/gist saves, and the objective-node implement-here refusal remain
-unchanged. Readiness failure suppresses late local decisions immediately, but fallback is announced
-only after verified degraded invalidation. A failed invalidation retains the claim and grants no
-fallback permission; a decision already dispatching cannot be rolled back by readiness failure.
+A first-party review opens the current-review slot before the editor (superseding an open browser
+review); after the verdict a plain approval runs the latch and destination checks before the save.
 
 Both draft doors review the exact validated artifact primed by the command. They never accept
 pasted draft text from the model. The shared companion tools are:
@@ -394,17 +363,15 @@ pasted draft text from the model. The shared companion tools are:
   *Non-terminating.*
 - **`plan_review`** — process the human decision through the normal approval/denial/save seams.
   It terminates on a successful approval-driven save and otherwise leaves the session available
-  for revision or human reconciliation. On the Plannotator provider, an eligible call — the Plannotator
+  for revision. On the Plannotator provider, an eligible call — the Plannotator
   extension actually loaded (the presence probe) plus a validated plan or objective draft
   artifact — first opens an in-TUI launch chooser — browser review **with** the
   reviewer wave or **without** it (Esc chooses without; the review always proceeds). Choosing
   the wave asks for an optional custom review angle, opens the same browser flow as the matching
   door below, and returns wave guidance (`wave_launched`) instead of blocking; the browser
   decision then routes back automatically. Gist review has no wave door and stays plain.
-  The plain plan-tool completion saves the reviewed original or verified Direct Edits bytes;
-  a failed patch write cannot select different partial artifact bytes as its fallback. Manual
-  save source tiers are unchanged. Interrupting gist review before its decision is processed
-  saves nothing and returns no actionable revision instructions.
+  The plain plan-tool completion saves the reviewed original or verified Direct Edits bytes.
+  Manual save source tiers are unchanged.
 
 ### `/plan-review-browser`
 
@@ -420,12 +387,11 @@ custom-angle input on the wave choice. `/plan-review-browser <angle text>` remai
 door for plans and `/objective-review-browser <angle text>` for objectives — the
 subject-appropriate doors (the plan door refuses objective stages).
 
-**APPROVE** applies verified Direct Edits to the plan artifact, then auto-saves the bound bytes.
-If the artifact changed while the browser was open, approval or denial can only produce stale
-reference DATA, never current-draft edit/save instructions. Unconfirmed saves stop for human
-reconciliation, not a blind `/plan-save` retry. A confirmed save and successful gate exit remain
-confirmed even if later delivery/bookkeeping fails. **DENY** on a matching draft returns feedback
-and any Direct Edits for a `plan_draft` revision round.
+**APPROVE** applies verified Direct Edits to the plan artifact, then auto-saves the reviewed
+bytes — behind the four guards above (a moved draft or a changed destination saves nothing and
+asks for a fresh `plan_review`; a paused session refuses until `/plan-save`, the deliberate
+retry). **DENY** returns the feedback and any Direct Edits for a `plan_draft` revision round,
+with the draft-moved note when the draft changed.
 
 The door refuses when Plannotator is missing, the session is headless, the current stage is not a
 plan-authoring stage, or the draft is missing or invalid. Create a valid artifact with `plan_draft`
@@ -437,12 +403,11 @@ Review the rendered structured objective draft — prose, explicit `**Delivery:*
 table — from `objective-author` or `objective-save`. The browser and reviewer wave otherwise behave
 like plan review, including the optional custom lane and automatic final core-Ponytail lane.
 
-**APPROVE** normally auto-saves and exits read-only, but Direct Edits never auto-apply to an
-objective: the browser edited rendered Markdown while save re-reads structured fields. An approval
-with Direct Edits on a matching draft therefore saves nothing and becomes a revise round; fold
-the diff into `objective_draft`, then re-review. On a changed draft, both Direct Edits and denial
-are stale diagnostic DATA only. An unconfirmed save stops for human reconciliation, never a blind
-`/objective-save` retry. **DENY** on a matching draft returns feedback for an `objective_draft` revision.
+**APPROVE** normally auto-saves and exits read-only — behind the four guards above — but Direct
+Edits never auto-apply to an objective: the browser edited rendered Markdown while save re-reads
+structured fields. An approval with Direct Edits therefore saves nothing and becomes a revise
+round; fold the diff into `objective_draft`, then re-review. **DENY** returns feedback for an
+`objective_draft` revision (with the draft-moved note when the draft changed).
 
 The door refuses when Plannotator is missing, the session is headless, the stage is not objective
 authoring, or the structured draft is missing or invalid. It never reviews raw JSON, a pasted

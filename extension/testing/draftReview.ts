@@ -1,187 +1,86 @@
-import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+// Dev-only fixtures for the draft-review guards (`pi/v1/draftReview.ts`): a scripted bridge that
+// records the reviewed bytes and returns a canned outcome, a slot whose git-remotes read is
+// scripted (the tool-arm suites fence destinations without a repo), and a seeded browser-review
+// scaffold (a git repo with one `origin` remote — the destination fence needs a verifiable
+// checkout — plus the subject's draft artifact written through the branch session) returning a
+// fresh slot. Outside the production corpus, the guard scans, and the npm tarball (the
+// `testing/` home).
+
+import { execFileSync } from "node:child_process";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
-  createDraftReviewActivation,
-  type DraftReviewAccess,
-  type DraftReviewRuntime,
-} from "../pi/v1/draftReviewActivation.ts";
-import type { ReviewOutcome } from "../pi/v1/review.ts";
+  createDraftReviewSlot,
+  type DraftReviewSlot,
+  type DraftReviewSubject,
+  REVIEW_SUBJECT_ARTIFACTS,
+} from "../pi/v1/draftReview.ts";
+import type { ReviewOutcome } from "../pi/v1/reviewOutcome.ts";
 import { openBranchWorkflowSession } from "../session/branchWorkflowSession.ts";
-import {
-  TARGET_COMPONENTS,
-  type TargetComponent,
-  type TargetComponents,
-} from "../session/draftReviewBinding.ts";
-import type { DraftReviewRegistration } from "../session/draftReviewState.ts";
-import { digestSessionData } from "../session/workflowSession.ts";
-
-/**
- * Fake diagnostic component digests for a fixture binding: every fixed component name digested
- * from `seed`, with `changed` names given a distinct digest (a fixture's way to stage "these
- * components drifted" against a baseline built from the same seed).
- */
-export function fakeTargetComponents(
-  seed = "target",
-  changed: readonly TargetComponent[] = [],
-): TargetComponents {
-  return Object.fromEntries(
-    TARGET_COMPONENTS.map((name) => [
-      name,
-      digestSessionData(`${name}:${seed}${changed.includes(name) ? ":changed" : ""}`),
-    ]),
-  ) as Record<TargetComponent, string>;
-}
-
+import { captureSaveDestination } from "../session/saveDestination.ts";
+import { resolveIssueRouting } from "../substrate/config.ts";
+import type { SessionArtifactCtx } from "../substrate/sessionData.ts";
+import type { EntrySink } from "../substrate/workflowState.ts";
 import { gitInit } from "./harness.ts";
 
-/** Explicit test-only transport hooks. State/claim composition tests use the real coordinator. */
-export function recordingDraftRegistration() {
-  const calls: string[] = [];
-  const registration: DraftReviewRegistration = {
-    open(id) {
-      calls.push(`open:${id}`);
-      return { ok: true };
-    },
-    attach(id, review) {
-      calls.push(`attach:${id}:${review}`);
-      return { ok: true };
-    },
-    invalidateOpening(id, reason) {
-      calls.push(`invalidate:${id}:${reason}`);
-      return { ok: true };
-    },
-    subscriptionFailed(id, review) {
-      calls.push(`subscribe:${id}:${review}`);
-      return { ok: true };
-    },
-    diagnostic(code) {
-      calls.push(`diagnostic:${code}`);
-    },
-  };
-  return { registration, calls };
-}
-
-/** Browser resource tests use real activation/state/claims with explicit fake session storage. */
-export function seedBrowserReviews(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  subject: "plan" | "objective",
-  markdown: string,
-  raw = markdown,
-): DraftReviewAccess {
-  gitInit(ctx.cwd, { dirty: false });
-  const branch: unknown[] = [
-    {
-      type: "custom",
-      customType: "perk:workflow-state",
-      data: {
-        run_id: "RID",
-        stage: subject === "plan" ? "plan" : "objective-author",
-        mode: "read-only",
-      },
-    },
-  ];
-  Object.assign(ctx, {
-    sessionManager: { getBranch: () => branch, getSessionId: () => "browser-fixture" },
-  });
-  Object.assign(pi, {
-    on() {},
-    appendEntry(customType: string, data: unknown) {
-      branch.push({ type: "custom", customType, data });
-    },
-  });
-  const written = openBranchWorkflowSession(pi, ctx).writeArtifact(
-    subject === "plan" ? "plan-draft.md" : "objective-draft.json",
-    raw,
-  );
-  if (written.status !== "applied") throw new Error("browser fixture draft write failed");
-  return createDraftReviewActivation(pi);
-}
-const mutationRuntimes = new WeakMap<ExtensionContext, DraftReviewRuntime>();
-function mutationRuntime(ctx: ExtensionContext): DraftReviewRuntime {
-  let runtime = mutationRuntimes.get(ctx);
-  if (runtime === undefined) {
-    // Policy tests fake only Pi's storage carrier; mutation identity/state/claims remain real.
-    const pi = {
-      on() {},
-      appendEntry(type: string, data: unknown) {
-        const manager = ctx.sessionManager;
-        if (!("appendCustomEntry" in manager) || typeof manager.appendCustomEntry !== "function")
-          throw new Error("Policy fixture needs a writable session manager");
-        manager.appendCustomEntry(type, data);
-      },
-    } as unknown as ExtensionAPI;
-    runtime = createDraftReviewActivation(pi);
-    mutationRuntimes.set(ctx, runtime);
-  }
-  return runtime;
-}
-export const policyDraftReviews: DraftReviewRuntime = {
-  mutate(ctx, reason, work, options) {
-    return mutationRuntime(ctx).mutate(ctx, reason, work, options);
-  },
-  mutateAsync(ctx, reason, work) {
-    return mutationRuntime(ctx).mutateAsync(ctx, reason, work);
-  },
-  prepare(_ctx, markdown = "", signal) {
-    const abort = new AbortController();
-    return {
-      ok: true,
-      value: {
-        snapshot: {
-          source: { kind: "parameter", plan: markdown, artifact_at_open: "absent" },
-          raw: markdown,
-          markdown,
-          sourceDigest: digestSessionData(markdown),
-          binding: {
-            runId: "RID",
-            subject: "plan",
-            digest: digestSessionData("target"),
-            warmNodeClaim: null,
-            components: fakeTargetComponents(),
-          },
-        },
-        registration: recordingDraftRegistration().registration,
-        signal: signal ?? abort.signal,
-        isCurrent: () => true,
-        degrade() {
-          throw new Error("Policy fixture cannot authorize degradation");
-        },
-        async complete() {
-          throw new Error(
-            "Policy-only fixture cannot authorize production completion; use real activation/state/claims",
-          );
-        },
-        dispose() {
-          abort.abort();
-        },
-      },
-    };
-  },
-};
-
-/** Legacy policy callers now exercise real state/claims; only the upstream verdict is scripted. */
-export function scriptedDraftReviewBridge(outcome: ReviewOutcome) {
+/** A recording bridge: captures every reviewed plan, returns the canned outcome. */
+export function scriptedDraftReviewBridge(outcome: ReviewOutcome): {
+  review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome>;
+  reviewed: string[];
+} {
   const reviewed: string[] = [];
   return {
-    ...policyDraftReviews,
     reviewed,
-    prepare(ctx: ExtensionContext, parameter?: string, signal?: AbortSignal) {
-      if (!existsSync(join(ctx.cwd, ".git"))) gitInit(ctx.cwd, { dirty: false });
-      return mutationRuntime(ctx).prepare(ctx, parameter, signal);
-    },
-    async review(markdown: string, registration: DraftReviewRegistration): Promise<ReviewOutcome> {
-      const id = randomUUID();
-      const opened = registration.open(id);
-      if (!opened.ok) throw new Error(`scripted registration refused: ${opened.reason}`);
-      if (outcome.status === "completed") {
-        const attached = registration.attach(id, outcome.reviewId);
-        if (!attached.ok) throw new Error(`scripted attachment refused: ${attached.reason}`);
-      }
-      reviewed.push(markdown);
+    async review(plan: string) {
+      reviewed.push(plan);
       return outcome;
     },
   };
+}
+
+/** The scripted `git config remote.*` read a fresh `scriptedRemotesSlot` starts from. */
+export const SCRIPTED_ORIGIN = "remote.origin.url\nhttps://github.com/acme/widgets.git";
+
+/**
+ * A slot over a scripted git-remotes reader (no repo needed): the real committed `[issues]` and
+ * node-claim capture, with `remotes.current` standing in for the checkout's `remote.*` entries.
+ * Flip it mid-review to simulate `git remote set-url`; set it to `null` for an unverifiable
+ * checkout.
+ */
+export function scriptedRemotesSlot(
+  pi: ExtensionAPI,
+  remotes: { current: string | null } = { current: SCRIPTED_ORIGIN },
+): DraftReviewSlot {
+  return createDraftReviewSlot(pi, {
+    session: openBranchWorkflowSession,
+    destination: (cwd, nodeClaim) =>
+      captureSaveDestination(cwd, nodeClaim, {
+        issues: resolveIssueRouting,
+        remotes: () => remotes.current,
+      }),
+  });
+}
+
+/**
+ * Seed a browser-reviewable session: git-init `ctx.cwd` (with an `origin` remote so the GitHub
+ * destination arm captures), write `raw` as the subject's draft artifact through the branch
+ * session, and return a fresh slot bound to `pi`.
+ */
+export function seedBrowserReview(
+  pi: ExtensionAPI & EntrySink,
+  ctx: SessionArtifactCtx,
+  subject: DraftReviewSubject,
+  raw: string,
+): DraftReviewSlot {
+  gitInit(ctx.cwd, { dirty: false });
+  execFileSync("git", ["remote", "add", "origin", "https://github.com/acme/widgets.git"], {
+    cwd: ctx.cwd,
+    stdio: "ignore",
+  });
+  const written = openBranchWorkflowSession(pi, ctx).writeArtifact(
+    REVIEW_SUBJECT_ARTIFACTS[subject],
+    raw,
+  );
+  if (written.status !== "applied" && written.status !== "unchanged")
+    throw new Error(`seedBrowserReview: draft write ${written.status}`);
+  return createDraftReviewSlot(pi);
 }

@@ -9,24 +9,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { recordingDraftRegistration } from "../../../testing/draftReview.ts";
 import type { PlannotatorBus } from "./plannotator.ts";
-import type { StartBrowserDeps } from "./plannotatorHandoff.ts";
-
-async function startPlannotatorPlanReview(
-  bus: PlannotatorBus,
-  opts: { plan: string; signal?: AbortSignal },
-  deps: StartBrowserDeps = {},
-) {
-  const started = await startRegisteredPlanReview(
-    bus,
-    { ...opts, registration: recordingDraftRegistration().registration },
-    deps,
-  );
-  assert.ok(!("status" in started));
-  return started;
-}
-
 import {
   CODE_REVIEW_READINESS_PROBE_PATH,
   type CodeReviewOutcome,
@@ -43,7 +26,7 @@ import {
   routePrReviewOutcome,
   stackRespondMessage,
   startPlannotatorBrowser,
-  startPlannotatorPlanReview as startRegisteredPlanReview,
+  startPlannotatorPlanReview,
 } from "./plannotatorHandoff.ts";
 
 /** A minimal in-memory event bus (the fake `pi.events` for the pure bridge tests). */
@@ -52,11 +35,6 @@ function fakeBus(): PlannotatorBus & { handlers: Map<string, ((data: unknown) =>
   return {
     handlers,
     emit(channel, data) {
-      const request = data as { action?: string; respond(value: unknown): void };
-      if (channel === "plannotator:request" && request.action === "review-status") {
-        request.respond({ status: "handled", result: { status: "pending" } });
-        return;
-      }
       for (const h of handlers.get(channel) ?? []) h(data);
     },
     on(channel, handler) {
