@@ -210,7 +210,10 @@ root = ".worktrees"
 #
 # [compaction]
 # enabled = true            # turn pi's auto-compaction on/off
-# reserve_tokens = 16384    # tokens reserved for the response (pi default)
+# reserve_tokens = 16384    # headroom AND summary output budget (pi default):
+#                           # 0.8x history / 0.5x turn-prefix. Raise for long
+#                           # single-turn sessions; keep far below the smallest
+#                           # model window
 # keep_recent_tokens = 20000 # recent tokens kept verbatim (pi default)
 # objective_threshold = 0.8 # compact when an objective session crosses this
 """

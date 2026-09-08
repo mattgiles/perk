@@ -447,9 +447,21 @@ is **runtime-read** (overlay-aware) by the extension instead.
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `enabled` | bool | _(pi default)_ | Auto-compaction on/off. |
-| `reserve_tokens` | int (> 0) | _(pi default)_ | Tokens reserved for the response. |
+| `reserve_tokens` | int (> 0) | _(pi default: 16384)_ | Headroom pi keeps free at the top of the context window (the auto-compaction trigger, `context > window − reserve`) **and** the output budget for compaction summaries: history summary `0.8 ×`, a split turn's turn-prefix summary `0.5 ×`; on adaptive-thinking models the summarizer's reasoning counts against it. |
 | `keep_recent_tokens` | int (> 0) | _(pi default)_ | Recent tokens kept verbatim. |
 | `objective_threshold` | float in `(0,1]` | `0.8` | Context-usage fraction that triggers compaction **while an objective is active**. A native float (`0.8`, not `"0.8"`); never converged into `settings.json`. |
+
+**Sizing `reserve_tokens`.** Since pi 0.84.3 a summary that hits its cap fails loudly
+(`Compaction failed: … generation hit the token cap and the summary is incomplete`) instead of being
+persisted truncated. Perk implement sessions are typically one long turn, so every compaction is a
+split turn whose turn-prefix summary gets only `0.5 × reserve_tokens` (8192 at the default), shared
+with the summarizer's reasoning at high thinking levels on adaptive-thinking models — if
+`/commit-and-compact` or `/compact` fails with that message, raise `reserve_tokens` (e.g. `65536`)
+and re-run `perk init`. Ceiling: the setting applies to **every** session in the repo (any model,
+subagent children included) and pi's trigger has no clamp, so keep it a small fraction of the
+smallest context window any session may run with — a reserve at or above a model's window compacts
+on every turn (`65536` is safe for ≥ 200K windows, wrong for ≤ 64K). Raising it also advances the
+auto-compaction trigger by the same amount.
 
 ```toml
 [compaction]
