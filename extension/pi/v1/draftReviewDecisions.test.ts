@@ -30,6 +30,7 @@ import {
 import { sessionDataDir } from "../../substrate/cache.ts";
 import { acquireDraftReviewLock, DRAFT_REVIEW_LOCK } from "../../substrate/draftReviewLock.ts";
 import { type BranchEntry, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
+import { fakeTargetComponents } from "../../testing/draftReview.ts";
 import { openMemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
 import { createDraftReviewDecisions, type DraftReviewCapability } from "./draftReviewDecisions.ts";
 import {
@@ -49,6 +50,7 @@ function fixture(subject: ReviewSubject = "plan", parameter = false) {
     subject,
     digest: `sha256:${"a".repeat(64)}`,
     warmNodeClaim: null,
+    components: fakeTargetComponents(),
   };
   session.draftReviewContext = () => ({
     ok: true,
@@ -865,6 +867,7 @@ test("independent real branch snapshots refuse advanced review bytes rather than
       subject: "plan" as const,
       digest: `sha256:${"a".repeat(64)}`,
       warmNodeClaim: null,
+      components: fakeTargetComponents(),
     },
   });
   try {

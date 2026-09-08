@@ -19,7 +19,10 @@ import {
 } from "../../authoring/refinement/draft.ts";
 import {
   captureDraftReviewBinding,
+  changedTargetComponents,
   type DraftReviewBinding,
+  type TargetComponents,
+  targetDriftDetail,
 } from "../../session/draftReviewBinding.ts";
 import {
   type AttemptIdentity,
@@ -146,6 +149,33 @@ class ReviewStop extends Error {
 function stop(reason: Parameters<typeof reviewRefused>[0]): never {
   throw new ReviewStop(reviewRefused(reason));
 }
+type Drift = Extract<BindingMatch, "target-changed" | "subject-changed">;
+type DriftCheckpoint = "open" | "attach" | "candidate" | "save";
+/**
+ * A target/subject drift refusal explained from the two ALREADY captured snapshots: checkpoint,
+ * both aggregate digests, and the ordered changed component names (or "unavailable" when no
+ * diagnostic baseline matches this record). Eligibility was decided by the aggregate digest;
+ * this only names what moved, and never a routing value.
+ */
+function driftStop(
+  match: Drift,
+  checkpoint: DriftCheckpoint,
+  record: DraftReviewRecord,
+  captured: DraftReviewBinding,
+  reference: TargetComponents | null,
+): never {
+  const refusal = reviewRefused(match);
+  const detail = targetDriftDetail({
+    checkpoint,
+    reviewed: record.correlation.target.digest,
+    current: captured.digest,
+    changed: reference === null ? null : changedTargetComponents(reference, captured.components),
+  });
+  throw new ReviewStop({ ...refusal, detail: `${refusal.detail}; ${detail}` });
+}
+function isDrift(match: BindingMatch): match is Drift {
+  return match === "target-changed" || match === "subject-changed";
+}
 
 /** Minted only inside a verified dispatch; all methods fence the same run/record/attempt.
  * Do not retain this capability beyond the callback. No reentrant acquisition is necessary.
@@ -181,6 +211,16 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
     deps.binding?.(session) ?? captureDraftReviewBinding(deps.cwd, session);
   const expectations = new Map<string, { id: AttemptIdentity; runId: string }>();
   let ended = false;
+  // Diagnostic-only: the last successfully opened request's component digests, bound to the
+  // target digest its record persisted. Consulted for dispatch-time drift explanations only when
+  // both identity and digest match; never persisted, never reconstructed on startup, no authority.
+  let baseline: { requestId: string; digest: string; components: TargetComponents } | undefined;
+  const baselineFor = (record: DraftReviewRecord): TargetComponents | null =>
+    baseline !== undefined &&
+    baseline.requestId === record.request_id &&
+    baseline.digest === record.correlation.target.digest
+      ? baseline.components
+      : null;
 
   function acquire(requestId: string, expectedRun?: string) {
     if (ended) stop("invalid-state");
@@ -319,22 +359,32 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
     }
     return outcome;
   }
-  function currentMatch(owned: Held, record: DraftReviewRecord): BindingMatch {
+  function currentMatch(
+    owned: Held,
+    record: DraftReviewRecord,
+  ): { match: BindingMatch; captured: DraftReviewBinding } {
     const captured = binding(owned.check());
     if (!captured.ok) throw new ReviewStop(captured);
-    if (captured.binding.subject !== record.correlation.subject) return "subject-changed";
-    if (captured.binding.digest !== record.correlation.target.digest) return "target-changed";
+    const current = captured.binding;
+    if (current.subject !== record.correlation.subject)
+      return { match: "subject-changed", captured: current };
+    if (current.digest !== record.correlation.target.digest)
+      return { match: "target-changed", captured: current };
     const source = record.correlation.source;
     const read = owned
       .check()
       .readArtifact(artifactNames[record.correlation.subject], { provenance: "strict" });
     if (read.status === "invalid") return owned.poison("invalid-state");
     if (source.kind === "parameter")
-      return read.status === "absent" ? "matching" : "source-changed";
-    return read.status === "found" &&
-      digestSessionData(read.content) === record.correlation.source_digest
-      ? "matching"
-      : "source-changed";
+      return { match: read.status === "absent" ? "matching" : "source-changed", captured: current };
+    return {
+      match:
+        read.status === "found" &&
+        digestSessionData(read.content) === record.correlation.source_digest
+          ? "matching"
+          : "source-changed",
+      captured: current,
+    };
   }
   function expected(owned: Held, id: ReviewIdentity): DraftReviewRecord {
     const record = owned.read();
@@ -380,16 +430,26 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
           // Refuse unresolved intent before consulting a new source; do not hide a human stop.
           const eligible = transitionDraftReview(owned.read(), { kind: "open", record });
           if (!eligible.ok) throw new ReviewStop(eligible);
-          const match = currentMatch(owned, record);
+          const { match, captured } = currentMatch(owned, record);
+          // Registration compares against its own frozen snapshot directly.
+          if (isDrift(match)) driftStop(match, "open", record, captured, frozen.binding.components);
           if (match !== "matching") stop(match);
           owned.transition({ kind: "open", record });
+          baseline = {
+            requestId,
+            digest: frozen.binding.digest,
+            components: frozen.binding.components,
+          };
         });
       },
       attach(requestId, reviewId) {
         return hook(requestId, (owned) => {
           const id = { requestId, reviewId: null };
-          const match = currentMatch(owned, expected(owned, id));
+          const record = expected(owned, id);
+          const { match, captured } = currentMatch(owned, record);
           owned.transition({ kind: "attach", id, reviewId, match });
+          if (isDrift(match))
+            driftStop(match, "attach", record, captured, frozen.binding.components);
           if (match !== "matching") stop(match);
         });
       },
@@ -619,6 +679,7 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
     /** Context replacement cannot use even cached expectations against the replacement branch. */
     abandon() {
       expectations.clear();
+      baseline = undefined;
       ended = true;
     },
     hasExpectation(id: ReviewIdentity): boolean {
@@ -662,7 +723,7 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
             stop("unresolved-dispatch");
           if (options.signal?.aborted) stop("invalid-state");
           if (!options.approved && options.effect === "save") stop("invalid-state");
-          const match = currentMatch(owner, prior);
+          const { match, captured } = currentMatch(owner, prior);
           const dispatchId = randomUUID();
           const next = owner.transition({
             kind: "candidate",
@@ -672,8 +733,10 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
             decisionDigest: decisionDigest(options.approved, options.feedback),
             effect: options.effect,
           });
-          if (next?.consumption.state !== "dispatch")
+          if (next?.consumption.state !== "dispatch") {
+            if (isDrift(match)) driftStop(match, "candidate", prior, captured, baselineFor(prior));
             stop(match === "matching" ? "invalid-state" : match);
+          }
           const id = { ...options.id, dispatchId };
           intent = id;
           activeDispatch = { owned: owner, id };
@@ -738,9 +801,10 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
               if (effect !== "save") stop("invalid-state");
               const captured = binding(owner.check());
               if (!captured.ok) throw new ReviewStop(captured);
-              if (captured.binding.subject !== prior.correlation.subject) stop("subject-changed");
+              if (captured.binding.subject !== prior.correlation.subject)
+                driftStop("subject-changed", "save", prior, captured.binding, baselineFor(prior));
               if (captured.binding.digest !== prior.correlation.target.digest)
-                stop("target-changed");
+                driftStop("target-changed", "save", prior, captured.binding, baselineFor(prior));
               // Owned failed patches alone allow the original-bytes fallback. The review intent,
               // subject, target, and save-started checkpoint must still verify independently.
               if (!patchFailed) {
@@ -889,11 +953,13 @@ export function createDraftReviewDecisions(deps: DraftReviewDecisionDeps) {
             expectations.delete(id.dispatchId);
           }
         } catch (error) {
+          baseline = undefined;
           ended = true;
           return caught(error);
         }
       }
       const result = interrupt(undefined, entries);
+      baseline = undefined;
       ended = true;
       return result;
     },

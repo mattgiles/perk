@@ -1,8 +1,20 @@
 // Conservative routing fingerprints, never semantic backend discovery. No raw routing inputs
 // escape in a refusal or persisted record; order and exact bytes are contractual (§8.23).
+// Perk TOML enters only through the strict routing projection (the selected save-routing fields
+// as digests), so unrelated configuration edits never retarget a review; Git config stdout,
+// the environment, and the handoff remain whole-value inputs.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { handoffPath, isSafeRunId } from "../substrate/cache.ts";
+import {
+  type ConfigValue,
+  projectRoutingConfig,
+  ROUTING_CONFIG_FIELDS,
+  type RoutingConfigField,
+  RoutingConfigError,
+  type RoutingConfigProjection,
+  routingConfigComponents,
+} from "../substrate/draftReviewConfig.ts";
 import { draftReviewGitContext } from "../substrate/git.ts";
 import { configFile, localConfigFile } from "../substrate/paths.ts";
 import { isNonblank, type ReviewSubject, reviewRefused } from "./draftReviewState.ts";
@@ -12,7 +24,7 @@ import {
   type WorkflowSession,
 } from "./workflowSession.ts";
 
-export type FileMark = { state: "absent" } | { state: "present"; digest: string };
+export type { ConfigValue, RoutingConfigProjection };
 export type PlanHandoff = {
   objective_id: string | null;
   node_id: string | null;
@@ -31,7 +43,8 @@ export type TargetProjection = {
   subject: ReviewSubject;
   warm_node_claim: { objective: string; node: string } | null;
   handoff: PlanHandoff | ObjectiveHandoff | GistHandoff | RefinementHandoff | null;
-  files: { main_config: FileMark; worktree_config: FileMark; worktree_local: FileMark };
+  /** The selected Perk TOML routing inputs (substrate/draftReviewConfig.ts), never file bytes. */
+  config: RoutingConfigProjection;
   git_config_digest: string;
   environment: { GH_REPO: string | null; GH_HOST: string | null };
   /**
@@ -106,10 +119,31 @@ export function projectReviewHandoff(
     throw new Error("invalid gist scope");
   return { gist_scope: scope ?? null };
 }
-/** Only the fixed-shape constructor below supplies this encoding; input-map order is not used. */
-export function targetEncoding(projection: TargetProjection): string {
+export const TARGET_ENCODING_PREFIX = "perk/draft-review-target/v2\n";
+/**
+ * The diagnostic component names, in fingerprint order. Component digests explain WHICH part of
+ * a target drifted; eligibility is always the aggregate digest, never a component comparison.
+ */
+export const TARGET_COMPONENTS = [
+  "identity",
+  "warm_node_claim",
+  "handoff",
+  "main_config.issues.backend",
+  "main_config.issues.team",
+  "worktree_config.workflow.base",
+  "worktree_local.workflow.base",
+  "main_local.linear.api_key",
+  "git_config",
+  "environment",
+  "context_artifact",
+] as const satisfies readonly (string | RoutingConfigField)[];
+export type TargetComponent = (typeof TARGET_COMPONENTS)[number];
+export type TargetComponents = Readonly<Record<TargetComponent, string>>;
+
+/** Reconstruct the fixed-shape projection so callers cannot accidentally change digest ordering. */
+function orderedProjection(projection: TargetProjection): TargetProjection {
   const p = projection;
-  const mark = (m: FileMark): FileMark =>
+  const mark = (m: ConfigValue): ConfigValue =>
     m.state === "absent" ? { state: "absent" } : { state: "present", digest: m.digest };
   // Reconstruct even nested typed inputs, so callers cannot accidentally change digest ordering.
   const h = p.handoff;
@@ -134,10 +168,19 @@ export function targetEncoding(projection: TargetProjection): string {
         ? null
         : { objective: p.warm_node_claim.objective, node: p.warm_node_claim.node },
     handoff,
-    files: {
-      main_config: mark(p.files.main_config),
-      worktree_config: mark(p.files.worktree_config),
-      worktree_local: mark(p.files.worktree_local),
+    config: {
+      main_issues: {
+        backend: mark(p.config.main_issues.backend),
+        team: mark(p.config.main_issues.team),
+      },
+      workflow_base:
+        p.config.workflow_base === null
+          ? null
+          : {
+              committed: mark(p.config.workflow_base.committed),
+              local: mark(p.config.workflow_base.local),
+            },
+      linear_credentials: { api_key: mark(p.config.linear_credentials.api_key) },
     },
     git_config_digest: p.git_config_digest,
     environment: { GH_REPO: p.environment.GH_REPO, GH_HOST: p.environment.GH_HOST },
@@ -146,13 +189,71 @@ export function targetEncoding(projection: TargetProjection): string {
       ? { context_artifact: p.context_artifact }
       : {}),
   };
-  return `perk/draft-review-target/v1\n${JSON.stringify(ordered)}`;
+  return ordered;
+}
+/** Only the fixed-shape constructor supplies this encoding; input-map order is not used. */
+export function targetEncoding(projection: TargetProjection): string {
+  return `${TARGET_ENCODING_PREFIX}${JSON.stringify(orderedProjection(projection))}`;
+}
+/**
+ * Diagnostic-only per-component digests over the same ordered projection. Selected TOML fields
+ * digest their ConfigValue (already a digest or absent), so no raw value — the credential in
+ * particular — is ever recoverable from a component; `null` marks a field inactive for the subject.
+ */
+export function targetComponents(projection: TargetProjection): TargetComponents {
+  const p = orderedProjection(projection);
+  const component = (value: unknown): string => digestSessionData(JSON.stringify(value));
+  const config = routingConfigComponents(p.config);
+  const fields = Object.fromEntries(
+    ROUTING_CONFIG_FIELDS.map((field) => [field.name, component(config[field.name])]),
+  ) as Record<RoutingConfigField, string>;
+  return {
+    identity: component({
+      worktree_root: p.worktree_root,
+      git_dir: p.git_dir,
+      git_common_dir: p.git_common_dir,
+      run_id: p.run_id,
+      subject: p.subject,
+    }),
+    warm_node_claim: component(p.warm_node_claim),
+    handoff: component(p.handoff),
+    ...fields,
+    git_config: component(p.git_config_digest),
+    environment: component(p.environment),
+    context_artifact: component(p.context_artifact ?? null),
+  };
+}
+/** The ordered component names whose digests differ between two captures. */
+export function changedTargetComponents(
+  reviewed: TargetComponents,
+  current: TargetComponents,
+): TargetComponent[] {
+  return TARGET_COMPONENTS.filter((name) => reviewed[name] !== current[name]);
+}
+export type TargetDrift = {
+  checkpoint: string;
+  reviewed: string;
+  current: string;
+  /** null: no diagnostic baseline for this record — the aggregate comparison alone decided. */
+  changed: readonly TargetComponent[] | null;
+};
+/** Code-owned refusal detail: digests and component NAMES only, never routing values. */
+export function targetDriftDetail(drift: TargetDrift): string {
+  const changed =
+    drift.changed === null
+      ? "unavailable (no matching diagnostic baseline)"
+      : drift.changed.length === 0
+        ? "none identified"
+        : drift.changed.join(", ");
+  return `checkpoint: ${drift.checkpoint}; reviewed target: ${drift.reviewed}; current target: ${drift.current}; changed components: ${changed}`;
 }
 export type DraftReviewBinding = {
   runId: string;
   subject: ReviewSubject;
   digest: string;
   warmNodeClaim: { objective: string; node: string } | null;
+  /** Diagnostic only: explains drift; grants no eligibility and is never persisted. */
+  components: TargetComponents;
 };
 export function captureDraftReviewBinding(
   cwd: string,
@@ -166,12 +267,6 @@ export function captureDraftReviewBinding(
     if (!isSafeRunId(runId)) return reviewRefused("no-identity");
     const git = ports.git(cwd);
     if (git === null) return reviewRefused("io-error");
-    const file = (path: string): FileMark => {
-      const bytes = ports.read(path);
-      return bytes === null
-        ? { state: "absent" }
-        : { state: "present", digest: digestSessionData(bytes) };
-    };
     const handoffBytes = ports.read(handoffPath(git.worktreeRoot, runId));
     const handoff =
       handoffBytes === null
@@ -189,6 +284,20 @@ export function captureDraftReviewBinding(
       if (context.status !== "found") return reviewRefused("invalid-state");
       contextArtifact = digestSessionData(context.content);
     }
+    // Role-specific roots: [issues] and the Linear credential follow the MAIN checkout (the
+    // common-directory parent), [workflow] base the invoking checkout — mirroring which file the
+    // Python save readers consult. Each distinct file is read once per capture; nothing caches.
+    const mainRoot = resolve(git.gitCommonDir, "..");
+    const config = projectRoutingConfig({
+      workflowBase: subject === "plan" || subject === "objective",
+      paths: {
+        main_config: configFile(mainRoot),
+        worktree_config: configFile(git.worktreeRoot),
+        worktree_local: localConfigFile(git.worktreeRoot),
+        main_local: localConfigFile(mainRoot),
+      },
+      read: (path) => ports.read(path),
+    });
     const env = ports.environment();
     const envMark = (value: string | undefined): string | null =>
       value === undefined ? null : digestSessionData(value);
@@ -200,11 +309,7 @@ export function captureDraftReviewBinding(
       subject,
       warm_node_claim: warmNodeClaim,
       handoff,
-      files: {
-        main_config: file(configFile(resolve(git.gitCommonDir, ".."))),
-        worktree_config: file(configFile(git.worktreeRoot)),
-        worktree_local: file(localConfigFile(git.worktreeRoot)),
-      },
+      config,
       git_config_digest: digestSessionData(git.configBytes),
       environment: { GH_REPO: envMark(env.GH_REPO), GH_HOST: envMark(env.GH_HOST) },
       ...(contextArtifact !== undefined ? { context_artifact: contextArtifact } : {}),
@@ -216,9 +321,14 @@ export function captureDraftReviewBinding(
         subject,
         digest: digestSessionData(targetEncoding(projection)),
         warmNodeClaim,
+        components: targetComponents(projection),
       },
     };
-  } catch {
-    return reviewRefused("io-error");
+  } catch (error) {
+    // A routing-config failure keeps its code-owned role/field explanation (no excerpt).
+    const refusal = reviewRefused("io-error");
+    if (error instanceof RoutingConfigError)
+      return { ...refusal, detail: `${refusal.detail}; ${error.explanation}` };
+    return refusal;
   }
 }

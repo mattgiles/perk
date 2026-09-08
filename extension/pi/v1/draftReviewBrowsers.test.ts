@@ -943,7 +943,7 @@ test("plan browser title await fences routing/source drift before actual backend
       else
         writeFileSync(
           join(f.cwd, ".perk", "config.toml"),
-          '[providers]\nplan = "plannotator-plan"\n# external config change\n',
+          '[providers]\nplan = "plannotator-plan"\n[workflow]\nbase = "release"\n',
         );
       release.resolve();
       await f.completed;
@@ -951,6 +951,11 @@ test("plan browser title await fences routing/source drift before actual backend
       assert.equal(f.sends.length, 0);
       assert.equal(f.exits(), 0);
       assert.equal(f.record().consumption.state, "uncertain");
+      if (drift === "target")
+        assert.match(
+          f.notices.join("\n"),
+          /target-changed.*checkpoint: save;.*changed components: worktree_config\.workflow\.base/,
+        );
     } finally {
       release.resolve();
       if (old === undefined) delete process.env.PERK_NO_LLM;

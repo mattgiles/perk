@@ -9,8 +9,30 @@ import {
 } from "../pi/v1/draftReviewActivation.ts";
 import type { ReviewOutcome } from "../pi/v1/review.ts";
 import { openBranchWorkflowSession } from "../session/branchWorkflowSession.ts";
+import {
+  TARGET_COMPONENTS,
+  type TargetComponent,
+  type TargetComponents,
+} from "../session/draftReviewBinding.ts";
 import type { DraftReviewRegistration } from "../session/draftReviewState.ts";
 import { digestSessionData } from "../session/workflowSession.ts";
+
+/**
+ * Fake diagnostic component digests for a fixture binding: every fixed component name digested
+ * from `seed`, with `changed` names given a distinct digest (a fixture's way to stage "these
+ * components drifted" against a baseline built from the same seed).
+ */
+export function fakeTargetComponents(
+  seed = "target",
+  changed: readonly TargetComponent[] = [],
+): TargetComponents {
+  return Object.fromEntries(
+    TARGET_COMPONENTS.map((name) => [
+      name,
+      digestSessionData(`${name}:${seed}${changed.includes(name) ? ":changed" : ""}`),
+    ]),
+  ) as Record<TargetComponent, string>;
+}
 import { gitInit } from "./harness.ts";
 
 /** Explicit test-only transport hooks. State/claim composition tests use the real coordinator. */
@@ -117,6 +139,7 @@ export const policyDraftReviews: DraftReviewRuntime = {
             subject: "plan",
             digest: digestSessionData("target"),
             warmNodeClaim: null,
+            components: fakeTargetComponents(),
           },
         },
         registration: recordingDraftRegistration().registration,

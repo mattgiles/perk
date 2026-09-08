@@ -577,11 +577,17 @@ for (const kind of ["source", "target"] as const) {
       else
         writeFileSync(
           join(f.cwd, ".perk", "config.toml"),
-          '[providers]\nplan = "plannotator-plan"\n# target changed\n',
+          '[providers]\nplan = "plannotator-plan"\n[issues]\nbackend = "linear"\n',
         );
       title.resolve("Title");
       const result = await pending;
       assert.equal(result.details.status, "refused");
+      assert.equal(result.details.reason, kind === "source" ? "source-changed" : "target-changed");
+      if (kind === "target")
+        assert.match(
+          String(result.content[0]?.text),
+          /checkpoint: save;.*changed components: main_config\.issues\.backend/,
+        );
       assert.equal(f.calls.length, 0);
       assert.equal(f.exits, 0);
       assert.equal(f.record().consumption.state, "uncertain");
@@ -613,7 +619,7 @@ for (const kind of ["source", "target"] as const) {
       else
         writeFileSync(
           join(f.cwd, ".perk", "config.toml"),
-          '[providers]\nplan = "plannotator-plan"\n# target changed\n',
+          '[providers]\nplan = "plannotator-plan"\n[issues]\nbackend = "linear"\n',
         );
       release.resolve();
       const result = await pending;

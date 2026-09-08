@@ -52,7 +52,11 @@ import {
 } from "../../authoring/refinement/save.ts";
 import type { ApprovalGate } from "../../authoring/review/approvalGate.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
-import { captureDraftReviewBinding } from "../../session/draftReviewBinding.ts";
+import {
+  captureDraftReviewBinding,
+  changedTargetComponents,
+  targetDriftDetail,
+} from "../../session/draftReviewBinding.ts";
 import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
 import {
@@ -1164,7 +1168,16 @@ export async function runRefinementReviewV1(
                   phase: "mutation",
                   detail:
                     "the refinement's routing binding (run, stage, config or grounding context) " +
-                    "changed during the review — nothing was saved; call plan_review again",
+                    "changed during the review — nothing was saved; call plan_review again; " +
+                    targetDriftDetail({
+                      checkpoint: "save",
+                      reviewed: bound.binding.digest,
+                      current: current.binding.digest,
+                      changed: changedTargetComponents(
+                        bound.binding.components,
+                        current.binding.components,
+                      ),
+                    }),
                 };
             }
             return completeRefinementReview(outcome, () =>
