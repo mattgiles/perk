@@ -12103,5 +12103,6 @@ manifest fragment regenerated); `shared/bindings.yaml` `stage:objective-refine` 
 parameterized `contexts/read-only.md` are all in `prompts/_fixtures/live.yaml`. User docs:
 `docs/user-docs/reference/cli/objective.md`, `reference/objectives.md`, the in-session
 `workflow-commands` / `model-tools` / `review-and-authoring` references, the backend/provider
-entries and the `perk-expert` mirror. Automatic later-plan consumption and authenticated
-refine-to-plan evidence are NOT shipped here (node 2.2); the GitHub carrier is node 3.1.
+entries and the `perk-expert` mirror. Automatic later-plan consumption of a saved refinement,
+authenticated refine-to-plan evidence, and a GitHub refinement carrier are NOT shipped by
+this section — each is a later increment.
