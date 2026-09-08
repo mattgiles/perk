@@ -59,6 +59,10 @@ subagents** — you review and report.
    them to the current local branch, infer a different PR, add head-SHA binding, or fetch again
    to corroborate them.
 
+   `diff_source` (`"github"` or `"local-git"`) is optional metadata outside the acceptance
+   table — when it is `"local-git"`, the diff was rendered locally because GitHub refused it as
+   too large; add one `fyi` line saying so and review normally.
+
    On a nonzero exit, unparseable stdout, or any failed acceptance check, return **`blocked`**
    (step 6). Include the returned failure code/message where available, otherwise identify the
    failed field/check. Never weaken or retry without `--expected-pr`.
