@@ -270,6 +270,13 @@ The unknown-type-is-boilerplate rule is what makes the parse edge safely lenient
 entry kinds absent from the installed type union. Repeated content is handled separately by a dedup
 step, not the boilerplate drop.
 
+**A rendered `↑ duplicate of entry <id>` marker is a content-deduplication projection, not execution
+chronology.** Before alleging missing execution or stale verification from a normalized transcript,
+inspect the raw JSONL entry (tool-call identity, timestamps, `message.details`): two `run_ci` results
+with identical displayed prose were distinct executions (different tool-call ids, different
+passing-test counts) that the dedup step collapsed into one pointer. Do not rerun CI or regather
+evidence to compensate for the projection — read the raw entry.
+
 Boundary discipline: a clean `LenientParseModel` → `to_domain()` → frozen domain dataclass; never
 raises (missing file → empty; non-JSON / type-less line → `malformed_lines += 1`); the additive
 `render` field is declared **last**, always serialized, `null` unless `--render`, keeping the
