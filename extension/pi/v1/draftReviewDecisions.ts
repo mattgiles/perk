@@ -13,6 +13,11 @@ import {
 } from "../../authoring/objective/draft.ts";
 import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
 import {
+  REFINEMENT_DRAFT_ARTIFACT,
+  renderRefinementDraft,
+  resumeRefinementDraft,
+} from "../../authoring/refinement/draft.ts";
+import {
   captureDraftReviewBinding,
   type DraftReviewBinding,
 } from "../../session/draftReviewBinding.ts";
@@ -63,6 +68,7 @@ const artifactNames = {
   plan: PLAN_DRAFT_ARTIFACT,
   objective: OBJECTIVE_DRAFT_ARTIFACT,
   gist: GIST_DRAFT_ARTIFACT,
+  refinement: REFINEMENT_DRAFT_ARTIFACT,
 } as const;
 export type DraftReviewSnapshot = {
   source: ReviewSource;
@@ -100,6 +106,16 @@ function sourceSnapshot(
     const decoded = decodeGistDraft(raw);
     if (!decoded.ok) return reviewRefused("invalid-state");
     markdown = renderGistDraft(decoded.draft);
+  } else if (subject === "refinement") {
+    // The refinement source is the validated (draft, context) PAIR: the raw draft bytes stay
+    // the authoritative source digest; the render comes from the captured pair, and a draft
+    // bound to an earlier context (a mismatch) or a missing context is not a reviewable source.
+    const resumed = resumeRefinementDraft(session);
+    if (resumed.kind === "absent" || resumed.kind === "no-context")
+      return reviewRefused("source-changed");
+    if (resumed.kind !== "valid") return reviewRefused("invalid-state");
+    if (resumed.pair.draftRaw !== raw) return reviewRefused("source-changed");
+    markdown = renderRefinementDraft(resumed.pair);
   } else {
     if (!isNonblank(raw)) return reviewRefused("source-changed");
     markdown = raw;

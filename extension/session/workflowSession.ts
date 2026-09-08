@@ -267,7 +267,7 @@ export interface WorkflowSession {
     | {
         ok: true;
         runId: string;
-        subject: "plan" | "objective" | "gist";
+        subject: "plan" | "objective" | "gist" | "refinement";
         warmNodeClaim: { objective: string; node: string } | null;
       }
     | { ok: false; reason: "no-identity" | "invalid-state" };
@@ -534,7 +534,9 @@ export function openWorkflowSession(deps: WorkflowSessionDeps): WorkflowSession 
             ? "objective"
             : stage === "gist-author"
               ? "gist"
-              : "plan";
+              : stage === "objective-refine"
+                ? "refinement"
+                : "plan";
         const raw: unknown = subject === "plan" ? snapshot.objective_node_claim : null;
         let warmNodeClaim: { objective: string; node: string } | null = null;
         if (raw != null) {
