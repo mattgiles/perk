@@ -46,6 +46,7 @@ Each row links to its authoritative entry in the [CLI reference](./cli.md) or th
 | [`perk objective node-add`](./cli/objective.md#perk-objective-node-add-number) | Add a genuinely-new node and assign its next phase-local id. |
 | [`perk objective engagement`](./cli/objective.md#perk-objective-engagement-number) | Read objective and node-issue human engagement as untrusted data. |
 | [`perk objective node-engagement`](./cli/objective.md#perk-objective-node-engagement-number) | Read one node-issue's pre-planning engagement. |
+| [`perk objective refine`](./cli/objective.md#perk-objective-refine-number) | Author an advisory refinement of a future node in a read-only session (Linear only). |
 | [`perk objective reconcile`](./cli/objective.md#perk-objective-reconcile-number-alias-rec) (`rec`) | Rewrite only the Reconcilable prose region after a merge. |
 | [`perk objective replan`](./cli/objective.md#perk-objective-replan-number) | Re-author unfinished work as a superseding objective. |
 | [`perk objective next`](./cli/objective.md#perk-objective-next-number-alias-n) (`n`) | Print the next plannable node. |
@@ -292,10 +293,61 @@ comment back, refusing on a concurrent change, duplicate records, or a damaged r
 retrying or overwriting. A refinement comment is never mistaken for the node's plan comment,
 even when it quotes a complete plan-body example.
 
-This release ships the **internal Linear persistence only** — there is no public
-`perk objective refine` command or `/objective-refine` door yet, planning sessions do not yet
-read refinements, and GitHub objectives are unsupported until their carrier lands. The wire
-format and guarantees are pinned in `shared/contracts.md` §8.67.
+#### Authoring a refinement
+
+Two doors open a refinement pass — both **Linear-only** in this release (a GitHub objective
+store refuses with `unsupported_backend` before any authentication, network call, sync or
+launch, and again at save):
+
+- **Cold:** `perk objective refine <objective> [--node <id>]` starts a fresh read-only
+  `objective-refine` session on the checkout you invoke it from — dirty changes included; it
+  never positions another worktree. Without `--node` it selects the first refinable, unrefined
+  future node (pending/blocked, no plan — independent of dependency readiness); with `--node`
+  that node must be refinable (a valid prior refinement is fine: you are re-refining, and a save
+  replaces it whole). `--dry-run [--json]` resolves eligibility online and reports the selected
+  identity, whether a prior refinement exists, and the checkout observation — nothing is synced,
+  minted, written or launched. Before selecting, a real launch fast-forwards `main` once (skip
+  with `--no-sync`) and re-reads the config from disk, so selection and provenance follow the
+  post-sync configuration; the launch itself never syncs again.
+- **Warm:** `/objective-refine [objective] [--node <id>]` enters the pass inside an existing
+  idle, **unbound** session (else the active objective is used). A session already bound to a
+  plan, carrying a planning claim, or launched as a plan-graph stage is refused
+  (`bound_session`) with nothing cleared — start a fresh `perk objective refine` instead.
+  Re-running it is an explicit new grounding pass: the context is re-prepared and an older draft
+  becomes rewrite evidence (it reports as needing a rewrite; it is never silently re-bound).
+
+Inside the session the model reads the materialized grounding context (the target as read, the
+full prior refinement, the node's human engagement, a **checkout observation** and any warnings),
+explores read-only, and keeps the working draft current with the single model tool
+**`objective_refinement_draft`** (Markdown only — target, digest, run and expectation are bound
+for it). `plan_review` renders the refinement (identity header, an advisory notice, the checkout
+observation, then the full Markdown) on the configured review surface; **APPROVE saves only the
+node's refinement comment** and ends the turn; DENY returns feedback for a rewrite; a
+Plannotator approval carrying `# Direct Edits` saves nothing and returns one revise round
+(header hunks are bound metadata — re-enter the pass rather than fabricate values). A skipped,
+dismissed or unavailable review saves nothing: the model presents the draft and offers **you**
+`/objective-refinement-save` — the human failsafe. Invoking that command (no arguments) is itself
+your explicit authorization to save the current validated draft: it needs no prior review, it
+may follow a denial, and its result is labelled a manual human save, never a reviewer approval. It
+refuses while a browser review's outcome is still unresolved (`unresolved-dispatch`) — reconcile
+first (see [Reconcile a draft-review stop](../how-to/reconcile-a-draft-review-stop.md)).
+
+A refinement session is deliberately isolated: `objective_node`, `plan_save`, `objective_save`,
+`gist_save`, `/plan-save`, `/objective-plan`, `/implement-here` and the browser review doors all
+refuse there, and a plan can never be saved from its run. Nothing it does creates a plan,
+claims a node, writes a backlink, or changes any node/objective state.
+
+**The checkout observation is not a freshness guarantee.** The refinement records the `HEAD`
+commit, whether the tree was dirty, and the capture time at the start of the pass. Uncommitted
+files are not snapshotted and later checkout changes are not detected; review binding and save
+fence the reviewed artifact and its target, not the code. Treat the observation as dated
+provenance, spell out changed-code assumptions in the Markdown, and re-verify them when the node
+is actually planned.
+
+Not shipped in this release: planning sessions do not yet read refinements automatically, no
+authenticated refine-to-plan proof is claimed, and GitHub objectives are unsupported until
+their carrier lands. The wire format, the transfer artifacts and the door guarantees are pinned
+in `shared/contracts.md` §8.67–§8.68.
 
 ### Reconcile is no longer post-land-only
 

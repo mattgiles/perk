@@ -30,6 +30,7 @@ These tools are registered by perk itself. Command-specific semantics live in
 | Objective authoring | `objective_draft` |
 | Gist authoring | `gist_draft` |
 | Gist authoring | `gist_save` |
+| Refinement authoring | `objective_refinement_draft` |
 | Learn lifecycle | `learn` |
 | Learn lifecycle | `run_learn_wave` |
 | Developer analysis | `run_audit_wave` |
@@ -177,7 +178,10 @@ kept reachable when a child adopts a read-only gate.
 
 Effective read-only gating is the existing workflow mode **or** a captured runner restriction
 floor. Perk installs `READ_ONLY_TOOLS` as the active set and independently checks the same full
-allowlist at tool-call time. Every excluded tool is denied, including `edit`, `write`, save/delivery
+allowlist at tool-call time — except in an `objective-refine` session, whose gate-ON set is its
+own narrower refinement allowlist (read/research/question, `plan_review`, and
+`objective_refinement_draft` — no node claim, no other draft or save tool, no delegation) and
+whose hidden guidance is the `[READ-ONLY REFINEMENT MODE]` flavor naming that writer. Every excluded tool is denied, including `edit`, `write`, save/delivery
 tools and unknown or late-registered foreign mutators—even if toolset synchronization failed.
 Allowlisted `bash` also retains its command-segment sub-allowlist. Other listed tools pass this gate
 but still undergo their ordinary authority checks. The sanctioned artifact writers and

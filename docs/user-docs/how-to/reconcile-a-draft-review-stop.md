@@ -8,7 +8,7 @@ sidebarGroup: "Core workflow"
 
 # How to reconcile a draft-review stop
 
-Use this procedure when a Plannotator plan, objective, or gist review stops with `busy`,
+Use this procedure when a Plannotator plan, objective, gist, or refinement review stops with `busy`,
 `invalid-state`, `persistence-failed`, or `unresolved-dispatch`. It also applies to retained
 pre-dispatch locks and content-written/pointer-dropped orphan artifacts. A refusal is not a denial,
 a failed save receipt is not proof nothing saved, and reopening Pi is not a retry protocol.
@@ -36,8 +36,10 @@ stopped, leave the state intact and stop here. Never remove a live lock.
 
 ## 2. Preserve evidence before investigating
 
-Keep the lock, review artifact, relevant draft (`plan-draft.md`, `objective-draft.json`, or
-`gist-draft.json`), run handoff, Pi session/transcript, and identity/digest diagnostics. Include
+Keep the lock, review artifact, relevant draft (`plan-draft.md`, `objective-draft.json`,
+`gist-draft.json`, or `objective-refinement-draft.json` together with its
+`objective-refinement-context.json` grounding context), run handoff, Pi session/transcript, and
+identity/digest diagnostics. Include
 receipts and evidence for prior attempts in the same run. If necessary, copy the evidence into an
 owner-controlled private directory; it can contain private draft and reviewer content.
 
@@ -64,6 +66,10 @@ subject in this run. Correlation is not authority; intent is not completion.
 
 Using normal **read-only** tools and returned IDs/URLs, inspect existing backend objects, objective
 node linkage, and persisted messages. For GitHub, use `gh` rather than unauthenticated web fetches.
+For a refinement, the saved object is the node-issue's single `perk:objective-refinement:v1:<key>`
+comment: corroborate the receipt's comment id and carrier URL against the node's comments (a
+failed save's `write_attempted` / `comment_ids` diagnostics name what was observed), and compare
+the persisted context digest bound in the draft with the session's grounding context.
 Check the existing object identified by a confirmed receipt; do not create another to test whether
 the first save worked. A successful gate exit remains a fact even if later bookkeeping failed.
 

@@ -305,11 +305,17 @@ produces one in-session fallback notice only after its transport invalidation ve
 works if readiness is still waiting or previously reported ready; failed persistence never grants
 fallback permission, and no review decision is manufactured.
 
-Plannotator `plan_review` guards completion for plan, objective, and gist. Both plan/objective
-browser doors and their chooser delegations use the same guarded completions, as well as the
-eligibility mutations below. Verified intent precedes edits, saves, or actionable revision
-feedback. Plans save frozen reviewed bytes (or verified Direct Edits); structured objective/gist
-Direct Edits requests revision without saving. A new artifact after a parameter review, including
+Plannotator `plan_review` guards completion for plan, objective, gist, and refinement. Both
+plan/objective browser doors and their chooser delegations use the same guarded completions, as
+well as the eligibility mutations below. Verified intent precedes edits, saves, or actionable
+revision feedback. Plans save frozen reviewed bytes (or verified Direct Edits); structured
+objective/gist/refinement Direct Edits requests revision without saving. A refinement review
+(an `objective-refine` session) reviews the validated (draft, grounding-context) pair — the
+target binding additionally fences the context artifact's digest, so a re-prepared context, a
+changed draft, or a changed run/stage/config invalidates approval even when the rendering is
+identical; this fences the reviewed artifact and save route, not the checkout contents. There is
+no refinement browser door or reviewer wave: `plan_review` uses the plain browser review or the
+first-party view-only editor. A new artifact after a parameter review, including
 identical text, can only produce stale diagnostic DATA. Source/target drift during title generation
 stops the save; a backend that already started is never automatically retried.
 
@@ -325,15 +331,19 @@ save/gate facts and prohibit blind save retry. No startup/reload discovery or re
 
 ### Participating authoring and first-party review
 
-The three draft tools, three manual save tools and slash commands, `objective_node`, and
-`/implement-here` share one current-run claim. They require verified safe run identity: missing or
+The four draft tools, three manual save tools and slash commands (plus the human
+`/objective-refinement-save`), `objective_node`, and `/implement-here` share one current-run
+claim. They require verified safe run identity: missing or
 unsafe identity is a refusal, not permission to save or start a fallback turn without a claim.
 A genuinely absent review record still permits ordinary authoring and save behavior under that
 claim; terminal records are preserved.
 
 Changed draft bytes invalidate an opening/pending review before writing. Identical sound bytes do
-not invalidate it, including structured objective/gist bytes. Manual saves invalidate with
-`manual-save`; node updates conservatively invalidate with `target-changed`. A busy claim,
+not invalidate it, including structured objective/gist/refinement bytes. Manual saves invalidate
+with `manual-save` (`/objective-refinement-save` included — invoking it is the human's fresh
+authorization: it needs no prior review, is labelled a manual save rather than an approval, and
+still refuses an unresolved dispatch or uncertain record); node updates and a re-entered
+`/objective-refine` grounding pass conservatively invalidate with `target-changed`. A busy claim,
 unresolved dispatch/uncertainty, invalid state, or failed invalidation blocks the competing
 operation. Failed invalidation retains the claim; do not discard state or blindly retry a save.
 If a save succeeds but later gate, linkage, or notification bookkeeping fails, the stop preserves

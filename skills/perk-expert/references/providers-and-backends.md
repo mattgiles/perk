@@ -420,8 +420,9 @@ a live workspace, so this is not part of ordinary Linear readiness.
 - Linear `RATELIMITED` GraphQL failures are loud and have no retry/backoff. Low-volume validation
   has not exercised rate limiting.
 - AgentSession emission is off by default and not live-verified.
-- Node-refinement persistence is proven offline only (real store/adapter over a fake Linear
-  workspace); authenticated refine-to-plan evidence is not yet claimed.
+- Node-refinement persistence and the refine doors are proven offline only (real
+  store/adapter/service over a fake Linear workspace; the interior over scripted workers);
+  authenticated refine-to-plan evidence is not yet claimed.
 - GitHub Issues Sync interactions are outside coverage; prefer a team without that two-way sync
   unless separately validated.
 - `pi-status-footer` hides extension status; non-default web providers have local credential or

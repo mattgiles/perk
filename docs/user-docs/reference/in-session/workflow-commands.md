@@ -253,6 +253,43 @@ draft with `objective_draft` and re-run; it never hands a save turn over a corru
 
 The cold `perk objective author` door has no `/objective-author` twin.
 
+### `/objective-refine`
+
+Enter an **objective-node refinement pass** in the current session: `/objective-refine [objective]
+[--node ID]` (otherwise the active objective; without `--node`, the first refinable, unrefined
+future node). **Linear-only** in this release. The session must be idle and **unbound**: a session
+already bound to a plan, carrying a planning claim, or launched as a plan-graph stage is refused
+(`bound_session`) with nothing cleared — the refusal names the equivalent
+`perk objective refine …` cold command. Extra, duplicate or value-less arguments refuse; unsafe or
+unreadable session state refuses (`bad_state`). The command prepares the grounding context
+through a worker, persists it byte-exact, enters the `objective-refine` stage, turns the read-only
+gate on with the refinement allowlist, and drives the flow turn. Re-running it is an explicit new
+grounding pass: an existing draft becomes rewrite evidence (never silently re-bound). Paired tool:
+
+- **`objective_refinement_draft`** — write the working refinement Markdown; the target, context
+  digest, run and comment expectation are bound for it. The only sanctioned write in a
+  refinement session; refuses outside one (`wrong_stage`). *Non-terminating.*
+
+`plan_review` in a refinement session reviews the (draft, context) pair; APPROVE saves only the
+node's refinement comment. There is **no** model save tool.
+
+### `/objective-refinement-save`
+
+The human failsafe for a refinement: save the current validated refinement draft as the node's
+refinement comment. Takes **no arguments**; refinement sessions only; idle only. Invoking it is
+itself your explicit authorization — no prior review is required, it may follow a denial, and its
+result is labelled a manual human save (never a reviewer approval). A pending browser review is
+invalidated before the save; an unresolved browser decision or an unconfirmed earlier save
+refuses (`unresolved-dispatch`) until reconciled — see
+[Reconcile a draft-review stop](../../how-to/reconcile-a-draft-review-stop.md). A missing, invalid
+or context-mismatched draft stops with rewrite/re-entry guidance and saves nothing. The
+read-only gate exits only after a verified save; a failed save keeps the worker's diagnostics
+(`write_attempted`, comment ids) and asks you to read the node's comments back before retrying.
+
+The plan-graph surfaces — `objective_node`, `plan_save`/`/plan-save`, `objective_save`/
+`/objective-save`, `gist_save`/`/gist-save`, `/objective-plan`, `/implement-here`, the browser
+review doors — refuse inside a refinement session (`wrong_stage`).
+
 ### `/objective-stack`, `/objective-sync`, `/objective-recover`, `/objective-land`
 
 The stacked-delivery control surface delegates mutations to the

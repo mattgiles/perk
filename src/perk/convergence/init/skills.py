@@ -26,6 +26,7 @@ PERK_SKILLS: tuple[str, ...] = (
     "perk-objective-author",
     "perk-objective-plan",
     "perk-objective-reconcile",
+    "perk-objective-refine",
     "perk-objective-replan",
     "perk-objective-review-browser",
     "perk-plan",

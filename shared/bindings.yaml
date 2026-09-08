@@ -49,6 +49,9 @@ bindings:
   - trigger: "stage:objective-plan"
     skill: perk-objective-plan
     mode: nudge
+  - trigger: "stage:objective-refine"
+    skill: perk-objective-refine
+    mode: nudge
   - trigger: "stage:implement"
     skill: perk-implement
     mode: nudge
