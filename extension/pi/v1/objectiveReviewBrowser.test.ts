@@ -1292,14 +1292,14 @@ test("/objective-review-browser: composition — a save-destination change mid-r
     git("remote", "add", "origin", "https://example.com/drifted.git");
     sink.emitDecision({ reviewId: "r-1", approved: true });
     await settled();
-    const refusal = injected.find((m) => m.includes("the save destination")) ?? "";
+    const refusal = injected.find((m) => m.includes("changed after the review opened")) ?? "";
     assert.match(
       refusal,
       /objective review decision APPROVED by reviewer, but the save destination \(\[issues\] backend\/team or the git remotes\) changed after the review opened — nothing was saved/,
       "the destination-changed notice is injected",
     );
     assert.ok(
-      h.notifies.some((n) => n.includes("the save destination") && n.includes("changed")),
+      h.notifies.some((n) => n.includes("changed after the review opened")),
       "…and reported loudly",
     );
     assert.equal(existsSync(argvFile), false, "the cold door never ran");
