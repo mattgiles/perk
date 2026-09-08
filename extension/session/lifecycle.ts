@@ -1,18 +1,24 @@
-// The session identity lifecycle (contracts.md §8.2/§8.3) as a named, Pi-free session
-// operation: decide what `session_start` should do (claim / fork / adopt / mint / keep) and
+// The session identity lifecycle (contracts.md §8.2/§8.3) as named, Pi-free session
+// operations: decide what `session_start` should do (claim / fork / adopt / mint / keep) and
 // perform the workflow-state establishment for the decided arm — the ONE combined claim entry
 // with establish-before-consume, the derived fork/adopt identities, the warm mint, and the
 // deliberate keep-arm non-write (reload-generation reconstruction IS the LWW rebuild; no
-// version backfill).
+// version backfill) — then the two-phase startup facts around the gate: `sessionStartToolScope`
+// (pure; the mode/stage slice the gate syncs from BEFORE any fallible read) and
+// `resolveSessionStartFacts` (post-gate; the lazy launched-stage linkage reconciliation plus the
+// implementation-capture and feedback-receiver inputs), with `sessionTreeFacts` as the
+// navigation twin over the already-rebuilt selected-branch state.
 //
-// Pi-free by construction (importDirectionGuard Rule D): effects arrive through two narrow
+// Pi-free by construction (importDirectionGuard Rule D): effects arrive through narrow
 // injection points — `SessionStateStore` (the workflow-state slice: rebuild + plain append +
-// the strict verified append) and `SessionIdentityPorts` (handoff read/consume, run-scratch
-// isolation, the run-id mint, the §8.3 version stamp). `index.ts` binds the production values
-// and renders the outcome's per-arm problems/warnings with today's exact report scopes; the
-// strict appends keep reporting through `appendWorkflowStateClassified`'s own loudness channel
-// (the report slice rides `SessionArtifactCtx`, re-exported via `substrate/sessionData.ts` —
-// this module never imports `surfaces/`).
+// the strict verified append), `SessionIdentityPorts` (handoff read/consume, run-scratch
+// isolation, the run-id mint, the §8.3 version stamp), and `SessionStartFactReads` (the handoff
+// + checkout plan-ref reads the post-gate facts may touch). `index.ts` binds the production
+// values, orders the Pi effects, and renders the outcome's per-arm problems/warnings with today's
+// exact report scopes; the strict appends keep reporting through
+// `appendWorkflowStateClassified`'s own loudness channel (the report slice rides
+// `SessionArtifactCtx`, re-exported via `substrate/sessionData.ts` — this module never imports
+// `surfaces/`, `pi/`, or the feedback receiver).
 //
 // ONE handoff authority: every handoff/run-id read — the claim arm's, `decideClaim`'s
 // env-child probe, `resolveRunStage`'s stage lookup, and `deriveForkRunId`'s sibling scan —
@@ -21,7 +27,8 @@
 // the fakes never touch disk. The decision logic is byte-identical to its
 // `substrate/workflowState.ts` ancestry.
 
-import type { Handoff } from "../substrate/cache.ts";
+import type { Handoff, PlanRef } from "../substrate/cache.ts";
+import { type Registry, stageConsumesPlanRef } from "../substrate/registry.ts";
 import type { SessionArtifactCtx } from "../substrate/sessionData.ts";
 import {
   type AppendWorkflowStateOpts,
@@ -29,6 +36,7 @@ import {
   branchOf,
   type ClassifiedAppend,
   type EntrySink,
+  planRefsEqual,
   rebuildWorkflowState,
   WORKFLOW_STATE_TYPE,
   type WorkflowState,
@@ -85,9 +93,11 @@ export type ClaimDecision =
 /**
  * The registry stage id the launched run is acting on, read from its handoff blob, or null.
  * Only `claim` (cold) and `keep` (reload) sessions have a settled run whose handoff records a
- * `stage`; `fork`, `adopt`, and `none` carry no launched stage (an adopted env-child must never
- * impersonate the launched stage; LWW restores fork/none state instead). The stage gates whether
- * `session_start` reconciles `cache.plan-ref` into `active_plan_ref`.
+ * `stage` — a kept session re-reads its run's handoff on every reload, so a consuming stage's
+ * checkout binding is re-read there too; `fork`, `adopt`, and `none` carry no launched stage (an
+ * adopted env-child must never impersonate the launched stage; LWW restores fork/none state
+ * instead). The stage gates whether `session_start` reconciles `cache.plan-ref` into
+ * `active_plan_ref`.
  */
 export function resolveRunStage(
   decision: ClaimDecision,
@@ -454,4 +464,181 @@ export function establishSessionIdentity(
   // deliberate no-version-backfill non-write is preserved (§8.3: an LWW backfill would
   // mis-stamp an old session with today's version).
   return { arm: "kept", resolved: decision.state, decision, problems, warnings };
+}
+
+// ------------------------------------------------------------- the two-phase startup facts
+
+/**
+ * PHASE 1 (before the gate) — the tool-scope slice `gating.syncFromState` consumes, derived
+ * PURELY from the established identity: no store, handoff, registry, or checkout read can sit
+ * between identity establishment and gate synchronization (a read failure must never leave the
+ * gate unsynced). Mode is exactly the resolved mode (after optional floor reflection). The scope
+ * stage is the workflow-state `stage` key (§8.40): claim → the handoff-recorded stage just
+ * appended; keep/none → the branch-LWW stage; fork INHERITS the parent's stage (a forked
+ * implement session is an implement session); adopt NEVER impersonates (a subagent child's
+ * fresh branch carries no stage, so `session_tree` agrees). A failed claim leaves `resolved`
+ * empty → no stage → unscoped (stage scoping is fail-open). No stage validation or
+ * normalization — an unknown stage id passes through as-is.
+ */
+export function sessionStartToolScope(
+  identity: EstablishIdentityOutcome,
+): Pick<WorkflowState, "mode" | "stage"> {
+  const { resolved, decision } = identity;
+  const stage =
+    decision.action === "adopt"
+      ? undefined
+      : (resolved.stage ?? (decision.action === "fork" ? decision.state.stage : undefined));
+  return { mode: resolved.mode, stage };
+}
+
+/**
+ * The exterior reads the post-gate facts may touch — the handoff (the launched-stage authority
+ * for claim/keep) and the checkout `cache.plan-ref` (read ONLY on the consuming arm). Production
+ * binds both cwd-bound in `index.ts`; the suites bind recording fakes.
+ */
+export interface SessionStartFactReads extends Pick<SessionIdentityReads, "readHandoff"> {
+  /** The worktree's `cache.plan-ref` selector, or null (missing/unreadable). */
+  readPlanRef(): PlanRef | null;
+}
+
+/**
+ * The receiver-shaped feedback inputs both startup and navigation derive. Deliberately a local,
+ * inferred structural shape (no shared vocabulary with `hunkFeedback/receiver.ts`): the
+ * `index.ts` call site adds Pi's run `mode` and the receiver's own `ReceiverSyncArgs` accepts
+ * the result structurally. Eligibility stays receiver-owned (its fresh checkout read included).
+ */
+interface SessionFeedbackFacts {
+  stage: string | null;
+  adopted: boolean;
+  runId: string | null;
+  piSessionId: string | null;
+  activePlanRef: PlanRef | null;
+}
+
+/**
+ * PHASE 2 (after the gate and the claimed-only refinement import) — the lazy linkage
+ * reconciliation plus the derived capture/feedback inputs. `resolved` is the same
+ * `WorkflowState`-shaped diagnostic startup always produced (the T3 sentinel's material) —
+ * lifecycle-local, not a feature-facing snapshot.
+ */
+export interface SessionStartFacts {
+  resolved: WorkflowState;
+  /** Present only for an identified implement session (launched or fork-inherited stage). */
+  implementationCapture: { runId: string; parentSessionId: string | null } | null;
+  feedback: SessionFeedbackFacts;
+}
+
+/**
+ * The post-gate startup facts. Operation order (each step's port is the only one it touches):
+ *
+ * 1. Rebuild the live linked `active_plan_ref` ONCE (the store), before any handoff read.
+ * 2. Resolve the launched stage through the handoff reader — claim/keep only (`resolveRunStage`);
+ *    fork/adopt/none never read a stage handoff here.
+ * 3. Registry admission: only a non-null launched stage can consume the checkout ref
+ *    (`stageConsumesPlanRef`); a null registry stays PERMISSIVE when a stage is present (to
+ *    preserve implement linkage); an unknown stage in an available registry does not consume.
+ * 4. On the consuming arm ONLY, read the checkout `cache.plan-ref`: same `(provider, pr_id)`
+ *    keeps the existing linked object without appending; a different ref performs ONE strict
+ *    verified append (`active_plan_ref`, `planRefsEqual`, the "workflow-state linkage error"
+ *    scope) and folds the new ref in ONLY on `applied` — a rejected/unverified append leaves
+ *    `resolved` exactly as it arrived (a kept session keeps its LWW ref; a fresh claim keeps
+ *    none — never flattened, never rebuilt again to manufacture a fallback); no cached ref
+ *    preserves a non-null linked ref. A non-consuming (or absent) launched stage preserves a
+ *    non-null linked ref WITHOUT reading the checkout — the root selector must not leak in.
+ * 5. The implementation stage is the launched stage, with only a fork falling back to its
+ *    parent's LWW stage; `implementationCapture` exists only for a truthy run id on
+ *    `stage === "implement"` (parent provenance comes only from the fork decision).
+ * 6. `feedback` carries the implementation stage, the decision's adoption, the resolved
+ *    run/ref, and startup's CURRENT Pi session handle (never an inherited branch handle).
+ *
+ * A throwing store/read propagates to the caller (Pi's hook error boundary) — unreadability is
+ * never turned into confirmed absence, and no later effect runs from guessed facts.
+ */
+export function resolveSessionStartFacts(
+  store: SessionStateStore,
+  reads: SessionStartFactReads,
+  input: {
+    identity: EstablishIdentityOutcome;
+    /** The already-loaded registry (null when it failed to load) — never a loader. */
+    registry: Registry | null;
+    currentSessionId: string | null;
+  },
+): SessionStartFacts {
+  const { identity, registry, currentSessionId } = input;
+  const decision = identity.decision;
+  let resolved: WorkflowState = identity.resolved;
+
+  const linked = store.rebuild().active_plan_ref ?? null;
+  const launchedStage = resolveRunStage(decision, reads);
+  const consumesPlanRef =
+    launchedStage !== null && (registry === null || stageConsumesPlanRef(registry, launchedStage));
+  if (consumesPlanRef) {
+    const cachedRef = reads.readPlanRef();
+    if (cachedRef !== null) {
+      if (planRefsEqual(linked, cachedRef)) {
+        resolved = { ...resolved, active_plan_ref: linked };
+      } else {
+        const appended = store.appendVerified({
+          data: { active_plan_ref: cachedRef },
+          field: "active_plan_ref",
+          expected: cachedRef,
+          scope: "workflow-state linkage error",
+          failure: `plan-ref read-back failed for ${cachedRef.provider}:${cachedRef.pr_id}`,
+          equals: planRefsEqual,
+        });
+        if (appended.status === "applied") resolved = { ...resolved, active_plan_ref: cachedRef };
+      }
+    } else if (linked !== null) {
+      resolved = { ...resolved, active_plan_ref: linked };
+    }
+  } else if (linked !== null) {
+    resolved = { ...resolved, active_plan_ref: linked };
+  }
+
+  const implementationStage =
+    launchedStage ?? (decision.action === "fork" ? (decision.state.stage ?? null) : null);
+  const implementationCapture =
+    resolved.run_id && implementationStage === "implement"
+      ? {
+          runId: resolved.run_id,
+          parentSessionId:
+            decision.action === "fork" ? (decision.state.pi_session_id ?? null) : null,
+        }
+      : null;
+
+  return {
+    resolved,
+    implementationCapture,
+    feedback: {
+      stage: implementationStage,
+      adopted: decision.action === "adopt",
+      runId: resolved.run_id ?? null,
+      piSessionId: currentSessionId,
+      activePlanRef: resolved.active_plan_ref ?? null,
+    },
+  };
+}
+
+/**
+ * The navigation twin (`session_tree`), PURE over the ONE already-rebuilt selected-branch state:
+ * tool scope is the branch's per-field-LWW mode/stage (the §8.40 key); feedback uses the
+ * branch's stage/run/ref AND ITS OWN recorded session id (not startup's current-handle
+ * override) with `adopted: false` — an env-adopted child's fresh branch carries no stage, so the
+ * stage gate alone keeps it receiver-ineligible. No handoff/checkout read, claim, linkage, or
+ * implementation capture happens on navigation (a deliberate asymmetry with startup).
+ */
+export function sessionTreeFacts(state: WorkflowState): {
+  toolScope: Pick<WorkflowState, "mode" | "stage">;
+  feedback: SessionFeedbackFacts;
+} {
+  return {
+    toolScope: { mode: state.mode, stage: state.stage },
+    feedback: {
+      stage: state.stage ?? null,
+      adopted: false,
+      runId: state.run_id ?? null,
+      piSessionId: state.pi_session_id ?? null,
+      activePlanRef: state.active_plan_ref ?? null,
+    },
+  };
 }
