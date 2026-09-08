@@ -11,6 +11,13 @@
 // Deliberately NOT `config.ts`'s fail-soft overlaid reader or its handwritten subset parser: a
 // malformed or wrong-shaped selected input refuses (a typed, code-owned explanation; never a parser
 // message or a config excerpt, which can carry the secret).
+//
+// The parser certifies nothing about whole-config validity for the Python CLI, whose TOML 1.0
+// reader is authoritative for the save: this parser also accepts TOML 1.1 syntax (a trailing
+// inline-table comma, a `\x` escape) that Python rejects, so such an edit is not routing drift —
+// the projection may be unchanged — and surfaces when the save subprocess refuses the whole file
+// (like any failed CLI call), never as a save to the wrong place. Matching Python's grammar here
+// would need a second handwritten parser; `shared/fixtures/draft-review-config.json` pins the gap.
 import { parse } from "../vendor/smol-toml/parse.js";
 import { digestSessionData } from "./sessionData.ts";
 

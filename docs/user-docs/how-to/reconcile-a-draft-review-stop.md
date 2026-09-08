@@ -41,6 +41,14 @@ backend call, but neither excludes an earlier saved attempt in the run — class
 other stop below. It grants no permission to repair, replay, or save the old review: open a new
 review under the current configuration after checking the named component was the intended change.
 
+A Perk TOML edit that the `perk` CLI cannot read is not a routing change either. The fingerprint's
+parser accepts some TOML 1.1 syntax (a trailing comma inside an inline table, a `\x` string
+escape) that the CLI's TOML 1.0 reader rejects, so such an edit — in any table — leaves the
+fingerprint unchanged and surfaces instead when the save subprocess refuses the configuration file:
+an `unresolved-dispatch` stop with `backend-unconfirmed`, exactly like any other failed CLI call
+(the same edit fails every `perk` command). The CLI refuses the whole file, so the review cannot be
+saved to the wrong place. Classify the stop below as usual, fix the file, and open a new review.
+
 ## 1. Stop all participants and prove quiescence
 
 Stop every Pi session and **every child save subprocess** able to use this namespace. Then close

@@ -22,6 +22,7 @@ type Case = {
   values?: Record<string, string | null>;
   refuse?: Record<string, string>;
   equivalent_to?: string;
+  dialect?: string;
 };
 const fixture = JSON.parse(
   readFileSync(
@@ -63,6 +64,38 @@ test("fixture shape: the shared file names exactly the four selected fields", ()
   assert.equal(names.size, fixture.cases.length, "case names are unique");
   for (const c of fixture.cases)
     if (c.equivalent_to !== undefined) assert.ok(names.has(c.equivalent_to), c.name);
+});
+
+test("TOML 1.1 syntax the vendored parser accepts is not routing drift: decodable here, Python-refused there", () => {
+  // The dialect boundary (§8.23): the projection certifies nothing about whole-config validity.
+  // A document only the TOML 1.1-capable parser reads (a trailing inline-table comma, a `\x`
+  // escape) projects normally — even identically to its TOML 1.0 twin — while Python's reader
+  // refuses the whole file, so such an edit surfaces at save as the CLI's config error, never
+  // as `target-changed` and never as a save to the wrong place. The fixture pins BOTH readings;
+  // if either parser's dialect moves, this test (or its Python twin) trips.
+  const dialect = fixture.cases.filter((c) => c.dialect === "toml-1.1");
+  assert.deepEqual(
+    dialect.map((c) => c.name),
+    ["toml-1.1-trailing-comma-in-unrelated-inline-table", "toml-1.1-hex-escape-in-selected-value"],
+  );
+  for (const c of dialect) {
+    assert.equal(c.refuse, undefined, `${c.name}: the TS projection must NOT refuse`);
+    assert.ok(c.toml);
+    for (const field of ["issues.backend", "issues.team", "workflow.base"])
+      assert.deepEqual(
+        (c as { python?: Record<string, unknown> }).python?.[field],
+        { raises: "TOMLDecodeError" },
+        `${c.name}: Python's config reader must refuse ${field}`,
+      );
+    // The whole document decodes and every selected value is the parser's own reading.
+    decodeRoutingConfig(Buffer.from(c.toml, "utf8"), "main_config");
+  }
+  const [trailingComma, hexEscape] = dialect;
+  assert.ok(
+    trailingComma?.toml?.includes(", }") && trailingComma.equivalent_to === "basic-strings",
+  );
+  assert.ok(hexEscape?.toml?.includes("\\x67"));
+  assert.equal(hexEscape?.values?.["issues.backend"], "github");
 });
 
 for (const c of fixture.cases) {

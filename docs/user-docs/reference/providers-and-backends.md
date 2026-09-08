@@ -65,7 +65,8 @@ only), and the main checkout's local `[linear] api_key` (hashed, never shown) â€
 handoff, `GH_REPO`/`GH_HOST`, and **all `git config --list --show-origin` output**. Unrelated
 valid Perk TOML changes (compaction, models, CI, skills, providers, presentation, comments,
 formatting, key order) no longer invalidate an open review, but an unrelated Git-config change
-still does. Genuine drift refuses `target-changed` naming the checkpoint and the changed
+still does; an edit the `perk` CLI cannot parse (TOML 1.1-only syntax) is not drift either â€” it
+fails the save subprocess like any CLI error, never saving elsewhere. Genuine drift refuses `target-changed` naming the checkpoint and the changed
 component (for example `main_config.issues.backend`), never the value; a malformed or
 wrong-shaped routing field refuses `io-error` naming the file role. Busy, broken-provenance,
 persistence, or unresolved-dispatch stops are **refusals**, not skipped reviews or permission to

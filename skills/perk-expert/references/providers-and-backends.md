@@ -67,7 +67,8 @@ local `[workflow] base` (plan/objective only), the main checkout's local `[linea
 (hashed), the run handoff, `GH_REPO`/`GH_HOST`, and **all `git config --list --show-origin`
 output**. An unrelated valid Perk TOML change (compaction, models, CI, skills, providers,
 presentation, comments, formatting) while a review is open leaves it valid; an unrelated Git-config
-change still invalidates it. Genuine drift refuses `target-changed` and the stop names the
+change still invalidates it, and an edit the `perk` CLI cannot parse (TOML 1.1-only syntax) fails
+the save subprocess like any CLI error rather than registering as drift. Genuine drift refuses `target-changed` and the stop names the
 checkpoint (`open`/`attach`/`candidate`/`save`) and the changed component
 (e.g. `main_config.issues.backend`, `worktree_local.workflow.base`, `git_config`), never the
 value; a malformed or wrong-shaped routing field refuses `io-error` naming the file role.

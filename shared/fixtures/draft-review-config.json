@@ -1,5 +1,5 @@
 {
-  "$comment": "TEST-ONLY cross-plane fixture for the draft-review routing-config projection (contracts.md §8.23). Read by extension/substrate/draftReviewConfig.test.ts (the TS projection: exact decoded strings, refusals) and tests/test_draft_review_config.py (the existing Python config readers). Not read at runtime by either plane. See shared/README.md.",
+  "$comment": "TEST-ONLY cross-plane fixture for the draft-review routing-config projection (contracts.md §8.23). Read by extension/substrate/draftReviewConfig.test.ts (the TS projection: exact decoded strings, refusals) and tests/test_draft_review_config.py (the existing Python config readers). Cases marked dialect \"toml-1.1\" pin syntax the TS parser accepts but Python 3.13's TOML 1.0 reader rejects — a save-time CLI failure, never a routing change. Not read at runtime by either plane. See shared/README.md.",
   "fields": [
     "issues.backend",
     "issues.team",
@@ -201,6 +201,53 @@
         },
         "workflow.base": {
           "raises": "ConfigError"
+        },
+        "linear.api_key": null
+      }
+    },
+    {
+      "name": "toml-1.1-trailing-comma-in-unrelated-inline-table",
+      "dialect": "toml-1.1",
+      "toml": "[issues]\nbackend = \"linear\"\nteam = \"ENG\"\n\n[workflow]\nbase = \"main\"\n\n[linear]\napi_key = \"lin_api_FAKE0000deadbeef\"\n\n[compaction]\nlimits = { reserve_tokens = 65536, }\n",
+      "values": {
+        "issues.backend": "linear",
+        "issues.team": "ENG",
+        "workflow.base": "main",
+        "linear.api_key": "lin_api_FAKE0000deadbeef"
+      },
+      "equivalent_to": "basic-strings",
+      "python": {
+        "issues.backend": {
+          "raises": "TOMLDecodeError"
+        },
+        "issues.team": {
+          "raises": "TOMLDecodeError"
+        },
+        "workflow.base": {
+          "raises": "TOMLDecodeError"
+        },
+        "linear.api_key": null
+      }
+    },
+    {
+      "name": "toml-1.1-hex-escape-in-selected-value",
+      "dialect": "toml-1.1",
+      "toml": "[issues]\nbackend = \"\\x67ithub\"\n",
+      "values": {
+        "issues.backend": "github",
+        "issues.team": null,
+        "workflow.base": null,
+        "linear.api_key": null
+      },
+      "python": {
+        "issues.backend": {
+          "raises": "TOMLDecodeError"
+        },
+        "issues.team": {
+          "raises": "TOMLDecodeError"
+        },
+        "workflow.base": {
+          "raises": "TOMLDecodeError"
         },
         "linear.api_key": null
       }

@@ -4475,7 +4475,13 @@ ENOENT, invalid UTF-8, a parser failure, a present non-table where a selected ta
 or a non-string selected value refuses capture `io-error` with a code-owned `routing config
 <role>[/<aliased role>]: <explanation>` detail — never a parser message or config excerpt. The
 Python configuration dialect stays authoritative; the parser certifies nothing about whole-config
-validity. Git config digest hashes exact successful stdout
+validity: it also accepts TOML 1.1 syntax (a trailing inline-table comma, a `\x` escape) that
+Python 3.13's TOML 1.0 reader rejects, so such an edit — in any table — is NOT routing drift (the
+projection may be unchanged, or decode a selected value Python never reads) and surfaces instead
+when the save CLI refuses the whole configuration file (`backend-unconfirmed` →
+`unresolved-dispatch`, like any failed CLI invocation); Python refuses the whole document, so the
+gap can fail a save but never misroute one. Both readings are pinned by the `dialect` cases of
+`shared/fixtures/draft-review-config.json`. Git config digest hashes exact successful stdout
 bytes of bounded `git config --null --list --show-origin`, without trimming, including successful
 empty output (so unrelated Git-config changes still retarget a review). No raw config is
 persisted/logged. `environment` is GH_REPO/GH_HOST, null when unset,

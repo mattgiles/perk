@@ -127,6 +127,35 @@ def test_python_normalizes_where_ts_keeps_exact_bytes():
     }
 
 
+def test_toml_1_1_syntax_is_a_save_time_cli_failure_not_routing_drift(tmp_path: Path):
+    # The dialect boundary (contracts §8.23): the TS fingerprint's vendored parser accepts TOML 1.1
+    # syntax (a trailing inline-table comma, a `\x` escape) that Python 3.13's `tomllib` rejects.
+    # Such an edit is NOT routing drift — the TS projection is unchanged (or decodes a value) — and
+    # surfaces instead when the save CLI refuses the whole configuration file, so it can fail a
+    # save but never misroute one. Both readings are pinned; a dialect move in either parser trips
+    # this test or its TS twin.
+    doc = _fixture()
+    dialect = [c for c in doc["cases"] if c.get("dialect") == "toml-1.1"]
+    assert [c["name"] for c in dialect] == [
+        "toml-1.1-trailing-comma-in-unrelated-inline-table",
+        "toml-1.1-hex-escape-in-selected-value",
+    ]
+    for case in dialect:
+        assert "refuse" not in case, case["name"]
+        for field in ("issues.backend", "issues.team", "workflow.base"):
+            assert case["python"][field] == {"raises": "TOMLDecodeError"}, case["name"]
+        # Python's reader rejects the WHOLE document (`load_config` is what every CLI command,
+        # including the save, loads first) — not merely the offending field.
+        target = paths.config_file(tmp_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(case["toml"], encoding="utf-8")
+        with pytest.raises(tomllib.TOMLDecodeError):
+            load_config(tmp_path)
+    trailing_comma, hex_escape = dialect
+    assert trailing_comma["equivalent_to"] == "basic-strings"
+    assert "\\x67" in hex_escape["toml"] and hex_escape["values"]["issues.backend"] == "github"
+
+
 def test_unrelated_config_is_invisible_to_both_planes(tmp_path: Path):
     # The incident shape: a `[compaction]` edit (plus other unselected tables) leaves every
     # routing reader's answer unchanged — the fixture's `values` for this case are the whole
