@@ -24,20 +24,15 @@ export function resolveRelative(fromFile: string, spec: string): string {
  * Build the relative-import edge map: file → sorted unique extension-relative targets. Every
  * relative specifier must resolve to a file in the scanned corpus: an extensionless specifier
  * (`./b`) would otherwise mint a phantom node (`b` ≠ `b.ts`) invisible to cycle detection, so
- * unresolvable specifiers are reported in `unresolved`, never silently edged or dropped. The
- * caller may declare `leaf` targets — a resolved path the policy treats as an opaque external
- * closure (vendored third-party code with its own internal graph): such a specifier is neither
- * an edge nor unresolved, and is reported in `leaves` so the policy can assert non-vacuity.
+ * unresolvable specifiers are reported in `unresolved`, never silently edged or dropped.
  */
 export function buildEdges(
   files: string[],
   read: (file: string) => string,
-  leaf: (resolved: string) => boolean = () => false,
-): { edges: Map<string, string[]>; unresolved: string[]; leaves: string[] } {
+): { edges: Map<string, string[]>; unresolved: string[] } {
   const corpus = new Set(files);
   const edges = new Map<string, string[]>();
   const unresolved: string[] = [];
-  const leaves: string[] = [];
   for (const file of files) {
     const targets = new Set<string>();
     for (const spec of extractSpecifiers(read(file))) {
@@ -45,15 +40,13 @@ export function buildEdges(
       const resolved = resolveRelative(file, spec);
       if (corpus.has(resolved)) {
         targets.add(resolved);
-      } else if (leaf(resolved)) {
-        leaves.push(`${file}: "${spec}" → ${resolved}`);
       } else {
         unresolved.push(`${file}: "${spec}" → ${resolved}`);
       }
     }
     edges.set(file, [...targets].sort());
   }
-  return { edges, unresolved, leaves };
+  return { edges, unresolved };
 }
 
 /**

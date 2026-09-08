@@ -1,3 +1,48 @@
+// The warm `/plan-review-browser` door: the summonable streaming draft review — from a
+// plan-authoring session the human summons a plannotator PLAN-REVIEW browser on the working
+// plan draft, a draft-reviewer wave streams phrase-anchored findings into that browser via
+// `push_annotations`, and the browser decision routes through the shared seams: APPROVE → the
+// decision ladder → the shared plan completion (`completePlanReviewV1`: the Direct-Edits
+// mechanical apply, `planApprovalSave`); DENY → a model-mediated `plan_draft` revision round.
+// Plannotator always, no provider dispatch (the surface-named command IS the selection — the
+// `/pr-review-browser` precedent); only the plannotator PRESENCE probe gates it.
+//
+// ARTIFACT-FIRST, DRAFTS ONLY: the reviewed bytes are the validated `plan-draft.md` artifact —
+// no param tier, no transcript tier (the review-surface law, tightened to drafts-only: an
+// approval auto-saves the reviewed bytes). Stage-gated to the three registry stages whose
+// STAGE_TOOLS carry `plan_draft` ({plan, save, objective-plan} — every session where the plan
+// draft is the working draft); anything else refuses loudly.
+//
+// THE GUARDS (`draftReview.ts`, contracts.md §8.23): the door opens the activation's
+// current-review slot at entry (superseding any other open review — blocking or browser) and
+// runs every completed browser decision through the decision ladder: a superseded review's
+// decision is ignored loudly; an APPROVE over a moved draft, a moved save destination, or a
+// latched unconfirmed save saves nothing and tells the model why; a DENY over a moved draft
+// proceeds with a one-line note. Nothing is persisted — a browser decision does not survive a
+// Pi restart (the human re-runs the door).
+//
+// THE BACKGROUND OPEN: the plan server's URL is deterministic the moment the port is picked
+// (the preset-PLANNOTATOR_PORT mechanism — see plannotatorHandoff.ts), so the handler starts
+// `startPlannotatorPlanReview`, primes BOTH companion surfaces (the `push_annotations` plan-mode
+// annotation surface + the draft-review wave context), injects the guidance IMMEDIATELY, and
+// ends its turn. The readiness poll is observed in a background task (ready → info; never-ready
+// → a loud degrade clearing both surfaces); the human DECISION is awaited in a second background
+// task (open-ended — exactly the model-called `plan_review` bridge semantics; a turn abort
+// settles `aborted` via the existing bridge abort handling) and routes the outcome.
+//
+// THE COMPANION TOOLS: the reviewer fan-out is the globally registered
+// `start_draft_review_wave` / `collect_draft_review_wave` pair (door-primed inputs — the model
+// picks only the angles), and the annotation delivery is the globally registered
+// `push_annotations` PRIMED BY THIS DOOR in plan mode. The door registers no tools of its own.
+//
+// Accepted edges (the /pr-review-browser posture — noted, not engineered around):
+//  - concurrent double-open: a second /plan-review-browser re-primes both surfaces and takes the
+//    slot (a new review supersedes everything); the FIRST bridge's later decision is ignored
+//    loudly by the ladder and its `finally` leaves the second session's surfaces alone.
+//  - an early human decision mid-wave is authoritative — the save proceeds; the cleared surface
+//    makes any late `push_annotations` refuse `no_surface`; a still-pending wave stays
+//    collectable (the wave module's timeout is the orphan insurance).
+
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
 import {
@@ -6,7 +51,6 @@ import {
   primeDraftReviewContext,
 } from "../../authoring/review/draftContext.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
-import type { RegistrationResult } from "../../session/draftReviewState.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
 import { registerPerkCommand } from "../../substrate/command.ts";
 import { interceptConsoleError } from "../../substrate/consoleCapture.ts";
@@ -15,20 +59,21 @@ import type { ToolGating } from "../../substrate/toolGating.ts";
 import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { type ReportTarget, report } from "../../surfaces/report.ts";
 import {
-  type DraftReviewAccess,
-  draftReviewCompletionResult,
-  draftReviewRefusalText,
-  type PreparedDraftReview,
-} from "./draftReviewActivation.ts";
+  checkDraftReviewDecision,
+  type DraftReviewSlot,
+  injectDraftReviewResult,
+  type OpenDraftReview,
+  SUPERSEDED_DECISION_WARNING,
+  withDraftChangedNote,
+} from "./draftReview.ts";
 import { planSaveDepsFor } from "./plan.ts";
-import { completePlanReviewV1 } from "./planReview.ts";
+import { completePlanReviewV1, planGuardResult } from "./planReview.ts";
 import {
   type AnnotationState,
   clearAnnotationSurface,
   primeAnnotationSurface,
   resumeAnnotationDelivery,
 } from "./providers/annotations.ts";
-import type { PlannotatorRefusal, PlannotatorReviewOutcome } from "./providers/plannotator.ts";
 import {
   plannotatorPresent,
   type RespondSink,
@@ -36,7 +81,7 @@ import {
   type StartedSurface,
   startPlannotatorPlanReview,
 } from "./providers/plannotatorHandoff.ts";
-import type { DraftReviewLaunchResult, ReviewOutcome } from "./review.ts";
+import { type ReviewOutcome, type ToolResult, untrustedReviewFeedback } from "./review.ts";
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
 const SCOPE = "plan-review-browser";
@@ -66,7 +111,7 @@ export function planReviewBrowserGuidance(opts: { custom?: string }): string {
  * findings in-session for the human, and the human falls back to `plan_review`/`/plan-save`.
  */
 const DEGRADE_NOTICE =
-  "The plannotator plan-review browser is unavailable — " +
+  "The plannotator plan-review browser is unavailable (the review server never became ready) — " +
   "degrade in-session: surface the draft-review wave's findings in your reply for the human. " +
   "Both door surfaces are cleared — `push_annotations` now refuses (`no_surface`) and the " +
   "draft-review context is gone. The human decides the next step: `plan_review` (the in-session " +
@@ -84,23 +129,28 @@ export interface PlanReviewDoorSession {
 }
 
 /**
- * Keep readiness and decisions independent: a timeout suppresses late local callbacks, but
- * only an identity-bound verified invalidation grants fallback permission. A dispatch winner
- * cannot be rolled back. Companion resource cleanup leaves any early wave collectable.
+ * Observe the readiness poll in the background (the plan flavor of `observeBrowserReadiness`;
+ * the handler has already injected the guidance and ended): `ready` → an info note plus one
+ * annotation-delivery continuation if the still-current surface has held or in-flight work;
+ * `aborted` → no-op; `bridge_settled` → await the bridge — a completed/aborted outcome
+ * returns silently (the decision task routes them) while `unavailable` falls through to the
+ * degrade; `timeout` → degrade. Degrade = a loud error report PLUS the degrade notice injected
+ * to the model (idle → immediate, streaming → followUp), both door surfaces cleared (the
+ * annotation surface + the threaded `draftReview` state's context — idempotent beside the
+ * decision task's clears), AND the door session marked `degraded` so the still-live decision
+ * task ignores any later bridge decision (loudly — never a silent late save). Structural param
+ * slices keep it offline-testable; exported for the door tests.
  */
 export async function observePlanReviewReadiness(
   pi: RespondSink,
   ctx: ReportTarget & Pick<ExtensionContext, "isIdle">,
-  started: StartedSurface<PlannotatorReviewOutcome>,
+  started: StartedSurface<ReviewOutcome>,
   draftReview: DraftReviewWaveState,
   annotations: AnnotationState,
-  session: PlanReviewDoorSession,
-  isCurrent: () => boolean,
-  degrade: () => RegistrationResult,
+  session?: PlanReviewDoorSession,
 ): Promise<void> {
   const surface = annotations.surface;
   const state = await started.readiness;
-  if (!isCurrent() || session.degraded) return;
   if (state === "ready") {
     report(ctx, SCOPE, "info", `plannotator is up at ${started.url} — browser opening`);
     resumeAnnotationDelivery(annotations, surface, pi, ctx);
@@ -109,107 +159,137 @@ export async function observePlanReviewReadiness(
   if (state === "aborted") return; // the turn was interrupted — no-op
   if (state === "bridge_settled") {
     const out = await started.bridgePromise;
-    if (!isCurrent() || out.status !== "unavailable") return; // the decision task routes the settled outcome
+    if (out.status !== "unavailable") return; // the decision task routes the settled outcome
   }
-  fallbackPlanReview(
-    pi,
+  report(
     ctx,
-    draftReview,
-    annotations,
-    session,
-    isCurrent,
-    degrade,
-    `the plannotator plan-review server did not become ready at ${started.url} — the browser review is unavailable`,
+    SCOPE,
+    "error",
+    `the plannotator plan-review server did not become ready at ${started.url} — the browser ` +
+      "review is unavailable",
+    { alsoLog: true },
   );
-}
-
-/** One local fallback attempt, whether readiness or transport failure arrives first. */
-function fallbackPlanReview(
-  pi: RespondSink,
-  ctx: ReportTarget & Pick<ExtensionContext, "isIdle">,
-  draftReview: DraftReviewWaveState,
-  annotations: AnnotationState,
-  session: PlanReviewDoorSession,
-  isCurrent: () => boolean,
-  degrade: () => RegistrationResult,
-  detail: string,
-): void {
-  if (!isCurrent() || session.degraded) return;
-  // Local suppression survives an unverified invalidation, but grants no fallback permission.
-  session.degraded = true;
-  clearAnnotationSurface(annotations);
-  clearDraftReviewContext(draftReview);
-  const invalidated = degrade();
-  if (!invalidated.ok) {
-    report(
-      ctx,
-      SCOPE,
-      "error",
-      draftReviewRefusalText({
-        status: "refused",
-        code: invalidated.reason,
-        phase: "mutation",
-        detail: invalidated.detail,
-      }),
-    );
-    return;
-  }
-  report(ctx, SCOPE, "error", detail, { alsoLog: true });
   if (ctx.isIdle()) {
     pi.sendUserMessage(DEGRADE_NOTICE);
   } else {
     pi.sendUserMessage(DEGRADE_NOTICE, { deliverAs: "followUp" });
   }
+  // Consistent with "surface findings in-session": a post-degrade push_annotations refuses
+  // loudly (`no_surface`) and a post-degrade start_draft_review_wave refuses
+  // `no_draft_context`. Idempotent beside the decision task's clears. The session flag makes
+  // the degrade authoritative for the decision task too — a later bridge decision is ignored.
+  clearAnnotationSurface(annotations);
+  clearDraftReviewContext(draftReview);
+  if (session !== undefined) session.degraded = true;
 }
 
-/** Same subject completion as the tool; dispatch owns every effect and delivery attempt. */
+/** The model-facing DENY revision result (the feedback delimited as untrusted DATA). */
+function planRevisionResult(out: Extract<ReviewOutcome, { status: "completed" }>): ToolResult {
+  const feedback = out.feedback
+    ? `\n\nReviewer feedback:\n${untrustedReviewFeedback(out.feedback)}`
+    : "";
+  return {
+    content: [
+      {
+        type: "text",
+        text:
+          "The human DENIED the plan in the browser review — revise the working draft with " +
+          "plan_draft per this feedback; the human re-runs /plan-review-browser (or you call " +
+          `plan_review) for the next round.${feedback}`,
+      },
+    ],
+    details: { ok: true, status: "denied", subject: "plan" },
+  };
+}
+
+/**
+ * Route the settled browser decision back into the session (the decision task's core; exported
+ * for the door tests — pure over the injected pi/ctx/gating/slot slices):
+ *
+ * - `aborted` → no-op (the turn was interrupted);
+ * - `unavailable` → a loud error report (the readiness observer's degrade arm owns the model
+ *   notice — never inject it twice);
+ * - `completed` → the decision ladder (`checkDraftReviewDecision`, effect `save` on APPROVE,
+ *   `revision` on DENY): `superseded` → one TUI warning, nothing injected, nothing saved;
+ *   `save-unconfirmed` / `stale-approval` / `destination-changed` → an error report AND the
+ *   matching fixed model text injected (nothing saved, gate untouched); `proceed` on APPROVE →
+ *   the shared plan completion (Direct-Edits mechanical apply → `planApprovalSave` → the latch
+ *   record) with its text reported (info on saved, error on save-failed) AND injected; `proceed`
+ *   on DENY → the model-mediated revision round (the feedback delimited as untrusted DATA),
+ *   prefixed with `DRAFT_CHANGED_NOTE` when the draft moved;
+ * - `dismissed`/`implement-here` → defensively unreachable (the plannotator bridge never
+ *   produces them) — no-op.
+ */
 export async function routePlanReviewDecision(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
+  slot: DraftReviewSlot,
   out: ReviewOutcome,
-  review: PreparedDraftReview,
+  review: OpenDraftReview,
 ): Promise<void> {
   if (out.status === "unavailable") {
     report(ctx, SCOPE, "error", out.warning, { alsoLog: true });
     return;
   }
-  if (out.status !== "completed") return;
-  const completion = await review.complete(out, {
-    effect: out.approved ? "save" : "revision",
-    carrier: { kind: "user" },
-    execute: async (capability) => {
-      const result = await completePlanReviewV1(
-        ctx,
-        planSaveDepsFor(pi, ctx, gating),
-        review.snapshot.markdown,
-        out,
-        capability,
-      );
+  if (out.status !== "completed") return; // aborted (+ the bridge-unreachable arms) — no-op
+
+  const check = checkDraftReviewDecision(slot, ctx, review, out.approved ? "save" : "revision");
+  if (check.kind === "superseded") {
+    report(ctx, SCOPE, "warning", SUPERSEDED_DECISION_WARNING);
+    return;
+  }
+  if (check.kind !== "proceed") {
+    const result = planGuardResult(check, review, out.feedback);
+    report(ctx, SCOPE, "error", result.content[0]?.text.split("\n")[0] ?? check.kind, {
+      alsoLog: true,
+    });
+    injectDraftReviewResult(pi, ctx, result);
+    return;
+  }
+
+  if (out.approved) {
+    // APPROVE: the shared completion (byte-identical to plan_review's plannotator arm) — the
+    // claim carrier (`objective_node_claim`) recovery rides `planApprovalSave`→`savePlan`.
+    const result = await completePlanReviewV1(
+      ctx,
+      slot,
+      planSaveDepsFor(pi, ctx, gating),
+      review.markdown,
+      out,
+    );
+    if (result.details.ok === true && result.details.saved === true) {
+      report(ctx, SCOPE, "info", "plan APPROVED in the browser — saved");
+    } else {
+      // save-failed (+ the defensively-unreachable no-plan arm): loud, gate left on; the
+      // composed text names the check-the-backend step and the /plan-save deliberate retry.
       report(
         ctx,
         SCOPE,
-        "info",
-        result.details.saved === true
-          ? "plan APPROVED in the browser — saved"
-          : "plan browser decision prepared",
+        "error",
+        "plan APPROVED in the browser but the auto-save did not confirm — the session stays " +
+          "read-only and automatic saves are paused; check the backend for this run id, then " +
+          "run /plan-save (the deliberate retry)",
+        { alsoLog: true },
       );
-      return result;
-    },
-  });
-  const result = draftReviewCompletionResult(completion);
-  report(
+    }
+    injectDraftReviewResult(pi, ctx, withDraftChangedNote(result, check.draftChanged));
+    return;
+  }
+
+  // DENY: model-mediated revise round (contracts.md §8.23) — no auto re-open. The feedback is
+  // passed through verbatim (Direct Edits diff included) but DELIMITED as untrusted DATA.
+  report(ctx, SCOPE, "info", "plan DENIED in the browser — feedback routed for a revision round");
+  injectDraftReviewResult(
+    pi,
     ctx,
-    SCOPE,
-    completion.ok ? "info" : "error",
-    completion.ok
-      ? "plan browser decision dispatched; persisted delivery confirmation is pending"
-      : result.content.map((block) => block.text).join("\n"),
+    withDraftChangedNote(planRevisionResult(out), check.draftChanged),
   );
 }
 
 /**
- * The guidance-returning open core: start the plan-review browser, prime BOTH companion
+ * The guidance-returning open core: open the current-review slot (a refusal is reported and
+ * returns `null` — nothing launched), start the plan-review browser, prime BOTH companion
  * surfaces the moment the port is picked (the URL is deterministic — see the header note),
  * observe readiness and the human decision in background tasks, and RETURN the composed
  * guidance string (template + the `command:plan-review-browser` binding suffix) — the caller
@@ -230,30 +310,33 @@ export async function openPlanReviewSurface(
   opts: { draft: string; custom?: string },
   draftReview: DraftReviewWaveState,
   annotations: AnnotationState,
-  reviews: DraftReviewAccess,
+  slot: DraftReviewSlot,
   deps: StartBrowserDeps = {},
-): Promise<DraftReviewLaunchResult> {
-  const prepared = reviews.prepare(ctx, opts.draft);
-  if (!prepared.ok) return prepared.refusal;
-  const review = prepared.value;
-  if (review.snapshot.binding.subject !== "plan" || review.snapshot.markdown !== opts.draft) {
-    review.dispose();
-    return {
-      status: "refused",
-      code: "source-changed",
-      phase: "open",
-      detail: "plan review source changed before opening",
-    };
+): Promise<string | null> {
+  // The slot open FIRST: no browser launches for a review that could never be routed (no run
+  // identity, the wrong subject, an unverifiable destination).
+  const opened = slot.open(ctx, {
+    subject: "plan",
+    source: "artifact",
+    raw: opts.draft,
+    markdown: opts.draft,
+  });
+  if (!opened.ok) {
+    report(ctx, SCOPE, "error", `cannot open the browser review: ${opened.detail}`, {
+      alsoLog: true,
+    });
+    return null;
   }
-  let started: StartedSurface<PlannotatorReviewOutcome> | PlannotatorRefusal;
+  const review = opened.review;
+
+  let started: StartedSurface<ReviewOutcome>;
   try {
     started = await startPlannotatorPlanReview(
       pi.events,
-      { plan: opts.draft, registration: review.registration, signal: review.signal },
+      { plan: opts.draft, signal: ctx.signal },
       deps,
     );
   } catch (error) {
-    review.dispose();
     const detail = error instanceof Error ? error.message : String(error);
     report(
       ctx,
@@ -264,21 +347,6 @@ export async function openPlanReviewSurface(
     );
     return null;
   }
-
-  if ("status" in started) {
-    review.dispose();
-    return started;
-  }
-  if (review.signal.aborted) {
-    review.dispose();
-    return {
-      status: "refused",
-      code: "invalid-state",
-      phase: "open",
-      detail: "review opening aborted",
-    };
-  }
-  const surface = started;
 
   // Prime BOTH companion surfaces the moment the port is picked: push_annotations serves this
   // browser session in plan mode, and the draft-review wave reviews exactly the browsed bytes
@@ -295,19 +363,7 @@ export async function openPlanReviewSurface(
   // routes a post-degrade decision through the save path (a readiness false-negative must not
   // let a late approval auto-save after the human followed the fallback).
   const session: PlanReviewDoorSession = { degraded: false };
-  void observePlanReviewReadiness(
-    pi,
-    ctx,
-    surface,
-    draftReview,
-    annotations,
-    session,
-    review.isCurrent,
-    review.degrade,
-  ).catch(() => {
-    session.degraded = true;
-    console.error("perk: browser readiness observation failed; no fallback permission established");
-  });
+  void observePlanReviewReadiness(pi, ctx, started, draftReview, annotations, session);
 
   // The decision task: the wait is open-ended (exactly the model-called `plan_review` bridge
   // semantics — a turn abort settles `aborted` via the bridge's abort handling).
@@ -317,27 +373,7 @@ export async function openPlanReviewSurface(
       quietMs: 6000,
     });
     try {
-      const out = await surface.bridgePromise;
-      if (!review.isCurrent()) return;
-      if (out.status === "refused") {
-        report(ctx, SCOPE, "error", draftReviewRefusalText(out));
-        return;
-      }
-      if (out.status === "unavailable") {
-        // The poll may be asleep or already ready. Handle the verified transport stop before
-        // dispose aborts observation; the shared local latch prevents a second fallback.
-        fallbackPlanReview(
-          pi,
-          ctx,
-          draftReview,
-          annotations,
-          session,
-          review.isCurrent,
-          review.degrade,
-          out.warning,
-        );
-        return;
-      }
+      const out = await started.bridgePromise;
       if (session.degraded) {
         // The review already degraded (surfaces cleared, the fallback announced) — a late
         // decision is ignored LOUDLY, never routed into a stale/duplicate save.
@@ -346,29 +382,26 @@ export async function openPlanReviewSurface(
             ctx,
             SCOPE,
             "warning",
-            "a browser decision arrived after local readiness suppression — ignored; " +
-              "inspect retained review state before further saves",
+            "a browser decision arrived after the review degraded — ignored (nothing saved); " +
+              "re-run /plan-review-browser to review the current draft",
           );
         }
         return;
       }
-      await routePlanReviewDecision(pi, ctx, gating, out, review);
+      await routePlanReviewDecision(pi, ctx, gating, slot, out, review);
     } finally {
       // The browser session is over — drop both surfaces so a late push refuses (`no_surface`)
-      // and a late wave start refuses (`no_draft_context`). Idempotent beside the degrade-arm
-      // clears; an early decision mid-wave leaves a still-pending wave collectable.
+      // and a late wave start refuses (`no_draft_context`), but ONLY while this review is still
+      // the current one: a superseding open re-primed the surfaces for ITS session. Idempotent
+      // beside the degrade-arm clears; an early decision mid-wave leaves a still-pending wave
+      // collectable.
       if (review.isCurrent()) {
         clearAnnotationSurface(annotations);
         clearDraftReviewContext(draftReview);
       }
-      review.dispose();
       interceptor.restore();
     }
-  })().catch(() => {
-    console.error(
-      "perk: browser decision reporting failed; inspect retained review state before further saves",
-    );
-  });
+  })();
 
   report(
     ctx,
@@ -386,8 +419,8 @@ export async function openPlanReviewSurface(
 
 /**
  * The door-facing open: the thin `sendUserMessage` wrapper over `openPlanReviewSurface` — the
- * command handler's delivery is the guidance injection; a `null` core return (port-pick
- * failure, already loudly reported) injects nothing.
+ * command handler's delivery is the guidance injection; a `null` core return (slot refusal or
+ * port-pick failure, already loudly reported) injects nothing.
  */
 export async function openPlanReviewAndGuide(
   pi: ExtensionAPI,
@@ -396,7 +429,7 @@ export async function openPlanReviewAndGuide(
   opts: { draft: string; custom?: string },
   draftReview: DraftReviewWaveState,
   annotations: AnnotationState,
-  reviews: DraftReviewAccess,
+  slot: DraftReviewSlot,
   deps: StartBrowserDeps = {},
 ): Promise<void> {
   const guidance = await openPlanReviewSurface(
@@ -406,11 +439,10 @@ export async function openPlanReviewAndGuide(
     opts,
     draftReview,
     annotations,
-    reviews,
+    slot,
     deps,
   );
-  if (typeof guidance === "string") pi.sendUserMessage(guidance);
-  else if (guidance !== null) report(ctx, SCOPE, "error", draftReviewRefusalText(guidance));
+  if (guidance !== null) pi.sendUserMessage(guidance);
 }
 
 // ------------------------------------------------------------------------ registration
@@ -421,7 +453,7 @@ export function registerPlanReviewBrowser(
   gating: ToolGating,
   draftReview: DraftReviewWaveState,
   annotations: AnnotationState,
-  reviews: DraftReviewAccess,
+  slot: DraftReviewSlot,
 ): void {
   registerPerkCommand(pi, SCOPE, {
     description:
@@ -487,7 +519,7 @@ export function registerPlanReviewBrowser(
         },
         draftReview,
         annotations,
-        reviews,
+        slot,
       );
     },
   });
