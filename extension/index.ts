@@ -1,8 +1,12 @@
-// perk Pi extension — the session *interior*.
+// perk Pi extension — the session *interior*: the composition root.
 //
-// The tier-3 session-state mechanics (contracts.md §8.2/§8.3): claim PERK_RUN_ID on
+// The tier-3 session-state mechanics (contracts.md §8.2/§8.3) — claim PERK_RUN_ID on
 // `session_start` (verified-linkage), rebuild `perk:workflow-state` on `session_start` AND
-// `session_tree` (per-field LWW), and derive a child run_id on fork.
+// `session_tree` (per-field LWW), derive a child run_id on fork, reconcile the stage-gated plan
+// linkage — are OWNED by `session/lifecycle.ts` (identity arms + the two-phase startup facts +
+// the navigation facts). This file binds the production ports and keeps the Pi effects visibly
+// ORDERED: gate sync from the pure scope slice → claimed-only refinement import → the post-gate
+// facts → implementation pointer capture → feedback receiver sync → presentation/probe tail.
 
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";

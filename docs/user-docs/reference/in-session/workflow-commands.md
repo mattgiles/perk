@@ -393,9 +393,12 @@ Commit completed work, compact, then automatically start a continuation turn onl
 that compaction succeeded. On a dirty tree, perk drives one model turn to stage only the completed
 changes and write a real commit; it never performs blanket `git add -A` or pushes, and compacts only
 after HEAD advances. Clean and read-only sessions compact immediately. The continuation distinguishes
-committed, already-clean, and read-only outcomes. A valid active-session plan gets provider-aware
-identity and canonical re-read guidance; sessions without that verified linkage resume the current
-task generically. Before continuing, the agent reorients from repository evidence (`git status`,
+committed, already-clean, and read-only outcomes. Only the live session's own validated plan
+linkage selects a plan: a valid active-session plan gets provider-aware identity and canonical
+re-read guidance. The worktree's checkout plan selector alone never does (it can name a future plan
+unrelated to this session), and malformed or unreadable session linkage resumes the current task
+generically. This selection reflects persisted session linkage only — the command does not verify
+the plan against its backend issue. Before continuing, the agent reorients from repository evidence (`git status`,
 recent log, and relevant diffs) instead of trusting the compacted summary alone. If worktree state
 cannot be determined or no commit appears, compaction is skipped loudly; a skipped or failed
 compaction never dispatches the continuation. Pi's `/compact` remains the escape hatch. No paired tool.

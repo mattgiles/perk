@@ -489,9 +489,11 @@ evidence. Under `PERK_SELFCHECK` the T3 sentinel records `source: "env-child"`.
 `plan-ref.json`) is reported loudly on stderr and treated as **absent** (`null`) — so a corrupt
 cold-launch blob degrades to the same loud-unclaimed error as a missing handoff (gate off, never
 an aborted `session_start`), rather than crashing mid-handler. Defense in depth: the interior
-orders the read-only gate sync **before** the plan-ref/stage reconciliation in `session_start`,
-so no cache read can prevent gate engagement — a session that already claimed
-`mode: "read-only"` re-gates on reload even when its handoff has since been corrupted. The Python
+orders the read-only gate sync **before** the plan-ref/stage reconciliation in `session_start`
+(the two-phase startup in `session/lifecycle.ts`: the pure `sessionStartToolScope` slice syncs
+the gate, then `resolveSessionStartFacts` performs the fallible handoff/checkout reads), so no
+cache read can prevent gate engagement — a session that already claimed `mode: "read-only"`
+re-gates on reload even when its handoff has since been corrupted. The Python
 readers (`src/perk/state/cache.py`) deliberately keep **raising** `CacheError` (launch-time
 fail-closed, exterior plane); the cross-plane contract is the *files*, not error semantics.
 
@@ -626,17 +628,48 @@ are **strict** (durable/cross-process → read-back + correct ordering); purely 
 fields cheaply reconstructable on the next `session_start`/`session_tree` are
 best-effort-with-logging (never silently swallowed).
 
-**`active_plan_ref` reconciliation (stage-gated):** on `session_start`, after the run_id claim,
-the extension reconciles `cache.plan-ref` into `active_plan_ref` — but **only when the launched
-stage *consumes* the ref**, i.e. the stage's registry `requires`/`reads` list `cache.plan-ref`
-(the worktree binding stages; the root `worktree: none` stages do not consume it, so a fresh
-planning session never inherits the stale **root selector** — §8.1's duality). The launched stage
-is read from the run's **handoff** blob (`stage`); `fork`/`none` claims carry no launched stage
-and never re-read the file (the LWW rebuild preserves an already-linked ref). The append is
-**idempotent by `(provider, pr_id)`** with a **strict read-back** (loud-but-non-fatal on
-mismatch, headless-safe). If the registry fails to load, reconciliation stays **permissive** when
-a launched stage is present (to preserve implement linkage). **No clearing** of the selector
-anywhere — gating alone fixes the leak.
+**`active_plan_ref` reconciliation (stage-gated, post-gate):** on `session_start`, after the
+run_id claim AND after the read-only gate has synced from the established identity alone
+(`session/lifecycle.ts::sessionStartToolScope` — a pure mode/stage slice; no store, handoff,
+registry, or checkout read sits between identity and gate), the extension reconciles
+`cache.plan-ref` into `active_plan_ref` (`session/lifecycle.ts::resolveSessionStartFacts`) — but
+**only when the launched stage *consumes* the ref**, i.e. the stage's registry
+`requires`/`reads` list `cache.plan-ref` (the worktree binding stages; the root `worktree: none`
+stages do not consume it, so a fresh planning session never inherits the stale **root selector**
+— §8.1's duality). The launched stage is read from the run's **handoff** blob (`stage`) for
+**claim and keep** alike (a reload re-reads a consuming stage's checkout binding);
+`fork`/`adopt`/`none` carry no launched stage and never read a handoff or the file here (the LWW
+rebuild preserves an already-linked ref; a fork's implementation capture inherits the parent's
+LWW stage but its linkage is not re-read). The checkout is read **only on the consuming arm**,
+lazily: an unknown stage id in an available registry does not consume. The append is
+**idempotent by `(provider, pr_id)`** (an equal identity keeps the already-linked object without
+appending) with a **strict read-back** (loud-but-non-fatal on mismatch, headless-safe); a
+rejected/unverified append leaves the resolved startup facts exactly as they arrived — a kept
+session keeps its LWW ref, a fresh claim keeps none — with no retry, clearing, or repaired
+linkage. If the registry fails to load, reconciliation stays **permissive** when a launched stage
+is present (to preserve implement linkage). **No clearing** of the selector anywhere — gating
+alone fixes the leak. A throwing post-gate branch/handoff read propagates to Pi's hook error
+boundary with the gate already synced: unreadability is never turned into confirmed absence, and
+the later capture/receiver effects do not run from guessed facts.
+
+**Tool scope ≠ implementation stage.** The gate's scope stage is the workflow-state `stage` key
+(§8.40: claim → the just-appended handoff stage; keep/mint → the branch-LWW stage; fork inherits
+the parent's; adopt is unscoped). The **implementation stage** that gates the §8.35
+`implementation.main` capture and feeds the §8.58 receiver is the **launched handoff stage**
+(claim/keep), with only a fork falling back to its parent's LWW stage — the two authorities can
+disagree on reload and are deliberately not unified. `session_tree` navigation derives both the
+scope and the receiver inputs from the one rebuilt selected-branch state
+(`session/lifecycle.ts::sessionTreeFacts`: the branch's own recorded `pi_session_id`,
+`adopted: false`, no handoff/checkout read, no capture, no linkage). The receiver keeps its own
+fresh checkout read and final eligibility authority on every sync (§8.58).
+
+**Session-only plan-ref read (`WorkflowSession.activeSessionPlanRef()`):** the shape-validated,
+fail-open read of the live session's rebuilt `active_plan_ref` — non-blank `provider`/`pr_id`/
+`url`, an all-string `labels` list, a required null-or-string `objective_id`, `base` absent/null/
+string; extra fields never escape; absent, malformed, or unreadable linkage reads null. It has
+**no checkout fallback** (the checkout-first `substrate/workflowState.ts::activePlanRef` is a
+different authority) and is for continuation rendering only (the `/commit-and-compact`
+continuation) — never permission, verified linkage, artifact validation, or review routing.
 
 **Warm `/plan-save` direct linkage + the version-skew decode posture:** the in-session warm door
 appends `active_plan_ref` **directly** after a successful save (same strict read-back, idempotent
@@ -854,9 +887,12 @@ own the save/store contracts); the objective plan factory + node-lifecycle selec
 `src/perk/objective/`; §8.24); objective reconciliation
 (the reconcile modules + `skills/perk-objective-reconcile/`; the land-path facts stay in §8.4);
 the session identity lifecycle — the §8.2 claim/fork/adopt/mint/keep arms as one named operation
-(`extension/session/lifecycle.ts::establishSessionIdentity`; `extension/index.ts` keeps the
-adapter wiring: gathering inputs, rendering the per-arm reports, and the downstream gate/stage
-sync);
+(`extension/session/lifecycle.ts::establishSessionIdentity`) plus the two-phase startup facts
+(`sessionStartToolScope` before the gate; `resolveSessionStartFacts` after it — the stage-gated
+linkage, implementation-capture and receiver inputs; `sessionTreeFacts` for navigation);
+`extension/index.ts` keeps the adapter wiring: gathering inputs, rendering the per-arm reports,
+and the ORDERED Pi effects (gate sync → claimed-only refinement import → post-gate facts →
+pointer capture → receiver sync);
 session-lifecycle gates + the warm `/implement` handoff (`extension/session/lifecycleGates.ts`
 (the Pi-free policy) + `extension/pi/v1/lifecycleGates.ts` (the registration),
 `extension/pi/v1/planReview.ts`'s implement-here seam); status/footer rendering detail
