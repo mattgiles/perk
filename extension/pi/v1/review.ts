@@ -185,8 +185,10 @@ export type SubjectSaveOutcome =
  * The shared approved-save mapper core: map an APPROVED review outcome + the approval-save
  * outcome into the model-facing tool result for `subject`. A successful save TERMINATES the turn
  * (propagating the seam's `terminate: true` intent); a failed save is non-terminating, leaves
- * the gate read-only, and requires human reconciliation before another save. Only a confirmed
- * save labels feedback as implementation guidance; an unconfirmed save carries diagnostic DATA.
+ * the gate read-only, and pauses automatic saves for the activation (the unconfirmed-save latch,
+ * `draftReview.ts`) — the human checks the backend for the run id, then the manual save command
+ * is the deliberate retry. Only a confirmed save labels feedback as implementation guidance; an
+ * unconfirmed save carries diagnostic DATA.
  * The `paramMismatch`/`edited`/`directEditsFailed` opts are plan-arm-only (their literals name
  * "plan"/"draft"): the objective delegator never passes opts, so the suffixes render empty and
  * `edited` never reaches its details. `directEditsFailed` (plannotator-only) flags that a Direct
@@ -291,8 +293,10 @@ export function approvedSubjectSaveResult(
         type: "text",
         text:
           `${subject.noun} APPROVED by reviewer, but the auto-save FAILED (${error}) — the ` +
-          `session stays read-only. Stop and reconcile backend objects and retained review ` +
-          `state with the human before any further save; do not blindly retry.${failedFeedback}`,
+          `session stays read-only and automatic saves are paused for this session. Do not ` +
+          `retry yourself: ask the human to check the issue backend for an existing ` +
+          `${subject.noun} carrying this run id, then run ${subject.failsafeCmd} (the ` +
+          `deliberate retry).${failedFeedback}`,
       },
     ],
     details: {
@@ -318,20 +322,13 @@ export function approvedSubjectSaveResult(
  * the synchronous port-pick failure (already loudly reported inside the core) — the caller
  * falls open to the plain blocking review.
  */
-export type DraftReviewLaunchResult =
-  | string
-  | import("./providers/plannotator.ts").PlannotatorRefusal
-  | null;
 export interface WaveLaunch {
   present(): boolean;
-  plan(
-    ctx: ExtensionContext,
-    opts: { draft: string; custom?: string },
-  ): Promise<DraftReviewLaunchResult>;
+  plan(ctx: ExtensionContext, opts: { draft: string; custom?: string }): Promise<string | null>;
   objective(
     ctx: ExtensionContext,
     opts: { rendered: string; artifactRaw: string; custom?: string },
-  ): Promise<DraftReviewLaunchResult>;
+  ): Promise<string | null>;
 }
 
 /** The minimal structural `ctx.ui` subset the launch chooser needs (both dialogs signal-aware). */

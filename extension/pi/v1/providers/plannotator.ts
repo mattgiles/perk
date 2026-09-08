@@ -19,9 +19,9 @@
 // a per-review `plannotator:review-result` listener disposed via the unsubscribe pi's
 // `EventBus.on` returns.
 //
-// Registration is mandatory and fail-closed: verified state hooks precede request/attachment.
-// Foreign handshake/decision/status values are contained unknown input, never invented verdicts.
-// Subscribe-then-status catch-up closes the handshake event gap without polling or recovery.
+// Foreign handshake/decision values are contained unknown input, never invented verdicts. The
+// result listener is installed BEFORE the request is emitted (an early-decision buffer bridges
+// the handshake gap), so no status catch-up query exists.
 //
 // INERT BY DEFAULT. The shim is ALWAYS registered in index.ts but the injection fires only when
 // the resolved `[providers] plan` selection is `plannotator-plan` (read fresh per-event, same
@@ -34,8 +34,7 @@
 // gate exit all live behind the plan installer's seams; the injection's gate-active check reads
 // the persisted `perk:workflow-state.mode`, the gate's own state twin.
 //
-// EVENT ENVELOPE (pinned against `@plannotator/pi-extension@0.20.0`, `plannotator-events.ts` —
-// with callback review-status catch-up specified against 0.27.12):
+// EVENT ENVELOPE (pinned against `@plannotator/pi-extension@0.20.0`, `plannotator-events.ts`):
 //   request  — pi.events.emit("plannotator:request", { requestId, action: "plan-review",
 //              payload: { planContent, origin? }, respond })   // respond = in-payload callback
 //   handshake — respond({ status: "handled", result: { status: "pending", reviewId } })
@@ -59,12 +58,6 @@ import {
   classifyAuthoringContext,
   readOnlyModeOf,
 } from "../../../authoring/context/eligibility.ts";
-import type {
-  DraftReviewRegistration,
-  RegistrationResult,
-  ReviewRefusal,
-  StatusDiagnostic,
-} from "../../../session/draftReviewState.ts";
 import type { ContextPolicyInputs } from "../../../substrate/contextPolicy.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { rebuildWorkflowState } from "../../../substrate/workflowState.ts";
@@ -139,20 +132,6 @@ export interface PlannotatorBus {
   on(channel: string, handler: (data: unknown) => void): () => void;
 }
 
-export type PlannotatorRefusal = {
-  status: "refused";
-  code: ReviewRefusal;
-  phase: "open" | "attach" | "invalidate" | "subscribe";
-  detail: string;
-};
-export type PlannotatorReviewOutcome = ReviewOutcome | PlannotatorRefusal;
-export type PlannotatorReviewStatus =
-  | Extract<ReviewOutcome, { status: "completed" | "aborted" }>
-  | { status: "pending" | "missing" }
-  | { status: "failed"; code: Exclude<StatusDiagnostic, "pending" | "missing"> };
-
-/** Independent from the handshake budget; no polling and no human-decision deadline. */
-export const PLANNOTATOR_STATUS_TIMEOUT_MS = 5_000;
 export interface PlannotatorTimers {
   setTimeout(callback: () => void, ms: number): ReturnType<typeof setTimeout>;
   clearTimeout(handle: ReturnType<typeof setTimeout>): void;
@@ -161,117 +140,6 @@ const defaultTimers: PlannotatorTimers = {
   setTimeout: (callback, ms) => globalThis.setTimeout(callback, ms),
   clearTimeout: (handle) => globalThis.clearTimeout(handle),
 };
-
-export function registrationHook(
-  phase: PlannotatorRefusal["phase"],
-  hook: () => RegistrationResult,
-): PlannotatorRefusal | null {
-  try {
-    const result = hook();
-    return result.ok
-      ? null
-      : { status: "refused", code: result.reason, phase, detail: result.detail };
-  } catch {
-    return {
-      status: "refused",
-      code: "persistence-failed",
-      phase,
-      detail: `draft review registration threw during ${phase}`,
-    };
-  }
-}
-function safeDiagnostic(
-  registration: DraftReviewRegistration,
-  code: StatusDiagnostic,
-  detail: string,
-) {
-  try {
-    registration.diagnostic(code, detail);
-  } catch {
-    console.error("perk: draft review diagnostic sink failed");
-  }
-}
-function parseReviewStatus(value: unknown, reviewId: string): PlannotatorReviewStatus {
-  const malformed = { status: "failed", code: "malformed" } as const;
-  try {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return malformed;
-    const envelope = value as Record<string, unknown>;
-    const status = envelope.status;
-    if (status === "unavailable") return { status: "failed", code: "unavailable" };
-    if (status === "error") return { status: "failed", code: "transport-error" };
-    if (status !== "handled") return malformed;
-    const result = envelope.result;
-    if (typeof result !== "object" || result === null || Array.isArray(result)) return malformed;
-    const record = result as Record<string, unknown>;
-    const state = record.status;
-    if (state === "pending" || state === "missing") return { status: state };
-    if (state !== "completed") return malformed;
-    const decision = parseReviewDecision(record);
-    return decision !== null && decision.reviewId === reviewId
-      ? { status: "completed", ...decision }
-      : malformed;
-  } catch {
-    return malformed;
-  }
-}
-
-/** The callback feeds catch-up synchronously so a later live event cannot overtake status. */
-function queryStatus(
-  bus: PlannotatorBus,
-  reviewId: string,
-  signal: AbortSignal | undefined,
-  timers: PlannotatorTimers,
-  candidate: (status: PlannotatorReviewStatus) => void,
-): Promise<PlannotatorReviewStatus> {
-  return new Promise((resolve) => {
-    let settled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const finish = (status: PlannotatorReviewStatus) => {
-      if (settled) return;
-      settled = true;
-      if (timer !== undefined) timers.clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-      resolve(status);
-      candidate(status);
-    };
-    const abort = () => finish({ status: "aborted" });
-    if (signal?.aborted) {
-      abort();
-      return;
-    }
-    if (!reviewId.trim()) {
-      finish({ status: "failed", code: "malformed" });
-      return;
-    }
-    signal?.addEventListener("abort", abort, { once: true });
-    timer = timers.setTimeout(
-      () => finish({ status: "failed", code: "timeout" }),
-      PLANNOTATOR_STATUS_TIMEOUT_MS,
-    );
-    try {
-      bus.emit("plannotator:request", {
-        requestId: randomUUID(),
-        action: "review-status",
-        payload: { reviewId },
-        respond: (value: unknown) => {
-          if (!settled) finish(parseReviewStatus(value, reviewId));
-        },
-      });
-    } catch {
-      finish({ status: "failed", code: "transport-error" });
-    }
-  });
-}
-
-/** Public callback-only status API; never reads upstream storage or starts a review. */
-export function queryPlannotatorReviewStatus(
-  bus: PlannotatorBus,
-  reviewId: string,
-  signal?: AbortSignal,
-  timers: PlannotatorTimers = defaultTimers,
-): Promise<PlannotatorReviewStatus> {
-  return queryStatus(bus, reviewId, signal, timers, () => {});
-}
 
 /** Plannotator's immediate `respond` handshake payload (pinned envelope, see header). */
 interface HandshakeResponse {
@@ -312,6 +180,8 @@ function parseHandshakeResponse(response: unknown): HandshakeResponse {
   }
 }
 
+type Decision = { reviewId: string; approved: boolean; feedback?: string };
+
 /**
  * Narrow a foreign `plannotator:review-result` payload to the load-bearing decision fields —
  * contained: an adversarial getter/malformed shape degrades to `null` (ignored, the wait
@@ -319,9 +189,7 @@ function parseHandshakeResponse(response: unknown): HandshakeResponse {
  * verdict, so a missing/mistyped approval field makes the whole payload malformed (ignored) —
  * it must never coerce into a DENY that completes a live review.
  */
-function parseReviewDecision(
-  data: unknown,
-): { reviewId: string; approved: boolean; feedback?: string } | null {
+function parseReviewDecision(data: unknown): Decision | null {
   try {
     if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
     const record = data as Record<string, unknown>;
@@ -342,28 +210,60 @@ function parseReviewDecision(
 
 /**
  * The pure, offline-testable plan-review bridge (the ergonomic mirror of
- * `requestPlannotatorCodeReview` in plannotatorHandoff.ts): emit ONE `plannotator:request` with
- * `action: "plan-review"`, await the bounded `respond` handshake, then await the human decision
- * on a PER-REVIEW `plannotator:review-result` listener with one status catch-up query. Hooks
- * finish exclusion before transport work. Refused/throwing hooks stop, never fall back or emit
- * a verdict. Every transport exit clears its own timers/listeners; local abort is not upstream
- * cancellation. A candidate is correlation only: persisted consumption authorizes effects.
+ * `requestPlannotatorCodeReview` in plannotatorHandoff.ts): subscribe to
+ * `plannotator:review-result` FIRST, emit ONE `plannotator:request` with `action: "plan-review"`,
+ * await the bounded `respond` handshake, then await the human decision on the listener (no
+ * timeout — the reviewer takes as long as they take), honoring a turn abort so an interrupted
+ * session never leaks a wedged promise.
+ *
+ * Subscribe-before-emit closes the handshake gap: a decision emitted synchronously inside (or
+ * right after) the `respond` callback — before the handshake promise resolves — lands in the
+ * `early` buffer; once the handshake yields the `reviewId`, the buffer is scanned for the first
+ * matching decision (which completes the review) and discarded. No status catch-up query is
+ * needed and none is emitted. Every exit (completion, abort, handshake failure/timeout) removes
+ * the listener and clears the timer.
  */
 export async function requestPlannotatorPlanReview(
   bus: PlannotatorBus,
   plan: string,
-  registration: DraftReviewRegistration,
   signal?: AbortSignal,
   timers: PlannotatorTimers = defaultTimers,
-): Promise<PlannotatorReviewOutcome> {
+): Promise<ReviewOutcome> {
   if (signal?.aborted) return { status: "aborted" };
 
   const requestId = randomUUID();
-  const opened = registrationHook("open", () => registration.open(requestId));
-  if (opened !== null) return opened;
-  const invalidate = (reason: "opening-aborted" | "handshake-failed") =>
-    registrationHook("invalidate", () => registration.invalidateOpening(requestId, reason));
-  if (signal?.aborted) return invalidate("opening-aborted") ?? { status: "aborted" };
+
+  // 1. The result listener — installed BEFORE the request goes out. Until the handshake attaches
+  //    a reviewId, decisions are buffered; afterwards a live match completes the wait.
+  let reviewId: string | null = null;
+  const early: Decision[] = [];
+  let settleDecision: ((outcome: ReviewOutcome) => void) | null = null;
+  let unsubscribe: (() => void) | undefined;
+  const dispose = (): void => {
+    const release = unsubscribe;
+    unsubscribe = undefined;
+    try {
+      release?.();
+    } catch {
+      // A throwing unsubscribe must not mask the outcome being delivered.
+    }
+  };
+  try {
+    unsubscribe = bus.on("plannotator:review-result", (data) => {
+      const decision = parseReviewDecision(data);
+      if (decision === null) return;
+      if (reviewId === null) {
+        early.push(decision);
+        return;
+      }
+      if (decision.reviewId !== reviewId || settleDecision === null) return;
+      settleDecision({ status: "completed", ...decision });
+    });
+  } catch {
+    return { status: "unavailable", warning: "plannotator result subscription failed" };
+  }
+
+  // 2. The bounded handshake.
   let handshakeSettled = false;
   let respondResolve: (response: HandshakeResponse | "timeout" | "aborted") => void = () => {};
   const handshake = new Promise<HandshakeResponse | "timeout" | "aborted">((resolve) => {
@@ -391,142 +291,73 @@ export async function requestPlannotatorPlanReview(
     });
   } catch {
     settleHandshake();
-    respondResolve("timeout");
-    return (
-      invalidate("handshake-failed") ?? {
-        status: "unavailable",
-        warning: "plannotator review request failed",
-      }
-    );
+    dispose();
+    return { status: "unavailable", warning: "plannotator review request failed" };
   }
   const response = await handshake;
   settleHandshake();
 
-  if (response === "aborted") return invalidate("opening-aborted") ?? { status: "aborted" };
+  const fail = (outcome: ReviewOutcome): ReviewOutcome => {
+    dispose();
+    return outcome;
+  };
+  if (response === "aborted") return fail({ status: "aborted" });
   if (response === "timeout") {
-    return (
-      invalidate("handshake-failed") ?? {
-        status: "unavailable",
-        warning: "plannotator did not respond to the review request (handshake timeout)",
-      }
-    );
+    return fail({
+      status: "unavailable",
+      warning: "plannotator did not respond to the review request (handshake timeout)",
+    });
   }
   if (response?.status !== "handled") {
     const detail = response?.error ? `: ${response.error}` : "";
-    return (
-      invalidate("handshake-failed") ?? {
-        status: "unavailable",
-        warning: `plannotator reported ${response?.status ?? "an invalid response"}${detail}`,
-      }
-    );
+    return fail({
+      status: "unavailable",
+      warning: `plannotator reported ${response?.status ?? "an invalid response"}${detail}`,
+    });
   }
-  const reviewId = response.result?.reviewId;
-  if (response.result?.status !== "pending" || typeof reviewId !== "string" || !reviewId.trim()) {
-    return (
-      invalidate("handshake-failed") ?? {
-        status: "unavailable",
-        warning: "plannotator handshake returned no pending reviewId",
-      }
-    );
+  const id = response.result?.reviewId;
+  if (response.result?.status !== "pending" || typeof id !== "string" || !id.trim()) {
+    return fail({
+      status: "unavailable",
+      warning: "plannotator handshake returned no pending reviewId",
+    });
   }
-
   // A usable ID wins the handshake race: preserve pending even if abort followed respond.
-  const attached = registrationHook("attach", () => registration.attach(requestId, reviewId));
-  if (attached !== null) return attached;
-  if (signal?.aborted) return { status: "aborted" };
+  if (signal?.aborted) return fail({ status: "aborted" });
 
-  // 2. Await the human decision (no timeout — the reviewer takes as long as they take), but
-  //    honor a turn abort so an interrupted session never leaks a wedged promise. Either exit
-  //    disposes the result listener via the unsubscribe.
-  return await new Promise<PlannotatorReviewOutcome>((resolve) => {
+  // 3. Attach the id: an early decision for THIS review completes immediately; the rest of the
+  //    buffer (other reviews' decisions) is discarded.
+  reviewId = id;
+  const buffered = early.find((decision) => decision.reviewId === id);
+  early.length = 0;
+  if (buffered !== undefined) return fail({ status: "completed", ...buffered });
+
+  // 4. Await the live decision (or the abort). Either exit disposes the listener.
+  return await new Promise<ReviewOutcome>((resolve) => {
     let settled = false;
-    let installing = true;
-    let early: PlannotatorReviewOutcome | undefined;
-    let unsubscribe: (() => void) | undefined;
-    const queryAbort = new AbortController();
-    const dispose = () => {
-      const release = unsubscribe;
-      unsubscribe = undefined;
-      try {
-        release?.();
-      } catch {
-        safeDiagnostic(registration, "transport-error", "live listener cleanup failed");
-      }
-    };
-    const finish = (outcome: PlannotatorReviewOutcome): void => {
+    const finish = (outcome: ReviewOutcome): void => {
       if (settled) return;
-      if (installing) {
-        early ??= outcome;
-        return;
-      }
       settled = true;
+      settleDecision = null;
       dispose();
       signal?.removeEventListener("abort", onAbort);
-      queryAbort.abort();
       resolve(outcome);
     };
     const onAbort = (): void => finish({ status: "aborted" });
+    settleDecision = finish;
     signal?.addEventListener("abort", onAbort, { once: true });
-    try {
-      unsubscribe = bus.on("plannotator:review-result", (data) => {
-        if (settled) return;
-        const decision = parseReviewDecision(data);
-        if (decision === null || decision.reviewId !== reviewId) return;
-        finish({ status: "completed", ...decision });
-      });
-    } catch {
-      installing = false;
-      finish(
-        registrationHook("subscribe", () =>
-          registration.subscriptionFailed(requestId, reviewId),
-        ) ?? {
-          status: "unavailable",
-          warning: "plannotator result subscription failed",
-        },
-      );
-      return;
-    }
-    // A callback cannot authorize completion until subscription setup returns successfully.
-    installing = false;
-    if (early !== undefined) {
-      finish(early);
-      return;
-    }
-    if (signal?.aborted) {
-      onAbort();
-      return;
-    }
-    void queryStatus(bus, reviewId, queryAbort.signal, timers, (status) => {
-      if (settled) return;
-      if (status.status === "completed") finish(status);
-      else if (status.status !== "aborted") {
-        const code = status.status === "failed" ? status.code : status.status;
-        safeDiagnostic(
-          registration,
-          code,
-          `plannotator review status: ${code}; live wait remains open`,
-        );
-      }
-    });
   });
 }
 
 /**
  * Create the plannotator bridge over an event bus — the thin structural slice
- * (`{ review(plan, registration, signal) }`) injected into the review door; the body
- * lives in `requestPlannotatorPlanReview`.
+ * (`{ review(plan, signal) }`) injected into the review door; the body lives in
+ * `requestPlannotatorPlanReview`.
  */
 export function createPlannotatorBridge(bus: PlannotatorBus): {
-  review(
-    plan: string,
-    registration: DraftReviewRegistration,
-    signal?: AbortSignal,
-  ): Promise<PlannotatorReviewOutcome>;
+  review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome>;
 } {
-  return {
-    review: (plan, registration, signal) =>
-      requestPlannotatorPlanReview(bus, plan, registration, signal),
-  };
+  return { review: (plan, signal) => requestPlannotatorPlanReview(bus, plan, signal) };
 }
 
 // ------------------------------------------------------------------ Direct Edits extraction
