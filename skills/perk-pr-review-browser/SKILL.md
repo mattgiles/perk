@@ -163,8 +163,9 @@ carries the full flow; these are the deltas from single-PR mode:
   after triage, through `submit_pr_review`: **one real call per member PR**, bottom→top, the
   gate ladder per call (N formal posts = N confirms — accepted).
 - **Routing is your judgment, not a worker.** Inputs: the reconciled findings + returned
-  browser annotations (both combined-diff coordinates), the per-PR diffs from
-  `review-context --stack`, and the snapshot's layer order. Fold each finding into the OWNING
+  browser annotations (both combined-diff coordinates), the per-PR diffs materialized by
+  `review-context --stack` (one `diff.patch` per member, paths in its envelope), and the
+  snapshot's layer order. Fold each finding into the OWNING
   PR's review body by default; add an inline anchor only when its location is straightforwardly
   identifiable in that PR's own diff; cross-cutting/unplaceable findings fold into the most
   relevant PR's body.

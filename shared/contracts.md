@@ -2056,7 +2056,8 @@ parallel rebuild.
   and runs the same core, returning the stack guidance as its ok text.
 - **Routing + per-PR posting (model judgment — no blame-attribution worker):** inputs are the
   reconciled wave findings + returned browser annotations (both combined-diff coordinates), the
-  per-PR diffs from `review-context --stack`, and the snapshot's layer order. Default
+  per-PR diffs materialized by `review-context --stack` (one `diff.patch` file per member, read
+  from the envelope's `stack[].diff.path` references), and the snapshot's layer order. Default
   disposition: fold each finding into the OWNING PR's review body; inline anchors only where
   the location is straightforwardly identifiable in that PR's own diff; cross-cutting/
   unplaceable findings fold into the most relevant PR's body. The posting protocol is the stack
