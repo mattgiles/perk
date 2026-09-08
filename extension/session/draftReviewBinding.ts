@@ -10,8 +10,8 @@ import {
   type ConfigValue,
   projectRoutingConfig,
   ROUTING_CONFIG_FIELDS,
-  type RoutingConfigField,
   RoutingConfigError,
+  type RoutingConfigField,
   type RoutingConfigProjection,
   routingConfigComponents,
 } from "../substrate/draftReviewConfig.ts";

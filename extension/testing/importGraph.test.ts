@@ -74,6 +74,32 @@ test("buildEdges: an extensionless relative import is reported, never a phantom-
   assert.deepEqual(findCycles(strict.edges), [["a.ts", "b.ts"]]);
 });
 
+test("buildEdges: a declared leaf closure is neither an edge nor unresolved, and is reported for non-vacuity", () => {
+  // a.ts → "../vendor/x/parse.js" (a vendored third-party closure outside the corpus). Without
+  // the leaf predicate it is unresolved; with it, it is a reported leaf and never an edge (the
+  // closure's internal graph is upstream's, not this policy's), while a truly unresolvable
+  // specifier in the same file is still reported.
+  const read = () => 'import { p } from "../vendor/x/parse.js";\nimport { q } from "./missing";';
+  const strict = buildEdges(["src/a.ts"], read);
+  assert.deepEqual(strict.unresolved, [
+    'src/a.ts: "../vendor/x/parse.js" → vendor/x/parse.js',
+    'src/a.ts: "./missing" → src/missing',
+  ]);
+  assert.deepEqual(strict.leaves, []);
+  const lax = buildEdges(["src/a.ts"], read, (resolved) => resolved.startsWith("vendor/x/"));
+  assert.deepEqual(lax.unresolved, ['src/a.ts: "./missing" → src/missing']);
+  assert.deepEqual(lax.leaves, ['src/a.ts: "../vendor/x/parse.js" → vendor/x/parse.js']);
+  assert.deepEqual(lax.edges.get("src/a.ts"), [], "a leaf is never an edge");
+  // A corpus member is always an edge, even if the predicate would also call it a leaf.
+  const member = buildEdges(
+    ["src/a.ts", "vendor/x/parse.js"],
+    (file) => (file === "src/a.ts" ? 'import { p } from "../vendor/x/parse.js";' : ""),
+    () => true,
+  );
+  assert.deepEqual(member.edges.get("src/a.ts"), ["vendor/x/parse.js"]);
+  assert.deepEqual(member.leaves, []);
+});
+
 test("checkDirCensus: fixtures (unknown, stale, overlap, anchor floor, valid entry)", () => {
   const frozen = ["alpha", "beta"];
   const inCorpus = (anchor: string) => anchor === "gamma/anchor.ts";

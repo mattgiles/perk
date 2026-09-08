@@ -57,9 +57,12 @@ test("every vendored module and the license are byte-identical to the pinned ups
 
 test("the vendored parser loads directly and honors integersAsBigInt for huge unrelated integers", async () => {
   const { parse } = await import("./smol-toml/parse.js");
-  const doc = parse('[compaction]\nreserve_tokens = 99999999999999999999\n[issues]\nbackend = "x"\n', {
-    integersAsBigInt: true,
-  });
+  const doc = parse(
+    '[compaction]\nreserve_tokens = 99999999999999999999\n[issues]\nbackend = "x"\n',
+    {
+      integersAsBigInt: true,
+    },
+  );
   assert.deepEqual(doc, {
     compaction: { reserve_tokens: 99999999999999999999n },
     issues: { backend: "x" },

@@ -12,6 +12,7 @@ planes' readings of one document stay reconciled where they legitimately differ.
 import base64
 import json
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -46,7 +47,7 @@ def _bytes(case: dict) -> bytes | None:
     return None if toml is None else toml.encode("utf-8")
 
 
-def _readers(root: Path) -> dict[str, object]:
+def _readers(root: Path) -> dict[str, Callable[[], object]]:
     # The four existing readers, keyed by the fixture's field names. Committed readers anchor to
     # the main checkout (falling back to the given root outside a git repo — tmp_path here).
     return {
@@ -57,14 +58,22 @@ def _readers(root: Path) -> dict[str, object]:
     }
 
 
-def _expectation(case: dict, field: str) -> object:
+def _expectation(case: dict, field: str) -> str | None | type[Exception]:
+    """The fixture's Python expectation: a ``str``/``None`` value, or the exception class raised."""
     overrides = case.get("python", {})
-    if field in overrides:
-        return overrides[field]
     values = case.get("values", {})
-    if field in values:
-        return values[field]
-    pytest.fail(f"fixture case {case['name']!r} carries no Python expectation for {field}")
+    if field in overrides:
+        expected = overrides[field]
+    elif field in values:
+        expected = values[field]
+    else:
+        pytest.fail(f"fixture case {case['name']!r} carries no Python expectation for {field}")
+    if isinstance(expected, dict):
+        raises = expected["raises"]
+        assert isinstance(raises, str), case["name"]
+        return RAISES[raises]
+    assert expected is None or isinstance(expected, str), case["name"]
+    return expected
 
 
 def test_fixture_shape_matches_the_ts_consumer():
@@ -92,8 +101,8 @@ def test_python_readers_agree_with_fixture(case: dict, tmp_path: Path):
             target.write_bytes(payload)
     for field, read in _readers(tmp_path).items():
         expected = _expectation(case, field)
-        if isinstance(expected, dict):
-            with pytest.raises(RAISES[expected["raises"]]):
+        if isinstance(expected, type):
+            with pytest.raises(expected):
                 read()
         else:
             assert read() == expected, f"{case['name']}: {field}"

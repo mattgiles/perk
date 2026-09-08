@@ -33,6 +33,7 @@ export function fakeTargetComponents(
     ]),
   ) as Record<TargetComponent, string>;
 }
+
 import { gitInit } from "./harness.ts";
 
 /** Explicit test-only transport hooks. State/claim composition tests use the real coordinator. */
