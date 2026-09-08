@@ -6,8 +6,8 @@
 // rejected (invalid name, io refusal), unverified (pointer-append failure), the read tiers
 // (found / absent — no pointer, malformed pointer, cross-run fork pointer / invalid — missing
 // file, digest mismatch), the strict ledger append pre-read, and the workflow-state ops
-// (`nodeClaim()`/`activeObjective()`/`reviewPosts()` reads + `apply()` over the closed change
-// union: applied / unchanged / unverified / rejected / non-matching claim /
+// (`nodeClaim()`/`activeObjective()`/`activeSessionPlanRef()`/`reviewPosts()` reads + `apply()`
+// over the closed change union: applied / unchanged / unverified / rejected / non-matching claim /
 // same-node-different-objective / no-identity). Branch-only seam-level cases prove the
 // fork/reload reconstruction shapes (identity + claims + active_objective rebuild from the
 // persisted branch; a fork-derived child reads the parent's artifacts as absent) and the
@@ -24,10 +24,14 @@ import {
   type EntrySink,
   rebuildWorkflowState,
   WORKFLOW_STATE_TYPE,
+  type WorkflowState,
 } from "../substrate/workflowState.ts";
 import { openMemoryWorkflowSession } from "../testing/memoryWorkflowSession.ts";
 import { openBranchWorkflowSession } from "./branchWorkflowSession.ts";
+import type { SessionStateStore } from "./lifecycle.ts";
 import {
+  type ArtifactContentStore,
+  openWorkflowSession,
   type PrReviewRecord,
   type ReviewBatchRecord,
   type ReviewPostRow,
@@ -189,7 +193,8 @@ interface SessionHarness {
 
 interface HarnessOpts {
   nodeClaim?: { objective: string; node: string };
-  activePlanRef?: PlanRef;
+  /** Deliberately wide: the session plan-ref validator table seeds malformed persisted shapes. */
+  activePlanRef?: unknown;
   activeObjective?: string;
   /** Deliberately wide: the strict-ledger pins seed malformed persisted shapes. */
   reviewPosts?: unknown;
@@ -646,6 +651,118 @@ for (const backing of [branchBacking(), memoryBacking()]) {
     }
   });
 
+  test(`${backing.label}: activeSessionPlanRef — present, absent, identity-less; observes a later link through the same session`, () => {
+    const linked = backing.harness("RID", { activePlanRef: planRef("42") });
+    const unlinked = backing.harness("RID");
+    const identityless = backing.harness(null, { activePlanRef: planRef("42") });
+    try {
+      assert.deepEqual(linked.session.activeSessionPlanRef(), planRef("42"));
+      assert.equal(unlinked.session.activeSessionPlanRef(), null);
+      // Session linkage is branch-backed and identity-independent (the identity-less save arm).
+      assert.deepEqual(identityless.session.activeSessionPlanRef(), planRef("42"));
+      // A later `link-plan-ref` through the SAME opened session is observed on the next read
+      // (fresh rebuild per call — no memoization).
+      assert.deepEqual(unlinked.session.apply({ kind: "link-plan-ref", ref: planRef("43") }), {
+        status: "applied",
+      });
+      assert.deepEqual(unlinked.session.activeSessionPlanRef(), planRef("43"));
+      assert.deepEqual(linked.session.apply({ kind: "link-plan-ref", ref: planRef("44") }), {
+        status: "applied",
+      });
+      assert.deepEqual(linked.session.activeSessionPlanRef(), planRef("44"));
+    } finally {
+      linked.dispose();
+      unlinked.dispose();
+      identityless.dispose();
+    }
+  });
+
+  test(`${backing.label}: activeSessionPlanRef — the validator table (accepted bytes, omitted base, no extra fields)`, () => {
+    const sound = {
+      provider: " github ",
+      pr_id: " 42 ",
+      url: " https://github.com/o/r/issues/42 ",
+      labels: ["perk:plan", ""],
+      objective_id: null,
+    };
+    const accepted: { seed: Record<string, unknown>; expected: PlanRef }[] = [
+      // Bytes are preserved verbatim (no trimming); an empty label is still a string.
+      { seed: sound, expected: { ...sound } },
+      { seed: { ...sound, labels: [] }, expected: { ...sound, labels: [] } },
+      { seed: { ...sound, objective_id: "7" }, expected: { ...sound, objective_id: "7" } },
+      // `base` omitted stays omitted; explicit null / string are carried as-is.
+      { seed: { ...sound, base: null }, expected: { ...sound, base: null } },
+      { seed: { ...sound, base: "main" }, expected: { ...sound, base: "main" } },
+      // Unknown providers and unparsed urls are accepted (no provider constraint, no URL parse).
+      {
+        seed: { ...sound, provider: "gitlab", url: "not a url" },
+        expected: { ...sound, provider: "gitlab", url: "not a url" },
+      },
+      // Extra persisted fields never escape the reconstructed ref.
+      { seed: { ...sound, extra: "junk", consumed: true }, expected: { ...sound } },
+    ];
+    for (const { seed, expected } of accepted) {
+      const h = backing.harness("RID", { activePlanRef: seed });
+      try {
+        const read = h.session.activeSessionPlanRef();
+        assert.deepEqual(read, expected, JSON.stringify(seed));
+        assert.deepEqual(
+          Object.keys(read ?? {}).sort(),
+          Object.keys(expected).sort(),
+          `exactly the accepted fields for ${JSON.stringify(seed)}`,
+        );
+        assert.equal("base" in (read ?? {}), "base" in seed, "base omission is preserved");
+      } finally {
+        h.dispose();
+      }
+    }
+    const without = (key: keyof typeof sound): Record<string, unknown> => {
+      const copy: Record<string, unknown> = { ...sound };
+      delete copy[key];
+      return copy;
+    };
+    const rejected: unknown[] = [
+      null,
+      "github:42",
+      7,
+      [],
+      {},
+      // each required field absent / wrong type / blank
+      without("provider"),
+      { ...sound, provider: 7 },
+      { ...sound, provider: "" },
+      { ...sound, provider: "   " },
+      without("pr_id"),
+      { ...sound, pr_id: 42 },
+      { ...sound, pr_id: " " },
+      without("url"),
+      { ...sound, url: null },
+      { ...sound, url: "" },
+      // labels: absent / not a list / mixed
+      without("labels"),
+      { ...sound, labels: "perk:plan" },
+      { ...sound, labels: null },
+      { ...sound, labels: ["perk:plan", 7] },
+      { ...sound, labels: [null] },
+      // objective_id is REQUIRED: absent or a non-string non-null value refuses
+      without("objective_id"),
+      { ...sound, objective_id: 7 },
+      { ...sound, objective_id: undefined },
+      // base: present but neither null nor string
+      { ...sound, base: 7 },
+      { ...sound, base: false },
+      { ...sound, base: {} },
+    ];
+    for (const seed of rejected) {
+      const h = backing.harness("RID", { activePlanRef: seed });
+      try {
+        assert.equal(h.session.activeSessionPlanRef(), null, JSON.stringify(seed));
+      } finally {
+        h.dispose();
+      }
+    }
+  });
+
   test(`${backing.label}: apply record-node-claim — applied, verified via the named read`, () => {
     const h = backing.harness("RID");
     try {
@@ -1067,9 +1184,95 @@ test("branch: a reopen over a fork-appended branch derives the child identity an
     const child = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
     assert.equal(child.runId, "RID.1");
     assert.deepEqual(child.readArtifact("draft.json"), { status: "absent" });
+    // Plan linkage is NOT run-isolated: the fork child inherits the parent's linked ref via LWW
+    // (artifacts are run-keyed; session linkage is branch-keyed).
+    assert.equal(parent.apply({ kind: "link-plan-ref", ref: planRef("42") }).status, "applied");
+    assert.deepEqual(child.activeSessionPlanRef(), planRef("42"));
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
+});
+
+test("branch: activeSessionPlanRef follows per-field LWW — latest ref, explicit-null clearing, unrelated patches", () => {
+  // The persisted branch IS the reconstruction source: the LATEST `active_plan_ref` entry wins,
+  // an explicit null clears (undefined never clobbers), patches to OTHER fields leave the linked
+  // ref untouched, and a malformed LATEST ref reads null — it never falls back to an older
+  // valid one (that would name a plan the session has since moved away from).
+  const cwd = mkdtempSync(join(tmpdir(), "workflow-session-plan-ref-lww-"));
+  try {
+    const branch: unknown[] = [stateEntry({ run_id: "RID" })];
+    const sink: EntrySink = {
+      appendEntry: (customType, data) => branch.push({ type: "custom", customType, data }),
+    };
+    const session = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+    assert.equal(session.activeSessionPlanRef(), null);
+    branch.push(stateEntry({ active_plan_ref: planRef("42") }));
+    assert.deepEqual(session.activeSessionPlanRef(), planRef("42"));
+    branch.push(stateEntry({ active_plan_ref: planRef("43") }));
+    assert.deepEqual(session.activeSessionPlanRef(), planRef("43"), "the latest ref wins");
+    // Unrelated-field patches (stage, mode, an undefined ref) never disturb the linkage.
+    branch.push(stateEntry({ stage: "implement", mode: "read-write" }));
+    branch.push(stateEntry({ active_plan_ref: undefined, active_objective: "7" }));
+    assert.deepEqual(session.activeSessionPlanRef(), planRef("43"));
+    // A malformed LATEST ref reads null — no fallback to the older valid #43.
+    branch.push(stateEntry({ active_plan_ref: { provider: "github", pr_id: "44" } }));
+    assert.equal(session.activeSessionPlanRef(), null, "invalid latest never falls back");
+    // A later valid ref re-links; an explicit null clears.
+    branch.push(stateEntry({ active_plan_ref: planRef("45") }));
+    assert.deepEqual(session.activeSessionPlanRef(), planRef("45"));
+    branch.push(stateEntry({ active_plan_ref: null }));
+    assert.equal(session.activeSessionPlanRef(), null, "explicit null clears");
+    // A fresh open over the same persisted branch (reload) reads the same live answer; the
+    // rebuilt linkage on a navigated-to branch prefix is the prefix's own LWW answer.
+    const reopened = openBranchWorkflowSession(sink, reportableCtx(cwd, branch));
+    assert.equal(reopened.activeSessionPlanRef(), null);
+    const prefix = branch.slice(0, 3); // run_id, #42, #43 — the branch the user navigated back to
+    const navigated = openBranchWorkflowSession(sink, reportableCtx(cwd, prefix));
+    assert.deepEqual(navigated.activeSessionPlanRef(), planRef("43"));
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("engine: activeSessionPlanRef is one fresh rebuild per read — no artifact I/O, no append, null on failure", () => {
+  // Recording/throwing ports over the bare engine: the open-time identity read is accounted
+  // for separately (`activeRunId` at open), then each named read rebuilds exactly once and
+  // touches neither the artifact store nor either append; a throwing rebuild reads null.
+  let rebuilds = 0;
+  let throws = false;
+  let linkage: unknown = planRef("42");
+  const forbidden = (what: string) => (): never => {
+    throw new Error(`${what} must not be touched by the named read`);
+  };
+  const state: SessionStateStore = {
+    rebuild: () => {
+      rebuilds++;
+      if (throws) throw new Error("unreadable branch");
+      return { run_id: "RID", active_plan_ref: linkage } as WorkflowState;
+    },
+    append: forbidden("append"),
+    appendVerified: forbidden("appendVerified"),
+  };
+  const artifacts: ArtifactContentStore = {
+    store: forbidden("artifacts.store"),
+    load: forbidden("artifacts.load"),
+    loadStrict: forbidden("artifacts.loadStrict"),
+    displayPath: forbidden("artifacts.displayPath"),
+  };
+  const session = openWorkflowSession({ state, artifacts });
+  assert.equal(rebuilds, 1, "the engine's existing open-time identity read");
+  assert.equal(session.runId, "RID");
+  rebuilds = 0;
+  assert.deepEqual(session.activeSessionPlanRef(), planRef("42"));
+  assert.equal(rebuilds, 1, "exactly one rebuild per named read");
+  const returned = session.activeSessionPlanRef();
+  assert.equal(rebuilds, 2, "no memoization — the next read rebuilds again");
+  assert.notEqual(returned, linkage, "a reconstructed ref, never the persisted object");
+  linkage = { ...planRef("43"), extra: "junk" };
+  assert.deepEqual(session.activeSessionPlanRef(), planRef("43"), "fresh per call");
+  throws = true;
+  assert.equal(session.activeSessionPlanRef(), null, "a throwing rebuild is fail-open");
+  assert.equal(rebuilds, 4);
 });
 
 test("branch: a reload-shaped reopen reconstructs runId, claims, and activeObjective", () => {
@@ -1081,6 +1284,7 @@ test("branch: a reload-shaped reopen reconstructs runId, claims, and activeObjec
       stateEntry({ run_id: "RID", mode: "read-only" }),
       stateEntry({ objective_node_claim: CLAIM }),
       stateEntry({ active_objective: "7" }),
+      stateEntry({ active_plan_ref: planRef("42") }),
     ];
     const sink: EntrySink = {
       appendEntry: (customType, data) => branch.push({ type: "custom", customType, data }),
@@ -1092,6 +1296,7 @@ test("branch: a reload-shaped reopen reconstructs runId, claims, and activeObjec
     assert.equal(reopened.runId, "RID");
     assert.deepEqual(reopened.nodeClaim(), CLAIM);
     assert.equal(reopened.activeObjective(), "7");
+    assert.deepEqual(reopened.activeSessionPlanRef(), planRef("42"));
     assert.deepEqual(reopened.readArtifact("draft.json"), { status: "found", content: "v1" });
   } finally {
     rmSync(cwd, { recursive: true, force: true });
