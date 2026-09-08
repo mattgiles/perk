@@ -69,7 +69,6 @@ import type { ContextPolicyInputs } from "../../../substrate/contextPolicy.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { rebuildWorkflowState } from "../../../substrate/workflowState.ts";
 import { installInjectedContext } from "../contextInjection.ts";
-import { isRefinementSession } from "../objectiveRefinement.ts";
 import type { ReviewOutcome } from "../reviewOutcome.ts";
 import { isPlannotatorPlanSelected } from "./selection.ts";
 
@@ -596,18 +595,24 @@ export function installPlannotatorPlanAdapter(
   contextPolicy: ContextPolicyInputs,
 ): void {
   // Inject the bridge context while plannotator is selected AND the shared authoring-context
-  // policy (`authoring/context/eligibility.ts`) classifies the session. Three content flavors,
+  // policy (`authoring/context/eligibility.ts`) classifies the session. Four content flavors,
   // one customType: an objective-authoring session (BOTH objective stages: `plan_review` routes
   // objective-author AND objective-save to the objective review arm) gets the objective flavor
   // (the review surface renders the objective draft), a gist-author session gets the gist
-  // flavor (the rendered gist draft), and an ELIGIBLE plan author (plan-family stage or warm
-  // `plan_authoring` intent) gets the plan flavor; anything else — gate off, a runner child, a
-  // bare gate with no plan evidence, or the `gist-save` stage — selects nothing. The gate signal
-  // is the persisted `perk:workflow-state.mode` (the gate's state twin) — never the gate itself.
+  // flavor (the rendered gist draft), an `objective-refine` session gets the refinement flavor
+  // (the review surface renders the (draft, context) pair), and an ELIGIBLE plan author
+  // (plan-family stage or warm `plan_authoring` intent) gets the plan flavor; anything else —
+  // gate off, a runner child, a bare gate with no plan evidence, or the `gist-save` stage —
+  // selects nothing. Every flavor sits behind the same gate + runner checks: a refinement stage
+  // left on the branch after the approved save exited the gate selects nothing, and a runner
+  // child inheriting refinement history receives no adapter guidance. The gate signal is the
+  // persisted `perk:workflow-state.mode` (the gate's state twin) — never the gate itself.
   //
   // Once-only PER FLAVOR: the dedup key is the SELECTED flavor's marker (not the shared
   // customType), so a stage change still delivers the missing flavor while a prior copy of
-  // Retention follows selection; obsolete sibling flavors are removed by the shared helper.
+  // another flavor sits on the branch. Retention follows selection: the shared helper removes
+  // obsolete sibling flavors (a warm `/objective-refine` after a plan-mode turn leaves only the
+  // refinement flavor directing the model) and every owned copy once nothing is selected.
   installInjectedContext(pi, {
     customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
     flavors: {
@@ -619,7 +624,6 @@ export function installPlannotatorPlanAdapter(
     select: (ctx, branch) => {
       if (!isPlannotatorPlanSelected(ctx.cwd)) return null;
       const state = rebuildWorkflowState(branch);
-      if (isRefinementSession(branch)) return REFINEMENT_ADAPTER_PLANNOTATOR_MARKER;
       switch (
         classifyAuthoringContext({
           gateActive: readOnlyModeOf(state),
@@ -634,6 +638,8 @@ export function installPlannotatorPlanAdapter(
           return OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER;
         case "gist-author":
           return GIST_ADAPTER_PLANNOTATOR_MARKER;
+        case "objective-refine":
+          return REFINEMENT_ADAPTER_PLANNOTATOR_MARKER;
         default:
           return null;
       }

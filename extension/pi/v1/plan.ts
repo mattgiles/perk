@@ -821,7 +821,15 @@ function installPlanMode(
     });
   }
 
-  // Inject only for positive plan-authoring eligibility. Dedicated refinement retains precedence.
+  // Inject the plan-authoring context for ELIGIBLE plan authors only (display:false): the
+  // effective gate active, not a runner child, and positive plan evidence on the FULL branch — a
+  // plan-family stage (the cold `plan`/`save`/`objective-plan` claims) or the warm
+  // `plan_authoring: true` intent the entries above record (`authoring/context/eligibility.ts`).
+  // The dedicated objective/gist/refinement stages keep precedence (their installers own those
+  // sessions), so plan guidance never falls through to them — an ad-hoc plan-mode turn followed
+  // by a warm `/objective-refine` retires the plan context there; a bare read-only gate with no
+  // evidence (a legacy stage-less session, an adopted child) selects nothing. Selection is also
+  // the retention decision: the shared helper strips the owned custom once selection turns null.
   installInjectedContext(pi, {
     customType: PLAN_CONTEXT_TYPE,
     flavors: {
@@ -832,7 +840,7 @@ function installPlanMode(
         gateActive: gating.isActive(),
         runnerChild: contextPolicy.runnerChild(),
         state: rebuildWorkflowState(branch),
-      }) && !isRefinementSession(branch)
+      })
         ? PLAN_MARKER
         : null,
   });

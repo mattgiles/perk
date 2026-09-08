@@ -114,15 +114,17 @@ plan-provider id.
 
 #### Authoring-guidance eligibility (perk-owned injection only)
 
-Perk's authoring contexts (`[PLAN AUTHORING]`, objective/gist) and its plan-adapter bridge
-contexts are injected on explicit eligibility, never inferred from the bare read-only gate. Plan
+Perk's authoring contexts (`[PLAN AUTHORING]`, objective/gist/refinement) and its plan-adapter
+bridge contexts are injected on explicit eligibility, never inferred from the bare read-only gate. Plan
 eligibility = gate on AND not a native subagent runner AND positive plan evidence: a plan-family
 cold stage (`plan`, `save`, `objective-plan`) or the warm `plan_authoring: true` intent that
 `/plan`, its shortcut, `--plan` and `/objective-plan` record beside `mode: read-only`. The
-dedicated `objective-author` / `objective-save` / `gist-author` / `gist-save` stages keep their own
-contexts and never fall through to plan guidance. Plannotator's bridge flavor follows the same
-rule (plan flavor for an eligible plan author, objective flavor in both objective stages, gist
-flavor in `gist-author`, nothing otherwise); tombell's bridge additionally honors tombell's own
+dedicated `objective-author` / `objective-save` / `gist-author` / `gist-save` / `objective-refine`
+stages keep their own contexts and never fall through to plan guidance (a stray warm intent from an
+earlier `/plan` turn cannot direct a refinement session to the plan flow). Plannotator's bridge
+flavor follows the same rule (plan flavor for an eligible plan author, objective flavor in both
+objective stages, gist flavor in `gist-author`, refinement flavor in `objective-refine`, nothing
+otherwise); tombell's bridge additionally honors tombell's own
 persisted `plan-mode-state.enabled === true` when perk's gate is off. Runner children (reviewer
 waves, analysts) never receive perk authoring/adapter guidance even over inherited history; their
 restrictions, `[READ-ONLY MODE]` guidance and engine tools are untouched.

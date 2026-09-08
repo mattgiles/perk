@@ -1,16 +1,16 @@
 // The ONE authoring-context eligibility policy (contracts.md §8.3/§8.23/§8.31) behind every
-// Perk-owned authoring/adapter injection: the plan-authoring context, the objective- and
-// gist-authoring contexts, and the plannotator/tombell plan-adapter flavors all classify the
-// session through `classifyAuthoringContext` instead of each re-deriving a stage exclusion list
-// from the bare read-only gate. Pi-free and pure (guard Rule D covers `authoring/` by prefix):
+// Perk-owned authoring/adapter injection: the plan-authoring context, the objective-, gist- and
+// refinement-authoring contexts, and the plannotator/tombell plan-adapter flavors all classify
+// the session through `classifyAuthoringContext` instead of each re-deriving a stage exclusion
+// list from the bare read-only gate. Pi-free and pure (guard Rule D covers `authoring/` by prefix):
 // the Pi installers supply the three inputs from their own authorities and consume the kind.
 //
 // The rule is POSITIVE evidence, never inference: a session receives plan guidance only when
 // (1) the effective read-only gate is active, (2) it is not a native runner child, and (3) the
 // full-branch workflow state carries plan evidence — a plan-family `stage` (`plan`, `save`,
 // `objective-plan`) or the warm `plan_authoring === true` intent bit the warm plan entries
-// record (§8.3). The dedicated objective/gist stages take precedence and never fall through to
-// plan guidance; explicit warm intent CAN authorize plan guidance in an otherwise unscoped or
+// record (§8.3). The dedicated objective/gist/refinement stages take precedence and never fall
+// through to plan guidance; explicit warm intent CAN authorize plan guidance in an otherwise unscoped or
 // non-authoring parent stage without rewriting that stage. Nothing here infers intent from
 // draft bytes, prompt markers, tool availability, plan-ref presence, node claims or a child's
 // name — an older stage-less session carrying only `mode: "read-only"` stays restricted but
@@ -23,6 +23,7 @@
 
 import { GIST_AUTHOR_STAGE, GIST_SAVE_STAGE } from "../gist/draft.ts";
 import { OBJECTIVE_AUTHOR_STAGE, OBJECTIVE_SAVE_STAGE } from "../objective/prose.ts";
+import { REFINE_STAGE } from "../refinement/context.ts";
 
 /**
  * The structural workflow-state slice the policy reads (§8.3 `stage` / `plan_authoring` / `mode`).
@@ -45,14 +46,16 @@ export const PLAN_AUTHORING_STAGES: readonly string[] = ["plan", "save", "object
 
 /**
  * The dedicated authoring stages with precedence over plan guidance: their own installers (or
- * the plannotator objective/gist flavors) own the session, so plan guidance never falls through
- * — even when a stray `plan_authoring: true` sits on the branch.
+ * the plannotator objective/gist/refinement flavors) own the session, so plan guidance never
+ * falls through — even when a stray `plan_authoring: true` sits on the branch (an ad-hoc `/plan`
+ * turn followed by a warm `/objective-refine`).
  */
 export const DEDICATED_AUTHORING_STAGES: readonly string[] = [
   OBJECTIVE_AUTHOR_STAGE,
   OBJECTIVE_SAVE_STAGE,
   GIST_AUTHOR_STAGE,
   GIST_SAVE_STAGE,
+  REFINE_STAGE,
 ];
 
 /** The three policy inputs, each supplied by the caller's own authority. */
@@ -78,7 +81,8 @@ export type AuthoringContextKind =
   | "objective-author"
   | "objective-save"
   | "gist-author"
-  | "gist-save";
+  | "gist-save"
+  | "objective-refine";
 
 /** Whether the persisted mode twin says read-only (the adapters' gate signal). */
 export function readOnlyModeOf(state: Pick<AuthoringStateSlice, "mode">): boolean {
@@ -90,7 +94,7 @@ export function hasWarmPlanIntent(state: Pick<AuthoringStateSlice, "plan_authori
   return state.plan_authoring === true;
 }
 
-/** Whether `stage` is one of the dedicated objective/gist authoring stages. */
+/** Whether `stage` is one of the dedicated objective/gist/refinement authoring stages. */
 export function isDedicatedAuthoringStage(stage: string | undefined): boolean {
   return stage !== undefined && DEDICATED_AUTHORING_STAGES.includes(stage);
 }
@@ -114,6 +118,8 @@ export function classifyAuthoringContext(
       return "gist-author";
     case GIST_SAVE_STAGE:
       return "gist-save";
+    case REFINE_STAGE:
+      return "objective-refine";
     default:
       break;
   }

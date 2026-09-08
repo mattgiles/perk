@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { GIST_AUTHOR_STAGE, GIST_SAVE_STAGE } from "../gist/draft.ts";
 import { OBJECTIVE_AUTHOR_STAGE, OBJECTIVE_SAVE_STAGE } from "../objective/prose.ts";
+import { REFINE_STAGE } from "../refinement/context.ts";
 import {
   type AuthoringContextInput,
   classifyAuthoringContext,
@@ -24,12 +25,19 @@ const gated = (state: AuthoringContextInput["state"], runnerChild = false) => ({
   state,
 });
 
-test("the stage tables are the registry's plan family and the four dedicated authoring stages", () => {
+test("the stage tables are the registry's plan family and the five dedicated authoring stages", () => {
   assert.deepEqual([...PLAN_AUTHORING_STAGES], ["plan", "save", "objective-plan"]);
   assert.deepEqual(
     [...DEDICATED_AUTHORING_STAGES],
-    [OBJECTIVE_AUTHOR_STAGE, OBJECTIVE_SAVE_STAGE, GIST_AUTHOR_STAGE, GIST_SAVE_STAGE],
+    [
+      OBJECTIVE_AUTHOR_STAGE,
+      OBJECTIVE_SAVE_STAGE,
+      GIST_AUTHOR_STAGE,
+      GIST_SAVE_STAGE,
+      REFINE_STAGE,
+    ],
   );
+  assert.equal(REFINE_STAGE, "objective-refine");
   for (const stage of DEDICATED_AUTHORING_STAGES)
     assert.equal(isDedicatedAuthoringStage(stage), true);
   for (const stage of [...PLAN_AUTHORING_STAGES, "implement", undefined]) {
@@ -76,6 +84,7 @@ test("the dedicated stages take precedence over plan evidence on the same branch
     [OBJECTIVE_SAVE_STAGE]: "objective-save",
     [GIST_AUTHOR_STAGE]: "gist-author",
     [GIST_SAVE_STAGE]: "gist-save",
+    [REFINE_STAGE]: "objective-refine",
   };
   for (const [stage, kind] of Object.entries(kinds)) {
     assert.equal(classifyAuthoringContext(gated({ stage })), kind);
@@ -91,6 +100,7 @@ test("the gate off selects nothing whatever the evidence", () => {
     { plan_authoring: true },
     { stage: OBJECTIVE_AUTHOR_STAGE },
     { stage: GIST_AUTHOR_STAGE },
+    { stage: REFINE_STAGE },
   ]) {
     assert.equal(
       classifyAuthoringContext({ gateActive: false, runnerChild: false, state }),
@@ -109,6 +119,8 @@ test("a runner child is suppressed even over inherited authoring evidence — ev
     { stage: OBJECTIVE_SAVE_STAGE },
     { stage: GIST_AUTHOR_STAGE },
     { stage: GIST_SAVE_STAGE },
+    { stage: REFINE_STAGE },
+    { stage: REFINE_STAGE, plan_authoring: true },
   ]) {
     assert.equal(classifyAuthoringContext(gated(state, true)), null, JSON.stringify(state));
   }

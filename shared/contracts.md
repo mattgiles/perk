@@ -61,7 +61,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   (`extension/cacheGuard.test.ts`, `tests/test_cache_guard.py`). The dedicated
   `cache.session-data` state key names the run-scoped session data dir artifacts and is
   declared in `writes` by the read-only authoring stages — `plan`, `objective-plan`,
-  `objective-author`, and `gist-author` (`cache.scratch` names the broader substrate).
+  `objective-author`, `gist-author`, and `objective-refine` (`cache.scratch` names the broader
+  substrate).
 
   **perk-owned dot-path construction seam.** Construction of the **perk-owned** dot-path
   families — the perk dir, the config files (`config.toml`/`local.toml`), the required-perk-version
@@ -570,7 +571,7 @@ end of the section).
 | `predecessor` | string \| null | the prior `run_id` this run forked from (or cold-relaunched after), §8.2; null for an original run |
 | `pi_session_id` | string | the current session handle — the basename of Pi's session file; the **fork discriminator** (§8.2) and the key to resume via `SessionManager.open`/`continueRecent` |
 | `mode` | string | the active registry stage `mode` (`read-only` / `read-write`) — **structurally gates tools** (see below) |
-| `stage` | string | the registry stage id this run is acting on, recorded at cold **claim** from the handoff; lets the interior distinguish two read-only stages (e.g. `objective-author` vs `plan`) and inject the right authoring context |
+| `stage` | string | the registry stage id this run is acting on, recorded at cold **claim** from the handoff — or, for the ONE warm exception, appended by the stage-only `enter-refinement-stage` change when `/objective-refine` enters a refinement pass in an unbound session (§8.68); lets the interior distinguish read-only stages (e.g. `objective-author` vs `plan` vs `objective-refine`) and inject the right authoring context |
 | `plan_authoring` | boolean | the **explicit warm plan-authoring intent**, distinct from the restriction: recorded by the gate's `enter(ctx, { planAuthoring: true })` beside `mode: "read-only"` in the SAME append (every perk-owned plan-mode entry — `/plan`, its shortcut, `--plan`, `/objective-plan`; an already-gated `/objective-plan` appends the bit alone, only when not already on the branch), reset to `false` by `exit` beside `mode: "read-write"` (a floor-refused exit appends nothing), and recorded `false` by a generic read-only enter. Only the literal `true` counts. It is positive evidence for the authoring-context policy below — never a grant: the gate is identical with or without it, and intent is NEVER inferred from a bare read-only `mode` (an older stage-less session stays restricted but receives no plan guidance until the human exits and re-enters `/plan` or invokes an authoring factory) |
 | `active_plan_ref` | object \| null | the provider-agnostic plan ref (§8.4); null during early `plan` |
 | `active_objective` | string \| null | the active objective id (`/objective <id>` sets it, `/objective clear` nulls it) |
@@ -764,13 +765,15 @@ the effective read-only gate and the **runner bit** (`extension/substrate/contex
 startup's `PI_SUBAGENT_CHILD === "1"`, captured in `session_start` before lifecycle work and
 reset on shutdown; a suppression signal only — never a tool grant or save authority, and distinct
 from the advisory `<active_agent>` parser and the runner restriction floor). The kinds:
-`objective-author` / `objective-save` / `gist-author` / `gist-save` for those exact stages
-(dedicated stages take precedence and never fall through to plan guidance); `plan` for
-**positive plan evidence** — `stage ∈ {plan, save, objective-plan}` (the cold claims) OR
-`plan_authoring === true` (the warm intent, which authorizes plan guidance in an otherwise
-unscoped/non-authoring parent stage without rewriting that stage); `null` otherwise — a gate that
-is off, a runner child (even over inherited authoring history), a bare gate with no plan
-evidence (a legacy stage-less session, an adopted child), an unknown or worktree stage. A runner
+`objective-author` / `objective-save` / `gist-author` / `gist-save` / `objective-refine` for
+those exact dedicated stages (they take precedence and never fall through to plan guidance —
+a stray `plan_authoring: true` left by an earlier `/plan` turn cannot direct a refinement
+session to the plan draft/save flow); `plan` for **positive plan evidence** — `stage ∈ {plan,
+save, objective-plan}` (the cold claims) OR `plan_authoring === true` (the warm intent, which
+authorizes plan guidance in an otherwise unscoped/non-authoring parent stage without rewriting
+that stage); `null` otherwise — a gate that is off, a runner child (even over inherited
+authoring history), a bare gate with no plan evidence (a legacy stage-less session, an adopted
+child), an unknown or worktree stage. A runner
 child receives NO Perk authoring or plan-adapter custom guidance; its restrictions, the
 `[READ-ONLY MODE]` guidance and the engine's child tools (`structured_output`/`contact_supervisor`)
 are untouched.
@@ -4461,12 +4464,17 @@ cooperative guarantee.
 
 Fingerprint assembly constructs these keys in order:
 `worktree_root, git_dir, git_common_dir, run_id, subject, warm_node_claim, handoff, files,
-git_config_digest, environment`. Nested warm claim order is objective/node. Paths come from
+git_config_digest, environment` — plus, for the `refinement` subject ONLY, a trailing
+`context_artifact` key (the strict session-data digest of `objective-refinement-context.json`;
+a missing/invalid context refuses capture `invalid-state`); every other subject's encoding never
+gains the key (§8.68). Nested warm claim order is objective/node. Paths come from
 bounded local strict Git discovery plus realpath; no mainCheckoutRoot fallback. Main root follows
 the common-directory parent convention. Handoff is read strictly from the calling root's derived
 run handoff path: ENOENT is null; malformed/unreadable/wrong-run/mistyped relevant values refuse.
 Unrelated keys are ignored. Plan projection order is objective_id/node_id/adopt_from/consumed_learn;
-objective is adopt_from/supersedes; gist is gist_scope (plan/objective/null). Optional omitted/null
+objective is adopt_from/supersedes; gist is gist_scope (plan/objective/null); refinement is the
+namespaced `objective_refinement.context_digest` only (null when the block is absent — no gist
+fallthrough, no planning link). Optional omitted/null
 IDs normalize to null; nonblank strings stay untrimmed. Omitted consumed_learn is [], otherwise an
 array of nonblank strings retaining order and duplicates. Present empty routing differs from no
 handoff. `files` is main_config/worktree_config/worktree_local, each `{state:"absent"}` on ENOENT
@@ -4661,20 +4669,21 @@ Editor waits occur only after synchronous invalidation has returned and released
   Every authoring context is selected by the ONE §8.3 eligibility policy (positive evidence,
   never inferred from the bare gate; runner children excluded): `PLAN_AUTHORING_CONTEXT` for an
   eligible plan author (a plan-family cold stage or the warm `plan_authoring` intent); the
-  objective/gist contexts for their exact stages. Under the plannotator selection the bridge
-  context is **flavor-dispatched by the same policy** (one customType, three contents — §8.42's
-  per-flavor marker dedup): the plan flavor for an ELIGIBLE plan author, the **objective** flavor
-  in **both** objective stages (`objective-author` **and** `objective-save` — matching
-  `plan_review`'s objective-arm stage routing), the gist flavor in `gist-author`, and nothing
-  otherwise (a bare gate, a runner child, `gist-save`). Under the tombell selection the bridge
-  context requires eligible Perk plan intent OR tombell's own latest valid persisted
-  `plan-mode-state.enabled === true` entry (the foreign-mode-only arm, preserved where Perk's gate
-  is off), still excluding runner children and the dedicated objective/gist stages. Provider
-  registration ownership is unchanged: Perk vacates `--plan`/the shortcut under plannotator and
-  every mode registration under tombell; neither foreign package's prompts, tools or enforcement
-  are touched — the policy governs Perk-owned injection only. Retention follows selection
-  (§8.31): once a session stops being eligible, its Perk-owned custom guidance is retired from
-  the outgoing context while the human's own turns (cold seeds and quotations included) stay.
+  objective/gist/refinement contexts for their exact dedicated stages. Under the plannotator
+  selection the bridge context is **flavor-dispatched by the same policy** (one customType, four
+  contents — §8.42's per-flavor marker dedup): the plan flavor for an ELIGIBLE plan author, the
+  **objective** flavor in **both** objective stages (`objective-author` **and** `objective-save`
+  — matching `plan_review`'s objective-arm stage routing), the gist flavor in `gist-author`, the
+  refinement flavor in `objective-refine` (§8.68), and nothing otherwise (a bare gate, a runner
+  child, `gist-save`). Under the tombell selection the bridge context requires eligible Perk
+  plan intent OR tombell's own latest valid persisted `plan-mode-state.enabled === true` entry
+  (the foreign-mode-only arm, preserved where Perk's gate is off), still excluding runner
+  children and the dedicated objective/gist/refinement stages. Provider registration ownership
+  is unchanged: Perk vacates `--plan`/the shortcut under plannotator and every mode registration
+  under tombell; neither foreign package's prompts, tools or enforcement are touched — the
+  policy governs Perk-owned injection only. Retention follows selection (§8.31): once a session
+  stops being eligible, its Perk-owned custom guidance is retired from the outgoing context
+  while the human's own turns (cold seeds and quotations included) stay.
 
 - **Plannotator "Direct Edits" (browser edits of the reviewed document).** Plannotator's
   plan-review browser lets the reviewer edit the reviewed document directly; the edits arrive as
@@ -4703,8 +4712,13 @@ Editor waits occur only after synchronous invalidation has returned and released
     objective arm: a NON-terminating revise round; the model folds the diff into the matching
     `gist_draft` fields (a `# <title>` heading hunk → `title`, a `Scope:` line hunk → `scope`,
     prose hunks → `prose`), then calls `plan_review` again to confirm.
+  - **Refinement arm, APPROVE with a Direct Edits section:** NO save — the same NON-terminating
+    revise round: Markdown hunks fold into ONE `objective_refinement_draft` rewrite; hunks against
+    the rendered header (objective, node, carrier, pass time, the checkout observation) are
+    bound metadata and require a new grounding pass (`/objective-refine`), never fabricated
+    values. The full arm is §8.68.
   - **DENY (all arms):** model-mediated — the feedback (diff included) passes through verbatim
-    for the `plan_draft`/`objective_draft`/`gist_draft` rewrite.
+    for the `plan_draft`/`objective_draft`/`gist_draft`/`objective_refinement_draft` rewrite.
 
   The plan arm's mechanical apply belongs to `completePlanReview` in
   `extension/authoring/plan/review.ts`. Tool and browser adapters both call
@@ -5683,15 +5697,15 @@ nothing, the subset being shared).
   zero-dependency `extension/substrate/miniJinja.ts` renderer (the frozen-subset engine). The
   seam is LIVE on both planes: consumers span the worker, the warm doors and authoring features, the two
   provider adapters (`tombell` / `plannotator` — `extension/pi/v1/providers/`; `juicesharp` is a
-  borrowed-tool package, not an adapter), and the Python cold doors. The seven injected mode/bridge
+  borrowed-tool package, not an adapter), and the Python cold doors. The ten injected mode/bridge
   contexts (the persistent `before_agent_start` injections stripped on `context`, each injection
   **dedup-guarded on its marker**) live under `prompts/contexts/` — the mode contexts at the top
   level, the adapter bridges under `prompts/contexts/adapters/` — with each module's identity
   marker passed as the `{{ marker }}` render var (never a template literal), so the marker the
   strip handler scans for cannot drift from the injected prose; the marker-as-render-var
-  invariant serves both the strip **and** the dedup key (plannotator's three flavors — plan /
-  objective / gist, the objective flavor serving both objective stages — share one customType
-  but dedup per-flavor on their distinct markers). Two dedup authorities, deliberately distinct:
+  invariant serves both the strip **and** the dedup key (plannotator's four flavors — plan /
+  objective / gist / refinement, the objective flavor serving both objective stages — share one
+  customType but dedup per-flavor on their distinct markers). Two dedup authorities, deliberately distinct:
   the read-only mode context (`substrate/toolGating.ts`) dedups on **full selected-branch
   history** (`branchCarries` over `branchOf(ctx)` — once per branch, compaction notwithstanding);
   every flow-owned injection — the gist-authoring context and plannotator's gist flavor, the
@@ -5716,17 +5730,19 @@ nothing, the subset being shared).
   `context` event the same guarded full-branch read + `select` run (a failed read or a throwing
   selector fails CLOSED to "nothing selected"), and the filter touches ONLY the owned customType —
   a null selection removes every owned copy; a selected flavor retains only the owned copies
-  carrying that flavor's marker and removes obsolete sibling flavors (a plan→objective transition
-  under plannotator cannot retain the old plan-adapter instructions). User/task messages are
-  NEVER removed for carrying an owned marker — user strings and text-part arrays survive
-  byte-for-byte, `<untrusted_draft>` bodies, marker quotations and historical cold seeds
-  included — and assistant/tool messages and other features' customs are never inspected. This
-  filters the outgoing model context only: persisted transcripts and compaction summaries are
-  never rewritten. Each caller's selection is the §8.3 eligibility policy (plan: positive plan
-  evidence; objective/gist: their exact stages; plannotator: the policy's kind → flavor; tombell:
-  eligible Perk intent or its persisted foreign-mode fallback, minus runner children and the
-  dedicated stages); the read-only mode context's own retention (`substrate/toolGating.ts`) is
-  independent and unchanged.
+  carrying that flavor's marker and removes obsolete sibling flavors (a plan→objective or
+  plan→refinement transition under plannotator cannot retain the old plan-adapter instructions).
+  User/task messages are NEVER removed for carrying an owned marker — user strings and text-part
+  arrays survive byte-for-byte, `<untrusted_draft>` bodies, marker quotations and historical cold
+  seeds included — and assistant/tool messages and other features' customs are never inspected.
+  This filters the outgoing model context only: persisted transcripts and compaction summaries
+  are never rewritten. Each caller's selection is the §8.3 eligibility policy (plan: positive
+  plan evidence, never one of the dedicated stages — a plan context injected before a warm
+  `/objective-refine` is retired there; objective/gist/refinement: their exact stages;
+  plannotator: the policy's kind → one of its four flavors — plan / objective / gist /
+  refinement; tombell: eligible Perk intent or its persisted foreign-mode fallback, minus runner
+  children and the dedicated stages); the read-only mode context's own retention
+  (`substrate/toolGating.ts`) is independent and unchanged.
 
 **Fail loudly on a missing var.** jinja2 uses `StrictUndefined` (raises `jinja2.UndefinedError`);
 the vendored `miniJinja` renderer matches it — a referenced name that is **absent OR non-string**
@@ -6793,7 +6809,11 @@ being their only governance surface.
 
 **Composition with the read-only gate (§8.3).** Gate ON → `setActiveTools(READ_ONLY_TOOLS)`
 **unchanged** — no stage filter, preserving every gated carve-out byte-for-byte (the gate-ON
-allowlist is §8.3's). Gate OFF + known stage → a **subtractive filter over the one
+allowlist is §8.3's) — with ONE named exception: the isolated `objective-refine` stage selects
+its own explicit gate-ON allowlist `REFINEMENT_READ_ONLY_TOOLS` (`gatedToolsFor(stage)`) for both
+the active set and the `tool_call` backstop, and its own read-only mode-context flavor; the
+refinement draft tool lives in `PERK_TOOLS` but never in `READ_ONLY_TOOLS`, so no other gated
+stage gains it (§8.68). Gate OFF + known stage → a **subtractive filter over the one
 shared pre-engagement snapshot**: non-perk names pass through; perk names survive only when the
 stage's list carries them. The rule "the gate never widens a stage's set and vice versa" holds:
 engaging the gate only ever narrows, and stage scoping never adds a tool. Both concerns share
@@ -10327,8 +10347,10 @@ standard carrier assignment:
 
 - **Launch statement** — the one-time prose that opens a session, classified by delivery call
   site, never by template path: a cold door's seed, a warm door's guidance turn, or the headless
-  worker's primer (`stages/implement.md` serves all three call-site classes) — carries **the
-  flow, stated once per session shape**.
+  worker's primer (`stages/implement.md` serves all three call-site classes; likewise
+  `stages/objective-refine/seed.md` serves the cold `perk objective refine` seed AND the warm
+  `/objective-refine` guidance turn — §8.68) — carries **the flow, stated once per session
+  shape**.
 - **Injected context** (the persistent marker-dedup'd `before_agent_start` injections, §8.31) —
   carries **live state + pointers**: what is true of this session (mode, constraints, tool
   surface) plus pointers to where the flow and the detail live; never a restatement of either.
@@ -11591,12 +11613,13 @@ persisted as a single marked comment on the node's carrier. It is content, never
 `planning` claim, no `pr` backlink, no node status, no readiness or freshness proof, no plan.
 "**Refined**" is derivable only from the presence of a valid saved record — never a node
 state, header, manifest, plan-header, or plan-ref field (none is added). This section fixes the
-**implemented Python slice only**: the domain types + wire format, one objective-store read, the
-guarded shared comment upsert, the backend-neutral service, plan/refinement coexistence, and the
-offline persistence gate. The public authoring/review doors (`perk objective refine` /
-`/objective-refine`), planning-seed consumption, authenticated Linear evidence, and the GitHub
-carrier are **explicitly deferred** to later slices — this slice adds no CLI command, stage,
-tool, transfer artifact, or review bypass, and no facade re-export.
+**persistence slice**: the domain types + wire format, one objective-store read, the guarded
+shared comment upsert, the backend-neutral service, plan/refinement coexistence, and the offline
+persistence gate. The public authoring/review doors (`perk objective refine` /
+`/objective-refine`, the `objective-refine` stage, the transfer artifacts, the
+`objective_refinement_draft` tool, the `plan_review` refinement arm and the human
+`/objective-refinement-save`) are §8.68. Planning-seed consumption, authenticated Linear
+evidence, and the GitHub carrier remain **deferred** to later slices.
 
 **Modules.** `perk/objective/refinement/{models,codec,service}.py` (`__init__` empty).
 `models.py` is the pure type leaf (frozen dataclasses + `RefinementError`; no Pydantic / Click /
@@ -11872,3 +11895,305 @@ unchanged roadmap/manifest and every non-comment surface; the refinement mutatio
 comment-only; then a real claim + plan save proves historical reads stay available while new
 saves refuse `node_ineligible`, with no delivery operation. Authenticated refine-to-plan
 evidence is NOT claimed here — it belongs to the planning-consumption slice's live Linear gate.
+
+## §8.68 · Objective-node refinement authoring and reviewed save (the `objective-refine` doors)
+
+The public loop over §8.67's persistence: **select** a future node, **explore** read-only,
+**author** a target-bound advisory refinement, **review** it with `plan_review`, and **save only
+the refinement's marked comment**. Nothing in this section creates a plan, claims a node, writes
+a backlink, changes node/objective/roadmap/delivery state, or provisions a predecessor worktree.
+**Linear-only in this increment**: an initially configured GitHub objective store refuses
+`unsupported_backend` before authentication, network, sync, scratch writes or launch — at the
+cold door, the warm entry, the dry run and the save (a retained Linear draft in a now-GitHub
+checkout included). This is an explicit temporary rollout refusal, not a capability flag or a
+dummy-node probe; other unsupported stores keep the service's typed refusal; Linear uses its
+normal resolver/auth diagnostics and never requires `gh auth` solely for refinement.
+
+**One disconnected stage.** `objective-refine` (registry): read-only, `worktree: none`, doors
+`warm` + `cold_local` (`perk objective refine`; remote disabled), normal warm-keep / cold-mint
+run-id policy, NO predecessor/successor edges (never connected to the executable plan graph).
+Requires `github.objective`; reads `github.objective`, `github.comments`; writes
+`github.comments` (the approved or human-authorized comment save), `session.workflow-state`,
+`cache.session-data`, `cache.scratch`. It is in `DEDICATED_STAGES`, the `STAGE_TOOLS` census and
+both planes' registry pins; no new registry state-key vocabulary.
+
+**The two transfer artifacts** (`perk/objective/refinement/authoring.py` owns the Python side;
+`extension/authoring/refinement/{context,draft}.ts` the interior):
+
+| Artifact | Fields |
+|---|---|
+| `objective-refinement-context.json` | `schema_version: 1` (integer), `run_id`, `target` (the complete §8.67 `RefinementTarget`, tuples as arrays), `expected` (the retained `MarkedCommentExpectation`), `provenance` (`RefinementProvenance`), `objective: {id, title, url}`, `prior` (null or `{markdown, source_digest, provenance, saved_at}` — the FULL prior Markdown, never the bounded preview), `engagement` (the bounded rendered human-engagement string), `warnings: string[]` |
+| `objective-refinement-draft.json` | `schema_version: 1`, `run_id`, `context_digest`, `markdown` |
+
+**Byte ownership — serialize once, preserve thereafter.** Python is the SOLE context
+serializer: the explicit JSON-shaped mapping from validated fields → `codec.canonical_json`
+(sorted keys, `(",", ":")`, `ensure_ascii=True`) + exactly one LF; the whole string (final LF
+included) is `context_json`; its transfer digest is `sha256:<lowercase hex>` over precisely those
+UTF-8 bytes (`authoring.artifact_digest`; the same `digestSessionData` convention the session
+data tier uses — distinct from §8.67's bare-hex remote digests). Cold writes those bytes to the
+fixed run-scratch file `<run scratch>/objective-refinement-context.json` (`atomic_write_text`) and
+carries only the namespaced `objective_refinement: {context_digest}` in the handoff — **never a
+top-level `objective_id`/`node_id`** (the cold claim reads those as a planning claim). The warm
+`refine-context` worker returns `{success: true, error_type: null, context_json: <string>,
+context_digest}` — the context is a JSON **string** inside the envelope, never a parsed object
+to re-encode. Both interior entries validate the raw string's digest and decode it STRICTLY for
+use (`decodeRefinementContext`: exact keys at every level, typed scalars, canonical digests, a
+consistent expectation, `run_id` = the session's run), then write the **unchanged raw string**
+through the strict `WorkflowSession.writeArtifact` (never `JSON.stringify(parsed)`, trim or
+newline normalization); the context reader (`resumeRefinementContext`) hands back the validated
+fields WITH the raw bytes and their digest so no consumer serializes twice. TypeScript is the
+SOLE draft serializer (`encodeRefinementDraft`: property order `schema_version`, `run_id`,
+`context_digest`, `markdown`; compact `JSON.stringify`; one LF); the draft's `context_digest` is
+exactly the current context artifact's session-data digest. Python parses the transferred draft
+strictly (`StrictInputModel`: exact keys, integer version, safe run id, `sha256:` digest,
+nonblank-without-trimming Markdown) and never reserializes or trims the Markdown. The shared
+golden fixtures `tests/fixtures/objective-refinement/{context.json,context.sha256,draft.json}`
+are consumed by BOTH suites (Unicode, embedded newlines/escapes, tabs, a Markdown tail without a
+final LF) — the Python-envelope → TS-write → Python-read identity proof.
+
+**Context preparation** (`prepare_refinement_context(repo_root, *, objective_id, node_id,
+run_id)`): resolve store + issues AFTER any cold sync/config reload; `select_refinement_target`;
+objective title/URL via `get_objective`, comparing exactly `ObjectiveState.id` with
+`target.identity.objective_id` and the nonblank header `run_id` with
+`target.identity.objective_run_id` (mismatch → `refinement_binding_mismatch`, never a silent
+rebind); the selected node's engagement through the existing store read + renderer, a failure
+becoming a visible warning + an empty string; provenance captured ONCE (`git.resolve_commit`,
+`git.is_dirty`, one `plan.now_iso()` serving `authored_at` and `captured_at`; no HEAD →
+`git_error`). No `objective show`, no delivery-readiness helper. **Provenance is a capture-time
+observation, not a frozen code basis**: HEAD + a dirty flag neither identify uncommitted bytes
+nor prove which bytes the model later explored; external edits during the pass go undetected;
+neither review binding nor save establishes code freshness. The observation is preserved
+verbatim across rewrites and saves and is never refreshed to conceal drift; every surface
+labels it "Checkout observation captured at <time>: HEAD <sha>, dirty <flag>; uncommitted files
+were not snapshotted and later checkout changes are not detected. This is not a freshness
+guarantee." — never "verified", "frozen" or "current" code. No worktree digest, clean-tree
+restriction, requeue or freezing is added.
+
+**Save conversion** (`save_refinement_draft(repo_root, *, run_id, draft_file)`): the fixed
+context is read strictly from `cache.session_data_dir(repo_root, run_id)` in the invocation
+checkout (safe run id + containment; missing → `refinement_context_missing`, malformed →
+`refinement_context_invalid`); the draft file likewise (`refinement_draft_missing` /
+`refinement_draft_invalid`); the draft's `run_id` and `context_digest` must match exactly. No
+caller-supplied context path, no other-run fallback, no reselection, no expectation/provenance
+refresh, no plan-handoff link recovery. `codec.document_for_target(target, markdown=…,
+provenance=…)` → `RefinementSaveRequest(document, expected)` → `service.save_node_refinement`.
+Every `RefinementError` code passes through unchanged with `comment_ids` + `write_attempted`
+(`cli.emit.fail(extra=…)`); authoring errors are the five codes above; local probe/write
+failures are `git_error` / `write_failed`; command syntax is `invalid_input`; resolver/store
+failures `backend_error`. Success reports the verified `comment_id`, `carrier_url`,
+`carrier_identifier`, objective/node identity, stored `body_digest`/`source_digest`, native
+`saved_at`, and `authored_at`; the verified comment id + carrier URL supply the `SaveReceipt`
+(no invented Linear comment deep link). No plan cache/ref, objective activation/budget, journal
+or secondary comment write.
+
+**The cold door** `perk objective refine <objective> [--node ID] [--dry-run] [--json] [--no-sync]
+[-- pi args…]`: an explicit objective (`parse_objective_id` / `complete_objective_id`),
+`--node` at most once and nonblank, `--worktree` refused, remote operation refused, the
+invoking checkout explored (dirty changes included), no predecessor checkout. Ordering: (1)
+parse + local restrictions + the initial rollout check without constructing a remote client; (2)
+a real launch without `--no-sync` calls the guarded `_sync_main_checkout` ONCE (best-effort; an
+unchanged checkout is the basis when it cannot fast-forward; dry run never syncs); (3) **reload
+the Config from disk** (`load_config(repo_root)`, never the cached command-context Config) and
+repeat the rollout check — only then construct fresh adapters, select and capture provenance
+(a sync that changed Linear config selects on the new route; one that changed to GitHub refuses
+before any target API read); (4) mint the run, serialize + materialize the context, launch
+`objective-refine` with `run_id_override`, `sync_main=False`, `handoff_extra={objective_refinement:
+{context_digest}}` and the post-sync Config via the defaulted `SeededLaunch.config_override:
+Config | None = None` (the seeded tail passes it when present; only refinement sets it; every
+sibling door keeps `None`). `--dry-run` resolves eligibility/support online and reports the
+selected identity, prior-refinement presence, advisory status and the checkout observation —
+no sync, mint, file write, claim, mutation or launch. Failures translate deliberately
+(`refinement_common.translate_failure`), never all to `github_error`.
+
+**The workers.** `perk objective refine-context <objective> [--node ID] --run-id RID --json`
+(the warm entry's context; safe run id required; no sync/files/launch) and `perk objective
+refinement-save --draft-file FILE --run-id RID [--json]` (the strict conversion + save; a
+human/extension persistence gesture — metadata is not an approval credential). Both are
+internal deterministic workers (Workers group), not browse surfaces or model tools.
+
+**Interior entry, isolation and the draft tool** (`extension/pi/v1/objectiveRefinement.ts`
+over the Pi-free `extension/authoring/refinement/`; registered from `index.ts` before tool
+snapshots):
+
+- **Cold admission** (`session/lifecycle.ts`): an `objective-refine` handoff carrying a top-level
+  planning-link / plan-ref input (`objective_id`, `node_id`, `adopt_from`, `supersedes`,
+  `gist_scope`, a non-empty `consumed_learn`) is REFUSED before any claim is recorded and is
+  NOT consumed (`refinementHandoffContamination`); ordinary objective-plan handoffs are
+  untouched. After a successful refinement claim (`arm === "claimed"` only — never keep / fork /
+  adopt / mint), `importRefinementContextOnClaim` imports the fixed transfer ONCE
+  (`importColdRefinementContext`: the handoff block's digest, the run, the stage, the strict
+  shape; the exact raw string written strictly). A refusal is loud and leaves the session gated
+  with no usable context — no orphan repair, missing-pointer reimport or target refresh; reload
+  uses the strict established artifact.
+- **Warm `/objective-refine [objective] [--node ID | --node=ID]`** (`parseRefineCommandArgs`
+  refuses extra/duplicate/missing-value inputs): explicit objective → `active_objective` →
+  `objective_required`; never the cached plan-ref selector. Admission
+  (`decideWarmRefinementAdmission`, strict over the rebuilt state + the run's launch handoff
+  read strictly): an unsafe/missing identity, a malformed claim/plan-ref/stage or an unreadable
+  handoff → `bad_state`; a sound `active_plan_ref`, a planning claim, or a plan-bearing launch
+  handoff (a plan-graph stage — `plan`, `objective-plan`, `save`, `implement`, `submit`,
+  `address`, `land`, `learn` — a planning link or an adoption source) → `bound_session` with
+  the equivalent cold command offered and nothing cleared, suspended or restored; the model
+  running → `session_busy`. Then: fetch + validate the worker's raw context; under §8.23's
+  mutation boundary (`reviews.mutate("target-changed")` — outstanding review eligibility is
+  invalidated by the boundary) recheck the same run/admission against LIVE state, persist the
+  exact context, apply the stage-only `WorkflowChange {kind: "enter-refinement-stage"}` (a
+  `stage` append verified on read-back; idempotent `unchanged`; never a claim, plan-ref,
+  objective or mode write), then enter/re-scope the gate (`gating.enter` when off;
+  `syncFromState("read-only", "objective-refine")`) and drive the shared flow seed. Failed setup
+  never drives; `active_objective` is preserved. Re-entry is an explicit new grounding pass:
+  fresh context replaces only the context (byte-identical bytes report `unchanged` — never "a
+  new context was created"); an existing draft becomes `mismatch` evidence that names the
+  rewrite (its `context_digest` differs) — never a silent rebind.
+- **`objective_refinement_draft({markdown})`** — the ONE model-facing writer (there is NO
+  `objective_refinement_save` tool, schema, binding or stage entry): refuses `wrong_stage`
+  outside the stage independently of visibility; `reviews.mutate("source-changed", …,
+  {draft: {subject: "refinement"}})`; `reviseRefinementDraft` strict-resumes the context
+  (absent → `refinement_context_missing`; refused → `refinement_context_invalid`; blank
+  Markdown → `invalid_input`) and writes only the small fixed envelope bound to the CURRENT
+  context (identical bytes `unchanged`). Returns the receipt/size and a concise target line,
+  never another full context copy. Readers (`resumeRefinementDraft`) classify `valid` /
+  `absent` / `no-context` / `mismatch` / `refused`; corruption, orphan pointers, fork/wrong-run
+  data and a context mismatch never fall back to plans or any other artifact.
+- **Gating** (§8.40): `PERK_TOOLS` gains only `objective_refinement_draft` — never
+  `READ_ONLY_TOOLS` (existing gated stages never gain it). The refinement stage has ONE explicit
+  gate-ON selection, `REFINEMENT_READ_ONLY_TOOLS` (read/grep/find/ls/bash, `ask_user_question`,
+  `plan_review`, `objective_refinement_draft`, the web/Linear-read/FFF research families — no
+  `objective_node`, no other draft or save tool, no delegation spawn surface, no new bash
+  allowance), used by BOTH the active set (`gatedToolsFor(stage)`) and the `tool_call` backstop
+  (recomputed per observation, so a late foreign activation is still blocked); gate-OFF scopes
+  `STAGE_TOOLS["objective-refine"]` (`ask_user_question`, the draft, `plan_review`, research —
+  no PR-loop or model-save tools). Read-only mode has a refinement **flavor**: the template
+  `contexts/read-only.md` is parameterized (`writer`, `artifact`) with defaults preserving every
+  other stage's bytes; the refinement flavor names `objective_refinement_draft` under the
+  distinct dedup marker `[READ-ONLY REFINEMENT MODE]` (not a superstring of `[READ-ONLY
+  MODE]`, so neither flavor masks the other's once-per-branch scan); with the gate ON only the
+  current flavor's injected block survives in model context (a stale `plan_draft`-only block is
+  dropped; user content is untouched), with the gate OFF both flavors strip.
+- **Refusals** (`refinementStageRefusal`, `wrong_stage`, independent of the gate): the
+  `objective_node`, `plan_save`, `objective_save`, `gist_save` tools; the `/plan-save`,
+  `/objective-save`, `/gist-save`, `/objective-plan`, `/implement-here` commands; the plan and
+  objective browser doors' stage gates; and the cold `perk plan save` on an `objective-refine`
+  run (refused before any handoff link recovery). Valid old artifacts cannot route anywhere
+  from a refinement session, even after a human gate toggle.
+- **Injection** (§8.57 layering): the flow is stated ONCE by the shared seed
+  `stages/objective-refine/seed.md` (cold: the door; warm: `refinementGuidance` over the
+  validated context — same template, same `<untrusted_objective>` DATA fence); the
+  state/pointer carrier is `contexts/objective-refinement.md` (`perk:objective-refinement-context`,
+  marker `[OBJECTIVE REFINEMENT]`, via `installInjectedContext`, selected by the §8.3
+  eligibility policy's `objective-refine` kind — gate-active, not a runner child, AND stage
+  match); plan mode and tombell yield to the dedicated kind, plannotator maps it to its
+  refinement flavor `contexts/adapters/plannotator-refinement.md`; the judgment detail is the bound skill
+  `perk-objective-refine` (`stage:objective-refine`, nudge — cold via the stage trigger, warm via
+  `bindingSuffix`).
+
+**The fenced review** (§8.23's refinement arm; its closed vocabulary widened): `ReviewSubject`
+gains `"refinement"`, `REVIEW_OPERATIONS` gains `refinement: "refinement-save"`, the strict
+record decoder accepts them, `WorkflowSession.draftReviewContext()` maps the
+`objective-refine` stage to the subject (no warm node claim), and the artifact source map names
+`objective-refinement-draft.json`. The target binding projects ONLY the namespaced
+`objective_refinement.context_digest` handoff block (`RefinementHandoff`; no gist fallthrough,
+no planning link) and additionally binds the strict session-data digest of the context artifact
+as a TRAILING, conditional `context_artifact` encoding key (absent for every other subject, so
+their encodings stay byte-identical); a missing/invalid context refuses capture
+(`invalid-state`). `sourceSnapshot` for the subject strict-resumes the (draft, context) pair,
+requires the pair's draft bytes to equal the raw source, and renders from the pair; the raw
+draft bytes stay the authoritative source digest. Context / run / stage / config / raw-draft
+changes invalidate approval even when the rendering is identical — **this fences the reviewed
+artifact and save route, not the checkout contents.** `executePlanReview` routes the stage to
+`runRefinementReviewV1` BEFORE the plan arm (decode-first bad-input behavior preserved; a
+well-typed `plan` param ignored). The rendering (`renderRefinementDraft`): objective/node
+header, description, carrier, "Authoring pass started" (`authored_at` + run), the prior/first
+line, a prominent ADVISORY notice, the checkout observation label, a rule, then the FULL Markdown
+verbatim; identity/provenance are immutable review metadata.
+
+- **Plannotator:** the registered bridge prepare/open/complete with the real tool-call identity;
+  `boundRefinementSaveDeps` beside `boundObjectiveSaveDeps` — immediately before the worker the
+  staged draft must decode, belong to this run and name the CURRENT bound context's digest (a
+  known pre-invocation failure returns a typed `refinement_draft_invalid` failure WITHOUT
+  entering the capability save: no save-started, no uncertainty, no gate exit); inside the
+  capability the worker receives the capability-selected reviewed source (which the seam's
+  strict resume must equal); one invocation supplies a receipt only from verified success;
+  delivery evidence / receipt / gate facts are preserved after failures with no bypass or replay.
+  A worker failure INSIDE the capability stays the capability's conservative
+  `unresolved-dispatch` stop (`uncertain`/`backend-unconfirmed`), but the worker's typed
+  diagnostics are retained beside it: `boundRefinementSaveDeps` records the failed envelope on a
+  `RefinementSaveDiagnostics` sink outside the capability callback, and the refinement arm
+  appends them to the stop (`details.worker_failure` = `{error_type, message, write_attempted,
+  comment_ids}` + a "Refinement worker diagnostics (…)" text line naming the observed comment
+  ids and whether a write was attempted) — reconciliation DATA, never a retry license. A late
+  decision against a pending review invalidated by a draft rewrite renders the shared
+  `stale-reference` DATA result over the REVIEWED digest (the worker is never invoked); a context
+  re-prepared while pending refuses `target-changed` through the capability's binding comparison.
+- **First-party:** the view-only `runFirstPartyReview` (approve / deny / skip); BEFORE display
+  the arm captures the reviewed pair (`reviewedPairOf`: the draft's exact bytes + the context
+  artifact's digest) and the routing binding (`captureDraftReviewBinding` — a capture failure is
+  an `open`-phase refusal); competing browser eligibility is invalidated at entry and exclusion
+  released for the human wait; after the verdict exclusion is reacquired and, for a plain
+  approval, the binding is recaptured under it and compared (`subject-changed` /
+  `target-changed` mutation-phase refusals, nothing saved) before the seam re-resumes the pair
+  and compares it with the reviewed one; abort wins before and after awaits; no replacement
+  artifact is ever saved on an old approval. The approve verdict label names the actual
+  destination (`ReviewSubject.saveDestination` — "Linear (the node's refinement comment)"; the
+  plan/objective/gist arms keep their GitHub default).
+- **The shared save seam** `refinementApprovalSave` (`authoring/refinement/save.ts`):
+  strict-resume the pair (`absent` → no-draft; `no-context`; `refused`/`mismatch` →
+  refused-draft — fail-closed stops, nothing invoked, the gate untouched); when the caller passed
+  a `reviewed` pair, a resumed pair that differs stops with `source-changed` (`changed: "context"`
+  first — a re-prepared context rebinds any draft — else `"draft"`), rendered as the
+  `approvedSourceChanged` result (`status: "stale"`, `reason: "source_changed"`, the human's
+  `approved: true` reported, nothing saved, the gate untouched, "call plan_review again"); the
+  human failsafe passes no `reviewed` pair (its invocation is the authorization for the CURRENT
+  artifact). Then stage the EXACT draft bytes through the `RefinementBackend` port (production:
+  `perk objective refinement-save --run-id RID --json --draft-file <run-scratch staged file>` via
+  `runColdDoor`) with the explicit run id, and exit the gate only on verified success
+  (`saveThroughApprovalGate`). No link/budget/claim/cache effects. Success text states that
+  ADVISORY content — not an executable plan — was saved (no plan created, no node claimed, no
+  state changed); the review tool's success terminates the turn; a failure keeps the worker's
+  `write_attempted` / `comment_ids` beside the message and never prescribes a blind retry. There
+  is no separate review-orchestration wrapper in the feature layer: the Pi arm resumes, renders
+  and reviews, then routes through `completeRefinementReview`.
+- **Outcomes:** DENY → the `objective_refinement_draft` redirect (feedback is untrusted DATA);
+  dismissed / unavailable / aborted → nothing saved, the human `/objective-refinement-save`
+  offered; headless → the standard skip. Stale feedback is diagnostic-only.
+
+**The human failsafe `/objective-refinement-save`** — no arguments (`invalid_input` otherwise),
+refinement stage only (`wrong_stage`), idle only (`session_busy`), the SOLE manual in-session
+save entry. **The command itself is the fresh, explicit human authorization**: no confirmation
+dialog, no fabricated stored "review skipped" credential, no requirement of a prior
+skipped/dismissed review; it may also precede review or follow a denial (a new human decision,
+never automatic fallthrough or reused browser approval). Its success is labelled a **manual
+human save (not a reviewer approval)** — never `approved: true`. Before effects it enters
+`reviews.mutateAsync("manual-save", …)` with the existing current-activation delivery
+observation; the table below is what the mutation boundary (§8.23's `transitionDraftReview`)
+enforces on the strict record AFTER that observation, under exclusion:
+
+| Review record | Human command behavior |
+|---|---|
+| Strictly absent | May save the valid current artifact; no prior review required. |
+| `opening` / `pending` | Persists + verifies `invalidated(reason: "manual-save")` BEFORE invoking the worker; a late browser decision cannot save. |
+| `invalidated` | May save the valid current artifact; invalidation is not approval and is not revived. |
+| `consumed` | May perform the deliberately requested save/re-save; the consumed decision is not replayed. |
+| `dispatch` / `uncertain` | Refuses `unresolved-dispatch` — even after an apparent denial, a failed approval or an explicit human command; facts/residue are preserved for reconciliation. |
+| Missing safe identity, corrupt/orphan/unverifiable record, lock/I/O/ownership failure | Refused through the existing typed guard; never treated as absence. |
+
+Inside the admitted mutation the shared seam runs with `mutationRefinementSaveDeps(…,
+"approval")` (the receipt = verified comment id + carrier URL; the gate exits only after the
+verified save). Missing / refused / mismatched artifacts stop with draft / re-entry guidance —
+no scrape, driven save, gate exit, alternative artifact, arbitrary target or metadata refresh.
+An explicit same-candidate re-save retains its expectation/provenance and relies on the
+service's convergence (same bytes → verified no-write success) and eligibility checks. A failed
+worker result reports the typed diagnostics (`write_attempted`, `comment_ids`) and requires
+reading the node's comments back before another attempt; it never claims "nothing saved" and
+adds no lock reclamation or generic state-machine change.
+
+**Docs + skill.** `skills/perk-objective-refine/SKILL.md` (in `PERK_SKILLS`; the managed
+manifest fragment regenerated); `shared/bindings.yaml` `stage:objective-refine` →
+`perk-objective-refine` (nudge); prompts `stages/objective-refine/seed.md`,
+`contexts/objective-refinement.md`, `contexts/adapters/plannotator-refinement.md` and the
+parameterized `contexts/read-only.md` are all in `prompts/_fixtures/live.yaml`. User docs:
+`docs/user-docs/reference/cli/objective.md`, `reference/objectives.md`, the in-session
+`workflow-commands` / `model-tools` / `review-and-authoring` references, the backend/provider
+entries and the `perk-expert` mirror. Automatic later-plan consumption of a saved refinement,
+authenticated refine-to-plan evidence, and a GitHub refinement carrier are NOT shipped by
+this section — each is a later increment.

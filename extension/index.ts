@@ -274,8 +274,12 @@ export default function perk(
   // only the hooks ordering is frozen).
   installGistBindings(pi, gating, draftReviews, contextPolicy);
 
-  // The v1 objective-refinement installer.
-  installObjectiveRefinementBindings(pi, gating, draftReviews);
+  // The v1 objective-refinement installer (contracts.md §8.67/§8.68): the refinement context hook
+  // pair (selected by the shared policy's dedicated `objective-refine` kind — plan mode and the
+  // provider adapters yield to it), the ONE model-facing `objective_refinement_draft` tool, the
+  // warm `/objective-refine` entry and the human `/objective-refinement-save` failsafe.
+  // Registered before the tool snapshots.
+  installObjectiveRefinementBindings(pi, gating, draftReviews, contextPolicy);
   let sharedOk = false;
   try {
     sharedDir();

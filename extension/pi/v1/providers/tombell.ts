@@ -46,7 +46,6 @@ import type { ContextPolicyInputs } from "../../../substrate/contextPolicy.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { type BranchEntry, rebuildWorkflowState } from "../../../substrate/workflowState.ts";
 import { installInjectedContext } from "../contextInjection.ts";
-import { isRefinementSession } from "../objectiveRefinement.ts";
 import { isTombellPlanSelected } from "./selection.ts";
 
 /** The tombell plan-adapter bridge customType (distinct from the `perk:plan-context`). */
@@ -88,7 +87,16 @@ export function installTombellPlanAdapter(
   contextPolicy: ContextPolicyInputs,
 ): void {
   // Inject the bridge context while the foreign tombell-plan provider is selected AND a plan
-  // Selection-driven retention strips stale adapter guidance across stage transitions.
+  // authoring intent is established — ELIGIBLE Perk plan intent under the shared
+  // authoring-context policy (`authoring/context/eligibility.ts`: the persisted
+  // `perk:workflow-state.mode` read-only twin — never the gate object — plus positive plan
+  // evidence) OR tombell's own latest valid persisted `plan-mode-state.enabled === true` entry
+  // (the ad-hoc interactive `/plan` arm, preserved where Perk's own gate is off). Runner children
+  // and the dedicated objective/gist/refinement stages never receive it (their own installers
+  // own those sessions; the tombell REPLACE posture covers the plan surface only). Retention
+  // follows selection: a null selection strips the owned copy, so the marker never lingers across
+  // a deselect, a stage transition or once authoring ends; the inject/strip mechanics live in
+  // the shared helper.
   installInjectedContext(pi, {
     customType: PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE,
     flavors: {
@@ -99,7 +107,7 @@ export function installTombellPlanAdapter(
       const runnerChild = contextPolicy.runnerChild();
       if (runnerChild) return null;
       const state = rebuildWorkflowState(branch);
-      if (isDedicatedAuthoringStage(state.stage) || isRefinementSession(branch)) return null;
+      if (isDedicatedAuthoringStage(state.stage)) return null;
       if (isPlanAuthoringEligible({ gateActive: readOnlyModeOf(state), runnerChild, state })) {
         return PLAN_ADAPTER_TOMBELL_MARKER;
       }

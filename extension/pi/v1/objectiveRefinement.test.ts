@@ -357,7 +357,7 @@ function fixture(
   installObjectiveAuthoringBindings(pi, gating, reviews, contextPolicy);
   installGistBindings(pi, gating, reviews, contextPolicy);
   installObjectivePlanningBindings(pi, gating, {} as ReportWave, reviews);
-  installObjectiveRefinementBindings(pi, gating, reviews);
+  installObjectiveRefinementBindings(pi, gating, reviews, contextPolicy);
   const session = openBranchWorkflowSession(pi, ctx);
   if (opts.grounded !== false && runId !== null) {
     const written = session.writeArtifact(REFINEMENT_CONTEXT_ARTIFACT, GOLDEN_CONTEXT, {

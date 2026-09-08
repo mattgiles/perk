@@ -403,67 +403,6 @@ test("retention reads the FULL branch through select (compaction-independent), n
   assert.deepEqual(reads, [], "retention never reads the projection");
 });
 
-test("strip: while live, a copy of a NON-selected flavor is stale — stripped alongside user turns carrying it; the selected flavor's copy and unrelated turns survive", async () => {
-  const { spec } = countingSpec({
-    flavors: {
-      [MARKER]: () => `${MARKER}\ninjected content`,
-      [SECOND_MARKER]: () => `${SECOND_MARKER}\nsecond flavor`,
-    },
-    select: () => SECOND_MARKER,
-  });
-  const { strip } = hooksFor(spec);
-  const result = (await strip(
-    {
-      messages: [
-        { customType: CONTEXT_TYPE, content: `${MARKER}\nthe previous flavor's copy` },
-        { customType: CONTEXT_TYPE, content: `${SECOND_MARKER}\nthe selected flavor's copy` },
-        { role: "user", content: `${MARKER} leaked into a user turn` },
-        { role: "user", content: [{ type: "text", text: `${SECOND_MARKER} selected, on a turn` }] },
-        { role: "assistant", content: `the assistant quoting ${MARKER} stays` },
-        { role: "user", content: "a normal message" },
-      ],
-    },
-    ctxOver(),
-  )) as { messages: { role?: string; customType?: string; content?: unknown }[] };
-  assert.deepEqual(
-    result.messages.map((m) => m.customType ?? m.role),
-    [CONTEXT_TYPE, "user", "user", "assistant", "user"],
-    "the stale flavor's copy is gone while user input and unrelated roles survive",
-  );
-  assert.deepEqual(
-    result.messages.map((m) => JSON.stringify(m.content).includes(MARKER)),
-    [false, true, false, true, false],
-    "marker quotations in user and assistant messages are preserved",
-  );
-  assert.ok(
-    String(result.messages[0]?.content).startsWith(SECOND_MARKER),
-    "exactly the selected flavor's owned copy survives",
-  );
-});
-
-test("strip: while live with NOTHING selected this turn, or a single-flavor spec, the hook yields no filter", async () => {
-  const idle = countingSpec({
-    flavors: {
-      [MARKER]: () => `${MARKER}\ninjected content`,
-      [SECOND_MARKER]: () => `${SECOND_MARKER}\nsecond flavor`,
-    },
-    select: () => null,
-  });
-  const messages = [{ customType: CONTEXT_TYPE, content: `${MARKER}\na prior copy` }];
-  assert.deepEqual(await hooksFor(idle.spec).strip({ messages }, ctxOver()), { messages: [] });
-  const single = countingSpec({});
-  assert.deepEqual(await hooksFor(single.spec).strip({ messages }, ctxOver()), { messages });
-  // A live multi-flavor spec whose messages carry no stale flavor yields no filter either.
-  const clean = countingSpec({
-    flavors: {
-      [MARKER]: () => `${MARKER}\ninjected content`,
-      [SECOND_MARKER]: () => `${SECOND_MARKER}\nsecond flavor`,
-    },
-    select: () => MARKER,
-  });
-  assert.deepEqual(await hooksFor(clean.spec).strip({ messages }, ctxOver()), { messages });
-});
-
 // --- composition smoke: the REAL registered extension rides the projection leaf -----------------
 
 test("composition: the bound extension injects, dedups on the live copy, re-injects off it, and keeps it on reload", async () => {

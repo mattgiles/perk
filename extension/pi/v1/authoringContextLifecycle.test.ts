@@ -1,8 +1,8 @@
 // The authoring-context eligibility policy WIRED through the real bound extension: which
-// installer injects what (plan guidance, the dedicated objective/gist contexts, the plannotator
-// adapter flavors), on which evidence (a plan-family cold stage, the warm `plan_authoring`
-// intent, a dedicated authoring stage), and for whom (never a native runner child, never a bare
-// read-only gate) — plus the retention side: owned copies follow selection across `/plan`
+// installer injects what (plan guidance, the dedicated objective/gist/refinement contexts, the
+// plannotator adapter flavors), on which evidence (a plan-family cold stage, the warm
+// `plan_authoring` intent, a dedicated authoring stage), and for whom (never a native runner
+// child, never a bare read-only gate) — plus the retention side: owned copies follow selection across `/plan`
 // on/off, tree navigation, compaction, reload and separate bound sessions, while user input and
 // the gate's own `[READ-ONLY MODE]` guidance are never touched. The pure policy table is pinned
 // in `authoring/context/eligibility.test.ts`; the helper mechanics in `contextInjection.test.ts`.
@@ -13,8 +13,13 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { GIST_AUTHOR_CONTEXT_TYPE } from "../../authoring/gist/prose.ts";
-import { OBJECTIVE_AUTHOR_CONTEXT_TYPE } from "../../authoring/objective/prose.ts";
+import {
+  OBJECTIVE_AUTHOR_CONTEXT_TYPE,
+  OBJECTIVE_AUTHOR_MARKER,
+} from "../../authoring/objective/prose.ts";
 import { PLAN_CONTEXT_TYPE, PLAN_MARKER } from "../../authoring/plan/prose.ts";
+import { REFINEMENT_CONTEXT_TYPE, REFINEMENT_MARKER } from "../../authoring/refinement/prose.ts";
+import { gatedToolsFor } from "../../substrate/toolGating.ts";
 import { loadPerkSession, plantRawSession, scaffoldRepo } from "../../testing/harness.ts";
 import { PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE } from "./providers/plannotator.ts";
 import { PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE } from "./providers/tombell.ts";
@@ -24,13 +29,27 @@ const MODE_CONTEXT_TYPE = "perk:mode-context";
 const PLAN_ADAPTER_PLANNOTATOR_MARKER = "[PLAN ADAPTER: PLANNOTATOR]";
 const OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER = "[OBJECTIVE ADAPTER: PLANNOTATOR]";
 const GIST_ADAPTER_PLANNOTATOR_MARKER = "[GIST ADAPTER: PLANNOTATOR]";
+const REFINEMENT_ADAPTER_PLANNOTATOR_MARKER = "[REFINEMENT ADAPTER: PLANNOTATOR]";
 const AUTHORING_TYPES = [
   PLAN_CONTEXT_TYPE,
   OBJECTIVE_AUTHOR_CONTEXT_TYPE,
   GIST_AUTHOR_CONTEXT_TYPE,
+  REFINEMENT_CONTEXT_TYPE,
   PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
   PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE,
 ];
+
+/** One owned copy per Perk authoring context (the plannotator adapter in its refinement flavor). */
+function inheritedAuthoringCopies(): Record<string, unknown>[] {
+  return [
+    { customType: PLAN_CONTEXT_TYPE, content: `${PLAN_MARKER}\ninherited copy` },
+    { customType: REFINEMENT_CONTEXT_TYPE, content: `${REFINEMENT_MARKER}\ninherited copy` },
+    {
+      customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
+      content: `${REFINEMENT_ADAPTER_PLANNOTATOR_MARKER}\ninherited copy`,
+    },
+  ];
+}
 
 const runnerPacket = {
   PI_SUBAGENT_CHILD: "1",
@@ -75,6 +94,18 @@ function preservedInput(): Record<string, unknown>[] {
     { customType: MODE_CONTEXT_TYPE, content: "[READ-ONLY MODE]\nthe gate's own guidance" },
     { role: "user", content: "a normal message" },
   ];
+}
+
+/**
+ * `preservedInput()` under the gate's OWN retention rule (independent of every authoring
+ * context): the generic `[READ-ONLY MODE]` copy survives while the gate is on — except in a
+ * refinement session, where the gate's refinement flavor is current and it drops the generic
+ * copy itself as the stale flavor — and the gate strips it once off.
+ */
+function preservedInputUnder(gate: "on" | "off" | "refinement"): Record<string, unknown>[] {
+  return gate === "on"
+    ? preservedInput()
+    : preservedInput().filter((m) => m.customType !== MODE_CONTEXT_TYPE);
 }
 
 // --- warm intent: /plan --------------------------------------------------------------------------
@@ -167,12 +198,14 @@ test("cold stage shapes: the plan family selects plan guidance; the dedicated st
     { stage: "objective-plan", mode: "read-only", expect: [PLAN_CONTEXT_TYPE] },
     { stage: "objective-author", mode: "read-only", expect: [OBJECTIVE_AUTHOR_CONTEXT_TYPE] },
     { stage: "gist-author", mode: "read-only", expect: [GIST_AUTHOR_CONTEXT_TYPE] },
+    { stage: "objective-refine", mode: "read-only", expect: [REFINEMENT_CONTEXT_TYPE] },
     { stage: "objective-save", mode: "read-only", expect: [] },
     { stage: "gist-save", mode: "read-only", expect: [] },
     { stage: "audit", mode: "read-only", expect: [] },
     { stage: "not-a-stage", mode: "read-only", expect: [] },
     { stage: "implement", mode: "read-write", expect: [] },
     { stage: "plan", mode: "read-write", expect: [] },
+    { stage: "objective-refine", mode: "read-write", expect: [] },
   ];
   for (const c of cases) {
     const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: c.mode, stage: c.stage } });
@@ -196,32 +229,54 @@ test("cold stage shapes: the plan family selects plan guidance; the dedicated st
   }
 });
 
-test("a stray warm intent never turns a dedicated authoring stage into a plan author", async () => {
-  const cwd = scaffoldRepo();
-  const file = plantRawSession(cwd, [
+test("a stray warm intent never turns a dedicated authoring stage into a plan author; the stale plan copy is retired while the stage's own copy survives", async () => {
+  const cases = [
     {
-      custom: {
-        type: "perk:workflow-state",
-        data: {
-          run_id: "01RID",
-          mode: "read-only",
-          stage: "objective-author",
-          plan_authoring: true,
+      stage: "objective-author",
+      owned: OBJECTIVE_AUTHOR_CONTEXT_TYPE,
+      marker: OBJECTIVE_AUTHOR_MARKER,
+      gate: "on" as const,
+    },
+    {
+      stage: "objective-refine",
+      owned: REFINEMENT_CONTEXT_TYPE,
+      marker: REFINEMENT_MARKER,
+      gate: "refinement" as const,
+    },
+  ];
+  for (const c of cases) {
+    const cwd = scaffoldRepo();
+    // An ad-hoc `/plan` turn (mode + intent) followed by the warm stage-only entry into the
+    // dedicated stage — the two appends the real commands make, rebuilt per-field.
+    const file = plantRawSession(cwd, [
+      {
+        custom: {
+          type: "perk:workflow-state",
+          data: { run_id: "01RID", mode: "read-only", plan_authoring: true },
         },
       },
-    },
-  ]);
-  const h = await loadPerkSession({
-    cwd,
-    sessionManager: SessionManager.open(file),
-    env: { PERK_RUN_ID: undefined },
-  });
-  try {
-    const types = await injectedTypes(h);
-    assert.ok(types.has(OBJECTIVE_AUTHOR_CONTEXT_TYPE));
-    assert.equal(types.has(PLAN_CONTEXT_TYPE), false);
-  } finally {
-    h.dispose();
+      { custom: { type: "perk:workflow-state", data: { stage: c.stage } } },
+    ]);
+    const h = await loadPerkSession({
+      cwd,
+      sessionManager: SessionManager.open(file),
+      env: { PERK_RUN_ID: undefined },
+    });
+    try {
+      assert.equal(h.workflowState().plan_authoring, true, c.stage);
+      const types = await injectedTypes(h);
+      assert.ok(types.has(c.owned), `${c.stage}: its own context`);
+      assert.equal(types.has(PLAN_CONTEXT_TYPE), false, `${c.stage}: no plan guidance`);
+      const stalePlan = { customType: PLAN_CONTEXT_TYPE, content: `${PLAN_MARKER}\nfrom /plan` };
+      const ownCopy = { customType: c.owned, content: `${c.marker}\nthe stage's copy` };
+      assert.deepEqual(
+        await h.emitContext([stalePlan, ownCopy, ...preservedInput()]),
+        [ownCopy, ...preservedInputUnder(c.gate)],
+        `${c.stage}: the plan copy from before the transition is retired`,
+      );
+    } finally {
+      h.dispose();
+    }
   }
 });
 
@@ -239,6 +294,8 @@ test("a native runner child receives no authoring or adapter guidance over inher
     { run_id: "01RID", mode: "read-only", plan_authoring: true },
     { run_id: "01RID", mode: "read-only", stage: "objective-author" },
     { run_id: "01RID", mode: "read-only", stage: "gist-author" },
+    { run_id: "01RID", mode: "read-only", stage: "objective-refine" },
+    { run_id: "01RID", mode: "read-only", stage: "objective-refine", plan_authoring: true },
   ];
   for (const binding of bindings) {
     for (const history of histories) {
@@ -247,6 +304,12 @@ test("a native runner child receives no authoring or adapter guidance over inher
       const file = plantRawSession(cwd, [
         { custom: { type: "perk:workflow-state", data: history } },
         { customMessage: { type: PLAN_CONTEXT_TYPE, content: `${PLAN_MARKER}\ninherited copy` } },
+        {
+          customMessage: {
+            type: REFINEMENT_CONTEXT_TYPE,
+            content: `${REFINEMENT_MARKER}\ninherited copy`,
+          },
+        },
       ]);
       const h = await loadPerkSession({
         cwd,
@@ -264,13 +327,10 @@ test("a native runner child receives no authoring or adapter guidance over inher
         const types = await injectedTypes(h);
         for (const t of AUTHORING_TYPES) assert.equal(types.has(t), false, `${label}: ${t}`);
         assert.ok(types.has(MODE_CONTEXT_TYPE), `${label}: reviewer mode guidance intact`);
-        // The inherited owned copy is retired from the outgoing context; input is preserved.
+        // EVERY inherited owned copy is retired from the outgoing context; input is preserved.
         assert.deepEqual(
-          await h.emitContext([
-            { customType: PLAN_CONTEXT_TYPE, content: `${PLAN_MARKER}\ninherited copy` },
-            ...preservedInput(),
-          ]),
-          preservedInput(),
+          await h.emitContext([...inheritedAuthoringCopies(), ...preservedInput()]),
+          preservedInputUnder(history.stage === "objective-refine" ? "refinement" : "on"),
           label,
         );
         // Restrictions and the engine's child tools are untouched by the suppression.
@@ -290,10 +350,13 @@ test("a native runner child receives no authoring or adapter guidance over inher
           undefined,
           `${label}: inspection bash`,
         );
+        // The engine's child tools follow the gate's stage allowlist alone (the refinement stage
+        // carries no delegation surface by its own design) — the suppression changes no answer.
+        const stage = typeof history.stage === "string" ? history.stage : null;
         for (const tool of ["structured_output", "contact_supervisor"])
           assert.equal(
             (await h.emitToolCall(tool, { value: {} }))?.block,
-            undefined,
+            gatedToolsFor(stage).includes(tool) ? undefined : true,
             `${label}: ${tool}`,
           );
       } finally {
@@ -328,6 +391,99 @@ test("the runner bit is activation-local: a reload without it in the SAME proces
     );
   } finally {
     h.dispose();
+  }
+});
+
+// --- refinement: the eligible parent, its runner child, and the post-save gate-off ------------
+
+test("refinement: the eligible parent receives the refinement context + plannotator flavor; the same history suppresses for a runner child and selects nothing once the approved save exits the gate", async () => {
+  const refinementCopies = () => [
+    { customType: REFINEMENT_CONTEXT_TYPE, content: `${REFINEMENT_MARKER}\nlive copy` },
+    {
+      customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
+      content: `${REFINEMENT_ADAPTER_PLANNOTATOR_MARKER}\nlive copy`,
+    },
+  ];
+  const open = async (
+    mode: "read-only" | "read-write",
+    env: Record<string, string | undefined>,
+  ) => {
+    const cwd = scaffoldRepo();
+    selectPlannotator(cwd);
+    const file = plantRawSession(cwd, [
+      {
+        custom: {
+          type: "perk:workflow-state",
+          data: { run_id: "01RID", mode, stage: "objective-refine" },
+        },
+      },
+    ]);
+    return loadPerkSession({
+      cwd,
+      sessionManager: SessionManager.open(file),
+      env: { PERK_RUN_ID: undefined, ...env },
+    });
+  };
+
+  // The eligible parent (the control): both refinement contexts inject and are retained; plan
+  // guidance and the other adapter flavors never appear.
+  const parent = await open("read-only", {});
+  try {
+    const types = await injectedTypes(parent);
+    assert.ok(types.has(REFINEMENT_CONTEXT_TYPE), "the refinement context");
+    assert.ok(types.has(PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE), "the adapter's refinement flavor");
+    assert.ok(types.has(MODE_CONTEXT_TYPE));
+    assert.equal(types.has(PLAN_CONTEXT_TYPE), false);
+    assert.equal(types.has(OBJECTIVE_AUTHOR_CONTEXT_TYPE), false);
+    assert.equal(types.has(GIST_AUTHOR_CONTEXT_TYPE), false);
+    const injected = await parent.emitBeforeAgentStart();
+    const adapter = injected.find((m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE);
+    assert.ok(
+      String(adapter?.content).includes(REFINEMENT_ADAPTER_PLANNOTATOR_MARKER),
+      "the refinement flavor, not the plan flavor",
+    );
+    const stalePlanFlavor = {
+      customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
+      content: `${PLAN_ADAPTER_PLANNOTATOR_MARKER}\nfrom an earlier plan turn`,
+    };
+    assert.deepEqual(
+      await parent.emitContext([stalePlanFlavor, ...refinementCopies(), ...preservedInput()]),
+      [...refinementCopies(), ...preservedInputUnder("refinement")],
+      "retained; the obsolete plan flavor is retired",
+    );
+  } finally {
+    parent.dispose();
+  }
+
+  // The runner child over the SAME history: nothing authoring, every inherited copy retired.
+  const child = await open("read-only", runnerPacket);
+  try {
+    assert.equal(child.workflowState().stage, "objective-refine", "the stage is inherited");
+    const types = await injectedTypes(child);
+    for (const t of AUTHORING_TYPES) assert.equal(types.has(t), false, `runner: ${t}`);
+    assert.ok(types.has(MODE_CONTEXT_TYPE), "runner: the restriction guidance stays");
+    assert.deepEqual(
+      await child.emitContext([...refinementCopies(), ...preservedInput()]),
+      preservedInputUnder("refinement"),
+    );
+  } finally {
+    child.dispose();
+  }
+
+  // Gate off with the refinement stage still recorded (what the approved save / a human exit
+  // leaves behind): neither refinement context is selected, stale copies are retired.
+  const exited = await open("read-write", {});
+  try {
+    assert.equal(exited.workflowState().stage, "objective-refine");
+    const types = await injectedTypes(exited);
+    for (const t of AUTHORING_TYPES) assert.equal(types.has(t), false, `gate off: ${t}`);
+    assert.equal(types.has(MODE_CONTEXT_TYPE), false);
+    assert.deepEqual(
+      await exited.emitContext([...refinementCopies(), ...preservedInput()]),
+      preservedInputUnder("off"),
+    );
+  } finally {
+    exited.dispose();
   }
 });
 
@@ -435,6 +591,7 @@ test("plannotator: a plan→objective transition retires the obsolete plan-adapt
     { stage: "objective-author", keep: OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER },
     { stage: "objective-save", keep: OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER },
     { stage: "gist-author", keep: GIST_ADAPTER_PLANNOTATOR_MARKER },
+    { stage: "objective-refine", keep: REFINEMENT_ADAPTER_PLANNOTATOR_MARKER },
     { stage: "gist-save", keep: null },
     { stage: undefined, keep: null },
   ];
@@ -459,10 +616,18 @@ test("plannotator: a plan→objective transition retires the obsolete plan-adapt
         flavorCopy(PLAN_ADAPTER_PLANNOTATOR_MARKER),
         flavorCopy(OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER),
         flavorCopy(GIST_ADAPTER_PLANNOTATOR_MARKER),
+        flavorCopy(REFINEMENT_ADAPTER_PLANNOTATOR_MARKER),
       ];
       const surviving = await h.emitContext([...all, ...preservedInput()]);
       const expectedOwned = c.keep === null ? [] : [flavorCopy(c.keep)];
-      assert.deepEqual(surviving, [...expectedOwned, ...preservedInput()], `stage ${c.stage}`);
+      assert.deepEqual(
+        surviving,
+        [
+          ...expectedOwned,
+          ...preservedInputUnder(c.stage === "objective-refine" ? "refinement" : "on"),
+        ],
+        `stage ${c.stage}`,
+      );
       const injected = (await injectedTypes(h)).has(PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE);
       assert.equal(injected, c.keep !== null, `stage ${c.stage}: injection follows selection`);
     } finally {
