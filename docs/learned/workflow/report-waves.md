@@ -1,6 +1,6 @@
 ---
 title: The report-wave module — flow migrations onto code-owned waves, lane semantics, and the wave test machinery
-read_when: You are changing extension/waves, review-wave identity/launch manifests, single-use post state, Ponytail coverage, flow migrations, lane semantics, or wave tests.
+read_when: You are changing extension/waves, review-wave identity/launch manifests, the single-use post record, the minimum-verdict floor, partial settlement, Ponytail coverage, lane semantics, or wave tests.
 cluster: subagent-orchestration
 ---
 
@@ -39,6 +39,10 @@ duplicate them here.
   "Session-scoped guard state".
 - Launch manifests preserve requested/runnable/preflight-failed lanes and required Ponytail
   coverage, so instability becomes honest incompleteness — "Session-scoped guard state".
+- The recorded post state carries a code-owned minimum verdict (a clean post over an actionable
+  floor is refused before the publisher); native `partial` settlement retains sibling reports but
+  never completeness; every child carries the parent-restriction snapshot — "One discriminated,
+  single-use post record", "Native partial settlement", "The parent-restriction snapshot channel".
 - "Watch items / residuals" is the flagged-edges register — check it before extending the
   module.
 
@@ -56,8 +60,10 @@ lifecycle — `start`/`collect`/`run` over opaque `ReportWaveRef`s: they supply 
 consume typed outcomes, never adapters, run handles, or result promises (the blocking `run` is
 start + await inside the instance; pending execution is instance-owned with drain-once,
 delete-as-claim collection). Adapter selection is wave-owned: `createReportWave(bus, { parentReadOnly })` constructs
-the ONE per-activation production instance at the composition root (`extension/index.ts`);
-`reportWaveOver(adapter)` is the test injection seam. `renderWaveScript` + assignment validation
+the ONE per-activation production instance at the composition root (`extension/index.ts`); the
+`parentReadOnly: () => boolean` supplier is **required** and lazy (`index.ts` passes the gate's
+`isActive`). `reportWaveOver(adapter, parentReadOnly = () => false)` is the test injection seam,
+and its permissive default is **test-only** — production always supplies its effective gate. `renderWaveScript` + assignment validation
 are module-private — script text is invisible outside `waves/`, so renderer assertions observe
 the spawned `workflowScript` through the adapter seam. `rpcAdapter.ts` is the live pi-subagents
 v1 RPC adapter (interior — `reportWave.ts` is its one sanctioned production construction site);
@@ -121,6 +127,27 @@ censuses raw `WAVE_RPC_`/channel tokens (tests included). The flow entrypoints:
   `extension/pi/v1/learning/dream.ts` adapter) — the
   `run_audit_wave` workflow-state-bound posture on BOTH the read and write sides; reducers
   launch only after a complete first wave and an in-budget bundle write.
+
+## The parent-restriction snapshot channel
+
+Every runnable child item in the rendered script carries exactly
+`extensionBindings: {"perk.parent-restrictions/1": {readOnly: boolean}}` — `false` is always
+serialized, never omitted, and the payload holds ONLY `readOnly` (no identity, stage, or run data;
+no root binding). The supplier is sampled **once per attempt**: after the required-skill preflight
+and the all-skipped early return, immediately before script rendering, so all children of one
+attempt share one captured boolean and a retry samples anew. It is not continuous revocation, not a
+handoff read, and never derived from task/assignment data — explicit field selection plus a
+whole-array `JSON.stringify` make hostile task text inert. A throwing snapshot normalizes to the
+existing non-retryable wave-level `unavailable` failure (`key: null`, receipt
+`{state: "unavailable", children: []}`, a capture diagnostic) BEFORE any adapter construction,
+ping, spawn, or ref mint; keyed skill-preflight failures are preserved; best-effort completeness
+stays false.
+
+This is the producer half of a producer/consumer split: the packet is inert until the consumer floor
+(`pi/subagents.md` § "Advisory child identity vs the authorization floor") decodes it, and the
+whole contract between them is the namespace literal plus the `gating.isActive()` seam. Lesson from
+shipping the halves separately: when only one half of a producer/consumer repair lands, state the
+residual in `contracts.md` and don't let passing tests imply end-to-end behavior.
 
 ## The fixed spawn contract carries an explicit acceptance disable
 
@@ -310,10 +337,48 @@ validity is not wave coverage.** Validate the report artifact separately, retry 
 lane only within its bounded policy, and persist an uncovered lane rather than upgrading partial
 coverage to clean.
 
+An engine-valid report is not necessarily a completed required assessment. Automated PR review
+normalizes an exact typed `blocked` verdict into an assignment-keyed `lane-failed` **before** retry
+selection and coverage (`prReviewWave.ts`): a recovered bounded retry is covered, a persistent block
+stays uncovered; the block's diagnostics keep their bytes and order and never become postable
+findings; missing/null/blank plan text **blocks** plan-fidelity (not FYI). Scope: this is the
+PR-review wave's assessment outcome — don't apply it to unrelated flow schemas. Relatedly,
+conversation isolation, filesystem placement, and perk's read-only floor are three separate
+controls: the two plan-ref-dependent callers opt into caller-checkout placement (`worktree: false`)
+plus a strengthened child restriction; every other request keeps native defaults; never repair
+missing plan authority by copying ignored state into allocated worktrees.
+
 Extra defensive arms worth keeping when extending the module: a pre-aborted `AbortSignal` cancels
 before launch (no spawn issued); malformed async-complete payloads are dropped, never surfaced as
 phantom completions; a `status.json` without a `state` field throws (`aggregate-unreadable`)
 rather than being treated as terminal.
+
+## Native partial settlement — retain sibling reports, never completeness
+
+When pi-subagents settles a workflow `partial` (`terminalOutcome: {state: "partial", reason:
+"timeout" | "budget_exhausted"}`), independently successful engine-validated sibling reports are
+preserved while the wave still surfaces failure and `complete: false`. The invariants:
+
+- **Report authority is dual-sourced, never merged.** An array-valued durable
+  `status.json.workflow.value` is authoritative in full (failed rows and holes included); only when
+  the durable value is not an array does the transport fall back to the completion's compact
+  child-result projection (`workflowKey`→`key`, `success`→`ok`, string `error`,
+  `structuredOutput`→`report`). Ordinary `complete` still uses the durable value exclusively.
+- **Keys come only from a nonempty `workflowKey`** — never `agent`, order, artifact paths, or
+  receipts. Duplicate keys, or one `runId` across keys, become one keyed malformed entry
+  (`ok: null`), not first/last-wins (`rpcAdapter.ts`'s retained-entry narrowing).
+- **Native partial ≠ perk's own timeout.** Retention happens only for the explicit native carrier
+  (an object `terminalOutcome` on a `failed`/`partial` completion; never inferred from prose);
+  perk's local timeout/cancel paths still best-effort stop and return no reports.
+- **Completeness is always false on this path** under both completeness policies, even if every
+  report survived; the retained `key: null` `run-failed` entry (ordered first, naming the native
+  reason) guarantees it; receipts stay output-free and `failed`.
+- **Storage lifetime.** Completions are buffered **only while the spawn handle is unknown**; after
+  the spawn reply the first matching completion goes into a single `matched` slot and the buffer is
+  cleared (foreign entries and duplicates included); an `accepting` flag closes on settlement,
+  timeout, or cancel so a completion arriving during best-effort stop can never become late
+  salvage. A run-long buffer would leak report DATA across concurrent waves — and output-only tests
+  cannot prove the release, so a source-shape pin was required.
 
 ## Session-scoped guard state
 
@@ -338,6 +403,24 @@ A successful post consumes the record exactly once. A `review_target_changed` re
 outcome back to pending because its identity evidence is no longer postable. Other mutation
 failures retain the record so a transient failure can be retried without rerunning the wave. Keep
 the post tool sequential: this check/transition sequence is safe only under one-at-a-time execution.
+
+The recorded variant also carries a code-owned **minimum verdict**. `runAutomatedReview` projects it
+ONCE from the reviewer's effective reports (`outcome.reports` — post-retry,
+post-blocked-reclassification) and stores it as a primitive: `actionable` iff any report object's
+exact `verdict === "actionable"` OR its `findings` is a nonempty array, else `clean`.
+`publishAutomatedReview` refuses a `clean` post over `minimumVerdict === "actionable"`
+**statelessly** (`review_verdict_conflict`: no consume, no `last_pr_review` append, holder
+untouched — the record survives for a reconciled actionable post). Refusal ordering is
+load-bearing: pending (`review_wave_unavailable`) → consumed (`review_wave_consumed`) →
+clean-over-incomplete (`incomplete_coverage`, which wins even when actionable) →
+clean-over-complete-but-actionable (`review_verdict_conflict`) → the publisher. Boundaries:
+complete coverage is necessary but insufficient for clean; the floor is not a second schema
+validator (the nonempty-findings arm is only a safeguard below schema validation — the schema
+permits `actionable` with empty findings, so neither arm alone suffices); store the primitive only
+(snapshot isolation — later source mutation must not move the floor); `minimumVerdict` is absent
+from `last_pr_review`, the tool aggregate, and §8.35 receipts; FYI prose is never consulted; and it
+is not an ever-actionable latch — retry replacement can move an earlier actionable report out of
+the effective set, hence the scan of `outcome.reports`, never attempt receipts.
 
 ### Layer identity through every boundary
 
@@ -483,6 +566,22 @@ Instances:
   (`findings: []`) with an injected throwing `fetchLike` is a side-effect-free primed/unprimed
   probe — nothing held means no fetch. Companion gotcha: background-`finally` clears need a
   bounded poll, not an immediate assert (`extension/pi/v1/codeReview/browser.test.ts`).
+- **The fake engine's ONE settlement mode.** `fakeSubagents.ts` plans take `executeSettlement`
+  beside `executeScript` (optional-`never` exclusions refuse a mixed plan at construction) to
+  script a native partial settlement. The offline gate is
+  `extension/waves/partialSettlementCompat.test.ts`: the module-rendered script runs through the
+  *installed* `runWorkflowScript`, the native timeout fires under test timer control, and a real
+  `WorkflowScriptError.partial.children` flows through the installed `planWorkflowSettlement` —
+  offline evidence, not a live-executor claim.
+- **Real-supplier wave tests.** `runs.all` is parallel and all-settled, so per-lane behavior cannot
+  ride child index or env interleaving: key fixtures by runtime **agent name** (test-owned
+  `draft-reviewer{,-empty,-invalid,-missing,-guarded}.md` copies sharing one TASK), split valid
+  lanes (wave A) from intentionally failing lanes (wave B), and assert identity as "receipt child
+  runIds ⊆ observed runner identities", not a raw status-file count.
+  `extension/testing/installedEngine.ts` is the shared fixture; the proof exercises 0.66.0
+  internals (`step.completionGuard !== false`), so an engine upgrade must re-verify the
+  parser/executor path. The scripted-child lifecycle protocol (result watcher, tool-execution
+  events) is in `pi/subagents.md` § "Installed-engine harness craft".
 
 ## Watch items / residuals
 
@@ -541,3 +640,5 @@ Instances:
   entrypoints
 - `extension/pi/v1/codeReview/reviewWave.ts` — the start/collect tool pair (live — the review
   doors drive it)
+- `docs/design/pi-subagents-child-execution-policy.md` — the binding record for the native child
+  execution profiles and the parent-restriction channel
