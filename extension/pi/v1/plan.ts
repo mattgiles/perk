@@ -836,6 +836,6 @@ function installPlanMode(
       }) && !isRefinementSession(branch)
         ? PLAN_MARKER
         : null,
-    live: (_ctx, branch) => gating.isActive() && !isRefinementSession(branch),
+
   });
 }

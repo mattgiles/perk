@@ -636,6 +636,5 @@ export function installPlannotatorPlanAdapter(
           return null;
       }
     },
-    live: (ctx) => isPlannotatorPlanSelected(ctx.cwd),
   });
 }

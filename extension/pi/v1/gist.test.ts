@@ -702,7 +702,7 @@ test("a normal plan read-only session injects plan context, not gist-authoring",
   }
 });
 
-test("gist-authoring marker is stripped from context when not authoring", async () => {
+test("gist-authoring owned context is removed when not authoring; user turns carrying the marker are preserved", async () => {
   const cwd = scaffoldRepo({
     handoff: { runId: "01RID", mode: "read-write", stage: "gist-save" },
   });
@@ -712,23 +712,20 @@ test("gist-authoring marker is stripped from context when not authoring", async 
     env: { PERK_RUN_ID: "01RID" },
   });
   try {
-    const stale = [
-      { customType: GIST_AUTHOR_CONTEXT_TYPE, content: "[GIST AUTHORING]\nstale" },
-      { role: "user", content: "[GIST AUTHORING] leaked into a user turn" },
+    const preserved = [
+      { role: "user", content: "[GIST AUTHORING] quoted in a user turn" },
+      { role: "user", content: [{ type: "text", text: "a text part with [GIST AUTHORING]" }] },
       { role: "user", content: "a normal message" },
     ];
-    const surviving = await h.emitContext(stale);
-    assert.equal(
-      surviving.some((m) => m.customType === GIST_AUTHOR_CONTEXT_TYPE),
-      false,
-      "gist-author custom message stripped when not authoring",
+    const surviving = await h.emitContext([
+      { customType: GIST_AUTHOR_CONTEXT_TYPE, content: "[GIST AUTHORING]\nstale" },
+      ...structuredClone(preserved),
+    ]);
+    assert.deepEqual(
+      surviving,
+      preserved,
+      "only the owned custom copy is removed; user input survives byte-for-byte",
     );
-    assert.equal(
-      surviving.some((m) => String(m.content).includes("[GIST AUTHORING]")),
-      false,
-      "marker stripped from user turns",
-    );
-    assert.equal(surviving.length, 1, "the normal message survives");
   } finally {
     h.dispose();
   }

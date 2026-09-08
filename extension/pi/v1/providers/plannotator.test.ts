@@ -1,8 +1,9 @@
 // The plannotator plan adapter (augment posture, injection + bridge only):
-// injection only when (gate active AND plannotator-plan selected) — three content flavors, one
-// customType (the plan bridge context; the objective flavor in an objective-authoring session —
-// objective-author OR objective-save; the gist flavor in a gist-author session) —
-// stale-marker strip on deselect (all flavors), and the pure event-bus bridge core — the bounded handshake
+// injection only when (an ELIGIBLE authoring context AND plannotator-plan selected) — three
+// content flavors, one customType (the plan bridge context for an eligible plan author; the
+// objective flavor in an objective-authoring session — objective-author OR objective-save; the
+// gist flavor in a gist-author session) — owned-copy retention following selection (every flavor
+// retired on deselect; user turns preserved), and the pure event-bus bridge core — the bounded handshake
 // (timeout / unavailable), the human decision (approved / denied + feedback), the turn-abort
 // path, and the per-review result-listener lifecycle (disposed via the `bus.on` unsubscribe).
 // Fully offline: the fake plannotator is a test listener on an event bus that calls
@@ -344,7 +345,7 @@ test("per-flavor dedup: a live copy of ANOTHER flavor under the shared customTyp
   }
 });
 
-test("default selection: shim injects nothing and strips a stale bridge marker", async () => {
+test("default selection: shim injects nothing and removes every stale owned bridge flavor; user turns quoting the markers are preserved", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
   const h = await loadPerkSession({
     cwd,
@@ -362,38 +363,34 @@ test("default selection: shim injects nothing and strips a stale bridge marker",
       false,
       "no bridge context injected on the default path",
     );
-    const stale = [
+    const preserved = [
+      { role: "user", content: "[PLAN ADAPTER: PLANNOTATOR] quoted in a user turn" },
+      { role: "user", content: "[OBJECTIVE ADAPTER: PLANNOTATOR] quoted in a user turn" },
+      { role: "user", content: [{ type: "text", text: "[GIST ADAPTER: PLANNOTATOR] in a part" }] },
+      { customType: PLAN_CONTEXT_TYPE, content: "[PLAN AUTHORING]\nanother feature's copy" },
+      { role: "user", content: "a normal message" },
+    ];
+    const surviving = await h.emitContext([
       {
         customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
         content: "[PLAN ADAPTER: PLANNOTATOR]\nstale",
       },
-      { role: "user", content: "[PLAN ADAPTER: PLANNOTATOR] leaked into a user turn" },
-      { role: "user", content: "[OBJECTIVE ADAPTER: PLANNOTATOR] leaked into a user turn" },
-      { role: "user", content: "[GIST ADAPTER: PLANNOTATOR] leaked into a user turn" },
-      { role: "user", content: "a normal message" },
-    ];
-    const surviving = await h.emitContext(stale);
-    assert.equal(
-      surviving.some((m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE),
-      false,
-      "stale bridge custom message stripped on the default path",
+      ...structuredClone(preserved.slice(0, 2)),
+      {
+        customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
+        content: "[OBJECTIVE ADAPTER: PLANNOTATOR]\nstale sibling",
+      },
+      {
+        customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
+        content: "[GIST ADAPTER: PLANNOTATOR]\nstale sibling",
+      },
+      ...structuredClone(preserved.slice(2)),
+    ]);
+    assert.deepEqual(
+      surviving,
+      preserved,
+      "every owned bridge flavor is removed on the default path; user input and other features' copies survive byte-for-byte",
     );
-    assert.equal(
-      surviving.some((m) => String(m.content).includes("[PLAN ADAPTER: PLANNOTATOR]")),
-      false,
-      "stale plan bridge marker stripped from user turns on the default path",
-    );
-    assert.equal(
-      surviving.some((m) => String(m.content).includes("[OBJECTIVE ADAPTER: PLANNOTATOR]")),
-      false,
-      "stale objective bridge marker stripped from user turns on the default path",
-    );
-    assert.equal(
-      surviving.some((m) => String(m.content).includes("[GIST ADAPTER: PLANNOTATOR]")),
-      false,
-      "stale gist bridge marker stripped from user turns on the default path",
-    );
-    assert.equal(surviving.length, 1, "the normal message survives");
   } finally {
     h.dispose();
   }

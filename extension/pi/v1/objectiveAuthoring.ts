@@ -461,7 +461,6 @@ export function installObjectiveAuthoringBindings(
     },
     select: (_ctx, branch) =>
       isObjectiveAuthoring(gating, contextPolicy, branch) ? OBJECTIVE_AUTHOR_MARKER : null,
-    live: (_ctx, branch) => isObjectiveAuthoring(gating, contextPolicy, branch),
   });
 
   pi.registerTool({

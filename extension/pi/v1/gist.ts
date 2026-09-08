@@ -276,7 +276,6 @@ export function installGistBindings(
     },
     select: (_ctx, branch) =>
       isGistAuthoring(gating, contextPolicy, branch) ? GIST_AUTHOR_MARKER : null,
-    live: (_ctx, branch) => isGistAuthoring(gating, contextPolicy, branch),
   });
 
   pi.registerTool({

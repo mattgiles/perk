@@ -104,7 +104,6 @@ export function installTombellPlanAdapter(
       }
       return isTombellPlanModeEnabled(branch) ? PLAN_ADAPTER_TOMBELL_MARKER : null;
     },
-    live: (ctx, branch) =>
-      isTombellPlanSelected(ctx.cwd) && !isRefinementSession(branch),
+
   });
 }

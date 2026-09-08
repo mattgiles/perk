@@ -9,7 +9,9 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { PLAN_CONTEXT_TYPE } from "../../authoring/plan/prose.ts";
 import { planRefPath, writePlanRef } from "../../substrate/cache.ts";
+import { WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import {
   createFakeSubagents,
   type FakeSubagents,
@@ -449,6 +451,11 @@ test("/objective-plan enters the read-only gate: mode flips, write blocked, anno
 
     assert.equal(h.workflowState().mode, "read-only", "mode flips to read-only");
     assert.equal(
+      h.workflowState().plan_authoring,
+      true,
+      "the explicit plan-authoring intent rides the enter (§8.3)",
+    );
+    assert.equal(
       (await h.emitToolCall("write", { path: "x", content: "y" }))?.block,
       true,
       "write is structurally blocked",
@@ -457,6 +464,11 @@ test("/objective-plan enters the read-only gate: mode flips, write blocked, anno
       h.notifies.some((m) => /read-only ON/.test(m)),
       "the read-only announce line was reported",
     );
+    assert.ok(
+      (await h.emitBeforeAgentStart()).some((m) => m.customType === PLAN_CONTEXT_TYPE),
+      "the plan-authoring guidance is selected on the recorded intent (no stage rewrite needed)",
+    );
+    assert.equal(h.workflowState().stage, undefined, "the warm intent never rewrites the stage");
   } finally {
     h.dispose();
   }
@@ -468,6 +480,20 @@ test("/objective-plan skip-if-active: an already read-only session gets no dupli
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
   spyInjections(h);
   try {
+    // A bare read-only gate (a stage-less legacy shape) is restricted but carries no plan
+    // evidence: no plan guidance before the factory establishes intent.
+    assert.equal(h.workflowState().plan_authoring, undefined);
+    assert.equal(
+      (await h.emitBeforeAgentStart()).some((m) => m.customType === PLAN_CONTEXT_TYPE),
+      false,
+      "a bare gate never infers plan authoring",
+    );
+    const stateEntries = () =>
+      h.session.sessionManager
+        .getBranch()
+        .filter((e) => e.type === "custom" && e.customType === WORKFLOW_STATE_TYPE).length;
+    const before = stateEntries();
+
     await h.invokeCommand("objective-plan", "7");
 
     assert.equal(h.workflowState().mode, "read-only", "mode stays read-only");
@@ -480,6 +506,16 @@ test("/objective-plan skip-if-active: an already read-only session gets no dupli
       h.notifies.some((m) => /#7/.test(m)),
       "the objective info line still reports",
     );
+    // The already-gated arm records the intent bit ALONE (no duplicate mode append)…
+    assert.equal(h.workflowState().plan_authoring, true, "the warm intent is recorded");
+    assert.equal(stateEntries(), before + 1, "exactly one append: the intent bit");
+    assert.ok(
+      (await h.emitBeforeAgentStart()).some((m) => m.customType === PLAN_CONTEXT_TYPE),
+      "the plan-authoring guidance is now selected",
+    );
+    // …and a second invocation with the intent already on the branch appends nothing.
+    await h.invokeCommand("objective-plan", "7");
+    assert.equal(stateEntries(), before + 1, "no redundant intent append");
   } finally {
     h.dispose();
   }
