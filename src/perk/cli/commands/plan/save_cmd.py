@@ -24,6 +24,7 @@ from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.cli.plan_selection import main_repo_root
 from perk.delivery import DeliveryError, PrepareRequest, PrepareResult, resolve_delivery
+from perk.objective.refinement.authoring import REFINE_STAGE_ID
 from perk.state import cache
 from perk.substrate.config import ConfigError, load_config
 from perk.substrate.output import user_output
@@ -114,6 +115,10 @@ def plan_save(
         if not dry_run:
             require_github(ctx)
         resolved_run_id = run_id if run_id is not None else os.environ.get("PERK_RUN_ID")
+        # A refinement run never saves a plan (contracts.md §8.67): the `objective-refine`
+        # handoff marks an isolated advisory session — refuse before any link recovery, so no
+        # handoff field of that run can ever be read as a planning link.
+        _refuse_refinement_run(repo_root, resolved_run_id)
         # Recover the objective link from the handoff: the `/plan-save` command forwards only
         # {plan, title}, so an objective-plan factory session would otherwise drop the link the
         # `objective-plan` command stashed in the handoff. Explicit flags always win; a non-
@@ -165,6 +170,28 @@ def plan_save(
         return
 
     emit(as_json=as_json, payload=_result_to_dict(result), render=lambda: _render_human(result))
+
+
+def _refuse_refinement_run(repo_root: Path, run_id: str | None) -> None:
+    """Refuse a save from an ``objective-refine`` run (``wrong_stage``).
+
+    The refinement stage is disconnected from the plan graph: its handoff carries no planning
+    link, and a plan save from that run would silently turn an advisory pass into a plan.
+    Only a READABLE handoff naming the stage refuses — a missing or malformed handoff leaves
+    the save alone (the ordinary best-effort recovery posture below)."""
+    if not run_id:
+        return
+    try:
+        handoff = cache.read_handoff(repo_root, run_id)
+    except (OSError, ValueError):
+        return
+    if handoff is not None and handoff.stage == REFINE_STAGE_ID:
+        raise UserFacingCliError(
+            f"run {run_id} is an objective-refine session — a refinement never saves a plan "
+            "(author with objective_refinement_draft; the human saves the refinement with "
+            "/objective-refinement-save).",
+            error_type="wrong_stage",
+        )
 
 
 def _link_from_handoff(

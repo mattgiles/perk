@@ -295,9 +295,30 @@
   vars: {}
 - template: "stages/gist-author/seed.md"
   vars: {}
+- template: "stages/objective-refine/seed.md"
+  vars:
+    number: "7"
+    title: "Ship it"
+    node_id: "2.3"
+    node_description: "Do the future thing"
+    read_clause: "This objective is a Linear Project (https://linear.app/x/ENG-1). Its roadmap nodes are Linear issues in that Project — inspect a node-issue's detail or discussion with the `linear_get_issue` and `linear_list_comments` tools; if the linear tools are unavailable, open https://linear.app/x/ENG-1."
+    context_path: ".perk/workflow/scratch/runs/01RID/data/objective-refinement-context.json"
+    prior_note: "A valid prior refinement already exists on this node — the context carries its FULL Markdown; you are re-refining, and a save replaces it whole (full-content replacement)."
+- template: "stages/objective-refine/seed.md"
+  vars:
+    number: "7"
+    title: "Ship it"
+    node_id: "2.3"
+    node_description: "Do the future thing"
+    read_clause: ""
+    context_path: ".perk/workflow/scratch/runs/01RID/data/objective-refinement-context.json"
+    prior_note: ""
 - template: "contexts/gist-authoring.md"
   vars:
     marker: "[GIST AUTHORING]"
+- template: "contexts/objective-refinement.md"
+  vars:
+    marker: "[OBJECTIVE REFINEMENT]"
 - template: "stages/gist-save.md"
   vars:
     title: ""
@@ -467,6 +488,13 @@
 - template: "contexts/read-only.md"
   vars:
     marker: "[READ-ONLY MODE]"
+    writer: "plan_draft"
+    artifact: "working-plan artifact"
+- template: "contexts/read-only.md"
+  vars:
+    marker: "[READ-ONLY REFINEMENT MODE]"
+    writer: "objective_refinement_draft"
+    artifact: "working-refinement artifact"
 - template: "contexts/plan-authoring.md"
   vars:
     marker: "[PLAN AUTHORING]"
@@ -485,6 +513,9 @@
 - template: "contexts/adapters/plannotator-gist.md"
   vars:
     marker: "[GIST ADAPTER: PLANNOTATOR]"
+- template: "contexts/adapters/plannotator-refinement.md"
+  vars:
+    marker: "[REFINEMENT ADAPTER: PLANNOTATOR]"
 - template: "stages/stack-review-browser/stack.md"
   vars:
     top_pr: "42"

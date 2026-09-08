@@ -41,6 +41,7 @@ EXPECTED_DEFAULTS = [
     ("stage:gist-author", "perk-gist-author", "nudge"),
     ("stage:objective-author", "perk-objective-author", "nudge"),
     ("stage:objective-plan", "perk-objective-plan", "nudge"),
+    ("stage:objective-refine", "perk-objective-refine", "nudge"),
     ("stage:implement", "perk-implement", "nudge"),
     ("stage:address", "perk-address", "nudge"),
     ("stage:learn", "perk-learn", "nudge"),

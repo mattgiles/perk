@@ -268,6 +268,42 @@ export const READ_ONLY_TOOLS = [
 ];
 
 /**
+ * The refinement stage id — the ONE stage whose gate-ON selection differs from READ_ONLY_TOOLS.
+ * (Registry vocabulary; the feature module re-declares the same literal as its stage constant.)
+ */
+export const REFINE_STAGE_ID = "objective-refine";
+
+/**
+ * The refinement session's gate-ON selection (contracts.md §8.67): read / research / question
+ * / local exploration, the backend-neutral review door, and the ONE refinement draft writer.
+ * Deliberately NOT READ_ONLY_TOOLS: no `objective_node` (a refinement never claims), no other
+ * draft tools (no plan/objective/gist artifact can be authored or routed from here), no save
+ * tools, no delegation spawn surface (children are unscoped by design). Same static-name
+ * posture as READ_ONLY_TOOLS; `setActiveTools` ignores absent names.
+ */
+export const REFINEMENT_READ_ONLY_TOOLS: readonly string[] = [
+  "read",
+  "grep",
+  "find",
+  "ls",
+  "bash",
+  "ask_user_question",
+  "plan_review",
+  // The objective_refinement_draft carve-out: it writes only the one working-refinement
+  // artifact in the session data dir (fixed artifact name, seam-derived path, bound to the
+  // session's grounding context); the gate's edit/write/bash blocking is unchanged.
+  "objective_refinement_draft",
+  ...WEB_RESEARCH_TOOLS,
+  ...LINEAR_READ_TOOLS,
+  ...FFF_SEARCH_TOOLS,
+];
+
+/** The gate-ON allowlist for a stage: refinement's own selection, else READ_ONLY_TOOLS. */
+export function gatedToolsFor(stage: string | null): readonly string[] {
+  return stage === REFINE_STAGE_ID ? REFINEMENT_READ_ONLY_TOOLS : READ_ONLY_TOOLS;
+}
+
+/**
  * Every tool perk itself registers (contracts.md §8.40). Name-keyed: `setActiveTools` ignores
  * unknown names, so an absent tool is inert (e.g. a borrowed census name whose package stripped
  * or never registered it — `ask_user_question` in a headless session — has nothing to enable).
@@ -285,6 +321,10 @@ export const PERK_TOOLS: readonly string[] = [
   "objective_draft",
   "gist_draft",
   "gist_save",
+  // The refinement session's ONE model-facing writer (contracts.md §8.67). Never in
+  // READ_ONLY_TOOLS: only the refinement gate-ON selection carries it, so no other gated
+  // stage can author a refinement draft.
+  "objective_refinement_draft",
   "learn",
   "run_learn_wave",
   "run_audit_wave",
@@ -408,6 +448,15 @@ const WORKTREE_STAGE_TOOLS: readonly string[] = [
  *    review arm; the drive-coverage guard forces both the moment the guidance names them).
  */
 export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
+  // The isolated refinement stage (contracts.md §8.67): the gate-OFF (defensive) arm scopes the
+  // draft writer + the review door + research only — no PR-loop, save, claim or other draft
+  // tools. The session normally runs GATED, where REFINEMENT_READ_ONLY_TOOLS is the set.
+  [REFINE_STAGE_ID]: [
+    "ask_user_question",
+    "objective_refinement_draft",
+    "plan_review",
+    ...RESEARCH_TOOLS,
+  ],
   "gist-author": ["ask_user_question", "gist_draft", "gist_save", ...RESEARCH_TOOLS],
   "gist-save": ["ask_user_question", "gist_draft", "gist_save", ...RESEARCH_TOOLS],
   "objective-author": [
@@ -506,12 +555,43 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
 /** The read-only marker / custom-message type injected into context while active. */
 const MODE_CONTEXT_TYPE = "perk:mode-context";
 const READ_ONLY_MARKER = "[READ-ONLY MODE]";
+/** The refinement flavor's DISTINCT dedup marker (not a superstring of the default marker, so
+ * neither flavor's presence masks the other's dedup scan). */
+const REFINEMENT_READ_ONLY_MARKER = "[READ-ONLY REFINEMENT MODE]";
+const MODE_MARKERS: readonly string[] = [READ_ONLY_MARKER, REFINEMENT_READ_ONLY_MARKER];
 
 /** Exported for tests: the injected read-only mode context. (No tool enumeration — gate-ON
  * already applies READ_ONLY_TOOLS via setActiveTools, so the active tool set IS the list.) */
 export const READ_ONLY_CONTEXT = render("contexts/read-only.md", {
   marker: READ_ONLY_MARKER,
+  writer: "plan_draft",
+  artifact: "working-plan artifact",
 });
+
+/** Exported for tests: the refinement flavor — names the ACTUAL sanctioned writer. */
+export const REFINEMENT_READ_ONLY_CONTEXT = render("contexts/read-only.md", {
+  marker: REFINEMENT_READ_ONLY_MARKER,
+  writer: "objective_refinement_draft",
+  artifact: "working-refinement artifact",
+});
+
+/** The mode-context flavor for a stage (the refinement session names its own writer). */
+function modeContextFor(stage: string | null): { marker: string; content: string } {
+  return stage === REFINE_STAGE_ID
+    ? { marker: REFINEMENT_READ_ONLY_MARKER, content: REFINEMENT_READ_ONLY_CONTEXT }
+    : { marker: READ_ONLY_MARKER, content: READ_ONLY_CONTEXT };
+}
+
+function textCarries(content: unknown, needles: readonly string[]): boolean {
+  if (typeof content === "string") return needles.some((n) => content.includes(n));
+  if (Array.isArray(content)) {
+    return content.some((c) => {
+      const part = c as { type?: string; text?: string };
+      return part.type === "text" && needles.some((n) => (part.text ?? "").includes(n));
+    });
+  }
+  return false;
+}
 
 // --- pure policy (copied from plan-mode/utils.ts so this primitive is self-contained; perk-owned
 // so retiring the borrowed pi-plan extension leaves no dangling import) -------
@@ -761,7 +841,9 @@ export function registerToolGating(
   }
 
   const isActive = () => active || hasFloor();
-  const readOnlyToolNames: ReadonlySet<string> = new Set(READ_ONLY_TOOLS);
+  // The gate-ON allowlist follows the scoped stage: refinement's own selection, else the
+  // shared READ_ONLY_TOOLS (recomputed per observation — a late stage sync re-scopes it).
+  const gatedToolNames = (): ReadonlySet<string> => new Set(gatedToolsFor(stageId));
 
   /**
    * Recompute + install the active tool set from both concerns (contracts.md §8.40):
@@ -790,7 +872,7 @@ export function registerToolGating(
       snapshot = pi.getActiveTools();
     }
     if (effective) {
-      pi.setActiveTools([...READ_ONLY_TOOLS]);
+      pi.setActiveTools([...gatedToolsFor(nextStage)]);
     } else if (stageList !== undefined) {
       // The snapshot-missing fallback mirrors the restore path below: the FULL configured tool
       // set (pi.getAllTools()), never a hardcoded list that would silently drop grep/find/ls
@@ -817,7 +899,7 @@ export function registerToolGating(
           reason: `perk read-only mode: ${event.toolName} is blocked (file modifications disabled).`,
         };
       }
-      if (!readOnlyToolNames.has(event.toolName)) {
+      if (!gatedToolNames().has(event.toolName)) {
         return {
           block: true,
           reason: `perk read-only mode: ${event.toolName} is blocked (tool not allowlisted).`,
@@ -847,34 +929,45 @@ export function registerToolGating(
     // delivered on this branch history and is NOT re-injected; navigating to a branch that never
     // carried it injects again. Deliberate: this is the structural gate's guidance, and the gate
     // itself (tool_call) enforces regardless of what the model can still read.
+    // The flavor follows the scoped stage: the refinement session names its actual writer. The
+    // dedup key is the SELECTED flavor's marker, so a session gated under the default flavor
+    // that then enters refinement still receives the refinement flavor once.
+    const flavor = modeContextFor(stageId);
     try {
-      if (branchCarries(branchOf(ctx), READ_ONLY_MARKER)) return;
+      if (branchCarries(branchOf(ctx), flavor.marker)) return;
     } catch {
       // An unreadable branch cannot suppress required read-only guidance.
     }
     return {
-      message: { customType: MODE_CONTEXT_TYPE, content: READ_ONLY_CONTEXT, display: false },
+      message: { customType: MODE_CONTEXT_TYPE, content: flavor.content, display: false },
     };
   });
 
-  // Strip the stale read-only marker from context when the gate is off (so it never lingers).
+  // Gate OFF: strip every stale mode-context flavor (so none lingers). Gate ON: retain ONLY the
+  // current flavor's injected block — a stale `plan_draft`-only block from before a stage
+  // change is dropped from model context (the injected customType only; user content is never
+  // touched while the gate is on).
   pi.on("context", async (event) => {
-    if (isActive()) return;
+    if (isActive()) {
+      const current = modeContextFor(stageId).marker;
+      const stale = (m: unknown): boolean => {
+        const msg = m as { customType?: string; content?: unknown };
+        return (
+          msg.customType === MODE_CONTEXT_TYPE &&
+          textCarries(msg.content, MODE_MARKERS) &&
+          !textCarries(msg.content, [current])
+        );
+      };
+      // No stale flavor → no intervention (the hook stays a no-op for every other message).
+      if (!event.messages.some(stale)) return;
+      return { messages: event.messages.filter((m) => !stale(m)) };
+    }
     return {
       messages: event.messages.filter((m) => {
         const msg = m as { customType?: string; role?: string; content?: unknown };
         if (msg.customType === MODE_CONTEXT_TYPE) return false;
         if (msg.role !== "user") return true;
-        const content = msg.content;
-        if (typeof content === "string") return !content.includes(READ_ONLY_MARKER);
-        if (Array.isArray(content)) {
-          return !content.some(
-            (c) =>
-              (c as { type?: string; text?: string }).type === "text" &&
-              ((c as { text?: string }).text ?? "").includes(READ_ONLY_MARKER),
-          );
-        }
-        return true;
+        return !textCarries(msg.content, MODE_MARKERS);
       }),
     };
   });

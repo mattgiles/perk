@@ -1433,3 +1433,37 @@ def test_plan_save_stacked_without_lineage_is_a_typed_refusal(monkeypatch):
     payload = json.loads(result.stdout)
     assert payload["error_type"] == "missing_lineage"
     assert "delivery_lineage" in payload["message"]
+
+
+def test_plan_save_refuses_an_objective_refine_run(monkeypatch):
+    # A refinement run is disconnected from the plan graph: the `objective-refine` handoff refuses
+    # the save (`wrong_stage`) BEFORE any link recovery or backend write — even when the handoff
+    # (defectively) carries planning-link fields, nothing is read as a link.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+
+    def _boom(**_k):
+        raise AssertionError("a refinement run must never link a node")
+
+    monkeypatch.setattr(objectives, "update_objective_node", _boom)
+    monkeypatch.setattr(
+        plans,
+        "create_plan_issue",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not create a plan issue")),
+    )
+    result = _run_with_handoff(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--json"],
+        {
+            "stage": "objective-refine",
+            "mode": "read-only",
+            "objective_id": "63",
+            "node_id": "1.1",
+            "objective_refinement": {"context_digest": "sha256:" + "0" * 64},
+        },
+    )
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error_type"] == "wrong_stage"
+    assert "objective-refine" in payload["message"]

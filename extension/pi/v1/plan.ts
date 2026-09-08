@@ -54,6 +54,7 @@ import {
   savePlan,
 } from "../../authoring/plan/save.ts";
 import { extractPlanMarkdown, resolvePlanSource } from "../../authoring/plan/source.ts";
+import { REFINE_STAGE } from "../../authoring/refinement/context.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { PlanRef } from "../../substrate/cache.ts";
 import {
@@ -73,7 +74,7 @@ import { failFor, ok } from "../../substrate/result.ts";
 import { captureSessionPointer } from "../../substrate/sessionPointers.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { idArrayParam, paramsOf, stringParam } from "../../substrate/toolParams.ts";
-import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
+import { type BranchEntry, branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
 // `Key` via the surfaces re-export (keybinding vocabulary, not rich UI) — keeps pi-tui imports
 // structurally confined to the surfaces module (the surfacesGuard pi-tui import rule).
@@ -85,6 +86,7 @@ import {
   draftReviewMutationRefusal,
 } from "./draftReviewActivation.ts";
 import { mutationPlanSaveDeps } from "./draftReviewEffects.ts";
+import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
 import {
   type ApprovalSaveOutcome,
   executePlanReview,
@@ -560,6 +562,15 @@ export function installPlanBindings(
           "plan_save",
         )("plan_save needs { plan: string, … } per the tool schema", "bad_input");
       }
+      // A refinement session never saves a plan — independent of the gate (a human toggle
+      // never makes an old plan draft routable here).
+      if (isRefinementSession(branchOf(ctx))) {
+        return failFor(
+          ctx,
+          "plan-save",
+          "plan_save",
+        )(refinementStageRefusal("plan_save"), "wrong_stage");
+      }
       const facts: DraftReviewConfirmedFacts = {};
       const mutation = await reviews.mutateAsync(ctx, "manual-save", async (session) => {
         const original = planSaveDepsFor(pi, ctx, gating);
@@ -614,6 +625,10 @@ export function installPlanBindings(
       "Save the latest proposed plan to GitHub — the manual failsafe for the approval→save flow " +
       "(the read-only → read-write boundary).",
     handler: async (args, ctx) => {
+      if (isRefinementSession(branchOf(ctx))) {
+        report(ctx, "plan-save", "warning", refinementStageRefusal("/plan-save"));
+        return;
+      }
       const title = args.trim() || undefined;
       // The manual-failsafe invocation of the shared approval→save seam. Artifact-first
       // (no explicit param on the command path ⇒ paramMismatch is always false); the D1a gate exit
@@ -799,25 +814,28 @@ function installPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
   }
 
   // Inject the plan-authoring context while the read-only gate is active (display:false). The
-  // exceptions: objective-author and gist-author sessions are ALSO read-only, but
-  // objectiveAuthor.ts / the gist installer inject their own authoring contexts there — so plan
-  // mode defers when the launched stage is either (the coupling break: plan-authoring context is
-  // no longer keyed off the bare read-only gate). The inject/strip mechanics (active-window
-  // dedup, stale-marker strip) live in the shared helper; the strip stays stage-blind — it keys
-  // on the gate alone.
+  // exceptions: objective-author, gist-author and objective-refine sessions are ALSO read-only,
+  // but objectiveAuthor.ts / the gist installer / the refinement installer inject their own
+  // contexts there — so plan mode defers when the session's stage is any of them (the coupling
+  // break: plan-authoring context is no longer keyed off the bare read-only gate). Liveness
+  // follows the same rule: a plan context injected BEFORE a warm transition into one of those
+  // stages (an ad-hoc plan-mode turn, then `/objective-refine`) is stale there and is stripped,
+  // so the model is never directed to the plan draft/save flow the stage refuses. On a failed
+  // branch read (`[]`) the stage is unknown and liveness degrades to the gate alone. The
+  // inject/strip mechanics (active-window dedup, stale-marker strip) live in the shared helper.
+  const ownedByAnotherAuthoringStage = (branch: readonly BranchEntry[]): boolean => {
+    const stage = rebuildWorkflowState(branch).stage;
+    return (
+      stage === OBJECTIVE_AUTHOR_STAGE || stage === GIST_AUTHOR_STAGE || stage === REFINE_STAGE
+    );
+  };
   installInjectedContext(pi, {
     customType: PLAN_CONTEXT_TYPE,
     flavors: {
       [PLAN_MARKER]: (ctx) => planAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
     },
-    select: (_ctx, branch) => {
-      if (!gating.isActive()) return null;
-      const launchedStage = rebuildWorkflowState(branch).stage;
-      if (launchedStage === OBJECTIVE_AUTHOR_STAGE || launchedStage === GIST_AUTHOR_STAGE) {
-        return null;
-      }
-      return PLAN_MARKER;
-    },
-    live: () => gating.isActive(),
+    select: (_ctx, branch) =>
+      gating.isActive() && !ownedByAnotherAuthoringStage(branch) ? PLAN_MARKER : null,
+    live: (_ctx, branch) => gating.isActive() && !ownedByAnotherAuthoringStage(branch),
   });
 }

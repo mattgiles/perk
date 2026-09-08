@@ -22,6 +22,7 @@ import {
   deriveForkRunId,
   type EstablishIdentityOutcome,
   establishSessionIdentity,
+  refinementHandoffContamination,
   reflectSessionReadOnlyFloor,
   resolveRunStage,
   type SessionIdentityPorts,
@@ -492,6 +493,79 @@ for (const backing of [branchStoreBacking(), memoryStoreBacking()]) {
       assert.equal(outcome.arm, "claimed");
       assert.equal(h.appends[0] !== undefined && "objective_node_claim" in h.appends[0], false);
     }
+  });
+
+  test(`${backing.label}: claim — a clean objective-refine handoff claims stage-only (namespaced block, no node claim)`, () => {
+    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
+    const h = backing.make(cwd, []);
+    const { ports, consumed } = fakePorts({
+      handoff: {
+        run_id: "01RID",
+        consumed: false,
+        mode: "read-only",
+        stage: "objective-refine",
+        objective_refinement: { context_digest: "sha256:abc" },
+        consumed_learn: [],
+        adopt_from: null,
+      },
+    });
+    const outcome = establishSessionIdentity(h.store, ports, {
+      currentSessionId: "me.jsonl",
+      envRunId: "01RID",
+    });
+    assert.equal(outcome.arm, "claimed");
+    assert.deepEqual(h.appends[0], {
+      run_id: "01RID",
+      pi_session_id: "me.jsonl",
+      mode: "read-only",
+      perk_version: "1.2.3",
+      stage: "objective-refine",
+    });
+    assert.deepEqual(consumed, [{ runId: "01RID", piSessionId: "me.jsonl" }]);
+  });
+
+  test(`${backing.label}: claim — a contaminated objective-refine handoff refuses before claiming and is NOT consumed`, () => {
+    for (const [extra, named] of [
+      [{ objective_id: "7", node_id: "1.1" }, "objective_id, node_id"],
+      [{ objective_id: "7" }, "objective_id"],
+      [{ adopt_from: "12" }, "adopt_from"],
+      [{ supersedes: "9" }, "supersedes"],
+      [{ gist_scope: "plan" }, "gist_scope"],
+      [{ consumed_learn: ["L1"] }, "consumed_learn"],
+    ] as const) {
+      const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
+      const h = backing.make(cwd, []);
+      const { ports, consumed } = fakePorts({
+        handoff: {
+          run_id: "01RID",
+          consumed: false,
+          mode: "read-only",
+          stage: "objective-refine",
+          ...extra,
+        },
+      });
+      const outcome = establishSessionIdentity(h.store, ports, {
+        currentSessionId: "me.jsonl",
+        envRunId: "01RID",
+      });
+      assert.equal(outcome.arm, "unclaimed", named);
+      assert.equal(outcome.problems.length, 1);
+      assert.ok(outcome.problems[0]?.includes(`it carries ${named}`), outcome.problems[0]);
+      assert.deepEqual(outcome.resolved, {});
+      assert.equal(h.appends.length, 0, "nothing recorded — no claim, no stage");
+      assert.equal(consumed.length, 0, "the contaminated handoff is not consumed");
+    }
+    // The same keys on an ordinary objective-plan handoff still claim normally.
+    assert.equal(
+      refinementHandoffContamination({
+        run_id: "01RID",
+        consumed: false,
+        stage: "objective-plan",
+        objective_id: "7",
+        node_id: "1.1",
+      }),
+      null,
+    );
   });
 
   test(`${backing.label}: claim — a missing or mismatched handoff is unclaimed (never mints)`, () => {

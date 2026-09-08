@@ -94,6 +94,7 @@ test("draft-review context strictly reads one routing snapshot and owns claim va
     ["objective-author", "objective"],
     ["objective-save", "objective"],
     ["gist-author", "gist"],
+    ["objective-refine", "refinement"],
   ]) {
     snapshot = { run_id: "RID", stage, objective_node_claim: subject === "plan" ? claim : false };
     const result = session.draftReviewContext();
@@ -746,6 +747,43 @@ for (const backing of [branchBacking(), memoryBacking()]) {
       const result = quietly(() => h.session.apply({ kind: "link-objective", objective: "7" }));
       assert.equal(result.status, "rejected");
       assert.equal(h.session.activeObjective(), null, "a rejected link lands nothing");
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply enter-refinement-stage — stage-only; applied, then unchanged`, () => {
+    const h = backing.harness("RID", { activeObjective: "7" });
+    try {
+      const before = h.appendCount();
+      assert.deepEqual(h.session.apply({ kind: "enter-refinement-stage" }), { status: "applied" });
+      const context = h.session.draftReviewContext();
+      assert.ok(context.ok);
+      assert.equal(context.subject, "refinement", "the stage maps to the refinement subject");
+      assert.equal(context.warmNodeClaim, null);
+      assert.equal(h.session.activeObjective(), "7", "the active objective is preserved");
+      assert.equal(h.session.nodeClaim(), null, "entering refinement never claims a node");
+      assert.equal(h.linkedPlanRef(), null, "entering refinement never links a plan");
+      assert.equal(h.appendCount(), before + 1);
+      assert.deepEqual(h.session.apply({ kind: "enter-refinement-stage" }), {
+        status: "unchanged",
+      });
+      assert.equal(h.appendCount(), before + 1, "the idempotent re-entry appends nothing");
+    } finally {
+      h.dispose();
+    }
+  });
+
+  test(`${backing.label}: apply enter-refinement-stage — a read-back miss classifies unverified`, () => {
+    const h = backing.harness("RID");
+    try {
+      h.induceApplyVerificationFailure();
+      const result = quietly(() => h.session.apply({ kind: "enter-refinement-stage" }));
+      assert.equal(result.status, "unverified");
+      assert.ok(
+        result.status === "unverified" &&
+          /stage read-back failed for objective-refine/.test(result.problem),
+      );
     } finally {
       h.dispose();
     }
@@ -1424,6 +1462,11 @@ test("branch: a read-back miss reports LOUDLY under each change's seam-owned sco
       seed: null,
       change: { kind: "link-objective", objective: "7" },
       expected: "perk: objective-save — active_objective read-back failed for #7",
+    },
+    {
+      seed: null,
+      change: { kind: "enter-refinement-stage" },
+      expected: "perk: objective-refine — stage read-back failed for objective-refine",
     },
     {
       seed: null,

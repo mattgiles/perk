@@ -74,6 +74,48 @@ def test_objective_author_is_dedicated_and_local_only(git_repo):
     assert "local-only" in remote.output
 
 
+def test_objective_refine_is_dedicated_local_only_and_completes_objective_ids(
+    monkeypatch, tmp_path
+):
+    # objective refine is a dedicated seeded launcher inside the `objective` group: its own
+    # positional NUMBER + --node, no generic launcher shape, local-only, and the
+    # objective-id shell completion wired on the argument (driven through Click's own
+    # completion machinery, which never launches or reads git).
+    from click.shell_completion import ShellComplete
+
+    from perk.backends import objective_store, resolve
+    from perk.cli import plan_selection
+    from perk.cli.stages import DEDICATED_STAGES
+
+    assert "objective-refine" in DEDICATED_STAGES
+    top = CliRunner().invoke(cli, ["--help"])
+    assert top.exit_code == 0 and "objective-refine" not in top.output  # no generic launcher
+    helped = CliRunner().invoke(cli, ["objective", "refine", "--help"])
+    assert helped.exit_code == 0, helped.output
+    assert "NUMBER" in helped.output and "--node" in helped.output
+    assert "--dry-run" in helped.output and "--no-sync" in helped.output
+    # --remote/--worktree are accepted by the parser only to refuse with a typed reason (the
+    # refusals themselves are pinned in test_objective_refine_cmd.py); the help says so.
+    assert "local-only" in helped.output and "never" in helped.output
+    for worker in ("refine-context", "refinement-save"):
+        assert CliRunner().invoke(cli, ["objective", worker, "--help"]).exit_code == 0
+    assert "refine-context" not in helped.output and "refinement-save" not in helped.output
+
+    class _Store:
+        def list_objective_completion_candidates(self):
+            return (
+                objective_store.ObjectiveSummary(id="proj-1", title="Ship it"),
+                objective_store.ObjectiveSummary(id="proj-2", title="Later"),
+            )
+
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda root: _Store())
+    monkeypatch.setattr(plan_selection, "main_repo_root", lambda root: tmp_path)
+    items = ShellComplete(cli, {}, "perk", "_PERK_COMPLETE").get_completions(
+        ["objective", "refine"], "proj"
+    )
+    assert [(i.value, i.help) for i in items] == [("proj-1", "Ship it"), ("proj-2", "Later")]
+
+
 def test_learn_is_dedicated_hybrid_group(git_repo):
     # `learn` is a hand-written hybrid group — bare invocation default-dispatches to the
     # hidden stage launcher (byte-identical to the generated launcher); `capture`/`docs` are verbs.

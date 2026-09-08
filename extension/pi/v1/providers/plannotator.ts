@@ -60,6 +60,7 @@ import {
   OBJECTIVE_AUTHOR_STAGE,
   OBJECTIVE_SAVE_STAGE,
 } from "../../../authoring/objective/prose.ts";
+import { REFINE_STAGE } from "../../../authoring/refinement/context.ts";
 import type {
   DraftReviewRegistration,
   RegistrationResult,
@@ -77,6 +78,7 @@ export const PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE = "perk:plan-adapter-plannota
 const PLAN_ADAPTER_PLANNOTATOR_MARKER = "[PLAN ADAPTER: PLANNOTATOR]";
 const OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER = "[OBJECTIVE ADAPTER: PLANNOTATOR]";
 const GIST_ADAPTER_PLANNOTATOR_MARKER = "[GIST ADAPTER: PLANNOTATOR]";
+const REFINEMENT_ADAPTER_PLANNOTATOR_MARKER = "[REFINEMENT ADAPTER: PLANNOTATOR]";
 
 /**
  * The handshake timeout for plannotator's immediate `respond` callback (mirrors plannotator's own
@@ -115,6 +117,17 @@ export const OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT = render(
  * prose); an approval carrying `# Direct Edits` does NOT auto-save — the model folds the diff
  * into the matching `gist_draft` fields and re-reviews (contracts.md §8.23's gist arm).
  */
+/**
+ * The refinement flavor of the bridge prompt, injected in an `objective-refine` session. The
+ * review surface renders the (draft, context) pair; header hunks are bound metadata (a new
+ * grounding pass), Markdown hunks fold into one `objective_refinement_draft` rewrite
+ * (contracts.md §8.23's refinement arm).
+ */
+export const REFINEMENT_ADAPTER_PLANNOTATOR_CONTEXT = render(
+  "contexts/adapters/plannotator-refinement.md",
+  { marker: REFINEMENT_ADAPTER_PLANNOTATOR_MARKER },
+);
+
 export const GIST_ADAPTER_PLANNOTATOR_CONTEXT = render("contexts/adapters/plannotator-gist.md", {
   marker: GIST_ADAPTER_PLANNOTATOR_MARKER,
 });
@@ -589,15 +602,17 @@ export function installPlannotatorPlanAdapter(pi: ExtensionAPI): void {
   //
   // Once-only PER FLAVOR: the dedup key is the SELECTED flavor's marker (not the shared
   // customType), so a stage change still delivers the missing flavor while a prior copy of
-  // another flavor sits on the branch; the strip owns ALL THREE markers, firing when
-  // plannotator-plan is no longer selected (same hygiene as the tombell shim). The inject/strip
-  // mechanics live in the shared helper.
+  // another flavor sits on the branch — and the shared helper strips that prior copy as a stale
+  // flavor while this one is selected (a warm `/objective-refine` after a plan-mode turn leaves
+  // only the refinement flavor directing the model). The strip owns ALL FOUR markers, firing
+  // wholesale when plannotator-plan is no longer selected (same hygiene as the tombell shim).
   installInjectedContext(pi, {
     customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
     flavors: {
       [PLAN_ADAPTER_PLANNOTATOR_MARKER]: () => PLAN_ADAPTER_PLANNOTATOR_CONTEXT,
       [OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER]: () => OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT,
       [GIST_ADAPTER_PLANNOTATOR_MARKER]: () => GIST_ADAPTER_PLANNOTATOR_CONTEXT,
+      [REFINEMENT_ADAPTER_PLANNOTATOR_MARKER]: () => REFINEMENT_ADAPTER_PLANNOTATOR_CONTEXT,
     },
     select: (ctx, branch) => {
       if (!isPlannotatorPlanSelected(ctx.cwd)) return null;
@@ -607,7 +622,9 @@ export function installPlannotatorPlanAdapter(pi: ExtensionAPI): void {
         ? OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER
         : state.stage === GIST_AUTHOR_STAGE
           ? GIST_ADAPTER_PLANNOTATOR_MARKER
-          : PLAN_ADAPTER_PLANNOTATOR_MARKER;
+          : state.stage === REFINE_STAGE
+            ? REFINEMENT_ADAPTER_PLANNOTATOR_MARKER
+            : PLAN_ADAPTER_PLANNOTATOR_MARKER;
     },
     live: (ctx) => isPlannotatorPlanSelected(ctx.cwd),
   });

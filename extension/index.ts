@@ -47,6 +47,10 @@ import { installObjectiveBindings } from "./pi/v1/objective.ts";
 import { installObjectiveAuthoringBindings } from "./pi/v1/objectiveAuthoring.ts";
 import { installObjectivePlanningBindings } from "./pi/v1/objectivePlanning.ts";
 import {
+  importRefinementContextOnClaim,
+  installObjectiveRefinementBindings,
+} from "./pi/v1/objectiveRefinement.ts";
+import {
   openObjectiveReviewSurface,
   registerObjectiveReviewBrowser,
 } from "./pi/v1/objectiveReviewBrowser.ts";
@@ -263,6 +267,12 @@ export default function perk(
   // `gist_draft`/`gist_save` tools and the `/gist-save` command (registration is name-keyed —
   // only the hooks ordering is frozen).
   installGistBindings(pi, gating, draftReviews);
+
+  // The v1 objective-refinement installer (contracts.md §8.67): the refinement context hook
+  // pair (planMode / the provider adapters defer to it in the `objective-refine` stage), the ONE
+  // model-facing `objective_refinement_draft` tool, the warm `/objective-refine` entry and the
+  // human `/objective-refinement-save` failsafe. Registered before the tool snapshots.
+  installObjectiveRefinementBindings(pi, gating, draftReviews);
   let sharedOk = false;
   try {
     sharedDir();
@@ -394,6 +404,14 @@ export default function perk(
       gating.syncFromState(resolved.mode, scopeStage);
     } catch (error) {
       console.error(`perk: tool-gating sync failed on session_start — ${error}`);
+    }
+
+    // The refinement cold claim's ONE-TIME context import (contracts.md §8.67): only on the
+    // actual cold claim of an `objective-refine` handoff (never keep/fork/adopt/mint), after the
+    // identity settled and the gate synced. A refusal is loud and leaves the session gated
+    // without a usable context (no orphan repair, no reimport on reload).
+    if (identity.arm === "claimed" && typeof resolved.run_id === "string") {
+      importRefinementContextOnClaim(pi, ctx, { runId: resolved.run_id, stage: resolved.stage });
     }
 
     // Plan-ref linkage (stage-gated): reconcile the cache.plan-ref file into

@@ -85,7 +85,7 @@ class DraftReviewTransportStop extends Error {
     this.refusal = refusal;
   }
 }
-type DraftReviewStop = Omit<PlannotatorRefusal, "phase"> & {
+export type DraftReviewStop = Omit<PlannotatorRefusal, "phase"> & {
   phase: PlannotatorRefusal["phase"] | "dispatch" | "mutation" | "observation";
 };
 export type DraftReviewConfirmedFacts = {

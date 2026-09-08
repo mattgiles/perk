@@ -52,6 +52,15 @@ export { digestSessionData };
 /** A human-readable problem description (the backing has already warned where its tier is loud). */
 export type SessionProblem = string;
 
+/** The refinement stage id (the session keys its subject mapping + stage-only entry on it). */
+const REFINE_STAGE_ID = "objective-refine";
+
+/**
+ * The refinement grounding-context artifact name — session-owned vocabulary because the review
+ * binding fences the refinement subject on this artifact's digest (features import it here).
+ */
+export const REFINEMENT_CONTEXT_ARTIFACT = "objective-refinement-context.json";
+
 /**
  * Session-owned artifact receipt: validated or re-derived values ONLY. `runId` is the
  * safe-narrowed active run id (matches the persisted pointer's `run_id` by construction);
@@ -212,6 +221,13 @@ export type WorkflowChange =
   /** Link the live session to a saved objective: append `active_objective` iff it differs. */
   | { kind: "link-objective"; objective: string }
   /**
+   * Enter the refinement stage from a warm session: append `stage: "objective-refine"` iff the
+   * live stage differs — a STAGE-ONLY change (never a claim, plan-ref, objective or mode write;
+   * the warm `/objective-refine` entry sets the stage the cold handoff would have carried). An
+   * idempotent re-entry short-circuits `unchanged`.
+   */
+  | { kind: "enter-refinement-stage" }
+  /**
    * Record the last automated `/pr-review` outcome: ONE `last_pr_review` append (LWW), strict
    * read-back. No pre-read, no dedupe (same runtime invariant as `record-review`:
    * `applied`/`unverified`/`rejected` only).
@@ -267,7 +283,7 @@ export interface WorkflowSession {
     | {
         ok: true;
         runId: string;
-        subject: "plan" | "objective" | "gist";
+        subject: "plan" | "objective" | "gist" | "refinement";
         warmNodeClaim: { objective: string; node: string } | null;
       }
     | { ok: false; reason: "no-identity" | "invalid-state" };
@@ -534,7 +550,9 @@ export function openWorkflowSession(deps: WorkflowSessionDeps): WorkflowSession 
             ? "objective"
             : stage === "gist-author"
               ? "gist"
-              : "plan";
+              : stage === REFINE_STAGE_ID
+                ? "refinement"
+                : "plan";
         const raw: unknown = subject === "plan" ? snapshot.objective_node_claim : null;
         let warmNodeClaim: { objective: string; node: string } | null = null;
         if (raw != null) {
@@ -805,6 +823,16 @@ export function openWorkflowSession(deps: WorkflowSessionDeps): WorkflowSession 
             expected: objective,
             scope: "objective-save",
             failure: `active_objective read-back failed for #${objective}`,
+          });
+        }
+        case "enter-refinement-stage": {
+          if (state.rebuild().stage === REFINE_STAGE_ID) return { status: "unchanged" };
+          return state.appendVerified({
+            data: { stage: REFINE_STAGE_ID },
+            field: "stage",
+            expected: REFINE_STAGE_ID,
+            scope: "objective-refine",
+            failure: `stage read-back failed for ${REFINE_STAGE_ID}`,
           });
         }
         case "record-pr-review": {

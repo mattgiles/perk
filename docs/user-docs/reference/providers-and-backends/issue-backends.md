@@ -206,9 +206,12 @@ then the Markdown. The node-issue description, its attachments, the roadmap, the
 the Project are never written by a refinement; re-refining replaces the same comment. Saves make
 one write attempt and verify it by reading the comment back, refusing on concurrent edits,
 duplicate records, or a damaged record instead of retrying. A refinement comment is never read
-as the node's plan comment. This is internal Linear persistence only for now — no public refine
-command, no planning-time consumption yet, and GitHub objectives are unsupported until their
-carrier lands. See [Objectives — Node refinements](../objectives.md#node-refinements-linear-project-objectives-only).
+as the node's plan comment. Refinements are authored with `perk objective refine` /
+`/objective-refine` and saved by an approved `plan_review` or the human's
+`/objective-refinement-save` — **Linear only**: a GitHub objective store refuses before
+authentication, network, sync or launch, and again at save, until the GitHub carrier lands.
+Planning sessions do not yet consume refinements automatically. See
+[Objectives — Node refinements](../objectives.md#node-refinements-linear-project-objectives-only).
 
 ### The dream-report companion
 

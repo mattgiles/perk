@@ -43,6 +43,7 @@ import {
   stringArrayParam,
   stringParam,
 } from "../../substrate/toolParams.ts";
+import { branchOf } from "../../substrate/workflowState.ts";
 import { type ReportTarget, report } from "../../surfaces/report.ts";
 import {
   EXPLORE_ASSIGNMENT_KEY,
@@ -56,6 +57,7 @@ import {
 } from "../../waves/reportWave.ts";
 import { type DraftReviewRuntime, draftReviewMutationRefusal } from "./draftReviewActivation.ts";
 import { fetchObjectiveUrl } from "./objective.ts";
+import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
 
 // ------------------------------------------------------------------- the tool-boundary decode
 
@@ -503,6 +505,9 @@ export function installObjectivePlanningBindings(
         )("objective_node needs { objective: <id>, node: <id> }", "bad_input");
       }
       const fail = failFor(ctx, "objective-plan", "objective_node");
+      // A refinement session never claims or advances a node — independent of tool visibility.
+      if (isRefinementSession(branchOf(ctx)))
+        return fail(refinementStageRefusal("objective_node"), "wrong_stage");
       const mutation = await reviews.mutateAsync(ctx, "target-changed", (session) =>
         transitionObjectiveNode(decoded, {
           backend: coldDoorObjectiveNodeBackend(pi, ctx),
@@ -729,6 +734,10 @@ export function installObjectivePlanningBindings(
       "Start the objective plan factory: select the next node and author a bounded plan. " +
       "Pass an objective number (else the active objective) and optional --node ID.",
     handler: async (args, ctx) => {
+      if (isRefinementSession(branchOf(ctx))) {
+        report(ctx, "objective-plan", "warning", refinementStageRefusal("/objective-plan"));
+        return;
+      }
       const { number, node } = parseCommandArgs(args ?? "");
       const objective = number ?? activeObjective(pi, ctx);
       if (objective === null) {

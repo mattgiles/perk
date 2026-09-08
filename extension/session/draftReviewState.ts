@@ -46,11 +46,12 @@ export type InvalidationReason = (typeof INVALIDATION_REASONS)[number];
 export type UncertaintyReason = (typeof UNCERTAINTY_REASONS)[number];
 export type ReviewRefusal = (typeof REVIEW_REFUSALS)[number];
 export type StatusDiagnostic = (typeof STATUS_DIAGNOSTICS)[number];
-export type ReviewSubject = "plan" | "objective" | "gist";
+export type ReviewSubject = "plan" | "objective" | "gist" | "refinement";
 export const REVIEW_OPERATIONS = {
   plan: "plan-save",
   objective: "objective-create",
   gist: "gist-create",
+  refinement: "refinement-save",
 } as const;
 export type ReviewSource =
   | { kind: "artifact" }
@@ -243,7 +244,7 @@ export function decodeDraftReview(raw: unknown): DraftReviewRecord | null {
     if (r.schema_version !== 1) return null;
     const c = object(r.correlation);
     keys(c, ["review_id", "subject", "source", "source_digest", "target"]);
-    const subject = member(c.subject, ["plan", "objective", "gist"]);
+    const subject = member(c.subject, ["plan", "objective", "gist", "refinement"]);
     const source = sourceOf(c.source);
     const source_digest = digest(c.source_digest);
     if (

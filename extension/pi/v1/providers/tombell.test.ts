@@ -186,6 +186,38 @@ test("tombell selected + objective-plan factory session: the bridge context inje
   }
 });
 
+test("tombell selected + objective-refine session: no injection, AND a bridge copy carried in from an earlier plan turn is stripped (stage-aware liveness)", async () => {
+  const cwd = scaffoldRepo({
+    handoff: { runId: "01RID", mode: "read-only", stage: "objective-refine" },
+  });
+  selectTombell(cwd);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    sessionManager: SessionManager.inMemory(cwd),
+  });
+  try {
+    assert.equal(
+      (await h.emitBeforeAgentStart()).some(
+        (m) => m.customType === PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE,
+      ),
+      false,
+      "no bridge context in a refinement session",
+    );
+    const surviving = await h.emitContext([
+      { customType: PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE, content: "[PLAN ADAPTER: TOMBELL]\nstale" },
+      { role: "user", content: "a normal message" },
+    ]);
+    assert.deepEqual(
+      surviving.map((m) => m.customType ?? m.role),
+      ["user"],
+      "the provider is still selected, but the copy is stale in a refinement session",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
 test("isTombellPlanModeEnabled: latest plan-mode-state entry wins; malformed ⇒ false", () => {
   const entry = (enabled: unknown): BranchEntry => ({
     type: "custom",

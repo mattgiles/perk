@@ -57,6 +57,12 @@ export interface ReviewSubject {
   detailsExtra: Record<string, unknown>;
   /** The defensively-unreachable no-source save arm's error string. */
   noSourceError: string;
+  /**
+   * Where an approval persists, as named in the approve verdict ("GitHub" when absent — the
+   * plan/objective/gist arms' shared default). A subject whose save lands elsewhere names its
+   * actual destination so the human's authorization menu never misstates the backend.
+   */
+  saveDestination?: string;
 }
 
 /** The plan-arm descriptor (the plan-flavor mappers in planReview.ts delegate with it). */
@@ -407,7 +413,8 @@ export interface PlanReviewUI {
 
 /**
  * Derive a subject's verdict options (plain text — charter D3: no emoji outside the footer);
- * only the skip label's manual-failsafe command varies by subject. `VERDICT_IMPLEMENT_HERE`
+ * the approve label's destination and the skip label's manual-failsafe command vary by subject.
+ * `VERDICT_IMPLEMENT_HERE`
  * stays a standalone constant on purpose — the no-save exit is plan-arm-only by contract
  * (§8.23), never part of the descriptor.
  */
@@ -417,7 +424,7 @@ export function verdictsFor(subject: ReviewSubject): {
   skip: string;
 } {
   return {
-    approve: "Approve — auto-save to GitHub",
+    approve: `Approve — auto-save to ${subject.saveDestination ?? "GitHub"}`,
     deny: "Deny — send feedback for revision",
     skip: `Skip — decide later (manual ${subject.failsafeCmd})`,
   };

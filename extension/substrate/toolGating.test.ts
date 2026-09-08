@@ -16,11 +16,16 @@ import {
 } from "../testing/harness.ts";
 import {
   FFF_SEARCH_TOOLS,
+  gatedToolsFor,
   isReadOnlyBashCommand,
+  LINEAR_READ_TOOLS,
   READ_ONLY_CONTEXT,
   READ_ONLY_TOOLS,
+  REFINEMENT_READ_ONLY_CONTEXT,
+  REFINEMENT_READ_ONLY_TOOLS,
   registerToolGating,
   SUBAGENT_CHILD_TOOLS,
+  WEB_RESEARCH_TOOLS,
 } from "./toolGating.ts";
 
 type Hook = (
@@ -544,4 +549,114 @@ test("mode-context is once-only per SELECTED BRANCH: a copy compaction summarize
   } finally {
     h.dispose();
   }
+});
+
+test("REFINEMENT_READ_ONLY_TOOLS: the exact refinement gate-ON selection (no claim/other-draft/save/spawn)", () => {
+  assert.deepEqual(REFINEMENT_READ_ONLY_TOOLS, [
+    "read",
+    "grep",
+    "find",
+    "ls",
+    "bash",
+    "ask_user_question",
+    "plan_review",
+    "objective_refinement_draft",
+    ...WEB_RESEARCH_TOOLS,
+    ...LINEAR_READ_TOOLS,
+    ...FFF_SEARCH_TOOLS,
+  ]);
+  for (const forbidden of [
+    "objective_node",
+    "plan_draft",
+    "objective_draft",
+    "gist_draft",
+    "plan_save",
+    "objective_save",
+    "gist_save",
+    "explore_objective_node",
+    "subagent",
+    "edit",
+    "write",
+  ]) {
+    assert.equal(REFINEMENT_READ_ONLY_TOOLS.includes(forbidden), false, forbidden);
+  }
+  // Existing stages never gain the refinement draft: it is absent from READ_ONLY_TOOLS.
+  assert.equal(READ_ONLY_TOOLS.includes("objective_refinement_draft"), false);
+  assert.equal(gatedToolsFor("objective-refine"), REFINEMENT_READ_ONLY_TOOLS);
+  for (const stage of [null, "plan", "objective-plan", "objective-author", "gist-author", "bogus"])
+    assert.equal(gatedToolsFor(stage), READ_ONLY_TOOLS, String(stage));
+});
+
+test("gate ON in the refinement stage: the active set, the tool_call backstop and the mode flavor follow the stage", async () => {
+  const h = gateFixture(() => false);
+  // An already-gated UNBOUND session (default flavor installed) that then enters refinement.
+  h.gate.syncFromState("read-only", undefined);
+  assert.deepEqual(h.installed.at(-1), READ_ONLY_TOOLS);
+  assert.equal((await h.call("before_agent_start"))?.message?.content, READ_ONLY_CONTEXT);
+  assert.equal(
+    (await h.call("tool_call", { toolName: "objective_refinement_draft", input: {} }))?.block,
+    true,
+    "the refinement draft is NOT allowlisted outside the refinement stage",
+  );
+  assert.equal(await h.call("tool_call", { toolName: "objective_node", input: {} }), undefined);
+
+  h.gate.syncFromState("read-only", "objective-refine");
+  assert.deepEqual(h.installed.at(-1), REFINEMENT_READ_ONLY_TOOLS);
+  assert.equal(
+    await h.call("tool_call", { toolName: "objective_refinement_draft", input: {} }),
+    undefined,
+  );
+  assert.equal(await h.call("tool_call", { toolName: "plan_review", input: {} }), undefined);
+  assert.equal(await h.call("tool_call", { toolName: "read", input: {} }), undefined);
+  for (const toolName of [
+    "objective_node",
+    "plan_draft",
+    "objective_draft",
+    "gist_draft",
+    "plan_save",
+    "objective_save",
+    "gist_save",
+    "subagent",
+    "edit",
+    "write",
+    "foreign_mutator",
+  ]) {
+    assert.equal(
+      (await h.call("tool_call", { toolName, input: {} }))?.block,
+      true,
+      `${toolName} blocked in the gated refinement stage (late-activation backstop)`,
+    );
+  }
+  assert.equal(
+    (await h.call("tool_call", { toolName: "bash", input: { command: "touch x" } }))?.block,
+    true,
+    "no new bash allowance",
+  );
+  // The flavor: names the actual writer with a distinct marker; the default marker is not a
+  // substring, so a prior default copy on the branch never masks the refinement flavor.
+  const injected = (await h.call("before_agent_start"))?.message?.content;
+  assert.equal(injected, REFINEMENT_READ_ONLY_CONTEXT);
+  assert.ok(injected?.includes("[READ-ONLY REFINEMENT MODE]"));
+  assert.ok(injected?.includes("objective_refinement_draft is the sole sanctioned write"));
+  assert.equal(injected?.includes("plan_draft"), false);
+  assert.equal(REFINEMENT_READ_ONLY_CONTEXT.includes("[READ-ONLY MODE]"), false);
+  assert.ok(READ_ONLY_CONTEXT.includes("plan_draft is the sole sanctioned write"));
+
+  // Gate ON: only the current flavor survives in model context — the stale plan_draft-only block
+  // is dropped; user content and marker-less mode entries are untouched.
+  const stale = { customType: "perk:mode-context", content: READ_ONLY_CONTEXT };
+  const current = { customType: "perk:mode-context", content: REFINEMENT_READ_ONLY_CONTEXT };
+  const user = { role: "user", content: "please [READ-ONLY MODE] keep me" };
+  const bare = { customType: "perk:mode-context" };
+  assert.deepEqual(await h.call("context", { messages: [stale, current, user, bare] }), {
+    messages: [current, user, bare],
+  });
+  assert.equal(await h.call("context", { messages: [current, user, bare] }), undefined);
+
+  // Gate OFF: both flavors strip (the injected type wholesale + the marker-bearing user echoes).
+  h.gate.exit();
+  const off = await h.call("context", {
+    messages: [stale, current, { role: "user", content: "[READ-ONLY REFINEMENT MODE] echo" }, user],
+  });
+  assert.deepEqual(off, { messages: [] });
 });

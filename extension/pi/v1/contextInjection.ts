@@ -69,27 +69,38 @@ interface StrippableMessage {
 }
 
 /**
- * The stale-strip filter (module-private — tests drive it through the registered hook): drop the
- * owned customType; drop `role === "user"` messages whose string content or text-part array
- * carries ANY owned marker (every `flavors` key); keep everything else (non-user roles are never
- * marker-scanned — a cold launch's user prompt is the only leak surface the markers ride).
+ * The stale-strip filter (module-private — tests drive it through the registered hook). Two
+ * scopes over one scan: `all-owned` (the context is no longer live) drops EVERY owned-customType
+ * message and any `role === "user"` message whose string content or text-part array carries one
+ * of `markers` (every `flavors` key); `marked-owned` (the context is live but a different flavor
+ * is selected) drops only owned copies and user turns carrying one of `markers` (the stale
+ * flavors), so the selected flavor's own copy survives. Non-user roles are never marker-scanned
+ * — a cold launch's user prompt is the only leak surface the markers ride.
  */
-function stripStaleMessages<T>(messages: T[], customType: string, markers: readonly string[]): T[] {
+function stripStaleMessages<T>(
+  messages: T[],
+  customType: string,
+  markers: readonly string[],
+  scope: "all-owned" | "marked-owned",
+): T[] {
   const hasMarker = (text: string): boolean => markers.some((m) => text.includes(m));
-  return messages.filter((m) => {
-    const msg = m as StrippableMessage;
-    if (msg.customType === customType) return false;
-    if (msg.role !== "user") return true;
-    const content = msg.content;
-    if (typeof content === "string") return !hasMarker(content);
+  const carries = (content: unknown): boolean => {
+    if (typeof content === "string") return hasMarker(content);
     if (Array.isArray(content)) {
-      return !content.some(
+      return content.some(
         (c) =>
           (c as { type?: string; text?: string }).type === "text" &&
           hasMarker((c as { text?: string }).text ?? ""),
       );
     }
-    return true;
+    return false;
+  };
+  return messages.filter((m) => {
+    const msg = m as StrippableMessage;
+    if (msg.customType === customType)
+      return scope === "marked-owned" ? !carries(msg.content) : false;
+    if (msg.role !== "user") return true;
+    return !carries(msg.content);
   });
 }
 
@@ -104,9 +115,12 @@ function stripStaleMessages<T>(messages: T[], customType: string, markers: reado
  *   not) → guarded projection read (a failed read returns — nothing constructed, nothing
  *   injected) → a live owned copy of the selected marker suppresses (the content thunk is never
  *   invoked) → inject `{ customType, content, display: false }`.
- * - `context`: guarded branch read (a failed read degrades to `[]` and proceeds) → keep
- *   everything while `spec.live`; otherwise strip the owned customType and any user turn
- *   carrying an owned marker.
+ * - `context`: guarded branch read (a failed read degrades to `[]` and proceeds) → when not
+ *   `spec.live`, strip the owned customType and any user turn carrying an owned marker; while
+ *   live, `spec.select` names the current flavor and every OTHER flavor's copy is stale — an
+ *   owned copy or user turn carrying a non-selected marker is stripped (a stage transition
+ *   under a shared customType must not leave the previous flavor's instructions directing the
+ *   model beside the new one); a live spec selecting nothing this turn keeps everything.
  */
 export function installInjectedContext<K extends string>(
   pi: ExtensionAPI,
@@ -149,7 +163,15 @@ export function installInjectedContext<K extends string>(
     } catch {
       branch = [];
     }
-    if (spec.live(ctx, branch)) return;
-    return { messages: stripStaleMessages(event.messages, spec.customType, markers) };
+    if (!spec.live(ctx, branch))
+      return {
+        messages: stripStaleMessages(event.messages, spec.customType, markers, "all-owned"),
+      };
+    const selected = spec.select(ctx, branch);
+    if (selected === null) return;
+    const stale = markers.filter((m) => m !== selected);
+    if (stale.length === 0) return;
+    const kept = stripStaleMessages(event.messages, spec.customType, stale, "marked-owned");
+    return kept.length === event.messages.length ? undefined : { messages: kept };
   });
 }

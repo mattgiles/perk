@@ -46,6 +46,7 @@ Which doors are available for each registry stage?
 | `land` | read-write | yes | `/land` | yes | `perk pr land` | — |
 | `learn` | read-write | yes | `/learn` | yes | `perk learn` | — |
 | `audit` (dev-only) | read-only | — | — | yes | `perk-dev audit judge` | — |
+| `objective-refine` | read-only | yes | `/objective-refine` | yes | `perk objective refine` | — |
 | `stack-review` | read-write | — | — | yes | `perk objective stack review` | — |
 {/* END perk stage matrix */}
 
@@ -57,6 +58,9 @@ Which doors are available for each registry stage?
   `/gist-author` or `/objective-author` command. Their direct launchers are cold.
 - `/implement` is an in-worktree context refresh. Fresh or cross-worktree implementation starts
   with `perk implement`.
+- `objective-refine` is an isolated advisory stage (Linear only): it has no predecessor or
+  successor in the plan graph, never creates a plan or claims a node, and its warm door only
+  enters an unbound session.
 - `address` is the only stage available through all three door classes.
 - Cold-remote dispatch is deliberately limited to the bounded `implement` and `address` stages.
 - `audit` is an isolated, dev-only read-only stage reached through `perk-dev`, not the operator

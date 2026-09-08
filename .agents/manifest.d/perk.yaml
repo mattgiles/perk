@@ -51,6 +51,8 @@ skills:
   - source: perk
     name: perk-objective-reconcile
   - source: perk
+    name: perk-objective-refine
+  - source: perk
     name: perk-objective-replan
   - source: perk
     name: perk-objective-review-browser

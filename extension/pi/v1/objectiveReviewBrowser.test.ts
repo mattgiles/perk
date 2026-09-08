@@ -684,7 +684,9 @@ test("/objective-review-browser: plannotator absent → the pinned provider-sele
 });
 
 test("/objective-review-browser: wrong/absent stage → the stage-gate refusal, nothing executed", async () => {
-  for (const stage of ["plan", undefined]) {
+  // `objective-refine` rides the same gate: a refinement session never routes an (old, valid)
+  // objective draft into the objective browser door.
+  for (const stage of ["plan", "objective-refine", undefined]) {
     const cwd = scaffoldRepo({
       handoff: { runId: "01RID", mode: "read-write", ...(stage !== undefined ? { stage } : {}) },
     });
