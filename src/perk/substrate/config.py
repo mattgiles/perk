@@ -16,7 +16,7 @@ import tempfile
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BeforeValidator, Field, field_validator, model_validator
 
@@ -559,6 +559,59 @@ def effective_pi_agent_dir(repo_root: Path) -> Path | None:
             f"pi.agent_dir: cannot expand home directory in {value!r}: {exc}"
         ) from exc
     return path if path.is_absolute() else main_root / path
+
+
+@dataclass(frozen=True)
+class PiAgentDir:
+    """The agent dir a cold-local launch hands Pi, tagged with which precedence arm chose it.
+
+    ``source`` is ``"env"`` for a non-blank ``PI_CODING_AGENT_DIR``, ``"config"`` for the main
+    checkout's `[pi] agent_dir`, ``"default"`` for pi's own ``~/.pi/agent``.
+    """
+
+    path: Path
+    source: Literal["env", "config", "default"]
+
+
+def launch_pi_agent_dir(repo_root: Path) -> PiAgentDir | None:
+    """Resolve the agent dir a cold-local launch hands Pi — the ONE precedence implementation.
+
+    ``launch_stage`` consumes this for env injection + the lock sweep, and the init/doctor
+    pieces that act on files *inside* the agent dir (pi-subagents' ``extensions/subagent/
+    config.json``, the user-scope ``settings.json``) consume the same resolver, so they act on
+    exactly the store a perk session's engine reads. Precedence: a non-blank
+    ``PI_CODING_AGENT_DIR`` (blank inherited values are dropped by the launch env builder, so
+    they are absent here too; pi's native ``~`` expansion is retained) → the main checkout's
+    `[pi] agent_dir` via :func:`effective_pi_agent_dir` → ``~/.pi/agent``.
+
+    Returns ``None`` when no directory is resolvable: ``Path.home()`` / ``expanduser()`` raising
+    ``RuntimeError`` (no resolvable home, an unknown ``~user``) is caught here and never
+    propagated — every caller is fail-open on it. ``ConfigError`` / ``TOMLDecodeError`` from the
+    config arm propagate unchanged: each caller owns its own posture for a broken config.
+    """
+    env = os.environ.get("PI_CODING_AGENT_DIR", "")
+    if env.strip():
+        try:
+            return PiAgentDir(Path(env).expanduser(), "env")
+        except RuntimeError:
+            return None
+    configured = effective_pi_agent_dir(repo_root)
+    if configured is not None:
+        return PiAgentDir(configured, "config")
+    return default_pi_agent_dir()
+
+
+def default_pi_agent_dir() -> PiAgentDir | None:
+    """The ``default`` arm of :func:`launch_pi_agent_dir` on its own: pi's ``~/.pi/agent``.
+
+    Exposed for the launch fallback when the config arm raises (a broken main-checkout config
+    warns and launches against the default store) so that arm shares this one resolution rather
+    than re-deriving it. ``None`` when ``Path.home()`` finds no resolvable home.
+    """
+    try:
+        return PiAgentDir(Path.home() / ".pi" / "agent", "default")
+    except RuntimeError:
+        return None
 
 
 def load_committed_compaction(repo_root: Path) -> dict[str, object]:
