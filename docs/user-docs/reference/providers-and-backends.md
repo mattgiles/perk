@@ -77,8 +77,15 @@ Draft/manual-save/node entries and first-party replacement/writeback require a v
 claim; first-party editor waits release it. Missing identity is not an unclaimed save fallback.
 All Plannotator tool/browser completions and chooser delegations verify intent before effects.
 They share subject-specific bound saves and delivery expectations: actual toolCallId plus exact
-result content, or a code-authored browser HTML receipt marker outside untrusted feedback.
-Only an exact later persisted entry acknowledges delivery; send/return is not acknowledgment.
+result content, or — for browser decisions — one canonical user text block formed from the
+feedback plus a code-authored HTML receipt marker after the final untrusted-feedback delimiter
+(the single block Pi persists for a sent user message), recorded before the send and sent
+unchanged. Only exact persisted evidence acknowledges delivery — a later entry whose whole
+content matches the recorded expectation; send/return or a marker alone is not acknowledgment.
+This applies to new dispatches only: an earlier review stuck in `dispatch`/`uncertain` is not
+migrated or automatically consumed — follow
+[Reconcile a draft-review stop](../how-to/reconcile-a-draft-review-stop.md), and never retry a
+confirmed approval save merely because delivery confirmation failed.
 Stale decisions carry only diagnostic DATA, never current-draft apply/fold/save instructions.
 Readiness fallback requires verified invalidation: degraded, or the same review's already recorded
 handshake/subscription failure. Transport failures reach one fallback notice before local cleanup,

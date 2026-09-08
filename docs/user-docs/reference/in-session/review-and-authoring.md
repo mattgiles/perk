@@ -314,11 +314,17 @@ identical text, can only produce stale diagnostic DATA. Source/target drift duri
 stops the save; a backend that already started is never automatically retried.
 
 The guarantee is at-most-once participating machine-local dispatch, not exactly-once delivery or
-power-loss durability. Browser feedback carries a code-authored HTML receipt marker outside the
-untrusted feedback. Its full content expectation is recorded before one idle/followUp send, then
-the claim is released. Only an exact persisted tool/user entry confirms delivery;
-returning a tool result or queueing a message does not. Abort/shutdown checks evidence first and
-otherwise retains an uncertain stop. Session/run changes do not replay or acknowledge old feedback.
+power-loss durability. Browser feedback plus a code-authored HTML receipt marker (after the final
+untrusted-feedback delimiter) forms one canonical user text block — the same single block Pi
+persists for a sent user message. Its full content expectation is recorded against that block
+before one idle/followUp send of the identical content, then the claim is released. Only exact
+persisted evidence confirms delivery — a tool/user entry whose whole content matches the recorded
+expectation; returning a tool result, queueing a message, or a marker alone does not.
+Abort/shutdown checks evidence first and otherwise retains an uncertain stop. Session/run changes
+do not replay or acknowledge old feedback. This applies to new dispatches: a review already stuck
+in `dispatch`/`uncertain` is not migrated or automatically consumed — follow
+[Reconcile a draft-review stop](../../how-to/reconcile-a-draft-review-stop.md), and never retry a
+confirmed approval save merely because delivery confirmation failed.
 Its stale-result format preserves the reviewed digest and verbatim feedback as diagnostic DATA,
 not approval or instructions to apply changes to the current draft. Refusals preserve confirmed
 save/gate facts and prohibit blind save retry. No startup/reload discovery or recovery door is added.

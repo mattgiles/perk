@@ -30,7 +30,17 @@ export function staleDraftReviewResult(
   };
 }
 
-/** The marker is code-authored outside reviewer DATA; digest exactly the returned/sent blocks. */
+/**
+ * The marker is code-authored outside reviewer DATA; digest exactly the returned/sent blocks.
+ *
+ * User-carrier content is canonicalized to the ONE text block Pi persists: `sendUserMessage`
+ * joins every text block with "\n" before its prompt/follow-up path stores a single block, so the
+ * expectation must be recorded against that same representation and the bytes sent unchanged —
+ * a separately appended marker block would never match its own persisted evidence. Text is
+ * joined verbatim (no trimming), and the marker still lands after the final code-authored
+ * `</untrusted_reviewer_feedback>` delimiter. Tool-carrier content is untouched; its marker rides
+ * `details.draft_review_dispatch`.
+ */
 export function draftReviewDeliveryResult(
   result: ToolResult,
   carrier: DeliveryCarrier,
@@ -42,7 +52,12 @@ export function draftReviewDeliveryResult(
     content:
       carrier.kind === "tool"
         ? result.content
-        : [...result.content, { type: "text", text: marker }],
+        : [
+            {
+              type: "text",
+              text: [...result.content.map((block) => block.text), marker].join("\n"),
+            },
+          ],
     details:
       carrier.kind === "tool"
         ? { ...result.details, draft_review_dispatch: marker }
