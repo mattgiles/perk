@@ -48,16 +48,28 @@ subagents** — you review and report.
    | `pr` | Positive safe integer, exactly equal to the task's expected PR number |
    | `branch`, `base_ref`, `head_ref` | Each a string containing at least one non-whitespace character |
    | `title` | String containing at least one non-whitespace character |
-   | `body`, `diff` | Each a string; empty and whitespace-only strings are permitted |
-   | `plan_body` | String or `null`; additionally, `plan-fidelity` requires a string containing at least one non-whitespace character |
+   | `context_dir` | String containing at least one non-whitespace character |
+   | `body`, `diff` | Each an object whose `path` is a string containing at least one non-whitespace character and whose `bytes`, `lines`, `max_line_bytes` are non-negative safe integers |
+   | `plan_body` | Such an object or exactly `null`; additionally, `plan-fidelity` requires a non-null object whose file contains at least one non-whitespace character |
 
    Whitespace checks do not rewrite accepted text. Ignore unknown extra fields for acceptance.
    A missing or wrongly typed required field blocks the lane. In particular, missing `plan_body`
-   is malformed for every lane; explicit `null` or blank string is valid optional evidence for
-   non-plan-fidelity lanes. No other listed field is optional. `pr` equality is the PR-identity
-   check; branch/ref strings are required metadata, not another authority lookup. Do not compare
-   them to the current local branch, infer a different PR, add head-SHA binding, or fetch again
-   to corroborate them.
+   is malformed for every lane; explicit `null` (or a file with blank text) is valid optional
+   evidence for non-plan-fidelity lanes. No other listed field is optional. `pr` equality is the
+   PR-identity check; branch/ref strings are required metadata, not another authority lookup. Do
+   not compare them to the current local branch, infer a different PR, add head-SHA binding, or
+   fetch again to corroborate them.
+
+   **Consuming the context.** `body`, `diff` and `plan_body` are **file references**
+   `{path, bytes, lines, max_line_bytes}` into `context_dir` (perk's gitignored scratch dir) —
+   the text never rides stdout. `read` `body.path` and `plan_body.path`; index the diff with
+   `grep -n '^diff --git' <diff.path>` (and `grep -n '^@@'` for hunks) and page it with `read`
+   (`offset`/`limit`) — never dump a whole file into your session. **Oversized lines:** when a
+   reference's `max_line_bytes` exceeds 51,200, `read` refuses the page containing that line;
+   locate it with `grep -n` and view it in slices with `sed -n '<N>p' <path> | head -c 51200`
+   (Pi's own hint) — a long line is never by itself a reason to block. A referenced file that
+   cannot be read (missing, unreadable) blocks the lane; a failed or unparseable command blocks
+   the lane.
 
    `diff_source` (`"github"` or `"local-git"`) is optional metadata outside the acceptance
    table — when it is `"local-git"`, the diff was rendered locally because GitHub refused it as
@@ -170,8 +182,8 @@ subagents** — you review and report.
      diff does not deliver** — the "nothing forgotten" check. A material unimplemented plan item is
      an ordinary finding, subject to the same binary bar.
 
-   When `plan_body` is **null or blank**, return `blocked`: conformance cannot be verified.
-   Missing `plan_body` already fails context acceptance for every angle. An empty diff is not
+   When `plan_body` is **`null`, or its file is blank**, return `blocked`: conformance cannot be
+   verified. Missing `plan_body` already fails context acceptance for every angle. An empty diff is not
    by itself a block: assess it, including whether it delivers the plan.
 
    If your angle is not plan-fidelity, skip this pass — the plan-fidelity sibling owns it.

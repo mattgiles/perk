@@ -16,10 +16,11 @@ import {
   ADVERSARIAL_REVIEW_REPORT_SCHEMA,
   type AdversarialReviewAngle,
   buildAdversarialReviewAssignments,
+  collectAdversarialReviewWave,
   isAdversarialReviewAngle,
   startAdversarialReviewWave,
 } from "./adversarialReviewWave.ts";
-import { reportWaveOver } from "./reportWave.ts";
+import { type ReportWave, type ReportWaveRef, reportWaveOver } from "./reportWave.ts";
 
 const TWO_ANGLES: AdversarialReviewAngle[] = ["claimed-intent", "correctness"];
 const PREFLIGHT_OK = async () => ({ ok: true }) as const;
@@ -32,7 +33,31 @@ function okEntry(key: string): unknown {
     key,
     ok: true,
     error: null,
-    report: { angle: key, summary: "solid", findings: [], fyi: [], streamed: false },
+    report: {
+      angle: key,
+      summary: "solid",
+      findings: [],
+      fyi: [],
+      streamed: false,
+      blocked: false,
+    },
+  };
+}
+
+/** A schema-valid BLOCKED entry: the lane could not complete its required review. */
+function blockedEntry(key: string, fyi: string[]): unknown {
+  return {
+    key,
+    ok: true,
+    error: null,
+    report: {
+      angle: key,
+      summary: "could not review",
+      findings: [],
+      fyi,
+      streamed: false,
+      blocked: true,
+    },
   };
 }
 
@@ -160,11 +185,12 @@ test("ADVERSARIAL_REVIEW_REPORT_SCHEMA pins the verdict-free report shape (close
   const s = ADVERSARIAL_REVIEW_REPORT_SCHEMA as {
     additionalProperties: boolean;
     required: string[];
-    properties: Record<string, unknown> & { angle: { enum: string[] } };
+    properties: Record<string, unknown> & { angle: { enum: string[] }; blocked: { type: string } };
     if?: unknown;
+    allOf: unknown[];
   };
   assert.equal(s.additionalProperties, false);
-  assert.deepEqual(s.required, ["angle", "summary", "findings", "fyi", "streamed"]);
+  assert.deepEqual(s.required, ["angle", "summary", "findings", "fyi", "streamed", "blocked"]);
   assert.deepEqual(s.properties.angle.enum, [
     "claimed-intent",
     "correctness",
@@ -172,10 +198,46 @@ test("ADVERSARIAL_REVIEW_REPORT_SCHEMA pins the verdict-free report shape (close
     "quality",
     "ponytail",
   ]);
-  // NO verdict field and no if/then conditional — the human triages, nothing derives a verdict.
+  // NO verdict field — the human triages, nothing derives a verdict. `blocked` is a coverage
+  // flag, not a verdict: the only conditional is its empty-findings/nonblank-fyi arm.
   assert.equal("verdict" in s.properties, false);
   assert.equal(s.if, undefined);
-  assert.deepEqual(Object.keys(s.properties), ["angle", "streamed", "summary", "findings", "fyi"]);
+  assert.equal(s.properties.blocked.type, "boolean");
+  assert.equal(s.allOf.length, 1);
+  assert.deepEqual(Object.keys(s.properties), [
+    "angle",
+    "streamed",
+    "blocked",
+    "summary",
+    "findings",
+    "fyi",
+  ]);
+});
+
+test("ADVERSARIAL_REVIEW_REPORT_SCHEMA blocked arm: empty findings + at least one nonblank fyi (the pr-review conditional shape)", () => {
+  const validator = Compile(ADVERSARIAL_REVIEW_REPORT_SCHEMA);
+  const base = { angle: "claimed-intent", summary: "s", findings: [], fyi: [], streamed: false };
+  const finding = {
+    path: "a.ts",
+    line: 1,
+    severity: "major",
+    confidence: "high",
+    body: "fix",
+  };
+  for (const [overrides, valid] of [
+    [{ blocked: false }, true],
+    [{ blocked: false, findings: [finding] }, true],
+    [{ blocked: true, fyi: ["context fetch failed"] }, true],
+    [{ blocked: true, fyi: ["  unreadable diff.patch\n  "] }, true],
+    [{ blocked: true, fyi: [] }, false],
+    [{ blocked: true, fyi: [""] }, false],
+    [{ blocked: true, fyi: [" \n\t"] }, false],
+    [{ blocked: true, fyi: ["blocker", " "] }, false],
+    [{ blocked: true, fyi: ["blocker"], findings: [finding] }, false],
+    [{ blocked: true, fyi: null }, false],
+    [{ blocked: true, fyi: [1] }, false],
+  ] as const)
+    assert.equal(validator.Check({ ...base, ...overrides }), valid, JSON.stringify(overrides));
 });
 
 test("ADVERSARIAL_REVIEW_REPORT_SCHEMA finding rows: closed, required-nullable line, optional side, the triage enums", () => {
@@ -260,13 +322,32 @@ test("the agent def completes via structured_output with the schema's required f
 
 test("streamed is a required boolean, not a truthy default", () => {
   const validator = Compile(ADVERSARIAL_REVIEW_REPORT_SCHEMA);
-  const base = { angle: "claimed-intent", summary: "solid", findings: [], fyi: [] };
+  const base = { angle: "claimed-intent", summary: "solid", findings: [], fyi: [], blocked: false };
   for (const streamed of [true, false]) {
     assert.equal(validator.Check({ ...base, streamed }), true);
   }
   assert.equal(validator.Check(base), false);
   for (const streamed of [null, "false", 0, 1]) {
     assert.equal(validator.Check({ ...base, streamed }), false);
+  }
+});
+
+test("blocked is a required boolean, not a defaulted false", () => {
+  // The `streamed` discipline: a lane that omits or mistypes `blocked` is engine-invalid, so
+  // "could not review" can never be silently read as "reviewed, nothing found".
+  const validator = Compile(ADVERSARIAL_REVIEW_REPORT_SCHEMA);
+  const base = {
+    angle: "claimed-intent",
+    summary: "solid",
+    findings: [],
+    fyi: [],
+    streamed: false,
+  };
+  assert.equal(validator.Check({ ...base, blocked: false }), true);
+  assert.equal(validator.Check({ ...base, blocked: true, fyi: ["blocker"] }), true);
+  assert.equal(validator.Check(base), false);
+  for (const blocked of [null, "false", "true", 0, 1]) {
+    assert.equal(validator.Check({ ...base, blocked }), false, JSON.stringify(blocked));
   }
 });
 
@@ -416,4 +497,88 @@ test("startAdversarialReviewWave: duplicate angles throw at start time (programm
     }),
     /duplicate lane key 'claimed-intent'/,
   );
+});
+
+// ------------------------------------------------------------- collectAdversarialReviewWave
+
+async function startedWave(
+  aggregate: unknown[],
+): Promise<{ wave: ReportWave; ref: ReportWaveRef }> {
+  const wave = reportWaveOver(
+    createMemoryWaveAdapter({ aggregate: { state: "complete", value: aggregate } }),
+  );
+  const start = await startAdversarialReviewWave(wave, {
+    angles: TWO_ANGLES,
+    pr: 42,
+    worktree: "/abs/wt",
+    requiredSkillPreflight: PREFLIGHT_OK,
+  });
+  assert.equal(start.ok, true);
+  if (!start.ok) throw new Error("unreachable");
+  return { wave, ref: start.ref };
+}
+
+test("collectAdversarialReviewWave: a blocked: true report is an uncovered lane-failed, never coverage", async () => {
+  const { wave, ref } = await startedWave([
+    okEntry("claimed-intent"),
+    blockedEntry("correctness", [
+      "perk pr review-context exited 1: pr_not_found",
+      "  ",
+      "partial: none",
+    ]),
+    okEntry("ponytail"),
+  ]);
+  const collected = await collectAdversarialReviewWave(wave, ref);
+  assert.equal(collected.kind, "settled");
+  if (collected.kind !== "settled") return;
+  assert.deepEqual(collected.keys, ["claimed-intent", "correctness", "ponytail"]);
+  const result = collected.result;
+  assert.equal(result.complete, false);
+  assert.deepEqual(
+    result.reports.map((r) => r.key),
+    ["claimed-intent", "ponytail"],
+  );
+  // The pr-review detail string byte-for-byte: blank fyi entries dropped, retained ones verbatim.
+  assert.deepEqual(result.failures, [
+    {
+      key: "correctness",
+      reason: "lane-failed",
+      detail: "reviewer blocked:\nperk pr review-context exited 1: pr_not_found\npartial: none",
+    },
+  ]);
+});
+
+test("collectAdversarialReviewWave: an all-clear wave passes through settled and complete", async () => {
+  const { wave, ref } = await startedWave([
+    okEntry("claimed-intent"),
+    okEntry("correctness"),
+    okEntry("ponytail"),
+  ]);
+  const collected = await collectAdversarialReviewWave(wave, ref);
+  assert.equal(collected.kind, "settled");
+  if (collected.kind !== "settled") return;
+  assert.equal(collected.result.complete, true);
+  assert.deepEqual(collected.result.failures, []);
+  assert.equal(collected.result.reports.length, 3);
+  // Drain-once: the second collect answers none (the wave's claim semantics are untouched).
+  assert.deepEqual(await collectAdversarialReviewWave(wave, ref), { kind: "none" });
+});
+
+test("collectAdversarialReviewWave: none and running pass through unchanged", async () => {
+  const noneWave: ReportWave = {
+    start: () => {
+      throw new Error("unused");
+    },
+    run: () => {
+      throw new Error("unused");
+    },
+    collect: async () => ({ kind: "none" }) as const,
+  };
+  const ref = {} as ReportWaveRef;
+  assert.deepEqual(await collectAdversarialReviewWave(noneWave, ref), { kind: "none" });
+  const runningWave: ReportWave = {
+    ...noneWave,
+    collect: async () => ({ kind: "running" }) as const,
+  };
+  assert.deepEqual(await collectAdversarialReviewWave(runningWave, ref), { kind: "running" });
 });

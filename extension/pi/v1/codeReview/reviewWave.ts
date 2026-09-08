@@ -32,6 +32,7 @@ import {
 import { type ReportTarget, report } from "../../../surfaces/report.ts";
 import {
   type AdversarialReviewAngle,
+  collectAdversarialReviewWave,
   isAdversarialReviewAngle,
   startAdversarialReviewWave,
 } from "../../../waves/adversarialReviewWave.ts";
@@ -217,7 +218,8 @@ export interface CollectReviewWaveOk {
  * `no_wave`; unsettled after the grace ⇒ `wave_running` with the pending ref RETAINED; settled
  * ⇒ the wave's drain-once claim returns the typed aggregate — an incomplete wave stays an ok
  * result carrying `complete: false` plus a loud warning naming the uncovered angle(s) (honest
- * incompleteness for the human triage, never papered over).
+ * incompleteness for the human triage, never papered over). A lane that reported `blocked: true`
+ * (it could not complete its required review) is one such uncovered angle, never coverage.
  */
 export async function executeCollectReviewWave(
   state: ReviewWaveState,
@@ -226,7 +228,10 @@ export async function executeCollectReviewWave(
 ): Promise<Result<CollectReviewWaveOk>> {
   const fail = failFor(target, "collect_review_wave");
   const ref = state.pending;
-  const collected = ref === null ? ({ kind: "none" } as const) : await wave.collect(ref);
+  // The flow's lane semantics ride the collect: a `blocked: true` report is reclassified into an
+  // uncovered `lane-failed` before `covered`/`complete` are computed below.
+  const collected =
+    ref === null ? ({ kind: "none" } as const) : await collectAdversarialReviewWave(wave, ref);
   if (collected.kind === "none") {
     return fail("no review wave is running — launch one with start_review_wave", "no_wave");
   }
