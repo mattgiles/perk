@@ -34,6 +34,11 @@ Treat the resulting proof ledger as a reviewable **claims artifact**, not planni
 - Technique labels are assertions too. If a heading says "raise" while the test constructs
   post-crash state instead, the ledger is factually wrong even when the underlying technique is
   stronger. Review headings and evidence links with the same precision as code.
+- **A same-plane imitation of the other plane's serialized shape is not a parity proof — drive
+  the real other plane.** The first end-to-end refinement test built the TS draft envelope *in
+  Python* and called the worker directly, proving nothing about TS↔Python byte identity (the
+  "three lookalikes" trap recurring in test code). A parity claim needs the real producer on one
+  side and the real consumer on the other, with the bytes crossing a real boundary.
 
 ## The test-shape catalog
 
@@ -62,6 +67,16 @@ Each shape below is a reusable pattern, with its landed exemplar:
 - **One physical fixture file consumed by BOTH suites.** The strongest cross-plane invariance pin
   shares the fixture bytes themselves — `tests/parity/dream_report_invariance.json`, with the
   `{repeat, count}` expansion convention for oversize cases (#1996).
+- **Full authoring-loop live harness (pytest ↔ the real other plane over a pipe).**
+  `extension/testing/refinementLoopLive.ts` drives the *real* TS interior — strict artifact import
+  → the draft seam → a scripted deny→revise→approve through the registered review path → the
+  shared save seam — against the canonical Python worker over a pipe handshake (the one faked
+  boundary is `pi.exec`, which hands the staged argv to Python instead of spawning `perk`), and
+  asserts byte identity across the planes; driven once as a subprocess by
+  `tests/test_objective_refine_cmd.py`. This extends the single-render `renderBindingsLive.ts`
+  shape to a whole loop. Byte-ownership discipline: Python is the sole context serializer, TS the
+  sole draft serializer, and digests fence every handoff — the `sha256:`-prefixed session-data
+  digest is deliberately distinct from the codec's bare-hex remote `source_digest`.
 
 Two-roots-era additions (#1740): `cli/plan_selection.select_plan` joins the
 `reconstruct_plan_ref` convergence sites; §8.38 row 5 covers the shared positioner plus the

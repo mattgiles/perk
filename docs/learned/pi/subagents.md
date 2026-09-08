@@ -1,6 +1,6 @@
 ---
 title: perk's subagent orchestration — project vs builtin agents, the two mutation shapes, and agent-def delivery to consumer repos
-read_when: You are spawning a subagent, an agent's model, re-enabling a builtin, supervisor streaming, child token/cache usage, a gated child missing engine tools, /pr-review, /address, or perk agent defs.
+read_when: You are spawning a subagent, an agent's model, re-enabling a builtin, supervisor streaming, child execution profiles/the restriction floor, installed-engine harness, /pr-review, /address, agent defs.
 cluster: subagent-orchestration
 ---
 
@@ -31,30 +31,31 @@ non-obvious rules an agent can't derive from any single file.
 ## Distillation
 
 - Since 0.64.0, `subagents.agentOverrides` applies the FULL override set to custom agents too
-  (the 0.52–0.63 frontmatter-sensitive fill is gone — an override can now displace a
-  frontmatter-pinned `model:`). perk's knob stays `[models.subagents]` + the workflow-level
-  `model` (spawn-time — wins over the def model) — its own section below.
-- Builtins are OFF in every perk repo; the re-enable precedence lives in "Builtins are OFF in
-  every perk repo — and the re-enable precedence".
-- Mutation shapes: the current shape is read-only child + PARENT posts once after reconciling
-  (/address always; /pr-review since its report-only reshape) — the child-posts-own-mutation
-  rule survives as a decision rule with no live example — "Two mutation shapes".
+  (an override can displace a frontmatter-pinned `model:`). perk's knob stays `[models.subagents]`
+  + the workflow-level `model` (spawn-time — wins over the def model) — its own section below.
+- Builtins are OFF in every perk repo (re-enable precedence: "Builtins are OFF in every perk
+  repo — and the re-enable precedence"); `context: "fresh"` = clean session (independent
+  judgment), `"fork"` branches parent history — "Isolation knob".
+- Mutation shapes: read-only child + PARENT posts once after reconciling (/address always;
+  /pr-review since its report-only reshape); child-posts-own-mutation has no live example.
 - Def-level `acceptance` frontmatter (level "none" + reason) immunizes children against
   acceptance auto-inference; `completionGuard: false` is the report-only escape when `bash`
   makes a child count as mutation-capable — "Def-level acceptance and completionGuard".
-- `context: "fresh"` = clean session (independent judgment); `"fork"` branches parent history —
-  "Isolation knob".
 - perk's agent defs (the sorted `PERK_AGENTS` tuple, the SSOT — never restate counts) are
   delivered to consumer repos by `perk init` — "Agent-def delivery to consumer repos".
-- The enabled native bridge supplies `contact_supervisor` without reviewer allowlist edits;
-  bridge-off is a separate unavailable-streaming condition. The turn-yielding parent relay
-  shape is pinned in "Supervisor-channel streaming". `outputSchema` injects an engine-validated
-  `structured_output` completion call (covered lane ⟺ ok ⟺ schema-valid report), and every wave
-  spawn passes the explicit `acceptance: {level: "none"}` disable — "Workflow structured
-  output".
-- A spawned child inherits the parent's read-only gate, but the engine's child-side tools
-  (`structured_output`, …) are load-time-injected and must ride `READ_ONLY_TOOLS` or gate sync
-  deactivates them — "The inherited read-only gate vs the engine's child-side tools".
+- The enabled native bridge supplies `contact_supervisor` without allowlist edits; bridge-off is
+  a separate unavailable-streaming condition ("Supervisor-channel streaming"). `outputSchema`
+  injects an engine-validated `structured_output` call, yet an engine-valid report is not always
+  a completed assessment (the PR-review wave reclassifies a typed `blocked` verdict as
+  `lane-failed` before coverage); every wave spawn disables acceptance — "Workflow structured output".
+- A child inherits the parent's read-only gate (engine child tools must ride `READ_ONLY_TOOLS`);
+  report roles run background with definition-owned async, the writer foreground; the
+  parent-restriction floor — spoof-proof authorization, distinct from advisory `<active_agent>`
+  identity — composes into every gate observation and the `tool_call` backstop — "Native child
+  execution profiles", "Advisory child identity vs the authorization floor".
+- Scripted native children must run the real lifecycle protocol (result watcher, tool-execution
+  events, terminal `agent_end`); probe-setup omissions look like lane failures — "Installed-engine
+  harness craft".
 - Historical: the correction blocks and landed-arc passages (the agent-def delivery arc, the
   reconverge ritual chronicle) record settled history — read them as records, not open work.
 
@@ -175,7 +176,10 @@ source):
   mutation-capable tools is refused at launch. `bash` counts as mutation-capable (only the
   read-only builtin set — read/grep/find/ls and friends — doesn't), so a report-only analyst
   that carries `bash` for evidence-gathering rides the `completionGuard: false` escape, not a
-  tools diet.
+  tools diet. `completionGuard` is a real frontmatter field (the parser reads the literal
+  `"false"`); setting it `false` on the report profiles removes only the engine's *mutation*
+  guard — the `structured_output` contract, perk's read-only floor, and the rubric prohibitions
+  still enforce non-mutation.
 
 ## Subagent context artifacts get swept by `git add -A` (recurring process hazard)
 
@@ -275,7 +279,8 @@ here). (This is an API-behavior reference — see `## Sources`.)
 **departing** from the read-only classifier/reviewer, because resolving merge conflicts requires
 understanding the code and running the repo's checks. Like the reviewer it **fetches its own
 context** read-only via `perk pr review-context --json` and is **driven reactively by the `/submit`
-warm door**. The orchestration that drives it lives in
+warm door**. It is dispatched **foreground** through the engine's structured delegation bridge,
+never RPC/ReportWave. The orchestration that drives it lives in
 `workflow/mergeability-and-conflict-resolution.md`.
 
 ## Agent-def delivery to consumer repos (the realized design)
@@ -458,6 +463,13 @@ parent loop shape:
   A read-only reviewer can stream without changes to its declared capabilities.
   `reason: "progress_update"` is **non-blocking** (returns "queued" immediately; requests capped
   at 64KB).
+
+  A **decision-type** `contact_supervisor` request from a wave lane is a different animal: it is
+  effectively unanswerable at parent-turn latency — two waves timed out at 0/5 covered while a
+  lane awaited "is the run-all evidence available?", and every parent reply found no pending
+  request. Treat a lane that needs a parent decision mid-run as a lane-design smell; reviewer
+  prompts must classify parent-owned execution evidence (`run_ci` results, test runs, builds) as
+  out of scope rather than asking for it (`agents/pr-reviewer.md` says so categorically).
 - **Delivery is an injected message, nothing else** (`intercom/native-supervisor-channel.ts`):
   a parent-side poller (≤500ms) injects each request via
   `pi.sendMessage({customType: SUPERVISOR_REQUEST_MESSAGE_TYPE})` — since the v0.65.0
@@ -560,9 +572,12 @@ session), never run-scoped. Supporting facts:
   and can leave only final reports. Reviewer protocol now requires `streamed: false` and factual
   `fyi` on unavailable streaming; collection visibly warns when such a lane has findings. Now guarded by the report-only
   `subagent-bridge-config` doctor check (`src/perk/convergence/doctor/checks.py`; both scopes —
-  project `.pi/settings.json` + user-global `~/.pi/agent/settings.json` — warn-never-fail, no
-  `--fix`; perk deliberately does NOT reimplement pi's cross-scope merge, so either scope's
-  explicit-off warns).
+  project `.pi/settings.json` + the user scope, i.e. `settings.json` inside the
+  **launch-precedence agent dir** (`src/perk/substrate/config.py::launch_pi_agent_dir`:
+  `PI_CODING_AGENT_DIR` → main-checkout `[pi] agent_dir` → `~/.pi/agent`), labeled by absolute
+  path in the report, never `Path.home()` at check time — warn-never-fail, no `--fix`; perk
+  deliberately does NOT reimplement pi's cross-scope merge, so either scope's explicit-off
+  warns).
 - **The dead fallback is dead**: code-owned spawn *without* live streaming is not to be built —
   the binding posture is RPC spawn + native-wake provisional relay, with explicit completion-only
   disclosure when streaming is unavailable (no replacement scheduler or polling tool).
@@ -634,7 +649,14 @@ whose *disappearance signals the architectural change you care about*, not just 
 — e.g. `pid: process.pid` is deliberately the async-workflow-status literal: if workflows ever
 move to a detached runner it vanishes and doctor warns, which is exactly the re-verify signal.
 File-scoped probes (no tree-wide fallback) make a *moved* file warn too — a wanted tripwire, not
-noise.
+noise. Because pi-subagents is a vendored *source snapshot*, the rows are **presence-only
+architectural drift tripwires**, never semantic proof of a delivery chain. Additive probe
+maintenance must NOT advance `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` — only a full baseline
+re-verify does (0.66.0 rests on a bounded per-node source/offline record in
+`docs/design/pi-subagents-child-execution-policy.md`, not on the stamp). `tests/test_doctor.py`
+needs *literal* full-row pins authored independently of the table (the fixture is table-derived,
+so a table-only pin is vacuous), and each substring must be proven absent before its warning is
+asserted (shared files carry markers from several rows).
 
 The repeatable success pattern: when a feature depends on subtle dependency runtime behavior, the
 **planning session** should read the dependency source and pre-digest the mechanics into the plan
@@ -713,6 +735,84 @@ physically unable to make the engine-REQUIRED `structured_output` completion cal
   ("never edit, never push") — never softened with an explicit-task exception ("unless the task
   says otherwise"): task text is data-adjacent, and a poisoned task would satisfy the exception.
 
+## Native child execution profiles — background reports, foreground writer
+
+Measured at 0.65.1 and source-read at installed 0.66.0 (source/offline corroborated, not the
+verified baseline); `docs/design/pi-subagents-child-execution-policy.md` is the binding record and
+`docs/design/archive/pi-subagents-child-capability-characterization.md` the evidence.
+
+**Child execution mode is orthogonal to workflow scheduling — never infer one from the other.**
+An omitted child `async` under the engine's `workflowAwaitAsync: true` selects *background*; an
+explicit child `async: true` is *detached launch* (materially different, never a substitute); the
+root workflow's async flag says nothing about child mode.
+
+**Extension selection: omitted vs `[]` vs an explicit list are not interchangeable.** Omitted
+means ambient runner discovery, so perk activates only in background/runner-hosted children
+(`host: "runner"`, `PI_SUBAGENT_CHILD === "1"`). **Foreground children have no ambient discovery**
+— no perk gate, scratch, or ambient-provider capability — and the `extensionBindings` transport is
+runner-only, so it cannot serve as a two-mode identity channel.
+
+That drove the split:
+
+- **All report roles run background** (they need ambient perk + inherited enforcement): `async:
+  true` in the agent **definition**, and child calls that deliberately OMIT `async` —
+  definition-owned async, not child-call async. Never add child-call async to report waves.
+- **The writer (`conflict-resolver`) runs foreground** (it needs builtins/edit/write and a real
+  spawn `cwd`, and tolerates absent perk scratch): definition async ABSENT, and the code-owned
+  dispatch sets child `async: false` plus the worktree as the request's typed `cwd`; the task
+  text carries a separately rendered POSIX-quoted `cd` reminder — never hand-quote a path into
+  JS or shell.
+
+Three distinctions to keep apart: workflow/root scheduling ≠ child mode; explicit assignment
+skills ≠ discovered-skill inheritance; a `false` restriction ≠ a write grant. Every role sets
+`inheritGlobalContext: false` and OMITS both `extensions` and `subagentOnlyExtensions` (an empty
+array ≠ omitted); report roles keep `inheritProjectContext: false` / `inheritSkills: false` /
+`systemPromptMode: replace` / read-only tools; the writer keeps project + skill inheritance and
+edit/write. Test convention: assert a **closed census independent of `PERK_AGENTS`** (deriving
+expectations from the production set would miss a dropped role); the repo-local
+`perk-dev.session-auditor` is a report role living OUTSIDE `PERK_AGENTS` and is tested separately.
+The restriction-snapshot channel the parent stamps on each child is documented from the producer
+side in `workflow/report-waves.md`.
+
+## Advisory child identity vs the authorization floor (the consumer half)
+
+Two readers, two purposes, no cross-grant:
+
+- **Identity is advisory.** The carrier is the engine-authored system-prompt prefix
+  `<active_agent name="…"/>` (from `buildInProcessChildLaunch`, `systemPromptMode: replace`),
+  read at `session_start` via `ctx.getSystemPrompt()` — a **spoofable prompt claim, never an
+  auth principal**, used only for scratch policy (`extension/substrate/childIdentity.ts`).
+- **The floor restricts.** `extension/substrate/childRestrictions.ts` decodes the
+  `perk.parent-restrictions/1` packet and is the only thing that restricts. The two readers share
+  only a neutral stateless `{sessionId, sessionFile}` key helper and startup's runner boolean — no
+  cross-import, no cross-grant; an identity failure must not block floor capture (each is
+  classified independently at startup).
+
+**Fail-closed is a composition discipline.** The floor threads into `registerToolGating` as an
+optional `readOnlyFloor: () => boolean` supplier composed with the activation's child restrictions;
+every gate observation reads `active || hasFloor()`; a **throwing supplier is restrictive, never
+permissive** (try/catch → `true`); an unreadable branch in `before_agent_start` must not suppress
+required read-only guidance (catch → inject).
+
+**The `tool_call` backstop.** An allowlist enforced only via `setActiveTools` is not enforced —
+toolset sync can fail and a foreign tool can register late. The hook denies **every** name outside
+a set derived from `READ_ONLY_TOOLS` (save/delivery tools, unknown/late mutators) for all effective
+read-only sessions including ordinary parents, keeping `bash`'s argument check.
+
+**Capture-before-rebuild.** Both readers capture at the very top of `session_start`, before
+identity establishment or toolset sync can rebuild the loader prompt — which let scratch
+eligibility become a pure `(readOnly, snapshot) => boolean`. The general move: capture volatile
+ambient state once at a known-clean point, then thread typed snapshots.
+
+**Physical-session keying.** Distinguish sessions by the SDK `getSessionId()` + `getSessionFile()`
+(or null) — never the persisted `pi_session_id` (a `session.jsonl` basename shared by many
+children) or the perk run id (aliases). The runner bit (`PI_SUBAGENT_CHILD === "1"`, captured once
+at `session_start`) only ever **suppresses** perk authoring/adapter guidance over inherited branch
+history; it never grants tools or save authority.
+
+Bounded posture: not an OS sandbox, not authentication between malicious host extensions; loss of
+both the runner packet and persisted mode across reload is an explicit unsupported case.
+
 ## The v1 extension RPC seam (`extension/waves/reportWave.ts` is the consumer)
 
 pi-subagents exposes an extension-to-extension RPC bridge on pi's in-process event bus, and
@@ -739,9 +839,18 @@ are the drift tripwire):
 - **The async-complete event** payload spreads the result-file data plus `runId`/`triggerTurn`;
   match a spawned run via `asyncDir` (fall back to `id` — both optional, at least one present).
   Since 0.45.0 the payload also carries a normalized per-child `results` array (child `runId`,
-  `success`, `outputState`, artifact paths — the row's `agent` field carries the workflow LANE
-  KEY, not an agent name), which perk's `rpcAdapter` normalizes into output-free receipt
-  children (`output`/`summary`/`structuredOutput` never copied; malformed rows dropped). And
+  `success`, `outputState`, artifact paths), which perk's `rpcAdapter` normalizes into
+  output-free receipt children (`output`/`summary`/`structuredOutput` never copied; malformed
+  rows dropped). At installed 0.66.0 (source-read — source/offline corroborated, not the
+  verified baseline) `results[].agent` is the **agent name**; the workflow assignment identity
+  rides `workflowChildren.children[].childId`, correlated by the unique child `runId` plus the
+  enclosing workflow run identity (`extension/waves/rpcAdapter.ts` header comment). A
+  present-but-malformed, mismatched, or ambiguous inventory **withholds** correlation; only
+  inventory-absent legacy payloads fall back to the overloaded `agent` mapping. Receipts stay
+  output-free telemetry — missing correlation changes neither report coverage nor posting
+  authority; `status.json.workflow.value` remains the report source. The discovery shape: the
+  installed-engine test exposed a receipt keyed `perk.pr-reviewer` where the assignment key was
+  `protected`. And
   the historical `subagent_wait` surfaced slim `details.completions` (identity/artifact trail — never
   output; that is historical wait-tool behavior, not the current parent collection protocol).
 - **The durable aggregate**: `<asyncDir>/status.json` survives completion; `state` is the
@@ -759,6 +868,42 @@ are the drift tripwire):
   the unsubscribe `EventBus.on` returns (`requestPlannotatorPlanReview` in
   `extension/pi/v1/providers/plannotator.ts`; `createPlannotatorBridge` is its thin
   wrapper).
+
+## Installed-engine harness craft (scripted native children)
+
+A scripted native child must exercise the **real lifecycle protocol**. Executor + RPC bridge alone
+did not deliver perk's expected completion: the fixture also starts the installed native **result
+watcher** and disposes it at teardown. A captured `structured_output` value is still rejected as a
+missing tool call until the scripted session emits `tool_execution_start`, executes the real
+registered hook with `{value}`, then `tool_execution_end` and a terminal `agent_end` — never a
+direct capture callback or a fabricated aggregate. Native `worktreeSetupHook` expects an existing
+**executable path** (not a shell string) and JSON-object stdout (`{}`), writing any sentinel to a
+separate test-owned log — engine-harness guidance distinct from perk's `[worktree] setup`
+shell-command array (`docs/user-docs/how-to/run-a-worktree-setup-hook.md`); do not merge the two
+contracts. Landed exemplars: `extension/waves/planBoundReviewCompat.test.ts` +
+`extension/testing/planBoundReviewChildFactory.mjs`, and `extension/waves/childExecutionCompat.test.ts`
+(loads the installed engine through its own jiti loader offline — a named skip when absent, a
+failure when present-but-unloadable; `RunSyncOptions.childSessionFactory` per-call injection proves
+cancellation propagation as offline evidence, not a live observation). The shared fixture is
+`extension/testing/installedEngine.ts`.
+
+- **Probe-setup omissions masquerade as verification failures.** A scripted `runSubagent` replay
+  against installed pi-subagents hard-requires `agentName` (acceptance resolution) and a nonempty
+  `sessionId` (async-result publication) — both fail before any child runs and surface as "0
+  covered / lane-failed", indistinguishable from the defect under test. Read field names off the
+  installed signatures first; a `complete: false` aggregate is not evidence about the engine until
+  the config-construction layer is cleared.
+- **Never correlate native child events by task-prose prefix** (the engine prepends `Task: `) —
+  correlate on engine-published identifiers: workflow key, session path, effective mode, PID, the
+  final tool-call id.
+- `stopChild` / the `stopped` flag is set at abort-*request* time — not proof of tool cancellation
+  or shutdown; verify real cancellation, the native terminal status, and absent trailing bytes over
+  the settlement window.
+- A scratch fixture that navigates to its already-current leaf emits no `session_tree` event
+  (false-negative resync assertions) — navigate to a genuinely different node. `loadPerkSession`
+  takes a `systemPrompt` input to drive the real replacement loader prompt.
+
+These are bounded installed-version measurements, not a compatibility certificate.
 
 ## Parent-prepare large evidence lanes
 
@@ -822,6 +967,10 @@ the `post_pr_review` tool turn + the `last_pr_review` record have existed since 
 - `extension/waves/reportWave.ts` (+ `rpcAdapter.ts`; the first-class test double is `extension/testing/memoryAdapter.ts`) — the Perk-owned report-wave module over the v1 RPC seam; `/pr-review` rides it via `extension/waves/prReviewWave.ts` (`PR_REVIEW_REPORT_SCHEMA`, `runPrReviewWave` — the bounded-retry entrypoint behind `run_pr_review_wave`)
 - `docs/learned/workflow/report-waves.md` — the perk-side report-wave module doc (flow migrations, lane semantics, guard state, wave test machinery); this doc keeps the upstream mechanics
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the `/submit` orchestration that drives the `conflict-resolver` agent
+- `extension/pi/v1/delivery/conflictResolverEngine.ts` — the foreground structured-delegation dispatch the writer role rides
+- `extension/substrate/childIdentity.ts` / `extension/substrate/childRestrictions.ts` — advisory identity vs the runner-only restriction floor
+- `docs/design/pi-subagents-child-execution-policy.md` — the binding record for the native child execution profiles
+- `extension/waves/planBoundReviewCompat.test.ts` / `extension/waves/childExecutionCompat.test.ts` — the installed-engine harness exemplars
 - `agents/*.md` — the SSOT agent-def sources (delivered into `.pi/agents/perk/` by `perk init`); `agents/pr-reviewer.md` carries the entire reviewer rubric
 - `skills/perk-pr-review/SKILL.md` — the orchestration skill that defers to the agent prompt (not where review logic lives)
 - `extension/waves/reviewClassifierWave.ts` / `extension/waves/objectiveExplorerWave.ts` — the single-lane wave entrypoints (schema SSOT constants) behind the flow-scoped `classify_review_feedback` / `explore_objective_node` tools

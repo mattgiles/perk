@@ -1,6 +1,6 @@
 ---
-title: Pi context injection — active compaction windows, conditional stripping, stage-field disambiguation
-read_when: You are injecting or stripping session context, deduplicating delivery across compaction, handling Pi compaction callbacks, or validating branch-entry data.
+title: Pi context injection — Pi-projection live-evidence dedup, selection-driven retention, stage-field disambiguation
+read_when: You are injecting or stripping session context, deduplicating delivery across compaction via Pi's projection, handling compaction callbacks or a token-cap failure, or validating branch-entry data.
 cluster: pi-extension
 ---
 
@@ -19,18 +19,21 @@ conditional**, not unconditional:
 
 - An unconditional strip of an injected custom type would remove it even on its **own injection
   turn**, defeating delivery.
-- Key the strip off "is this injection still relevant?" perk keys it off the **current stage** —
-  e.g. binding delivery strips its custom type only when the current stage no longer renders
-  non-empty bindings, mirroring how `planMode`/`objectiveAuthor` strip their context once their gate
-  is off.
+- ONE decision drives both hooks. Each injected context declares a `select(ctx, branch)` policy
+  over the FULL rebuilt branch; the same selection result drives injection at `before_agent_start`
+  AND retention on `context` (`extension/pi/v1/contextInjection.ts::installInjectedContext`). The
+  `context` filter touches only the owned `customType`: a null selection (ineligible) removes every
+  owned copy; a selected flavor retains only owned copies carrying that flavor's marker and drops
+  obsolete sibling flavors (plannotator's plan→objective transition). A failed branch read or a
+  throwing selector fails CLOSED to "nothing selected" — stale owned guidance never survives an
+  unreadable branch.
 
 The pattern: **keep while relevant, strip only when stale.** Injected custom messages persist to the
-branch (`pi/extension-api.md`). Compaction does not drop those entries from the branch: Pi appends a
-compaction entry and rebuilds only the model context from the summary plus the entries beginning at
-`firstKeptEntryId`. Re-delivery decisions therefore need the active model-context window, not the
-append-only branch history.
+branch (`pi/extension-api.md`). Compaction keeps the historical entries on the branch — it appends a
+compaction entry and rebuilds the model context from the summary plus a kept tail. Liveness is
+therefore Pi's *projection* of the branch into model context, not the append-only branch history.
 
-## Dedup against the active compaction window
+## Dedup against Pi's own live projection (delegate, don't re-derive)
 
 Injected custom messages persist to the branch as *message* entries whose exact shape (where
 `customType` sits) varies. The shared `branchCarries(branch, needle)` helper in
@@ -40,36 +43,44 @@ strict once-per-session fact: Pi's branch is append-only through compaction, so 
 historical marker forever. Used for model-context delivery, it silently suppresses the very
 post-compaction re-delivery the model now needs.
 
-The reusable delivery pattern is `activeContextWindow(...)`, beside `branchCarries` in
-`extension/substrate/workflowState.ts` and consumed by
-`extension/substrate/bindingDelivery.ts`. It finds the latest compaction, starts at that entry's
-validated `firstKeptEntryId`, falls back to the first entry after the compaction when the id is
-missing or unusable, and excludes compaction entries themselves. A summary that quotes a marker
-is evidence of old delivery, not a live custom block. Run the shape-agnostic marker scan only over
-this returned window. Contracts §8.38 records the cold/warm binding-delivery behavior that relies
-on that distinction.
+perk's first answer was a manual window reconstruction — find the latest compaction, validate its
+kept-entry cutoff, scan serialized entries from there. That machinery was **deleted**. Live-delivery
+dedup now flattens `sessionManager.buildContextEntries()` (the current leaf's compaction-aware
+`SessionEntry[]`) through Pi's package-root `sessionEntryToContextMessages` converter, and perk keeps
+only typed predicates in the no-state leaf `extension/pi/v1/contextEvidence.ts`
+(`activeContextMessages`, `contextCarriesMarker`). The durable insight: **prefer the platform's
+projection over re-deriving it** — the whole window machinery existed only because perk rebuilt what
+Pi already computes for every provider call.
 
-The dedup key remains each block's **marker literal**, not the custom type. In plannotator's
-two-flavors-one-customType case, per-flavor markers let a stage transition deliver the missing
-flavor even while the other flavor is active. Distinctive markers still matter: an unrelated
-live tool result quoting one can false-positive, at which point a typed message-entry scan is the
-escalation.
+Evidence is **typed, not serialized**: a marker counts only on `user` content (a cold launch prompt)
+or on `custom` content whose `customType` is exactly the owner's. A compaction/branch summary
+quoting the marker, assistant/tool/bash output, an unrelated custom, or plain custom `data` state is
+never a live delivery — Pi's converter keeps the roles distinguishable, so the predicate never
+guesses from bytes. This retires the old fragility where a live tool result quoting a marker could
+false-positive the dedup.
 
-`bindingDelivery` is the first active-window adopter. The five flow injections — gist, plan,
-objective-authoring, plannotator's three flavors, and the tombell bridge — all scan the active
-window through the shared pi/v1 helper
-(`extension/pi/v1/contextInjection.ts::installInjectedContext`, which composes `branchCarries` +
-`activeContextWindow` behind each caller's policy closures). ToolGating's read-only mode context
-deliberately remains the full-branch scan — the strict once-per-session marker, not a
-model-context-bound delivery. Escalate to `activeContextWindow` when the feature's delivery
-lifetime is model-context-bound.
+Two authorities stay distinct. Full-branch history (`branchOf` + `branchCarries` in
+`extension/substrate/workflowState.ts`) serves eligibility and state rebuild, and the strict
+once-per-selected-branch read-only marker — `toolGating` deliberately keeps the full-branch scan,
+a historical latch rather than a model-context-bound delivery. The new leaf answers only "is the
+delivery live in model context *now*". Projection failures propagate to the consumer (a read
+failure is never manufactured into a falsely clean empty projection).
+
+Two invariants carried over unchanged: the dedup key is each block's **marker literal**, not the
+customType (plannotator's flavors-share-one-customType case needs per-flavor markers so a stage
+transition can deliver the missing flavor), and the submitting `event.prompt` is checked BEFORE
+the projection read at `before_agent_start` — a cold launch's prompt is not yet persisted on the
+launch turn, so only that check sees a cold seed. All five flow injections — gist, plan,
+objective-authoring, plannotator's three flavors, the tombell bridge — consume the leaf through
+`installInjectedContext`; `extension/substrate/bindingDelivery.ts` and
+`extension/substrate/agentScratch.ts` consume it directly with their own strip semantics.
 
 An adjacent timing fact: slash commands do **not** fire `before_agent_start`, and a command
 handler reads the branch **as of the last completed turn**. A fresh session therefore shows 0–1
 copies of each injected context, and per-turn growth is observable only after completed turns.
-The payload census in `docs/design/archive/context-payload-baseline.md` established the original growth;
-the active-window scan bounds copies in the live context while still permitting delivery after
-compaction.
+The payload census in `docs/design/archive/context-payload-baseline.md` established the original
+growth; the projection-based dedup bounds copies in the live context while still permitting
+delivery after compaction.
 
 ## Compaction callback lifecycle and data-shape discipline
 
@@ -82,8 +93,15 @@ call boundary only rather than pretending an asynchronous result can be awaited.
 Compaction metadata also illustrates a broader TypeScript boundary rule. After checking a few
 fields on an `unknown` object, do not cast the original object to a richer declared structure.
 Validate and reconstruct the fields one by one, or return a `Pick` containing only the fields the
-check actually proved. `activeContextWindow` deliberately treats `firstKeptEntryId` as unknown
-until its string check; the same discipline applies to every branch-entry decoder.
+check actually proved. A branch-entry decoder treats every field as unknown until its own type
+check — `contextEvidence.ts`'s content check ignores non-text and malformed parts rather than
+trusting the declared shape; the same discipline applies to every branch-entry decoder.
+
+- The message `Compaction failed: … generation hit the token cap` is Pi's **summary output
+  budget** (half of `reserveTokens` for a split turn's prefix, shared with adaptive-thinking
+  reasoning; loud since Pi 0.84.3). It is fixed by `[compaction] reserve_tokens` in
+  `.perk/config.toml` (`workflow/config-tables.md`), **not** by perk context code — the first
+  planner to meet it misattributed it to the projection-dedup change.
 
 ## Two content flavors, one customType
 
@@ -94,15 +112,30 @@ content. Cheaper and safer than a second customType; deselect hygiene stays one 
 
 ## Strip-scope discipline: don't strip more than you own
 
-A strip must be **narrower than it's tempting to make it.** `planMode` strips its marker from *user
-messages* too (its marker only ever appears in perk-injected guidance). Binding delivery must NOT do
-the same: **a cold launch's initial user prompt legitimately carries the binding header**, and
-stripping user messages would erase the cold-delivered bindings. So binding delivery strips **only
-its own `perk:binding-context` custom type**, never user turns.
+A strip must be **narrower than it's tempting to make it.** No authoring context strips user
+messages any more: user/assistant/tool messages are **never** removed for carrying an owned marker
+— a cold seed, an `<untrusted_draft>` body, a quotation stay byte-for-byte (the retention filter
+edits only the outgoing model context; transcripts and compaction summaries are never rewritten).
+Binding delivery's rule stands as the archetype: **a cold launch's initial user prompt legitimately
+carries the binding header**, so it strips **only its own `perk:binding-context` custom type**,
+never user turns.
 
 **General rule:** scope a strip to exactly the custom type / marker the feature owns. If a marker can
 legitimately appear in a user-authored message (because a cold door seeded the user prompt with it),
 stripping user turns destroys real content.
+
+The gate's `[READ-ONLY MODE]` retention (`perk:mode-context`, `extension/substrate/toolGating.ts`)
+is independent of every authoring context and has a refinement flavor with its own distinct marker
+that drops the generic copy in `objective-refine` sessions — tests model it separately from the
+authoring injections.
+
+## Warm stage transitions must strip the deselected flavor
+
+Deferring the *injection* of a flavor does not remove an already-injected copy. A session that ran
+a plan-mode turn and then entered `/objective-refine` kept live plan-authoring instructions in model
+context until `installInjectedContext`'s retention was made to strip live owned copies of any
+non-selected flavor (contracts §8.31). Any warm door that changes the selected stage must reason
+about the copies the previous stage already delivered, not only about what it will inject.
 
 ## Stage-field disambiguation when stages share a `mode`
 
@@ -126,8 +159,11 @@ many stages share the mode.
 ## Cross-references
 
 - `extension/pi/v1/plan.ts` (plan mode), `extension/pi/v1/objectiveAuthoring.ts`, `extension/pi/v1/gist.ts` — the three read-only authoring injectors
+- `extension/pi/v1/contextInjection.ts` — the one inject/retain hook pair behind the five flow injections
+- `extension/pi/v1/contextEvidence.ts` — the typed live-projection predicates (`activeContextMessages`, `contextCarriesMarker`)
 - `extension/substrate/bindingDelivery.ts` — the narrowest strip (own custom type only)
-- `extension/substrate/workflowState.ts` — `branchCarries` plus the compaction-aware `activeContextWindow`
+- `extension/substrate/workflowState.ts` — `branchCarries`, the full-branch history authority
 - `docs/learned/pi/extension-api.md` — the every-call `context` event + injected-message persistence
 - `docs/learned/workflow/skill-bindings.md` — cold↔warm binding delivery this strip discipline serves
 - `docs/learned/workflow/objective-lifecycle.md` — the authoring loop using the `stage` discriminator
+- `docs/learned/workflow/config-tables.md` — the `[compaction]` table (`reserve_tokens`)

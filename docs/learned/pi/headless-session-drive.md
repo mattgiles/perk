@@ -1,6 +1,6 @@
 ---
 title: Headless Pi session construction & driving — the SDK runtime-factory recipe
-read_when: You are constructing or driving a headless (non-TUI) Pi session via the SDK — the runtime-factory path, bindExtensions, a single-prompt drive, offline model determinism, or worker extension scoping.
+read_when: You are constructing or driving a headless (non-TUI) Pi session via the SDK — the runtime-factory path, a single-prompt drive, compaction replay, sendUserMessage persistence, or offline determinism.
 cluster: pi-extension
 ---
 
@@ -32,6 +32,10 @@ from the right path instead of rediscovering it.
 - `session.prompt("/command")` resolves when the command settles, but dispose only after a
   bounded wait for the terminating `tool_execution_end`; `pi --mode json -p` probes are the
   cheap capturable registered-tool proof — "Headless probe and dogfood-session craft".
+- A recorded compaction replays byte-faithfully via `SessionManager.forkFrom` → `navigateTree` →
+  `compact()`; `sendUserMessage` persists ONE newline-joined text block, so hash the canonical
+  single block, never the sent array — "Replaying a recorded session's compaction headlessly",
+  "`sendUserMessage` persists ONE newline-joined text block".
 - "Sources" pins the audited pi versions — re-verify on SDK bumps (a pin bump is a
   session-construction migration audit).
 
@@ -282,6 +286,66 @@ shape mismatch.
   registered-tool path works, streamed partials included — the JSON event stream is greppable
   evidence. Remember: Pi retains the registration graph loaded at session start, so a probe
   launched before a binding change cannot observe that change (a fresh session is required).
+- Pi refuses to compact a small session (`Nothing to compact (session too small)`; the default
+  `keepRecentTokens` is 20,000) — inflate the session past that floor before a real compaction
+  smoke.
+- RPC mode exposes no navigate command — `navigateTree` / `/tree` reach only extension command
+  contexts — so branch/checkpoint evidence must come from tests over the real `branch` /
+  `branchWithSummary` APIs, not from a driven RPC session.
+- Headless print/RPC output does not expose the post-`context`-filter LLM input; strip/keep
+  behavior stays pinned by the consumer suites, not by a driven probe.
+- The Python seam for the env-unset rule: `src/perk/substrate/proc.py`'s `env_remove` deletes
+  inherited names *before* the overlay is applied — removal is not expressible as an overlay merge,
+  so a launcher that must drop `PERK_RUN_ID`/`PI_SESSION_FILE` names them there.
+
+## Replaying a recorded session's compaction headlessly
+
+To re-run a failing session's compaction with different settings, fork instead of touching the live
+file: `SessionManager.forkFrom(sourcePath, cwd)` (the live file is never written) →
+`session.navigateTree(leafId, { summarize: false })` → `session.compact()` — the same
+`AgentSession.compact` path the TUI `/compact` and `ctx.compact()` enter (identical `usage.input`
+across replays proved byte-faithfulness). Dry-run the preparation before spending:
+`prepareCompaction(sessionManager.getBranch(), settingsManager.getCompactionSettings())` is not
+exported from the package root — deep-import `dist/core/compaction/compaction.js` — and assert
+the first-kept entry id / `isSplitTurn` / `tokensBefore` match the original compaction entry, logging the
+effective `reserveTokens`, before the first (paid) model call.
+
+Run against the install the failing session actually ran, by absolute path (a worktree's
+`node_modules` copy can lag the pin). `PI_CODING_AGENT_DIR=<main checkout>/.pi/agent` mirrors perk's
+`[pi] agent_dir` injection so auth, `models.json`, and the session dir match;
+`SettingsManager.create(cwd, agentDir)` with the checkout as `cwd` proves the project-tier
+`.pi/settings.json` value is what the session sees. Bare `createAgentSession` + a hand-built
+`DefaultResourceLoader` with the `no*` flags + a manual `reload()` is the isolation shape (the
+read-only half of the recipe above); pin `model` via `resolveCliModel` and `thinkingLevel`
+explicitly; launch with `env -u PERK_RUN_ID -u PI_SESSION_FILE`. Repeated replays can branch off the
+same leaf in one fork (each compaction entry gets `parentId` = the leaf), so filtering the fork for
+`compaction` entries reads every reading at once.
+
+## `sendUserMessage` persists ONE newline-joined text block
+
+`AgentSession.sendUserMessage(content[])` joins every text block with `"\n"` into a single string
+on both the idle path and the streaming follow-up path. Any digest/evidence scheme that hashes the
+*sent* block array can therefore never match its persisted evidence: construct the canonical single
+block *before* recording the expectation and send it unchanged; never normalize inside the digest.
+
+The real-transport regression recipe (`extension/pi/v1/draftReviewUserDelivery.test.ts`, the guard
+against a future join change — there is no separate version-aware guard):
+
+- Observe the send with a **forwarding wrapper** assigned as an own property on the session
+  instance (the runner's bound action calls `this.sendUserMessage(...)` dynamically): read retained
+  state before forwarding, forward the original args, retain the promise (idle → resolves at run
+  settlement; followUp → at queue acceptance).
+- Create genuine streaming with a one-shot `context`-event barrier (resolve a `streaming`
+  deferred, await a `release` deferred once) so `session.isStreaming` is truthfully true and
+  `deliverAs: "followUp"` lands in the follow-up queue — no sleeps, no forged idle flag.
+- Prepare/register the review while idle, not mid-run: `ctx.signal` is the active run's abort
+  controller, so a review prepared mid-run is interrupted at run end into
+  `uncertain/delivery-unconfirmed`.
+- The faux provider is microtask-paced when `tokensPerSecond` is unset, so assert the pre-forward
+  snapshot and take live-state checkpoints only at deterministic points (the `tool_call` handler;
+  after settlement).
+- Surface-test fakes must mirror Pi: a hand-built branch fake's `persist()` joins text blocks with
+  `"\n"` — correcting the fake exposed latent mismatches.
 
 ## `DefaultResourceLoaderOptions` is not exported from the package root
 

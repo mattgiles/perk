@@ -41,6 +41,9 @@ only the still-inline surfaces.
 - `upload_file` is one resolver-owned method; strict marker parsing never strips first;
   byte-identity across a lossy transcoder rejects its whole normalization domain — "File upload
   + strict-parse boundary craft".
+- Node refinement persistence: a state-bearing sibling query, presence-not-parse plan
+  disqualification, guarded marked-comment convergence, and the ownership-only coexistence
+  predicate applied before plan-body extraction — "Objective-node refinement persistence".
 - Historical: "Live-validation record (dated)" + "Live-spike process craft" carry the dated
   live-run evidence.
 
@@ -54,6 +57,18 @@ only the still-inline surfaces.
   errors.
 - **Partial success is real**: HTTP 200 can carry `errors` alongside partial `data`. The client
   fails loud and discards partial data — perk's narrow queries never want partial results.
+- **`ProjectCreateInput.name` is capped at 80 characters**, and an over-long name fails with the
+  *generic* top-level `"Argument Validation Error"` — argument validation fires before entity
+  lookup (the same class already noted for `issueRelationCreate` below). perk truncates with an
+  ellipsis at the single `create_project` bottleneck in `src/perk/backends/linear/project_ops.py`
+  (the only mutation that names a project — it covers create, supersede, and the gist source),
+  `rstrip`-ing before the ellipsis so a whitespace cut never dangles. Truncation over validation
+  so the automated supersede path can't dead-end; lossy by design — the name is a display label,
+  and `content` is never mutated to compensate.
+- **Linear's actionable detail lives in `errors[].extensions.userPresentableMessage`**, not the
+  top-level `message`. `src/perk/backends/linear/client.py` appends it per entry
+  (`<text> — <presentable>`) when it is a non-empty string differing from the raw message;
+  `codes` semantics are unchanged.
 
 ## The client/consumer contract
 
@@ -61,7 +76,12 @@ only the still-inline surfaces.
   `data` are the caller's domain** — the client never interprets them. The backend owns the
   `... | None` not-found semantics.
 - Branch on `LinearGraphQLError.codes` (de-duplicated, order-preserved `extensions.code` values),
-  **never on message substrings**. `RATELIMITED_CODE` is exported.
+  **never on message substrings**. `RATELIMITED_CODE` is exported. The one blessed substring
+  read, `_is_entity_not_found`, scans the **enriched** text by decision — enrichment can only add
+  matches, and an added match is semantically correct. Pinned both ways: the incident shape
+  (`INPUT_ERROR` + a length-cap presentable message) must NOT classify as not-found; a classic
+  not-found with a presentable appended still does; the regressions drive through the real
+  `request` path with a scripted errors body, not a standalone predicate class.
 - The client IS the error boundary (no intermediate Linear-private error type): everything is
   `IssueBackendError`, GraphQL-level failures the `LinearGraphQLError` subclass.
 - **No retry/backoff on RATELIMITED** — a typed loud failure by design (Linear's API-key budget of
@@ -806,6 +826,49 @@ The cancellation/doctor work over the project-backed store pinned the authority 
 - Residual: the projection, the state-bearing query, the attachment-only conditional writer, and
   the transfer path are **fake-proven only** — no authenticated live run yet. Remember this
   before trusting `--fix` against a real workspace.
+
+## Objective-node refinement persistence (the marked-comment carrier, contracts §8.67)
+
+A node refinement is advisory prose persisted as a perk-owned marked comment on the node issue.
+The Linear persistence has four load-bearing shapes:
+
+- **A dedicated state-bearing sibling query, not a widened projection.**
+  `project_issues_for_refinement` (`src/perk/backends/linear/project_ops.py`) sits beside the
+  objective projection query; it enumerates ALL project-issue pages and carries full descriptions
+  plus attachment `pageInfo`, because the projection caps its embedded attachment connection at 50
+  with no completeness signal — you **cannot prove plan absence** from a truncated attachment
+  selection. Missing or malformed completeness fields, or `hasNextPage: true` on an attachment
+  connection, must refuse `malformed_target`, never infer absence.
+- **Presence-not-parse disqualification.** A recognizable plan-header attachment sets
+  `has_plan_metadata` even with a corrupt payload (no plan parse needed); multiple plan-header
+  attachments prove presence without preventing historical refinement reads; an unknown or
+  unreadable envelope cannot prove absence → `malformed_target`. Native cancellation reads as an
+  effective `skipped`; all statuses and plan-bearing nodes stay in the snapshot (eligibility is
+  derived by the service); node carriers resolve by metadata, never title, backlink, or sentinel;
+  duplicate sentinel/header/node identity → `ambiguous_target`.
+- **Guarded marked-comment convergence** — the shared `upsert_marked_comment` guarded arm
+  (contract in `workflow/issue-backend.md`): preflight scans every paginated comment with authors,
+  matches only an **exact first-line ownership marker** (HTML or native inline encoding — not
+  substring/prefix), replaces using the observed comment UUID, and reads back the full observed
+  `EngagementComment`; idempotent no-write success when the observed body already equals the
+  Linear-rendered desired body.
+- **Plan/refinement coexistence.** Apply the ownership-only predicate `is_refinement_comment`
+  (`src/perk/objective/refinement/codec.py`; no JSON validity required) BEFORE plan-body extraction
+  at the four Linear comment-selection sites (`save_node_plan`, `get_plan_body`,
+  `update_plan_issue`, `adopt_issue_as_plan`), so an advisory comment containing a complete
+  plan-body example — even under a damaged header — is never read or overwritten as the plan.
+
+Fakes: route the real new query and never manufacture omitted completeness fields; register
+specific needles before generic ones (the insertion-order footgun below); assert semantic
+completeness (pagination, mutation identity, at-most-one attempt) rather than freezing GraphQL
+documents. Digest discipline: SHA-256 lowercase hex, 64 chars, no prefix — the `target-key` over
+the 5-field identity, `source_digest` over the 6-field source (excluding statuses, backlinks,
+timestamps, URLs, prose, and sibling progress), `body_digest` over the exact stored comment bytes;
+canonical timestamps `YYYY-MM-DDTHH:MM:SSZ`, and reads reject noncanonical spellings rather than
+normalizing. Residuals: this is observed-conflict detection, not synchronization — no remote CAS, so
+a writer can win after final verification, concurrent first saves can leave duplicate records, and a
+late refinement stays inert advice; authenticated Linear behavior is **unverified by design** at
+this writing (offline over `FakeLinearWorkspace`) — don't claim live verification.
 
 ## File upload + strict-parse boundary craft (#1996)
 

@@ -149,6 +149,19 @@ A malformed external-API payload raises `IssueBackendError`/`ObjectiveStoreError
 adapter/client is the error-translation boundary — not `ValueError`. The `linear/client.py`
 precedent is canonical; `_parse_created_session` was retyped to match it.
 
+## A convergence reading a file perk does not own classifies EVERY read outcome
+
+A managed convergence over a foreign file (pi-subagents' native `config.json`,
+`src/perk/convergence/init/subagent_config.py`) met three misclassifications at once:
+`path.is_file()` misread a *directory* as "absent" while the TS engine reads it as `incompatible`
+via EISDIR (a refusal/repair loop doctor could neither see nor fix); `UnicodeDecodeError` is a
+`ValueError` outside a `(UserFacingCliError, OSError)` net and aborted read-only doctor; and
+`PermissionError` was caught by doctor's net but re-raised under `--fix`, whose net catches only
+`UserFacingCliError`. The fix pattern: split `exists()` from `is_file()`, split the read from the
+parse, and translate `(OSError, UnicodeDecodeError)` and `JSONDecodeError` into one path-naming
+`UserFacingCliError` *inside* the convergence, so both callers report and continue. The review wave
+found it — the plan's "malformed JSON" arm was too narrow for a file another program writes.
+
 ## Cross-references
 
 - `shared/contracts.md` — the fail-open formulation (expected infra failures, not bugs) + the
@@ -156,3 +169,4 @@ precedent is canonical; `_parse_created_session` was retyped to match it.
 - `docs/learned/workflow/objective-store.md` — `ObjectiveStoreError` is NOT a subclass of
   `IssueBackendError` (the not-a-subclass fact lives there)
 - `docs/learned/workflow/issue-backend.md` — the backend error taxonomy the typed sets draw from
+- `docs/learned/workflow/init-doctor.md` — the pieces acting on files outside the repo (the foreign-file convergence)

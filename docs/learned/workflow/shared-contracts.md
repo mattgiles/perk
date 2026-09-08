@@ -31,6 +31,9 @@ This doc captures the repeatable recipe for both, because the ripple is wide and
 - Contract sections are read literally: fenced JSON examples are valid JSON with concrete rows,
   exceptions are exempted inline, and conditional fields name their exact carrying shapes —
   "Prose-contract maintenance & objective hygiene".
+- When a non-authoritative plane parses config the authoritative plane also parses, pin the
+  divergence as a `shared/fixtures/*.json` fact with per-plane expectations and document the
+  failure boundary — "A `shared/fixtures/*.json` cross-plane fixture with per-plane expectations".
 
 ## The six-seam recipe for a new parsed data file
 
@@ -256,6 +259,28 @@ validator strict.
 - **Multi-block `edit` batches are atomic** — a partial-failure report means NONE of the blocks
   applied. Re-read every intended region before proceeding, keep batches per-section, and
   re-verify locators after any failure (#2030).
+- **A plan's reserved "next §8.x" is a lead, not a claim** — verify the number is still free on
+  the **merged base** at implementation time: a sibling node consumed §8.67 while a plan that
+  reserved it was in flight, and the content shipped as §8.68. Re-check every in-plan `§8.x`
+  pointer (docs, comments, tests) against the final number in the same turn.
+
+## A `shared/fixtures/*.json` cross-plane fixture with per-plane expectations
+
+`shared/fixtures/draft-review-config.json` is **test-only** — read at runtime by neither plane
+(`shared/README.md` documents `fixtures/`). It carries one TOML document per case with `values` (the
+TS projection's exact decoded strings), an optional `refuse` (the code-owned TS refusal text; `"*"` =
+the whole document), `equivalent_to` (two spellings that must project identically), and a `python`
+override block (`str` / `null` / `{"raises": ...}`), consumed by
+`extension/substrate/draftReviewConfig.test.ts` and `tests/test_draft_review_config.py` against the
+**real** Python readers.
+
+The override block is essential because the planes legitimately differ: Python strips and
+blanks→`None`; the Linear key loader is fail-soft; and there is a TOML 1.1-vs-1.0 dialect gap between
+the vendored smol-toml closure and `tomllib` (which has no strict mode). The principle: when a
+non-authoritative plane parses config the authoritative plane also parses, **pin the divergence as a
+fixture fact and document the failure boundary** — here the gap can *fail* a save
+(`backend-unconfirmed → unresolved-dispatch`) but never *misroute* one (contracts §8.23) — rather
+than making the non-authoritative parser certify validity.
 
 ## Cross-references
 

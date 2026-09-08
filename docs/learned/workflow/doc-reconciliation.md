@@ -30,9 +30,12 @@ with the grouped CLI) has its own craft. These are the durable rules from doing 
   advisories".
 - git-mv reorganizations sweep with per-link change classes and explicit per-hit dispositions —
   "Relocation sweeps (git mv reorganizations)".
-- Post-submit operator choreography fails (3-for-3): front-load artifacts, author only
-  artifact-anchored forward references, route durable prose to plan-issue comments — "Sequencing
-  work around `/submit`".
+- Post-submit operator choreography has failed on every observed instance (a todo-tracked
+  follow-up included): front-load artifacts, author only artifact-anchored forward references,
+  route durable prose to plan-issue comments — "Sequencing work around `/submit`".
+- Curation batches keep the single-home invariant (relocate, never delete unhomed content),
+  qualify overbroad "absolute law" prose to the real N-way boundary, and pointerize commands to
+  one authority — "docs/learned curation-batch craft".
 - Evidence records owed by a stamped layer land on the next unpublished layer; an acceptance
   line names a surface — run exactly that surface; gates compare content, never byte fidelity —
   "Validation-record reconciliation" / "Acceptance evidence craft".
@@ -391,7 +394,7 @@ repository, branches, worktrees, and related issues. Cleanup intention is not cl
 A plan whose deliverables depend on operator action *after* the first `/submit` (live dogfood
 legs, evidence capture, record fills) cannot complete inside one implementation-session turn:
 `/submit` ends the turn, and nothing stops the draft PR merging before the follow-up turns run.
-This recurred **four consecutive times** in one dogfood arc — awareness in plan prose,
+This has recurred on **every observed instance** across the dogfood arcs — awareness in plan prose,
 "mandatory"/"ALWAYS" labels included, does not enforce itself. Mitigations, in preference order:
 
 1. **Front-load** every land-worthy artifact before the first `/submit`. The
@@ -416,8 +419,13 @@ Three structural corollaries:
   may land without which.
 - **A plan step "record X in the PR description" cannot be satisfied in the submitting turn.**
   `/submit` terminates the turn and the PR body is auto-composed, so the content never makes it
-  into that body from the same turn — defer it to a post-submit follow-up or route it into a
-  committed artifact instead.
+  into that body from the same turn. **A todo-tracked follow-up does not survive the terminating
+  turn either**: an executor pre-authored the evidence table to scratch and tracked a post-submit
+  `gh pr edit --body-file` todo; the PR merged before any next turn ran. `_compose_pr_body` is
+  fixed (closing keyword + plan link + embed + footer), and its own "edit the body on the first
+  turn after `/submit`" advice is the trap. Route evidence to something written *before*
+  `/submit` — the implementation commit message, a plan-issue comment, or a tracked artifact —
+  never the PR description.
 
 Evidence-anchoring and stacked-train rules (the empirical record):
 
@@ -430,7 +438,7 @@ Evidence-anchoring and stacked-train rules (the empirical record):
 - **On a stacked train the post-submit follow-up slot does not exist.** Ready-stamping pins the
   layer's head, so in-record evidence must be complete at ready time; anything definitionally
   post-ready must be evidenced outside the branch (#2187).
-- **Unenforced post-submit operator choreography is 3-for-3 at failing.** Treat any leg depending
+- **Unenforced post-submit operator choreography has failed on every observed instance.** Treat any leg depending
   on post-submit human action as expected-to-fail; the self-describing-forward-reference design
   converts silent lies into honest checkable gaps — it mitigates, it does not prevent (#2193,
   #2189).
@@ -619,6 +627,35 @@ Rules from running verbatim merge/deletion batches over the `docs/learned/` corp
   counts drift (#2175).
 - **Git-history dating (`git log -S`) substitutes for absent in-text dates** when the
   archaeology is bounded (#2167).
+- **The single-home invariant.** Delete a duplicated section ONLY after grep-proving its only
+  inbound citers are rewritten in the SAME plan. Content with NO other corpus home is RELOCATED,
+  not deleted — a "pointerize to verified homes" clause does not license deleting it (make a
+  home, and surface it as an explicit deviation from a bare prune framing). Bidirectional pointers
+  survive as a one-line rule+pointer stub, never a delete.
+- **Byte targets are working targets, not gates.** A "prune" node can land near original size
+  when inbound-ref-protected sections must be kept; the acceptance is the section-by-section
+  disposition table (KEEP/COMPRESS/DELETE/RELOCATE), the preserve list, the N-doc
+  inbound-reference sweep, and dated historical-vs-current labels.
+- **Qualify, don't prune, overbroad "absolute law" prose.** Hunt for invariants stated more
+  absolutely than the code enforces ("never", "BOTH … exactly two"); replace the blanket claim
+  with the actual N-way boundary (the warm-handler split: direct cold delegation / never direct
+  GitHub mutation / genuine session-driving) and **name the exception** — a consumer that cannot
+  import a centralized seam gets a named allowlist entry plus a parity test, never a silent
+  duplicate. Every edit is a substitution, narrowing, or addition.
+- **Pointerize, don't copy, commands.** Three verbatim copies of a raw test command all went
+  stale when the justfile glob changed; name the stable entrypoint (`just test-js`) and point to
+  the one glob authority.
+- **Scope-narrow an overstated evidence shorthand across ALL its carriers** — the learned doc,
+  the test's docstrings, the contracts row, and any clause inheriting that row's proof; grep the
+  overstated phrase repo-wide.
+- **Delete, don't reword, unverifiable non-load-bearing cautions.** A stale caution that cannot
+  be re-verified from a read-only session and is superseded is dropped; it re-enters only via
+  `/learn` with fresh evidence.
+- **A re-verify pass legitimately prunes prose the new facts falsify** even outside the
+  enumerated work items (the stale "Perk-owned profiles" user-doc section).
+- **The docs-gate reality.** A `docs/learned/**`-only diff (and `shared/contracts.md`) matches no
+  `[[ci.checks]]` glob — the substantive gates are `perk learn docs-sync` + `docs-check` +
+  grep-proofs, and every additive bullet edit is re-checked against the Distillation budget.
 
 ## Relocation sweeps (git mv reorganizations)
 

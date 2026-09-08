@@ -20,7 +20,10 @@ launcher that emits its own JSON.
 - pi parses args last-wins: inject perk defaults BEFORE pass-through args so the user's flag
   wins free — "Last-wins arg injection".
 - Launch-seam env layering is merge order — injected defaults < operator env < perk stamps — no
-  conditionals — "Env setdefault via merge order".
+  conditionals — "Env setdefault via merge order". The agent dir has ONE precedence
+  implementation (`launch_pi_agent_dir`: env → main-checkout `[pi] agent_dir` → `~/.pi/agent`),
+  and a blank inherited `PI_CODING_AGENT_DIR` is scrubbed from the child env, not forwarded —
+  "The launch-precedence agent dir", "Precedence normalization must reach the child environment".
 - A linked-worktree session sees zero skills unless the cold door mirrors `.agents/skills/` at
   positioning time (gitignored → never checked out) — "Worktree positioning must mirror
   `.agents/skills/`".
@@ -45,8 +48,10 @@ execute-vs-preview, never construct two divergent vectors.
 
 pi prompts for project trust on a cwd that has trust inputs (`.pi/`, `AGENTS.md`/`CLAUDE.md`,
 `.agents/skills` in the cwd or an ancestor) and no saved decision; trust is keyed per canonical cwd and
-persisted in `~/.pi/agent/trust.json`. perk `chdir`s into a brand-new `plan-<id>` checkout for every
-worktree stage, so pi re-prompted on **every** `implement`/`submit`/`address`/`land`/`learn` launch.
+persisted in `trust.json` inside the agent dir (`~/.pi/agent/trust.json` by default — with a
+redirect, the whole agent directory, `trust.json` included, moves; see "The launch-precedence agent
+dir"). perk `chdir`s into a brand-new `plan-<id>` checkout for every worktree stage, so pi
+re-prompted on **every** `implement`/`submit`/`address`/`land`/`learn` launch.
 
 **Fix:** prepend `--approve` for worktree stages —
 `trust_args = ["--approve"] if stage.worktree != "none" else []`.
@@ -60,9 +65,9 @@ source disagree, trust the dist source.
 
 ### `--approve` is run-scoped, not persisted
 
-`--approve` does **not** write `~/.pi/agent/trust.json` — it is run-scoped, which is exactly right for
-throwaway `plan-<id>` worktrees (no trust residue accumulates). Don't reach for a persistent trust
-write for ephemeral paths.
+`--approve` does **not** write the agent dir's `trust.json` (`~/.pi/agent/trust.json` by default)
+— it is run-scoped, which is exactly right for throwaway `plan-<id>` worktrees (no trust residue
+accumulates). Don't reach for a persistent trust write for ephemeral paths.
 
 ## Last-wins arg injection
 
@@ -110,6 +115,29 @@ vars into this layering rather than writing `env.setdefault()` loops.
   provide it**, just before `os.execvpe` — read **before the `os.chdir(worktree)`** so worktree
   consumers inherit it. This is the bridge that carries a gitignored `.perk/local.toml` secret into
   a linked worktree session (see `docs/learned/workflow/linear-backend.md` for the consumer side).
+
+**Precedence normalization must reach the child environment.** Merge order suffices only when key
+*presence* is the override rule. If precedence treats a blank inherited value as unset, copying that
+value into the child env defeats the decision: the first `PI_CODING_AGENT_DIR` implementation ignored
+whitespace-only values during selection but still forwarded them when no configured replacement
+existed — including on the fail-soft config-error path — so Pi read an empty dir. Scrub the rejected
+value from the copied child env without mutating the parent env; preserve nonblank operator
+overrides; decide the configured redirect once before the generic preview branch, carry it through
+preview and exec, and make lock cleanup follow the directory the child actually uses.
+
+## The launch-precedence agent dir (`launch_pi_agent_dir`)
+
+`src/perk/substrate/config.py::launch_pi_agent_dir` is the ONE precedence implementation for the
+agent dir a cold-local launch hands Pi: a non-blank `PI_CODING_AGENT_DIR` → the main checkout's
+`[pi] agent_dir` (via `effective_pi_agent_dir`, which reads committed config AND its local overlay
+from the main checkout — `workflow/config-tables.md`) → `~/.pi/agent`; `None` when no directory is
+resolvable. The result is tagged with its `source`. Env injection happens only for the `config`
+source (the env arm already carries the value; the default is Pi's own); the launch-lock sweep
+targets the resolution and is skipped when it is `None`; and the launch context carries the
+resolution beside the injected value because the exec step cannot safely recompute precedence after
+`chdir`. Every consumer that acts on files *inside* the agent dir — doctor's `subagent-bridge-config`
+user scope, the `subagent-worktree-default` convergence (`workflow/init-doctor.md`) — resolves
+through this same function, never a parallel copy.
 
 ## Running a repo-configured setup hook before exec (#652)
 
@@ -422,6 +450,9 @@ combined stream.
 ## Cross-references
 
 - `src/perk/run/launch/` — `launch_stage` argv construction + `--approve` trust injection
+- `src/perk/substrate/config.py` — `launch_pi_agent_dir` / `effective_pi_agent_dir` (the one agent-dir precedence)
+- `docs/learned/workflow/init-doctor.md` — the pieces that act on files inside the agent dir
+- `docs/learned/workflow/config-tables.md` — config authority vs overlay policy for `[pi] agent_dir`
 - `docs/learned/workflow/plan-factories.md` — the shared seeded-cold-door pipeline (whose tail composes `launch_stage`) now lives there
 - `src/perk/cli/commands/objective/run_cmd.py` — the supervisor that composes the remote dispatch launcher
 - `docs/learned/workflow/objective-lifecycle.md` — the supervisor design that composes these mechanics

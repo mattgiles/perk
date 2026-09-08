@@ -60,6 +60,15 @@ artifact (`objectiveApprovalSave`, `authoring/objective/save.ts`); with no draft
 performs no write and drives the structured save instead. If a command can neither carry nor
 recover the payload, it must not half-write.
 
+**Gating on `mode`: match toolGating's *effective* writability.** Warm-minted sessions leave
+`perk:workflow-state.mode` **undefined** — the warm-mint arm of `establishSessionIdentity` writes no
+mode — and `toolGating` treats undefined as writable. A tool that requires an explicit
+`"read-write"` token therefore refuses every ordinary warm session (the `/objective-sync` retained
+resolver did exactly this and was caught only in review). Deny only the explicit
+`mode === "read-only"` floor; never require a positive token the warm path never writes. The
+incident and its sibling re-guard-after-await gap are in
+`workflow/mergeability-and-conflict-resolution.md` § "Two authorization gaps only review caught".
+
 ## The stage-scoping sibling trap (a drive naming a tool the stage filtered off)
 
 The read-only gate above has a sibling: **stage scoping** (`STAGE_TOOLS` in

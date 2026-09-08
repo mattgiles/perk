@@ -30,6 +30,9 @@ in plan #51, PR #55; the patterns below generalize to any external CLI perk driv
 - Guided onboarding is a gap-driven gesture family: healthy hosts no-op; supported installs
   confirm, run, and re-probe; non-interactive paths never prompt or mutate — "Gap-driven guided
   onboarding gestures".
+- Vendoring a skill: byte fidelity to the pinned upstream proves provenance, not correctness —
+  record the pin/tree/license/file set, keep semantic acceptance separate, and record any owner-
+  approved local correction — "Vendoring a skill: fidelity and correctness are separate".
 
 ## Failure posture: D3 superseded for the skills CLI (GitHub readiness stays non-fatal)
 
@@ -172,6 +175,16 @@ fallback is retired — presence is strict on `.agents/skills/` everywhere, and 
 committed-but-undelivered state is classified by doctor's `_skills_delivery_check` instead (see
 `skill-bindings.md`).
 
+**Borrowed skill-link ownership vs source freshness.** When `.agents/skills` holds links borrowed
+from the main checkout and the worktree-local skills state is missing, `skills doctor` reports
+unmanaged destination conflicts. The bounded, owner-controlled repair — after confirming the links
+are perk-owned and untracked — is: back up the untracked link dir, `skills init --cache=local`, then
+`skills sync` + `skills doctor` (zero warnings; tracked files unchanged). That is not blanket
+permission to delete skill dirs, edit cached targets, or rewrite source refs. And a healthy skills
+workspace still does not prove that uncommitted edits to canonical `skills/` sources are loaded —
+they are delivered only via the configured source/ref plus a resync (the dogfooding caveat above);
+agent-def convergence is a separate owning operation.
+
 ## Ref pinning: the skills-manifest `main` ref beside the version-pinned installs
 
 > **Update (superseded — the "mirrors `_desired_packages`" claim no longer holds).**
@@ -284,6 +297,24 @@ editing the wrong one is the trap:
 - Cross-ref the recurring **"run_ci green ≠ committable"** rule (pre-commit `ruff-format` can
   collapse a multi-line `"\n".join(...)` after CI passed — re-stage, re-commit) →
   `docs/learned/toolchain/ruff.md`.
+
+## Vendoring a skill: fidelity and correctness are separate acceptance criteria
+
+Byte equality against the pinned upstream payload establishes **provenance and preservation** — not
+the correctness of the imported instructions. The `dignified-python` import faithfully preserved
+erroneous Python 3.13 annotation guidance (a PEP 649/749 release mismatch), caught only in review.
+The checklist for a vendored skill:
+
+- Record the pinned commit, the payload tree, the license identity, and the exact file set —
+  compare files and license separately (an added license sidecar changes the destination tree).
+- Keep semantic/runtime acceptance distinct from source-byte and delivery checks;
+  `workflow/doc-reconciliation.md` owns the execute-the-examples rule — cross-ref it, don't
+  duplicate it.
+- When a proven defect conflicts with the verbatim constraint: obtain and durably record the
+  owner's decision before modifying the snapshot, name the smallest exception, add the
+  modification notice, preserve upstream licensing, and re-prove the unchanged remainder.
+- Reconcile docs so a locally corrected import is not still described as wholly verbatim — the pin
+  stays the provenance baseline, not a claim that every file still matches.
 
 ## Committed declaration vs. transient state — the gitignore boundary
 

@@ -32,6 +32,9 @@ a capability is a borrow at all.
   skill/doc prose — "When upstream's own surfaces disagree".
 - Lazy install/restart, filter security limits, and attempted-vs-covered bookkeeping remain explicit
   residuals — "Residuals".
+- A parser needed by the bare-clone extension is vendored as a byte-pinned module *closure* (a
+  devDependency exists only for the identity test), not borrowed as a runtime dependency — "Vendor a
+  parser closure, not a runtime dependency".
 
 ## The lockstep-surfaces recipe
 
@@ -205,6 +208,23 @@ no cross-plane contract gets a plain `BORROWED_PACKAGES` entry — not a seam.
 Evaluation keys that held up for the borrow decision: zero-config (no API key required — the bar
 for a *required* borrowed package), headless-safe (`ctx.hasUI` guards verified in the package's
 source), actively maintained, license, and the package's pi-version floor vs perk's pin.
+
+## Vendor a parser *closure*, not a runtime dependency
+
+The bare-clone extension must load with **no `node_modules`**, so a library it needs at load time
+cannot be a runtime dependency (`tests/test_packaging.py` pins that invariant). The
+`extension/vendor/smol-toml/` shape is the answer, and it is a different bar from the
+lockstep-surfaces recipe above (which governs Pi *packages* converged into `settings.json`):
+
+- Copy only the needed module closure (the parse side — `stringify` is excluded) plus its `.d.ts`,
+  the upstream `LICENSE`, and a `README.md` naming provenance and version.
+- Pin the upstream as a **devDependency** solely so a test can assert byte identity against
+  `node_modules` (`extension/vendor/smolToml.test.ts`) — the pin is provenance proof, not a runtime
+  edge.
+- Exclude the directory from Biome (`biome.json`); the source-scan guards need the widen/carve-out/
+  prove-live treatment in `workflow/source-scan-guards.md`.
+- Cover the shipped file set in `tests/test_packaging.py` and `perk_dev/build.py` so the closure
+  reaches the published artifact and nothing outside it leaks in.
 
 ## Residuals
 

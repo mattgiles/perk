@@ -1,6 +1,6 @@
 ---
 title: Binding design records & disposable-scaffold spikes
-read_when: You are authoring or reconciling a binding design record/spike/blueprint — evidence, teardown, cross-section invariants, stale current-state claims, or narrowed literals.
+read_when: You are authoring or reconciling a binding design record, spike, or dogfood/characterization record — evidence, teardown, measured-vs-source-derived claims, FAIL verdicts, waivers, stale claims.
 cluster: knowledge-stewardship
 ---
 
@@ -76,9 +76,47 @@ invariant before declaring reconciliation complete. Adjacent bullets often encod
 value, once as a rule, and once as an exception. Fixing only the exact sentence identified by the
 plan leaves an internally contradictory binding record.
 
+## Characterization and dogfood nodes: what the record must separate
+
+The pi-subagents native-execution arc (a capability characterization, two dogfood gates, and a
+bounded re-verification) added the record disciplines below. The binding record is
+`docs/design/pi-subagents-child-execution-policy.md`; the evidence lives in
+`docs/design/archive/pi-subagents-child-capability-characterization.md`,
+`docs/design/archive/pi-subagents-native-streaming-dogfood.md`, and
+`docs/design/archive/pi-subagents-native-baseline-dogfood.md`.
+
+- **Hard-separate the MEASURED pass from SOURCE-DERIVED design.** Source tracing — not the
+  measurement matrix — surfaced the warm-parent gap that became the restriction channel. A
+  source-established gap gets a documented repair *design* handed to the implementation node,
+  never a fictional measured result; negative or absent measurements are evidence, not permission
+  to repair in the characterization node.
+- **A dogfood gate can legitimately land with a FAIL verdict** when the root cause is precise and
+  repair ownership is assigned. The host-peer baseline did exactly that: implementation committed
+  first, the smoke run at that clean SHA, the evidence record as a trailing docs-only commit — the
+  FAIL recorded, not patched around.
+- **An owner redirect of the plan's approval protocol is honored and recorded faithfully.** Leave
+  the policy pointer at "Pending human PR review", fabricate no approval attestation, and keep
+  experiment/amendment approvals distinct from the final measured-decision approval.
+- **When live dogfooding hits an upstream defect**, preserve every failed or unobserved leg in the
+  archive as NOT PASSED; prefer a self-disabling, proof-gated in-repo guard over host patches or
+  upstream churn; land on a bounded, owner-approved waiver that names the residual gaps. Budget
+  for host-level surprises dominating a "swap the guidance" node — the streaming restore tripled
+  its scope through three owner-approved amendments.
+- **High-stakes deletion sits behind an offline proof gate**: "retain the guard and stop without a
+  PR on failed verification", each blocker recorded with exact anchors and hashes, each retry
+  separately owner-authorized (one bounded attempt at a time) — no harness growth, no
+  proof-weakening to get through.
+- **A bounded source/offline re-verification is not a new full certification.** Record a Context
+  table, a SHA-256 source census before/after over a fixed closed file list (raw bytes, lowercase
+  hex, package-relative paths), semantic-check rows citing durable anchors, and a fixed
+  command/disposition table; do not advance the doctor full-baseline stamp on its strength.
+
 ## Cross-references
 
 - `docs/learned/workflow/doc-reconciliation.md` — the curation-batch measurement rules
   (SHA-stamped, mechanically-derived tables) and the record-completeness bar
 - `docs/design/docs-site-blueprint.md`, `docs/design/docs-site-visual-blueprint.md`,
   `docs/design/archive/docs-site-bridge-spike.md` — the binding records this craft was distilled from
+- `docs/design/pi-subagents-child-execution-policy.md` (+ the three archive records named above) —
+  the characterization/dogfood arc the separation disciplines were distilled from
+- `docs/learned/pi/subagents.md` — the version-anchoring convention the re-verification rule serves

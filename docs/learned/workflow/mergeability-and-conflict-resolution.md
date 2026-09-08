@@ -1,6 +1,6 @@
 ---
 title: "/submit mergeability gate + the conflict-resolver subagent"
-read_when: /submit mergeability gate, the conflict-resolver agent and its outcome vocabulary, /objective-sync conflict drives, warm-route hints on cold refusals, or stall/rebase analysis.
+read_when: /submit mergeability gate, the code-owned conflict-resolver dispatch (resolve_submit_conflicts, the retained /objective-sync drive), the worktree resolver lock, the attempt cap, or rebase analysis.
 cluster: plan-lifecycle
 ---
 
@@ -21,10 +21,15 @@ data-format example).
   parsed conflict paths — "The load-bearing bug class".
 - The probe fails open everywhere; conflicts never flip submit's exit code — "Fail-open
   everywhere".
-- The resolver reports through a closed 5-class outcome vocabulary; a dispatcher gate maps every
-  branch to an emittable class (add a class, never soften a gate); mode dispatch is
-  sentinel-based and fail-closed — "The resolver outcome vocabulary + the sentinel mode
-  dispatch".
+- Both dispatch paths are code-owned native foreground delegation over a strict TypeBox record
+  schema (no prose parsing); the submit tool is single-use and re-guards at every await; the
+  worktree lock is manual-recovery-only — "The resolver record schema + the two code-owned
+  dispatch modes", "The transport", "The worktree-scoped execution lock", "Two authorization
+  gaps only review caught".
+- Check the native worktree-default config-compat gate BEFORE the first `/submit` on a
+  conflicted PR (refusals spend the attempt cap; a fix is invisible until Pi restarts); after a
+  resolver rebase, diff intended-vs-rebased per file and re-gate the rebased head — "Native
+  worktree default + the attempt cap", "Live conflict-loop findings".
 - The conflict loop is a textual-integrity mechanism, not a semantic-consistency one —
   auto-merges carry base-advance-falsified claims past the resolver; blob-level prediction is a
   ceiling ("at most N stops"), not a profile — "Live conflict-loop findings".
@@ -156,27 +161,114 @@ correctly stopped — the task text hadn't pinned the worktree cwd, so the comma
 plan worktree. A retry whose task text opened with an explicit worktree-`cd` instruction
 succeeded (and the same explicit-cwd task text succeeded first-try in a later `finalize_address`
 publish step). Rule: resolver task text opens with the `cd <worktree>` command — a concrete
-command line, not a prose description of where to work. The rule is now plumbed into the dispatch
-itself: `conflictResolutionGuidance` takes the plan worktree path (the session cwd — `/submit`
-runs only in worktree-bound sessions) and `prompts/stages/conflict-resolution.md` opens the child
-instruction with the concrete `cd {{ worktree }}` command, so the session no longer has to
-remember to author it.
+command line, not a prose description of where to work. The session no longer authors the task at
+all: `conflictResolutionGuidance` (`extension/pi/v1/delivery/submit.ts`) renders **parent
+guidance only**, and the code-owned dispatch authors the child task with the concrete worktree
+(`extension/delivery/conflictResolution.ts::conflictResolutionTask` /
+`retainedConflictResolutionTask`, both refusing a worktree string they cannot safely quote).
 
-## The resolver outcome vocabulary + the sentinel mode dispatch
+## The resolver record schema + the two code-owned dispatch modes
 
-`agents/conflict-resolver.md` reports through a **closed 5-class outcome vocabulary**:
-`completed` / `verification-failed` / `stopped-before-mutation` / `unresolvable-conflict` /
-`aborted`. The design rule: every gate in a dispatcher that consumes the report must map **every
-branch to an emittable class** — when a new refusal shape appears, **add a class rather than
-soften a gate** (an unclassifiable branch forces downstream consumers into prose-matching).
+The closed 5-class outcome vocabulary (`completed` / `verification-failed` /
+`stopped-before-mutation` / `unresolvable-conflict` / `aborted`) survives as a **strict TypeBox
+terminal schema** in `extension/delivery/conflictResolution.ts`: `pr-rebase` records carry
+`mode/outcome/verification/push/summary`; `retained-continuation` records omit `push` and the
+`aborted` outcome; unknown fields are rejected (`additionalProperties: false`); the JSON-serialized
+schema is the native delegation `outputSchema`. **No prose parsing survives on either path** —
+`agents/conflict-resolver.md` completes through `structured_output` when a schema is supplied, and
+only its legacy first line otherwise. The design rule stands: every dispatcher gate maps every
+branch to an emittable class — add a class, never soften a gate.
 
-Mode dispatch is **sentinel-based and fail-closed**: the dispatcher renders an exact marker at
-column zero (a task-text line opening with the retained-continuation sentinel prefix), the agent
-def matches tolerantly (a line's first non-whitespace content), and retained mode additionally
-corroborates against **concrete rebase state** (the rebase-in-progress probe) before mutating
-anything — sentinel absence selects the legacy PR-rebase mode. The shape generalizes: exact
-rendered marker on the producing side, tolerant def-side matching on the consuming side, and a
-concrete state probe as the fail-closed corroborator.
+`resolved` requires ALL of: native `completed` + a schema-valid record + outcome `completed` +
+verification `passed` + push `succeeded` (PR mode) + a successful lock release. Every other
+combination withholds. The **mode is selected by the discriminated `ConflictResolutionRequest` the
+caller builds**, not by a task-text sentinel — the retained sentinel line in the task survives only
+as the worktree-naming carrier the agent def reads (it corroborates against concrete rebase state
+before mutating, as before).
+
+- **The submit path**: a parameterless, single-use, non-terminating `resolve_submit_conflicts`
+  tool (`extension/pi/v1/delivery/submitConflict.ts`), primed only by a verified
+  `ConflictFollowUp.kind === "drive"`, bound to session/run/cwd/attempt, and consumed
+  synchronously before any await. On `resolved` the parent still calls canonical `submit` again —
+  publication, cap, and mergeability authority are unchanged.
+- **The retained path** (`extension/pi/v1/delivery/stackConflictResolver.ts`, the
+  `/objective-sync` drive) reuses the same engine with the `continuation-ready` success kind.
+
+Cross-cutting rule: a schema-valid child record is NOT proof of tests or remote mergeability.
+Native status, domain outcome, and the parent's canonical re-submit stay separate authorities;
+receipts are output-free and diagnostic only.
+
+## The transport: pi-subagents' structured foreground delegation, not RPC/ReportWave
+
+Both obvious "call the engine synchronously" routes are dead ends: Pi's `getAllTools()` returns
+tool *metadata*, not callables, and the engine's RPC `spawn` rejects `async: false`. The working
+path is the engine's structured foreground delegation interface (`src/api/delegation.ts` publishes
+the event constants; the adapter fixes `async: false`, `foregroundOnly: true`, `clarify: false`,
+`acceptance: false`), driven by the `prompt-template:subagent:{request,started,update,response,
+cancel}` event family with exact `(requestId, ownerRunId, nodeId)` correlation
+(`extension/pi/v1/delivery/conflictResolverEngine.ts::DELEGATION_EVENTS`). The confined
+source-bound loader — walk the registered `subagent` tool's `sourceInfo.path` up to the
+`pi-subagents` manifest and load only its `./preflight` export — is a tested narrow exception to
+`bareImportGuard`, not a general escape hatch. The role split this implies (report roles
+background, the writer foreground) is in `pi/subagents.md` § "Native child execution profiles".
+
+## The worktree-scoped execution lock
+
+`extension/substrate/worktreeResolverLock.ts` keys on the canonical **per-worktree** git dir
+(`git rev-parse --absolute-git-dir`, realpath'd — `extension/substrate/git.ts::worktreeGitDir`),
+NOT `--git-common-dir`, the run id, the branch, or the raw cwd — so symlink/subdirectory aliases
+collapse to one lock while distinct linked worktrees never serialize against each other. It fails
+closed: `worktreeGitDir` returns null on any probe failure (joining `revalidationBracket` as
+`git.ts`'s second deliberate fail-closed exception). Acquisition is an atomic exclusive create; an
+existing file is busy even for the same PID/session and even if dead, empty, or malformed — **no
+heartbeat, expiry, same-PID bypass, or automatic reclaim**; reload and process exit are not unlock
+gestures; recovery is manual-only (`docs/user-docs/how-to/recover-a-dirty-worktree.md`). Contrast
+`extension/substrate/resolverLease.ts`, a session *claim* permitting same-PID reacquire and
+dead-PID reclamation; the primitive decision table is in `workflow/lease-outbox-delivery.md`.
+
+## Two authorization gaps only review caught
+
+1. **The mode floor.** Gating on `state.mode !== "read-write"` refused ordinary warm sessions: the
+   warm-mint arm of `establishSessionIdentity` (`extension/session/lifecycle.ts`) leaves `mode`
+   undefined, and `toolGating` treats undefined as writable. Deny only the explicit
+   `state.mode === "read-only"` floor (generalized in `workflow/warm-door-commands.md`).
+2. **Re-guard at the synchronous mutation port.** A currency/cancellation check before an `await`
+   is not sound for a claim or counter write after it. The retained resolver's `isCurrent()` check
+   runs at the actual claim acquisition and attempt-counter increment, so a revoked invocation
+   cannot mutate budget or claim. Any single-use authorization spanning awaits must be revalidated
+   after every await boundary (preflight + lock acquisition), each with its own regression test
+   (the revocation-race tests).
+
+## Native worktree default + the attempt cap — fix config BEFORE spending an attempt
+
+pi-subagents' delegation has no per-request `worktree` field, so the engine applies
+`<agent dir>/extensions/subagent/config.json`'s `worktree` default; `true` ⇒ the resolver child
+would run in a separate managed worktree, so the engine refuses with
+`incompatible-worktree-default`. Every such refusal — at all four gates (pre- and post-preflight,
+post-lock, and the pre-emit gate inside `waitForTerminal`, which settles with its own reason rather
+than collapsing to `unauthorized`) — stamps `receipt.nativeWorktreeConfig {path, observed,
+atActivation}` through one `worktreeRefusal()` closure, and the submit diagnostic renders the exact
+path plus `perk doctor --fix` (or `perk init`) plus a restart. Post-lock precedence: a lock-finish
+failure wins, then `cancelled` → the stamped worktree refusal → `unauthorized`. The repair is
+Python-owned (the `subagent-worktree-default` convergence, `workflow/init-doctor.md`), never the
+adapter's.
+
+Two traps: the effective agent dir is `getAgentDir()` — perk redirects it to the **project-local**
+`.pi/agent`, not `~/.pi/agent` (time was lost editing the wrong file); and `configCompatible()`
+requires the current state `===` the value pinned at extension activation, so a fix is invisible
+until the Pi process is quit and the session resumed (`pi --session <file>` with
+`PI_CODING_AGENT_DIR` exported; resuming is the lifecycle `keep` arm, so `PERK_RUN_ID` need not be
+re-exported) — `/reload` is not enough. The cap counts pre-dispatch refusals: two config refusals
+(no child ever launched) consumed `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`, and because the counter is
+rebuilt only when the session file is opened, resetting it required in-place edits of persisted
+entries in the live session JSONL — unsafe surgery not to normalize. Rule: check the config-compat
+gate before the first `/submit` on a conflicted PR; treat a spent budget as "fresh session /
+explicit recovery", never "edit the JSONL".
+
+Test note: to hit the pre-emit gate there is no async seam — mutate state from the `authorized`
+callback on its Nth read (the post-lock gate reads the native config before re-reading
+authorization, so poisoning on the third read leaves the pre-emit gate as the first observer;
+assert the read count) and use the `acquire` wrapper to hit the post-lock gate.
 
 ## Live conflict-loop findings (first retained-mode dogfood)
 
@@ -188,7 +280,19 @@ First live evidence from the retained-continuation loop (the `/objective-sync` c
 - **The loop is a textual-integrity mechanism, not a semantic-consistency one.** Auto-merges
   carry base-advance-falsified claims (prose the base's advance made wrong) straight past the
   resolver — nothing conflicts textually. The content workflow owns semantic reconciliation;
-  don't expect the conflict loop to catch it.
+  don't expect the conflict loop to catch it. The sharper instance: a resolver rebase reported
+  `completed / verification passed / push succeeded` and was genuinely green, yet had dropped
+  main's newly landed contract sections wholesale, bolted an early return ahead of gate checks,
+  and introduced a circular import — nothing caught it until `/pr-review`. The recipe: compare
+  intended vs rebased diffs per file (`git diff <old-base> <pre-rebase-head> --numstat` against
+  `git diff <new-base> <rebased-head> --numstat`; post-rebase deletions exceeding the intended
+  deletions are suspect), then `comm -12` the lines main ADDED against the lines the rebased diff
+  REMOVES to pinpoint dropped content; restore prose by three-way merge (`git merge-file` with
+  base = old base, ours = the pre-rebase intended file, theirs = main). **The green run-all gate on
+  the pre-rebase head is void after a rebase** — re-gate the rebased head as a distinct
+  checkpoint. Enumerated-stage policies also go stale mid-flight: a closed enumeration over
+  registry vocabulary must be re-checked against main's registry at rebase time
+  (`objective-refine` landed mid-implementation).
 - The fail-closed retained-mode prompt produced **content-correct semantic resolution** on its
   first live conflict — the first evidence the prompt shape resolves well, not merely refuses
   safely.
@@ -278,6 +382,12 @@ don't drift" discipline).
 - `extension/pi/v1/delivery/land.ts` — `driveReconcileAfterLand`, the shape the drive mirrors
 - `extension/worker/stageExecution.ts` — `evaluateTerminal`'s `mergeable !== false` implement bar
 - `agents/conflict-resolver.md` — the write-capable + context-inheriting agent def
+- `extension/pi/v1/delivery/submitConflict.ts` / `stackConflictResolver.ts` / `conflictResolverEngine.ts` — the two code-owned dispatch paths over the native foreground delegation engine
+- `extension/delivery/conflictResolution.ts` — the strict record schema + the code-authored child tasks
+- `extension/substrate/worktreeResolverLock.ts` — the manual-recovery-only per-worktree lock
+- `docs/learned/workflow/lease-outbox-delivery.md` — the exclusion-primitive decision table
+- `docs/learned/workflow/warm-door-commands.md` — the effective-writability mode floor
+- `docs/user-docs/how-to/recover-a-dirty-worktree.md` — the manual lock/worktree recovery exit
 - `docs/learned/workflow/warm-door-commands.md` — the terminate+followUp composition, the
   reactive-sub-result drive, the drive-helper test shape
 - `docs/learned/pi/subagents.md` — the widening-lockstep census, project-vs-builtin agents

@@ -29,6 +29,11 @@ cluster: config-and-convergence
   `EnvCheck` tier".
 - Drift-tripwire probes pin positive load-bearing literals, never removal messages; unprobeable
   surfaces stay unprobed with an intent comment — "Marker-probe table craft".
+- Pieces acting on the user's agent dir resolve it through `launch_pi_agent_dir` (never a parallel
+  `Path.home()` copy), rewrite in place without creating, and need autouse `PI_CODING_AGENT_DIR`
+  hermeticity — "Managed pieces and checks that act on files OUTSIDE the repo"; whole-directory
+  safety checks probe representative artifacts and use `:(literal)` pathspecs — "Whole-directory
+  safety checks need representative probes and literal pathspecs".
 
 ## The split
 
@@ -115,7 +120,10 @@ single intended artifact) also refreshes **pre-existing stale rows** — a row t
 since an earlier PR (the `skills-manifest` row is the recorded instance) rides along in the same
 diff. Don't treat the extra hash rows as a mistake: verify each is a legitimate `desired == live`
 refresh rather than a regression, and commit them together with the intended move. A reconvergence
-diff that touches *only* the row you expected is the surprise, not the reverse.
+diff that touches *only* the row you expected is the surprise, not the reverse. The same holds for
+a convergence run scoped to ONE key: it rewrites that artifact's recorded hash **and any
+already-stale hash it finds** in `.perk/managed-state.toml` — commit the companion file, and don't
+read "settings.json is the only diff" literally.
 
 The sharper variant: a mid-plan `uv run perk init` run for one piece can also **revert deliberate
 divergences**. The recorded instance rewrote `.github/workflows/perk-run.yml` +
@@ -384,20 +392,63 @@ asserting its own concern; add dedicated arms per new warn part, including an ag
 proving multiple parts ride ONE warn check. Convention: when extending a report-only doctor
 nudge, grep for every fixture that plants the artifact the nudge inspects.
 
-## Doctor checks reading user-global state (`Path.home()`)
+## Managed pieces and checks that act on files OUTSIDE the repo (the user's agent dir)
 
-A check that reads `Path.home()` (e.g. the user-global `~/.pi/agent/settings.json` scope of
-`subagent-bridge-config`) forces **hermetic isolation in EVERY test of that check** — not just the
-user-scope arms — or a developer's real user-global settings flip unrelated assertions. Two
-mechanics make the isolation workable:
+Some pieces read or rewrite files inside the user's Pi agent directory rather than the repo: the
+user scope of `subagent-bridge-config`, and pi-subagents' native `extensions/subagent/config.json`.
+Three rules govern them:
 
-- Resolve `Path.home()` **at check time** (not import time) so a
-  `monkeypatch.setattr(Path, "home", …)` lands; and catch `RuntimeError` (unresolvable home)
-  fail-open by skipping the scope.
+- **Resolve the user scope through the ONE shared resolver `launch_stage` also consumes** —
+  `src/perk/substrate/config.py::launch_pi_agent_dir` (env `PI_CODING_AGENT_DIR` → main-checkout
+  `[pi] agent_dir` → `~/.pi/agent`; `None` on an unresolvable home; `ConfigError` /
+  `TOMLDecodeError` propagate and each caller keeps its own posture). Never a parallel
+  `Path.home()`/env copy: the check must act on exactly the store a perk session's engine reads.
+- **The `subagent-worktree-default` `ManagedConvergence`**
+  (`src/perk/convergence/init/subagent_config.py`) is the worked example of writing there: rewrite
+  ONE key in place via atomic replace (`fs.atomic_write_text`), **never create** the file, and let
+  only a genuinely **missing** path count as compatible — every other unreadable shape is the loud
+  arm (`workflow/broad-catch-narrowing.md`). The incident that forced it: a poisoned live file,
+  plausibly written by an earlier test or dogfood run against the real redirected store.
+- **Doctor `--fix` catches `UserFacingCliError` from a managed `converge(True)`** and records
+  `"<check>: <message>"` on `fix_errors` instead of aborting, so a refusal on one piece never
+  blocks the rest of the repair pass.
+
+Such pieces force **hermetic isolation in EVERY test that reaches them** — not just the
+user-scope arms — or a developer's real agent dir flips unrelated assertions (and a test can poison
+the real store). The mechanics that make the isolation workable:
+
+- An **autouse `PI_CODING_AGENT_DIR` fixture** is the right default — the env arm wins precedence
+  — but it must **not** `mkdir` under `tmp_path` (tests asserting an untouched `tmp_path` broke;
+  consumers mkdir on demand).
+- Tests that `delenv` to exercise the config/default arms must also isolate `Path.home`: patch
+  `Path.home` → `<tmp>/home` (Python-process-only — safer than `HOME=`, which git/gh subprocesses
+  would also see). Resolution happens at call time, so the monkeypatch lands.
+- Session-scoped fixtures sit outside function-scoped autouse fixtures — wrap their `run_init` in
+  `pytest.MonkeyPatch.context()`.
 - **Mutating the scaffolded `.pi/settings.json` in a doctor test must merge, not overwrite** —
   preserve the init-converged keys AND init's serialization shape (indent=2 + trailing newline),
   or the unrelated `settings-wiring` check goes red. Doctor tests are coupled across checks
   through the shared scaffold.
+
+## Whole-directory safety checks need representative probes and literal pathspecs
+
+A check that vouches for a whole redirected directory (`_pi_agent_dir_check`,
+`src/perk/convergence/doctor/checks.py`, guarding a `[pi] agent_dir` inside the repo) can be
+vacuously green: an auth.json-only ignore probe reports acceptable coverage while trust, settings,
+model-store data, locks, and nested session logs stay exposed. Probe **representative** sensitive
+and volatile artifact classes — including nonexistent files (warn before pi writes the first one)
+and nested paths — and describe the result as representative coverage, never exhaustive proof.
+Keep ignore rules distinct from already-tracked content: scan tracked artifacts separately and
+report remediation without auto-untracking user files (gitignore rules never untrack). Where one
+exception must remain trackable, ignore the directory's contents and then negate the exception
+(`/.pi/agent/*` followed by `!/.pi/agent/models.json`) rather than excluding a parent directory Git
+cannot descend into.
+
+**A filesystem path is not a literal Git pathspec.** `--` stops option parsing but not pathspec
+grammar — brackets, wildcards, and magic-like names redirect or hide a tracked-artifact scan. Use
+`:(literal)<repo-relative-dir>` at this boundary (`git.tracked_paths`), with regression tests that
+create real tracked files under metacharacter names and prove both detection and the exclusion of
+unrelated glob matches.
 
 ## Managed template reconvergence
 
@@ -477,7 +528,9 @@ the `again.fixed == []` idempotency tests.
   `data.py::_MANAGED_GROUP`, `fixes.py::_apply_fixes`
 - `src/perk/cli/commands/doctor/render.py` — `GROUP_ORDER` (the human-render group allow-list)
 - `src/perk/convergence/capabilities.py` — `Capability`, `applicable()`
-- `src/perk/substrate/git.py` — `is_tracked`, `rm_cached`
+- `src/perk/substrate/git.py` — `is_tracked`, `rm_cached`, `tracked_paths` (the `:(literal)` pathspec boundary)
+- `src/perk/substrate/config.py` — `launch_pi_agent_dir` (the one agent-dir precedence); `src/perk/convergence/init/subagent_config.py` — the `subagent-worktree-default` convergence
+- `docs/learned/workflow/cold-door-launch.md` — the launch side of the agent-dir precedence; `docs/learned/workflow/broad-catch-narrowing.md` — classifying every read outcome of a file perk does not own
 - `tests/test_doctor.py` — `test_every_required_capability_has_a_doctor_check`
 - `tests/test_init_t5.py` — `test_cli_idempotent_second_run`
 - `extension/pi/v1/selfcheck.ts` — `MANAGED_AGENTS_MARKER`, `readAmbientIndex`, `buildSelfcheckReport`

@@ -79,6 +79,14 @@ pick (`messages[Math.floor(...)]`); and a **guard before discriminant-narrowing*
 a discriminated union (`if (entry && entry.type === "custom")` before reading the variant-only field,
 since the element access is possibly-`undefined`).
 
+## `tsc` on explicit input files needs `--ignoreConfig` (TypeScript 6)
+
+With TypeScript 6, compiling explicit input files (`tsc <file>.ts`) from a directory that carries a
+`tsconfig.json` stops with **TS5112** before executing anything — the CLI now refuses to silently
+ignore the config when files are named. Pass `--ignoreConfig` for a one-off file compile (hit in
+the child-capability harness, whose scratch compiles named files directly); the project build is
+unaffected because it compiles through the config.
+
 ## An object-shape guard needs three clauses (`typeof` admits arrays)
 
 `typeof x === "object"` admits arrays (and `null`), so plan language like "not a non-null object"
