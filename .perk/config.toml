@@ -117,3 +117,16 @@ setup = ["uv sync --all-packages", "npm ci"]
 [providers]
 footer = "perk-footer"
 plan = "plannotator-plan"
+
+# ═══ How the session manages its context ═══
+
+# Committed-only; `perk init` converges it into .pi/settings.json's `compaction` object (re-run
+# after editing). `reserve_tokens` is more than response headroom: it is also Pi's compaction
+# summary output budget — a split turn's turn-prefix summary gets `0.5 ×` this value and, on
+# adaptive-thinking models, shares it with the summarizer's reasoning. Perk implement sessions are
+# one long turn, so every compaction is a split turn, and Pi's 16384 default fails at `xhigh` with
+# "generation hit the token cap". Ceiling: Pi compacts when `context > window − reserve` with no
+# clamp and this applies to every session launched here, so keep the value a small fraction of
+# the smallest context window any session runs with (smallest configured model today: 272K).
+[compaction]
+reserve_tokens = 65536

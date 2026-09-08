@@ -25,5 +25,8 @@
   "subagents": {
     "disableBuiltins": true
   },
-  "tuiMode": "fullscreen"
+  "tuiMode": "fullscreen",
+  "compaction": {
+    "reserveTokens": 65536
+  }
 }

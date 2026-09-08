@@ -1,4 +1,5 @@
 import dataclasses
+import json
 import tomllib
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -27,6 +28,8 @@ from perk.substrate.config import (
     load_local_linear_api_key,
     save_local_linear_api_key,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Map the legacy config filenames callers still pass to the `.perk/` target locations, so the
 # seeding helper writes where the readers now look (`.perk/config.toml` / `.perk/local.toml`).
@@ -721,6 +724,20 @@ def test_compaction_objective_threshold_is_ignored_by_python(tmp_path):
     # into pi settings (extra="ignore" drops it here).
     _write(tmp_path, "perk.toml", "[compaction]\nenabled = true\nobjective_threshold = 0.8\n")
     assert load_committed_compaction(tmp_path) == {"enabled": True}
+
+
+def test_repo_committed_settings_carry_converged_compaction():
+    # perk's OWN repo commits both halves of the `[compaction]` convergence: the table in
+    # `.perk/config.toml` and the mapped `compaction` object `perk init` writes into
+    # `.pi/settings.json`. Editing the table without re-running init would silently leave the
+    # committed settings stale (Pi reads settings.json, never the TOML) — this guards the pair.
+    desired = load_committed_compaction(REPO_ROOT)
+    assert desired, "perk's own .perk/config.toml must carry a live [compaction] table"
+    settings = json.loads((REPO_ROOT / ".pi" / "settings.json").read_text(encoding="utf-8"))
+    committed = settings.get("compaction")
+    assert isinstance(committed, dict)
+    for key, value in desired.items():
+        assert committed.get(key) == value, f"settings.json compaction.{key} drifted from config"
 
 
 # --- [models] committed-only read -----------------------------------------------------

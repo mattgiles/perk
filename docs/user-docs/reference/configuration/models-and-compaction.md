@@ -161,9 +161,22 @@ keys leaves those settings in place to clean up by hand. The `objective_threshol
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `enabled` | bool | _(Pi default)_ | Turns Pi's auto-compaction on or off. |
-| `reserve_tokens` | int (> 0) | _(Pi default)_ | Tokens reserved for the response. |
+| `reserve_tokens` | int (> 0) | _(Pi default: 16384)_ | Headroom Pi keeps free at the top of the context window — the auto-compaction trigger (`context > window − reserve`) — **and** the output budget for compaction summaries: the history summary may use `0.8 ×` this value, a split turn's turn-prefix summary `0.5 ×`; on adaptive-thinking models the summarizer's reasoning counts against that budget. |
 | `keep_recent_tokens` | int (> 0) | _(Pi default)_ | Recent tokens kept verbatim. |
 | `objective_threshold` | float in `(0,1]` | `0.8` | The context-usage fraction that triggers compaction **while an objective is active**. It is a native float (`0.8`, not `"0.8"`) and is never converged into `settings.json`. |
+
+**Sizing `reserve_tokens`.** *Why raise it:* since Pi 0.84.3 a summary that hits its output cap
+fails loudly (`Compaction failed: … generation hit the token cap and the summary is incomplete`)
+instead of being persisted truncated. Perk implement sessions are typically one long turn, so every
+compaction is a *split turn* — a compaction whose cut point lands mid-turn — and the discarded head of
+that turn gets its own *turn-prefix summary* budgeted at only `0.5 × reserve_tokens` (8192 at the
+default), shared with the summarizer's reasoning at high thinking levels on adaptive-thinking models.
+If `/commit-and-compact` or `/compact` fails with that message, raise `reserve_tokens` (e.g. `65536`)
+and re-run `perk init`. *The ceiling:* the setting applies to **every** session in the repo (any
+model, subagent children included) and Pi's trigger has no clamp, so keep it a small fraction of the
+smallest context window any session may run with — a reserve at or above a model's window compacts on
+every turn (`65536` is safe for ≥ 200K windows and wrong for a ≤ 64K one). Raising it also advances
+the auto-compaction trigger by the same amount.
 
 ```toml
 [compaction]
