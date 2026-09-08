@@ -641,4 +641,138 @@ def test_non_stack_context_envelope_byte_identical(monkeypatch):
         "body",
         "diff",
         "plan_body",
+        "diff_source",
     ]
+
+
+# --- `--local` + `diff_source` (the large-PR fallback's CLI surface) ---------------------------
+
+
+def _offline_backend(_root: Path):
+    """A plan-body enrichment that fails (the stack arm tolerates it → ``plan_body`` null)."""
+    raise github.GitHubError("offline")
+
+
+def _capture_context(monkeypatch, context: github.PrReviewContext) -> dict[str, object]:
+    """Monkeypatch the gateway read with a kwargs-recording fake returning ``context``."""
+    seen: dict[str, object] = {}
+
+    def _capture(**kwargs):
+        seen.update(kwargs)
+        return context
+
+    monkeypatch.setattr(github, "get_pr_review_context", _capture)
+    return seen
+
+
+def test_local_flag_threads_local_diff_on_the_flagless_arm(monkeypatch):
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+    seen = _capture_context(monkeypatch, _context())
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
+        assert runner.invoke(cli, ["pr", "review-context", "--json"]).exit_code == 0
+        assert seen["local_diff"] is False
+        result = runner.invoke(cli, ["pr", "review-context", "--local", "--json"])
+    assert result.exit_code == 0
+    assert seen["local_diff"] is True
+    assert seen["pr_number"] == 42
+
+
+def test_local_flag_threads_local_diff_on_the_pr_arm(monkeypatch):
+    monkeypatch.setattr(
+        github,
+        "get_pr",
+        lambda **k: github.PullRequest(
+            number=123, url="u", is_draft=False, state="OPEN", existed=True, head_ref="feature-x"
+        ),
+    )
+    seen = _capture_context(monkeypatch, _foreign_context())
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["pr", "review-context", "--pr", "123", "--local", "--json"])
+    assert result.exit_code == 0
+    assert seen["local_diff"] is True
+    assert seen["pr_number"] == 123
+
+
+def test_local_flag_threads_local_diff_to_every_stack_member(git_repo, monkeypatch):
+    import perk.cli.commands.pr.review_context_cmd as review_context_cmd
+
+    monkeypatch.setattr(
+        review_context_cmd, "resolve_stack_from_pr", lambda repo_root, pr: _stack_members()
+    )
+    # The combined diff is always a local rendering by construction — stubbed here so the
+    # test isolates the per-member threading (the real fetch is covered above).
+    monkeypatch.setattr(review_context_cmd, "_combined_diff", lambda repo_root, stack: "combined")
+    monkeypatch.setattr(
+        "perk.cli.commands.pr.review_context_cmd.resolve.resolve_issue_backend", _offline_backend
+    )
+    seen: list[dict[str, object]] = []
+    contexts = {
+        1: replace(_member_context(1, "plan-301", "main"), diff_source="local-git"),
+        2: replace(_member_context(2, "feat-b", "plan-301"), diff_source="local-git"),
+    }
+
+    def _capture(**kwargs):
+        seen.append(kwargs)
+        return contexts[kwargs["pr_number"]]
+
+    monkeypatch.setattr(github, "get_pr_review_context", _capture)
+    monkeypatch.chdir(git_repo)
+
+    result = CliRunner().invoke(
+        cli, ["pr", "review-context", "--pr", "2", "--stack", "--local", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    assert [call["pr_number"] for call in seen] == [1, 2]
+    assert all(call["local_diff"] is True for call in seen)
+    data = json.loads(result.stdout)
+    assert [row["diff_source"] for row in data["stack"]] == ["local-git", "local-git"]
+    assert data["diff_source"] == "local-git"
+    assert data["combined_diff"] == "combined"
+
+
+def test_local_git_diff_source_surfaces_in_the_envelope_and_human_line(monkeypatch):
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+    _capture_context(monkeypatch, replace(_context(), diff_source="local-git"))
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
+        as_json = runner.invoke(cli, ["pr", "review-context", "--json"])
+        human = runner.invoke(cli, ["pr", "review-context"])
+    assert as_json.exit_code == 0
+    assert json.loads(as_json.output)["diff_source"] == "local-git"
+    assert human.exit_code == 0
+    assert "diff via local-git" in human.output
+
+
+def test_stack_envelope_carries_diff_source_per_member_and_for_the_top(git_repo, monkeypatch):
+    import perk.cli.commands.pr.review_context_cmd as review_context_cmd
+
+    monkeypatch.setattr(
+        review_context_cmd, "resolve_stack_from_pr", lambda repo_root, pr: _stack_members()
+    )
+    monkeypatch.setattr(review_context_cmd, "_combined_diff", lambda repo_root, stack: "combined")
+    monkeypatch.setattr(
+        "perk.cli.commands.pr.review_context_cmd.resolve.resolve_issue_backend", _offline_backend
+    )
+    # Only the top member tripped the fallback — each row describes its OWN diff.
+    contexts = {
+        1: _member_context(1, "plan-301", "main"),
+        2: replace(_member_context(2, "feat-b", "plan-301"), diff_source="local-git"),
+    }
+    monkeypatch.setattr(
+        github, "get_pr_review_context", lambda *, pr_number, **k: contexts[pr_number]
+    )
+    monkeypatch.chdir(git_repo)
+
+    result = CliRunner().invoke(cli, ["pr", "review-context", "--pr", "2", "--stack", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert [row["diff_source"] for row in data["stack"]] == ["github", "local-git"]
+    assert data["diff_source"] == "local-git"  # the top-level fields describe the top PR
+    assert "combined_diff_source" not in data  # combined_diff is always local; no constant field

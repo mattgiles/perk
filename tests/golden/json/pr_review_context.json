@@ -9,5 +9,6 @@
   "title": "My PR",
   "body": "PR body",
   "diff": "diff --git a/x b/x\n",
-  "plan_body": "# Plan\n"
+  "plan_body": "# Plan\n",
+  "diff_source": "github"
 }
