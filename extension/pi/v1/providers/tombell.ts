@@ -81,11 +81,20 @@ export function installTombellPlanAdapter(pi: ExtensionAPI): void {
   // Inject the bridge context while the foreign tombell-plan provider is selected AND a plan
   // authoring mode is on — perk's read-only gate (per the persisted `perk:workflow-state.mode`,
   // the gate's state twin — never the gate object) OR tombell's own persisted `plan-mode-state`
-  // entry (the ad-hoc interactive `/plan` arm). Objective-author and gist-author sessions are
-  // excepted (objectiveAuthor/gistAuthor own those sessions; mirrors the plannotator adapter's
-  // recipe — the tombell REPLACE posture covers the plan surface only). The strip fires when
-  // tombell-plan is no longer selected, so the marker never lingers across a deselect; the
-  // inject/strip mechanics (active-window dedup, stale-marker strip) live in the shared helper.
+  // entry (the ad-hoc interactive `/plan` arm). Objective-author, gist-author and
+  // objective-refine sessions are excepted (objectiveAuthor/gistAuthor/the refinement installer
+  // own those sessions; mirrors the plannotator adapter's recipe — the tombell REPLACE posture
+  // covers the plan surface only). The strip fires when tombell-plan is no longer selected OR
+  // the session has transitioned into an excepted stage (a bridge copy injected before a warm
+  // `/objective-refine` is stale there), so the marker never lingers; on a failed branch read
+  // (`[]`) the stage is unknown and liveness degrades to provider selection. The inject/strip
+  // mechanics (active-window dedup, stale-marker strip) live in the shared helper.
+  const ownedByAnotherAuthoringStage = (branch: readonly BranchEntry[]): boolean => {
+    const stage = rebuildWorkflowState(branch).stage;
+    return (
+      stage === OBJECTIVE_AUTHOR_STAGE || stage === GIST_AUTHOR_STAGE || stage === REFINE_STAGE
+    );
+  };
   installInjectedContext(pi, {
     customType: PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE,
     flavors: {
@@ -93,16 +102,11 @@ export function installTombellPlanAdapter(pi: ExtensionAPI): void {
     },
     select: (ctx, branch) => {
       if (!isTombellPlanSelected(ctx.cwd)) return null;
+      if (ownedByAnotherAuthoringStage(branch)) return null;
       const state = rebuildWorkflowState(branch);
-      if (
-        state.stage === OBJECTIVE_AUTHOR_STAGE ||
-        state.stage === GIST_AUTHOR_STAGE ||
-        state.stage === REFINE_STAGE
-      )
-        return null;
       if (state.mode !== "read-only" && !isTombellPlanModeEnabled(branch)) return null;
       return PLAN_ADAPTER_TOMBELL_MARKER;
     },
-    live: (ctx) => isTombellPlanSelected(ctx.cwd),
+    live: (ctx, branch) => isTombellPlanSelected(ctx.cwd) && !ownedByAnotherAuthoringStage(branch),
   });
 }

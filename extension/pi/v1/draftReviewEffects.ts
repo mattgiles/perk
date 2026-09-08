@@ -4,7 +4,11 @@ import type { ObjectiveApprovalSaveDeps } from "../../authoring/objective/save.t
 import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
 import type { PlanApprovalSaveDeps } from "../../authoring/plan/save.ts";
 import { decodeRefinementDraft } from "../../authoring/refinement/draft.ts";
-import type { RefinementBackend } from "../../authoring/refinement/save.ts";
+import type {
+  RefinementBackend,
+  RefinementBackendSaveResult,
+  ReviewedRefinementPair,
+} from "../../authoring/refinement/save.ts";
 import type { ApprovalGate } from "../../authoring/review/approvalGate.ts";
 import type { SaveReceipt } from "../../session/draftReviewState.ts";
 import {
@@ -102,10 +106,26 @@ export function mutationGistSaveDeps(
   };
 }
 
-/** The human refinement save: exact draft bytes + explicit run id; the receipt is the verified
- * comment id + carrier URL (never an invented deep link). No linkage operation exists. */
+/**
+ * The worker's typed failure, retained OUTSIDE the capability callback: the capability itself
+ * only sees "no receipt" and stops conservatively (unresolved dispatch), so the caller relays
+ * these facts beside the stop for reconciliation. Never a retry license.
+ */
+export interface RefinementSaveDiagnostics {
+  failure?: Extract<RefinementBackendSaveResult, { status: "failed" }>;
+}
+
+/** The mutation-boundary refinement save (the human command and the first-party approval):
+ * exact draft bytes + explicit run id; the receipt is the verified comment id + carrier URL
+ * (never an invented deep link). An optional `reviewed` pair rides through to the seam, which
+ * refuses to save a replacement of what the human judged. No linkage operation exists. */
 export function mutationRefinementSaveDeps(
-  deps: { session: WorkflowSession; backend: RefinementBackend; gate: ApprovalGate },
+  deps: {
+    session: WorkflowSession;
+    backend: RefinementBackend;
+    gate: ApprovalGate;
+    reviewed?: ReviewedRefinementPair;
+  },
   facts: DraftReviewConfirmedFacts,
   mode: "manual" | "approval",
 ) {
@@ -225,11 +245,15 @@ export function boundObjectiveSaveDeps(
  * — a known pre-invocation failure returns a typed failure WITHOUT entering the capability save
  * (no save-started, no uncertainty, no gate exit). Inside the capability the bytes handed to the
  * worker are the capability-selected reviewed source (which the seam's strict resume must
- * equal — the `source-changed` fence already guards the artifact). No linkage operation exists.
+ * equal — the `source-changed` fence already guards the artifact). A worker failure inside the
+ * capability is recorded on `diagnostics` BEFORE the capability sees the missing receipt, so
+ * the conservative unresolved-dispatch stop it raises can be rendered with the worker's typed
+ * facts. No linkage operation exists.
  */
 export function boundRefinementSaveDeps(
   deps: { session: WorkflowSession; backend: RefinementBackend; gate: ApprovalGate },
   capability: DraftReviewCapability,
+  diagnostics: RefinementSaveDiagnostics = {},
 ) {
   const exit = receiptGate(deps.gate);
   return {
@@ -267,6 +291,7 @@ export function boundRefinementSaveDeps(
           if (source !== request.draftRaw)
             throw new Error("the reviewed refinement source and the staged draft bytes diverged");
           const value = await deps.backend.save({ runId: request.runId, draftRaw: source });
+          if (value.status === "failed") diagnostics.failure = value;
           return {
             value,
             receipt:

@@ -602,9 +602,10 @@ export function installPlannotatorPlanAdapter(pi: ExtensionAPI): void {
   //
   // Once-only PER FLAVOR: the dedup key is the SELECTED flavor's marker (not the shared
   // customType), so a stage change still delivers the missing flavor while a prior copy of
-  // another flavor sits on the branch; the strip owns ALL THREE markers, firing when
-  // plannotator-plan is no longer selected (same hygiene as the tombell shim). The inject/strip
-  // mechanics live in the shared helper.
+  // another flavor sits on the branch — and the shared helper strips that prior copy as a stale
+  // flavor while this one is selected (a warm `/objective-refine` after a plan-mode turn leaves
+  // only the refinement flavor directing the model). The strip owns ALL FOUR markers, firing
+  // wholesale when plannotator-plan is no longer selected (same hygiene as the tombell shim).
   installInjectedContext(pi, {
     customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
     flavors: {

@@ -48,9 +48,11 @@ import {
   type RefinementBackend,
   type RefinementBackendSaveResult,
   refinementApprovalSave,
+  reviewedPairOf,
 } from "../../authoring/refinement/save.ts";
 import type { ApprovalGate } from "../../authoring/review/approvalGate.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import { captureDraftReviewBinding } from "../../session/draftReviewBinding.ts";
 import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
 import {
@@ -84,6 +86,7 @@ import {
   captureDraftReviewRefusal,
   type DraftReviewConfirmedFacts,
   type DraftReviewRuntime,
+  type DraftReviewStop,
   draftReviewCompletionResult,
   draftReviewMutationRefusal,
   draftReviewMutationValue,
@@ -91,7 +94,11 @@ import {
   type RegisteredDraftReviewBridge,
 } from "./draftReviewActivation.ts";
 import type { DraftReviewCapability } from "./draftReviewDecisions.ts";
-import { boundRefinementSaveDeps, mutationRefinementSaveDeps } from "./draftReviewEffects.ts";
+import {
+  boundRefinementSaveDeps,
+  mutationRefinementSaveDeps,
+  type RefinementSaveDiagnostics,
+} from "./draftReviewEffects.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import { isPlannotatorPlanSelected } from "./providers/selection.ts";
 import {
@@ -927,6 +934,7 @@ const REFINEMENT_SUBJECT: ReviewSubject = {
   failsafeCmd: "/objective-refinement-save",
   detailsExtra: { subject: "refinement" },
   noSourceError: "no refinement draft resolved",
+  saveDestination: "Linear (the node's refinement comment)",
 };
 
 const REFINEMENT_REVIEW_EDITOR_TITLE =
@@ -1037,6 +1045,14 @@ function completedOutcome(
  * outcome mapping through the shared subject machinery. An approval carrying Direct Edits
  * returns the NON-terminating revise round with nothing saved; a plain approval re-resumes the
  * pair through `refinementApprovalSave` (gate released only after the verified save).
+ *
+ * The first-party path fences its own wait: the reviewed pair (draft bytes + context digest)
+ * and the routing binding are captured BEFORE the editor opens; after the verdict, under the
+ * reacquired mutation exclusion, an approval saves only when the binding still matches and the
+ * seam finds the SAME pair — a replacement written during the wait stops with nothing saved.
+ * The plannotator path's capability performs the equivalent comparison itself; a worker
+ * failure inside it is a conservative unresolved-dispatch stop whose typed diagnostics are
+ * retained beside the stop (never a bypass, never a replay).
  */
 export async function runRefinementReviewV1(
   pi: ExtensionAPI,
@@ -1069,6 +1085,7 @@ export async function runRefinementReviewV1(
     const prepared = bridge.prepare(ctx, undefined, sig);
     if (!prepared.ok) return draftReviewRefusalResult(prepared.refusal);
     const review = prepared.value;
+    const diagnostics: RefinementSaveDiagnostics = {};
     try {
       const outcome = await bridge.review(
         review.snapshot.markdown,
@@ -1080,17 +1097,17 @@ export async function runRefinementReviewV1(
         return subjectReviewOutcomeResult(REFINEMENT_SUBJECT, { status: "aborted" });
       if (outcome.status !== "completed")
         return subjectReviewOutcomeResult(REFINEMENT_SUBJECT, outcome);
-      return draftReviewCompletionResult(
-        await review.complete(outcome, {
-          effect:
-            outcome.approved &&
-            !(outcome.feedback !== undefined && hasDirectEditsHeading(outcome.feedback))
-              ? "save"
-              : "revision",
-          carrier: { kind: "tool", tool_call_id: toolCallId },
-          execute: (capability) => completeRefinementReviewV1(pi, ctx, gating, outcome, capability),
-        }),
-      );
+      const completion = await review.complete(outcome, {
+        effect:
+          outcome.approved &&
+          !(outcome.feedback !== undefined && hasDirectEditsHeading(outcome.feedback))
+            ? "save"
+            : "revision",
+        carrier: { kind: "tool", tool_call_id: toolCallId },
+        execute: (capability) =>
+          completeRefinementReviewV1(pi, ctx, gating, outcome, capability, diagnostics),
+      });
+      return withRefinementWorkerDiagnostics(draftReviewCompletionResult(completion), diagnostics);
     } finally {
       review.dispose();
     }
@@ -1098,40 +1115,119 @@ export async function runRefinementReviewV1(
   const reviewer = firstPartyRefinementReviewer(ctx);
   const facts: DraftReviewConfirmedFacts = {};
   const result = await captureDraftReviewRefusal(
-    (async () => {
+    (async (): Promise<ReviewRefinementResult | DraftReviewStop> => {
       if (sig?.aborted) return { status: "aborted" as const };
       const resumed = resumeRefinementDraft(session);
       if (resumed.kind === "absent") return { status: "noDraft" as const };
       if (resumed.kind === "no-context") return { status: "noContext" as const };
       if (resumed.kind === "refused" || resumed.kind === "mismatch")
         return { status: "refusedDraft" as const, problem: resumed.problem };
+      // Capture what the human will judge BEFORE display: the exact pair and the routing
+      // binding (run, stage, config, environment, context artifact). A binding that cannot be
+      // captured has no reviewable target.
+      const reviewed = reviewedPairOf(resumed.pair);
+      const bound = captureDraftReviewBinding(ctx.cwd, session);
+      if (!bound.ok)
+        return { status: "refused", code: bound.reason, phase: "open", detail: bound.detail };
       // Invalidate competing browser eligibility at entry; release exclusion for the human wait.
       draftReviewMutationValue(bridge.mutate(ctx, "first-party-review", () => undefined));
       const rendered = renderRefinementDraft(resumed.pair);
       const outcome = await reviewer.review(rendered, sig);
       if (sig?.aborted) return { status: "aborted" as const };
-      // Reacquire exclusion; the seam re-resumes the pair and compares before saving.
+      // Reacquire exclusion. An approval saves only against the reviewed binding (compared
+      // here) and the reviewed pair (compared by the seam) — never a replacement.
       return draftReviewMutationValue(
-        await bridge.mutateAsync(ctx, "first-party-review", (mutationSession) =>
-          completeRefinementReview(outcome, () =>
-            refinementApprovalSave(
-              mutationRefinementSaveDeps(
-                {
-                  session: mutationSession,
-                  backend: coldDoorRefinementBackend(pi, ctx),
-                  gate: gateFor(gating, ctx),
-                },
-                facts,
-                "approval",
+        await bridge.mutateAsync(
+          ctx,
+          "first-party-review",
+          async (mutationSession): Promise<ReviewRefinementResult | DraftReviewStop> => {
+            if (outcome.status === "approved") {
+              const current = captureDraftReviewBinding(ctx.cwd, mutationSession);
+              if (!current.ok)
+                return {
+                  status: "refused",
+                  code: current.reason,
+                  phase: "mutation",
+                  detail: current.detail,
+                };
+              if (current.binding.subject !== bound.binding.subject)
+                return {
+                  status: "refused",
+                  code: "subject-changed",
+                  phase: "mutation",
+                  detail: "the session's review subject changed during the refinement review",
+                };
+              if (current.binding.digest !== bound.binding.digest)
+                return {
+                  status: "refused",
+                  code: "target-changed",
+                  phase: "mutation",
+                  detail:
+                    "the refinement's routing binding (run, stage, config or grounding context) " +
+                    "changed during the review — nothing was saved; call plan_review again",
+                };
+            }
+            return completeRefinementReview(outcome, () =>
+              refinementApprovalSave(
+                mutationRefinementSaveDeps(
+                  {
+                    session: mutationSession,
+                    backend: coldDoorRefinementBackend(pi, ctx),
+                    gate: gateFor(gating, ctx),
+                    reviewed,
+                  },
+                  facts,
+                  "approval",
+                ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       );
     })(),
   );
   if (result.status === "refused") return draftReviewRefusalResult(result, facts);
   return renderRefinementReviewResult(ctx, result);
+}
+
+/**
+ * A worker failure inside the capability-fenced save is a conservative unresolved-dispatch stop
+ * (the capability saw no receipt); the worker's typed diagnostics are retained beside that stop
+ * so the human reconciles from facts — which comment ids were observed and whether a write was
+ * attempted — rather than from a bare refusal. They are DATA for reconciliation, never a retry
+ * license.
+ */
+function withRefinementWorkerDiagnostics(
+  result: ToolResult,
+  diagnostics: RefinementSaveDiagnostics,
+): ToolResult {
+  const failure = diagnostics.failure;
+  if (failure === undefined || result.details.ok !== false) return result;
+  const attempted =
+    failure.writeAttempted === null ? "unknown" : failure.writeAttempted ? "yes" : "no";
+  const ids = failure.commentIds.length === 0 ? "none" : failure.commentIds.join(", ");
+  return {
+    ...result,
+    content: [
+      ...result.content,
+      {
+        type: "text",
+        text:
+          `Refinement worker diagnostics (${failure.errorType}): ${failure.message}. ` +
+          `Write attempted: ${attempted}; refinement comment ids observed: ${ids}. Read the ` +
+          "node's refinement comment back before any reconciliation; nothing here authorizes a retry.",
+      },
+    ],
+    details: {
+      ...result.details,
+      worker_failure: {
+        error_type: failure.errorType,
+        message: failure.message,
+        write_attempted: failure.writeAttempted,
+        comment_ids: failure.commentIds,
+      },
+    },
+  };
 }
 
 export function renderRefinementReviewResult(
@@ -1206,6 +1302,33 @@ export function renderRefinementReviewResult(
         status: "refused-draft",
         problem: result.problem,
       });
+    case "approvedSourceChanged": {
+      const what =
+        result.changed === "context"
+          ? "grounding context was re-prepared"
+          : "working draft was rewritten";
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `refinement APPROVED by reviewer, but the ${what} after the reviewed version was ` +
+              "shown — nothing was saved and the session stays read-only. An approval never " +
+              "transfers to a replacement: call plan_review again over the current draft.",
+          },
+        ],
+        details: {
+          ok: false,
+          status: "stale",
+          reason: "source_changed",
+          changed: result.changed,
+          approved: true,
+          ...(result.feedback !== undefined ? { feedback: result.feedback } : {}),
+          ...(result.reviewId !== undefined ? { reviewId: result.reviewId } : {}),
+          subject: "refinement",
+        },
+      };
+    }
     case "denied":
       return subjectReviewOutcomeResult(REFINEMENT_SUBJECT, completedOutcome(false, result));
     case "dismissed":
@@ -1227,6 +1350,7 @@ export async function completeRefinementReviewV1(
   gating: ToolGating,
   outcome: Extract<ReviewOutcome, { status: "completed" }>,
   capability: DraftReviewCapability,
+  diagnostics: RefinementSaveDiagnostics = {},
 ): Promise<ToolResult> {
   return renderRefinementReviewResult(
     ctx,
@@ -1239,6 +1363,7 @@ export async function completeRefinementReviewV1(
             gate: gateFor(gating, ctx),
           },
           capability,
+          diagnostics,
         ),
       ),
     ),

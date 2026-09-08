@@ -74,7 +74,7 @@ import { failFor, ok } from "../../substrate/result.ts";
 import { captureSessionPointer } from "../../substrate/sessionPointers.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { idArrayParam, paramsOf, stringParam } from "../../substrate/toolParams.ts";
-import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
+import { type BranchEntry, branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
 // `Key` via the surfaces re-export (keybinding vocabulary, not rich UI) — keeps pi-tui imports
 // structurally confined to the surfaces module (the surfacesGuard pi-tui import rule).
@@ -816,28 +816,26 @@ function installPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
   // Inject the plan-authoring context while the read-only gate is active (display:false). The
   // exceptions: objective-author, gist-author and objective-refine sessions are ALSO read-only,
   // but objectiveAuthor.ts / the gist installer / the refinement installer inject their own
-  // contexts there — so plan mode defers when the launched stage is any of them (the coupling
-  // break: plan-authoring context is
-  // no longer keyed off the bare read-only gate). The inject/strip mechanics (active-window
-  // dedup, stale-marker strip) live in the shared helper; the strip stays stage-blind — it keys
-  // on the gate alone.
+  // contexts there — so plan mode defers when the session's stage is any of them (the coupling
+  // break: plan-authoring context is no longer keyed off the bare read-only gate). Liveness
+  // follows the same rule: a plan context injected BEFORE a warm transition into one of those
+  // stages (an ad-hoc plan-mode turn, then `/objective-refine`) is stale there and is stripped,
+  // so the model is never directed to the plan draft/save flow the stage refuses. On a failed
+  // branch read (`[]`) the stage is unknown and liveness degrades to the gate alone. The
+  // inject/strip mechanics (active-window dedup, stale-marker strip) live in the shared helper.
+  const ownedByAnotherAuthoringStage = (branch: readonly BranchEntry[]): boolean => {
+    const stage = rebuildWorkflowState(branch).stage;
+    return (
+      stage === OBJECTIVE_AUTHOR_STAGE || stage === GIST_AUTHOR_STAGE || stage === REFINE_STAGE
+    );
+  };
   installInjectedContext(pi, {
     customType: PLAN_CONTEXT_TYPE,
     flavors: {
       [PLAN_MARKER]: (ctx) => planAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
     },
-    select: (_ctx, branch) => {
-      if (!gating.isActive()) return null;
-      const launchedStage = rebuildWorkflowState(branch).stage;
-      if (
-        launchedStage === OBJECTIVE_AUTHOR_STAGE ||
-        launchedStage === GIST_AUTHOR_STAGE ||
-        launchedStage === REFINE_STAGE
-      ) {
-        return null;
-      }
-      return PLAN_MARKER;
-    },
-    live: () => gating.isActive(),
+    select: (_ctx, branch) =>
+      gating.isActive() && !ownedByAnotherAuthoringStage(branch) ? PLAN_MARKER : null,
+    live: (_ctx, branch) => gating.isActive() && !ownedByAnotherAuthoringStage(branch),
   });
 }

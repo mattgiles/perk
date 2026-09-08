@@ -5642,15 +5642,15 @@ nothing, the subset being shared).
   zero-dependency `extension/substrate/miniJinja.ts` renderer (the frozen-subset engine). The
   seam is LIVE on both planes: consumers span the worker, the warm doors and authoring features, the two
   provider adapters (`tombell` / `plannotator` — `extension/pi/v1/providers/`; `juicesharp` is a
-  borrowed-tool package, not an adapter), and the Python cold doors. The seven injected mode/bridge
+  borrowed-tool package, not an adapter), and the Python cold doors. The ten injected mode/bridge
   contexts (the persistent `before_agent_start` injections stripped on `context`, each injection
   **dedup-guarded on its marker**) live under `prompts/contexts/` — the mode contexts at the top
   level, the adapter bridges under `prompts/contexts/adapters/` — with each module's identity
   marker passed as the `{{ marker }}` render var (never a template literal), so the marker the
   strip handler scans for cannot drift from the injected prose; the marker-as-render-var
-  invariant serves both the strip **and** the dedup key (plannotator's three flavors — plan /
-  objective / gist, the objective flavor serving both objective stages — share one customType
-  but dedup per-flavor on their distinct markers). Two dedup authorities, deliberately distinct:
+  invariant serves both the strip **and** the dedup key (plannotator's four flavors — plan /
+  objective / gist / refinement, the objective flavor serving both objective stages — share one
+  customType but dedup per-flavor on their distinct markers). Two dedup authorities, deliberately distinct:
   the read-only mode context (`substrate/toolGating.ts`) dedups on **full selected-branch
   history** (`branchCarries` over `branchOf(ctx)` — once per branch, compaction notwithstanding);
   every flow-owned injection — the gist-authoring context and plannotator's gist flavor, the
@@ -5671,12 +5671,21 @@ nothing, the subset being shared).
   the **selected** marker suppresses (cold delivery before persistence; another flavor's marker
   does not) → guarded projection read (failure → return, nothing constructed) → the typed live
   check → the content thunk runs only on a miss. Stale stripping stays separate from projection:
-  its guarded branch read degrades to `[]` for `spec.live`, and when no longer live it strips the
-  owned customType and user messages carrying any owned flavor marker (non-user quotes and
-  unrelated content survive); each caller's selection/liveness policy is unchanged (plan defers to
-  the objective/gist authors with gate-only liveness; objective/gist are gate-and-stage; plannotator
-  keeps three markers under one customType with provider-selection liveness; tombell keeps its
-  persisted foreign-mode fallback and authoring-stage exclusions).
+  its guarded branch read degrades to `[]` for `spec.live`/`spec.select`, and when no longer live
+  it strips the owned customType and user messages carrying any owned flavor marker (non-user
+  quotes and unrelated content survive); while live, `spec.select` names the current flavor and
+  every OTHER owned flavor is stale — owned copies and user turns carrying a non-selected marker
+  are stripped while the selected flavor's copy survives (a live spec selecting nothing this
+  turn, or a single-flavor spec, strips nothing) — so a stage transition under a shared
+  customType never leaves the previous flavor's instructions beside the new one. Caller policy:
+  plan defers to the objective/gist/refinement authoring stages with liveness that follows the
+  same rule (gate active AND not one of those stages — a plan context injected before a warm
+  `/objective-refine` is stripped there; on `[]` the stage is unknown and liveness degrades to the
+  gate alone); objective/gist are gate-and-stage; plannotator keeps four markers (plan /
+  objective / gist / refinement) under one customType with provider-selection liveness (the
+  flavor-scoped strip retires a prior flavor's copy on a stage change); tombell keeps its
+  persisted foreign-mode fallback and its authoring-stage exclusions (objective-author /
+  gist-author / objective-refine) in BOTH selection and liveness.
 
 **Fail loudly on a missing var.** jinja2 uses `StrictUndefined` (raises `jinja2.UndefinedError`);
 the vendored `miniJinja` renderer matches it — a referenced name that is **absent OR non-string**
@@ -12048,20 +12057,44 @@ verbatim; identity/provenance are immutable review metadata.
   capability the worker receives the capability-selected reviewed source (which the seam's
   strict resume must equal); one invocation supplies a receipt only from verified success;
   delivery evidence / receipt / gate facts are preserved after failures with no bypass or replay.
-- **First-party:** the view-only `runFirstPartyReview` (approve / deny / skip); competing browser
-  eligibility invalidated at entry and exclusion released for the human wait; after the verdict
-  exclusion is reacquired and the seam re-resumes + compares before saving; abort wins before
-  and after awaits; no replacement artifact is ever saved on an old approval.
+  A worker failure INSIDE the capability stays the capability's conservative
+  `unresolved-dispatch` stop (`uncertain`/`backend-unconfirmed`), but the worker's typed
+  diagnostics are retained beside it: `boundRefinementSaveDeps` records the failed envelope on a
+  `RefinementSaveDiagnostics` sink outside the capability callback, and the refinement arm
+  appends them to the stop (`details.worker_failure` = `{error_type, message, write_attempted,
+  comment_ids}` + a "Refinement worker diagnostics (…)" text line naming the observed comment
+  ids and whether a write was attempted) — reconciliation DATA, never a retry license. A late
+  decision against a pending review invalidated by a draft rewrite renders the shared
+  `stale-reference` DATA result over the REVIEWED digest (the worker is never invoked); a context
+  re-prepared while pending refuses `target-changed` through the capability's binding comparison.
+- **First-party:** the view-only `runFirstPartyReview` (approve / deny / skip); BEFORE display
+  the arm captures the reviewed pair (`reviewedPairOf`: the draft's exact bytes + the context
+  artifact's digest) and the routing binding (`captureDraftReviewBinding` — a capture failure is
+  an `open`-phase refusal); competing browser eligibility is invalidated at entry and exclusion
+  released for the human wait; after the verdict exclusion is reacquired and, for a plain
+  approval, the binding is recaptured under it and compared (`subject-changed` /
+  `target-changed` mutation-phase refusals, nothing saved) before the seam re-resumes the pair
+  and compares it with the reviewed one; abort wins before and after awaits; no replacement
+  artifact is ever saved on an old approval. The approve verdict label names the actual
+  destination (`ReviewSubject.saveDestination` — "Linear (the node's refinement comment)"; the
+  plan/objective/gist arms keep their GitHub default).
 - **The shared save seam** `refinementApprovalSave` (`authoring/refinement/save.ts`):
   strict-resume the pair (`absent` → no-draft; `no-context`; `refused`/`mismatch` →
-  refused-draft — fail-closed stops, nothing invoked, the gate untouched), stage the EXACT draft
-  bytes through the `RefinementBackend` port (production: `perk objective refinement-save
-  --run-id RID --json --draft-file <run-scratch staged file>` via `runColdDoor`) with the explicit
-  run id, and exit the gate only on verified success (`saveThroughApprovalGate`). No
-  link/budget/claim/cache effects. Success text states that ADVISORY content — not an executable
-  plan — was saved (no plan created, no node claimed, no state changed); the review tool's
-  success terminates the turn; a failure keeps the worker's `write_attempted` / `comment_ids`
-  beside the message and never prescribes a blind retry.
+  refused-draft — fail-closed stops, nothing invoked, the gate untouched); when the caller passed
+  a `reviewed` pair, a resumed pair that differs stops with `source-changed` (`changed: "context"`
+  first — a re-prepared context rebinds any draft — else `"draft"`), rendered as the
+  `approvedSourceChanged` result (`status: "stale"`, `reason: "source_changed"`, the human's
+  `approved: true` reported, nothing saved, the gate untouched, "call plan_review again"); the
+  human failsafe passes no `reviewed` pair (its invocation is the authorization for the CURRENT
+  artifact). Then stage the EXACT draft bytes through the `RefinementBackend` port (production:
+  `perk objective refinement-save --run-id RID --json --draft-file <run-scratch staged file>` via
+  `runColdDoor`) with the explicit run id, and exit the gate only on verified success
+  (`saveThroughApprovalGate`). No link/budget/claim/cache effects. Success text states that
+  ADVISORY content — not an executable plan — was saved (no plan created, no node claimed, no
+  state changed); the review tool's success terminates the turn; a failure keeps the worker's
+  `write_attempted` / `comment_ids` beside the message and never prescribes a blind retry. There
+  is no separate review-orchestration wrapper in the feature layer: the Pi arm resumes, renders
+  and reviews, then routes through `completeRefinementReview`.
 - **Outcomes:** DENY → the `objective_refinement_draft` redirect (feedback is untrusted DATA);
   dismissed / unavailable / aborted → nothing saved, the human `/objective-refinement-save`
   offered; headless → the standard skip. Stale feedback is diagnostic-only.

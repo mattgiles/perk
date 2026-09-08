@@ -12,12 +12,17 @@ import {
   REFINEMENT_CONTEXT_ARTIFACT,
   validateContextTransfer,
 } from "./context.ts";
-import { REFINEMENT_DRAFT_ARTIFACT, reviseRefinementDraft } from "./draft.ts";
-import { completeRefinementReview, reviewRefinement } from "./review.ts";
+import {
+  REFINEMENT_DRAFT_ARTIFACT,
+  resumeRefinementDraft,
+  reviseRefinementDraft,
+} from "./draft.ts";
+import { completeRefinementReview } from "./review.ts";
 import {
   type RefinementBackend,
   type RefinementBackendSaveResult,
   refinementApprovalSave,
+  reviewedPairOf,
 } from "./save.ts";
 
 const SAVED: RefinementBackendSaveResult = {
@@ -205,52 +210,65 @@ test("completion: Direct Edits approval is one revise round (no save); plain app
   assert.deepEqual(refused, { status: "approvedRefusedDraft", problem: "bad" });
 });
 
-test("reviewRefinement: resumes the pair FIRST, reviews the RENDERED surface, routes; stops never touch the reviewer", async () => {
+test("seam: the reviewed pair fences the save — a draft or context rewritten after display stops with source-changed", async () => {
   const session = grounded(true);
+  const before = resumeRefinementDraft(session);
+  assert.ok(before.kind === "valid");
+  const reviewed = reviewedPairOf(before.pair);
   const { backend, calls } = fakeBackend(SAVED);
-  const { gate } = fakeGate(true);
-  const seen: string[] = [];
-  const result = await reviewRefinement({
-    session,
-    backend,
-    gate,
-    reviewer: {
-      async review(rendered) {
-        seen.push(rendered);
-        return { status: "approved", reviewId: "fp" };
-      },
-    },
-  });
-  assert.equal(result.status, "approvedSaved");
-  assert.ok(
-    seen[0]?.startsWith("# Refinement — objective proj-1 · node 2.3"),
-    "the rendered pair, never raw JSON",
-  );
+  const { gate, exits } = fakeGate(true);
+
+  // Identical bytes: the reviewed pair IS the current pair — the save proceeds.
+  const same = await refinementApprovalSave({ session, backend, gate, reviewed });
+  assert.equal(same.status, "saved");
   assert.equal(calls.length, 1);
 
-  let reviewed = 0;
-  const reviewer = {
-    async review() {
-      reviewed += 1;
-      return { status: "approved" as const };
-    },
-  };
-  assert.deepEqual(await reviewRefinement({ session: grounded(false), backend, gate, reviewer }), {
-    status: "noDraft",
-  });
-  const corrupt = grounded(true);
-  corrupt.corruptContent(REFINEMENT_DRAFT_ARTIFACT);
+  // The draft rewritten (through the sanctioned seam) during the wait: valid, but not the
+  // reviewed draft — nothing invoked, the gate untouched.
+  const replaced = grounded(true);
+  const { gate: gate2, exits: exits2 } = fakeGate(true);
+  const revised = reviseRefinementDraft({ markdown: "## Replacement\n" }, replaced);
+  assert.equal(revised.status, "revised");
+  const stale = await refinementApprovalSave({ session: replaced, backend, gate: gate2, reviewed });
+  assert.deepEqual(stale, { status: "source-changed", changed: "draft" });
+
+  // The context re-prepared (a new grounding pass) with the draft re-bound to it: the CONTEXT
+  // arm wins even though the draft bytes also differ (the pass, not the prose, moved).
+  const regrounded = grounded(true);
+  regrounded.writeArtifact(
+    REFINEMENT_CONTEXT_ARTIFACT,
+    GOLDEN_CONTEXT.replace('"warnings":[', '"warnings":["w",'),
+    { provenance: "strict" },
+  );
   assert.equal(
-    (await reviewRefinement({ session: corrupt, backend, gate, reviewer })).status,
-    "refusedDraft",
+    reviseRefinementDraft({ markdown: "## Refinement\n\nbody\n" }, regrounded).status,
+    "revised",
   );
-  const aborted = new AbortController();
-  aborted.abort();
-  assert.deepEqual(
-    await reviewRefinement({ session: grounded(true), backend, gate, reviewer }, aborted.signal),
-    {
-      status: "aborted",
-    },
+  const moved = await refinementApprovalSave({
+    session: regrounded,
+    backend,
+    gate: gate2,
+    reviewed,
+  });
+  assert.deepEqual(moved, { status: "source-changed", changed: "context" });
+  assert.equal(calls.length, 1, "no backend invocation on a changed pair");
+  assert.equal(exits.length, 1);
+  assert.equal(exits2.length, 0, "no gate exit on a changed pair");
+
+  // Without a captured pair (the human failsafe), the seam saves the current artifact.
+  const { backend: backend2, calls: calls2 } = fakeBackend(SAVED);
+  const manual = await refinementApprovalSave({
+    session: replaced,
+    backend: backend2,
+    gate: gate2,
+  });
+  assert.equal(manual.status, "saved");
+  assert.equal(calls2.length, 1);
+
+  // Completion routes the stop to its approved-* twin: nothing saved, the verdict carried.
+  const routed = await completeRefinementReview(
+    { status: "approved", reviewId: "fp" },
+    async () => ({ status: "source-changed" as const, changed: "draft" as const }),
   );
-  assert.equal(reviewed, 0, "no reviewer call on any stop");
+  assert.deepEqual(routed, { status: "approvedSourceChanged", changed: "draft", reviewId: "fp" });
 });

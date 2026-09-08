@@ -1,22 +1,17 @@
 // The objective-refinement REVIEW feature: the reviewer role over the rendered pair and the
 // one-entry completion routing (contracts.md §8.67 / §8.23's refinement arm).
 //
-// Discipline: resume the (draft, context) pair FIRST (the pair is the SOLE review source —
-// never a param, never the transcript), render, review, route the verdict. An approval carrying
-// Direct Edits SKIPS the save and returns one revise round (the heading means no save and no
-// gate exit — Markdown edits are folded via the draft tool and re-reviewed; target/provenance
-// edits need a new grounding pass, never fabricated metadata). A plain approval re-reads the
-// pair through `refinementApprovalSave`. Denial stays untrusted DATA. Skipped / dismissed /
+// Discipline: the (draft, context) pair is the SOLE review source — never a param, never the
+// transcript. The Pi arm resumes the pair, renders it, reviews, then routes the verdict through
+// `completeRefinementReview`. An approval carrying Direct Edits SKIPS the save and returns one
+// revise round (the heading means no save and no gate exit — Markdown edits are folded via the
+// draft tool and re-reviewed; target/provenance edits need a new grounding pass, never
+// fabricated metadata). A plain approval re-reads the pair through `refinementApprovalSave`,
+// which compares it with the REVIEWED pair when the caller captured one — approval never
+// transfers to a replacement artifact. Denial stays untrusted DATA. Skipped / dismissed /
 // unavailable outcomes save nothing — the caller offers the human `/objective-refinement-save`.
 
-import type { WorkflowSession } from "../../session/workflowSession.ts";
-import type { ApprovalGate } from "../review/approvalGate.ts";
-import { renderRefinementDraft, resumeRefinementDraft } from "./draft.ts";
-import {
-  type RefinementApprovalSaveOutcome,
-  type RefinementBackend,
-  refinementApprovalSave,
-} from "./save.ts";
+import type { RefinementApprovalSaveOutcome } from "./save.ts";
 
 export type RefinementReviewOutcome =
   | { status: "approved"; feedback?: string; reviewId?: string }
@@ -50,34 +45,17 @@ export type ReviewRefinementResult =
     }
   | { status: "approvedNoDraft"; feedback?: string; reviewId?: string }
   | { status: "approvedRefusedDraft"; problem: string; feedback?: string; reviewId?: string }
+  | {
+      /** The approval named a pair the session no longer holds: nothing saved, review again. */
+      status: "approvedSourceChanged";
+      changed: "draft" | "context";
+      feedback?: string;
+      reviewId?: string;
+    }
   | { status: "denied"; feedback?: string; reviewId?: string }
   | { status: "dismissed" }
   | { status: "aborted" }
   | { status: "unavailable"; warning: string };
-
-/**
- * Review the working refinement end-to-end: resume → render → review → route. Never throws.
- */
-export async function reviewRefinement(
-  deps: {
-    session: WorkflowSession;
-    reviewer: RefinementDraftReviewer;
-    backend: RefinementBackend;
-    gate: ApprovalGate;
-  },
-  signal?: AbortSignal,
-): Promise<ReviewRefinementResult> {
-  if (signal?.aborted) return { status: "aborted" };
-  const resumed = resumeRefinementDraft(deps.session);
-  if (resumed.kind === "absent") return { status: "noDraft" };
-  if (resumed.kind === "no-context") return { status: "noContext" };
-  if (resumed.kind === "refused" || resumed.kind === "mismatch")
-    return { status: "refusedDraft", problem: resumed.problem };
-  const rendered = renderRefinementDraft(resumed.pair);
-  const outcome = await deps.reviewer.review(rendered, signal);
-  if (signal?.aborted) return { status: "aborted" };
-  return completeRefinementReview(outcome, () => refinementApprovalSave(deps));
-}
 
 /** Subject policy only: callers authorize effects before entering this completion seam. */
 export async function completeRefinementReview(
@@ -112,6 +90,8 @@ export async function completeRefinementReview(
         };
       case "refused-draft":
         return { status: "approvedRefusedDraft", problem: save.problem, ...carried };
+      case "source-changed":
+        return { status: "approvedSourceChanged", changed: save.changed, ...carried };
     }
   }
   switch (outcome.status) {

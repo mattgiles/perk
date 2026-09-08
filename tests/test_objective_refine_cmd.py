@@ -7,6 +7,7 @@ only stubs (no `exec pi`, no network).
 
 import copy
 import json
+import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -764,22 +765,28 @@ def test_selection_is_delivery_independent_and_never_reconstructs_the_train(
 # --------------------------------------------------------------------------- end to end
 
 FIXTURES = Path(__file__).parent / "fixtures" / "objective-refinement"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+_REFINEMENT_LOOP_LIVE = REPO_ROOT / "extension" / "testing" / "refinementLoopLive.ts"
 
 
 def _comment_counts(ws: FakeLinearWorkspace) -> dict[str, int]:
     return {uuid: len(ws.comments_of(issue)) for uuid, issue in ws.issues.items()}
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_refinement_loop_end_to_end_over_a_fake_linear_objective(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The named ordinary integration proof of the public Linear loop over FRAMEWORK/FAKE
     transport (a real temp checkout, the real store + adapter + service + resolvers on a
     ``FakeLinearWorkspace``; `pi` and the network never run — authenticated live evidence is a
-    later dogfood, not this test): a blocked future node → the cold door's preparation and the
-    warm worker's payload are the SAME bytes → the interior's strict import + TS-shaped draft
-    (a denied first round revised, never saved) → the approved save through the canonical worker
-    → the full-content read; and nothing but the node's one refinement comment changed."""
+    later dogfood, not this test), composed across BOTH planes: a blocked future node → the cold
+    door's preparation and the warm worker's payload are the SAME bytes → the REAL interior
+    (``extension/testing/refinementLoopLive.ts``: strict import, the draft seam, a scripted
+    DENY routed through the real completion, the revision, the approved save through the real
+    seam + real cold-door adapter) → the canonical Python worker over the adapter's exact staged
+    bytes → the adapter decodes the worker's exact envelope and the gate exits → the
+    full-content read; and nothing but the node's one refinement comment changed."""
     from perk.delivery.persistence import TrainPersistence
     from perk.objective.refinement import service
 
@@ -807,9 +814,8 @@ def test_refinement_loop_end_to_end_over_a_fake_linear_objective(
     result = _invoke(monkeypatch, root, ["objective", "refine", obj_id, "--node", "1.2", "--json"])
     assert result.exit_code == 0, result.output
     rid = launched["run_id_override"]
-    cold_raw = (cache.run_scratch_dir(root, rid) / authoring.CONTEXT_ARTIFACT).read_text(
-        encoding="utf-8"
-    )
+    transfer_path = cache.run_scratch_dir(root, rid) / authoring.CONTEXT_ARTIFACT
+    cold_raw = transfer_path.read_text(encoding="utf-8")
     cold_digest = launched["handoff_extra"]["objective_refinement"]["context_digest"]
     assert authoring.artifact_digest(cold_raw) == cold_digest
 
@@ -822,9 +828,6 @@ def test_refinement_loop_end_to_end_over_a_fake_linear_objective(
     assert result.exit_code == 0, result.output
     warm = _payload(result)
     assert warm["context_json"] == cold_raw and warm["context_digest"] == cold_digest
-
-    # 3. The strict interior import writes the UNCHANGED bytes as the session artifact (the
-    #    TS import is pinned to the same golden in extension/authoring/refinement/context.test.ts).
     context = authoring.parse_context(cold_raw)
     assert context.target.identity.node_id == "1.2"
     assert context.target.status is objective.NodeStatus.BLOCKED
@@ -832,52 +835,84 @@ def test_refinement_loop_end_to_end_over_a_fake_linear_objective(
     assert context.provenance.code_basis == authoring.RefinementCodeBasis(
         head_sha=head, dirty=True, captured_at=TS
     )
-    assert context.provenance.authored_at == TS
-    assert cache.write_session_data(root, rid, authoring.CONTEXT_ARTIFACT, cold_raw) is not None
-    assert cache.read_session_data(root, rid, authoring.CONTEXT_ARTIFACT) == cold_raw
 
-    # 4. The TS draft serializer's shape (the golden pins `_write_draft` to encodeRefinementDraft):
-    #    a first draft the human DENIES is revised in place — the denial saves nothing.
-    golden = json.loads((FIXTURES / "draft.json").read_text(encoding="utf-8"))
-    probe = tmp_path / "golden-probe.json"
-    _write_draft(
-        probe,
-        run_id=golden["run_id"],
-        digest=golden["context_digest"],
-        markdown=golden["markdown"],
+    # 3-5. The real interior over the temp checkout: import → deny → revise → approve, with the
+    #      adapter's staged argv handed to THIS process to run the canonical worker.
+    denied_md = "## Too vague\n"
+    revised_md = "## Refinement of 1.2\n\nSharpen the blocked node: ✓ Ünïcode, a tab\t, no final LF"
+    spec_path = tmp_path / "loop-spec.json"
+    spec_path.write_text(
+        json.dumps(
+            {
+                "cwd": str(root),
+                "runId": rid,
+                "transferPath": str(transfer_path),
+                "expectedDigest": cold_digest,
+                "deniedMarkdown": denied_md,
+                "revisedMarkdown": revised_md,
+            }
+        ),
+        encoding="utf-8",
     )
-    assert probe.read_bytes() == (FIXTURES / "draft.json").read_bytes()
-    draft_path = tmp_path / "objective-refinement-draft.json"
-    _write_draft(draft_path, run_id=rid, digest=cold_digest, markdown="## Too vague\n")
-    assert _mutation_names(ws, start) == []  # the denied round wrote nothing anywhere
-    revised = "## Refinement of 1.2\n\nSharpen the blocked node: ✓ Ünïcode, a tab\t, no final LF"
-    _write_draft(draft_path, run_id=rid, digest=cold_digest, markdown=revised)
-
-    # 5. APPROVE → the canonical worker over the exact draft bytes; exactly one comment write.
-    result = _invoke(
-        monkeypatch,
-        root,
-        [
-            "objective",
-            "refinement-save",
-            "--draft-file",
-            str(draft_path),
-            "--run-id",
-            rid,
-            "--json",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    saved = _payload(result)
+    with subprocess.Popen(
+        ["node", str(_REFINEMENT_LOOP_LIVE), str(spec_path)],
+        cwd=REPO_ROOT,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    ) as proc:
+        assert proc.stdout is not None and proc.stdin is not None
+        staged = json.loads(proc.stdout.readline())
+        assert staged["phase"] == "staged", staged
+        argv = staged["argv"]
+        assert argv[:2] == ["objective", "refinement-save"]
+        assert argv[argv.index("--run-id") + 1] == rid
+        # The staged file lives in THIS run's scratch (the adapter's `runColdDoor` staging) and
+        # holds the TS serializer's bytes: the revised Markdown, byte-exact, bound to the context.
+        staged_file = Path(argv[argv.index("--draft-file") + 1])
+        assert staged_file.parent == cache.run_scratch_dir(root, rid)
+        staged_bytes = staged_file.read_text(encoding="utf-8")
+        assert staged_bytes == staged["stagedBytes"]
+        draft = authoring.parse_draft(staged_bytes)
+        assert draft.markdown == revised_md and draft.markdown != denied_md
+        assert draft.run_id == rid and draft.context_digest == cold_digest
+        assert _mutation_names(ws, start) == [], "nothing written before the approved save"
+        # The canonical worker, over the adapter's exact argv, in the pytest process.
+        worker = _invoke(monkeypatch, root, argv)
+        out, err = proc.communicate(
+            input=json.dumps({"code": worker.exit_code, "stdout": worker.stdout}), timeout=120
+        )
+        assert proc.returncode == 0, f"{out}\n{err}"
+    done = json.loads(out.strip().splitlines()[-1])
+    assert done["phase"] == "done", done
+    assert worker.exit_code == 0, worker.output
+    saved = _payload(worker)
     assert saved["success"] is True and saved["node_id"] == "1.2"
     assert _mutation_names(ws, start) == ["commentCreate"]
+    # The interior's view: the transfer bytes stored unchanged; the denial routed without a save;
+    # the human saw the rendered pair; the adapter decoded the worker's exact envelope into the
+    # verified save; the gate exited only after it; exactly one invocation.
+    assert done["storedContext"] == cold_raw
+    assert done["denied"] == "denied"
+    assert done["rendered"].startswith(f"# Refinement — objective {obj_id} · node 1.2")
+    assert revised_md in done["rendered"] and denied_md not in done["rendered"]
+    assert done["reviewed"] == {"draftRaw": staged_bytes, "contextDigest": cold_digest}
+    assert done["result"]["status"] == "approvedSaved", json.dumps(done["result"], indent=1)
+    interior_save = done["result"]["save"]
+    assert interior_save["gateExited"] is True and done["gateActive"] is False
+    assert interior_save["save"]["commentId"] == saved["comment_id"]
+    assert interior_save["save"]["bodyDigest"] == saved["body_digest"]
+    assert interior_save["save"]["carrierUrl"] == saved["carrier_url"]
+    assert interior_save["pair"]["draftRaw"] == staged_bytes
+    assert done["invocations"] == 1
 
     # 6. The full-content read: byte-exact Markdown, the captured provenance, the bound target.
     back = service.read_node_refinement(store, issues, objective_id=obj_id, node_id="1.2")
     assert back.saved is not None
     assert back.saved.comment.id == saved["comment_id"]
     assert back.saved.body_digest == saved["body_digest"]
-    assert back.saved.document.markdown == revised
+    assert back.saved.document.markdown == revised_md
     assert back.saved.document.provenance == context.provenance
     assert back.target.identity == context.target.identity
     # The saved record is what a later grounding pass would carry as the prior (re-refinable).
@@ -890,7 +925,7 @@ def test_refinement_loop_end_to_end_over_a_fake_linear_objective(
     later_json = _payload(result)["context_json"]
     assert isinstance(later_json, str)
     later = authoring.parse_context(later_json)
-    assert later.prior is not None and later.prior.markdown == revised
+    assert later.prior is not None and later.prior.markdown == revised_md
     assert later.expected.comment_id == saved["comment_id"]
 
     # 7. Nothing else changed: roadmap (descriptions, statuses, backlinks), manifest, node
