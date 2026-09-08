@@ -473,26 +473,83 @@ for (const mode of ["pr-rebase", "retained-continuation"] as const) {
     const w = world(t);
     const path = w.options.configPath as string;
     assert.equal(nativeWorktreeDefault(path), "missing");
-    for (const content of [
-      "{}",
-      '{"worktree":false}',
-      '{"worktree":true}',
-      '{"worktree":"false"}',
-      "{",
-      "null",
-    ]) {
+    // A successful run (activation `missing`, still missing) never carries the diagnostic.
+    const running = w.engine.resolve(w.request);
+    respond(w, await w.emitted.promise);
+    const success = await running;
+    assert.equal(success.kind, successKind);
+    assert.equal("nativeWorktreeConfig" in success.receipt, false);
+    // Every refusal names the file and both observations (changed since activation, or
+    // incompatible outright) so the diagnostic points at the exact path to repair.
+    for (const [content, observed] of [
+      ["{}", "absent"],
+      ['{"worktree":false}', "false"],
+      ['{"worktree":true}', "incompatible"],
+      ['{"worktree":"false"}', "incompatible"],
+      ["{", "incompatible"],
+      ["null", "incompatible"],
+    ] as const) {
       writeFileSync(path, content);
-      assert.equal(
-        (await w.engine.resolve(w.request)).kind,
-        "failed",
+      const result = await w.engine.resolve(w.request);
+      assert.ok(
+        result.kind === "failed" && result.reason === "incompatible-worktree-default",
         "changed setting requires reload",
       );
+      assert.deepEqual(result.receipt.nativeWorktreeConfig, {
+        path,
+        observed,
+        atActivation: "missing",
+      });
     }
     rmSync(path);
     mkdirSync(path);
     assert.equal(nativeWorktreeDefault(path), "incompatible");
-    assert.equal(w.bus.sent.length, 0);
+    assert.equal(w.bus.sent.filter((e) => e.event === DELEGATION_EVENTS.request).length, 1);
   });
+
+  for (const gate of ["post-lock", "pre-emit"] as const) {
+    test(`native worktree default flipped after the lock (${gate} gate) refuses with the stamped reason`, async (t) => {
+      // Both gates after lock acquisition must settle with their OWN reason: a config change in
+      // the window before emission is `incompatible-worktree-default` carrying the file, never
+      // collapsed to `unauthorized` (the pre-emit gate inside the wait used to do exactly that).
+      const w = world(t);
+      const path = w.options.configPath as string;
+      let authorizations = 0;
+      const engine = createConflictResolverEngine({
+        ...w.options,
+        authorized: () => {
+          authorizations++;
+          // The post-lock gate reads the native default BEFORE re-reading authorization (its
+          // third read), so poisoning here leaves the pre-emit gate as the first to observe it.
+          if (gate === "pre-emit" && authorizations === 3) writeFileSync(path, '{"worktree":true}');
+          return true;
+        },
+        acquire: (...args) => {
+          const acquisition = acquireWorktreeResolverLock(...args);
+          assert.equal(acquisition.kind, "acquired");
+          // Poison the native default once the real claim is held: the post-lock gate re-reads it.
+          if (gate === "post-lock") writeFileSync(path, '{"worktree":true}');
+          return acquisition;
+        },
+      });
+      w.bus.on(DELEGATION_EVENTS.request, (r) => respond(w, r as Record<string, unknown>));
+      const result = await engine.resolve(w.request);
+      assert.ok(result.kind === "failed" && result.reason === "incompatible-worktree-default");
+      assert.deepEqual(result.receipt.nativeWorktreeConfig, {
+        path,
+        observed: "incompatible",
+        atActivation: "missing",
+      });
+      // pre-emit: initial, post-preflight, post-lock, pre-emit; post-lock: the stamped worktree
+      // refusal short-circuits that gate's authorization read.
+      assert.equal(authorizations, gate === "pre-emit" ? 4 : 2);
+      assert.equal(result.receipt.lock.disposition, "released");
+      assert.equal(result.receipt.termination, "not-requested");
+      assert.deepEqual(w.bus.sent, [], "no writer request was emitted");
+      assert.equal(existsSync(w.lockPath), false);
+      await engine.shutdown();
+    });
+  }
 
   test("PR and retained requests cannot both emit against one retained canonical Git directory", async (t) => {
     if (mode !== "retained-continuation") return;

@@ -460,6 +460,9 @@ for (const mode of ["pr-rebase", "retained-continuation"] as const) {
       });
       const r = await e.resolve(request(cwd));
       assert.ok(r.kind === "failed" && r.reason === "incompatible-worktree-default");
+      // The refusal names the exact file pi-subagents reads (the installed engine's own path).
+      assert.equal(r.receipt.nativeWorktreeConfig?.path, config.getConfigPath());
+      assert.equal(r.receipt.nativeWorktreeConfig?.observed, "incompatible");
       assert.equal(bus.sent.length, 0);
       assert.equal(readFileSync(path, "utf8"), '{"worktree":true}');
     });

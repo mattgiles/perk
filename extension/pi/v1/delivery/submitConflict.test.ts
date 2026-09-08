@@ -41,10 +41,13 @@ function details(result: { details: unknown }) {
 async function setup(
   script?: Parameters<typeof fakeConflictResolver>[1],
   pausePreflight?: () => Promise<void>,
+  nativeConfig?: string,
 ) {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   gitInit(cwd, { dirty: false });
   const engine = fakeConflictResolver(cwd, script);
+  // Planted BEFORE the session loads: the engine classifies the file at activation.
+  if (nativeConfig !== undefined) writeFileSync(engine.resolverEngine.configPath, nativeConfig);
   if (pausePreflight) {
     const preflight = engine.resolverEngine.preflight;
     engine.resolverEngine.preflight = async (input) => {
@@ -194,6 +197,25 @@ for (const change of ["counter", "identity"]) {
     }
   });
 }
+
+test("incompatible native worktree default names the exact file and the perk repair", async () => {
+  const w = await setup(undefined, undefined, '{"worktree":true}');
+  try {
+    await w.h.invokeTool("submit", {});
+    const r = await w.h.invokeTool("resolve_submit_conflicts", {});
+    assert.equal(details(r).ok, false);
+    assert.equal(details(r).reason, "incompatible-worktree-default");
+    const text = r.content.map((block) => ("text" in block ? block.text : "")).join("\n");
+    assert.ok(text.includes(w.engine.resolverEngine.configPath), text);
+    assert.ok(text.includes('"worktree": false'), text);
+    assert.ok(text.includes("perk doctor --fix"), text);
+    assert.ok(text.includes("observed incompatible; incompatible at activation"), text);
+    assert.doesNotMatch(text, /Inspect native subagent worktree defaults/);
+    assert.equal(w.engine.requests.length, 0, "the bus never received a request");
+  } finally {
+    w.h.dispose();
+  }
+});
 
 test("malformed finalizer leaves pending alone; valid failed finalizer clears; full success primes", async () => {
   const w = await setup();

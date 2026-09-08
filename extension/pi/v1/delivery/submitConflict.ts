@@ -167,10 +167,15 @@ export function installSubmitConflictBindings(
             result,
           );
         const reason = result.reason;
+        // Every engine refusal on the worktree default carries the exact file + observations;
+        // the generic sentence remains only for a receipt without the field.
+        const worktreeConfig = result.receipt.nativeWorktreeConfig;
         const diagnostic =
           `Resolver ${result.kind}: ${reason}. Stop and report; no local conflict edits, automatic unlock, or another launch.` +
           (reason === "incompatible-worktree-default"
-            ? " Inspect native subagent worktree defaults and reload after correction."
+            ? worktreeConfig
+              ? ` Native subagent config ${worktreeConfig.path} has an incompatible worktree default (observed ${worktreeConfig.observed}; ${worktreeConfig.atActivation} at activation). Run perk doctor --fix (or perk init) to set "worktree": false there, then reload the session.`
+              : " Inspect native subagent worktree defaults and reload after correction."
             : "") +
           (result.receipt.nativeStatus ? ` Native status: ${result.receipt.nativeStatus}.` : "") +
           (result.receipt.runId ? ` Native run: ${result.receipt.runId}.` : "") +

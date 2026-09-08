@@ -91,6 +91,13 @@ export function conflictResolutionSchema(
   return mode === "pr-rebase" ? CONFLICT_RESOLUTION_SCHEMA : RETAINED_CONFLICT_RESOLUTION_SCHEMA;
 }
 
+/**
+ * The engine's classification of pi-subagents' native `worktree` default in its config file:
+ * `missing` (no file), `absent` (no key), `false` (the only compatible explicit value), or
+ * `incompatible` (any other value, or an unparseable file).
+ */
+export type NativeWorktreeDefault = "missing" | "absent" | "false" | "incompatible";
+
 /** Whitelist only: no task, report, raw errors, output, ownership tokens or invented artifacts. */
 export interface ConflictResolutionReceipt {
   parentSessionId?: string;
@@ -109,6 +116,16 @@ export interface ConflictResolutionReceipt {
   lock: {
     path?: string;
     disposition: "not-acquired" | "busy" | "released" | "retained" | "ownership-error";
+  };
+  /**
+   * Stamped on every `incompatible-worktree-default` refusal (a diagnostic location like
+   * `lock.path` — no output, no tokens): the exact native config file the engine read, what it
+   * observed at the refusing gate, and what it observed at activation (a change requires reload).
+   */
+  nativeWorktreeConfig?: {
+    path: string;
+    observed: NativeWorktreeDefault;
+    atActivation: NativeWorktreeDefault;
   };
 }
 
