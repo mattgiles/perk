@@ -36,6 +36,9 @@ hit.
   review doors — three race classes".
 - Finding→annotation mechanics for both plannotator modes live in the `push_annotations`
   module, not curl — "The annotation-push module (`push_annotations`)".
+- Background draft reviews now ride a persisted closed-state-machine artifact (`draft-review.json`)
+  with a run-scoped exclusive claim, verified dispatch intent, and a routing-inputs fingerprint
+  (v2) — "Hardened into a persisted protocol", "The routing-target fingerprint (v2)".
 - "Footguns" and "Testing recipes" are reference sections — scan them before touching any
   review backend.
 
@@ -174,6 +177,18 @@ guidance between the gather list and the executor paragraph.**
 - The verdict is a 3-option select, plus a `dismissed` outcome arm.
 - **`savePlan` trims the plan before staging the stdin file** — tests asserting the cold-door
   `--plan-file` content must expect the *trimmed* bytes, not the artifact bytes.
+- **Capture-before / recompare-after fencing.** Any first-party (view-only, human-waits) review
+  that then mutates must capture the reviewed `(draft bytes + context digest)` pair and the
+  routing binding BEFORE the human wait, and recompare under reacquired exclusion AFTER the
+  verdict — the `approvedSourceChanged` stop in `extension/authoring/refinement/review.ts`.
+  Re-resolving whatever pair is current at save time lets a draft rewritten during the wait be
+  saved under the previous draft's approval.
+- Retain typed worker diagnostics through a conservative stop: a failed worker inside the
+  capability-fenced save must still surface `error_type`/`message`/`write_attempted`/`comment_ids`.
+- Approval labels must name the real destination (`ReviewSubject.saveDestination`) — a Linear-only
+  save must not read "auto-save to GitHub".
+- Exercise orchestration through the registered path, not an unrun wrapper — a wrapper nobody
+  calls proves nothing about the door.
 
 ## Plannotator Direct Edits — the prose-diff apply
 
@@ -286,6 +301,63 @@ friction: module-private delimiter helpers duplicated, a local door-session twin
 rule-of-three deferral of a generic door core — **the third door (gist) is the extraction
 trigger**.
 
+### Hardened into a persisted protocol (`draft-review.json`)
+
+The three race classes were later closed by a persisted protocol rather than more in-memory
+tokens: one closed-state-machine artifact per session (`extension/session/draftReviewState.ts` —
+the invalidation, uncertainty, refusal, and status vocabularies), a run-scoped machine-local
+exclusive claim (`extension/substrate/draftReviewLock.ts`), subscribe-then-status catch-up closing
+the missed-event window, and verified dispatch intent guarding every effect: identity-bound
+activation (`extension/pi/v1/draftReviewActivation.ts`), subject effects (`draftReviewEffects.ts`),
+stale-reference rendering (`draftReviewRendering.ts`), operator diagnostics → how-to linkage
+(`draftReviewDiagnostics.ts`), with the provider split into `plannotator.ts` + the handshake module
+`plannotatorHandoff.ts` (its transport behaviors pinned by `plannotatorTransport.test.ts`).
+Planning lesson: a closed transition table this size under-estimates module count by roughly 2× —
+expect activation/effects/rendering/diagnostics to want their own files and the transport provider
+to split once registration hooks and status catch-up land.
+
+The disciplines:
+
+- **Correlation ≠ authority; intent ≠ completion.** Delivery is proven only by persisted branch
+  evidence (the persisted-evidence rule — `workflow/lease-outbox-delivery.md` § "Observation-acked
+  delivery"), never by a spy on the send.
+- **Fail-closed everywhere; a stop is not a retry.** A persistence or ownership failure overrides
+  every transition row; failing to persist *uncertainty* is itself a stop; and
+  `docs/user-docs/how-to/reconcile-a-draft-review-stop.md` supplies an EXIT, not an in-place repair
+  — an orphan, a dead PID, or a missing message can never prove no effects happened, so a blind
+  restart is prohibited.
+- **Failure/readiness path coordination.** A browser handshake or subscription failure could lose
+  the advertised fallback because the decision-cleanup path aborts the readiness observer, or
+  because degradation refuses an already-invalidated record. Coordinate teardown ordering for BOTH
+  the plan and objective browser reviews — a degradation invalidation must not swallow an
+  already-decided outcome.
+- **Dead-helper trap.** A "universal" helper extracted during a large refactor shipped with zero
+  callers — verify every caller routes through it before exporting.
+
+Guarantees cover participating local handlers plus checked routing inputs only (at-most-once local
+dispatch, not exactly-once delivery); recovery dogfood against a real crash/restart is deferred.
+
+## The routing-target fingerprint (v2) — hash routing inputs, not file bytes
+
+A draft review stays valid only while a save would still go where the reviewer saw it going, so the
+binding fingerprints the **routing inputs**, not config file bytes: a fixed-order projection of only
+the fields that select a destination — `[issues] backend`/`team` from the MAIN checkout; committed +
+local `[workflow] base` from the INVOKING checkout (plan/objective subjects only); the `[linear]
+api_key` from main-local, hashed — each leaf `absent` or the digest of the exact decoded string (no
+stripping, defaulting, or precedence reproduced, so the projection is conservatively sensitive).
+The encoding prefix is versioned (`perk/draft-review-target/v2`,
+`extension/session/draftReviewBinding.ts`) and v1 records are never migrated — a v2 capture simply
+never matches. Drift explanations compare fixed-name component digests between two
+already-captured snapshots (never a second read) with at most one activation-local baseline
+(cleared on abandon/end); a mismatch reports `unavailable` rather than reconstructing authority;
+eligibility rides the aggregate digest alone.
+
+The TS reader (`extension/substrate/draftReviewConfig.ts`) parses TOML through the vendored
+`extension/vendor/smol-toml/` closure; its dialect gap against Python's `tomllib` is pinned as a
+fixture fact (contracts §8.23; `workflow/shared-contracts.md` § on cross-plane fixtures). Accepted
+limit: all `git config --list --show-origin` output is still fingerprinted, so unrelated Git-config
+edits still invalidate reviews.
+
 ## Footguns (each documented at its site; collected here)
 
 1. **The shared outcome-mapper core (`subjectReviewOutcomeResult`, behind `reviewOutcomeResult` /
@@ -350,6 +422,13 @@ trigger**.
   rendered markdown instead of raw artifact bytes as the stale baseline (making every real
   approval stale-refuse) — each critical data-threading seam needs one harness-level
   command→open→decision composition test.
+- **Idle vs followUp browser-feedback routing is proven only through Pi's real persistence.** Drive
+  Pi's *real* prompt/follow-up persistence and assert whole-content evidence (the digest plus the
+  exact code-authored marker outside the final `</untrusted_reviewer_feedback>`); the sanctioned
+  observation seam is a **forwarding wrapper** on the session instance, not method replacement
+  (`extension/pi/v1/draftReviewUserDelivery.test.ts`); marker-only or altered-feedback entries must
+  never acknowledge. The SDK recipe (the newline-join contract, the streaming barrier) is in
+  `pi/headless-session-drive.md`.
 
 ## The second event-bus bridge: the `code-review` request (`plannotatorHandoff.ts`)
 
@@ -384,6 +463,20 @@ lives in `extension/pi/v1/providers/plannotatorHandoff.ts`) and the reusable cro
   registry stage, no model tool) → no `shared/registry.yaml` / `READ_ONLY_TOOLS` change; all UI
   via `report()` so `surfacesGuard` stays green. (The tsc combined-literal-discriminant
   `||`-narrowing gotcha hit here is recorded in `toolchain/biome.md`.)
+- **Terminal vs browser active arms compute the target differently.** Both share the `perk pr url`
+  locator, but `/pr-review-terminal` (`extension/pi/v1/codeReview/terminal.ts`) computes a local
+  since-base merge-base itself (`git.ts::sinceBaseSha` with the PR's `baseRef`) while the browser
+  hands `{cwd, prUrl}` to Plannotator, which owns diff selection — so a targeting fix belongs to
+  the terminal arm only. **A plan-ref's pinned `base` is not a stacked PR's dynamic base**: for a
+  stacked layer whose plan-ref base is null, the old code widened the hunk diff to the whole train
+  against the repo default; the PR's current base branch (from GitHub) is authoritative for review
+  targeting (targeting, not delivery-drift repair); only the pre-PR `local` arm still uses the
+  plan-ref base. The locator now carries `base_ref` as required fail-closed evidence — producer and
+  decoder refuse empty/missing, and an old CLI fails closed through the existing `bad_output` skew
+  path (the general pattern for enriching a shared cross-plane locator: an additive JSON field, a
+  strict decode, no legacy fallback); `resolveActivePr` shares the decoder and ignores the extra
+  field. Residual: active terminal review is based on local HEAD + working tree, not promised
+  byte-identical to the published PR diff.
 
 ## The annotation-push module (`push_annotations`)
 
@@ -436,3 +529,8 @@ detected only at push time as `push_rejected` — loud but late, by design.
 - `docs/learned/pi/extension-api.md` — `ctx.ui.editor` facts + the `headfulUIContext` gap
 - `docs/learned/pi/tool-param-decode.md` — the tri-state param decode the door's `plan` param uses
 - `docs/learned/pi/extension-seams.md` — minimal structural slices + the type-only-import cycle break
+- `extension/session/draftReviewState.ts` / `draftReviewBinding.ts` — the persisted state machine + the v2 routing fingerprint
+- `extension/pi/v1/draftReviewActivation.ts` (+ `draftReviewEffects.ts`, `draftReviewRendering.ts`, `draftReviewDiagnostics.ts`) — the verified-intent effect surfaces
+- `extension/substrate/draftReviewLock.ts` / `draftReviewConfig.ts` — the run-scoped claim + the TOML routing-input reader
+- `docs/user-docs/how-to/reconcile-a-draft-review-stop.md` — the human-only exit from a stopped review
+- `docs/learned/workflow/lease-outbox-delivery.md` — the persisted-evidence rule + the exclusion-primitive table
