@@ -8,8 +8,19 @@ gathers the whole stack containing that PR — per-member sections plus the comb
 diff — and each member whose head is a plan branch (`plan-<id>`) IS enriched with its plan body
 (the resolver-fallback fetch; non-plan members carry null). Either way it gathers everything a
 fresh-context reviewer child needs (the diff, the PR title/body, and the plan body where one
-exists) and emits `--json`. Read-only — no GitHub mutation; the verbose payload is consumed by
-the spawned reviewer child so it never transits the parent session.
+exists) and emits `--json`. Read-only — no GitHub mutation; the payload is consumed by the
+spawned reviewer child so it never transits the parent session.
+
+The `--json` payload is a POINTER envelope: every free-text section (`body`, `diff`,
+`plan_body`, each `stack[]` member's sections, `combined_diff`) is written to its own
+line-oriented file under the invocation checkout's run scratch dir —
+`cache.run_scratch_dir(root, $PERK_RUN_ID or a minted run id)` +
+`/review-context/pr-<n>[-stack]-<token>/` (gitignored, per-invocation unique, pruned by the
+run-dir age GC) — and the envelope carries `{path, bytes, lines, max_line_bytes}` references plus
+`context_dir`. The reviewer pages the files with `read`/`grep`; a line above Pi's per-line `read`
+bound is announced by `max_line_bytes` so the child falls back to a `sed -n 'Np' <path> | head -c`
+byte slice. Inlining the text would put a multi-hundred-KB single line on stdout that no reviewer
+tool can consume. A filesystem or encoding failure while writing is `write_failed`.
 
 Diff provenance: every per-PR `diff` is GitHub's diff media type by default; on GitHub's 406
 `too_large` refusal (above 20,000 lines / 300 files) the gateway renders it locally (a fetch +
@@ -24,6 +35,7 @@ Supervisor surface: `--json` to stdout, human text to stderr, stable exit codes.
 Exit codes: 0 ok · 1 invalid input / no plan / no PR / op failure · 2 not-a-repo.
 """
 
+import os
 import re
 import uuid
 from dataclasses import dataclass
@@ -35,6 +47,13 @@ from perk import github, plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.boundary import OutputModel
+from perk.cli.commands.pr.review.context_files import (
+    MaterializedContext,
+    MaterializedSections,
+    TextFileRef,
+    context_dir_for,
+    materialize_review_context,
+)
 from perk.cli.commands.pr.review.stack_resolve import ResolvedStack, resolve_stack_from_pr
 from perk.cli.context import require_repo
 from perk.cli.emit import emit, fail
@@ -42,6 +61,7 @@ from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.run import launch
 from perk.state import cache
+from perk.state import run_id as run_id_mod
 from perk.substrate import git
 from perk.substrate.git import GitError
 from perk.substrate.output import log_warn, user_output
@@ -152,7 +172,39 @@ def review_context_pr(
         )
         return
 
-    emit(as_json=as_json, payload=_result_to_dict(result), render=lambda: _render_human(result))
+    # The files land in the INVOCATION checkout's run scratch dir (never the CWD or a system
+    # tempdir): gitignored, reachable by the reviewer children (they run in the caller
+    # checkout), and pruned by the run-dir age rule — the live run is protected via PERK_RUN_ID.
+    effective_run_id = os.environ.get("PERK_RUN_ID") or run_id_mod.mint()
+    context_dir = context_dir_for(
+        repo_root,
+        pr_number=result.context.pr_number,
+        stack=bool(result.stack),
+        run_id=effective_run_id,
+    )
+    try:
+        materialized = materialize_review_context(
+            context_dir,
+            top=result.context,
+            members=result.stack,
+            combined_diff=result.combined_diff,
+        )
+    except (OSError, UnicodeError) as exc:
+        # Exactly the writer's documented failure set: the filesystem arms and the
+        # UnicodeEncodeError even UTF-8 raises for unencodable text (lone surrogates).
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="write_failed",
+            message=f"could not write the review context files under {context_dir}\n{exc}",
+        )
+        return
+
+    emit(
+        as_json=as_json,
+        payload=_result_to_dict(result, materialized),
+        render=lambda: _render_human(result, materialized),
+    )
 
 
 def _impl(
@@ -411,9 +463,35 @@ def _resolve_plan_body(repo_root: Path, plan_ref: plan.PlanRef) -> str | None:
     return _fetch_plan_body(repo_root, pr_id)
 
 
+class TextFileRefOut(OutputModel):
+    """One materialized text section: its absolute ``path`` plus the sizes a reviewer pages
+    against — ``max_line_bytes`` is the longest line's UTF-8 length (compared against Pi's
+    per-line ``read`` bound to pick the byte-slice fallback)."""
+
+    path: str
+    bytes: int
+    lines: int
+    max_line_bytes: int
+
+    @classmethod
+    def from_domain(cls, ref: TextFileRef) -> "TextFileRefOut":
+        return cls(
+            path=str(ref.path),
+            bytes=ref.bytes,
+            lines=ref.lines,
+            max_line_bytes=ref.max_line_bytes,
+        )
+
+
+def _optional_ref(ref: TextFileRef | None) -> TextFileRefOut | None:
+    return None if ref is None else TextFileRefOut.from_domain(ref)
+
+
 class PrReviewContextOut(OutputModel):
-    """The ``--json`` serialization boundary of :class:`PrReviewContextResult`
-    (flat; field order load-bearing). ``pr`` maps from the domain ``pr_number``."""
+    """The ``--json`` serialization boundary of :class:`PrReviewContextResult` — a pointer
+    envelope (field order load-bearing). ``pr`` maps from the domain ``pr_number``; ``body``,
+    ``diff`` and ``plan_body`` are file references into ``context_dir`` (in stack mode they
+    alias the LAST ``stack[]`` member's files — the top PR's text is written once)."""
 
     success: bool
     error_type: str | None
@@ -423,14 +501,18 @@ class PrReviewContextOut(OutputModel):
     base_ref: str
     head_ref: str
     title: str
-    body: str
-    diff: str
-    plan_body: str | None
+    context_dir: str
+    body: TextFileRefOut
+    diff: TextFileRefOut
+    plan_body: TextFileRefOut | None
     diff_source: github.DiffSource
 
     @classmethod
-    def from_domain(cls, result: PrReviewContextResult) -> "PrReviewContextOut":
+    def from_domain(
+        cls, result: PrReviewContextResult, materialized: MaterializedContext
+    ) -> "PrReviewContextOut":
         c = result.context
+        top = materialized.top
         return cls(
             success=True,
             error_type=None,
@@ -440,74 +522,91 @@ class PrReviewContextOut(OutputModel):
             base_ref=c.base_ref,
             head_ref=c.head_ref,
             title=c.title,
-            body=c.body,
-            diff=c.diff,
-            plan_body=c.plan_body,
+            context_dir=str(materialized.context_dir),
+            body=TextFileRefOut.from_domain(top.body),
+            diff=TextFileRefOut.from_domain(top.diff),
+            plan_body=_optional_ref(top.plan_body),
             diff_source=c.diff_source,
         )
 
 
 class StackContextMemberOut(OutputModel):
-    """One ``stack[]`` per-member section (bottom→top order)."""
+    """One ``stack[]`` per-member section (bottom→top order); text fields are file references
+    under ``context_dir/stack/<pr>/``."""
 
     pr: int
     base_ref: str
     head_ref: str
     title: str
-    body: str
-    diff: str
-    plan_body: str | None
+    body: TextFileRefOut
+    diff: TextFileRefOut
+    plan_body: TextFileRefOut | None
     diff_source: github.DiffSource
 
     @classmethod
-    def from_domain(cls, member: StackContextMember) -> "StackContextMemberOut":
+    def from_domain(
+        cls, member: StackContextMember, sections: MaterializedSections
+    ) -> "StackContextMemberOut":
         return cls(
             pr=member.pr_number,
             base_ref=member.base_ref,
             head_ref=member.head_ref,
             title=member.title,
-            body=member.body,
-            diff=member.diff,
-            plan_body=member.plan_body,
+            body=TextFileRefOut.from_domain(sections.body),
+            diff=TextFileRefOut.from_domain(sections.diff),
+            plan_body=_optional_ref(sections.plan_body),
             diff_source=member.diff_source,
         )
 
 
 class PrReviewStackContextOut(PrReviewContextOut):
     """The ``--stack`` envelope: the single-PR fields (describing the top PR) plus the
-    additive per-member sections and combined diff. A separate model so non-stack calls stay
-    byte-identical (no null stack keys)."""
+    additive per-member sections and the combined-diff reference. A separate model so
+    non-stack calls stay byte-identical (no null stack keys)."""
 
     stack: tuple[StackContextMemberOut, ...]
-    combined_diff: str
+    combined_diff: TextFileRefOut
 
     @classmethod
-    def from_stack_domain(cls, result: PrReviewContextResult) -> "PrReviewStackContextOut":
-        base = PrReviewContextOut.from_domain(result)
+    def from_stack_domain(
+        cls, result: PrReviewContextResult, materialized: MaterializedContext
+    ) -> "PrReviewStackContextOut":
+        if materialized.combined_diff is None:
+            raise ValueError("the --stack envelope requires a materialized combined diff")
+        base = PrReviewContextOut.from_domain(result, materialized)
         return cls(
             **base.model_dump(),
-            stack=tuple(StackContextMemberOut.from_domain(m) for m in result.stack),
-            combined_diff=result.combined_diff or "",
+            stack=tuple(
+                StackContextMemberOut.from_domain(member, sections)
+                for member, sections in zip(result.stack, materialized.members, strict=True)
+            ),
+            combined_diff=TextFileRefOut.from_domain(materialized.combined_diff),
         )
 
 
-def _result_to_dict(result: PrReviewContextResult) -> dict[str, object]:
+def _result_to_dict(
+    result: PrReviewContextResult, materialized: MaterializedContext
+) -> dict[str, object]:
     if result.stack:
-        return PrReviewStackContextOut.from_stack_domain(result).model_dump(mode="json")
-    return PrReviewContextOut.from_domain(result).model_dump(mode="json")
+        return PrReviewStackContextOut.from_stack_domain(result, materialized).model_dump(
+            mode="json"
+        )
+    return PrReviewContextOut.from_domain(result, materialized).model_dump(mode="json")
 
 
-def _render_human(result: PrReviewContextResult) -> None:
+def _render_human(result: PrReviewContextResult, materialized: MaterializedContext) -> None:
     c = result.context
     user_output(
         click.style("PR review context ", fg="cyan")
         + f"#{c.pr_number} ({result.branch}): "
-        + f"{len(c.diff)} diff byte(s), "
+        + f"{materialized.top.diff.bytes} diff byte(s), "
         + ("plan body present" if c.plan_body else "no plan body")
         + f", diff via {c.diff_source}"
     )
+    user_output(f"  context: {materialized.context_dir}")
     if result.stack:
+        combined = materialized.combined_diff
         user_output(
             f"  stack: {len(result.stack)} member(s), "
-            f"{len(result.combined_diff or '')} combined-diff byte(s)"
+            f"{0 if combined is None else combined.bytes} combined-diff byte(s)"
         )
