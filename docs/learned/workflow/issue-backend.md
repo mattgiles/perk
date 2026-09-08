@@ -38,6 +38,9 @@ doc preserves the patterns, enforcement, and residuals.
   by the backend and explained by the door — "Presence-only evidence and guarded writers".
 - Default-miss fakes hide redirect/targeting mistakes; map every plausible target to a distinct
   value or exception and keep whole-repo consumer censuses — "Backend fake posture".
+- The guarded marked-comment upsert is opt-in via a non-null `MarkedCommentExpectation`: ONE
+  mutation attempt, then one full verification scan decides the typed outcome; different owned
+  body bytes are `stale_comment`, never success — "The expectation-fenced marked-comment upsert".
 
 ## Protocol-module shape
 
@@ -266,6 +269,29 @@ presence over `get_plan`, and resolve the actual carrier through contracts §8.4
 `journal_carrier_id` before reading. A generic writer that becomes merge-only will also break tests
 that quietly used it as a creator; reseed those fixtures through the sanctioned creation seam
 instead of reopening create behavior.
+
+## The expectation-fenced marked-comment upsert (one attempt, then verify)
+
+The guarded protocol layers *beside* the ordinary marker upsert and is opted into only by a non-null
+`expected` argument — `expected=None` preserves the existing first-substring behavior unchanged.
+The shapes live in `src/perk/backends/issue_backend.py`: the frozen
+`MarkedCommentExpectation(comment_id, body_digest)` (both null = expected absence; both present =
+the exact observed comment; a partial pair, a blank id, or a noncanonical digest = `invalid_input`),
+`MarkedCommentError` (codes `unsupported_backend | invalid_input | malformed_comment |
+ambiguous_comment | stale_comment | backend_error | write_unverified`, plus `comment_ids` and
+`write_attempted`), and one defaulted `CommentResult.verified_comment` — no new result type, no
+scalar proof fields.
+
+**One mutation attempt, then verify — never retry or poll.** Capture any mutation exception and run
+one full verification scan; the precedence is: an unreadable scan → `write_unverified`; a duplicate
+→ `ambiguous_comment`; a malformed carrier → `malformed_comment`; exactly one exact candidate →
+success (including when the mutation raised *after* landing); raised + a proven-unchanged baseline →
+`backend_error` (cause preserved); a unique differently-addressed or changed target →
+`stale_comment`; anything else → `write_unverified`. Different owned body bytes are **stale**, never
+success, even when the backend cannot distinguish a competing edit from server-side alteration.
+GitHub's non-null-`expected` arm raises a typed `unsupported_backend` before any operation (dry run
+included). The Linear consumer of this arm — objective-node refinement persistence — is in
+`workflow/linear-backend.md`.
 
 ## Backend fake posture
 

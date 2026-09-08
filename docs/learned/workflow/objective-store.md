@@ -48,6 +48,8 @@ sections) — this doc points there and never restates them.
 - The reviewed dream report persists as marker-keyed companion comments on the objective's
   `journal_carrier_id`, with the `dream_report` header reference recorded LAST as the completion
   marker — "The dream-companion flow".
+- `read_node_refinement_targets` is the whole refinement support+read surface (no capability
+  flag; `None` = missing, empty targets = supported) — "`read_node_refinement_targets`".
 - Historical: the node-numbered growth narratives (Phase-4 protocol growth, the manifest/doctor
   design arcs, adoption growth) chronicle landed work.
 
@@ -240,6 +242,27 @@ Protocol-append rebase conflict is purely additive (both parties append after `u
 → keep both). The #626 growth carries its own trap: CI's **whole-repo `uv run ty check` caught the
 stale `_FakeObjectiveStore`** when `ty check perk/` alone did **not** — the conformance fake lives
 under `tests/`, so scope the type check to the whole repo, never just `perk/`.
+
+### `read_node_refinement_targets` — one read is the whole support+read surface
+
+`read_node_refinement_targets(*, objective_id) -> RefinementObjectiveSnapshot | None`
+(`src/perk/backends/objective_store.py`) deliberately replaced a singular-read-plus-capability-flag
+design: no capability flag, no dummy-node probe. `None` means a genuinely missing or non-perk
+objective; an **empty target tuple is a supported objective with no nodes**; and there is no
+node-status eligibility restriction on the read (eligibility is derived downstream — refinements
+survive planning/done/skipped as advisory history). Its typed refusal
+`RefinementTargetReadError(ObjectiveStoreError)` carries the codes `unsupported_backend |
+malformed_target | ambiguous_target`; GitHub and the dormant issue-backed Linear store raise
+`unsupported_backend` with **no network call**. Growing the Protocol again meant updating every
+concrete and static conformer *including* `_FakeObjectiveStore` in lockstep — the THREE-implementers
+rule above, now with the fake counted explicitly.
+
+The backend-neutral service (`src/perk/objective/refinement/service.py`) keeps the layering honest:
+read/select/save import backend contracts only, resolve the store and issues through the existing
+resolvers (a backend mismatch is `invalid_input`), and map each typed store/upsert error onto a
+`RefinementError` code through a fixed table without message-matching — never relabel a typed error
+as a generic backend failure. The Linear persistence beneath it is in `workflow/linear-backend.md`
+§ "Objective-node refinement persistence".
 
 ### `add_objective_node`: the re-render-vs-materialize split
 
