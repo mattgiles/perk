@@ -587,6 +587,7 @@ async function startPlannotatorSurface<T>(
   try {
     bridgePromise = launch(signal);
   } catch (error) {
+    // A synchronous launch throw must still restore the env — the port preset is ours to undo.
     if (priorPort === undefined) delete process.env.PLANNOTATOR_PORT;
     else process.env.PLANNOTATOR_PORT = priorPort;
     throw error;

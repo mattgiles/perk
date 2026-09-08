@@ -68,7 +68,6 @@ import { arrayParam, objectParam, paramsOf, stringParam } from "../../substrate/
 import { type BranchEntry, branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
 import { installInjectedContext } from "./contextInjection.ts";
-import { type DraftReviewSlot, recordSaveOutcome } from "./draftReview.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { productionDreamGateRecovery } from "./objectiveDreamGate.ts";
 import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
@@ -293,7 +292,7 @@ function dreamGateFor(
  * branch backing, the cold-door backend, the gate slice, and the ctx-bound dream-gate resolver.
  * The review arm + the browser door consume the composed `objectiveApprovalSaveV1` instead.
  */
-export function objectiveSaveDepsFor(
+function objectiveSaveDepsFor(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
@@ -375,8 +374,8 @@ export async function objectiveApprovalSaveV1(
   );
 }
 
-/** Preserve the subject's linkage-budget and rendered save policy for explicit owned sessions. */
-export function renderObjectiveApprovalSave(
+/** Seed the linkage-budget marker and render the seam's outcome (the composition + rendering half). */
+function renderObjectiveApprovalSave(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   outcome: Awaited<ReturnType<typeof objectiveApprovalSave>>,
@@ -442,7 +441,6 @@ const SAVE_TOOL_GUIDELINES = [
 export function installObjectiveAuthoringBindings(
   pi: ExtensionAPI,
   gating: ToolGating,
-  reviews: DraftReviewSlot,
   contextPolicy: ContextPolicyInputs,
 ): void {
   // The objective-authoring context injection (display:false), keyed off (read-only gate AND
@@ -612,11 +610,6 @@ export function installObjectiveAuthoringBindings(
         },
         objectiveSaveDepsFor(pi, ctx, gating),
       );
-      // The manual save never consults the latch (it IS the deliberate retry) but reports into it.
-      recordSaveOutcome(reviews, "objective", {
-        confirmed: save.status === "saved",
-        ...(save.status === "failed" ? { detail: save.message } : {}),
-      });
       activateBudgetIfLinked(pi, save);
       return objectiveSaveResultOf(ctx, save);
     },
@@ -637,12 +630,6 @@ export function installObjectiveAuthoringBindings(
       // draft-LESS sessions — objectives have no transcript scrape by design, so a draftless
       // session still needs a working save path.
       const outcome = await objectiveApprovalSaveV1(pi, ctx, gating, { title });
-      // The manual save never consults the latch (it IS the deliberate retry) but reports into it.
-      if (outcome.status === "saved" || outcome.status === "save-failed")
-        recordSaveOutcome(reviews, "objective", {
-          confirmed: outcome.status === "saved",
-          ...(outcome.result.details.ok ? {} : { detail: outcome.result.details.error }),
-        });
       if (outcome.status === "refused-draft") {
         // Fail-closed stop: the command's own precondition is a VALID draft — no gate exit,
         // no driven turn (those fallbacks are for draft-LESS sessions; driving a fresh

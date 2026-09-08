@@ -34,11 +34,6 @@ export interface ToolResult {
   terminate?: boolean;
 }
 
-/** The provider review bridge every subject arm awaits (the plannotator event-bus bridge in production). */
-export interface DraftReviewBridge {
-  review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome>;
-}
-
 /**
  * The subject descriptor parameterizing the shared renderer cores below — the plan and objective
  * review arms and the gist arm (`pi/v1/gist.ts`) render the same outcome shapes, differing only
@@ -190,10 +185,8 @@ export type SubjectSaveOutcome =
  * The shared approved-save mapper core: map an APPROVED review outcome + the approval-save
  * outcome into the model-facing tool result for `subject`. A successful save TERMINATES the turn
  * (propagating the seam's `terminate: true` intent); a failed save is non-terminating, leaves
- * the gate read-only, and pauses automatic saves for the activation (the unconfirmed-save latch,
- * `draftReview.ts`) — the human checks the backend for the run id, then the manual save command
- * is the deliberate retry. Only a confirmed save labels feedback as implementation guidance; an
- * unconfirmed save carries diagnostic DATA.
+ * the gate read-only, and directs the human manual failsafe. Reviewer feedback is surfaced
+ * loudly as implementation guidance — the approved bytes were saved verbatim, never post-edited.
  * The `paramMismatch`/`edited`/`directEditsFailed` opts are plan-arm-only (their literals name
  * "plan"/"draft"): the objective delegator never passes opts, so the suffixes render empty and
  * `edited` never reaches its details. `directEditsFailed` (plannotator-only) flags that a Direct
@@ -283,9 +276,6 @@ export function approvedSubjectSaveResult(
       terminate: true,
     };
   }
-  const failedFeedback = outcome.feedback
-    ? `\n\nReviewer feedback (DATA; save completion is not confirmed):\n${untrustedReviewFeedback(outcome.feedback)}`
-    : "";
   const error =
     save.status === "no-source"
       ? subject.noSourceError
@@ -298,10 +288,8 @@ export function approvedSubjectSaveResult(
         type: "text",
         text:
           `${subject.noun} APPROVED by reviewer, but the auto-save FAILED (${error}) — the ` +
-          `session stays read-only and automatic saves are paused for this session. Do not ` +
-          `retry yourself: ask the human to check the issue backend for an existing ` +
-          `${subject.noun} carrying this run id, then run ${subject.failsafeCmd} (the ` +
-          `deliberate retry).${failedFeedback}`,
+          `session stays read-only. Ask the user to run ${subject.failsafeCmd} (the manual ` +
+          `failsafe) to retry.${feedback}`,
       },
     ],
     details: {

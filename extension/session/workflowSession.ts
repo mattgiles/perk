@@ -20,7 +20,7 @@
 // Identity is OPTIONAL: `runId` is `string | null` and a session always opens — the plan-save
 // surfaces prove the shape (workflow-state appends are branch-backed and identity-independent:
 // an identity-less save still links `active_plan_ref`). The ARTIFACT ops classify no-identity as
-// `rejected` (write) / `absent` (ordinary read) / `invalid` (strict read); the state ops work without
+// `rejected` (write) / `absent` (read); the state ops (`nodeClaim`, `apply`) work without
 // identity. Identity is TRUST-NARROWED: a rebuilt `run_id` that is unsafe as a path component
 // (`isSafeRunId`) degrades to no-identity before any path derivation — a hostile persisted id
 // can never steer artifact reads outside the run root or reach a receipt.
@@ -38,7 +38,7 @@
 // arms — nothing consumes them (narrow until proven).
 
 import { isSafeRunId, type PlanRef } from "../substrate/cache.ts";
-import { digestSessionData, type SessionDataRead } from "../substrate/sessionData.ts";
+import { digestSessionData } from "../substrate/sessionData.ts";
 import {
   nodeClaimsEqual,
   planRefsEqual,
@@ -48,7 +48,7 @@ import type { SessionStateStore } from "./lifecycle.ts";
 
 /** Session-owned vocabulary: features import the plan-ref shape through the session seam. */
 export type { PlanRef };
-/** One digest convention, exposed through the session boundary for bound review consumers. */
+/** One digest convention, exposed through the session boundary (refinement's context transfer digests through it). */
 export { digestSessionData };
 
 /** A human-readable problem description (the backing has already warned where its tier is loud). */
@@ -58,8 +58,9 @@ export type SessionProblem = string;
 const REFINE_STAGE_ID = "objective-refine";
 
 /**
- * The refinement grounding-context artifact name — session-owned vocabulary because the review
- * binding fences the refinement subject on this artifact's digest (features import it here).
+ * The refinement grounding-context artifact name — session-owned vocabulary because the
+ * refinement save seam compares the reviewed (draft, context) pair on this artifact's digest
+ * (features import it here).
  */
 export const REFINEMENT_CONTEXT_ARTIFACT = "objective-refinement-context.json";
 
@@ -87,8 +88,6 @@ export interface ArtifactContentStore {
   store(runId: string, name: string, content: string): boolean;
   /** The run's current bytes; null = missing/unreadable. */
   load(runId: string, name: string): string | null;
-  /** Strict reads distinguish genuine absence from I/O refusal; no fallback to load(). */
-  loadStrict(runId: string, name: string): SessionDataRead;
   /** The receipt/warning display path, re-derived from the given identity — NEVER a persisted pointer field. */
   displayPath(runId: string, name: string): string;
 }
@@ -96,9 +95,7 @@ export interface ArtifactContentStore {
 /**
  * The classified artifact read. `absent` is the silent, branchable tier (no identity, no
  * pointer, or a cross-run fork pointer — designed isolation); `invalid` is the loud tier (a
- * pointer whose file is missing or digest-mismatched — rewind/tamper). Opt-in strict reads also
- * classify missing identity, malformed provenance, orphan bytes and I/O failure as `invalid`;
- * they return problems to the authorizing caller rather than emitting ordinary read warnings.
+ * pointer whose file is missing or digest-mismatched — rewind/tamper).
  */
 export type ReadArtifactResult =
   | { status: "found"; content: string }
@@ -276,26 +273,12 @@ export type WorkflowChangeResult =
  */
 export interface WorkflowSession {
   readonly runId: string | null;
-  /** Strict live identity only; completion must not revalidate source or routing inputs. */
+  /** The strict live identity read: the safe `run_id` from one rebuilt snapshot (refinement's context/draft ops). */
   currentRunIdentity():
     | { ok: true; runId: string }
     | { ok: false; reason: "no-identity" | "invalid-state" };
-  /** Strict single-snapshot routing read; malformed relevant claims refuse, never disappear. */
-  draftReviewContext():
-    | {
-        ok: true;
-        runId: string;
-        subject: "plan" | "objective" | "gist" | "refinement";
-        warmNodeClaim: { objective: string; node: string } | null;
-      }
-    | { ok: false; reason: "no-identity" | "invalid-state" };
-  readArtifact(name: string, options?: { provenance: "strict" }): ReadArtifactResult;
-  /** Strict writes refuse broken prior provenance; callers still own exclusion and failure residue. */
-  writeArtifact(
-    name: string,
-    content: string,
-    options?: { provenance: "strict" },
-  ): WriteArtifactResult;
+  readArtifact(name: string): ReadArtifactResult;
+  writeArtifact(name: string, content: string): WriteArtifactResult;
   /** Snapshot read of the rebuilt `objective_node_claim` (malformed ⇒ null). */
   nodeClaim(): { objective: string; node: string } | null;
   /** Snapshot read of the rebuilt `active_objective` (malformed/throwing ⇒ null). */
@@ -483,82 +466,6 @@ function readReviewPosts(state: SessionStateStore): ReviewPostRow[] {
   }
 }
 
-function strictArtifactMap(raw: unknown): Record<string, SessionArtifactPointer> {
-  if (raw === undefined || raw === null) return {};
-  if (
-    typeof raw !== "object" ||
-    Array.isArray(raw) ||
-    (Object.getPrototypeOf(raw) !== Object.prototype && Object.getPrototypeOf(raw) !== null)
-  ) {
-    throw new Error("session_artifacts map is malformed");
-  }
-  const entries: [string, SessionArtifactPointer][] = [];
-  for (const [key, value] of Object.entries(raw)) {
-    if (
-      !isSafeRunId(key) ||
-      key.trim() === "" ||
-      typeof value !== "object" ||
-      value === null ||
-      Array.isArray(value)
-    )
-      throw new Error("session_artifacts pointer is malformed");
-    const p = value as Record<string, unknown>;
-    if (
-      typeof p.run_id !== "string" ||
-      !isSafeRunId(p.run_id) ||
-      typeof p.digest !== "string" ||
-      !/^sha256:[0-9a-f]{64}$/.test(p.digest) ||
-      p.name !== key ||
-      typeof p.path !== "string" ||
-      p.path.length === 0 ||
-      typeof p.at !== "string" ||
-      p.at.length === 0
-    ) {
-      throw new Error("session_artifacts pointer is malformed");
-    }
-    entries.push([key, { run_id: p.run_id, name: key, path: p.path, digest: p.digest, at: p.at }]);
-  }
-  return Object.fromEntries(entries);
-}
-
-function strictArtifactRead(deps: WorkflowSessionDeps, name: string): ReadArtifactResult {
-  const invalid = (problem: string): ReadArtifactResult => ({ status: "invalid", problem });
-  if (!isSafeRunId(name) || sessionArtifactNameProblem(name) !== null) {
-    return invalid("unsafe session artifact name");
-  }
-  try {
-    // One snapshot: a throwing/malformed identity read is never evidence of absence.
-    const snapshot = deps.state.rebuild();
-    if (typeof snapshot !== "object" || snapshot === null || Array.isArray(snapshot)) {
-      return invalid("session artifact state is malformed");
-    }
-    const runId = snapshot.run_id;
-    if (typeof runId !== "string" || !isSafeRunId(runId)) {
-      return invalid("session has no safe run_id — strict artifact reads need identity");
-    }
-    // Validate siblings too: the next whole-map append must not launder malformed provenance.
-    const map = strictArtifactMap(snapshot.session_artifacts);
-    const pointer = Object.hasOwn(map, name) ? map[name] : null;
-    // Never dereference inherited pointers. Inspect ONLY the active run's namespace, including
-    // when there is no pointer: bytes without current-run provenance are an orphan, not absent.
-    const loaded = deps.artifacts.loadStrict(runId, name);
-    if (loaded.status === "io-error") return invalid(`session artifact ${name} I/O failure`);
-    if (pointer == null || pointer.run_id !== runId) {
-      return loaded.status === "absent"
-        ? { status: "absent" }
-        : invalid(`session artifact ${name} has no current-run provenance (orphan)`);
-    }
-    if (loaded.status === "absent")
-      return invalid(`session artifact ${name} has a pointer but no file`);
-    if (digestSessionData(loaded.content) !== pointer.digest) {
-      return invalid(`session artifact ${name} digest mismatch (rewound or modified)`);
-    }
-    return { status: "found", content: loaded.content };
-  } catch {
-    return invalid(`session artifact ${name} strict read failed`);
-  }
-}
-
 /**
  * Open a session over the two ports — the ONE deep implementation of the seam. ALWAYS opens;
  * `runId: null` is the identity-less arm (artifact writes reject, reads read absent; the state
@@ -586,46 +493,7 @@ export function openWorkflowSession(deps: WorkflowSessionDeps): WorkflowSession 
         return { ok: false, reason: "invalid-state" };
       }
     },
-    draftReviewContext() {
-      try {
-        const snapshot = state.rebuild();
-        const runId = snapshot.run_id;
-        if (typeof runId !== "string" || !isSafeRunId(runId))
-          return { ok: false, reason: "no-identity" };
-        const stage = snapshot.stage;
-        if (stage != null && (typeof stage !== "string" || !stage.trim()))
-          return { ok: false, reason: "invalid-state" };
-        const subject =
-          stage === "objective-author" || stage === "objective-save"
-            ? "objective"
-            : stage === "gist-author"
-              ? "gist"
-              : stage === REFINE_STAGE_ID
-                ? "refinement"
-                : "plan";
-        const raw: unknown = subject === "plan" ? snapshot.objective_node_claim : null;
-        let warmNodeClaim: { objective: string; node: string } | null = null;
-        if (raw != null) {
-          if (typeof raw !== "object" || Array.isArray(raw))
-            return { ok: false, reason: "invalid-state" };
-          const claim = raw as Record<string, unknown>;
-          if (
-            Object.keys(claim).length !== 2 ||
-            typeof claim.objective !== "string" ||
-            !claim.objective.trim() ||
-            typeof claim.node !== "string" ||
-            !claim.node.trim()
-          )
-            return { ok: false, reason: "invalid-state" };
-          warmNodeClaim = { objective: claim.objective, node: claim.node };
-        }
-        return { ok: true, runId, subject, warmNodeClaim };
-      } catch {
-        return { ok: false, reason: "invalid-state" };
-      }
-    },
-    readArtifact(name: string, options): ReadArtifactResult {
-      if (options?.provenance === "strict") return strictArtifactRead(deps, name);
+    readArtifact(name: string): ReadArtifactResult {
       const runId = activeRunId(state);
       if (runId === null) return { status: "absent" }; // no identity — silent, branchable
       let pointer: { run_id: string; digest: string } | null;
@@ -657,154 +525,98 @@ export function openWorkflowSession(deps: WorkflowSessionDeps): WorkflowSession 
       }
       return { status: "found", content };
     },
-    writeArtifact(name: string, content: string, options): WriteArtifactResult {
-      const strict = options?.provenance === "strict";
-      if (strict) {
-        const prior = strictArtifactRead(deps, name);
-        if (prior.status === "invalid") return { status: "rejected", problem: prior.problem };
+    writeArtifact(name: string, content: string): WriteArtifactResult {
+      const nameProblem = sessionArtifactNameProblem(name);
+      if (nameProblem !== null) return { status: "rejected", problem: nameProblem };
+
+      const runId = activeRunId(state);
+      if (runId === null) {
+        return {
+          status: "rejected",
+          problem: "session has no run_id — session artifacts need identity",
+        };
       }
-      let effectAttempted = false;
+
+      // The unchanged short-circuit: a byte-identical rewrite is a no-op (no store, no fresh
+      // pointer entry) — the recorded pointer already proves exactly these bytes. QUIET by
+      // design: a stale/broken/malformed pointer simply fails the probe and the write proceeds
+      // (the probe must never emit the read tier's rewind warnings). The receipt is fully
+      // re-derived — junk persisted fields are unobservable.
+      let current: { run_id: string; digest: string } | null;
       try {
-        const nameProblem = sessionArtifactNameProblem(name);
-        if (nameProblem !== null) return { status: "rejected", problem: nameProblem };
-
-        const runId = activeRunId(state);
-        if (runId === null) {
+        current = soundPointer(state.rebuild().session_artifacts?.[name]);
+      } catch {
+        current = null;
+      }
+      if (current !== null && current.run_id === runId) {
+        const stored = artifacts.load(runId, name);
+        if (
+          stored !== null &&
+          digestSessionData(stored) === current.digest &&
+          current.digest === digestSessionData(content)
+        ) {
           return {
-            status: "rejected",
-            problem: "session has no run_id — session artifacts need identity",
+            status: "unchanged",
+            receipt: {
+              runId,
+              path: artifacts.displayPath(runId, name),
+              digest: digestSessionData(stored),
+            },
           };
         }
+      }
 
-        // The unchanged short-circuit: a byte-identical rewrite is a no-op (no store, no fresh
-        // pointer entry) — the recorded pointer already proves exactly these bytes. QUIET by
-        // design: a stale/broken/malformed pointer simply fails the probe and the write proceeds
-        // (the probe must never emit the read tier's rewind warnings). The receipt is fully
-        // re-derived — junk persisted fields are unobservable.
-        let current: { run_id: string; digest: string } | null;
-        try {
-          const snapshot = state.rebuild();
-          if (strict && snapshot.run_id !== runId) throw new Error("session identity changed");
-          current = strict
-            ? (strictArtifactMap(snapshot.session_artifacts)[name] ?? null)
-            : soundPointer(snapshot.session_artifacts?.[name]);
-        } catch (error) {
-          if (strict) throw error;
-          current = null;
-        }
-        if (current !== null && current.run_id === runId) {
-          const checked = strict ? strictArtifactRead(deps, name) : null;
-          if (checked !== null && checked.status !== "found") {
-            return {
-              status: "rejected",
-              problem: `session artifact ${name} provenance changed before write`,
-            };
-          }
-          const stored =
-            checked?.status === "found" ? checked.content : artifacts.load(runId, name);
-          if (
-            stored !== null &&
-            digestSessionData(stored) === current.digest &&
-            current.digest === digestSessionData(content)
-          ) {
-            return {
-              status: "unchanged",
-              receipt: {
-                runId,
-                path: artifacts.displayPath(runId, name),
-                digest: digestSessionData(stored),
-              },
-            };
-          }
-        }
-
-        effectAttempted = true;
-        if (!artifacts.store(runId, name, content)) {
-          // the port already warned; never point at an unwritten file
-          return {
-            status: "rejected",
-            problem: `could not write session data ${name} (see warnings)`,
-          };
-        }
-
-        // Digest the bytes as read back from the store — catches encoding/disk surprises.
-        const strictReadBack = strict ? artifacts.loadStrict(runId, name) : null;
-        const readBack =
-          strictReadBack === null
-            ? artifacts.load(runId, name)
-            : strictReadBack.status === "found"
-              ? strictReadBack.content
-              : null;
-        if (readBack === null) {
-          const problem = `session artifact ${artifacts.displayPath(runId, name)} unreadable after write`;
-          console.error(`perk: warning: ${problem}`);
-          return { status: "unverified", problem };
-        }
-
-        if (strict && readBack !== content) {
-          return {
-            status: "unverified",
-            problem: `session artifact ${name} write read-back differs`,
-          };
-        }
-
-        // The persisted wire shape (contracts §8.3) — constructed at the storage boundary,
-        // internal to the engine, never exposed through results.
-        const pointer: SessionArtifactPointer = {
-          run_id: runId,
-          name,
-          path: artifacts.displayPath(runId, name),
-          digest: digestSessionData(readBack),
-          at: new Date().toISOString(),
-        };
-
-        // Per-field LWW: each append must carry the WHOLE merged map so sibling artifacts survive
-        // (junk siblings carry forward unchanged — existing LWW behavior).
-        const latest = state.rebuild();
-        if (strict && latest.run_id !== runId) {
-          return { status: "unverified", problem: "session identity changed after artifact write" };
-        }
-        const merged: Record<string, unknown> = {
-          ...(strict
-            ? strictArtifactMap(latest.session_artifacts)
-            : (latest.session_artifacts ?? {})),
-          [name]: pointer,
-        };
-        const appended = state.appendVerified({
-          data: { session_artifacts: merged },
-          field: "session_artifacts",
-          expected: merged,
-          scope: "session-data",
-          failure: `session_artifacts pointer read-back failed for ${name}`,
-          equals: artifactMapsEqual,
-        });
-        if (appended.status !== "applied") {
-          // already reported through the strict-append port
-          return {
-            status: "unverified",
-            problem: `session_artifacts pointer read-back failed for ${name}`,
-          };
-        }
-        if (strict) {
-          const verified = strictArtifactRead(deps, name);
-          if (verified.status !== "found" || verified.content !== content) {
-            return {
-              status: "unverified",
-              problem: `session artifact ${name} strict write verification failed`,
-            };
-          }
-        }
+      if (!artifacts.store(runId, name, content)) {
+        // the port already warned; never point at an unwritten file
         return {
-          status: "applied",
-          receipt: { runId, path: pointer.path, digest: pointer.digest },
-        };
-      } catch (error) {
-        if (!strict) throw error;
-        return {
-          status: effectAttempted ? "unverified" : "rejected",
-          problem: `session artifact ${name} strict write failed`,
+          status: "rejected",
+          problem: `could not write session data ${name} (see warnings)`,
         };
       }
+
+      // Digest the bytes as read back from the store — catches encoding/disk surprises.
+      const readBack = artifacts.load(runId, name);
+      if (readBack === null) {
+        const problem = `session artifact ${artifacts.displayPath(runId, name)} unreadable after write`;
+        console.error(`perk: warning: ${problem}`);
+        return { status: "unverified", problem };
+      }
+
+      // The persisted wire shape (contracts §8.3) — constructed at the storage boundary,
+      // internal to the engine, never exposed through results.
+      const pointer: SessionArtifactPointer = {
+        run_id: runId,
+        name,
+        path: artifacts.displayPath(runId, name),
+        digest: digestSessionData(readBack),
+        at: new Date().toISOString(),
+      };
+
+      // Per-field LWW: each append must carry the WHOLE merged map so sibling artifacts survive
+      // (junk siblings carry forward unchanged — existing LWW behavior).
+      const merged: Record<string, unknown> = {
+        ...(state.rebuild().session_artifacts ?? {}),
+        [name]: pointer,
+      };
+      const appended = state.appendVerified({
+        data: { session_artifacts: merged },
+        field: "session_artifacts",
+        expected: merged,
+        scope: "session-data",
+        failure: `session_artifacts pointer read-back failed for ${name}`,
+        equals: artifactMapsEqual,
+      });
+      if (appended.status !== "applied") {
+        // already reported through the strict-append port
+        return {
+          status: "unverified",
+          problem: `session_artifacts pointer read-back failed for ${name}`,
+        };
+      }
+      return {
+        status: "applied",
+        receipt: { runId, path: pointer.path, digest: pointer.digest },
+      };
     },
     nodeClaim() {
       return readClaim(state);

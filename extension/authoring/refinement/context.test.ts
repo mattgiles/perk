@@ -178,7 +178,7 @@ test("import + resume: the UNCHANGED raw bytes land as the session artifact (byt
   const imported = importRefinementContext(session, validated.read);
   assert.equal(imported.status, "imported");
   assert.ok(imported.status === "imported" && imported.receipt.digest === GOLDEN_DIGEST);
-  const stored = session.readArtifact(REFINEMENT_CONTEXT_ARTIFACT, { provenance: "strict" });
+  const stored = session.readArtifact(REFINEMENT_CONTEXT_ARTIFACT);
   assert.ok(stored.status === "found" && stored.content === GOLDEN_CONTEXT, "byte-identical");
   const again = importRefinementContext(session, validated.read);
   assert.equal(again.status, "unchanged");
@@ -207,12 +207,12 @@ test("resume: absent / corrupt / dropped / foreign-run / wrong-run artifacts cla
   const disowned = openMemoryWorkflowSession({ runId: GOLDEN_RUN });
   importRefinementContext(disowned, validated.read);
   disowned.disownPointer(REFINEMENT_CONTEXT_ARTIFACT);
-  // Strict provenance: a foreign-run (orphan) pointer is REFUSED, never read as absent.
-  const orphaned = resumeRefinementContext(disowned);
-  assert.ok(orphaned.kind === "refused" && orphaned.problem.includes("orphan"));
+  // Ordinary reads treat a foreign-run pointer as absent (fork isolation) — "no context —
+  // nothing to draft"; the wrong-run content check below still refuses `not this run`.
+  assert.deepEqual(resumeRefinementContext(disowned), { kind: "absent" });
   // A context whose run_id is another run is refused on resume even with an intact pointer.
   const wrongRun = openMemoryWorkflowSession({ runId: "01OTHER" });
-  wrongRun.writeArtifact(REFINEMENT_CONTEXT_ARTIFACT, GOLDEN_CONTEXT, { provenance: "strict" });
+  wrongRun.writeArtifact(REFINEMENT_CONTEXT_ARTIFACT, GOLDEN_CONTEXT);
   const result = resumeRefinementContext(wrongRun);
   assert.ok(result.kind === "refused" && result.problem.includes("not this run"));
   // A write refusal / orphan write classifies, never a half-imported context.

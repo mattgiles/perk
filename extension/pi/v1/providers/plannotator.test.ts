@@ -40,22 +40,12 @@ function selectPlannotator(cwd: string): void {
   );
 }
 
-/**
- * A minimal in-memory event bus (the fake `pi.events` for the pure bridge tests). `requests`
- * records every `plannotator:request` action the bridge emits — the pin that no status
- * catch-up query exists.
- */
-function fakeBus(): PlannotatorBus & {
-  handlers: Map<string, ((data: unknown) => void)[]>;
-  requests: string[];
-} {
+/** A minimal in-memory event bus (the fake `pi.events` for the pure bridge tests). */
+function fakeBus(): PlannotatorBus & { handlers: Map<string, ((data: unknown) => void)[]> } {
   const handlers = new Map<string, ((data: unknown) => void)[]>();
-  const requests: string[] = [];
   return {
     handlers,
-    requests,
     emit(channel, data) {
-      if (channel === "plannotator:request") requests.push((data as RequestEnvelope).action);
       for (const h of handlers.get(channel) ?? []) h(data);
     },
     on(channel, handler) {
@@ -599,7 +589,7 @@ test("bridge: a synchronous emit throw is contained as unavailable (timer actual
   });
   const outcome = await createPlannotatorBridge(bus).review("# A plan");
   assert.equal(outcome.status, "unavailable");
-  assert.match((outcome as { warning: string }).warning, /request failed/);
+  assert.match((outcome as { warning: string }).warning, /foreign handler exploded/);
   const allocated = setSpy.mock.calls.map((c) => c.result);
   assert.equal(allocated.length, 1, "the bridge allocated exactly the handshake timer");
   const clearedHandles = clearSpy.mock.calls.map((c) => c.arguments[0]);
@@ -635,7 +625,7 @@ test("bridge: a turn abort DURING the handshake wait settles aborted promptly (t
   assert.equal(
     (bus.handlers.get("plannotator:review-result") ?? []).length,
     0,
-    "the decision listener (installed before the request) was disposed on the aborted-handshake path",
+    "no decision listener was ever registered on the aborted-handshake path",
   );
 });
 
@@ -684,13 +674,13 @@ test("requestPlannotatorPlanReview: a turn abort disposes the result listener li
   );
 });
 
-test("requestPlannotatorPlanReview: an abort during the pending handshake leaves no listener behind", async () => {
+test("requestPlannotatorPlanReview: an abort during the pending handshake disposes the listener", async () => {
   const bus = fakeBus();
   const controller = new AbortController();
   bus.on("plannotator:request", (data) => {
     const req = data as RequestEnvelope;
     // Abort FIRST, while the handshake is still pending; the handshake then succeeds late.
-    // Without the post-handshake abort re-check this would arm the decision wait on an
+    // Without the post-handshake abort re-check this would park the decision wait on an
     // already-aborted signal (whose abort event never re-fires) and wedge the promise forever.
     setTimeout(() => {
       controller.abort();
@@ -706,117 +696,142 @@ test("requestPlannotatorPlanReview: an abort during the pending handshake leaves
   );
 });
 
-test("requestPlannotatorPlanReview: a failed handshake disposes the pre-installed result listener", async () => {
+test("requestPlannotatorPlanReview: the listener is installed BEFORE the request is emitted", async () => {
   const bus = fakeBus();
+  let listenersAtEmit = -1;
   bus.on("plannotator:request", (data) => {
-    assert.equal(
-      (bus.handlers.get("plannotator:review-result") ?? []).length,
-      1,
-      "the listener is live BEFORE the request is answered (subscribe-before-emit)",
-    );
-    (data as RequestEnvelope).respond({ status: "unavailable", error: "no browser" });
+    listenersAtEmit = (bus.handlers.get("plannotator:review-result") ?? []).length;
+    const req = data as RequestEnvelope;
+    req.respond({ status: "handled", result: { status: "pending", reviewId: "rev-8" } });
+    setTimeout(() => bus.emit("plannotator:review-result", { reviewId: "rev-8", approved: true }), 5);
   });
   const outcome = await requestPlannotatorPlanReview(bus, "# A plan");
-  assert.equal(outcome.status, "unavailable");
-  assert.equal(
-    (bus.handlers.get("plannotator:review-result") ?? []).length,
-    0,
-    "the result listener is disposed on the failed handshake",
-  );
+  assert.equal(listenersAtEmit, 1, "the result listener was live when the request was emitted");
+  assert.equal(outcome.status, "completed");
 });
 
-// ------------------------------------------------- subscribe-before-emit (the handshake gap)
-
-test("bridge: a decision emitted synchronously INSIDE the handshake respond still completes the review", async () => {
-  const bus = fakeBus();
-  bus.on("plannotator:request", (data) => {
-    const req = data as RequestEnvelope;
-    req.respond({ status: "handled", result: { status: "pending", reviewId: "rev-sync" } });
-    // Before the bridge's handshake promise has even resolved: the early buffer catches it.
-    bus.emit("plannotator:review-result", {
-      reviewId: "rev-sync",
-      approved: false,
-      feedback: "tighten step 2",
+test("requestPlannotatorPlanReview: a decision delivered synchronously by `on()` (before it returns) is buffered and honored", async () => {
+  // Adversarial bus: subscribing replays a decision into the handler synchronously — before the
+  // handshake has even been emitted, let alone named the reviewId.
+  const inner = fakeBus();
+  const bus: PlannotatorBus = {
+    emit: (channel, data) => inner.emit(channel, data),
+    on(channel, handler) {
+      const unsubscribe = inner.on(channel, handler);
+      if (channel === "plannotator:review-result") {
+        handler({ reviewId: "r-1", approved: true, feedback: "looks good" });
+      }
+      return unsubscribe;
+    },
+  };
+  inner.on("plannotator:request", (data) => {
+    (data as RequestEnvelope).respond({
+      status: "handled",
+      result: { status: "pending", reviewId: "r-1" },
     });
   });
-  const outcome = await createPlannotatorBridge(bus).review("# A plan");
+  const outcome = await requestPlannotatorPlanReview(bus, "# A plan");
   assert.deepEqual(outcome, {
     status: "completed",
-    approved: false,
-    reviewId: "rev-sync",
-    feedback: "tighten step 2",
-  });
-  assert.equal((bus.handlers.get("plannotator:review-result") ?? []).length, 0);
-  assert.deepEqual(
-    bus.requests,
-    ["plan-review"],
-    "exactly one request; never a review-status query",
-  );
-});
-
-test("bridge: a decision emitted BEFORE the handshake respond (other order) also completes", async () => {
-  const bus = fakeBus();
-  bus.on("plannotator:request", (data) => {
-    const req = data as RequestEnvelope;
-    bus.emit("plannotator:review-result", { reviewId: "rev-pre", approved: true });
-    req.respond({ status: "handled", result: { status: "pending", reviewId: "rev-pre" } });
-  });
-  const outcome = await createPlannotatorBridge(bus).review("# A plan");
-  assert.deepEqual(outcome, { status: "completed", approved: true, reviewId: "rev-pre" });
-});
-
-test("bridge: buffered decisions for OTHER reviews are discarded; the live match still wins", async () => {
-  const bus = fakeBus();
-  bus.on("plannotator:request", (data) => {
-    const req = data as RequestEnvelope;
-    bus.emit("plannotator:review-result", { reviewId: "rev-other", approved: true });
-    bus.emit("plannotator:review-result", { reviewId: "rev-other-2", approved: false });
-    req.respond({ status: "handled", result: { status: "pending", reviewId: "rev-live" } });
-    setTimeout(() => {
-      bus.emit("plannotator:review-result", { reviewId: "rev-other", approved: true });
-      bus.emit("plannotator:review-result", { reviewId: "rev-live", approved: false });
-    }, 5);
-  });
-  const outcome = await createPlannotatorBridge(bus).review("# A plan");
-  assert.deepEqual(outcome, { status: "completed", approved: false, reviewId: "rev-live" });
-  assert.deepEqual(bus.requests, ["plan-review"]);
-});
-
-test("bridge: malformed early payloads are ignored; the first well-formed match for this review completes", async () => {
-  const bus = fakeBus();
-  bus.on("plannotator:request", (data) => {
-    const req = data as RequestEnvelope;
-    bus.emit("plannotator:review-result", { reviewId: "rev-e", approved: "yes" });
-    bus.emit("plannotator:review-result", "garbage");
-    bus.emit("plannotator:review-result", { reviewId: "rev-e", approved: true, feedback: "first" });
-    bus.emit("plannotator:review-result", {
-      reviewId: "rev-e",
-      approved: false,
-      feedback: "second",
-    });
-    req.respond({ status: "handled", result: { status: "pending", reviewId: "rev-e" } });
-  });
-  const outcome = await createPlannotatorBridge(bus).review("# A plan");
-  assert.deepEqual(outcome, {
-    status: "completed",
+    reviewId: "r-1",
     approved: true,
-    reviewId: "rev-e",
-    feedback: "first",
+    feedback: "looks good",
   });
+  assert.equal((inner.handlers.get("plannotator:review-result") ?? []).length, 0, "disposed");
 });
 
-test("bridge: no review-status request is ever emitted across the live-decision path", async () => {
+test("requestPlannotatorPlanReview: a decision emitted in the same synchronous call as the handshake is not lost; foreign ids in the buffer are dropped", async () => {
   const bus = fakeBus();
   bus.on("plannotator:request", (data) => {
     const req = data as RequestEnvelope;
-    req.respond({ status: "handled", result: { status: "pending", reviewId: "rev-q" } });
-    setTimeout(
-      () => bus.emit("plannotator:review-result", { reviewId: "rev-q", approved: true }),
-      5,
-    );
+    // A decision for ANOTHER review lands first (buffered, then dropped once r-1 is named).
+    bus.emit("plannotator:review-result", { reviewId: "r-other", approved: true });
+    req.respond({ status: "handled", result: { status: "pending", reviewId: "r-1" } });
+    // The human's DENY arrives in the same synchronous call — before `respond` even returns to
+    // the bridge's await.
+    bus.emit("plannotator:review-result", { reviewId: "r-1", approved: false, feedback: "no" });
   });
-  await createPlannotatorBridge(bus).review("# A plan");
-  assert.deepEqual(bus.requests, ["plan-review"]);
+  const outcome = await requestPlannotatorPlanReview(bus, "# A plan");
+  assert.deepEqual(outcome, { status: "completed", reviewId: "r-1", approved: false, feedback: "no" });
+  assert.equal((bus.handlers.get("plannotator:review-result") ?? []).length, 0, "disposed");
+});
+
+test("requestPlannotatorPlanReview: every handshake failure path unsubscribes the early listener", async () => {
+  const failures: Array<{ name: string; respond: (req: RequestEnvelope) => void }> = [
+    { name: "unavailable", respond: (req) => req.respond({ status: "unavailable", error: "no browser" }) },
+    { name: "error", respond: (req) => req.respond({ status: "error", error: "boom" }) },
+    { name: "malformed", respond: (req) => req.respond(42) },
+    { name: "no reviewId", respond: (req) => req.respond({ status: "handled", result: { status: "pending" } }) },
+    {
+      name: "emit throw",
+      respond: () => {
+        throw new Error("foreign handler exploded");
+      },
+    },
+  ];
+  for (const failure of failures) {
+    const inner = fakeBus();
+    let subscribed = 0;
+    let unsubscribed = 0;
+    const bus: PlannotatorBus = {
+      emit: (channel, data) => inner.emit(channel, data),
+      on(channel, handler) {
+        subscribed += 1;
+        const release = inner.on(channel, handler);
+        return () => {
+          unsubscribed += 1;
+          release();
+        };
+      },
+    };
+    inner.on("plannotator:request", (data) => failure.respond(data as RequestEnvelope));
+    const outcome = await requestPlannotatorPlanReview(bus, "# A plan");
+    assert.equal(outcome.status, "unavailable", failure.name);
+    assert.equal(subscribed, 1, `${failure.name}: one early subscription`);
+    assert.equal(unsubscribed, 1, `${failure.name}: unsubscribed on the failure path`);
+  }
+  // The timeout arm, with a shortened handshake budget.
+  const prior = process.env.PERK_PLANNOTATOR_HANDSHAKE_MS;
+  process.env.PERK_PLANNOTATOR_HANDSHAKE_MS = "20";
+  try {
+    const inner = fakeBus();
+    let unsubscribed = 0;
+    const bus: PlannotatorBus = {
+      emit: (channel, data) => inner.emit(channel, data),
+      on(channel, handler) {
+        const release = inner.on(channel, handler);
+        return () => {
+          unsubscribed += 1;
+          release();
+        };
+      },
+    };
+    inner.on("plannotator:request", () => {});
+    const outcome = await requestPlannotatorPlanReview(bus, "# A plan");
+    assert.equal(outcome.status, "unavailable");
+    assert.equal(unsubscribed, 1, "timeout: unsubscribed");
+  } finally {
+    if (prior === undefined) delete process.env.PERK_PLANNOTATOR_HANDSHAKE_MS;
+    else process.env.PERK_PLANNOTATOR_HANDSHAKE_MS = prior;
+  }
+});
+
+test("requestPlannotatorPlanReview: a throwing `on()` degrades to unavailable without emitting", async () => {
+  let emitted = 0;
+  const bus: PlannotatorBus = {
+    emit: () => {
+      emitted += 1;
+    },
+    on: () => {
+      throw new Error("bus refused the subscription");
+    },
+  };
+  const outcome = await requestPlannotatorPlanReview(bus, "# A plan");
+  assert.deepEqual(outcome, {
+    status: "unavailable",
+    warning: "plannotator result subscription failed",
+  });
+  assert.equal(emitted, 0);
 });
 
 // -------------------------------------------------- the Direct Edits feedback extraction

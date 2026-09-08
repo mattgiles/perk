@@ -38,7 +38,6 @@ import {
 } from "./pi/v1/delivery/stackSync.ts";
 import { installSubmitBindings } from "./pi/v1/delivery/submit.ts";
 import { installSubmitConflictBindings } from "./pi/v1/delivery/submitConflict.ts";
-import { createDraftReviewSlot } from "./pi/v1/draftReview.ts";
 import { registerDraftReviewWaveTools } from "./pi/v1/draftReviewWaveTools.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
 import { installAuditBindings } from "./pi/v1/learning/audit.ts";
@@ -64,6 +63,7 @@ import { createAnnotationState, installAnnotationBindings } from "./pi/v1/provid
 import { installPlannotatorPlanAdapter } from "./pi/v1/providers/plannotator.ts";
 import { plannotatorPresent } from "./pi/v1/providers/plannotatorHandoff.ts";
 import { installTombellPlanAdapter } from "./pi/v1/providers/tombell.ts";
+import { createCurrentReviewRuntime } from "./pi/v1/reviewRecord.ts";
 import { registerSelfcheck } from "./pi/v1/selfcheck.ts";
 import {
   branchSessionStateStore,
@@ -246,16 +246,16 @@ export default function perk(
   // deps power the plannotator launch chooser (§8.23): the presence probe + the two door open
   // cores are composed HERE so plan.ts/planReview.ts import nothing from the browser modules
   // (planReviewBrowser.ts/objectiveReviewBrowser.ts — the value-import cycle break:
-  // planReviewBrowser.ts value-imports the review arms). `draftReviews` is the ONE
-  // per-activation current-review slot + unconfirmed-save latch every review surface shares
-  // (§8.23 "Draft-review guards") — in-memory, nothing persisted.
-  const draftReviews = createDraftReviewSlot(pi);
-  installPlanBindings(pi, gating, draftReviews, contextPolicy, {
+  // planReviewBrowser.ts value-imports the review arms). The activation's ONE current-review
+  // record runtime (contracts.md §8.23) is threaded only to the Plannotator review surfaces: the
+  // `plan_review` bridge and the two browser doors.
+  const reviews = createCurrentReviewRuntime(pi);
+  installPlanBindings(pi, gating, reviews, contextPolicy, {
     present: () => plannotatorPresent(pi),
     plan: (ctx, opts) =>
-      openPlanReviewSurface(pi, ctx, gating, opts, draftReviewWave, annotations, draftReviews),
+      openPlanReviewSurface(pi, ctx, gating, opts, draftReviewWave, annotations, reviews),
     objective: (ctx, opts) =>
-      openObjectiveReviewSurface(pi, ctx, gating, opts, draftReviewWave, annotations, draftReviews),
+      openObjectiveReviewSurface(pi, ctx, gating, opts, draftReviewWave, annotations, reviews),
   });
 
   // The first 3rd-party plan adapter: a perk-owned, injection-only bridge that re-enables
@@ -278,20 +278,20 @@ export default function perk(
   // gate AND stage === objective-author); planMode defers to it), plus the
   // `objective_draft`/`objective_save` tools and the `/objective-save` command (registration is
   // name-keyed — only the hooks ordering is frozen).
-  installObjectiveAuthoringBindings(pi, gating, draftReviews, contextPolicy);
+  installObjectiveAuthoringBindings(pi, gating, contextPolicy);
 
   // The v1 gist installer: the gist-authoring context hook pair (this call sits at the frozen
   // hooks-ordering slot the injection always held; planMode defers to it too), plus the
   // `gist_draft`/`gist_save` tools and the `/gist-save` command (registration is name-keyed —
   // only the hooks ordering is frozen).
-  installGistBindings(pi, gating, draftReviews, contextPolicy);
+  installGistBindings(pi, gating, contextPolicy);
 
   // The v1 objective-refinement installer (contracts.md §8.67/§8.68): the refinement context hook
   // pair (selected by the shared policy's dedicated `objective-refine` kind — plan mode and the
   // provider adapters yield to it), the ONE model-facing `objective_refinement_draft` tool, the
   // warm `/objective-refine` entry and the human `/objective-refinement-save` failsafe.
   // Registered before the tool snapshots.
-  installObjectiveRefinementBindings(pi, gating, draftReviews, contextPolicy);
+  installObjectiveRefinementBindings(pi, gating, contextPolicy);
   let sharedOk = false;
   try {
     sharedDir();
@@ -635,13 +635,13 @@ export default function perk(
   // plannotator plan-review browser on the working plan draft, draft reviewers streaming
   // phrase-anchored findings in; APPROVE auto-saves via the approvalSave seam, DENY returns a
   // model-mediated revision round.
-  registerPlanReviewBrowser(pi, gating, draftReviewWave, annotations, draftReviews);
+  registerPlanReviewBrowser(pi, gating, draftReviewWave, annotations, reviews);
 
   // The warm `/objective-review-browser` door: the summonable streaming objective-draft review
   // — the plannotator plan-review browser on the RENDERED working objective draft, draft
   // reviewers streaming phrase-anchored findings in; APPROVE auto-saves via the
   // objectiveApprovalSave seam, Direct Edits = a model-mediated revise round (never auto-saved).
-  registerObjectiveReviewBrowser(pi, gating, draftReviewWave, annotations, draftReviews);
+  registerObjectiveReviewBrowser(pi, gating, draftReviewWave, annotations, reviews);
 
   // The read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).

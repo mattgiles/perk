@@ -15,10 +15,8 @@
 // `reason: "no_objective_draft"`). First-party reviews run VIEW-ONLY (edits are never written
 // back; deny+feedback is the change channel). An APPROVED outcome wires into the approval→save
 // seam: re-read the STRUCTURED artifact → `saveObjective` → D1a gate exit → a TERMINATING
-// result; an unconfirmed save is non-terminating, leaves the gate read-only, and latches
-// automatic saves off for the activation (`draftReview.ts`) — `/objective-save` is the
-// deliberate retry. Every arm opens the current-review slot at entry and runs the decision
-// ladder on a completed verdict before anything is saved.
+// result; a failed save is non-terminating, leaves the gate read-only, and directs the human
+// `/objective-save` failsafe.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
@@ -28,36 +26,22 @@ import {
 } from "../../authoring/objective/draft.ts";
 import {
   completeObjectiveReview,
+  type ObjectiveDraftReviewer,
   type ObjectiveReviewOutcome,
   type ReviewObjectiveDraftResult,
+  reviewObjectiveDraft,
 } from "../../authoring/objective/review.ts";
-import { objectiveApprovalSave } from "../../authoring/objective/save.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import {
-  checkDraftReviewDecision,
-  type DecisionCheck,
-  type DraftReviewSlot,
-  destinationChangedResult,
-  type OpenDraftReview,
-  openRefusedResult,
-  recordSaveOutcome,
-  saveUnconfirmedResult,
-  staleApprovalResult,
-  supersededReviewResult,
-  withDraftChangedNote,
-} from "./draftReview.ts";
-import {
   type ObjectiveApprovalSaveV1Outcome,
-  objectiveSaveDepsFor,
-  renderObjectiveApprovalSave,
+  objectiveApprovalSaveV1,
 } from "./objectiveAuthoring.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import { isPlannotatorPlanSelected } from "./providers/selection.ts";
 import {
   approvedSubjectSaveResult,
   chooseReviewLaunch,
-  type DraftReviewBridge,
   type ReviewOutcome,
   type ReviewSubject,
   runFirstPartyReview,
@@ -69,6 +53,7 @@ import {
   type WaveLaunch,
   waveLaunchedResult,
 } from "./review.ts";
+import { type PlanReviewBridge, staleReviewResult } from "./reviewRecord.ts";
 
 /** The objective-arm descriptor for the shared renderer cores. */
 export const OBJECTIVE_SUBJECT: ReviewSubject = {
@@ -223,128 +208,76 @@ function objectiveOutcomeOf(outcome: ReviewOutcome): ObjectiveReviewOutcome {
   }
 }
 
-/**
- * The first-party reviewer: the in-TUI editor review, VIEW-ONLY (3 verdicts). Returns the door
- * vocabulary (`ReviewOutcome`) so both arms share one ladder + completion path.
- */
-async function firstPartyObjectiveReview(
-  ctx: ExtensionContext,
-  rendered: string,
-  signal: AbortSignal | undefined,
-): Promise<ReviewOutcome> {
-  const fp = await runFirstPartyReview({
-    ui: ctx.ui,
-    plan: rendered,
-    writeDraft: () => true, // unreachable under viewOnly — the branch is skipped
-    signal,
-    editorTitle: OBJECTIVE_REVIEW_EDITOR_TITLE,
-    verdicts: verdictsFor(OBJECTIVE_SUBJECT),
-    viewOnly: true,
-  });
-  return fp.outcome;
-}
-
-/** Whether a completed bridge outcome's effect is a save (an approval without Direct Edits). */
-export function objectiveEffectOf(
-  outcome: Extract<ReviewOutcome, { status: "completed" }>,
-): "save" | "revision" {
-  return outcome.approved &&
-    !(outcome.feedback !== undefined && hasDirectEditsHeading(outcome.feedback))
-    ? "save"
-    : "revision";
-}
-
-/**
- * Render a non-`proceed` ladder verdict as the objective arm's tool result (nothing saved; the
- * gate untouched). Shared by the Plannotator arm, the first-party arm and the browser door.
- */
-export function objectiveGuardResult(
-  check: Exclude<DecisionCheck, { kind: "proceed" }>,
-  review: OpenDraftReview,
-  feedback: string | undefined,
-): ToolResult {
-  switch (check.kind) {
-    case "superseded":
-      return supersededReviewResult("objective");
-    case "save-unconfirmed":
-      return saveUnconfirmedResult("objective", review.runId, check.detail, feedback);
-    case "stale-approval":
-      return staleApprovalResult("objective", check.reviewedDigest, feedback);
-    case "destination-changed":
-      return destinationChangedResult("objective", check.changed, feedback);
-  }
-}
-
-/** Report a completed objective review's save result into the unconfirmed-save latch. */
-function recordObjectiveSaveOutcome(
-  slot: DraftReviewSlot,
-  result: ReviewObjectiveDraftResult<ObjectiveApprovalSaveV1Outcome>,
-): void {
-  if (result.status !== "approvedSave") return;
-  const save = result.save;
-  switch (save.status) {
-    case "saved":
-      recordSaveOutcome(slot, "objective", { confirmed: true });
-      return;
-    case "save-failed":
-      recordSaveOutcome(slot, "objective", {
-        confirmed: false,
-        detail: save.result.details.ok ? undefined : save.result.details.error,
+/** The first-party reviewer adapter: the in-TUI editor review, VIEW-ONLY (3 verdicts). */
+function firstPartyObjectiveReviewer(ctx: ExtensionContext): ObjectiveDraftReviewer {
+  return {
+    async review(rendered, signal) {
+      const fp = await runFirstPartyReview({
+        ui: ctx.ui,
+        plan: rendered,
+        writeDraft: () => true, // unreachable under viewOnly — the branch is skipped
+        signal,
+        editorTitle: OBJECTIVE_REVIEW_EDITOR_TITLE,
+        verdicts: verdictsFor(OBJECTIVE_SUBJECT),
+        viewOnly: true,
       });
-      return;
-    case "no-draft":
-    case "refused-draft":
-      // Nothing reached the backend — no attempt to confirm.
-      return;
-  }
+      return objectiveOutcomeOf(fp.outcome);
+    },
+  };
 }
 
 /**
  * The objective review arm, mirroring the plan arm's shape: the headless skip, the wave arm's
- * fail-closed baseline ordering + launch chooser, the slot open (both arms — the raw artifact
- * bytes are the reviewed bytes, the rendered markdown what the reviewer saw), the review, the
- * decision ladder on a completed verdict, then the subject completion with the save reported
- * into the latch.
+ * fail-closed baseline ordering + launch chooser, then reviewer dispatch. The Plannotator path
+ * opens a current-review record over the raw artifact bytes read beside the valid resume,
+ * reviews the RENDERED draft through the bridge, checks the record is still current (a
+ * superseded decision is ignored loudly), gates a plain approval on the record (re-read bytes
+ * + save destination) and only then runs the completion seam; a Direct-Edits approval is the
+ * no-save revise round (no gate). The first-party path is the feature's `reviewObjectiveDraft`
+ * routing with `approvalSave` bound to the composed `objectiveApprovalSaveV1`.
  */
 export async function executeObjectiveReview(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
-  bridge: DraftReviewBridge,
-  slot: DraftReviewSlot,
+  bridge: PlanReviewBridge,
   signal?: AbortSignal,
   wave?: WaveLaunch,
 ): Promise<ToolResult> {
   // 1. Headless → soft skip (fail-open; never wedges CI/supervisor runs on an interactive UI).
   if (!ctx.hasUI) return skipResult();
   const sig = signal ?? ctx.signal;
-  // 2. The raw artifact bytes are read BEFORE the validated resume (fail-closed ordering): the
-  //    reviewed bytes always derive from a read at or after this baseline, so a concurrent
-  //    objective_draft write between the two reads makes the browsed render NEWER than the
-  //    reviewed bytes and the reviewed-bytes guard refuses the approval — the reverse order
-  //    would fail open (approve unreviewed bytes). Raw artifact bytes on purpose: the
-  //    save-authoritative surface catches render-invisible changes.
+  // 2. The wave arm's stale-guard baseline is captured BEFORE any validated read (the
+  //    objective door's fail-closed ordering): the reviewed bytes always derive from a read at
+  //    or after this baseline, so a concurrent objective_draft write between the two reads makes
+  //    the browsed render NEWER than the baseline and routeObjectiveReviewDecision's existing
+  //    guard refuses the approval — the reverse order would fail open (approve unreviewed
+  //    bytes). Raw artifact bytes on purpose: the save-authoritative surface catches
+  //    render-invisible changes.
   const session = openBranchWorkflowSession(pi, ctx);
   const baseline = session.readArtifact(OBJECTIVE_DRAFT_ARTIFACT);
   // 3. Backend dispatch (mirrors the plan path): plannotator-selected → the bridge; ANY other
-  //    selection → the first-party editor, view-only.
-  const plannotator = isPlannotatorPlanSelected(ctx.cwd);
-  if (plannotator && wave?.present() && baseline.status === "found") {
+  //    selection → the first-party editor, view-only. The first-party draft resume/render is
+  //    owned by the feature op (step 4); the Plannotator path resumes here (the record needs the
+  //    raw bytes beside the valid draft).
+  if (isPlannotatorPlanSelected(ctx.cwd)) {
     // The launch chooser (contracts.md §8.23): every eligible round the human picks with/without
     // the streamed reviewer wave BEFORE anything launches. Eligibility is drafts-only — the wave
-    // door stale-guards the raw artifact bytes, so a null baseline keeps the plain path
+    // door stale-guards the raw artifact baseline, so a null baseline keeps the plain path
     // (silently: there is no forced mode to warn about). A non-`valid` resume (raw bytes
     // present but refused) also skips the wave arm — the plain review below renders the
-    // refused-draft skip exactly once.
-    const resumed = resumeObjectiveDraft(session);
-    if (resumed.kind === "valid") {
+    // refused-draft skip through the feature op's arm, exactly once.
+    const resumed =
+      wave?.present() && baseline.status === "found" ? resumeObjectiveDraft(session) : null;
+    const draft = resumed !== null && resumed.kind === "valid" ? resumed.draft : null;
+    if (draft !== null && baseline.status === "found") {
       const choice = await chooseReviewLaunch(ctx.ui, "Objective", sig);
       if (choice.launch === "aborted") return objectiveReviewOutcomeResult({ status: "aborted" });
       if (choice.launch === "wave") {
-        const guidance = await wave.objective(ctx, {
+        const guidance = await wave?.objective(ctx, {
           // The reviewed bytes are the RENDERED markdown (prose + roadmap table) — never raw
           // JSON.
-          rendered: renderObjectiveDraft(resumed.draft),
+          rendered: renderObjectiveDraft(draft),
           artifactRaw: baseline.content,
           ...(choice.custom !== undefined ? { custom: choice.custom } : {}),
         });
@@ -352,46 +285,69 @@ export async function executeObjectiveReview(
         // never report a successful launch (the door's own bridge abort handling settles the
         // background tasks and clears the primed surfaces).
         if (sig?.aborted) return objectiveReviewOutcomeResult({ status: "aborted" });
-        if (guidance !== null) return waveLaunchedResult(OBJECTIVE_SUBJECT, guidance);
+        if (guidance !== undefined && guidance !== null) {
+          return waveLaunchedResult(OBJECTIVE_SUBJECT, guidance);
+        }
         // null = the synchronous port-pick failure (already loudly reported inside the core) —
         // fall open to the plain blocking review in the same call: the review never wedges.
       }
     }
+    if (sig?.aborted) return objectiveReviewOutcomeResult({ status: "aborted" });
+    // The raw bytes and the valid resume are read together so the record's source and the
+    // rendered subject describe the same artifact.
+    const raw = session.readArtifact(OBJECTIVE_DRAFT_ARTIFACT);
+    const checked = resumeObjectiveDraft(session);
+    if (checked.kind === "absent") return noObjectiveDraftResult();
+    if (checked.kind === "refused")
+      return renderObjectiveReviewResult({ status: "refusedDraft", problem: checked.problem });
+    const review = bridge.current.open(
+      ctx,
+      raw.status === "found" ? { name: OBJECTIVE_DRAFT_ARTIFACT, raw: raw.content } : null,
+    );
+    try {
+      // The reviewed bytes are the RENDERED markdown (prose + roadmap table) — never raw JSON.
+      const outcome = await bridge.review(renderObjectiveDraft(checked.draft), sig);
+      if (sig?.aborted) return objectiveReviewOutcomeResult({ status: "aborted" });
+      if (!bridge.current.isCurrent(review)) {
+        return staleReviewResult(
+          OBJECTIVE_SUBJECT,
+          "superseded",
+          outcome.status === "completed" ? outcome : undefined,
+        );
+      }
+      if (outcome.status !== "completed")
+        return subjectReviewOutcomeResult(OBJECTIVE_SUBJECT, outcome);
+      // A plain approval saves and is gated on the record; a Direct-Edits approval is the
+      // model-mediated revise round (nothing saved — no gate).
+      const plainApproval =
+        outcome.approved &&
+        !(outcome.feedback !== undefined && hasDirectEditsHeading(outcome.feedback));
+      if (plainApproval) {
+        const gate = bridge.current.approve(ctx, review);
+        if (!gate.ok) return staleReviewResult(OBJECTIVE_SUBJECT, gate.reason, outcome);
+      }
+      return completeObjectiveReviewV1(pi, ctx, gating, outcome);
+    } finally {
+      bridge.current.close(review);
+    }
   }
-
-  if (sig?.aborted) return objectiveReviewOutcomeResult({ status: "aborted" });
-  // 4. Resolve the reviewed bytes: the validated resume for the render, the raw artifact read
-  //    for the guard (never the rendered bytes — the save re-reads the STRUCTURED artifact).
-  const resumed = resumeObjectiveDraft(session);
-  if (resumed.kind === "absent") return noObjectiveDraftResult();
-  if (resumed.kind === "refused")
-    return renderObjectiveReviewResult({ status: "refusedDraft", problem: resumed.problem });
-  const raw = session.readArtifact(OBJECTIVE_DRAFT_ARTIFACT);
-  if (raw.status !== "found") return noObjectiveDraftResult();
-  const rendered = renderObjectiveDraft(resumed.draft);
-  const opened = slot.open(ctx, {
-    subject: "objective",
-    source: plannotator ? "artifact" : "editor",
-    raw: raw.content,
-    markdown: rendered,
-  });
-  if (!opened.ok) return openRefusedResult(opened);
-  const review = opened.review;
-
-  // 5. The review itself, then the ladder, then the completion.
-  const outcome = plannotator
-    ? await bridge.review(rendered, sig)
-    : await firstPartyObjectiveReview(ctx, rendered, sig);
-  if (sig?.aborted) return objectiveReviewOutcomeResult({ status: "aborted" });
-  if (outcome.status !== "completed") return objectiveReviewOutcomeResult(outcome);
-  const check = checkDraftReviewDecision(slot, ctx, review, objectiveEffectOf(outcome));
-  if (check.kind !== "proceed") return objectiveGuardResult(check, review, outcome.feedback);
-  return withDraftChangedNote(
-    await completeObjectiveReviewV1(pi, ctx, gating, slot, outcome),
-    check.draftChanged,
+  const reviewer = firstPartyObjectiveReviewer(ctx);
+  // 4. The feature op owns the routing (resume → render → review → the abort checkpoint →
+  //    route): a missing/invalid draft is its `noDraft` arm (rendered below as the soft skip
+  //    with the objective_draft redirect); APPROVED wires into the approval→save seam (the
+  //    STRUCTURED artifact is re-read at save time — never the rendered bytes; auto-save → D1a
+  //    gate exit → terminating result); Direct Edits is the no-save revise round; everything
+  //    else maps via objectiveReviewOutcomeResult. Approved-first routing: the completed case
+  //    renders DENIED.
+  return renderObjectiveReviewResult(
+    await reviewObjectiveDraft(
+      { session, reviewer, approvalSave: () => objectiveApprovalSaveV1(pi, ctx, gating) },
+      sig,
+    ),
   );
 }
 
+/** Render the feature's review result as the model-facing tool result (byte-stable texts). */
 export function renderObjectiveReviewResult(
   result: ReviewObjectiveDraftResult<ObjectiveApprovalSaveV1Outcome>,
 ): ToolResult {
@@ -434,25 +390,21 @@ export function renderObjectiveReviewResult(
 }
 
 /**
- * The objective completion shared by both tool arms and the browser door: a completed outcome
- * → the feature completion (an approval re-reads the STRUCTURED artifact and saves through the
- * production deps; Direct Edits is the no-save revise round) → the latch record → the rendered
- * tool result. The caller has already run the decision ladder.
+ * The shared Plannotator completion (the blocking arm and the `/objective-review-browser`
+ * door): the feature's subject policy (a Direct-Edits approval is the revise round; a plain
+ * approval saves through the composed `objectiveApprovalSaveV1` — the STRUCTURED artifact is
+ * re-read at save time) rendered as the tool result. Callers gate a plain approval on the
+ * current-review record BEFORE entering here.
  */
 export async function completeObjectiveReviewV1(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
-  slot: DraftReviewSlot,
   outcome: Extract<ReviewOutcome, { status: "completed" }>,
 ): Promise<ToolResult> {
-  const result = await completeObjectiveReview(objectiveOutcomeOf(outcome), async () =>
-    renderObjectiveApprovalSave(
-      pi,
-      ctx,
-      await objectiveApprovalSave(objectiveSaveDepsFor(pi, ctx, gating)),
+  return renderObjectiveReviewResult(
+    await completeObjectiveReview(objectiveOutcomeOf(outcome), () =>
+      objectiveApprovalSaveV1(pi, ctx, gating),
     ),
   );
-  recordObjectiveSaveOutcome(slot, result);
-  return renderObjectiveReviewResult(result);
 }

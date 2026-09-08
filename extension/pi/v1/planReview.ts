@@ -8,7 +8,8 @@
 // (perk-plan, tombell, unknown ids) → the FIRST-PARTY in-TUI editor review
 // (`runFirstPartyReview`, pi/v1/review.ts): display the draft in pi's built-in `ctx.ui.editor`
 // dialog (scrollable, Ctrl+G opens the user's external $EDITOR), write optional human edits
-// back to the draft BEFORE the verdict (a failed write-back aborts the review fail-open), then an
+// back to the draft via the session seam BEFORE the verdict (reviewed bytes == artifact bytes
+// == saved bytes — a failed write-back ABORTS the review fail-open, nothing saved), then an
 // approve/deny/skip `ctx.ui.select` verdict — on the plan arm with a 4th "Implement here — no
 // issue saved" option (§8.23; suppressed in objective-node planning sessions) — with deny
 // feedback via a second editor dialog.
@@ -48,11 +49,6 @@
 // died with the factories home; `pi/v1` siblings import directly, and none of them import this
 // module back).
 //
-// THE GUARDS (`draftReview.ts`, §8.23): EVERY arm opens the activation's current-review slot at
-// entry (superseding whatever review any other surface had open) and, on a completed verdict,
-// runs the decision ladder — superseded / unconfirmed-save latch / reviewed-bytes / destination
-// fence — before the feature completion saves anything. Every save result reports into the latch.
-//
 // INVARIANTS HELD: never calls `setActiveTools`, never registers a `tool_call` handler, never
 // restamps `cache.plan-ref.provider`. The door composes the gate AND the save EXCLUSIVELY
 // through the feature seams (Invariant 1: composes, never owns).
@@ -60,12 +56,17 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { GIST_AUTHOR_STAGE } from "../../authoring/gist/draft.ts";
 import { OBJECTIVE_AUTHOR_STAGE, OBJECTIVE_SAVE_STAGE } from "../../authoring/objective/prose.ts";
-import { resumePlanDraft, revisePlanDraft } from "../../authoring/plan/draft.ts";
+import {
+  PLAN_DRAFT_ARTIFACT,
+  resumePlanDraft,
+  revisePlanDraft,
+} from "../../authoring/plan/draft.ts";
 import {
   completePlanReview,
   type PlanDraftReviewer,
   type PlanReviewOutcome,
   type ReviewPlanDraftResult,
+  reviewPlanDraft,
 } from "../../authoring/plan/review.ts";
 import type {
   ObjectiveNodeLink,
@@ -75,6 +76,7 @@ import type {
 import { type PlanSource, resolvePlanSource } from "../../authoring/plan/source.ts";
 import { REFINE_STAGE } from "../../authoring/refinement/context.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
 import type { PlanRef } from "../../substrate/cache.ts";
 import type { Result } from "../../substrate/result.ts";
@@ -82,20 +84,6 @@ import type { ToolGating } from "../../substrate/toolGating.ts";
 import { paramsOf, stringParam } from "../../substrate/toolParams.ts";
 import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report } from "../../surfaces/report.ts";
-import {
-  checkDraftReviewDecision,
-  type DecisionCheck,
-  type DraftReviewSlot,
-  destinationChangedResult,
-  type OpenDraftReview,
-  openRefusedResult,
-  type ReviewSource,
-  recordSaveOutcome,
-  saveUnconfirmedResult,
-  staleApprovalResult,
-  supersededReviewResult,
-  withDraftChangedNote,
-} from "./draftReview.ts";
 import { runGistReviewV1 } from "./gist.ts";
 import {
   isRefinementSession,
@@ -108,7 +96,6 @@ import { isPlannotatorPlanSelected } from "./providers/selection.ts";
 import {
   approvedSubjectSaveResult,
   chooseReviewLaunch,
-  type DraftReviewBridge,
   PLAN_SUBJECT,
   type ReviewOutcome,
   runFirstPartyReview,
@@ -120,9 +107,10 @@ import {
   type WaveLaunch,
   waveLaunchedResult,
 } from "./review.ts";
+import { type PlanReviewBridge, staleReviewResult } from "./reviewRecord.ts";
 
-/** The review bridge slice the installer builds over the plannotator event bus. */
-export type PlanReviewBridge = DraftReviewBridge;
+/** The review bridge slice the installer builds (declared beside the record runtime). */
+export type { PlanReviewBridge } from "./reviewRecord.ts";
 
 /** The warm-door ok-arm fields — the `details` surface doubles as branch-safe persisted state. */
 export interface PlanSaveOk {
@@ -287,10 +275,9 @@ export async function runImplementHereCommand(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
-  slot: DraftReviewSlot,
 ): Promise<void> {
-  // A refinement session has no plan to implement: refuse before any effect — the gate toggle
-  // never makes an old plan draft routable.
+  // A refinement session has no plan to implement: refuse first (no gate effect) — the gate
+  // toggle never makes an old plan draft routable.
   if (isRefinementSession(branchOf(ctx))) {
     report(ctx, "implement-here", "warning", refinementStageRefusal("/implement-here"));
     return;
@@ -316,9 +303,6 @@ export async function runImplementHereCommand(
     );
     return;
   }
-  // Exiting plan mode without saving retires whatever review is open: a later browser decision
-  // for it is ignored (loudly) rather than saving a plan the human chose not to save.
-  slot.supersede();
   implementHereExit(ctx, gating);
   const message = implementHereGuidance(ctx.cwd, {});
   if (ctx.isIdle()) {
@@ -433,7 +417,7 @@ function planOutcomeOf(outcome: ReviewOutcome): PlanReviewOutcome {
  */
 function firstPartyPlanReviewer(
   ctx: ExtensionContext,
-  deps: PlanReviewV1Deps,
+  session: WorkflowSession,
   nodeClaimed: boolean,
 ): PlanDraftReviewer {
   return {
@@ -442,7 +426,7 @@ function firstPartyPlanReviewer(
         ui: ctx.ui,
         plan,
         writeDraft: (text) => {
-          const written = revisePlanDraft({ plan: text }, deps.session);
+          const written = revisePlanDraft({ plan: text }, session);
           return written.status === "revised" || written.status === "unchanged";
         },
         ...(signal !== undefined ? { signal } : {}),
@@ -455,65 +439,6 @@ function firstPartyPlanReviewer(
       return { outcome: planOutcomeOf(fp.outcome), plan: fp.plan, edited: fp.edited };
     },
   };
-}
-
-/** Whether a feature outcome is an approval (the arms whose completion saves). */
-function isApproval(outcome: PlanReviewOutcome): boolean {
-  return (
-    outcome.status === "approved" ||
-    outcome.status === "approvedDirectEdits" ||
-    outcome.status === "approvedEditsUnparseable"
-  );
-}
-
-/** The reviewer feedback an approval carries (for the no-save results' DATA suffix). */
-function approvalFeedback(outcome: PlanReviewOutcome): string | undefined {
-  switch (outcome.status) {
-    case "approved":
-    case "denied":
-      return outcome.feedback;
-    case "approvedDirectEdits":
-    case "approvedEditsUnparseable":
-      return outcome.rawFeedback;
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Render a non-`proceed` ladder verdict as the plan arm's tool result (nothing saved; the gate
- * untouched). Shared by the Plannotator arm, the first-party arm and the browser door.
- */
-export function planGuardResult(
-  check: Exclude<DecisionCheck, { kind: "proceed" }>,
-  review: OpenDraftReview,
-  feedback: string | undefined,
-): ToolResult {
-  switch (check.kind) {
-    case "superseded":
-      return supersededReviewResult("plan");
-    case "save-unconfirmed":
-      return saveUnconfirmedResult("plan", review.runId, check.detail, feedback);
-    case "stale-approval":
-      return staleApprovalResult("plan", check.reviewedDigest, feedback);
-    case "destination-changed":
-      return destinationChangedResult("plan", check.changed, feedback);
-  }
-}
-
-/** Report a completed plan review's save result into the unconfirmed-save latch. */
-function recordPlanSaveOutcome(slot: DraftReviewSlot, result: ReviewPlanDraftResult): void {
-  switch (result.status) {
-    case "approvedSaved":
-      recordSaveOutcome(slot, "plan", { confirmed: true });
-      return;
-    case "approvedSaveFailed":
-      recordSaveOutcome(slot, "plan", { confirmed: false, detail: result.save.result.message });
-      return;
-    default:
-      // Denials, Direct Edits and the no-plan arm never reach the backend — no attempt to confirm.
-      return;
-  }
 }
 
 // ------------------------------------------------------------------------- the execute paths
@@ -541,19 +466,19 @@ function noPlanResult(): ToolResult {
 
 /**
  * The plan arm: headless skip → file-first resolution skip (`no_plan`) → the launch chooser
- * (plannotator + drafts-only eligibility, abort-outranks-everything ordering) → the slot open
- * (every arm; the source names how the reviewed bytes were obtained) → reviewer dispatch: the
- * Plannotator bridge judges the reviewed bytes verbatim; the first-party editor review writes
- * human edits back before the verdict → the decision ladder on a completed verdict → the
- * feature completion (`completePlanReview`: the Direct-Edits apply ladder and the D1a approval
- * save) → result rendering, with the save reported into the latch.
+ * (plannotator + drafts-only eligibility, abort-outranks-everything ordering) → reviewer
+ * dispatch. The Plannotator path opens a current-review record over the reviewed source
+ * (`{PLAN_DRAFT_ARTIFACT, raw}` for a draft; `null` for a param-tier plan), reviews the bytes
+ * through the bridge, checks the record is still current (a superseded decision is ignored
+ * loudly), gates a plain approval on the record (re-read bytes + save destination) and only then
+ * enters the completion seam. The first-party path is the pre-record synchronous modal: the
+ * feature `reviewPlanDraft` (`allowImplementHere` = no node claim) → result rendering.
  * (No `pi`/`gating` parameters: every effect rides `ctx` or the injected deps bag — the gate
  * is `deps.gate`, composed once in `plan.ts`.)
  */
 export async function runPlanReviewV1(
   ctx: ExtensionContext,
   bridge: PlanReviewBridge,
-  slot: DraftReviewSlot,
   deps: PlanReviewV1Deps,
   plan: string | undefined,
   signal?: AbortSignal,
@@ -575,8 +500,6 @@ export async function runPlanReviewV1(
   // The claim read rides the injected session (the seam owns workflow-state reads — another
   // backing must never disagree with a raw branch read here).
   const nodeClaimed = deps.session.nodeClaim() !== null;
-  const sourceTier = src.source === "plan-draft" ? "plan-draft" : "param";
-  const completion = { source: sourceTier, paramMismatch: src.paramMismatch } as const;
   // 3. Backend dispatch: plannotator-selected → the event-bus bridge; ANY other selection
   //    (perk-plan, tombell, unknown ids) → the first-party in-TUI editor review.
   if (isPlannotatorPlanSelected(ctx.cwd)) {
@@ -602,60 +525,58 @@ export async function runPlanReviewV1(
         // fall open to the plain blocking review in the same call: the review never wedges.
       }
     }
-    if (sig?.aborted) return reviewOutcomeResult({ status: "aborted" });
-    const source: ReviewSource = src.source === "plan-draft" ? "artifact" : "parameter";
-    const opened = slot.open(ctx, { subject: "plan", source, raw: src.plan, markdown: src.plan });
-    if (!opened.ok) return openRefusedResult(opened);
-    const review = opened.review;
-    // Browser edits arrive as the Direct Edits diff ON the outcome (applied feature-side); the
-    // reviewed bytes ride through unchanged.
-    const outcome = await bridge.review(review.markdown, sig);
-    if (sig?.aborted) return reviewOutcomeResult({ status: "aborted" });
-    if (outcome.status === "implement-here") return implementHereRefusedResult();
-    if (outcome.status !== "completed") return reviewOutcomeResult(outcome);
-    const check = checkDraftReviewDecision(
-      slot,
+    // The record: a draft-tier source is re-read at approve time; a param-tier plan has no
+    // artifact to re-read (the destination check still applies).
+    const review = bridge.current.open(
       ctx,
-      review,
-      outcome.approved ? "save" : "revision",
+      src.source === "plan-draft" ? { name: PLAN_DRAFT_ARTIFACT, raw: src.plan } : null,
     );
-    if (check.kind !== "proceed") return planGuardResult(check, review, outcome.feedback);
-    return withDraftChangedNote(
-      await completePlanReviewV1(ctx, slot, deps, review.markdown, outcome, completion),
-      check.draftChanged,
-    );
+    try {
+      const outcome = await bridge.review(src.plan, sig);
+      // The abort checkpoint: a turn interrupted while the reviewer ran must produce NO effect.
+      if (sig?.aborted) return reviewOutcomeResult({ status: "aborted" });
+      // The common current-record check: a decision for a superseded record — APPROVE or DENY —
+      // is ignored loudly before any effect or feedback rendering.
+      if (!bridge.current.isCurrent(review)) {
+        return staleReviewResult(
+          PLAN_SUBJECT,
+          "superseded",
+          outcome.status === "completed" ? outcome : undefined,
+        );
+      }
+      if (outcome.status === "implement-here") return implementHereRefusedResult();
+      if (outcome.status !== "completed") return reviewOutcomeResult(outcome);
+      if (outcome.approved) {
+        const gate = bridge.current.approve(ctx, review);
+        if (!gate.ok) return staleReviewResult(PLAN_SUBJECT, gate.reason, outcome);
+      }
+      return completePlanReviewV1(
+        ctx,
+        deps,
+        src.plan,
+        outcome,
+        src.paramMismatch,
+        src.source === "plan-draft" ? "plan-draft" : "param",
+      );
+    } finally {
+      bridge.current.close(review);
+    }
   }
-
-  // The first-party arm: the human's own edit write-back is the one legitimate draft change
-  // during a modal review, so the source is `editor` (no byte compare); the destination fence
-  // and the latch still apply to an approval.
-  const opened = slot.open(ctx, {
-    subject: "plan",
-    source: "editor",
-    raw: src.plan,
-    markdown: src.plan,
-  });
-  if (!opened.ok) return openRefusedResult(opened);
-  const review = opened.review;
-  if (sig?.aborted) return reviewOutcomeResult({ status: "aborted" });
-  const reviewed = await firstPartyPlanReviewer(ctx, deps, nodeClaimed).review(src.plan, sig);
-  if (sig?.aborted) return reviewOutcomeResult({ status: "aborted" });
-  if (isApproval(reviewed.outcome) || reviewed.outcome.status === "denied") {
-    const check = checkDraftReviewDecision(
-      slot,
-      ctx,
-      review,
-      isApproval(reviewed.outcome) ? "save" : "revision",
-    );
-    if (check.kind !== "proceed")
-      return planGuardResult(check, review, approvalFeedback(reviewed.outcome));
-  }
-  const result = await completePlanReview(
-    { ...deps, allowImplementHere: !nodeClaimed },
-    reviewed,
-    completion,
+  // 4. The feature review operation owns the resolve → review → abort-checkpoint → route
+  //    discipline (incl. the Direct-Edits apply ladder and the D1a approval save).
+  const result = await reviewPlanDraft(
+    {
+      session: deps.session,
+      reviewer: firstPartyPlanReviewer(ctx, deps.session, nodeClaimed),
+      backend: deps.backend,
+      gate: deps.gate,
+      generateTitle: deps.generateTitle,
+      capturePlanningPointer: deps.capturePlanningPointer,
+      ...(plan !== undefined ? { explicit: plan } : {}),
+      allowImplementHere: !nodeClaimed,
+    },
+    sig,
   );
-  recordPlanSaveOutcome(slot, result);
   return renderPlanReviewResult(ctx, deps, result);
 }
 
@@ -743,7 +664,6 @@ export async function executePlanReview(
   ctx: ExtensionContext,
   gating: ToolGating,
   bridge: PlanReviewBridge,
-  slot: DraftReviewSlot,
   deps: PlanReviewV1Deps,
   params: unknown,
   signal?: AbortSignal,
@@ -779,42 +699,38 @@ export async function executePlanReview(
   // the gist arm (the rendered gist draft).
   const launchedStage = rebuildWorkflowState(branchOf(ctx)).stage;
   if (launchedStage === OBJECTIVE_AUTHOR_STAGE || launchedStage === OBJECTIVE_SAVE_STAGE) {
-    return executeObjectiveReview(pi, ctx, gating, bridge, slot, signal ?? ctx.signal, wave);
+    return executeObjectiveReview(pi, ctx, gating, bridge, signal ?? ctx.signal, wave);
   }
   if (launchedStage === GIST_AUTHOR_STAGE) {
-    return runGistReviewV1(pi, ctx, gating, bridge, slot, signal ?? ctx.signal);
+    return runGistReviewV1(pi, ctx, gating, bridge, signal ?? ctx.signal);
   }
   // A refinement session routes to the refinement arm BEFORE the plan arm: the validated
   // (draft, context) pair is the sole source; a well-typed `plan` param is ignored (the plan
   // fallthrough could otherwise review/save an unrelated plan from a refinement session).
   if (launchedStage === REFINE_STAGE) {
-    return runRefinementReviewV1(pi, ctx, gating, bridge, slot, signal ?? ctx.signal);
+    return runRefinementReviewV1(pi, ctx, gating, bridge, signal ?? ctx.signal);
   }
-  return runPlanReviewV1(ctx, bridge, slot, deps, plan, signal, wave);
+  return runPlanReviewV1(ctx, bridge, deps, plan, signal, wave);
 }
 
 /**
- * The plan completion shared by the Plannotator tool arm and the browser door: a completed
- * bridge outcome over the reviewed bytes → the feature completion (Direct-Edits apply ladder,
- * D1a approval save; implement-here never allowed here — the bridge cannot produce it) → the
- * latch record → the rendered tool result. The caller has already run the decision ladder.
+ * The shared Plannotator completion (the blocking arm and the `/plan-review-browser` door):
+ * translate the bridge outcome into the feature's vocabulary (Direct Edits included) and run the
+ * feature's completion seam — the apply ladder + `planApprovalSave` — over `markdown`, the exact
+ * bytes reviewed. Callers gate the approval on the current-review record BEFORE entering here.
  */
 export async function completePlanReviewV1(
   ctx: ExtensionContext,
-  slot: DraftReviewSlot,
   deps: PlanReviewV1Deps,
   markdown: string,
   outcome: Extract<ReviewOutcome, { status: "completed" }>,
-  completion: { source: "plan-draft" | "param"; paramMismatch: boolean } = {
-    source: "plan-draft",
-    paramMismatch: false,
-  },
+  paramMismatch = false,
+  source: "plan-draft" | "param" = "plan-draft",
 ): Promise<ToolResult> {
   const result = await completePlanReview(
     { ...deps, allowImplementHere: false },
     { outcome: planOutcomeOf(outcome), plan: markdown, edited: false },
-    completion,
+    { source, paramMismatch },
   );
-  recordPlanSaveOutcome(slot, result);
   return renderPlanReviewResult(ctx, deps, result);
 }

@@ -523,9 +523,6 @@ export function installObjectivePlanningBindings(
       // A refinement session never claims or advances a node — independent of tool visibility.
       if (isRefinementSession(branchOf(ctx)))
         return fail(refinementStageRefusal("objective_node"), "wrong_stage");
-      // A node transition moves the plan save destination's `node_claim` component: an open
-      // review's approval is refused by the destination fence (`draftReview.ts`), never saved
-      // against the moved claim.
       const outcome = await transitionObjectiveNode(decoded, {
         backend: coldDoorObjectiveNodeBackend(pi, ctx),
         session: openBranchWorkflowSession(pi, ctx),

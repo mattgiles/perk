@@ -11,6 +11,7 @@ import { test } from "node:test";
 import {
   commitsSince,
   headSha,
+  remoteUrls,
   revalidationBracket,
   sinceBaseSha,
   unbornHead,
@@ -211,4 +212,23 @@ test("revalidationBracket: an unprovable flags probe drifts (the third fail-clos
   const result = revalidationBracket(cwd, sha, { flags: () => null });
   assert.equal(result.ok, false);
   assert.match(result.detail ?? "", /index flag state could not be verified/);
+});
+
+test("remoteUrls: [] with no remotes (absence is a value), sorted lines with two, null outside a repo", () => {
+  const { cwd } = scratchRepo();
+  const g = (...args: string[]): void => {
+    execFileSync("git", args, { cwd, stdio: ["ignore", "ignore", "ignore"] });
+  };
+  assert.deepEqual(remoteUrls(cwd), []);
+  // An unrelated config key never shows up in the reading.
+  g("config", "user.name", "dogfood");
+  assert.deepEqual(remoteUrls(cwd), []);
+  g("remote", "add", "upstream", "https://example.com/upstream.git");
+  g("remote", "add", "origin", "https://example.com/origin.git");
+  assert.deepEqual(remoteUrls(cwd), [
+    "remote.origin.url https://example.com/origin.git",
+    "remote.upstream.url https://example.com/upstream.git",
+  ]);
+  const norepo = mkdtempSync(join(tmpdir(), "perk-git-norepo-"));
+  assert.equal(remoteUrls(norepo), null);
 });

@@ -7,7 +7,7 @@
 // The Markdown is the model's ONLY contribution: it cannot supply a title, path, target, digest,
 // run id or expectation. Python parses the transferred draft without reserializing or trimming.
 //
-// A draft is USABLE only when both strict session pointers verify, the run ids match, the
+// A draft is USABLE only when both session artifact reads verify, the run ids match, the
 // draft's `context_digest` equals the current context artifact's digest, the context fields
 // validate, and the Markdown is nonblank. A context re-prepared after the draft makes the draft
 // `mismatch` (evidence that needs rewriting), never a silent rebind.
@@ -115,7 +115,7 @@ export type ReviseRefinementDraftResult =
 
 /**
  * Rewrite the working draft (a whole-value replacement) bound to the CURRENT context: blank
- * Markdown is refused first, then missing identity, then the strict context resume (absent →
+ * Markdown is refused first, then missing identity, then the context resume (absent →
  * the session needs a grounding pass; refused → a fail-closed stop), then the verified write of
  * the small fixed envelope. Identical bytes are `unchanged`. Never throws.
  */
@@ -161,9 +161,7 @@ export function reviseRefinementDraft(
     markdown: input.markdown,
   });
   const bytes = Buffer.byteLength(content, "utf8");
-  const written = session.writeArtifact(REFINEMENT_DRAFT_ARTIFACT, content, {
-    provenance: "strict",
-  });
+  const written = session.writeArtifact(REFINEMENT_DRAFT_ARTIFACT, content);
   switch (written.status) {
     case "applied":
       return { status: "revised", receipt: written.receipt, bytes, context: context.read };
@@ -195,9 +193,9 @@ export type ResumeRefinementDraftResult =
   | { kind: "refused"; problem: string };
 
 /**
- * Resume the (draft, context) pair strictly: identity → strict context → strict draft → the
- * binding check (matching run id AND exact context digest). Corruption, orphan pointers,
- * fork/wrong-run data and a context mismatch never fall back to plans or to any other artifact.
+ * Resume the (draft, context) pair strictly: identity → context → draft → the binding check
+ * (matching run id AND exact context digest). Corruption, foreign-run pointers (read as absent),
+ * wrong-run data and a context mismatch never fall back to plans or to any other artifact.
  * Never throws.
  */
 export function resumeRefinementDraft(session: WorkflowSession): ResumeRefinementDraftResult {
@@ -205,7 +203,7 @@ export function resumeRefinementDraft(session: WorkflowSession): ResumeRefinemen
   if (!identity.ok) return { kind: "refused", problem: `session identity ${identity.reason}` };
   const context = resumeRefinementContext(session);
   if (context.kind === "refused") return { kind: "refused", problem: context.problem };
-  const read = session.readArtifact(REFINEMENT_DRAFT_ARTIFACT, { provenance: "strict" });
+  const read = session.readArtifact(REFINEMENT_DRAFT_ARTIFACT);
   if (read.status === "invalid") return { kind: "refused", problem: read.problem };
   if (context.kind === "absent")
     return read.status === "absent" ? { kind: "absent" } : { kind: "no-context" };

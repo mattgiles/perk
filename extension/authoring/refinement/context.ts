@@ -343,16 +343,14 @@ export type ImportRefinementContextResult =
 
 /**
  * Persist a validated transfer as the session's context artifact — the UNCHANGED raw string
- * through the strict session write. `unchanged` is the byte-identical short-circuit (a
+ * through the session write. `unchanged` is the byte-identical short-circuit (a
  * re-prepared context whose bytes happen to be identical is no new context). Never throws.
  */
 export function importRefinementContext(
   session: WorkflowSession,
   read: RefinementContextRead,
 ): ImportRefinementContextResult {
-  const written = session.writeArtifact(REFINEMENT_CONTEXT_ARTIFACT, read.raw, {
-    provenance: "strict",
-  });
+  const written = session.writeArtifact(REFINEMENT_CONTEXT_ARTIFACT, read.raw);
   switch (written.status) {
     case "applied":
       return { status: "imported", receipt: written.receipt, read };
@@ -428,16 +426,15 @@ export type ResumeRefinementContextResult =
   | { kind: "refused"; problem: string };
 
 /**
- * Strictly resume the session's context artifact: the strict seam read (an orphan pointer or a
- * foreign/wrong-run artifact is `invalid` there), the strict decode, and the run check against
- * the session identity. Returns the raw bytes + digest beside the fields. Never throws.
+ * Strictly resume the session's context artifact: the session read (a foreign-run pointer reads
+ * `absent` — fork isolation; a missing/digest-mismatched file is `invalid`), the strict decode,
+ * and the run check against the session identity (a wrong-run transfer refuses `not this run`).
+ * Returns the raw bytes + digest beside the fields. Never throws.
  */
 export function resumeRefinementContext(session: WorkflowSession): ResumeRefinementContextResult {
   const identity = session.currentRunIdentity();
   if (!identity.ok) return { kind: "refused", problem: `session identity ${identity.reason}` };
-  const read: ReadArtifactResult = session.readArtifact(REFINEMENT_CONTEXT_ARTIFACT, {
-    provenance: "strict",
-  });
+  const read: ReadArtifactResult = session.readArtifact(REFINEMENT_CONTEXT_ARTIFACT);
   if (read.status === "absent") return { kind: "absent" };
   if (read.status === "invalid") return { kind: "refused", problem: read.problem };
   const validated = validateContextTransfer(read.content, { runId: identity.runId });

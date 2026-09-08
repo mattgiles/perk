@@ -53,6 +53,8 @@ export interface MemoryWorkflowSession extends WorkflowSession {
   lastReviewBatchRecord(): ReviewBatchRecord | null;
   /** Attempted workflow-state appends (substrate observation for no-append pins). */
   appendCount(): number;
+  /** The live rebuilt `stage` (test observation of the `enter-refinement-stage` effect). */
+  stage(): string | null;
 }
 
 /**
@@ -126,10 +128,6 @@ export function openMemoryWorkflowSession(opts: {
     load(_runId: string, name: string): string | null {
       return contents.get(name) ?? null;
     },
-    loadStrict(_runId: string, name: string) {
-      const content = contents.get(name);
-      return content === undefined ? { status: "absent" } : { status: "found", content };
-    },
     displayPath(_runId: string, name: string): string {
       return name;
     },
@@ -184,6 +182,9 @@ export function openMemoryWorkflowSession(opts: {
     },
     appendCount() {
       return appends;
+    },
+    stage() {
+      return rebuildWorkflowState(branch).stage ?? null;
     },
   };
 }

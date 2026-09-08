@@ -122,7 +122,7 @@ test("revise: writes the small context-bound envelope; identical bytes are uncha
   const revised = reviseRefinementDraft({ markdown: MARKDOWN }, session);
   assert.equal(revised.status, "revised");
   assert.ok(revised.status === "revised" && revised.context.digest === GOLDEN_DIGEST);
-  const stored = session.readArtifact(REFINEMENT_DRAFT_ARTIFACT, { provenance: "strict" });
+  const stored = session.readArtifact(REFINEMENT_DRAFT_ARTIFACT);
   assert.ok(
     stored.status === "found" && stored.content === GOLDEN_DRAFT,
     "the TS-serialized golden bytes",
@@ -172,9 +172,6 @@ test("resume: valid pair, absent, no-context, mismatch (re-prepared context) and
   const replaced = session.writeArtifact(
     REFINEMENT_CONTEXT_ARTIFACT,
     GOLDEN_CONTEXT.replace('"warnings":[', '"warnings":["w",'),
-    {
-      provenance: "strict",
-    },
   );
   assert.equal(replaced.status, "applied");
   const mismatch = resumeRefinementDraft(session);
@@ -185,7 +182,7 @@ test("resume: valid pair, absent, no-context, mismatch (re-prepared context) and
 
   // A draft without its context: `no-context` (a grounding pass is needed).
   const bare = openMemoryWorkflowSession({ runId: GOLDEN_RUN });
-  bare.writeArtifact(REFINEMENT_DRAFT_ARTIFACT, GOLDEN_DRAFT, { provenance: "strict" });
+  bare.writeArtifact(REFINEMENT_DRAFT_ARTIFACT, GOLDEN_DRAFT);
   assert.deepEqual(resumeRefinementDraft(bare), { kind: "no-context" });
   // Corruption of either artifact refuses.
   const corruptDraft = groundedSession();
@@ -198,9 +195,7 @@ test("resume: valid pair, absent, no-context, mismatch (re-prepared context) and
   assert.equal(resumeRefinementDraft(corruptContext).kind, "refused");
   // A draft belonging to another run under this run's pointer is refused.
   const foreign = groundedSession();
-  foreign.writeArtifact(REFINEMENT_DRAFT_ARTIFACT, GOLDEN_DRAFT.replace(GOLDEN_RUN, "01OTHER"), {
-    provenance: "strict",
-  });
+  foreign.writeArtifact(REFINEMENT_DRAFT_ARTIFACT, GOLDEN_DRAFT.replace(GOLDEN_RUN, "01OTHER"));
   const foreignResult = resumeRefinementDraft(foreign);
   assert.ok(foreignResult.kind === "refused" && foreignResult.problem.includes("another run"));
   assert.equal(resumeRefinementDraft(openMemoryWorkflowSession({ runId: null })).kind, "refused");

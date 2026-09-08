@@ -7,7 +7,9 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { readReviewDestination } from "../pi/v1/reviewRecord.ts";
 import {
+  issueDestination,
   loadPerkConfig,
   parseCiChecks,
   parseTomlSubset,
@@ -700,4 +702,61 @@ test("resolveIssueBackendId: a legacy .pi/perk.toml selection is ignored", () =>
   mkdirSync(join(cwd, ".pi"), { recursive: true });
   writeFileSync(join(cwd, ".pi", "perk.toml"), '[issues]\nbackend = "linear"\n', "utf8");
   assert.equal(resolveIssueBackendId(cwd), "github");
+});
+
+// --- issueDestination (the save-destination [issues] reading) ------------
+
+test("issueDestination: a missing [issues] table reads as null/null (absence is a value)", () => {
+  assert.deepEqual(issueDestination(mkdtempSync(join(tmpdir(), "perk-config-"))), {
+    backend: null,
+    team: null,
+  });
+  const cwd = repoWith({ "perk.toml": '[models]\nplan = "x"\n[compaction]\nobjective_threshold = 0.5\n' });
+  assert.deepEqual(issueDestination(cwd), { backend: null, team: null });
+});
+
+test("issueDestination: raw committed backend/team strings; non-strings read as null", () => {
+  const cwd = repoWith({ "perk.toml": '[issues]\nbackend = "linear"\nteam = "ENG"\n' });
+  assert.deepEqual(issueDestination(cwd), { backend: "linear", team: "ENG" });
+  const typed = repoWith({ "perk.toml": '[issues]\nbackend = "jira"\nteam = 7\n' });
+  assert.deepEqual(issueDestination(typed), { backend: "jira", team: null });
+});
+
+test("issueDestination: unrelated [models]/[compaction] edits never change the reading; local.toml is ignored", () => {
+  const cwd = repoWith({
+    "perk.toml": '[issues]\nbackend = "github"\n[models]\nplan = "a"\n',
+    "perk.local.toml": '[issues]\nbackend = "linear"\nteam = "LOCAL"\n',
+  });
+  const before = issueDestination(cwd);
+  writeFileSync(
+    join(cwd, ".perk", "config.toml"),
+    '[issues]\nbackend = "github"\n[models]\nplan = "b"\n[compaction]\nobjective_threshold = 0.9\n',
+    "utf8",
+  );
+  assert.deepEqual(issueDestination(cwd), before);
+  assert.deepEqual(before, { backend: "github", team: null });
+});
+
+test("readReviewDestination composes the two injected readers into one snapshot", () => {
+  const calls: string[] = [];
+  const destination = readReviewDestination("/repo", {
+    issues: (cwd) => {
+      calls.push(`issues:${cwd}`);
+      return { backend: "linear", team: "ENG" };
+    },
+    remotes: (cwd) => {
+      calls.push(`remotes:${cwd}`);
+      return ["remote.origin.url https://example.com/a.git"];
+    },
+  });
+  assert.deepEqual(destination, {
+    backend: "linear",
+    team: "ENG",
+    remotes: ["remote.origin.url https://example.com/a.git"],
+  });
+  assert.deepEqual(calls, ["issues:/repo", "remotes:/repo"]);
+  assert.deepEqual(
+    readReviewDestination("/repo", { issues: () => ({ backend: null, team: null }), remotes: () => null }),
+    { backend: null, team: null, remotes: null },
+  );
 });

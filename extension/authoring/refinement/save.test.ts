@@ -80,7 +80,7 @@ function grounded(withDraft: boolean) {
 
 test("seam: saves the EXACT draft bytes with the run id; gate exits only after the verified save", async () => {
   const session = grounded(true);
-  const stored = session.readArtifact(REFINEMENT_DRAFT_ARTIFACT, { provenance: "strict" });
+  const stored = session.readArtifact(REFINEMENT_DRAFT_ARTIFACT);
   assert.ok(stored.status === "found");
   const { backend, calls } = fakeBackend(SAVED);
   const { gate, exits } = fakeGate(true);
@@ -115,9 +115,6 @@ test("seam: no draft / no context / refused / mismatched drafts stop before any 
     '{"schema_version":1,"run_id":"01AUTHRUN","context_digest":"sha256:' +
       "0".repeat(64) +
       '","markdown":"x"}\n',
-    {
-      provenance: "strict",
-    },
   );
   assert.deepEqual(await refinementApprovalSave({ session: bare, backend, gate }), {
     status: "no-context",
@@ -130,9 +127,6 @@ test("seam: no draft / no context / refused / mismatched drafts stop before any 
   stale.writeArtifact(
     REFINEMENT_CONTEXT_ARTIFACT,
     GOLDEN_CONTEXT.replace('"warnings":[', '"warnings":["w",'),
-    {
-      provenance: "strict",
-    },
   );
   const mismatch = await refinementApprovalSave({ session: stale, backend, gate });
   assert.ok(mismatch.status === "refused-draft" && mismatch.problem.includes("re-prepared"));
@@ -238,7 +232,6 @@ test("seam: the reviewed pair fences the save — a draft or context rewritten a
   regrounded.writeArtifact(
     REFINEMENT_CONTEXT_ARTIFACT,
     GOLDEN_CONTEXT.replace('"warnings":[', '"warnings":["w",'),
-    { provenance: "strict" },
   );
   assert.equal(
     reviseRefinementDraft({ markdown: "## Refinement\n\nbody\n" }, regrounded).status,

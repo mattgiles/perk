@@ -41,7 +41,7 @@ import {
   type WorkflowSession,
 } from "./workflowSession.ts";
 
-test("draft-review context strictly reads one routing snapshot and owns claim values", () => {
+test("currentRunIdentity: the safe run_id from one rebuilt snapshot; unsafe/missing → no-identity; a throwing rebuild → invalid-state", () => {
   let snapshot: Record<string, unknown> = { run_id: "RID" };
   let throws = false;
   let reads = 0;
@@ -61,63 +61,16 @@ test("draft-review context strictly reads one routing snapshot and owns claim va
     },
   );
   reads = 0;
-  assert.deepEqual(session.draftReviewContext(), {
-    ok: true,
-    runId: "RID",
-    subject: "plan",
-    warmNodeClaim: null,
-  });
+  assert.deepEqual(session.currentRunIdentity(), { ok: true, runId: "RID" });
   assert.equal(reads, 1);
-  for (const claim of [undefined, null]) {
-    snapshot.objective_node_claim = claim;
-    const result = session.draftReviewContext();
-    assert.ok(result.ok);
-    assert.equal(result.warmNodeClaim, null);
-  }
-  const claim = { objective: " 雪 ", node: " 1.1 " };
-  snapshot.objective_node_claim = claim;
-  const owned = session.draftReviewContext();
-  assert.ok(owned.ok);
-  assert.deepEqual(owned.warmNodeClaim, claim);
-  assert.notEqual(owned.warmNodeClaim, claim);
-  for (const malformed of [
-    false,
-    [],
-    {},
-    { objective: "x" },
-    { objective: "x", node: " " },
-    { objective: "x", node: "1", extra: true },
-  ]) {
-    snapshot.objective_node_claim = malformed;
-    assert.deepEqual(session.draftReviewContext(), { ok: false, reason: "invalid-state" });
-  }
-  for (const [stage, subject] of [
-    ["plan", "plan"],
-    ["objective-plan", "plan"],
-    ["plan-save", "plan"],
-    ["objective-author", "objective"],
-    ["objective-save", "objective"],
-    ["gist-author", "gist"],
-    ["objective-refine", "refinement"],
-  ]) {
-    snapshot = { run_id: "RID", stage, objective_node_claim: subject === "plan" ? claim : false };
-    const result = session.draftReviewContext();
-    assert.ok(result.ok);
-    assert.equal(result.subject, subject);
-    assert.deepEqual(result.warmNodeClaim, subject === "plan" ? claim : null);
-  }
+  snapshot = { run_id: "RID.1" };
+  assert.deepEqual(session.currentRunIdentity(), { ok: true, runId: "RID.1" });
   for (const run_id of [null, "../other", ""]) {
     snapshot = { run_id };
-    assert.deepEqual(session.draftReviewContext(), { ok: false, reason: "no-identity" });
+    assert.deepEqual(session.currentRunIdentity(), { ok: false, reason: "no-identity" });
   }
-  snapshot = { run_id: "RID", stage: false };
-  assert.deepEqual(session.draftReviewContext(), { ok: false, reason: "invalid-state" });
-  assert.deepEqual(session.currentRunIdentity(), { ok: true, runId: "RID" });
-  snapshot.run_id = "RID.1";
-  assert.deepEqual(session.currentRunIdentity(), { ok: true, runId: "RID.1" });
   throws = true;
   assert.deepEqual(session.currentRunIdentity(), { ok: false, reason: "invalid-state" });
-  assert.deepEqual(session.draftReviewContext(), { ok: false, reason: "invalid-state" });
 });
 
 function planRef(prId: string): PlanRef {
@@ -186,6 +139,8 @@ interface SessionHarness {
   lastReviewBatch(): ReviewBatchRecord | null;
   /** Attempted workflow-state appends (the no-append observation for the unchanged arm). */
   appendCount(): number;
+  /** The rebuilt/live `stage` (observation of the enter-refinement-stage effect). */
+  stage(): string | null;
   /** The backing's derived display path for `name` (what a receipt's `path` must equal). */
   expectedPath(name: string): string;
   dispose(): void;
@@ -338,6 +293,12 @@ function branchBacking(): Backing {
         appendCount() {
           return appends;
         },
+        stage() {
+          return (
+            rebuildWorkflowState(branch as Parameters<typeof rebuildWorkflowState>[0]).stage ??
+            null
+          );
+        },
         expectedPath(name) {
           return relative(cwd, join(sessionDataDir(cwd, runId ?? ""), name));
         },
@@ -380,6 +341,7 @@ function memoryBacking(): Backing {
         lastPrReview: () => session.lastPrReviewRecord(),
         lastReviewBatch: () => session.lastReviewBatchRecord(),
         appendCount: () => session.appendCount(),
+        stage: () => session.stage(),
         expectedPath: (name) => name,
         dispose() {},
       };
@@ -874,10 +836,7 @@ for (const backing of [branchBacking(), memoryBacking()]) {
     try {
       const before = h.appendCount();
       assert.deepEqual(h.session.apply({ kind: "enter-refinement-stage" }), { status: "applied" });
-      const context = h.session.draftReviewContext();
-      assert.ok(context.ok);
-      assert.equal(context.subject, "refinement", "the stage maps to the refinement subject");
-      assert.equal(context.warmNodeClaim, null);
+      assert.equal(h.stage(), "objective-refine", "the rebuilt stage is the refinement stage");
       assert.equal(h.session.activeObjective(), "7", "the active objective is preserved");
       assert.equal(h.session.nodeClaim(), null, "entering refinement never claims a node");
       assert.equal(h.linkedPlanRef(), null, "entering refinement never links a plan");
@@ -1256,7 +1215,6 @@ test("engine: activeSessionPlanRef is one fresh rebuild per read — no artifact
   const artifacts: ArtifactContentStore = {
     store: forbidden("artifacts.store"),
     load: forbidden("artifacts.load"),
-    loadStrict: forbidden("artifacts.loadStrict"),
     displayPath: forbidden("artifacts.displayPath"),
   };
   const session = openWorkflowSession({ state, artifacts });

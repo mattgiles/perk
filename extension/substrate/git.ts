@@ -52,48 +52,6 @@ export function worktreeGitDir(cwd: string): string | null {
   }
 }
 
-/**
- * The git-config entries that decide WHERE a GitHub-backed save lands: every `remote.*.url` and
- * `remote.*.gh-resolved` key (`gh` resolves the target repo from exactly these). Returns the
- * NUL-separated `key\nvalue` entries sorted lexicographically and re-joined with `\0` (a
- * canonical form fit for digesting), `""` when the repo has no remotes at all (git exits 1 with
- * empty stdout), or `null` when the destination cannot be verified (not a repo, git missing,
- * any other failure). **Fails closed** on purpose: a caller fencing a save must treat `null` as
- * "unverifiable", never as "unchanged". No other git config participates — `branch.*`,
- * `user.*`, and friends never route a save, so they must never invalidate a review.
- *
- * Repo membership is probed first (`worktreeGitDir`): outside a repo `git config` still reads
- * the global/system files and reports "no match" — which would masquerade as a verified empty
- * destination.
- */
-export function remoteConfig(cwd: string): string | null {
-  if (worktreeGitDir(cwd) === null) return null;
-  try {
-    const out = execFileSync(
-      "git",
-      ["config", "--null", "--get-regexp", "^remote\\..*\\.(url|gh-resolved)$"],
-      {
-        cwd,
-        encoding: "utf8",
-        timeout: 5_000,
-        maxBuffer: 1024 * 1024,
-        stdio: ["ignore", "pipe", "ignore"],
-      },
-    );
-    return out
-      .split("\0")
-      .filter((entry) => entry !== "")
-      .sort()
-      .join("\0");
-  } catch (error) {
-    // `git config --get-regexp` exits 1 with empty stdout when NO key matches — a repo with no
-    // remotes is a verified (empty) destination, not a failure.
-    const failure = error as { status?: unknown; stdout?: unknown };
-    if (failure.status === 1 && String(failure.stdout ?? "") === "") return "";
-    return null;
-  }
-}
-
 /** Run one git command; trimmed stdout, or null on any failure (the module's fail-open style). */
 function git(cwd: string, args: string[], timeout?: number): string | null {
   try {
@@ -276,6 +234,38 @@ export function revalidationBracket(
     };
   }
   return { ok: true, detail: null };
+}
+
+/**
+ * The repository's `remote.<name>.url` readings as sorted `<key> <url>` lines — one of the three
+ * save-destination readings the current-review record snapshots (contracts.md §8.23). Absence is
+ * a VALUE: a repo with no remotes returns `[]` (`git config --get-regexp` exits 1 with empty
+ * stdout when no key matches). Every other failure — not a repo, git missing, timeout, another
+ * exit status — returns `null` (UNREADABLE), which the approve gate treats as a refusal rather
+ * than as "no remotes": a destination that cannot be read must never compare equal to one that
+ * can. `--local` scopes the read to the repository's own config so a non-repo `cwd` is a
+ * failure (exit 128) instead of a global-config read that would masquerade as "no remotes".
+ * Own `execFileSync`: the `git()` helper conflates empty output with failure.
+ */
+export function remoteUrls(cwd: string): string[] | null {
+  try {
+    const out = execFileSync("git", ["config", "--local", "--get-regexp", "^remote\\..*\\.url$"], {
+      cwd,
+      encoding: "utf8",
+      timeout: 5_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+      .sort();
+  } catch (err) {
+    const failure = err as { status?: unknown; stdout?: unknown };
+    const stdout = typeof failure.stdout === "string" ? failure.stdout : "";
+    if (failure.status === 1 && stdout.trim() === "") return [];
+    return null;
+  }
 }
 
 /**

@@ -4,7 +4,7 @@
 // Python-owned `tests/test_objective_refine_cmd.py` end-to-end test.
 //
 // It runs the REAL interior over a real branch-backed workflow session rooted at the temp
-// checkout the Python side prepared: the strict context import (the cold door's transfer bytes
+// checkout the Python side prepared: the context import (the cold door's transfer bytes
 // written unchanged as the session artifact), the draft seam (a first draft the scripted human
 // DENIES — routed through the real completion, saving nothing — then the revision), and the
 // approved save through the real seam + the real cold-door adapter (`runColdDoor` stages the
@@ -97,7 +97,7 @@ const ctx = {
 
 const session = openBranchWorkflowSession(pi, ctx);
 
-// 1. The strict import of the cold door's transfer bytes.
+// 1. The import of the cold door's transfer bytes (validated before the session write).
 const transfer = readFileSync(spec.transferPath, "utf8");
 const validated = validateContextTransfer(transfer, {
   runId: spec.runId,
@@ -106,7 +106,7 @@ const validated = validateContextTransfer(transfer, {
 if (!validated.ok) fail(`transfer refused: ${validated.problem}`);
 const imported = importRefinementContext(session, validated.read);
 if (imported.status !== "imported") fail(`import ${imported.status}`);
-const stored = session.readArtifact(REFINEMENT_CONTEXT_ARTIFACT, { provenance: "strict" });
+const stored = session.readArtifact(REFINEMENT_CONTEXT_ARTIFACT);
 if (stored.status !== "found") fail("the imported context is not readable");
 
 // 2. The denied round: a first draft the scripted human rejects — the completion routes the

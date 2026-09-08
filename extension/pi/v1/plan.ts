@@ -79,11 +79,11 @@ import { report, type Severity } from "../../surfaces/report.ts";
 // structurally confined to the surfaces module (the surfacesGuard pi-tui import rule).
 import { Key } from "../../surfaces/surfaces.ts";
 import { installInjectedContext } from "./contextInjection.ts";
-import { type DraftReviewSlot, recordSaveOutcome } from "./draftReview.ts";
 import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
 import {
   type ApprovalSaveOutcome,
   executePlanReview,
+  type PlanReviewBridge,
   type PlanReviewV1Deps,
   runImplementHereCommand,
   type SaveResult,
@@ -92,6 +92,7 @@ import { generatePlanTitle } from "./planTitle.ts";
 import { createPlannotatorBridge } from "./providers/plannotator.ts";
 import { resolvedPlanProviderId } from "./providers/selection.ts";
 import type { WaveLaunch } from "./review.ts";
+import type { CurrentReviewRuntime } from "./reviewRecord.ts";
 
 // ------------------------------------------------------------------- the tool-boundary decode
 
@@ -409,7 +410,7 @@ export async function approvalSave(
 export function installPlanBindings(
   pi: ExtensionAPI,
   gating: ToolGating,
-  reviews: DraftReviewSlot,
+  reviews: CurrentReviewRuntime,
   contextPolicy: ContextPolicyInputs,
   wave?: WaveLaunch,
 ): void {
@@ -597,11 +598,6 @@ export function installPlanBindings(
         },
         deps,
       );
-      // The manual save never consults the latch (it IS the deliberate retry) but reports into it.
-      recordSaveOutcome(reviews, "plan", {
-        confirmed: outcome.status === "saved",
-        ...(outcome.status === "failed" ? { detail: outcome.message } : {}),
-      });
       return deps.renderSave(outcome);
     },
   });
@@ -631,11 +627,6 @@ export function installPlanBindings(
         );
         return;
       }
-      // The manual save never consults the latch (it IS the deliberate retry) but reports into it.
-      recordSaveOutcome(reviews, "plan", {
-        confirmed: outcome.status === "saved",
-        ...(outcome.result.details.ok ? {} : { detail: outcome.result.details.error }),
-      });
       // Severity reflects a failed objective-node advance: not-ok → error; saved-but-link-failed →
       // warning; otherwise info. A failed node-link never blocks the gate exit above (the plan was
       // saved) — but it MUST surface (the silent-partial-failure fix), in headless runs too.
@@ -668,14 +659,14 @@ export function installPlanBindings(
     // The handler body lives in planReview.ts (next to the seam it composes — and so the
     // sendUserMessage call sites stay out of this installer file, whose registration prose the
     // prose-review workbench edits through the whole-file-validating TypeScript adapter).
-    handler: async (_args, ctx) => runImplementHereCommand(pi, ctx, gating, reviews),
+    handler: async (_args, ctx) => runImplementHereCommand(pi, ctx, gating),
   });
 
   // ---------------------------------------------------------------- the plan_review tool
   // perk's universal review door. In READ_ONLY_TOOLS so it is callable INSIDE plan mode (the
   // whole point — review happens before the gate ever comes off). Fail-open everywhere:
   // headless / dismissed / backend-unavailable all soft-skip so authoring never wedges.
-  const bridge = createPlannotatorBridge(pi.events);
+  const bridge: PlanReviewBridge = { ...createPlannotatorBridge(pi.events), current: reviews };
   pi.registerTool({
     name: "plan_review",
     label: "Plan review",
@@ -717,7 +708,6 @@ export function installPlanBindings(
         ctx,
         gating,
         bridge,
-        reviews,
         planSaveDepsFor(pi, ctx, gating),
         params,
         signal,

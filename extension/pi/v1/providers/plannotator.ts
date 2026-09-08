@@ -19,9 +19,13 @@
 // a per-review `plannotator:review-result` listener disposed via the unsubscribe pi's
 // `EventBus.on` returns.
 //
-// Foreign handshake/decision values are contained unknown input, never invented verdicts. The
-// result listener is installed BEFORE the request is emitted (an early-decision buffer bridges
-// the handshake gap), so no status catch-up query exists.
+// BRIDGE HARDENING (fail-open by construction): the handshake/decision payloads arrive as
+// `unknown` from a foreign package — every load-bearing field is narrowed by a contained parser
+// (an adversarial getter or malformed shape degrades to the documented `unavailable`/ignored
+// arms, never a throw), and a synchronous `bus.emit` throw is contained with deterministic
+// timer cleanup. The result listener is installed BEFORE the request is emitted and buffers
+// decisions until the handshake names the `reviewId`, so a decision emitted during the
+// handshake window is never lost. The well-formed lifecycle is byte-identical.
 //
 // INERT BY DEFAULT. The shim is ALWAYS registered in index.ts but the injection fires only when
 // the resolved `[providers] plan` selection is `plannotator-plan` (read fresh per-event, same
@@ -34,7 +38,8 @@
 // gate exit all live behind the plan installer's seams; the injection's gate-active check reads
 // the persisted `perk:workflow-state.mode`, the gate's own state twin.
 //
-// EVENT ENVELOPE (pinned against `@plannotator/pi-extension@0.20.0`, `plannotator-events.ts`):
+// EVENT ENVELOPE (pinned against `@plannotator/pi-extension@0.20.0`, `plannotator-events.ts` —
+// verified unchanged through 0.26.1):
 //   request  — pi.events.emit("plannotator:request", { requestId, action: "plan-review",
 //              payload: { planContent, origin? }, respond })   // respond = in-payload callback
 //   handshake — respond({ status: "handled", result: { status: "pending", reviewId } })
@@ -132,15 +137,6 @@ export interface PlannotatorBus {
   on(channel: string, handler: (data: unknown) => void): () => void;
 }
 
-export interface PlannotatorTimers {
-  setTimeout(callback: () => void, ms: number): ReturnType<typeof setTimeout>;
-  clearTimeout(handle: ReturnType<typeof setTimeout>): void;
-}
-const defaultTimers: PlannotatorTimers = {
-  setTimeout: (callback, ms) => globalThis.setTimeout(callback, ms),
-  clearTimeout: (handle) => globalThis.clearTimeout(handle),
-};
-
 /** Plannotator's immediate `respond` handshake payload (pinned envelope, see header). */
 interface HandshakeResponse {
   status?: string;
@@ -180,8 +176,6 @@ function parseHandshakeResponse(response: unknown): HandshakeResponse {
   }
 }
 
-type Decision = { reviewId: string; approved: boolean; feedback?: string };
-
 /**
  * Narrow a foreign `plannotator:review-result` payload to the load-bearing decision fields —
  * contained: an adversarial getter/malformed shape degrades to `null` (ignored, the wait
@@ -189,7 +183,9 @@ type Decision = { reviewId: string; approved: boolean; feedback?: string };
  * verdict, so a missing/mistyped approval field makes the whole payload malformed (ignored) —
  * it must never coerce into a DENY that completes a live review.
  */
-function parseReviewDecision(data: unknown): Decision | null {
+function parseReviewDecision(
+  data: unknown,
+): { reviewId: string; approved: boolean; feedback?: string } | null {
   try {
     if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
     const record = data as Record<string, unknown>;
@@ -210,74 +206,66 @@ function parseReviewDecision(data: unknown): Decision | null {
 
 /**
  * The pure, offline-testable plan-review bridge (the ergonomic mirror of
- * `requestPlannotatorCodeReview` in plannotatorHandoff.ts): subscribe to
- * `plannotator:review-result` FIRST, emit ONE `plannotator:request` with `action: "plan-review"`,
- * await the bounded `respond` handshake, then await the human decision on the listener (no
- * timeout — the reviewer takes as long as they take), honoring a turn abort so an interrupted
- * session never leaks a wedged promise.
- *
- * Subscribe-before-emit closes the handshake gap: a decision emitted synchronously inside (or
- * right after) the `respond` callback — before the handshake promise resolves — lands in the
- * `early` buffer; once the handshake yields the `reviewId`, the buffer is scanned for the first
- * matching decision (which completes the review) and discarded. No status catch-up query is
- * needed and none is emitted. Every exit (completion, abort, handshake failure/timeout) removes
- * the listener and clears the timer.
+ * `requestPlannotatorCodeReview` in plannotatorHandoff.ts): install the PER-REVIEW
+ * `plannotator:review-result` listener FIRST, emit ONE `plannotator:request` with
+ * `action: "plan-review"`, await the bounded `respond` handshake, then await the human decision
+ * on the already-installed listener — filtered on the handshake's `reviewId` (decisions that
+ * arrive before the handshake names it are buffered, then replayed once it does) and disposed
+ * via the unsubscribe `bus.on` returns when the decision arrives or the turn aborts. Pure over
+ * the bus → unit-testable offline with a fake plannotator listener. Fail-open end to end: a
+ * synchronous `emit` throw (a throwing foreign handler) is contained with the handshake timer +
+ * abort listener cleared and the listener unsubscribed, a turn abort settles the PENDING
+ * handshake promptly (never parked on the timeout), and malformed payloads degrade per the
+ * parsers above.
  */
 export async function requestPlannotatorPlanReview(
   bus: PlannotatorBus,
   plan: string,
   signal?: AbortSignal,
-  timers: PlannotatorTimers = defaultTimers,
 ): Promise<ReviewOutcome> {
   if (signal?.aborted) return { status: "aborted" };
-
   const requestId = randomUUID();
 
-  // 1. The result listener — installed BEFORE the request goes out. Until the handshake attaches
-  //    a reviewId, decisions are buffered; afterwards a live match completes the wait.
+  // 1. Subscribe BEFORE emitting: plannotator may deliver the decision in the same tick as the
+  //    handshake (or before its `respond` returns), so the listener buffers every well-formed
+  //    decision until the handshake names the reviewId — then only that id settles the wait.
+  type Decision = NonNullable<ReturnType<typeof parseReviewDecision>>;
   let reviewId: string | null = null;
-  const early: Decision[] = [];
-  let settleDecision: ((outcome: ReviewOutcome) => void) | null = null;
-  let unsubscribe: (() => void) | undefined;
-  const dispose = (): void => {
-    const release = unsubscribe;
-    unsubscribe = undefined;
-    try {
-      release?.();
-    } catch {
-      // A throwing unsubscribe must not mask the outcome being delivered.
-    }
+  const buffered: Decision[] = [];
+  let onDecision: (decision: Decision) => void = (decision) => {
+    buffered.push(decision);
   };
+  let unsubscribe: () => void;
   try {
     unsubscribe = bus.on("plannotator:review-result", (data) => {
       const decision = parseReviewDecision(data);
       if (decision === null) return;
-      if (reviewId === null) {
-        early.push(decision);
-        return;
-      }
-      if (decision.reviewId !== reviewId || settleDecision === null) return;
-      settleDecision({ status: "completed", ...decision });
+      if (reviewId !== null && decision.reviewId !== reviewId) return;
+      onDecision(decision);
     });
   } catch {
     return { status: "unavailable", warning: "plannotator result subscription failed" };
   }
+  const completed = (decision: Decision): ReviewOutcome => ({
+    status: "completed",
+    reviewId: decision.reviewId,
+    approved: decision.approved,
+    ...(decision.feedback !== undefined ? { feedback: decision.feedback } : {}),
+  });
 
-  // 2. The bounded handshake.
-  let handshakeSettled = false;
+  // 2. Emit the request and await the immediate `respond` handshake (bounded — fail-open).
+  //    Every handshake exit — respond, timeout, emit throw, turn abort — clears the timer and
+  //    the abort listener deterministically (the promise's first settle wins; later respond
+  //    calls are inert), and every EARLY exit also disposes the result listener.
   let respondResolve: (response: HandshakeResponse | "timeout" | "aborted") => void = () => {};
   const handshake = new Promise<HandshakeResponse | "timeout" | "aborted">((resolve) => {
-    respondResolve = (response) => {
-      if (handshakeSettled) return;
-      handshakeSettled = true;
-      resolve(response);
-    };
+    respondResolve = resolve;
   });
-  const timer = timers.setTimeout(() => respondResolve("timeout"), handshakeTimeoutMs());
+  const timer = setTimeout(() => respondResolve("timeout"), handshakeTimeoutMs());
   const onHandshakeAbort = (): void => respondResolve("aborted");
   signal?.addEventListener("abort", onHandshakeAbort, { once: true });
   const settleHandshake = (): void => {
-    timers.clearTimeout(timer);
+    clearTimeout(timer);
     signal?.removeEventListener("abort", onHandshakeAbort);
   };
   try {
@@ -285,74 +273,88 @@ export async function requestPlannotatorPlanReview(
       requestId,
       action: "plan-review",
       payload: { planContent: plan, origin: "perk" },
-      respond: (response: unknown) => {
-        if (!handshakeSettled) respondResolve(parseHandshakeResponse(response));
-      },
+      respond: (response: unknown) => respondResolve(parseHandshakeResponse(response)),
     });
-  } catch {
+  } catch (error) {
+    // A synchronous throw from a foreign handler must not leak the handshake timer/abort
+    // listener or reject a fail-open path — contain it as the unavailable arm.
     settleHandshake();
-    dispose();
-    return { status: "unavailable", warning: "plannotator review request failed" };
+    unsubscribe();
+    return {
+      status: "unavailable",
+      warning: `plannotator review request failed: ${String(error)}`,
+    };
   }
   const response = await handshake;
   settleHandshake();
 
-  const fail = (outcome: ReviewOutcome): ReviewOutcome => {
-    dispose();
-    return outcome;
-  };
-  if (response === "aborted") return fail({ status: "aborted" });
+  if (response === "aborted") {
+    unsubscribe();
+    return { status: "aborted" };
+  }
   if (response === "timeout") {
-    return fail({
+    unsubscribe();
+    return {
       status: "unavailable",
       warning: "plannotator did not respond to the review request (handshake timeout)",
-    });
+    };
   }
   if (response?.status !== "handled") {
+    unsubscribe();
     const detail = response?.error ? `: ${response.error}` : "";
-    return fail({
+    return {
       status: "unavailable",
       warning: `plannotator reported ${response?.status ?? "an invalid response"}${detail}`,
-    });
+    };
   }
-  const id = response.result?.reviewId;
-  if (response.result?.status !== "pending" || typeof id !== "string" || !id.trim()) {
-    return fail({
+  const pendingId = response.result?.reviewId;
+  if (response.result?.status !== "pending" || typeof pendingId !== "string" || !pendingId.trim()) {
+    unsubscribe();
+    return {
       status: "unavailable",
       warning: "plannotator handshake returned no pending reviewId",
-    });
+    };
   }
-  // A usable ID wins the handshake race: preserve pending even if abort followed respond.
-  if (signal?.aborted) return fail({ status: "aborted" });
+  reviewId = pendingId;
 
-  // 3. Attach the id: an early decision for THIS review completes immediately; the rest of the
-  //    buffer (other reviews' decisions) is discarded.
-  reviewId = id;
-  const buffered = early.find((decision) => decision.reviewId === id);
-  early.length = 0;
-  if (buffered !== undefined) return fail({ status: "completed", ...buffered });
+  // 3. The handshake named the review: a buffered decision for it settles immediately; the rest
+  //    of the buffer (foreign ids) is dropped.
+  const early = buffered.find((decision) => decision.reviewId === pendingId);
+  buffered.length = 0;
+  if (early !== undefined) {
+    unsubscribe();
+    return completed(early);
+  }
 
-  // 4. Await the live decision (or the abort). Either exit disposes the listener.
+  // `addEventListener("abort", …)` on an already-aborted signal never fires, so re-check before
+  // parking on the decision wait.
+  if (signal?.aborted) {
+    unsubscribe();
+    return { status: "aborted" };
+  }
+
+  // 4. Await the human decision (no timeout — the reviewer takes as long as they take), but
+  //    honor a turn abort so an interrupted session never leaks a wedged promise. Either exit
+  //    disposes the result listener via the unsubscribe.
   return await new Promise<ReviewOutcome>((resolve) => {
     let settled = false;
     const finish = (outcome: ReviewOutcome): void => {
       if (settled) return;
       settled = true;
-      settleDecision = null;
-      dispose();
+      unsubscribe();
       signal?.removeEventListener("abort", onAbort);
       resolve(outcome);
     };
     const onAbort = (): void => finish({ status: "aborted" });
-    settleDecision = finish;
+    onDecision = (decision) => finish(completed(decision));
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
 /**
  * Create the plannotator bridge over an event bus — the thin structural slice
- * (`{ review(plan, signal) }`) injected into the review door; the body lives in
- * `requestPlannotatorPlanReview`.
+ * (`{ review(plan, signal) }`) that the plan installer injects into the review door; the body
+ * lives in `requestPlannotatorPlanReview`.
  */
 export function createPlannotatorBridge(bus: PlannotatorBus): {
   review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome>;

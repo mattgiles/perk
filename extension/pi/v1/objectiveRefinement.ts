@@ -41,11 +41,11 @@ import {
 } from "../../authoring/refinement/prose.ts";
 import {
   completeRefinementReview,
+  type RefinementDraftReviewer,
   type RefinementReviewOutcome,
   type ReviewRefinementResult,
 } from "../../authoring/refinement/review.ts";
 import {
-  type RefinementApprovalSaveOutcome,
   type RefinementBackend,
   type RefinementBackendSaveResult,
   type ReviewedRefinementPair,
@@ -84,24 +84,10 @@ import {
 } from "../../substrate/workflowState.ts";
 import { report } from "../../surfaces/report.ts";
 import { installInjectedContext } from "./contextInjection.ts";
-import {
-  checkDraftReviewDecision,
-  type DecisionCheck,
-  type DraftReviewSlot,
-  destinationChangedResult,
-  type OpenDraftReview,
-  openRefusedResult,
-  recordSaveOutcome,
-  saveUnconfirmedResult,
-  staleApprovalResult,
-  supersededReviewResult,
-  withDraftChangedNote,
-} from "./draftReview.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import { isPlannotatorPlanSelected } from "./providers/selection.ts";
 import {
   approvedSubjectSaveResult,
-  type DraftReviewBridge,
   type ReviewOutcome,
   type ReviewSubject,
   runFirstPartyReview,
@@ -110,6 +96,7 @@ import {
   type ToolResult,
   verdictsFor,
 } from "./review.ts";
+import { type PlanReviewBridge, staleReviewResult } from "./reviewRecord.ts";
 
 const SCOPE_REFINE = "objective-refine";
 const SCOPE_SAVE = "objective-refinement-save";
@@ -588,7 +575,6 @@ export function importRefinementContextOnClaim(
 export function installObjectiveRefinementBindings(
   pi: ExtensionAPI,
   gating: ToolGating,
-  reviews: DraftReviewSlot,
   contextPolicy: ContextPolicyInputs,
 ): void {
   // The refinement context is selected by the shared authoring-context policy's dedicated
@@ -760,9 +746,10 @@ export function installObjectiveRefinementBindings(
         );
         return;
       }
-      // Recheck the same run/admission against LIVE state, persist the exact raw context, then
-      // the stage-only entry. A new grounding pass rebinds the reviewed context digest, so any
-      // open review's approval is refused by the reviewed-bytes guard (`draftReview.ts`).
+      // Recheck the same run/admission against LIVE state (the cold-door fetch awaited), persist
+      // the exact raw context, then the stage-only entry. A new grounding pass changes the
+      // reviewed pair, so a review approved over the old context refuses at save time
+      // (`refinementApprovalSave`'s reviewed-pair compare).
       type Entered =
         | { status: "entered" | "unchanged"; path: string; read: RefinementContextRead }
         | { status: "refused"; problem: string };
@@ -845,16 +832,14 @@ export function installObjectiveRefinementBindings(
         warn("the model is running (session_busy) — wait for the turn to finish, then re-run");
         return;
       }
-      // The command IS the human authorization — the deliberate retry the unconfirmed-save latch
-      // points at, so it never consults the latch (but reports into it). The shared seam
-      // strict-resumes both artifacts and saves the EXACT draft bytes; the gate exits only on a
-      // verified save.
+      // The command IS the human authorization: the shared seam resumes both artifacts and
+      // saves the EXACT current draft bytes (no `reviewed` pair — the human is saving what is
+      // there now); the gate exits only on a verified save.
       const outcome = await refinementApprovalSave({
         session: openSession(pi, ctx),
         backend: coldDoorRefinementBackend(pi, ctx),
         gate: gateFor(gating, ctx),
       });
-      recordRefinementSaveOutcome(reviews, outcome);
       switch (outcome.status) {
         case "no-draft":
           report(
@@ -882,10 +867,6 @@ export function installObjectiveRefinementBindings(
             `the working refinement draft is invalid: ${outcome.problem} — nothing saved. ` +
               "Rewrite it with objective_refinement_draft, then re-run /objective-refinement-save.",
           );
-          return;
-        case "source-changed":
-          // Unreachable without a `reviewed` pair (the manual save reviews nothing) — kept total.
-          report(ctx, SCOPE_SAVE, "error", "the refinement pair changed — nothing saved; re-run");
           return;
         case "saved": {
           const result = refinementSaveResultOf(ctx, outcome.save);
@@ -915,32 +896,6 @@ export function installObjectiveRefinementBindings(
       }
     },
   });
-}
-
-/** Report a refinement approval-save outcome into the unconfirmed-save latch. */
-function recordRefinementSaveOutcome(
-  slot: DraftReviewSlot,
-  outcome: RefinementApprovalSaveOutcome,
-): void {
-  switch (outcome.status) {
-    case "saved":
-      recordSaveOutcome(slot, "refinement", { confirmed: true });
-      return;
-    case "save-failed":
-      recordSaveOutcome(slot, "refinement", {
-        confirmed: false,
-        detail: `${outcome.save.message} (write attempted: ${
-          outcome.save.writeAttempted === null ? "unknown" : String(outcome.save.writeAttempted)
-        })`,
-      });
-      return;
-    case "no-draft":
-    case "no-context":
-    case "refused-draft":
-    case "source-changed":
-      // Nothing reached the backend — no attempt to confirm.
-      return;
-  }
 }
 
 // ------------------------------------------------------------------------ the review arm
@@ -1029,53 +984,21 @@ function refinementOutcomeOf(outcome: ReviewOutcome): RefinementReviewOutcome {
   }
 }
 
-/**
- * The first-party reviewer: the in-TUI editor review, VIEW-ONLY (3 verdicts). Returns the door
- * vocabulary (`ReviewOutcome`) so both arms share one ladder + completion path.
- */
-async function firstPartyRefinementReview(
-  ctx: ExtensionContext,
-  rendered: string,
-  signal: AbortSignal | undefined,
-): Promise<ReviewOutcome> {
-  const fp = await runFirstPartyReview({
-    ui: ctx.ui,
-    plan: rendered,
-    writeDraft: () => true,
-    signal,
-    editorTitle: REFINEMENT_REVIEW_EDITOR_TITLE,
-    verdicts: verdictsFor(REFINEMENT_SUBJECT),
-    viewOnly: true,
-  });
-  return fp.outcome;
-}
-
-/** Whether a completed bridge outcome's effect is a save (an approval without Direct Edits). */
-function refinementEffectOf(
-  outcome: Extract<ReviewOutcome, { status: "completed" }>,
-): "save" | "revision" {
-  return outcome.approved &&
-    !(outcome.feedback !== undefined && hasDirectEditsHeading(outcome.feedback))
-    ? "save"
-    : "revision";
-}
-
-/** Render a non-`proceed` ladder verdict as the refinement arm's tool result (nothing saved). */
-function refinementGuardResult(
-  check: Exclude<DecisionCheck, { kind: "proceed" }>,
-  review: OpenDraftReview,
-  feedback: string | undefined,
-): ToolResult {
-  switch (check.kind) {
-    case "superseded":
-      return supersededReviewResult("refinement");
-    case "save-unconfirmed":
-      return saveUnconfirmedResult("refinement", review.runId, check.detail, feedback);
-    case "stale-approval":
-      return staleApprovalResult("refinement", check.reviewedDigest, feedback);
-    case "destination-changed":
-      return destinationChangedResult("refinement", check.changed, feedback);
-  }
+function firstPartyRefinementReviewer(ctx: ExtensionContext): RefinementDraftReviewer {
+  return {
+    async review(rendered, signal) {
+      const fp = await runFirstPartyReview({
+        ui: ctx.ui,
+        plan: rendered,
+        writeDraft: () => true,
+        signal,
+        editorTitle: REFINEMENT_REVIEW_EDITOR_TITLE,
+        verdicts: verdictsFor(REFINEMENT_SUBJECT),
+        viewOnly: true,
+      });
+      return refinementOutcomeOf(fp.outcome);
+    },
+  };
 }
 
 function completedOutcome(
@@ -1092,55 +1015,78 @@ function completedOutcome(
 
 /**
  * The `plan_review` refinement arm: headless soft-skip; the validated (draft, context) PAIR as
- * the sole review source (a well-typed `plan` param is ignored upstream); the slot open with the
- * exact pair (`raw` = the draft bytes, `contextDigest` = the grounding context's digest — the
- * reviewed-bytes guard compares BOTH, so a re-prepared context also refuses the approval);
- * reviewer dispatch (plannotator bridge or the first-party view-only editor); the decision
- * ladder; the shared completion. An approval carrying Direct Edits returns the NON-terminating
- * revise round with nothing saved; a plain approval re-resumes the pair through
- * `refinementApprovalSave` with the reviewed pair as its content guard (gate released only after
- * the verified save).
+ * the sole review source (a well-typed `plan` param is ignored upstream); reviewer dispatch
+ * (plannotator bridge or the first-party view-only editor); outcome mapping through the shared
+ * subject machinery. An approval carrying Direct Edits returns the NON-terminating revise round
+ * with nothing saved; a plain approval re-resumes the pair through `refinementApprovalSave`
+ * (gate released only after the verified save).
+ *
+ * Both paths capture the reviewed pair (draft bytes + context digest) BEFORE display and pass
+ * it to the save seam, which compares it against the re-resumed pair — a replacement written
+ * during the wait renders `approvedSourceChanged` with nothing saved. The Plannotator path
+ * additionally opens a current-review record with a `null` source (the seam owns the byte
+ * compare) so a superseded decision is ignored loudly and a plain approval is deduped and
+ * destination-checked through the record.
  */
 export async function runRefinementReviewV1(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
-  bridge: DraftReviewBridge,
-  slot: DraftReviewSlot,
+  bridge: PlanReviewBridge,
   signal?: AbortSignal,
 ): Promise<ToolResult> {
   if (!ctx.hasUI) return skipResult();
   const sig = signal ?? ctx.signal;
-  if (sig?.aborted) return subjectReviewOutcomeResult(REFINEMENT_SUBJECT, { status: "aborted" });
   const session = openSession(pi, ctx);
+  if (sig?.aborted) return subjectReviewOutcomeResult(REFINEMENT_SUBJECT, { status: "aborted" });
   const resumed = resumeRefinementDraft(session);
   if (resumed.kind === "absent") return noRefinementDraftResult();
   if (resumed.kind === "no-context") return noRefinementContextResult();
   if (resumed.kind === "refused" || resumed.kind === "mismatch")
     return renderRefinementReviewResult(ctx, { status: "refusedDraft", problem: resumed.problem });
+  // Capture what the human will judge BEFORE display: the exact pair the save seam compares.
   const reviewed = reviewedPairOf(resumed.pair);
   const rendered = renderRefinementDraft(resumed.pair);
-  const plannotator = isPlannotatorPlanSelected(ctx.cwd);
-  const opened = slot.open(ctx, {
-    subject: "refinement",
-    source: plannotator ? "artifact" : "editor",
-    raw: reviewed.draftRaw,
-    markdown: rendered,
-    contextDigest: reviewed.contextDigest,
-  });
-  if (!opened.ok) return openRefusedResult(opened);
-  const review = opened.review;
-  const outcome = plannotator
-    ? await bridge.review(rendered, sig)
-    : await firstPartyRefinementReview(ctx, rendered, sig);
+  if (isPlannotatorPlanSelected(ctx.cwd)) {
+    const review = bridge.current.open(ctx, null);
+    try {
+      const outcome = await bridge.review(rendered, sig);
+      if (sig?.aborted)
+        return subjectReviewOutcomeResult(REFINEMENT_SUBJECT, { status: "aborted" });
+      if (!bridge.current.isCurrent(review)) {
+        return staleReviewResult(
+          REFINEMENT_SUBJECT,
+          "superseded",
+          outcome.status === "completed" ? outcome : undefined,
+        );
+      }
+      if (outcome.status !== "completed")
+        return subjectReviewOutcomeResult(REFINEMENT_SUBJECT, outcome);
+      const plainApproval =
+        outcome.approved &&
+        !(outcome.feedback !== undefined && hasDirectEditsHeading(outcome.feedback));
+      if (plainApproval) {
+        const gate = bridge.current.approve(ctx, review);
+        if (!gate.ok) return staleReviewResult(REFINEMENT_SUBJECT, gate.reason, outcome);
+      }
+      return completeRefinementReviewV1(pi, ctx, gating, outcome, reviewed);
+    } finally {
+      bridge.current.close(review);
+    }
+  }
+  const outcome = await firstPartyRefinementReviewer(ctx).review(rendered, sig);
+  // The abort checkpoint: a turn interrupted while the reviewer ran must produce NO effect.
   if (sig?.aborted) return subjectReviewOutcomeResult(REFINEMENT_SUBJECT, { status: "aborted" });
-  if (outcome.status !== "completed")
-    return subjectReviewOutcomeResult(REFINEMENT_SUBJECT, outcome);
-  const check = checkDraftReviewDecision(slot, ctx, review, refinementEffectOf(outcome));
-  if (check.kind !== "proceed") return refinementGuardResult(check, review, outcome.feedback);
-  return withDraftChangedNote(
-    await completeRefinementReviewV1(pi, ctx, gating, slot, outcome, reviewed),
-    check.draftChanged,
+  return renderRefinementReviewResult(
+    ctx,
+    await completeRefinementReview(outcome, () =>
+      refinementApprovalSave({
+        session,
+        backend: coldDoorRefinementBackend(pi, ctx),
+        gate: gateFor(gating, ctx),
+        reviewed,
+      }),
+    ),
   );
 }
 
@@ -1258,33 +1204,29 @@ export function renderRefinementReviewResult(
 }
 
 /**
- * The refinement completion shared by the tool arm and any door: a completed outcome → the
- * feature completion (an approval re-resumes the pair through `refinementApprovalSave`, the
- * `reviewed` pair its content guard — a replacement written during the wait is the
- * `approvedSourceChanged` arm; Direct Edits is the no-save revise round) → the latch record →
- * the rendered tool result. A failed worker surfaces as the feature's own `approvedSaveFailed`
- * (its typed diagnostics ride the rendered save message).
+ * The Plannotator completion: the feature's subject policy (a Direct-Edits approval is the
+ * revise round; a plain approval saves through `refinementApprovalSave` against the `reviewed`
+ * pair captured before display) rendered as the tool result. Callers gate a plain approval on
+ * the current-review record BEFORE entering here.
  */
 export async function completeRefinementReviewV1(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
-  slot: DraftReviewSlot,
   outcome: Extract<ReviewOutcome, { status: "completed" }>,
   reviewed: ReviewedRefinementPair,
 ): Promise<ToolResult> {
-  const result = await completeRefinementReview(refinementOutcomeOf(outcome), () =>
-    refinementApprovalSave({
-      session: openSession(pi, ctx),
-      backend: coldDoorRefinementBackend(pi, ctx),
-      gate: gateFor(gating, ctx),
-      reviewed,
-    }),
+  return renderRefinementReviewResult(
+    ctx,
+    await completeRefinementReview(refinementOutcomeOf(outcome), () =>
+      refinementApprovalSave({
+        session: openSession(pi, ctx),
+        backend: coldDoorRefinementBackend(pi, ctx),
+        gate: gateFor(gating, ctx),
+        reviewed,
+      }),
+    ),
   );
-  // Denials, Direct Edits and the no-draft arm never reach the backend — nothing to confirm.
-  if (result.status === "approvedSaved" || result.status === "approvedSaveFailed")
-    recordRefinementSaveOutcome(slot, result.save);
-  return renderRefinementReviewResult(ctx, result);
 }
 
 /** The refusal text the plan-graph surfaces render inside a refinement session. */

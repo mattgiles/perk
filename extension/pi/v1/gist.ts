@@ -35,11 +35,12 @@ import {
 } from "../../authoring/gist/prose.ts";
 import {
   completeGistReview,
+  type GistDraftReviewer,
   type GistReviewOutcome,
   type ReviewGistResult,
+  reviewGist,
 } from "../../authoring/gist/review.ts";
 import {
-  type GistApprovalSaveOutcome,
   type GistBackend,
   gistApprovalSave,
   type SaveGistOutcome,
@@ -66,25 +67,11 @@ import { paramsOf, stringParam } from "../../substrate/toolParams.ts";
 import { type BranchEntry, branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
 import { installInjectedContext } from "./contextInjection.ts";
-import {
-  checkDraftReviewDecision,
-  type DecisionCheck,
-  type DraftReviewSlot,
-  destinationChangedResult,
-  type OpenDraftReview,
-  openRefusedResult,
-  recordSaveOutcome,
-  saveUnconfirmedResult,
-  staleApprovalResult,
-  supersededReviewResult,
-  withDraftChangedNote,
-} from "./draftReview.ts";
 import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import { isPlannotatorPlanSelected } from "./providers/selection.ts";
 import {
   approvedSubjectSaveResult,
-  type DraftReviewBridge,
   type ReviewOutcome,
   type ReviewSubject,
   runFirstPartyReview,
@@ -93,6 +80,7 @@ import {
   type ToolResult,
   verdictsFor,
 } from "./review.ts";
+import { type PlanReviewBridge, staleReviewResult } from "./reviewRecord.ts";
 
 // ------------------------------------------------------------------- the tool-boundary decode
 
@@ -264,7 +252,6 @@ function isGistAuthoring(
 export function installGistBindings(
   pi: ExtensionAPI,
   gating: ToolGating,
-  reviews: DraftReviewSlot,
   contextPolicy: ContextPolicyInputs,
 ): void {
   // The gist-authoring context injection (display:false), keyed off (read-only gate AND stage
@@ -409,14 +396,9 @@ export function installGistBindings(
           "gist-save",
           "gist_save",
         )(refinementStageRefusal("gist_save"), "wrong_stage");
-      // The manual save never consults the latch (it IS the deliberate retry) but reports into it.
       const save = await saveGist(decoded, {
         backend: coldDoorGistBackend(pi, ctx),
         runId: openSession(pi, ctx).runId,
-      });
-      recordSaveOutcome(reviews, "gist", {
-        confirmed: save.status === "saved",
-        ...(save.status === "failed" ? { detail: save.message } : {}),
       });
       return gistSaveResultOf(ctx, save);
     },
@@ -443,7 +425,6 @@ export function installGistBindings(
         { session, backend: coldDoorGistBackend(pi, ctx), gate: gateFor(gating, ctx) },
         { title },
       );
-      recordGistSaveOutcome(reviews, outcome);
       if (outcome.status === "refused-draft") {
         // Fail-closed stop: the command's own precondition is a VALID draft — no gate exit,
         // no driven turn (those fallbacks are for draft-LESS sessions; driving a fresh
@@ -474,22 +455,6 @@ export function installGistBindings(
       pi.sendUserMessage(gistSaveGuidance(title) + bindingSuffix(ctx.cwd, "stage:gist-author"));
     },
   });
-}
-
-/** Report a gist approval-save outcome into the unconfirmed-save latch. */
-function recordGistSaveOutcome(slot: DraftReviewSlot, outcome: GistApprovalSaveOutcome): void {
-  switch (outcome.status) {
-    case "saved":
-      recordSaveOutcome(slot, "gist", { confirmed: true });
-      return;
-    case "save-failed":
-      recordSaveOutcome(slot, "gist", { confirmed: false, detail: outcome.save.message });
-      return;
-    case "no-draft":
-    case "refused-draft":
-      // Nothing reached the backend — no attempt to confirm.
-      return;
-  }
 }
 
 // ------------------------------------------------------------------------ the review arm
@@ -564,53 +529,22 @@ function gistOutcomeOf(outcome: ReviewOutcome): GistReviewOutcome {
   }
 }
 
-/**
- * The first-party reviewer: the in-TUI editor review, VIEW-ONLY (3 verdicts). Returns the door
- * vocabulary (`ReviewOutcome`) so both arms share one ladder + completion path.
- */
-async function firstPartyGistReview(
-  ctx: ExtensionContext,
-  rendered: string,
-  signal: AbortSignal | undefined,
-): Promise<ReviewOutcome> {
-  const fp = await runFirstPartyReview({
-    ui: ctx.ui,
-    plan: rendered,
-    writeDraft: () => true, // unreachable under viewOnly — the branch is skipped
-    signal,
-    editorTitle: GIST_REVIEW_EDITOR_TITLE,
-    verdicts: verdictsFor(GIST_SUBJECT),
-    viewOnly: true,
-  });
-  return fp.outcome;
-}
-
-/** Whether a completed bridge outcome's effect is a save (an approval without Direct Edits). */
-function gistEffectOf(
-  outcome: Extract<ReviewOutcome, { status: "completed" }>,
-): "save" | "revision" {
-  return outcome.approved &&
-    !(outcome.feedback !== undefined && hasDirectEditsHeading(outcome.feedback))
-    ? "save"
-    : "revision";
-}
-
-/** Render a non-`proceed` ladder verdict as the gist arm's tool result (nothing saved). */
-function gistGuardResult(
-  check: Exclude<DecisionCheck, { kind: "proceed" }>,
-  review: OpenDraftReview,
-  feedback: string | undefined,
-): ToolResult {
-  switch (check.kind) {
-    case "superseded":
-      return supersededReviewResult("gist");
-    case "save-unconfirmed":
-      return saveUnconfirmedResult("gist", review.runId, check.detail, feedback);
-    case "stale-approval":
-      return staleApprovalResult("gist", check.reviewedDigest, feedback);
-    case "destination-changed":
-      return destinationChangedResult("gist", check.changed, feedback);
-  }
+/** The first-party reviewer adapter: the in-TUI editor review, VIEW-ONLY (3 verdicts). */
+function firstPartyGistReviewer(ctx: ExtensionContext): GistDraftReviewer {
+  return {
+    async review(rendered, signal) {
+      const fp = await runFirstPartyReview({
+        ui: ctx.ui,
+        plan: rendered,
+        writeDraft: () => true, // unreachable under viewOnly — the branch is skipped
+        signal,
+        editorTitle: GIST_REVIEW_EDITOR_TITLE,
+        verdicts: verdictsFor(GIST_SUBJECT),
+        viewOnly: true,
+      });
+      return gistOutcomeOf(fp.outcome);
+    },
+  };
 }
 
 /** Rebuild the door's completed outcome from the arm result (the mappers consume it). */
@@ -627,56 +561,75 @@ function completedOutcome(
 }
 
 /**
- * The `plan_review` gist arm: headless soft-skip, the validated draft artifact as the SOLE
- * review source (absent identity or absent draft → the `no_gist_draft` skip), the slot open
- * (raw artifact bytes + the rendered markdown), reviewer dispatch (plannotator bridge or
- * first-party view-only editor), the decision ladder on a completed verdict, and the shared
- * completion — byte-stable with the review door's results. An approval carrying Direct Edits
- * returns the NON-terminating revise round with NOTHING saved; a plain approval re-reads the
- * artifact through `gistApprovalSave` (gate released only after the verified save).
+ * The injected `plan_review` gist arm (the `GistReviewArm` shape): headless soft-skip, the
+ * validated draft artifact as the SOLE review source (absent identity or absent draft → the
+ * `no_gist_draft` skip), reviewer dispatch (plannotator bridge or first-party view-only
+ * editor), and outcome mapping through the shared subject machinery — byte-stable with the
+ * review door's results. An approval carrying Direct Edits returns the NON-terminating revise
+ * round with NOTHING saved; a plain approval re-reads the artifact through `gistApprovalSave`
+ * (gate released only after the verified save).
  */
 export async function runGistReviewV1(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
-  bridge: DraftReviewBridge,
-  slot: DraftReviewSlot,
+  bridge: PlanReviewBridge,
   signal?: AbortSignal,
 ): Promise<ToolResult> {
   // Headless → soft skip (fail-open; never wedges CI/supervisor runs on an interactive UI).
   if (!ctx.hasUI) return skipResult();
   const sig = signal ?? ctx.signal;
-  if (sig?.aborted) return subjectReviewOutcomeResult(GIST_SUBJECT, { status: "aborted" });
   // The session always opens (identity-optional): an identity-less session reads the draft
-  // `absent` → the same rendered redirect as before.
+  // `absent`, so `reviewGist` classifies `noDraft` — the same rendered redirect as before.
   const session = openSession(pi, ctx);
-  const resumed = resumeGistDraft(session);
-  if (resumed.kind === "absent") return noGistDraftResult();
-  if (resumed.kind === "refused")
-    return renderGistReviewResult(ctx, { status: "refusedDraft", problem: resumed.problem });
-  const raw = session.readArtifact(GIST_DRAFT_ARTIFACT);
-  if (raw.status !== "found") return noGistDraftResult();
-  const rendered = renderGistDraft(resumed.draft);
-  const plannotator = isPlannotatorPlanSelected(ctx.cwd);
-  const opened = slot.open(ctx, {
-    subject: "gist",
-    source: plannotator ? "artifact" : "editor",
-    raw: raw.content,
-    markdown: rendered,
-  });
-  if (!opened.ok) return openRefusedResult(opened);
-  const review = opened.review;
-  const outcome = plannotator
-    ? await bridge.review(rendered, sig)
-    : await firstPartyGistReview(ctx, rendered, sig);
-  if (sig?.aborted) return subjectReviewOutcomeResult(GIST_SUBJECT, { status: "aborted" });
-  if (outcome.status !== "completed") return subjectReviewOutcomeResult(GIST_SUBJECT, outcome);
-  const check = checkDraftReviewDecision(slot, ctx, review, gistEffectOf(outcome));
-  if (check.kind !== "proceed") return gistGuardResult(check, review, outcome.feedback);
-  return withDraftChangedNote(
-    await completeGistReviewV1(pi, ctx, gating, slot, outcome),
-    check.draftChanged,
+  if (isPlannotatorPlanSelected(ctx.cwd)) {
+    if (sig?.aborted) return subjectReviewOutcomeResult(GIST_SUBJECT, { status: "aborted" });
+    // The record's source is the raw artifact read beside the resume (the approve gate re-reads
+    // and compares those bytes); the rendered draft is what the browser shows.
+    const resumed = resumeGistDraft(session);
+    if (resumed.kind === "absent") return noGistDraftResult();
+    if (resumed.kind === "refused")
+      return renderGistReviewResult(ctx, { status: "refusedDraft", problem: resumed.problem });
+    const raw = session.readArtifact(GIST_DRAFT_ARTIFACT);
+    const review = bridge.current.open(
+      ctx,
+      raw.status === "found" ? { name: GIST_DRAFT_ARTIFACT, raw: raw.content } : null,
+    );
+    try {
+      const outcome = await bridge.review(renderGistDraft(resumed.draft), sig);
+      if (sig?.aborted) return subjectReviewOutcomeResult(GIST_SUBJECT, { status: "aborted" });
+      if (!bridge.current.isCurrent(review)) {
+        return staleReviewResult(
+          GIST_SUBJECT,
+          "superseded",
+          outcome.status === "completed" ? outcome : undefined,
+        );
+      }
+      if (outcome.status !== "completed") return subjectReviewOutcomeResult(GIST_SUBJECT, outcome);
+      // A plain approval saves and is gated on the record; a Direct-Edits approval is the
+      // model-mediated revise round (nothing saved — no gate).
+      const plainApproval =
+        outcome.approved &&
+        !(outcome.feedback !== undefined && hasDirectEditsHeading(outcome.feedback));
+      if (plainApproval) {
+        const gate = bridge.current.approve(ctx, review);
+        if (!gate.ok) return staleReviewResult(GIST_SUBJECT, gate.reason, outcome);
+      }
+      return completeGistReviewV1(pi, ctx, gating, outcome);
+    } finally {
+      bridge.current.close(review);
+    }
+  }
+  const result = await reviewGist(
+    {
+      session,
+      reviewer: firstPartyGistReviewer(ctx),
+      backend: coldDoorGistBackend(pi, ctx),
+      gate: gateFor(gating, ctx),
+    },
+    sig,
   );
+  return renderGistReviewResult(ctx, result);
 }
 
 export function renderGistReviewResult(
@@ -771,35 +724,24 @@ export function renderGistReviewResult(
 }
 
 /**
- * The gist completion shared by both tool arms: a completed outcome → the feature completion
- * (an approval re-reads the artifact through `gistApprovalSave`; Direct Edits is the no-save
- * revise round) → the latch record → the rendered tool result. The caller has already run the
- * decision ladder.
+ * The Plannotator completion: the feature's subject policy (a Direct-Edits approval is the
+ * revise round; a plain approval saves through `gistApprovalSave`) rendered as the tool result.
+ * Callers gate a plain approval on the current-review record BEFORE entering here.
  */
 export async function completeGistReviewV1(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   gating: ToolGating,
-  slot: DraftReviewSlot,
   outcome: Extract<ReviewOutcome, { status: "completed" }>,
 ): Promise<ToolResult> {
-  const result = await completeGistReview(gistOutcomeOf(outcome), () =>
-    gistApprovalSave({
-      session: openSession(pi, ctx),
-      backend: coldDoorGistBackend(pi, ctx),
-      gate: gateFor(gating, ctx),
-    }),
+  return renderGistReviewResult(
+    ctx,
+    await completeGistReview(gistOutcomeOf(outcome), () =>
+      gistApprovalSave({
+        session: openSession(pi, ctx),
+        backend: coldDoorGistBackend(pi, ctx),
+        gate: gateFor(gating, ctx),
+      }),
+    ),
   );
-  switch (result.status) {
-    case "approvedSaved":
-      recordSaveOutcome(slot, "gist", { confirmed: true });
-      break;
-    case "approvedSaveFailed":
-      recordSaveOutcome(slot, "gist", { confirmed: false, detail: result.save.save.message });
-      break;
-    default:
-      // Denials, Direct Edits, the no-draft and refused-draft arms never reach the backend.
-      break;
-  }
-  return renderGistReviewResult(ctx, result);
 }
