@@ -2,11 +2,14 @@ import json
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from pydantic import AliasChoices, Field
 
 from perk.boundary import LenientParseModel, translate_validation_errors
 from perk.github import _exec
+from perk.substrate import git
+from perk.substrate.git import GitError
 
 # ===========================================================================
 # Review-feedback ops (the `/address` loop; contracts.md §8.4).
@@ -415,11 +418,24 @@ def resolve_review_threads(
 # ===========================================================================
 
 
+# Where a review diff was rendered: ``"github"`` is GitHub's diff media type (the default);
+# ``"local-git"`` is the local merge-base diff (``git.pr_merge_base_diff``) the gateway falls
+# back to when GitHub refuses the diff as too large (HTTP 406 ``too_large`` above 20,000 lines /
+# 300 files) or when a caller asks for it (`perk pr review-context --local`).
+type DiffSource = Literal["github", "local-git"]
+
+# Why a local diff was rendered — carried into every diagnostic so a forced ``--local`` failure
+# never claims an HTTP 406.
+type LocalDiffReason = Literal["too-large", "forced"]
+
+
 @dataclass(frozen=True)
 class PrReviewContext:
     """The read-only context a `/pr-review` child needs to review the active PR.
 
-    ``plan_body`` is the materialized plan markdown (or ``None`` when unavailable)."""
+    ``plan_body`` is the materialized plan markdown (or ``None`` when unavailable).
+    ``diff_source`` records where ``diff`` was rendered (trailing, defaulted: every existing
+    constructor stays valid)."""
 
     pr_number: int
     base_ref: str
@@ -428,6 +444,7 @@ class PrReviewContext:
     body: str
     diff: str
     plan_body: str | None
+    diff_source: DiffSource = "github"
 
 
 class OwnPrReviewError(_exec.GitHubError):
@@ -466,14 +483,78 @@ class ReviewPostResult:
     error: str | None = None
 
 
+def _is_diff_too_large(proc: subprocess.CompletedProcess[str]) -> bool:
+    """Did a failed ``gh pr diff`` report GitHub's diff-size refusal (HTTP 406)?
+
+    GitHub's message differs between the line cap (``Sorry, the diff exceeded the maximum
+    number of lines (20000)``) and the file cap (``…maximum number of files (300)``);
+    ``too_large`` is the durable ``PullRequest.diff too_large`` code gh prints after it. The
+    live-observed shape does not match ``_exec._is_not_found``, but callers evaluate this check
+    BEFORE any not-found fold regardless."""
+    haystack = (proc.stderr + proc.stdout).lower()
+    return "too_large" in haystack or "exceeded the maximum number of" in haystack
+
+
+def _local_pr_diff(
+    *, pr_number: int, repo_root: Path, base_ref: str | None, reason: LocalDiffReason
+) -> str:
+    """The local merge-base diff arm of both ``gh pr diff`` readers (``git.pr_merge_base_diff``).
+
+    ``reason`` keeps every diagnostic truthful: a forced ``--local`` never claims a 406. A
+    missing base branch or a git failure is a ``GitHubError`` naming the actual trigger, so
+    every existing ``except GitHubError`` consumer keeps working unchanged."""
+    cause = (
+        "GitHub refused the diff as too large (HTTP 406 too_large)"
+        if reason == "too-large"
+        else "a local diff was requested (--local)"
+    )
+    if not base_ref:
+        raise _exec.GitHubError(
+            f"failed to read the diff for PR #{pr_number}: {cause}, and the PR payload carries "
+            "no base branch for the local merge-base diff"
+        )
+    try:
+        return git.pr_merge_base_diff(repo_root, pr_number=pr_number, base_ref=base_ref)
+    except GitError as exc:
+        raise _exec.GitHubError(
+            f"failed to read the diff for PR #{pr_number}: {cause}, and the local merge-base "
+            f"diff failed: {exc}"
+        ) from exc
+
+
+def _pr_base_ref(*, pr_number: int, repo_root: Path) -> str | None:
+    """The PR's base branch name (``base.ref``), or ``None`` when the payload lacks one — the
+    one extra read ``get_pr_diff``'s fallback needs (``get_pr_review_context`` already has the
+    PR payload in hand)."""
+    data = _exec._run_json(
+        ["api", f"repos/{{owner}}/{{repo}}/pulls/{pr_number}", "--jq", "{base: .base.ref}"],
+        what=f"failed to read PR #{pr_number}",
+        source=f"`gh api pulls/{pr_number}`",
+        cwd=repo_root,
+        default="{}",
+    )
+    return _exec._opt_str(data.get("base")) if isinstance(data, dict) else None
+
+
 def get_pr_review_context(
-    *, pr_number: int, branch: str, repo_root: Path, plan_body: str | None
+    *,
+    pr_number: int,
+    branch: str,
+    repo_root: Path,
+    plan_body: str | None,
+    local_diff: bool = False,
 ) -> PrReviewContext:
     """Gather the active PR's review context (diff + PR text + plan body). Read-only; raises
     ``GitHubError`` on an infra failure. ``branch`` is the head ref (already resolved by the
     caller). ``plan_body`` is resolved backend-neutrally by the consumer (the cache mirror, else the
     backend's ``get_plan_body``) and passed straight through — the gateway never reads plan/issue
-    state."""
+    state.
+
+    The diff is GitHub's diff media type (``gh pr diff``) by default; on GitHub's 406
+    ``too_large`` refusal, or when ``local_diff`` is set (the CLI's ``--local``), it is rendered
+    locally via ``git.pr_merge_base_diff`` and stamped ``diff_source="local-git"``. Any other
+    ``gh pr diff`` failure raises exactly as before. PR title/body/base/head are always GitHub
+    reads."""
     data = _exec._run_json(
         [
             "api",
@@ -489,9 +570,29 @@ def get_pr_review_context(
     if not isinstance(data, dict):
         raise _exec.GitHubError(f"unexpected PR payload: {data!r}")
 
-    diff_proc = _exec._run(["pr", "diff", str(pr_number)], cwd=repo_root)
-    if diff_proc.returncode != 0:
-        raise _exec._failed(diff_proc, f"failed to read the diff for PR #{pr_number}")
+    diff_source: DiffSource = "github"
+    if local_diff:
+        diff = _local_pr_diff(
+            pr_number=pr_number,
+            repo_root=repo_root,
+            base_ref=_exec._opt_str(data.get("base")),
+            reason="forced",
+        )
+        diff_source = "local-git"
+    else:
+        diff_proc = _exec._run(["pr", "diff", str(pr_number)], cwd=repo_root)
+        if diff_proc.returncode == 0:
+            diff = diff_proc.stdout
+        elif _is_diff_too_large(diff_proc):
+            diff = _local_pr_diff(
+                pr_number=pr_number,
+                repo_root=repo_root,
+                base_ref=_exec._opt_str(data.get("base")),
+                reason="too-large",
+            )
+            diff_source = "local-git"
+        else:
+            raise _exec._failed(diff_proc, f"failed to read the diff for PR #{pr_number}")
 
     return PrReviewContext(
         pr_number=pr_number,
@@ -499,8 +600,9 @@ def get_pr_review_context(
         head_ref=str(data.get("head") or branch),
         title=str(data.get("title") or ""),
         body=str(data.get("body") or ""),
-        diff=diff_proc.stdout,
+        diff=diff,
         plan_body=plan_body,
+        diff_source=diff_source,
     )
 
 
@@ -520,10 +622,23 @@ def _render_review_comment(summary: str, comments: list[InlineReviewComment]) ->
 def get_pr_diff(*, pr_number: int, repo_root: Path) -> str | None:
     """The PR's unified diff via ``gh pr diff`` — the merge-base 3-dot diff, which is exactly what
     GitHub validates review-comment anchors against. Lookup convention: a missing PR returns
-    ``None``; any other failure raises ``GitHubError``."""
+    ``None``; any other failure raises ``GitHubError``.
+
+    GitHub's diff media type 406s above 20,000 lines / 300 files; on that shape the diff is
+    rendered locally (``git.pr_merge_base_diff`` over the PR's base branch). Unified-diff line
+    numbering is content-derived and ``git.diff_range``'s pins hold the rendering to GitHub's,
+    so ``parse_diff_anchors`` validates the same anchors GitHub does; the posting ladder stays
+    the backstop. The too-large check runs BEFORE the not-found fold."""
     proc = _exec._run(["pr", "diff", str(pr_number)], cwd=repo_root)
     if proc.returncode == 0:
         return proc.stdout
+    if _is_diff_too_large(proc):
+        return _local_pr_diff(
+            pr_number=pr_number,
+            repo_root=repo_root,
+            base_ref=_pr_base_ref(pr_number=pr_number, repo_root=repo_root),
+            reason="too-large",
+        )
     if _exec._is_not_found(proc):
         return None
     raise _exec._failed(proc, f"failed to read the diff for PR #{pr_number}")
