@@ -58,8 +58,10 @@ command and steers emphasis without removing plan fidelity or changing the 2–4
 limit.
 
 Before spawning, the parent resolves the active PR once. Every reviewer lane and retry
-reads context only through `perk pr review-context --expected-pr <that-number> --json`; target drift
-fails the lane. The resulting outcome is single-use and mutation-bound: starting any new valid pass
+reads context only through `perk pr review-context --expected-pr <that-number> --json` — a
+pointer envelope whose `body`/`diff`/`plan_body` are `{path, bytes, lines, max_line_bytes}` file
+references the child pages with `read`/`grep` (an unreadable referenced file blocks the lane; a
+long line, byte-sliced via `sed -n | head -c`, never does); target drift fails the lane. The resulting outcome is single-use and mutation-bound: starting any new valid pass
 invalidates older evidence immediately, target-resolution failure leaves posting unavailable, and
 one successful post consumes the record. Duplicate posts fail `review_wave_consumed`; pending
 passes fail `review_wave_unavailable`. At mutation time `perk pr review-post` re-resolves the PR and
@@ -127,6 +129,15 @@ no findings is neutral **“no provisional batches (no findings)”**. False wit
 an in-session **“completion-only findings; no provisional batches”** warning naming those lanes.
 `fyi` explains unavailable or partial streaming. Neither false case changes coverage or implies
 by itself that the supervisor bridge is broken; these notices never become posted comments.
+
+Each report also requires `blocked: boolean` (never defaulted — a missing or mistyped value is
+schema-invalid). `false` is every completed angle, findings or not. `true` means the lane could
+not complete its required review — the context fetch failed, a referenced context file was
+unreadable, or the hunt stopped early — with empty `findings` and the blocker first in `fyi`. A
+blocked lane is **uncovered**, never "no findings": collection reports `complete: false`, lists
+the lane in `failures` as `lane-failed` with the `fyi` detail, drops it from `covered`, and the
+browser reconcile clears its provisional annotations with the other uncovered sources. There is
+no retry (the doors' zero-retry posture stands).
 
 Browser reconciliation withdraws provisional annotations from uncovered lanes before replacing
 final findings. Shared anchors get one merged annotation from valid final reports, owned by the

@@ -462,11 +462,13 @@ toolset installation fails, including save/delivery and unknown/late foreign mut
 tools pass this gate but keep downstream checks. All gate observations OR in the floor; supplier
 exceptions are restrictive. A floor-backed `exit()` skips the read-write append and reapplies the
 gate even after reflection failure. Ordinary no-floor transitions and tool inventories are
-unchanged. Bash additionally admits exactly `perk pr review-context --expected-pr N --json`
-(N matches `[1-9][0-9]*`) and `perk pr feedback --json`, whitespace-separated with optional
+unchanged. Bash additionally admits exactly the `perk pr review-context --expected-pr N --json`,
+`perk pr review-context --pr N --json` and `perk pr review-context --pr N --stack --json` forms
+(N matches `[1-9][0-9]*`; the `--pr` forms serve the human-triage doors' adversarial children and
+the stack-review routing step) and `perk pr feedback --json`, whitespace-separated with optional
 surrounding whitespace. Existing segment validation and destructive veto remain: a `cd` prefix
-can scope a query, not enable extra/foreign/stack arguments, arbitrary PR verbs, `gh api`, real-file
-redirects or chained mutations. Allowlisted delegation, browser, web and artifact exceptions remain bounded posture
+can scope a query, not enable the flagless form, extra arguments or other argument orders,
+arbitrary PR verbs, `gh api`, real-file redirects or chained mutations. Allowlisted delegation, browser, web and artifact exceptions remain bounded posture
 choices, not an OS sandbox. `/btw` and ReportWave use the same effective `gating.isActive()` supplier.
 
 This is a spawn-time restriction snapshot, not continuous permission revocation. A later parent

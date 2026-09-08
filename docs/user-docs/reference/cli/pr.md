@@ -187,15 +187,38 @@ and compares that number before fetching context. Drift fails `review_target_cha
 `--pr <n>` instead resolves an arbitrary PR plan-ref-free (`plan_body` is null; a nonexistent PR
 is `pr_not_found`). The two flags are mutually exclusive; values must be positive integers.
 
+**The pointer envelope.** The `--json` payload never inlines the large text. Every free-text
+section — the PR `body`, the `diff`, the `plan_body` (and, on the stack arm, each member's
+sections plus `combined_diff`) — is written to its own line-oriented file, and the envelope
+carries `context_dir` plus a `{path, bytes, lines, max_line_bytes}` reference per section
+(`plan_body` is `null` when the PR has no plan body). `title`, refs and numbers stay inline. The
+files land under the invocation checkout's run scratch dir —
+`.perk/workflow/scratch/runs/<run id>/review-context/pr-<n>[-stack]-<token>/` (the run id is
+`$PERK_RUN_ID` when set, else a freshly minted one) — gitignored, unique per invocation (concurrent
+reviewer lanes never share a directory), and cleaned up by `perk state prune`'s run-directory age
+rule like any other run scratch. Layout: single-PR mode writes `diff.patch`, `body.md` and
+`plan.md` (only when a plan body exists) at the directory root; stack mode writes
+`combined.patch` and `stack/<pr>/{diff.patch,body.md,plan.md}` per member (bottom→top) with no
+root-level section files — the top-level `body`/`diff`/`plan_body` references point at the top
+member's files, so the top PR's text is written once. Files are byte-exact (no trimming or
+newline normalization, so diff line anchors and hunk headers are untouched). A filesystem or
+text-encoding failure while writing exits 1 with `error_type: write_failed`.
+
+**Oversized lines.** Pi's `read` tool refuses a single line above 50 KiB, so each reference
+reports `max_line_bytes` — the longest line's UTF-8 length. When it exceeds 51,200 the reviewer
+locates the line with `grep -n` and views it in slices with `sed -n '<N>p' <path> | head -c 51200`
+(both commands pass the read-only gate); the file itself is never rewritten.
+
 `--pr <top> --stack` is the **stacked** reviewer-context arm (`--stack` requires `--pr` and
 excludes `--expected-pr`): it re-resolves the whole stack from the given PR via the base-ref
 chain walk (a perk train *is* a base-ref chain; the same single-PR/fork/depth refusals as the
 stack checkout, so reviewer children and the doors refuse consistently), keeps the top-level
 fields on the top PR, and adds per-member `stack[]` sections (`{pr, base_ref, head_ref, title,
-body, diff, plan_body, diff_source}` — `plan_body` enriched for `plan-<N>` head branches) plus
-`combined_diff` (the base→top diff every stack reviewer works in, re-validated against the
-same fail-closed ancestry gate as the checkout and fetched through a per-invocation temp-ref
-namespace so concurrent reviewer lanes never collide).
+body, diff, plan_body, diff_source}` — the text fields file references as above, `plan_body`
+enriched for `plan-<N>` head branches) plus `combined_diff` (a file reference to the base→top
+diff every stack reviewer works in, re-validated against the same fail-closed ancestry gate as
+the checkout and fetched through a per-invocation temp-ref namespace so concurrent reviewer
+lanes never collide).
 
 **Large PRs.** Each PR `diff` is GitHub's rendered PR diff by default, which GitHub refuses above
 **20,000 lines or 300 files** (HTTP 406 `too_large`). On that refusal the command automatically
