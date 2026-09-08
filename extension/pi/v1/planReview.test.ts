@@ -19,32 +19,24 @@ import { GIST_DRAFT_ARTIFACT } from "../../authoring/gist/draft.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "../../authoring/objective/draft.ts";
 import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
-import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
 import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
-import {
-  SCRIPTED_ORIGIN,
-  scriptedDraftReviewBridge,
-  scriptedRemotesSlot,
-} from "../../testing/draftReview.ts";
-import { gitInit, loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
-import type { DraftReviewSlot } from "./draftReview.ts";
-import { executeObjectiveReview as executeObjectiveReviewCore } from "./objectiveReview.ts";
+import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
+import { loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
+import { testReviewRuntime } from "../../testing/reviewRecord.ts";
+import { executeObjectiveReview } from "./objectiveReview.ts";
 import { installPlanBindings, planSaveDepsFor } from "./plan.ts";
 import {
   approvedSaveResult,
-  executePlanReview as executePlanReviewCore,
+  executePlanReview,
+  type PlanReviewBridge,
   type PlanReviewV1Deps,
   reviewOutcomeResult,
-  runImplementHereCommand,
 } from "./planReview.ts";
 import { PLANNOTATOR_REVIEW_COMMAND } from "./providers/plannotatorHandoff.ts";
 import type { PlanReviewUI, ReviewLaunchUI, ReviewOutcome, WaveLaunch } from "./review.ts";
-
-/** The non-runner context-policy input the installer tests compose (no runner suppression). */
-const NOT_A_RUNNER: ContextPolicyInputs = { runnerChild: () => false };
 
 /** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(
@@ -89,7 +81,20 @@ const FAIL_ENVELOPE = JSON.stringify({
 });
 
 /** A recording bridge: captures the reviewed bytes, returns the canned outcome. */
-const cannedBridge = scriptedDraftReviewBridge;
+function cannedBridge(outcome: ReviewOutcome): PlanReviewBridge & { reviewed: string[] } {
+  const reviewed: string[] = [];
+  return {
+    reviewed,
+    current: testReviewRuntime(),
+    async review(plan: string) {
+      reviewed.push(plan);
+      return outcome;
+    },
+  };
+}
+
+/** The non-runner context-policy input the installer tests compose (no runner suppression). */
+const NOT_A_RUNNER: ContextPolicyInputs = { runnerChild: () => false };
 
 /** A ToolGating fake recording exits; `active` is the isActive snapshot. */
 function fakeGating(active: boolean): ToolGating & { exits: number } {
@@ -177,13 +182,7 @@ function headfulCtx(
 ): SessionDataCtx & ReportTarget {
   return {
     cwd,
-    sessionManager: {
-      getBranch: () => branch,
-      getSessionId: () => "policy-session",
-      appendCustomEntry(customType: string, data: unknown) {
-        branch.push({ type: "custom", customType, data });
-      },
-    },
+    sessionManager: { getBranch: () => branch },
     hasUI: true,
     ui: { notify() {}, ...(ui as object) },
   } as SessionDataCtx & ReportTarget;
@@ -246,7 +245,6 @@ test("plan_review: headless -> soft skip (fail-open; never wedges a CI/superviso
 
 test("plan_review: no plannotator listener -> handshake timeout -> loud unavailable skip", async () => {
   const cwd = scaffoldRepo();
-  gitInit(cwd, { dirty: false });
   selectPlanProvider(cwd, "plannotator-plan");
   const h = await loadPerkSession({
     cwd,
@@ -504,7 +502,7 @@ test("execute: approved (bridge) -> auto-save runs, gate exits, result terminate
   });
 });
 
-test("execute: approved but the save fails -> non-terminating, gate stays on, the latch pauses the next approval", async () => {
+test("execute: approved but the save fails -> non-terminating, gate stays on, /plan-save failsafe", async () => {
   await withNoLlm(async () => {
     const cwd = scaffoldRepo();
     selectPlanProvider(cwd, "plannotator-plan");
@@ -516,7 +514,6 @@ test("execute: approved but the save fails -> non-terminating, gate stays on, th
     );
     const pi = fakeColdDoorPi(branch, { stdout: FAIL_ENVELOPE, code: 1 });
     const gating = fakeGating(true);
-    const slot = scriptedRemotesSlot(pi);
     const result = await executePlanReview(
       pi,
       ctx as unknown as ExtensionContext,
@@ -524,9 +521,6 @@ test("execute: approved but the save fails -> non-terminating, gate stays on, th
       cannedBridge(APPROVED),
       depsFor(pi, ctx, gating),
       {},
-      undefined,
-      undefined,
-      slot,
     );
     assert.equal(result.terminate, undefined, "a failed auto-save never terminates");
     const details = result.details as { ok?: boolean; saved?: boolean; error_type?: string };
@@ -538,34 +532,7 @@ test("execute: approved but the save fails -> non-terminating, gate stays on, th
     assert.match(text, /APPROVED/);
     assert.match(text, /auto-save FAILED/);
     assert.match(text, /gh exploded/);
-    assert.match(text, /automatic saves are paused for this session/);
-    assert.match(text, /\/plan-save \(the deliberate retry\)/);
-    // The unconfirmed-save latch: the next approval in the same activation is paused before
-    // the cold door — the human checks the backend for run id RID, then /plan-save retries.
-    assert.equal(slot.unconfirmed()?.subject, "plan");
-    const argvs: string[][] = [];
-    const again = await executePlanReview(
-      fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs }),
-      ctx as unknown as ExtensionContext,
-      gating,
-      cannedBridge(APPROVED),
-      depsFor(pi, ctx, gating),
-      {},
-      undefined,
-      undefined,
-      slot,
-    );
-    assert.deepEqual(again.details, {
-      ok: false,
-      error_type: "save_unconfirmed",
-      status: "refused",
-      subject: "plan",
-    });
-    assert.match(String(again.content[0]?.text), /run id RID/);
-    assert.match(String(again.content[0]?.text), /\/plan-save \(the deliberate retry\)/);
-    assert.match(String(again.content[0]?.text), /gh exploded/, "the first failure's detail");
-    assert.equal(argvs.length, 0, "the paused approval never reaches the cold door");
-    assert.equal(gating.exits, 0);
+    assert.match(text, /\/plan-save/);
   });
 });
 
@@ -662,7 +629,10 @@ test("first-party approve with edits -> write-back to the draft, edited bytes sa
   });
 });
 
-test("first-party: missing identity refuses to open the review BEFORE the editor, nothing saved", async () => {
+test("first-party: a failed edit write-back aborts the review fail-open, nothing saved", async () => {
+  // No run_id ⇒ the draft write rejects (no identity); the plan param is the reviewed source (no
+  // artifact needs a run_id to resolve), so the review reaches the editor — then the edit
+  // write-back fails and the review aborts BEFORE any verdict.
   const cwd = scaffoldRepo();
   const branch: unknown[] = [stateEntry({})];
   const ui = fakeUI({ editor: ["# Edited\n"], select: [APPROVE] });
@@ -678,15 +648,13 @@ test("first-party: missing identity refuses to open the review BEFORE the editor
     depsFor(pi, ctx, gating),
     { plan: "# Param plan" },
   );
-  assert.deepEqual(result.details, {
-    ok: false,
-    error_type: "review_open_refused",
-    status: "refused",
-    reason: "no-identity",
-  });
-  assert.match(String(result.content[0]?.text), /cannot open the review: .*no run identity/);
-  assert.match(String(result.content[0]?.text), /call plan_review again/);
-  assert.equal(ui.editors.length, 0, "no editor opened without a run identity");
+  const wbDetails = result.details as { ok?: boolean; status?: string; error_type?: string };
+  assert.equal(wbDetails.status, "unavailable");
+  assert.equal(wbDetails.ok, false);
+  assert.equal(wbDetails.error_type, "unavailable");
+  const text = String(result.content[0]?.text);
+  assert.match(text, /WARNING/);
+  assert.match(text, /could not write the edited draft back/);
   assert.equal(ui.selects.length, 0, "the verdict prompt never opened");
   assert.equal(argvs.length, 0, "the approval save was never called");
 });
@@ -1111,9 +1079,11 @@ test("plannotator approve + heading but unparseable section -> verbatim save + w
   });
 });
 
-test("plannotator parameter approval without identity refuses to open before the bridge", async () => {
+test("plannotator approve + Direct Edits + failed write-back -> verbatim save + warning", async () => {
   await withNoLlm(async () => {
-    // Every arm opens the slot at entry; without a run identity there is nothing to review under.
+    // No run_id ⇒ the draft artifact tier is unreadable AND the draft write rejects; the plan
+    // param is the reviewed source, the diff applies cleanly, but the write-back failure must
+    // fall open to the verbatim path (never save bytes the artifact doesn't carry).
     const cwd = scaffoldRepo();
     selectPlanProvider(cwd, "plannotator-plan");
     const branch: unknown[] = [stateEntry({})];
@@ -1135,11 +1105,16 @@ test("plannotator parameter approval without identity refuses to open before the
       depsFor(pi, ctx, gating),
       { plan: DE_BASE },
     );
-    assert.equal(argvs.length, 0);
-    assert.equal(gating.exits, 0);
-    assert.equal(result.details.status, "refused");
-    assert.equal(result.details.error_type, "review_open_refused");
-    assert.equal(result.details.reason, "no-identity");
+    const argv = argvs[0] ?? [];
+    assert.equal(
+      readFileSync(argv[argv.indexOf("--plan-file") + 1] ?? "", "utf8"),
+      DE_BASE.trimEnd(),
+      "the ORIGINAL reviewed bytes were saved verbatim",
+    );
+    const details = result.details as Record<string, unknown>;
+    assert.equal(details.edited, undefined);
+    assert.equal(details.direct_edits_applied, false);
+    assert.match(String(result.content[0]?.text), /Direct Edits could NOT be auto-applied/);
   });
 });
 
@@ -1509,9 +1484,7 @@ test("objective wave arm: the stale-guard baseline is captured BEFORE the valida
 test("objective wave arm: a null opener return (port-pick failure) -> falls through to the plain review", async () => {
   const cwd = scaffoldRepo();
   selectPlanProvider(cwd, "plannotator-plan");
-  const branch: unknown[] = [
-    stateEntry({ run_id: "RID", mode: "read-only", stage: "objective-author" }),
-  ];
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
   const ui = fakeUI({ select: [LAUNCH_WAVE], input: [undefined] });
   const ctx = headfulCtx(cwd, branch, ui);
   assert.ok(
@@ -1658,8 +1631,7 @@ test("installPlanBindings: the injected wave deps thread through the registered 
   const savedCwd = process.cwd();
   process.chdir((s.ctx as { cwd: string }).cwd);
   try {
-    const pi = recordingPi(defs);
-    installPlanBindings(pi, fakeGating(true), scriptedRemotesSlot(pi), NOT_A_RUNNER, wave);
+    installPlanBindings(recordingPi(defs), fakeGating(true), testReviewRuntime(), NOT_A_RUNNER, wave);
   } finally {
     process.chdir(savedCwd);
   }
@@ -1682,7 +1654,6 @@ test("index.ts composition: the REAL root wiring reaches wave_launched through p
   // port pick included — and every background task (decision routing, readiness observer)
   // settles on its silent arm without a browser or a server.
   const cwd = scaffoldRepo();
-  gitInit(cwd, { dirty: false });
   selectPlanProvider(cwd, "plannotator-plan");
   const selects: { title: string; options: string[] }[] = [];
   const h = await loadPerkSession({
@@ -1752,130 +1723,3 @@ test("index.ts composition: the REAL root wiring reaches wave_launched through p
     h.dispose();
   }
 });
-
-// ------------------------------------------------------------- the draft-review guards (one case)
-
-test("plannotator arm: the ladder runs before the completion — a destination drift during the review refuses the approval, nothing saved; a steady destination saves once", async () => {
-  await withNoLlm(async () => {
-    const cwd = scaffoldRepo();
-    selectPlanProvider(cwd, "plannotator-plan");
-    const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
-    const ctx = headfulCtx(cwd, branch);
-    assert.ok(
-      writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
-      "the draft artifact landed",
-    );
-    const argvs: string[][] = [];
-    const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
-    const gating = fakeGating(true);
-    const remotes = { current: SCRIPTED_ORIGIN };
-    const slot = scriptedRemotesSlot(pi, remotes);
-    // `git remote set-url origin …` lands while the browser review is open.
-    const scripted = cannedBridge(APPROVED);
-    const bridge = {
-      ...scripted,
-      async review(...args: Parameters<typeof scripted.review>): Promise<ReviewOutcome> {
-        const outcome = await scripted.review(...args);
-        remotes.current = "remote.origin.url\nhttps://github.com/acme/forked.git";
-        return outcome;
-      },
-    };
-    const result = await executePlanReview(
-      pi,
-      ctx as unknown as ExtensionContext,
-      gating,
-      bridge,
-      depsFor(pi, ctx, gating),
-      {},
-      undefined,
-      undefined,
-      slot,
-    );
-    assert.deepEqual(result.details, {
-      ok: true,
-      status: "destination-changed",
-      subject: "plan",
-      changed: ["remotes"],
-    });
-    const text = String(result.content[0]?.text);
-    assert.match(text, /save destination changed while the review was open \(changed: remotes\)/);
-    assert.doesNotMatch(text, /forked/, "component names only — never values");
-    assert.match(text, /a fresh human approval is required before any save/);
-    assert.equal(result.terminate, undefined);
-    assert.equal(argvs.length, 0, "nothing saved");
-    assert.equal(gating.exits, 0, "the gate stays on");
-    // A fresh review against the (now steady) destination saves once.
-    const fresh = await executePlanReview(
-      pi,
-      ctx as unknown as ExtensionContext,
-      gating,
-      cannedBridge(APPROVED),
-      depsFor(pi, ctx, gating),
-      {},
-      undefined,
-      undefined,
-      slot,
-    );
-    assert.equal((fresh.details as { saved?: boolean }).saved, true);
-    assert.equal(argvs.length, 1, "exactly one save call");
-    assert.equal(gating.exits, 1);
-  });
-});
-
-test("/implement-here supersedes the open review: a browser decision arriving afterwards is ignored", async () => {
-  const cwd = scaffoldRepo();
-  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
-  const sent: string[] = [];
-  const pi = {
-    appendEntry(customType: string, data?: unknown) {
-      branch.push({ type: "custom", customType, data });
-    },
-    sendUserMessage(text: string) {
-      sent.push(text);
-    },
-  } as unknown as ExtensionAPI;
-  const ctx = { ...headfulCtx(cwd, branch), isIdle: () => true } as unknown as ExtensionContext;
-  const slot = scriptedRemotesSlot(pi);
-  const opened = slot.open(ctx, {
-    subject: "plan",
-    source: "artifact",
-    raw: "# The draft\n",
-    markdown: "# The draft\n",
-  });
-  assert.ok(opened.ok);
-  assert.equal(opened.review.isCurrent(), true);
-  const gating = fakeGating(true);
-  await runImplementHereCommand(pi, ctx, gating, slot);
-  assert.equal(gating.exits, 1, "plan mode exited without a save");
-  assert.equal(sent.length, 1, "the implement-here guidance was injected");
-  assert.equal(opened.review.isCurrent(), false, "the open review was retired");
-});
-
-// ---------------------------------------------------------------------------------- wrappers
-
-/** The dispatcher over a fresh scripted-remotes slot unless the case threads its own. */
-function executePlanReview(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  gating: ToolGating,
-  bridge: { review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome> },
-  deps: PlanReviewV1Deps,
-  params: unknown,
-  signal?: AbortSignal,
-  wave?: WaveLaunch,
-  slot: DraftReviewSlot = scriptedRemotesSlot(pi),
-) {
-  return executePlanReviewCore(pi, ctx, gating, bridge, slot, deps, params, signal, wave);
-}
-
-function executeObjectiveReview(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  gating: ToolGating,
-  bridge: { review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome> },
-  signal?: AbortSignal,
-  wave?: WaveLaunch,
-  slot: DraftReviewSlot = scriptedRemotesSlot(pi),
-) {
-  return executeObjectiveReviewCore(pi, ctx, gating, bridge, slot, signal, wave);
-}

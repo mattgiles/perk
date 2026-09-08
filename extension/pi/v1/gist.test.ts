@@ -20,16 +20,15 @@ import { PLAN_CONTEXT_TYPE } from "../../authoring/plan/prose.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import { soundPointer } from "../../session/workflowSession.ts";
 import { sessionDataDir } from "../../substrate/cache.ts";
-import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
 import {
   digestSessionData,
   type SessionArtifactCtx,
   type SessionDataCtx,
 } from "../../substrate/sessionData.ts";
+import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
-import { scriptedDraftReviewBridge, scriptedRemotesSlot } from "../../testing/draftReview.ts";
 import {
   fakePerk,
   loadPerkSession,
@@ -37,13 +36,14 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../../testing/harness.ts";
-import { createDraftReviewSlot, type DraftReviewSlot } from "./draftReview.ts";
+import { testReviewRuntime } from "../../testing/reviewRecord.ts";
 import {
   decodeGistSaveParams,
   gistSaveGuidance,
   installGistBindings,
-  runGistReviewV1 as runGistReviewV1Core,
+  runGistReviewV1,
 } from "./gist.ts";
+import type { PlanReviewBridge } from "./planReview.ts";
 import type { PlanReviewUI, ReviewOutcome } from "./review.ts";
 
 /** The non-runner context-policy input the installer tests compose (no runner suppression). */
@@ -561,7 +561,7 @@ function installOffline(opts: { stdout: string; argvs: string[][]; sent: string[
       return { stdout: opts.stdout, stderr: "", code: 0, killed: false };
     },
   } as unknown as Parameters<typeof installGistBindings>[0];
-  installGistBindings(pi, gating, createDraftReviewSlot(pi), NOT_A_RUNNER);
+  installGistBindings(pi, gating, NOT_A_RUNNER);
   return { tools, commands, gating };
 }
 
@@ -744,7 +744,17 @@ function selectPlanProvider(cwd: string, id: string): void {
 }
 
 /** A recording bridge: captures the reviewed bytes, returns the canned outcome. */
-const cannedBridge = scriptedDraftReviewBridge;
+function cannedBridge(outcome: ReviewOutcome): PlanReviewBridge & { reviewed: string[] } {
+  const reviewed: string[] = [];
+  return {
+    reviewed,
+    current: testReviewRuntime(),
+    async review(plan: string) {
+      reviewed.push(plan);
+      return outcome;
+    },
+  };
+}
 
 /** A ToolGating fake recording exits; `active` is the isActive snapshot. */
 function fakeGating(active: boolean): ToolGating & { exits: number } {
@@ -809,13 +819,7 @@ function headfulCtx(
 ): SessionDataCtx & ReportTarget {
   return {
     cwd,
-    sessionManager: {
-      getBranch: () => branch,
-      getSessionId: () => "policy-session",
-      appendCustomEntry(customType: string, data: unknown) {
-        branch.push({ type: "custom", customType, data });
-      },
-    },
+    sessionManager: { getBranch: () => branch },
     hasUI: true,
     ui: { notify() {}, ...(ui as object) },
   } as SessionDataCtx & ReportTarget;
@@ -1085,7 +1089,7 @@ test("gist arm: default selection -> first-party VIEW-ONLY, 3 verdicts; approval
   );
 });
 
-test("gist arm: approved but the cold door fails -> non-terminating, gate stays on, latched", async () => {
+test("gist arm: approved but the cold door fails -> non-terminating, gate stays on, failsafe", async () => {
   const cwd = scaffoldRepo();
   const branch: unknown[] = [stateEntry(GIST_STATE)];
   const ui = fakeUI({ editor: ["# whatever was shown"], select: [GIST_APPROVE] });
@@ -1109,11 +1113,10 @@ test("gist arm: approved but the cold door fails -> non-terminating, gate stays 
   const text = String(result.content[0]?.text);
   assert.match(text, /gist APPROVED by reviewer, but the auto-save FAILED/);
   assert.match(text, /gh exploded/);
-  assert.match(text, /automatic saves are paused for this session/);
-  assert.match(text, /\/gist-save \(the deliberate retry\)/);
+  assert.match(text, /\/gist-save \(the manual failsafe\)/);
 });
 
-test("gist arm: approved but the draft vanished during the review -> stale-approval, never the save re-read", async () => {
+test("gist arm: approved but the draft vanished before the approve re-read -> the record refuses source-changed", async () => {
   const cwd = scaffoldRepo();
   selectPlanProvider(cwd, "plannotator-plan");
   const branch: unknown[] = [stateEntry(GIST_STATE)];
@@ -1121,15 +1124,16 @@ test("gist arm: approved but the draft vanished during the review -> stale-appro
   const drafted = plantGistDraft(ctx, branch);
   const argvs: string[][] = [];
   const pi = fakeColdDoorPi(branch, { stdout: GIST_JSON, argvs });
-  const scripted = cannedBridge({ status: "completed", approved: true, reviewId: "rev-gone" });
-  const bridge = {
-    ...scripted,
-    async review(...args: Parameters<typeof scripted.review>): Promise<ReviewOutcome> {
-      const outcome = await scripted.review(...args);
-      // The draft file vanishes while the review is open — the reviewed-bytes guard sees a
-      // moved draft (not found ≠ the reviewed bytes) and refuses the approval before any save.
+  const bridge: PlanReviewBridge & { reviewed: string[] } = {
+    reviewed: [],
+    current: testReviewRuntime(),
+    async review(plan: string): Promise<ReviewOutcome> {
+      // The draft file vanishes between the review read and the approve-time re-read — the
+      // record's byte compare sees an invalid artifact (an intact pointer + a missing file) and
+      // refuses BEFORE the save seam ever runs.
+      bridge.reviewed.push(plan);
       rmSync(drafted);
-      return outcome;
+      return { status: "completed", approved: true, reviewId: "rev-gone" };
     },
   };
   const quiet = console.error;
@@ -1145,12 +1149,20 @@ test("gist arm: approved but the draft vanished during the review -> stale-appro
   } finally {
     console.error = quiet;
   }
-  assert.equal(result.terminate, undefined);
-  assert.equal(result.details.status, "stale-approval");
-  assert.equal(result.details.subject, "gist");
-  assert.equal(result.details.reviewed_digest, digestSessionData(GIST_PAYLOAD));
-  assert.match(String(result.content[0]?.text), /working draft changed after the review opened/);
-  assert.match(String(result.content[0]?.text), /Nothing was saved/);
+  assert.equal(result.terminate, undefined, "non-terminating");
+  assert.equal(
+    String(result.content[0]?.text),
+    "gist review decision APPROVED by reviewer, but the working draft was rewritten after the " +
+      "reviewed version was shown — nothing was saved and the session stays read-only. Call " +
+      "plan_review again over the current draft.",
+  );
+  assert.deepEqual(result.details, {
+    ok: false,
+    status: "stale",
+    reason: "source-changed",
+    approved: true,
+    subject: "gist",
+  });
   assert.equal(argvs.length, 0, "the cold door was never invoked");
 });
 
@@ -1265,15 +1277,3 @@ test("gist arm: headless -> the standard skipResult", async () => {
   assert.equal(skipDetails.ok, true, "the sanctioned fail-open skip is ok:true");
   assert.match(String(result.content[0]?.text), /no interactive review surface available/);
 });
-
-/** The gist arm over a fresh scripted-remotes slot unless the case threads its own. */
-function runGistReviewV1(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  gating: ToolGating,
-  bridge: ReturnType<typeof cannedBridge>,
-  signal?: AbortSignal,
-  slot: DraftReviewSlot = scriptedRemotesSlot(pi),
-) {
-  return runGistReviewV1Core(pi, ctx, gating, bridge, slot, signal);
-}
