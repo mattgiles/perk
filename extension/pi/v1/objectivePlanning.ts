@@ -43,7 +43,11 @@ import {
   stringArrayParam,
   stringParam,
 } from "../../substrate/toolParams.ts";
-import { branchOf } from "../../substrate/workflowState.ts";
+import {
+  branchOf,
+  rebuildWorkflowState,
+  WORKFLOW_STATE_TYPE,
+} from "../../substrate/workflowState.ts";
 import { type ReportTarget, report } from "../../surfaces/report.ts";
 import {
   EXPLORE_ASSIGNMENT_KEY,
@@ -58,6 +62,19 @@ import {
 import { type DraftReviewRuntime, draftReviewMutationRefusal } from "./draftReviewActivation.ts";
 import { fetchObjectiveUrl } from "./objective.ts";
 import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
+
+/**
+ * Whether the branch already carries the literal warm plan-authoring intent (§8.3). An
+ * unreadable branch reads as "not recorded": the human explicitly asked for the factory, so a
+ * failed read must never suppress the intent append.
+ */
+function warmPlanIntentRecorded(ctx: ExtensionContext): boolean {
+  try {
+    return rebuildWorkflowState(branchOf(ctx)).plan_authoring === true;
+  } catch {
+    return false;
+  }
+}
 
 // ------------------------------------------------------------------- the tool-boundary decode
 
@@ -750,20 +767,24 @@ export function installObjectivePlanningBindings(
         return;
       }
       report(ctx, "objective-plan", "info", `#${objective}${node ? ` node ${node}` : ""}`);
-      // Enter the read-only gate (parity with the cold door's `mode: read-only` handoff claim) —
+      // Enter the read-only gate (parity with the cold door's `mode: read-only` handoff claim) as
+      // an EXPLICIT plan-authoring enter (`plan_authoring: true` rides the mode append, §8.3) —
       // skip-if-active so an already-gated session (cold objective-plan, `/plan` on) gets no
-      // duplicate `mode` append or announce. Entering BEFORE sendUserMessage means the seeded
-      // factory turn runs gated and picks up the [READ-ONLY MODE] + [PLAN AUTHORING] injections
-      // on its before_agent_start. Exit stays owned by plan_save (approval auto-save included)
-      // and `/plan` off.
+      // duplicate `mode` append or announce; there the intent bit alone is recorded, and only
+      // when not already on the branch (no redundant append). Establishing intent BEFORE
+      // sendUserMessage means the seeded factory turn runs gated and picks up the [READ-ONLY
+      // MODE] + [PLAN AUTHORING] injections on its before_agent_start. Exit stays owned by
+      // plan_save (approval auto-save included) and `/plan` off.
       if (!gating.isActive()) {
-        gating.enter(ctx);
+        gating.enter(ctx, { planAuthoring: true });
         report(
           ctx,
           "objective-plan",
           "info",
           "read-only ON — structurally enforced exploration; plan_save exits (approval auto-saves), or /plan toggles off.",
         );
+      } else if (!warmPlanIntentRecorded(ctx)) {
+        pi.appendEntry(WORKFLOW_STATE_TYPE, { plan_authoring: true });
       }
       // Inject the factory guidance as a user message so the model starts the loop (always a turn).
       // The perk-objective-plan pointer rides the skill-binding suffix (D5) since a warm

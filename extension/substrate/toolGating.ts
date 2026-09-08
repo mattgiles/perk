@@ -798,16 +798,36 @@ export function isReadOnlyBashCommand(command: string): boolean {
 
 // --- the controller -----------------------------------------------------------------------------
 
+/**
+ * The warm-entry intent the gate records beside `mode: "read-only"` (§8.3 `plan_authoring`).
+ * GUIDANCE ONLY: the bit selects the plan-authoring context; it grants no tool, moves no stage,
+ * and authorizes no review or save — the gate's structural restrictions are identical either way.
+ */
+export interface ToolGateEnterOptions {
+  /** `true` ⇒ an explicit plan-authoring enter (`/plan`, its shortcut, `--plan`, `/objective-plan`). */
+  planAuthoring?: boolean;
+}
+
 /** The API the plan-mode and read-only-stage consumers use + the lifecycle hooks index.ts wires. */
 export interface ToolGating {
   /**
    * Reapply the gate + stage scoping from a rebuilt `mode` + `stage` (called on session_start
    * AND session_tree). `stage` is the branch-LWW workflow-state stage id (undefined = unscoped).
+   * Never touches `plan_authoring` — the rebuilt branch already carries the recorded intent.
    */
   syncFromState(mode: string | undefined, stage: string | undefined): void;
-  /** Enter read-only mode: persist `mode=read-only` + snapshot/restrict tools. (Called by the plan-mode toggle and the objective-plan factory.) */
-  enter(ctx?: ExtensionContext): void;
-  /** Exit read-only mode: persist `mode=read-write` + restore tools. (Called by the plan-mode toggle and the save/exit doors.) */
+  /**
+   * Enter read-only mode: persist `mode=read-only` + snapshot/restrict tools. ONE append carries
+   * the mode and the intent bit together: `planAuthoring: true` records `plan_authoring: true`
+   * (the warm plan entries), a generic enter records `false`. (Called by the plan-mode toggle and
+   * the objective-plan factory.)
+   */
+  enter(ctx?: ExtensionContext, opts?: ToolGateEnterOptions): void;
+  /**
+   * Exit read-only mode: persist `mode=read-write` + `plan_authoring: false` + restore tools.
+   * (Called by the plan-mode toggle and the save/exit doors.) A floor-refused exit appends
+   * nothing and cannot open access.
+   */
   exit(ctx?: ExtensionContext): void;
   /** Whether the gate is currently active (in-memory source of truth for `tool_call`). */
   isActive(): boolean;
@@ -976,8 +996,13 @@ export function registerToolGating(
     syncFromState(mode: string | undefined, stage: string | undefined): void {
       apply(isReadOnlyMode(mode), stage ?? null);
     },
-    enter(_ctx?: ExtensionContext): void {
-      pi.appendEntry(WORKFLOW_STATE_TYPE, { mode: "read-only" });
+    enter(_ctx?: ExtensionContext, opts?: ToolGateEnterOptions): void {
+      // Mode and intent ride ONE entry so a partial append can never leave intent recorded
+      // without the restriction it describes (or vice versa). Only literal `true` is intent.
+      pi.appendEntry(WORKFLOW_STATE_TYPE, {
+        mode: "read-only",
+        plan_authoring: opts?.planAuthoring === true,
+      });
       apply(true, stageId);
     },
     exit(_ctx?: ExtensionContext): void {
@@ -985,7 +1010,7 @@ export function registerToolGating(
         apply(true, stageId);
         return;
       }
-      pi.appendEntry(WORKFLOW_STATE_TYPE, { mode: "read-write" });
+      pi.appendEntry(WORKFLOW_STATE_TYPE, { mode: "read-write", plan_authoring: false });
       apply(false, stageId);
     },
     isActive,

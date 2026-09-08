@@ -21,6 +21,7 @@
 
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { classifyAuthoringContext } from "../../authoring/context/eligibility.ts";
 import {
   DELIVERY_CHOICES,
   isDeliveryChoice,
@@ -35,7 +36,6 @@ import {
 import {
   OBJECTIVE_AUTHOR_CONTEXT_TYPE,
   OBJECTIVE_AUTHOR_MARKER,
-  OBJECTIVE_AUTHOR_STAGE,
   objectiveAuthoringContextContent,
   objectiveSaveGuidance,
 } from "../../authoring/objective/prose.ts";
@@ -61,6 +61,7 @@ import {
 } from "../../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../../substrate/command.ts";
 import { loadPerkConfig } from "../../substrate/config.ts";
+import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
 import { failFor, ok, type Result } from "../../substrate/result.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { arrayParam, objectParam, paramsOf, stringParam } from "../../substrate/toolParams.ts";
@@ -398,13 +399,25 @@ export function renderObjectiveApprovalSave(
 }
 
 /**
- * Whether the current branch is an objective-author session (read-only gate AND stage match).
- * Fail-open: a throwing state rebuild reports false.
+ * Whether the current branch is an objective-author session: the shared authoring-context
+ * policy's exact `objective-author` kind (effective read-only gate AND stage match, never a
+ * runner child — `authoring/context/eligibility.ts`). Fail-open: a throwing state rebuild
+ * reports false.
  */
-function isObjectiveAuthoring(gating: ToolGating, branch: readonly BranchEntry[]): boolean {
+function isObjectiveAuthoring(
+  gating: ToolGating,
+  contextPolicy: ContextPolicyInputs,
+  branch: readonly BranchEntry[],
+): boolean {
   if (!gating.isActive()) return false;
   try {
-    return rebuildWorkflowState(branch).stage === OBJECTIVE_AUTHOR_STAGE;
+    return (
+      classifyAuthoringContext({
+        gateActive: true,
+        runnerChild: contextPolicy.runnerChild(),
+        state: rebuildWorkflowState(branch),
+      }) === "objective-author"
+    );
   } catch {
     return false;
   }
@@ -435,10 +448,11 @@ export function installObjectiveAuthoringBindings(
   pi: ExtensionAPI,
   gating: ToolGating,
   reviews: DraftReviewRuntime,
+  contextPolicy: ContextPolicyInputs,
 ): void {
   // The objective-authoring context injection (display:false), keyed off (read-only gate AND
-  // stage === objective-author); the inject/strip mechanics (active-window dedup, stale-marker
-  // strip) live in the shared helper.
+  // stage === objective-author, never a runner child); the inject/strip mechanics (active-window
+  // dedup, selection-driven retention) live in the shared helper.
   installInjectedContext(pi, {
     customType: OBJECTIVE_AUTHOR_CONTEXT_TYPE,
     flavors: {
@@ -446,8 +460,8 @@ export function installObjectiveAuthoringBindings(
         objectiveAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
     },
     select: (_ctx, branch) =>
-      isObjectiveAuthoring(gating, branch) ? OBJECTIVE_AUTHOR_MARKER : null,
-    live: (_ctx, branch) => isObjectiveAuthoring(gating, branch),
+      isObjectiveAuthoring(gating, contextPolicy, branch) ? OBJECTIVE_AUTHOR_MARKER : null,
+    live: (_ctx, branch) => isObjectiveAuthoring(gating, contextPolicy, branch),
   });
 
   pi.registerTool({
