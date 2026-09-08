@@ -44,6 +44,35 @@ owns only an interface, so perk yields that interface without bridging an artifa
 The adapters are selected behavior, not new storage formats. A plan reference's `provider` field
 names the **issue backend**, not the plan-provider id.
 
+#### When perk injects authoring guidance
+
+Perk's own authoring guidance (`[PLAN AUTHORING]`, the objective/gist authoring contexts) and the
+plan-adapter bridge contexts are injected on **explicit authoring eligibility**, never on the bare
+read-only gate. A session is an eligible plan author when the gate is on, the session is not a
+native subagent runner, and there is positive plan evidence: a plan-family cold stage (`plan`,
+`save`, `objective-plan`) or the explicit warm intent that `/plan`, its shortcut, `--plan` and
+`/objective-plan` record beside the read-only mode. The dedicated `objective-author`,
+`objective-save`, `gist-author` and `gist-save` stages keep their own contexts and never receive
+plan guidance. Under `plannotator-plan` the bridge flavor follows the same rule (plan flavor for an
+eligible plan author, objective flavor in both objective stages, gist flavor in `gist-author`,
+nothing otherwise); under `tombell-plan` the bridge additionally honors tombell's own persisted
+plan-mode state when perk's gate is off. Reviewer and other subagent children never receive perk's
+authoring or adapter guidance, even when their session history carries it; their read-only
+restrictions and engine tools are unaffected.
+
+Consequences worth knowing:
+
+- **Legacy warm sessions.** An older session that carries only `mode: read-only` (no stage, no
+  recorded intent) stays restricted but receives no plan guidance. Re-enter with `/plan` (off,
+  then on) or invoke an authoring factory; perk never guesses intent from history.
+- **Owned-context cleanup.** When a session stops being eligible — `/plan` off, a stage change
+  under plannotator, navigating to an earlier branch — perk retires only its own injected
+  guidance from the outgoing model context. Your own messages are never removed or edited for
+  quoting a marker, and persisted transcripts and compaction summaries are never rewritten.
+- **Foreign ownership is unchanged.** perk still vacates `--plan`/`Ctrl+Alt+P` under plannotator
+  and every plan-mode registration under tombell; neither package's prompts, tools or
+  enforcement are touched.
+
 ### Footer: vacate-only
 
 The footer is an interface seam with no durable artifact and no adapter:
