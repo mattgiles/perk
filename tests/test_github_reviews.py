@@ -688,20 +688,17 @@ def test_get_pr_diff_not_found_still_returns_none_with_fallback_present(monkeypa
     assert fake.calls == []
 
 
-@pytest.mark.parametrize(
-    "proc",
-    [
-        _Proc(1, "", "HTTP 404: Not Found"),
-        _Proc(1, "", "HTTP 500"),
-        _Proc(1, "", ""),
-    ],
-)
-def test_is_diff_too_large_negatives(proc):
-    assert reviews._is_diff_too_large(proc) is False
+def _completed(stdout: str, stderr: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(["gh", "pr", "diff"], 1, stdout=stdout, stderr=stderr)
+
+
+@pytest.mark.parametrize("stderr", ["HTTP 404: Not Found", "HTTP 500", ""])
+def test_is_diff_too_large_negatives(stderr):
+    assert reviews._is_diff_too_large(_completed("", stderr)) is False
 
 
 def test_is_diff_too_large_positives():
-    assert reviews._is_diff_too_large(_Proc(1, "", _TOO_LARGE_LINES)) is True
-    assert reviews._is_diff_too_large(_Proc(1, "", _TOO_LARGE_FILES)) is True
+    assert reviews._is_diff_too_large(_completed("", _TOO_LARGE_LINES)) is True
+    assert reviews._is_diff_too_large(_completed("", _TOO_LARGE_FILES)) is True
     # The durable code alone (on either stream) is enough.
-    assert reviews._is_diff_too_large(_Proc(1, "PullRequest.diff too_large", "")) is True
+    assert reviews._is_diff_too_large(_completed("PullRequest.diff too_large", "")) is True
