@@ -15,7 +15,6 @@ from perk.run.launch import (
     _address_prompt,
     _build_exec_env,
     _initial_prompt,
-    _pi_agent_dir,
     _stage_model_argv,
     _sweep_stale_pi_agent_locks,
     launch_stage,
@@ -26,6 +25,7 @@ from perk.run.launch import (
 )
 from perk.run.launch import worktree as worktree_mod
 from perk.state import cache
+from perk.substrate import config as config_mod
 from perk.substrate import git as git_mod
 from perk.substrate.bindings import Binding
 from perk.substrate.config import Config, StageModel
@@ -74,21 +74,6 @@ def test_sweep_swallows_oserror(tmp_path, monkeypatch):
 
     monkeypatch.setattr(Path, "unlink", _boom)
     _sweep_stale_pi_agent_locks(tmp_path)  # must not raise
-
-
-def test_pi_agent_dir_honors_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "custom"))
-    assert _pi_agent_dir() == tmp_path / "custom"
-
-
-def test_pi_agent_dir_env_expanduser(monkeypatch):
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", "~/somewhere")
-    assert _pi_agent_dir() == Path.home() / "somewhere"
-
-
-def test_pi_agent_dir_falls_back_to_home(monkeypatch):
-    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
-    assert _pi_agent_dir() == Path.home() / ".pi" / "agent"
 
 
 @pytest.mark.parametrize("agent_dir", [None, Path("/configured/agent")])
@@ -168,7 +153,7 @@ def test_launch_pi_agent_dir_operator_wins_without_config_read(
     def no_read(root):
         pytest.fail("operator choice must skip the main-root config read")
 
-    monkeypatch.setattr(launch, "effective_pi_agent_dir", no_read)
+    monkeypatch.setattr(config_mod, "effective_pi_agent_dir", no_read)
     _launch_agent_dir_plan(tmp_path)
     assert launch_exec_recorder.calls[0][2]["PI_CODING_AGENT_DIR"] == "/operator/agent"
 
@@ -180,7 +165,7 @@ def test_remote_launch_never_reads_pi_agent_dir(tmp_path, monkeypatch):
         pytest.fail("remote dispatch must not consult the local agent directory")
 
     calls = []
-    monkeypatch.setattr(launch, "effective_pi_agent_dir", no_read)
+    monkeypatch.setattr(config_mod, "effective_pi_agent_dir", no_read)
     monkeypatch.setattr(launch, "_drive_remote_target", lambda **kwargs: calls.append(kwargs))
     launch_stage(
         repo_root=tmp_path,
@@ -206,9 +191,7 @@ def test_launch_blank_pi_agent_dir_without_config_uses_default_store(
     tmp_path, monkeypatch, launch_exec_recorder, capsys, value, config_text
 ):
     monkeypatch.setenv("PI_CODING_AGENT_DIR", value)
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    # Exercise the real fallback instead of the exec fixture's isolated-directory stub.
-    monkeypatch.setattr(launch, "_pi_agent_dir", _pi_agent_dir)
+    # The exec recorder points `Path.home` at `<tmp>/home`, so the default arm is hermetic.
     default_dir = tmp_path / "home/.pi/agent"
     default_dir.mkdir(parents=True)
     stale_lock = default_dir / "settings.json.lock"
@@ -273,6 +256,22 @@ def test_launch_bad_main_pi_config_warns_without_redirect(
     _launch_agent_dir_plan(tmp_path)
     assert "PI_CODING_AGENT_DIR" not in launch_exec_recorder.calls[0][2]
     assert "launching without the redirect" in capsys.readouterr().err
+
+
+def test_launch_unresolvable_home_skips_lock_sweep(tmp_path, monkeypatch, launch_exec_recorder):
+    """No env redirect, no `[pi] agent_dir`, and no resolvable home: the launch still execs —
+    the best-effort lock sweep is skipped instead of crashing on `Path.home()`."""
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+
+    def no_home(cls):
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "home", classmethod(no_home))
+    swept: list[Path] = []
+    monkeypatch.setattr(launch, "_sweep_stale_pi_agent_locks", lambda d: swept.append(d))
+    _launch_agent_dir_plan(tmp_path)
+    assert "PI_CODING_AGENT_DIR" not in launch_exec_recorder.calls[0][2]
+    assert swept == []
 
 
 def test_launch_pi_agent_dir_home_expansion_failure_warns_and_execs(

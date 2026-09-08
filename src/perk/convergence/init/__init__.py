@@ -10,9 +10,10 @@ wiring from the first turn (the init-spine principle).
 symbol behind a sorted ``__all__``, preserving the ``init.X`` attribute-access import path.
 The orchestrators reference the moved helpers as
 facade globals, so the existing ``init_mod.sync_skills`` monkeypatch keeps working. Submodules:
-``templates``, ``report``, ``blocks``, ``settings``, ``agents``, ``skills``, ``onboarding``
-(the interactive gestures — guided tool installs, gh login, git identity, the Linear key
-prompt).
+``templates``, ``report``, ``blocks``, ``settings``, ``agents``, ``subagent_config`` (the
+borrowed engine's native ``worktree`` default in the launch-precedence agent dir), ``skills``,
+``onboarding`` (the interactive gestures — guided tool installs, gh login, git identity, the
+Linear key prompt).
 """
 
 import shutil
@@ -115,6 +116,7 @@ from perk.convergence.init.skills import (
     skills_conflict_paths,
     sync_skills,
 )
+from perk.convergence.init.subagent_config import _converge_subagent_worktree_default
 from perk.convergence.init.templates import (
     PERK_LOCAL_TOML_TEMPLATE,
     PERK_TOML_TEMPLATE,
@@ -181,6 +183,7 @@ __all__ = [
     "_converge_settings",
     "_converge_skills_manifest",
     "_converge_subagent_agents",
+    "_converge_subagent_worktree_default",
     "_converge_workflow_dir",
     "_desired_packages",
     "_desired_skills_manifest",
@@ -304,6 +307,11 @@ def managed_convergences(root: Path, self_repo: bool) -> list[ManagedConvergence
             "subagent-agents",
             ("subagent-engine",),
             lambda apply: _converge_subagent_agents(root, apply=apply),
+        ),
+        ManagedConvergence(
+            "subagent-worktree-default",
+            ("subagent-engine",),
+            lambda apply: _converge_subagent_worktree_default(root, apply=apply),
         ),
         ManagedConvergence(
             "skills-manifest",

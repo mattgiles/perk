@@ -19,6 +19,7 @@ from perk.substrate.config import (
     ConfigError,
     ModelsTable,
     effective_pi_agent_dir,
+    launch_pi_agent_dir,
     load_committed_issues_backend,
     load_committed_issues_team,
     load_committed_models,
@@ -1227,21 +1228,25 @@ def _subagent_bridge_config_check(root: Path) -> Check:
     ``"fork-only"``, since perk's wave children run fresh-context) suppresses the channel-dir
     stamp: children get no ``contact_supervisor`` and streaming silently degrades to
     completion-only. perk neither sets nor manages the key, so this is **warn-never-fail with
-    no ``--fix`` arm**. Both scopes are read — project ``.pi/settings.json`` + user-global
-    ``~/.pi/agent/settings.json`` — and perk does NOT reimplement pi's cross-scope merge
+    no ``--fix`` arm**. Both scopes are read — project ``.pi/settings.json`` + the user scope,
+    ``settings.json`` in the **launch-precedence agent dir** (:func:`launch_pi_agent_dir`: env
+    → `[pi] agent_dir` → ``~/.pi/agent`` — the store a perk session actually launches with,
+    labeled by its absolute path) — and perk does NOT reimplement pi's cross-scope merge
     semantics: an explicit off/fork-only in EITHER scope warns, with the offending file(s) +
     value named in the detail (the ``resource-overrides`` heuristic-honesty precedent).
-    Invalid settings stay quiet here — ``settings-wiring`` owns that complaint. ``Path.home()``
-    is resolved at check time; no resolvable home simply skips the user scope (fail-open, as
-    befits a report-only check).
+    Invalid settings stay quiet here — ``settings-wiring`` owns that complaint. The agent dir
+    is resolved at check time; no resolvable dir (no home) or a broken main-checkout config
+    (the ``config`` check's complaint) simply skips the user scope (fail-open, as befits a
+    report-only check).
     """
     scopes = [(root / ".pi" / "settings.json", ".pi/settings.json")]
     try:
-        home = Path.home()
-    except RuntimeError:
-        home = None
-    if home is not None:
-        scopes.append((home / ".pi" / "agent" / "settings.json", "~/.pi/agent/settings.json"))
+        resolution = launch_pi_agent_dir(root)
+    except (ConfigError, tomllib.TOMLDecodeError):
+        resolution = None
+    if resolution is not None:
+        user_settings = resolution.path / "settings.json"
+        scopes.append((user_settings, str(user_settings)))
     offenders = [
         f"{label}: subagents.intercomBridge.mode = {json.dumps(mode)}"
         for path, label in scopes

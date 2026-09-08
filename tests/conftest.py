@@ -101,6 +101,23 @@ def _reset_launch_banner_guard():
 
 
 @pytest.fixture(autouse=True)
+def isolated_pi_agent_dir(monkeypatch, tmp_path) -> Path:
+    """Point pi's agent dir at a throwaway directory for every test.
+
+    perk's init/doctor convergences and the launch lock sweep act on files INSIDE the
+    launch-precedence agent dir (``launch_pi_agent_dir``: env → `[pi] agent_dir` → ``~/.pi/agent``),
+    so without this every ``run_init``/``run_doctor`` in the suite would read — and ``--fix``
+    would rewrite — the developer's real store. The env arm wins the precedence, so setting it
+    here is the hermetic default; tests that exercise the config/default arms ``delenv`` it
+    explicitly (and isolate ``Path.home`` themselves). The directory is NOT created (tests
+    asserting an untouched ``tmp_path`` must keep passing) — consumers ``mkdir`` as needed.
+    """
+    agent_dir = tmp_path / "pi-agent"
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(agent_dir))
+    return agent_dir
+
+
+@pytest.fixture(autouse=True)
 def _no_interactive_prompts(monkeypatch):
     """Fail fast with a clear message when a test reaches a real interactive prompt.
 
@@ -134,13 +151,17 @@ def stub_launch_extension_warm(monkeypatch):
 
 
 @pytest.fixture
-def launch_context_factory(tmp_path):
-    """Build a resolved launch context for direct phase tests."""
+def launch_context_factory(tmp_path, isolated_pi_agent_dir):
+    """Build a resolved launch context for direct phase tests.
+
+    ``agent_dir`` is the lock-sweep target (an ``env``-sourced resolution); it defaults to the
+    isolated per-test agent dir so a direct ``_exec_pi`` never sweeps the real store.
+    """
     from perk import plan
     from perk.run import launch
     from perk.run.launch import ResolvedWorktree
     from perk.run.launch.worktree import Disposition
-    from perk.substrate.config import Config
+    from perk.substrate.config import Config, PiAgentDir
     from perk.substrate.registry import Stage
 
     def build(
@@ -154,6 +175,7 @@ def launch_context_factory(tmp_path):
         base: str | None = None,
         rid: str = "01TESTLAUNCH",
         argv: tuple[str, ...] = ("pi",),
+        agent_dir: Path | None = None,
     ) -> launch._LaunchContext:
         root = repo_root if repo_root is not None else tmp_path
         resolved_path = worktree if worktree is not None else tmp_path / "worktree"
@@ -171,20 +193,29 @@ def launch_context_factory(tmp_path):
             resolved=resolved,
             rid=rid,
             argv=argv,
+            agent_dir_resolution=PiAgentDir(
+                agent_dir if agent_dir is not None else isolated_pi_agent_dir, "env"
+            ),
         )
 
     return build
 
 
 @pytest.fixture
-def launch_exec_recorder(tmp_path, monkeypatch) -> LaunchExecRecorder:
-    """Capture chdir/exec calls and isolate pi's global agent directory."""
+def launch_exec_recorder(tmp_path, monkeypatch, isolated_pi_agent_dir) -> LaunchExecRecorder:
+    """Capture chdir/exec calls and isolate pi's global agent directory.
+
+    ``agent_dir`` is the isolated env-arm store. ``Path.home`` is also pointed at a tmp dir so
+    the tests that ``delenv`` the redirect to exercise the config/default arms sweep
+    ``<tmp>/home/.pi/agent``, never the developer's real ``~/.pi/agent``.
+    """
     from perk.run import launch
 
-    agent_dir = tmp_path / "agent"
-    agent_dir.mkdir()
-    recorder = LaunchExecRecorder(agent_dir=agent_dir)
-    monkeypatch.setattr(launch, "_pi_agent_dir", lambda: agent_dir)
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    isolated_pi_agent_dir.mkdir(exist_ok=True)
+    recorder = LaunchExecRecorder(agent_dir=isolated_pi_agent_dir)
     monkeypatch.setattr(launch, "_resolve_pi_executable", lambda: recorder.pi_path)
     monkeypatch.setattr(launch.os, "chdir", lambda path: recorder.chdirs.append(Path(path)))
     monkeypatch.setattr(
@@ -337,7 +368,12 @@ def _scaffolded_perk_template(
         _committed_git_template,
         tmp_path_factory.mktemp("scaffolded-perk-template"),
     )
-    init_mod.run_init(root, verify=False)
+    # Session-scoped setup runs outside the function-scoped `isolated_pi_agent_dir` fixture, so
+    # redirect the agent dir explicitly: init's agent-dir convergences must never touch the
+    # developer's real store from a fixture.
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("PI_CODING_AGENT_DIR", str(tmp_path_factory.mktemp("scaffolded-pi-agent")))
+        init_mod.run_init(root, verify=False)
     return root
 
 

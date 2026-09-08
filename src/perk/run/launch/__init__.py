@@ -26,8 +26,8 @@ self-gating post-dry-run pipeline :func:`_write_session_handoff` / :func:`_warm_
 / :func:`_materialize_into_worktree` / :func:`_emit_linear_run_started` / :func:`_run_setup_hook`
 / :func:`_exec_pi`), the pure child-environment builder (:func:`_build_exec_env`), the
 ``--dry-run`` preview
-(:func:`_emit_dry_run_preview`), the agent-lock helpers (:func:`_pi_agent_dir` /
-:func:`_sweep_stale_pi_agent_locks`), and the module constants used here
+(:func:`_emit_dry_run_preview`), the agent-lock sweep (:func:`_sweep_stale_pi_agent_locks`,
+targeting the shared ``launch_pi_agent_dir`` resolution), and the module constants used here
 (``_PI_AGENT_LOCK_FILES`` / ``_NPM_QUIET_ENV``). The module-level imports the string-path
 monkeypatches resolve against (``os`` / ``subprocess`` / ``github`` / ``git`` / ``cache`` /
 ``linear_agent`` / ``init`` / ``runner``) are kept here so ``perk.run.launch.<mod>.attr`` rebinds
@@ -102,8 +102,10 @@ from perk.substrate import git as git
 from perk.substrate.config import (
     Config,
     ConfigError,
+    PiAgentDir,
     StageModel,
-    effective_pi_agent_dir,
+    default_pi_agent_dir,
+    launch_pi_agent_dir,
     load_local_linear_api_key,
 )
 from perk.substrate.output import io_step, log_warn, machine_output, user_output
@@ -141,6 +143,12 @@ class _LaunchContext:
     (``handoff_extra``) is passed to that phase directly. ``argv`` is a tuple for real
     immutability — the two consumers convert at the edge (``list(ctx.argv)`` for the dry-run
     preview and for ``os.execvpe``).
+
+    ``pi_agent_dir`` is the value *injected* into the child's ``PI_CODING_AGENT_DIR`` — set only
+    when the main checkout's `[pi] agent_dir` chose the dir (an operator env value is inherited
+    as-is, the default store needs no injection). ``agent_dir_resolution`` is the full
+    launch-precedence resolution the lock sweep targets (``None`` = no resolvable dir; the
+    best-effort sweep is skipped).
     """
 
     repo_root: Path
@@ -150,18 +158,7 @@ class _LaunchContext:
     rid: str
     argv: tuple[str, ...]
     pi_agent_dir: Path | None = None
-
-
-def _pi_agent_dir() -> Path:
-    """Resolve the cold-local child's agent dir for lock sweeping.
-
-    Blank inherited values are removed by `_build_exec_env`, so treat them as absent here too.
-    Non-blank values retain pi's native expansion semantics; otherwise use `~/.pi/agent`.
-    """
-    env = os.environ.get("PI_CODING_AGENT_DIR")
-    if env and env.strip():
-        return Path(env).expanduser()
-    return Path.home() / ".pi" / "agent"
+    agent_dir_resolution: PiAgentDir | None = None
 
 
 def _sweep_stale_pi_agent_locks(agent_dir: Path) -> None:
@@ -321,29 +318,32 @@ def launch_stage(
         plan_state=plan_state,
         plan_id=plan_id,
     )
-    # Resolve once for preview/exec parity. Inherited redirects count as operator choices,
-    # including the value injected by a parent session into a nested cold launch.
+    # Resolve once for preview/exec parity through the shared launch-precedence resolver.
+    # Inherited redirects count as operator choices, including the value injected by a parent
+    # session into a nested cold launch. A broken main-checkout config warns and falls back to
+    # pi's default store (no injection) — the same fallback the resolver's `default` arm yields.
+    try:
+        agent_dir_resolution = launch_pi_agent_dir(repo_root)
+    except (ConfigError, tomllib.TOMLDecodeError) as exc:
+        log_warn(
+            "could not read [pi] agent_dir from the main checkout config — "
+            f"launching without the redirect ({exc})"
+        )
+        agent_dir_resolution = default_pi_agent_dir()
     pi_agent_dir = None
-    if not os.environ.get("PI_CODING_AGENT_DIR", "").strip():
-        try:
-            pi_agent_dir = effective_pi_agent_dir(repo_root)
-        except (ConfigError, tomllib.TOMLDecodeError) as exc:
+    if agent_dir_resolution is not None and agent_dir_resolution.source == "config":
+        pi_agent_dir = agent_dir_resolution.path
+        if not pi_agent_dir.exists():
             log_warn(
-                "could not read [pi] agent_dir from the main checkout config — "
-                f"launching without the redirect ({exc})"
+                f"pi agent dir {pi_agent_dir} is missing — pi creates an empty agent dir "
+                "on demand; sessions launch with no auth.json/models.json"
             )
-        if pi_agent_dir is not None:
-            if not pi_agent_dir.exists():
-                log_warn(
-                    f"pi agent dir {pi_agent_dir} is missing — pi creates an empty agent dir "
-                    "on demand; sessions launch with no auth.json/models.json"
-                )
-            elif not pi_agent_dir.is_dir():
-                raise UserFacingCliError(
-                    f"pi agent dir {pi_agent_dir} is not a directory — pi cannot create its "
-                    "sessions tree under a non-directory. Set [pi] agent_dir to a directory.",
-                    error_type="pi_agent_dir_invalid",
-                )
+        elif not pi_agent_dir.is_dir():
+            raise UserFacingCliError(
+                f"pi agent dir {pi_agent_dir} is not a directory — pi cannot create its "
+                "sessions tree under a non-directory. Set [pi] agent_dir to a directory.",
+                error_type="pi_agent_dir_invalid",
+            )
     ctx = _LaunchContext(
         repo_root=repo_root,
         config=config,
@@ -351,6 +351,7 @@ def launch_stage(
         resolved=resolved,
         rid=run_id_override or run_id.mint(),
         pi_agent_dir=pi_agent_dir,
+        agent_dir_resolution=agent_dir_resolution,
         argv=_build_argv(
             stage=stage,
             config=config,
@@ -658,7 +659,8 @@ def _exec_pi(ctx: _LaunchContext) -> None:
         fallback_linear_api_key=local_linear_key,
         pi_agent_dir=ctx.pi_agent_dir,
     )
-    _sweep_stale_pi_agent_locks(ctx.pi_agent_dir or _pi_agent_dir())
+    if ctx.agent_dir_resolution is not None:
+        _sweep_stale_pi_agent_locks(ctx.agent_dir_resolution.path)
     # The presence probe does not eliminate the exec race — a failed chdir/exec is an ordinary
     # OSError arm, not a crash (the watch-seam shape).
     try:
@@ -761,7 +763,6 @@ __all__ = [
     "_initial_prompt",
     "_learn_prompt",
     "_materialize_into_worktree",
-    "_pi_agent_dir",
     "_plan_read_instruction",
     "_resolve_pi_executable",
     "_resolve_prompt",

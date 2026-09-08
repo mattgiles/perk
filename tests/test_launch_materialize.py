@@ -233,7 +233,6 @@ def test_exec_pi_resolves_before_chdir_and_execs_the_absolute_path(
     events: list[object] = []
     agent_dir = tmp_path / "agent"
     agent_dir.mkdir()
-    monkeypatch.setattr(launch, "_pi_agent_dir", lambda: agent_dir)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         shutil, "which", lambda binary: events.append(("which", binary)) or "bin/pi"
@@ -242,7 +241,7 @@ def test_exec_pi_resolves_before_chdir_and_execs_the_absolute_path(
     monkeypatch.setattr(
         launch.os, "execvpe", lambda program, argv, env: events.append(("exec", program, argv))
     )
-    ctx = launch_context_factory(stage=_stage("implement"), plan_ref=_PLAN_REF)
+    ctx = launch_context_factory(stage=_stage("implement"), plan_ref=_PLAN_REF, agent_dir=agent_dir)
     launch._exec_pi(ctx)
     assert events[0] == ("which", "pi")  # the real resolver probed the pi binary…
     assert events.index(("which", "pi")) < events.index("chdir")  # …BEFORE the chdir
@@ -265,11 +264,10 @@ def test_exec_pi_which_miss_aborts_before_any_exec_phase_side_effect(
     # the refusal precedes the sweep — not just the chdir/exec.
     stale_lock = agent_dir / "settings.json.lock"
     stale_lock.write_text("", encoding="utf-8")
-    monkeypatch.setattr(launch, "_pi_agent_dir", lambda: agent_dir)
     monkeypatch.setattr(shutil, "which", lambda binary: None)
     monkeypatch.setattr(launch.os, "chdir", lambda path: events.append("chdir"))
     monkeypatch.setattr(launch.os, "execvpe", lambda program, argv, env: events.append("exec"))
-    ctx = launch_context_factory(stage=_stage("implement"), plan_ref=_PLAN_REF)
+    ctx = launch_context_factory(stage=_stage("implement"), plan_ref=_PLAN_REF, agent_dir=agent_dir)
     with pytest.raises(UserFacingCliError) as excinfo:
         launch._exec_pi(ctx)
     assert excinfo.value.error_type == "pi_cli_missing"
@@ -288,7 +286,6 @@ def test_exec_pi_chdir_or_exec_oserror_becomes_launch_failed(
     events: list[str] = []
     agent_dir = tmp_path / "agent"
     agent_dir.mkdir()
-    monkeypatch.setattr(launch, "_pi_agent_dir", lambda: agent_dir)
     monkeypatch.setattr(launch, "_resolve_pi_executable", lambda: "/stub/bin/pi")
 
     def _chdir(path):
@@ -303,7 +300,7 @@ def test_exec_pi_chdir_or_exec_oserror_becomes_launch_failed(
 
     monkeypatch.setattr(launch.os, "chdir", _chdir)
     monkeypatch.setattr(launch.os, "execvpe", _execvpe)
-    ctx = launch_context_factory(stage=_stage("implement"), plan_ref=_PLAN_REF)
+    ctx = launch_context_factory(stage=_stage("implement"), plan_ref=_PLAN_REF, agent_dir=agent_dir)
     with pytest.raises(UserFacingCliError) as excinfo:
         launch._exec_pi(ctx)
     assert excinfo.value.error_type == "launch_failed"

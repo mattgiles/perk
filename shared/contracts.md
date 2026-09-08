@@ -902,8 +902,28 @@ ride preflight; the bridge supplies foreground-only execution and disables accep
 mission, worktree or acceptance keys are sent. Native `worktree` defaults are captured from
 `join(getAgentDir(), "extensions/subagent/config.json")` and rechecked before dispatch. Missing
 file/absent key/false are compatible; true, nonboolean, malformed or unreadable config, or changed
-captured state, refuses with inspection/reload guidance. Configuration/source edits during launch
-are unsupported; preflight is a snapshot, not a source-edit fence.
+captured state, refuses with inspection/reload guidance. Every `incompatible-worktree-default`
+receipt — from any of the four gates (pre-preflight, post-preflight, post-lock, and the pre-emit
+gate inside the wait, which settles with this reason rather than collapsing to `unauthorized`) —
+carries `nativeWorktreeConfig {path, observed, atActivation}` (a diagnostic location like
+`lock.path`: the exact file read, the state at the refusing gate, the state at activation), and the
+`resolve_submit_conflicts` diagnostic renders it ("Native subagent config `<path>` has an
+incompatible worktree default (observed …; … at activation). Run `perk doctor --fix` (or `perk
+init`) to set `"worktree": false` there, then reload the session."). The setting is
+**perk-managed**: `perk init`'s `subagent-worktree-default` managed convergence (with its derived
+doctor check + `--fix` arm) atomically sets `worktree: false` in the launch-precedence agent
+dir's `extensions/subagent/config.json` — the dir resolved by the ONE `launch_pi_agent_dir`
+resolver `launch_stage` also consumes (`PI_CODING_AGENT_DIR` → the main checkout's `[pi]
+agent_dir` → `~/.pi/agent`; no resolvable home → nothing to converge) — rewriting only that key
+(sibling keys preserved; pi-subagents' own tab-indented serialization), only when it is present and
+not exactly `false`, and never creating the file. Only a genuinely missing path is compatible:
+anything perk cannot read as a JSON object — an existing non-file (a directory, which the engine
+reads as `incompatible`), an unreadable or non-UTF-8 file, invalid JSON, a non-object document —
+is translated inside the convergence into one path-naming `invalid_subagent_config` refusal that
+fails `perk init` loudly, renders `unverifiable` in doctor, rides `fix_errors` under `--fix`, and
+never rewrites the path.
+Configuration/source edits during launch are unsupported; preflight is a snapshot, not a
+source-edit fence (a `--fix` mid-session still needs the reload the diagnostic states).
 
 **Shared exclusive-file mechanics.** `extension/substrate/exclusiveFileClaim.ts` owns token UUID
 minting, the 16 KiB metadata bound, JSON encoding/parsing through a caller-supplied owner codec,
@@ -2325,7 +2345,12 @@ second `--fix` at `fixed == []`).
   `[issues] backend` is `"linear"`; warn-level, the github D3 mirror; `--fix` ensures the six
   perk labels (§8.21).
 - `runner` — remote-runner prereqs; report-only, non-fatal (§8.16).
-- `package` — the wiring/install/version surfaces: `settings-wiring`, `extension-install`, the
+- `package` — the wiring/install/version surfaces: `settings-wiring`, `subagent-worktree-default`
+  (the managed check pinning pi-subagents' native `worktree` default to `false` in the
+  launch-precedence agent dir's `extensions/subagent/config.json` — drift is a `fail` that
+  `--fix` repairs in place; a path perk cannot read as a JSON object (malformed, non-UTF-8,
+  unreadable, or a directory) is `unverifiable`; the file is never created —
+  §8.3), `extension-install`, the
   `required-perk-version` managed check, and the report-only probes `cli-version`
   (CLI-vs-repo-pin warn), `resource-overrides` (pi overrides touching perk's own resources),
   `subagent-compat` (the pi-subagents orchestration surfaces perk's guidance assumes —
@@ -2338,11 +2363,16 @@ second `--fix` at `fixed == []`).
   detail, never affecting status; `info` when not installed), `ponytail-compat` (exact
   package/`pi.skills`/skill-file/frontmatter;
   known-good remediation `npm:@dietrichgebert/ponytail@4.9.0` + `perk init` + session restart),
-  and `subagent-bridge-config` (warns when either settings scope sets
-  `subagents.intercomBridge.mode` to `"off"`/`"fork-only"`, which silently disables the
-  supervisor channel the live-streaming review flows require) — all report-only probes warn at
-  worst and have no `--fix` arm. `--fix` also migrates a former git-clone consumer forward by
-  removing the orphaned clone. The full package-group contract is §8.6a.
+  and `subagent-bridge-config` (warns when either settings scope — the project
+  `.pi/settings.json` or the user scope, `settings.json` in the launch-precedence agent dir
+  (`launch_pi_agent_dir`, labeled by absolute path; skipped when no dir resolves or the main
+  checkout config is broken) — sets `subagents.intercomBridge.mode` to `"off"`/`"fork-only"`,
+  which silently disables the supervisor channel the live-streaming review flows require) — all
+  report-only probes warn at worst and have no `--fix` arm. `--fix` also migrates a former
+  git-clone consumer forward by removing the orphaned clone. A managed piece `--fix` cannot
+  verify (a malformed `.pi/settings.json` or pi-subagents `config.json`) is reported on
+  `fix_errors` (`<check>: <message>`) instead of aborting the run — the file stays untouched and
+  every other fix still runs. The full package-group contract is §8.6a.
 - `repository` — gitignore/agents blocks + config present/valid.
 - `registry` — the registry self-check.
 - `skills` — the skills-CLI manifest fragment + the fail-level `skills-delivery` substrate

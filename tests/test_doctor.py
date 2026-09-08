@@ -1436,23 +1436,16 @@ def test_ponytail_compat_divergence_warns(scaffolded_perk_repo, mutate, expected
     assert expected in check.detail
 
 
-def _isolate_home(monkeypatch, tmp_path, *, bridge_mode=None):
-    """Point ``Path.home()`` at a tmp dir (hermetic — the check reads the real user scope
-    otherwise), optionally planting ``.pi/agent/settings.json`` with the given bridge mode.
-    The check must call ``Path.home()`` at check time for this patch to land."""
-    from pathlib import Path
-
-    home = tmp_path / "fake-home"
-    home.mkdir(exist_ok=True)
-    if bridge_mode is not None:
-        settings = home / ".pi" / "agent" / "settings.json"
-        settings.parent.mkdir(parents=True, exist_ok=True)
-        settings.write_text(
-            json.dumps({"subagents": {"intercomBridge": {"mode": bridge_mode}}}),
-            encoding="utf-8",
-        )
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
-    return home
+def _plant_user_bridge_mode(agent_dir, bridge_mode):
+    """Plant the user-scope ``settings.json`` (inside the launch-precedence agent dir — the
+    autouse ``isolated_pi_agent_dir`` in these tests) with the given bridge mode."""
+    settings = agent_dir / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(
+        json.dumps({"subagents": {"intercomBridge": {"mode": bridge_mode}}}),
+        encoding="utf-8",
+    )
+    return settings
 
 
 def _set_project_bridge_mode(repo, mode):
@@ -1465,17 +1458,15 @@ def _set_project_bridge_mode(repo, mode):
     settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
 
 
-def test_subagent_bridge_config_default_is_ok(scaffolded_perk_repo, monkeypatch, tmp_path):
+def test_subagent_bridge_config_default_is_ok(scaffolded_perk_repo):
     # The scaffolded default (mode unset in both scopes) reports the bridge active.
-    _isolate_home(monkeypatch, tmp_path)
     report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
     assert bridge.status == "ok" and bridge.group == "package"
     assert "bridge active" in bridge.message
 
 
-def test_subagent_bridge_config_project_off_is_warn(scaffolded_perk_repo, monkeypatch, tmp_path):
-    _isolate_home(monkeypatch, tmp_path)
+def test_subagent_bridge_config_project_off_is_warn(scaffolded_perk_repo):
     _set_project_bridge_mode(scaffolded_perk_repo, "off")
     report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
@@ -1486,12 +1477,9 @@ def test_subagent_bridge_config_project_off_is_warn(scaffolded_perk_repo, monkey
     assert report.healthy
 
 
-def test_subagent_bridge_config_project_fork_only_is_warn(
-    scaffolded_perk_repo, monkeypatch, tmp_path
-):
+def test_subagent_bridge_config_project_fork_only_is_warn(scaffolded_perk_repo):
     # "fork-only" counts: perk's wave children run fresh-context, which deactivates a
     # fork-only bridge — streaming silently degrades to completion-only.
-    _isolate_home(monkeypatch, tmp_path)
     _set_project_bridge_mode(scaffolded_perk_repo, "fork-only")
     report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
@@ -1500,31 +1488,74 @@ def test_subagent_bridge_config_project_fork_only_is_warn(
     assert report.healthy
 
 
-def test_subagent_bridge_config_explicit_always_is_ok(scaffolded_perk_repo, monkeypatch, tmp_path):
-    _isolate_home(monkeypatch, tmp_path)
+def test_subagent_bridge_config_explicit_always_is_ok(scaffolded_perk_repo):
     _set_project_bridge_mode(scaffolded_perk_repo, "always")
     report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
     assert bridge.status == "ok"
 
 
-def test_subagent_bridge_config_user_scope_off_is_warn(scaffolded_perk_repo, monkeypatch, tmp_path):
-    # The user-global scope (~/.pi/agent/settings.json) warns too — an explicit off in EITHER
-    # scope disables streaming (perk does not reimplement pi's cross-scope merge semantics).
-    _isolate_home(monkeypatch, tmp_path, bridge_mode="off")
+def test_subagent_bridge_config_user_scope_off_is_warn(scaffolded_perk_repo, isolated_pi_agent_dir):
+    # The user scope (settings.json in the launch-precedence agent dir) warns too — an explicit
+    # off in EITHER scope disables streaming (perk does not reimplement pi's cross-scope merge
+    # semantics). The detail names the absolute planted path, not a `~/.pi/agent` assumption.
+    settings = _plant_user_bridge_mode(isolated_pi_agent_dir, "off")
     report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
     assert bridge.status == "warn"
-    assert "~/.pi/agent/settings.json" in bridge.detail
+    assert str(settings) in bridge.detail
     assert report.healthy
 
 
-def test_subagent_bridge_config_invalid_settings_stays_quiet(
-    scaffolded_perk_repo, monkeypatch, tmp_path
+def test_subagent_bridge_config_user_scope_follows_configured_agent_dir(
+    scaffolded_perk_repo, monkeypatch
 ):
+    # With no operator env, the user scope is the main checkout's `[pi] agent_dir` store —
+    # the same launch-precedence resolver as launch_stage, never a hardcoded ~/.pi/agent.
+    from pathlib import Path
+
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    home = scaffolded_perk_repo.parent / "fake-home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    _plant_user_bridge_mode(home / ".pi" / "agent", "off")  # the wrong store: must be ignored
+    _configure_pi_agent_dir(scaffolded_perk_repo, ".pi/agent")
+    settings = _plant_user_bridge_mode(scaffolded_perk_repo / ".pi" / "agent", "off")
+    check = doctor_checks._subagent_bridge_config_check(scaffolded_perk_repo)
+    assert check.status == "warn"
+    assert str(settings) in check.detail and str(home) not in check.detail
+
+
+def test_subagent_bridge_config_unresolvable_agent_dir_skips_user_scope(
+    scaffolded_perk_repo, monkeypatch
+):
+    from pathlib import Path
+
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+
+    def no_home(cls):
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "home", classmethod(no_home))
+    check = doctor_checks._subagent_bridge_config_check(scaffolded_perk_repo)
+    assert check.status == "ok"
+
+
+@pytest.mark.parametrize("text", ["[pi", "[pi]\nagent_dir = 7\n"])
+def test_subagent_bridge_config_bad_config_skips_user_scope(
+    scaffolded_perk_repo, monkeypatch, text
+):
+    # A broken main-checkout config is the `config` check's complaint; the report-only bridge
+    # check skips the user scope rather than crashing.
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    (scaffolded_perk_repo / ".perk/config.toml").write_text(text, encoding="utf-8")
+    check = doctor_checks._subagent_bridge_config_check(scaffolded_perk_repo)
+    assert check.status == "ok"
+
+
+def test_subagent_bridge_config_invalid_settings_stays_quiet(scaffolded_perk_repo):
     # Invalid project settings are the settings-wiring check's complaint, not this one's —
     # the bridge check stays ok/quiet on that scope.
-    _isolate_home(monkeypatch, tmp_path)
     (scaffolded_perk_repo / ".pi" / "settings.json").write_text("not json{", encoding="utf-8")
     report = run_doctor(scaffolded_perk_repo, verify=False)
     bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
@@ -1545,6 +1576,243 @@ def test_edited_delivered_def_reports_drift_and_is_fixed(scaffolded_perk_repo):
     fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert fixed.healthy
     assert delivered.read_bytes() == (_resources.agents_dir() / f"{name}.md").read_bytes()
+
+
+# --- subagent-worktree-default: pi-subagents' native `worktree` default, perk-managed ------
+
+
+def _native_subagent_config(agent_dir):
+    """pi-subagents' config path inside an agent dir (what the engine reads at activation)."""
+    return agent_dir / "extensions" / "subagent" / "config.json"
+
+
+def _plant_native_subagent_config(agent_dir, text):
+    path = _native_subagent_config(agent_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _worktree_default_check(report):
+    return next(c for c in report.checks if c.name == "subagent-worktree-default")
+
+
+@pytest.mark.parametrize("text", [None, "{}", '{"worktree": false, "x": 1}'])
+def test_subagent_worktree_default_compatible_is_ok(
+    scaffolded_perk_repo, isolated_pi_agent_dir, text
+):
+    # An absent file, an absent key, and an explicit `false` are all compatible for the engine
+    # (pi-subagents' own default is no worktree) — nothing to converge, never a file created.
+    if text is not None:
+        _plant_native_subagent_config(isolated_pi_agent_dir, text)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    check = _worktree_default_check(report)
+    assert check.status == "ok" and check.group == "package"
+    if text is None:
+        assert not _native_subagent_config(isolated_pi_agent_dir).exists()
+
+
+def test_subagent_worktree_default_true_is_drift_and_fixed_preserving_siblings(
+    scaffolded_perk_repo, isolated_pi_agent_dir
+):
+    path = _plant_native_subagent_config(isolated_pi_agent_dir, '{"worktree":true,"x":1}')
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    check = _worktree_default_check(report)
+    assert check.status == "fail" and check.remediation == "perk doctor --fix"
+    assert str(path) in check.detail and "worktree=true → false" in check.detail
+    assert path.read_text(encoding="utf-8") == '{"worktree":true,"x":1}'  # dry-run: untouched
+
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert fixed.healthy and fixed.fix_errors == []
+    assert any(str(path) in line for line in fixed.fixed)
+    # pi-subagents' own `saveConfig` shape: tab indent + trailing newline; only `worktree`
+    # rewritten, the sibling key preserved.
+    assert path.read_text(encoding="utf-8") == '{\n\t"worktree": false,\n\t"x": 1\n}\n'
+    assert json.loads(path.read_text(encoding="utf-8")) == {"worktree": False, "x": 1}
+
+    again = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert again.healthy and again.fixed == [] and again.fix_errors == []
+
+
+@pytest.mark.parametrize("value", ['"false"', "0", "null", '"true"'])
+def test_subagent_worktree_default_non_boolean_is_repaired(
+    scaffolded_perk_repo, isolated_pi_agent_dir, value
+):
+    # Only an exact JSON `false` is compatible; any other present value (including the string
+    # "false" or the falsy 0) is drift the engine would classify `incompatible`.
+    path = _plant_native_subagent_config(isolated_pi_agent_dir, f'{{"worktree": {value}}}')
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    check = _worktree_default_check(report)
+    assert check.status == "fail" and f"worktree={value} → false" in check.detail
+    run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert json.loads(path.read_text(encoding="utf-8")) == {"worktree": False}
+
+
+def _plant_bytes(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
+def _plant_directory(path):
+    path.mkdir(parents=True)
+
+
+def _plant_unreadable(path, monkeypatch):
+    # A permission failure is simulated at the read seam (chmod 000 is unreliable under root/CI).
+    from pathlib import Path
+
+    _plant_bytes(path, b'{"worktree": true}')
+    read_text = Path.read_text
+
+    def deny(self, *args, **kwargs):
+        if self == path:
+            raise PermissionError(13, "Permission denied", str(path))
+        return read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", deny)
+
+
+def _snapshot_path(path):
+    """The on-disk state of the planted path: (kind, bytes-or-listing)."""
+    if path.is_dir():
+        return ("dir", sorted(p.name for p in path.iterdir()))
+    return ("file", path.read_bytes())
+
+
+@pytest.mark.parametrize(
+    ("plant", "expected_message"),
+    [
+        (lambda p, mp: _plant_bytes(p, b"{not json"), "is not valid JSON"),
+        (lambda p, mp: _plant_bytes(p, b"[true]"), "must contain a JSON object"),
+        (lambda p, mp: _plant_bytes(p, b'"worktree"'), "must contain a JSON object"),
+        # Invalid UTF-8: a `UnicodeDecodeError` (a ValueError, outside the managed-check net)
+        # must become the same path-naming refusal, never abort read-only doctor.
+        (lambda p, mp: _plant_bytes(p, b'\xff\xfe{"worktree": true}'), "could not be read"),
+        # A directory at the path: the engine reads it as `incompatible` (EISDIR), so treating it
+        # as "absent" would leave a refusal/repair loop doctor can neither see nor fix.
+        (lambda p, mp: _plant_directory(p), "is not a regular file"),
+        # An unreadable file: doctor's net caught the raw OSError, but `--fix` re-reads and only
+        # catches UserFacingCliError — the convergence must translate it itself.
+        (lambda p, mp: _plant_unreadable(p, mp), "could not be read"),
+    ],
+    ids=["invalid-json", "array", "string", "invalid-utf8", "directory", "unreadable"],
+)
+def test_subagent_worktree_default_unreadable_is_unverifiable_and_fix_does_not_crash(
+    scaffolded_perk_repo, isolated_pi_agent_dir, monkeypatch, plant, expected_message
+):
+    path = _native_subagent_config(isolated_pi_agent_dir)
+    plant(path, monkeypatch)
+    before = _snapshot_path(path)
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    check = _worktree_default_check(report)
+    assert check.status == "fail" and check.message == "subagent-worktree-default unverifiable"
+    assert str(path) in check.detail and expected_message in check.detail
+    # `--fix` records the refusal on fix_errors instead of aborting; the path is never touched.
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert any(
+        e.startswith("subagent-worktree-default: ") and str(path) in e and expected_message in e
+        for e in fixed.fix_errors
+    )
+    assert _snapshot_path(path) == before
+    assert not fixed.healthy
+    # The other managed pieces still converged/verified around the refusal (no abort).
+    assert next(c for c in fixed.checks if c.name == "settings-wiring").status == "ok"
+
+
+@pytest.mark.parametrize("plant", [_plant_directory, lambda p: _plant_bytes(p, b"\xff{")])
+def test_subagent_worktree_default_unreadable_fails_init_loudly(
+    scaffolded_perk_repo, isolated_pi_agent_dir, plant
+):
+    from perk.cli.ensure import UserFacingCliError
+
+    path = _native_subagent_config(isolated_pi_agent_dir)
+    plant(path)
+    before = _snapshot_path(path)
+    with pytest.raises(UserFacingCliError) as exc:
+        run_init(scaffolded_perk_repo, verify=False)
+    assert exc.value.error_type == "invalid_subagent_config"
+    assert str(path) in exc.value.format_message()
+    assert _snapshot_path(path) == before
+
+
+def test_subagent_worktree_default_follows_configured_agent_dir(scaffolded_perk_repo, monkeypatch):
+    # With no operator env, the convergence targets the main checkout's `[pi] agent_dir` — the
+    # exact store a perk session launches with (the same resolver as launch_stage).
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    _configure_pi_agent_dir(scaffolded_perk_repo, ".pi/agent")
+    path = _plant_native_subagent_config(
+        scaffolded_perk_repo / ".pi" / "agent", '{"worktree": true}'
+    )
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    check = _worktree_default_check(report)
+    assert check.status == "fail" and str(path) in check.detail
+    run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert json.loads(path.read_text(encoding="utf-8")) == {"worktree": False}
+
+
+def test_subagent_worktree_default_env_wins_over_configured_agent_dir(
+    scaffolded_perk_repo, isolated_pi_agent_dir
+):
+    # PI_CODING_AGENT_DIR (set by the autouse fixture) beats `[pi] agent_dir`: the configured
+    # store's poisoned file is NOT what a launched session reads, so it is left alone.
+    _configure_pi_agent_dir(scaffolded_perk_repo, ".pi/agent")
+    configured = _plant_native_subagent_config(
+        scaffolded_perk_repo / ".pi" / "agent", '{"worktree": true}'
+    )
+    env_path = _plant_native_subagent_config(isolated_pi_agent_dir, '{"worktree": true}')
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    check = _worktree_default_check(report)
+    assert check.status == "fail"
+    assert str(env_path) in check.detail and str(configured) not in check.detail
+    run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert json.loads(env_path.read_text(encoding="utf-8")) == {"worktree": False}
+    assert configured.read_text(encoding="utf-8") == '{"worktree": true}'
+
+
+def test_subagent_worktree_default_unresolvable_agent_dir_converges_nothing(
+    scaffolded_perk_repo, monkeypatch
+):
+    from pathlib import Path
+
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+
+    def no_home(cls):
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "home", classmethod(no_home))
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    assert _worktree_default_check(report).status == "ok"
+
+
+@pytest.mark.parametrize("text", ["[pi", "[pi]\nagent_dir = 7\n"])
+def test_subagent_worktree_default_defers_bad_config(scaffolded_perk_repo, monkeypatch, text):
+    # A broken main-checkout config is the `config` check's complaint; this convergence stays ok.
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    (scaffolded_perk_repo / ".perk/config.toml").write_text(text, encoding="utf-8")
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    assert _worktree_default_check(report).status == "ok"
+    assert next(c for c in report.checks if c.name == "config").status == "fail"
+
+
+def test_subagent_worktree_default_write_failure_leaves_original_bytes(
+    scaffolded_perk_repo, isolated_pi_agent_dir, monkeypatch
+):
+    # The atomic replace fails at the rename: the original file keeps its bytes and no temp
+    # residue is left beside it (a torn/half-written config would break the engine's resolver).
+    from pathlib import Path
+
+    from perk.convergence.init import subagent_config
+
+    path = _plant_native_subagent_config(isolated_pi_agent_dir, '{"worktree": true}')
+
+    def boom(self, target):
+        raise PermissionError("read-only store")
+
+    monkeypatch.setattr(Path, "replace", boom)
+    with pytest.raises(PermissionError):
+        subagent_config._converge_subagent_worktree_default(scaffolded_perk_repo)
+    assert path.read_text(encoding="utf-8") == '{"worktree": true}'
+    assert sorted(p.name for p in path.parent.iterdir()) == ["config.json"]
 
 
 def test_missing_agents_dir_is_fail_only_on_owning_check(scaffolded_perk_repo):

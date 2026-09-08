@@ -16,9 +16,12 @@ from perk.substrate.config import (
     Config,
     ConfigError,
     ConfigFileModel,
+    PiAgentDir,
     SkillsPolicy,
     StageModel,
+    default_pi_agent_dir,
     effective_pi_agent_dir,
+    launch_pi_agent_dir,
     load_committed_compaction,
     load_committed_issues_backend,
     load_committed_issues_team,
@@ -231,6 +234,91 @@ def test_effective_pi_agent_dir_home_expansion_failure_is_config_error(
     assert isinstance(exc.value.__cause__, RuntimeError)
     # Parsing itself remains a raw-string boundary, with no home lookup.
     assert load_config(tmp_path).pi_agent_dir == value
+
+
+# --- launch_pi_agent_dir: the ONE launch-precedence resolver (env → config → default) ------
+
+
+def test_launch_pi_agent_dir_env_wins_with_expansion(tmp_path, monkeypatch):
+    from perk.substrate import git
+
+    def no_read(root):
+        pytest.fail("a non-blank env value must skip the main-root config read")
+
+    monkeypatch.setattr(git, "main_worktree_root", no_read)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", "~/custom-agent")
+    _write(tmp_path, "config.toml", '[pi]\nagent_dir = ".pi/agent"\n')
+    assert launch_pi_agent_dir(tmp_path) == PiAgentDir(tmp_path / "home/custom-agent", "env")
+
+
+@pytest.mark.parametrize("env_value", [None, "", " \t "])
+def test_launch_pi_agent_dir_config_arm_resolves_against_main_root(
+    tmp_path, monkeypatch, env_value
+):
+    from perk.substrate import git
+
+    main = tmp_path / "main"
+    worktree = tmp_path / "worktree"
+    _write(main, "config.toml", '[pi]\nagent_dir = ".pi/agent"\n')
+    monkeypatch.setattr(git, "main_worktree_root", lambda root: main)
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    if env_value is not None:
+        monkeypatch.setenv("PI_CODING_AGENT_DIR", env_value)
+    assert launch_pi_agent_dir(worktree) == PiAgentDir(main / ".pi/agent", "config")
+
+
+def test_launch_pi_agent_dir_default_arm_is_home_store(tmp_path, monkeypatch):
+    from perk.substrate import git
+
+    monkeypatch.setattr(git, "main_worktree_root", lambda root: None)
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    expected = PiAgentDir(home / ".pi" / "agent", "default")
+    assert launch_pi_agent_dir(tmp_path) == expected
+    assert default_pi_agent_dir() == expected
+
+
+def test_launch_pi_agent_dir_unresolvable_home_is_none(tmp_path, monkeypatch):
+    from perk.substrate import git
+
+    monkeypatch.setattr(git, "main_worktree_root", lambda root: None)
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+
+    def no_home(cls):
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "home", classmethod(no_home))
+    assert launch_pi_agent_dir(tmp_path) is None
+    assert default_pi_agent_dir() is None
+
+
+def test_launch_pi_agent_dir_env_unknown_user_is_none(tmp_path, monkeypatch):
+    # POSIX `expanduser` raises RuntimeError for an unknown `~user`; the env arm never
+    # propagates it (and never falls through to the config/default arms either).
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", "~nosuchuser_perk/agent")
+    _write(tmp_path, "config.toml", '[pi]\nagent_dir = ".pi/agent"\n')
+    assert launch_pi_agent_dir(tmp_path) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "error"), [("[pi", tomllib.TOMLDecodeError), ("[pi]\nagent_dir = 7", ConfigError)]
+)
+def test_launch_pi_agent_dir_propagates_config_errors(tmp_path, monkeypatch, text, error):
+    from perk.substrate import git
+
+    monkeypatch.setattr(git, "main_worktree_root", lambda root: None)
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    _write(tmp_path, "config.toml", text)
+    with pytest.raises(error):
+        launch_pi_agent_dir(tmp_path)
+
+
+def test_pi_agent_dir_is_frozen():
+    resolution = PiAgentDir(Path("/x"), "env")
+    with pytest.raises(FrozenInstanceError):
+        resolution.path = Path("/y")  # ty: ignore[invalid-assignment]
 
 
 def test_user_bindings_absent_is_empty(tmp_path):

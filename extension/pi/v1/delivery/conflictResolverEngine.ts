@@ -15,6 +15,7 @@ import {
   classifyConflictResolution,
   conflictResolutionSchema,
   conflictResolutionTask,
+  type NativeWorktreeDefault,
   retainedConflictResolutionTask,
 } from "../../../delivery/conflictResolution.ts";
 import {
@@ -140,8 +141,7 @@ export async function loadResolverPreflight(
 export function nativeWorktreeConfigPath(): string {
   return join(getAgentDir(), "extensions/subagent/config.json");
 }
-type WorktreeDefault = "missing" | "absent" | "false" | "incompatible";
-export function nativeWorktreeDefault(path: string): WorktreeDefault {
+export function nativeWorktreeDefault(path: string): NativeWorktreeDefault {
   try {
     const config = object(JSON.parse(readFileSync(path, "utf8")));
     if (config === null) return "incompatible";
@@ -311,10 +311,6 @@ export function createConflictResolverEngine(
       return false;
     }
   }
-  function configCompatible(): boolean {
-    const current = nativeWorktreeDefault(configPath);
-    return current !== "incompatible" && current === configAtActivation;
-  }
   async function dispatch(
     request: ConflictResolutionRequest,
     signal: AbortSignal,
@@ -333,6 +329,20 @@ export function createConflictResolverEngine(
       receipt.disposition = reason;
       return { kind: "failed", reason, receipt };
     }
+    /**
+     * Re-read the native worktree default at a gate. Every refusal names the file and both
+     * observations on the receipt, so the diagnostic points at the exact path to repair.
+     */
+    function worktreeRefusal(): "incompatible-worktree-default" | null {
+      const observed = nativeWorktreeDefault(configPath);
+      if (observed !== "incompatible" && observed === configAtActivation) return null;
+      receipt.nativeWorktreeConfig = {
+        path: configPath,
+        observed,
+        atActivation: configAtActivation,
+      };
+      return "incompatible-worktree-default";
+    }
     if (signal.aborted) return failed("cancelled");
     if (!allowed(request)) return failed("unauthorized");
     const task =
@@ -345,7 +355,8 @@ export function createConflictResolverEngine(
     } catch {
       return failed("invalid-worktree");
     }
-    if (!configCompatible()) return failed("incompatible-worktree-default");
+    const preRefusal = worktreeRefusal();
+    if (preRefusal) return failed(preRefusal);
     let proof: ConflictResolutionReceipt["preflight"];
     try {
       loaded ??= options.preflight
@@ -379,7 +390,8 @@ export function createConflictResolverEngine(
     if (!allowed(request)) return failed("unauthorized");
     if (!proof) return failed("incompatible-profile");
     receipt.preflight = proof;
-    if (!configCompatible()) return failed("incompatible-worktree-default");
+    const postRefusal = worktreeRefusal();
+    if (postRefusal) return failed(postRefusal);
     const acquisition = (options.acquire ?? acquireWorktreeResolverLock)(request.worktree, {
       ...request.parent,
       requestId: receipt.requestId,
@@ -408,16 +420,13 @@ export function createConflictResolverEngine(
           ? "lock-io"
           : null;
     }
-    if (signal.aborted || !allowed(request) || !configCompatible() || claim.check() !== "owned") {
-      return failed(
-        finishLock(true) ??
-          (signal.aborted
-            ? "cancelled"
-            : !configCompatible()
-              ? "incompatible-worktree-default"
-              : "unauthorized"),
-      );
-    }
+    // Post-lock gate: the lock is released first (its failure wins), then the gate's own
+    // reason — cancelled, else the stamped worktree refusal, else unauthorized.
+    const lockedRefusal = signal.aborted
+      ? "cancelled"
+      : (worktreeRefusal() ??
+        (!allowed(request) || claim.check() !== "owned" ? "unauthorized" : null));
+    if (lockedRefusal) return failed(finishLock(true) ?? lockedRefusal);
     const result = await waitForTerminal(
       options.events,
       request,
@@ -425,7 +434,7 @@ export function createConflictResolverEngine(
       receipt,
       claim,
       signal,
-      () => allowed(request) && configCompatible(),
+      () => (allowed(request) ? worktreeRefusal() : "unauthorized"),
     );
     const lockFailure = finishLock(result.release);
     if (lockFailure) return failed(lockFailure);
@@ -468,7 +477,7 @@ function waitForTerminal(
   receipt: ConflictResolutionReceipt,
   claim: WorktreeResolverClaim,
   signal: AbortSignal,
-  authorized: () => boolean,
+  refusal: () => ConflictResolutionFailure | null,
 ): Promise<WaitResult> {
   return new Promise((resolveResult) => {
     const tuple = {
@@ -572,8 +581,13 @@ function waitForTerminal(
         }),
       );
       signal.addEventListener("abort", abort, { once: true });
-      if (signal.aborted || !authorized() || claim.check() !== "owned") {
-        settle({ failure: signal.aborted ? "cancelled" : "unauthorized", release: true });
+      // The pre-emit gate settles with the gate's own reason (a config flip between the lock
+      // and the emission is `incompatible-worktree-default`, never collapsed to `unauthorized`).
+      const preEmit = signal.aborted
+        ? "cancelled"
+        : (refusal() ?? (claim.check() !== "owned" ? "unauthorized" : null));
+      if (preEmit) {
+        settle({ failure: preEmit, release: true });
         return;
       }
       ack = setTimeout(() => cancel("termination-unconfirmed"), START_ACK_MS);

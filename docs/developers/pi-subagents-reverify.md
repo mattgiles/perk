@@ -158,8 +158,11 @@ TypeBox's non-enumerable metadata must not enter the native plain-JSON request.
 
 The narrow `worktree` setting comes from `join(getAgentDir(), "extensions/subagent/config.json")`.
 Missing/absent/false are compatible; true, nonboolean, malformed/unreadable or activation-changed
-settings refuse. Inspect/correct and reload, never rewrite settings or allocate a second worktree
-inside the adapter. Preflight/config observations are not atomic against concurrent source edits.
+settings refuse, stamping `nativeWorktreeConfig {path, observed, atActivation}` on the receipt.
+The adapter never rewrites settings or allocates a second worktree; the repair is the Python
+plane's `subagent-worktree-default` managed convergence (`perk init` / `perk doctor --fix`),
+which targets the launch-precedence agent dir (`PI_CODING_AGENT_DIR` → `[pi] agent_dir` →
+`~/.pi/agent`, the `launch_pi_agent_dir` resolver shared with `launch_stage`) — then reload. Preflight/config observations are not atomic against concurrent source edits.
 The persistent canonical Git-directory execution lock survives reload and process death; do not
 use compatibility testing as an unlock gesture. See the
 [human-only recovery procedure](../user-docs/how-to/recover-a-dirty-worktree.md#recover-a-retained-submit-conflict-lock).
