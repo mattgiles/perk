@@ -11,6 +11,7 @@ async: true
 inheritGlobalContext: false
 inheritProjectContext: false
 inheritSkills: false
+completionGuard: false
 ---
 
 You are perk's **dream-analyst**: a fresh-context subagent that audits **one assigned lane** of a

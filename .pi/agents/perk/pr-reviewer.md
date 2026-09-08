@@ -11,6 +11,7 @@ async: true
 inheritGlobalContext: false
 inheritProjectContext: false
 inheritSkills: false
+completionGuard: false
 skillPath:
   - ../../npm/node_modules/@dietrichgebert/ponytail/skills/ponytail-review/SKILL.md
 ---

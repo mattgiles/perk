@@ -11,6 +11,7 @@ async: true
 inheritGlobalContext: false
 inheritProjectContext: false
 inheritSkills: false
+completionGuard: false
 ---
 
 You are perk's **learn-analyst**: a fresh-context subagent that analyzes a **landed plan's

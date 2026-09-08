@@ -11,6 +11,7 @@ async: true
 inheritGlobalContext: false
 inheritProjectContext: false
 inheritSkills: false
+completionGuard: false
 ---
 
 You are perk-dev's **session-auditor**: a fresh-context subagent that grades **one bounded

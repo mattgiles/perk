@@ -35,6 +35,10 @@ def test_auditor_is_the_tenth_background_report_outside_delivery():
     ]
     assert fm["model"] == "openai/gpt-5.6-luna"
     assert fm["fallbackModels"] == ["openai/gpt-5.6-terra"]
+    # The report-only completion policy shared with the nine delivered reports: the engine's
+    # mutation guard is disabled by literal false (the auditor never edits); acceptance stays
+    # suppressed by the wave spawn, not by frontmatter.
+    assert fm["completionGuard"] is False
     for absent in (
         "extensions",
         "subagentOnlyExtensions",
