@@ -52,48 +52,24 @@ The plan seam must always produce perk's reviewed, canonical plan artifact.
   with or without the streamed reviewer wave (Esc = without; the review always proceeds); the
   wave choice takes an optional custom angle, opens the `/plan-review-browser` /
   `/objective-review-browser` flow, and returns non-blocking `wave_launched` guidance while the
-  browser decision routes back automatically. Approval without direct edits uses the ordinary
-  approval/save seam. Approved plan direct edits are applied and the edited bytes saved; an
-  unapplyable diff falls back to the original bytes with a warning. Approved objective or gist
+  browser decision routes back automatically. Approval without direct edits uses the
+  ordinary approval/save seam. Approved plan direct edits are applied and the edited bytes saved;
+  an unapplyable diff falls back to the original bytes with a warning. Approved objective or gist
   direct edits do not save: they return one revise round so the agent folds the edits into the
-  structured draft and re-reviews. Denial returns actionable feedback to the agent.
+  structured draft and re-reviews. Denial returns feedback to the agent.
 
-Every draft review — the blocking `plan_review` tool (Plannotator or first-party; plan, objective,
-gist, refinement) and both browser doors — runs the same four in-memory guards; nothing is
-persisted (no review record, no lock, no reconciliation procedure), and a browser decision does
-not survive a Pi restart (re-run the door):
-
-1. **Reviewed bytes** — an approval saves only the bytes the human saw; a draft written while the
-   review was open (or, for refinements, a re-prepared grounding context) makes the approval
-   save nothing and ask for `plan_review` on the current draft; a denial keeps its feedback with
-   a one-line "the draft moved" note. Applies to artifact-sourced reviews (doors, the Plannotator
-   tool arm); a first-party editor's own edit write-back is saved as reviewed.
-2. **Save destination** — at approval the main checkout's committed `[issues] backend`/`team`,
-   the git `remote.*.url`/`remote.*.gh-resolved` entries (GitHub backend only; Linear never
-   reads remotes) and, for plans, the objective node claim must equal their open-time values.
-   Nothing else is fenced: landing a PR (`branch.*` git config), `[workflow] base`, credentials,
-   other Perk TOML edits never block an approval. A changed or unverifiable destination saves
-   nothing, names the moved component (never its value) and requires a fresh `plan_review` —
-   a fresh human approval. Denials never check it. `[issues]` is read for `"basic"`, `'literal'`
-   and multi-line spellings; dotted-key/inline-table spellings are not read and not fenced
-   (Python remains the save authority).
-3. **One current review per session** — opening a review on any surface supersedes the previous
-   one (`/implement-here` retires it); a superseded review's decision is ignored loudly (one TUI
-   warning, nothing saved or injected) even when its bytes are still current.
-4. **Unconfirmed-save latch** — a save attempt without a typed receipt (failed/thrown backend
-   call, unavailable port) pauses automatic approval-driven saves for the rest of the session;
-   the next approval is refused (`save_unconfirmed`) before the backend is touched, naming the
-   failure and the run id. Check the backend for an existing object carrying that run id first
-   (on Linear a partially completed create can leave an issue the retry cannot find; GitHub
-   creates are find-then-return on the run id), then the manual save command (`/plan-save`,
-   `/objective-save`, `/gist-save`, `/objective-refinement-save`) is the deliberate retry — it
-   never consults the latch. A restart clears the latch; still check the backend before saving.
-
-A refused approval is never a skipped review, a denial, or permission for the model to retry a
-save. Reviewer feedback reaches the model only inside `<untrusted_reviewer_feedback>` delimiters.
-The bridge subscribes to the browser's decision before emitting the review request (no status
-query, polling, startup discovery, replay or resume); if the browser never becomes ready, findings
-degrade loudly in-session and a later browser decision is ignored.
+Every Plannotator draft review (plan, objective, gist, refinement — the browser doors and the
+blocking `plan_review`) is fenced by one in-memory **current review** per session: opening a review
+supersedes the previous one (a late decision for a superseded review is ignored loudly), APPROVE
+re-reads the draft bytes and re-checks the **save destination** — the main checkout's committed
+`[issues] backend`/`team` and the `remote.*.url` set (absence is a value; an unreadable git remote
+reading refuses) — and refuses on drift with nothing saved (`plan_review` reports `status:
+"stale"` with the reason), DENY is delivered once as untrusted DATA, and a review saves at most
+once. Nothing else is fingerprinted: unrelated `.perk/*.toml` or `git config` edits leave the
+review valid. Nothing is persisted and no lock is taken: a lost browser decision (a crash, a
+superseded review) is recovered by re-running the door. Perk installs the
+`plannotator:review-result` listener **before** emitting the request and buffers decisions until
+the handshake names the review; there is no status query, polling, startup discovery or replay.
 
 The warm `/pr-review-browser` door also uses plannotator when that package is installed. It can
 review a foreign PR, the active worktree's PR, or a local since-base diff before submission. That

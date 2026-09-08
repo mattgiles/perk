@@ -44,13 +44,6 @@ selector (**77** total sources counting the four `.mdx` pages; `_authoring.md` s
 excluded source), **76** routed pages, **76** sidebar entries (Home, the four section
 landings, and the 71 enumerated in §3).
 
-*Draft-review amendment:* `how-to/reconcile-a-draft-review-stop.md` was added to Core workflow
-with the persisted draft-review record and later removed with it — draft reviews now run four
-in-memory guards with no reconciliation procedure (`reference/in-session/review-and-authoring.md`
-"Browser draft review"). Current tree totals are **78** Markdown/MDX sources (**74** `.md`, four
-`.mdx`), **77** routed pages and sidebar entries; `_authoring.md` remains excluded. Earlier dated
-totals above describe their respective snapshots, not the current corpus.
-
 ## §1 Purpose & binding scope
 
 ### What this blueprint binds

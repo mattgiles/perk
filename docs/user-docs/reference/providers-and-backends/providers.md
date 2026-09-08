@@ -30,16 +30,14 @@ owns only an interface, so perk yields that interface without bridging an artifa
 - **`plannotator-plan` — AUGMENT.** perk keeps `/plan`, its authoring context, and the read-only
   gate. It vacates only `--plan`, `Ctrl+Alt+P`, and the matching startup handler because
   plannotator registers those surfaces. `planAdapterPlannotator` sends the draft to the browser
-  through `plan_review`. An eligible matching approval without direct edits saves through the normal approval seam.
+  through `plan_review`. An approval without direct edits saves through the normal approval seam.
   For a plan approval with `# Direct Edits`, perk applies the diff and saves the edited bytes; if
   the diff cannot apply, it saves the original bytes and reports the fallback. For objective and
   gist approvals with direct edits, perk does not save: it returns one revise round so the agent
-  folds the edits into the appropriate draft fields and re-reviews. Denial returns actionable
-  feedback to the agent. Every approval runs the shared draft-review guards (reviewed bytes, save
-  destination, one current review, the unconfirmed-save latch) — a refused approval saves nothing
-  and asks for a fresh `plan_review`. See
-  [Plannotator draft-review transport](../providers-and-backends.md#plannotator-draft-review-transport)
-  and [Browser draft review](../in-session/review-and-authoring.md#browser-draft-review).
+  folds the edits into the appropriate draft fields and re-reviews. A denial returns the feedback
+  to the agent. Every review is fenced by one in-memory current review (a newer review supersedes;
+  an approval after the draft or the save destination changed refuses — nothing saved). See
+  [Plannotator draft-review transport](../providers-and-backends.md#plannotator-draft-review-transport).
 
 The adapters are selected behavior, not new storage formats. A plan reference's `provider` field
 names the **issue backend**, not the plan-provider id.

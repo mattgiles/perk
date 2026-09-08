@@ -69,12 +69,11 @@ later plan must re-verify.
 
 Nothing was saved. Present the complete refinement to the human and **offer** the
 `/objective-refinement-save` command — the human's own explicit save gesture. Never invoke it
-yourself, and never save as a consequence of a skipped, dismissed or unavailable review. If the
-runtime reports that an approval was NOT saved because the working draft or its grounding context
-changed, or because the save destination changed, nothing was saved: keep editing as needed and
-call `plan_review` again for a fresh human review. If it reports that automatic saves are paused
-after an unconfirmed save, do not retry yourself — relay the check-the-backend guidance (read the
-node's comments back) to the human; `/objective-refinement-save` is their deliberate retry.
+yourself, and never save as a consequence of a skipped, dismissed or unavailable review. A
+`plan_review` result reporting `stale` (the draft or the save destination changed while the
+review was open, or a newer review superseded it) saved nothing — call `plan_review` again over
+the current draft; a `save_failed` result names the human's `/objective-refinement-save` and its
+worker diagnostics — read the node's comments back with the human before any further attempt.
 
 ## Availability and boundaries
 

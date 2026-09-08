@@ -56,29 +56,18 @@ summarized in [Issue backends](./providers-and-backends/issue-backends.md).
 
 ## Plannotator draft-review transport
 
-Plan, objective, gist and refinement reviews on the Plannotator provider — the blocking
-`plan_review` tool and both browser doors — share the in-memory guards described in
-[Browser draft review](./in-session/review-and-authoring.md#browser-draft-review): the reviewed
-bytes must still be the live draft at approval; the save destination (the main checkout's
-committed `[issues] backend`/`team`, the git `remote.*.url`/`remote.*.gh-resolved` entries on the
-GitHub backend only, and the plan's objective node claim) must equal what it was when the review
-opened; one review is current per session and a decision from a superseded review is ignored
-loudly; and an unconfirmed save pauses automatic saves until the manual save command (the
-deliberate retry — check the backend for the run id first; on Linear a partially completed
-create can leave an issue the retry cannot find). Nothing else is fenced — an unrelated Perk TOML
-edit, a `[workflow] base` change or any other git-config change (landing a PR rewrites
-`branch.*`) never blocks an approval. A refused approval saves nothing and asks for a fresh
-`plan_review`; it is never a skipped review, a denial, or permission to retry a save yourself.
-
-The bridge subscribes to the browser's decision before it emits the review request, so a
-decision emitted during the handshake is not lost; there is no status query, polling, startup
-discovery, automatic replay, or resume. Cancellation closes the local wait, not the upstream
-browser. Nothing is persisted: a browser decision does not survive a Pi restart — re-run the
-door. The fence trusts its own `[issues]` read only for the plain shape (one `[issues]`
-header, single-line `"basic"`/`'literal'` strings); for any other valid spelling — dotted keys
-(`issues.backend = …`), an inline table, multi-line strings, escapes — it compares the whole
-committed `config.toml` instead, so a routing edit is always noticed but any edit to that file
-during a review counts as a changed destination. Python remains the authority for the save.
+Every Plannotator draft review (plan, objective, gist, refinement — the browser doors and the
+blocking `plan_review`) is fenced by one in-memory **current review** per session: opening a review
+supersedes the previous one (a late decision for a superseded review is ignored loudly), APPROVE
+re-reads the draft bytes and re-checks the **save destination** — the main checkout's committed
+`[issues] backend`/`team` and the `remote.*.url` set (absence is a value; an unreadable git remote
+reading refuses) — and refuses on drift with nothing saved, DENY is delivered once as untrusted
+DATA, and a review saves at most once. Nothing else is fingerprinted: unrelated `.perk/*.toml` or
+`git config` edits leave the review valid. Nothing is persisted and no lock is taken: a lost
+browser decision (a crash, a superseded review) is recovered by re-running the door. Perk installs
+the `plannotator:review-result` listener **before** emitting the request and buffers decisions
+until the handshake names the review, so a decision emitted during the handshake is not lost;
+there is no status query, polling, startup discovery or replay.
 
 ## Known caveats & maturity
 

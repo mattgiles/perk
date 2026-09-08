@@ -32,26 +32,24 @@ Toggle perk plan mode — a read-only exploration and plan-authoring session. Pa
   decision. Approval auto-saves and ends the turn. *Terminating on approval.* Before review, the
   authoring skills direct a one-question-at-a-time pre-review grill.
 
-On an eligible matching review, the Plannotator browser can return a `# Direct Edits` unified diff. On the **plan** arm, approval
+The Plannotator browser can return a `# Direct Edits` unified diff. On the **plan** arm, approval
 applies the diff to the draft and saves the edited bytes; if application fails, perk saves the
 original draft with a loud warning and leaves the diff in feedback. Denial returns the diff for a
 `plan_draft` rewrite. On the **objective** and **gist** arms, approval with Direct Edits does not
 save: the agent must fold the rendered-markdown diff into `objective_draft` or the matching
 `gist_draft` fields and request a confirming review.
 
-Every review surface runs the same four in-memory guards — reviewed bytes, save destination,
-one current review, the unconfirmed-save latch; see
-[Browser draft review](./review-and-authoring.md#browser-draft-review). The draft tools, manual
-saves, `objective_node` and `/implement-here` consult no review state; a manual save is the
-deliberate retry once automatic saves are paused. Nothing is persisted — a browser decision does
-not survive a Pi restart (re-run the door).
+Every Plannotator review is fenced by one in-memory current review per session: a newer review
+supersedes the previous one (its late decision is ignored), an approval that arrives after the
+draft or the save destination changed refuses (`status: "stale"` — nothing saved; call
+`plan_review` again), and a review saves at most once. See
+[Browser draft review](./review-and-authoring.md#browser-draft-review).
 
 ### `/plan-save`
 
 Persist the plan to the issue backend, link the session to it, and cross the read-only → read-write
-boundary. `/plan-save` is the manual save entry — and the deliberate retry after an unconfirmed
-approval save paused automatic saves (check the backend for an existing plan carrying this run id
-first). Paired tool:
+boundary. `/plan-save` is a manual save entry, not a retry for an unconfirmed review save.
+A retained review-state stop requires human reconciliation first. Paired tool:
 
 - **`plan_save`** — save the validated `plan-draft.md` artifact when present, otherwise an explicit
   plan parameter, otherwise the latest assistant-message fallback. *Terminating.*
@@ -275,12 +273,10 @@ node's refinement comment. There is **no** model save tool.
 The human failsafe for a refinement: save the current validated refinement draft as the node's
 refinement comment. Takes **no arguments**; refinement sessions only; idle only. Invoking it is
 itself your explicit authorization — no prior review is required, it may follow a denial, and its
-result is labelled a manual human save (never a reviewer approval). It is also the deliberate
-retry after an unconfirmed approval save paused automatic saves (read the node's comments back
-first). A missing, invalid or context-mismatched draft stops with rewrite/re-entry guidance and
-saves nothing. The read-only gate exits only after a verified save; a failed save keeps the
-worker's diagnostics (`write_attempted`, comment ids), pauses automatic saves, and asks you to
-read the node's comments back before retrying.
+result is labelled a manual human save (never a reviewer approval). A missing, invalid
+or context-mismatched draft stops with rewrite/re-entry guidance and saves nothing. The
+read-only gate exits only after a verified save; a failed save keeps the worker's diagnostics
+(`write_attempted`, comment ids) and asks you to read the node's comments back before retrying.
 
 The plan-graph surfaces — `objective_node`, `plan_save`/`/plan-save`, `objective_save`/
 `/objective-save`, `gist_save`/`/gist-save`, `/objective-plan`, `/implement-here`, the browser
