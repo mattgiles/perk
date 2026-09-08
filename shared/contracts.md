@@ -189,36 +189,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `absent`; the review-style draft consumers (gist/objective) fold `invalid` into their
   classified `refused` resume arm and STOP with a rendered refusal instead of falling back.
 
-  **Opt-in strict provenance.** `WorkflowSession.readArtifact(name, {provenance: "strict"})`
-  keeps the `found`/`absent`/`invalid` vocabulary but never treats unknown provenance as absence.
-  It reads one workflow-state snapshot, requires a safe current run identity, validates the entire
-  pointer map (including siblings), and checks the current run's content even without a matching
-  pointer. Missing/null map is an empty map; a present pointer requires safe `run_id`, matching
-  `name`, nonempty informational `path`/`at`, and `sha256:<64 lowercase hex>` digest. Throwing or
-  malformed state/map/pointer, content I/O failure, orphan bytes, missing file behind a current-run
-  pointer, and digest mismatch are `invalid`. A sound inherited pointer never authorizes a parent
-  read: an empty child namespace is `absent` and usable; bytes in the child without child provenance
-  are an orphan and refuse. Independent stale branch snapshots over advanced disk bytes therefore
-  refuse, rather than authorize replacement. Ordinary readers keep their existing tier behavior.
-
-  The strict content port distinguishes ENOENT from I/O failure and rejects symlink/non-directory/
-  group-world-writable namespace components and nonregular artifact files. Its canonical namespace
-  comes through `cache.ts::canonicalSessionDataDir` / the session-data seam; aliases above the
-  checkout are legal, redirects within checkout-owned components are not. Reads never create dirs.
-  `writeArtifact(name, content, {provenance: "strict"})` first verifies prior strict provenance,
-  refuses invalid reads before effects, and verifies exact read-back content plus the appended
-  pointer. Rejected/unverified review-state writes never authorize effects or speculative repair.
-  Callers own exclusion; this option is not a transaction or an automatic lock. Draft reviews
-  persist nothing beside the draft artifacts themselves — the review guards are in-memory
-  (§8.23 "Draft-review guards").
-
-  Digest consumers use `digestSessionData` through the session boundary (exact UTF-8 strings or
-  exact byte arrays, the same unprefixed artifact digest meaning).
-  `WorkflowSession.draftReviewContext()` reads one strict routing snapshot: safe run ID, the
-  review-stage subject (`plan` / `objective` / `gist` / `refinement`), and an owned nonblank
-  objective/node claim for plans only. Missing/null plan claim is null; malformed relevant
-  claim/state refuses. Non-plans bind no warm claim. `currentRunIdentity()` is the separate
-  strict live identity-only read. Ordinary `nodeClaim()` and artifact readers remain unchanged.
+  `WorkflowSession.currentRunIdentity()` is the strict live identity read (safe `run_id` from one
+  rebuilt snapshot) used by refinement's context/draft ops.
 - **Agent scratch.** `.perk/workflow/scratch/runs/<run_id>/agent/` is the run-owned directory for
   disposable command/model intermediates. Interior run-directory creation shares one hardened
   boundary — `extension/substrate/cache.ts::ensureRunScratch` + `ensureAgentScratch` own the
@@ -303,12 +275,12 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `outbox.ndjson`/`delivered.ndjson` (O_APPEND appends cannot truncate-tear; whole-file
   replace would introduce a read-modify-write race) — and **existence-only markers** (Python
   `set_marker`'s `.touch()` carries no content; the TS `setMarker` is routed anyway — uniformity
-  is free). The shared `extension/substrate/exclusiveFileClaim.ts` primitive is a separate
-  **exclusive-descriptor** exemption: it writes/fsyncs only a freshly `wx`/0600-created descriptor;
-  replacing an incumbent via atomic rename would violate mutual exclusion. The §8.3 resolver
-  wrapper keeps its Git-directory filename outside `.perk/workflow/` (it is the primitive's only
-  wrapper). Atomicity is **not** mutual exclusion — whole-file last-writer-wins between ordinary concurrent
-  artifact writers remains the accepted residual; participating claim users must serialize. Corruption posture:
+  is free). The §8.3 submit-conflict execution lock is a separate **Git-directory** writer,
+  outside `.perk/workflow/`: it writes/fsyncs only a freshly exclusive-created descriptor;
+  replacing an incumbent via atomic rename would violate its mutual-exclusion protocol. A partial
+  record remains busy until identity-fenced initialization cleanup or human recovery.
+  Atomicity is **not** mutual exclusion — whole-file last-writer-wins between
+  concurrent writers is the accepted residual (no locking/versioning). Corruption posture:
   Python's fail-closed workflow readers translate malformed JSON / invalid UTF-8 into `CacheError` — now
   `(UserFacingCliError, ValueError)`-based with `error_type: "cache_invalid"`, so an uncaught
   corruption presents as a clean actionable CLI error naming the corrupt file and the
@@ -755,13 +727,11 @@ inspection commands (read-only `git` queries, `jq`, `curl`, …), read-only `gh`
 subcommands (view/list/diff/status/checks/search + `gh auth status`; `gh api` and every mutating
 subcommand stay blocked), the read-only `perk objective` queries (`show`/`next` + aliases and
 `node-engagement`; the mutating subcommands stay blocked), and exactly the whitespace-separated
-`perk pr review-context --expected-pr N --json` (the plan-bound form), `perk pr review-context
---pr N --json` and `perk pr review-context --pr N --stack --json` (the human-triage doors'
-adversarial children and the stack-review routing step; N matches `[1-9][0-9]*` on every form,
-`--json` last) and `perk pr feedback --json` forms with optional surrounding whitespace. Anchored
-query exceptions retain segment validation and the destructive veto: `cd … && query` passes, but
-the flagless context form, other argument orders, extra arguments (`--local` included), lookalike
-verbs, `review-post`, `gh api`, real-file redirects, and chained mutations do not. The sub-allowlist also retains command-keyed `ast-grep` /
+`perk pr review-context --expected-pr N --json` (N matches `[1-9][0-9]*`) and
+`perk pr feedback --json` forms with optional surrounding whitespace. Anchored query exceptions
+retain segment validation and the destructive veto: `cd … && query` passes, but flagless/foreign/
+stack context forms, extra arguments, lookalike verbs, `review-post`, `gh api`, real-file redirects,
+and chained mutations do not. The sub-allowlist also retains command-keyed `ast-grep` /
 `agent-browser` (+ `npx agent-browser`) entries (an accepted arg-blind leniency, like `curl`);
 (3) injects a hidden `[READ-ONLY MODE]` context at `before_agent_start` — **once-only per
 selected branch**: the injection is FULL-branch-scan dedup'd on the marker (`branchCarries` over
@@ -951,18 +921,9 @@ never rewrites the path.
 Configuration/source edits during launch are unsupported; preflight is a snapshot, not a
 source-edit fence (a `--fix` mid-session still needs the reload the diagnostic states).
 
-**Shared exclusive-file mechanics.** `extension/substrate/exclusiveFileClaim.ts` owns token UUID
-minting, the 16 KiB metadata bound, JSON encoding/parsing through a caller-supplied owner codec,
-exclusive `wx`/0600 creation, fsync, read-back through `check()`, device/inode/path/token ownership
-fencing, typed busy/I/O results, and idempotent `finish(release|retain)`. Diagnostic owners exclude
-tokens. The primitive does not discover Git, choose filenames, queue/retry, change workflow state,
-reclaim incumbents, or prove quiescence from PID/age. Wrappers preserve resource-specific identity
-and metadata; ownership must be checked before effects. Metadata stays unchanged while held.
-
-Draft reviews take no file lock: their guards are in-memory (§8.23 "Draft-review guards").
-Neither atomic file replacement nor fsync claims power-loss durability or exactly-once delivery.
-
-**Shared resolver worktree execution lock (both modes).** `worktreeGitDir` runs shell-free
+**Shared resolver worktree execution lock (both modes).** The lock is self-contained in
+`extension/substrate/worktreeResolverLock.ts` (token minting, `wx`/0600 creation, fsync, ownership
+fencing, `finish(release|retain)`). `worktreeGitDir` runs shell-free
 `git rev-parse --absolute-git-dir` with a five-second timeout, validates a directory and returns
 its realpath or unavailable, never cwd/common-dir fallback. `perk-submit-conflict.lock` lives
 inside that per-worktree Git directory. Aliases/subdirectories contend; linked worktrees are
@@ -1290,85 +1251,28 @@ the summary (+ rendered findings) as a single discussion comment, so an advisory
 ops below:
 
 ```
-get_pr_review_context{ pr_number, branch, plan_body, local_diff? } -> PrReviewContext{ pr_number, base_ref, head_ref, title, body, diff, plan_body, diff_source }
+get_pr_review_context{ pr_number, branch, plan_body } -> PrReviewContext{ pr_number, base_ref, head_ref, title, body, diff, plan_body }
     # Read-only. PR meta via `gh api pulls/{n}`, diff via `gh pr diff {n}`. The gateway reads
     # no plan/issue state: `plan_body` is resolved backend-neutrally by the consumer
     # (`perk pr review-context`) — the materialized `cache.plan` mirror first, else
     # `IssueBackend.get_plan_body` via the resolver — and passed straight in (best-effort; null
     # permits non-plan-fidelity review from the diff; automated plan-fidelity blocks without
     # nonblank plan text). What the spawned child runs.
-    # LARGE-PR FALLBACK: `gh pr diff` is GitHub's diff media type, which GitHub refuses above
-    # 20,000 lines / 300 files (HTTP 406 `PullRequest.diff too_large`; the message names the
-    # line or the file cap). On that shape, or on `local_diff=True` (the CLI's `--local`), the
-    # gateway renders the diff locally via `git.pr_merge_base_diff`: fetch `refs/pull/{n}/head`
-    # + `refs/heads/{base}` into a per-invocation `refs/perk/review-ctx/<uuid>/` namespace →
-    # merge-base (GitHub's 3-dot base) → `diff_range`; both refs deleted best-effort in a
-    # finally (a failed delete is warned, never masks the result); objects are fetched into
-    # refs, never checked out or executed. `fetch_refspecs` passes `--no-write-fetch-head`
-    # (nobody reads FETCH_HEAD; it is the ONE file every worktree's fetch would otherwise
-    # lock), so concurrently falling-back lanes touch nothing shared. The result is stamped
-    # `diff_source: "local-git"` (`"github"` on the default path). A git failure or a PR
-    # payload without a base ref (absent, null, or blank) is a `GitHubError` naming the
-    # ACTUAL trigger (the 406 vs. the request) — a forced `--local`
-    # never claims a 406; every other `gh pr diff` failure raises exactly as before. GitHub's
-    # diff stays the default; the local path is never routed to unconditionally.
-    # `diff_range` is the hardened, config-pinned review diff for every local rendering:
-    # `git diff --no-ext-diff --no-textconv --no-color --unified=3 --diff-algorithm=myers
-    # --find-renames --src-prefix=a/ --dst-prefix=b/ <base> <head>` — the never-execute posture
-    # (no `diff.external` / textconv helper ever runs against PR content) plus GitHub's hunk
-    # rendering and the `a/`/`b/` prefixes `diff_anchors` keys on, regardless of user config
-    # (every pin is Git's default, so default-configured repos render byte-identically).
     # CLI arms: `--pr <n>` resolves an arbitrary PR by number (existence + head ref via `get_pr`,
     # `plan_body` null, clean `pr_not_found` arm). `--expected-pr <n>` stays on the active-plan,
     # plan-body-preserving arm and compares the branch-selected target before context fetch;
-    # mismatch is `review_target_changed`. The two flags are mutually exclusive. `--local`
-    # composes with EVERY arm (no new exclusion): it forces the single-PR `diff` and each
-    # `--stack` member `diff` local; PR title/body/base/head stay GitHub reads. It is an
-    # operator/debug escape hatch — the reviewer defs never use it and the read-only bash gate
-    # does not admit it.
+    # mismatch is `review_target_changed`. The two flags are mutually exclusive.
     # `--pr <top> --stack` (the stacked reviewer-context arm; --stack requires --pr and
     # excludes --expected-pr): re-resolves the chain from the given PR (a perk train IS a
     # base-ref chain; the same cardinality/fork gates as checkout, so children and doors refuse
     # consistently), keeps the top-level fields on the top PR (non-stack byte-identical), and
-    # adds stack:[{pr, base_ref, head_ref, title, body, diff, plan_body, diff_source}]
-    # per-member sections (plan_body enriched for `plan-<N>` head branches) + combined_diff:
-    # the member heads + stack base fetched into a PER-INVOCATION refs/perk/review-ctx/<token>/
-    # namespace (concurrent reviewer lanes share one ref store — no shared temp ref is ever
-    # touched; deleted in a finally), the checkout worker's predecessor→successor ancestry gate
+    # adds stack:[{pr, base_ref, head_ref, title, body, diff, plan_body}] per-member sections
+    # (plan_body enriched for `plan-<N>` head branches) + combined_diff: the member heads +
+    # stack base fetched into a PER-INVOCATION refs/perk/review-ctx/<token>/ namespace
+    # (concurrent reviewer lanes share one ref store — no shared temp ref is ever touched;
+    # deleted in a finally), the checkout worker's predecessor→successor ancestry gate
     # re-validated fail-closed (stack_topology_broken — indeterminate probes refuse too),
-    # then a local `diff_range(<base_sha>, <top_sha>)`.
-    # PROVENANCE IS PER ARTIFACT: every `diff_source` describes exactly the `diff` beside it —
-    # the top-level field the top-level `diff` (the top member's in stack mode), each `stack[]`
-    # member's its own `diff`. `combined_diff` is ALWAYS a local merge-base rendering by
-    # construction and carries no provenance field (documented, never emitted as a constant).
-    # `diff_source` is a TRAILING field on `PrReviewContextOut` / `StackContextMemberOut`
-    # (JSON-schema enum {github, local-git}); the reviewer defs disclose a `"local-git"` diff
-    # as one `fyi` line (anchors are unchanged).
-    # THE CLI ARMS EMIT A POINTER ENVELOPE, NEVER INLINE TEXT: every free-text section —
-    # `body`, `diff`, `plan_body`, each `stack[]` member's sections, `combined_diff` — is
-    # written to its own line-oriented file and the `--json` payload carries `context_dir` +
-    # `{path, bytes, lines, max_line_bytes}` references (`plan_body` null when absent; the
-    # `--stack` arm's top-level refs ALIAS the top member's files — the top PR's text is
-    # written exactly once). Rationale: Pi's `read` refuses a single line above its 50 KiB
-    # per-line bound and `bash` keeps only the last 50 KiB, so a large PR inlined as a JSON
-    # string was unreadable by every reviewer child by construction (pretty-printing cannot
-    # split a JSON string). Location: `cache.run_scratch_dir(<invocation checkout>,
-    # $PERK_RUN_ID or a minted run id)/review-context/pr-<n>[-stack]-<12-hex token>/` —
-    # gitignored, reachable by the caller-checkout children, per-invocation unique (concurrent
-    # lanes never share a directory), pruned by the run-dir age rule. Layout: single-PR
-    # `diff.patch`, `body.md`, `plan.md` (only when a plan body exists); stack
-    # `combined.patch` + `stack/<pr>/{diff.patch,body.md,plan.md}` per member (bottom→top),
-    # NO root-level section files. Files are byte-exact (no trimming/normalization — a
-    # reformatted diff would break `line` anchors and hunk headers); `bytes` is the UTF-8
-    # length, `lines` the splitlines count, `max_line_bytes` the longest line's UTF-8 length
-    # (the number a child compares against Pi's 51,200-byte per-line bound: above it, the
-    # child locates the line with `grep -n` and views it in 51,200-byte slices via
-    # `sed -n 'Np' <path> | tail -c +<offset> | head -c 51200`, offsets +1, +51201, +102401, …
-    # until a slice is empty — every byte reachable; all three commands pass the read-only
-    # gate, and `head -c` alone would expose only the first slice). The writer's documented
-    # failure set (`OSError` filesystem arms, `UnicodeError` for text UTF-8 cannot encode) is
-    # the CLI's `write_failed` arm (exit 1). Goldens: `pr-review-context.schema.json` +
-    # `pr-review-stack-context.schema.json`.
+    # then a local `git diff <base_sha> <top_sha>`.
 post_pr_review{ pr_number, summary, comments:[{path,line,body,side?}], event? } -> ReviewPostResult{ ok, mode, pr_number, comment_count }
     # ONE atomic review via POST .../pulls/{n}/reviews — comments + body + event land together or
     # not at all. `event` defaults to COMMENT (wire spelling: COMMENT|APPROVE|REQUEST_CHANGES) and
@@ -1436,29 +1340,17 @@ does not block. Only completed assessments derive actionable from surviving find
 clean. Blockers come first in FYI, followed by explicitly **partial, unassessed, diagnostic-only**
 concerns/anchors; these are in-session diagnostics, never posting input.
 
-The child-only context acceptance policy is in `agents/pr-reviewer.md`, grounded in the
-`PrReviewContextOut` / `pr-review-context.schema.json` pointer envelope (the `--stack` arm's
-`PrReviewStackContextOut` / `pr-review-stack-context.schema.json` golden carries the same
-reference shape per member). Exit must be zero and entire stdout one non-null JSON object, not an
-array. All fields are required without coercion: `success: true`, `error_type: null`,
-`message: null`; `pr` a positive safe integer equal to the task target; `branch`, `base_ref`,
-`head_ref`, `title`, `context_dir` nonblank strings; `body` and `diff` file-reference objects —
-`path` a nonblank string, `bytes`/`lines`/`max_line_bytes` non-negative safe integers; `plan_body`
-such an object or null, with a non-null reference whose file holds nonblank text required for
-plan-fidelity. Missing `plan_body` blocks every lane; explicit null (or a blank file) is optional
-evidence only for other angles. The child then reads the referenced files (`read` the body/plan,
-`grep -n`-index and page the diff; a line over Pi's per-line bound is byte-sliced via `sed -n
-'Np' <path> | tail -c +<offset> | head -c 51200`, advancing the 1-based offset by 51,200 until a
-slice is empty): an unreadable/missing referenced file blocks the lane; a long line never does. Unknown extras are ignored, accepted text is not rewritten, refs are metadata
-not another authority lookup, and no parent parser, fallback PR fetch, local-branch comparison,
-or head-SHA binding is added.
-The trailing `diff_source` ∈ {`github`, `local-git`} is one such unknown extra for the acceptance
-table (an older CLI without it must not block); a `local-git` value is disclosed as one `fyi`
-line and the review proceeds normally.
+The child-only context acceptance policy is in `agents/pr-reviewer.md`, grounded in the unchanged
+`PrReviewContextOut` / `pr-review-context.schema.json` envelope. Exit must be zero and entire stdout
+one non-null JSON object, not an array. All fields are required without coercion: `success: true`,
+`error_type: null`, `message: null`; `pr` a positive safe integer equal to the task target;
+`branch`, `base_ref`, `head_ref`, `title` nonblank strings; `body` and `diff` strings (blank allowed);
+`plan_body` string or null, with nonblank text required for plan-fidelity. Missing `plan_body`
+blocks every lane; explicit null/blank is optional evidence only for other angles. Unknown extras
+are ignored, accepted text is not rewritten, refs are metadata not another authority lookup,
+and no parent parser, fallback PR fetch, local-branch comparison, or head-SHA binding is added.
 
-`prReviewWave.ts` normalizes only non-null non-array report objects with exact `verdict: "blocked"`
-(through the flow-neutral `reclassifyBlockedReports(result, isBlocked)` in
-`extension/waves/blockedReports.ts`; the adversarial doors supply `blocked === true` instead).
+`prReviewWave.ts` normalizes only non-null non-array report objects with exact `verdict: "blocked"`.
 The enclosing assignment key identifies a `lane-failed` failure, never the report angle or prose.
 FYI retains only strings whose trim is nonempty, preserving retained bytes, duplicates and order.
 Detail is exactly `"reviewer blocked:\n" + (notes.length > 0 ? notes.join("\n") :
@@ -1539,12 +1431,7 @@ perk pr review-submit --pr <n> --event <e> --batch <file> --json -> { success, e
     # against, parsed by the pure `diff_anchors` module) BEFORE anything touches GitHub; any
     # failure → bad_anchors (exit 1, NOTHING submitted) with per-comment
     # invalid:[{index, path, line, side, reason}] detail — identical shape for dry-run and real
-    # runs (the agent's repair loop: re-run --dry-run until it exits 0). `get_pr_diff` applies
-    # the same 406 `too_large` fallback as `get_pr_review_context` — one extra `gh api pulls/{n}`
-    # read for the base ref, then the local merge-base diff, whose unified-diff line numbering
-    # is identical and whose `diff_range` pins hold the rendering to GitHub's — so anchor
-    # validation works above GitHub's cap; the too-large check runs BEFORE the not-found → None
-    # fold, and the posting ladder stays the backstop. `--dry-run` stops before
+    # runs (the agent's repair loop: re-run --dry-run until it exits 0). `--dry-run` stops before
     # the mutation (mode "validated") but — unlike review-post's fully-offline dry-run — REQUIRES
     # gh + auth (anchor validation fetches the diff): a deliberate, documented divergence.
     # Dry-run ADDITIONALLY predicts the own-PR 422 for formal events (before the diff fetch):
@@ -1692,13 +1579,7 @@ prompt; the contracts pin the output shape, not the judgment rubric.
 
 - **Input (per-spawn task prompt):** the assigned angle, the PR number, and the absolute path to
   the detached read-only head worktree (the checkout above). The child fetches its own context
-  via `perk pr review-context --pr <n> --json` (`--stack` added in stack mode) — the pointer
-  envelope above (`plan_body` may be null) — and reads the materialized files itself with
-  `read`/`grep` (indexing the diff with `grep -n '^diff --git'`, paging with `read`
-  `offset`/`limit`, byte-slicing a line over Pi's per-line bound via `sed -n 'Np' <path> |
-  tail -c +<offset> | head -c 51200`, offsets +1, +51201, … until empty). A failed/unparseable
-  command or an unreadable referenced file ⇒ `blocked: true` (below); a long line alone never
-  blocks.
+  via `perk pr review-context --pr <n> --json` (`plan_body` may be null).
 - **Angles** (one per spawn; the adversarial selectable menu is exactly these four —
   `pr-reviewer`'s autonomous menu is wider, seven fixed angles): `claimed-intent` (the PR text's claims checked against the diff, plus a first-class hunt
   for **undisclosed scope**; the parent always includes this angle) · `correctness` (incl. the
@@ -1714,11 +1595,10 @@ prompt; the contracts pin the output shape, not the judgment rubric.
   by the PR author** (an author not trusted by default) — checked against the diff, never built
   on. **Never-execute-the-head:** inside the head worktree the child uses
   `read`/`grep`/`find`/`ls` only (no builds, no tests, no installs); the only command it runs in
-  the whole session is `review-context` — inspecting the files it materializes
-  (`read`/`grep`/`wc`/`sed -n … | tail -c … | head -c`) is inspection, not execution of the head.
+  the whole session is `review-context`.
 - **Output (the cross-plane contract).** ONE engine-injected **`structured_output`** call
-  carrying `{angle, summary, findings[], fyi[], streamed: boolean, blocked: boolean}` — the
-  wave's `ADVERSARIAL_REVIEW_REPORT_SCHEMA` (`extension/waves/adversarialReviewWave.ts`); all
+  carrying `{angle, summary, findings[], fyi[], streamed: boolean}` — the wave's
+  `ADVERSARIAL_REVIEW_REPORT_SCHEMA` (`extension/waves/adversarialReviewWave.ts`); all
   fields required (`fyi` may be `[]`) and **verdict-free** (a human triages downstream; an empty
   `findings` array is the "nothing found" statement, earned by hunting, never manufactured).
   Each finding is `{path, line: <int-in-diff or null>, side?: "LEFT"|"RIGHT" (omitted = RIGHT),
@@ -1726,19 +1606,6 @@ prompt; the contracts pin the output shape, not the judgment rubric.
   real-but-unanchorable finding (folded into the review body downstream, never lost); `fyi` is
   in-session triage color, never posted. No fenced-JSON completion block — a lane without a
   schema-valid `structured_output` call fails (honest incompleteness at collect).
-  **`blocked` is a required boolean, never defaulted** (the `streamed` discipline —
-  missing/mistyped is engine-invalid): `false` for every completed angle; `true` ONLY when the
-  required review could not complete (context fetch failed, a referenced context file
-  unreadable, the hunt stopped early), in which case the schema conditional requires
-  `findings: []` and a nonblank `fyi` with the blocker first (then partial, unassessed,
-  diagnostic-only notes). Blocked is NOT a verdict — only coverage changes:
-  `collectAdversarialReviewWave` normalizes every `blocked: true` report into an uncovered
-  assignment-keyed `lane-failed` (the shared `reclassifyBlockedReports` helper,
-  `extension/waves/blockedReports.ts` — the exact `prReviewWave.ts` detail string
-  `"reviewer blocked:\n" + nonblank fyi joined by "\n"`, else `"required review assessment could
-  not complete"`) BEFORE `covered`/`complete` are computed, so `collect_review_wave` reports
-  the lane in `failures` with `complete: false`, never as "no findings"; the browser reconcile's
-  uncovered-source clear withdraws its provisional annotations. Zero retries stand.
 - **The streaming protocol (child-side, unconditional whenever `contact_supervisor` exists).**
   While reviewing, the child sends **non-blocking** progress-update batches —
   `contact_supervisor({reason: "progress_update", message})`, the message a short line plus a
@@ -2110,8 +1977,7 @@ parallel rebuild.
   and runs the same core, returning the stack guidance as its ok text.
 - **Routing + per-PR posting (model judgment — no blame-attribution worker):** inputs are the
   reconciled wave findings + returned browser annotations (both combined-diff coordinates), the
-  per-PR diffs materialized by `review-context --stack` (one `diff.patch` file per member, read
-  from the envelope's `stack[].diff.path` references), and the snapshot's layer order. Default
+  per-PR diffs from `review-context --stack`, and the snapshot's layer order. Default
   disposition: fold each finding into the OWNING PR's review body; inline anchors only where
   the location is straightforwardly identifiable in that PR's own diff; cross-cutting/
   unplaceable findings fold into the most relevant PR's body. The posting protocol is the stack
@@ -4439,133 +4305,15 @@ artifacts + "File-first plan save"), §8.3 (the `approvalSave` seam + the warm c
 §8.57 (review-first carrier ownership), and §8.10 (provider deltas + the interactive save
 discipline); this section keeps the unique cross-cutting rules.
 
-### Draft-review guards
-
-Every review surface — the blocking `plan_review` tool's Plannotator and first-party arms (plan,
-objective, gist, refinement) and both browser doors — runs one code path in
-`extension/pi/v1/draftReview.ts`: four in-memory guards, nothing persisted, no lock, no
-reconciliation procedure. A browser decision does not survive a Pi restart — the human re-runs
-the door.
-
-1. **The current-review slot** (`createDraftReviewSlot(pi)`, one per activation, composed in
-   `index.ts` and threaded to every installer and door). EVERY review arm calls `slot.open(ctx,
-   {subject, source, raw, markdown, contextDigest?})` at entry — a first-party review supersedes
-   an open browser review and vice versa. `open` reads `WorkflowSession.draftReviewContext()` for
-   the run id / stage-derived subject / warm plan node claim (refusals `no-identity`,
-   `invalid-state`, `subject-mismatch`), captures the save destination (`null` →
-   `destination-unavailable`), then makes this review the activation's current one. A refusal is
-   the blocking tool's non-terminating `review_open_refused` result ("cannot open the review:
-   … — fix the cause and call plan_review again") or, on a door, a loud error report and a `null`
-   open (nothing launched). `supersede()` clears the slot (`/implement-here` retires the open
-   review before exiting the gate). A decision whose review is no longer current — or whose live
-   run id / subject diverged — is **superseded**: the door reports one TUI warning
-   (`SUPERSEDED_DECISION_WARNING`, never injected), the tool returns `review_superseded`; nothing
-   is saved even when the bytes are still current — once a newer review exists, its approval is
-   the only authority. The `OpenDraftReview` token carries `reviewedDigest =
-   digestSessionData(raw)` (the raw artifact bytes / parameter text / editor text — never the
-   rendering), `contextDigest` (refinement only: the strict `REFINEMENT_CONTEXT_ARTIFACT`
-   digest at open) and the open-time `destination`.
-2. **The reviewed-bytes guard** (`source: "artifact"` only — the doors and the Plannotator tool
-   arm over a draft artifact; `parameter` and `editor` sources have no artifact to compare, the
-   editor source because the human's own edit write-back is the one legitimate draft change
-   during a modal review). At decision time the subject's draft artifact is re-read through the
-   session seam; `changed` = not found or bytes ≠ `raw` (refinement additionally: the current
-   context digest ≠ `contextDigest`). APPROVE + changed → `stale-approval`: nothing saved, the
-   mode unchanged, the fixed text names the reviewed digest and directs `plan_review` on the
-   current draft (`details {ok:true, status:"stale-approval", subject, reviewed_digest}`). DENY +
-   changed → the revision round proceeds with `DRAFT_CHANGED_NOTE` prepended to its first text
-   block. An objective/gist APPROVE carrying a Direct Edits section is a revision effect (the
-   existing rule), so it proceeds with the note rather than refusing.
-3. **The destination fence** (`extension/session/saveDestination.ts`; APPROVE only, EVERY source
-   — first-party included). `captureSaveDestination(cwd, nodeClaim)` digests three components
-   (`digestSessionData` per component, no aggregate, no raw value retained): `issues` — the main
-   checkout's committed `.perk/config.toml` `[issues] backend`/`team` as `resolveIssueRouting`
-   reads them (the subset TOML reader: `"basic"`, `'literal'` and multi-line strings, through
-   the `StrippedStr` boundary — stripped, blank/non-string → `null`), digested as the two keys
-   ONLY while the document **provably** spells the table the way that reader parses it — one
-   bare `[issues]` header, `backend`/`team` each at most once as plain single-line strings with
-   no backslash, and no other header or key segment spelling `issues`; any spelling the reader
-   cannot vouch for (dotted keys `issues.backend = …`, an inline table, quoted keys, `[[issues]]`,
-   super-/sub-tables, escapes, multi-line strings, a header the reader skips, a duplicate
-   header/key — every line it cannot classify) **widens** the component to the verbatim
-   committed document, so a routing edit `tomllib` would read and the subset reader would not
-   still moves the digest (over-fencing an unrelated edit to that file; never under-fencing).
-   The proven and widened digest inputs are tagged (`{backend, team}` vs `{document}`) so they
-   never collide. Parity is pinned through `shared/fixtures/issues-table.json`: each case
-   records the subset reader's reading and its `provable` verdict, a divergent `tomllib` reading
-   where the planes differ, and `tests/test_issues_config_parity.py` asserts "divergent ⇒
-   unproven" (Python remains the authority for the save itself); `node_claim` — the plan's
-   objective node claim (`null` for every other subject); `remotes` — the sorted `git config
-   --null --get-regexp '^remote\..*\.(url|gh-resolved)$'` entries (`remoteConfig`; `""` when
-   no remote matches), captured whenever the read backend is anything but exactly `"linear"` —
-   `"github"`, `null` (the fail-safe default), an unknown value Python would refuse, or a
-   verbatim unproven read such as `"\u0067ithub"` (only a Linear save never consults remotes,
-   so only there does no git subprocess run; the subset reader reads `"linear"` only from a
-   bare `[issues]` table `tomllib` reads identically); a `null` `remoteConfig` on the GitHub arm
-   makes the capture `null` ("unverifiable"). No other git
-   config, `[workflow] base`, credentials, environment or the handoff participate — landing a PR
-   (which rewrites `branch.*`) never blocks an approval. At APPROVE the destination is recaptured
-   and `changedDestinationComponents(reviewed, current)` (a key present on one side only counts)
-   decides: a nonempty list or an unverifiable capture → `destination-changed`: nothing saved,
-   the draft unchanged and still editable, the fixed text names the changed component NAMES
-   (never values, or "could not be verified") and requires a fresh `plan_review` — a fresh human
-   approval — before any save (`details {ok:true, status:"destination-changed", subject,
-   changed}`). DENY/revision never checks the destination.
-4. **The unconfirmed-save latch** (`slot.markUnconfirmed(subject, detail)` / `unconfirmed()`;
-   first writer wins; nothing clears it within the activation — a restart clears it). Every
-   subject completion (`complete{Plan,Objective,Gist,Refinement}ReviewV1`) and every manual save
-   tool/command (`plan_save`/`/plan-save`, `objective_save`/`/objective-save`,
-   `gist_save`/`/gist-save`, `/objective-refinement-save`) reports its feature save result through
-   `recordSaveOutcome(slot, subject, {confirmed, detail?})`: the subject's typed saved arm
-   confirms; a `save-failed` result, a thrown backend call or an unavailable port latches with the
-   outcome's message. Outcomes that never reached the backend (denials, Direct Edits revise
-   rounds, no-draft / refused-draft stops) neither confirm nor latch. While latched, an APPROVE
-   on any surface is `save-unconfirmed` BEFORE the byte compare and the backend: nothing new
-   saved, the fixed text names the detail and the run id and directs the human to check the issue
-   backend for an existing `<subject>` carrying that run id before retrying — on Linear a
-   partially completed create (the documented create→marker crash window) can leave an issue the
-   retry cannot find, which is why a blind automatic retry is never attempted — then the manual
-   save command (`MANUAL_SAVE_COMMANDS[subject]`, the deliberate retry) or continuing in the
-   existing saved object (`details {ok:false, error_type:"save_unconfirmed", status:"refused",
-   subject}`). The manual save commands never consult the latch — they ARE the deliberate retry —
-   but a failed manual save latches too.
-
-**The ladder** (`checkDraftReviewDecision(slot, ctx, review, effect)`, `effect` = `save` on a
-saving APPROVE, `revision` otherwise) runs in this order: superseded → latch (`save` only) →
-reviewed bytes (artifact source only; `save` + changed → `stale-approval`) → destination (`save`
-only) → `proceed {draftChanged}`. The fixed model texts (`staleApprovalResult`,
-`destinationChangedResult`, `saveUnconfirmedResult`, `supersededReviewResult`) carry reviewer
-feedback only inside `<untrusted_reviewer_feedback>` delimiters with the `FEEDBACK_DATA_NOTE`. On
-a door the non-`proceed` arms are one error report AND `injectDraftReviewResult` (text blocks
-joined with `\n`; `pi.sendUserMessage` immediately when idle, else `{deliverAs: "followUp"}`); a
-`proceed` APPROVE runs the shared subject completion → `recordSaveOutcome` → the note → the
-injection. The doors keep their `degraded` liveness token: a completed decision after the
-readiness degrade is ignored with a TUI warning; the `finally` clears the companion surfaces only
-while the review is still current (a superseding open re-primed them for ITS session).
-
-**The bridge** (`extension/pi/v1/providers/plannotator.ts`): `requestPlannotatorPlanReview(bus,
-plan, signal?)` → `Promise<ReviewOutcome>`; `createPlannotatorBridge(bus)` → `{review(plan,
-signal?)}`; `startPlannotatorPlanReview(bus, {plan, signal?}, deps)` →
-`StartedSurface<ReviewOutcome>`. The `plannotator:review-result` listener is installed BEFORE
-`plannotator:request` is emitted; until the handshake yields the `reviewId` every parsed decision
-(`parseReviewDecision`: boolean `approved`, malformed payloads ignored) is buffered, then the
-buffer is scanned once for the matching id (first match completes the review) and discarded — a
-result emitted synchronously inside the handshake `respond` still completes the review. There is
-no status query, no polling, no automatic reopen; every exit (completion, abort, handshake
-failure/timeout) removes the listener. A lost handshake identity or a decision that was never
-emitted remains unrecoverable — the human re-runs the door.
-
-### Existing live review surfaces
-
 - **The artifact + save resolution → §8.1.** The working plan lives in the session data dir as
   `plan-draft.md`, written only by `plan_draft` through the accessor seam and consumable only
   via its validated provenance pointer.
-- **The two resolution chains + the asymmetry law.** **Manual save** surfaces resolve
+- **The two resolution chains + the asymmetry law.** **Save** surfaces resolve
   artifact → `plan` param → transcript scrape (the universal fail-open last resort)
   (`resolvePlanSource`, → §8.1 "File-first plan save"). **Review** surfaces resolve
   artifact → param **only** — the transcript tier is excluded because an approval auto-saves the
   reviewed bytes, and scraped conversation bytes must never be what gets approved. The browser
-  doors tighten further to **validated artifact only**.
+  review doors tighten further to **validated artifact only**.
 - **The review door + the approval seam.** `plan_review` (in `READ_ONLY_TOOLS`; backend-neutral,
   `extension/pi/v1/planReview.ts`; the objective arm's home is `extension/pi/v1/objectiveReview.ts`)
   dispatches: plannotator-selected → the event-bus bridge; **any**
@@ -4573,12 +4321,10 @@ emitted remains unrecoverable — the human re-runs the door.
   shared approval→save orchestration — the feature op `planApprovalSave`
   (`extension/authoring/plan/save.ts`), adapter-composed as `approvalSave`
   (`extension/pi/v1/plan.ts`): save → D1a gate exit on success (→ §8.3). The
-  `/plan-save` command is a manual invocation of the same seam, taking only an optional title
-  argument — the deliberate human retry once the unconfirmed-save latch is set ("Draft-review
-  guards" above). Every `plan_review` arm carries the universal `details.ok` discriminant
-  (`ok:false` + `error`/`error_type` on unavailable / save-failed / save_unconfirmed /
-  review_open_refused / bad_input / no_plan / no_objective_draft; `ok:true` on verdicts, the
-  stale-approval / destination-changed stops and the sanctioned fail-open skips), so `tool_outcome`
+  `/plan-save` command is the **manual failsafe** invocation of the same seam, taking only an
+  optional title argument. Every `plan_review` arm carries the universal `details.ok` discriminant
+  (`ok:false` + `error`/`error_type` on unavailable / save-failed / bad_input / no_plan /
+  no_objective_draft; `ok:true` on verdicts and the sanctioned fail-open skips), so `tool_outcome`
   run events classify it via `details.ok` rather than the `!isError` fallback. On an eligible
   plannotator-arm round `plan_review` offers an in-TUI launch chooser ("Browser review + reviewer
   wave" vs "Browser review only"); an ineligible round keeps the plain blocking review.
@@ -4646,10 +4392,12 @@ emitted remains unrecoverable — the human re-runs the door.
     for the `plan_draft`/`objective_draft`/`gist_draft`/`objective_refinement_draft` rewrite.
 
   The plan arm's mechanical apply belongs to `completePlanReview` in
-  `extension/authoring/plan/review.ts`. Tool and browser adapters both call
-  `completePlanReviewV1` after the decision ladder; no duplicate browser save/apply policy
-  remains. A saving APPROVE reaches the apply only through the ladder's `proceed` arm (the
-  reviewed bytes still current, the destination unchanged, no latch).
+  `extension/authoring/plan/review.ts`; `executePlanReview`'s plannotator arm and the
+  `/plan-review-browser` door both call `completePlanReviewV1` — ONE apply path shared
+  byte-identically (`planApprovalSave`'s `boundSource` selects only the reviewed original or the
+  verified patched bytes, never an artifact-first fallback after a patch failure). The
+  objective/gist/refinement arms have the matching `completeObjectiveReview` /
+  `completeGistReview` / `completeRefinementReview` seams.
 
 - **The two draft-review browser doors** (`/plan-review-browser` /
   `/objective-review-browser`): the summonable streaming draft reviews — a plannotator
@@ -4659,9 +4407,10 @@ emitted remains unrecoverable — the human re-runs the door.
   `extension/waves/draftReviewWave.ts`) streaming phrase-anchored findings into it via
   `push_annotations` (plan mode), and the browser decision routed through the existing
   approval seams — the objective APPROVE arm applies the Direct-Edits carve-out above (a
-  revise round, nothing saved). Both doors open the current-review slot before launching and
-  route the decision through the ladder ("Draft-review guards" above). Door mechanics — the
-  launch chooser, port/readiness handling, wave lifecycle, abort ordering, prime/clear
+  revise round, nothing saved), and both doors save only through the current-review record's
+  approve gate below (the live artifact still carries the exact bytes captured at open, the save
+  destination is unchanged, the record has not saved yet). Door mechanics — the launch chooser,
+  port/readiness handling, wave lifecycle, abort ordering, stale guards, prime/clear
   lifecycle, and the accepted concurrency behavior — live in the owning modules:
   `extension/pi/v1/planReviewBrowser.ts` + `extension/pi/v1/objectiveReviewBrowser.ts` (over
   `pi/v1/providers/plannotatorHandoff.ts` + `pi/v1/draftReviewWaveTools.ts`). Bindings:
@@ -4680,13 +4429,36 @@ emitted remains unrecoverable — the human re-runs the door.
   `author` displays the owning lane; merged-body attribution retains valid custom contributions.
   No status annotations or provisional-report recovery.
 
+- **The current-review record.** One in-memory record per extension activation
+  (`extension/authoring/review/currentReview.ts`, Pi-free; adapter
+  `extension/pi/v1/reviewRecord.ts`, threaded from the composition root into the plan installer's
+  `PlanReviewBridge.current` and both browser doors) fences every Plannotator review: both doors
+  open it right after the browser start succeeds (a start that throws never supersedes an earlier
+  review) and the four Plannotator `plan_review` arms open it around the bridge await. Opening
+  mints a local UUID, SUPERSEDES the previous record and resets `saved`; every decision — APPROVE
+  or DENY, door or arm — first passes an `isCurrent` check, and a decision for a superseded record
+  is ignored loudly (`superseded`: a warning report for the doors, `{status: "stale"}` for the
+  arms; feedback retained as DATA only). DENY never consults the approve gate. A plain APPROVE runs
+  the gate in this order: `already-saved` → `source-changed` (the artifact named at open is
+  re-read through the session and compared byte for byte; absent/invalid never equals; a `null`
+  source — the param-tier plan, refinement — skips this arm and the subject's own seam compares) →
+  `destination-unreadable` → `destination-changed`. The **save destination** is exactly three
+  readings taken at open and re-taken at approve: the main checkout's committed `[issues]
+  backend`/`team` (`substrate/config.ts::issueDestination`; absence is a value) and the sorted
+  `remote.*.url` set (`substrate/git.ts::remoteUrls`; `[]` is a value, `null` = git unreadable
+  and refuses at either end). Nothing else is fingerprinted — unrelated `.perk/*.toml` or `git
+  config` changes never invalidate a review. On `ok` the record marks itself saved BEFORE the save
+  runs (a repeated decision cannot duplicate a save); the check-to-save window is the accepted
+  residual. Nothing is persisted: a crash or reload loses the browser decision and the human
+  re-runs the door. The bridge (`providers/plannotator.ts`) subscribes to
+  `plannotator:review-result` BEFORE emitting the request and buffers decisions until the
+  handshake names the `reviewId` (foreign ids dropped; every handshake failure unsubscribes).
+
 - **Link/`consumed_learn` recovery carriers → §8.3.** Approval-triggered saves carry **no model
   params**; the **cold** `handoff_extra` carrier (→ §8.2) and the **warm**
   `objective_node_claim` carrier (→ §8.3) recover `objective_id`/`node_id` with identical
   semantics — fill both-or-neither, explicit values win outright (even one — never mixed),
-  the cold fallback's malformed-carrier handling is unchanged. The plan's node claim is also a
-  destination-fence component: a claim that changes while a review is open refuses the approval
-  (`destination-changed`, "Draft-review guards" above). `consumed_learn` rides the cold handoff
+  fail-open (a malformed carrier never blocks a save). `consumed_learn` rides the cold handoff
   (`_consumed_learn_from_handoff`).
 
 - **The implement-here exit (the no-save path).** A sanctioned, HUMAN-ONLY exit from plan
@@ -11947,9 +11719,9 @@ snapshots):
   untouched. After a successful refinement claim (`arm === "claimed"` only — never keep / fork /
   adopt / mint), `importRefinementContextOnClaim` imports the fixed transfer ONCE
   (`importColdRefinementContext`: the handoff block's digest, the run, the stage, the strict
-  shape; the exact raw string written strictly). A refusal is loud and leaves the session gated
-  with no usable context — no orphan repair, missing-pointer reimport or target refresh; reload
-  uses the strict established artifact.
+  shape; the exact raw string written through the session). A refusal is loud and leaves the
+  session gated with no usable context — no orphan repair, missing-pointer reimport or target
+  refresh; reload uses the established artifact.
 - **Warm `/objective-refine [objective] [--node ID | --node=ID]`** (`parseRefineCommandArgs`
   refuses extra/duplicate/missing-value inputs): explicit objective → `active_objective` →
   `objective_required`; never the cached plan-ref selector. Admission
@@ -11960,7 +11732,8 @@ snapshots):
   `address`, `land`, `learn` — a planning link or an adoption source) → `bound_session` with
   the equivalent cold command offered and nothing cleared, suspended or restored; the model
   running → `session_busy`. Then: fetch + validate the worker's raw context; recheck the same
-  run/admission against LIVE state, persist the exact context, apply the stage-only `WorkflowChange {kind: "enter-refinement-stage"}` (a
+  run/admission against LIVE state, persist the exact context, apply the stage-only
+  `WorkflowChange {kind: "enter-refinement-stage"}` (a
   `stage` append verified on read-back; idempotent `unchanged`; never a claim, plan-ref,
   objective or mode write), then enter/re-scope the gate (`gating.enter` when off;
   `syncFromState("read-only", "objective-refine")`) and drive the shared flow seed. Failed setup
@@ -11970,7 +11743,8 @@ snapshots):
   rewrite (its `context_digest` differs) — never a silent rebind.
 - **`objective_refinement_draft({markdown})`** — the ONE model-facing writer (there is NO
   `objective_refinement_save` tool, schema, binding or stage entry): refuses `wrong_stage`
-  outside the stage independently of visibility; `reviseRefinementDraft` strict-resumes the context
+  outside the stage independently of visibility; `reviseRefinementDraft` requires the strict
+  live identity (`currentRunIdentity`; missing → `no_run_id`) and resumes the context
   (absent → `refinement_context_missing`; refused → `refinement_context_invalid`; blank
   Markdown → `invalid_input`) and writes only the small fixed envelope bound to the CURRENT
   context (identical bytes `unchanged`). Returns the receipt/size and a concise target line,
@@ -12009,40 +11783,37 @@ snapshots):
   `perk-objective-refine` (`stage:objective-refine`, nudge — cold via the stage trigger, warm via
   `bindingSuffix`).
 
-**The fenced review** (§8.23's refinement arm): `DraftReviewSubject` includes `"refinement"`,
-`WorkflowSession.draftReviewContext()` maps the `objective-refine` stage to the subject (no warm
-node claim), and `REVIEW_SUBJECT_ARTIFACTS` names `objective-refinement-draft.json`. The slot
-snapshot is the pair: `raw` = the draft's exact bytes (the reviewed digest), `markdown` =
-`renderRefinementDraft(pair)`, `contextDigest` = the strict session-data digest of the context
-artifact at open. The reviewed-bytes guard compares BOTH: a draft rewrite or a context
-re-prepared while the review is open makes an approval `stale-approval` even when the rendering
-is identical; the destination fence covers `[issues]` (Linear — no `remotes` component) — **this
-fences the reviewed artifact and save route, not the checkout contents.** `executePlanReview` routes the stage to
-`runRefinementReviewV1` BEFORE the plan arm (decode-first bad-input behavior preserved; a
-well-typed `plan` param ignored). The rendering (`renderRefinementDraft`): objective/node
-header, description, carrier, "Authoring pass started" (`authored_at` + run), the prior/first
-line, a prominent ADVISORY notice, the checkout observation label, a rule, then the FULL Markdown
-verbatim; identity/provenance are immutable review metadata.
+**The fenced review** (§8.23's refinement arm; its closed vocabulary widened): `ReviewSubject`
+gains `"refinement"`. The arm resumes the (draft, context) pair, captures the reviewed pair
+BEFORE display (`reviewedPairOf`: the draft's exact bytes + the context artifact's digest) and
+renders from the pair (`renderRefinementDraft`: objective/node header, description, carrier,
+"Authoring pass started" (`authored_at` + run), the prior/first line, a prominent ADVISORY
+notice, the checkout observation label, a rule, then the FULL Markdown verbatim;
+identity/provenance are immutable review metadata). A draft rewritten or a context re-prepared
+while the human decides refuses the approval even when the rendering is identical — **this
+fences the reviewed artifact, not the checkout contents.** `executePlanReview` routes the stage
+to `runRefinementReviewV1` BEFORE the plan arm (decode-first bad-input behavior preserved; a
+well-typed `plan` param ignored).
 
-- **Plannotator:** the slot opens on the pair (source `artifact`), the bridge reviews the
-  rendering, the ladder runs on the completed verdict, then `completeRefinementReviewV1`
-  routes through `completeRefinementReview` → `refinementApprovalSave({session, backend, gate,
-  reviewed})` → `recordSaveOutcome`. A late approval against a rewritten draft or a re-prepared
-  context is `stale-approval` (the worker is never invoked); a worker failure surfaces as the
-  feature's `approvedSaveFailed` result — `details.save` carries the worker's typed
-  `write_attempted` / `comment_ids` beside the message, the gate stays ON and the latch pauses
-  further automatic saves (the human checks the node's comments, then
-  `/objective-refinement-save` is the deliberate retry).
-- **First-party:** the view-only `runFirstPartyReview` (approve / deny / skip); the slot opens
-  on the pair with source `editor` (superseding any open browser review); after the verdict a
-  plain approval runs the ladder (the latch and the destination fence — no byte compare for the
-  editor source) before the seam re-resumes the pair and compares it with the reviewed one
-  (`source-changed`, `changed: "context"` first); abort wins before and after awaits; no
-  replacement artifact is ever saved on an old approval. The approve verdict label names the actual
-  destination (`ReviewSubject.saveDestination` — "Linear (the node's refinement comment)"; the
+- **Plannotator:** the arm opens a §8.23 current-review record with `source: null` (the pair
+  compare belongs to the save seam, not the record), awaits the bridge, runs the common
+  `isCurrent` check (a superseded decision → `stale`/`superseded`), and for a plain approval
+  runs the record's approve gate (`already-saved` / destination drift → `stale` with the gate's
+  reason) before `completeRefinementReviewV1(…, reviewed)` → `refinementApprovalSave({session,
+  backend, gate, reviewed})`: a changed draft or context renders `approvedSourceChanged` (the
+  worker is never invoked). A worker failure is the ordinary `save-failed` result naming
+  `/objective-refinement-save` (the manual failsafe) with the worker's typed diagnostics
+  (`write_attempted`, `comment_ids`) retained in `details.save` — reconciliation DATA, never a
+  retry license; the gate stays on.
+- **First-party:** the view-only `runFirstPartyReview` (approve / deny / skip); the same
+  pre-display `reviewedPairOf` capture; after the verdict the seam re-resumes the pair and
+  compares it with the reviewed one; abort wins before and after awaits; no replacement artifact
+  is ever saved on an old approval. No record and no destination check — the modal is
+  synchronous. The approve verdict label names the actual destination
+  (`ReviewSubject.saveDestination` — "Linear (the node's refinement comment)"; the
   plan/objective/gist arms keep their GitHub default).
 - **The shared save seam** `refinementApprovalSave` (`authoring/refinement/save.ts`):
-  strict-resume the pair (`absent` → no-draft; `no-context`; `refused`/`mismatch` →
+  resume the pair (`absent` → no-draft; `no-context`; `refused`/`mismatch` →
   refused-draft — fail-closed stops, nothing invoked, the gate untouched); when the caller passed
   a `reviewed` pair, a resumed pair that differs stops with `source-changed` (`changed: "context"`
   first — a re-prepared context rebinds any draft — else `"draft"`), rendered as the
@@ -12060,8 +11831,7 @@ verbatim; identity/provenance are immutable review metadata.
   and reviews, then routes through `completeRefinementReview`.
 - **Outcomes:** DENY → the `objective_refinement_draft` redirect (feedback is untrusted DATA);
   dismissed / unavailable / aborted → nothing saved, the human `/objective-refinement-save`
-  offered; headless → the standard skip. Feedback riding a `stale-approval` /
-  `destination-changed` / `save-unconfirmed` stop is delimited untrusted DATA.
+  offered; headless → the standard skip. Stale feedback is diagnostic-only.
 
 **The human failsafe `/objective-refinement-save`** — no arguments (`invalid_input` otherwise),
 refinement stage only (`wrong_stage`), idle only (`session_busy`), the SOLE manual in-session
@@ -12069,16 +11839,14 @@ save entry. **The command itself is the fresh, explicit human authorization**: n
 dialog, no fabricated stored "review skipped" credential, no requirement of a prior
 skipped/dismissed review; it may also precede review or follow a denial (a new human decision,
 never automatic fallthrough or reused browser approval). Its success is labelled a **manual
-human save (not a reviewer approval)** — never `approved: true`. It never consults the
-unconfirmed-save latch (it IS the deliberate retry, §8.23 "Draft-review guards") but reports
-its outcome into it; it does not supersede an open review (a later browser approval still runs
-the ladder against the live draft). The shared seam runs with the production deps (the receipt
-= verified comment id + carrier URL; the gate exits only after the verified save). Missing /
-refused / mismatched artifacts stop with draft / re-entry guidance — no scrape, driven save,
-gate exit, alternative artifact, arbitrary target or metadata refresh. An explicit
-same-candidate re-save relies on the service's convergence (same bytes → verified no-write
-success) and eligibility checks. A failed worker result reports the typed diagnostics
-(`write_attempted`, `comment_ids`), latches automatic saves off, and requires reading the
+human save (not a reviewer approval)** — never `approved: true`. It saves the valid CURRENT
+artifact through `refinementApprovalSave` with no `reviewed` pair (the command is the
+authorization for what is there now; it does not touch the §8.23 current-review record) and
+exits the gate only on verified success. Missing / refused / mismatched artifacts stop with
+draft / re-entry guidance — no scrape, driven save, gate exit, alternative artifact, arbitrary
+target or metadata refresh. An explicit same-candidate re-save relies on the service's
+convergence (same bytes → verified no-write success) and eligibility checks. A failed worker
+result reports the typed diagnostics (`write_attempted`, `comment_ids`) and requires reading the
 node's comments back before another attempt; it never claims "nothing saved".
 
 **Docs + skill.** `skills/perk-objective-refine/SKILL.md` (in `PERK_SKILLS`; the managed
