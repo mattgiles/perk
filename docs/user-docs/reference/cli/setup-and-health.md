@@ -133,13 +133,27 @@ arm because Perk preserves operator source pins. Set the managed entry's source 
 `npm:@dietrichgebert/ponytail@4.9.0`, run `perk init`, and restart the Perk/Pi session. Runtime
 review-wave preflight is the enforcement boundary: an incompatible Ponytail lane remains explicitly
 uncovered rather than resolving a same-named skill elsewhere.
+The `package` group also carries the **managed** `subagent-worktree-default` check. pi-subagents'
+native `worktree` default lives in `<agent dir>/extensions/subagent/config.json` — the agent dir
+a perk session launches with (`PI_CODING_AGENT_DIR`, else the configured `[pi] agent_dir`, else
+`~/.pi/agent`). perk's `/submit` conflict resolver drives the engine through an API with no
+per-request `worktree` field, so a `"worktree": true` default there would run the resolver in a
+separate managed worktree instead of the conflicted one; the engine refuses such a launch
+(`incompatible-worktree-default`, naming the exact file). Any present value other than exactly
+`false` is drift: the check `fail`s naming the absolute path, and `perk doctor --fix` (or `perk
+init`) rewrites just that key to `false` in place, preserving sibling keys. An absent file or key
+is compatible and is left alone — perk never creates the file. A file perk cannot parse is
+`fail` with an `unverifiable` message, and `--fix` records the refusal on `fix_errors` instead of
+aborting (the file is never rewritten; the other fixes still run). A repair made while a perk
+session is open takes effect after that session reloads.
 The `package` group also carries the report-only `subagent-bridge-config` check: it reads
 `subagents.intercomBridge.mode` from both pi settings scopes — the project `.pi/settings.json`
-and the user-global `~/.pi/agent/settings.json` — and warns (never fails, no `--fix` arm — perk
-neither sets nor manages the key) when either scope sets it to `"off"` or `"fork-only"`. Either
-value silently disables pi-subagents' supervisor channel for perk's fresh-context wave children,
-so perk's live-streaming review flows degrade to completion-only; remove the key (or set it to
-`"always"`) in the named settings file to restore streaming.
+and the user scope, `settings.json` inside the same launch-precedence agent dir (named by its
+absolute path in the detail; skipped when no agent dir resolves) — and warns (never fails, no
+`--fix` arm — perk neither sets nor manages the key) when either scope sets it to `"off"` or
+`"fork-only"`. Either value silently disables pi-subagents' supervisor channel for perk's
+fresh-context wave children, so perk's live-streaming review flows degrade to completion-only;
+remove the key (or set it to `"always"`) in the named settings file to restore streaming.
 Beyond these doctor checks, a local `perk <stage>` launch also surfaces a **soft, non-fatal warning
 at session start** when the `@mgiles/perk` extension that pi actually loaded differs in version from the
 running `perk` CLI (pi can lazy-load a stale `npm:` package), pointing you at `perk doctor --fix` to

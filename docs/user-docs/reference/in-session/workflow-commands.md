@@ -106,7 +106,9 @@ Authorization is bound to this session, run, worktree and unchanged attempt coun
 repeated, stale or read-only calls refuse. Full address finalization uses the same tool and cap,
 only after publication and thread resolution succeed. Missing/disabled/ambiguous/shadowed native
 profiles stop before mutation. Native `worktree: true` allocation defaults are incompatible with
-Perk's Python-owned worktree; inspect the native setting and reload after correction, rather than
+Perk's Python-owned worktree; the refusal diagnostic names the exact
+`extensions/subagent/config.json` it read (and what it observed there). Run `perk doctor --fix`
+(or `perk init`) to set `"worktree": false` in that file, then reload the session — rather than
 switching execution mode or adding extensions. No new Perk config key is involved.
 
 A persistent `perk-submit-conflict.lock` in the worktree's canonical Git directory excludes other

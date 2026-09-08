@@ -60,8 +60,9 @@ skills, not global context; foreground mode does not load ambient extensions. Su
 uses `resolve_submit_conflicts`: a single-use authorized, code-owned native foreground delegation
 at the trusted worktree cwd, with a strict structured terminal record and a persistent worktree-wide
 execution lock. The bridge disables acceptance; receipts do not invent artifact paths or expose
-child output. Native `worktree: true` allocation defaults are incompatible: inspect
-`extensions/subagent/config.json` under Pi's agent directory, correct the setting and reload.
+child output. Native `worktree: true` allocation defaults are incompatible: the refusal names the
+exact `extensions/subagent/config.json` under Pi's launch agent directory; run `perk doctor --fix`
+(or `perk init`) to set `worktree: false` there, then reload the session.
 Reload does not clear a retained lock; use [human-only recovery](recover-a-dirty-worktree.md#recover-a-retained-submit-conflict-lock).
 Retained continuation uses the same code-owned foreground adapter, directly awaited inside
 `objective_stack_sync`, with a distinct retained schema and activation-local authorization. Its
