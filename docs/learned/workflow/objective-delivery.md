@@ -96,7 +96,21 @@ carrier taught (#2021, #1996):
 - **One routing dispatcher must cover EVERY scan path.** When a shared carrier gains a second
   comment grammar, a single dispatcher (`parse_carrier_comment`, operation-marker precedence)
   routes all scans — including the OLD grammar's rescans, where the fail-closed property
-  silently degrades otherwise (§8.43's symmetric rescan posture).
+  silently degrades otherwise (§8.43's symmetric rescan posture). Recognition is **positional**:
+  a journal record is recognized only when the marker text appears on the body's **first
+  nonblank line** (perk always renders marker-first bodies; `parse_carrier_comment` routes on
+  that line, operation-marker precedence applying there) — marker text anywhere else is ordinary
+  untrusted DATA. The cross-cutting insight: whole-body substring detection is safe only on
+  carriers perk *solely* owns. The objective carrier also holds mutable human prose, and a prose
+  comment merely mentioning a marker mid-body was classified as a journal region, parsed
+  strictly, and (being edited) tripped the `edited_at` corruption raise — blocking the whole
+  train while the real stamp was intact. Accepted trade: a real event body with prose PREPENDED
+  becomes *unrecognized* rather than corruption (equivalent to out-of-band deletion, an existing
+  undetectable exposure); the fail-safe directions are preserved — orphaned outcomes still fold as
+  corruption, a vanished stamp degrades toward `unstamped`/`stale` (the handoff gate blocks, never
+  falsely ready), and a first line that carries the marker text but isn't well-formed stays
+  fail-closed corruption. Both seams are pinned (`tests/test_delivery_journal.py`,
+  `tests/test_delivery_persistence.py`; the fake's `edited_at` seed is load-bearing).
 - **Marker-embedded values take allowlists derived from the encoding's delimiters**
   (`[A-Za-z0-9._-]+` — the HTML-comment `-->` is exactly the miss a denylist makes), with
   vocabulary narrowing recorded as a contracts-typed refusal, never a silent skip. Residual:
