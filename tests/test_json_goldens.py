@@ -337,6 +337,39 @@ def _pr_review_context_result():
     return PrReviewContextResult(context=context, branch="plan-42")
 
 
+def _pr_review_context_materialized():
+    """The single-PR pointer envelope's file references at a fixed context dir (no filesystem)."""
+    from pathlib import Path
+
+    from perk.cli.commands.pr.review.context_files import (
+        MaterializedContext,
+        MaterializedSections,
+        TextFileRef,
+    )
+
+    context_dir = Path("/repo/.perk/workflow/scratch/runs/RUN/review-context/pr-42-0123456789ab")
+
+    def ref(name: str, text: str) -> TextFileRef:
+        lines = text.splitlines()
+        return TextFileRef(
+            path=context_dir / name,
+            bytes=len(text.encode("utf-8")),
+            lines=len(lines),
+            max_line_bytes=max((len(line.encode("utf-8")) for line in lines), default=0),
+        )
+
+    return MaterializedContext(
+        context_dir=context_dir,
+        top=MaterializedSections(
+            body=ref("body.md", "PR body"),
+            diff=ref("diff.patch", "diff --git a/x b/x\n"),
+            plan_body=ref("plan.md", "# Plan\n"),
+        ),
+        members=(),
+        combined_diff=None,
+    )
+
+
 def test_golden_pr_submit() -> None:
     from perk.cli.commands.pr.submit_cmd import _result_to_dict
 
@@ -364,7 +397,10 @@ def test_golden_pr_feedback() -> None:
 def test_golden_pr_review_context() -> None:
     from perk.cli.commands.pr.review_context_cmd import _result_to_dict
 
-    assert_golden("pr_review_context", _result_to_dict(_pr_review_context_result()))
+    assert_golden(
+        "pr_review_context",
+        _result_to_dict(_pr_review_context_result(), _pr_review_context_materialized()),
+    )
 
 
 def _pr_review_checkout_result():
