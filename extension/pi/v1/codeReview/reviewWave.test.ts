@@ -623,7 +623,7 @@ test("executeCollectReviewWave: an incomplete wave is an ok result with the loud
 });
 
 test("executeCollectReviewWave: a blocked: true lane is uncovered — a lane-failed with the fyi detail, never coverage", async () => {
-  // The PR #2311 shape: a lane that could not read its context still emits a schema-valid,
+  // The observed failure shape: a lane that could not read its context still emits a schema-valid,
   // verdict-free report with empty findings. With `blocked: true` it must surface as an
   // incomplete wave (the lane in `failures`, absent from `covered`/`reports`) — not "no findings".
   const state = freshState();
