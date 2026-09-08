@@ -8,7 +8,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createDraftReviewWaveState } from "./authoring/review/draftContext.ts";
-import { createHunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
+import { createHunkFeedbackReceiver, type HunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
 import { installAutomatedReviewBindings } from "./pi/v1/codeReview/automated.ts";
 import { installPrReviewBrowserBindings } from "./pi/v1/codeReview/browser.ts";
 import { installReviewWaveBindings } from "./pi/v1/codeReview/reviewWave.ts";
@@ -147,6 +147,12 @@ export default function perk(
   options: {
     resolverEngine?: Pick<ConflictResolverEngineOptions, "preflight" | "configPath" | "acquire">;
     stackResolutionDelivery?: StackResolutionDelivery;
+    /**
+     * Construction-only: the hunk feedback receiver factory (default `createHunkFeedbackReceiver`).
+     * Constructed ONCE per activation exactly like production; the registered-path suites bind a
+     * recording receiver to observe the startup/navigation sync order and inputs.
+     */
+    feedbackReceiverFactory?: (pi: ExtensionAPI) => HunkFeedbackReceiver;
   } = {},
 ) {
   const version = perkVersion();
@@ -314,7 +320,7 @@ export default function perk(
   // globals). Synced from session_start/session_tree below; closed on session_shutdown so the
   // consumer lease releases with the session. A stale /reload predecessor instance is retired
   // by the lease fencing (fresh token per same-identity reacquire + verify-before-inject).
-  const feedbackReceiver = createHunkFeedbackReceiver(pi);
+  const feedbackReceiver = (options.feedbackReceiverFactory ?? createHunkFeedbackReceiver)(pi);
   pi.on("session_shutdown", async () => {
     submitConflict.shutdown();
     stackConflict.shutdown();

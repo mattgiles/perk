@@ -16,13 +16,13 @@ import {
   settleCommitAndCompact,
   startCommitAndCompact,
 } from "../../../delivery/commitCompact.ts";
+import { openBranchWorkflowSession } from "../../../session/branchWorkflowSession.ts";
+import type { PlanRef } from "../../../session/workflowSession.ts";
 import { bindingSuffix } from "../../../substrate/bindingDelivery.ts";
-import type { PlanRef } from "../../../substrate/cache.ts";
 import { registerPerkCommand } from "../../../substrate/command.ts";
 import { commitsSince, headSha, unbornHead, worktreeDirty } from "../../../substrate/git.ts";
 import { planReadInstruction, render } from "../../../substrate/prompts.ts";
 import type { ToolGating } from "../../../substrate/toolGating.ts";
-import { branchOf, rebuildWorkflowState } from "../../../substrate/workflowState.ts";
 import { report, type Severity } from "../../../surfaces/report.ts";
 
 /** The driven-commit guidance (exported SOLELY for the stageTools DRIVE_COVERAGE guard). */
@@ -53,30 +53,6 @@ function compactInstructions(commits: string | null): string {
     "commit(s) contain, and the concrete next steps for the remaining work. The committed diff " +
     "is recoverable via git, so prefer intent and next steps over restating the diff."
   );
-}
-
-const str = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
-
-/** The command-specific active-plan resolver. Session-tier `active_plan_ref` is the ONLY
- * authority — a checkout cache ref can name a future plan unrelated to this live session, so
- * there is deliberately NO worktree-cache fallback (this is NOT the shared
- * `substrate/workflowState.ts::activePlanRef` seam, which casts where this shape-validates).
- * Fail-open to null: a malformed or unreadable linkage renders the generic continuation. */
-function activeSessionPlanRef(ctx: ExtensionContext): PlanRef | null {
-  try {
-    const ref: unknown = rebuildWorkflowState(branchOf(ctx)).active_plan_ref;
-    if (typeof ref !== "object" || ref === null) return null;
-    const { provider, pr_id, url, labels, objective_id, base } = ref as Record<string, unknown>;
-    if (!str(provider) || !str(pr_id) || !str(url)) return null;
-    if (!Array.isArray(labels) || !labels.every((l): l is string => typeof l === "string")) {
-      return null;
-    }
-    if (objective_id !== null && typeof objective_id !== "string") return null;
-    if (base !== undefined && base !== null && typeof base !== "string") return null;
-    return { provider, pr_id, url, labels, objective_id, ...(base !== undefined ? { base } : {}) };
-  } catch {
-    return null;
-  }
 }
 
 /** The completion-gated reorientation turn (exported SOLELY for the DRIVE_COVERAGE guard). */
@@ -139,7 +115,14 @@ export function installCommitCompactBindings(pi: ExtensionAPI, gating: ToolGatin
   ): void => {
     // Render while the command/event context is current: manual compaction stays in the same
     // AgentSession + runner, so onComplete may use captured `pi` (never `ctx` or fresh state).
-    const continuation = commitAndCompactContinuation(activeSessionPlanRef(ctx), completion);
+    // The plan named is the LIVE SESSION's validated linkage only (the session seam's
+    // `activeSessionPlanRef`, fail-open to the generic continuation) — deliberately never the
+    // checkout selector, which can name a future plan unrelated to this session. Opened here,
+    // at render time, not at registration or on the dirty-arm drive.
+    const continuation = commitAndCompactContinuation(
+      openBranchWorkflowSession(pi, ctx).activeSessionPlanRef(),
+      completion,
+    );
     ctx.compact({
       customInstructions,
       onComplete: () => {
