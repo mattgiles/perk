@@ -11,6 +11,15 @@ fresh-context reviewer child needs (the diff, the PR title/body, and the plan bo
 exists) and emits `--json`. Read-only — no GitHub mutation; the verbose payload is consumed by
 the spawned reviewer child so it never transits the parent session.
 
+Diff provenance: every per-PR `diff` is GitHub's diff media type by default; on GitHub's 406
+`too_large` refusal (above 20,000 lines / 300 files) the gateway renders it locally (a fetch +
+merge-base diff), and `--local` forces that on every arm (the single-PR `diff` and each `--stack`
+member `diff`; PR title/body/base/head stay GitHub reads). Each `diff_source`
+(`"github"` | `"local-git"`) describes exactly the `diff` beside it — the top-level field the
+top-level `diff`, each `stack[]` member's its own `diff`. `combined_diff` is ALWAYS a local
+merge-base rendering (the stack arm fetches and diffs locally by construction) and carries no
+provenance field.
+
 Supervisor surface: `--json` to stdout, human text to stderr, stable exit codes.
 Exit codes: 0 ok · 1 invalid input / no plan / no PR / op failure · 2 not-a-repo.
 """
@@ -53,6 +62,7 @@ class StackContextMember:
     body: str
     diff: str
     plan_body: str | None
+    diff_source: github.DiffSource = "github"
 
 
 @dataclass(frozen=True)
@@ -87,6 +97,13 @@ class PrReviewContextResult:
     help="Gather the whole PR stack's context (per-member sections + the combined diff); "
     "requires --pr.",
 )
+@click.option(
+    "--local",
+    "local_diff",
+    is_flag=True,
+    help="Render the diff locally (git fetch + merge-base diff) instead of GitHub's diff media "
+    "type; automatic on GitHub's 20,000-line/300-file 406.",
+)
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def review_context_pr(
@@ -95,6 +112,7 @@ def review_context_pr(
     pr_number: int | None,
     expected_pr: int | None,
     stack_mode: bool,
+    local_diff: bool,
     as_json: bool,
 ) -> None:
     """Fetch a PR's review context (read-only; a fresh-context reviewer child runs this).
@@ -105,7 +123,8 @@ def review_context_pr(
     an arbitrary PR by number, plan-ref-free (plan_body is null). With
     --pr N --stack: the whole PR stack containing N — per-member sections
     plus the combined base→top diff, plan-branch members enriched with
-    their plan bodies.
+    their plan bodies. --local renders every diff locally (composes
+    with every arm).
     """
     try:
         repo_root = require_repo(ctx)
@@ -114,6 +133,7 @@ def review_context_pr(
             pr_number=pr_number,
             expected_pr=expected_pr,
             stack_mode=stack_mode,
+            local_diff=local_diff,
         )
     except GitHubError as exc:
         fail(
@@ -141,6 +161,7 @@ def _impl(
     pr_number: int | None,
     expected_pr: int | None,
     stack_mode: bool = False,
+    local_diff: bool = False,
 ) -> PrReviewContextResult:
     if stack_mode and expected_pr is not None:
         raise UserFacingCliError(
@@ -160,9 +181,9 @@ def _impl(
             "--expected-pr must be a positive integer", error_type="invalid_input"
         )
     if stack_mode and pr_number is not None:
-        return _stack_context(repo_root=repo_root, pr_number=pr_number)
+        return _stack_context(repo_root=repo_root, pr_number=pr_number, local_diff=local_diff)
     if pr_number is not None:
-        return _foreign_pr_context(repo_root=repo_root, pr_number=pr_number)
+        return _foreign_pr_context(repo_root=repo_root, pr_number=pr_number, local_diff=local_diff)
     plan_ref = cache.read_plan_ref(repo_root)
     if plan_ref is None:
         raise UserFacingCliError(
@@ -186,11 +207,14 @@ def _impl(
         branch=branch,
         repo_root=repo_root,
         plan_body=_resolve_plan_body(repo_root, plan_ref),
+        local_diff=local_diff,
     )
     return PrReviewContextResult(context=context, branch=branch)
 
 
-def _foreign_pr_context(*, repo_root: Path, pr_number: int) -> PrReviewContextResult:
+def _foreign_pr_context(
+    *, repo_root: Path, pr_number: int, local_diff: bool
+) -> PrReviewContextResult:
     """The ``--pr <n>`` arm: an arbitrary PR, plan-ref-free (no plan exists, so ``plan_body`` is
     None). The ``get_pr`` pre-check supplies existence (the clean ``pr_not_found`` arm — a 404
     inside ``get_pr_review_context`` would raise a generic ``GitHubError``) and the head branch
@@ -202,19 +226,25 @@ def _foreign_pr_context(*, repo_root: Path, pr_number: int) -> PrReviewContextRe
             error_type="pr_not_found",
         )
     context = github.get_pr_review_context(
-        pr_number=pr_number, branch=pr.head_ref, repo_root=repo_root, plan_body=None
+        pr_number=pr_number,
+        branch=pr.head_ref,
+        repo_root=repo_root,
+        plan_body=None,
+        local_diff=local_diff,
     )
     return PrReviewContextResult(context=context, branch=pr.head_ref)
 
 
-def _stack_context(*, repo_root: Path, pr_number: int) -> PrReviewContextResult:
+def _stack_context(*, repo_root: Path, pr_number: int, local_diff: bool) -> PrReviewContextResult:
     """The ``--stack`` arm: resolve the chain containing ``pr_number`` (a perk train IS a
     base-ref chain, so the same cardinality/fork gates apply and children refuse consistently
     with the doors), gather one per-member section per PR, and render the combined diff from
     a local fetch (the same refspec build as checkout — idempotent).
 
     The existing top-level fields keep describing the TOP PR (the stack arm is foreign-style,
-    so top-level ``plan_body`` mirrors the top member's enrichment).
+    so top-level ``plan_body`` mirrors the top member's enrichment). Each member's
+    ``diff_source`` describes that member's ``diff`` (``local_diff`` forces every one local);
+    ``combined_diff`` is always rendered locally and carries no provenance field.
     """
     stack = resolve_stack_from_pr(repo_root, pr_number)
     members = tuple(
@@ -226,6 +256,7 @@ def _stack_context(*, repo_root: Path, pr_number: int) -> PrReviewContextResult:
             body=context.body,
             diff=context.diff,
             plan_body=_plan_body_for_branch(repo_root, member.head_ref),
+            diff_source=context.diff_source,
         )
         for member, context in (
             (
@@ -235,6 +266,7 @@ def _stack_context(*, repo_root: Path, pr_number: int) -> PrReviewContextResult:
                     branch=member.head_ref,
                     repo_root=repo_root,
                     plan_body=None,
+                    local_diff=local_diff,
                 ),
             )
             for member in stack.members
@@ -250,6 +282,7 @@ def _stack_context(*, repo_root: Path, pr_number: int) -> PrReviewContextResult:
         body=top.body,
         diff=top.diff,
         plan_body=top.plan_body,
+        diff_source=top.diff_source,
     )
     return PrReviewContextResult(
         context=top_context,
@@ -393,6 +426,7 @@ class PrReviewContextOut(OutputModel):
     body: str
     diff: str
     plan_body: str | None
+    diff_source: github.DiffSource
 
     @classmethod
     def from_domain(cls, result: PrReviewContextResult) -> "PrReviewContextOut":
@@ -409,6 +443,7 @@ class PrReviewContextOut(OutputModel):
             body=c.body,
             diff=c.diff,
             plan_body=c.plan_body,
+            diff_source=c.diff_source,
         )
 
 
@@ -422,6 +457,7 @@ class StackContextMemberOut(OutputModel):
     body: str
     diff: str
     plan_body: str | None
+    diff_source: github.DiffSource
 
     @classmethod
     def from_domain(cls, member: StackContextMember) -> "StackContextMemberOut":
@@ -433,6 +469,7 @@ class StackContextMemberOut(OutputModel):
             body=member.body,
             diff=member.diff,
             plan_body=member.plan_body,
+            diff_source=member.diff_source,
         )
 
 
@@ -467,6 +504,7 @@ def _render_human(result: PrReviewContextResult) -> None:
         + f"#{c.pr_number} ({result.branch}): "
         + f"{len(c.diff)} diff byte(s), "
         + ("plan body present" if c.plan_body else "no plan body")
+        + f", diff via {c.diff_source}"
     )
     if result.stack:
         user_output(

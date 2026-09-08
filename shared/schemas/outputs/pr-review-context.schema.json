@@ -1,4 +1,13 @@
 {
+  "$defs": {
+    "DiffSource": {
+      "enum": [
+        "github",
+        "local-git"
+      ],
+      "type": "string"
+    }
+  },
   "additionalProperties": false,
   "description": "The ``--json`` serialization boundary of :class:`PrReviewContextResult`\n(flat; field order load-bearing). ``pr`` maps from the domain ``pr_number``.",
   "properties": {
@@ -66,6 +75,9 @@
         }
       ],
       "title": "Plan Body"
+    },
+    "diff_source": {
+      "$ref": "#/$defs/DiffSource"
     }
   },
   "required": [
@@ -79,7 +91,8 @@
     "title",
     "body",
     "diff",
-    "plan_body"
+    "plan_body",
+    "diff_source"
   ],
   "title": "PrReviewContextOut",
   "type": "object"

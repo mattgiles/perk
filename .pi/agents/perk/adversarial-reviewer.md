@@ -40,7 +40,10 @@ and report.
    This resolves the PR plan-ref-free and returns
    `{ pr, base_ref, head_ref, title, body, diff, plan_body }` (`plan_body` may be null — not
    every PR has a perk plan). If it fails (non-zero exit, unparseable output), report the failure
-   plainly and stop — do not guess.
+   plainly and stop — do not guess. The envelope also carries `diff_source`: `"github"`
+   (GitHub's rendered PR diff) or `"local-git"` (rendered locally from a fetch + merge-base diff
+   because GitHub refused the diff as too large, or on request); in single-PR mode, when it is
+   `"local-git"` add one `fyi` line saying so — anchors are unchanged, the note is for the human.
 
    **Stack mode.** When your task says "Review the PR stack topped by PR #‹n› (combined diff)",
    fetch context with `perk pr review-context --pr <n> --stack --json` instead — it additionally
@@ -48,7 +51,8 @@ and report.
    (`{pr, base_ref, head_ref, title, body, diff, plan_body}`, bottom→top) and the
    `combined_diff` (stack base → top head). Review the **combined diff** — the worktree is the
    top head, so the whole stack's changes are present — and use the per-member sections to
-   understand which layer introduced what. Report findings in **combined-diff coordinates**
+   understand which layer introduced what. `combined_diff` is always rendered locally (the
+   documented default) and needs no `diff_source` disclosure. Report findings in **combined-diff coordinates**
    (top-head positions in the combined diff); routing findings to individual member PRs is the
    parent's job, never yours. All other rules are unchanged.
 

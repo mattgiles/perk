@@ -192,10 +192,24 @@ excludes `--expected-pr`): it re-resolves the whole stack from the given PR via 
 chain walk (a perk train *is* a base-ref chain; the same single-PR/fork/depth refusals as the
 stack checkout, so reviewer children and the doors refuse consistently), keeps the top-level
 fields on the top PR, and adds per-member `stack[]` sections (`{pr, base_ref, head_ref, title,
-body, diff, plan_body}` — `plan_body` enriched for `plan-<N>` head branches) plus
+body, diff, plan_body, diff_source}` — `plan_body` enriched for `plan-<N>` head branches) plus
 `combined_diff` (the base→top diff every stack reviewer works in, re-validated against the
 same fail-closed ancestry gate as the checkout and fetched through a per-invocation temp-ref
 namespace so concurrent reviewer lanes never collide).
+
+**Large PRs.** Each PR `diff` is GitHub's rendered PR diff by default, which GitHub refuses above
+**20,000 lines or 300 files** (HTTP 406 `too_large`). On that refusal the command automatically
+renders the diff locally instead: it fetches the PR head and base branch into a private
+per-invocation ref namespace (objects only — nothing is checked out or executed), takes their
+merge-base (GitHub's 3-dot base), and runs a hardened, config-pinned `git diff` (no external
+diff or textconv helpers, GitHub's hunk rendering and `a/`/`b/` prefixes regardless of your git
+config), so the result matches GitHub's diff and its line numbers. `--local` forces that local
+rendering on any arm (flagless, `--expected-pr`, `--pr`, `--pr --stack`) — every per-PR `diff`
+goes local while the PR title/body/base/head still come from GitHub. The envelope discloses the
+provenance as `diff_source` (`"github"` or `"local-git"`) beside the top-level `diff` and on
+each `stack[]` member for its own `diff`; `combined_diff` is always rendered locally and carries
+no provenance field. A local rendering that fails (no `origin` access, a PR payload without a
+base branch) is a `github_error` naming the actual trigger.
 
 ### `perk pr review-post`
 
@@ -222,6 +236,9 @@ body upstream, during triage curation), and a stray key (including `fyi`) is a `
 Before anything touches GitHub, every comment's `path`/`line`/`side` anchor is **validated against
 the PR diff** (the merge-base 3-dot diff GitHub validates review anchors against): any failure
 exits 1 with `error_type: bad_anchors` and per-comment `invalid[]` detail — nothing is submitted.
+Above GitHub's 20,000-line / 300-file diff cap the validation falls back to the same local
+merge-base diff `review-context` uses (identical line numbering), so anchors on very large PRs
+still validate.
 `--dry-run` runs the full validation and stops before the mutation (`mode: "validated"`) — unlike
 `review-post`'s fully-offline dry-run it **requires `gh` + auth** (it fetches the PR diff); the
 repair loop is: fix the anchors, re-run `--dry-run` until it exits 0.

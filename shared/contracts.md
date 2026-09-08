@@ -1288,28 +1288,60 @@ the summary (+ rendered findings) as a single discussion comment, so an advisory
 ops below:
 
 ```
-get_pr_review_context{ pr_number, branch, plan_body } -> PrReviewContext{ pr_number, base_ref, head_ref, title, body, diff, plan_body }
+get_pr_review_context{ pr_number, branch, plan_body, local_diff? } -> PrReviewContext{ pr_number, base_ref, head_ref, title, body, diff, plan_body, diff_source }
     # Read-only. PR meta via `gh api pulls/{n}`, diff via `gh pr diff {n}`. The gateway reads
     # no plan/issue state: `plan_body` is resolved backend-neutrally by the consumer
     # (`perk pr review-context`) — the materialized `cache.plan` mirror first, else
     # `IssueBackend.get_plan_body` via the resolver — and passed straight in (best-effort; null
     # permits non-plan-fidelity review from the diff; automated plan-fidelity blocks without
     # nonblank plan text). What the spawned child runs.
+    # LARGE-PR FALLBACK: `gh pr diff` is GitHub's diff media type, which GitHub refuses above
+    # 20,000 lines / 300 files (HTTP 406 `PullRequest.diff too_large`; the message names the
+    # line or the file cap). On that shape, or on `local_diff=True` (the CLI's `--local`), the
+    # gateway renders the diff locally via `git.pr_merge_base_diff`: fetch `refs/pull/{n}/head`
+    # + `refs/heads/{base}` into a per-invocation `refs/perk/review-ctx/<uuid>/` namespace →
+    # merge-base (GitHub's 3-dot base) → `diff_range`; both refs deleted best-effort in a
+    # finally (a failed delete is warned, never masks the result); objects are fetched into
+    # refs, never checked out or executed. `fetch_refspecs` passes `--no-write-fetch-head`
+    # (nobody reads FETCH_HEAD; it is the ONE file every worktree's fetch would otherwise
+    # lock), so concurrently falling-back lanes touch nothing shared. The result is stamped
+    # `diff_source: "local-git"` (`"github"` on the default path). A git failure or a PR
+    # payload without a base ref (absent, null, or blank) is a `GitHubError` naming the
+    # ACTUAL trigger (the 406 vs. the request) — a forced `--local`
+    # never claims a 406; every other `gh pr diff` failure raises exactly as before. GitHub's
+    # diff stays the default; the local path is never routed to unconditionally.
+    # `diff_range` is the hardened, config-pinned review diff for every local rendering:
+    # `git diff --no-ext-diff --no-textconv --no-color --unified=3 --diff-algorithm=myers
+    # --find-renames --src-prefix=a/ --dst-prefix=b/ <base> <head>` — the never-execute posture
+    # (no `diff.external` / textconv helper ever runs against PR content) plus GitHub's hunk
+    # rendering and the `a/`/`b/` prefixes `diff_anchors` keys on, regardless of user config
+    # (every pin is Git's default, so default-configured repos render byte-identically).
     # CLI arms: `--pr <n>` resolves an arbitrary PR by number (existence + head ref via `get_pr`,
     # `plan_body` null, clean `pr_not_found` arm). `--expected-pr <n>` stays on the active-plan,
     # plan-body-preserving arm and compares the branch-selected target before context fetch;
-    # mismatch is `review_target_changed`. The two flags are mutually exclusive.
+    # mismatch is `review_target_changed`. The two flags are mutually exclusive. `--local`
+    # composes with EVERY arm (no new exclusion): it forces the single-PR `diff` and each
+    # `--stack` member `diff` local; PR title/body/base/head stay GitHub reads. It is an
+    # operator/debug escape hatch — the reviewer defs never use it and the read-only bash gate
+    # does not admit it.
     # `--pr <top> --stack` (the stacked reviewer-context arm; --stack requires --pr and
     # excludes --expected-pr): re-resolves the chain from the given PR (a perk train IS a
     # base-ref chain; the same cardinality/fork gates as checkout, so children and doors refuse
     # consistently), keeps the top-level fields on the top PR (non-stack byte-identical), and
-    # adds stack:[{pr, base_ref, head_ref, title, body, diff, plan_body}] per-member sections
-    # (plan_body enriched for `plan-<N>` head branches) + combined_diff: the member heads +
-    # stack base fetched into a PER-INVOCATION refs/perk/review-ctx/<token>/ namespace
-    # (concurrent reviewer lanes share one ref store — no shared temp ref is ever touched;
-    # deleted in a finally), the checkout worker's predecessor→successor ancestry gate
+    # adds stack:[{pr, base_ref, head_ref, title, body, diff, plan_body, diff_source}]
+    # per-member sections (plan_body enriched for `plan-<N>` head branches) + combined_diff:
+    # the member heads + stack base fetched into a PER-INVOCATION refs/perk/review-ctx/<token>/
+    # namespace (concurrent reviewer lanes share one ref store — no shared temp ref is ever
+    # touched; deleted in a finally), the checkout worker's predecessor→successor ancestry gate
     # re-validated fail-closed (stack_topology_broken — indeterminate probes refuse too),
-    # then a local `git diff <base_sha> <top_sha>`.
+    # then a local `diff_range(<base_sha>, <top_sha>)`.
+    # PROVENANCE IS PER ARTIFACT: every `diff_source` describes exactly the `diff` beside it —
+    # the top-level field the top-level `diff` (the top member's in stack mode), each `stack[]`
+    # member's its own `diff`. `combined_diff` is ALWAYS a local merge-base rendering by
+    # construction and carries no provenance field (documented, never emitted as a constant).
+    # `diff_source` is a TRAILING field on `PrReviewContextOut` / `StackContextMemberOut`
+    # (JSON-schema enum {github, local-git}); the reviewer defs disclose a `"local-git"` diff
+    # as one `fyi` line (anchors are unchanged).
 post_pr_review{ pr_number, summary, comments:[{path,line,body,side?}], event? } -> ReviewPostResult{ ok, mode, pr_number, comment_count }
     # ONE atomic review via POST .../pulls/{n}/reviews — comments + body + event land together or
     # not at all. `event` defaults to COMMENT (wire spelling: COMMENT|APPROVE|REQUEST_CHANGES) and
@@ -1386,6 +1418,9 @@ one non-null JSON object, not an array. All fields are required without coercion
 blocks every lane; explicit null/blank is optional evidence only for other angles. Unknown extras
 are ignored, accepted text is not rewritten, refs are metadata not another authority lookup,
 and no parent parser, fallback PR fetch, local-branch comparison, or head-SHA binding is added.
+The trailing `diff_source` ∈ {`github`, `local-git`} is one such unknown extra for the acceptance
+table (an older CLI without it must not block); a `local-git` value is disclosed as one `fyi`
+line and the review proceeds normally.
 
 `prReviewWave.ts` normalizes only non-null non-array report objects with exact `verdict: "blocked"`.
 The enclosing assignment key identifies a `lane-failed` failure, never the report angle or prose.
@@ -1468,7 +1503,12 @@ perk pr review-submit --pr <n> --event <e> --batch <file> --json -> { success, e
     # against, parsed by the pure `diff_anchors` module) BEFORE anything touches GitHub; any
     # failure → bad_anchors (exit 1, NOTHING submitted) with per-comment
     # invalid:[{index, path, line, side, reason}] detail — identical shape for dry-run and real
-    # runs (the agent's repair loop: re-run --dry-run until it exits 0). `--dry-run` stops before
+    # runs (the agent's repair loop: re-run --dry-run until it exits 0). `get_pr_diff` applies
+    # the same 406 `too_large` fallback as `get_pr_review_context` — one extra `gh api pulls/{n}`
+    # read for the base ref, then the local merge-base diff, whose unified-diff line numbering
+    # is identical and whose `diff_range` pins hold the rendering to GitHub's — so anchor
+    # validation works above GitHub's cap; the too-large check runs BEFORE the not-found → None
+    # fold, and the posting ladder stays the backstop. `--dry-run` stops before
     # the mutation (mode "validated") but — unlike review-post's fully-offline dry-run — REQUIRES
     # gh + auth (anchor validation fetches the diff): a deliberate, documented divergence.
     # Dry-run ADDITIONALLY predicts the own-PR 422 for formal events (before the diff fetch):

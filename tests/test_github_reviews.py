@@ -486,3 +486,242 @@ def test_get_pr_diff_other_failure_raises(monkeypatch):
     monkeypatch.setattr(subprocess, "run", rec)
     with pytest.raises(github.GitHubError, match="failed to read the diff for PR #42"):
         github.get_pr_diff(pr_number=42, repo_root=ROOT)
+
+
+# --- the large-PR fallback (GitHub's 406 too_large → the local merge-base diff) ---------------
+
+# The live-observed gh 2.x shape for the line cap (a 107-file, ~22k-line PR).
+_TOO_LARGE_LINES = (
+    "could not find pull request diff: HTTP 406: Sorry, the diff exceeded the maximum number "
+    "of lines (20000) (https://api.github.com/repos/octo/repo/pulls/42)\n"
+    "PullRequest.diff too_large"
+)
+_TOO_LARGE_FILES = (
+    "could not find pull request diff: HTTP 406: Sorry, the diff exceeded the maximum number "
+    "of files (300) (https://api.github.com/repos/octo/repo/pulls/42)"
+)
+_PR_PAYLOAD = json.dumps({"title": "Big one", "body": "lots", "base": "main", "head": "plan-2311"})
+_PR_PAYLOAD_NO_BASE = json.dumps({"title": "Big one", "body": "lots", "head": "plan-2311"})
+# Every shape the gateway must read as "no base branch": the key omitted, null, empty, blank.
+_PAYLOADS_WITHOUT_A_BASE = [
+    _PR_PAYLOAD_NO_BASE,
+    json.dumps({"title": "Big one", "body": "lots", "base": None, "head": "plan-2311"}),
+    json.dumps({"title": "Big one", "body": "lots", "base": "", "head": "plan-2311"}),
+    json.dumps({"title": "Big one", "body": "lots", "base": "   ", "head": "plan-2311"}),
+]
+_LOCAL_DIFF = "diff --git a/big.py b/big.py\n--- a/big.py\n+++ b/big.py\n@@ -1 +1 @@\n-a\n+b\n"
+
+
+class _LocalDiffFake:
+    """Records ``git.pr_merge_base_diff`` calls so no real git runs; ``error`` makes it raise."""
+
+    def __init__(self, *, error: str | None = None) -> None:
+        self.calls: list[dict[str, object]] = []
+        self.error = error
+
+    def __call__(self, repo, *, pr_number, base_ref):
+        self.calls.append({"repo": repo, "pr_number": pr_number, "base_ref": base_ref})
+        if self.error is not None:
+            raise reviews.GitError(self.error)
+        return _LOCAL_DIFF
+
+
+def _context_dispatch(*, diff_proc: _Proc, pr_payload: str = _PR_PAYLOAD) -> _GhDispatch:
+    return _GhDispatch(
+        [
+            (_has("api", "pulls/42", "--jq"), _Proc(0, pr_payload)),
+            (_has("pr", "diff"), diff_proc),
+        ]
+    )
+
+
+def _pr_diff_calls(rec: _GhDispatch) -> list[list[str]]:
+    return [c for c in rec.calls if c[:2] == ["pr", "diff"]]
+
+
+def test_review_context_github_diff_is_the_default(monkeypatch):
+    fake = _LocalDiffFake()
+    monkeypatch.setattr(reviews.git, "pr_merge_base_diff", fake)
+    rec = _context_dispatch(diff_proc=_Proc(0, "diff --git a/x.py b/x.py\n"))
+    monkeypatch.setattr(subprocess, "run", rec)
+
+    ctx = github.get_pr_review_context(
+        pr_number=42, branch="plan-2311", repo_root=ROOT, plan_body=None
+    )
+    assert ctx.diff == "diff --git a/x.py b/x.py\n"
+    assert ctx.diff_source == "github"
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize("stderr", [_TOO_LARGE_LINES, _TOO_LARGE_FILES])
+def test_review_context_too_large_falls_back_to_the_local_diff(monkeypatch, stderr):
+    fake = _LocalDiffFake()
+    monkeypatch.setattr(reviews.git, "pr_merge_base_diff", fake)
+    rec = _context_dispatch(diff_proc=_Proc(1, "", stderr))
+    monkeypatch.setattr(subprocess, "run", rec)
+
+    ctx = github.get_pr_review_context(
+        pr_number=42, branch="plan-2311", repo_root=ROOT, plan_body="plan"
+    )
+    assert ctx.diff == _LOCAL_DIFF
+    assert ctx.diff_source == "local-git"
+    assert ctx.base_ref == "main" and ctx.title == "Big one" and ctx.plan_body == "plan"
+    assert fake.calls == [{"repo": ROOT, "pr_number": 42, "base_ref": "main"}]
+    assert len(_pr_diff_calls(rec)) == 1  # GitHub's diff was tried first
+
+
+@pytest.mark.parametrize("pr_payload", _PAYLOADS_WITHOUT_A_BASE)
+def test_review_context_too_large_without_a_base_ref_raises_truthfully(monkeypatch, pr_payload):
+    fake = _LocalDiffFake()
+    monkeypatch.setattr(reviews.git, "pr_merge_base_diff", fake)
+    rec = _context_dispatch(diff_proc=_Proc(1, "", _TOO_LARGE_LINES), pr_payload=pr_payload)
+    monkeypatch.setattr(subprocess, "run", rec)
+
+    with pytest.raises(github.GitHubError) as excinfo:
+        github.get_pr_review_context(
+            pr_number=42, branch="plan-2311", repo_root=ROOT, plan_body=None
+        )
+    message = str(excinfo.value)
+    assert "failed to read the diff for PR #42" in message
+    assert "HTTP 406 too_large" in message
+    assert "no base branch" in message
+    assert fake.calls == []
+
+
+def test_review_context_too_large_git_failure_is_a_github_error(monkeypatch):
+    fake = _LocalDiffFake(error="git fetch origin ... exited 128")
+    monkeypatch.setattr(reviews.git, "pr_merge_base_diff", fake)
+    rec = _context_dispatch(diff_proc=_Proc(1, "", _TOO_LARGE_LINES))
+    monkeypatch.setattr(subprocess, "run", rec)
+
+    with pytest.raises(github.GitHubError) as excinfo:
+        github.get_pr_review_context(
+            pr_number=42, branch="plan-2311", repo_root=ROOT, plan_body=None
+        )
+    message = str(excinfo.value)
+    assert "HTTP 406 too_large" in message
+    assert "local merge-base diff failed: git fetch origin ... exited 128" in message
+    assert isinstance(excinfo.value.__cause__, reviews.GitError)
+
+
+def test_review_context_other_diff_failure_raises_unchanged(monkeypatch):
+    fake = _LocalDiffFake()
+    monkeypatch.setattr(reviews.git, "pr_merge_base_diff", fake)
+    rec = _context_dispatch(diff_proc=_Proc(1, "", "HTTP 500"))
+    monkeypatch.setattr(subprocess, "run", rec)
+
+    with pytest.raises(github.GitHubError, match=r"^failed to read the diff for PR #42: HTTP 500$"):
+        github.get_pr_review_context(
+            pr_number=42, branch="plan-2311", repo_root=ROOT, plan_body=None
+        )
+    assert fake.calls == []
+
+
+def test_review_context_local_diff_flag_skips_github_diff(monkeypatch):
+    fake = _LocalDiffFake()
+    monkeypatch.setattr(reviews.git, "pr_merge_base_diff", fake)
+    rec = _context_dispatch(diff_proc=_Proc(0, "diff --git a/x.py b/x.py\n"))
+    monkeypatch.setattr(subprocess, "run", rec)
+
+    ctx = github.get_pr_review_context(
+        pr_number=42, branch="plan-2311", repo_root=ROOT, plan_body=None, local_diff=True
+    )
+    assert ctx.diff == _LOCAL_DIFF
+    assert ctx.diff_source == "local-git"
+    assert _pr_diff_calls(rec) == []
+    assert ctx.title == "Big one"  # PR text is still a GitHub read
+    assert fake.calls == [{"repo": ROOT, "pr_number": 42, "base_ref": "main"}]
+
+
+def test_review_context_forced_local_diff_failures_never_claim_a_406(monkeypatch):
+    fake = _LocalDiffFake(error="fetch failed")
+    monkeypatch.setattr(reviews.git, "pr_merge_base_diff", fake)
+    monkeypatch.setattr(subprocess, "run", _context_dispatch(diff_proc=_Proc(0, "unused")))
+    with pytest.raises(github.GitHubError) as excinfo:
+        github.get_pr_review_context(
+            pr_number=42, branch="plan-2311", repo_root=ROOT, plan_body=None, local_diff=True
+        )
+    assert "a local diff was requested (--local)" in str(excinfo.value)
+    assert "fetch failed" in str(excinfo.value)
+    assert "406" not in str(excinfo.value)
+
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _context_dispatch(diff_proc=_Proc(0, "unused"), pr_payload=_PR_PAYLOAD_NO_BASE),
+    )
+    with pytest.raises(github.GitHubError) as excinfo:
+        github.get_pr_review_context(
+            pr_number=42, branch="plan-2311", repo_root=ROOT, plan_body=None, local_diff=True
+        )
+    assert "a local diff was requested (--local)" in str(excinfo.value)
+    assert "no base branch" in str(excinfo.value)
+    assert "406" not in str(excinfo.value)
+
+
+def test_get_pr_diff_too_large_reads_the_base_then_falls_back(monkeypatch):
+    fake = _LocalDiffFake()
+    monkeypatch.setattr(reviews.git, "pr_merge_base_diff", fake)
+    rec = _GhDispatch(
+        [
+            (_has("pr", "diff"), _Proc(1, "", _TOO_LARGE_LINES)),
+            (_has("api", "pulls/42", "--jq"), _Proc(0, json.dumps({"base": "main"}))),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+
+    assert github.get_pr_diff(pr_number=42, repo_root=ROOT) == _LOCAL_DIFF
+    assert rec.calls == [
+        ["pr", "diff", "42"],
+        ["api", "repos/{owner}/{repo}/pulls/42", "--jq", "{base: .base.ref}"],
+    ]
+    assert fake.calls == [{"repo": ROOT, "pr_number": 42, "base_ref": "main"}]
+
+
+@pytest.mark.parametrize("base", [None, "", "   "])
+def test_get_pr_diff_too_large_with_a_blank_base_raises_truthfully(monkeypatch, base):
+    fake = _LocalDiffFake()
+    monkeypatch.setattr(reviews.git, "pr_merge_base_diff", fake)
+    rec = _GhDispatch(
+        [
+            (_has("pr", "diff"), _Proc(1, "", _TOO_LARGE_LINES)),
+            (_has("api", "pulls/42", "--jq"), _Proc(0, json.dumps({"base": base}))),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+
+    with pytest.raises(github.GitHubError, match=r"HTTP 406 too_large.*no base branch"):
+        github.get_pr_diff(pr_number=42, repo_root=ROOT)
+    assert fake.calls == []
+
+
+def test_get_pr_diff_not_found_still_returns_none_with_fallback_present(monkeypatch):
+    fake = _LocalDiffFake()
+    monkeypatch.setattr(reviews.git, "pr_merge_base_diff", fake)
+    rec = _GhDispatch(
+        [
+            (
+                _has("pr", "diff"),
+                _Proc(1, "", "GraphQL: Could not resolve to a PullRequest with the number of 42"),
+            )
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert github.get_pr_diff(pr_number=42, repo_root=ROOT) is None
+    assert fake.calls == []
+
+
+def _completed(stdout: str, stderr: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(["gh", "pr", "diff"], 1, stdout=stdout, stderr=stderr)
+
+
+@pytest.mark.parametrize("stderr", ["HTTP 404: Not Found", "HTTP 500", ""])
+def test_is_diff_too_large_negatives(stderr):
+    assert reviews._is_diff_too_large(_completed("", stderr)) is False
+
+
+def test_is_diff_too_large_positives():
+    assert reviews._is_diff_too_large(_completed("", _TOO_LARGE_LINES)) is True
+    assert reviews._is_diff_too_large(_completed("", _TOO_LARGE_FILES)) is True
+    # The durable code alone (on either stream) is enough.
+    assert reviews._is_diff_too_large(_completed("PullRequest.diff too_large", "")) is True
