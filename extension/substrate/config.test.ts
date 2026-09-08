@@ -711,7 +711,9 @@ test("issueDestination: a missing [issues] table reads as null/null (absence is 
     backend: null,
     team: null,
   });
-  const cwd = repoWith({ "perk.toml": '[models]\nplan = "x"\n[compaction]\nobjective_threshold = 0.5\n' });
+  const cwd = repoWith({
+    "perk.toml": '[models]\nplan = "x"\n[compaction]\nobjective_threshold = 0.5\n',
+  });
   assert.deepEqual(issueDestination(cwd), { backend: null, team: null });
 });
 
@@ -756,7 +758,10 @@ test("readReviewDestination composes the two injected readers into one snapshot"
   });
   assert.deepEqual(calls, ["issues:/repo", "remotes:/repo"]);
   assert.deepEqual(
-    readReviewDestination("/repo", { issues: () => ({ backend: null, team: null }), remotes: () => null }),
+    readReviewDestination("/repo", {
+      issues: () => ({ backend: null, team: null }),
+      remotes: () => null,
+    }),
     { backend: null, team: null, remotes: null },
   );
 });

@@ -295,8 +295,7 @@ function branchBacking(): Backing {
         },
         stage() {
           return (
-            rebuildWorkflowState(branch as Parameters<typeof rebuildWorkflowState>[0]).stage ??
-            null
+            rebuildWorkflowState(branch as Parameters<typeof rebuildWorkflowState>[0]).stage ?? null
           );
         },
         expectedPath(name) {

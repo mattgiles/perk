@@ -20,12 +20,12 @@ import { PLAN_CONTEXT_TYPE } from "../../authoring/plan/prose.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import { soundPointer } from "../../session/workflowSession.ts";
 import { sessionDataDir } from "../../substrate/cache.ts";
+import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
 import {
   digestSessionData,
   type SessionArtifactCtx,
   type SessionDataCtx,
 } from "../../substrate/sessionData.ts";
-import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";

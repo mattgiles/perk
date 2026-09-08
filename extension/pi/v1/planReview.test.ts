@@ -19,11 +19,11 @@ import { GIST_DRAFT_ARTIFACT } from "../../authoring/gist/draft.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "../../authoring/objective/draft.ts";
 import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
 import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
-import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
 import { loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
 import { testReviewRuntime } from "../../testing/reviewRecord.ts";
 import { executeObjectiveReview } from "./objectiveReview.ts";
@@ -941,6 +941,77 @@ function directEditsScaffold(draft = DE_BASE): {
   return { ctx, pi, gating: fakeGating(true), argvs, drafted };
 }
 
+test("plannotator arm: a record superseded before the decision -> stale/superseded (APPROVE or DENY), nothing saved, feedback retained as DATA", async () => {
+  for (const outcome of [APPROVED, DENIED]) {
+    const { ctx, pi, gating, argvs } = directEditsScaffold();
+    const reviews = testReviewRuntime();
+    const bridge: PlanReviewBridge & { reviewed: string[] } = {
+      reviewed: [],
+      current: reviews,
+      async review(plan: string) {
+        bridge.reviewed.push(plan);
+        // Another review opens while this decision is outstanding (a door run, say): the
+        // arm's record is no longer current when the decision lands.
+        reviews.open(ctx as unknown as ExtensionContext, null);
+        return outcome;
+      },
+    };
+    const result = await executePlanReview(
+      pi,
+      ctx as unknown as ExtensionContext,
+      gating,
+      bridge,
+      depsFor(pi, ctx, gating),
+      {},
+    );
+    assert.equal(result.terminate, undefined, "non-terminating");
+    assert.match(
+      String(result.content[0]?.text),
+      /plan review decision arrived, but a newer review superseded this one \(the decision is ignored\) — nothing was saved/,
+    );
+    assert.deepEqual(result.details, {
+      ok: false,
+      status: "stale",
+      reason: "superseded",
+      approved: outcome.status === "completed" ? outcome.approved : undefined,
+      ...(outcome.status === "completed" && outcome.feedback !== undefined
+        ? { feedback: outcome.feedback }
+        : {}),
+    });
+    assert.equal(argvs.length, 0, "nothing saved");
+    assert.equal(gating.exits, 0, "the gate stays on");
+  }
+});
+
+test("plannotator arm: the draft rewritten during the review -> stale/source-changed; the record closes so the next review opens cleanly", async () => {
+  const { ctx, pi, gating, argvs, drafted } = directEditsScaffold();
+  const reviews = testReviewRuntime();
+  const bridge: PlanReviewBridge & { reviewed: string[] } = {
+    reviewed: [],
+    current: reviews,
+    async review(plan: string) {
+      bridge.reviewed.push(plan);
+      writeFileSync(drafted, "# rewritten while the browser was open\n", "utf8");
+      return APPROVED;
+    },
+  };
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    bridge,
+    depsFor(pi, ctx, gating),
+    {},
+  );
+  assert.equal((result.details as { reason?: string }).reason, "source-changed");
+  assert.equal((result.details as { status?: string }).status, "stale");
+  assert.equal(argvs.length, 0, "nothing saved");
+  assert.equal(gating.exits, 0);
+  // The arm closed its record: a fresh open is current (nothing lingers from the stale arm).
+  const next = reviews.open(ctx as unknown as ExtensionContext, null);
+  assert.equal(reviews.isCurrent(next), true);
+});
+
 test("plannotator approve + Direct Edits -> applied, written back, edited bytes saved, remainder-only feedback", async () => {
   await withNoLlm(async () => {
     const { ctx, pi, gating, argvs, drafted } = directEditsScaffold();
@@ -1631,7 +1702,13 @@ test("installPlanBindings: the injected wave deps thread through the registered 
   const savedCwd = process.cwd();
   process.chdir((s.ctx as { cwd: string }).cwd);
   try {
-    installPlanBindings(recordingPi(defs), fakeGating(true), testReviewRuntime(), NOT_A_RUNNER, wave);
+    installPlanBindings(
+      recordingPi(defs),
+      fakeGating(true),
+      testReviewRuntime(),
+      NOT_A_RUNNER,
+      wave,
+    );
   } finally {
     process.chdir(savedCwd);
   }

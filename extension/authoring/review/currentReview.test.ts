@@ -29,7 +29,9 @@ test("openCurrentReview mints an id, supersedes the previous record and resets s
   const a = openCurrentReview(state, { source: SOURCE, destination: DEST }, mint());
   assert.equal(a.id, "id-1");
   assert.equal(isCurrentReview(state, a), true);
-  assert.deepEqual(gateApprovedSave(state, a, { source: SOURCE.raw, destination: DEST }), { ok: true });
+  assert.deepEqual(gateApprovedSave(state, a, { source: SOURCE.raw, destination: DEST }), {
+    ok: true,
+  });
   assert.equal(state.saved, true);
 
   const b = openCurrentReview(state, { source: SOURCE, destination: DEST }, () => "id-2");
@@ -46,7 +48,9 @@ test("openCurrentReview mints an id, supersedes the previous record and resets s
 test("gateApprovedSave: a second approve for the same record refuses already-saved", () => {
   const state = createCurrentReviewState();
   const a = openCurrentReview(state, { source: SOURCE, destination: DEST });
-  assert.deepEqual(gateApprovedSave(state, a, { source: SOURCE.raw, destination: DEST }), { ok: true });
+  assert.deepEqual(gateApprovedSave(state, a, { source: SOURCE.raw, destination: DEST }), {
+    ok: true,
+  });
   assert.deepEqual(gateApprovedSave(state, a, { source: SOURCE.raw, destination: DEST }), {
     ok: false,
     reason: "already-saved",
@@ -65,7 +69,9 @@ test("gateApprovedSave: source-changed when the re-read differs or is null; a nu
     reason: "source-changed",
   });
   const sourceless = openCurrentReview(state, { source: null, destination: DEST });
-  assert.deepEqual(gateApprovedSave(state, sourceless, { source: null, destination: DEST }), { ok: true });
+  assert.deepEqual(gateApprovedSave(state, sourceless, { source: null, destination: DEST }), {
+    ok: true,
+  });
 });
 
 test("gateApprovedSave: destination-changed on a backend, team or remote change", () => {
@@ -92,12 +98,17 @@ test("gateApprovedSave: absence is a value — null backend/team and [] remotes 
   const absent: ReviewDestination = { backend: null, team: null, remotes: [] };
   const state = createCurrentReviewState();
   const a = openCurrentReview(state, { source: null, destination: absent });
-  assert.deepEqual(gateApprovedSave(state, a, { source: null, destination: { ...absent } }), { ok: true });
+  assert.deepEqual(gateApprovedSave(state, a, { source: null, destination: { ...absent } }), {
+    ok: true,
+  });
 
   const unordered: ReviewDestination = { backend: "github", team: "ENG", remotes: ["b", "a"] };
   const b = openCurrentReview(state, { source: null, destination: unordered });
   assert.deepEqual(
-    gateApprovedSave(state, b, { source: null, destination: { ...unordered, remotes: ["a", "b"] } }),
+    gateApprovedSave(state, b, {
+      source: null,
+      destination: { ...unordered, remotes: ["a", "b"] },
+    }),
     { ok: true },
   );
 });
@@ -114,7 +125,10 @@ test("gateApprovedSave: an unreadable remote reading at either end refuses desti
   });
   const approvedUnreadable = openCurrentReview(state, { source: null, destination: DEST });
   assert.deepEqual(
-    gateApprovedSave(state, approvedUnreadable, { source: null, destination: { ...DEST, remotes: null } }),
+    gateApprovedSave(state, approvedUnreadable, {
+      source: null,
+      destination: { ...DEST, remotes: null },
+    }),
     { ok: false, reason: "destination-unreadable" },
   );
   // Unreadable outranks changed: both null is still unreadable, never "equal".
@@ -123,7 +137,10 @@ test("gateApprovedSave: an unreadable remote reading at either end refuses desti
     destination: { ...DEST, remotes: null },
   });
   assert.deepEqual(
-    gateApprovedSave(state, bothUnreadable, { source: null, destination: { ...DEST, remotes: null } }),
+    gateApprovedSave(state, bothUnreadable, {
+      source: null,
+      destination: { ...DEST, remotes: null },
+    }),
     { ok: false, reason: "destination-unreadable" },
   );
 });
@@ -135,7 +152,9 @@ test("gate order: already-saved outranks source/destination drift; source-change
     gateApprovedSave(state, a, { source: "changed", destination: { ...DEST, remotes: null } }),
     { ok: false, reason: "source-changed" },
   );
-  assert.deepEqual(gateApprovedSave(state, a, { source: SOURCE.raw, destination: DEST }), { ok: true });
+  assert.deepEqual(gateApprovedSave(state, a, { source: SOURCE.raw, destination: DEST }), {
+    ok: true,
+  });
   assert.deepEqual(
     gateApprovedSave(state, a, { source: "changed", destination: { ...DEST, remotes: null } }),
     { ok: false, reason: "already-saved" },

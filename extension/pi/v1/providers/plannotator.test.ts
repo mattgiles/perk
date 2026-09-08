@@ -703,7 +703,10 @@ test("requestPlannotatorPlanReview: the listener is installed BEFORE the request
     listenersAtEmit = (bus.handlers.get("plannotator:review-result") ?? []).length;
     const req = data as RequestEnvelope;
     req.respond({ status: "handled", result: { status: "pending", reviewId: "rev-8" } });
-    setTimeout(() => bus.emit("plannotator:review-result", { reviewId: "rev-8", approved: true }), 5);
+    setTimeout(
+      () => bus.emit("plannotator:review-result", { reviewId: "rev-8", approved: true }),
+      5,
+    );
   });
   const outcome = await requestPlannotatorPlanReview(bus, "# A plan");
   assert.equal(listenersAtEmit, 1, "the result listener was live when the request was emitted");
@@ -752,16 +755,27 @@ test("requestPlannotatorPlanReview: a decision emitted in the same synchronous c
     bus.emit("plannotator:review-result", { reviewId: "r-1", approved: false, feedback: "no" });
   });
   const outcome = await requestPlannotatorPlanReview(bus, "# A plan");
-  assert.deepEqual(outcome, { status: "completed", reviewId: "r-1", approved: false, feedback: "no" });
+  assert.deepEqual(outcome, {
+    status: "completed",
+    reviewId: "r-1",
+    approved: false,
+    feedback: "no",
+  });
   assert.equal((bus.handlers.get("plannotator:review-result") ?? []).length, 0, "disposed");
 });
 
 test("requestPlannotatorPlanReview: every handshake failure path unsubscribes the early listener", async () => {
   const failures: Array<{ name: string; respond: (req: RequestEnvelope) => void }> = [
-    { name: "unavailable", respond: (req) => req.respond({ status: "unavailable", error: "no browser" }) },
+    {
+      name: "unavailable",
+      respond: (req) => req.respond({ status: "unavailable", error: "no browser" }),
+    },
     { name: "error", respond: (req) => req.respond({ status: "error", error: "boom" }) },
     { name: "malformed", respond: (req) => req.respond(42) },
-    { name: "no reviewId", respond: (req) => req.respond({ status: "handled", result: { status: "pending" } }) },
+    {
+      name: "no reviewId",
+      respond: (req) => req.respond({ status: "handled", result: { status: "pending" } }),
+    },
     {
       name: "emit throw",
       respond: () => {
