@@ -251,6 +251,19 @@ stages:
     predecessors: []          # a deliberately isolated node — the dev-only audit component
     successors: []
 
+  - id: objective-refine
+    summary: Author an advisory refinement of a future objective node and save it as the node's marked comment (read-only).
+    mode: read-only
+    worktree: none            # explores the invoking checkout as-is (dirty changes included); never provisions a predecessor checkout
+    doors: { warm: true, cold_local: true, cold_remote: false }  # interactive local authoring (perk objective refine + /objective-refine)
+    run_id: { warm: keep, cold_local: mint, cold_remote: mint }
+    command: objective refine  # dedicated seeded cold door + the warm /objective-refine command
+    requires: [github.objective]                       # an objective with a refinable future node must exist
+    reads: [github.objective, github.comments]         # target selection + the node's existing marked refinement comment
+    writes: [github.comments, session.workflow-state, cache.session-data, cache.scratch]  # the approved/human-authorized refinement comment upsert; the read-only `mode` append; objective_refinement_draft + the imported context artifact; run scratch
+    predecessors: []          # a deliberately isolated node — refinement never enters the executable plan graph (contracts.md §8.67)
+    successors: []
+
   - id: stack-review
     summary: Review a stacked PR train in the plannotator browser with judgment-routed per-PR posting.
     mode: read-write          # deliberate parity with the warm /stack-review-browser door — the

@@ -23,6 +23,7 @@ DEDICATED_STAGES: frozenset[str] = frozenset(
         "objective-author",  # perk/cli/commands/objective/author_cmd.py
         "objective-save",  # perk/cli/commands/objective/save_cmd.py
         "objective-plan",  # perk/cli/commands/objective/plan_cmd.py
+        "objective-refine",  # perk/cli/commands/objective/refine_cmd.py
         # The pr group: submit/land are merged launcher+worker commands
         # and address is the launcher-only door, all under `perk pr` + flat aliases — so the
         # generic generator must not also build the flat `perk submit`/`address`/`land` launchers.

@@ -564,6 +564,11 @@ class FakeLinearWorkspace(LinearClient):
             if issue is None:
                 raise _not_found()
             return {"issue": {"comments": self._page_of(self.comments_of(issue), v.get("cursor"))}}
+        if "history(first" in query:  # the description-edit history read: no edits recorded
+            issue = self._issue_by_any_id(str(v.get("id", "")))
+            if issue is None:
+                raise _not_found()
+            return {"issue": {"history": self._page_of([], v.get("cursor"))}}
         if "comment(id" in query:
             for issue in self.issues.values():
                 for comment in self.comments_of(issue):

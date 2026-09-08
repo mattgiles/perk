@@ -38,7 +38,7 @@ from perk import plan
 from perk.backends import resolve
 from perk.backends.engagement import render_node_engagement
 from perk.backends.issue_backend import MarkedCommentExpectation, is_canonical_digest
-from perk.backends.objective_store import ObjectiveStoreError
+from perk.backends.objective_store import ObjectiveStore, ObjectiveStoreError
 from perk.boundary import StrictInputModel, StrTuple, ValidationError
 from perk.objective._models import NodeStatus
 from perk.objective.refinement import codec, service
@@ -49,6 +49,7 @@ from perk.objective.refinement.models import (
     RefinementErrorCode,
     RefinementIdentity,
     RefinementProvenance,
+    RefinementRead,
     RefinementSaveRequest,
     RefinementSource,
     RefinementTarget,
@@ -613,16 +614,29 @@ def _header_run_id(header: dict[str, object]) -> str | None:
     return None
 
 
-def prepare_refinement_context(
-    repo_root: Path, *, objective_id: str, node_id: str | None, run_id: str
-) -> RefinementContext:
-    """Prepare one grounding pass against FRESH adapters (the caller has already done any sync
-    and config reload): refuse unsupported backends, resolve store + issue backend, select the
-    target through the service (explicit node or default walk), read the objective's addressing
-    facts through ``get_objective`` and compare its identity EXACTLY with the target's (mismatch
-    → ``refinement_binding_mismatch``, never a silent rebind), read the node engagement
-    fail-soft (a failure is a visible warning + an empty block), and capture provenance once.
-    No `objective show`, no delivery-readiness helper, no claim, no write."""
+@dataclass(frozen=True)
+class SelectedTarget:
+    """A target selected and identity-bound against fresh adapters, before any provenance is
+    captured — the dry-run report's input and the first half of a real preparation."""
+
+    read: RefinementRead
+    objective: RefinementObjective
+    store: ObjectiveStore
+
+    @property
+    def target(self) -> RefinementTarget:
+        return self.read.target
+
+
+def select_bound_target(
+    repo_root: Path, *, objective_id: str, node_id: str | None
+) -> SelectedTarget:
+    """Select the target against FRESH adapters (the caller has already done any sync and
+    config reload): refuse unsupported backends, resolve store + issue backend, select through
+    the service (explicit node or default walk), read the objective's addressing facts through
+    ``get_objective`` and compare its identity EXACTLY with the target's (mismatch →
+    ``refinement_binding_mismatch``, never a silent rebind). No `objective show`, no
+    delivery-readiness helper, no claim, no write, no clock, no git."""
     require_supported_backend(repo_root)
     store = resolve.resolve_objective_store(repo_root)
     issues = resolve.resolve_issue_backend(repo_root)
@@ -646,23 +660,38 @@ def prepare_refinement_context(
             f"selected target is bound to id {target.identity.objective_id!r} / run "
             f"{target.identity.objective_run_id!r}",
         )
+    return SelectedTarget(
+        read=read,
+        objective=RefinementObjective(id=state.id, title=state.title, url=state.url),
+        store=store,
+    )
+
+
+def prepare_refinement_context(
+    repo_root: Path, *, objective_id: str, node_id: str | None, run_id: str
+) -> RefinementContext:
+    """Prepare one grounding pass: :func:`select_bound_target`, then read the node engagement
+    fail-soft (a failure is a visible warning + an empty block) and capture provenance once."""
+    selected = select_bound_target(repo_root, objective_id=objective_id, node_id=node_id)
+    target = selected.target
     warnings: list[str] = []
     engagement = ""
     try:
-        ne = store.read_node_engagement(objective_id=objective_id, node_id=target.identity.node_id)
+        ne = selected.store.read_node_engagement(
+            objective_id=objective_id, node_id=target.identity.node_id
+        )
     except ObjectiveStoreError as exc:
         warnings.append(f"node engagement unavailable ({exc}) — continuing without it")
     else:
         engagement = render_node_engagement(ne) or ""
     provenance = capture_provenance(repo_root, run_id=run_id)
-    prior = _prior_of(read.saved)
     return RefinementContext(
         run_id=run_id,
         target=target,
-        expected=read.expected,
+        expected=selected.read.expected,
         provenance=provenance,
-        objective=RefinementObjective(id=state.id, title=state.title, url=state.url),
-        prior=prior,
+        objective=selected.objective,
+        prior=_prior_of(selected.read.saved),
         engagement=engagement,
         warnings=tuple(warnings),
     )

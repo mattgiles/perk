@@ -96,6 +96,14 @@ class SeededLaunch:
     launched in place of the registry stage, plus the bare plan id ``launch_stage`` forwards to
     the positioner. Both default ``None`` — every other door is unaffected. The handoff still
     records the same stage id (the override never changes ``stage.id``).
+
+    ``config_override`` is the one seam for a door whose ``gather`` performs the run's ONE sync
+    *itself* and must launch with the Config **as it reads post-sync** (``objective refine``:
+    the fast-forward may change the committed ``[issues]`` route, and the launched session must
+    see the same route the door selected against). When set, the tail passes it to
+    ``launch_stage`` in place of the invocation-time Config it retained before ``gather``; the
+    default ``None`` keeps every other door on its original Config. Owner: the refine door — no
+    command-context cache mutation and no general auto-reload policy.
     """
 
     seed: str  # the prompt_override
@@ -109,6 +117,7 @@ class SeededLaunch:
     run_id_override: str | None = None
     stage_override: Stage | None = None
     plan_id: str | None = None
+    config_override: Config | None = None
 
 
 def run_seeded_door(
@@ -167,7 +176,7 @@ def run_seeded_door(
     # launch_stage exec's pi with the seeded prompt (becomes the session — nothing after runs).
     launch.launch_stage(
         repo_root=repo_root,
-        config=config,
+        config=spec.config_override if spec.config_override is not None else config,
         stage=spec.stage_override or stage,
         worktree=worktree,
         dry_run=False,
