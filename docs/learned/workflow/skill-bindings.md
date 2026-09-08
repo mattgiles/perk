@@ -95,18 +95,18 @@ Anyone changing the pointer format again reaches for the helper, not a re-inline
 Cold and warm renderers are **independent code paths** that must not double-deliver when both fire
 for one session (a cold launch *and* `before_agent_start`). They dedup through one **byte-identical
 header literal**: `BINDING_HEADER` (TS, `extension/substrate/bindingDelivery.ts`) ≡ `_HEADER` (Python,
-`src/perk/substrate/binding_delivery.py`). The warm injector skips when the header already occurs
-in Pi's **active model-context window** — a shape-agnostic marker scan over
-`activeContextWindow(branchOf(ctx))` — **or in the submitting `event.prompt`**: at
-`before_agent_start` the just-submitted prompt is not yet on the branch, so the branch scan alone
-cannot cover the launch turn (the `event.prompt.includes(BINDING_HEADER)` guard is what stops a
-cold-delivered launch prompt from double-delivering). Pi compaction appends history;
-it does not delete the original delivery entry. Scanning the full branch would therefore suppress
-re-delivery forever even after the marker left model context. The window begins at the latest
-compaction's `firstKeptEntryId` (or just after that compaction as fallback) and excludes compaction
-entries so a summary quoting the header cannot masquerade as live delivery. The cross-plane header
-equality is pinned by literal tests in both planes; changing one must update the other in the same
-turn.
+`src/perk/substrate/binding_delivery.py`). The warm injector asks Pi's **own projection** whether
+the header is live — `extension/pi/v1/contextEvidence.ts::activeContextMessages` flattens the
+current leaf's compaction-aware entries through Pi's converter and `contextCarriesMarker` accepts
+the header only as user content or as the owned custom content; a compaction summary quoting the
+header is not live delivery — **or in the submitting `event.prompt`**: at `before_agent_start` the
+just-submitted prompt is not yet on the branch, so the projection alone cannot cover the launch
+turn (the `event.prompt.includes(BINDING_HEADER)` guard is what stops a cold-delivered launch
+prompt from double-delivering). Pi compaction appends history; it does not delete the original
+delivery entry, so a full-branch scan would suppress re-delivery forever even after the marker left
+model context — hence the projection, never branch history, decides liveness. The cross-plane
+header equality is pinned by literal tests in both planes; changing one must update the other in
+the same turn.
 
 The cold/warm injection+strip and compaction mechanics are captured in
 `pi/context-injection.md`; contracts §8.38 names their externally relevant behavior.
