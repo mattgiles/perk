@@ -64,6 +64,36 @@ def test_no_runtime_dependencies():
     assert deps == {}, f"extension must have zero runtime dependencies, found: {deps}"
 
 
+def test_vendored_toml_parser_pin_and_shipped_files():
+    # The draft-review routing-config projection needs a full TOML parser, but the bare-clone
+    # invariant above forbids a runtime dependency — so the parser-only closure of `smol-toml`
+    # is vendored (`extension/vendor/smol-toml/`) with its BSD-3-Clause license. The exact
+    # devDependency pin is what `extension/vendor/smolToml.test.ts` diffs the vendored bytes
+    # against; the license must ride along with the code it covers.
+    assert _package_json()["devDependencies"]["smol-toml"] == "1.8.0"
+    vendored = REPO_ROOT / "extension" / "vendor" / "smol-toml"
+    for name in (
+        "parse.js",
+        "struct.js",
+        "extract.js",
+        "primitive.js",
+        "date.js",
+        "error.js",
+        "util.js",
+        "parse.d.ts",
+        "date.d.ts",
+        "error.d.ts",
+        "util.d.ts",
+    ):
+        assert (vendored / name).is_file(), name
+    license_text = (vendored / "LICENSE").read_text(encoding="utf-8")
+    assert "Copyright (c) Squirrel Chat et al." in license_text
+    assert "Redistribution and use in source and binary forms" in license_text
+    # Neither the serializer nor the package entry points are vendored.
+    for name in ("stringify.js", "index.js", "index.cjs", "index.d.ts"):
+        assert not (vendored / name).exists(), name
+
+
 def test_npm_pin_lockstep():
     # Beyond the `__version__` lockstep, both perk-owned `@mgiles/perk` install pins must track the
     # file SSOT (`pyproject.toml` version): the `perk init` *wired* pin (`_perk_npm_entry()` written
@@ -285,6 +315,12 @@ def test_npm_pack_lists_shipped_and_excludes_dev():
     assert "shared/schemas/contracts/registry.schema.json" in paths
     assert "shared/subagents/representative-wave-script.js" in paths
     assert "prompts/README.md" in paths
+    # The vendored TOML parser closure ships with its license (plain `.js` rides `extension/`).
+    assert "extension/vendor/smol-toml/parse.js" in paths
+    assert "extension/vendor/smol-toml/LICENSE" in paths
+    assert "extension/vendor/smol-toml/README.md" in paths
+    assert not any(p.startswith("extension/vendor/smol-toml/stringify") for p in paths), paths
+    assert not any(p.startswith("extension/vendor/smol-toml/index") for p in paths), paths
 
     # Dev-only surface must be excluded.
     assert not any(p.startswith("extension/testing/") for p in paths), paths

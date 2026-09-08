@@ -4,6 +4,7 @@
   "files": {
     "includes": [
       "extension/**/*.ts",
+      "!extension/vendor/smol-toml/**",
       "tools/**/*.ts",
       "tools/**/*.tsx",
       "tools/**/*.css",
