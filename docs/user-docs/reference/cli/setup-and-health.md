@@ -142,9 +142,11 @@ separate managed worktree instead of the conflicted one; the engine refuses such
 (`incompatible-worktree-default`, naming the exact file). Any present value other than exactly
 `false` is drift: the check `fail`s naming the absolute path, and `perk doctor --fix` (or `perk
 init`) rewrites just that key to `false` in place, preserving sibling keys. An absent file or key
-is compatible and is left alone — perk never creates the file. A file perk cannot parse is
-`fail` with an `unverifiable` message, and `--fix` records the refusal on `fix_errors` instead of
-aborting (the file is never rewritten; the other fixes still run). A repair made while a perk
+is compatible and is left alone — perk never creates the file. A path perk cannot read as a JSON
+object — invalid JSON, invalid UTF-8, an unreadable file, or a directory at that path (which the
+engine also refuses) — is `fail` with an `unverifiable` message naming the path, and `--fix`
+records the refusal on `fix_errors` instead of aborting (nothing there is rewritten; the other
+fixes still run). A repair made while a perk
 session is open takes effect after that session reloads.
 The `package` group also carries the report-only `subagent-bridge-config` check: it reads
 `subagents.intercomBridge.mode` from both pi settings scopes — the project `.pi/settings.json`

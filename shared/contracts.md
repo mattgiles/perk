@@ -891,8 +891,12 @@ dir's `extensions/subagent/config.json` — the dir resolved by the ONE `launch_
 resolver `launch_stage` also consumes (`PI_CODING_AGENT_DIR` → the main checkout's `[pi]
 agent_dir` → `~/.pi/agent`; no resolvable home → nothing to converge) — rewriting only that key
 (sibling keys preserved; pi-subagents' own tab-indented serialization), only when it is present and
-not exactly `false`, and never creating the file. A malformed file fails `perk init` loudly
-(`invalid_subagent_config`), renders `unverifiable` in doctor, and is never rewritten.
+not exactly `false`, and never creating the file. Only a genuinely missing path is compatible:
+anything perk cannot read as a JSON object — an existing non-file (a directory, which the engine
+reads as `incompatible`), an unreadable or non-UTF-8 file, invalid JSON, a non-object document —
+is translated inside the convergence into one path-naming `invalid_subagent_config` refusal that
+fails `perk init` loudly, renders `unverifiable` in doctor, rides `fix_errors` under `--fix`, and
+never rewrites the path.
 Configuration/source edits during launch are unsupported; preflight is a snapshot, not a
 source-edit fence (a `--fix` mid-session still needs the reload the diagnostic states).
 
@@ -2313,7 +2317,8 @@ second `--fix` at `fixed == []`).
 - `package` — the wiring/install/version surfaces: `settings-wiring`, `subagent-worktree-default`
   (the managed check pinning pi-subagents' native `worktree` default to `false` in the
   launch-precedence agent dir's `extensions/subagent/config.json` — drift is a `fail` that
-  `--fix` repairs in place; a malformed file is `unverifiable`; the file is never created —
+  `--fix` repairs in place; a path perk cannot read as a JSON object (malformed, non-UTF-8,
+  unreadable, or a directory) is `unverifiable`; the file is never created —
   §8.3), `extension-install`, the
   `required-perk-version` managed check, and the report-only probes `cli-version`
   (CLI-vs-repo-pin warn), `resource-overrides` (pi overrides touching perk's own resources),

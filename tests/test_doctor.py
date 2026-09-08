@@ -1648,22 +1648,91 @@ def test_subagent_worktree_default_non_boolean_is_repaired(
     assert json.loads(path.read_text(encoding="utf-8")) == {"worktree": False}
 
 
-@pytest.mark.parametrize("text", ["{not json", "[true]", '"worktree"'])
-def test_subagent_worktree_default_malformed_is_unverifiable_and_fix_does_not_crash(
-    scaffolded_perk_repo, isolated_pi_agent_dir, text
+def _plant_bytes(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
+def _plant_directory(path):
+    path.mkdir(parents=True)
+
+
+def _plant_unreadable(path, monkeypatch):
+    # A permission failure is simulated at the read seam (chmod 000 is unreliable under root/CI).
+    from pathlib import Path
+
+    _plant_bytes(path, b'{"worktree": true}')
+    read_text = Path.read_text
+
+    def deny(self, *args, **kwargs):
+        if self == path:
+            raise PermissionError(13, "Permission denied", str(path))
+        return read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", deny)
+
+
+def _snapshot_path(path):
+    """The on-disk state of the planted path: (kind, bytes-or-listing)."""
+    if path.is_dir():
+        return ("dir", sorted(p.name for p in path.iterdir()))
+    return ("file", path.read_bytes())
+
+
+@pytest.mark.parametrize(
+    ("plant", "expected_message"),
+    [
+        (lambda p, mp: _plant_bytes(p, b"{not json"), "is not valid JSON"),
+        (lambda p, mp: _plant_bytes(p, b"[true]"), "must contain a JSON object"),
+        (lambda p, mp: _plant_bytes(p, b'"worktree"'), "must contain a JSON object"),
+        # Invalid UTF-8: a `UnicodeDecodeError` (a ValueError, outside the managed-check net)
+        # must become the same path-naming refusal, never abort read-only doctor.
+        (lambda p, mp: _plant_bytes(p, b'\xff\xfe{"worktree": true}'), "could not be read"),
+        # A directory at the path: the engine reads it as `incompatible` (EISDIR), so treating it
+        # as "absent" would leave a refusal/repair loop doctor can neither see nor fix.
+        (lambda p, mp: _plant_directory(p), "is not a regular file"),
+        # An unreadable file: doctor's net caught the raw OSError, but `--fix` re-reads and only
+        # catches UserFacingCliError — the convergence must translate it itself.
+        (lambda p, mp: _plant_unreadable(p, mp), "could not be read"),
+    ],
+    ids=["invalid-json", "array", "string", "invalid-utf8", "directory", "unreadable"],
+)
+def test_subagent_worktree_default_unreadable_is_unverifiable_and_fix_does_not_crash(
+    scaffolded_perk_repo, isolated_pi_agent_dir, monkeypatch, plant, expected_message
 ):
-    path = _plant_native_subagent_config(isolated_pi_agent_dir, text)
+    path = _native_subagent_config(isolated_pi_agent_dir)
+    plant(path, monkeypatch)
+    before = _snapshot_path(path)
     report = run_doctor(scaffolded_perk_repo, verify=False)
     check = _worktree_default_check(report)
     assert check.status == "fail" and check.message == "subagent-worktree-default unverifiable"
-    assert str(path) in check.detail
-    # `--fix` records the refusal on fix_errors instead of aborting; the file is never rewritten.
+    assert str(path) in check.detail and expected_message in check.detail
+    # `--fix` records the refusal on fix_errors instead of aborting; the path is never touched.
     fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
     assert any(
-        e.startswith("subagent-worktree-default: ") and str(path) in e for e in fixed.fix_errors
+        e.startswith("subagent-worktree-default: ") and str(path) in e and expected_message in e
+        for e in fixed.fix_errors
     )
-    assert path.read_text(encoding="utf-8") == text
+    assert _snapshot_path(path) == before
     assert not fixed.healthy
+    # The other managed pieces still converged/verified around the refusal (no abort).
+    assert next(c for c in fixed.checks if c.name == "settings-wiring").status == "ok"
+
+
+@pytest.mark.parametrize("plant", [_plant_directory, lambda p: _plant_bytes(p, b"\xff{")])
+def test_subagent_worktree_default_unreadable_fails_init_loudly(
+    scaffolded_perk_repo, isolated_pi_agent_dir, plant
+):
+    from perk.cli.ensure import UserFacingCliError
+
+    path = _native_subagent_config(isolated_pi_agent_dir)
+    plant(path)
+    before = _snapshot_path(path)
+    with pytest.raises(UserFacingCliError) as exc:
+        run_init(scaffolded_perk_repo, verify=False)
+    assert exc.value.error_type == "invalid_subagent_config"
+    assert str(path) in exc.value.format_message()
+    assert _snapshot_path(path) == before
 
 
 def test_subagent_worktree_default_follows_configured_agent_dir(scaffolded_perk_repo, monkeypatch):

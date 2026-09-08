@@ -32,11 +32,15 @@ def _converge_subagent_worktree_default(root: Path, *, apply: bool = True) -> li
 
     Fail-open where the resolver is: no resolvable agent dir → nothing to converge; a broken
     main-checkout config → ``[]`` (the ``config`` check owns that complaint — the
-    ``_converge_models`` posture). A file that is not valid JSON / not a JSON object is the one
-    loud arm (the ``_converge_settings`` posture): it raises a ``UserFacingCliError`` naming the
-    absolute path — ``perk init`` fails, the managed doctor check renders it ``unverifiable``,
-    and ``--fix`` records the refusal on ``fix_errors`` — because perk never rewrites a file it
-    cannot parse, and the same malformed file already breaks the resolver.
+    ``_converge_models`` posture). Only a genuinely **missing** path is compatible. Everything
+    else perk cannot read as a JSON object — an existing non-file (a directory, which the
+    engine reads as ``incompatible`` via EISDIR), an unreadable or non-UTF-8 file, invalid JSON, a
+    non-object document — is the one loud arm (the ``_converge_settings`` posture): it raises a
+    ``UserFacingCliError`` (``invalid_subagent_config``) naming the absolute path — ``perk init``
+    fails, the managed doctor check renders it ``unverifiable``, and ``--fix`` records the refusal
+    on ``fix_errors`` and continues — because perk never rewrites a file it cannot parse, and the
+    same broken path already breaks the resolver. Every read failure is translated here (not left
+    to the callers' nets) so read-only ``doctor`` and ``--fix`` both report instead of aborting.
 
     The would-be change list is identical for ``apply`` True/False (the managed-convergence
     invariant): the auto-generated ``subagent-worktree-default`` doctor check reports drift and
@@ -49,10 +53,23 @@ def _converge_subagent_worktree_default(root: Path, *, apply: bool = True) -> li
     if resolution is None:
         return []
     path = resolution.path / "extensions" / "subagent" / "config.json"
-    if not path.is_file():
+    if not path.exists():
         return []
+    if not path.is_file():
+        raise UserFacingCliError(
+            f"{path} is not a regular file (the engine reads it as an incompatible worktree "
+            "default)\nFix or remove it, then re-run 'perk init'.",
+            error_type="invalid_subagent_config",
+        )
     try:
-        config = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise UserFacingCliError(
+            f"{path} could not be read ({exc})\nFix or remove it, then re-run 'perk init'.",
+            error_type="invalid_subagent_config",
+        ) from exc
+    try:
+        config = json.loads(text)
     except json.JSONDecodeError as exc:
         raise UserFacingCliError(
             f"{path} is not valid JSON ({exc})\nFix or remove it, then re-run 'perk init'.",

@@ -84,8 +84,8 @@ thinking = "high"
 > one key to `false` in place — sibling keys survive, the file is written atomically, and it is
 > **never created** when absent (an absent file or key is already compatible). The agent dir it
 > targets is the one a perk session launches with: `PI_CODING_AGENT_DIR` → `[pi] agent_dir` →
-> `~/.pi/agent`. A file perk cannot parse fails `perk init` (`invalid_subagent_config`) and is
-> left untouched. A fix applied while a session is open takes effect after that session reloads.
+> `~/.pi/agent`. A path perk cannot read as a JSON object (invalid JSON or UTF-8, an unreadable
+> file, a directory) fails `perk init` (`invalid_subagent_config`) and is left untouched. A fix applied while a session is open takes effect after that session reloads.
 
 ## `[models.stages.<id>]`
 
