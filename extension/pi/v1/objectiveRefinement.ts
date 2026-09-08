@@ -599,7 +599,6 @@ export function installObjectiveRefinementBindings(
       [REFINEMENT_MARKER]: (ctx) => refinementContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
     },
     select: (_ctx, branch) => (isRefining(branch) ? REFINEMENT_MARKER : null),
-    live: (_ctx, branch) => isRefining(branch),
   });
 
   pi.registerTool({

@@ -53,7 +53,6 @@ import {
   savePlan,
 } from "../../authoring/plan/save.ts";
 import { extractPlanMarkdown, resolvePlanSource } from "../../authoring/plan/source.ts";
-import { REFINE_STAGE } from "../../authoring/refinement/context.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { PlanRef } from "../../substrate/cache.ts";
 import {
@@ -74,7 +73,7 @@ import { failFor, ok } from "../../substrate/result.ts";
 import { captureSessionPointer } from "../../substrate/sessionPointers.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { idArrayParam, paramsOf, stringParam } from "../../substrate/toolParams.ts";
-import { type BranchEntry, branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
+import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
 // `Key` via the surfaces re-export (keybinding vocabulary, not rich UI) — keeps pi-tui imports
 // structurally confined to the surfaces module (the surfacesGuard pi-tui import rule).
@@ -836,6 +835,5 @@ function installPlanMode(
       }) && !isRefinementSession(branch)
         ? PLAN_MARKER
         : null,
-
   });
 }

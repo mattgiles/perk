@@ -410,7 +410,6 @@ test("strip: while live, a copy of a NON-selected flavor is stale — stripped a
       [SECOND_MARKER]: () => `${SECOND_MARKER}\nsecond flavor`,
     },
     select: () => SECOND_MARKER,
-    live: () => true,
   });
   const { strip } = hooksFor(spec);
   const result = (await strip(
@@ -428,13 +427,13 @@ test("strip: while live, a copy of a NON-selected flavor is stale — stripped a
   )) as { messages: { role?: string; customType?: string; content?: unknown }[] };
   assert.deepEqual(
     result.messages.map((m) => m.customType ?? m.role),
-    [CONTEXT_TYPE, "user", "assistant", "user"],
-    "the stale flavor's copy and its leaked user turn are gone; everything else survives",
+    [CONTEXT_TYPE, "user", "user", "assistant", "user"],
+    "the stale flavor's copy is gone while user input and unrelated roles survive",
   );
   assert.deepEqual(
     result.messages.map((m) => JSON.stringify(m.content).includes(MARKER)),
-    [false, false, true, false],
-    "the stale marker survives only on the non-user (assistant) quote",
+    [false, true, false, true, false],
+    "marker quotations in user and assistant messages are preserved",
   );
   assert.ok(
     String(result.messages[0]?.content).startsWith(SECOND_MARKER),
@@ -449,12 +448,11 @@ test("strip: while live with NOTHING selected this turn, or a single-flavor spec
       [SECOND_MARKER]: () => `${SECOND_MARKER}\nsecond flavor`,
     },
     select: () => null,
-    live: () => true,
   });
   const messages = [{ customType: CONTEXT_TYPE, content: `${MARKER}\na prior copy` }];
-  assert.equal(await hooksFor(idle.spec).strip({ messages }, ctxOver()), undefined);
-  const single = countingSpec({ live: () => true });
-  assert.equal(await hooksFor(single.spec).strip({ messages }, ctxOver()), undefined);
+  assert.deepEqual(await hooksFor(idle.spec).strip({ messages }, ctxOver()), { messages: [] });
+  const single = countingSpec({});
+  assert.deepEqual(await hooksFor(single.spec).strip({ messages }, ctxOver()), { messages });
   // A live multi-flavor spec whose messages carry no stale flavor yields no filter either.
   const clean = countingSpec({
     flavors: {
@@ -462,9 +460,8 @@ test("strip: while live with NOTHING selected this turn, or a single-flavor spec
       [SECOND_MARKER]: () => `${SECOND_MARKER}\nsecond flavor`,
     },
     select: () => MARKER,
-    live: () => true,
   });
-  assert.equal(await hooksFor(clean.spec).strip({ messages }, ctxOver()), undefined);
+  assert.deepEqual(await hooksFor(clean.spec).strip({ messages }, ctxOver()), { messages });
 });
 
 // --- composition smoke: the REAL registered extension rides the projection leaf -----------------

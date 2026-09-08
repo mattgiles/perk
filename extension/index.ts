@@ -156,7 +156,7 @@ export default function perk(
   const childIdentity = createChildIdentity();
   const childRestrictions = createChildRestrictions();
   const gating = registerToolGating(pi, childRestrictions.hasFloor);
-  // The activation-local authoring-context policy input (§8.23): the startup runner bit, captured
+  // The activation-local authoring-context policy input (§8.3): the startup runner bit, captured
   // in session_start before lifecycle work and consumed by the authoring/adapter installers as a
   // suppression signal only — never a tool grant or save authority, and distinct from the
   // advisory `<active_agent>` name parser and the runner restriction floor above.

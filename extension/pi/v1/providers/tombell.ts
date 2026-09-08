@@ -37,15 +37,16 @@
 //     stages bind only to the provider-agnostic plan-ref and are unchanged.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
   isDedicatedAuthoringStage,
   isPlanAuthoringEligible,
   readOnlyModeOf,
 } from "../../../authoring/context/eligibility.ts";
 import type { ContextPolicyInputs } from "../../../substrate/contextPolicy.ts";
-import { isRefinementSession } from "../objectiveRefinement.ts";
-import { render from "../../../substrate/prompts.ts";
+import { render } from "../../../substrate/prompts.ts";
 import { type BranchEntry, rebuildWorkflowState } from "../../../substrate/workflowState.ts";
 import { installInjectedContext } from "../contextInjection.ts";
+import { isRefinementSession } from "../objectiveRefinement.ts";
 import { isTombellPlanSelected } from "./selection.ts";
 
 /** The tombell plan-adapter bridge customType (distinct from the `perk:plan-context`). */
@@ -104,6 +105,5 @@ export function installTombellPlanAdapter(
       }
       return isTombellPlanModeEnabled(branch) ? PLAN_ADAPTER_TOMBELL_MARKER : null;
     },
-
   });
 }

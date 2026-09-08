@@ -1,4 +1,4 @@
-// The ONE authoring-context eligibility policy (contracts.md §8.23/§8.31) behind every
+// The ONE authoring-context eligibility policy (contracts.md §8.3/§8.23/§8.31) behind every
 // Perk-owned authoring/adapter injection: the plan-authoring context, the objective- and
 // gist-authoring contexts, and the plannotator/tombell plan-adapter flavors all classify the
 // session through `classifyAuthoringContext` instead of each re-deriving a stage exclusion list

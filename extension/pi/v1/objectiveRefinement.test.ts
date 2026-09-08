@@ -352,9 +352,10 @@ function fixture(
     },
   } satisfies ToolGating;
   const reviews = createDraftReviewActivation(pi);
-  installPlanBindings(pi, gating, reviews);
-  installObjectiveAuthoringBindings(pi, gating, reviews);
-  installGistBindings(pi, gating, reviews);
+  const contextPolicy = { runnerChild: () => false };
+  installPlanBindings(pi, gating, reviews, contextPolicy);
+  installObjectiveAuthoringBindings(pi, gating, reviews, contextPolicy);
+  installGistBindings(pi, gating, reviews, contextPolicy);
   installObjectivePlanningBindings(pi, gating, {} as ReportWave, reviews);
   installObjectiveRefinementBindings(pi, gating, reviews);
   const session = openBranchWorkflowSession(pi, ctx);

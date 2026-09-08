@@ -1,4 +1,4 @@
-// The activation-local context-policy inputs (contracts.md §8.23): the runner bit
+// The activation-local context-policy inputs (contracts.md §8.3): the runner bit
 // (`PI_SUBAGENT_CHILD === "1"`, read ONCE per `session_start` in index.ts before lifecycle work)
 // that the authoring-context eligibility policy (`authoring/context/eligibility.ts`) consumes
 // through the Pi installers. Suppression only: a runner child receives no Perk authoring or

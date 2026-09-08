@@ -69,6 +69,7 @@ import type { ContextPolicyInputs } from "../../../substrate/contextPolicy.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { rebuildWorkflowState } from "../../../substrate/workflowState.ts";
 import { installInjectedContext } from "../contextInjection.ts";
+import { isRefinementSession } from "../objectiveRefinement.ts";
 import type { ReviewOutcome } from "../reviewOutcome.ts";
 import { isPlannotatorPlanSelected } from "./selection.ts";
 
@@ -618,6 +619,7 @@ export function installPlannotatorPlanAdapter(
     select: (ctx, branch) => {
       if (!isPlannotatorPlanSelected(ctx.cwd)) return null;
       const state = rebuildWorkflowState(branch);
+      if (isRefinementSession(branch)) return REFINEMENT_ADAPTER_PLANNOTATOR_MARKER;
       switch (
         classifyAuthoringContext({
           gateActive: readOnlyModeOf(state),
