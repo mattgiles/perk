@@ -48,6 +48,11 @@ the two models, not either table in isolation.
   Python trips loudly — "Ill-typed values — the trap differs per plane".
 - Know which read you need: the committed-only read vs the overlaid `load_config` (local.toml
   overlay, main-checkout anchoring) — "Committed-only read vs the overlaid `load_config`".
+- Config authority, overlay policy, and resolution phase are separate decisions (`[pi] agent_dir`
+  reads committed + local overlay FROM THE MAIN CHECKOUT at the consumer); a validated path string
+  still has a runtime `expanduser()` boundary; the repo's own committed table is guarded against
+  its generated `settings.json` — "Main-checkout anchoring…", "Ill-typed values…", "Convergence
+  composition".
 - `[[ci.checks]]` rows are an execution contract (declared order, glob change-scoping decides
   what gates a diff) — "The `[[ci.checks]]` execution contract and change-scoped gating".
 - Two consumption models decide where a knob lands: runtime interior gate vs init convergence
@@ -97,6 +102,13 @@ The two planes handle values they can't use differently:
   reserve_tokens = 16000
   ```
 
+**Validated path strings still have a runtime resolution boundary.** `Path.expanduser()` can raise
+`RuntimeError` (an unknown `~user`, an unresolvable home) *after* TOML/type validation succeeded.
+Translate it into a field-named `ConfigError` at the effective-reader boundary
+(`effective_pi_agent_dir` does this for `[pi] agent_dir`) so launch applies its warning/fallback
+posture and doctor reports an actionable diagnostic — don't broaden consumers to catch arbitrary
+exceptions.
+
 ## Committed-only read vs the overlaid `load_config`
 
 Most tables (`[providers]`, `[subagents]`, `[[bindings]]`) read through `load_config`, which overlays
@@ -108,7 +120,8 @@ overrides for such knobs belong in pi's native global `~/.pi/agent/settings.json
 project settings).
 
 **Rule of thumb:** the local overlay is safe for session-transient config, unsafe for config that
-lands in committed files.
+lands in committed files — the scope of "unsafe" is *committed artifacts*, not every canonical
+store (see the authority/overlay/phase distinction under "Main-checkout anchoring" below).
 
 Committed-only knobs now have **three precedents** (`[compaction]`, `[issues]`, the
 settings-convergence reads); the recipe is fixed: a pure `parse_*(raw)` parser + a
@@ -145,6 +158,16 @@ committed config.
   `subagentModel` in `extension/substrate/config.ts`: committed config read from the worktree,
   the local overlay read from the main checkout, a worktree-local overlay still winning when one
   exists — byte-identical behavior in the main checkout — pinned by linked-worktree unit tests.
+- **Config authority, overlay policy, and resolution phase are separate decisions.** Main-checkout
+  anchoring does not imply committed-only input: repo-wide issue identity uses a committed-only
+  reader, while the per-user Pi credential/session store (`[pi] agent_dir`) intentionally reads
+  committed config AND its local overlay **from the main checkout** (`effective_pi_agent_dir`) —
+  the store must not fork per worktree, but a per-user redirect is exactly what the overlay is
+  for. A caller-supplied `Config` may have been loaded from a linked worktree, so it cannot
+  establish this authority: use one consumer-side effective reader shared by launch and doctor,
+  keep the raw value in `Config`, and resolve at the consumers — never add git/filesystem work to
+  `to_domain`. Test conflicting main/worktree files and a main-only local overlay, not just path
+  joining.
 
 ### Global `subprocess.run` fakes break when a code path grows a git shell
 
@@ -338,6 +361,14 @@ summary. See `init-doctor.md` for the managed-convergence SSOT.
 
 **Residual wrinkle:** deleting `[compaction]` from `.perk/config.toml` leaves a stale `settings.json` block to
 clean up by hand.
+
+**The committed-config ↔ generated-artifact self-consistency guard.** For perk's own repo the
+"edit the table → re-run init" gotcha is now a CI failure:
+`tests/test_config.py::test_repo_committed_settings_carry_converged_compaction` parses the repo's
+own table through the production reader (`load_committed_compaction(REPO_ROOT)`) and asserts every
+mapped key/value is present in the generated `.pi/settings.json` (verified non-vacuous by mutating
+the committed value). The guard is forward-only — the residual wrinkle above (a deleted table
+leaving a stale block) is still uncovered — and consumer repos keep the docs-only gotcha.
 
 ### snake_case → camelCase mapping in the table model
 

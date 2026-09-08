@@ -64,3 +64,25 @@ it ran a sequence. Lease-reclaim races only became testable via explicit test-on
 run a competitor synchronously *inside* the check-then-act window — and the first hook-driven
 interleaving immediately exposed a real defect the sequential test had passed over. (The lease
 protocol itself is documented in `workflow/lease-outbox-delivery.md`.)
+
+### Proving *isolation* (not just exposing a race) needs three refinements
+
+Exposing a race says "two workers can collide"; proving isolation says "two workers never see each
+other's state". The second claim needs three things the first does not (the exemplar is the
+`perk pr review-context --stack` interleaved test, which proves per-invocation refspec isolation):
+
+1. **The competitor must contend on the SAME key**, not a distinguishable sibling. Distinct
+   targets only prove per-target isolation; both workers targeting the identical stack makes the
+   per-invocation namespace the ONLY separator, so a leak has nowhere to hide.
+2. **The survival oracle must capture target identity** (a name→OID mapping), not a name-only set
+   — a `set[str]` cannot detect a ref that was retargeted but kept its name.
+3. **Take an in-lifecycle coexistence snapshot at the competitor's OWN nested seam re-entry**, so
+   a clobber-and-restore sequence (which a before/after comparison would miss) is excluded.
+
+Enablers: a once-per-invocation seam call (`fetch_refspecs` in `src/perk/substrate/git.py`) makes
+a plain call counter serve as both the reentrancy guard and the snapshot index; assert per-worker
+payload correctness FIRST and the empty-store residual sweep LAST; carry observations in a typed
+dataclass with `X | None` fields plus `is not None` narrowing — it passes `ty` and doubles as the
+barrier-liveness proof (a field still `None` means the competitor never reached the seam). The same
+reasoning applies in pytest (`CliRunner` + `monkeypatch` on a module-attribute seam) as in
+node:test.
