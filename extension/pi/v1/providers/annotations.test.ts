@@ -981,6 +981,93 @@ test("execute: plan-mode batches post the COMMENT/GLOBAL_COMMENT shapes", async 
   });
 });
 
+test("execute: reconciling a FAILED streamed lane clears ONLY its provisional source; the successful lanes' final findings are retained (plan mode)", async () => {
+  // The draft-review reconcile over a mixed outcome: grounding and risk both streamed
+  // provisional batches; the supplier then failed the risk lane's completion (uncovered) while
+  // grounding completed. The parent clears the uncovered source with `replace: true, findings: []`
+  // and re-shapes the covered source with its final batch — the risk clear is source-scoped
+  // (one DELETE on `perk:risk`), never a wholesale wipe, and grounding's final batch survives.
+  primeAnnotationSurface(state, { mode: "plan", url: URL_BASE });
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint({ removed: 4 });
+  // Provisional batches while the wave ran.
+  await executePushAnnotations(
+    state,
+    target,
+    { angle: "grounding", findings: [planFinding({ phrase: "Step one.", body: "grounding g1" })] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  await executePushAnnotations(
+    state,
+    target,
+    {
+      angle: "risk",
+      findings: [
+        planFinding({ phrase: "Step two.", body: "risk r1" }),
+        planFinding({ phrase: null, body: "risk global" }),
+      ],
+    },
+    { fetchLike: endpoint.fetchLike },
+  );
+  endpoint.calls.length = 0;
+
+  // Reconcile: the uncovered risk lane is a pure source clear.
+  const cleared = await executePushAnnotations(
+    state,
+    target,
+    { angle: "risk", findings: [], replace: true },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.equal(cleared.details.ok, true);
+  assert.equal((cleared.details as OkDetails).deleted, 4);
+  assert.equal((cleared.details as OkDetails).pushed, 0);
+  assert.deepEqual(
+    endpoint.calls.map((c) => [c.method, c.url]),
+    [["DELETE", `${URL_BASE}/api/external-annotations?source=${encodeURIComponent("perk:risk")}`]],
+    "one source-scoped DELETE on the failed lane; no POST, no other source touched",
+  );
+  endpoint.calls.length = 0;
+
+  // Reconcile: the covered grounding lane re-shapes to its final report (same anchor re-pushes
+  // after ITS source-scoped clear; the final body wins).
+  const finalized = await executePushAnnotations(
+    state,
+    target,
+    {
+      angle: "grounding",
+      findings: [planFinding({ phrase: "Step one.", body: "grounding final" })],
+      replace: true,
+    },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.equal(finalized.details.ok, true);
+  assert.equal((finalized.details as OkDetails).pushed, 1);
+  assert.deepEqual(
+    endpoint.calls.map((c) => c.method),
+    ["DELETE", "POST"],
+  );
+  assert.equal(
+    endpoint.calls[0]?.url,
+    `${URL_BASE}/api/external-annotations?source=${encodeURIComponent("perk:grounding")}`,
+  );
+  const posted = endpoint.calls[1]?.body as { annotations: { source: string; text: string }[] };
+  assert.deepEqual(
+    posted.annotations.map((a) => [a.source, a.text]),
+    [["perk:grounding", "[minor/medium] grounding final"]],
+  );
+  // The failed lane's anchors are gone from the ledger: a later push of the same risk anchor is
+  // NOT deduped as already present (nothing of the failed lane survived the clear).
+  endpoint.calls.length = 0;
+  const repushed = await executePushAnnotations(
+    state,
+    target,
+    { angle: "risk", findings: [planFinding({ phrase: "Step two.", body: "risk r1 again" })] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.equal((repushed.details as OkDetails).pushed, 1);
+  assert.deepEqual((repushed.details as OkDetails).skipped, []);
+});
+
 test("execute: re-priming resets the ledger and the held queue (a new session supersedes)", async () => {
   primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target } = fakeTarget();

@@ -55,6 +55,21 @@ prompt, inherit neither global/project context nor discovered skills, and omit e
 so runner ambient discovery remains available. Explicit source-bound Ponytail assignment skills
 are separate from discovered-skill inheritance. Models and ordered fallbacks are unchanged.
 
+Report profiles also declare `completionGuard: false`. This is **report-only completion**, and it
+is separate from acceptance: the wave already disables pi-subagents' acceptance contract, while
+this field disables the engine's completion *mutation* guard — the check that fails a child for
+finishing "without making edits" when its task text reads like an implementation request. A
+reviewer's task quotes the reviewed document verbatim, so a draft saying "… must change …" used
+to fail every lane after it had submitted its findings. With the field set, a report lane
+completes on its validated `structured_output` report and its findings are retained. Three things
+do not change: the report contract (a lane that never calls `structured_output`, or calls it with
+a schema-invalid report, still fails), the read-only enforcement (inspection `bash` remains
+available; not editing is Perk's restrictions and the rubric's job, never the guard's), and
+coverage (a failed lane is uncovered — `collect_*` reports it as incomplete, its provisional
+annotations are cleared rather than finalized, and a failed lane is never a clean review). Your
+own custom agents keep the engine default; an agent override that re-enables the guard on a Perk
+report profile reintroduces the failure and is a documented compatibility limit.
+
 The conflict resolver keeps an unspecified definition mode and inherits project context and
 skills, not global context; foreground mode does not load ambient extensions. Submit/address
 uses `resolve_submit_conflicts`: a single-use authorized, code-owned native foreground delegation

@@ -1191,7 +1191,7 @@ test("a normal plan read-only session injects plan context, not objective-author
   }
 });
 
-test("objective-authoring marker is stripped from context when not authoring", async () => {
+test("objective-authoring owned context is removed when not authoring; user turns carrying the marker are preserved", async () => {
   const cwd = scaffoldRepo({
     handoff: { runId: "01RID", mode: "read-write", stage: "objective-save" },
   });
@@ -1201,23 +1201,20 @@ test("objective-authoring marker is stripped from context when not authoring", a
     env: { PERK_RUN_ID: "01RID" },
   });
   try {
-    const stale = [
-      { customType: OBJECTIVE_AUTHOR_CONTEXT_TYPE, content: "[OBJECTIVE AUTHORING]\nstale" },
-      { role: "user", content: "[OBJECTIVE AUTHORING] leaked into a user turn" },
+    const preserved = [
+      { role: "user", content: "[OBJECTIVE AUTHORING] quoted in a user turn" },
+      { role: "user", content: [{ type: "text", text: "a text part with [OBJECTIVE AUTHORING]" }] },
       { role: "user", content: "a normal message" },
     ];
-    const surviving = await h.emitContext(stale);
-    assert.equal(
-      surviving.some((m) => m.customType === OBJECTIVE_AUTHOR_CONTEXT_TYPE),
-      false,
-      "objective-author custom message stripped when not authoring",
+    const surviving = await h.emitContext([
+      { customType: OBJECTIVE_AUTHOR_CONTEXT_TYPE, content: "[OBJECTIVE AUTHORING]\nstale" },
+      ...structuredClone(preserved),
+    ]);
+    assert.deepEqual(
+      surviving,
+      preserved,
+      "only the owned custom copy is removed; user input survives byte-for-byte",
     );
-    assert.equal(
-      surviving.some((m) => String(m.content).includes("[OBJECTIVE AUTHORING]")),
-      false,
-      "marker stripped from user turns",
-    );
-    assert.equal(surviving.length, 1, "the normal message survives");
   } finally {
     h.dispose();
   }

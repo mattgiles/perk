@@ -14,6 +14,7 @@ import {
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import { readDraftReview } from "../../session/draftReviewState.ts";
 import { sessionDataDir } from "../../substrate/cache.ts";
+import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import { report } from "../../surfaces/report.ts";
@@ -33,6 +34,9 @@ import { installPlanBindings, planSaveDepsFor } from "./plan.ts";
 import { runPlanReviewV1 } from "./planReview.ts";
 import { createPlannotatorBridge } from "./providers/plannotator.ts";
 import type { ToolResult } from "./review.ts";
+
+/** The non-runner context-policy input the installer tests compose (no runner suppression). */
+const NOT_A_RUNNER: ContextPolicyInputs = { runnerChild: () => false };
 
 function deferred<T>() {
   let resolve = (_value: T): void => {
@@ -247,9 +251,9 @@ function fixture(subject: Subject = "plan", runId: string | null = "RID") {
     syncFromState() {},
   } satisfies ToolGating;
   const reviews = createDraftReviewActivation(pi);
-  installPlanBindings(pi, gating, reviews);
-  installObjectiveAuthoringBindings(pi, gating, reviews);
-  installGistBindings(pi, gating, reviews);
+  installPlanBindings(pi, gating, reviews, NOT_A_RUNNER);
+  installObjectiveAuthoringBindings(pi, gating, reviews, NOT_A_RUNNER);
+  installGistBindings(pi, gating, reviews, NOT_A_RUNNER);
   const session = openBranchWorkflowSession(pi, ctx);
   const invoke = async (name: string, params: unknown = {}, signal?: AbortSignal) => {
     const tool = tools.get(name);
@@ -730,7 +734,7 @@ test("Pi SDK: real registered plan_review result is absent at message_end and pe
     extensionFactories: [
       (pi) => {
         const reviews = createDraftReviewActivation(pi);
-        installPlanBindings({ ...pi, exec: f.pi.exec }, f.gating, reviews);
+        installPlanBindings({ ...pi, exec: f.pi.exec }, f.gating, reviews, NOT_A_RUNNER);
         pi.on("session_start", (_event, ctx) => {
           pi.appendEntry(WORKFLOW_STATE_TYPE, { run_id: "RID", stage: "plan", mode: "read-only" });
           assert.equal(
@@ -1105,7 +1109,7 @@ for (const residue of ["retained opening lock", "opening orphan"] as const) {
         data: { run_id: "FRESH", session_artifacts: {} },
       });
       const fresh = createDraftReviewActivation(f.pi);
-      installPlanBindings(f.pi, f.gating, fresh);
+      installPlanBindings(f.pi, f.gating, fresh, NOT_A_RUNNER);
       assert.equal((await f.draft()).details.ok, true);
       const freshRecord = readDraftReview(f.session);
       assert.deepEqual(freshRecord, { ok: true, record: null });

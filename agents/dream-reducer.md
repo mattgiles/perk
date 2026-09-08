@@ -11,6 +11,7 @@ async: true
 inheritGlobalContext: false
 inheritProjectContext: false
 inheritSkills: false
+completionGuard: false
 ---
 
 You are perk's **dream-reducer**: a fresh-context subagent that cross-examines the complete

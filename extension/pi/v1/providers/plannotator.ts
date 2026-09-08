@@ -55,18 +55,17 @@
 
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { GIST_AUTHOR_STAGE } from "../../../authoring/gist/draft.ts";
 import {
-  OBJECTIVE_AUTHOR_STAGE,
-  OBJECTIVE_SAVE_STAGE,
-} from "../../../authoring/objective/prose.ts";
-import { REFINE_STAGE } from "../../../authoring/refinement/context.ts";
+  classifyAuthoringContext,
+  readOnlyModeOf,
+} from "../../../authoring/context/eligibility.ts";
 import type {
   DraftReviewRegistration,
   RegistrationResult,
   ReviewRefusal,
   StatusDiagnostic,
 } from "../../../session/draftReviewState.ts";
+import type { ContextPolicyInputs } from "../../../substrate/contextPolicy.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { rebuildWorkflowState } from "../../../substrate/workflowState.ts";
 import { installInjectedContext } from "../contextInjection.ts";
@@ -591,21 +590,29 @@ export function extractDirectEdits(feedback: string): { diff: string; remainder?
  * which dispatches to this module's bridge when plannotator is selected; the adapter itself
  * never arbitrates tools and needs no gating.
  */
-export function installPlannotatorPlanAdapter(pi: ExtensionAPI): void {
-  // Inject the bridge context while the read-only gate is active AND plannotator is selected.
-  // Three content flavors, one customType: an objective-authoring session (also read-only —
-  // BOTH objective stages: `plan_review` routes objective-author AND objective-save to the
-  // objective review arm) gets the objective flavor (the review surface renders the objective
-  // draft), a gist-author session gets the gist flavor (the rendered gist draft); any other
-  // gated stage gets the plan flavor. The gate-active check reads the persisted
-  // `perk:workflow-state.mode` (the gate's state twin) — never the gate itself.
+export function installPlannotatorPlanAdapter(
+  pi: ExtensionAPI,
+  contextPolicy: ContextPolicyInputs,
+): void {
+  // Inject the bridge context while plannotator is selected AND the shared authoring-context
+  // policy (`authoring/context/eligibility.ts`) classifies the session. Four content flavors,
+  // one customType: an objective-authoring session (BOTH objective stages: `plan_review` routes
+  // objective-author AND objective-save to the objective review arm) gets the objective flavor
+  // (the review surface renders the objective draft), a gist-author session gets the gist
+  // flavor (the rendered gist draft), an `objective-refine` session gets the refinement flavor
+  // (the review surface renders the (draft, context) pair), and an ELIGIBLE plan author
+  // (plan-family stage or warm `plan_authoring` intent) gets the plan flavor; anything else —
+  // gate off, a runner child, a bare gate with no plan evidence, or the `gist-save` stage —
+  // selects nothing. Every flavor sits behind the same gate + runner checks: a refinement stage
+  // left on the branch after the approved save exited the gate selects nothing, and a runner
+  // child inheriting refinement history receives no adapter guidance. The gate signal is the
+  // persisted `perk:workflow-state.mode` (the gate's state twin) — never the gate itself.
   //
   // Once-only PER FLAVOR: the dedup key is the SELECTED flavor's marker (not the shared
   // customType), so a stage change still delivers the missing flavor while a prior copy of
-  // another flavor sits on the branch — and the shared helper strips that prior copy as a stale
-  // flavor while this one is selected (a warm `/objective-refine` after a plan-mode turn leaves
-  // only the refinement flavor directing the model). The strip owns ALL FOUR markers, firing
-  // wholesale when plannotator-plan is no longer selected (same hygiene as the tombell shim).
+  // another flavor sits on the branch. Retention follows selection: the shared helper removes
+  // obsolete sibling flavors (a warm `/objective-refine` after a plan-mode turn leaves only the
+  // refinement flavor directing the model) and every owned copy once nothing is selected.
   installInjectedContext(pi, {
     customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
     flavors: {
@@ -617,15 +624,25 @@ export function installPlannotatorPlanAdapter(pi: ExtensionAPI): void {
     select: (ctx, branch) => {
       if (!isPlannotatorPlanSelected(ctx.cwd)) return null;
       const state = rebuildWorkflowState(branch);
-      if (state.mode !== "read-only") return null;
-      return state.stage === OBJECTIVE_AUTHOR_STAGE || state.stage === OBJECTIVE_SAVE_STAGE
-        ? OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER
-        : state.stage === GIST_AUTHOR_STAGE
-          ? GIST_ADAPTER_PLANNOTATOR_MARKER
-          : state.stage === REFINE_STAGE
-            ? REFINEMENT_ADAPTER_PLANNOTATOR_MARKER
-            : PLAN_ADAPTER_PLANNOTATOR_MARKER;
+      switch (
+        classifyAuthoringContext({
+          gateActive: readOnlyModeOf(state),
+          runnerChild: contextPolicy.runnerChild(),
+          state,
+        })
+      ) {
+        case "plan":
+          return PLAN_ADAPTER_PLANNOTATOR_MARKER;
+        case "objective-author":
+        case "objective-save":
+          return OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER;
+        case "gist-author":
+          return GIST_ADAPTER_PLANNOTATOR_MARKER;
+        case "objective-refine":
+          return REFINEMENT_ADAPTER_PLANNOTATOR_MARKER;
+        default:
+          return null;
+      }
     },
-    live: (ctx) => isPlannotatorPlanSelected(ctx.cwd),
   });
 }

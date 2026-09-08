@@ -19,6 +19,7 @@ import { GIST_DRAFT_ARTIFACT } from "../../authoring/gist/draft.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "../../authoring/objective/draft.ts";
 import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
 import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
@@ -35,6 +36,9 @@ import {
 } from "./planReview.ts";
 import { PLANNOTATOR_REVIEW_COMMAND } from "./providers/plannotatorHandoff.ts";
 import type { PlanReviewUI, ReviewLaunchUI, ReviewOutcome, WaveLaunch } from "./review.ts";
+
+/** The non-runner context-policy input the installer tests compose (no runner suppression). */
+const NOT_A_RUNNER: ContextPolicyInputs = { runnerChild: () => false };
 
 /** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(
@@ -1653,7 +1657,13 @@ test("installPlanBindings: the injected wave deps thread through the registered 
   const savedCwd = process.cwd();
   process.chdir((s.ctx as { cwd: string }).cwd);
   try {
-    installPlanBindings(recordingPi(defs), fakeGating(true), policyDraftReviews, wave);
+    installPlanBindings(
+      recordingPi(defs),
+      fakeGating(true),
+      policyDraftReviews,
+      NOT_A_RUNNER,
+      wave,
+    );
   } finally {
     process.chdir(savedCwd);
   }

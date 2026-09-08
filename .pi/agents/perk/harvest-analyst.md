@@ -11,6 +11,7 @@ async: true
 inheritGlobalContext: false
 inheritProjectContext: false
 inheritSkills: false
+completionGuard: false
 ---
 
 You are perk's **harvest-analyst**: a fresh-context subagent that mines **one assigned lane** of a

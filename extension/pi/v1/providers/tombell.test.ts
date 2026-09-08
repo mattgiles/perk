@@ -1,7 +1,7 @@
 // The tombell plan adapter shim: review-first injection under a `tombell-plan`
-// selection when a plan authoring mode is on (perk gate read-only OR tombell's own persisted
-// `plan-mode-state`; objective-author and gist-author excepted), inert (+ stale-marker strip) under the default
-// selection. Driven through a REAL bound AgentSession (offline) via the shared harness. See
+// selection when a plan authoring intent is on (an ELIGIBLE perk plan author OR tombell's own
+// persisted `plan-mode-state`; runner children and the dedicated objective/gist stages excepted),
+// inert (+ owned-copy retirement, user turns preserved) under the default selection. Driven through a REAL bound AgentSession (offline) via the shared harness. See
 // tombell.ts. The suite doubles as the contracts.md §8.57 seeded-plan-shape proof
 // for the REPLACE-posture flow-carrier claim: under `tombell-plan` the adapter block is the
 // designated plan-authoring flow carrier, and these cases verify it per adapter-visible shape.
@@ -239,7 +239,7 @@ test("isTombellPlanModeEnabled: latest plan-mode-state entry wins; malformed ⇒
   assert.equal(isTombellPlanModeEnabled([entry("yes")]), false, "non-boolean enabled ⇒ false");
 });
 
-test("default selection: shim injects nothing and strips a stale bridge marker", async () => {
+test("default selection: shim injects nothing and removes a stale owned bridge copy; a user turn quoting the marker is preserved", async () => {
   const cwd = scaffoldRepo();
   const h = await loadPerkSession({
     cwd,
@@ -255,24 +255,24 @@ test("default selection: shim injects nothing and strips a stale bridge marker",
       false,
       "no bridge context injected on the default path",
     );
-    // A stale bridge marker (custom entry + a leaked user turn) is stripped from context.
-    const stale = [
-      { customType: PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE, content: "[PLAN ADAPTER: TOMBELL]\nstale" },
-      { role: "user", content: "[PLAN ADAPTER: TOMBELL] leaked into a user turn" },
+    // A stale owned bridge copy is removed from context; user input carrying the marker stays.
+    const preserved = [
+      { role: "user", content: "[PLAN ADAPTER: TOMBELL] quoted in a user turn" },
+      {
+        role: "user",
+        content: [{ type: "text", text: "a text part with [PLAN ADAPTER: TOMBELL]" }],
+      },
       { role: "user", content: "a normal message" },
     ];
-    const surviving = await h.emitContext(stale);
-    assert.equal(
-      surviving.some((m) => m.customType === PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE),
-      false,
-      "stale bridge custom message stripped on the default path",
+    const surviving = await h.emitContext([
+      { customType: PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE, content: "[PLAN ADAPTER: TOMBELL]\nstale" },
+      ...structuredClone(preserved),
+    ]);
+    assert.deepEqual(
+      surviving,
+      preserved,
+      "only the owned bridge copy is removed on the default path; user input survives byte-for-byte",
     );
-    assert.equal(
-      surviving.some((m) => String(m.content).includes("[PLAN ADAPTER: TOMBELL]")),
-      false,
-      "stale bridge marker stripped from user turns on the default path",
-    );
-    assert.equal(surviving.length, 1, "the normal message survives");
   } finally {
     h.dispose();
   }

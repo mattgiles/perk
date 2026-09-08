@@ -1,8 +1,8 @@
 // The shared context-injection mechanism's DISTINCT policies — owned ONCE here, for every
 // `installInjectedContext` caller (gist, plan, objective-authoring, plannotator, tombell): the
-// scan-before-construct content thunk, the two guarded reads' asymmetric failure semantics, the
-// submitting-prompt check, the stale-strip filter shape, and one registered-extension composition
-// smoke. Drives the installer through a `pi.on`-recorder fake over REAL `SessionManager` sources
+// scan-before-construct content thunk, the two guarded reads' failure semantics, the
+// submitting-prompt check, the selection-driven retention filter shape (owned copies only —
+// user input is preserved byte-for-byte), and one registered-extension composition smoke. Drives the installer through a `pi.on`-recorder fake over REAL `SessionManager` sources
 // (no second reconstruction of Pi's selection); the exhaustive carrier/compaction/branch matrix
 // lives in `contextEvidence.test.ts`, and feature policy (eligibility, flavor selection, content
 // identity) stays pinned in each feature's own suite.
@@ -75,10 +75,19 @@ function countingSpec(overrides: Partial<InjectedContextSpec> = {}): {
       counts.select += 1;
       return MARKER;
     },
-    live: () => false,
     ...overrides,
   };
   return { spec, counts };
+}
+
+/** The `context` hook over a fixed message list; returns the surviving messages. */
+async function retained(
+  strip: Hook,
+  messages: Record<string, unknown>[],
+  ctx: ExtensionContext = ctxOver(),
+): Promise<Record<string, unknown>[]> {
+  const result = (await strip({ messages }, ctx)) as { messages: Record<string, unknown>[] };
+  return result.messages;
 }
 
 /** Persist a prior hidden copy the way Pi persists a `before_agent_start` injection. */
@@ -219,13 +228,8 @@ test("the submitting prompt carrying ANOTHER flavor's marker does not suppress t
   assert.equal(counts.content, 1);
 });
 
-test("a THROWING branch read: injection short-circuits (no select call, no throw); the strip still fires over []", async () => {
+test("a THROWING branch read: injection short-circuits (no select call, no throw); retention fails closed and removes the owned copy", async () => {
   const { spec, counts } = countingSpec();
-  const liveBranches: (readonly BranchEntry[])[] = [];
-  spec.live = (_ctx, branch) => {
-    liveBranches.push(branch);
-    return false;
-  };
   const { inject, strip } = hooksFor(spec);
   const reads: string[] = [];
   const ctx = ctxFrom({
@@ -242,23 +246,39 @@ test("a THROWING branch read: injection short-circuits (no select call, no throw
   assert.equal(counts.select, 0, "select is never consulted on a failed read");
   assert.deepEqual(reads, [], "the projection is never read after a failed branch read");
 
-  const result = (await strip(
-    {
-      messages: [
-        { customType: CONTEXT_TYPE, content: `${MARKER}\nstale` },
-        { role: "user", content: "a normal message" },
-      ],
-    },
+  const surviving = await retained(
+    strip,
+    [
+      { customType: CONTEXT_TYPE, content: `${MARKER}\nstale` },
+      { role: "user", content: "a normal message" },
+    ],
     ctx,
-  )) as { messages: { customType?: string }[] };
-  assert.deepEqual(liveBranches, [[]], "live sees the degraded empty branch");
-  assert.equal(
-    result.messages.some((m) => m.customType === CONTEXT_TYPE),
-    false,
-    "the stale custom message is still stripped",
   );
-  assert.equal(result.messages.length, 1, "the normal message survives");
-  assert.deepEqual(reads, [], "the strip never reads the projection either");
+  assert.equal(counts.select, 0, "eligibility cannot be established — select is not consulted");
+  assert.deepEqual(
+    surviving,
+    [{ role: "user", content: "a normal message" }],
+    "the owned copy is removed; the user turn survives",
+  );
+  assert.deepEqual(reads, [], "retention never reads the projection either");
+});
+
+test("a THROWING selector on the context event fails closed: the owned copy is removed, nothing else is touched", async () => {
+  const { spec } = countingSpec({
+    select: () => {
+      throw new Error("adversarial selector");
+    },
+  });
+  const { strip } = hooksFor(spec);
+  const surviving = await retained(strip, [
+    { customType: CONTEXT_TYPE, content: `${MARKER}\nstale` },
+    { customType: "perk:other-feature", content: `${MARKER}\nanother feature quoting the marker` },
+    { role: "user", content: `${MARKER} quoted by the human` },
+  ]);
+  assert.deepEqual(surviving, [
+    { customType: "perk:other-feature", content: `${MARKER}\nanother feature quoting the marker` },
+    { role: "user", content: `${MARKER} quoted by the human` },
+  ]);
 });
 
 test("a THROWING projection read: guarded return — nothing constructed, nothing injected, no throw", async () => {
@@ -275,122 +295,112 @@ test("a THROWING projection read: guarded return — nothing constructed, nothin
   assert.equal(counts.content, 0, "the content thunk never ran");
 });
 
-test("strip: drops the owned customType and any user turn carrying ANY owned marker", async () => {
+/** Every non-owned message shape a retention pass must hand back byte-for-byte. */
+const PRESERVED_INPUT: Record<string, unknown>[] = [
+  { role: "user", content: `${MARKER} leaked into a user turn` },
+  { role: "user", content: `${SECOND_MARKER} the second owned marker in a user string` },
+  { role: "user", content: [{ type: "text", text: `text-part carrying ${SECOND_MARKER}` }] },
+  {
+    role: "user",
+    content: [
+      {
+        type: "text",
+        text: `<untrusted_draft>\n${MARKER}\nquoted inside a draft\n</untrusted_draft>`,
+      },
+      { type: "text", text: "and a trailing part" },
+    ],
+  },
+  { role: "user", content: `Do the work.\n\n${MARKER}\nhistorical cold seed` },
+  { role: "user", content: [{ type: "text", text: "an unrelated text part" }] },
+  { role: "user", content: "a normal message" },
+  { role: "assistant", content: `the assistant quoting ${MARKER} stays` },
+  { role: "toolResult", content: [{ type: "text", text: `tool output with ${MARKER}` }] },
+  { customType: "perk:other-feature", content: `${MARKER}\nanother feature's custom copy` },
+  { customType: "perk:mode-context", content: "[READ-ONLY MODE]\nthe gate's own guidance" },
+];
+
+test("retention on null selection: removes EVERY owned copy (all flavors); preserves user input, other roles and other features byte-for-byte", async () => {
   const { spec } = countingSpec({
     flavors: {
       [MARKER]: () => `${MARKER}\ninjected content`,
       [SECOND_MARKER]: () => `${SECOND_MARKER}\nsecond flavor`,
     },
+    select: () => null,
   });
   const { strip } = hooksFor(spec);
-  const result = (await strip(
+  const input = structuredClone(PRESERVED_INPUT);
+  const surviving = await retained(strip, [
+    { customType: CONTEXT_TYPE, content: `${MARKER}\nstale` },
+    ...input.slice(0, 3),
+    { customType: CONTEXT_TYPE, content: `${SECOND_MARKER}\nstale sibling` },
+    ...input.slice(3),
     {
-      messages: [
-        { customType: CONTEXT_TYPE, content: `${MARKER}\nstale` },
-        { role: "user", content: `${MARKER} leaked into a user turn` },
-        { role: "user", content: `${SECOND_MARKER} the second owned marker leaks too` },
-        { role: "user", content: [{ type: "text", text: `text-part carrying ${SECOND_MARKER}` }] },
-        { role: "user", content: [{ type: "text", text: "an unrelated text part" }] },
-        { role: "user", content: "a normal message" },
-      ],
+      customType: CONTEXT_TYPE,
+      content: [{ type: "text", text: `${MARKER}\nstale text-part copy` }],
     },
-    ctxOver(),
-  )) as { messages: { role?: string; customType?: string; content?: unknown }[] };
-  assert.equal(result.messages.length, 2, "only the unrelated user turns survive");
-  assert.ok(result.messages.every((m) => m.customType !== CONTEXT_TYPE));
-  assert.ok(
-    result.messages.every((m) => !JSON.stringify(m.content).includes("[TEST CONTEXT")),
-    "no owned marker survives on a user turn",
-  );
+  ]);
+  assert.deepEqual(surviving, PRESERVED_INPUT, "only the owned copies are gone; order intact");
 });
 
-test("strip: keeps non-user roles even when they quote a marker", async () => {
-  const { spec } = countingSpec();
-  const { strip } = hooksFor(spec);
-  const result = (await strip(
-    {
-      messages: [
-        { role: "assistant", content: `the assistant quoting ${MARKER} stays` },
-        { role: "toolResult", content: [{ type: "text", text: `tool output with ${MARKER}` }] },
-      ],
-    },
-    ctxOver(),
-  )) as { messages: unknown[] };
-  assert.equal(result.messages.length, 2, "non-user roles are never marker-stripped");
-});
-
-test("strip: keeps everything while live (the hook yields no filter)", async () => {
-  const { spec } = countingSpec({ live: () => true });
-  const { strip } = hooksFor(spec);
-  const result = await strip(
-    { messages: [{ customType: CONTEXT_TYPE, content: `${MARKER}\nstill relevant` }] },
-    ctxOver(),
-  );
-  assert.equal(result, undefined, "a live context is never stripped");
-});
-
-test("strip: while live, a copy of a NON-selected flavor is stale — stripped alongside user turns carrying it; the selected flavor's copy and unrelated turns survive", async () => {
+test("retention on a selected flavor: keeps that flavor's owned copies, removes obsolete sibling flavors, touches nothing else", async () => {
   const { spec } = countingSpec({
     flavors: {
       [MARKER]: () => `${MARKER}\ninjected content`,
       [SECOND_MARKER]: () => `${SECOND_MARKER}\nsecond flavor`,
     },
     select: () => SECOND_MARKER,
-    live: () => true,
   });
   const { strip } = hooksFor(spec);
-  const result = (await strip(
-    {
-      messages: [
-        { customType: CONTEXT_TYPE, content: `${MARKER}\nthe previous flavor's copy` },
-        { customType: CONTEXT_TYPE, content: `${SECOND_MARKER}\nthe selected flavor's copy` },
-        { role: "user", content: `${MARKER} leaked into a user turn` },
-        { role: "user", content: [{ type: "text", text: `${SECOND_MARKER} selected, on a turn` }] },
-        { role: "assistant", content: `the assistant quoting ${MARKER} stays` },
-        { role: "user", content: "a normal message" },
-      ],
-    },
-    ctxOver(),
-  )) as { messages: { role?: string; customType?: string; content?: unknown }[] };
-  assert.deepEqual(
-    result.messages.map((m) => m.customType ?? m.role),
-    [CONTEXT_TYPE, "user", "assistant", "user"],
-    "the stale flavor's copy and its leaked user turn are gone; everything else survives",
-  );
-  assert.deepEqual(
-    result.messages.map((m) => JSON.stringify(m.content).includes(MARKER)),
-    [false, false, true, false],
-    "the stale marker survives only on the non-user (assistant) quote",
-  );
-  assert.ok(
-    String(result.messages[0]?.content).startsWith(SECOND_MARKER),
-    "exactly the selected flavor's owned copy survives",
-  );
+  const selectedCopy = { customType: CONTEXT_TYPE, content: `${SECOND_MARKER}\nselected flavor` };
+  const selectedTextPart = {
+    customType: CONTEXT_TYPE,
+    content: [{ type: "text", text: `${SECOND_MARKER}\nselected as a text part` }],
+  };
+  const surviving = await retained(strip, [
+    { customType: CONTEXT_TYPE, content: `${MARKER}\nobsolete plan-flavor copy` },
+    selectedCopy,
+    ...structuredClone(PRESERVED_INPUT),
+    { customType: CONTEXT_TYPE, content: "an owned copy carrying NO marker" },
+    selectedTextPart,
+  ]);
+  assert.deepEqual(surviving, [selectedCopy, ...PRESERVED_INPUT, selectedTextPart]);
 });
 
-test("strip: while live with NOTHING selected this turn, or a single-flavor spec, the hook yields no filter", async () => {
-  const idle = countingSpec({
-    flavors: {
-      [MARKER]: () => `${MARKER}\ninjected content`,
-      [SECOND_MARKER]: () => `${SECOND_MARKER}\nsecond flavor`,
+test("retention on an off-table select key (a widened K): removes the owned copies — never retains on a marker the table does not own", async () => {
+  const { spec } = countingSpec({ select: () => "[NOT A FLAVOR]" });
+  const { strip } = hooksFor(spec);
+  const surviving = await retained(strip, [
+    { customType: CONTEXT_TYPE, content: `${MARKER}\nowned` },
+    { customType: CONTEXT_TYPE, content: "[NOT A FLAVOR]\nowned, tagged with the stray key" },
+    { role: "user", content: "[NOT A FLAVOR] typed by the human" },
+  ]);
+  assert.deepEqual(surviving, [{ role: "user", content: "[NOT A FLAVOR] typed by the human" }]);
+});
+
+test("retention reads the FULL branch through select (compaction-independent), never the projection", async () => {
+  const seen: (readonly BranchEntry[])[] = [];
+  const { spec } = countingSpec({
+    select: (_ctx, branch) => {
+      seen.push(branch);
+      return MARKER;
     },
-    select: () => null,
-    live: () => true,
   });
-  const messages = [{ customType: CONTEXT_TYPE, content: `${MARKER}\na prior copy` }];
-  assert.equal(await hooksFor(idle.spec).strip({ messages }, ctxOver()), undefined);
-  const single = countingSpec({ live: () => true });
-  assert.equal(await hooksFor(single.spec).strip({ messages }, ctxOver()), undefined);
-  // A live multi-flavor spec whose messages carry no stale flavor yields no filter either.
-  const clean = countingSpec({
-    flavors: {
-      [MARKER]: () => `${MARKER}\ninjected content`,
-      [SECOND_MARKER]: () => `${SECOND_MARKER}\nsecond flavor`,
+  const { strip } = hooksFor(spec);
+  const reads: string[] = [];
+  const branch = [
+    { type: "custom", customType: "perk:workflow-state", data: { mode: "read-only" } },
+  ];
+  const ctx = ctxFrom({
+    getBranch: () => branch,
+    buildContextEntries: () => {
+      reads.push("projection");
+      return [];
     },
-    select: () => MARKER,
-    live: () => true,
   });
-  assert.equal(await hooksFor(clean.spec).strip({ messages }, ctxOver()), undefined);
+  const kept = { customType: CONTEXT_TYPE, content: `${MARKER}\nstill relevant` };
+  assert.deepEqual(await retained(strip, [kept], ctx), [kept], "a selected copy is retained");
+  assert.deepEqual(seen, [branch], "select saw the full branch");
+  assert.deepEqual(reads, [], "retention never reads the projection");
 });
 
 // --- composition smoke: the REAL registered extension rides the projection leaf -----------------

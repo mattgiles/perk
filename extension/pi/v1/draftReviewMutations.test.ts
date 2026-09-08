@@ -7,6 +7,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import { readDraftReview } from "../../session/draftReviewState.ts";
 import { sessionDataDir } from "../../substrate/cache.ts";
+import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
 import { acquireDraftReviewLock } from "../../substrate/draftReviewLock.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type BranchEntry, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
@@ -18,6 +19,9 @@ import { installObjectiveAuthoringBindings } from "./objectiveAuthoring.ts";
 import { installObjectivePlanningBindings } from "./objectivePlanning.ts";
 import { installPlanBindings } from "./plan.ts";
 import type { ToolResult } from "./review.ts";
+
+/** The non-runner context-policy input the installer tests compose (no runner suppression). */
+const NOT_A_RUNNER: ContextPolicyInputs = { runnerChild: () => false };
 
 function deferred<T>() {
   let resolve = (_value: T): void => {
@@ -189,9 +193,9 @@ function fixture(subject: Subject = "plan", runId: string | null = "RID") {
     syncFromState() {},
   } satisfies ToolGating;
   const reviews = createDraftReviewActivation(pi);
-  installPlanBindings(pi, gating, reviews);
-  installObjectiveAuthoringBindings(pi, gating, reviews);
-  installGistBindings(pi, gating, reviews);
+  installPlanBindings(pi, gating, reviews, NOT_A_RUNNER);
+  installObjectiveAuthoringBindings(pi, gating, reviews, NOT_A_RUNNER);
+  installGistBindings(pi, gating, reviews, NOT_A_RUNNER);
   // The explorer wave is unrelated; any accidental use fails rather than bypassing a guard.
   installObjectivePlanningBindings(pi, gating, {} as ReportWave, reviews);
   const session = openBranchWorkflowSession(pi, ctx);

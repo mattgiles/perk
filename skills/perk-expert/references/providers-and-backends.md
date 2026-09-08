@@ -112,6 +112,33 @@ PR-review choice is command-owned, not a provider seam.
 A plan reference's `provider` field means the **issue backend** (`github` or `linear`), never the
 plan-provider id.
 
+#### Authoring-guidance eligibility (perk-owned injection only)
+
+Perk's authoring contexts (`[PLAN AUTHORING]`, objective/gist/refinement) and its plan-adapter
+bridge contexts are injected on explicit eligibility, never inferred from the bare read-only gate. Plan
+eligibility = gate on AND not a native subagent runner AND positive plan evidence: a plan-family
+cold stage (`plan`, `save`, `objective-plan`) or the warm `plan_authoring: true` intent that
+`/plan`, its shortcut, `--plan` and `/objective-plan` record beside `mode: read-only`. The
+dedicated `objective-author` / `objective-save` / `gist-author` / `gist-save` / `objective-refine`
+stages keep their own contexts and never fall through to plan guidance (a stray warm intent from an
+earlier `/plan` turn cannot direct a refinement session to the plan flow). Plannotator's bridge
+flavor follows the same rule (plan flavor for an eligible plan author, objective flavor in both
+objective stages, gist flavor in `gist-author`, refinement flavor in `objective-refine`, nothing
+otherwise); tombell's bridge additionally honors tombell's own
+persisted `plan-mode-state.enabled === true` when perk's gate is off. Runner children (reviewer
+waves, analysts) never receive perk authoring/adapter guidance even over inherited history; their
+restrictions, `[READ-ONLY MODE]` guidance and engine tools are untouched.
+
+- **Legacy warm sessions:** an older session carrying only `mode: read-only` stays restricted with
+  no plan guidance until the human re-enters `/plan` (off, then on) or invokes an authoring
+  factory — intent is never backfilled from history.
+- **Owned-context cleanup:** when eligibility ends (`/plan` off, a plannotator stage change, tree
+  navigation), perk retires only its own injected custom guidance from the outgoing model context;
+  user messages are never removed for quoting a marker, and transcripts/compaction summaries are
+  never rewritten.
+- **Foreign ownership unchanged:** perk still vacates `--plan`/`Ctrl+Alt+P` under plannotator and
+  all plan-mode registrations under tombell; neither package's prompts, tools or enforcement change.
+
 ### Footer seam: vacate-only
 
 The footer has no durable artifact and no adapter.

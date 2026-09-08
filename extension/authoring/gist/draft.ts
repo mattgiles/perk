@@ -17,6 +17,9 @@ import type { SessionArtifactReceipt, WorkflowSession } from "../../session/work
 /** The registry stage id of the gist-authoring session (shared with planMode's defer check). */
 export const GIST_AUTHOR_STAGE = "gist-author";
 
+/** The registry stage id of the gist structured-save session (`perk gist save`). */
+export const GIST_SAVE_STAGE = "gist-save";
+
 /** The gist consumption tiers (`scope` — contracts.md §8.41). */
 export const GIST_SCOPES = ["plan", "objective"] as const;
 

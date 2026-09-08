@@ -177,23 +177,20 @@ test("/plan round-trip: on -> read-only + write blocked + plan-context injected;
     await h.invokeCommand("plan");
     assert.equal(h.workflowState().mode, "read-write", "mode flips back to read-write");
     assert.equal((await h.emitToolCall("write", { path: "x", content: "y" }))?.block, undefined);
-    const stale = [
-      { customType: PLAN_CONTEXT_TYPE, content: "[PLAN AUTHORING]\nstale" },
-      { role: "user", content: "[PLAN AUTHORING] leaked into a user turn" },
+    const preserved = [
+      { role: "user", content: "[PLAN AUTHORING] quoted in a user turn" },
+      { role: "user", content: [{ type: "text", text: "a text part with [PLAN AUTHORING]" }] },
       { role: "user", content: "a normal message" },
     ];
-    const surviving = await h.emitContext(stale);
-    assert.equal(
-      surviving.some((m) => m.customType === PLAN_CONTEXT_TYPE),
-      false,
-      "plan-context custom message stripped when off",
+    const surviving = await h.emitContext([
+      { customType: PLAN_CONTEXT_TYPE, content: "[PLAN AUTHORING]\nstale" },
+      ...structuredClone(preserved),
+    ]);
+    assert.deepEqual(
+      surviving,
+      preserved,
+      "the owned plan-context copy is removed when off; user input survives byte-for-byte",
     );
-    assert.equal(
-      surviving.some((m) => String(m.content).includes("[PLAN AUTHORING]")),
-      false,
-      "plan-authoring marker stripped from user turns when off",
-    );
-    assert.equal(surviving.length, 1, "the normal message survives");
   } finally {
     h.dispose();
   }
@@ -313,7 +310,12 @@ test("--plan cold start enters read-only on session_start", async () => {
     h.setFlag("plan", true);
     await h.reload();
     assert.equal(h.workflowState().mode, "read-only", "--plan enters read-only on session_start");
+    assert.equal(h.workflowState().plan_authoring, true, "--plan is an explicit authoring enter");
     assert.equal((await h.emitToolCall("write", { path: "x", content: "y" }))?.block, true);
+    assert.ok(
+      (await h.emitBeforeAgentStart()).some((m) => m.customType === PLAN_CONTEXT_TYPE),
+      "plan guidance follows the recorded intent",
+    );
   } finally {
     h.dispose();
     process.chdir(savedCwd);

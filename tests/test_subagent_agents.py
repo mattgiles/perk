@@ -62,6 +62,15 @@ def test_native_child_profile(name):
         assert absent not in fm
     if name not in {"pr-reviewer", "adversarial-reviewer", "draft-reviewer"}:
         assert "skillPath" not in fm
+    # Report profiles never edit, so the engine's completion mutation guard (which fails a child
+    # that "completed without making edits for an implementation task" when the task wording
+    # reads as implementation) is disabled by the literal `false` the installed parser reads.
+    # The writer keeps the engine default: it IS expected to mutate. Acceptance suppression
+    # (`WAVE_ACCEPTANCE` on the spawn) is a separate mechanism — no `acceptance` frontmatter here.
+    if writer:
+        assert "completionGuard" not in fm
+    else:
+        assert fm["completionGuard"] is False
 
 
 def _source_bytes(name):

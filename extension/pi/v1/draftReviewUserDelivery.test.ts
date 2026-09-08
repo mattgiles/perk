@@ -19,6 +19,7 @@ import {
   deliveryEncoding,
   readDraftReview,
 } from "../../session/draftReviewState.ts";
+import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import { fauxModelRuntime, gitInit, scaffoldRepo } from "../../testing/harness.ts";
@@ -29,6 +30,9 @@ import {
 } from "./draftReviewActivation.ts";
 import { installPlanBindings } from "./plan.ts";
 import { routePlanReviewDecision } from "./planReviewBrowser.ts";
+
+/** The non-runner context-policy input the installer tests compose (no runner suppression). */
+const NOT_A_RUNNER: ContextPolicyInputs = { runnerChild: () => false };
 
 // Real Pi user-carrier delivery: the browser denial rides `pi.sendUserMessage`, and Pi itself
 // persists whatever single text block its prompt path constructs. These two cases prove the
@@ -131,7 +135,7 @@ async function fixture() {
         } as ExtensionAPI;
         api = bound;
         reviews = createDraftReviewActivation(pi);
-        installPlanBindings(bound, gating, reviews);
+        installPlanBindings(bound, gating, reviews, NOT_A_RUNNER);
         pi.on("session_start", (_event, context) => {
           ctx = context;
           pi.appendEntry(WORKFLOW_STATE_TYPE, { run_id: "RID", stage: "plan", mode: "read-only" });

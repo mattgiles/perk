@@ -6,42 +6,25 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
   realpathSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { test } from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
 import type { Static } from "typebox";
 import { Compile } from "typebox/compile";
+import {
+  bootInstalledEngine,
+  INSTALLED_PI_SUBAGENTS,
+  type InstalledEngine,
+  installedEngineSkip,
+  isolateEngineEnv,
+  runnerIdentities,
+} from "../testing/installedEngine.ts";
 import { createReportWave, type ReportWaveResult } from "./reportWave.ts";
-import type { WaveBus } from "./transport.ts";
 
-// Optional installed-source interop stays test-local; production has no dependency on these APIs.
-type Execute = (
-  id: string,
-  params: object,
-  signal: AbortSignal,
-  update: undefined,
-  ctx: object,
-) => Promise<unknown>;
-interface ExecutorModule {
-  createSubagentExecutor(deps: object): { executePublic: Execute };
-}
-interface RpcModule {
-  registerSubagentRpcBridge(options: {
-    events: WaveBus;
-    getContext(): object;
-    execute: Execute;
-    state: object;
-  }): { dispose(): void };
-}
-const installation = resolve(import.meta.dirname, "../../.pi/npm/node_modules/pi-subagents");
 const OBSERVATION_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -85,167 +68,19 @@ function observationOf(result: ReportWaveResult, key: string): Observation {
   return observation;
 }
 
-function bus(): WaveBus {
-  const handlers = new Map<string, Set<(data: unknown) => void>>();
-  return {
-    emit(event, data) {
-      for (const handler of handlers.get(event) ?? []) handler(data);
-    },
-    on(event, handler) {
-      let listeners = handlers.get(event);
-      if (!listeners) {
-        listeners = new Set();
-        handlers.set(event, listeners);
-      }
-      listeners.add(handler);
-      return () => {
-        listeners.delete(handler);
-      };
-    },
-  };
-}
-
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ESRCH") return false;
-    throw error;
-  }
-}
-
-// Runner status files are teardown evidence only; reports come exclusively through ReportWave.
-function runnerIdentities(root: string): Array<{ path: string; pid: number; runId: string }> {
-  if (!existsSync(root)) return [];
-  return readdirSync(root, { recursive: true, withFileTypes: true }).flatMap((entry) => {
-    if (!entry.isFile() || entry.name !== "status.json") return [];
-    const path = join(entry.parentPath, entry.name);
-    const status = JSON.parse(readFileSync(path, "utf8"));
-    return Number.isInteger(status.pid) &&
-      status.pid > 0 &&
-      status.pid !== process.pid &&
-      typeof status.runId === "string"
-      ? [{ path, pid: status.pid, runId: status.runId }]
-      : [];
-  });
-}
-
 test("installed engine: plan-bound caller placement versus native worktree default", {
-  skip: !existsSync(installation) && "optional pi-subagents installation absent",
+  skip: installedEngineSkip(),
   timeout: 180_000,
 }, async (t) => {
-  const root = realpathSync(installation);
+  const root = realpathSync(INSTALLED_PI_SUBAGENTS);
   const scratch = realpathSync(mkdtempSync(join(tmpdir(), "perk-plan-bound-")));
   const caller = join(scratch, "caller");
-  const agentHome = join(scratch, "agent-home");
-  const nativeTemp = join(scratch, "native");
-  const before = { ...process.env };
-  for (const key of Object.keys(process.env)) {
-    if (/API_KEY|TOKEN|SECRET|CREDENTIAL|^PI_|^PERK_|^ANTHROPIC_|^OPENAI_|^GITHUB_|^GH_/.test(key))
-      delete process.env[key];
-  }
-  process.env.HOME = scratch;
-  process.env.PI_CODING_AGENT_DIR = agentHome;
-  process.env.PI_SUBAGENTS_TEMP_ROOT = nativeTemp;
-  process.env.GIT_CONFIG_NOSYSTEM = "1";
-  process.env.GIT_CONFIG_GLOBAL = join(scratch, "empty-gitconfig");
-  writeFileSync(process.env.GIT_CONFIG_GLOBAL, "");
-  let bridge: ReturnType<RpcModule["registerSubagentRpcBridge"]> | undefined;
-  let watcher: { startResultWatcher(): void; stopResultWatcher(): void } | undefined;
+  const env = isolateEngineEnv(scratch);
+  let engine: InstalledEngine | undefined;
   let passed = false;
-  let factory:
-    | {
-        setChildSessionFactoryModule(path: string | undefined): void;
-        childSessionFactoryModule(): string | undefined;
-      }
-    | undefined;
-  let previousFactory: string | undefined;
-  let executor: ReturnType<ExecutorModule["createSubagentExecutor"]> | undefined;
-  const events = bus();
-  const ctx = {
-    cwd: caller,
-    hasUI: false,
-    sessionManager: {
-      getSessionId: () => "placement-parent",
-      getSessionFile: () => undefined,
-      getBranch: () => [],
-      getEntries: () => [],
-    },
-    modelRegistry: { getAvailable: () => [] },
-    ui: { setWidget() {}, notify() {} },
-  };
-  const state = {
-    baseCwd: caller,
-    currentSessionId: "placement-parent",
-    parentSessionFile: null,
-    trustedSessionRoots: [],
-    subagentInProgress: false,
-    lastUiContext: ctx,
-    asyncJobs: new Map(),
-    fleetJobs: new Map(),
-    foregroundRuns: new Map(),
-    foregroundControls: new Map(),
-    cleanupTimers: new Map(),
-    completionSeen: new Map(),
-    lastForegroundControlId: null,
-    poller: null,
-    watcher: null,
-    watcherRestartTimer: null,
-    resultFileCoalescer: { schedule: () => false, clear() {} },
-  };
   t.after(async () => {
-    const deadline = Date.now() + 30_000;
-    try {
-      for (const runner of runnerIdentities(nativeTemp).filter(({ pid }) => alive(pid))) {
-        if (executor) {
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          try {
-            await Promise.race([
-              executor.executePublic(
-                `stop-${runner.runId}`,
-                { action: "stop", id: runner.runId },
-                AbortSignal.timeout(Math.max(1, deadline - Date.now())),
-                undefined,
-                ctx,
-              ),
-              new Promise<never>((_resolve, reject) => {
-                timer = setTimeout(
-                  () =>
-                    reject(
-                      new Error(`stop unsettled; retained ${scratch}: ${JSON.stringify(runner)}`),
-                    ),
-                  Math.max(1, deadline - Date.now()),
-                );
-              }),
-            ]);
-          } finally {
-            clearTimeout(timer);
-          }
-        }
-      }
-      bridge?.dispose();
-      watcher?.stopResultWatcher();
-      factory?.setChildSessionFactoryModule(previousFactory);
-      for (const timer of state.cleanupTimers.values()) clearTimeout(timer);
-      while (true) {
-        const live = runnerIdentities(nativeTemp).filter(({ pid }) => alive(pid));
-        if (live.length === 0) break;
-        assert.ok(
-          Date.now() < deadline,
-          `runners still live; retained ${scratch}: ${JSON.stringify(live)}`,
-        );
-        await delay(50);
-      }
-      if (passed) rmSync(scratch, { recursive: true, force: true });
-      else t.diagnostic(`failed measurement artifacts retained: ${scratch}`);
-    } finally {
-      bridge?.dispose();
-      watcher?.stopResultWatcher();
-      factory?.setChildSessionFactoryModule(previousFactory);
-      for (const key of Object.keys(process.env)) if (!(key in before)) delete process.env[key];
-      Object.assign(process.env, before);
-    }
+    if (engine) await engine.teardown(t, () => passed);
+    else env.restore();
   });
   t.mock.method(globalThis, "fetch", () => {
     throw new Error("network forbidden in placement test");
@@ -276,65 +111,24 @@ test("installed engine: plan-bound caller placement versus native worktree defau
   const hook = join(scratch, "setup.sh");
   writeFileSync(hook, `#!/bin/sh\nprintf 'setup\\n' >> '${setupLog}'\nprintf '{}\\n'\n`);
   chmodSync(hook, 0o755);
-  const configPath = join(agentHome, "extensions/subagent/config.json");
-  mkdirSync(join(configPath, ".."), { recursive: true });
-  writeFileSync(
-    configPath,
-    JSON.stringify({
+  engine = await bootInstalledEngine({
+    root,
+    scratch,
+    caller,
+    env,
+    parentSessionId: "placement-parent",
+    factoryModule: resolve(import.meta.dirname, "../testing/planBoundReviewChildFactory.mjs"),
+    config: {
       worktree: true,
       worktreeBaseDir: join(scratch, "worktrees"),
       worktreeSetupHook: hook,
       worktreeSetupHookTimeoutMs: 5_000,
       artifactDir: "temp",
       asyncByDefault: true,
-    }),
-  );
-  const require = createRequire(join(root, "package.json"));
-  const jiti = require("jiti").createJiti(join(root, "package.json"));
-  const configModule = (await jiti.import(join(root, "src/extension/config.ts"))) as {
-    loadConfig(): { worktree?: boolean };
-    getConfigPath(): string;
-  };
-  assert.equal(configModule.getConfigPath(), configPath);
-  const config = configModule.loadConfig();
-  assert.equal(config.worktree, true);
-  factory = await jiti.import(join(root, "src/runs/shared/child-session.ts"));
-  assert.ok(factory);
-  previousFactory = factory.childSessionFactoryModule();
-  factory.setChildSessionFactoryModule(
-    resolve(import.meta.dirname, "../testing/planBoundReviewChildFactory.mjs"),
-  );
-  const discovery = await jiti.import(join(root, "src/agents/agents.ts"));
-  const executorModule = (await jiti.import(
-    join(root, "src/runs/foreground/subagent-executor.ts"),
-  )) as ExecutorModule;
-  const rpcModule = (await jiti.import(join(root, "src/extension/rpc.ts"))) as RpcModule;
-  const pi = { events, getSessionName: () => undefined, sendMessage() {}, appendEntry() {} };
-  const watcherModule = await jiti.import(join(root, "src/runs/background/result-watcher.ts"));
-  const nativeTypes = await jiti.import(join(root, "src/shared/types.ts"));
-  watcher = watcherModule.createResultWatcher(pi, state, nativeTypes.DIRS.results, 600_000, {
-    hasDeliveryDemand: () => true,
-    deliverIntercomResults: false,
+    },
   });
-  assert.ok(watcher);
-  watcher.startResultWatcher();
-  executor = executorModule.createSubagentExecutor({
-    pi,
-    state,
-    config,
-    asyncByDefault: true,
-    tempArtifactsDir: join(scratch, "artifacts"),
-    getSubagentSessionRoot: () => join(scratch, "sessions"),
-    expandTilde: (path: string) => path.replace(/^~(?=\/|$)/, scratch),
-    discoverAgents: discovery.discoverAgents,
-  });
-  bridge = rpcModule.registerSubagentRpcBridge({
-    events,
-    getContext: () => ctx,
-    execute: executor.executePublic,
-    state,
-  });
-  const wave = createReportWave(events, { parentReadOnly: () => false });
+  assert.equal(engine.config.worktree, true);
+  const wave = createReportWave(engine.events, { parentReadOnly: () => false });
   const request = {
     flow: "plan-bound-review-compat",
     completeness: "strict" as const,
@@ -374,7 +168,7 @@ test("installed engine: plan-bound caller placement versus native worktree defau
   assert.equal(control.read_only, false);
   assert.equal(readFileSync(setupLog, "utf8"), "setup\n");
   assert.deepEqual(
-    new Set(runnerIdentities(nativeTemp).map(({ runId }) => runId)),
+    new Set(runnerIdentities(env.nativeTemp).map(({ runId }) => runId)),
     new Set([protectedObservation.child_run_id, control.child_run_id]),
     "exactly two detached native children",
   );

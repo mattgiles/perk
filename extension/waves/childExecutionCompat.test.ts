@@ -23,6 +23,7 @@ import { waveScriptItems } from "../testing/fakeSubagents.ts";
 interface Agent extends Record<string, unknown> {
   name: string;
   defaultAsync?: boolean;
+  completionGuard?: boolean;
 }
 interface WorkflowModule {
   validateWorkflowScript(script: string): { ok: boolean; errors: unknown[] };
@@ -107,6 +108,11 @@ test("installed engine: native child profile/preparation and report compatibilit
     () => {
       assert.equal(report.defaultAsync, true);
       assert.equal(writer.defaultAsync, undefined);
+      // The report-only completion policy rides the definition field the installed parser
+      // reads (`frontmatter.completionGuard === "false"` → literal false); the writer keeps the
+      // engine default (undefined ⇒ guard enabled) because it IS expected to mutate.
+      assert.equal(report.completionGuard, false);
+      assert.equal(writer.completionGuard, undefined);
       for (const [agent, inherits] of [
         [report, false],
         [writer, true],

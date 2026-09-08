@@ -16,6 +16,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { classifyAuthoringContext } from "../../authoring/context/eligibility.ts";
 import {
   importColdRefinementContext,
   importRefinementContext,
@@ -71,6 +72,7 @@ import {
 } from "../../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../../substrate/command.ts";
 import { loadPerkConfig } from "../../substrate/config.ts";
+import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
 import { failFor, ok, type Result } from "../../substrate/result.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { paramsOf, stringParam } from "../../substrate/toolParams.ts";
@@ -590,16 +592,26 @@ export function installObjectiveRefinementBindings(
   pi: ExtensionAPI,
   gating: ToolGating,
   reviews: DraftReviewRuntime,
+  contextPolicy: ContextPolicyInputs,
 ): void {
-  const isRefining = (branch: readonly BranchEntry[]) =>
-    gating.isActive() && isRefinementSession(branch);
+  // The refinement context is selected by the shared authoring-context policy's dedicated
+  // `objective-refine` kind (`authoring/context/eligibility.ts`): the effective gate active, not
+  // a runner child, and the refinement stage on the FULL branch. A runner child inheriting a
+  // refinement session's history receives no refinement guidance; once the approved save exits
+  // the gate the selection turns null and the shared helper retires the owned copy.
   installInjectedContext(pi, {
     customType: REFINEMENT_CONTEXT_TYPE,
     flavors: {
       [REFINEMENT_MARKER]: (ctx) => refinementContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
     },
-    select: (_ctx, branch) => (isRefining(branch) ? REFINEMENT_MARKER : null),
-    live: (_ctx, branch) => isRefining(branch),
+    select: (_ctx, branch) =>
+      classifyAuthoringContext({
+        gateActive: gating.isActive(),
+        runnerChild: contextPolicy.runnerChild(),
+        state: rebuildWorkflowState(branch),
+      }) === "objective-refine"
+        ? REFINEMENT_MARKER
+        : null,
   });
 
   pi.registerTool({
