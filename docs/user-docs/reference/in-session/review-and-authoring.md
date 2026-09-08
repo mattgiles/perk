@@ -312,8 +312,8 @@ revision feedback. Plans save frozen reviewed bytes (or verified Direct Edits); 
 objective/gist/refinement Direct Edits requests revision without saving. A refinement review
 (an `objective-refine` session) reviews the validated (draft, grounding-context) pair — the
 target binding additionally fences the context artifact's digest, so a re-prepared context, a
-changed draft, or a changed run/stage/config invalidates approval even when the rendering is
-identical; this fences the reviewed artifact and save route, not the checkout contents. There is
+changed draft, or a changed run/stage/routing-config invalidates approval even when the rendering
+is identical; this fences the reviewed artifact and save route, not the checkout contents. There is
 no refinement browser door or reviewer wave: `plan_review` uses the plain browser review or the
 first-party view-only editor. A new artifact after a parameter review, including
 identical text, can only produce stale diagnostic DATA. Source/target drift during title generation
@@ -334,6 +334,19 @@ confirmed approval save merely because delivery confirmation failed.
 Its stale-result format preserves the reviewed digest and verbatim feedback as diagnostic DATA,
 not approval or instructions to apply changes to the current draft. Refusals preserve confirmed
 save/gate facts and prohibit blind save retry. No startup/reload discovery or recovery door is added.
+
+The target binding fingerprints save-routing inputs, not whole configuration files: the main
+checkout's committed `[issues] backend`/`team`, the invoking checkout's committed and local
+`[workflow] base` (plan/objective only; not bound for gist or refinement), the main checkout's local
+`[linear] api_key` (hashed), the run handoff, `GH_REPO`/`GH_HOST`, and **all Git-config output**.
+An unrelated valid Perk TOML change while a review is open — a `[compaction]`, `[models]`, `[ci]`,
+`[skills]`, `[providers]` or comment/formatting edit, including one pulled in by a checkout update —
+leaves the review valid: a denial delivers once with no save, an approval saves once. Changing a
+bound routing field refuses `target-changed` and the stop names the checkpoint (`open`, `attach`,
+`candidate`, `save`) and the changed component (`main_config.issues.backend`,
+`worktree_local.workflow.base`, `git_config`, …) without exposing its value; unrelated Git-config
+changes therefore still invalidate a review. Retained-state reconciliation rules are unchanged, and
+no earlier review record is migrated or replayed under the new fingerprint.
 
 ### Participating authoring and first-party review
 

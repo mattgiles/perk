@@ -34,9 +34,10 @@ const ALLOWED_PACKAGES = new Set([
 ]);
 
 /**
- * Production sources: every `.ts` under extension/ except test files and the dev-only testing/
- * fakes — neither is reachable from the runtime import graph rooted at index.ts (testing/ is
- * imported only by *.test.ts), and the npm tarball ships neither.
+ * Production sources: every `.ts`, `.js`, and `.mjs` under extension/ except test files and the
+ * dev-only testing/ fakes — neither is reachable from the runtime import graph rooted at index.ts
+ * (testing/ is imported only by *.test.ts), and the npm tarball ships neither. Plain JavaScript
+ * counts because the vendored third-party closures ship as upstream `.js` bytes.
  */
 function productionFiles(): string[] {
   const entries = readdirSync(import.meta.dirname, { recursive: true }) as string[];
@@ -44,10 +45,27 @@ function productionFiles(): string[] {
     .map((entry) => entry.split(path.sep).join("/"))
     .filter(
       (entry) =>
-        entry.endsWith(".ts") && !entry.endsWith(".test.ts") && !entry.startsWith("testing/"),
+        /\.(ts|js|mjs)$/.test(entry) &&
+        !entry.endsWith(".test.ts") &&
+        !entry.startsWith("testing/"),
     )
     .sort();
 }
+
+/** The vendored smol-toml parser closure (see vendor/smol-toml/README.md) — shipped as-is. */
+const VENDORED_TOML_PARSER = [
+  "parse.js",
+  "struct.js",
+  "extract.js",
+  "primitive.js",
+  "date.js",
+  "error.js",
+  "util.js",
+  "parse.d.ts",
+  "date.d.ts",
+  "error.d.ts",
+  "util.d.ts",
+].map((name) => `vendor/smol-toml/${name}`);
 
 /** Strip block then line comments before scanning (mirrors surfacesGuard's deliberately-naive strip). */
 function stripComments(source: string): string {
@@ -92,6 +110,14 @@ test("production extension sources import only node:/relative/host specifiers (z
   // Self-check: a layout change that silently empties the scan must fail loudly, not pass vacuously.
   assert.ok(files.length > 0, "production-file scan came up empty — guard is vacuous");
   assert.ok(files.includes("index.ts"), "scan missed index.ts — guard is misaimed");
+  // Positive census: the plain-JavaScript vendored parser closure is inside the scan (a `.ts`-only
+  // filter would silently exempt exactly the third-party code most likely to carry a bare import).
+  for (const vendored of VENDORED_TOML_PARSER)
+    assert.ok(files.includes(vendored), `scan missed ${vendored} — .js production files exempt`);
+  assert.ok(
+    !files.some((file) => file.startsWith("testing/")),
+    "dev-only testing/ fakes (including .mjs) must stay outside the production scan",
+  );
 
   const violations: string[] = [];
   for (const file of files) {

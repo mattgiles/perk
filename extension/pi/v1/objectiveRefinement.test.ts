@@ -956,10 +956,38 @@ test("plan_review first-party: an approval never saves a replacement — draft r
     assert.equal(details.reason, "target-changed");
     assert.equal(details.phase, "mutation");
     assert.match(String(result.content[0]?.text), /routing binding .* changed during the review/);
+    assert.match(
+      String(result.content[0]?.text),
+      /checkpoint: save; reviewed target: sha256:[0-9a-f]{64}; current target: sha256:[0-9a-f]{64}; changed components: main_config\.issues\.backend/,
+    );
+    assert.doesNotMatch(String(result.content[0]?.text), /linear/);
     assert.equal(rerouted.calls.length, 0);
     assert.equal(rerouted.exits, 0);
   } finally {
     rerouted.dispose();
+  }
+
+  // An unrelated config change during the wait (compaction/provider/comment edits, plus a
+  // [workflow] base the refinement save never consumes) is not routing drift: the approval saves.
+  const unrelated = fixture();
+  try {
+    await unrelated.draft();
+    unrelated.verdict = APPROVE;
+    unrelated.duringWait = () => {
+      mkdirSync(join(unrelated.cwd, ".perk"), { recursive: true });
+      writeFileSync(
+        join(unrelated.cwd, ".perk", "config.toml"),
+        '# edited during the wait\n[compaction]\nreserve_tokens = 65536\n[providers]\nplan = "perk-plan"\n[workflow]\nbase = "release"\n',
+      );
+    };
+    const result = await unrelated.invoke("plan_review", {});
+    const details = result.details as Record<string, unknown>;
+    assert.equal(details.ok, true, JSON.stringify(details));
+    assert.equal(details.saved, true);
+    assert.equal(unrelated.calls.length, 1);
+    assert.equal(unrelated.exits, 1);
+  } finally {
+    unrelated.dispose();
   }
 
   // A denial during which the draft is rewritten is still just a denial (no save was at stake).
@@ -1233,6 +1261,61 @@ test("plannotator arm: a context re-prepared while the review is pending blocks 
     assert.equal(arm.exits, 0);
   } finally {
     arm.dispose();
+  }
+});
+
+test("plannotator arm: an unrelated TOML edit during the review leaves the approval saving once; a routing edit refuses naming its component", async () => {
+  let arm: ReturnType<typeof plannotatorArm> | undefined;
+  arm = plannotatorArm(
+    { status: "completed", approved: true, reviewId: "rev-unrelated" },
+    {
+      duringReview: () => {
+        const cwd = arm?.cwd as string;
+        writeFileSync(
+          join(cwd, ".perk", "config.toml"),
+          '# rewritten during the review\n[compaction]\nreserve_tokens = 65536\n[providers]\nplan = "plannotator-plan"\n[workflow]\nbase = "release"\n',
+        );
+        // A refinement save does not consume [workflow] base: even that edit is invisible here.
+      },
+    },
+  );
+  try {
+    const result = await arm.run();
+    const details = result.details as Record<string, unknown>;
+    assert.equal(details.ok, true, JSON.stringify(details));
+    assert.equal(details.saved, true);
+    assert.equal(arm.calls.length, 1, "exactly one worker invocation");
+    assert.equal(arm.exits, 1);
+  } finally {
+    arm.dispose();
+  }
+  let rerouted: ReturnType<typeof plannotatorArm> | undefined;
+  rerouted = plannotatorArm(
+    { status: "completed", approved: true, reviewId: "rev-rerouted" },
+    {
+      duringReview: () => {
+        const cwd = rerouted?.cwd as string;
+        writeFileSync(
+          join(cwd, ".perk", "config.toml"),
+          '[providers]\nplan = "plannotator-plan"\n[issues]\nbackend = "linear"\n',
+        );
+      },
+    },
+  );
+  try {
+    const result = await rerouted.run();
+    const details = result.details as Record<string, unknown>;
+    assert.equal(details.status, "refused", JSON.stringify(details));
+    assert.equal(details.reason, "target-changed");
+    assert.match(
+      String(result.content[0]?.text),
+      /checkpoint: candidate; reviewed target: sha256:[0-9a-f]{64}; current target: sha256:[0-9a-f]{64}; changed components: main_config\.issues\.backend/,
+    );
+    assert.doesNotMatch(String(result.content[0]?.text), /linear/);
+    assert.equal(rerouted.calls.length, 0);
+    assert.equal(rerouted.exits, 0);
+  } finally {
+    rerouted.dispose();
   }
 });
 

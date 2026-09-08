@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -46,10 +46,14 @@ function fixture() {
   const events = new Map<string, (event: unknown, ctx: ExtensionContext) => void>();
   const messages: string[] = [];
   const notices: string[] = [];
+  let handshakeHook: ((request: Request) => void) | undefined;
   const bus: PlannotatorBus = {
     emit(_channel, raw) {
       const request = raw as Request;
       requests.push(request);
+      // A controlled handshake: the hook runs after open() succeeded and before the review ID
+      // attaches — the window an external config change can land in.
+      if (request.action === "plan-review" && handshakeHook !== undefined) handshakeHook(request);
       request.respond({
         status: "handled",
         result:
@@ -145,6 +149,10 @@ function fixture() {
     notices,
     record,
     flush,
+    config: join(cwd, ".perk", "config.toml"),
+    setHandshake(hook: (request: Request) => void) {
+      handshakeHook = hook;
+    },
     close() {
       events.get("session_shutdown")?.({}, ctx);
     },
@@ -772,5 +780,92 @@ test("fresh activation does not discover or consume previous activation dispatch
     review.dispose();
   } finally {
     f.dispose();
+  }
+});
+
+test("unrelated config changes between prepare, open and attach keep the review pending; genuine routing drift names its component and checkpoint", async () => {
+  // Unrelated: a compaction edit before open and a models edit during the handshake — no invalidation.
+  const f = fixture();
+  try {
+    f.setHandshake(() =>
+      appendFileSync(f.config, '\n[models]\ndefault = "anthropic/claude-sonnet-4-5"\n'),
+    );
+    const prepared = f.reviews.prepare(f.ctx);
+    assert.ok(prepared.ok);
+    appendFileSync(
+      f.config,
+      "\n# pulled in during the review\n[compaction]\nreserve_tokens = 65536\n",
+    );
+    const review = prepared.value;
+    const wait = f.bridge.review(review.snapshot.markdown, review.registration, review.signal);
+    await f.flush();
+    assert.equal(f.record().consumption.state, "pending");
+    assert.ok(f.record().correlation.review_id);
+    assert.equal(f.requests.filter((request) => request.action === "plan-review").length, 1);
+    assert.equal(f.notices.length, 0);
+    const reviewId = f.record().correlation.review_id;
+    for (const listener of f.listeners) listener({ reviewId, approved: false, feedback: "deny" });
+    const outcome = await wait;
+    assert.equal(outcome.status, "completed");
+    if (outcome.status !== "completed") assert.fail();
+    const result = await toolCompletion(review, outcome);
+    assert.ok(result.ok && "content" in result.value, JSON.stringify(result));
+    assert.equal(f.record().consumption.state, "dispatch");
+  } finally {
+    f.dispose();
+  }
+  // Genuine drift between prepare and open: refused at the open checkpoint, nothing opened.
+  const g = fixture();
+  try {
+    const prepared = g.reviews.prepare(g.ctx);
+    assert.ok(prepared.ok);
+    appendFileSync(g.config, '\n[workflow]\nbase = "release"\n');
+    const opened = prepared.value.registration.open("33333333-3333-4333-8333-333333333333");
+    assert.ok(!opened.ok);
+    assert.equal(opened.reason, "target-changed");
+    assert.match(
+      opened.detail,
+      /^draft review refused: target-changed; checkpoint: open; reviewed target: sha256:[0-9a-f]{64}; current target: sha256:[0-9a-f]{64}; changed components: worktree_config\.workflow\.base\. Run: "RID"/,
+    );
+    assert.ok(!opened.detail.includes("release"), "no routing value in the explanation");
+    const read = readDraftReview(g.session);
+    assert.ok(read.ok && read.record === null);
+    assert.equal(g.requests.length, 0);
+  } finally {
+    g.dispose();
+  }
+  // Genuine drift during the handshake: invalidated at attach with the changed component named,
+  // no ID attached, a typed refusal (never a skipped review or a fallback).
+  const h = fixture();
+  try {
+    h.setHandshake(() =>
+      writeFileSync(
+        h.config,
+        '[providers]\nplan = "plannotator-plan"\n[issues]\nbackend = "linear"\nteam = "ENG"\n',
+      ),
+    );
+    const prepared = h.reviews.prepare(h.ctx);
+    assert.ok(prepared.ok);
+    const review = prepared.value;
+    const outcome = await h.bridge.review(
+      review.snapshot.markdown,
+      review.registration,
+      review.signal,
+    );
+    assert.equal(outcome.status, "refused");
+    if (outcome.status !== "refused") assert.fail();
+    assert.equal(outcome.code, "target-changed");
+    assert.equal(outcome.phase, "attach");
+    assert.match(
+      outcome.detail,
+      /checkpoint: attach; reviewed target: sha256:[0-9a-f]{64}; current target: sha256:[0-9a-f]{64}; changed components: main_config\.issues\.backend, main_config\.issues\.team\. Run: "RID"/,
+    );
+    assert.ok(!outcome.detail.includes("linear") && !outcome.detail.includes("ENG"));
+    assert.deepEqual(h.record().consumption, { state: "invalidated", reason: "target-changed" });
+    assert.equal(h.record().correlation.review_id, null);
+    assert.equal(h.listeners.size, 0, "no subscription after a refused attachment");
+    assert.equal(h.messages.length, 0, "a typed refusal is not a fallback");
+  } finally {
+    h.dispose();
   }
 });

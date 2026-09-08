@@ -1,0 +1,315 @@
+{
+  "$comment": "TEST-ONLY cross-plane fixture for the draft-review routing-config projection (contracts.md §8.23). Read by extension/substrate/draftReviewConfig.test.ts (the TS projection: exact decoded strings, refusals) and tests/test_draft_review_config.py (the existing Python config readers). Cases marked dialect \"toml-1.1\" pin syntax the TS parser accepts but Python 3.13's TOML 1.0 reader rejects — a save-time CLI failure, never a routing change. Not read at runtime by either plane. See shared/README.md.",
+  "fields": [
+    "issues.backend",
+    "issues.team",
+    "workflow.base",
+    "linear.api_key"
+  ],
+  "fake_credential": "lin_api_FAKE0000deadbeef",
+  "cases": [
+    {
+      "name": "absent-file",
+      "toml": null,
+      "values": {
+        "issues.backend": null,
+        "issues.team": null,
+        "workflow.base": null,
+        "linear.api_key": null
+      }
+    },
+    {
+      "name": "empty-file",
+      "toml": "",
+      "values": {
+        "issues.backend": null,
+        "issues.team": null,
+        "workflow.base": null,
+        "linear.api_key": null
+      },
+      "equivalent_to": "absent-file"
+    },
+    {
+      "name": "comments-only",
+      "toml": "# [issues]\n# backend = \"linear\"\n# [linear]\n# api_key = \"lin_api_FAKE0000deadbeef\"\n",
+      "values": {
+        "issues.backend": null,
+        "issues.team": null,
+        "workflow.base": null,
+        "linear.api_key": null
+      },
+      "equivalent_to": "absent-file"
+    },
+    {
+      "name": "empty-relevant-tables",
+      "toml": "[issues]\n[workflow]\n[linear]\n",
+      "values": {
+        "issues.backend": null,
+        "issues.team": null,
+        "workflow.base": null,
+        "linear.api_key": null
+      },
+      "equivalent_to": "absent-file"
+    },
+    {
+      "name": "basic-strings",
+      "toml": "[issues]\nbackend = \"linear\"\nteam = \"ENG\"\n\n[workflow]\nbase = \"main\"\n\n[linear]\napi_key = \"lin_api_FAKE0000deadbeef\"\n",
+      "values": {
+        "issues.backend": "linear",
+        "issues.team": "ENG",
+        "workflow.base": "main",
+        "linear.api_key": "lin_api_FAKE0000deadbeef"
+      }
+    },
+    {
+      "name": "equivalent-formatting",
+      "toml": "# comments carry fake headers: [issues] backend = \"github\"\n[linear] # [workflow] base = \"release\"\n  api_key   =   \"lin_api_FAKE0000deadbeef\"   # team = \"OPS\"\n\n\n[workflow]\nbase = \"main\"\n[issues]\n\tteam = \"ENG\"\n\tbackend = \"linear\"\n",
+      "values": {
+        "issues.backend": "linear",
+        "issues.team": "ENG",
+        "workflow.base": "main",
+        "linear.api_key": "lin_api_FAKE0000deadbeef"
+      },
+      "equivalent_to": "basic-strings"
+    },
+    {
+      "name": "literal-and-multiline-strings",
+      "toml": "[issues]\nbackend = 'linear'\nteam = \"\"\"ENG\"\"\"\n[workflow]\nbase = '''main'''\n[linear]\napi_key = \"lin_api_\\u0046AKE0000deadbeef\"\n",
+      "values": {
+        "issues.backend": "linear",
+        "issues.team": "ENG",
+        "workflow.base": "main",
+        "linear.api_key": "lin_api_FAKE0000deadbeef"
+      },
+      "equivalent_to": "basic-strings"
+    },
+    {
+      "name": "dotted-and-quoted-keys",
+      "toml": "issues.backend = \"linear\"\nissues.\"team\" = \"ENG\"\n\"workflow\".base = \"main\"\nlinear.'api_key' = \"lin_api_FAKE0000deadbeef\"\n",
+      "values": {
+        "issues.backend": "linear",
+        "issues.team": "ENG",
+        "workflow.base": "main",
+        "linear.api_key": "lin_api_FAKE0000deadbeef"
+      },
+      "equivalent_to": "basic-strings"
+    },
+    {
+      "name": "inline-tables",
+      "toml": "issues = { backend = \"linear\", team = \"ENG\" }\nworkflow = { base = \"main\" }\nlinear = { api_key = \"lin_api_FAKE0000deadbeef\" }\n",
+      "values": {
+        "issues.backend": "linear",
+        "issues.team": "ENG",
+        "workflow.base": "main",
+        "linear.api_key": "lin_api_FAKE0000deadbeef"
+      },
+      "equivalent_to": "basic-strings"
+    },
+    {
+      "name": "whitespace-and-empty-strings-preserved",
+      "toml": "[issues]\nbackend = \" linear \"\nteam = \"\"\n[workflow]\nbase = \"  \"\n[linear]\napi_key = \"\"\n",
+      "values": {
+        "issues.backend": " linear ",
+        "issues.team": "",
+        "workflow.base": "  ",
+        "linear.api_key": ""
+      },
+      "python": {
+        "issues.backend": "linear",
+        "issues.team": null,
+        "workflow.base": null,
+        "linear.api_key": null
+      }
+    },
+    {
+      "name": "unrelated-tables-and-large-integers",
+      "toml": "[compaction]\nreserve_tokens = 99999999999999999999\nobjective_threshold = 0.8\n[workflow]\nplan_authoring = \"unselected\"\n[issues]\nbackend = \"github\"\n[presentation]\ntheme = \"dark\"\n",
+      "values": {
+        "issues.backend": "github",
+        "issues.team": null,
+        "workflow.base": null,
+        "linear.api_key": null
+      }
+    },
+    {
+      "name": "fake-header-inside-a-string-value",
+      "toml": "[issues]\nteam = \"# [linear]\\napi_key = \\\"leaked\\\"\"\n",
+      "values": {
+        "issues.backend": null,
+        "issues.team": "# [linear]\napi_key = \"leaked\"",
+        "workflow.base": null,
+        "linear.api_key": null
+      }
+    },
+    {
+      "name": "array-of-tables-is-not-a-table",
+      "toml": "[[issues]]\nbackend = \"linear\"\n",
+      "values": {
+        "workflow.base": null,
+        "linear.api_key": null
+      },
+      "refuse": {
+        "issues.backend": "[issues] is not a table",
+        "issues.team": "[issues] is not a table"
+      },
+      "python": {
+        "issues.backend": {
+          "raises": "ConfigError"
+        },
+        "issues.team": {
+          "raises": "ConfigError"
+        }
+      }
+    },
+    {
+      "name": "string-where-table-expected",
+      "toml": "issues = \"linear\"\nlinear = \"lin_api_FAKE0000deadbeef\"\n",
+      "values": {
+        "workflow.base": null
+      },
+      "refuse": {
+        "issues.backend": "[issues] is not a table",
+        "issues.team": "[issues] is not a table",
+        "linear.api_key": "[linear] is not a table"
+      },
+      "python": {
+        "issues.backend": {
+          "raises": "ConfigError"
+        },
+        "issues.team": {
+          "raises": "ConfigError"
+        },
+        "linear.api_key": null
+      }
+    },
+    {
+      "name": "non-string-selected-values",
+      "toml": "[issues]\nbackend = 1\nteam = true\n[workflow]\nbase = 2024-01-01\n[linear]\napi_key = [\"lin_api_FAKE0000deadbeef\"]\n",
+      "values": {},
+      "refuse": {
+        "issues.backend": "[issues] backend is not a string",
+        "issues.team": "[issues] team is not a string",
+        "workflow.base": "[workflow] base is not a string",
+        "linear.api_key": "[linear] api_key is not a string"
+      },
+      "python": {
+        "issues.backend": {
+          "raises": "ConfigError"
+        },
+        "issues.team": {
+          "raises": "ConfigError"
+        },
+        "workflow.base": {
+          "raises": "ConfigError"
+        },
+        "linear.api_key": null
+      }
+    },
+    {
+      "name": "toml-1.1-trailing-comma-in-unrelated-inline-table",
+      "dialect": "toml-1.1",
+      "toml": "[issues]\nbackend = \"linear\"\nteam = \"ENG\"\n\n[workflow]\nbase = \"main\"\n\n[linear]\napi_key = \"lin_api_FAKE0000deadbeef\"\n\n[compaction]\nlimits = { reserve_tokens = 65536, }\n",
+      "values": {
+        "issues.backend": "linear",
+        "issues.team": "ENG",
+        "workflow.base": "main",
+        "linear.api_key": "lin_api_FAKE0000deadbeef"
+      },
+      "equivalent_to": "basic-strings",
+      "python": {
+        "issues.backend": {
+          "raises": "TOMLDecodeError"
+        },
+        "issues.team": {
+          "raises": "TOMLDecodeError"
+        },
+        "workflow.base": {
+          "raises": "TOMLDecodeError"
+        },
+        "linear.api_key": null
+      }
+    },
+    {
+      "name": "toml-1.1-hex-escape-in-selected-value",
+      "dialect": "toml-1.1",
+      "toml": "[issues]\nbackend = \"\\x67ithub\"\n",
+      "values": {
+        "issues.backend": "github",
+        "issues.team": null,
+        "workflow.base": null,
+        "linear.api_key": null
+      },
+      "python": {
+        "issues.backend": {
+          "raises": "TOMLDecodeError"
+        },
+        "issues.team": {
+          "raises": "TOMLDecodeError"
+        },
+        "workflow.base": {
+          "raises": "TOMLDecodeError"
+        },
+        "linear.api_key": null
+      }
+    },
+    {
+      "name": "malformed-toml",
+      "toml": "[issues\nbackend = \"linear\"\n[linear]\napi_key = \"lin_api_FAKE0000deadbeef\"\n",
+      "refuse": {
+        "*": "TOML parse failed"
+      },
+      "python": {
+        "issues.backend": {
+          "raises": "TOMLDecodeError"
+        },
+        "issues.team": {
+          "raises": "TOMLDecodeError"
+        },
+        "workflow.base": {
+          "raises": "TOMLDecodeError"
+        },
+        "linear.api_key": null
+      }
+    },
+    {
+      "name": "duplicate-key-is-malformed",
+      "toml": "[issues]\nbackend = \"github\"\nbackend = \"linear\"\n",
+      "refuse": {
+        "*": "TOML parse failed"
+      },
+      "python": {
+        "issues.backend": {
+          "raises": "TOMLDecodeError"
+        },
+        "issues.team": {
+          "raises": "TOMLDecodeError"
+        },
+        "workflow.base": {
+          "raises": "TOMLDecodeError"
+        },
+        "linear.api_key": null
+      }
+    },
+    {
+      "name": "invalid-utf8",
+      "bytes_base64": "W2lzc3Vlc10KYmFja2VuZCA9ICL/IgpbbGluZWFyXQphcGlfa2V5ID0gImxpbl9hcGlfRkFLRTAwMDBkZWFkYmVlZiIK",
+      "refuse": {
+        "*": "not valid UTF-8"
+      },
+      "python": {
+        "issues.backend": {
+          "raises": "UnicodeDecodeError"
+        },
+        "issues.team": {
+          "raises": "UnicodeDecodeError"
+        },
+        "workflow.base": {
+          "raises": "UnicodeDecodeError"
+        },
+        "linear.api_key": {
+          "raises": "UnicodeDecodeError"
+        }
+      }
+    }
+  ]
+}

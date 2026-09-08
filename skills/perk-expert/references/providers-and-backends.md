@@ -61,7 +61,19 @@ The plan seam must always produce perk's reviewed, canonical plan artifact.
 
 Plannotator plan/objective/gist reviews require verified run-local opening and attachment
 registration. Exact source and conservative routing inputs are checked; drift during handshake
-can require rereview. Busy, invalid-state, persistence-failed and unresolved-dispatch are stops,
+can require rereview. The routing inputs are the save-selecting fields, not whole config files:
+the main checkout's committed `[issues] backend`/`team`, the invoking checkout's committed and
+local `[workflow] base` (plan/objective only), the main checkout's local `[linear] api_key`
+(hashed), the run handoff, `GH_REPO`/`GH_HOST`, and **all `git config --list --show-origin`
+output**. An unrelated valid Perk TOML change (compaction, models, CI, skills, providers,
+presentation, comments, formatting) while a review is open leaves it valid; an unrelated Git-config
+change still invalidates it, and an edit the `perk` CLI cannot parse (TOML 1.1-only syntax) fails
+the save subprocess like any CLI error rather than registering as drift. Genuine drift refuses `target-changed` and the stop names the
+checkpoint (`open`/`attach`/`candidate`/`save`) and the changed component
+(e.g. `main_config.issues.backend`, `worktree_local.workflow.base`, `git_config`), never the
+value; a malformed or wrong-shaped routing field refuses `io-error` naming the file role.
+Retained-state reconciliation is unchanged and no earlier review record is migrated or replayed.
+Busy, invalid-state, persistence-failed and unresolved-dispatch are stops,
 not skipped reviews, successful wave launches, or permission to retry a save. Preserve retained
 state for human reconciliation; never remove a lock or forge provenance to bypass a refusal.
 The canonical operator procedure is `docs/user-docs/how-to/reconcile-a-draft-review-stop.md`.

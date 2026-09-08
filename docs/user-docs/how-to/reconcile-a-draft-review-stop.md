@@ -27,6 +27,28 @@ An unavailable field stays unknown, not absent. The fixed files are `draft-revie
 reported paths; do not guess a different checkout or run. Lock owner metadata identifies a claimant,
 not whether it saved or delivered anything.
 
+A `target-changed` or `subject-changed` stop additionally names the checkpoint (`open`, `attach`,
+`candidate`, or `save`), the reviewed and current target digests, and the **changed component
+names** — for example `main_config.issues.backend` or `worktree_local.workflow.base`, or
+`git_config` when Git configuration changed — never the values themselves. Unrelated Perk TOML
+edits (compaction, models, CI, skills, providers, comments, formatting) do not produce this stop;
+all `git config --list --show-origin` output is still fingerprinted, so an unrelated Git-config
+change can.
+When the diagnostic reports the components as `unavailable`, only the aggregate comparison is
+known; treat that as unknown, not as "nothing relevant changed". A `target-changed` stop before
+the save checkpoint made no save; a stop *at* the save checkpoint after an await still made no
+backend call, but neither excludes an earlier saved attempt in the run — classify it like any
+other stop below. It grants no permission to repair, replay, or save the old review: open a new
+review under the current configuration after checking the named component was the intended change.
+
+A Perk TOML edit that the `perk` CLI cannot read is not a routing change either. The fingerprint's
+parser accepts some TOML 1.1 syntax (a trailing comma inside an inline table, a `\x` string
+escape) that the CLI's TOML 1.0 reader rejects, so such an edit — in any table — leaves the
+fingerprint unchanged and surfaces instead when the save subprocess refuses the configuration file:
+an `unresolved-dispatch` stop with `backend-unconfirmed`, exactly like any other failed CLI call
+(the same edit fails every `perk` command). The CLI refuses the whole file, so the review cannot be
+saved to the wrong place. Classify the stop below as usual, fix the file, and open a new review.
+
 ## 1. Stop all participants and prove quiescence
 
 Stop every Pi session and **every child save subprocess** able to use this namespace. Then close

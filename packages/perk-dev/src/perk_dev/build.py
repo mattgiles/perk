@@ -57,6 +57,9 @@ NPM_TARBALL_EXPECTED: frozenset[str] = frozenset(
         "shared/README.md",
         "shared/schemas/contracts/registry.schema.json",
         "prompts/README.md",
+        # The vendored smol-toml parser closure ships as plain `.js` with its license.
+        "extension/vendor/smol-toml/parse.js",
+        "extension/vendor/smol-toml/LICENSE",
     }
 )
 # Dev-only surfaces that must never ship: (prefix, suffix) rules over the packed paths.
