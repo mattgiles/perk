@@ -86,6 +86,7 @@ import {
   draftReviewMutationRefusal,
 } from "./draftReviewActivation.ts";
 import { mutationPlanSaveDeps } from "./draftReviewEffects.ts";
+import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
 import {
   type ApprovalSaveOutcome,
   executePlanReview,
@@ -561,6 +562,15 @@ export function installPlanBindings(
           "plan_save",
         )("plan_save needs { plan: string, … } per the tool schema", "bad_input");
       }
+      // A refinement session never saves a plan — independent of the gate (a human toggle
+      // never makes an old plan draft routable here).
+      if (isRefinementSession(branchOf(ctx))) {
+        return failFor(
+          ctx,
+          "plan-save",
+          "plan_save",
+        )(refinementStageRefusal("plan_save"), "wrong_stage");
+      }
       const facts: DraftReviewConfirmedFacts = {};
       const mutation = await reviews.mutateAsync(ctx, "manual-save", async (session) => {
         const original = planSaveDepsFor(pi, ctx, gating);
@@ -615,6 +625,10 @@ export function installPlanBindings(
       "Save the latest proposed plan to GitHub — the manual failsafe for the approval→save flow " +
       "(the read-only → read-write boundary).",
     handler: async (args, ctx) => {
+      if (isRefinementSession(branchOf(ctx))) {
+        report(ctx, "plan-save", "warning", refinementStageRefusal("/plan-save"));
+        return;
+      }
       const title = args.trim() || undefined;
       // The manual-failsafe invocation of the shared approval→save seam. Artifact-first
       // (no explicit param on the command path ⇒ paramMismatch is always false); the D1a gate exit

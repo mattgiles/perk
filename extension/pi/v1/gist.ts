@@ -62,7 +62,7 @@ import { render } from "../../substrate/prompts.ts";
 import { failFor, ok, type Result } from "../../substrate/result.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { paramsOf, stringParam } from "../../substrate/toolParams.ts";
-import { type BranchEntry, rebuildWorkflowState } from "../../substrate/workflowState.ts";
+import { type BranchEntry, branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
 import { installInjectedContext } from "./contextInjection.ts";
 import {
@@ -77,6 +77,7 @@ import {
 } from "./draftReviewActivation.ts";
 import type { DraftReviewCapability } from "./draftReviewDecisions.ts";
 import { boundGistSaveDeps, mutationGistSaveDeps } from "./draftReviewEffects.ts";
+import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
 import { hasDirectEditsHeading } from "./providers/plannotator.ts";
 import { isPlannotatorPlanSelected } from "./providers/selection.ts";
 import {
@@ -389,6 +390,13 @@ export function installGistBindings(
           "bad_input",
         );
       }
+      // A refinement session never creates a gist — independent of tool visibility.
+      if (isRefinementSession(branchOf(ctx)))
+        return failFor(
+          ctx,
+          "gist-save",
+          "gist_save",
+        )(refinementStageRefusal("gist_save"), "wrong_stage");
       const facts: DraftReviewConfirmedFacts = {};
       const mutation = await reviews.mutateAsync(ctx, "manual-save", async (session) => {
         const deps = mutationGistSaveDeps(
@@ -408,6 +416,10 @@ export function installGistBindings(
       "Save the working gist draft to the issue backend — the manual failsafe for the " +
       "approval→save flow (artifact-first; drives the save only when no draft exists).",
     handler: async (args, ctx) => {
+      if (isRefinementSession(branchOf(ctx))) {
+        report(ctx, "gist-save", "warning", refinementStageRefusal("/gist-save"));
+        return;
+      }
       const title = args.trim() || undefined;
       // The artifact-first manual-failsafe invocation of the shared approval→save seam (the D1a
       // gate exit lives in the seam). The drive-the-session fallback covers draft-LESS

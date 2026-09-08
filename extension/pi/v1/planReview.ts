@@ -90,7 +90,11 @@ import {
 import type { DraftReviewCapability } from "./draftReviewDecisions.ts";
 import { boundPlanSaveDeps, mutationPlanSaveDeps } from "./draftReviewEffects.ts";
 import { runGistReviewV1 } from "./gist.ts";
-import { runRefinementReviewV1 } from "./objectiveRefinement.ts";
+import {
+  isRefinementSession,
+  refinementStageRefusal,
+  runRefinementReviewV1,
+} from "./objectiveRefinement.ts";
 import { executeObjectiveReview } from "./objectiveReview.ts";
 import { extractDirectEdits, hasDirectEditsHeading } from "./providers/plannotator.ts";
 import { isPlannotatorPlanSelected } from "./providers/selection.ts";
@@ -277,6 +281,12 @@ export async function runImplementHereCommand(
   gating: ToolGating,
   reviews: DraftReviewRuntime,
 ): Promise<void> {
+  // A refinement session has no plan to implement: refuse before the mutation boundary (no
+  // gate effect, no invalidation) — the gate toggle never makes an old plan draft routable.
+  if (isRefinementSession(branchOf(ctx))) {
+    report(ctx, "implement-here", "warning", refinementStageRefusal("/implement-here"));
+    return;
+  }
   const mutation = reviews.mutate(ctx, "implement-here", (session) => {
     // The explicit mutation capability owns both node-claim reads and the no-save gate effect.
     if (session.nodeClaim() !== null) {

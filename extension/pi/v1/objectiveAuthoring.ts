@@ -64,7 +64,7 @@ import { loadPerkConfig } from "../../substrate/config.ts";
 import { failFor, ok, type Result } from "../../substrate/result.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { arrayParam, objectParam, paramsOf, stringParam } from "../../substrate/toolParams.ts";
-import { type BranchEntry, rebuildWorkflowState } from "../../substrate/workflowState.ts";
+import { type BranchEntry, branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { report, type Severity } from "../../surfaces/report.ts";
 import { installInjectedContext } from "./contextInjection.ts";
 import {
@@ -75,6 +75,7 @@ import {
 import { mutationObjectiveSaveDeps } from "./draftReviewEffects.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { productionDreamGateRecovery } from "./objectiveDreamGate.ts";
+import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
 
 // ------------------------------------------------------------------- the tool-boundary decode
 
@@ -593,6 +594,12 @@ export function installObjectiveAuthoringBindings(
           "bad_input",
         );
       }
+      // A refinement session never creates an objective — independent of tool visibility.
+      if (isRefinementSession(branchOf(ctx)))
+        return failFor(ctx, "objective_save")(
+          refinementStageRefusal("objective_save"),
+          "wrong_stage",
+        );
       // The direct tool path wraps ONLY a present decoded value as the union's `direct` arm
       // (the save stamps generated_at); no stored parts, so no byte-compare on this path.
       const { dream_report, ...rest } = decoded;
@@ -624,6 +631,10 @@ export function installObjectiveAuthoringBindings(
       "Save the working objective draft to GitHub — the manual failsafe for the approval→save " +
       "flow (artifact-first; drives the structured save only when no draft exists).",
     handler: async (args, ctx) => {
+      if (isRefinementSession(branchOf(ctx))) {
+        report(ctx, "objective-save", "warning", refinementStageRefusal("/objective-save"));
+        return;
+      }
       const title = args.trim() || undefined;
       // The artifact-first manual-failsafe invocation of the shared approval→save
       // seam (the D1a gate exit lives in the seam). The drive-the-session fallback covers

@@ -255,6 +255,7 @@ export function renderRefinementDraft(pair: RefinementDraftPair): string {
     "",
     "---",
     "",
+    "",
   ];
   return head.join("\n") + pair.draft.markdown;
 }

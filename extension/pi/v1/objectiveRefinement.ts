@@ -883,11 +883,12 @@ export function installObjectiveRefinementBindings(
             return;
           case "saved": {
             const result = refinementSaveResultOf(ctx, outcome.save);
+            // One headline line: the verified facts AND the advisory statement stay visible.
             report(
               ctx,
               SCOPE_SAVE,
               "info",
-              `manual human save (not a reviewer approval): ${result.content[0]?.text ?? "saved"}`,
+              `manual human save (not a reviewer approval): ${(result.content[0]?.text ?? "saved").replace(/\n/g, " ")}`,
             );
             return;
           }
