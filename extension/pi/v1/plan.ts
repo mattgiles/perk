@@ -54,6 +54,7 @@ import {
   savePlan,
 } from "../../authoring/plan/save.ts";
 import { extractPlanMarkdown, resolvePlanSource } from "../../authoring/plan/source.ts";
+import { REFINE_STAGE } from "../../authoring/refinement/context.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { PlanRef } from "../../substrate/cache.ts";
 import {
@@ -799,9 +800,10 @@ function installPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
   }
 
   // Inject the plan-authoring context while the read-only gate is active (display:false). The
-  // exceptions: objective-author and gist-author sessions are ALSO read-only, but
-  // objectiveAuthor.ts / the gist installer inject their own authoring contexts there — so plan
-  // mode defers when the launched stage is either (the coupling break: plan-authoring context is
+  // exceptions: objective-author, gist-author and objective-refine sessions are ALSO read-only,
+  // but objectiveAuthor.ts / the gist installer / the refinement installer inject their own
+  // contexts there — so plan mode defers when the launched stage is any of them (the coupling
+  // break: plan-authoring context is
   // no longer keyed off the bare read-only gate). The inject/strip mechanics (active-window
   // dedup, stale-marker strip) live in the shared helper; the strip stays stage-blind — it keys
   // on the gate alone.
@@ -813,7 +815,11 @@ function installPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
     select: (_ctx, branch) => {
       if (!gating.isActive()) return null;
       const launchedStage = rebuildWorkflowState(branch).stage;
-      if (launchedStage === OBJECTIVE_AUTHOR_STAGE || launchedStage === GIST_AUTHOR_STAGE) {
+      if (
+        launchedStage === OBJECTIVE_AUTHOR_STAGE ||
+        launchedStage === GIST_AUTHOR_STAGE ||
+        launchedStage === REFINE_STAGE
+      ) {
         return null;
       }
       return PLAN_MARKER;

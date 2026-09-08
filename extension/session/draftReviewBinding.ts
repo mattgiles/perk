@@ -6,7 +6,11 @@ import { handoffPath, isSafeRunId } from "../substrate/cache.ts";
 import { draftReviewGitContext } from "../substrate/git.ts";
 import { configFile, localConfigFile } from "../substrate/paths.ts";
 import { isNonblank, type ReviewSubject, reviewRefused } from "./draftReviewState.ts";
-import { digestSessionData, type WorkflowSession } from "./workflowSession.ts";
+import {
+  digestSessionData,
+  REFINEMENT_CONTEXT_ARTIFACT,
+  type WorkflowSession,
+} from "./workflowSession.ts";
 
 export type FileMark = { state: "absent" } | { state: "present"; digest: string };
 export type PlanHandoff = {
@@ -17,6 +21,8 @@ export type PlanHandoff = {
 };
 export type ObjectiveHandoff = { adopt_from: string | null; supersedes: string | null };
 export type GistHandoff = { gist_scope: "plan" | "objective" | null };
+/** The cold refine door's namespaced handoff: only the context digest it materialized. */
+export type RefinementHandoff = { context_digest: string | null };
 export type TargetProjection = {
   worktree_root: string;
   git_dir: string;
@@ -24,10 +30,16 @@ export type TargetProjection = {
   run_id: string;
   subject: ReviewSubject;
   warm_node_claim: { objective: string; node: string } | null;
-  handoff: PlanHandoff | ObjectiveHandoff | GistHandoff | null;
+  handoff: PlanHandoff | ObjectiveHandoff | GistHandoff | RefinementHandoff | null;
   files: { main_config: FileMark; worktree_config: FileMark; worktree_local: FileMark };
   git_config_digest: string;
   environment: { GH_REPO: string | null; GH_HOST: string | null };
+  /**
+   * Refinement ONLY: the strict session-data digest of the grounding-context artifact — the
+   * reviewed draft is fenced to the exact context it was authored against. Absent (not null)
+   * for every other subject so their encodings stay byte-identical.
+   */
+  context_artifact?: string;
 };
 export interface DraftReviewBindingPorts {
   git(cwd: string): ReturnType<typeof draftReviewGitContext>;
@@ -81,6 +93,14 @@ export function projectReviewHandoff(
   }
   if (subject === "objective")
     return { adopt_from: optionalId(h.adopt_from), supersedes: optionalId(h.supersedes) };
+  if (subject === "refinement") {
+    // Only the namespaced refinement block projects (no gist fallthrough, no planning link).
+    const block = h.objective_refinement;
+    if (block === undefined || block === null) return { context_digest: null };
+    if (typeof block !== "object" || Array.isArray(block))
+      throw new Error("invalid refinement handoff");
+    return { context_digest: optionalId((block as Record<string, unknown>).context_digest) };
+  }
   const scope = h.gist_scope;
   if (scope != null && scope !== "plan" && scope !== "objective")
     throw new Error("invalid gist scope");
@@ -94,7 +114,15 @@ export function targetEncoding(projection: TargetProjection): string {
   // Reconstruct even nested typed inputs, so callers cannot accidentally change digest ordering.
   const h = p.handoff;
   const handoff =
-    h === null ? null : projectReviewHandoff({ run_id: p.run_id, ...h }, p.subject, p.run_id);
+    h === null
+      ? null
+      : projectReviewHandoff(
+          p.subject === "refinement" && "context_digest" in h
+            ? { run_id: p.run_id, objective_refinement: { context_digest: h.context_digest } }
+            : { run_id: p.run_id, ...h },
+          p.subject,
+          p.run_id,
+        );
   const ordered: TargetProjection = {
     worktree_root: p.worktree_root,
     git_dir: p.git_dir,
@@ -113,6 +141,10 @@ export function targetEncoding(projection: TargetProjection): string {
     },
     git_config_digest: p.git_config_digest,
     environment: { GH_REPO: p.environment.GH_REPO, GH_HOST: p.environment.GH_HOST },
+    // Trailing + conditional: other subjects' encodings never gain the key.
+    ...(p.subject === "refinement" && p.context_artifact !== undefined
+      ? { context_artifact: p.context_artifact }
+      : {}),
   };
   return `perk/draft-review-target/v1\n${JSON.stringify(ordered)}`;
 }
@@ -149,6 +181,14 @@ export function captureDraftReviewBinding(
             subject,
             runId,
           );
+    // Refinement binds the grounding-context artifact: a missing or invalid context refuses
+    // capture outright (a refinement session without its context has no reviewable target).
+    let contextArtifact: string | undefined;
+    if (subject === "refinement") {
+      const context = session.readArtifact(REFINEMENT_CONTEXT_ARTIFACT, { provenance: "strict" });
+      if (context.status !== "found") return reviewRefused("invalid-state");
+      contextArtifact = digestSessionData(context.content);
+    }
     const env = ports.environment();
     const envMark = (value: string | undefined): string | null =>
       value === undefined ? null : digestSessionData(value);
@@ -167,6 +207,7 @@ export function captureDraftReviewBinding(
       },
       git_config_digest: digestSessionData(git.configBytes),
       environment: { GH_REPO: envMark(env.GH_REPO), GH_HOST: envMark(env.GH_HOST) },
+      ...(contextArtifact !== undefined ? { context_artifact: contextArtifact } : {}),
     };
     return {
       ok: true,

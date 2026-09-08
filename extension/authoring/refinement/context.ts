@@ -16,13 +16,13 @@ import type {
   SessionArtifactReceipt,
   WorkflowSession,
 } from "../../session/workflowSession.ts";
-import { digestSessionData } from "../../session/workflowSession.ts";
+import { digestSessionData, REFINEMENT_CONTEXT_ARTIFACT } from "../../session/workflowSession.ts";
 
 /** The registry stage id of the refinement session (the isolated, read-only stage). */
 export const REFINE_STAGE = "objective-refine";
 
 /** The fixed context artifact name — the SAME name in run scratch (cold) and session data. */
-export const REFINEMENT_CONTEXT_ARTIFACT = "objective-refinement-context.json";
+export { REFINEMENT_CONTEXT_ARTIFACT };
 
 /** The handoff namespace the cold door carries (never a top-level objective_id/node_id). */
 export const REFINEMENT_HANDOFF_KEY = "objective_refinement";
@@ -362,6 +362,61 @@ export function importRefinementContext(
       return { status: "rejected", problem: written.problem };
     case "unverified":
       return { status: "unverified", problem: written.problem };
+  }
+}
+
+export type ColdImportResult =
+  | { status: "imported" | "unchanged"; read: RefinementContextRead }
+  | { status: "not-applicable" }
+  | { status: "refused"; problem: string };
+
+/** The transfer read port the edge binds to the run's fixed scratch path (`null` = missing). */
+export interface ColdImportPorts {
+  readTransfer(): string | null;
+}
+
+/**
+ * The cold claim's ONE-TIME context import (contracts.md §8.67): on the actual `objective-refine`
+ * cold claim, read the fixed run-scratch transfer the door materialized (through the edge-bound
+ * port), validate its declared digest (from the namespaced handoff block), run, stage and strict
+ * shape, and write the exact raw string as the session artifact. `not-applicable` for every
+ * non-refinement claim; every defect is a fail-closed `refused` (the session stays read-only and
+ * unusable for drafting — never an orphan repair, missing-pointer reimport or target refresh).
+ * Never throws.
+ */
+export function importColdRefinementContext(
+  session: WorkflowSession,
+  claim: { runId: string; stage: string | undefined; handoff: Record<string, unknown> },
+  ports: ColdImportPorts,
+): ColdImportResult {
+  if (claim.stage !== REFINE_STAGE) return { status: "not-applicable" };
+  const refuse = (problem: string): ColdImportResult => ({ status: "refused", problem });
+  const identity = session.currentRunIdentity();
+  if (!identity.ok) return refuse(`session identity ${identity.reason}`);
+  if (identity.runId !== claim.runId) return refuse("the claimed run is not the session's run");
+  const block = claim.handoff[REFINEMENT_HANDOFF_KEY];
+  if (typeof block !== "object" || block === null || Array.isArray(block))
+    return refuse(`the handoff carries no ${REFINEMENT_HANDOFF_KEY} block`);
+  const declared = (block as Record<string, unknown>).context_digest;
+  if (typeof declared !== "string" || !isArtifactDigest(declared))
+    return refuse("the handoff's context_digest is not a sha256: digest");
+  let raw: string | null;
+  try {
+    raw = ports.readTransfer();
+  } catch (error) {
+    return refuse(`could not read the context transfer (${String(error)})`);
+  }
+  if (raw === null) return refuse("the context transfer is missing from the run's scratch");
+  const validated = validateContextTransfer(raw, { runId: claim.runId, expectedDigest: declared });
+  if (!validated.ok) return refuse(validated.problem);
+  const imported = importRefinementContext(session, validated.read);
+  switch (imported.status) {
+    case "imported":
+    case "unchanged":
+      return { status: imported.status, read: imported.read };
+    case "rejected":
+    case "unverified":
+      return refuse(`could not persist the context artifact (${imported.problem})`);
   }
 }
 

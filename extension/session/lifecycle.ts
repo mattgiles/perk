@@ -266,6 +266,35 @@ export function reflectSessionReadOnlyFloor(
   };
 }
 
+/** The refinement stage id (registry vocabulary; the admission check keys on it). */
+const REFINE_STAGE_ID = "objective-refine";
+
+/** The top-level handoff keys the plan-graph doors use as planning-link / plan-ref inputs. */
+const PLANNING_LINK_KEYS = [
+  "objective_id",
+  "node_id",
+  "adopt_from",
+  "supersedes",
+  "gist_scope",
+  "consumed_learn",
+] as const;
+
+/**
+ * Which planning-link / plan-ref input (if any) an `objective-refine` handoff carries at the
+ * top level — `null` for every non-refinement handoff and for a clean refinement one. A key is
+ * "carried" when present and not null/undefined (an empty `consumed_learn` list is clean).
+ */
+export function refinementHandoffContamination(handoff: Handoff): string | null {
+  if (handoff.stage !== REFINE_STAGE_ID) return null;
+  const carried = PLANNING_LINK_KEYS.filter((key) => {
+    const value = handoff[key];
+    if (value === undefined || value === null) return false;
+    if (Array.isArray(value)) return value.length > 0;
+    return true;
+  });
+  return carried.length === 0 ? null : carried.join(", ");
+}
+
 /**
  * Establish the session's run identity — the four `session_start` arms as one named operation:
  *
@@ -305,6 +334,20 @@ export function establishSessionIdentity(
     const handoff = ports.readHandoff(decision.runId);
     if (handoff === null || handoff.run_id !== decision.runId) {
       problems.push(`handoff missing or mismatched for run ${decision.runId}`);
+      return { arm: "unclaimed", resolved: {}, decision, problems, warnings };
+    }
+    // Refinement admission (contracts.md §8.67): the isolated `objective-refine` stage must
+    // never arrive carrying a planning link or plan-ref input — those top-level keys are what
+    // the claim arm below (and the plan-save recovery paths) read as a planning claim /
+    // adoption. A contaminated refinement handoff is REFUSED before any claim is recorded and
+    // is NOT consumed (the door that wrote it is the defect; nothing here rebinds or clears).
+    // Ordinary objective-plan handoffs (which legitimately carry objective_id/node_id) are
+    // untouched.
+    const contamination = refinementHandoffContamination(handoff);
+    if (contamination !== null) {
+      problems.push(
+        `refusing the objective-refine handoff for run ${decision.runId}: it carries ${contamination} (a planning link/plan-ref input a refinement session never accepts)`,
+      );
       return { arm: "unclaimed", resolved: {}, decision, problems, warnings };
     }
     // The objective-plan cold door's handoff_extra carries the node link

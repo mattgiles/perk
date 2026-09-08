@@ -3,9 +3,15 @@ import type { GistBackend } from "../../authoring/gist/save.ts";
 import type { ObjectiveApprovalSaveDeps } from "../../authoring/objective/save.ts";
 import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
 import type { PlanApprovalSaveDeps } from "../../authoring/plan/save.ts";
+import { decodeRefinementDraft } from "../../authoring/refinement/draft.ts";
+import type { RefinementBackend } from "../../authoring/refinement/save.ts";
 import type { ApprovalGate } from "../../authoring/review/approvalGate.ts";
 import type { SaveReceipt } from "../../session/draftReviewState.ts";
-import type { WorkflowSession } from "../../session/workflowSession.ts";
+import {
+  digestSessionData,
+  REFINEMENT_CONTEXT_ARTIFACT,
+  type WorkflowSession,
+} from "../../session/workflowSession.ts";
 import type { DraftReviewConfirmedFacts } from "./draftReviewActivation.ts";
 import type { DraftReviewCapability } from "./draftReviewDecisions.ts";
 
@@ -90,6 +96,28 @@ export function mutationGistSaveDeps(
       async save(request: Parameters<GistBackend["save"]>[0]) {
         const value = await deps.backend.save(request);
         if (value.status === "saved") receipt.confirm({ id: value.id, url: value.url });
+        return value;
+      },
+    },
+  };
+}
+
+/** The human refinement save: exact draft bytes + explicit run id; the receipt is the verified
+ * comment id + carrier URL (never an invented deep link). No linkage operation exists. */
+export function mutationRefinementSaveDeps(
+  deps: { session: WorkflowSession; backend: RefinementBackend; gate: ApprovalGate },
+  facts: DraftReviewConfirmedFacts,
+  mode: "manual" | "approval",
+) {
+  const receipt = mutationReceipt(deps.session, deps.gate, mode, facts);
+  return {
+    ...deps,
+    gate: receipt.gate,
+    backend: {
+      async save(request: Parameters<RefinementBackend["save"]>[0]) {
+        const value = await deps.backend.save(request);
+        if (value.status === "saved")
+          receipt.confirm({ id: value.commentId, url: value.carrierUrl });
         return value;
       },
     },
@@ -186,6 +214,66 @@ export function boundObjectiveSaveDeps(
             receipt: value.status === "saved" ? { id: value.id, url: value.url } : null,
           };
         }, exit),
+    },
+    gate: { isActive: () => deps.gate.isActive(), exit },
+  };
+}
+
+/**
+ * Refinement fences the reviewed (draft, context) pair: immediately before the worker, the
+ * staged draft bytes must decode, belong to this run and name the CURRENT bound context's digest
+ * — a known pre-invocation failure returns a typed failure WITHOUT entering the capability save
+ * (no save-started, no uncertainty, no gate exit). Inside the capability the bytes handed to the
+ * worker are the capability-selected reviewed source (which the seam's strict resume must
+ * equal — the `source-changed` fence already guards the artifact). No linkage operation exists.
+ */
+export function boundRefinementSaveDeps(
+  deps: { session: WorkflowSession; backend: RefinementBackend; gate: ApprovalGate },
+  capability: DraftReviewCapability,
+) {
+  const exit = receiptGate(deps.gate);
+  return {
+    ...deps,
+    session: ownedReviewSession(deps.session, capability),
+    backend: {
+      save: async (request: Parameters<RefinementBackend["save"]>[0]) => {
+        const refused = (message: string): Awaited<ReturnType<RefinementBackend["save"]>> => ({
+          status: "failed",
+          message,
+          errorType: "refinement_draft_invalid",
+          writeAttempted: false,
+          commentIds: [],
+        });
+        const decoded = decodeRefinementDraft(request.draftRaw);
+        if (!decoded.ok) return refused(decoded.problem);
+        const identity = deps.session.currentRunIdentity();
+        if (
+          !identity.ok ||
+          decoded.draft.run_id !== identity.runId ||
+          request.runId !== identity.runId
+        )
+          return refused("the staged refinement draft does not belong to this run");
+        const context = deps.session.readArtifact(REFINEMENT_CONTEXT_ARTIFACT, {
+          provenance: "strict",
+        });
+        if (context.status !== "found")
+          return refused("the refinement context is missing or invalid at save time");
+        if (decoded.draft.context_digest !== digestSessionData(context.content))
+          return refused(
+            "the staged refinement draft is bound to an earlier context (rewrite it with " +
+              "objective_refinement_draft against the current context)",
+          );
+        return capability.save(async ({ source }) => {
+          if (source !== request.draftRaw)
+            throw new Error("the reviewed refinement source and the staged draft bytes diverged");
+          const value = await deps.backend.save({ runId: request.runId, draftRaw: source });
+          return {
+            value,
+            receipt:
+              value.status === "saved" ? { id: value.commentId, url: value.carrierUrl } : null,
+          };
+        }, exit);
+      },
     },
     gate: { isActive: () => deps.gate.isActive(), exit },
   };

@@ -37,6 +37,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { GIST_AUTHOR_STAGE } from "../../../authoring/gist/draft.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "../../../authoring/objective/prose.ts";
+import { REFINE_STAGE } from "../../../authoring/refinement/context.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { type BranchEntry, rebuildWorkflowState } from "../../../substrate/workflowState.ts";
 import { installInjectedContext } from "../contextInjection.ts";
@@ -93,7 +94,12 @@ export function installTombellPlanAdapter(pi: ExtensionAPI): void {
     select: (ctx, branch) => {
       if (!isTombellPlanSelected(ctx.cwd)) return null;
       const state = rebuildWorkflowState(branch);
-      if (state.stage === OBJECTIVE_AUTHOR_STAGE || state.stage === GIST_AUTHOR_STAGE) return null;
+      if (
+        state.stage === OBJECTIVE_AUTHOR_STAGE ||
+        state.stage === GIST_AUTHOR_STAGE ||
+        state.stage === REFINE_STAGE
+      )
+        return null;
       if (state.mode !== "read-only" && !isTombellPlanModeEnabled(branch)) return null;
       return PLAN_ADAPTER_TOMBELL_MARKER;
     },

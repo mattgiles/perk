@@ -69,6 +69,7 @@ import type {
   SavePlanOutcome,
 } from "../../authoring/plan/save.ts";
 import { type PlanSource, resolvePlanSource } from "../../authoring/plan/source.ts";
+import { REFINE_STAGE } from "../../authoring/refinement/context.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
 import type { PlanRef } from "../../substrate/cache.ts";
 import type { Result } from "../../substrate/result.ts";
@@ -89,6 +90,7 @@ import {
 import type { DraftReviewCapability } from "./draftReviewDecisions.ts";
 import { boundPlanSaveDeps, mutationPlanSaveDeps } from "./draftReviewEffects.ts";
 import { runGistReviewV1 } from "./gist.ts";
+import { runRefinementReviewV1 } from "./objectiveRefinement.ts";
 import { executeObjectiveReview } from "./objectiveReview.ts";
 import { extractDirectEdits, hasDirectEditsHeading } from "./providers/plannotator.ts";
 import { isPlannotatorPlanSelected } from "./providers/selection.ts";
@@ -688,7 +690,8 @@ export function renderPlanReviewResult(
  * The `plan_review` execute core — the STAGE DISPATCHER (exported for the offline tests). Arm
  * order: param decode → the objective arm (`executeObjectiveReview` — the rendered objective
  * draft is the review subject in BOTH objective-authoring stages) → the gist arm
- * (`runGistReviewV1` — the rendered gist draft) → the plan arm (`runPlanReviewV1`).
+ * (`runGistReviewV1` — the rendered gist draft) → the refinement arm (`runRefinementReviewV1`
+ * — the rendered (draft, context) pair) → the plan arm (`runPlanReviewV1`).
  */
 export async function executePlanReview(
   pi: ExtensionAPI,
@@ -735,6 +738,12 @@ export async function executePlanReview(
   }
   if (launchedStage === GIST_AUTHOR_STAGE) {
     return runGistReviewV1(pi, ctx, gating, bridge, signal ?? ctx.signal, toolCallId);
+  }
+  // A refinement session routes to the refinement arm BEFORE the plan arm: the validated
+  // (draft, context) pair is the sole source; a well-typed `plan` param is ignored (the plan
+  // fallthrough could otherwise review/save an unrelated plan from a refinement session).
+  if (launchedStage === REFINE_STAGE) {
+    return runRefinementReviewV1(pi, ctx, gating, bridge, signal ?? ctx.signal, toolCallId);
   }
   return runPlanReviewV1(ctx, bridge, deps, plan, signal, wave, toolCallId);
 }

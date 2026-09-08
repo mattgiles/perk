@@ -15,7 +15,11 @@ import {
   type TargetProjection,
   targetEncoding,
 } from "./draftReviewBinding.ts";
-import { digestSessionData, type WorkflowSession } from "./workflowSession.ts";
+import {
+  digestSessionData,
+  REFINEMENT_CONTEXT_ARTIFACT,
+  type WorkflowSession,
+} from "./workflowSession.ts";
 
 const emptyDigest = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 const projection: TargetProjection = {
@@ -37,7 +41,7 @@ const projection: TargetProjection = {
 const encoding =
   'perk/draft-review-target/v1\n{"worktree_root":"/repo","git_dir":"/repo/.git","git_common_dir":"/repo/.git","run_id":"RID","subject":"plan","warm_node_claim":null,"handoff":null,"files":{"main_config":{"state":"absent"},"worktree_config":{"state":"absent"},"worktree_local":{"state":"absent"}},"git_config_digest":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","environment":{"GH_REPO":null,"GH_HOST":null}}';
 
-function setup(subject: "plan" | "objective" | "gist" = "plan") {
+function setup(subject: "plan" | "objective" | "gist" | "refinement" = "plan") {
   const session: WorkflowSession = openMemoryWorkflowSession({ runId: "RID" });
   session.draftReviewContext = () => ({ ok: true, runId: "RID", subject, warmNodeClaim: null });
   const files = new Map<string, Uint8Array>();
@@ -200,6 +204,76 @@ test("handoff projection ignores unrelated fields but retains every relevant byt
   const ordered = f.capture();
   handoff({ consumed_learn: ["a", "a", "b"] });
   assert.notEqual(f.capture(), ordered);
+});
+
+test("refinement binds the strict context artifact digest and only the namespaced handoff block", () => {
+  // Projection: only `objective_refinement.context_digest` is relevant; planning-link fields and
+  // gist scope never fall through (no rebind by a top-level objective_id/node_id).
+  const digest = "sha256:33e357e7ed77d5adbcfc0df41491deda7b152aede4858bdd2be270302d874163";
+  assert.deepEqual(
+    projectReviewHandoff(
+      {
+        run_id: "RID",
+        objective_id: "7",
+        node_id: "1.1",
+        gist_scope: "plan",
+        objective_refinement: { context_digest: digest, ignored: true },
+      },
+      "refinement",
+      "RID",
+    ),
+    { context_digest: digest },
+  );
+  assert.deepEqual(
+    projectReviewHandoff({ run_id: "RID", objective_id: "7" }, "refinement", "RID"),
+    {
+      context_digest: null,
+    },
+  );
+  assert.deepEqual(
+    projectReviewHandoff({ run_id: "RID", objective_refinement: null }, "refinement", "RID"),
+    { context_digest: null },
+  );
+  for (const block of [[], "x", 42, { context_digest: "" }, { context_digest: false }])
+    assert.throws(() =>
+      projectReviewHandoff({ run_id: "RID", objective_refinement: block }, "refinement", "RID"),
+    );
+  assert.throws(() => projectReviewHandoff({ run_id: "WRONG" }, "refinement", "RID"));
+
+  // Encoding: the refinement key is trailing and conditional — the pinned plan encoding above is
+  // byte-identical (no `context_artifact` key ever appears for another subject).
+  const withContext: TargetProjection = {
+    ...projection,
+    subject: "refinement",
+    handoff: { context_digest: digest },
+    context_artifact: emptyDigest,
+  };
+  const encoded = targetEncoding(withContext);
+  assert.ok(encoded.endsWith(`,"context_artifact":"${emptyDigest}"}`));
+  assert.ok(encoded.includes(`"handoff":{"context_digest":"${digest}"}`));
+  assert.equal(targetEncoding({ ...projection, context_artifact: emptyDigest }), encoding);
+  assert.notEqual(targetEncoding({ ...withContext, context_artifact: digest }), encoded);
+
+  // Capture: a missing or invalid context artifact refuses; the digest is the strict read's.
+  const f = setup("refinement");
+  assert.deepEqual(captureDraftReviewBinding("/repo", f.session, f.ports), {
+    ok: false,
+    reason: "invalid-state",
+    detail: "draft review refused: invalid-state",
+  });
+  const written = f.session.writeArtifact(REFINEMENT_CONTEXT_ARTIFACT, '{"a":1}\n', {
+    provenance: "strict",
+  });
+  assert.equal(written.status, "applied");
+  const first = f.capture();
+  const rewritten = f.session.writeArtifact(REFINEMENT_CONTEXT_ARTIFACT, '{"a":2}\n', {
+    provenance: "strict",
+  });
+  assert.equal(rewritten.status, "applied");
+  assert.notEqual(f.capture(), first, "a re-prepared context changes the target fingerprint");
+  const other = setup("gist");
+  other.session.writeArtifact(REFINEMENT_CONTEXT_ARTIFACT, '{"a":2}\n', { provenance: "strict" });
+  assert.equal(other.capture(), setup("gist").capture(), "other subjects ignore the context");
 });
 
 test("all unreadable/malformed routing inputs refuse instead of sentinel hashing", () => {

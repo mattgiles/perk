@@ -316,6 +316,9 @@
 - template: "contexts/gist-authoring.md"
   vars:
     marker: "[GIST AUTHORING]"
+- template: "contexts/objective-refinement.md"
+  vars:
+    marker: "[OBJECTIVE REFINEMENT]"
 - template: "stages/gist-save.md"
   vars:
     title: ""
@@ -485,6 +488,13 @@
 - template: "contexts/read-only.md"
   vars:
     marker: "[READ-ONLY MODE]"
+    writer: "plan_draft"
+    artifact: "working-plan artifact"
+- template: "contexts/read-only.md"
+  vars:
+    marker: "[READ-ONLY REFINEMENT MODE]"
+    writer: "objective_refinement_draft"
+    artifact: "working-refinement artifact"
 - template: "contexts/plan-authoring.md"
   vars:
     marker: "[PLAN AUTHORING]"
@@ -503,6 +513,9 @@
 - template: "contexts/adapters/plannotator-gist.md"
   vars:
     marker: "[GIST ADAPTER: PLANNOTATOR]"
+- template: "contexts/adapters/plannotator-refinement.md"
+  vars:
+    marker: "[REFINEMENT ADAPTER: PLANNOTATOR]"
 - template: "stages/stack-review-browser/stack.md"
   vars:
     top_pr: "42"
