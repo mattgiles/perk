@@ -1281,13 +1281,9 @@ export async function completeRefinementReviewV1(
       reviewed,
     }),
   );
-  if (result.status === "approvedSaved") recordRefinementSaveOutcome(slot, result.save);
-  else if (result.status === "approvedSaveFailed") recordRefinementSaveOutcome(slot, result.save);
-  else if (result.status === "approvedNoDraft")
-    recordSaveOutcome(slot, "refinement", {
-      confirmed: false,
-      detail: "no refinement draft reached the save",
-    });
+  // Denials, Direct Edits and the no-draft arm never reach the backend — nothing to confirm.
+  if (result.status === "approvedSaved" || result.status === "approvedSaveFailed")
+    recordRefinementSaveOutcome(slot, result.save);
   return renderRefinementReviewResult(ctx, result);
 }
 

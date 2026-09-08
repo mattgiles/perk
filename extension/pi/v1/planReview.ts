@@ -510,13 +510,8 @@ function recordPlanSaveOutcome(slot: DraftReviewSlot, result: ReviewPlanDraftRes
     case "approvedSaveFailed":
       recordSaveOutcome(slot, "plan", { confirmed: false, detail: result.save.result.message });
       return;
-    case "approvedNoPlan":
-      recordSaveOutcome(slot, "plan", {
-        confirmed: false,
-        detail: "no plan bytes reached the save",
-      });
-      return;
     default:
+      // Denials, Direct Edits and the no-plan arm never reach the backend — no attempt to confirm.
       return;
   }
 }

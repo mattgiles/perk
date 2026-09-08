@@ -940,11 +940,7 @@ function fakePlannotator(sink: FakePlannotatorSink): (pi: ExtensionAPI) => void 
       handler: async () => {},
     });
     pi.events.on("plannotator:request", (data) => {
-      const envelope = data as FakePlannotatorSink["envelopes"][number] & { action: string };
-      if (envelope.action === "review-status") {
-        envelope.respond({ status: "handled", result: { status: "pending" } });
-        return;
-      }
+      const envelope = data as FakePlannotatorSink["envelopes"][number];
       sink.envelopes.push(envelope);
       envelope.respond({
         status: "handled",

@@ -13,8 +13,13 @@ import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/session
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
-import { scriptedDraftReviewBridge } from "../../testing/draftReview.ts";
+import {
+  SCRIPTED_ORIGIN,
+  scriptedDraftReviewBridge,
+  scriptedRemotesSlot,
+} from "../../testing/draftReview.ts";
 import { scaffoldRepo } from "../../testing/harness.ts";
+import type { DraftReviewSlot } from "./draftReview.ts";
 import type { ObjectiveApprovalSaveV1Outcome, ObjectiveSaveResult } from "./objectiveAuthoring.ts";
 import {
   approvedObjectiveSaveResult,
@@ -109,10 +114,14 @@ function fakeColdDoorPi(
   } as unknown as ExtensionAPI;
 }
 
-/** A recording first-party UI: scripted editor/select answers, captured prompts. */
+/**
+ * A recording first-party UI: scripted editor/select answers, captured prompts. `duringWait`
+ * runs inside the verdict `select` — the human wait — where a concurrent writer really acts.
+ */
 function fakeUI(script: {
   editor?: (string | undefined)[];
   select?: (string | undefined)[];
+  duringWait?: () => void;
 }): PlanReviewUI & {
   editors: { title: string; prefill: string | undefined }[];
   selects: { title: string; options: string[] }[];
@@ -128,6 +137,7 @@ function fakeUI(script: {
     },
     async select(title: string, options: string[]) {
       ui.selects.push({ title, options });
+      script.duringWait?.();
       return selectAnswers.shift();
     },
   };
@@ -447,7 +457,7 @@ test("objective arm: default selection -> first-party VIEW-ONLY; approval auto-s
   assert.doesNotMatch(String(result.content[0]?.text), /nothing is saved yet/);
 });
 
-test("objective arm: approved but the cold door fails -> non-terminating, gate stays on, reconciliation", async () => {
+test("objective arm: approved but the cold door fails -> non-terminating, gate stays on, latched", async () => {
   const cwd = scaffoldRepo();
   const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
   const ui = fakeUI({ editor: ["# whatever was shown"], select: [OBJECTIVE_APPROVE] });
@@ -455,6 +465,7 @@ test("objective arm: approved but the cold door fails -> non-terminating, gate s
   plantObjectiveDraft(ctx, branch);
   const pi = fakeColdDoorPi(branch, { stdout: FAIL_ENVELOPE, code: 1 });
   const gating = fakeGating(true);
+  const slot = scriptedRemotesSlot(pi);
   const result = await executePlanReview(
     pi,
     ctx as unknown as ExtensionContext,
@@ -462,6 +473,9 @@ test("objective arm: approved but the cold door fails -> non-terminating, gate s
     cannedBridge(DENIED),
     stubDeps(pi, ctx),
     {},
+    undefined,
+    undefined,
+    slot,
   );
   assert.equal(result.terminate, undefined, "a failed auto-save never terminates");
   assert.equal(gating.exits, 0, "the gate stays on");
@@ -473,7 +487,31 @@ test("objective arm: approved but the cold door fails -> non-terminating, gate s
   const text = String(result.content[0]?.text);
   assert.match(text, /objective APPROVED by reviewer, but the auto-save FAILED/);
   assert.match(text, /gh exploded/);
-  assert.match(text, /reconcile backend objects and retained review/);
+  assert.match(text, /automatic saves are paused for this session/);
+  assert.match(text, /\/objective-save \(the deliberate retry\)/);
+  // The unconfirmed-save latch: a second approval in the same activation is paused BEFORE the
+  // cold door, naming the run id and the manual command.
+  assert.equal(slot.unconfirmed()?.subject, "objective");
+  const argvs: string[][] = [];
+  const again = await executePlanReview(
+    fakeColdDoorPi(branch, { stdout: OBJECTIVE_JSON, argvs }),
+    headfulCtx(
+      cwd,
+      branch,
+      fakeUI({ editor: ["shown"], select: [OBJECTIVE_APPROVE] }),
+    ) as unknown as ExtensionContext,
+    gating,
+    cannedBridge(DENIED),
+    stubDeps(pi, ctx),
+    {},
+    undefined,
+    undefined,
+    slot,
+  );
+  assert.equal((again.details as { error_type?: string }).error_type, "save_unconfirmed");
+  assert.match(String(again.content[0]?.text), /run id RID/);
+  assert.match(String(again.content[0]?.text), /\/objective-save \(the deliberate retry\)/);
+  assert.equal(argvs.length, 0, "the paused approval never reaches the cold door");
 });
 
 test("objective arm: approved via the plannotator bridge -> the same seam path saves the artifact", async () => {
@@ -684,12 +722,13 @@ test("approvedObjectiveSaveResult: saved -> terminating, feedback as guidance, s
   assert.equal((details.save as { ok?: boolean }).ok, true);
 });
 
-test("approvedObjectiveSaveResult: save-failed -> non-terminating, error surfaced, reconciliation required", () => {
+test("approvedObjectiveSaveResult: save-failed -> non-terminating, error surfaced, the deliberate retry named", () => {
   const result = approvedObjectiveSaveResult(OBJECTIVE_APPROVED_FB, failedObjectiveSave());
   assert.equal(result.terminate, undefined);
   const text = String(result.content[0]?.text);
   assert.match(text, /auto-save FAILED \(gh exploded\)/);
-  assert.match(text, /reconcile backend objects and retained review/);
+  assert.match(text, /automatic saves are paused for this session/);
+  assert.match(text, /\/objective-save \(the deliberate retry\)/);
   assert.match(text, /phase 3 can shrink/, "feedback still surfaced");
   const details = result.details as Record<string, unknown>;
   assert.equal(details.ok, false);
@@ -781,7 +820,6 @@ test("objective arm: approved via the bridge + Direct Edits -> NO save, non-term
     ok: true,
     status: "revise",
     reason: "direct_edits",
-    draft_review_dispatch: result.details.draft_review_dispatch,
     approved: true,
     feedback: directEditsFeedback,
     reviewId: "rev-ode",
@@ -822,12 +860,107 @@ test("objective arm: approved via the bridge + a heading-only broken section sti
   assert.equal((result.details as { status?: string }).status, "revise");
 });
 
-function executePlanReview(...args: Parameters<typeof executePlanReviewCore>) {
-  args[8] = "policy-tool-id";
-  return executePlanReviewCore(...args);
+// ------------------------------------------------------------- the draft-review guards (one case)
+
+test("objective arm: the first-party review opens the slot (superseding a prior review) and its approve is destination-fenced", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
+  const remotes = { current: SCRIPTED_ORIGIN };
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: OBJECTIVE_JSON, argvs });
+  const slot = scriptedRemotesSlot(pi, remotes);
+  const ui = fakeUI({
+    editor: ["shown"],
+    select: [OBJECTIVE_APPROVE],
+    // `git remote set-url origin …` while the verdict menu is open.
+    duringWait: () => {
+      remotes.current = "remote.origin.url\nhttps://github.com/acme/forked.git";
+    },
+  });
+  const ctx = headfulCtx(cwd, branch, ui);
+  plantObjectiveDraft(ctx, branch);
+  // A review already open on another surface (a browser door) is superseded by this one.
+  const prior = slot.open(ctx as unknown as ExtensionContext, {
+    subject: "objective",
+    source: "artifact",
+    raw: OBJECTIVE_PAYLOAD,
+    markdown: "# rendered",
+  });
+  assert.ok(prior.ok);
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(APPROVED),
+    stubDeps(pi, ctx),
+    {},
+    undefined,
+    undefined,
+    slot,
+  );
+  assert.equal(prior.review.isCurrent(), false, "the first-party open superseded the prior review");
+  assert.equal(ui.editors.length, 1, "the first-party editor opened");
+  assert.deepEqual(result.details, {
+    ok: true,
+    status: "destination-changed",
+    subject: "objective",
+    changed: ["remotes"],
+  });
+  assert.match(
+    String(result.content[0]?.text),
+    /save destination changed while the review was open \(changed: remotes\)/,
+  );
+  assert.match(String(result.content[0]?.text), /call plan_review to open a fresh review/);
+  assert.equal(argvs.length, 0, "nothing saved");
+  assert.equal(gating.exits, 0, "the gate stays on");
+  assert.equal(result.terminate, undefined);
+  // The same destination held steady: the fresh review saves once.
+  const steady = await executePlanReview(
+    pi,
+    headfulCtx(
+      cwd,
+      branch,
+      fakeUI({ editor: ["shown"], select: [OBJECTIVE_APPROVE] }),
+    ) as unknown as ExtensionContext,
+    gating,
+    cannedBridge(APPROVED),
+    stubDeps(pi, ctx),
+    {},
+    undefined,
+    undefined,
+    slot,
+  );
+  assert.equal((steady.details as { saved?: boolean }).saved, true);
+  assert.equal(argvs.length, 1, "one save call");
+  assert.equal(gating.exits, 1);
+});
+
+// ---------------------------------------------------------------------------------- wrappers
+
+/** The dispatcher over a fresh scripted-remotes slot unless the case threads its own. */
+function executePlanReview(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  gating: ToolGating,
+  bridge: ReturnType<typeof cannedBridge>,
+  deps: PlanReviewV1Deps,
+  params: unknown,
+  signal?: AbortSignal,
+  wave?: WaveLaunch,
+  slot: DraftReviewSlot = scriptedRemotesSlot(pi),
+) {
+  return executePlanReviewCore(pi, ctx, gating, bridge, slot, deps, params, signal, wave);
 }
 
-function executeObjectiveReview(...args: Parameters<typeof executeObjectiveReviewCore>) {
-  args[6] = "policy-tool-id";
-  return executeObjectiveReviewCore(...args);
+function executeObjectiveReview(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  gating: ToolGating,
+  bridge: ReturnType<typeof cannedBridge>,
+  signal?: AbortSignal,
+  wave?: WaveLaunch,
+  slot: DraftReviewSlot = scriptedRemotesSlot(pi),
+) {
+  return executeObjectiveReviewCore(pi, ctx, gating, bridge, slot, signal, wave);
 }

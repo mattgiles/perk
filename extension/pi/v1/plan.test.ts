@@ -8,7 +8,15 @@
 // `perk` (PERK_BIN) stands in for the GitHub write, so no LLM / network / gh / Python runs.
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -547,6 +555,9 @@ test("harness: plan_draft succeeds while read-only; artifact + pointer land", as
     assert.equal(readFileSync(path, "utf8"), PLAN_MD);
     const pointer = soundPointer(h.workflowState().session_artifacts?.[PLAN_DRAFT_ARTIFACT]);
     assert.equal(pointer?.digest, digestSessionData(PLAN_MD));
+    // The draft tool consults no review state: the session data dir holds the artifact alone
+    // (no persisted draft-review record or lock — the guards are in-memory).
+    assert.deepEqual(readdirSync(sessionDataDir(cwd, "01RID")), [PLAN_DRAFT_ARTIFACT]);
   } finally {
     h.dispose();
     rmSync(cwd, { recursive: true, force: true });

@@ -797,13 +797,8 @@ export async function completeGistReviewV1(
     case "approvedSaveFailed":
       recordSaveOutcome(slot, "gist", { confirmed: false, detail: result.save.save.message });
       break;
-    case "approvedNoDraft":
-      recordSaveOutcome(slot, "gist", {
-        confirmed: false,
-        detail: "no gist draft reached the save",
-      });
-      break;
     default:
+      // Denials, Direct Edits, the no-draft and refused-draft arms never reach the backend.
       break;
   }
   return renderGistReviewResult(ctx, result);
