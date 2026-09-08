@@ -13,6 +13,7 @@ import {
   parseTomlSubset,
   resolveIssueBackendId,
   resolveIssueDestination,
+  resolveIssueRouting,
   subagentModel,
 } from "./config.ts";
 
@@ -105,6 +106,8 @@ const ISSUES_FIXTURE = JSON.parse(
     name: string;
     toml: string;
     expected: { backend: string | null; team: string | null };
+    tomllib?: { backend: string | null; team: string | null };
+    provable: boolean;
   }[];
 };
 
@@ -118,6 +121,11 @@ test("issues-table fixture: unique case names, every string spelling covered", (
     /multi-line literal/,
     /absent/,
     /non-string/,
+    /dotted keys/,
+    /inline table/,
+    /quoted header/,
+    /trailing comment/,
+    /escape/,
   ])
     assert.ok(
       names.some((n) => needle.test(n)),
@@ -126,15 +134,52 @@ test("issues-table fixture: unique case names, every string spelling covered", (
 });
 
 for (const c of ISSUES_FIXTURE.cases) {
-  test(`issues-table fixture ${c.name}: resolveIssueDestination reads what tomllib reads`, () => {
+  test(`issues-table fixture ${c.name}: the recorded reading, proven or widened`, () => {
     const cwd = repoWith({ "perk.toml": c.toml });
     assert.deepEqual(resolveIssueDestination(cwd), c.expected);
-    // The same extraction rule over the bare parser (the fixture's stated TS reading).
+    // The same extraction rule over the bare parser (the fixture's stated TS reading, through
+    // the StrippedStr boundary).
     const issues = parseTomlSubset(c.toml).tables.issues;
-    const pick = (v: unknown) => (typeof v === "string" ? v : null);
+    const pick = (v: unknown) => (typeof v === "string" ? v.trim() || null : null);
     assert.deepEqual({ backend: pick(issues?.backend), team: pick(issues?.team) }, c.expected);
+    // The fence's verdict: proven keys, or the whole document standing in for them.
+    const routing = resolveIssueRouting(cwd);
+    assert.deepEqual({ backend: routing.backend, team: routing.team }, c.expected);
+    if (c.provable) {
+      assert.equal(routing.kind, "keys");
+      assert.equal(c.tomllib, undefined, "a proven case never diverges from tomllib");
+    } else {
+      assert.equal(routing.kind, "document");
+      assert.equal(routing.kind === "document" && routing.text, c.toml);
+    }
   });
 }
+
+test("resolveIssueRouting: invalid-TOML shapes the subset reader tolerates are unproven", () => {
+  // Each of these makes tomllib raise (so Python cannot save at all); the subset reader would
+  // read something, and the fence must not trust it.
+  for (const toml of [
+    '[issues]\nbackend = "linear"\n[issues]\nteam = "ENG"\n',
+    '[issues]\nbackend = "linear"\nbackend = "github"\n',
+    '[issues]\nbackend = "linear" trailing\n',
+    '[issues]\nbackend.kind = "linear"\n',
+    "[issues]\nbackend\n",
+  ]) {
+    const routing = resolveIssueRouting(repoWith({ "perk.toml": toml }));
+    assert.equal(routing.kind, "document", toml);
+  }
+});
+
+test("resolveIssueRouting: an `issues` key nested under another table widens (conservative)", () => {
+  const routing = resolveIssueRouting(
+    repoWith({
+      "perk.toml": '[issues]\nbackend = "github"\n\n[labels]\nissues = "perk"\n',
+    }),
+  );
+  // Conservative: a key segment spelling `issues` anywhere widens — the reader never has to
+  // decide whether the nesting matters.
+  assert.equal(routing.kind, "document");
+});
 
 test("parseTomlSubset: native booleans and numbers", () => {
   const t = parseTomlSubset(
@@ -522,9 +567,9 @@ test("resolveIssueDestination: absent config and a local.toml-only table both re
   assert.deepEqual(resolveIssueDestination(cwd), { backend: null, team: null });
 });
 
-test("resolveIssueDestination: unknown backends pass through verbatim (no validation here)", () => {
+test("resolveIssueDestination: unknown backends pass through (no validation here), stripped", () => {
   const cwd = repoWith({ "perk.toml": '[issues]\nbackend = "jira"\nteam = "  ENG "\n' });
-  assert.deepEqual(resolveIssueDestination(cwd), { backend: "jira", team: "  ENG " });
+  assert.deepEqual(resolveIssueDestination(cwd), { backend: "jira", team: "ENG" });
 });
 
 test("resolveIssueDestination: a linked worktree reads the MAIN checkout's [issues] table", () => {

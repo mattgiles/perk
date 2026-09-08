@@ -208,10 +208,12 @@ backend = "linear"
 team = "ENG"
 ```
 
-The in-session draft-review destination fence reads these two keys too: every TOML string
-spelling (`"basic"`, `'literal'`, multi-line forms) is read; dotted-key / inline-table spellings
-of `[issues]` are not read by the extension and therefore not fenced (the `perk` CLI remains the
-save authority and reads any valid TOML).
+The in-session draft-review destination fence reads these two keys too. It trusts its own read
+only for the plain shape above (one `[issues]` header, single-line `"basic"`/`'literal'`
+strings); any other valid spelling — dotted keys, an inline table, multi-line strings, escapes —
+makes it compare the whole committed `config.toml` instead, so a routing edit is always noticed
+but any edit to that file during a review counts as "the destination changed" (the `perk` CLI
+remains the save authority and reads any valid TOML).
 
 ### `[linear]`
 

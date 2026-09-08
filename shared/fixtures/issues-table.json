@@ -1,55 +1,130 @@
 {
-  "description": "Perk TOML documents paired with the `[issues] backend`/`team` values both planes must read (TS: extension/substrate/config.ts::resolveIssueDestination via parseTomlSubset; Python: tomllib). A non-string value or an absent key reads as null. contracts.md §8.23.",
+  "description": "Perk TOML documents paired with the `[issues] backend`/`team` values the TS subset reader yields (`expected`: extension/substrate/config.ts::resolveIssueDestination via parseTomlSubset — stripped, blank/non-string/absent → null) and whether that read is provably tomllib's (`provable`: resolveIssueRouting reads `keys`; otherwise the save-destination fence widens to the whole `document`). When Python's tomllib reads something else, `tomllib` carries its reading — every such case MUST be unproven. contracts.md §8.23.",
   "cases": [
     {
       "name": "basic strings",
       "toml": "[issues]\nbackend = \"linear\"\nteam = \"ENG\"\n",
-      "expected": { "backend": "linear", "team": "ENG" }
+      "expected": { "backend": "linear", "team": "ENG" },
+      "provable": true
     },
     {
       "name": "literal strings",
       "toml": "[issues]\nbackend = 'linear'\nteam = 'ENG'\n",
-      "expected": { "backend": "linear", "team": "ENG" }
+      "expected": { "backend": "linear", "team": "ENG" },
+      "provable": true
     },
     {
-      "name": "multi-line basic strings",
+      "name": "multi-line basic strings (unproven: the subset's escape handling is not tomllib's)",
       "toml": "[issues]\nbackend = \"\"\"linear\"\"\"\nteam = \"\"\"\nENG\"\"\"\n",
-      "expected": { "backend": "linear", "team": "ENG" }
+      "expected": { "backend": "linear", "team": "ENG" },
+      "provable": false
     },
     {
-      "name": "multi-line literal strings",
+      "name": "multi-line literal strings (unproven: only single-line strings are vouched for)",
       "toml": "[issues]\nbackend = '''linear'''\nteam = '''\nENG'''\n",
-      "expected": { "backend": "linear", "team": "ENG" }
+      "expected": { "backend": "linear", "team": "ENG" },
+      "provable": false
     },
     {
       "name": "literal strings keep backslashes verbatim",
       "toml": "[issues]\nbackend = 'github'\nteam = 'C:\\ENG'\n",
-      "expected": { "backend": "github", "team": "C:\\ENG" }
+      "expected": { "backend": "github", "team": "C:\\ENG" },
+      "provable": true
     },
     {
       "name": "inline comments after the strings",
       "toml": "[issues]\nbackend = \"linear\" # committed\nteam = 'ENG' # the team key\n",
-      "expected": { "backend": "linear", "team": "ENG" }
+      "expected": { "backend": "linear", "team": "ENG" },
+      "provable": true
+    },
+    {
+      "name": "surrounding whitespace is stripped (StrippedStr)",
+      "toml": "[issues]\nbackend = \" linear \"\nteam = '  ENG'\n",
+      "expected": { "backend": "linear", "team": "ENG" },
+      "provable": true
+    },
+    {
+      "name": "blank strings read as absent (StrippedStr)",
+      "toml": "[issues]\nbackend = \"\"\nteam = '   '\n",
+      "expected": { "backend": null, "team": null },
+      "provable": true
+    },
+    {
+      "name": "other keys in the table and other tables around it",
+      "toml": "[workflow]\nbase = \"main\"\n\n[issues]\nlabel = \"perk\"\nbackend = \"github\"\n\n[models.stages.plan]\nmodel = \"x\"\n\n[[ci.checks]]\nname = \"t\"\ncommand = \"\"\"\njust test\n\"\"\"\n",
+      "expected": { "backend": "github", "team": null },
+      "provable": true
     },
     {
       "name": "absent table",
       "toml": "[workflow]\nbase = \"main\"\n",
-      "expected": { "backend": null, "team": null }
+      "expected": { "backend": null, "team": null },
+      "provable": true
     },
     {
       "name": "absent key",
       "toml": "[issues]\nbackend = \"github\"\n",
-      "expected": { "backend": "github", "team": null }
+      "expected": { "backend": "github", "team": null },
+      "provable": true
     },
     {
-      "name": "non-string values",
+      "name": "non-string values (unproven: Python's boundary rejects them outright)",
       "toml": "[issues]\nbackend = true\nteam = 42\n",
-      "expected": { "backend": null, "team": null }
+      "expected": { "backend": null, "team": null },
+      "provable": false
     },
     {
       "name": "empty document",
       "toml": "",
-      "expected": { "backend": null, "team": null }
+      "expected": { "backend": null, "team": null },
+      "provable": true
+    },
+    {
+      "name": "dotted keys (unproven: the subset reader never sees them)",
+      "toml": "issues.backend = \"linear\"\nissues.team = \"ENG\"\n",
+      "expected": { "backend": null, "team": null },
+      "tomllib": { "backend": "linear", "team": "ENG" },
+      "provable": false
+    },
+    {
+      "name": "inline table (unproven: the subset reader never sees it)",
+      "toml": "issues = { backend = \"linear\", team = \"ENG\" }\n",
+      "expected": { "backend": null, "team": null },
+      "tomllib": { "backend": "linear", "team": "ENG" },
+      "provable": false
+    },
+    {
+      "name": "quoted header (unproven: quoted segments can spell any key)",
+      "toml": "[\"issues\"]\nbackend = \"linear\"\nteam = \"ENG\"\n",
+      "expected": { "backend": null, "team": null },
+      "tomllib": { "backend": "linear", "team": "ENG" },
+      "provable": false
+    },
+    {
+      "name": "header with a trailing comment (unproven: the subset reader skips that header)",
+      "toml": "[issues] # routing\nbackend = \"linear\"\n",
+      "expected": { "backend": null, "team": null },
+      "tomllib": { "backend": "linear", "team": null },
+      "provable": false
+    },
+    {
+      "name": "unicode escape (unproven: the subset reader keeps the escape verbatim)",
+      "toml": "[issues]\nbackend = \"\\u0067ithub\"\n",
+      "expected": { "backend": "\\u0067ithub", "team": null },
+      "tomllib": { "backend": "github", "team": null },
+      "provable": false
+    },
+    {
+      "name": "sub-table (unproven: a super-table the subset reader keeps flat)",
+      "toml": "[issues.extra]\nkey = \"x\"\n",
+      "expected": { "backend": null, "team": null },
+      "provable": false
+    },
+    {
+      "name": "array of tables (unproven: tomllib reads a list, never the table)",
+      "toml": "[[issues]]\nbackend = \"linear\"\n",
+      "expected": { "backend": null, "team": null },
+      "provable": false
     }
   ]
 }

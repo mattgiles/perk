@@ -4382,16 +4382,30 @@ the door.
 3. **The destination fence** (`extension/session/saveDestination.ts`; APPROVE only, EVERY source
    — first-party included). `captureSaveDestination(cwd, nodeClaim)` digests three components
    (`digestSessionData` per component, no aggregate, no raw value retained): `issues` — the main
-   checkout's committed `.perk/config.toml` `[issues] backend`/`team`
-   (`resolveIssueDestination`; the subset TOML reader now reads `'literal'` and `'''multi-line
-   literal'''` strings beside the basic forms, parity-pinned against `tomllib` through
-   `shared/fixtures/issues-table.json` — dotted-key / inline-table spellings of `[issues]` are
-   not read and therefore not fenced; Python remains the authority for the save itself);
-   `node_claim` — the plan's objective node claim (`null` for every other subject); `remotes` —
-   the sorted `git config --null --get-regexp '^remote\..*\.(url|gh-resolved)$'` entries
-   (`remoteConfig`; `""` when no remote matches), captured ONLY when the resolved backend is
-   `null`/`"github"` (Linear never reads remotes, so no git subprocess runs there); a `null`
-   `remoteConfig` on the GitHub arm makes the capture `null` ("unverifiable"). No other git
+   checkout's committed `.perk/config.toml` `[issues] backend`/`team` as `resolveIssueRouting`
+   reads them (the subset TOML reader: `"basic"`, `'literal'` and multi-line strings, through
+   the `StrippedStr` boundary — stripped, blank/non-string → `null`), digested as the two keys
+   ONLY while the document **provably** spells the table the way that reader parses it — one
+   bare `[issues]` header, `backend`/`team` each at most once as plain single-line strings with
+   no backslash, and no other header or key segment spelling `issues`; any spelling the reader
+   cannot vouch for (dotted keys `issues.backend = …`, an inline table, quoted keys, `[[issues]]`,
+   super-/sub-tables, escapes, multi-line strings, a header the reader skips, a duplicate
+   header/key — every line it cannot classify) **widens** the component to the verbatim
+   committed document, so a routing edit `tomllib` would read and the subset reader would not
+   still moves the digest (over-fencing an unrelated edit to that file; never under-fencing).
+   The proven and widened digest inputs are tagged (`{backend, team}` vs `{document}`) so they
+   never collide. Parity is pinned through `shared/fixtures/issues-table.json`: each case
+   records the subset reader's reading and its `provable` verdict, a divergent `tomllib` reading
+   where the planes differ, and `tests/test_issues_config_parity.py` asserts "divergent ⇒
+   unproven" (Python remains the authority for the save itself); `node_claim` — the plan's
+   objective node claim (`null` for every other subject); `remotes` — the sorted `git config
+   --null --get-regexp '^remote\..*\.(url|gh-resolved)$'` entries (`remoteConfig`; `""` when
+   no remote matches), captured whenever the read backend is anything but exactly `"linear"` —
+   `"github"`, `null` (the fail-safe default), an unknown value Python would refuse, or a
+   verbatim unproven read such as `"\u0067ithub"` (only a Linear save never consults remotes,
+   so only there does no git subprocess run; the subset reader reads `"linear"` only from a
+   bare `[issues]` table `tomllib` reads identically); a `null` `remoteConfig` on the GitHub arm
+   makes the capture `null` ("unverifiable"). No other git
    config, `[workflow] base`, credentials, environment or the handoff participate — landing a PR
    (which rewrites `branch.*`) never blocks an approval. At APPROVE the destination is recaptured
    and `changedDestinationComponents(reviewed, current)` (a key present on one side only counts)

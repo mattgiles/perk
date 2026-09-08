@@ -74,9 +74,11 @@ The bridge subscribes to the browser's decision before it emits the review reque
 decision emitted during the handshake is not lost; there is no status query, polling, startup
 discovery, automatic replay, or resume. Cancellation closes the local wait, not the upstream
 browser. Nothing is persisted: a browser decision does not survive a Pi restart — re-run the
-door. The `[issues]` table is read for every TOML string spelling (`"basic"`, `'literal'`,
-multi-line); dotted-key (`issues.backend = …`) or inline-table spellings are not read by the
-extension and therefore not fenced — Python remains the authority for the save itself.
+door. The fence trusts its own `[issues]` read only for the plain shape (one `[issues]`
+header, single-line `"basic"`/`'literal'` strings); for any other valid spelling — dotted keys
+(`issues.backend = …`), an inline table, multi-line strings, escapes — it compares the whole
+committed `config.toml` instead, so a routing edit is always noticed but any edit to that file
+during a review counts as a changed destination. Python remains the authority for the save.
 
 ## Known caveats & maturity
 

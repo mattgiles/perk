@@ -66,11 +66,13 @@ team = "ENG"
 ```
 
 The in-session draft-review destination fence reads these two keys too (see
-[Browser draft review](../in-session/review-and-authoring.md#browser-draft-review)): every TOML
-string spelling — `"basic"`, `'literal'`, and their multi-line forms — is read; a dotted-key
-(`issues.backend = …`) or inline-table (`issues = { … }`) spelling is not read by the extension
-and therefore not fenced. The `perk` CLI remains the authority for the save itself and reads any
-valid TOML.
+[Browser draft review](../in-session/review-and-authoring.md#browser-draft-review)). It trusts
+its own read only for the plain shape above — one `[issues]` header with single-line `"basic"`
+or `'literal'` strings; any other valid spelling (dotted keys `issues.backend = …`, an inline
+table `issues = { … }`, multi-line strings, escapes) makes the fence compare the whole committed
+`config.toml` instead, so a routing edit is always noticed — at the cost that any edit to that
+file during a review then counts as "the destination changed". The `perk` CLI remains the
+authority for the save itself and reads any valid TOML.
 
 ## `[linear]`
 

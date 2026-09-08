@@ -17,7 +17,7 @@ import {
 import type { ReviewOutcome } from "../pi/v1/reviewOutcome.ts";
 import { openBranchWorkflowSession } from "../session/branchWorkflowSession.ts";
 import { captureSaveDestination } from "../session/saveDestination.ts";
-import { resolveIssueDestination } from "../substrate/config.ts";
+import { resolveIssueRouting } from "../substrate/config.ts";
 import type { SessionArtifactCtx } from "../substrate/sessionData.ts";
 import type { EntrySink } from "../substrate/workflowState.ts";
 import { gitInit } from "./harness.ts";
@@ -54,7 +54,7 @@ export function scriptedRemotesSlot(
     session: openBranchWorkflowSession,
     destination: (cwd, nodeClaim) =>
       captureSaveDestination(cwd, nodeClaim, {
-        issues: resolveIssueDestination,
+        issues: resolveIssueRouting,
         remotes: () => remotes.current,
       }),
   });

@@ -96,6 +96,44 @@ test("[issues] backend/team edits change only `issues` — basic and literal spe
   assert.deepEqual(changedDestinationComponents(reviewed, capture(cwd)), ["issues"]);
 });
 
+test("a spelling the subset reader cannot vouch for widens `issues` to the whole document", () => {
+  // The finding: `issues.backend = …` is valid TOML tomllib reads and the subset reader does
+  // not — so a Linear→GitHub flip written that way must still move the fence.
+  const cwd = repo('issues.backend = "linear"\nissues.team = "ENG"\n');
+  const reviewed = capture(cwd);
+  writeIssues(cwd, 'issues.backend = "github"\nissues.team = "ENG"\n');
+  assert.deepEqual(changedDestinationComponents(reviewed, capture(cwd)), ["issues"]);
+  writeIssues(cwd, 'issues = { backend = "linear", team = "OPS" }\n');
+  assert.deepEqual(changedDestinationComponents(reviewed, capture(cwd)), ["issues"]);
+  // Widened means over-fenced: an unrelated edit to the same document reads as `issues` too —
+  // never under-fenced. (Proven documents ignore such edits: see the incident test above.)
+  writeIssues(cwd, 'issues.backend = "linear"\nissues.team = "ENG"\n\n[compaction]\nx = 1\n');
+  assert.deepEqual(changedDestinationComponents(reviewed, capture(cwd)), ["issues"]);
+  // The proven and widened digests of the same routing never collide (and the proven Linear
+  // read now also drops the fail-safe GitHub arm's `remotes`).
+  writeIssues(cwd, '[issues]\nbackend = "linear"\nteam = "ENG"\n');
+  assert.deepEqual(changedDestinationComponents(reviewed, capture(cwd)), ["issues", "remotes"]);
+});
+
+test("an escape in a proven-looking table widens too (the reader's unescape is not tomllib's)", () => {
+  const cwd = repo('[issues]\nbackend = "github"\n');
+  const reviewed = capture(cwd);
+  // tomllib reads both spellings as `github`; the subset reader reads the escape verbatim. The
+  // fence must not compare a value it cannot vouch for — it widens, so the edit is a change —
+  // and the verbatim non-`linear` read keeps the GitHub arm, so `remotes` stays fenced.
+  writeIssues(cwd, '[issues]\nbackend = "\\u0067ithub"\n');
+  const widened = capture(cwd);
+  assert.deepEqual(changedDestinationComponents(reviewed, widened), ["issues"]);
+  assert.equal(widened.issues, capture(cwd).issues, "widened captures are stable");
+  git(cwd, "remote", "set-url", "origin", "https://github.com/acme/other.git");
+  assert.deepEqual(changedDestinationComponents(widened, capture(cwd)), ["remotes"]);
+});
+
+test("an unknown backend keeps the fail-safe GitHub arm (Python refuses the save; remotes stay fenced)", () => {
+  const cwd = repo('[issues]\nbackend = "jira"\n');
+  assert.deepEqual(Object.keys(capture(cwd)).sort(), [...DESTINATION_COMPONENTS].sort());
+});
+
 test("a different node claim (or none) changes only `node_claim`; key order is fixed", () => {
   const cwd = repo();
   const reviewed = capture(cwd);
@@ -117,7 +155,7 @@ test("backend = linear → no `remotes` component and NO git subprocess", () => 
   const cwd = repo('[issues]\nbackend = "linear"\nteam = "ENG"\n');
   let remoteCalls = 0;
   const destination = captureSaveDestination(cwd, CLAIM, {
-    issues: () => ({ backend: "linear", team: "ENG" }),
+    issues: () => ({ kind: "keys", backend: "linear", team: "ENG" }),
     remotes: () => {
       remoteCalls++;
       return null;
@@ -129,6 +167,13 @@ test("backend = linear → no `remotes` component and NO git subprocess", () => 
   // Same through the production ports: the literal spelling selects the Linear arm too.
   writeIssues(cwd, "[issues]\nbackend = 'linear'\nteam = 'ENG'\n");
   assert.deepEqual(Object.keys(capture(cwd)).sort(), ["issues", "node_claim"]);
+});
+
+test("an unproven document with no readable backend takes the fail-safe GitHub arm", () => {
+  // `issues.backend = "linear"` is invisible to the subset reader, so the arm falls back to
+  // GitHub and captures remotes as well — over-capture, never a skipped component.
+  const cwd = repo('issues.backend = "linear"\nissues.team = "ENG"\n');
+  assert.deepEqual(Object.keys(capture(cwd)).sort(), [...DESTINATION_COMPONENTS].sort());
 });
 
 test("a GitHub-backend repo with no remotes captures `remotes` over the empty string", () => {
