@@ -130,6 +130,41 @@ def test_reviewer_defs_source_bind_only_the_exact_ponytail_skill_paths():
         assert "must not emit a second, standalone Ponytail finding" in compact
 
 
+def test_reviewer_defs_consume_the_review_context_pointer_envelope():
+    """Both reviewer defs teach the file-reference envelope `perk pr review-context` emits (the
+    text never rides stdout) and the byte-slice fallback for a line over Pi's per-line `read`
+    bound; the adversarial def additionally names `blocked` among its required report fields
+    (the wave schema's required list is pinned in lockstep by its node:test suite)."""
+    for name in ("pr-reviewer", "adversarial-reviewer", "conflict-resolver"):
+        text = _source_bytes(name).decode()
+        compact = " ".join(text.split())
+        assert "`context_dir`" in compact, name
+        assert "`max_line_bytes`" in compact, name
+        # The offset-capable byte-slice recipe: `head -c` alone exposes only the first slice.
+        assert "sed -n '<N>p' <path> | tail -c +<offset> | head -c 51200" in compact, name
+        assert "until a slice" in compact, name
+        assert "{path, bytes, lines, max_line_bytes}" in compact, name
+    for name in ("pr-reviewer", "adversarial-reviewer"):
+        compact = " ".join(_source_bytes(name).decode().split())
+        assert "a long line is never by itself a reason to block" in compact, name
+        assert "never dump a whole file into your session" in compact, name
+    adversarial = " ".join(_source_bytes("adversarial-reviewer").decode().split())
+    assert (
+        "**required fields: `angle`, `summary`, `findings`, `fyi`, `streamed`, `blocked`**"
+        in adversarial
+    )
+    assert "Blocked is **not a verdict**" in adversarial
+    assert "An unfinished hunt is a **blocked lane**" in adversarial
+    resolver = " ".join(_source_bytes("conflict-resolver").decode().split())
+    # The envelope permits `plan_body: null`; the resolver must name that arm, never dereference
+    # `plan_body.path` unconditionally.
+    assert "such a reference **or `null`**" in resolver
+    assert "when it is `null`, work from `body` and `diff` alone" in resolver
+    pr_reviewer = " ".join(_source_bytes("pr-reviewer").decode().split())
+    assert "perk pr review-context --expected-pr <n> --json" in pr_reviewer
+    assert "`plan-fidelity` requires a non-null object whose file contains" in pr_reviewer
+
+
 def test_committed_mirrors_are_byte_identical_for_all_perk_agents():
     root = _resources.agents_dir().parent
     for name in PERK_AGENTS:

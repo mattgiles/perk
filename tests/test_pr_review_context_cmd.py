@@ -8,6 +8,7 @@ from click.testing import CliRunner, Result
 from perk import github, plan
 from perk.cli.cli import cli
 from perk.state import cache
+from perk.state import run_id as run_id_mod
 from perk.substrate import git as git_mod
 
 _REF = {
@@ -52,6 +53,18 @@ def _open_pr():
     return github.PullRequest(number=42, url="u", is_draft=False, state="OPEN", existed=True)
 
 
+def _text(ref: dict[str, object]) -> str:
+    """Read the file a `{path, bytes, lines, max_line_bytes}` envelope reference points at."""
+    assert set(ref) == {"path", "bytes", "lines", "max_line_bytes"}
+    raw_path = ref["path"]
+    assert isinstance(raw_path, str)
+    path = Path(raw_path)
+    assert path.is_absolute()
+    text = path.read_text(encoding="utf-8")
+    assert ref["bytes"] == len(text.encode("utf-8"))
+    return text
+
+
 def test_context_success_json(monkeypatch):
     monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
     monkeypatch.setattr(github, "get_pr_review_context", lambda **k: _context())
@@ -60,13 +73,19 @@ def test_context_success_json(monkeypatch):
         _git_init(d)
         cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
         result = runner.invoke(cli, ["pr", "review-context", "--json"])
-    assert result.exit_code == 0
-    data = json.loads(result.output)
-    assert data["success"] is True
-    assert data["pr"] == 42 and data["branch"] == "plan-7"
-    assert data["base_ref"] == "main" and data["head_ref"] == "plan-7"
-    assert "new line" in data["diff"]
-    assert data["plan_body"].startswith("# Plan")
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["success"] is True
+        assert data["pr"] == 42 and data["branch"] == "plan-7"
+        assert data["base_ref"] == "main" and data["head_ref"] == "plan-7"
+        assert "new line" in _text(data["diff"])
+        assert _text(data["plan_body"]).startswith("# Plan")
+        # Every text section lives under the invocation's context dir, in the run scratch tree.
+        context_dir = Path(data["context_dir"])
+        assert Path(data["diff"]["path"]) == context_dir / "diff.patch"
+        assert Path(data["body"]["path"]) == context_dir / "body.md"
+        assert Path(data["plan_body"]["path"]) == context_dir / "plan.md"
+        assert cache.scratch_dir(Path(d).resolve()) in context_dir.resolve().parents
 
 
 def test_context_no_plan_ref_exits_1():
@@ -205,10 +224,10 @@ def test_context_expected_pr_preserves_active_plan_context(monkeypatch):
         cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
         cache.plan_body_path(Path(d)).write_text("# Snapshot plan\n", encoding="utf-8")
         result = runner.invoke(cli, ["pr", "review-context", "--expected-pr", "42", "--json"])
-    assert result.exit_code == 0
-    data = json.loads(result.output)
-    assert data["pr"] == 42
-    assert data["plan_body"] == "# Snapshot plan"
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["pr"] == 42
+        assert _text(data["plan_body"]) == "# Snapshot plan"
     assert seen["plan_body"] == "# Snapshot plan"
 
 
@@ -407,10 +426,11 @@ def test_stack_context_sections_and_combined_diff(git_repo_with_remote, monkeypa
     assert data["title"] == "title 2"
     # Per-member sections, bottom→top; the plan-branch member is enriched.
     assert [row["pr"] for row in data["stack"]] == [1, 2]
-    assert data["stack"][0]["plan_body"] == "# Plan 301"
+    assert _text(data["stack"][0]["plan_body"]) == "# Plan 301"
     assert data["stack"][1]["plan_body"] is None
     # The combined base→top diff carries BOTH layers' changes.
-    assert "a.txt" in data["combined_diff"] and "b.txt" in data["combined_diff"]
+    combined = _text(data["combined_diff"])
+    assert "a.txt" in combined and "b.txt" in combined
     # The per-invocation temp-ref namespace is fully cleaned up after the read — no ref
     # under refs/perk/ survives (checkout's shared refs/perk/review/<n> names included:
     # this worker must never touch them, or concurrent lanes would clobber each other).
@@ -562,9 +582,10 @@ def test_stack_context_two_workers_interleaved_ref_isolation(git_repo_with_remot
     data_a = json.loads(result.stdout)
     assert data_a["pr"] == 2 and data_a["branch"] == "feat-b"
     assert [row["pr"] for row in data_a["stack"]] == [1, 2]
-    assert data_a["stack"][0]["plan_body"] == "# Plan 301"
+    assert _text(data_a["stack"][0]["plan_body"]) == "# Plan 301"
     assert data_a["stack"][1]["plan_body"] is None
-    assert "a.txt" in data_a["combined_diff"] and "b.txt" in data_a["combined_diff"]
+    combined_a = _text(data_a["combined_diff"])
+    assert "a.txt" in combined_a and "b.txt" in combined_a
 
     # Worker B completed independently — the narrowing doubles as the barrier-liveness proof
     # (the interleave actually fired; a seam rename cannot silently turn this sequential).
@@ -573,9 +594,12 @@ def test_stack_context_two_workers_interleaved_ref_isolation(git_repo_with_remot
     data_b = json.loads(state.b_result.stdout)
     assert data_b["pr"] == 2 and data_b["branch"] == "feat-b"
     assert [row["pr"] for row in data_b["stack"]] == [1, 2]
-    assert data_b["stack"][0]["plan_body"] == "# Plan 301"
+    assert _text(data_b["stack"][0]["plan_body"]) == "# Plan 301"
     assert data_b["stack"][1]["plan_body"] is None
-    assert "a.txt" in data_b["combined_diff"] and "b.txt" in data_b["combined_diff"]
+    combined_b = _text(data_b["combined_diff"])
+    assert "a.txt" in combined_b and "b.txt" in combined_b
+    # Two invocations never share a context directory.
+    assert data_a["context_dir"] != data_b["context_dir"]
 
     # A's namespace before B started: two member refs + base under ONE namespace prefix.
     assert state.refs_at_b_start is not None
@@ -638,6 +662,7 @@ def test_non_stack_context_envelope_byte_identical(monkeypatch):
         "base_ref",
         "head_ref",
         "title",
+        "context_dir",
         "body",
         "diff",
         "plan_body",
@@ -732,7 +757,7 @@ def test_local_flag_threads_local_diff_to_every_stack_member(git_repo, monkeypat
     data = json.loads(result.stdout)
     assert [row["diff_source"] for row in data["stack"]] == ["local-git", "local-git"]
     assert data["diff_source"] == "local-git"
-    assert data["combined_diff"] == "combined"
+    assert _text(data["combined_diff"]) == "combined"
 
 
 def test_local_git_diff_source_surfaces_in_the_envelope_and_human_line(monkeypatch):
@@ -776,3 +801,179 @@ def test_stack_envelope_carries_diff_source_per_member_and_for_the_top(git_repo,
     assert [row["diff_source"] for row in data["stack"]] == ["github", "local-git"]
     assert data["diff_source"] == "local-git"  # the top-level fields describe the top PR
     assert "combined_diff_source" not in data  # combined_diff is always local; no constant field
+
+
+# --- the pointer envelope (materialized files) ------------------------------------------------
+
+
+def _synthetic_diff(*, lines: int, line: str = "+" + "x" * 55) -> str:
+    """A diff of ``lines`` lines — the shape that used to make stdout one unreadable line."""
+    return "diff --git a/big b/big\n" + "\n".join(line for _ in range(lines - 1)) + "\n"
+
+
+def test_large_diff_yields_one_small_stdout_line_with_matching_file_sizes(monkeypatch):
+    # ~3 MiB / ~60k lines: the envelope stays ONE short line regardless of diff size, and the
+    # reference sizes are the file's own (the child's paging contract).
+    diff = _synthetic_diff(lines=60_000)
+    assert len(diff.encode("utf-8")) > 3 * 1024 * 1024
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+    monkeypatch.setattr(github, "get_pr_review_context", lambda **k: replace(_context(), diff=diff))
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
+        result = runner.invoke(cli, ["pr", "review-context", "--json"])
+        assert result.exit_code == 0
+        stdout_lines = result.stdout.splitlines()
+        assert len(stdout_lines) == 1
+        assert len(stdout_lines[0].encode("utf-8")) < 4 * 1024
+        data = json.loads(stdout_lines[0])
+        ref = data["diff"]
+        path = Path(ref["path"])
+        assert path.read_bytes() == diff.encode("utf-8")
+        assert ref["bytes"] == len(diff.encode("utf-8"))
+        assert ref["lines"] == 60_000 == len(path.read_text(encoding="utf-8").splitlines())
+        assert ref["max_line_bytes"] == 56
+
+
+def test_oversized_single_line_is_reported_via_max_line_bytes(monkeypatch):
+    # One 60 KiB line: the file stays byte-exact (anchors intact) and the envelope announces the
+    # longest line so the child knows to byte-slice it instead of blocking.
+    diff = _synthetic_diff(lines=3, line="+" + "y" * (60 * 1024))
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+    monkeypatch.setattr(github, "get_pr_review_context", lambda **k: replace(_context(), diff=diff))
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
+        result = runner.invoke(cli, ["pr", "review-context", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["diff"]["max_line_bytes"] >= 61_440
+        assert data["diff"]["lines"] == 3
+        assert Path(data["diff"]["path"]).read_bytes() == diff.encode("utf-8")
+        assert data["body"]["max_line_bytes"] == len("does the thing")
+
+
+def test_unencodable_body_exits_1_with_write_failed(monkeypatch):
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+    monkeypatch.setattr(
+        github, "get_pr_review_context", lambda **k: replace(_context(), body="lone \udcff")
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
+        result = runner.invoke(cli, ["pr", "review-context", "--json"])
+    assert result.exit_code == 1
+    data = json.loads(result.stdout)
+    assert data["error_type"] == "write_failed"
+    assert "could not write the review context files under" in data["message"]
+
+
+def test_filesystem_failure_exits_1_with_write_failed(monkeypatch):
+    # The run scratch path pre-exists as a FILE → the context dir cannot be created.
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+    monkeypatch.setattr(github, "get_pr_review_context", lambda **k: _context())
+    monkeypatch.setenv("PERK_RUN_ID", "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
+        run_dir = cache.run_scratch_dir(Path(d), "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+        run_dir.parent.mkdir(parents=True, exist_ok=True)
+        run_dir.write_text("not a directory", encoding="utf-8")
+        result = runner.invoke(cli, ["pr", "review-context", "--json"])
+    assert result.exit_code == 1
+    data = json.loads(result.stdout)
+    assert data["error_type"] == "write_failed"
+    assert "01ARZ3NDEKTSV4RRFFQ69G5FAV" in data["message"]
+
+
+def test_context_dir_uses_perk_run_id_when_set_and_mints_otherwise(monkeypatch):
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+    monkeypatch.setattr(github, "get_pr_review_context", lambda **k: _context())
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
+        monkeypatch.setenv("PERK_RUN_ID", "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+        pinned = json.loads(runner.invoke(cli, ["pr", "review-context", "--json"]).stdout)
+        expected_parent = cache.run_scratch_dir(Path(d), "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+        assert expected_parent.resolve() in Path(pinned["context_dir"]).resolve().parents
+        monkeypatch.delenv("PERK_RUN_ID")
+        minted = json.loads(runner.invoke(cli, ["pr", "review-context", "--json"]).stdout)
+        minted_dir = Path(minted["context_dir"])
+        # …/scratch/runs/<minted run id>/review-context/pr-42-<token>
+        run_id = minted_dir.parent.parent.name
+        assert run_id != "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+        assert run_id_mod.is_run_id(run_id)
+        assert (
+            minted_dir.parent.parent.parent.resolve()
+            == cache.scratch_dir(Path(d)).resolve() / "runs"
+        )
+
+
+def test_pr_arm_plan_body_reference_is_null(monkeypatch):
+    monkeypatch.setattr(
+        github,
+        "get_pr",
+        lambda **k: github.PullRequest(
+            number=123, url="u", is_draft=False, state="OPEN", existed=True, head_ref="feature-x"
+        ),
+    )
+    monkeypatch.setattr(github, "get_pr_review_context", lambda **k: _foreign_context())
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["pr", "review-context", "--pr", "123", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["plan_body"] is None
+        assert not (Path(data["context_dir"]) / "plan.md").exists()
+        assert _text(data["body"]) == "no plan behind it"
+        assert _text(data["diff"]) == "diff --git a/y b/y\n+foreign line\n"
+
+
+def test_stack_envelope_aliases_the_top_member_files_and_writes_no_root_sections(
+    git_repo, monkeypatch
+):
+    import perk.cli.commands.pr.review_context_cmd as review_context_cmd
+
+    monkeypatch.setattr(
+        review_context_cmd, "resolve_stack_from_pr", lambda repo_root, pr: _stack_members()
+    )
+    monkeypatch.setattr(review_context_cmd, "_combined_diff", lambda repo_root, stack: "combined")
+    monkeypatch.setattr(
+        "perk.cli.commands.pr.review_context_cmd.resolve.resolve_issue_backend", _offline_backend
+    )
+    contexts = {
+        1: _member_context(1, "plan-301", "main"),
+        2: _member_context(2, "feat-b", "plan-301"),
+    }
+    monkeypatch.setattr(
+        github, "get_pr_review_context", lambda *, pr_number, **k: contexts[pr_number]
+    )
+    monkeypatch.chdir(git_repo)
+
+    result = CliRunner().invoke(cli, ["pr", "review-context", "--pr", "2", "--stack", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    context_dir = Path(data["context_dir"])
+    assert context_dir.name.startswith("pr-2-stack-")
+    # Per-member refs under stack/<pr>/, bottom→top.
+    assert [Path(row["diff"]["path"]) for row in data["stack"]] == [
+        context_dir / "stack" / "1" / "diff.patch",
+        context_dir / "stack" / "2" / "diff.patch",
+    ]
+    assert [_text(row["diff"]) for row in data["stack"]] == ["diff 1", "diff 2"]
+    assert [_text(row["body"]) for row in data["stack"]] == ["body 1", "body 2"]
+    assert all(row["plan_body"] is None for row in data["stack"])
+    # The top-level refs alias the LAST member's files — written once, referenced twice.
+    assert data["diff"] == data["stack"][-1]["diff"]
+    assert data["body"] == data["stack"][-1]["body"]
+    assert not (context_dir / "diff.patch").exists()
+    assert not (context_dir / "body.md").exists()
+    assert Path(data["combined_diff"]["path"]) == context_dir / "combined.patch"
+    assert _text(data["combined_diff"]) == "combined"
+    assert sorted(p.name for p in context_dir.iterdir()) == ["combined.patch", "stack"]

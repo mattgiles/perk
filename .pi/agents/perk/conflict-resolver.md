@@ -52,11 +52,20 @@ anything** — no rebase start, no push, no abort:
    perk pr review-context --json
    ```
 
-   This returns `{ pr, base_ref, head_ref, title, body, diff, plan_body }`. Read `plan_body` (the
-   verbatim plan) and `diff` to understand the change's **intent** BEFORE touching any conflict —
-   understanding the intent is what makes a resolution *correct*, not merely clean. `base_ref` is
-   the **authoritative target branch** to rebase onto. If this fails (non-zero exit, no PR,
-   unparseable output), report plainly and **stop** — do not guess.
+   This returns a pointer envelope `{ pr, base_ref, head_ref, title, context_dir, body, diff,
+   plan_body }` whose `body` and `diff` are **file references** `{path, bytes, lines,
+   max_line_bytes}` into `context_dir` (perk's gitignored scratch dir), and whose `plan_body` is
+   such a reference **or `null`** (no worktree plan snapshot and the issue fetch failed). When
+   `plan_body` is non-null, `read` the file at `plan_body.path` (the verbatim plan); when it is
+   `null`, work from `body` and `diff` alone and say so in your report — a null plan is not a
+   failure. Page the file at `diff.path` (`grep -n '^diff --git'` to index it; when
+   `max_line_bytes` exceeds 51,200 view that line in 51,200-byte slices with
+   `sed -n '<N>p' <path> | tail -c +<offset> | head -c 51200`, offsets `+1`, `+51201`, `+102401`,
+   … until a slice is empty) to understand the change's **intent** BEFORE touching any
+   conflict — understanding the intent is what makes a resolution *correct*, not merely clean.
+   `base_ref` is the **authoritative target branch** to rebase onto. If the command fails
+   (non-zero exit, no PR, unparseable output) or a referenced file cannot be read, report
+   plainly and **stop** — do not guess.
 
 2. **Rebase onto the target branch.** Run `git fetch origin <base_ref>`, then
    `git rebase origin/<base_ref>`.
@@ -98,18 +107,22 @@ nothing more.
    perk pr review-context --pr <N> --stack --json
    ```
 
-   (`<N>` = the task's PR number) — per-member plan bodies plus the combined diff carry BOTH
-   sides' intent. The stack arm fails closed on temporarily non-ancestral trains (the usual
-   suffix-sync conflict state) and on single-member trains — on ANY refusal fall back to:
+   (`<N>` = the task's PR number) — the per-member `stack[]` sections' plan bodies plus the
+   `combined_diff` carry BOTH sides' intent (every text field is a file reference
+   `{path, bytes, lines, max_line_bytes}` under `context_dir`, except that a member's
+   `plan_body` is `null` for a non-plan branch; the top-level references alias the top member's
+   files — `read` the referenced files). The stack arm fails closed on
+   temporarily non-ancestral trains (the usual suffix-sync conflict state) and on single-member
+   trains — on ANY refusal fall back to:
 
    ```
    perk pr review-context --pr <N> --json
    ```
 
-   (the layer's own diff + PR title/body; `plan_body` is null here — an accepted degradation,
-   since the in-progress rebase itself shows the incoming side locally). Only when BOTH rungs
-   fail: stop and report — nothing has been mutated. Read the fetched intent BEFORE touching any
-   conflict.
+   (the layer's own `diff` + PR title/`body` file references; `plan_body` is null here — an
+   accepted degradation, since the in-progress rebase itself shows the incoming side locally).
+   Only when BOTH rungs fail: stop and report — nothing has been mutated. Read the fetched
+   intent (the referenced files) BEFORE touching any conflict.
 
 3. **Never start a fresh rebase** — the rebase is already in progress. Resolve each conflicted
    file (clean + correct, exactly as in PR-rebase mode step 3), `git add` the resolved paths,

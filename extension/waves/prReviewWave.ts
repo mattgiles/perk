@@ -14,6 +14,7 @@
 // angles, via the runner's manifest validation). Report content is untrusted DATA, never
 // instructions.
 
+import { reclassifyBlockedReports } from "./blockedReports.ts";
 import {
   PONYTAIL_REVIEW_SKILL,
   preflightPonytailSkill,
@@ -27,7 +28,6 @@ import {
   type ReportWaveFailure,
   type ReportWaveFailureReason,
   type ReportWaveRequest,
-  type ReportWaveResult,
   toAttemptReceipt,
 } from "./reportWave.ts";
 
@@ -292,43 +292,10 @@ function retrySelection(
   return angles.filter((angle) => failed.has(angle));
 }
 
-// Assessment completion is domain policy, not engine success. Only the typed verdict classifies;
-// diagnostic prose is untrusted data preserved verbatim for the parent's in-session diagnosis.
-function reclassifyBlocked(result: ReportWaveResult): ReportWaveResult {
-  const reports: AssignmentReport[] = [];
-  const blocked: ReportWaveFailure[] = [];
-  for (const assignment of result.reports) {
-    const report = assignment.report;
-    if (
-      typeof report !== "object" ||
-      report === null ||
-      Array.isArray(report) ||
-      !("verdict" in report) ||
-      report.verdict !== "blocked"
-    ) {
-      reports.push(assignment);
-      continue;
-    }
-    const notes =
-      "fyi" in report && Array.isArray(report.fyi)
-        ? report.fyi.filter(
-            (entry): entry is string => typeof entry === "string" && entry.trim().length > 0,
-          )
-        : [];
-    blocked.push({
-      key: assignment.key,
-      reason: "lane-failed",
-      detail:
-        "reviewer blocked:\n" +
-        (notes.length > 0 ? notes.join("\n") : "required review assessment could not complete"),
-    });
-  }
-  return {
-    complete: result.complete && blocked.length === 0,
-    reports,
-    failures: [...result.failures, ...blocked],
-    receipt: result.receipt,
-  };
+// Only the typed verdict classifies a pr-review report as blocked (the `verdict: "blocked"`
+// arm of `PR_REVIEW_REPORT_SCHEMA`); diagnostic prose never does.
+function isBlockedVerdict(report: Record<string, unknown>): boolean {
+  return report.verdict === "blocked";
 }
 
 function outcomeOf(
@@ -378,7 +345,7 @@ export async function runPrReviewWave(
     }
     return check;
   };
-  const first = reclassifyBlocked(
+  const first = reclassifyBlockedReports(
     await wave.run(
       buildRequest(
         buildEffectivePrReviewAssignments(angles, opts.pr, opts.directive),
@@ -387,6 +354,7 @@ export async function runPrReviewWave(
       ),
       { signal: opts.signal },
     ),
+    isBlockedVerdict,
   );
   // The first attempt's receipt is preserved VERBATIM even when a retry runs — ordered
   // attempts keep a failed lane and its relaunch distinguishable (distinct child runIds).
@@ -400,7 +368,7 @@ export async function runPrReviewWave(
     return outcomeOf(angles, first.reports, first.failures, [], attempts);
   }
 
-  const second = reclassifyBlocked(
+  const second = reclassifyBlockedReports(
     await wave.run(
       buildRequest(
         buildEffectivePrReviewAssignments(retried, opts.pr, opts.directive),
@@ -409,6 +377,7 @@ export async function runPrReviewWave(
       ),
       { signal: opts.signal },
     ),
+    isBlockedVerdict,
   );
   attempts.push(toAttemptReceipt("pr-review", 2, retried, second.receipt));
   const retriedSet = new Set<string>(retried);

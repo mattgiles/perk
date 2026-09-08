@@ -55,7 +55,14 @@ function okEntry(key: string): unknown {
     key,
     ok: true,
     error: null,
-    report: { angle: key, summary: "solid", findings: [], fyi: [], streamed: false },
+    report: {
+      angle: key,
+      summary: "solid",
+      findings: [],
+      fyi: [],
+      streamed: false,
+      blocked: false,
+    },
   };
 }
 
@@ -612,6 +619,78 @@ test("executeCollectReviewWave: an incomplete wave is an ok result with the loud
         n.message.includes("lane exploded"),
     ),
     "the warning names the uncovered angle and the reason",
+  );
+});
+
+test("executeCollectReviewWave: a blocked: true lane is uncovered — a lane-failed with the fyi detail, never coverage", async () => {
+  // The observed failure shape: a lane that could not read its context still emits a schema-valid,
+  // verdict-free report with empty findings. With `blocked: true` it must surface as an
+  // incomplete wave (the lane in `failures`, absent from `covered`/`reports`) — not "no findings".
+  const state = freshState();
+  const { target, notified } = fakeTarget();
+  const adapter = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: [
+        okEntry("claimed-intent"),
+        {
+          key: "correctness",
+          ok: true,
+          error: null,
+          report: {
+            angle: "correctness",
+            summary: "could not review",
+            findings: [],
+            fyi: ["diff.patch unreadable: ENOENT", "partial, unassessed: none"],
+            streamed: false,
+            blocked: true,
+          },
+        },
+        okEntry("ponytail"),
+      ],
+    },
+  });
+  const wave = reportWaveOver(adapter);
+  await executeStartReviewWave(state, wave, target, START_OPTS);
+  const collected = await executeCollectReviewWave(state, wave, target);
+  assert.equal(collected.details.ok, true, "honest incompleteness is an ok result, never a throw");
+  const details = collected.details as {
+    complete?: boolean;
+    covered?: string[];
+    reports?: { key: string }[];
+    failures?: { key: string | null; reason: string; detail: string }[];
+  };
+  assert.equal(details.complete, false);
+  assert.deepEqual(details.covered, ["claimed-intent", "ponytail"]);
+  assert.deepEqual(
+    details.reports?.map((r) => r.key),
+    ["claimed-intent", "ponytail"],
+  );
+  assert.deepEqual(details.failures, [
+    {
+      key: "correctness",
+      reason: "lane-failed",
+      detail: "reviewer blocked:\ndiff.patch unreadable: ENOENT\npartial, unassessed: none",
+    },
+  ]);
+  assert.match(collected.content[0]?.text ?? "", /Review wave INCOMPLETE: covered 2\/3 angle\(s\)/);
+  // The headline names the blocked lane (report() keeps the first line; the multi-line detail
+  // rides the sink), while the model-facing aggregate carries the blocker verbatim.
+  assert.ok(
+    notified.some(
+      (n) =>
+        n.severity === "warning" &&
+        n.message.includes("uncovered angle(s): correctness") &&
+        n.message.includes("correctness: lane-failed — reviewer blocked:"),
+    ),
+    "the loud warning names the blocked lane",
+  );
+  assert.match(collected.content[0]?.text ?? "", /diff\.patch unreadable: ENOENT/);
+  // The blocked lane never reaches the streamed:false disclosures (it is not a covered report).
+  assert.ok(
+    !notified.some(
+      (n) => n.message.includes("no provisional batches") && n.message.includes("correctness"),
+    ),
   );
 });
 

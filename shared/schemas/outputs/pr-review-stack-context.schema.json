@@ -7,6 +7,59 @@
       ],
       "type": "string"
     },
+    "StackContextMemberOut": {
+      "additionalProperties": false,
+      "description": "One ``stack[]`` per-member section (bottom\u2192top order); text fields are file references\nunder ``context_dir/stack/<pr>/``.",
+      "properties": {
+        "pr": {
+          "title": "Pr",
+          "type": "integer"
+        },
+        "base_ref": {
+          "title": "Base Ref",
+          "type": "string"
+        },
+        "head_ref": {
+          "title": "Head Ref",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "body": {
+          "$ref": "#/$defs/TextFileRefOut"
+        },
+        "diff": {
+          "$ref": "#/$defs/TextFileRefOut"
+        },
+        "plan_body": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TextFileRefOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "diff_source": {
+          "$ref": "#/$defs/DiffSource"
+        }
+      },
+      "required": [
+        "pr",
+        "base_ref",
+        "head_ref",
+        "title",
+        "body",
+        "diff",
+        "plan_body",
+        "diff_source"
+      ],
+      "title": "StackContextMemberOut",
+      "type": "object"
+    },
     "TextFileRefOut": {
       "additionalProperties": false,
       "description": "One materialized text section: its absolute ``path`` plus the sizes a reviewer pages\nagainst \u2014 ``max_line_bytes`` is the longest line's UTF-8 length (compared against Pi's\nper-line ``read`` bound to pick the byte-slice fallback).",
@@ -39,7 +92,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "The ``--json`` serialization boundary of :class:`PrReviewContextResult` \u2014 a pointer\nenvelope (field order load-bearing). ``pr`` maps from the domain ``pr_number``; ``body``,\n``diff`` and ``plan_body`` are file references into ``context_dir`` (in stack mode they\nalias the LAST ``stack[]`` member's files \u2014 the top PR's text is written once).",
+  "description": "The ``--stack`` envelope: the single-PR fields (describing the top PR) plus the\nadditive per-member sections and the combined-diff reference. A separate model so\nnon-stack calls stay byte-identical (no null stack keys).",
   "properties": {
     "success": {
       "title": "Success",
@@ -109,6 +162,16 @@
     },
     "diff_source": {
       "$ref": "#/$defs/DiffSource"
+    },
+    "stack": {
+      "items": {
+        "$ref": "#/$defs/StackContextMemberOut"
+      },
+      "title": "Stack",
+      "type": "array"
+    },
+    "combined_diff": {
+      "$ref": "#/$defs/TextFileRefOut"
     }
   },
   "required": [
@@ -124,8 +187,10 @@
     "body",
     "diff",
     "plan_body",
-    "diff_source"
+    "diff_source",
+    "stack",
+    "combined_diff"
   ],
-  "title": "PrReviewContextOut",
+  "title": "PrReviewStackContextOut",
   "type": "object"
 }

@@ -390,8 +390,35 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
   }
 });
 
+test("the reviewer defs' oversized-line byte-slice recipe passes the gate; its redirect does not", () => {
+  // The agent defs teach `sed -n 'Np' <path> | tail -c +<offset> | head -c 51200` to page a line
+  // over Pi's per-line `read` bound. Every segment must stay allowlisted or the defs' recipe
+  // silently stops working for read-only children; a real-file redirect stays vetoed.
+  const path = "/repo/.perk/workflow/scratch/runs/RUN/review-context/pr-42-0123456789ab/diff.patch";
+  for (const offset of ["+1", "+51201", "+102401"])
+    assert.equal(
+      isReadOnlyBashCommand(`sed -n '12p' ${path} | tail -c ${offset} | head -c 51200`),
+      true,
+      offset,
+    );
+  assert.equal(isReadOnlyBashCommand(`sed -n '12p' ${path} | head -c 51200`), true);
+  assert.equal(isReadOnlyBashCommand(`grep -n '^diff --git' ${path}`), true);
+  assert.equal(isReadOnlyBashCommand(`wc -lc ${path}`), true);
+  assert.equal(
+    isReadOnlyBashCommand(`sed -n '12p' ${path} | tail -c +51201 | head -c 51200 > slice.txt`),
+    false,
+  );
+});
+
 test("plan-bound review queries allow only the exact argument forms", () => {
-  const queries = ["perk pr review-context --expected-pr 42 --json", "perk pr feedback --json"];
+  // The plan-bound `--expected-pr` form, the human-triage doors' foreign `--pr` / `--pr --stack`
+  // forms, and the feedback query — each gets the same whitespace/`cd`-prefix/redirect matrix.
+  const queries = [
+    "perk pr review-context --expected-pr 42 --json",
+    "perk pr review-context --pr 42 --json",
+    "perk pr review-context --pr 42 --stack --json",
+    "perk pr feedback --json",
+  ];
   for (const query of queries) {
     for (const command of [
       query,
@@ -413,20 +440,30 @@ test("plan-bound review queries allow only the exact argument forms", () => {
   for (const command of [
     "perk pr review-context",
     "perk pr review-context --json",
-    "perk pr review-context --pr 42 --json",
-    "perk pr review-context --pr 42 --stack --json",
     "perk pr review-context --expected-pr 42",
     "perk pr review-context --json --expected-pr 42",
     "perk pr review-context --expected-pr 42 --json --stack",
+    "perk pr review-context --expected-pr 42 --stack --json",
+    "perk pr review-context --pr 42",
+    "perk pr review-context --pr 42 --stack",
+    "perk pr review-context --pr 42 --json --stack",
+    "perk pr review-context --stack --pr 42 --json",
+    "perk pr review-context --json --pr 42",
+    "perk pr review-context --pr 42 --local --json",
+    "perk pr review-context --pr 42 --json --pr 43 --json",
+    "perk pr review-context --pr 42 --expected-pr 42 --json",
     "perk pr review-contextual --expected-pr 42 --json",
+    "perk pr review-contexts --pr 42 --json",
     "perk pr feedback",
     "perk pr feedback --pr 42 --json",
     "perk pr feedback-extra --json",
     "perk pr review-post --json",
     "gh api user",
-    ...["0", "01", "-1", "1.5", "+1", "N", "42x"].map(
-      (n) => `perk pr review-context --expected-pr ${n} --json`,
-    ),
+    ...["0", "01", "-1", "1.5", "+1", "N", "42x"].flatMap((n) => [
+      `perk pr review-context --expected-pr ${n} --json`,
+      `perk pr review-context --pr ${n} --json`,
+      `perk pr review-context --pr ${n} --stack --json`,
+    ]),
   ])
     assert.equal(isReadOnlyBashCommand(command), false, command);
 });

@@ -17,10 +17,13 @@
 // (`extension/pi/v1/codeReview/reviewWave.ts`); the `agents/adversarial-reviewer.md` def completes via
 // the `structured_output` tool this wave's `outputSchema` injects per lane.
 
+import { reclassifyBlockedReports } from "./blockedReports.ts";
 import { PONYTAIL_REVIEW_SKILL } from "./ponytail.ts";
 import type {
+  CollectWaveResult,
   ReportAssignment,
   ReportWave,
+  ReportWaveRef,
   ReportWaveRequest,
   StartWaveResult,
 } from "./reportWave.ts";
@@ -49,23 +52,29 @@ export function isAdversarialReviewAngle(value: string): value is AdversarialRev
  * The per-lane completion-report schema the wave enforces as its `outputSchema` — the engine
  * injects a `structured_output` tool into each lane and fails any lane whose report is missing
  * or schema-invalid. Transcribes the adversarial-reviewer's completion-report contract
- * (contracts.md §8.4): closed shapes, `{angle, summary, findings, fyi, streamed}` all required, and
- * DELIBERATELY NO VERDICT FIELD — the human triages every finding, so there is no clean/
- * actionable derivation to make consistent (hence also no if/then conditional). Finding rows
- * anchor candidate GitHub review comments: `line` is required-nullable (a real finding that
- * cannot anchor to a diff line keeps `line: null`), `side` optional (omitted ⇒ RIGHT), and the
- * severity/confidence enums match the agent def's triage tags.
+ * (contracts.md §8.4): closed shapes, `{angle, summary, findings, fyi, streamed, blocked}` all
+ * required, and DELIBERATELY NO VERDICT FIELD — the human triages every finding, so there is no
+ * clean/actionable derivation to make consistent. `blocked: true` is NOT a verdict: it marks a
+ * required review that could not complete (context fetch failed, a context file unreadable, the
+ * hunt stopped early) — `collectAdversarialReviewWave` normalizes it into an uncovered
+ * `lane-failed` BEFORE coverage is computed, so a schema-valid-but-empty report never counts as
+ * "no findings". The conditional mirrors `PR_REVIEW_REPORT_SCHEMA`'s blocked arm: empty
+ * `findings` and a nonblank `fyi` (the blocker first). Finding rows anchor candidate GitHub review
+ * comments: `line` is required-nullable (a real finding that cannot anchor to a diff line keeps
+ * `line: null`), `side` optional (omitted ⇒ RIGHT), and the severity/confidence enums match the
+ * agent def's triage tags.
  */
 export const ADVERSARIAL_REVIEW_REPORT_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["angle", "summary", "findings", "fyi", "streamed"],
+  required: ["angle", "summary", "findings", "fyi", "streamed", "blocked"],
   properties: {
     angle: {
       type: "string",
       enum: ["claimed-intent", "correctness", "tests", "quality", "ponytail"],
     },
     streamed: { type: "boolean" },
+    blocked: { type: "boolean" },
     summary: { type: "string" },
     findings: {
       type: "array",
@@ -88,6 +97,19 @@ export const ADVERSARIAL_REVIEW_REPORT_SCHEMA = {
       items: { type: "string" },
     },
   },
+  allOf: [
+    {
+      // `blocked` is top-level required, so this `if` cannot vacuously match an absent key.
+      if: { properties: { blocked: { const: true } } },
+      // biome-ignore lint/suspicious/noThenProperty: JSON-Schema conditional, not a thenable.
+      then: {
+        properties: {
+          findings: { maxItems: 0 },
+          fyi: { minItems: 1, items: { type: "string", pattern: "\\S" } },
+        },
+      },
+    },
+  ],
 };
 
 /**
@@ -158,6 +180,27 @@ export interface AdversarialReviewWaveOptions {
   signal?: AbortSignal;
   /** Test seam; production validates the exact source-bound Ponytail review skill. */
   requiredSkillPreflight?: ReportWaveRequest["requiredSkillPreflight"];
+}
+
+// Only the typed flag classifies an adversarial report as blocked; diagnostic prose never does.
+function isBlockedFlag(report: Record<string, unknown>): boolean {
+  return report.blocked === true;
+}
+
+/**
+ * Collect the adversarial-review wave and apply the flow's lane semantics: a settled result has
+ * every `blocked: true` report reclassified into an uncovered assignment-keyed `lane-failed`
+ * (`reclassifyBlockedReports` — the same detail string as `prReviewWave.ts`) BEFORE the caller
+ * computes `covered`/`complete`; `none`/`running` pass through unchanged. The report stays
+ * verdict-free — only coverage changes.
+ */
+export async function collectAdversarialReviewWave(
+  wave: ReportWave,
+  ref: ReportWaveRef,
+): Promise<CollectWaveResult> {
+  const collected = await wave.collect(ref);
+  if (collected.kind !== "settled") return collected;
+  return { ...collected, result: reclassifyBlockedReports(collected.result, isBlockedFlag) };
 }
 
 /**

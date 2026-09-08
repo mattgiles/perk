@@ -7,8 +7,24 @@
   "base_ref": "main",
   "head_ref": "plan-42",
   "title": "My PR",
-  "body": "PR body",
-  "diff": "diff --git a/x b/x\n",
-  "plan_body": "# Plan\n",
+  "context_dir": "/repo/.perk/workflow/scratch/runs/RUN/review-context/pr-42-0123456789ab",
+  "body": {
+    "path": "/repo/.perk/workflow/scratch/runs/RUN/review-context/pr-42-0123456789ab/body.md",
+    "bytes": 7,
+    "lines": 1,
+    "max_line_bytes": 7
+  },
+  "diff": {
+    "path": "/repo/.perk/workflow/scratch/runs/RUN/review-context/pr-42-0123456789ab/diff.patch",
+    "bytes": 19,
+    "lines": 1,
+    "max_line_bytes": 18
+  },
+  "plan_body": {
+    "path": "/repo/.perk/workflow/scratch/runs/RUN/review-context/pr-42-0123456789ab/plan.md",
+    "bytes": 7,
+    "lines": 1,
+    "max_line_bytes": 6
+  },
   "diff_source": "github"
 }

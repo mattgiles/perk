@@ -711,8 +711,14 @@ const SAFE_PATTERNS = [
   // from matching the mutating `node` subcommand; node-engagement allowed; create/node/reconcile
   // stay blocked.
   /^\s*perk\s+(objective|obj)\s+(show|s|next|n|node-engagement)\b/i,
-  // Plan-bound report children need exactly these query forms, not arbitrary PR operations.
-  /^\s*perk\s+pr\s+review-context\s+--expected-pr\s+[1-9][0-9]*\s+--json\s*$/,
+  // Report children need exactly these query forms, not arbitrary PR operations: plan-bound
+  // children (`/pr-review`, `/address`) use the `--expected-pr` form; the human-triage doors'
+  // adversarial children — and the stack-review routing step — use the foreign `--pr` /
+  // `--pr --stack` forms (a read-only parent would otherwise block the doors' children outright).
+  // ONE anchored alternation: `--json` last, nothing else; the flagless form stays out (only the
+  // write-capable foreground conflict-resolver uses it, outside the gate). The destructive veto
+  // still blocks `> file` redirects — the CLI writes its own scratch files.
+  /^\s*perk\s+pr\s+review-context\s+(?:--expected-pr\s+[1-9][0-9]*|--pr\s+[1-9][0-9]*(?:\s+--stack)?)\s+--json\s*$/,
   /^\s*perk\s+pr\s+feedback\s+--json\s*$/,
   // Read-only `gh` queries — the guidance in the managed AGENTS block ("GitHub access goes
   // through gh") must be followable in read-only sessions. Query-shaped subcommands only;

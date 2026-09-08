@@ -755,11 +755,13 @@ inspection commands (read-only `git` queries, `jq`, `curl`, …), read-only `gh`
 subcommands (view/list/diff/status/checks/search + `gh auth status`; `gh api` and every mutating
 subcommand stay blocked), the read-only `perk objective` queries (`show`/`next` + aliases and
 `node-engagement`; the mutating subcommands stay blocked), and exactly the whitespace-separated
-`perk pr review-context --expected-pr N --json` (N matches `[1-9][0-9]*`) and
-`perk pr feedback --json` forms with optional surrounding whitespace. Anchored query exceptions
-retain segment validation and the destructive veto: `cd … && query` passes, but flagless/foreign/
-stack context forms, extra arguments, lookalike verbs, `review-post`, `gh api`, real-file redirects,
-and chained mutations do not. The sub-allowlist also retains command-keyed `ast-grep` /
+`perk pr review-context --expected-pr N --json` (the plan-bound form), `perk pr review-context
+--pr N --json` and `perk pr review-context --pr N --stack --json` (the human-triage doors'
+adversarial children and the stack-review routing step; N matches `[1-9][0-9]*` on every form,
+`--json` last) and `perk pr feedback --json` forms with optional surrounding whitespace. Anchored
+query exceptions retain segment validation and the destructive veto: `cd … && query` passes, but
+the flagless context form, other argument orders, extra arguments (`--local` included), lookalike
+verbs, `review-post`, `gh api`, real-file redirects, and chained mutations do not. The sub-allowlist also retains command-keyed `ast-grep` /
 `agent-browser` (+ `npx agent-browser`) entries (an accepted arg-blind leniency, like `curl`);
 (3) injects a hidden `[READ-ONLY MODE]` context at `before_agent_start` — **once-only per
 selected branch**: the injection is FULL-branch-scan dedup'd on the marker (`branchCarries` over
@@ -1342,6 +1344,31 @@ get_pr_review_context{ pr_number, branch, plan_body, local_diff? } -> PrReviewCo
     # `diff_source` is a TRAILING field on `PrReviewContextOut` / `StackContextMemberOut`
     # (JSON-schema enum {github, local-git}); the reviewer defs disclose a `"local-git"` diff
     # as one `fyi` line (anchors are unchanged).
+    # THE CLI ARMS EMIT A POINTER ENVELOPE, NEVER INLINE TEXT: every free-text section —
+    # `body`, `diff`, `plan_body`, each `stack[]` member's sections, `combined_diff` — is
+    # written to its own line-oriented file and the `--json` payload carries `context_dir` +
+    # `{path, bytes, lines, max_line_bytes}` references (`plan_body` null when absent; the
+    # `--stack` arm's top-level refs ALIAS the top member's files — the top PR's text is
+    # written exactly once). Rationale: Pi's `read` refuses a single line above its 50 KiB
+    # per-line bound and `bash` keeps only the last 50 KiB, so a large PR inlined as a JSON
+    # string was unreadable by every reviewer child by construction (pretty-printing cannot
+    # split a JSON string). Location: `cache.run_scratch_dir(<invocation checkout>,
+    # $PERK_RUN_ID or a minted run id)/review-context/pr-<n>[-stack]-<12-hex token>/` —
+    # gitignored, reachable by the caller-checkout children, per-invocation unique (concurrent
+    # lanes never share a directory), pruned by the run-dir age rule. Layout: single-PR
+    # `diff.patch`, `body.md`, `plan.md` (only when a plan body exists); stack
+    # `combined.patch` + `stack/<pr>/{diff.patch,body.md,plan.md}` per member (bottom→top),
+    # NO root-level section files. Files are byte-exact (no trimming/normalization — a
+    # reformatted diff would break `line` anchors and hunk headers); `bytes` is the UTF-8
+    # length, `lines` the splitlines count, `max_line_bytes` the longest line's UTF-8 length
+    # (the number a child compares against Pi's 51,200-byte per-line bound: above it, the
+    # child locates the line with `grep -n` and views it in 51,200-byte slices via
+    # `sed -n 'Np' <path> | tail -c +<offset> | head -c 51200`, offsets +1, +51201, +102401, …
+    # until a slice is empty — every byte reachable; all three commands pass the read-only
+    # gate, and `head -c` alone would expose only the first slice). The writer's documented
+    # failure set (`OSError` filesystem arms, `UnicodeError` for text UTF-8 cannot encode) is
+    # the CLI's `write_failed` arm (exit 1). Goldens: `pr-review-context.schema.json` +
+    # `pr-review-stack-context.schema.json`.
 post_pr_review{ pr_number, summary, comments:[{path,line,body,side?}], event? } -> ReviewPostResult{ ok, mode, pr_number, comment_count }
     # ONE atomic review via POST .../pulls/{n}/reviews — comments + body + event land together or
     # not at all. `event` defaults to COMMENT (wire spelling: COMMENT|APPROVE|REQUEST_CHANGES) and
@@ -1409,20 +1436,29 @@ does not block. Only completed assessments derive actionable from surviving find
 clean. Blockers come first in FYI, followed by explicitly **partial, unassessed, diagnostic-only**
 concerns/anchors; these are in-session diagnostics, never posting input.
 
-The child-only context acceptance policy is in `agents/pr-reviewer.md`, grounded in the unchanged
-`PrReviewContextOut` / `pr-review-context.schema.json` envelope. Exit must be zero and entire stdout
-one non-null JSON object, not an array. All fields are required without coercion: `success: true`,
-`error_type: null`, `message: null`; `pr` a positive safe integer equal to the task target;
-`branch`, `base_ref`, `head_ref`, `title` nonblank strings; `body` and `diff` strings (blank allowed);
-`plan_body` string or null, with nonblank text required for plan-fidelity. Missing `plan_body`
-blocks every lane; explicit null/blank is optional evidence only for other angles. Unknown extras
-are ignored, accepted text is not rewritten, refs are metadata not another authority lookup,
-and no parent parser, fallback PR fetch, local-branch comparison, or head-SHA binding is added.
+The child-only context acceptance policy is in `agents/pr-reviewer.md`, grounded in the
+`PrReviewContextOut` / `pr-review-context.schema.json` pointer envelope (the `--stack` arm's
+`PrReviewStackContextOut` / `pr-review-stack-context.schema.json` golden carries the same
+reference shape per member). Exit must be zero and entire stdout one non-null JSON object, not an
+array. All fields are required without coercion: `success: true`, `error_type: null`,
+`message: null`; `pr` a positive safe integer equal to the task target; `branch`, `base_ref`,
+`head_ref`, `title`, `context_dir` nonblank strings; `body` and `diff` file-reference objects —
+`path` a nonblank string, `bytes`/`lines`/`max_line_bytes` non-negative safe integers; `plan_body`
+such an object or null, with a non-null reference whose file holds nonblank text required for
+plan-fidelity. Missing `plan_body` blocks every lane; explicit null (or a blank file) is optional
+evidence only for other angles. The child then reads the referenced files (`read` the body/plan,
+`grep -n`-index and page the diff; a line over Pi's per-line bound is byte-sliced via `sed -n
+'Np' <path> | tail -c +<offset> | head -c 51200`, advancing the 1-based offset by 51,200 until a
+slice is empty): an unreadable/missing referenced file blocks the lane; a long line never does. Unknown extras are ignored, accepted text is not rewritten, refs are metadata
+not another authority lookup, and no parent parser, fallback PR fetch, local-branch comparison,
+or head-SHA binding is added.
 The trailing `diff_source` ∈ {`github`, `local-git`} is one such unknown extra for the acceptance
 table (an older CLI without it must not block); a `local-git` value is disclosed as one `fyi`
 line and the review proceeds normally.
 
-`prReviewWave.ts` normalizes only non-null non-array report objects with exact `verdict: "blocked"`.
+`prReviewWave.ts` normalizes only non-null non-array report objects with exact `verdict: "blocked"`
+(through the flow-neutral `reclassifyBlockedReports(result, isBlocked)` in
+`extension/waves/blockedReports.ts`; the adversarial doors supply `blocked === true` instead).
 The enclosing assignment key identifies a `lane-failed` failure, never the report angle or prose.
 FYI retains only strings whose trim is nonempty, preserving retained bytes, duplicates and order.
 Detail is exactly `"reviewer blocked:\n" + (notes.length > 0 ? notes.join("\n") :
@@ -1656,7 +1692,13 @@ prompt; the contracts pin the output shape, not the judgment rubric.
 
 - **Input (per-spawn task prompt):** the assigned angle, the PR number, and the absolute path to
   the detached read-only head worktree (the checkout above). The child fetches its own context
-  via `perk pr review-context --pr <n> --json` (`plan_body` may be null).
+  via `perk pr review-context --pr <n> --json` (`--stack` added in stack mode) — the pointer
+  envelope above (`plan_body` may be null) — and reads the materialized files itself with
+  `read`/`grep` (indexing the diff with `grep -n '^diff --git'`, paging with `read`
+  `offset`/`limit`, byte-slicing a line over Pi's per-line bound via `sed -n 'Np' <path> |
+  tail -c +<offset> | head -c 51200`, offsets +1, +51201, … until empty). A failed/unparseable
+  command or an unreadable referenced file ⇒ `blocked: true` (below); a long line alone never
+  blocks.
 - **Angles** (one per spawn; the adversarial selectable menu is exactly these four —
   `pr-reviewer`'s autonomous menu is wider, seven fixed angles): `claimed-intent` (the PR text's claims checked against the diff, plus a first-class hunt
   for **undisclosed scope**; the parent always includes this angle) · `correctness` (incl. the
@@ -1672,10 +1714,11 @@ prompt; the contracts pin the output shape, not the judgment rubric.
   by the PR author** (an author not trusted by default) — checked against the diff, never built
   on. **Never-execute-the-head:** inside the head worktree the child uses
   `read`/`grep`/`find`/`ls` only (no builds, no tests, no installs); the only command it runs in
-  the whole session is `review-context`.
+  the whole session is `review-context` — inspecting the files it materializes
+  (`read`/`grep`/`wc`/`sed -n … | tail -c … | head -c`) is inspection, not execution of the head.
 - **Output (the cross-plane contract).** ONE engine-injected **`structured_output`** call
-  carrying `{angle, summary, findings[], fyi[], streamed: boolean}` — the wave's
-  `ADVERSARIAL_REVIEW_REPORT_SCHEMA` (`extension/waves/adversarialReviewWave.ts`); all
+  carrying `{angle, summary, findings[], fyi[], streamed: boolean, blocked: boolean}` — the
+  wave's `ADVERSARIAL_REVIEW_REPORT_SCHEMA` (`extension/waves/adversarialReviewWave.ts`); all
   fields required (`fyi` may be `[]`) and **verdict-free** (a human triages downstream; an empty
   `findings` array is the "nothing found" statement, earned by hunting, never manufactured).
   Each finding is `{path, line: <int-in-diff or null>, side?: "LEFT"|"RIGHT" (omitted = RIGHT),
@@ -1683,6 +1726,19 @@ prompt; the contracts pin the output shape, not the judgment rubric.
   real-but-unanchorable finding (folded into the review body downstream, never lost); `fyi` is
   in-session triage color, never posted. No fenced-JSON completion block — a lane without a
   schema-valid `structured_output` call fails (honest incompleteness at collect).
+  **`blocked` is a required boolean, never defaulted** (the `streamed` discipline —
+  missing/mistyped is engine-invalid): `false` for every completed angle; `true` ONLY when the
+  required review could not complete (context fetch failed, a referenced context file
+  unreadable, the hunt stopped early), in which case the schema conditional requires
+  `findings: []` and a nonblank `fyi` with the blocker first (then partial, unassessed,
+  diagnostic-only notes). Blocked is NOT a verdict — only coverage changes:
+  `collectAdversarialReviewWave` normalizes every `blocked: true` report into an uncovered
+  assignment-keyed `lane-failed` (the shared `reclassifyBlockedReports` helper,
+  `extension/waves/blockedReports.ts` — the exact `prReviewWave.ts` detail string
+  `"reviewer blocked:\n" + nonblank fyi joined by "\n"`, else `"required review assessment could
+  not complete"`) BEFORE `covered`/`complete` are computed, so `collect_review_wave` reports
+  the lane in `failures` with `complete: false`, never as "no findings"; the browser reconcile's
+  uncovered-source clear withdraws its provisional annotations. Zero retries stand.
 - **The streaming protocol (child-side, unconditional whenever `contact_supervisor` exists).**
   While reviewing, the child sends **non-blocking** progress-update batches —
   `contact_supervisor({reason: "progress_update", message})`, the message a short line plus a
@@ -2054,7 +2110,8 @@ parallel rebuild.
   and runs the same core, returning the stack guidance as its ok text.
 - **Routing + per-PR posting (model judgment — no blame-attribution worker):** inputs are the
   reconciled wave findings + returned browser annotations (both combined-diff coordinates), the
-  per-PR diffs from `review-context --stack`, and the snapshot's layer order. Default
+  per-PR diffs materialized by `review-context --stack` (one `diff.patch` file per member, read
+  from the envelope's `stack[].diff.path` references), and the snapshot's layer order. Default
   disposition: fold each finding into the OWNING PR's review body; inline anchors only where
   the location is straightforwardly identifiable in that PR's own diff; cross-cutting/
   unplaceable findings fold into the most relevant PR's body. The posting protocol is the stack

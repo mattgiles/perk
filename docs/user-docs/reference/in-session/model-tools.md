@@ -197,11 +197,13 @@ hidden guidance perk injects (authoring and provider contexts, stage bindings, a
 the opposite lifetime: it is re-delivered whenever Pi's own context projection no longer carries
 it, because those messages exist to be read, not to enforce.
 
-The bash gate admits these two exact whitespace-separated plan-context query forms (optional
-surrounding whitespace): `perk pr review-context --expected-pr N --json`, with N matching
-`[1-9][0-9]*`, and `perk pr feedback --json`. `cd … && query` works because every segment is
-checked. This does not admit flagless/foreign/stack context forms, extra arguments, lookalike
-verbs, `review-post`, `gh api`, real-file redirects, or a mutation chained after a query.
+The bash gate admits these exact whitespace-separated review-context query forms (optional
+surrounding whitespace, N matching `[1-9][0-9]*`, `--json` last): the plan-bound
+`perk pr review-context --expected-pr N --json`, the human-triage doors' foreign
+`perk pr review-context --pr N --json` and `perk pr review-context --pr N --stack --json`, and
+`perk pr feedback --json`. `cd … && query` works because every segment is checked. This does not
+admit the flagless context form, other argument orders, extra arguments, lookalike verbs,
+`review-post`, `gh api`, real-file redirects, or a mutation chained after a query.
 
 Perk-owned report waves deliver a startup restriction packet to native runner children: the
 captured parent gate, strengthened to true for automated review and `/address` classification.
