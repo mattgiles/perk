@@ -141,6 +141,8 @@ test("rendered caller-read-only packet strengthens a read-write handoff without 
     assert.equal(h.workflowState().mode, "read-only");
     for (const command of [
       "perk pr review-context --expected-pr 42 --json",
+      "perk pr review-context --pr 42 --json",
+      "perk pr review-context --pr 42 --stack --json",
       "perk pr feedback --json",
     ])
       assert.equal((await h.emitToolCall("bash", { command }))?.block, undefined);

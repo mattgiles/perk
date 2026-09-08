@@ -391,7 +391,14 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
 });
 
 test("plan-bound review queries allow only the exact argument forms", () => {
-  const queries = ["perk pr review-context --expected-pr 42 --json", "perk pr feedback --json"];
+  // The plan-bound `--expected-pr` form, the human-triage doors' foreign `--pr` / `--pr --stack`
+  // forms, and the feedback query — each gets the same whitespace/`cd`-prefix/redirect matrix.
+  const queries = [
+    "perk pr review-context --expected-pr 42 --json",
+    "perk pr review-context --pr 42 --json",
+    "perk pr review-context --pr 42 --stack --json",
+    "perk pr feedback --json",
+  ];
   for (const query of queries) {
     for (const command of [
       query,
@@ -413,20 +420,30 @@ test("plan-bound review queries allow only the exact argument forms", () => {
   for (const command of [
     "perk pr review-context",
     "perk pr review-context --json",
-    "perk pr review-context --pr 42 --json",
-    "perk pr review-context --pr 42 --stack --json",
     "perk pr review-context --expected-pr 42",
     "perk pr review-context --json --expected-pr 42",
     "perk pr review-context --expected-pr 42 --json --stack",
+    "perk pr review-context --expected-pr 42 --stack --json",
+    "perk pr review-context --pr 42",
+    "perk pr review-context --pr 42 --stack",
+    "perk pr review-context --pr 42 --json --stack",
+    "perk pr review-context --stack --pr 42 --json",
+    "perk pr review-context --json --pr 42",
+    "perk pr review-context --pr 42 --local --json",
+    "perk pr review-context --pr 42 --json --pr 43 --json",
+    "perk pr review-context --pr 42 --expected-pr 42 --json",
     "perk pr review-contextual --expected-pr 42 --json",
+    "perk pr review-contexts --pr 42 --json",
     "perk pr feedback",
     "perk pr feedback --pr 42 --json",
     "perk pr feedback-extra --json",
     "perk pr review-post --json",
     "gh api user",
-    ...["0", "01", "-1", "1.5", "+1", "N", "42x"].map(
-      (n) => `perk pr review-context --expected-pr ${n} --json`,
-    ),
+    ...["0", "01", "-1", "1.5", "+1", "N", "42x"].flatMap((n) => [
+      `perk pr review-context --expected-pr ${n} --json`,
+      `perk pr review-context --pr ${n} --json`,
+      `perk pr review-context --pr ${n} --stack --json`,
+    ]),
   ])
     assert.equal(isReadOnlyBashCommand(command), false, command);
 });

@@ -755,11 +755,13 @@ inspection commands (read-only `git` queries, `jq`, `curl`, …), read-only `gh`
 subcommands (view/list/diff/status/checks/search + `gh auth status`; `gh api` and every mutating
 subcommand stay blocked), the read-only `perk objective` queries (`show`/`next` + aliases and
 `node-engagement`; the mutating subcommands stay blocked), and exactly the whitespace-separated
-`perk pr review-context --expected-pr N --json` (N matches `[1-9][0-9]*`) and
-`perk pr feedback --json` forms with optional surrounding whitespace. Anchored query exceptions
-retain segment validation and the destructive veto: `cd … && query` passes, but flagless/foreign/
-stack context forms, extra arguments, lookalike verbs, `review-post`, `gh api`, real-file redirects,
-and chained mutations do not. The sub-allowlist also retains command-keyed `ast-grep` /
+`perk pr review-context --expected-pr N --json` (the plan-bound form), `perk pr review-context
+--pr N --json` and `perk pr review-context --pr N --stack --json` (the human-triage doors'
+adversarial children and the stack-review routing step; N matches `[1-9][0-9]*` on every form,
+`--json` last) and `perk pr feedback --json` forms with optional surrounding whitespace. Anchored
+query exceptions retain segment validation and the destructive veto: `cd … && query` passes, but
+the flagless context form, other argument orders, extra arguments (`--local` included), lookalike
+verbs, `review-post`, `gh api`, real-file redirects, and chained mutations do not. The sub-allowlist also retains command-keyed `ast-grep` /
 `agent-browser` (+ `npx agent-browser`) entries (an accepted arg-blind leniency, like `curl`);
 (3) injects a hidden `[READ-ONLY MODE]` context at `before_agent_start` — **once-only per
 selected branch**: the injection is FULL-branch-scan dedup'd on the marker (`branchCarries` over
