@@ -5,9 +5,10 @@ const reports = await runs.all([
     "task": "angle: plan-fidelity — review ONLY plan fidelity & completeness.",
     "extensionBindings": {
       "perk.parent-restrictions/1": {
-        "readOnly": false
+        "readOnly": true
       }
     },
+    "worktree": false,
     "label": "plan-fidelity",
     "phase": "review"
   },
@@ -17,9 +18,10 @@ const reports = await runs.all([
     "task": "angle: custom-scope — review ONLY the requested scope.",
     "extensionBindings": {
       "perk.parent-restrictions/1": {
-        "readOnly": false
+        "readOnly": true
       }
     },
+    "worktree": false,
     "label": "custom-scope-lane",
     "outputSchema": {
       "type": "object",
@@ -38,9 +40,10 @@ const reports = await runs.all([
     "task": "angle: ponytail — the standalone simplification pass.",
     "extensionBindings": {
       "perk.parent-restrictions/1": {
-        "readOnly": false
+        "readOnly": true
       }
     },
+    "worktree": false,
     "skill": "ponytail-review",
     "label": "ponytail"
   }

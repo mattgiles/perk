@@ -29,7 +29,7 @@
 // the streaming split serves flows whose parent ends the launch turn and relays provisional
 // batches on native wakes (`adversarialReviewWave.ts`, `draftReviewWave.ts`).
 //
-// The module owns ADAPTER SELECTION: `createReportWave(bus, { parentReadOnly })` constructs
+// The module owns ADAPTER SELECTION: `createReportWave(bus)` constructs
 // a FRESH rpc adapter per launch over the supplied bus; `reportWaveOver(adapter)` is the
 // injection seam (tests; the same internal core). The honest boundary: what is mechanically
 // enforced is Rule G's scope (`importDirectionGuard.test.ts`) — no production import edges into
@@ -113,8 +113,6 @@ export interface ReportWaveRequest {
   /** Workflow-level default → the engine injects a `structured_output` tool into each child. */
   outputSchema: object;
   completeness: ReportWaveCompleteness;
-  /** Keep plan-bound readers in the caller checkout and strengthen the child restriction. */
-  execution?: "caller-read-only";
   /** Workflow-level model default (flows read their configured subagent model). */
   model?: string;
   /** Module default (`WAVE_TIMEOUT_MS`) when omitted. */
@@ -223,6 +221,12 @@ export function toAttemptReceipt(
 export const RUN_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 /**
+ * The report restriction packet (contracts.md §8.35): a constant every report child receives.
+ * With the runner bit it is the whole authorization input for the child's read-only floor.
+ */
+const REPORT_CHILD_RESTRICTIONS = { "perk.parent-restrictions/1": { readOnly: true } } as const;
+
+/**
  * Validate the assignment manifest (throws on programmer error: empty, duplicate keys, or a key
  * outside the run-key contract). Module-private — the script surface never leaves `waves/`.
  */
@@ -248,24 +252,20 @@ function validateAssignments(assignments: ReportAssignment[]): void {
  * Render the wave `workflowScript`: an explicit-return, all-settled `runs.all` over the
  * assignment items, projected to the compact typed aggregate only (assignment key, outcome,
  * error, and the schema-validated report — children's prose never enters the aggregate beyond
- * `error`/`output` on failure). Items are embedded via `JSON.stringify`, so hostile task text
- * (quotes, newlines, backticks, `${}`) cannot escape the array literal. Module-private: the
- * script bytes are observable outside `waves/` only through the adapter seam's spawn params.
+ * `error`/`output` on failure). Every report child is read-only under perk's floor and runs in
+ * the caller checkout; hostile task/assignment fields cannot override either (explicit field
+ * selection + `JSON.stringify`, so hostile task text — quotes, newlines, backticks, `${}` —
+ * cannot escape the array literal either). Module-private: the script bytes are observable
+ * outside `waves/` only through the adapter seam's spawn params.
  */
-function renderWaveScript(
-  assignments: ReportAssignment[],
-  readOnly: boolean,
-  execution: ReportWaveRequest["execution"],
-): string {
+function renderWaveScript(assignments: ReportAssignment[]): string {
   validateAssignments(assignments);
   const items = assignments.map((assignment) => ({
     key: assignment.key,
     agent: assignment.agent,
     task: assignment.task,
-    extensionBindings: {
-      "perk.parent-restrictions/1": { readOnly: execution === "caller-read-only" || readOnly },
-    },
-    ...(execution === "caller-read-only" ? { worktree: false } : {}),
+    extensionBindings: REPORT_CHILD_RESTRICTIONS,
+    worktree: false,
     ...(assignment.skill !== undefined ? { skill: assignment.skill } : {}),
     label: assignment.label ?? assignment.key,
     ...(assignment.phase !== undefined ? { phase: assignment.phase } : {}),
@@ -522,7 +522,6 @@ type InternalStart =
  */
 async function startWave(
   supplyAdapter: () => WaveAdapter,
-  parentReadOnly: () => boolean,
   request: ReportWaveRequest,
   signal?: AbortSignal,
 ): Promise<InternalStart> {
@@ -579,25 +578,7 @@ async function startWave(
 
   // Required-skill metadata never reaches the renderer; only runnable assignments spawn.
   const runnableRequest: ReportWaveRequest = { ...request, assignments: runnable };
-  // Sample only after preflight: every runnable child gets one shared attempt snapshot.
-  // A failed capture must stop before adapter construction, ping, or any child launch.
-  let readOnly: boolean;
-  try {
-    readOnly = parentReadOnly();
-  } catch (error) {
-    return {
-      ok: false,
-      result: settleWithSkillFailures(
-        waveFailure(
-          "unavailable",
-          `parent-restriction capture failed: ${error instanceof Error ? error.message : String(error)}`,
-          { state: "unavailable", children: [] },
-        ),
-      ),
-      launch,
-    };
-  }
-  const workflowScript = renderWaveScript(runnable, readOnly, request.execution);
+  const workflowScript = renderWaveScript(runnable);
 
   const start = await startWaveScript(
     supplyAdapter(),
@@ -640,12 +621,12 @@ const STILL_RUNNING = Symbol("wave-still-running");
  * `"none"` structurally — and the WeakMap plus the settled drain's delete both release retained
  * results promptly.
  */
-function waveOver(supplyAdapter: () => WaveAdapter, parentReadOnly: () => boolean): ReportWave {
+function waveOver(supplyAdapter: () => WaveAdapter): ReportWave {
   const records = new WeakMap<ReportWaveRef, PendingRecord>();
 
   return {
     async start(request, control) {
-      const start = await startWave(supplyAdapter, parentReadOnly, request, control?.signal);
+      const start = await startWave(supplyAdapter, request, control?.signal);
       if (!start.ok) {
         return { ok: false, result: start.result, launch: start.launch };
       }
@@ -691,7 +672,7 @@ function waveOver(supplyAdapter: () => WaveAdapter, parentReadOnly: () => boolea
     },
 
     async run(request, control) {
-      const start = await startWave(supplyAdapter, parentReadOnly, request, control?.signal);
+      const start = await startWave(supplyAdapter, request, control?.signal);
       return start.ok ? await start.result : start.result;
     },
   };
@@ -703,17 +684,11 @@ function waveOver(supplyAdapter: () => WaveAdapter, parentReadOnly: () => boolea
  * One per-activation instance is constructed at the composition root (`extension/index.ts`) and
  * threaded to the installers.
  */
-export function createReportWave(
-  bus: WaveBus,
-  { parentReadOnly }: { parentReadOnly: () => boolean },
-): ReportWave {
-  return waveOver(() => createRpcWaveAdapter(bus), parentReadOnly);
+export function createReportWave(bus: WaveBus): ReportWave {
+  return waveOver(() => createRpcWaveAdapter(bus));
 }
 
-/** The permissive snapshot default is test-only; production must supply its effective gate. */
-export function reportWaveOver(
-  adapter: WaveAdapter,
-  parentReadOnly: () => boolean = () => false,
-): ReportWave {
-  return waveOver(() => adapter, parentReadOnly);
+/** The injection seam (tests; the same internal core over one supplied adapter). */
+export function reportWaveOver(adapter: WaveAdapter): ReportWave {
+  return waveOver(() => adapter);
 }

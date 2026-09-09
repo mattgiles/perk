@@ -467,46 +467,6 @@ test("PR_REVIEW_REPORT_SCHEMA pins the report shape (closed, all four fields req
   assert.equal(validator.Check({ angle: base.angle, verdict: "blocked", findings: [] }), false);
 });
 
-for (const parentReadOnly of [false, true]) {
-  test(`all automated lanes and retries stay caller-read-only over parent ${parentReadOnly}`, async () => {
-    let captures = 0;
-    const adapter = createMemoryWaveAdapter({
-      aggregates: [
-        {
-          state: "complete",
-          value: [
-            okEntry("plan-fidelity"),
-            failedEntry("correctness", "retry"),
-            failedEntry("ponytail", "retry"),
-          ],
-        },
-        { state: "complete", value: [okEntry("correctness"), okEntry("ponytail")] },
-      ],
-    });
-    const wave = reportWaveOver(adapter, () => {
-      captures++;
-      return parentReadOnly;
-    });
-    const outcome = await runPrReviewWaveBase(wave, {
-      pr: 42,
-      angles: TWO_ANGLES,
-      requiredSkillPreflight: PREFLIGHT_OK,
-    });
-    assert.equal(outcome.complete, true);
-    assert.equal(captures, 2);
-    for (const spawn of adapter.calls.spawn) {
-      for (const item of waveScriptItems(spawn.workflowScript)) {
-        assert.equal(item.worktree, false);
-        assert.deepEqual(item.extensionBindings, {
-          "perk.parent-restrictions/1": { readOnly: true },
-        });
-        for (const field of ["async", "cwd", "extensions", "workflowAwaitAsync", "execution"])
-          assert.equal(field in item, false);
-      }
-    }
-  });
-}
-
 // -------------------------------------------------------------------- blocked assessments
 
 function blockedEntry(key: string, fyi: string[]) {

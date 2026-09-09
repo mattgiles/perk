@@ -18,7 +18,6 @@ import { createMemoryWaveAdapter, type MemoryWaveAdapter } from "../testing/memo
 import { PONYTAIL_CORE_SKILL } from "./ponytail.ts";
 import {
   type CollectWaveResult,
-  createReportWave,
   type ReportAssignment,
   type ReportWaveRequest,
   reportWaveOver,
@@ -439,184 +438,58 @@ const REPORT_ROLES = [
   "perk.draft-reviewer",
 ];
 
-for (const execution of [undefined, "caller-read-only"] as const) {
-  for (const readOnly of [false, true]) {
-    for (const method of ["start", "run"] as const) {
-      test(`${method}: report profiles apply ${execution ?? "default"} over parent ${readOnly}`, async () => {
-        let captures = 0;
-        const adapter = createMemoryWaveAdapter({ aggregate: { state: "complete", value: [] } });
-        const wave = reportWaveOver(adapter, () => {
-          captures++;
-          return readOnly;
-        });
-        const spec = makeSpec({
-          assignments: REPORT_ROLES.map((agent, i) => ({ key: `r${i}`, agent, task: "report" })),
-          model: "configured/model:high",
-          execution,
-        });
-        const result = await wave[method](spec);
-        if ("ok" in result && result.ok) await wave.collect(result.ref);
-        assert.equal(captures, 1);
-        const spawn = adapter.calls.spawn[0];
-        assert.ok(spawn);
-        assert.equal(spawn.async, true);
-        assert.equal(spawn.context, "fresh");
-        assert.equal(spawn.mission, false);
-        assert.deepEqual(spawn.acceptance, WAVE_ACCEPTANCE);
-        assert.equal(spawn.model, spec.model);
-        assert.deepEqual(spawn.outputSchema, spec.outputSchema);
-        assert.equal("extensionBindings" in spawn, false);
-        assert.equal("execution" in spawn, false);
-        const items = waveScriptItems(spawn.workflowScript);
-        assert.deepEqual(
-          items.map((item) => item.agent),
-          REPORT_ROLES,
-        );
-        for (const item of items) {
-          assert.deepEqual(item.extensionBindings, {
-            "perk.parent-restrictions/1": {
-              readOnly: execution === "caller-read-only" || readOnly,
-            },
-          });
-          if (execution === "caller-read-only") assert.equal(item.worktree, false);
-          else assert.equal("worktree" in item, false);
-          assert.equal("execution" in item, false);
-          for (const field of [
-            "async",
-            "cwd",
-            "extensions",
-            "subagentOnlyExtensions",
-            "workflowAwaitAsync",
-          ])
-            assert.equal(field in item, false, field);
-        }
-        assert.ok(
-          spawn.workflowScript.endsWith(
-            "return reports.map(({key, ok, error, structuredOutput}) => " +
-              "({key, ok, error: error ?? null, report: structuredOutput ?? null}));",
-          ),
-        );
-      });
-    }
-  }
-}
+const REPORT_CHILD_RESTRICTIONS = { "perk.parent-restrictions/1": { readOnly: true } };
 
-test("snapshot is post-preflight, resampled per attempt, and instance-local", async () => {
-  let finishPreflight!: (result: { ok: true }) => void;
-  const preflight = new Promise<{ ok: true }>((resolve) => {
-    finishPreflight = resolve;
-  });
-  let gate = false;
-  let captures = 0;
-  const adapter = createMemoryWaveAdapter({ aggregate: { state: "complete", value: [] } });
-  const wave = reportWaveOver(adapter, () => {
-    captures++;
-    return gate;
-  });
-  const running = wave.run(
-    makeSpec({
-      assignments: [
-        { key: "p", agent: "perk.pr-reviewer", task: "t", requiredSkill: PONYTAIL_CORE_SKILL },
-      ],
-      requiredSkillPreflight: () => preflight,
-    }),
-  );
-  assert.equal(captures, 0);
-  gate = true;
-  finishPreflight({ ok: true });
-  await running;
-  gate = false;
-  await wave.run(makeSpec());
-  assert.equal(captures, 2);
-  assert.deepEqual(
-    adapter.calls.spawn.map((spawn) => waveScriptItems(spawn.workflowScript)[0]?.extensionBindings),
-    [
-      { "perk.parent-restrictions/1": { readOnly: true } },
-      { "perk.parent-restrictions/1": { readOnly: false } },
-    ],
-  );
-  const other = createMemoryWaveAdapter({ aggregate: { state: "complete", value: [] } });
-  await reportWaveOver(other, () => true).run(makeSpec());
-  assert.equal(captures, 2);
-  assert.deepEqual(
-    waveScriptItems(other.calls.spawn[0]?.workflowScript ?? "")[0]?.extensionBindings,
-    { "perk.parent-restrictions/1": { readOnly: true } },
-  );
-});
-
-for (const execution of [undefined, "caller-read-only"] as const) {
-  for (const skipped of [false, true]) {
-    test(`capture failure before RPC construction: ${execution}, skipped ${skipped}`, async () => {
-      let busCalls = 0;
-      let captures = 0;
-      const wave = createReportWave(
-        {
-          emit() {
-            busCalls++;
-          },
-          on() {
-            busCalls++;
-            return () => {};
-          },
-        },
-        {
-          parentReadOnly: () => {
-            captures++;
-            throw new Error("gate unreadable");
-          },
-        },
-      );
-      const assignments = [...ASSIGNMENTS];
-      if (skipped)
-        assignments.push({
-          key: "p",
-          agent: "perk.pr-reviewer",
-          task: "t",
-          requiredSkill: PONYTAIL_CORE_SKILL,
-        });
-      const start = await wave.start(
-        makeSpec({
-          assignments,
-          execution,
-          completeness: "best-effort",
-          requiredSkillPreflight: async () => ({ ok: false, detail: "missing skill" }),
-        }),
-      );
-      assert.equal(start.ok, false);
-      assert.equal("ref" in start, false);
-      if (start.ok) return;
-      assert.equal(captures, 1);
-      assert.equal(busCalls, 0);
-      assert.equal(start.result.complete, false);
-      assert.deepEqual(start.result.receipt, { state: "unavailable", children: [] });
-      assert.deepEqual(
-        start.result.failures.map(({ key, reason }) => [key, reason]),
-        [[null, "unavailable"], ...(skipped ? [["p", "skill-unavailable"]] : [])],
-      );
-      assert.match(
-        start.result.failures[0]?.detail ?? "",
-        /parent-restriction capture.*gate unreadable/,
-      );
-      assert.deepEqual(
-        start.launch.requested,
-        assignments.map(({ key }) => key),
-      );
-      assert.deepEqual(
-        start.launch.runnable,
-        ASSIGNMENTS.map(({ key }) => key),
-      );
-      assert.equal(start.launch.preflightFailures.length, skipped ? 1 : 0);
+for (const method of ["start", "run"] as const) {
+  test(`${method}: every report child carries the constant packet and caller-checkout placement`, async () => {
+    const adapter = createMemoryWaveAdapter({ aggregate: { state: "complete", value: [] } });
+    const wave = reportWaveOver(adapter);
+    const spec = makeSpec({
+      assignments: REPORT_ROLES.map((agent, i) => ({ key: `r${i}`, agent, task: "report" })),
+      model: "configured/model:high",
     });
-  }
+    const result = await wave[method](spec);
+    if ("ok" in result && result.ok) await wave.collect(result.ref);
+    const spawn = adapter.calls.spawn[0];
+    assert.ok(spawn);
+    assert.equal(spawn.async, true);
+    assert.equal(spawn.context, "fresh");
+    assert.equal(spawn.mission, false);
+    assert.deepEqual(spawn.acceptance, WAVE_ACCEPTANCE);
+    assert.equal(spawn.model, spec.model);
+    assert.deepEqual(spawn.outputSchema, spec.outputSchema);
+    assert.equal("extensionBindings" in spawn, false);
+    assert.equal("execution" in spawn, false);
+    const items = waveScriptItems(spawn.workflowScript);
+    assert.deepEqual(
+      items.map((item) => item.agent),
+      REPORT_ROLES,
+    );
+    for (const item of items) {
+      assert.deepEqual(item.extensionBindings, REPORT_CHILD_RESTRICTIONS);
+      assert.equal(item.worktree, false);
+      for (const field of [
+        "async",
+        "cwd",
+        "extensions",
+        "subagentOnlyExtensions",
+        "workflowAwaitAsync",
+        "execution",
+      ])
+        assert.equal(field in item, false, field);
+    }
+    assert.ok(
+      spawn.workflowScript.endsWith(
+        "return reports.map(({key, ok, error, structuredOutput}) => " +
+          "({key, ok, error: error ?? null, report: structuredOutput ?? null}));",
+      ),
+    );
+  });
 }
 
-test("all-skipped preflight never captures or spawns", async () => {
+test("all-skipped preflight never spawns", async () => {
   const adapter = createMemoryWaveAdapter({});
-  let captures = 0;
-  const result = await reportWaveOver(adapter, () => {
-    captures++;
-    throw new Error("must not run");
-  }).start(
+  const result = await reportWaveOver(adapter).start(
     makeSpec({
       assignments: [
         { key: "p", agent: "perk.pr-reviewer", task: "t", requiredSkill: PONYTAIL_CORE_SKILL },
@@ -625,49 +498,42 @@ test("all-skipped preflight never captures or spawns", async () => {
     }),
   );
   assert.equal(result.ok, false);
-  assert.equal(captures, 0);
   assert.equal(adapter.calls.spawn.length, 0);
 });
 
-for (const execution of [undefined, "caller-read-only"] as const) {
-  test(`the renderer rejects hostile extra fields under ${execution ?? "default"}`, async () => {
-    const hostile = `end"}]); process.exit(1); //\n\`rm -rf ~\` \${process.env.HOME} \\" done`;
-    const script = await renderedScript({
-      execution,
-      assignments: [
-        Object.assign(
-          { key: "hostile", agent: "perk.pr-reviewer", task: hostile },
-          {
-            extensionBindings: {
-              "perk.parent-restrictions/1": { readOnly: false, stage: "write" },
-            },
-            worktree: true,
-            execution: "hostile",
-            async: true,
-            cwd: "/hostile",
-            extensions: [],
-            workflowAwaitAsync: false,
+test("the renderer rejects hostile extra fields: the packet and placement cannot be overridden", async () => {
+  const hostile = `end"}]); process.exit(1); //\n\`rm -rf ~\` \${process.env.HOME} \\" done`;
+  const script = await renderedScript({
+    assignments: [
+      Object.assign(
+        { key: "hostile", agent: "perk.pr-reviewer", task: hostile },
+        {
+          extensionBindings: {
+            "perk.parent-restrictions/1": { readOnly: false, stage: "write" },
           },
-        ),
-        { key: "tame", agent: "perk.pr-reviewer", task: "review calmly" },
-      ],
-    });
-    // The array literal is exactly the JSON between `runs.all(` and the closing `);` before the
-    // return line — parse it back and prove the hostile text arrived intact as DATA.
-    const items = waveScriptItems(script) as Array<{ key: string; task: string }>;
-    assert.equal(items.length, 2);
-    assert.equal(items[0]?.task, hostile);
-    assert.equal(items[1]?.task, "review calmly");
-    const raw = waveScriptItems(script)[0];
-    assert.deepEqual(raw?.extensionBindings, {
-      "perk.parent-restrictions/1": { readOnly: execution === "caller-read-only" },
-    });
-    if (execution === "caller-read-only") assert.equal(raw?.worktree, false);
-    else assert.equal("worktree" in (raw ?? {}), false);
-    for (const field of ["async", "cwd", "extensions", "workflowAwaitAsync", "execution"])
-      assert.equal(field in (raw ?? {}), false);
+          worktree: true,
+          execution: "hostile",
+          async: true,
+          cwd: "/hostile",
+          extensions: [],
+          workflowAwaitAsync: false,
+        },
+      ),
+      { key: "tame", agent: "perk.pr-reviewer", task: "review calmly" },
+    ],
   });
-}
+  // The array literal is exactly the JSON between `runs.all(` and the closing `);` before the
+  // return line — parse it back and prove the hostile text arrived intact as DATA.
+  const items = waveScriptItems(script) as Array<{ key: string; task: string }>;
+  assert.equal(items.length, 2);
+  assert.equal(items[0]?.task, hostile);
+  assert.equal(items[1]?.task, "review calmly");
+  const raw = waveScriptItems(script)[0];
+  assert.deepEqual(raw?.extensionBindings, REPORT_CHILD_RESTRICTIONS);
+  assert.equal(raw?.worktree, false);
+  for (const field of ["async", "cwd", "extensions", "workflowAwaitAsync", "execution"])
+    assert.equal(field in (raw ?? {}), false);
+});
 
 test("the rendered script carries a per-assignment outputSchema on exactly the assignments that carry one", async () => {
   const laneSchema = { type: "object", properties: { angle: { enum: ["custom-scope"] } } };

@@ -254,7 +254,6 @@ function buildRequest(
 ): ReportWaveRequest {
   return {
     flow: "pr-review",
-    execution: "caller-read-only",
     assignments,
     outputSchema: PR_REVIEW_REPORT_SCHEMA,
     completeness: "strict",

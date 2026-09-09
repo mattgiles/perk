@@ -62,7 +62,7 @@ function installPonytailSkill(cwd: string, skillName: string): void {
 }
 
 for (const handoff of [false, true]) {
-  test(`real composition samples the warm gate without rewriting handoff: ${handoff}`, async () => {
+  test(`real composition: the rendered packet floors a child without touching the parent or handoff: ${handoff}`, async () => {
     const cwd = scaffoldRepo(handoff ? { handoff: { runId: "01RID", mode: "read-write" } } : {});
     installPonytailSkill(cwd, "ponytail-review");
     const fake = createFakeSubagents(
@@ -102,25 +102,22 @@ for (const handoff of [false, true]) {
       await h.invokeTool("collect_review_wave", {});
       await sibling.invokeTool("start_review_wave", args);
       await sibling.invokeTool("collect_review_wave", {});
+      const packet = { "perk.parent-restrictions/1": { readOnly: true } };
       assert.deepEqual(
         fake.spawns.map(
           (spawn) => waveScriptItems(String(spawn.workflowScript))[0]?.extensionBindings,
         ),
-        [
-          { "perk.parent-restrictions/1": { readOnly: false } },
-          { "perk.parent-restrictions/1": { readOnly: true } },
-        ],
+        [packet, packet],
       );
       assert.deepEqual(
         waveScriptItems(String(siblingFake.spawns[0]?.workflowScript))[0]?.extensionBindings,
-        { "perk.parent-restrictions/1": { readOnly: false } },
+        packet,
       );
       const renderedBindings = waveScriptItems(String(fake.spawns[1]?.workflowScript))[0]
         ?.extensionBindings;
       assert.ok(renderedBindings, "consume the packet from the actual rendered fake-RPC item");
       const child = await loadPerkSession({
         cwd,
-        systemPrompt: '<active_agent name="perk.adversarial-reviewer"/>\n\nReport rubric',
         env: {
           PERK_RUN_ID: handoff ? "01RID" : undefined,
           PI_SUBAGENT_CHILD: "1",

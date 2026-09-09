@@ -142,29 +142,6 @@ test("runReviewClassifierWave: ONE lane with the fixed flow/key/agent/task, modu
   assert.equal(REVIEW_CLASSIFIER_FLOW, "review-classifier");
 });
 
-for (const parentReadOnly of [false, true]) {
-  test(`classifier stays caller-read-only over parent ${parentReadOnly}`, async () => {
-    const adapter = createMemoryWaveAdapter({ aggregate: okAggregate() });
-    let captures = 0;
-    await runReviewClassifierWave(
-      reportWaveOver(adapter, () => {
-        captures++;
-        return parentReadOnly;
-      }),
-    );
-    assert.equal(captures, 1);
-    const spawn = adapter.calls.spawn[0];
-    assert.ok(spawn);
-    assert.equal("model" in spawn, false);
-    const [item] = waveScriptItems(spawn.workflowScript);
-    assert.ok(item);
-    assert.equal(item.worktree, false);
-    assert.deepEqual(item.extensionBindings, { "perk.parent-restrictions/1": { readOnly: true } });
-    for (const field of ["async", "cwd", "extensions", "workflowAwaitAsync", "execution"])
-      assert.equal(field in item, false);
-  });
-}
-
 // ------------------------------------------------------------------------ the failure arms
 
 test("runReviewClassifierWave: a failed lane is incomplete under strict (no retry — one spawn, ever)", async () => {

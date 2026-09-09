@@ -34,17 +34,12 @@ import {
   type SessionPointer,
 } from "./substrate/sessionPointers.ts";
 import { READ_ONLY_CONTEXT, READ_ONLY_TOOLS } from "./substrate/toolGating.ts";
-import { waveScriptItems } from "./testing/fakeSubagents.ts";
 import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
-import { createMemoryWaveAdapter } from "./testing/memoryAdapter.ts";
-import { reportWaveOver } from "./waves/reportWave.ts";
 
 const runnerPacket = {
   PI_SUBAGENT_CHILD: "1",
   PI_SUBAGENT_EXTENSION_BINDINGS: '{"perk.parent-restrictions/1":{"readOnly":true}}',
 };
-const reportPrompt = '<active_agent name="perk.pr-reviewer"/>\n\nReport rubric';
-const writerPrompt = '<active_agent name="perk.conflict-resolver"/>\n\nWriter rubric';
 
 async function noScratch(h: Awaited<ReturnType<typeof loadPerkSession>>, cwd: string) {
   assert.equal(
@@ -61,194 +56,52 @@ async function noScratch(h: Awaited<ReturnType<typeof loadPerkSession>>, cwd: st
   if (runId) assert.equal(existsSync(agentScratchDir(cwd, runId)), false);
 }
 
-test("startup captures the original prefix before gate tool rebuild; reload recaptures the loader prompt", async (t) => {
-  const original = AgentSession.prototype.setActiveToolsByName;
-  t.mock.method(
-    AgentSession.prototype,
-    "setActiveToolsByName",
-    function (this: AgentSession, names: string[]) {
-      original.call(this, names);
-      if (
-        names.length === READ_ONLY_TOOLS.length &&
-        names.every((name, i) => name === READ_ONLY_TOOLS[i])
-      ) {
-        this.agent.state.systemPrompt = writerPrompt;
-      }
-    },
-  );
-  const cwd = scaffoldRepo();
-  const file = plantSession(cwd, [{ run_id: "RID", mode: "read-write" }, { mode: "read-only" }]);
-  const h = await loadPerkSession({
-    cwd,
-    sessionManager: SessionManager.open(file),
-    systemPrompt: reportPrompt,
-  });
-  try {
-    assert.equal(
-      h.session.systemPrompt,
-      writerPrompt,
-      "the tool rebuild deliberately changed the live prompt",
-    );
-    await h.navigateTo("c0");
-    assert.equal((await h.emitToolCall("write", {}))?.block, undefined);
-    await noScratch(h, cwd);
-    h.session.agent.state.systemPrompt = writerPrompt;
-    await h.reload();
-    assert.ok(h.session.systemPrompt.startsWith(reportPrompt));
-    await noScratch(h, cwd);
-  } finally {
-    h.dispose();
-  }
-});
-
-test("rendered caller-read-only packet strengthens a read-write handoff without changing its parent", async (t) => {
-  const cwd = scaffoldRepo();
-  const file = plantSession(cwd, [{ run_id: "PARENT", mode: "read-write" }]);
-  const parent = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
-  t.after(() => parent.dispose());
-  assert.equal(parent.workflowState().mode, "read-write");
-  const adapter = createMemoryWaveAdapter({ aggregate: { state: "complete", value: [] } });
-  await reportWaveOver(adapter, () => parent.workflowState().mode === "read-only").run({
-    flow: "gate-wiring",
-    execution: "caller-read-only",
-    assignments: [{ key: "review", agent: "perk.pr-reviewer", task: "report" }],
-    outputSchema: { type: "object" },
-    completeness: "strict",
-  });
-  const spawn = adapter.calls.spawn[0];
-  assert.ok(spawn);
-  const [item] = waveScriptItems(spawn.workflowScript);
-  assert.ok(item);
-  assert.equal(item.worktree, false);
-  writeFileSync(
-    handoffPath(cwd, "PARENT"),
-    JSON.stringify({
-      run_id: "PARENT",
-      mode: "read-write",
-      consumed: true,
-    }),
-  );
-  const h = await loadPerkSession({
-    cwd,
-    systemPrompt: reportPrompt,
-    env: {
-      PERK_RUN_ID: "PARENT",
-      PI_SUBAGENT_CHILD: "1",
-      PI_SUBAGENT_EXTENSION_BINDINGS: JSON.stringify(item.extensionBindings),
-    },
-  });
-  try {
-    assert.equal(h.workflowState().mode, "read-only");
-    for (const command of [
-      "perk pr review-context --expected-pr 42 --json",
-      "perk pr review-context --pr 42 --json",
-      "perk pr review-context --pr 42 --stack --json",
-      "perk pr feedback --json",
-    ])
-      assert.equal((await h.emitToolCall("bash", { command }))?.block, undefined);
-    assert.equal((await h.emitToolCall("structured_output", { value: {} }))?.block, undefined);
-    for (const tool of ["write", "edit"])
-      assert.equal((await h.emitToolCall(tool, {}))?.block, true);
-    assert.equal(
-      (await h.emitToolCall("bash", { command: "perk pr review-post --json" }))?.block,
-      true,
-    );
-    assert.equal(parent.workflowState().mode, "read-write");
-    assert.equal((await parent.emitToolCall("write", {}))?.block, undefined);
-    assert.equal(JSON.parse(readFileSync(handoffPath(cwd, "PARENT"), "utf8")).mode, "read-write");
-  } finally {
-    h.dispose();
-  }
-});
-
-test("runner floor survives tree/compaction and original-packet reload over a read-write branch", async () => {
+test("runner floor: latched for the activation, backstopped, and invisible to a sibling activation", async () => {
   const cwd = scaffoldRepo();
   const file = plantSession(cwd, [{ run_id: "RID", mode: "read-write" }]);
   const h = await loadPerkSession({
     cwd,
     sessionManager: SessionManager.open(file),
-    systemPrompt: writerPrompt,
     env: runnerPacket,
   });
   try {
     assert.equal(h.workflowState().mode, "read-only");
+    for (const tool of ["write", "edit", "plan_save", "foreign_mutator"])
+      assert.equal((await h.emitToolCall(tool, {}))?.block, true, tool);
+    assert.equal((await h.emitToolCall("structured_output", { value: {} }))?.block, undefined);
+    assert.equal((await h.emitToolCall("bash", { command: "git status" }))?.block, undefined);
+    await noScratch(h, cwd);
+
+    // A same-activation restart without the runner env, and a producer's honest `false`, cannot
+    // clear a latched floor; neither can navigating to the read-write leaf.
     delete process.env.PI_SUBAGENT_CHILD;
     process.env.PI_SUBAGENT_EXTENSION_BINDINGS =
       '{"perk.parent-restrictions/1":{"readOnly":false}}';
-    await h.navigateTo("c0");
-    assert.equal(h.workflowState().mode, "read-write");
-    await h.emitLifecycle({ type: "session_compact" });
+    await h.emitSessionStart();
+    assert.equal((await h.emitToolCall("write", {}))?.block, true);
     assert.equal((await h.emitToolCall("foreign_mutator", {}))?.block, true);
-    await noScratch(h, cwd);
-    await h.reload(runnerPacket);
-    assert.equal(h.workflowState().mode, "read-only", "original packet reflects again on reload");
+    await h.navigateTo("c0");
     assert.equal((await h.emitToolCall("write", {}))?.block, true);
     await noScratch(h, cwd);
-  } finally {
-    h.dispose();
-  }
-});
 
-test("existing branch read-only survives reload without a restriction packet", async () => {
-  const cwd = scaffoldRepo();
-  const file = plantSession(cwd, [{ run_id: "RID", mode: "read-only" }]);
-  const h = await loadPerkSession({
-    cwd,
-    sessionManager: SessionManager.open(file),
-    systemPrompt: writerPrompt,
-    env: { PI_SUBAGENT_CHILD: "1" },
-  });
-  try {
-    await h.reload();
-    assert.equal(h.workflowState().mode, "read-only");
-    assert.equal((await h.emitToolCall("submit", {}))?.block, true);
-    assert.equal(
-      h.notifies.some((message) => message.includes("child restriction")),
-      false,
-      "legacy absence is silent",
-    );
-  } finally {
-    h.dispose();
-  }
-});
-
-test("missing/mismatched env handoff stays loudly unclaimed under true/invalid runner restrictions", async () => {
-  for (const mismatch of [false, true]) {
-    const cwd = scaffoldRepo();
-    if (mismatch)
-      writeFileSync(
-        handoffPath(cwd, "MISSING"),
-        JSON.stringify({ run_id: "WRONG", consumed: true, mode: "read-write" }),
-      );
-    const h = await loadPerkSession({
+    // The floor is per activation: a sibling session in the same process without the runner env
+    // is untouched.
+    const siblingFile = plantSession(cwd, [{ run_id: "SIB", mode: "read-write" }], {
+      fileName: "planted-sibling.jsonl",
+    });
+    const sibling = await loadPerkSession({
       cwd,
-      systemPrompt: writerPrompt,
-      env: {
-        ...runnerPacket,
-        PERK_RUN_ID: "MISSING",
-        PI_SUBAGENT_EXTENSION_BINDINGS: mismatch
-          ? "invalid"
-          : runnerPacket.PI_SUBAGENT_EXTENSION_BINDINGS,
-      },
+      sessionManager: SessionManager.open(siblingFile),
     });
     try {
-      assert.equal(h.workflowState().run_id, undefined, "failed claim must not mint");
-      assert.equal(
-        h.workflowState().mode,
-        undefined,
-        "no invented persisted restriction on unclaimed outcome",
-      );
-      assert.ok(
-        h.notifies.some((message) =>
-          message.includes("handoff missing or mismatched for run MISSING"),
-        ),
-      );
-      assert.equal((await h.emitToolCall("plan_save", {}))?.block, true);
-      assert.ok(h.footerFactory(), "startup continues after honest unclaimed outcome");
-      await noScratch(h, cwd);
+      assert.equal(sibling.workflowState().mode, "read-write");
+      assert.equal((await sibling.emitToolCall("write", {}))?.block, undefined);
+      assert.equal((await h.emitToolCall("write", {}))?.block, true);
     } finally {
-      h.dispose();
+      sibling.dispose();
     }
+  } finally {
+    h.dispose();
   }
 });
 
@@ -270,12 +123,7 @@ test("escaping reflection exception reports safely and continues startup with ba
     }
     return append(type, data);
   };
-  const h = await loadPerkSession({
-    cwd,
-    sessionManager: manager,
-    systemPrompt: writerPrompt,
-    env: runnerPacket,
-  });
+  const h = await loadPerkSession({ cwd, sessionManager: manager, env: runnerPacket });
   try {
     assert.equal(reflections, 1);
     assert.equal(h.workflowState().mode, undefined);
@@ -295,41 +143,6 @@ test("escaping reflection exception reports safely and continues startup with ba
     await noScratch(h, cwd);
   } finally {
     h.dispose();
-  }
-});
-
-test("paired sessions cache identity/floor independently; forged prefixes change scratch only, not authority", async () => {
-  const cwd = scaffoldRepo({
-    handoff: { runId: "PARENT", mode: "read-write", stage: "implement" },
-  });
-  const parent = await loadPerkSession({
-    cwd,
-    systemPrompt: reportPrompt,
-    env: { PERK_RUN_ID: "PARENT" },
-  });
-  const handoff = readFileSync(handoffPath(cwd, "PARENT"), "utf8");
-  const original = parent.workflowState();
-  const child = await loadPerkSession({
-    cwd,
-    systemPrompt: writerPrompt,
-    env: { ...runnerPacket, PERK_RUN_ID: "PARENT", PI_SUBAGENT_CHILD_AGENT: "perk.pr-reviewer" },
-  });
-  try {
-    assert.equal(child.workflowState().predecessor, "PARENT");
-    assert.equal(child.workflowState().stage, undefined);
-    assert.equal(child.workflowState().mode, "read-only", "writer prefix is not a write grant");
-    assert.equal((await parent.emitToolCall("write", {}))?.block, undefined);
-    assert.equal((await child.emitToolCall("write", {}))?.block, true);
-    parent.session.agent.state.systemPrompt = writerPrompt;
-    await parent.emitLifecycle({ type: "session_compact" });
-    await noScratch(parent, cwd);
-    await noScratch(child, cwd);
-    assert.deepEqual(parent.workflowState(), original);
-    assert.equal(parent.workflowState().stage, "implement");
-    assert.equal(readFileSync(handoffPath(cwd, "PARENT"), "utf8"), handoff);
-  } finally {
-    child.dispose();
-    parent.dispose();
   }
 });
 

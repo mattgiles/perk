@@ -3,9 +3,9 @@
 // that the authoring-context eligibility policy (`authoring/context/eligibility.ts`) consumes
 // through the Pi installers. Suppression only: a runner child receives no Perk authoring or
 // plan-adapter guidance; the bit never grants tools or save authority, and it is deliberately
-// NOT the advisory `<active_agent>` name parser (`childIdentity.ts`) nor the runner restriction
-// floor (`childRestrictions.ts`) — three independent captures of one startup boolean, each with
-// its own consumer. Reset on shutdown so a re-activation starts from "not a runner".
+// NOT the runner restriction floor (`childRestrictions.ts`) — two independent captures of one
+// startup boolean, each with its own consumer. Reset on shutdown so a re-activation starts from
+// "not a runner".
 
 /** The read side the installers compose (a supplier, so registration precedes capture). */
 export interface ContextPolicyInputs {
