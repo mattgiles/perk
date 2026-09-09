@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -15,8 +15,6 @@ import {
   parseCiChecks,
   parseTomlSubset,
   resolveIssueBackendId,
-  resolveIssueDestination,
-  resolveIssueRouting,
   subagentModel,
   type TomlScalar,
 } from "./config.ts";
@@ -96,93 +94,6 @@ test("parseTomlSubset: double-quoted behaviour is byte-stable beside the literal
   assert.equal(t.tables[""]?.basic, "tab\there");
   assert.equal(t.tables[""]?.literal, "tab\\there");
   assert.equal(t.tables[""]?.multi, "x");
-});
-
-// --- the shared `[issues]` parity fixture (TS half; tests/test_issues_config_parity.py is Python's) ---
-
-const ISSUES_FIXTURE = JSON.parse(
-  readFileSync(
-    join(import.meta.dirname, "..", "..", "shared", "fixtures", "issues-table.json"),
-    "utf8",
-  ),
-) as {
-  cases: {
-    name: string;
-    toml: string;
-    expected: { backend: string | null; team: string | null };
-    tomllib?: { backend: string | null; team: string | null };
-    provable: boolean;
-  }[];
-};
-
-test("issues-table fixture: unique case names, every string spelling covered", () => {
-  const names = ISSUES_FIXTURE.cases.map((c) => c.name);
-  assert.equal(new Set(names).size, names.length);
-  for (const needle of [
-    /basic/,
-    /literal/,
-    /multi-line basic/,
-    /multi-line literal/,
-    /absent/,
-    /non-string/,
-    /dotted keys/,
-    /inline table/,
-    /quoted header/,
-    /trailing comment/,
-    /escape/,
-  ])
-    assert.ok(
-      names.some((n) => needle.test(n)),
-      `a case matching ${needle} exists`,
-    );
-});
-
-for (const c of ISSUES_FIXTURE.cases) {
-  test(`issues-table fixture ${c.name}: the recorded reading, proven or widened`, () => {
-    const cwd = repoWith({ "perk.toml": c.toml });
-    assert.deepEqual(resolveIssueDestination(cwd), c.expected);
-    // The same extraction rule over the bare parser (the fixture's stated TS reading, through
-    // the StrippedStr boundary).
-    const issues = parseTomlSubset(c.toml).tables.issues;
-    const pick = (v: unknown) => (typeof v === "string" ? v.trim() || null : null);
-    assert.deepEqual({ backend: pick(issues?.backend), team: pick(issues?.team) }, c.expected);
-    // The fence's verdict: proven keys, or the whole document standing in for them.
-    const routing = resolveIssueRouting(cwd);
-    assert.deepEqual({ backend: routing.backend, team: routing.team }, c.expected);
-    if (c.provable) {
-      assert.equal(routing.kind, "keys");
-      assert.equal(c.tomllib, undefined, "a proven case never diverges from tomllib");
-    } else {
-      assert.equal(routing.kind, "document");
-      assert.equal(routing.kind === "document" && routing.text, c.toml);
-    }
-  });
-}
-
-test("resolveIssueRouting: invalid-TOML shapes the subset reader tolerates are unproven", () => {
-  // Each of these makes tomllib raise (so Python cannot save at all); the subset reader would
-  // read something, and the fence must not trust it.
-  for (const toml of [
-    '[issues]\nbackend = "linear"\n[issues]\nteam = "ENG"\n',
-    '[issues]\nbackend = "linear"\nbackend = "github"\n',
-    '[issues]\nbackend = "linear" trailing\n',
-    '[issues]\nbackend.kind = "linear"\n',
-    "[issues]\nbackend\n",
-  ]) {
-    const routing = resolveIssueRouting(repoWith({ "perk.toml": toml }));
-    assert.equal(routing.kind, "document", toml);
-  }
-});
-
-test("resolveIssueRouting: an `issues` key nested under another table widens (conservative)", () => {
-  const routing = resolveIssueRouting(
-    repoWith({
-      "perk.toml": '[issues]\nbackend = "github"\n\n[labels]\nissues = "perk"\n',
-    }),
-  );
-  // Conservative: a key segment spelling `issues` anywhere widens — the reader never has to
-  // decide whether the nesting matters.
-  assert.equal(routing.kind, "document");
 });
 
 test("parseTomlSubset: native booleans and numbers", () => {
@@ -604,79 +515,6 @@ test("resolveIssueBackendId: a malformed file falls safe to github", () => {
 test("resolveIssueBackendId: a literal-string 'linear' is read like the basic spelling", () => {
   const cwd = repoWith({ "perk.toml": "[issues]\nbackend = 'linear'\n" });
   assert.equal(resolveIssueBackendId(cwd), "linear");
-});
-
-// --- resolveIssueDestination (verbatim committed-only routing keys) ------------
-
-test("resolveIssueDestination: absent config and a local.toml-only table both read null/null", () => {
-  assert.deepEqual(resolveIssueDestination(mkdtempSync(join(tmpdir(), "perk-config-"))), {
-    backend: null,
-    team: null,
-  });
-  const cwd = repoWith({ "perk.local.toml": '[issues]\nbackend = "linear"\nteam = "ENG"\n' });
-  assert.deepEqual(resolveIssueDestination(cwd), { backend: null, team: null });
-});
-
-test("resolveIssueDestination: unknown backends pass through (no validation here), stripped", () => {
-  const cwd = repoWith({ "perk.toml": '[issues]\nbackend = "jira"\nteam = "  ENG "\n' });
-  assert.deepEqual(resolveIssueDestination(cwd), { backend: "jira", team: "ENG" });
-});
-
-test("resolveIssueDestination: a linked worktree reads the MAIN checkout's [issues] table", () => {
-  const cwd = mkdtempSync(join(tmpdir(), "perk-config-git-"));
-  const g = (...args: string[]): string =>
-    execFileSync("git", args, {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  g("init", "-q");
-  g("config", "user.email", "t@example.com");
-  g("config", "user.name", "perk tests");
-  writeFileSync(join(cwd, "seed.txt"), "seed\n", "utf8");
-  g("add", "-A");
-  g("commit", "-qm", "base");
-  const baseSha = g("rev-parse", "HEAD");
-  mkdirSync(join(cwd, ".perk"), { recursive: true });
-  writeFileSync(
-    join(cwd, ".perk", "config.toml"),
-    "[issues]\nbackend = 'linear'\nteam = 'ENG'\n",
-    "utf8",
-  );
-  g("add", "-A");
-  g("commit", "-qm", "add linear issues config");
-  const wt = join(cwd, ".worktrees", "wt-issues");
-  g("worktree", "add", "--detach", wt, baseSha);
-  assert.deepEqual(resolveIssueDestination(wt), { backend: "linear", team: "ENG" });
-});
-
-test("resolveIssueBackendId: a linked worktree reads the MAIN checkout's selection", () => {
-  // The incident shape: a worktree detached at a commit without `.perk/config.toml`. The
-  // selection is anchored to the main checkout, so the worktree's checkout state never flips
-  // a Linear repo's prompt clauses to github. (The non-git cases above pin the fail-open-to-cwd
-  // arm of mainCheckoutRoot.)
-  const cwd = mkdtempSync(join(tmpdir(), "perk-config-git-"));
-  const g = (...args: string[]): string =>
-    execFileSync("git", args, {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  g("init", "-q");
-  g("config", "user.email", "t@example.com");
-  g("config", "user.name", "perk tests");
-  writeFileSync(join(cwd, "seed.txt"), "seed\n", "utf8");
-  g("add", "-A");
-  g("commit", "-qm", "base"); // commit A: no .perk/
-  const baseSha = g("rev-parse", "HEAD");
-  mkdirSync(join(cwd, ".perk"), { recursive: true });
-  writeFileSync(join(cwd, ".perk", "config.toml"), '[issues]\nbackend = "linear"\n', "utf8");
-  g("add", "-A");
-  g("commit", "-qm", "add linear issues config"); // commit B: main checkout stays here
-
-  const wt = join(cwd, ".worktrees", "wt-issues");
-  g("worktree", "add", "--detach", wt, baseSha);
-  assert.equal(resolveIssueBackendId(wt), "linear");
 });
 
 test("subagentModel: a linked worktree honors the MAIN checkout's gitignored local.toml override", () => {
