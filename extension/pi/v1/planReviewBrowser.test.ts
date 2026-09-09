@@ -49,6 +49,7 @@ import {
   observePlanReviewReadiness,
   openPlanReviewAndGuide,
   openPlanReviewSurface,
+  type PlanReviewDoorSession,
   planReviewBrowserGuidance,
   routePlanReviewDecision,
 } from "./planReviewBrowser.ts";
@@ -194,9 +195,14 @@ function fakeStarted(
   };
 }
 
+/** The always-current door-session token (the default `observe()` session). */
+function currentSession(): PlanReviewDoorSession {
+  return { degraded: false, current: () => true };
+}
+
 async function observe(
   started: StartedSurface<ReviewOutcome>,
-  opts?: { idle?: boolean },
+  opts?: { idle?: boolean; session?: PlanReviewDoorSession },
 ): Promise<{
   notifies: { message: string; severity?: string }[];
   sent: { message: string; options?: { deliverAs?: string } }[];
@@ -217,7 +223,7 @@ async function observe(
     started,
     draftReview,
     annotations,
-    { degraded: false },
+    opts?.session ?? currentSession(),
   );
   return { notifies, sent };
 }
@@ -290,6 +296,49 @@ test("observer: bridge settled unavailable → degrade + clear; completed/aborte
   assert.equal(turnAborted.notifies.length, 0, "an aborted turn stays silent");
   assert.equal(turnAborted.sent.length, 0);
   assert.equal(await annotationMode(), "plan", "aborted arms leave the surfaces primed");
+  clearAnnotationSurface(annotations);
+  clearDraftReviewContext(draftReview);
+});
+
+test("observer: a superseded review's observer is inert — timeout → no report, no notice, both surfaces untouched, session not degraded", async () => {
+  // Review A's observer times out AFTER review B opened (and re-primed the surfaces for ITS
+  // session): A must not inject the fallback, clear B's surfaces, or flip its own session.
+  primeBoth();
+  const session: PlanReviewDoorSession = { degraded: false, current: () => false };
+  const { notifies, sent } = await observe(fakeStarted("timeout"), { session });
+  assert.equal(notifies.length, 0, "no error report");
+  assert.equal(sent.length, 0, "no degrade notice");
+  assert.equal(await annotationMode(), "plan", "the newer review's annotation surface survives");
+  assert.equal(await draftContextPrimed(), true, "…and its draft-review context");
+  assert.equal(session.degraded, false, "the superseded session is never flipped");
+  clearAnnotationSurface(annotations);
+  clearDraftReviewContext(draftReview);
+});
+
+test("observer: bridge settled unavailable for a superseded review → silent (no report, no notice, surfaces untouched)", async () => {
+  primeBoth();
+  const session: PlanReviewDoorSession = { degraded: false, current: () => false };
+  const { notifies, sent } = await observe(
+    fakeStarted("bridge_settled", { status: "unavailable", warning: "boom" }),
+    { session },
+  );
+  assert.equal(notifies.length, 0);
+  assert.equal(sent.length, 0);
+  assert.equal(await annotationMode(), "plan");
+  assert.equal(await draftContextPrimed(), true);
+  assert.equal(session.degraded, false);
+  clearAnnotationSurface(annotations);
+  clearDraftReviewContext(draftReview);
+});
+
+test("observer: ready for a superseded review → no announce", async () => {
+  primeBoth();
+  const { notifies, sent } = await observe(fakeStarted("ready"), {
+    session: { degraded: false, current: () => false },
+  });
+  assert.equal(notifies.length, 0, "a superseded review never announces 'plannotator is up'");
+  assert.equal(sent.length, 0);
+  assert.equal(await annotationMode(), "plan", "the ready arm never clears either way");
   clearAnnotationSurface(annotations);
   clearDraftReviewContext(draftReview);
 });

@@ -100,6 +100,7 @@ const observers: { name: string; mode: AnnotationMode; observe(f: Fixture): Prom
         f.started,
         createDraftReviewWaveState(),
         f.annotations,
+        currentDoorSession(),
       ),
   },
   {
@@ -112,9 +113,15 @@ const observers: { name: string; mode: AnnotationMode; observe(f: Fixture): Prom
         f.started,
         createDraftReviewWaveState(),
         f.annotations,
+        currentDoorSession(),
       ),
   },
 ];
+
+/** The always-current door-session token: these cases pin the ready-arm delivery continuation. */
+function currentDoorSession(): { degraded: boolean; readonly current: () => boolean } {
+  return { degraded: false, current: () => true };
+}
 
 for (const observer of observers) {
   for (const idle of [true, false]) {
@@ -218,6 +225,7 @@ test("a held final pure clear wakes on readiness even with zero held findings", 
     f.started,
     createDraftReviewWaveState(),
     f.annotations,
+    currentDoorSession(),
   );
   const held = await executePushAnnotations(
     f.annotations,
