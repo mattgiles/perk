@@ -1537,6 +1537,16 @@ class LinearProjectObjectiveStore:
             )
             return objective_store.CancellationRepairOutcome.APPLIED
 
+    def read_objective_body(self, *, objective_id: str) -> str | None:
+        """The project **overview** verbatim (Linear markdown: the Mechanical table in inline-code
+        marker form, the Reconcilable prose, any Immutable notes) — the read twin of
+        ``update_objective_body``. ``None`` when the project is absent or its overview is empty."""
+        with _translate_objective():
+            project = self._projects.project_or_none(objective_id, "content")
+            if project is None:
+                return None
+            return _opt_str(project.get("content")) or None
+
     def update_objective_body(
         self, *, objective_id: str, prose: str, dry_run: bool = False
     ) -> objective_store.ObjectiveBodyUpdate:

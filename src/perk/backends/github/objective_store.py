@@ -272,6 +272,13 @@ class GitHubObjectiveStore:
             state="closed" if state.state == "closed" else "open",
         )
 
+    def read_objective_body(self, *, objective_id: str) -> str | None:
+        """The metadata-referenced ``objective-body`` comment verbatim (``None`` = no body
+        comment); delegates to ``objectives.get_objective_body``."""
+        number = _number(objective_id)
+        with _translate():
+            return objectives.get_objective_body(number=number, repo_root=self._repo_root)
+
     def journal_carrier_id(self, *, objective_id: str) -> str | None:
         """The journal carrier IS the objective issue (§8.43): confirm existence via the same
         read ``get_objective`` uses (absent → ``None``), then return the NORMALIZED issue-tier

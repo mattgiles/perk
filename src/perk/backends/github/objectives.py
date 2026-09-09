@@ -771,6 +771,33 @@ def add_objective_node(
     )
 
 
+def _body_comment(number: int, repo_root: Path) -> tuple[int, str] | None:
+    """Locate + read the ``objective-body`` comment the issue body's ``objective-header``
+    references via ``objective_comment_id`` — never by comment order (an adopted objective can
+    carry earlier human comments; the deferred-supersession convergence can re-post the carrier).
+    ``None`` when the header carries no int ``objective_comment_id`` or the comment has vanished;
+    raises ``GitHubError`` on an infra failure."""
+    body = plans._get_issue_body(number, repo_root)
+    header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
+    comment_id = header.get("objective_comment_id")
+    if not isinstance(comment_id, int):
+        return None
+    comment_body = plans._get_comment_body(comment_id, repo_root)
+    if comment_body is None:
+        return None
+    return comment_id, comment_body
+
+
+def get_objective_body(*, number: int, repo_root: Path) -> str | None:
+    """Read the objective-body comment verbatim (the read twin of :func:`update_objective_body`):
+    the Mechanical table, the Reconcilable prose and any Immutable notes, as untrusted DATA. The
+    comment's table is a best-effort mirror of the authoritative roadmap block — presenters
+    re-render it from ``get_objective``'s nodes. ``None`` when the objective has no body comment;
+    raises ``GitHubError`` on an infra failure."""
+    found = _body_comment(number, repo_root)
+    return None if found is None else found[1]
+
+
 def update_objective_body(
     *, number: int, prose: str, repo_root: Path, dry_run: bool = False
 ) -> ObjectiveBodyUpdate:
@@ -784,14 +811,10 @@ def update_objective_body(
     Raises ``GitHubError`` when the objective has no body comment or the comment lacks the
     Reconcilable region (legacy objectives lacking it). A dry run composes only (no PATCH).
     """
-    body = plans._get_issue_body(number, repo_root)
-    header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
-    comment_id = header.get("objective_comment_id")
-    if not isinstance(comment_id, int):
+    found = _body_comment(number, repo_root)
+    if found is None:
         raise _exec.GitHubError(f"objective #{number} has no body comment")
-    comment_body = plans._get_comment_body(comment_id, repo_root)
-    if comment_body is None:
-        raise _exec.GitHubError(f"objective #{number} has no body comment")
+    comment_id, comment_body = found
     spliced = objective.replace_reconcilable_section(comment_body, prose)
     if spliced is None:
         raise _exec.GitHubError(f"objective #{number} body comment has no reconcilable region")

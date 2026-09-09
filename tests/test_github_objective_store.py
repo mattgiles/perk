@@ -198,6 +198,19 @@ class TestGitHubDelegation:
         result = GitHubObjectiveStore(tmp_path).get_objective(objective_id="252")
         assert result is not None and result.state == "closed"
 
+    def test_read_objective_body(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = _Recorder("BODY")
+        monkeypatch.setattr(objectives, "get_objective_body", rec)
+        result = GitHubObjectiveStore(tmp_path).read_objective_body(objective_id="252")
+        assert rec.kwargs == {"number": 252, "repo_root": tmp_path}
+        assert result == "BODY"
+
+    def test_read_objective_body_none_passthrough(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(objectives, "get_objective_body", _Recorder(None))
+        assert GitHubObjectiveStore(tmp_path).read_objective_body(objective_id="252") is None
+
     def test_journal_carrier_id_is_the_objective_issue(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -642,6 +655,8 @@ class TestErrorTranslation:
             store.get_objective(objective_id="LIN-42")
         with pytest.raises(ObjectiveStoreError, match="numeric"):
             store.update_objective_body(objective_id="abc", prose="p")
+        with pytest.raises(ObjectiveStoreError, match="numeric"):
+            store.read_objective_body(objective_id="abc")
 
     def test_canonical_hash_id_is_accepted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
