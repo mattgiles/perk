@@ -280,7 +280,7 @@ def test_tool_field_governance_findings_have_exact_contract_messages() -> None:
 def test_repository_prose_map_is_complete_and_current(built: BuildResult) -> None:
     assert built.catalog.findings == ()
     assert len(built.catalog.units) > 150
-    assert len(built.catalog.governed_tools) == 37
+    assert len(built.catalog.governed_tools) == 38
     assert "resolve_submit_conflicts" in built.catalog.governed_tools
     assert (ROOT / RENDERED_PATH).read_text(encoding="utf-8") == built.rendered
 
@@ -381,6 +381,7 @@ def test_python_owned_prompt_wrappers_are_ast_selected(built: BuildResult) -> No
         "python-symbol:src/perk/backends/engagement.py:render_plan_engagement",
         "python-symbol:src/perk/cli/commands/learn/factory_common.py:render_inbox",
         "python-symbol:src/perk/cli/commands/objective/author_cmd.py:_render_source",
+        "python-symbol:src/perk/cli/commands/objective/node_context.py:render_node_refinement",
         "python-symbol:src/perk/cli/commands/objective/plan_cmd.py:_layer_context_block",
         "python-symbol:src/perk/cli/commands/objective/replan_cmd.py:_render_existing_objective",
         "python-symbol:src/perk/cli/commands/plan/from_cmd.py:_render_source_issue",

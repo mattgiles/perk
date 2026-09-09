@@ -249,7 +249,7 @@ routes:
     role: skill-detail
     priority: 80
   - id: skill-objective-planning
-    match: { paths: ["skills/perk-objective-plan/**", "skills/perk-objective-replan/**", "skills/perk-objective-reconcile/**"] }
+    match: { paths: ["skills/perk-objective-plan/**", "skills/perk-objective-refine/**", "skills/perk-objective-replan/**", "skills/perk-objective-reconcile/**"] }
     capability: planning.objective
     audience: shipped
     role: skill-detail
@@ -347,7 +347,7 @@ routes:
     role: context
     priority: 90
   - id: py-objective-plan-data
-    match: { paths: ["src/perk/cli/commands/objective/plan_cmd.py"] }
+    match: { paths: ["src/perk/cli/commands/objective/plan_cmd.py", "src/perk/cli/commands/objective/node_context.py"] }
     capability: planning.objective
     audience: shipped
     role: context
@@ -390,7 +390,7 @@ routes:
     role: control-guidance
     priority: 80
   - id: ts-objective-plan
-    match: { paths: ["extension/pi/v1/objectivePlanning.ts"] }
+    match: { paths: ["extension/pi/v1/objectivePlanning.ts", "extension/pi/v1/objectiveRefinement.ts"] }
     capability: planning.objective
     audience: shipped
     role: tool-contract
@@ -402,7 +402,7 @@ routes:
     role: tool-contract
     priority: 75
   - id: ts-plan-review
-    match: { paths: ["extension/pi/v1/planReview.ts", "extension/pi/v1/objectiveReview.ts", "extension/pi/v1/review.ts", "extension/pi/v1/planReviewBrowser.ts", "extension/pi/v1/objectiveReviewBrowser.ts", "extension/pi/v1/providers/plannotatorHandoff.ts", "extension/pi/v1/draftReviewWaveTools.ts"] }
+    match: { paths: ["extension/pi/v1/planReview.ts", "extension/pi/v1/objectiveReview.ts", "extension/pi/v1/review.ts", "extension/pi/v1/planReviewBrowser.ts", "extension/pi/v1/objectiveReviewBrowser.ts", "extension/pi/v1/providers/plannotatorHandoff.ts", "extension/pi/v1/draftReview.ts", "extension/pi/v1/draftReviewWaveTools.ts"] }
     capability: review.drafts
     audience: shipped
     role: tool-contract

@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **225** canonical source units
-- **1218** logical fragments
+- **229** canonical source units
+- **1231** logical fragments
 - **16** session shapes and **12** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -67,8 +67,10 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
 | `markdown:prompts/commit-and-compact-continuation.md` | `context` | `shipped` | [`prompts/commit-and-compact-continuation.md`](../../prompts/commit-and-compact-continuation.md) · `file` | — |
 | `markdown:prompts/commit-and-compact.md` | `context` | `shipped` | [`prompts/commit-and-compact.md`](../../prompts/commit-and-compact.md) · `file` | — |
 | `markdown:prompts/common/resume-advisory.md` | `context` | `shipped` | [`prompts/common/resume-advisory.md`](../../prompts/common/resume-advisory.md) · `file` | — |
+| `markdown:prompts/contexts/objective-refinement.md` | `context` | `shipped` | [`prompts/contexts/objective-refinement.md`](../../prompts/contexts/objective-refinement.md) · `file` | — |
 | `markdown:prompts/contexts/read-only.md` | `context` | `shipped` | [`prompts/contexts/read-only.md`](../../prompts/contexts/read-only.md) · `file` | — |
 | `markdown:prompts/stages/gist-save.md` | `context` | `shipped` | [`prompts/stages/gist-save.md`](../../prompts/stages/gist-save.md) · `file` | — |
+| `markdown:prompts/stages/objective-refine/seed.md` | `context` | `shipped` | [`prompts/stages/objective-refine/seed.md`](../../prompts/stages/objective-refine/seed.md) · `file` | — |
 | `python-symbol:src/perk/backends/engagement.py:render_adopted_engagement` | `context` | `shipped` | [`src/perk/backends/engagement.py`](../../src/perk/backends/engagement.py) · `symbol:render_adopted_engagement` | — |
 | `python-symbol:src/perk/backends/engagement.py:render_node_engagement` | `context` | `shipped` | [`src/perk/backends/engagement.py`](../../src/perk/backends/engagement.py) · `symbol:render_node_engagement` | — |
 | `python-symbol:src/perk/backends/engagement.py:render_objective_engagement` | `context` | `shipped` | [`src/perk/backends/engagement.py`](../../src/perk/backends/engagement.py) · `symbol:render_objective_engagement` | — |
@@ -89,9 +91,13 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
   - `body` — Document body (`file-body`)
 - `markdown:prompts/common/resume-advisory.md`
   - `body` — Document body (`file-body`)
+- `markdown:prompts/contexts/objective-refinement.md`
+  - `body` — Document body (`file-body`)
 - `markdown:prompts/contexts/read-only.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/gist-save.md`
+  - `body` — Document body (`file-body`)
+- `markdown:prompts/stages/objective-refine/seed.md`
   - `body` — Document body (`file-body`)
 - `python-symbol:src/perk/backends/engagement.py:render_adopted_engagement`
   - `symbol:render_adopted_engagement` — Render adopted engagement (`symbol:render_adopted_engagement`)
@@ -297,13 +303,17 @@ Select, explore, and plan the next objective roadmap node.
 | `markdown:prompts/stages/objective-plan/seed.md` | `launch` | `shipped` | [`prompts/stages/objective-plan/seed.md`](../../prompts/stages/objective-plan/seed.md) · `file` | objective-plan.cold, objective-plan.warm |
 | `markdown:skills/perk-objective-plan/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-objective-plan/SKILL.md`](../../skills/perk-objective-plan/SKILL.md) · `file` | objective-plan.cold, objective-plan.warm |
 | `markdown:skills/perk-objective-reconcile/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-objective-reconcile/SKILL.md`](../../skills/perk-objective-reconcile/SKILL.md) · `file` | — |
+| `markdown:skills/perk-objective-refine/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-objective-refine/SKILL.md`](../../skills/perk-objective-refine/SKILL.md) · `file` | — |
 | `markdown:skills/perk-objective-replan/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-objective-replan/SKILL.md`](../../skills/perk-objective-replan/SKILL.md) · `file` | — |
+| `python-symbol:src/perk/cli/commands/objective/node_context.py:render_node_refinement` | `context` | `shipped` | [`src/perk/cli/commands/objective/node_context.py`](../../src/perk/cli/commands/objective/node_context.py) · `symbol:render_node_refinement` | — |
 | `python-symbol:src/perk/cli/commands/objective/plan_cmd.py:_layer_context_block` | `context` | `shipped` | [`src/perk/cli/commands/objective/plan_cmd.py`](../../src/perk/cli/commands/objective/plan_cmd.py) · `symbol:_layer_context_block` | — |
 | `typescript-model-call:extension/pi/v1/objectivePlanning.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/objectivePlanning.ts`](../../extension/pi/v1/objectivePlanning.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/objectivePlanning.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/objectivePlanning.ts`](../../extension/pi/v1/objectivePlanning.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-model-call:extension/pi/v1/objectiveRefinement.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveRefinement.ts`](../../extension/pi/v1/objectiveRefinement.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-tool:add_objective_node` | `tool-contract` | `shipped` | [`extension/pi/v1/objectivePlanning.ts`](../../extension/pi/v1/objectivePlanning.ts) · `tool:add_objective_node` | — |
 | `typescript-tool:explore_objective_node` | `tool-contract` | `shipped` | [`extension/pi/v1/objectivePlanning.ts`](../../extension/pi/v1/objectivePlanning.ts) · `tool:explore_objective_node` | — |
 | `typescript-tool:objective_node` | `tool-contract` | `shipped` | [`extension/pi/v1/objectivePlanning.ts`](../../extension/pi/v1/objectivePlanning.ts) · `tool:objective_node` | — |
+| `typescript-tool:objective_refinement_draft` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveRefinement.ts`](../../extension/pi/v1/objectiveRefinement.ts) · `tool:objective_refinement_draft` | — |
 | `typescript-tool:reconcile_objective` | `tool-contract` | `shipped` | [`extension/pi/v1/objectivePlanning.ts`](../../extension/pi/v1/objectivePlanning.ts) · `tool:reconcile_objective` | — |
 
 <details>
@@ -335,6 +345,15 @@ Select, explore, and plan the next objective roadmap node.
   - `section:reconciling-an-objective-after-landing-the-objective-reconcile-pass/skip-if-nothing-is-stale` — Skip if nothing is stale (`heading:reconciling-an-objective-after-landing-the-objective-reconcile-pass/skip-if-nothing-is-stale`)
   - `section:reconciling-an-objective-after-landing-the-objective-reconcile-pass/never-delegate-boundaries` — Never-delegate boundaries (`heading:reconciling-an-objective-after-landing-the-objective-reconcile-pass/never-delegate-boundaries`)
   - `section:reconciling-an-objective-after-landing-the-objective-reconcile-pass/the-ready-time-mode-after-a-stacked-handoff-stamp` — The ready-time mode (after a stacked handoff stamp) (`heading:reconciling-an-objective-after-landing-the-objective-reconcile-pass/the-ready-time-mode-after-a-stacked-handoff-stamp`)
+- `markdown:skills/perk-objective-refine/SKILL.md`
+  - `frontmatter:description` — Discovery description (`frontmatter.description`)
+  - `section:refining-an-objective-node-the-objective-refine-stage` — Refining an objective node (the `objective-refine` stage) (`heading:refining-an-objective-node-the-objective-refine-stage`)
+  - `section:refining-an-objective-node-the-objective-refine-stage/what-a-refinement-is-and-is-not` — What a refinement is (and is not) (`heading:refining-an-objective-node-the-objective-refine-stage/what-a-refinement-is-and-is-not`)
+  - `section:refining-an-objective-node-the-objective-refine-stage/the-grounding-context-untrusted-data` — The grounding context (untrusted DATA) (`heading:refining-an-objective-node-the-objective-refine-stage/the-grounding-context-untrusted-data`)
+  - `section:refining-an-objective-node-the-objective-refine-stage/the-capture-time-observation-is-not-freshness` — The capture-time observation is not freshness (`heading:refining-an-objective-node-the-objective-refine-stage/the-capture-time-observation-is-not-freshness`)
+  - `section:refining-an-objective-node-the-objective-refine-stage/the-loop` — The loop (`heading:refining-an-objective-node-the-objective-refine-stage/the-loop`)
+  - `section:refining-an-objective-node-the-objective-refine-stage/skipped-dismissed-or-unavailable-review` — Skipped, dismissed or unavailable review (`heading:refining-an-objective-node-the-objective-refine-stage/skipped-dismissed-or-unavailable-review`)
+  - `section:refining-an-objective-node-the-objective-refine-stage/availability-and-boundaries` — Availability and boundaries (`heading:refining-an-objective-node-the-objective-refine-stage/availability-and-boundaries`)
 - `markdown:skills/perk-objective-replan/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:re-authoring-an-objective-the-objective-replan-cold-door` — Re-authoring an objective (the `objective replan` cold door) (`heading:re-authoring-an-objective-the-objective-replan-cold-door`)
@@ -342,12 +361,16 @@ Select, explore, and plan the next objective roadmap node.
   - `section:re-authoring-an-objective-the-objective-replan-cold-door/the-loop` — The loop (`heading:re-authoring-an-objective-the-objective-replan-cold-door/the-loop`)
   - `section:re-authoring-an-objective-the-objective-replan-cold-door/stacked-predecessors-the-transfer-protocol` — Stacked predecessors: the transfer protocol (`heading:re-authoring-an-objective-the-objective-replan-cold-door/stacked-predecessors-the-transfer-protocol`)
   - `section:re-authoring-an-objective-the-objective-replan-cold-door/carrying-node-issues-forward-linear-only` — Carrying node-issues forward (Linear only) (`heading:re-authoring-an-objective-the-objective-replan-cold-door/carrying-node-issues-forward-linear-only`)
+- `python-symbol:src/perk/cli/commands/objective/node_context.py:render_node_refinement`
+  - `symbol:render_node_refinement` — Render node refinement (`symbol:render_node_refinement`)
 - `python-symbol:src/perk/cli/commands/objective/plan_cmd.py:_layer_context_block`
   - `symbol:_layer_context_block` — Layer context block (`symbol:_layer_context_block`)
 - `typescript-model-call:extension/pi/v1/objectivePlanning.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/objectivePlanning.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
+- `typescript-model-call:extension/pi/v1/objectiveRefinement.ts:module:sendUserMessage:0`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-tool:add_objective_node`
   - `description` — description (`tool:add_objective_node.description`)
   - `promptSnippet` — promptSnippet (`tool:add_objective_node.promptSnippet`)
@@ -379,6 +402,11 @@ Select, explore, and plan the next objective roadmap node.
   - `parameters.properties.description` — parameters.properties.description (`tool:objective_node.parameters.properties.description`)
   - `parameters.properties.description.description` — parameters.properties.description.description (`tool:objective_node.parameters.properties.description.description`)
   - `parameters.properties.audit.description` — parameters.properties.audit.description (`tool:objective_node.parameters.properties.audit.description`)
+- `typescript-tool:objective_refinement_draft`
+  - `description` — description (`tool:objective_refinement_draft.description`)
+  - `promptSnippet` — promptSnippet (`tool:objective_refinement_draft.promptSnippet`)
+  - `promptGuidelines` — promptGuidelines (`tool:objective_refinement_draft.promptGuidelines`)
+  - `parameters.properties.markdown.description` — parameters.properties.markdown.description (`tool:objective_refinement_draft.parameters.properties.markdown.description`)
 - `typescript-tool:reconcile_objective`
   - `description` — description (`tool:reconcile_objective.description`)
   - `promptSnippet` — promptSnippet (`tool:reconcile_objective.promptSnippet`)
@@ -428,7 +456,6 @@ Explore, draft, adopt, review, and save a bounded implementation plan.
 | `markdown:skills/perk-replan/SKILL.md` | `skill-detail` | `shipped` | [`skills/perk-replan/SKILL.md`](../../skills/perk-replan/SKILL.md) · `file` | — |
 | `python-symbol:src/perk/cli/commands/plan/from_cmd.py:_render_source_issue` | `context` | `shipped` | [`src/perk/cli/commands/plan/from_cmd.py`](../../src/perk/cli/commands/plan/from_cmd.py) · `symbol:_render_source_issue` | — |
 | `python-symbol:src/perk/cli/seed_file.py:render_seed_file_scratch` | `context` | `shipped` | [`src/perk/cli/seed_file.py`](../../src/perk/cli/seed_file.py) · `symbol:render_seed_file_scratch` | — |
-| `typescript-symbol:extension/pi/v1/planTitle.ts:module:complete-structured` | `tool-contract` | `shipped` | [`extension/pi/v1/planTitle.ts`](../../extension/pi/v1/planTitle.ts) · `symbol:module/call:completeStructured` | — |
 | `typescript-tool:plan_draft` | `tool-contract` | `shipped` | [`extension/pi/v1/plan.ts`](../../extension/pi/v1/plan.ts) · `tool:plan_draft` | plan.cold, plan.warm |
 | `typescript-tool:plan_save` | `tool-contract` | `shipped` | [`extension/pi/v1/plan.ts`](../../extension/pi/v1/plan.ts) · `tool:plan_save` | — |
 
@@ -473,11 +500,6 @@ Explore, draft, adopt, review, and save a bounded implementation plan.
   - `symbol:_render_source_issue` — Render source issue (`symbol:_render_source_issue`)
 - `python-symbol:src/perk/cli/seed_file.py:render_seed_file_scratch`
   - `symbol:render_seed_file_scratch` — Render seed file scratch (`symbol:render_seed_file_scratch`)
-- `typescript-symbol:extension/pi/v1/planTitle.ts:module:complete-structured`
-  - `toolDescription` — completeStructured toolDescription (`symbol:module/call:completeStructured/toolDescription`)
-  - `system` — completeStructured system (`symbol:module/call:completeStructured/system`)
-  - `instruction` — completeStructured instruction (`symbol:module/call:completeStructured/instruction`)
-  - `schema` — completeStructured schema (`symbol:module/call:completeStructured/schema`)
 - `typescript-tool:plan_draft`
   - `description` — description (`tool:plan_draft.description`)
   - `promptSnippet` — promptSnippet (`tool:plan_draft.promptSnippet`)
@@ -797,21 +819,20 @@ Human and agent review surfaces for gists, objectives, and plans.
 | `markdown:prompts/contexts/adapters/plannotator-gist.md` | `adapter` | `shipped` | [`prompts/contexts/adapters/plannotator-gist.md`](../../prompts/contexts/adapters/plannotator-gist.md) · `file` | — |
 | `markdown:prompts/contexts/adapters/plannotator-objective.md` | `adapter` | `shipped` | [`prompts/contexts/adapters/plannotator-objective.md`](../../prompts/contexts/adapters/plannotator-objective.md) · `file` | — |
 | `markdown:prompts/contexts/adapters/plannotator-plan.md` | `adapter` | `shipped` | [`prompts/contexts/adapters/plannotator-plan.md`](../../prompts/contexts/adapters/plannotator-plan.md) · `file` | — |
+| `markdown:prompts/contexts/adapters/plannotator-refinement.md` | `adapter` | `shipped` | [`prompts/contexts/adapters/plannotator-refinement.md`](../../prompts/contexts/adapters/plannotator-refinement.md) · `file` | — |
 | `markdown:prompts/contexts/adapters/tombell-plan.md` | `adapter` | `shipped` | [`prompts/contexts/adapters/tombell-plan.md`](../../prompts/contexts/adapters/tombell-plan.md) · `file` | — |
 | `markdown:prompts/stages/objective-review-browser.md` | `adapter` | `shipped` | [`prompts/stages/objective-review-browser.md`](../../prompts/stages/objective-review-browser.md) · `file` | — |
 | `markdown:prompts/stages/plan-review-browser.md` | `adapter` | `shipped` | [`prompts/stages/plan-review-browser.md`](../../prompts/stages/plan-review-browser.md) · `file` | — |
+| `typescript-model-call:extension/pi/v1/draftReview.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/draftReview.ts`](../../extension/pi/v1/draftReview.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/draftReview.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/draftReview.ts`](../../extension/pi/v1/draftReview.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveReviewBrowser.ts`](../../extension/pi/v1/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveReviewBrowser.ts`](../../extension/pi/v1/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveReviewBrowser.ts`](../../extension/pi/v1/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/2` | — |
-| `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:3` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveReviewBrowser.ts`](../../extension/pi/v1/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/3` | — |
-| `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:4` | `tool-contract` | `shipped` | [`extension/pi/v1/objectiveReviewBrowser.ts`](../../extension/pi/v1/objectiveReviewBrowser.ts) · `symbol:module/call:sendUserMessage/4` | — |
 | `typescript-model-call:extension/pi/v1/planReview.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/planReview.ts`](../../extension/pi/v1/planReview.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/planReview.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/planReview.ts`](../../extension/pi/v1/planReview.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/planReviewBrowser.ts`](../../extension/pi/v1/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/planReviewBrowser.ts`](../../extension/pi/v1/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/pi/v1/planReviewBrowser.ts`](../../extension/pi/v1/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/2` | — |
-| `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:3` | `tool-contract` | `shipped` | [`extension/pi/v1/planReviewBrowser.ts`](../../extension/pi/v1/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/3` | — |
-| `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:4` | `tool-contract` | `shipped` | [`extension/pi/v1/planReviewBrowser.ts`](../../extension/pi/v1/planReviewBrowser.ts) · `symbol:module/call:sendUserMessage/4` | — |
 | `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:0` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/plannotatorHandoff.ts`](../../extension/pi/v1/providers/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:1` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/plannotatorHandoff.ts`](../../extension/pi/v1/providers/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:2` | `tool-contract` | `shipped` | [`extension/pi/v1/providers/plannotatorHandoff.ts`](../../extension/pi/v1/providers/plannotatorHandoff.ts) · `symbol:module/call:sendUserMessage/2` | — |
@@ -829,22 +850,24 @@ Human and agent review surfaces for gists, objectives, and plans.
   - `body` — Document body (`file-body`)
 - `markdown:prompts/contexts/adapters/plannotator-plan.md`
   - `body` — Document body (`file-body`)
+- `markdown:prompts/contexts/adapters/plannotator-refinement.md`
+  - `body` — Document body (`file-body`)
 - `markdown:prompts/contexts/adapters/tombell-plan.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/objective-review-browser.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/plan-review-browser.md`
   - `body` — Document body (`file-body`)
+- `typescript-model-call:extension/pi/v1/draftReview.ts:module:sendUserMessage:0`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
+- `typescript-model-call:extension/pi/v1/draftReview.ts:module:sendUserMessage:1`
+  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:2`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/2/argument:0`)
-- `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:3`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/3/argument:0`)
-- `typescript-model-call:extension/pi/v1/objectiveReviewBrowser.ts:module:sendUserMessage:4`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/4/argument:0`)
 - `typescript-model-call:extension/pi/v1/planReview.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/planReview.ts:module:sendUserMessage:1`
@@ -855,10 +878,6 @@ Human and agent review surfaces for gists, objectives, and plans.
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:2`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/2/argument:0`)
-- `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:3`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/3/argument:0`)
-- `typescript-model-call:extension/pi/v1/planReviewBrowser.ts:module:sendUserMessage:4`
-  - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/4/argument:0`)
 - `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
 - `typescript-model-call:extension/pi/v1/providers/plannotatorHandoff.ts:module:sendUserMessage:1`
@@ -971,13 +990,13 @@ Automated, terminal, and browser PR-review families.
   - `section:reviewing-the-working-objective-draft-in-the-plannotator-browser-the-objective-review-browser-door` — Reviewing the working objective draft in the plannotator browser (the `/objective-review-browser` door) (`heading:reviewing-the-working-objective-draft-in-the-plannotator-browser-the-objective-review-browser-door`)
   - `section:reviewing-the-working-objective-draft-in-the-plannotator-browser-the-objective-review-browser-door/behind-the-flow-the-detail-the-launch-guidance-doesn-t-state` — Behind the flow (the detail the launch guidance doesn't state) (`heading:reviewing-the-working-objective-draft-in-the-plannotator-browser-the-objective-review-browser-door/behind-the-flow-the-detail-the-launch-guidance-doesn-t-state`)
   - `section:reviewing-the-working-objective-draft-in-the-plannotator-browser-the-objective-review-browser-door/the-approve-deny-loop` — The approve/deny loop (`heading:reviewing-the-working-objective-draft-in-the-plannotator-browser-the-objective-review-browser-door/the-approve-deny-loop`)
-  - `section:reviewing-the-working-objective-draft-in-the-plannotator-browser-the-objective-review-browser-door/degraded-mode-loud-never-lossy` — Degraded mode (loud, never lossy) (`heading:reviewing-the-working-objective-draft-in-the-plannotator-browser-the-objective-review-browser-door/degraded-mode-loud-never-lossy`)
+  - `section:reviewing-the-working-objective-draft-in-the-plannotator-browser-the-objective-review-browser-door/degraded-mode` — Degraded mode (`heading:reviewing-the-working-objective-draft-in-the-plannotator-browser-the-objective-review-browser-door/degraded-mode`)
 - `markdown:skills/perk-plan-review-browser/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:reviewing-the-working-plan-draft-in-the-plannotator-browser-the-plan-review-browser-door` — Reviewing the working plan draft in the plannotator browser (the `/plan-review-browser` door) (`heading:reviewing-the-working-plan-draft-in-the-plannotator-browser-the-plan-review-browser-door`)
   - `section:reviewing-the-working-plan-draft-in-the-plannotator-browser-the-plan-review-browser-door/behind-the-flow-the-detail-the-launch-guidance-doesn-t-state` — Behind the flow (the detail the launch guidance doesn't state) (`heading:reviewing-the-working-plan-draft-in-the-plannotator-browser-the-plan-review-browser-door/behind-the-flow-the-detail-the-launch-guidance-doesn-t-state`)
   - `section:reviewing-the-working-plan-draft-in-the-plannotator-browser-the-plan-review-browser-door/the-approve-deny-loop` — The approve/deny loop (`heading:reviewing-the-working-plan-draft-in-the-plannotator-browser-the-plan-review-browser-door/the-approve-deny-loop`)
-  - `section:reviewing-the-working-plan-draft-in-the-plannotator-browser-the-plan-review-browser-door/degraded-mode-loud-never-lossy` — Degraded mode (loud, never lossy) (`heading:reviewing-the-working-plan-draft-in-the-plannotator-browser-the-plan-review-browser-door/degraded-mode-loud-never-lossy`)
+  - `section:reviewing-the-working-plan-draft-in-the-plannotator-browser-the-plan-review-browser-door/degraded-mode` — Degraded mode (`heading:reviewing-the-working-plan-draft-in-the-plannotator-browser-the-plan-review-browser-door/degraded-mode`)
 - `markdown:skills/perk-pr-review-browser/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door` — Reviewing a PR in the plannotator browser (the `/pr-review-browser` door) (`heading:reviewing-a-pr-in-the-plannotator-browser-the-pr-review-browser-door`)
@@ -2133,6 +2152,7 @@ Expert configuration guidance, structural search, and ancillary model utilities.
   - `section:perk-providers-issue-backends/supported-provider-catalog` — Supported provider catalog (`heading:perk-providers-issue-backends/supported-provider-catalog`)
   - `section:perk-providers-issue-backends/provider-postures` — Provider postures (`heading:perk-providers-issue-backends/provider-postures`)
   - `section:perk-providers-issue-backends/provider-postures/plan-seam-durable-artifact-adapters` — Plan seam: durable-artifact adapters (`heading:perk-providers-issue-backends/provider-postures/plan-seam-durable-artifact-adapters`)
+  - `section:perk-providers-issue-backends/provider-postures/plan-seam-durable-artifact-adapters/authoring-guidance-selection-perk-owned-injection-only` — Authoring-guidance selection (perk-owned injection only) (`heading:perk-providers-issue-backends/provider-postures/plan-seam-durable-artifact-adapters/authoring-guidance-selection-perk-owned-injection-only`)
   - `section:perk-providers-issue-backends/provider-postures/footer-seam-vacate-only` — Footer seam: vacate-only (`heading:perk-providers-issue-backends/provider-postures/footer-seam-vacate-only`)
   - `section:perk-providers-issue-backends/provider-postures/web-seam-package-selection` — Web seam: package selection (`heading:perk-providers-issue-backends/provider-postures/web-seam-package-selection`)
   - `section:perk-providers-issue-backends/provider-postures/built-in-not-selectable` — Built in, not selectable (`heading:perk-providers-issue-backends/provider-postures/built-in-not-selectable`)
@@ -2145,6 +2165,7 @@ Expert configuration guidance, structural search, and ancillary model utilities.
   - `section:perk-providers-issue-backends/linear-backend/readiness-checks` — Readiness checks (`heading:perk-providers-issue-backends/linear-backend/readiness-checks`)
   - `section:perk-providers-issue-backends/linear-backend/project-backed-objectives` — Project-backed objectives (`heading:perk-providers-issue-backends/linear-backend/project-backed-objectives`)
   - `section:perk-providers-issue-backends/linear-backend/native-attachment-metadata` — Native attachment metadata (`heading:perk-providers-issue-backends/linear-backend/native-attachment-metadata`)
+  - `section:perk-providers-issue-backends/linear-backend/node-refinements` — Node refinements (`heading:perk-providers-issue-backends/linear-backend/node-refinements`)
   - `section:perk-providers-issue-backends/linear-backend/the-dream-report-companion` — The dream-report companion (`heading:perk-providers-issue-backends/linear-backend/the-dream-report-companion`)
   - `section:perk-providers-issue-backends/linear-backend/dream-origin-and-the-one-open-dream-guard` — Dream origin and the one-open-dream guard (`heading:perk-providers-issue-backends/linear-backend/dream-origin-and-the-one-open-dream-guard`)
   - `section:perk-providers-issue-backends/linear-backend/replan-and-cancellation` — Replan and cancellation (`heading:perk-providers-issue-backends/linear-backend/replan-and-cancellation`)
