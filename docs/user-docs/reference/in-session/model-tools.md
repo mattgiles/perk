@@ -205,18 +205,14 @@ surrounding whitespace, N matching `[1-9][0-9]*`, `--json` last): the plan-bound
 admit the flagless context form, other argument orders, extra arguments, lookalike verbs,
 `review-post`, `gh api`, real-file redirects, or a mutation chained after a query.
 
-Perk-owned report waves deliver a startup restriction packet to native runner children: the
-captured parent gate, strengthened to true for automated review and `/address` classification.
-Those plan-bound callers also force `worktree: false`, reading the caller checkout under the
-child-only floor without changing the parent's mode. Other report requests are unchanged.
-True or invalid packets establish a read-only floor before lifecycle work. A child cannot clear it
-through gate exit, later false/missing input or tree navigation; failed mode persistence is loud
-and leaves the in-memory floor active. False and legacy absence are never write grants: inherited
-branch read-only still applies. The child-only `structured_output` and `contact_supervisor` tools
-remain allowlisted. `/btw` mirrors the effective gate with read-only side tools and no scratch.
-Normal reload recaptures the original packet plus branch mode; losing both is outside this guarantee.
-Foreground/parent activations ignore the runner-only carrier. Manual launches outside Perk's report
-producer and foreground writers without ambient Perk loading are not certified by this channel.
+Perk-owned report waves deliver the constant `perk.parent-restrictions/1 = {readOnly: true}`
+packet and `worktree: false` to every native runner child. The packet — or a malformed /
+unsupported-version one — establishes a read-only floor before lifecycle work; a child cannot clear
+it through gate exit, later false/missing input or tree navigation, and failed mode persistence is
+loud and leaves the in-memory floor active. No packet is never a write grant: inherited branch
+read-only still applies. The child-only `structured_output` and `contact_supervisor` tools remain
+allowlisted; `/btw` mirrors the effective gate with read-only side tools and no scratch. Manual
+launches outside Perk's report producer and foreground children are not covered by this channel.
 
 ### Stage tool diet
 

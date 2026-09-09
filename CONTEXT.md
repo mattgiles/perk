@@ -40,8 +40,25 @@ _Avoid_: duplicated phrase, tag, topic
 
 **Agent scratch**:
 A run-owned, disposable directory for non-authoritative command and model intermediate files,
-distinct from pointer-validated session data and host-global temporary space.
+distinct from pointer-validated session data and host-global temporary space; never provisioned
+in a runner child.
 _Avoid_: session data, evidence store, temp directory
+
+**Runner child**:
+A pi-subagents background child (`PI_SUBAGENT_CHILD=1`), the only kind in which perk's extension
+activates as a child; every perk report child is one.
+_Avoid_: native child, report identity, `<active_agent>` name
+
+**Report restriction packet**:
+The constant `perk.parent-restrictions/1 = {readOnly: true}` binding perk's `ReportWave` stamps on
+every report child; with the runner bit it is the whole authorization input for the child's
+read-only floor.
+_Avoid_: parent-restriction snapshot, captured parent gate, caller-read-only policy
+
+**Read-only floor**:
+The activation-latched restriction a runner child derives from the packet; it composes into the
+tool gate and cannot be cleared by gate exit, tree navigation or a same-activation restart.
+_Avoid_: child mode, inherited mode
 
 ### Review
 
