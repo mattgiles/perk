@@ -44,44 +44,23 @@ for the boundary definition.
 ## Recover a retained submit-conflict lock
 
 Both `resolve_submit_conflicts` and retained resolution inside `objective_stack_sync` report the
-exact `perk-submit-conflict.lock` path inside the target's canonical **per-worktree Git directory**
-(`git rev-parse --absolute-git-dir`). The historical filename is shared to preserve exclusion with
-installed PR resolvers. For retained mode it is in the retained worktree, not the parent's checkout.
-A busy lock excludes another participating resolver in either mode, even when it is old, empty, malformed, or records a dead
-PID. A retained lock means termination was uncertain; an ownership/I/O error also requires
-inspection. Reload, process exit, resetting an attempt counter, or clearing pending authorization
-never unlocks it. Separate linked worktrees have separate locks.
+exact `perk-submit-conflict.lock` path inside the target's per-worktree Git directory (for retained
+mode, the retained worktree — never the parent's checkout). A busy lock excludes every other
+participating resolver even when it is old, empty, malformed or records a dead PID. A retained lock
+means termination was uncertain. Reload, process exit, a counter reset or clearing an
+authorization never unlock it.
 
-Recovery is **human-only**, in this order:
+Recovery is **human-only**: quiesce every session that can use the worktree and prove the writer
+**and its subprocesses** stopped (PID death is not enough); inspect the exact reported path and the
+worktree's rebase/index/HEAD state (cancellation never rolled back a finished rebase or push);
+remove that exact regular file, nothing else; then decide repair, canonical `/submit` (PR mode) or
+a separately approved `objective_stack_sync {continue:true}` (retained mode).
 
-1. Stop or quiesce **every session** capable of using this worktree. Establish that the native
-   writer **and its subprocesses** are stopped. PID death alone is not enough; do not race a live
-   owner or rely on elapsed time.
-2. Inspect the exact reported path without following a symlink. Confirm it is the expected
-   regular lock file, and inspect its device/inode identity and schema-1 owner metadata (PID,
-   session/run/request ids, canonical worktree identity and creation time).
-3. Inspect `git status`, the rebase-in-progress state, index and HEAD in that worktree. Preserve
-   any valuable unresolved work. Cancellation may have happened after rebase completion (or,
-   in PR mode, a push); it did not roll those operations back.
-4. **Only after quiescence and inspection**, remove that exact regular lock file. Do not use
-   recursive removal or replace it while a participant is active. If its identity changed, stop
-   and investigate rather than removing the replacement.
-5. Decide whether the worktree needs repair, verification, canonical `/submit` (PR mode), or a
-   separately human-approved `objective_stack_sync {continue:true}` (retained mode). Python
-   re-proves continuation state before publication; child success is not a prerequisite after
-   human repair. Lock cleanup itself permits no abort, rebase or push. If uncertain, leave it.
+The stacked `<manifest>.resolver-lock` **session claim** is different — reclaimable under its own
+policy, and never a bypass of the execution lock.
 
-There is no model-callable unlock, automatic stale cleanup or recovery CLI. This file coordinates
-Perk's code-owned resolver launches only; it does not fence arbitrary manual Git or continuation.
-The stacked `<manifest>.resolver-lock` **session claim** is different: it persists after child
-completion and may be reclaimed under its own policy. Session-claim cleanup/reclamation, counter
-reset or process reload never removes or bypasses execution exclusion.
-
-A **follow-up delivery is unconfirmed** diagnostic is different from uncertain child termination.
-The extra tool text block preserves the settled receipt/lock disposition and labels report JSON
-untrusted; rendering or sending may have failed after a message queued. Stop for human direction,
-not another launch or automatic continuation. Use the receipt's lock disposition to decide whether
-this quiescence-first recovery procedure is needed.
+A follow-up **delivery is unconfirmed** diagnostic preserves the settled result (receipt, lock
+disposition, untrusted report JSON) after rendering or sending failed; stop for human direction.
 
 ## Watch out
 

@@ -847,54 +847,40 @@ publication flag, extension list or worktree allocation. Submit/address PR-rebas
 parameterless, sequential, non-terminating **`resolve_submit_conflicts`**, not a model-authored
 script or ReportWave. Only a `drive` decision after the verified attempt increment primes its
 activation-local single-use authorization (current Pi session UUID, parent run id, cwd, attempt).
-Execution consumes before awaiting and rechecks identity, unchanged counter, effective read-write
-non-planning state after preflight and lock acquisition, and immediately before emission. Active
-writers exclude replacement priming. Later submit/valid finalization clears unused authorization;
+Execution consumes the authorization synchronously; the dispatch has no await before emission (no
+preflight), so identity, unchanged counter and effective read-write non-planning state are checked
+once at entry. Active writers exclude replacement priming. Later submit/valid finalization clears unused authorization;
 malformed finalizer input does not. Address still publishes, resolves all threads, then decides
 conflicts; only full finalization can prime. No counter mutation or automatic retry in the tool.
 
-The adapter discovers the **loaded** subagent tool's real package ancestry, requires the
-manifest-declared public `./preflight` and `./delegation` exports, and imports only the realpath-
-contained public preflight through that engine's own jiti. This confined optional loader is not a
-bare-dependency/global-search/private-executor escape hatch. Preflight requires the canonical
-`.pi/agents/perk/conflict-resolver.md` at the supplied existing absolute worktree, no shadowed
-candidates, replacement prompt, project/skill inheritance (not global), declared writer tools,
-no added configured/path-based extensions or nested delegation, and a native model selection.
-Internal completion tools are permitted. Cwd controls NUL/CR/LF are refused; other shell bytes are
-POSIX-single-quoted in the code-built `cd` reminder. Flagless `perk pr review-context --json`
-owns the authoritative `base_ref`; the parent's displayed base is advisory. Rebase, verification,
-PR-only abort and force-with-lease authority remain the resolver's, not cleanup's.
+The engine carries the public delegation event literals and emits directly on Pi's event bus —
+no loader, no pre-launch preflight, no profile evidence or launch-contract digest. The only
+engine-presence fact it reads is Pi's public tool census: a missing `subagent` tool refuses
+`unavailable` before any lock. The resolver definition is the perk-managed, git-tracked
+`.pi/agents/perk/conflict-resolver.md` (the profile policy below; `subagent-agents` reconverges
+it) and its resolution is the engine's — profile drift is a reviewed repo change, not a
+dispatch-time check. Cwd controls NUL/CR/LF are refused; other shell bytes are POSIX-single-quoted
+in the code-built `cd` reminder. Flagless `perk pr review-context --json` owns the authoritative
+`base_ref`; the parent's displayed base is advisory. Rebase, verification, PR-only abort and
+force-with-lease authority remain the resolver's, not cleanup's.
 
-One fresh owned-leaf request rides native foreground structured delegation, correlated by fresh
-request UUID + real parent `ownerRunId` + mode-selected `nodeId: submit-conflict` (PR) or
-`retained-conflict`. Only the requested mode's exact schema is passed to preflight and delegation. The optional existing
-conflict-resolver model override (including inherit/fallback semantics) and current model snapshot
-ride preflight; the bridge supplies foreground-only execution and disables acceptance. No async,
-mission, worktree or acceptance keys are sent. Native `worktree` defaults are captured from
-`join(getAgentDir(), "extensions/subagent/config.json")` and rechecked before dispatch. Missing
-file/absent key/false are compatible; true, nonboolean, malformed or unreadable config, or changed
-captured state, refuses with inspection/reload guidance. Every `incompatible-worktree-default`
-receipt — from any of the four gates (pre-preflight, post-preflight, post-lock, and the pre-emit
-gate inside the wait, which settles with this reason rather than collapsing to `unauthorized`) —
-carries `nativeWorktreeConfig {path, observed, atActivation}` (a diagnostic location like
-`lock.path`: the exact file read, the state at the refusing gate, the state at activation), and the
-`resolve_submit_conflicts` diagnostic renders it ("Native subagent config `<path>` has an
-incompatible worktree default (observed …; … at activation). Run `perk doctor --fix` (or `perk
-init`) to set `"worktree": false` there, then reload the session."). The setting is
-**perk-managed**: `perk init`'s `subagent-worktree-default` managed convergence (with its derived
-doctor check + `--fix` arm) atomically sets `worktree: false` in the launch-precedence agent
-dir's `extensions/subagent/config.json` — the dir resolved by the ONE `launch_pi_agent_dir`
-resolver `launch_stage` also consumes (`PI_CODING_AGENT_DIR` → the main checkout's `[pi]
-agent_dir` → `~/.pi/agent`; no resolvable home → nothing to converge) — rewriting only that key
-(sibling keys preserved; pi-subagents' own tab-indented serialization), only when it is present and
-not exactly `false`, and never creating the file. Only a genuinely missing path is compatible:
-anything perk cannot read as a JSON object — an existing non-file (a directory, which the engine
-reads as `incompatible`), an unreadable or non-UTF-8 file, invalid JSON, a non-object document —
-is translated inside the convergence into one path-naming `invalid_subagent_config` refusal that
-fails `perk init` loudly, renders `unverifiable` in doctor, rides `fix_errors` under `--fix`, and
-never rewrites the path.
-Configuration/source edits during launch are unsupported; preflight is a snapshot, not a
-source-edit fence (a `--fix` mid-session still needs the reload the diagnostic states).
+One fresh owned-leaf request per dispatch rides native foreground structured delegation,
+correlated by fresh request UUID + real parent `ownerRunId` + mode-selected `nodeId:
+submit-conflict` (PR) or `retained-conflict`. It carries `agent`, the code-built `task`, the
+trusted worktree `cwd`, `context: "fresh"`, `timeoutMs`, `result: {kind: "structured", schema}`
+(the requested mode's exact plain-JSON schema) and the optional configured model — and **no
+`extensionBindings`** (no `perk.parent-restrictions/…` packet: the writer never receives the
+read-only floor; pinned by one fake-bus assertion). No async, mission, worktree or acceptance keys
+are sent. pi-subagents' global `worktree` default is read **once at engine activation** from
+`join(getAgentDir(), "extensions/subagent/config.json")`: a missing file, an absent key or `false`
+is compatible; anything else (true, non-boolean, unparseable, non-object, unreadable) refuses
+every dispatch of the activation with `incompatible-worktree-default` — deliberately stricter than
+the engine's own fallback — stamping `nativeWorktreeConfig {path, observed}` on the receipt (a
+diagnostic location like `lock.path`), and both surfaces render `nativeWorktreeRefusal`: the exact
+path, the observation and the one-line fix (set `"worktree": false` there or delete the key, then
+quit and resume the session). perk never rewrites that file — no convergence, doctor check or
+`--fix` arm exists for it. The two engines' activation snapshots are independent and taken inside
+one extension-loading pass.
 
 Draft reviews take no file lock: their guards are in-memory (§8.23 "Draft-review guards").
 Neither atomic file replacement nor fsync claims power-loss durability or exactly-once delivery.
@@ -948,12 +934,11 @@ only. Unknown fields/modes are rejected. Schema serialization strips TypeBox met
 native plain-JSON carrier. Native non-completed status never salvages a report. `resolved` requires
 native completed + valid PR record + outcome completed + verification passed + push succeeded +
 successful lock release. Valid non-authorizing records return `withheld`; contradictions (including
-retained-only verification-failed in PR mode) explicitly say invalid-outcome. Preflight, lock,
+retained-only verification-failed in PR mode) explicitly say invalid-outcome. Absent-engine, lock,
 transport/native and malformed-record failures return typed `failed`; busy, I/O, ownership and
 retained-lock failures remain distinguishable. Bounded summaries are separately labeled untrusted
-DATA. Receipts contain only known parent/request/logical ids, trusted cwd, local disposition and
-termination certainty, optional native status/run/agent/exit/digest, preflight source/digest, and
-lock path/disposition. They contain no task, summary/report, raw error/output, usage, token or
+DATA. Receipts contain only known parent/request/logical ids, trusted cwd, termination certainty,
+optional native status/run/agent/exit, and lock path/disposition. They contain no task, summary/report, raw error/output, usage, token or
 invented artifact paths and never authorize publication. Agent completion uses `structured_output`
 when supplied; ad-hoc launches without a schema may still use first-line prose, but no owned
 resolver dispatch consumes it.
@@ -2390,12 +2375,7 @@ second `--fix` at `fixed == []`).
   `[issues] backend` is `"linear"`; warn-level, the github D3 mirror; `--fix` ensures the six
   perk labels (§8.21).
 - `runner` — remote-runner prereqs; report-only, non-fatal (§8.16).
-- `package` — the wiring/install/version surfaces: `settings-wiring`, `subagent-worktree-default`
-  (the managed check pinning pi-subagents' native `worktree` default to `false` in the
-  launch-precedence agent dir's `extensions/subagent/config.json` — drift is a `fail` that
-  `--fix` repairs in place; a path perk cannot read as a JSON object (malformed, non-UTF-8,
-  unreadable, or a directory) is `unverifiable`; the file is never created —
-  §8.3), `extension-install`, the
+- `package` — the wiring/install/version surfaces: `settings-wiring`, `extension-install`, the
   `required-perk-version` managed check, and the report-only probes `cli-version`
   (CLI-vs-repo-pin warn), `resource-overrides` (pi overrides touching perk's own resources),
   `subagent-compat` (the pi-subagents orchestration surfaces perk's guidance assumes —
@@ -9125,13 +9105,13 @@ without manufacturing a mode entry. Explicit read-only mode, the effective read-
 planning-stage restrictions still refuse.
 `session_start` and `session_tree` invalidate previous invocations; shutdown revokes before awaiting
 engine shutdown. The composed tool/controller signal reaches native execution; revalidate after
-preflight and acquisition, and after execution before settling the operation. Revocation/cancellation
+execution before settling the operation. Revocation/cancellation
 becomes failed/unauthorized or cancelled with the actual receipt. Clear the active slot in `finally`,
 without execution-lock cleanup, counter refund or retry. Successful child completion never resets
 attempts. A new explicit attempt reruns preparation and consumes the next capped increment.
 
-The §8.3 native adapter performs actual-target-cwd canonical profile checks, foreground delegation
-and execution exclusion at the retained worktree. No parent-cwd fallback, setup/handoff repair or
+The §8.3 native adapter performs foreground delegation and execution exclusion at the retained
+worktree. No parent-cwd fallback, setup/handoff repair or
 alternate launcher. The parent session's existing model override is read at invocation. Code in
 `conflictResolution.ts` builds the quoted `cd`, exact column-zero `RETAINED-CONTINUATION SENTINEL:`
 line and layer/branch/PR identity, plus structured completion and untrusted-DATA framing. The agent

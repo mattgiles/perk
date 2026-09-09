@@ -70,23 +70,18 @@ annotations are cleared rather than finalized, and a failed lane is never a clea
 own custom agents keep the engine default; an agent override that re-enables the guard on a Perk
 report profile reintroduces the failure and is a documented compatibility limit.
 
-The conflict resolver keeps an unspecified definition mode and inherits project context and
-skills, not global context; foreground mode does not load ambient extensions. Submit/address
-uses `resolve_submit_conflicts`: a single-use authorized, code-owned native foreground delegation
-at the trusted worktree cwd, with a strict structured terminal record and a persistent worktree-wide
-execution lock. The bridge disables acceptance; receipts do not invent artifact paths or expose
-child output. Native `worktree: true` allocation defaults are incompatible: the refusal names the
-exact `extensions/subagent/config.json` under Pi's launch agent directory; run `perk doctor --fix`
-(or `perk init`) to set `worktree: false` there, then reload the session.
-Reload does not clear a retained lock; use [human-only recovery](recover-a-dirty-worktree.md#recover-a-retained-submit-conflict-lock).
-Retained continuation uses the same code-owned foreground adapter, directly awaited inside
-`objective_stack_sync`, with a distinct retained schema and activation-local authorization. Its
-sentinel is code-built child task data, not parent-authored launch guidance. The lock is acquired
-at the retained worktree; the independent manifest-side session claim persists across outcomes.
-Missing target directory/profile capabilities stop dispatch without repairing wiring, copying a
-handoff, or changing mode/extensions. Retained `continuation-ready` permits only a post-result
-offer and new human approval before canonical continuation, never push/abort authority. A
-follow-up delivery-unconfirmed diagnostic preserves the result and means stop for human direction.
+The conflict resolver keeps writer tools and project/skill inheritance; its definition is the
+git-tracked `.pi/agents/perk/conflict-resolver.md` perk reconverges. `/submit` and `/address`
+dispatch it through `resolve_submit_conflicts`: one code-owned foreground delegation at the worktree
+cwd with a strict structured record and one per-worktree execution lock, and **no restriction
+packet** (so the read-only floor never binds it). Without pi-subagents' `subagent` tool loaded the
+tool refuses `unavailable` before any lock. If pi-subagents' global `worktree` default
+(`<agent dir>/extensions/subagent/config.json`) is anything but absent or `false`, the launch is
+refused naming the file, the observation and the fix (set `"worktree": false` or delete the key,
+then quit and resume) — perk never edits that file. Reload never clears a retained lock
+([human-only recovery](recover-a-dirty-worktree.md#recover-a-retained-submit-conflict-lock)).
+Retained continuation reuses the adapter as an offer only (new human approval precedes canonical
+continuation); a follow-up delivery-unconfirmed diagnostic means stop for human direction.
 
 Every code-owned report child receives the constant `perk.parent-restrictions/1 = {readOnly: true}`
 binding and `worktree: false`. A pi-subagents runner child carrying the packet has an in-memory

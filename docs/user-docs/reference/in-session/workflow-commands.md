@@ -99,12 +99,12 @@ run, submission succeeds with mergeability undetermined.
 
 Authorization is bound to this session, run, worktree and unchanged attempt counter; direct,
 repeated, stale or read-only calls refuse. Full address finalization uses the same tool and cap,
-only after publication and thread resolution succeed. Missing/disabled/ambiguous/shadowed native
-profiles stop before mutation. Native `worktree: true` allocation defaults are incompatible with
-Perk's Python-owned worktree; the refusal diagnostic names the exact
-`extensions/subagent/config.json` it read (and what it observed there). Run `perk doctor --fix`
-(or `perk init`) to set `"worktree": false` in that file, then reload the session — rather than
-switching execution mode or adding extensions. No new Perk config key is involved.
+only after publication and thread resolution succeed. Without pi-subagents' `subagent` tool loaded
+the resolver refuses `unavailable` before taking any lock. A pi-subagents global `worktree` default
+other than `false` is incompatible with perk's own worktree: the refusal names the exact
+`extensions/subagent/config.json` read at session start, what it observed, and the fix (set
+`"worktree": false` there or delete the key, then quit and resume the session). perk never edits
+that file.
 
 A persistent `perk-submit-conflict.lock` in the worktree's canonical Git directory excludes other
 participating submit/address resolvers across sessions/processes. Contention does not refund an

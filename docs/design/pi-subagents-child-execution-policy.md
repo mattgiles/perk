@@ -83,7 +83,9 @@ pinned by `extension/waves/reportWave.test.ts`.
 ## The writer
 
 `perk.conflict-resolver` is dispatched foreground through the delegation door with no
-`extensionBindings` at all, so it never gets a floor; it edits and writes by design.
+`extensionBindings` at all, so it never gets a floor (the request-shape assertion in
+`extension/pi/v1/delivery/conflictResolverEngine.test.ts` pins the packet's absence); it edits and
+writes by design.
 
 ## Not claimed
 
