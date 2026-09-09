@@ -144,7 +144,12 @@ function incumbent(fs: WorktreeLockFs, path: string): WorktreeResolverAcquisitio
 export function acquireWorktreeResolverLock(
   cwd: string,
   parent: { sessionId: string; runId: string; requestId: string },
-  opts: { fs?: Partial<WorktreeLockFs>; gitDir?: (cwd: string) => string | null } = {},
+  opts: {
+    fs?: Partial<WorktreeLockFs>;
+    gitDir?: (cwd: string) => string | null;
+    /** The token minter (default `randomUUID`) — only deterministic fault tests substitute it. */
+    token?: () => string;
+  } = {},
 ): WorktreeResolverAcquisition {
   const identity = (opts.gitDir ?? worktreeGitDir)(cwd);
   if (identity === null) return { kind: "unavailable" };
@@ -163,20 +168,26 @@ export function acquireWorktreeResolverLock(
     }
     return { kind: "io-error", path, residue: false };
   }
+  // Everything after the exclusive create runs inside the cleanup-protected block — the record
+  // construction included: a token-minting failure must take the same identity-fenced unlink
+  // path as a write failure, never escape with the descriptor open and an empty lock file that
+  // would wedge every later acquisition as busy.
   let stat: Stats | undefined;
-  const record: LockRecord = {
-    schema: 1,
-    token: randomUUID(),
-    pid: process.pid,
-    parentSessionId: parent.sessionId,
-    ownerRunId: parent.runId,
-    requestId: parent.requestId,
-    worktreeIdentity: identity,
-    createdAt: new Date().toISOString(),
-  };
+  let token: string;
   try {
     stat = fs.fstat(fd);
     if (!stat.isFile()) throw new Error("not a regular file");
+    token = (opts.token ?? randomUUID)();
+    const record: LockRecord = {
+      schema: 1,
+      token,
+      pid: process.pid,
+      parentSessionId: parent.sessionId,
+      ownerRunId: parent.runId,
+      requestId: parent.requestId,
+      worktreeIdentity: identity,
+      createdAt: new Date().toISOString(),
+    };
     fs.write(fd, `${JSON.stringify(record)}\n`);
     fs.sync(fd);
   } catch {
@@ -209,7 +220,7 @@ export function acquireWorktreeResolverLock(
       );
       try {
         if (!sameFile(acquiredStat, fs.fstat(reader))) return "ownership-error";
-        return readRecord(fs, reader)?.token === record.token ? "owned" : "ownership-error";
+        return readRecord(fs, reader)?.token === token ? "owned" : "ownership-error";
       } finally {
         fs.close(reader);
       }
