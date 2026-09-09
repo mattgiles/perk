@@ -451,11 +451,6 @@ test("/objective-plan enters the read-only gate: mode flips, write blocked, anno
 
     assert.equal(h.workflowState().mode, "read-only", "mode flips to read-only");
     assert.equal(
-      h.workflowState().plan_authoring,
-      true,
-      "the explicit plan-authoring intent rides the enter (§8.3)",
-    );
-    assert.equal(
       (await h.emitToolCall("write", { path: "x", content: "y" }))?.block,
       true,
       "write is structurally blocked",
@@ -466,9 +461,9 @@ test("/objective-plan enters the read-only gate: mode flips, write blocked, anno
     );
     assert.ok(
       (await h.emitBeforeAgentStart()).some((m) => m.customType === PLAN_CONTEXT_TYPE),
-      "the plan-authoring guidance is selected on the recorded intent (no stage rewrite needed)",
+      "plan guidance rides the gate the factory entered",
     );
-    assert.equal(h.workflowState().stage, undefined, "the warm intent never rewrites the stage");
+    assert.equal(h.workflowState().stage, undefined, "the warm factory never rewrites the stage");
   } finally {
     h.dispose();
   }
@@ -480,13 +475,10 @@ test("/objective-plan skip-if-active: an already read-only session gets no dupli
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
   spyInjections(h);
   try {
-    // A bare read-only gate (a stage-less legacy shape) is restricted but carries no plan
-    // evidence: no plan guidance before the factory establishes intent.
-    assert.equal(h.workflowState().plan_authoring, undefined);
-    assert.equal(
+    // A stage-less read-only session already receives plan guidance: the gate is the evidence.
+    assert.ok(
       (await h.emitBeforeAgentStart()).some((m) => m.customType === PLAN_CONTEXT_TYPE),
-      false,
-      "a bare gate never infers plan authoring",
+      "a stage-less read-only session already receives plan guidance",
     );
     const stateEntries = () =>
       h.session.sessionManager
@@ -506,16 +498,10 @@ test("/objective-plan skip-if-active: an already read-only session gets no dupli
       h.notifies.some((m) => /#7/.test(m)),
       "the objective info line still reports",
     );
-    // The already-gated arm records the intent bit ALONE (no duplicate mode append)…
-    assert.equal(h.workflowState().plan_authoring, true, "the warm intent is recorded");
-    assert.equal(stateEntries(), before + 1, "exactly one append: the intent bit");
-    assert.ok(
-      (await h.emitBeforeAgentStart()).some((m) => m.customType === PLAN_CONTEXT_TYPE),
-      "the plan-authoring guidance is now selected",
-    );
-    // …and a second invocation with the intent already on the branch appends nothing.
+    assert.equal(stateEntries(), before, "skip-if-active appends nothing");
+    // A second invocation still appends nothing.
     await h.invokeCommand("objective-plan", "7");
-    assert.equal(stateEntries(), before + 1, "no redundant intent append");
+    assert.equal(stateEntries(), before, "a repeat invocation appends nothing either");
   } finally {
     h.dispose();
   }

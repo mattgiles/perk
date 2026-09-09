@@ -780,10 +780,18 @@ function ref(prId: string, extra: Partial<PlanRef> = {}): PlanRef {
 
 /** A minimal registry: implement/submit consume `cache.plan-ref`; plan does not. */
 function fakeRegistry(calls: string[]): Registry {
+  const stage = (id: string, mode: string): Registry["stages"][number] => ({
+    id,
+    command: id,
+    mode,
+    doors: {},
+    predecessors: [],
+    successors: [],
+  });
   const stages: Registry["stages"] = [
-    { id: "implement", command: "implement", doors: {}, predecessors: [], successors: [] },
-    { id: "submit", command: "submit", doors: {}, predecessors: [], successors: [] },
-    { id: "plan", command: "plan", doors: {}, predecessors: [], successors: [] },
+    stage("implement", "read-write"),
+    stage("submit", "read-write"),
+    stage("plan", "read-only"),
   ];
   (stages[0] as Registry["stages"][number]).requires = ["cache.plan-ref"];
   (stages[1] as Registry["stages"][number]).reads = ["cache.plan-ref"];

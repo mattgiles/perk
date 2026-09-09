@@ -126,45 +126,10 @@ test("false cannot clear inherited read-only; ordinary parents use the same back
   h.fail(undefined);
   h.gate.exit();
   assert.equal(h.gate.isActive(), false);
-  assert.deepEqual(h.appends, [{ mode: "read-write", plan_authoring: false }]);
+  assert.deepEqual(h.appends, [{ mode: "read-write" }]);
   for (const toolName of ["write", "foreign_mutator", "plan_save", "submit", "bash"]) {
     assert.equal(await h.call("tool_call", { toolName, input: { command: "touch x" } }), undefined);
   }
-});
-
-test("enter records the intent bit beside the mode in ONE append; exit records read-write + false; the gate is identical either way", async () => {
-  const h = gateFixture(() => false);
-  // A generic read-only enter: restricted, no plan intent.
-  h.gate.enter();
-  assert.deepEqual(h.appends, [{ mode: "read-only", plan_authoring: false }]);
-  await assertBackstop(h);
-  h.gate.exit();
-  assert.deepEqual(h.appends.at(-1), { mode: "read-write", plan_authoring: false });
-  // An explicit plan-authoring enter: the SAME restrictions, plus the recorded intent.
-  h.gate.enter(undefined, { planAuthoring: true });
-  assert.deepEqual(h.appends.at(-1), { mode: "read-only", plan_authoring: true });
-  await assertBackstop(h);
-  // Only literal true is intent: a false/absent option records false.
-  h.gate.exit();
-  h.gate.enter(undefined, { planAuthoring: false });
-  assert.deepEqual(h.appends.at(-1), { mode: "read-only", plan_authoring: false });
-  h.gate.exit();
-  h.gate.enter(undefined, {});
-  assert.deepEqual(h.appends.at(-1), { mode: "read-only", plan_authoring: false });
-  // syncFromState never touches the intent bit (the rebuilt branch carries it).
-  const before = h.appends.length;
-  h.gate.syncFromState("read-only", "plan");
-  h.gate.syncFromState("read-write", undefined);
-  assert.equal(h.appends.length, before);
-});
-
-test("a floor-refused exit appends nothing — an authoring enter under a floor cannot be exited into access", async () => {
-  const h = gateFixture(() => true);
-  h.gate.enter(undefined, { planAuthoring: true });
-  assert.deepEqual(h.appends, [{ mode: "read-only", plan_authoring: true }]);
-  h.gate.exit();
-  assert.deepEqual(h.appends, [{ mode: "read-only", plan_authoring: true }]);
-  await assertBackstop(h);
 });
 
 test("a throwing supplier and malformed bash inputs never open the gate", async () => {

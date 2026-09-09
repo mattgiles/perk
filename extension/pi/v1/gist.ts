@@ -17,8 +17,8 @@
 // context re-injects on the next turn.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { classifyAuthoringContext } from "../../authoring/context/eligibility.ts";
 import {
+  GIST_AUTHOR_STAGE,
   GIST_DRAFT_ARTIFACT,
   GIST_SCOPES,
   type GistScope,
@@ -58,7 +58,6 @@ import {
 } from "../../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../../substrate/command.ts";
 import { loadPerkConfig } from "../../substrate/config.ts";
-import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
 import { render } from "../../substrate/prompts.ts";
 import { failFor, ok, type Result } from "../../substrate/result.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
@@ -234,23 +233,11 @@ export function gistSaveGuidance(title?: string): string {
 }
 
 /**
- * Whether the current branch is a gist-author session: the shared authoring-context policy's
- * exact `gist-author` kind (effective read-only gate AND stage match, never a runner child —
- * `authoring/context/eligibility.ts`).
+ * Whether the current branch is a gist-author session (read-only gate AND stage match). (The
+ * runner fence lives in the shared injection helper.)
  */
-function isGistAuthoring(
-  gating: ToolGating,
-  contextPolicy: ContextPolicyInputs,
-  branch: readonly BranchEntry[],
-): boolean {
-  return (
-    gating.isActive() &&
-    classifyAuthoringContext({
-      gateActive: true,
-      runnerChild: contextPolicy.runnerChild(),
-      state: rebuildWorkflowState(branch),
-    }) === "gist-author"
-  );
+function isGistAuthoring(gating: ToolGating, branch: readonly BranchEntry[]): boolean {
+  return gating.isActive() && rebuildWorkflowState(branch).stage === GIST_AUTHOR_STAGE;
 }
 
 // ------------------------------------------------------------------------------ the installer
@@ -265,20 +252,23 @@ export function installGistBindings(
   pi: ExtensionAPI,
   gating: ToolGating,
   reviews: DraftReviewSlot,
-  contextPolicy: ContextPolicyInputs,
+  runnerChild: () => boolean,
 ): void {
   // The gist-authoring context injection (display:false), keyed off (read-only gate AND stage
-  // === gist-author, never a runner child); the inject/strip mechanics (active-window dedup,
-  // selection-driven retention) live in the shared helper.
-  installInjectedContext(pi, {
-    customType: GIST_AUTHOR_CONTEXT_TYPE,
-    flavors: {
-      [GIST_AUTHOR_MARKER]: (ctx) =>
-        gistAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
+  // === gist-author); the inject/strip mechanics (active-window dedup, selection-driven
+  // retention) and the runner fence live in the shared helper.
+  installInjectedContext(
+    pi,
+    {
+      customType: GIST_AUTHOR_CONTEXT_TYPE,
+      flavors: {
+        [GIST_AUTHOR_MARKER]: (ctx) =>
+          gistAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
+      },
+      select: (_ctx, branch) => (isGistAuthoring(gating, branch) ? GIST_AUTHOR_MARKER : null),
     },
-    select: (_ctx, branch) =>
-      isGistAuthoring(gating, contextPolicy, branch) ? GIST_AUTHOR_MARKER : null,
-  });
+    runnerChild,
+  );
 
   pi.registerTool({
     name: "gist_draft",

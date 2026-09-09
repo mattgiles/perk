@@ -350,12 +350,12 @@ function fixture(
     },
   } satisfies ToolGating;
   const reviews = createDraftReviewSlot(pi);
-  const contextPolicy = { runnerChild: () => false };
-  installPlanBindings(pi, gating, reviews, contextPolicy);
-  installObjectiveAuthoringBindings(pi, gating, reviews, contextPolicy);
-  installGistBindings(pi, gating, reviews, contextPolicy);
+  const notARunner = () => false;
+  installPlanBindings(pi, gating, reviews, notARunner);
+  installObjectiveAuthoringBindings(pi, gating, reviews, notARunner);
+  installGistBindings(pi, gating, reviews, notARunner);
   installObjectivePlanningBindings(pi, gating, {} as ReportWave);
-  installObjectiveRefinementBindings(pi, gating, reviews, contextPolicy);
+  installObjectiveRefinementBindings(pi, gating, reviews, notARunner);
   const session = openBranchWorkflowSession(pi, ctx);
   if (opts.grounded !== false && runId !== null) {
     const written = session.writeArtifact(REFINEMENT_CONTEXT_ARTIFACT, GOLDEN_CONTEXT, {

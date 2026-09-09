@@ -804,7 +804,7 @@ test("decision: APPROVE + failed save → loud error naming /plan-save, gate ON,
       },
       on() {},
     } as unknown as ExtensionAPI;
-    installPlanBindings(registrar, s.gating, s.slot, { runnerChild: () => false });
+    installPlanBindings(registrar, s.gating, s.slot, () => false);
     const planSave = commands.get("plan-save");
     assert.ok(planSave, "/plan-save registered");
     await planSave("", s.ctx);

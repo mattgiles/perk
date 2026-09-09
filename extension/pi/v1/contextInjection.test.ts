@@ -1,11 +1,13 @@
 // The shared context-injection mechanism's DISTINCT policies — owned ONCE here, for every
-// `installInjectedContext` caller (gist, plan, objective-authoring, plannotator, tombell): the
-// scan-before-construct content thunk, the two guarded reads' failure semantics, the
-// submitting-prompt check, the selection-driven retention filter shape (owned copies only —
-// user input is preserved byte-for-byte), and one registered-extension composition smoke. Drives the installer through a `pi.on`-recorder fake over REAL `SessionManager` sources
-// (no second reconstruction of Pi's selection); the exhaustive carrier/compaction/branch matrix
-// lives in `contextEvidence.test.ts`, and feature policy (eligibility, flavor selection, content
-// identity) stays pinned in each feature's own suite.
+// `installInjectedContext` caller (gist, plan, objective-authoring, refinement, plannotator,
+// tombell): the scan-before-construct content thunk, the two guarded reads' failure semantics,
+// the submitting-prompt check, the selection-driven retention filter shape (owned copies only —
+// user input is preserved byte-for-byte), the runner fence, the `isPlanGuidanceStage` registry
+// guard, and one registered-extension composition smoke. Drives the installer through a
+// `pi.on`-recorder fake over REAL `SessionManager` sources (no second reconstruction of Pi's
+// selection); the exhaustive carrier/compaction/branch matrix lives in
+// `contextEvidence.test.ts`, and feature policy (flavor selection, content identity) stays
+// pinned in each feature's own suite.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -19,9 +21,14 @@ import {
   PLAN_MARKER,
   planAuthoringContextContent,
 } from "../../authoring/plan/prose.ts";
+import { loadRegistry } from "../../substrate/registry.ts";
 import type { BranchEntry } from "../../substrate/workflowState.ts";
 import { loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
-import { type InjectedContextSpec, installInjectedContext } from "./contextInjection.ts";
+import {
+  type InjectedContextSpec,
+  installInjectedContext,
+  isPlanGuidanceStage,
+} from "./contextInjection.ts";
 
 const CONTEXT_TYPE = "perk:test-context";
 const MARKER = "[TEST CONTEXT]";
@@ -30,14 +37,17 @@ const SECOND_MARKER = "[TEST CONTEXT: SECOND]";
 type Hook = (event: unknown, ctx: unknown) => Promise<unknown>;
 
 /** Install the spec through a `pi.on`-recorder fake and hand back the two registered hooks. */
-function hooksFor(spec: InjectedContextSpec): { inject: Hook; strip: Hook } {
+function hooksFor(
+  spec: InjectedContextSpec,
+  runnerChild: () => boolean = () => false,
+): { inject: Hook; strip: Hook } {
   const handlers = new Map<string, Hook>();
   const pi = {
     on(event: string, handler: Hook) {
       handlers.set(event, handler);
     },
   } as unknown as ExtensionAPI;
-  installInjectedContext(pi, spec);
+  installInjectedContext(pi, spec, runnerChild);
   const inject = handlers.get("before_agent_start");
   const strip = handlers.get("context");
   assert.ok(inject !== undefined && strip !== undefined, "both hooks registered");
@@ -401,6 +411,47 @@ test("retention reads the FULL branch through select (compaction-independent), n
   assert.deepEqual(await retained(strip, [kept], ctx), [kept], "a selected copy is retained");
   assert.deepEqual(seen, [branch], "select saw the full branch");
   assert.deepEqual(reads, [], "retention never reads the projection");
+});
+
+// --- the runner fence ------------------------------------------------------------------------------
+
+test("a runner child selects nothing for every owned context: select is never called, nothing injects, every owned copy is stripped while other messages survive byte-for-byte", async () => {
+  const { spec, counts } = countingSpec();
+  const { inject, strip } = hooksFor(spec, () => true);
+
+  assert.equal(await inject(EMPTY_EVENT, ctxOver()), undefined, "a runner child injects nothing");
+  assert.equal(counts.select, 0, "the fence precedes every selector read");
+  assert.equal(counts.content, 0);
+
+  const userQuote = { role: "user", content: `${MARKER} quoted` };
+  const otherCustom = { customType: "perk:other", content: "x" };
+  const surviving = await retained(strip, [
+    { customType: CONTEXT_TYPE, content: `${MARKER}\nowned copy` },
+    userQuote,
+    otherCustom,
+  ]);
+  assert.deepEqual(surviving, [userQuote, otherCustom], "only the owned copy is removed");
+  assert.equal(counts.select, 0, "retention never consulted the selector either");
+});
+
+// --- the plan-guidance stage predicate (the registry guard) -----------------------------------
+
+test("isPlanGuidanceStage: every read-only registry stage outside plan/objective-plan is owned elsewhere; the stage-less session and a worktree stage are admitted", () => {
+  const visited: string[] = [];
+  for (const stage of loadRegistry().stages) {
+    if (stage.mode !== "read-only") continue;
+    visited.push(stage.id);
+    assert.equal(
+      isPlanGuidanceStage(stage.id),
+      stage.id === "plan" || stage.id === "objective-plan",
+      `read-only stage ${stage.id}: plan guidance rides the gate only for the plan claims`,
+    );
+  }
+  // Vacuity control: the loop visited the plan claim AND the non-authoring read-only door.
+  assert.ok(visited.includes("plan"), "the registry's plan stage was visited");
+  assert.ok(visited.includes("audit"), "the registry's audit stage was visited");
+  assert.equal(isPlanGuidanceStage(undefined), true, "the stage-less warm /plan session");
+  assert.equal(isPlanGuidanceStage("implement"), true, "a worktree stage with /plan toggled on");
 });
 
 // --- composition smoke: the REAL registered extension rides the projection leaf -----------------

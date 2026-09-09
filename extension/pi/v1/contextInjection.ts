@@ -1,10 +1,13 @@
 // The one marker-dedup'd context-injection mechanism (contracts §8.31 semantics) behind the
-// five injected authoring/adapter contexts: gist, plan, objective-authoring, and the
+// six injected authoring/adapter contexts: gist, plan, objective-authoring, refinement and the
 // plannotator/tombell plan adapters all register the same `before_agent_start` + `context` hook
 // pair around one injected, marker-dedup'd context. The MECHANICS live here — the live-evidence
-// dedup, the selection-driven retention filter, the guarded reads; feature POLICY (eligibility,
-// flavor selection, content construction, the customType/marker vocabulary) stays with each
-// caller's `InjectedContextSpec` closures.
+// dedup, the selection-driven retention filter, the guarded reads. Callers keep flavor selection
+// + content construction (the customType/marker vocabulary) in their `InjectedContextSpec`
+// closures; two cross-cutting rules live here — the runner fence (`installInjectedContext`'s
+// third argument: a runner child selects nothing for every owned context) and
+// `isPlanGuidanceStage` (the one stage predicate behind the plan context and the two
+// plan-adapter plan flavors).
 //
 // ONE decision drives both hooks: `spec.select` (the flavor to deliver this turn, or null). It
 // reads the FULL branch (`branchOf` — eligibility/state survive compaction), while the dedup
@@ -42,12 +45,44 @@
 // and `hunkFeedback/receiver.ts`.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { GIST_AUTHOR_STAGE } from "../../authoring/gist/draft.ts";
+import { OBJECTIVE_AUTHOR_STAGE, OBJECTIVE_SAVE_STAGE } from "../../authoring/objective/prose.ts";
+import { REFINE_STAGE } from "../../authoring/refinement/context.ts";
 import { type BranchEntry, branchOf } from "../../substrate/workflowState.ts";
 import {
   activeContextMessages,
   type ContextMessage,
   contextCarriesMarker,
 } from "./contextEvidence.ts";
+
+/**
+ * The stages whose authoring guidance another context owns, so plan guidance never falls
+ * through to them: the three dedicated authoring stages (their installers inject their own
+ * contexts) plus `objective-save` (mirroring `plan_review`'s objective-arm routing — both
+ * objective stages route there, and plannotator's objective flavor covers both), and `audit` —
+ * the dev-only `perk-dev audit judge` door, a read-only registry stage that authors nothing (a
+ * literal: the stage has no authoring module; the registry guard test pins it).
+ */
+const PLAN_GUIDANCE_OWNED_ELSEWHERE: ReadonlySet<string> = new Set([
+  OBJECTIVE_AUTHOR_STAGE,
+  OBJECTIVE_SAVE_STAGE,
+  GIST_AUTHOR_STAGE,
+  REFINE_STAGE,
+  "audit",
+]);
+
+/**
+ * Whether plan-authoring guidance rides the read-only gate in `stage`: every stage no other
+ * guidance owns is admitted — the stage-less warm `/plan` (`undefined`), the cold
+ * `plan`/`objective-plan` claims, a worktree stage with `/plan` toggled on. The
+ * objective/gist/refinement installers own their stages (plannotator's matching flavors follow
+ * `plan_review`'s objective-arm routing, both objective stages included). An unknown stage id is
+ * admitted (fail-open, like the stage tool filter); read-write stages (`save`, the worktree
+ * family) are admitted but only reached when the human toggles `/plan` on in such a session.
+ */
+export function isPlanGuidanceStage(stage: string | undefined): boolean {
+  return stage === undefined || !PLAN_GUIDANCE_OWNED_ELSEWHERE.has(stage);
+}
 
 /**
  * One marker-dedup'd injected context: the owned customType + the flavor table. Each flavor is
@@ -114,23 +149,35 @@ function carriesMarker(content: unknown, marker: string): boolean {
  * ordering is frozen by each installer's internal sequence.
  *
  * - `before_agent_start`: guarded branch read (a failed read short-circuits — no `select` call,
- *   no injection) → `spec.select` (null → no injection) → the submitting prompt carrying the
- *   SELECTED marker suppresses (cold delivery before persistence; another flavor's marker does
- *   not) → guarded projection read (a failed read returns — nothing constructed, nothing
- *   injected) → a live owned copy of the selected marker suppresses (the content thunk is never
- *   invoked) → inject `{ customType, content, display: false }`.
- * - `context`: guarded branch read + `spec.select` (a failed read or a throwing selector fails
- *   closed to null) → retain the owned customType's copies carrying the selected flavor's marker
- *   only; remove every other owned copy (all of them on null). No other message is inspected.
+ *   no injection) → the runner fence (a runner child selects nothing — no `select` call) →
+ *   `spec.select` (null → no injection) → the submitting prompt carrying the SELECTED marker
+ *   suppresses (cold delivery before persistence; another flavor's marker does not) → guarded
+ *   projection read (a failed read returns — nothing constructed, nothing injected) → a live
+ *   owned copy of the selected marker suppresses (the content thunk is never invoked) → inject
+ *   `{ customType, content, display: false }`.
+ * - `context`: guarded branch read + the same fence + `spec.select` (a failed read or a throwing
+ *   selector fails closed to null) → retain the owned customType's copies carrying the selected
+ *   flavor's marker only; remove every other owned copy (all of them on null — a runner child
+ *   included). No other message is inspected.
+ *
+ * `runnerChild` is the composition root's per-`session_start` runner bit (§8.3) — a SUPPRESSION
+ * signal only: it never grants tools or save authority. Every perk report child is a runner
+ * child, so this one fence is the whole "no authoring or adapter guidance for children" rule;
+ * it runs BEFORE `spec.select`, so a runner child never performs the selector's config/branch
+ * reads.
  */
 export function installInjectedContext<K extends string>(
   pi: ExtensionAPI,
   spec: InjectedContextSpec<K>,
+  runnerChild: () => boolean,
 ): void {
   // Defensive over a widened K (string): an off-table key names no flavor — never inject or
   // retain on it.
   const flavorOf = (key: K | null): string | null =>
     key !== null && spec.flavors[key] !== undefined ? key : null;
+  // ONE selection helper for both hooks: the fence, then the caller's policy.
+  const selectedMarker = (ctx: ExtensionContext, branch: readonly BranchEntry[]): string | null =>
+    runnerChild() ? null : flavorOf(spec.select(ctx, branch));
 
   pi.on("before_agent_start", async (event, ctx) => {
     let branch: readonly BranchEntry[];
@@ -139,7 +186,7 @@ export function installInjectedContext<K extends string>(
     } catch {
       return;
     }
-    const marker = flavorOf(spec.select(ctx, branch));
+    const marker = selectedMarker(ctx, branch);
     if (marker === null) return;
     const content = spec.flavors[marker as K];
     if (event.prompt.includes(marker)) return;
@@ -162,7 +209,7 @@ export function installInjectedContext<K extends string>(
   pi.on("context", async (event, ctx) => {
     let selected: string | null;
     try {
-      selected = flavorOf(spec.select(ctx, branchOf(ctx)));
+      selected = selectedMarker(ctx, branchOf(ctx));
     } catch {
       selected = null;
     }

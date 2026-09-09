@@ -86,7 +86,6 @@ import {
   workflowDir,
 } from "./substrate/cache.ts";
 import { decodeReadOnlyFloor, isRunnerChild } from "./substrate/childRestrictions.ts";
-import { createContextPolicyInputs } from "./substrate/contextPolicy.ts";
 import { loadRegistry, type Registry } from "./substrate/registry.ts";
 import { perkVersion, sharedDir, versionStamp } from "./substrate/resources.ts";
 import { mintRunId } from "./substrate/runId.ts";
@@ -162,16 +161,14 @@ export default function perk(
 
   // The read-only tool-gating primitive. Attaches to perk:workflow-state.mode; synced on
   // both session_start AND session_tree below. enter/exit are the surface the gated stages consume.
-  // The two native-child booleans (§8.3), re-read at every session_start: the runner bit, and the
-  // read-only floor a runner child derives from the report restriction packet — latched for the
-  // activation (`||=`) so no later session_start, gate exit, or tree navigation can clear it.
+  // The two native-child booleans (§8.3), re-read at every session_start: the runner bit (also the
+  // `() => runnerChild` closure every injected authoring/adapter context takes as its fence — the
+  // REAL closure, never a constant), and the read-only floor a runner child derives from the
+  // report restriction packet — latched for the activation (`||=`) so no later session_start,
+  // gate exit, or tree navigation can clear it.
   let runnerChild = false;
   let readOnlyFloor = false;
   const gating = registerToolGating(pi, () => readOnlyFloor);
-  // The activation-local authoring-context policy input (§8.3): the startup runner bit, captured
-  // in session_start before lifecycle work and consumed by the authoring/adapter installers as a
-  // suppression signal only — never a tool grant or save authority.
-  const contextPolicy = createContextPolicyInputs();
 
   // Run-owned disposable scratch guidance for every eligible write-capable model turn. One
   // activation-scoped provisioner shares retry/warning suppression with the isolated /btw side
@@ -249,7 +246,7 @@ export default function perk(
   // per-activation current-review slot + unconfirmed-save latch every review surface shares
   // (§8.23 "Draft-review guards") — in-memory, nothing persisted.
   const draftReviews = createDraftReviewSlot(pi);
-  installPlanBindings(pi, gating, draftReviews, contextPolicy, {
+  installPlanBindings(pi, gating, draftReviews, () => runnerChild, {
     present: () => plannotatorPresent(pi),
     plan: (ctx, opts) =>
       openPlanReviewSurface(pi, ctx, gating, opts, draftReviewWave, annotations, draftReviews),
@@ -262,7 +259,7 @@ export default function perk(
   // `[providers] plan = "tombell-plan"`; it directs the foreign free-form prose `/plan` surface into
   // perk's canonical `plan_save` → `cache.plan-ref` contract. It needs no `gating` (Invariant 1: the
   // read-only gate stays perk's, engaged by the cold-door launch — the shim never arbitrates tools).
-  installTombellPlanAdapter(pi, contextPolicy);
+  installTombellPlanAdapter(pi, () => runnerChild);
 
   // The second 3rd-party plan adapter — AUGMENT posture: `@plannotator/pi-extension` contributes
   // its browser plan-review UI while perk's plan surface + gate stay (the plan installer skips
@@ -270,27 +267,27 @@ export default function perk(
   // `[providers] plan = "plannotator-plan"`. Injection-only — the `plan_review` tool lives in
   // the plan installer (above), which dispatches to this adapter's event-bus bridge when
   // plannotator is selected.
-  installPlannotatorPlanAdapter(pi, contextPolicy);
+  installPlannotatorPlanAdapter(pi, () => runnerChild);
 
   // The v1 objective-authoring installer: the objective-author context hook pair (this call
   // sits at the frozen hooks-ordering slot the injection always held — keyed off (read-only
   // gate AND stage === objective-author); planMode defers to it), plus the
   // `objective_draft`/`objective_save` tools and the `/objective-save` command (registration is
   // name-keyed — only the hooks ordering is frozen).
-  installObjectiveAuthoringBindings(pi, gating, draftReviews, contextPolicy);
+  installObjectiveAuthoringBindings(pi, gating, draftReviews, () => runnerChild);
 
   // The v1 gist installer: the gist-authoring context hook pair (this call sits at the frozen
   // hooks-ordering slot the injection always held; planMode defers to it too), plus the
   // `gist_draft`/`gist_save` tools and the `/gist-save` command (registration is name-keyed —
   // only the hooks ordering is frozen).
-  installGistBindings(pi, gating, draftReviews, contextPolicy);
+  installGistBindings(pi, gating, draftReviews, () => runnerChild);
 
   // The v1 objective-refinement installer (contracts.md §8.67/§8.68): the refinement context hook
-  // pair (selected by the shared policy's dedicated `objective-refine` kind — plan mode and the
-  // provider adapters yield to it), the ONE model-facing `objective_refinement_draft` tool, the
-  // warm `/objective-refine` entry and the human `/objective-refinement-save` failsafe.
-  // Registered before the tool snapshots.
-  installObjectiveRefinementBindings(pi, gating, draftReviews, contextPolicy);
+  // pair (keyed off (read-only gate AND stage === objective-refine); plan mode and the provider
+  // adapters defer to it), the ONE model-facing `objective_refinement_draft` tool, the warm
+  // `/objective-refine` entry and the human `/objective-refinement-save` failsafe. Registered
+  // before the tool snapshots.
+  installObjectiveRefinementBindings(pi, gating, draftReviews, () => runnerChild);
   let sharedOk = false;
   try {
     sharedDir();
@@ -331,7 +328,6 @@ export default function perk(
     stackConflict.shutdown();
     resolverContext = undefined;
     await conflictResolver.shutdown();
-    contextPolicy.clear();
     feedbackReceiver.close();
   });
 
@@ -339,7 +335,6 @@ export default function perk(
     // Read the two native-child booleans and latch the floor before lifecycle work or tool rebuilds.
     runnerChild = isRunnerChild(process.env);
     readOnlyFloor ||= decodeReadOnlyFloor(runnerChild, process.env.PI_SUBAGENT_EXTENSION_BINDINGS);
-    contextPolicy.capture(runnerChild);
 
     submitConflict.setContext(ctx);
     stackConflict.setContext(ctx);
