@@ -221,6 +221,15 @@ whole PR-loop family so a later warm command cannot dead-end in an earlier workt
 shared family includes submission, readiness, CI, review/address, land/learn, reconciliation, and
 stack-control operations, plus delegation and the checklist.
 
+When perk first engages it records the host's active starting set and the registered-tool census,
+then reconciles at `session_start`, `session_tree`, and once at `resources_discover` (after every
+extension's `session_start` has run). The base is that starting set plus every later-registered
+tool perk has seen active with the gate off — the delegation supervisor tool, which registers late,
+lands inside the diet at launch and is restored when navigation returns to a stage that carries it;
+a late tool its owner deactivated before perk saw it is left alone; a tool inactive at the start is
+never re-activated by perk. A late tool outside the read-only allowlist is inactive from the first
+turn and is not restored at gate exit.
+
 Pi owns its builtins (`read`, `edit`, `write`, `bash`, `grep`, `find`, and related host tools); this
 reference does not redefine them. Stage scoping is fail-open at compatibility boundaries: a bare
 session, an unknown stage id, and an unenumerated foreign tool are not filtered. Read-only mode is

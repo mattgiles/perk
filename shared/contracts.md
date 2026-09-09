@@ -728,7 +728,8 @@ branch that never carried it injects again; an unreadable branch cannot suppress
 and **strips** it from `context` when off (its retention is independent of every authoring
 context: the reviewer/runner restriction guidance stays delivered after authoring guidance is
 removed). The allowlist is restored on both `session_start` and `session_tree` (re-sync
-from the rebuilt `mode`). **Fail-closed:** a failed state-rebuild never opens the gate, and
+from the rebuilt `mode`) and re-applied once at `resources_discover` from the in-memory
+mode/stage (§8.40). **Fail-closed:** a failed state-rebuild never opens the gate, and
 `tool_call` blocks on any internal error. The `enter(ctx?)`/`exit(ctx?)` surface is the API the
 interior consumers (plan mode, the authoring installers, the CI executor) compose — the gate is
 the single read-only authority. Beside the gate, the same rebuild points apply **stage-scoped active tools** keyed off the
@@ -6661,7 +6662,9 @@ transitions, and the remote worker (§8.38 named difference 7) are untouched.
 A stage session's model carries only the perk tool schemas its stage's flows can actually invoke.
 The mechanism is extension-owned end to end: a curated per-stage map (`STAGE_TOOLS`, beside
 `READ_ONLY_TOOLS` in `extension/substrate/toolGating.ts`, keyed by registry stage ids) applied at
-the existing `session_start`/`session_tree` rebuild points via `syncFromState(mode, stage)`. The
+the `session_start`/`session_tree` rebuild points via `syncFromState(mode, stage)` and re-applied
+ONCE at `resources_discover` from the in-memory mode/stage — after every extension's
+`session_start` has registered its tools. The
 key is the branch-LWW workflow-state **`stage`** field (§8.3): claim syncs the handoff-recorded
 stage just appended; keep/none sync the branch-rebuilt stage; **fork inherits** the parent's
 stage (a forked implement session is an implement session); **adopt never impersonates** (spawned
@@ -6690,24 +6693,22 @@ pass through untouched (fail-open — enumeration is diet-completeness, not corr
 
 **The borrowed census posture.** Static names, inert when absent (the `READ_ONLY_TOOLS`
 posture — `setActiveTools` simply has nothing to enable; no presence detection). Every census
-name registers at load time EXCEPT pi-subagents' parent supervisor pair (`subagent_supervisor`,
-`intercom`), which registers during `session_start` after perk's sync and deliberately leaks
-past rebuild-point filtering at launch (accepted + test-pinned; a later tree-navigation
-re-apply filters over the original snapshot — which lacks the late names — and drops them).
-A name is governed ONCE — it lives in exactly one census
-(hygiene-tested): perk does not register `ask_user_question` — `BORROWED_TOOLS` owns that
-name: the borrowed
-`@juicesharp/rpiv-ask-user-question` package registers it at load time, then a `hasUI`-keyed
-reconcile strips/restores it (headless sessions carry no `ask_user_question` schema at all).
-`todo` is likewise a required-borrow name: the borrowed `@juicesharp/rpiv-todo` package
-registers it at load time (its checklist overlay is `hasUI`-gated — headless-safe).
-Foreign packages that run their own
-`setActiveTools` (plannotator's phase machinery, @tombell/pi-plan's plan mode) win between
-perk's rebuild points (the fail-open direction), and a mid-session rebuild re-installs perk's
-stage set over a foreign restriction — recorded interplay, not re-engineered. Stage placement:
+name registers at load time EXCEPT pi-subagents' `subagent_supervisor`, which registers during
+its own `session_start` after perk's sync and is admitted by the `resources_discover` re-apply
+under the baseline rule below — inside the diet at launch, kept where a stage list carries it,
+filtered where none does (`intercom` is the separate pi-intercom bridge's tool name — a static
+census entry, inert unless that package is present). A name is governed ONCE — exactly one
+census (hygiene-tested): `ask_user_question` and `todo` are required-borrow names owned by
+`BORROWED_TOOLS`, not `PERK_TOOLS` (their packages register at load; the questionnaire
+strips/restores its tool per `hasUI` before each turn, so headless sessions carry no
+`ask_user_question` schema). Foreign packages that run their own `setActiveTools`
+(plannotator's phase machinery, @tombell/pi-plan's plan mode) win between perk's reconciliation
+points (the fail-open direction), and every reconciliation — a rebuild or the startup re-apply —
+re-installs perk's set over a foreign toggle, admitted late tools included; recorded interplay,
+not re-engineered. Stage placement:
 the research families (web union + Linear reads + FFF local search) ride EVERY stage list; delegation
-(`subagent`/`wait`/the supervisor pair) and `todo` are worktree-family only among the gate-OFF
-stage lists (delegation additionally rides the read-only gate — §8.3);
+(`subagent`/`wait`/`subagent_supervisor`/`intercom`) and `todo` are worktree-family only among the
+gate-OFF stage lists (delegation additionally rides the read-only gate — §8.3);
 `LINEAR_MUTATING_TOOLS` (incl. `linear_configure_auth`, which writes `~/.pi/agent/auth.json`)
 and `plannotator_submit_plan` appear in NO stage list — in the census, so subtracted from every
 stage session; bare/unscoped sessions keep full access. Child-session tools
@@ -6723,12 +6724,21 @@ allowlist is §8.3's) — with ONE named exception: the isolated `objective-refi
 its own explicit gate-ON allowlist `REFINEMENT_READ_ONLY_TOOLS` (`gatedToolsFor(stage)`) for both
 the active set and the `tool_call` backstop, and its own read-only mode-context flavor; the
 refinement draft tool lives in `PERK_TOOLS` but never in `READ_ONLY_TOOLS`, so no other gated
-stage gains it (§8.68). Gate OFF + known stage → a **subtractive filter over the one
-shared pre-engagement snapshot**: non-perk names pass through; perk names survive only when the
-stage's list carries them. The rule "the gate never widens a stage's set and vice versa" holds:
-engaging the gate only ever narrows, and stage scoping never adds a tool. Both concerns share
-ONE snapshot, taken on first engagement of either; neither engaged → restore the snapshot if one
-exists. The worktree family (implement/submit/address/land/learn) is deliberately **one shared
+stage gains it (§8.68). Gate OFF + known stage → a **subtractive filter over the reconciliation
+baseline `snapshot ∪ admitted`** — the one shared pre-engagement snapshot (the host's active
+starting set, never `getAllTools()`) plus every name the registry census recorded beside it never
+saw that a gate-OFF reconciliation has since seen active. Admission is sticky: perk's own filtering
+(a stage list, the gate) never evicts an admitted name, so navigating back to an admitting stage or
+to a no-stage branch restores it; a late tool its owner deactivated before perk saw it active is
+never admitted; a tool inactive at snapshot time is never re-activated. Non-perk names pass
+through; scoped names survive only when the stage's list carries them. The rule "the gate never
+widens a stage's set and vice versa" holds: engaging the gate only ever narrows, and stage scoping
+never adds a tool. Both concerns share ONE snapshot + census + admitted set, taken on first
+engagement of either; neither engaged → restore the baseline and forget it. Gate ON does no
+admission bookkeeping. Accepted residual: a late tool outside the gate-ON allowlist is deactivated
+by the `resources_discover` re-apply (schema-invisible from the first turn) and, never seen active
+by a gate-OFF reconciliation, is not restored at gate exit. The worktree family
+(implement/submit/address/land/learn) is deliberately **one shared
 PR-loop list** — any PR-loop warm command works in any worktree session (warm doors inject
 guidance naming their companion tool; a per-stage cut would dead-end e.g. `/land` run inside the
 implement session). The reconcile trio (`reconcile_objective`/`add_objective_node`/
@@ -6753,9 +6763,8 @@ read-only `perk.draft-reviewer` over the already-carved-in delegation family).
 
 **Fail postures.** Stage scoping is **fail-open** where the gate is fail-closed: no stage, an
 unknown stage id (version skew), or any lookup miss → no filtering. Absent tool names
-are inert (`setActiveTools` ignores unknown names — e.g. the borrowed `ask_user_question` is
-stripped by its package when `!hasUI`, so the name-keyed entries simply have nothing to enable
-in a headless session). There is no `tool_call` backstop for stage scoping (schema removal is the same structural
+are inert (`setActiveTools` ignores unknown names). There is no `tool_call` backstop for stage
+scoping (schema removal is the same structural
 lever the gate's allowlist uses; the full read-only tool-call allowlist and bash argument check
 remain the gate's job) and no
 config surface for the map (the §8.39 non-interference posture; fail-open on unknown ids covers
