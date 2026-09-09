@@ -72,17 +72,12 @@ for the background baseline and the five human-operated streaming legs; unobserv
 
 ## Child execution policy
 
-The [child-policy record](../design/pi-subagents-child-execution-policy.md) is the binding
-description: two booleans — the pi-subagents runner bit (`PI_SUBAGENT_CHILD=1`) and perk's constant
-report restriction packet (`perk.parent-restrictions/1 = {readOnly: true}` with `worktree: false`
-on every report child) — give a runner child a monotone read-only floor and no agent scratch; a
-malformed or unsupported-version packet fails closed. Its regression table names the owning suites
-(`extension/substrate/childRestrictions.test.ts`, `sessionLifecycle.test.ts`, `agentScratch.test.ts`,
-`waves/reportWave.test.ts`, `pi/v1/waveIsolation.test.ts`). For consumer changes, re-read the
-worktree-resolved Pi startup/rebuild/reload path and the installed engine's runner stamp,
-runner-only binding delivery and child loader; relevant source behavior, not version equality, is
-the compatibility bar, and incompatibility stops for owner disposition — no install, mode or
-composition fallback.
+The [child-policy record](../design/pi-subagents-child-execution-policy.md) is binding: two
+booleans — the runner bit (`PI_SUBAGENT_CHILD=1`) and the constant report restriction packet
+(`perk.parent-restrictions/1 = {readOnly: true}` + `worktree: false` on every report child) — give
+a runner child a monotone read-only floor and no agent scratch; a malformed or unsupported-version
+packet fails closed. Its regression table names the owning suites (`childRestrictions.test.ts`,
+`sessionLifecycle.test.ts`, `agentScratch.test.ts`, `reportWave.test.ts`, `waveIsolation.test.ts`).
 
 The linked [capability characterization](../design/archive/pi-subagents-child-capability-characterization.md)
 records the pi-subagents 0.65.1 / five-package Pi 0.85.1 matrix, actual tool denials and writer

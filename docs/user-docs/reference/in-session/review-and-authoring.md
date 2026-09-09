@@ -92,13 +92,11 @@ fixed report-only acceptance contract. Review-head paths are task data, not agen
 discovery roots: the native RPC context supplies the trusted calling session cwd.
 
 Every report child carries the constant `perk.parent-restrictions/1 = {readOnly: true}` packet and
-`worktree: false` (it runs in the caller checkout, so `/pr-review` and the `/address` classifier
-read the actual caller's local plan reference). A runner child that receives the packet is
-read-only for its whole activation — gate exit and branch navigation cannot clear it, the
-tool-call allowlist backstop stays active even when toolset narrowing fails — and it provisions no
-agent scratch. Both halves are perk-owned; a malformed or unsupported-version packet fails closed.
-Manual subagent calls and foreground children are outside this channel, which is neither
-continuous revocation nor an OS sandbox. Streaming and final-report coverage rules below are unchanged.
+`worktree: false` (it runs in the caller checkout, so `/pr-review` and the `/address` classifier read
+the caller's local plan reference). A runner child with the packet is read-only for its activation —
+gate exit and branch navigation cannot clear it; the tool-call allowlist backstop stays — and gets no
+agent scratch. Both halves are perk-owned; a malformed packet fails closed. Manual subagent calls and
+foreground children are outside this channel. Streaming and coverage rules below are unchanged.
 
 ## Human-triaged PR review
 

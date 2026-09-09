@@ -229,12 +229,10 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   The extension provisions the directory before every eligible model turn and injects one hidden
   `customType: "perk:agent-scratch"` block naming the repository-relative current-run path. A
   turn is eligible iff the effective gate (§8.3, floor included) is off **and** the activation is
-  not a runner child (`PI_SUBAGENT_CHILD === "1"`, read at `session_start`). Every perk report
-  child is a runner child, so no per-role census, prompt-prefix identity, or agent-name reader
-  exists; the composition root supplies the one `eligible` predicate (`!gate && !runner`) to
-  `registerAgentScratch`. The writer is dispatched foreground (no perk activation), custom agents
-  launched by hand are outside the channel, and a runner child's absence of scratch is never a
-  write grant or a mode.
+  not a runner child (`PI_SUBAGENT_CHILD === "1"` at `session_start`). Every perk report child is
+  a runner child, so no per-role census, prompt-prefix identity or agent-name reader exists; the
+  composition root supplies the one `eligible` predicate (`!gate && !runner`). Foreground writers
+  and hand-launched agents are outside the channel; suppression is never a write grant or a mode.
 
   Neither ineligible hook calls the provisioner: suppression means no `agent/` creation or direct
   guidance, not zero lifecycle filesystem activity or deletion of existing directories. The context
@@ -644,16 +642,13 @@ swallowed**: a failed advance shows a visible `⚠ … NOT advanced — re-run /
 
 **Runner restriction floor.** `extension/substrate/childRestrictions.ts` exports two pure booleans:
 `isRunnerChild(env)` (`PI_SUBAGENT_CHILD === "1"`) and `decodeReadOnlyFloor(runner, raw)` over
-`PI_SUBAGENT_EXTENSION_BINDINGS`. A non-runner never gets a floor. For a runner: `undefined` raw,
-or an object envelope with no `perk.parent-restrictions/…` key at all, is **no packet** (`false`);
-invalid JSON, a non-object envelope, any `perk.parent-restrictions/` key other than exactly `/1`
-(an unsupported version — producer/consumer skew, even beside a valid `/1`), or `/1` with anything
-but exactly `{readOnly: boolean}` is **malformed** (`true`, fail closed); `/1 = {readOnly: b}` is
-**valid** (`b`). Unrelated namespaces are opaque. `index.ts` reads both at the top of every
-`session_start` and **latches** the floor for the activation (`readOnlyFloor ||= …`) before
-lifecycle establishment or gate sync; no session-key binding, status vocabulary, size bound or
-warning exists — the gate's `perk read-only mode: … blocked` reasons are the visible signal.
-`false`/absence is never a write grant or proof of warm inheritance.
+`PI_SUBAGENT_EXTENSION_BINDINGS`. A non-runner never gets a floor. For a runner: `undefined` raw or
+an object envelope with no `perk.parent-restrictions/…` key is **no packet** (`false`); invalid JSON,
+a non-object envelope, any family key other than exactly `/1` (an unsupported version, even beside a
+valid `/1`), or `/1` with anything but exactly one own `readOnly: boolean` is **malformed** (`true`,
+fail closed); `/1 = {readOnly: b}` is **valid** (`b`). Unrelated namespaces are opaque. `index.ts`
+reads both at the top of every `session_start` and **latches** the floor for the activation (`||=`)
+before lifecycle or gate sync; no session-key binding, status vocabulary, size bound or warning.
 
 After unchanged `establishSessionIdentity`, `reflectSessionReadOnlyFloor` runs only for a latched
 floor. Unclaimed/already-read-only outcomes append nothing. Other established outcomes use one
@@ -6164,15 +6159,13 @@ extension lists, private `workflowAwaitAsync`, or extra collector is emitted.
 Every rendered child item carries exactly `extensionBindings: {"perk.parent-restrictions/1":
 {"readOnly": true}}` and `worktree: false` — a constant, never sampled from the parent gate,
 handoff, task or assignment data (explicit field selection + whole-array `JSON.stringify` keep
-hostile task text and extra runtime assignment properties inert). The native RPC context supplies
-the caller cwd, so plan-bound readers (`/pr-review`, the `/address` classifier) keep their local
-plan-ref without a per-request policy; there is no `execution` opt-in or other placement.
-`createReportWave(bus)` takes no supplier and there is no capture-failure arm; the consumer is
-§8.3's floor (runner bit + packet ⇒ latched read-only), and §8.1's runner-child scratch
-suppression. No parent mode, handoff, identity/stage/run data, root binding, arbitrary cwd/profile
-registry or model-tool parameter is added. This is spawn-time policy for Perk-owned report waves,
-not continuous revocation, foreground Perk enforcement, certification of manual subagent calls,
-arbitrary cross-cwd handoff transport, or a universal OS sandbox.
+hostile fields inert). The native RPC context supplies the caller cwd, so plan-bound readers
+(`/pr-review`, the `/address` classifier) keep their local plan-ref; there is no `execution`
+opt-in or other placement. `createReportWave(bus)` takes no supplier and has no capture-failure
+arm; the consumer is §8.3's floor and §8.1's runner-child scratch suppression. No parent mode,
+handoff, identity/stage/run data or model-tool parameter is added. This is spawn-time policy for
+Perk-owned report waves, not continuous revocation, foreground Perk enforcement, certification of
+manual subagent calls, cross-cwd handoff transport, or an OS sandbox.
 
 **Report authority and native partial settlement.** Ordinary durable `state: "complete"`
 uses only `status.json.workflow.value`; completion metadata never supplements or replaces it.

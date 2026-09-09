@@ -31,6 +31,9 @@ export function decodeReadOnlyFloor(runner: boolean, raw: string | undefined): b
   if (Object.keys(envelope).some((key) => key.startsWith(FAMILY) && key !== NAMESPACE)) return true;
   if (!Object.hasOwn(envelope, NAMESPACE)) return false;
   const value = envelope[NAMESPACE];
-  if (!isRecord(value) || Object.keys(value).length !== 1) return true;
+  // Own-key check: a polluted `Object.prototype.readOnly` must never un-floor a malformed value.
+  if (!isRecord(value) || !Object.hasOwn(value, "readOnly") || Object.keys(value).length !== 1) {
+    return true;
+  }
   return typeof value.readOnly === "boolean" ? value.readOnly : true;
 }

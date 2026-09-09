@@ -89,17 +89,15 @@ offer and new human approval before canonical continuation, never push/abort aut
 follow-up delivery-unconfirmed diagnostic preserves the result and means stop for human direction.
 
 Every code-owned report child receives the constant `perk.parent-restrictions/1 = {readOnly: true}`
-binding and `worktree: false`. A pi-subagents runner child that carries the packet has an
-in-memory read-only floor for its whole activation, even if mode persistence fails; a malformed
-or unsupported-version packet fails closed. Your direct custom calls above are outside that channel.
+binding and `worktree: false`. A pi-subagents runner child carrying the packet has an in-memory
+read-only floor for its whole activation, even if mode persistence fails; a malformed or
+unsupported-version packet fails closed. Your direct custom calls above are outside that channel.
 
 ## Scratch guidance and custom-agent limits
 
 A runner child (`PI_SUBAGENT_CHILD=1`) never receives Perk's scratch guidance or provisioning, and
-there is no name-based eligibility: nothing in a prompt or definition can opt a child in or out.
-Foreground mode does not discover ambient Perk extensions; do not add an explicit Perk extension
-list or switch execution modes merely to make a failing profile pass. See
-[Agent scratch](../reference/configuration/repository-layout.md#agent-scratch) for the directory lifecycle.
+there is no name-based eligibility. Foreground mode does not discover ambient Perk extensions; see
+[Agent scratch](../reference/configuration/repository-layout.md#agent-scratch) for the lifecycle.
 
 ## Builtins in a perk repo
 

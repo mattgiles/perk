@@ -51,6 +51,17 @@ test("decoder: runner child — no packet ⇒ no floor, malformed ⇒ floor, val
   }
 });
 
+test("decoder: an inherited readOnly never counts — a polluted prototype cannot un-floor", (t) => {
+  const proto = Object.prototype as Record<string, unknown>;
+  Object.defineProperty(proto, "readOnly", { value: false, configurable: true, writable: true });
+  t.after(() => {
+    delete proto.readOnly;
+  });
+  assert.equal(decodeReadOnlyFloor(true, '{"perk.parent-restrictions/1":{"extra":1}}'), true);
+  assert.equal(decodeReadOnlyFloor(true, '{"perk.parent-restrictions/1":{}}'), true);
+  assert.equal(decodeReadOnlyFloor(true, packet(false)), false, "an own boolean is still honored");
+});
+
 test("isRunnerChild reads exactly PI_SUBAGENT_CHILD=1", () => {
   assert.equal(isRunnerChild({ PI_SUBAGENT_CHILD: "1" }), true);
   assert.equal(isRunnerChild({ PI_SUBAGENT_CHILD: "0" }), false);

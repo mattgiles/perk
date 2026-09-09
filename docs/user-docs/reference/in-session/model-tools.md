@@ -207,12 +207,10 @@ admit the flagless context form, other argument orders, extra arguments, lookali
 
 Perk-owned report waves deliver the constant `perk.parent-restrictions/1 = {readOnly: true}`
 packet and `worktree: false` to every native runner child. The packet — or a malformed /
-unsupported-version one — establishes a read-only floor before lifecycle work; a child cannot clear
-it through gate exit, later false/missing input or tree navigation, and failed mode persistence is
-loud and leaves the in-memory floor active. No packet is never a write grant: inherited branch
-read-only still applies. The child-only `structured_output` and `contact_supervisor` tools remain
-allowlisted; `/btw` mirrors the effective gate with read-only side tools and no scratch. Manual
-launches outside Perk's report producer and foreground children are not covered by this channel.
+unsupported-version one — establishes a read-only floor before lifecycle work that gate exit, later
+input or tree navigation cannot clear; failed mode persistence is loud and leaves the floor active.
+No packet is never a write grant. `structured_output` and `contact_supervisor` stay allowlisted;
+`/btw` mirrors the gate. Manual launches and foreground children are outside this channel.
 
 ### Stage tool diet
 
