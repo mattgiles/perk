@@ -231,6 +231,7 @@ test("revise: a gate block stores the tool-written dream_report before prose; re
   assert.deepEqual(resumeObjectiveDraft(session), {
     kind: "valid",
     draft: { dream_report: DREAM_BLOCK, prose: PROSE, roadmap: [] },
+    raw: storedContent(session),
   });
 });
 
@@ -269,6 +270,7 @@ test("resume: happy path round-trips a revise", () => {
     { prose: PROSE, title: "Objective title", roadmap: ROADMAP },
     { session, resolveDreamGate: scriptedGate().resolveDreamGate },
   );
+  // `raw` is the exact stored bytes — the reviewed-bytes baseline rides the same read.
   assert.deepEqual(resumeObjectiveDraft(session), {
     kind: "valid",
     draft: {
@@ -276,6 +278,7 @@ test("resume: happy path round-trips a revise", () => {
       prose: PROSE,
       roadmap: ROADMAP,
     },
+    raw: storedContent(session),
   });
 });
 
@@ -344,32 +347,31 @@ test("resume: a malformed dream_report block refuses the WHOLE draft (exact prob
 });
 
 test("resume: junk base/delivery drop to absent; blank title dropped; roadmap defaults to []", () => {
-  const session = plantedSession(
-    JSON.stringify({
-      schema_version: 1,
-      title: "   ",
-      base: "  ",
-      delivery: "atomic",
-      prose: PROSE,
-      roadmap: "nope",
-    }),
-  );
+  const content = JSON.stringify({
+    schema_version: 1,
+    title: "   ",
+    base: "  ",
+    delivery: "atomic",
+    prose: PROSE,
+    roadmap: "nope",
+  });
+  const session = plantedSession(content);
   assert.deepEqual(resumeObjectiveDraft(session), {
     kind: "valid",
     draft: { prose: PROSE, roadmap: [] },
+    raw: content,
   });
 });
 
 test("resume: valid base/delivery survive the validated read", () => {
-  const session = plantedSession(
-    JSON.stringify({
-      schema_version: 1,
-      base: "develop",
-      delivery: "stacked",
-      prose: PROSE,
-      roadmap: [],
-    }),
-  );
+  const content = JSON.stringify({
+    schema_version: 1,
+    base: "develop",
+    delivery: "stacked",
+    prose: PROSE,
+    roadmap: [],
+  });
+  const session = plantedSession(content);
   assert.deepEqual(resumeObjectiveDraft(session), {
     kind: "valid",
     draft: {
@@ -378,6 +380,7 @@ test("resume: valid base/delivery survive the validated read", () => {
       prose: PROSE,
       roadmap: [],
     },
+    raw: content,
   });
 });
 

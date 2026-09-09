@@ -10,7 +10,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { GIST_DRAFT_ARTIFACT, GIST_SCOPES } from "../../authoring/gist/draft.ts";
+import {
+  decodeGistDraft,
+  GIST_DRAFT_ARTIFACT,
+  GIST_SCOPES,
+  renderGistDraft,
+} from "../../authoring/gist/draft.ts";
 import {
   GIST_AUTHOR_CONTEXT_TYPE,
   GIST_DRAFT_TOOL_GUIDELINES,
@@ -37,7 +42,11 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../../testing/harness.ts";
-import { createDraftReviewSlot, type DraftReviewSlot } from "./draftReview.ts";
+import {
+  createDraftReviewSlot,
+  type DraftReviewSlot,
+  type DraftReviewSnapshot,
+} from "./draftReview.ts";
 import {
   decodeGistSaveParams,
   gistSaveGuidance,
@@ -923,7 +932,7 @@ test("gist arm: a refused draft -> the bad_state soft skip; nothing reviewed, ga
   assert.equal(gating.exits, 0, "the gate stays untouched");
 });
 
-test("gist arm: plannotator selected -> the bridge receives the RENDERED markdown", async () => {
+test("gist arm: plannotator selected -> the bridge receives the RENDERED markdown; the slot's baseline and rendering derive from ONE read", async () => {
   const cwd = scaffoldRepo();
   selectPlanProvider(cwd, "plannotator-plan");
   const branch: unknown[] = [stateEntry(GIST_STATE)];
@@ -931,11 +940,22 @@ test("gist arm: plannotator selected -> the bridge receives the RENDERED markdow
   plantGistDraft(ctx, branch);
   const bridge = cannedBridge(DENIED);
   const pi = fakeColdDoorPi(branch, { stdout: GIST_JSON });
+  const snapshots: DraftReviewSnapshot[] = [];
+  const inner = scriptedRemotesSlot(pi);
+  const slot: DraftReviewSlot = {
+    ...inner,
+    open(c, snapshot) {
+      snapshots.push(snapshot);
+      return inner.open(c, snapshot);
+    },
+  };
   const result = await runGistReviewV1(
     pi,
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     bridge,
+    undefined,
+    slot,
   );
   assert.equal(bridge.reviewed.length, 1, "the bridge reviewed once");
   const reviewed = String(bridge.reviewed[0]);
@@ -944,6 +964,14 @@ test("gist arm: plannotator selected -> the bridge receives the RENDERED markdow
   assert.match(reviewed, /The intent and the why\./);
   assert.doesNotMatch(reviewed, /schema_version/, "never raw JSON");
   assert.match(String(result.content[0]?.text), /gist DENIED/);
+  // The reviewed-bytes baseline is the planted artifact bytes and the rendering is derived
+  // from those SAME bytes — a second read could never straddle a concurrent draft write.
+  assert.equal(snapshots.length, 1, "the slot opened once");
+  assert.equal(snapshots[0]?.raw, GIST_PAYLOAD, "the baseline is the planted bytes");
+  const decoded = decodeGistDraft(snapshots[0]?.raw ?? "");
+  assert.ok(decoded.ok);
+  assert.equal(snapshots[0]?.markdown, renderGistDraft(decoded.draft));
+  assert.equal(reviewed, snapshots[0]?.markdown, "the bridge saw the slot's markdown");
 });
 
 test("gist arm: ordinary plannotator approval (no Direct Edits) saves, exits the gate, terminates", async () => {

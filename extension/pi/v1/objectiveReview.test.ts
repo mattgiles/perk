@@ -7,7 +7,11 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { OBJECTIVE_DRAFT_ARTIFACT } from "../../authoring/objective/draft.ts";
+import {
+  decodeObjectiveDraft,
+  OBJECTIVE_DRAFT_ARTIFACT,
+  renderObjectiveDraft,
+} from "../../authoring/objective/draft.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
@@ -19,7 +23,7 @@ import {
   scriptedRemotesSlot,
 } from "../../testing/draftReview.ts";
 import { scaffoldRepo } from "../../testing/harness.ts";
-import type { DraftReviewSlot } from "./draftReview.ts";
+import type { DraftReviewSlot, DraftReviewSnapshot } from "./draftReview.ts";
 import type { ObjectiveApprovalSaveV1Outcome, ObjectiveSaveResult } from "./objectiveAuthoring.ts";
 import {
   approvedObjectiveSaveResult,
@@ -368,7 +372,7 @@ test("objective-save stage: plan_review routes to the objective arm too (never t
   assert.match(String(result.content[0]?.text), /write the working objective with objective_draft/);
 });
 
-test("objective arm: plannotator selected -> the bridge receives the RENDERED markdown", async () => {
+test("objective arm: plannotator selected -> the bridge receives the RENDERED markdown; the slot's baseline and rendering derive from ONE read", async () => {
   const cwd = scaffoldRepo();
   selectPlanProvider(cwd, "plannotator-plan");
   const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
@@ -376,6 +380,7 @@ test("objective arm: plannotator selected -> the bridge receives the RENDERED ma
   plantObjectiveDraft(ctx, branch);
   const bridge = cannedBridge(DENIED);
   const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const { slot, snapshots } = spiedSlot(scriptedRemotesSlot(pi));
   const result = await executePlanReview(
     pi,
     ctx as unknown as ExtensionContext,
@@ -383,9 +388,20 @@ test("objective arm: plannotator selected -> the bridge receives the RENDERED ma
     bridge,
     stubDeps(pi, ctx),
     {},
+    undefined,
+    undefined,
+    slot,
   );
   assert.equal(bridge.reviewed.length, 1, "the bridge reviewed once");
   const reviewed = String(bridge.reviewed[0]);
+  // The reviewed-bytes baseline is the planted artifact bytes and the rendering is derived
+  // from those SAME bytes — a second read could never straddle a concurrent draft write.
+  assert.equal(snapshots.length, 1, "the slot opened once");
+  assert.equal(snapshots[0]?.raw, OBJECTIVE_PAYLOAD, "the baseline is the planted bytes");
+  const decoded = decodeObjectiveDraft(snapshots[0]?.raw ?? "");
+  assert.ok(decoded.kind === "valid");
+  assert.equal(snapshots[0]?.markdown, renderObjectiveDraft(decoded.draft));
+  assert.equal(reviewed, snapshots[0]?.markdown, "the bridge saw the slot's markdown");
   assert.match(reviewed, /# Conform planning/);
   assert.match(reviewed, /The why and the design\./);
   assert.match(reviewed, /\| 1\.1 \| first node \| 0\.9 \| pending \|/, "a roadmap table row");
@@ -937,6 +953,22 @@ test("objective arm: the first-party review opens the slot (superseding a prior 
 });
 
 // ---------------------------------------------------------------------------------- wrappers
+
+/** Wrap a slot so every `open` snapshot is captured (the single-read baseline pin). */
+function spiedSlot(inner: DraftReviewSlot): {
+  slot: DraftReviewSlot;
+  snapshots: DraftReviewSnapshot[];
+} {
+  const snapshots: DraftReviewSnapshot[] = [];
+  const slot: DraftReviewSlot = {
+    ...inner,
+    open(ctx, snapshot) {
+      snapshots.push(snapshot);
+      return inner.open(ctx, snapshot);
+    },
+  };
+  return { slot, snapshots };
+}
 
 /** The dispatcher over a fresh scripted-remotes slot unless the case threads its own. */
 function executePlanReview(

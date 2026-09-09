@@ -629,7 +629,8 @@ function completedOutcome(
 /**
  * The `plan_review` gist arm: headless soft-skip, the validated draft artifact as the SOLE
  * review source (absent identity or absent draft → the `no_gist_draft` skip), the slot open
- * (raw artifact bytes + the rendered markdown), reviewer dispatch (plannotator bridge or
+ * (the resume's raw bytes + the rendered markdown — one read serves both, so the baseline is
+ * never newer than what the human saw), reviewer dispatch (plannotator bridge or
  * first-party view-only editor), the decision ladder on a completed verdict, and the shared
  * completion — byte-stable with the review door's results. An approval carrying Direct Edits
  * returns the NON-terminating revise round with NOTHING saved; a plain approval re-reads the
@@ -654,14 +655,12 @@ export async function runGistReviewV1(
   if (resumed.kind === "absent") return noGistDraftResult();
   if (resumed.kind === "refused")
     return renderGistReviewResult(ctx, { status: "refusedDraft", problem: resumed.problem });
-  const raw = session.readArtifact(GIST_DRAFT_ARTIFACT);
-  if (raw.status !== "found") return noGistDraftResult();
   const rendered = renderGistDraft(resumed.draft);
   const plannotator = isPlannotatorPlanSelected(ctx.cwd);
   const opened = slot.open(ctx, {
     subject: "gist",
     source: plannotator ? "artifact" : "editor",
-    raw: raw.content,
+    raw: resumed.raw,
     markdown: rendered,
   });
   if (!opened.ok) return openRefusedResult(opened);
