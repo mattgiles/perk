@@ -3,8 +3,9 @@
 // `initialPromptForWorktree` prompt derivation over written plan-refs. The suite carries the
 // runStage terminal-classification matrix, the two frozen-RunOutcome lockstep literals
 // (reciprocal of tests/test_run_report.py), the budget/abort watchdog with exact `>=` thresholds,
-// the seam's never-throws contract under adversarial fakes, the structured run-event stream, and
-// the cross-plane prompt-parity invariant (reciprocal of tests/test_worker_prompt_parity.py).
+// the initialization boundary (`runtime_init`; the entry and pre-prompt abort samples), the seam's
+// never-throws contract under adversarial fakes, the structured run-event stream, and the
+// cross-plane prompt-parity invariant (reciprocal of tests/test_worker_prompt_parity.py).
 // The adapter-owned helpers (translateEvent, the drive-session handle,
 // resolveAuth/resolveWorkerModel) are covered in sdkAdapter.test.ts; the real-factory tier lives
 // in stageExecutionE2e.test.ts. See stageExecution.ts.
@@ -25,6 +26,7 @@ import {
   type DriveSessionLike,
   initialPromptForWorktree,
   type RunEvent,
+  type RunOutcome,
   runStage,
 } from "./stageExecution.ts";
 
@@ -654,25 +656,6 @@ test("runStage: fresh tokens one below maxTokens never trip → completed", asyn
   assert.equal(session.abortCalls, 0, "the watchdog never tripped below the limit");
 });
 
-test("runStage: an external abort signal → aborted/external_abort + abort called", async () => {
-  const controller = new AbortController();
-  controller.abort();
-  const session = new FakeSession(() => {});
-  const outcome = await runStage(
-    {
-      worktree: "/tmp/wt",
-      stage: "implement",
-      initialPrompt: "go",
-      budget: baseBudget,
-      signal: controller.signal,
-    },
-    { createRuntime: async () => fakeRuntime(session) },
-  );
-  assert.equal(outcome.status, "aborted");
-  assert.equal(outcome.terminal_signal, "external_abort");
-  assert.ok(session.abortCalls >= 1);
-});
-
 test("runStage: a wall-clock timeout trips → budget_exhausted", async () => {
   const session = new FakeSession(async () => {
     await new Promise((r) => setTimeout(r, 40));
@@ -704,6 +687,99 @@ test("runStage: no model available → failed/no_model, never throws", async () 
   });
   assert.equal(outcome.status, "failed");
   assert.equal(outcome.error?.type, "no_model");
+});
+
+// --- the initialization boundary ------------------------------------------------------------------
+
+/** Injected failures: `throwing` for sync reads, `rejecting` for async factories/binds. */
+const throwing = (message: string) => (): never => {
+  throw new Error(message);
+};
+const rejecting = (message: string) => async (): Promise<never> => throwing(message)();
+
+/** Drive with the fixed clock + an array sink (the boundary tests' shared shape). */
+async function driveInit(
+  opts: Partial<Parameters<typeof runStage>[0]>,
+  deps: Parameters<typeof runStage>[1] = {},
+): Promise<{ outcome: RunOutcome; events: RunEvent[] }> {
+  const events: RunEvent[] = [];
+  const outcome = await runStage(
+    { worktree: "/tmp/wt", stage: "implement", initialPrompt: "go", budget: baseBudget, ...opts },
+    { ...deps, now: () => 0, eventSink: (e) => events.push(e) },
+  );
+  return { outcome, events };
+}
+
+test("runStage: a rejecting auth/runtime initialization → zero-turn failed/model_error/runtime_init pair, never throws", async () => {
+  const expectRuntimeInit = async (drive: ReturnType<typeof driveInit>, fragment: string) => {
+    const { outcome, events } = await drive;
+    assert.equal(outcome.status, "failed");
+    assert.equal(outcome.terminal_signal, "model_error");
+    assert.equal(outcome.error?.type, "runtime_init");
+    assert.ok(outcome.error?.message.includes(fragment), `names the cause: ${fragment}`);
+    assert.deepEqual([outcome.budget.turns, outcome.budget.tokens, outcome.pr], [0, 0, null]);
+    assert.deepEqual(
+      events.map((e) => e.kind),
+      ["run_started", "run_finished"],
+    );
+    assert.deepEqual((events[1] as Extract<RunEvent, { kind: "run_finished" }>).outcome, outcome);
+  };
+  // Arm A — the production `resolveAuth` rejects: a throwing snapshot is the deterministic offline
+  // proxy for an unreadable auth store (the supplied selection means `ModelRuntime.create` never runs).
+  const snapshot = { getAvailableSnapshot: throwing("auth store unreadable") } as never;
+  const auth = driveInit({ model: new WorkerModelSelection(snapshot) });
+  await expectRuntimeInit(auth, "auth store unreadable");
+  // Arm B — the runtime factory rejects.
+  const factory = driveInit({}, { createRuntime: rejecting("construction exploded") });
+  await expectRuntimeInit(factory, "construction exploded");
+  // Arm C — extension binding rejects; the never-bound handle is still disposed.
+  const session = new FakeSession(() => {});
+  session.bindExtensions = rejecting("bind exploded");
+  const runtime = fakeRuntime(session);
+  await expectRuntimeInit(driveInit({}, { createRuntime: async () => runtime }), "bind exploded");
+  assert.equal(runtime.disposed, true, "guarded disposal ran on the never-bound handle");
+});
+
+test("runStage: an abort before the driving prompt → aborted/external_abort with zero turns, no prompt, no idle-session abort", async () => {
+  const expectPrePromptAbort = async (drive: ReturnType<typeof driveInit>, s: FakeSession) => {
+    const { outcome, events } = await drive;
+    assert.equal(outcome.status, "aborted");
+    assert.equal(outcome.terminal_signal, "external_abort");
+    assert.equal(outcome.error?.type, "external_abort");
+    assert.equal(outcome.budget.turns, 0);
+    assert.equal(s.abortCalls, 0, "no session.abort() is fired on an idle session");
+    assert.deepEqual(
+      events.map((e) => e.kind),
+      ["run_started", "run_finished"],
+    );
+  };
+  // Arm A — aborted on entry: nothing is constructed or bound.
+  const entry = new AbortController();
+  entry.abort();
+  const entrySession = new FakeSession(() => {});
+  let factoryCalls = 0;
+  const entryFactory = async (): Promise<DriveRuntimeLike> => {
+    factoryCalls++;
+    return fakeRuntime(entrySession);
+  };
+  const entryDrive = driveInit({ signal: entry.signal }, { createRuntime: entryFactory });
+  await expectPrePromptAbort(entryDrive, entrySession);
+  assert.deepEqual([factoryCalls, entrySession.bindCalls], [0, 0], "nothing constructed or bound");
+  // Arm B — aborted during initialization (inside the factory: strictly between the two samples):
+  // initialization completes, then the pre-prompt sample returns without a prompt().
+  const mid = new AbortController();
+  let prompted = false;
+  const midSession = new FakeSession(() => {
+    prompted = true;
+  });
+  const midRuntime = fakeRuntime(midSession);
+  const midFactory = async (): Promise<DriveRuntimeLike> => {
+    mid.abort();
+    return midRuntime;
+  };
+  const midDrive = driveInit({ signal: mid.signal }, { createRuntime: midFactory });
+  await expectPrePromptAbort(midDrive, midSession);
+  assert.deepEqual([midSession.bindCalls, prompted, midRuntime.disposed], [1, false, true]);
 });
 
 // --- the never-throws contract under adversarial fakes (contracts.md §8.11) ---------------------
@@ -1061,6 +1137,8 @@ test("runStage: an external abort emits a terminal run_finished(aborted)", async
   );
   const finished = events.at(-1) as Extract<RunEvent, { kind: "run_finished" }>;
   assert.equal(finished.outcome.status, "aborted");
+  assert.equal(finished.outcome.terminal_signal, "external_abort");
+  assert.ok(session.abortCalls >= 1, "the SDK abort was fired");
 });
 
 test("runStage: the no_model early return still emits run_started + run_finished(failed/no_model)", async () => {

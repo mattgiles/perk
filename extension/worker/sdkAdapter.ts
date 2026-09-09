@@ -396,7 +396,7 @@ export async function resolveAuth(
  * retry-off determinism overrides ride the merged view only (package resolution reads the
  * per-scope raws — overrides cannot leak into it). Missing `npm:` packages auto-install into
  * `.pi/npm` during the loader's reload (skipped under `PI_OFFLINE`); an install failure throws →
- * the seam's catch arm → a loud `failed`/`drive_error`. No `tools` allowlist — read-write
+ * the seam's catch arm → a loud `failed`/`runtime_init`. No `tools` allowlist — read-write
  * defaults + extension tools. The `createAgentSessionServices` factory builds the
  * `DefaultResourceLoader` internally from `cwd`/`agentDir` (recipe correction #1).
  *

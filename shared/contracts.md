@@ -3125,7 +3125,7 @@ over that union, and `workerMain.ts` imports **no SDK** — it consumes only the
 | `initialPrompt` | string | re-derived by `initialPromptFor(stage, planRef)` — the TS twin of `perk/run/launch/prompts.py._implement_prompt`/`_address_prompt` (parity asserted reciprocally in `extension/worker/stageExecution.test.ts` + `tests/test_worker_prompt_parity.py`); the prompt carries **no skill-binding suffix** — the worker's bindings arrive via §8.9 Mechanism A (the extension's `before_agent_start` injection, which fires because the handoff records the stage and neither the prompt nor Pi's live context projection carries `BINDING_HEADER`); the injected content is byte-identical to the cold door's prompt suffix (`tests/test_binding_render_parity.py`; the named mechanism difference is §8.38 row 2) |
 | `model` | optional `WorkerModelSelection` — an **opaque nominal token** (`#private` fields; structurally unforgeable) minted only by `resolveWorkerModel` in the **private SDK adapter** (`worker/sdkAdapter.ts`); it carries the `ModelRuntime` (default-created when the flag is absent) plus the optional explicit model and parsed thinking level | explicit worker input (`stageExecution.ts::StageRunOptions`); **no available model ⇒ a fail-soft `failed`/`no_model` outcome, never a throw** (same semantics as before). The workerMain shim resolves an explicit `--model` flag through pi's `resolveCliModel` (CLI parity: fuzzy matching, `provider/pattern`, a `:thinking` suffix — `resolveWorkerModel`, re-exported through the seam); a parsed thinking level rides the selection, applied at session creation (absent ⇒ the settings default) |
 | `budget` | `{ maxTurns, maxTokens, wallClockMs }` | worker input; the watchdog that drives abort |
-| `signal` | `AbortSignal` | external cancellation; OR'd with the budget watchdog |
+| `signal` | `AbortSignal` | external cancellation; OR'd with the budget watchdog — sampled at drive entry and again immediately before the driving `prompt()` (an aborted signal at either point yields `aborted`/`external_abort` with zero turns, no `prompt()` and no `session.abort()`; nothing is constructed on the entry sample), and subscribed only for the drive itself (registered synchronously after the pre-prompt sample — `AbortSignal` does not replay an earlier abort to a late listener). A terminal reached inside the initialization window (`runtime_init`, `no_model`, `no_extension_tools`) is reported as itself |
 
 ### Determinism invariants (fixed by the worker; not caller-tunable)
 
@@ -3137,7 +3137,7 @@ over that union, and `workerMain.ts` imports **no SDK** — it consumes only the
   isolation invariant; loader/install mechanics live in `extension/worker/sdkAdapter.ts`. Missing
   `npm:` packages **auto-install** into the
   project-scope root `.pi/npm` at session construction (an install failure throws → a loud
-  `failed`/`drive_error` outcome; installs are skipped under `PI_OFFLINE`) — §8.14's composite
+  `failed`/`runtime_init` outcome; installs are skipped under `PI_OFFLINE`) — §8.14's composite
   worker-deps step pre-installs the pinned `@mgiles/perk` there for consumers.
 - **Compaction-off + retry-off** via disk-layered settings — `SettingsManager.create(worktree,
   throwawayAgentDir)` + `applyOverrides({ compaction:{enabled:false}, retry:{enabled:false} })`
@@ -3177,7 +3177,9 @@ The drive terminates on the **first** of:
    **not** itself success — if the predicate does not hold, → `failed`/`agent_idle_incomplete`.
 3. **Budget / timeout / external abort** → `session.abort()` (hard; propagates into the in-flight
    `ctx.signal`-aware shelled tools `submit`/`finalize_address`/`run_ci`): the watchdog →
-   `budget_exhausted`/`budget`; the external `signal` → `aborted`/`external_abort`.
+   `budget_exhausted`/`budget`; the external `signal` → `aborted`/`external_abort` — an abort
+   observed at the entry or pre-prompt sample returns `aborted`/`external_abort` directly (zero
+   turns; no `session.abort()` is fired on an idle session).
 4. **Post-acceptance model error** (with retry off, an assistant `message_end` with
    `stopReason:"error"`) → `failed`/`model_error`.
 
@@ -3192,6 +3194,13 @@ worker's stderr (drained settings errors + extension load errors), and the event
 well-formed `run_started`→`run_finished` pair. The check is presence-gated on the session's
 `extensionRunner` and deliberately does **not** require the `subagent` tool for `address` (the live
 subagent-under-worker smoke stays the carried risk below).
+
+**The initialization boundary.** Auth/model resolution (`resolveAuth` → `ModelRuntime.create()`
+when no selection is supplied), runtime construction, and `bindExtensions` all run **inside** the
+outcome boundary: a rejection before the session is bound is a **zero-turn** `failed` outcome under
+the existing `model_error` terminal signal with `error.type "runtime_init"` (the
+`no_model`/`no_extension_tools` precedent — no new `TerminalSignal` vocabulary); a rejection after
+bind keeps `error.type "drive_error"`. `runStage` never rejects.
 
 ### Outcome shape (frozen; **additive-stable** — fields may be added, existing fields keep meaning)
 
@@ -3255,7 +3264,9 @@ A small, JSON-serializable, **additive-stable** discriminated union. Every event
 { "kind": "run_finished", "seq": 3, "t": 0, "outcome": { /* the frozen §8.11 RunOutcome */ } }
 ```
 
-- **`run_started`** — emitted once at drive start (after a successful bind, before `session.prompt`).
+- **`run_started`** — emitted once at drive entry — before auth/runtime resolution, construction and
+  bind — so every exit, including the zero-turn ones, is a well-formed `run_started` →
+  `run_finished` pair.
 - **`step_marker`** — **deprecated / never emitted**: no `[WIP:n]`/`[DONE:n]` marker protocol
   exists — nothing writes markers and the worker does not scan for them. The
   variant stays in the grammar (additive-stable; legacy `events.ndjson` files may carry it).
@@ -3266,7 +3277,8 @@ A small, JSON-serializable, **additive-stable** discriminated union. Every event
   carries a `details.ok` boolean, else `!isError`. `summary` is `null` on success and, on failure, a
   **capped** synthesis (`capForModel(message, EVENT_SUMMARY_CAP=2KiB).shown`) — never the raw result.
 - **`run_finished`** — emitted **exactly once** at every terminal exit (natural-idle/verdict,
-  budget/abort, drive-error catch, AND the `no_model` early return), carrying the full frozen
+  budget/abort, the entry and pre-prompt abort samples, the `runtime_init` initialization failure,
+  drive-error catch, AND the `no_model` early return), carrying the full frozen
   `RunOutcome` (terminal status + `error.summary` = the terminal failure summary). The stream's
   "terminal status" event. A zero-turn run still emits a `run_started` + `run_finished` pair.
 

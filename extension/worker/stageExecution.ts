@@ -217,6 +217,18 @@ function applyStageEvent(counters: DriveCounters, event: StageEvent): void {
   counters.modelError = { message: event.message };
 }
 
+/**
+ * The one abort verdict — shared by the entry sample, the pre-prompt sample and the mid-drive
+ * `classify()` arm so all three abort routes yield a byte-identical outcome.
+ */
+const EXTERNAL_ABORT_VERDICT: TerminalVerdict = {
+  status: "aborted",
+  terminal_signal: "external_abort",
+  pr: null,
+  errorType: "external_abort",
+  errorMessage: "drive aborted by external signal.",
+};
+
 /** True when the budget watchdog should trip from the current counters. */
 function budgetTripped(counters: DriveCounters, budget: DriveBudget): boolean {
   return counters.turns >= budget.maxTurns || counters.tokens >= budget.maxTokens;
@@ -470,6 +482,16 @@ function initialPromptFor(stage: DriveStage, planRef: PlanRef | null): string | 
  * the external `signal`, classifies the terminal at idle, and disposes the adapter handle in
  * `finally` (guarded — a cleanup error can never replace the computed outcome). All session
  * mechanics go through the adapter's drive-session handle; policy stays here.
+ *
+ * The `run_started` + `run_finished` pair is emitted at entry / at every exit, so each path —
+ * pre-aborted, `runtime_init`, `no_model`, the preflight, a pre-prompt abort, the drive — is a
+ * well-formed zero-or-more-turn stream. Auth/model resolution, runtime construction and the bind
+ * all run inside the outcome boundary: the catch arm keys its `error.type` on the bind boundary
+ * (`runtime_init` before the session is bound, `drive_error` after). The external `signal` is
+ * SAMPLED at entry and again immediately before `prompt()` (an idle session has nothing to abort,
+ * so an aborted sample returns `aborted` directly) and SUBSCRIBED only for the drive — the
+ * listener is registered synchronously after the pre-prompt sample because `AbortSignal` never
+ * replays an earlier abort to a late listener.
  */
 export async function runStage(
   opts: StageRunOptions,
@@ -480,8 +502,9 @@ export async function runStage(
   const counters = freshCounters();
   const elapsed = (): number => Math.max(0, now() - startMs);
 
-  // Structured run-event stream: resolve the sink + run_id once, build the emitter, and
-  // route every terminal exit through `finish` so exactly one `run_finished` is emitted per drive.
+  // Structured run-event stream: resolve the sink + run_id once, build the emitter, emit
+  // `run_started` once at entry, and route every terminal exit through `finish` so exactly one
+  // `run_started` + `run_finished` pair is emitted per drive.
   const runId = env.PERK_RUN_ID ?? "";
   const sink = deps.eventSink ?? defaultEventSink(opts.worktree, runId);
   const emitter = createEventEmitter(sink, now, startMs);
@@ -494,24 +517,14 @@ export async function runStage(
     emitter.emit({ kind: "run_finished", outcome });
     return outcome;
   };
+  emitter.emit({ kind: "run_started", run_id: runId, stage: opts.stage });
 
-  // Auth/model resolution is a production-path concern only: with an injected runtime factory
-  // (tests) the drive never touches the default `ModelRuntime.create` (no host file reads).
-  const resolved = deps.createRuntime ? null : await resolveAuth(opts.model);
-  if (resolved === null && !deps.createRuntime) {
-    // A zero-turn run is still observable: emit a `run_started` + `run_finished` pair.
-    emitter.emit({ kind: "run_started", run_id: runId, stage: opts.stage });
-    return finish({
-      status: "failed",
-      terminal_signal: "model_error",
-      pr: null,
-      errorType: "no_model",
-      errorMessage: "no model available — set an API key (e.g. ANTHROPIC_API_KEY) or pass a model.",
-    });
-  }
+  // The entry sample: nothing is resolved, constructed or bound for an already-aborted signal.
+  if (opts.signal?.aborted) return finish(EXTERNAL_ABORT_VERDICT);
 
   let terminationReason: "natural" | "budget" | "abort" = "natural";
   let settled = false;
+  let bound = false;
   let handle: DriveSessionHandle | null = null;
   const listener = (event: StageEvent): void => {
     applyStageEvent(counters, event);
@@ -532,13 +545,27 @@ export async function runStage(
   const onSignal = (): void => trip("abort");
 
   try {
-    const runtime = deps.createRuntime
-      ? await deps.createRuntime(opts)
-      : // biome-ignore lint/style/noNonNullAssertion: resolved is non-null on the production path.
-        await defaultCreateRuntime(opts.worktree, resolved!);
+    let runtime: DriveRuntimeLike;
+    if (deps.createRuntime) runtime = await deps.createRuntime(opts);
+    else {
+      // Auth/model resolution is a production-path concern only: an injected runtime factory
+      // (tests) never touches the default `ModelRuntime.create` (no host file reads).
+      const resolved = await resolveAuth(opts.model);
+      if (resolved === null) {
+        return finish({
+          status: "failed",
+          terminal_signal: "model_error",
+          pr: null,
+          errorType: "no_model",
+          errorMessage:
+            "no model available — set an API key (e.g. ANTHROPIC_API_KEY) or pass a model.",
+        });
+      }
+      runtime = await defaultCreateRuntime(opts.worktree, resolved);
+    }
     handle = createDriveSession(runtime, listener);
     await handle.bind();
-    emitter.emit({ kind: "run_started", run_id: runId, stage: opts.stage });
+    bound = true;
 
     // Terminating-tool preflight (presence-gated on the session's extension runner): disk
     // discovery has a silent-zero arm — a missing/unparseable `.pi/settings.json` or an
@@ -577,12 +604,12 @@ export async function runStage(
       });
     }
 
-    // Budget/abort wiring (Gap 2): wall-clock timer + external signal both trip → handle.abort().
+    // The pre-prompt sample, then the drive-only subscription with no `await` in between (no
+    // check-then-subscribe window). Budget/abort wiring (Gap 2): wall-clock timer + external
+    // signal both trip → handle.abort().
+    if (opts.signal?.aborted) return finish(EXTERNAL_ABORT_VERDICT);
     const timer = setTimeout(() => trip("budget"), opts.budget.wallClockMs);
-    if (opts.signal) {
-      if (opts.signal.aborted) onSignal();
-      else opts.signal.addEventListener("abort", onSignal, { once: true });
-    }
+    opts.signal?.addEventListener("abort", onSignal, { once: true });
 
     try {
       await handle.prompt(opts.initialPrompt);
@@ -605,8 +632,10 @@ export async function runStage(
       status: "failed",
       terminal_signal: "model_error",
       pr: null,
-      errorType: "drive_error",
-      errorMessage: `headless drive failed: ${message}`,
+      errorType: bound ? "drive_error" : "runtime_init",
+      errorMessage: bound
+        ? `headless drive failed: ${message}`
+        : `worker runtime initialization failed: ${message}`,
     });
   } finally {
     if (handle) await handle.dispose();
@@ -632,15 +661,7 @@ function classify(
       errorMessage: "budget exhausted (turns/tokens/wall-clock) — drive aborted.",
     };
   }
-  if (terminationReason === "abort") {
-    return {
-      status: "aborted",
-      terminal_signal: "external_abort",
-      pr: null,
-      errorType: "external_abort",
-      errorMessage: "drive aborted by external signal.",
-    };
-  }
+  if (terminationReason === "abort") return EXTERNAL_ABORT_VERDICT;
   const lastReviewBatchPresent =
     rebuildWorkflowState((branch() ?? []) as never).last_review_batch != null;
   return evaluateTerminal({
