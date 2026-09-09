@@ -303,11 +303,11 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `outbox.ndjson`/`delivered.ndjson` (O_APPEND appends cannot truncate-tear; whole-file
   replace would introduce a read-modify-write race) — and **existence-only markers** (Python
   `set_marker`'s `.touch()` carries no content; the TS `setMarker` is routed anyway — uniformity
-  is free). The shared `extension/substrate/exclusiveFileClaim.ts` primitive is a separate
-  **exclusive-descriptor** exemption: it writes/fsyncs only a freshly `wx`/0600-created descriptor;
-  replacing an incumbent via atomic rename would violate mutual exclusion. The §8.3 resolver
-  wrapper keeps its Git-directory filename outside `.perk/workflow/` (it is the primitive's only
-  wrapper). Atomicity is **not** mutual exclusion — whole-file last-writer-wins between ordinary concurrent
+  is free). The §8.3 submit-conflict execution lock is a separate **Git-directory** writer,
+  outside `.perk/workflow/`: it writes/fsyncs only a freshly exclusive-created descriptor;
+  replacing an incumbent via atomic rename would violate its mutual-exclusion protocol. A partial
+  record remains busy until identity-fenced initialization cleanup or human recovery.
+  Atomicity is **not** mutual exclusion — whole-file last-writer-wins between ordinary concurrent
   artifact writers remains the accepted residual; participating claim users must serialize. Corruption posture:
   Python's fail-closed workflow readers translate malformed JSON / invalid UTF-8 into `CacheError` — now
   `(UserFacingCliError, ValueError)`-based with `error_type: "cache_invalid"`, so an uncaught
@@ -950,14 +950,6 @@ fails `perk init` loudly, renders `unverifiable` in doctor, rides `fix_errors` u
 never rewrites the path.
 Configuration/source edits during launch are unsupported; preflight is a snapshot, not a
 source-edit fence (a `--fix` mid-session still needs the reload the diagnostic states).
-
-**Shared exclusive-file mechanics.** `extension/substrate/exclusiveFileClaim.ts` owns token UUID
-minting, the 16 KiB metadata bound, JSON encoding/parsing through a caller-supplied owner codec,
-exclusive `wx`/0600 creation, fsync, read-back through `check()`, device/inode/path/token ownership
-fencing, typed busy/I/O results, and idempotent `finish(release|retain)`. Diagnostic owners exclude
-tokens. The primitive does not discover Git, choose filenames, queue/retry, change workflow state,
-reclaim incumbents, or prove quiescence from PID/age. Wrappers preserve resource-specific identity
-and metadata; ownership must be checked before effects. Metadata stays unchanged while held.
 
 Draft reviews take no file lock: their guards are in-memory (§8.23 "Draft-review guards").
 Neither atomic file replacement nor fsync claims power-loss durability or exactly-once delivery.
@@ -4461,7 +4453,10 @@ the door.
    run id / subject diverged — is **superseded**: the door reports one TUI warning
    (`SUPERSEDED_DECISION_WARNING`, never injected), the tool returns `review_superseded`; nothing
    is saved even when the bytes are still current — once a newer review exists, its approval is
-   the only authority. The `OpenDraftReview` token carries `reviewedDigest =
+   the only authority. The doors' readiness observers are fenced the same way — a superseded
+   review's observer neither announces readiness nor degrades (no fallback notice, no surface
+   clear, no door-session flip), so a review still starting when a newer one opens can never
+   disturb the newer one's surfaces. The `OpenDraftReview` token carries `reviewedDigest =
    digestSessionData(raw)` (the raw artifact bytes / parameter text / editor text — never the
    rendering), `contextDigest` (refinement only: the strict `REFINEMENT_CONTEXT_ARTIFACT`
    digest at open) and the open-time `destination`.
@@ -4475,7 +4470,10 @@ the door.
    current draft (`details {ok:true, status:"stale-approval", subject, reviewed_digest}`). DENY +
    changed → the revision round proceeds with `DRAFT_CHANGED_NOTE` prepended to its first text
    block. An objective/gist APPROVE carrying a Direct Edits section is a revision effect (the
-   existing rule), so it proceeds with the note rather than refusing.
+   existing rule), so it proceeds with the note rather than refusing. The objective and gist
+   arms take `raw` from the same validated resume read that produced the rendering
+   (`ResumeObjectiveDraftResult`/`ResumeGistDraftResult` carry `raw`), so the baseline is never
+   newer than what the human saw.
 3. **The destination fence** (`extension/session/saveDestination.ts`; APPROVE only, EVERY source
    — first-party included). `captureSaveDestination(cwd, nodeClaim)` digests three components
    (`digestSessionData` per component, no aggregate, no raw value retained): `issues` — the main
