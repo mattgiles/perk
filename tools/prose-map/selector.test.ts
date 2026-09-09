@@ -400,28 +400,6 @@ test("delimiter-bearing owners resolve by exact identity before fallback parsing
   assert.equal(focus(source, selectors[0] ?? ""), '"text"');
 });
 
-test("completeStructured duplicates are ambiguous and each supported field is exact", () => {
-  const source = `
-function owner() {
-  completeStructured({
-    toolDescription: "tool",
-    system: \`system\`,
-    instruction: "instruction",
-    schema: schemaRef,
-  });
-  completeStructured({ system: "duplicate" });
-}`;
-  assert.equal(focus(source, "symbol:owner/call:completeStructured/toolDescription"), '"tool"');
-  const duplicate = result(source, "symbol:owner/call:completeStructured/system");
-  assert.ok(duplicate);
-  assert.equal(duplicate.status, "unresolved");
-  assert.equal(duplicate.reason, "selector-ambiguous");
-  const schema = result(source, "symbol:owner/call:completeStructured/schema");
-  assert.ok(schema);
-  assert.equal(schema.status, "unresolved");
-  assert.equal(schema.reason, "unsupported-source-shape");
-});
-
 test("event handlers and workflow properties use exact callback and initializer targets", () => {
   const source = `
 function install() {
@@ -499,7 +477,6 @@ test("fallback grammar separates unsupported selectors from stale supported sele
   const notFound = [
     "tool:demo.description",
     "symbol:owner/call:complete/0/argument:0",
-    "symbol:owner/call:completeStructured/system",
     "symbol:owner/event:before_agent_start/0/handler",
     "symbol:owner/property:workflowScript/0",
   ];
@@ -516,6 +493,7 @@ test("fallback grammar separates unsupported selectors from stale supported sele
     "tool:demo",
     "symbol:module",
     "symbol:owner/call:unknown/0/argument:0",
+    "symbol:owner/call:completeStructured/system",
     "symbol:owner/property:workflowScript/00",
   ]) {
     const unresolved = result(source, selector);
@@ -569,7 +547,7 @@ test("diagnostic locations honor every TypeScript line break and EOF insertion",
 
 test("real discovery output stays resolver-covered and all resolved ranges recompose", async () => {
   const catalog = scanRepository(ROOT);
-  assert.equal(catalog.candidates.length, 95);
+  assert.equal(catalog.candidates.length, 94);
   assert.ok(
     catalog.candidates.some(
       (candidate) => candidate.id === "typescript-tool:resolve_submit_conflicts",

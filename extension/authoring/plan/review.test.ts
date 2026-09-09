@@ -100,9 +100,6 @@ function depsFor(
     reviewer,
     backend: opts.backend ?? fakeBackend(),
     gate: opts.gate ?? fakeGate(true),
-    async generateTitle() {
-      return null;
-    },
     capturePlanningPointer() {},
     ...(opts.explicit !== undefined ? { explicit: opts.explicit } : {}),
     allowImplementHere: opts.allowImplementHere ?? true,

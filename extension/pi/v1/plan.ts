@@ -86,7 +86,6 @@ import {
   runImplementHereCommand,
   type SaveResult,
 } from "./planReview.ts";
-import { generatePlanTitle } from "./planTitle.ts";
 import { createPlannotatorBridge } from "./providers/plannotator.ts";
 import { resolvedPlanProviderId } from "./providers/selection.ts";
 import type { WaveLaunch } from "./review.ts";
@@ -240,7 +239,7 @@ function coldDoorPlanBackend(pi: ExtensionAPI, ctx: ExtensionContext): PlanBacke
     async save(req) {
       const args = ["plan", "save", "--json"];
       if (req.runId !== null && req.runId !== "") args.push("--run-id", req.runId);
-      // The resolved title (explicit or LLM-generated). When absent, the cold door derives it.
+      // An explicit title; when absent the cold door derives it (`plan.derive_title`).
       if (req.title) args.push("--title", req.title);
       // The plan→objective link. The objective plan-factory passes the active objective
       // number; non-objective plans omit it (unchanged behavior).
@@ -334,10 +333,9 @@ function renderSavePlanOutcome(ctx: ExtensionContext, save: SavePlanOutcome): Sa
  * Build the full production dependency bag every plan-save surface consumes (the `plan_save`
  * tool, `/plan-save`, `approvalSave`, AND the `plan_review` registration — ONE composition
  * point, so no reverse edges and no duplicated composition): the branch-backed session, the
- * cold-door `PlanBackend`, the D1a gate slice over `gating`, the LLM title closure (binding
- * `ctx` + `ctx.signal` over `pi/v1/planTitle.ts` — via `substrate/structuredOutput`'s consumer),
- * the best-effort planning-pointer capture (§8.35 — no-ops on absent identity), the transcript
- * scrape thunk, and the byte-stable save rendering.
+ * cold-door `PlanBackend`, the D1a gate slice over `gating`, the best-effort planning-pointer
+ * capture (§8.35 — no-ops on absent identity), the transcript scrape thunk, and the byte-stable
+ * save rendering.
  */
 export function planSaveDepsFor(
   pi: ExtensionAPI,
@@ -349,7 +347,6 @@ export function planSaveDepsFor(
     session,
     backend: coldDoorPlanBackend(pi, ctx),
     gate: { isActive: () => gating.isActive(), exit: () => gating.exit(ctx) },
-    generateTitle: (plan) => generatePlanTitle(ctx, plan, ctx.signal),
     capturePlanningPointer: () => {
       // Capture the planning session pointer (contracts.md §8.35): this planning run self-keys
       // by its own run_id into the shared main checkout, so a later/other session can resolve

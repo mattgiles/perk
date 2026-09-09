@@ -68,7 +68,7 @@ revisiting this stack.
   deliberately retains that same private temporary-request/helper IPC.
 - **TypeScript selector resolution has one shared AST authority.** `tools/prose-map/selector.ts`
   owns static property handling, registered-tool field traversal/policy, enclosing owners,
-  depth-first ordinals, event/workflow/`completeStructured` sites, and raw selector identity;
+  depth-first ordinals, event/workflow sites, and raw selector identity;
   `catalog.ts` maps those shared records into the unchanged discovery DTO while the helper groups
   every exact raw site and treats collisions as ambiguity. Raw discovery identities take precedence
   over parent-linked helper aliases when their text collides. The helper parses supplied text exactly

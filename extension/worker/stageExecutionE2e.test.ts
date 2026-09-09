@@ -74,7 +74,6 @@ async function runDrive(opts: {
   const argvFile = join(cwd, "perk-argv.txt");
   setEnv("PERK_RUN_ID", runId);
   setEnv("PERK_BIN", fakePerkRouter(cwd, opts.routes ?? {}, opts.captureArgv ? { argvFile } : {}));
-  setEnv("PERK_NO_LLM", "1");
   setEnv("PI_OFFLINE", "1");
 
   const reg = await fauxModelRuntime();

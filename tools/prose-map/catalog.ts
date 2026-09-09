@@ -116,19 +116,6 @@ function recordCandidate(record: SelectorRecord, sourcePath: string): Discovered
       ],
     };
   }
-  if (record.kind === "complete-structured") {
-    const fragments = uniqueFragments(record.fields);
-    if (fragments.length === 0) {
-      return null;
-    }
-    return {
-      id: `typescript-symbol:${sourcePath}:${record.catalogOwner}:complete-structured`,
-      kind: "typescript-symbol",
-      path: sourcePath,
-      selector: `symbol:${record.catalogOwner}/call:completeStructured`,
-      fragments,
-    };
-  }
   if (record.kind === "event-handler") {
     return {
       id: `typescript-model-call:${sourcePath}:${record.catalogOwner}:before-agent-start:${record.catalogOrdinal}`,

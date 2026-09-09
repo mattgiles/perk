@@ -77,17 +77,11 @@ async function quietly<T>(fn: () => Promise<T> | T): Promise<T> {
 function depsFor(
   session: MemoryWorkflowSession,
   backend: PlanBackend,
-  opts: { title?: string | null } = {},
-): PlanSaveDeps & { captured: number; titled: string[] } {
+): PlanSaveDeps & { captured: number } {
   const deps = {
     session,
     backend,
     captured: 0,
-    titled: [] as string[],
-    async generateTitle(plan: string) {
-      deps.titled.push(plan);
-      return opts.title === undefined ? "A generated title" : opts.title;
-    },
     capturePlanningPointer() {
       deps.captured += 1;
     },
@@ -107,28 +101,24 @@ test("savePlan: a blank plan refuses invalid_input before the backend", async ()
     errorType: "invalid_input",
   });
   assert.equal(backend.requests.length, 0);
-  assert.equal(deps.titled.length, 0, "no title generation for a refused save");
 });
 
-test("savePlan: an explicit title wins outright — generateTitle is never invoked", async () => {
+test("savePlan: an explicit title is trimmed and forwarded", async () => {
   const backend = fakeBackend();
   const deps = depsFor(openMemoryWorkflowSession({ runId: "RID" }), backend);
   await savePlan({ plan: PLAN, title: "  Explicit title  " }, deps);
   assert.equal(backend.requests[0]?.title, "Explicit title");
-  assert.equal(deps.titled.length, 0);
 });
 
-test("savePlan: no explicit title → generateTitle; null falls back to the cold door (omitted)", async () => {
-  const generated = fakeBackend();
-  const genDeps = depsFor(openMemoryWorkflowSession({ runId: "RID" }), generated);
-  await savePlan({ plan: PLAN }, genDeps);
-  assert.equal(generated.requests[0]?.title, "A generated title");
-  assert.deepEqual(genDeps.titled, [PLAN.trim()], "the trimmed plan fed the title model");
-
-  const fallback = fakeBackend();
-  const nullDeps = depsFor(openMemoryWorkflowSession({ runId: "RID" }), fallback, { title: null });
-  await savePlan({ plan: PLAN }, nullDeps);
-  assert.equal(fallback.requests[0]?.title, undefined, "null ⇒ omit — the cold door derives");
+test("savePlan: no explicit title ⇒ title omitted (the cold door derives)", async () => {
+  const backend = fakeBackend();
+  const deps = depsFor(openMemoryWorkflowSession({ runId: "RID" }), backend);
+  await savePlan({ plan: PLAN }, deps);
+  assert.equal(
+    backend.requests[0]?.title,
+    undefined,
+    "omitted — the cold door derives from the plan heading",
+  );
 });
 
 test("savePlan: claim recovery fills BOTH link params when both are absent", async () => {

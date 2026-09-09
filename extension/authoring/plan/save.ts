@@ -84,16 +84,14 @@ export type SavePlanOutcome =
 export interface PlanSaveDeps {
   session: WorkflowSession;
   backend: PlanBackend;
-  /** Best-effort LLM title (null ⇒ the cold door's `derive_title` fallback takes over). */
-  generateTitle(plan: string): Promise<string | null>;
   /** Best-effort planning-pointer capture (contracts §8.35; no-ops on absent identity). */
   capturePlanningPointer(): void;
 }
 
 /**
  * The single save operation every plan-save surface calls. Ordering preserved exactly: validate
- * the non-blank plan → resolve the title (explicit wins; else `generateTitle`; null ⇒ the cold
- * door derives) → warm node-claim recovery (BOTH link params absent ⇒ fill both from
+ * the non-blank plan → resolve the title (an explicit title is trimmed and forwarded; else omitted
+ * so the cold door derives it) → warm node-claim recovery (BOTH link params absent ⇒ fill both from
  * `session.nodeClaim()`; any explicit value — even one — wins outright, never mixed) →
  * `backend.save` → `capturePlanningPointer()` (best-effort thunk) → link the live session
  * (`apply({kind:"link-plan-ref"})` — append iff the ref differs) → on a node-linked save whose
@@ -123,11 +121,9 @@ export async function savePlan(
     };
   }
 
-  // Forward an explicit title (previously accepted but DROPPED), else best-effort generate one
-  // via the session model. On any failure the cold door's `derive_title` fallback takes over.
-  const explicit = input.title?.trim();
-  const title =
-    explicit && explicit.length > 0 ? explicit : ((await deps.generateTitle(plan)) ?? undefined);
+  // Forward an explicit (trimmed, non-blank) title; when absent the flag is omitted and the cold
+  // door derives one from the plan's first `# ` heading (`plan.derive_title`).
+  const title = input.title?.trim() || undefined;
 
   // Warm node-link recovery. When BOTH link params are absent (an approval-triggered save
   // carries no model params), fill both-or-neither from the rebuilt `objective_node_claim`. Any
