@@ -19,6 +19,18 @@ planning stays at the repo root and the DATA block says so — a *selection* rul
 failure fallback (positioning failures refuse typed inside the positioner). Bottom layers,
 incremental objectives, and dry runs are unchanged (repo root).
 
+**Node-context consumption** (contracts.md §8.26): after the planning mark the door runs the
+shared selected-node advisory assembly (engagement + saved refinement, §8.67). A present
+refinement mints the run id FIRST, snapshots the rendered block under that run's scratch dir
+(``<run scratch>/node-context/<objective>/<node>/refinement.md``), launches with that id, and the
+seed carries only a pointer (``path/bytes/lines/max_line_bytes``) the session pages with ``read``
+— never the refinement text. Any advisory warning rides the seed as a compact status + code
+notice; the full messages are stderr narration. The artifact is anchored at the **invoking**
+checkout's run scratch and the pointer is absolute, so a positioned stacked session (whose cwd is
+the predecessor's worktree) still reaches it. No refinement (or GitHub's ``unsupported``) with no
+warning leaves the seed byte-identical and the mint launch-owned; ``--dry-run`` reads, mints and
+writes nothing.
+
 A **dedicated** command (in ``DEDICATED_STAGES``), not the generic registry launcher: the generic
 launcher accepts only ``--worktree/--dry-run/--remote`` and could not select a node. Mirrors
 ``implement_cmd``. The cold door **requires** an explicit objective NUMBER — a fresh cold session
@@ -30,6 +42,7 @@ the judgment (scope bounding, the completion audit) lives in the ``perk-objectiv
 """
 
 import dataclasses
+import functools
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,9 +50,19 @@ import click
 
 from perk import objective
 from perk.backends import resolve
-from perk.backends.engagement import EMPTY_NODE_ENGAGEMENT, render_node_engagement
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli import completions
+from perk.cli.commands.objective.node_context import (
+    AssembledRefinement,
+    NodeContext,
+    NodeContextWarning,
+    RefinementMissing,
+    RefinementPresent,
+    RefinementSnapshotted,
+    SnapshotRefinement,
+    assemble_node_context,
+    snapshot_refinement,
+)
 from perk.cli.commands.objective.shared import (
     handoff_blocker_phrase,
     objective_read_instruction,
@@ -48,13 +71,15 @@ from perk.cli.commands.objective.shared import (
 from perk.cli.commands.seeded_door import SeededLaunch, run_seeded_door, seeded_door_options
 from perk.cli.context import require_github
 from perk.cli.ensure import Ensure, UserFacingCliError
+from perk.cli.paged_files import TextFileRef
 from perk.delivery import DeliveryError, PrepareRequest, PrepareResult, resolve_delivery
 from perk.prompts import render
 from perk.run import launch
+from perk.state import run_id as run_id_mod
 from perk.substrate import git
 from perk.substrate.config import Config
 from perk.substrate.git import GitError
-from perk.substrate.output import io_step, user_output
+from perk.substrate.output import io_step, log_warn, user_output
 from perk.substrate.registry import Stage
 
 
@@ -289,6 +314,55 @@ def _layer_context_block(
     )
 
 
+def _snapshot_if_present(
+    assembled: NodeContext[AssembledRefinement], repo_root: Path
+) -> tuple[SnapshotRefinement, tuple[NodeContextWarning, ...], str | None]:
+    """Mint-then-snapshot for a present refinement; pass a missing one through untouched.
+
+    The run id is minted BEFORE the snapshot so the artifact lands under the run the launched
+    session will own, and it is returned even when the snapshot then downgrades (a fresh id
+    either way; a partially created run dir stays coherent with the session's own). ``None``
+    means no mint happened — the launch mints as usual.
+
+    Value-level on purpose: the missing arm's ``RefinementMissing`` already belongs to the
+    snapshot union, while the assembled *context* cannot be retyped as a snapshotted one from
+    outside the assembly module (its rephase seam is private), so the door carries the
+    refinement value + warnings + the minted id and reads everything else off ``assembled``.
+    """
+    match assembled.refinement:
+        case RefinementPresent():
+            rid = run_id_mod.mint()
+            snapshotted = snapshot_refinement(assembled, repo_root=repo_root, run_id=rid)
+            return snapshotted.refinement, snapshotted.warnings, rid
+        case RefinementMissing() as missing:
+            return missing, assembled.warnings, None
+
+
+def _refinement_status(refinement: SnapshotRefinement) -> str:
+    return "present" if isinstance(refinement, RefinementSnapshotted) else refinement.status
+
+
+def _node_context_reference(file: TextFileRef) -> str:
+    """The seed's pointer to the snapshotted refinement: the absolute path + measurements,
+    never the text (the session pages the file)."""
+    return (
+        f"`{file.path}` (bytes={file.bytes}, lines={file.lines}, "
+        f"max_line_bytes={file.max_line_bytes})"
+    )
+
+
+def _node_context_notice(
+    refinement: SnapshotRefinement, warnings: tuple[NodeContextWarning, ...]
+) -> str:
+    """Status + warning codes only (closed vocabularies — door-derived, safe to interpolate);
+    empty when nothing degraded, so the seed stays byte-identical. Full messages are stderr
+    narration."""
+    if not warnings:
+        return ""
+    codes = ", ".join(f"{w.surface}/{w.code}" for w in warnings)
+    return f"refinement status: {_refinement_status(refinement)}; advisory warnings: {codes}"
+
+
 def _seed_prompt(
     number: str,
     node: objective.ObjectiveNode | PrepareResult.PlanningNode,
@@ -297,6 +371,8 @@ def _seed_prompt(
     url: str = "",
     node_engagement: str = "",
     layer_context: str = "",
+    node_context_reference: str = "",
+    node_context_notice: str = "",
 ) -> str:
     """The node-seeded initial prompt for the read-only plan-mode session.
 
@@ -315,6 +391,12 @@ def _seed_prompt(
     ``layer_context`` is the pre-rendered stacked-layer DATA block (§8.46,
     :func:`_layer_context_block`); when empty (incremental objectives, dry runs) the seed is
     byte-unchanged.
+
+    ``node_context_reference`` is the pointer to a refinement snapshotted at launch (§8.26):
+    the absolute path + ``bytes/lines/max_line_bytes`` ONLY — never refinement text; the template
+    carries the ``read`` instruction and the boundary-token rule. ``node_context_notice`` is the
+    compact status + ``surface/code`` line when any advisory read degraded. Both empty → the
+    seed is byte-unchanged.
     """
     read_clause = objective_read_instruction(backend, number, url)
     return render(
@@ -325,6 +407,8 @@ def _seed_prompt(
             "node_id": node.id,
             "node_description": node.description,
             "node_engagement": node_engagement,
+            "node_context_reference": node_context_reference,
+            "node_context_notice": node_context_notice,
             "layer_context": layer_context,
             "read_clause": read_clause,
         },
@@ -517,21 +601,39 @@ def plan_objective(
                 )
                 mark.done(f"marked node {node.id} planning")
 
-        # Read the node-issue's pre-planning human engagement, fail-soft: a Linear hiccup
-        # must never break the factory launch. Empty/None for GitHub + no-engagement →
-        # byte-unchanged seed. Skipped on a dry run (resolve-only, offline). Read AFTER the node
-        # is marked above.
         engagement_block = ""
+        node_context_reference = ""
+        node_context_notice = ""
+        launch_run_id: str | None = None
         if not dry_run:
-            with io_step("reading node engagement") as eng:
-                try:
-                    ne = store.read_node_engagement(objective_id=number, node_id=node.id)
-                except ObjectiveStoreError:
-                    ne = EMPTY_NODE_ENGAGEMENT
-                    eng.warn("node engagement unavailable — continuing without it")
+            # Advisory reads AFTER the claim above (claim before read; a failed read never rolls
+            # the claim back). One narrated step spans both reads and the optional snapshot; the
+            # full warning messages are stderr-only — the seed carries codes. Every catch lives
+            # inside the assembly (typed tier failures become warnings); the door adds none, so
+            # an unexpected exception still propagates as it does for the store lookup. Skipped
+            # on a dry run (resolve-only, offline: no read, no mint, no write).
+            with io_step("reading node context") as ctx_step:
+                assembled = assemble_node_context(
+                    store,
+                    objective_id=number,
+                    node_id=node.id,
+                    issues=functools.partial(resolve.resolve_issue_backend, repo_root),
+                )
+                refinement, warnings, launch_run_id = _snapshot_if_present(assembled, repo_root)
+                status = _refinement_status(refinement)
+                if warnings:
+                    ctx_step.warn(
+                        f"read node context — refinement {status}; "
+                        f"{len(warnings)} advisory warning(s)"
+                    )
                 else:
-                    eng.done("read node engagement")
-            engagement_block = render_node_engagement(ne) or ""
+                    ctx_step.done(f"read node context — refinement {status}")
+            for warning in warnings:
+                log_warn(f"[{warning.surface}/{warning.code}] {warning.message}")
+            engagement_block = assembled.engagement_block or ""
+            if isinstance(refinement, RefinementSnapshotted):
+                node_context_reference = _node_context_reference(refinement.file)
+            node_context_notice = _node_context_notice(refinement, warnings)
 
         seed = _seed_prompt(
             number,
@@ -541,6 +643,8 @@ def plan_objective(
             url=objective_url,
             node_engagement=engagement_block,
             layer_context=layer_block,
+            node_context_reference=node_context_reference,
+            node_context_notice=node_context_notice,
         )
         dry_run_payload: dict[str, object] = {
             "success": True,
@@ -578,6 +682,9 @@ def plan_objective(
             # children).
             stage_override=stage_override,
             plan_id=launch_plan_id,
+            # Pre-minted iff a present refinement was snapshotted (the artifact path and the
+            # session must agree on one run id); None → the launch mints as usual.
+            run_id_override=launch_run_id,
         )
 
     run_seeded_door(

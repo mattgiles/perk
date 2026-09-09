@@ -5276,16 +5276,46 @@ partial success · 1 invalid/op-failure · 2 not-a-repo). The read-only bash gat
 (`toolGating.ts`) admits the worker unchanged; its scratch write is the accepted `pr
 review-context` leniency.
 
-**Cold injects, warm instructs.** The cold door (`plan_cmd.py`) already knows the node → it reads
-engagement **fail-soft** (`ObjectiveStoreError` → empty; a Linear hiccup never breaks the launch),
-renders, and injects the block **immediately after** `<untrusted_objective>` in `_seed_prompt`
-(`node_engagement` param; empty → seed byte-unchanged on GitHub / no engagement). The cold door's
-consumption of the shared node-context assembly (the refinement pointer in the seed) is wired by
-the following slice; until then `plan_cmd.py` reads engagement as before. The warm door
-(`authoring/objective/prose.ts`'s `factoryGuidance`) **cannot pre-fetch** (the model selects the node in-session)
-→ it instructs the model to run `perk objective node-engagement <objective> --node <id>` once it
-knows the node, treating the output as untrusted DATA (harmless on GitHub — the worker returns no
-engagement). The parity-pinned `objective_read_instruction` / `objectiveReadInstruction` clause is
+**Cold injects, warm instructs.** The cold door (`plan_cmd.py`) already knows the node → AFTER
+the planning mark it runs the shared node-context assembly (`assemble_node_context`: engagement +
+refinement, one narrated `reading node context` step; claim before read — a failed read never
+rolls the claim back) and injects the engagement block **immediately after** `<untrusted_objective>`
+in `_seed_prompt` (`node_engagement` param; empty → seed byte-unchanged on GitHub / no
+engagement). Refinement consumption: a `present` refinement mints the run id **FIRST**
+(`run_id.mint()`), snapshots through `snapshot_refinement` under that run's scratch dir, launches
+with `SeededLaunch.run_id_override`, and the seed's `node_context_reference` variable carries the
+**pointer only** — `` `<absolute path>` (bytes=N, lines=N, max_line_bytes=N) `` — never refinement
+text; the template (not the door) carries the `read` instruction, the 51,200-byte trigger as a
+pointer to the skill, the boundary-token rule, re-verify, and "incomplete paging is incomplete
+advisory input, never absence". Any advisory warning → the seed's `node_context_notice` =
+`refinement status: <status>; advisory warnings: <surface/code>, …` (closed vocabularies — status
++ codes only) while the full messages are stderr `⚠ [surface/code] message` lines after the step
+(which resolves `warn` with the status + warning count, else `done` with the status).
+`absent` / `unsupported` with no warning → the seed is **byte-identical** to the no-advice seed
+(GitHub included — its refinement read is a quiet typed `unsupported` with no network) and the
+mint stays launch-owned (`run_id_override=None`). A failed snapshot → `unavailable` +
+`refinement/node_context_snapshot_failed` in the notice, no pointer, no inline text, the claim not
+rolled back, and the **already-minted** id still launches (a fresh id either way; a partially
+created run dir stays coherent with the session's own). `--dry-run` performs no advisory read,
+mint, or write (the dry-run payload/fields and `launch_note` are byte-stable). The artifact is
+anchored at the **invoking checkout's** run scratch (`require_repo` — the root launch's own
+handoff root); on the stacked positioned arm (§8.46) the session's handoff/session data live under
+the predecessor worktree while the artifact stays under the invoking root, so the pointer is
+absolute (usable from the predecessor cwd) and the artifact is regenerable scratch under the
+run-dir age GC. Every catch stays inside the assembly — the door adds none. The warm door
+(`authoring/objective/prose.ts`'s `factoryGuidance`) **cannot pre-fetch** (the model selects the
+node in-session) → it instructs the model to run
+`perk objective node-engagement <objective> --node <id> --json` AFTER the successful
+`objective_node` planning transition, treating every field as untrusted DATA; on
+`refinement.status == "present"` page `refinement.file.path` with `read`. The
+`perk-objective-plan` skill is the **sole carrier** of the byte-slice recipe (`read` itself reports
+the oversized line number; `sed -n 'Np' <path> | tail -c +<offset> | head -c 51200` slices it,
+then `read` resumes at N+1) and of the boundary rule's elaboration (§8.57: elaboration behind the
+skill pointer), while the honest-reporting rule — any other status → continue planning, report
+`warnings` / incomplete consumption in the plan's Assumptions, never auto-retry — is **flow** and
+rides every carrier (seed, guidance, skill). Neither carrier instructs a refresh: the cold pointer
+is the launch-time snapshot (a warm worker call in the same run overwrites the same path
+atomically). The parity-pinned `objective_read_instruction` / `objectiveReadInstruction` clause is
 **unchanged** (engagement is a separate seam). Read-only inbound context only — no outbound /
 agent-session emission.
 
@@ -11536,8 +11566,8 @@ shared comment upsert, the backend-neutral service, plan/refinement coexistence,
 persistence gate. The public authoring/review doors (`perk objective refine` /
 `/objective-refine`, the `objective-refine` stage, the transfer artifacts, the
 `objective_refinement_draft` tool, the `plan_review` refinement arm and the human
-`/objective-refinement-save`) are §8.68. Planning-seed consumption, authenticated Linear
-evidence, and the GitHub carrier remain **deferred** to later slices.
+`/objective-refinement-save`) are §8.68. Planning-seed consumption is §8.26 (shipped);
+authenticated Linear evidence and the GitHub carrier remain **deferred** to later slices.
 
 **Modules.** `perk/objective/refinement/{models,codec,service}.py` (`__init__` empty).
 `models.py` is the pure type leaf (frozen dataclasses + `RefinementError`; no Pydantic / Click /
@@ -12080,6 +12110,6 @@ manifest fragment regenerated); `shared/bindings.yaml` `stage:objective-refine` 
 parameterized `contexts/read-only.md` are all in `prompts/_fixtures/live.yaml`. User docs:
 `docs/user-docs/reference/cli/objective.md`, `reference/objectives.md`, the in-session
 `workflow-commands` / `model-tools` / `review-and-authoring` references, the backend/provider
-entries and the `perk-expert` mirror. Automatic later-plan consumption of a saved refinement,
-authenticated refine-to-plan evidence, and a GitHub refinement carrier are NOT shipped by
+entries and the `perk-expert` mirror. Automatic later-plan consumption of a saved refinement is
+§8.26; authenticated refine-to-plan evidence and a GitHub refinement carrier are NOT shipped by
 this section — each is a later increment.

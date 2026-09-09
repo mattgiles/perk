@@ -346,10 +346,14 @@ fence the reviewed artifact and its target, not the code. Treat the observation 
 provenance, spell out changed-code assumptions in the Markdown, and re-verify them when the node
 is actually planned.
 
-Not shipped in this release: planning sessions do not yet read refinements automatically, no
-authenticated refine-to-plan proof is claimed, and GitHub objectives are unsupported until
-their carrier lands. The wire format, the transfer artifacts and the door guarantees are pinned
-in `shared/contracts.md` §8.67–§8.68.
+Planning sessions consume a saved refinement (Linear): `perk objective plan` snapshots it at
+launch under the run's scratch dir and seeds a pointer the session pages with `read`;
+`/objective-plan` reads it through `perk objective node-engagement N --node <id> --json`. Either
+way it is dated advisory DATA the plan re-verifies against the live tree, and a degraded advisory
+read is reported (a `⚠` line plus a compact notice in the seed) rather than retried. Still not
+shipped: an authenticated refine-to-plan proof, and GitHub objectives until their carrier lands.
+The wire format, the transfer artifacts and the door guarantees are pinned in
+`shared/contracts.md` §8.26 and §8.67–§8.68.
 
 ### Reconcile is no longer post-land-only
 

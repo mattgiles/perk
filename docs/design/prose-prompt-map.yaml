@@ -347,7 +347,7 @@ routes:
     role: context
     priority: 90
   - id: py-objective-plan-data
-    match: { paths: ["src/perk/cli/commands/objective/plan_cmd.py"] }
+    match: { paths: ["src/perk/cli/commands/objective/plan_cmd.py", "src/perk/cli/commands/objective/node_context.py"] }
     capability: planning.objective
     audience: shipped
     role: context
@@ -642,6 +642,8 @@ scenarios:
       node: "1.2"
       node_description: "Do the thing"
       node_engagement: "<untrusted_node_engagement>\n[c-1 by Ada] please scope this down\n</untrusted_node_engagement>"
+      node_context_reference: "`/repo/.perk/workflow/scratch/runs/01RID/node-context/7/1.2/refinement.md` (bytes=2048, lines=24, max_line_bytes=180)"
+      node_context_notice: "refinement status: present; advisory warnings: engagement/engagement_read_failed"
       layer_context: "<stacked_layer_context>\nThis node is layer 2 of 3 in the delivery order.\n</stacked_layer_context>"
       read_clause: "This objective is a Linear Project (https://linear.app/x/ENG-1). Its roadmap nodes are Linear issues in that Project — inspect a node-issue's detail or discussion with the `linear_get_issue` and `linear_list_comments` tools; if the linear tools are unavailable, open https://linear.app/x/ENG-1."
     include_ambient: true
@@ -774,6 +776,7 @@ concerns:
       - { unit: "python-symbol:src/perk/backends/engagement.py:render_plan_engagement", relation: Plan-engagement fence. }
       - { unit: "python-symbol:src/perk/backends/engagement.py:render_adopted_engagement", relation: Adopted-source engagement fence. }
       - { unit: "python-symbol:src/perk/backends/engagement.py:render_objective_engagement", relation: Aggregate objective-engagement fence. }
+      - { unit: "python-symbol:src/perk/cli/commands/objective/node_context.py:render_node_refinement", relation: Node-refinement boundary-tagged fence. }
   - id: route-dont-relay
     label: Route, don't relay
     summary: Parent workflows assign bounded work and consume typed reports without hand-transcribing child prompts.

@@ -381,6 +381,7 @@ def test_python_owned_prompt_wrappers_are_ast_selected(built: BuildResult) -> No
         "python-symbol:src/perk/backends/engagement.py:render_plan_engagement",
         "python-symbol:src/perk/cli/commands/learn/factory_common.py:render_inbox",
         "python-symbol:src/perk/cli/commands/objective/author_cmd.py:_render_source",
+        "python-symbol:src/perk/cli/commands/objective/node_context.py:render_node_refinement",
         "python-symbol:src/perk/cli/commands/objective/plan_cmd.py:_layer_context_block",
         "python-symbol:src/perk/cli/commands/objective/replan_cmd.py:_render_existing_objective",
         "python-symbol:src/perk/cli/commands/plan/from_cmd.py:_render_source_issue",

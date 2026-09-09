@@ -125,6 +125,21 @@ def test_perk_address_sole_carried_detail():
     assert "go to `/land`" in norm
 
 
+def test_perk_objective_plan_sole_carried_detail():
+    norm = _norm("perk-objective-plan")
+    # The warm worker form (JSON, after the planning transition).
+    assert "perk objective node-engagement N --node <id> --json" in norm
+    # The byte-slice recipe: `read` names the oversized line; sed | tail | head slices it; the
+    # slicing ends on an empty slice and paging resumes at the next line.
+    assert "[Line N is <size>, exceeds 50 KB limit" in norm
+    assert "sed -n 'Np' <path> | tail -c +<offset> | head -c 51200" in norm
+    assert "until a slice comes back empty" in norm
+    assert "`offset` N+1" in norm
+    # The boundary-token rule's elaboration + the honest-reporting rule.
+    assert "same boundary token as the opener" in norm
+    assert "never auto-retry" in norm
+
+
 def test_review_skills_require_and_do_not_duplicate_ponytail_coverage():
     automated = _norm("perk-pr-review")
     assert "`ponytail` lane is **required automatic coverage**" in automated

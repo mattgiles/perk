@@ -210,7 +210,8 @@ as the node's plan comment. Refinements are authored with `perk objective refine
 `/objective-refine` and saved by an approved `plan_review` or the human's
 `/objective-refinement-save` — **Linear only**: a GitHub objective store refuses before
 authentication, network, sync or launch, and again at save, until the GitHub carrier lands.
-Planning sessions do not yet consume refinements automatically. See
+Planning sessions consume a saved refinement as dated advisory DATA (a launch-time snapshot behind
+a file pointer; Linear only until the GitHub carrier lands). See
 [Objectives — Node refinements](../objectives.md#node-refinements-linear-project-objectives-only).
 
 ### The dream-report companion
