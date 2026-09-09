@@ -677,7 +677,7 @@ providers' research tools, the read-only Linear tools, the pi-fff search family 
 name-sets — `fffind`/`ffgrep`/`fff-multi-grep` + override's `multi_grep`; the override names
 `find`/`grep` are already present — local search belongs in read-only exploration, and FFF's
 frecency state lives under `~/.pi/agent/fff/`, outside the worktree), and the pi-subagents delegation family
-(`subagent`/`wait` + the parent supervisor pair — kept reachable for the gated delegation flows
+(`subagent`/`wait` + `subagent_supervisor` — kept reachable for the gated delegation flows
 and for answering child `contact_supervisor` asks; **accepted no-backstop posture**: spawned
 children are unscoped by design (§8.40 adopt-never-impersonates) — `subagent` itself can spawn
 ad-hoc read-write children, a deliberate documented leniency like the arg-blind
