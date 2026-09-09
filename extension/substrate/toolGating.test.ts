@@ -35,7 +35,7 @@ type Hook = (
 
 function gateFixture(floor: () => boolean) {
   const hooks = new Map<string, Hook>();
-  let fail: "snapshot" | "toolset" | "append" | undefined;
+  let fail: "snapshot" | "census" | "toolset" | "append" | undefined;
   const appends: unknown[] = [];
   const installed: string[][] = [];
   const pi = {
@@ -46,7 +46,10 @@ function gateFixture(floor: () => boolean) {
       if (fail === "snapshot") throw new Error("snapshot");
       return ["read", "write", "plan_save"];
     },
-    getAllTools: () => ["read", "write", "plan_save"].map((name) => ({ name })),
+    getAllTools: () => {
+      if (fail === "census") throw new Error("census");
+      return ["read", "write", "plan_save"].map((name) => ({ name }));
+    },
     setActiveTools: (names: string[]) => {
       if (fail === "toolset") throw new Error("toolset");
       installed.push(names);
@@ -97,9 +100,9 @@ async function assertBackstop(h: ReturnType<typeof gateFixture>) {
   );
 }
 
-test("floor enforces all observations before sync, despite snapshot/toolset/append failures", async () => {
+test("floor enforces all observations before sync, despite snapshot/census/toolset/append failures", async () => {
   for (const mode of [undefined, "read-write"]) {
-    for (const failure of ["snapshot", "toolset", "append"] as const) {
+    for (const failure of ["snapshot", "census", "toolset", "append"] as const) {
       const h = gateFixture(() => true);
       await assertBackstop(h);
       h.fail(failure);
@@ -131,6 +134,31 @@ test("false cannot clear inherited read-only; ordinary parents use the same back
   for (const toolName of ["write", "foreign_mutator", "plan_save", "submit", "bash"]) {
     assert.equal(await h.call("tool_call", { toolName, input: { command: "touch x" } }), undefined);
   }
+});
+
+test("a census-read failure on a cold read-only sync stays closed, records no half engagement, and the startup re-apply retakes it", async () => {
+  // No floor: the ordinary cold read-only sync (a `mode: read-only` handoff) whose first
+  // engagement read throws AFTER the snapshot read — the one path where the in-memory gate had
+  // never been engaged, so fail-closed must come from `apply()` itself, not from a prior state.
+  const h = gateFixture(() => false);
+  h.fail("census");
+  assert.throws(() => h.gate.syncFromState("read-only", undefined));
+  await assertBackstop(h);
+  assert.deepEqual(h.installed, [], "a half-taken engagement installs nothing");
+  // The `resources_discover` re-apply (Pi reports the throw) does not open the gate either.
+  await assert.rejects(() => h.call("resources_discover") ?? Promise.resolve());
+  await assertBackstop(h);
+  assert.deepEqual(h.installed, []);
+  // The failed read recorded nothing: once it succeeds, the same re-apply takes a FRESH
+  // snapshot + census and installs the gated set; the exit then restores that fresh snapshot.
+  h.fail(undefined);
+  await h.call("resources_discover");
+  assert.deepEqual(h.installed, [READ_ONLY_TOOLS]);
+  await assertBackstop(h);
+  h.gate.exit();
+  assert.equal(h.gate.isActive(), false);
+  assert.deepEqual(h.installed.at(-1), ["read", "write", "plan_save"]);
+  assert.deepEqual(h.appends, [{ mode: "read-write" }]);
 });
 
 test("a throwing supplier and malformed bash inputs never open the gate", async () => {

@@ -146,9 +146,9 @@ export const FFF_SEARCH_TOOLS: readonly string[] = [
  *  - Registration timing: every census name registers at load time EXCEPT pi-subagents'
  *    `subagent_supervisor` (SUBAGENT_TOOLS — session_start; admitted at `resources_discover`).
  *  - Foreign `setActiveTools` owners: plannotator's phase machinery and @tombell/pi-plan's plan
- *    mode run their OWN toggles — perk re-applies only at rebuild points, so a foreign toggle
- *    between rebuilds wins (fail-open direction), and a mid-session rebuild re-installs perk's
- *    stage set over a foreign restriction. Pre-existing interplay, recorded, not re-engineered.
+ *    mode run their OWN toggles — perk re-applies only at its reconciliation points (the rebuilds
+ *    + the startup `resources_discover` re-apply), so a toggle between them wins (fail-open) and
+ *    every reconciliation re-installs perk's set over it, admitted late tools included (§8.40).
  *  - Zero-tool packages: @tombell/pi-diff (commands only), the footer providers, and the hunk
  *    review CLI (not a Pi package) register nothing — nothing to enumerate.
  *  - Single-governance rule: a name is governed ONCE — it lives in exactly one census. perk
@@ -894,6 +894,8 @@ export function registerToolGating(
   }
 
   function apply(nextActive: boolean, nextStage: string | null): void {
+    // Fail-closed: a read-only sync engages the in-memory gate BEFORE the fallible reads/installs.
+    if (nextActive) active = true;
     const effective = nextActive || hasFloor();
     const stageList = nextStage === null ? undefined : STAGE_TOOLS[nextStage];
     // First engagement of either concern: ONE literal (a throwing read records no half state).
@@ -924,8 +926,7 @@ export function registerToolGating(
   // Pi fires `resources_discover` after EVERY extension's `session_start` has run (pi-subagents
   // registers `subagent_supervisor` there, after perk's sync) — the one point where startup-late
   // registrants meet the gate/stage diet: re-apply the in-memory mode/stage (no rebuild, no other
-  // checkpoint). A throw is caught + reported by Pi's handler boundary and never opens the gate
-  // (nothing follows it here). Idempotent on `reason: "reload"` (`session_start(reload)` synced).
+  // checkpoint). Idempotent on `reason: "reload"`; a throw is Pi-reported and never opens the gate.
   pi.on("resources_discover", async () => {
     apply(active, stageId);
   });
