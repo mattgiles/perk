@@ -25,7 +25,6 @@ import { PLAN_CONTEXT_TYPE } from "../../authoring/plan/prose.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import { soundPointer } from "../../session/workflowSession.ts";
 import { sessionDataDir } from "../../substrate/cache.ts";
-import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
 import {
   digestSessionData,
   type SessionArtifactCtx,
@@ -58,9 +57,6 @@ import {
   runGistReviewV1 as runGistReviewV1Core,
 } from "./gist.ts";
 import type { PlanReviewUI, ReviewOutcome } from "./review.ts";
-
-/** The non-runner context-policy input the installer tests compose (no runner suppression). */
-const NOT_A_RUNNER: ContextPolicyInputs = { runnerChild: () => false };
 
 /** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(
@@ -574,7 +570,7 @@ function installOffline(opts: { stdout: string; argvs: string[][]; sent: string[
       return { stdout: opts.stdout, stderr: "", code: 0, killed: false };
     },
   } as unknown as Parameters<typeof installGistBindings>[0];
-  installGistBindings(pi, gating, createDraftReviewSlot(pi), NOT_A_RUNNER);
+  installGistBindings(pi, gating, createDraftReviewSlot(pi), () => false);
   return { tools, commands, gating };
 }
 

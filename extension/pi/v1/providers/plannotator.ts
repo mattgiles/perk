@@ -54,14 +54,15 @@
 
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { GIST_AUTHOR_STAGE } from "../../../authoring/gist/draft.ts";
 import {
-  classifyAuthoringContext,
-  readOnlyModeOf,
-} from "../../../authoring/context/eligibility.ts";
-import type { ContextPolicyInputs } from "../../../substrate/contextPolicy.ts";
+  OBJECTIVE_AUTHOR_STAGE,
+  OBJECTIVE_SAVE_STAGE,
+} from "../../../authoring/objective/prose.ts";
+import { REFINE_STAGE } from "../../../authoring/refinement/context.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { rebuildWorkflowState } from "../../../substrate/workflowState.ts";
-import { installInjectedContext } from "../contextInjection.ts";
+import { installInjectedContext, isPlanGuidanceStage } from "../contextInjection.ts";
 import type { ReviewOutcome } from "../reviewOutcome.ts";
 import { isPlannotatorPlanSelected } from "./selection.ts";
 
@@ -421,22 +422,17 @@ export function extractDirectEdits(feedback: string): { diff: string; remainder?
  * which dispatches to this module's bridge when plannotator is selected; the adapter itself
  * never arbitrates tools and needs no gating.
  */
-export function installPlannotatorPlanAdapter(
-  pi: ExtensionAPI,
-  contextPolicy: ContextPolicyInputs,
-): void {
-  // Inject the bridge context while plannotator is selected AND the shared authoring-context
-  // policy (`authoring/context/eligibility.ts`) classifies the session. Four content flavors,
-  // one customType: an objective-authoring session (BOTH objective stages: `plan_review` routes
-  // objective-author AND objective-save to the objective review arm) gets the objective flavor
-  // (the review surface renders the objective draft), a gist-author session gets the gist
-  // flavor (the rendered gist draft), an `objective-refine` session gets the refinement flavor
-  // (the review surface renders the (draft, context) pair), and an ELIGIBLE plan author
-  // (plan-family stage or warm `plan_authoring` intent) gets the plan flavor; anything else —
-  // gate off, a runner child, a bare gate with no plan evidence, or the `gist-save` stage —
-  // selects nothing. Every flavor sits behind the same gate + runner checks: a refinement stage
-  // left on the branch after the approved save exited the gate selects nothing, and a runner
-  // child inheriting refinement history receives no adapter guidance. The gate signal is the
+export function installPlannotatorPlanAdapter(pi: ExtensionAPI, runnerChild: () => boolean): void {
+  // Inject the bridge context while the read-only gate is active AND plannotator is selected.
+  // Four content flavors, one customType, dispatched on the stage: an objective-authoring
+  // session (BOTH objective stages: `plan_review` routes objective-author AND objective-save to
+  // the objective review arm) gets the objective flavor (the review surface renders the
+  // objective draft), a gist-author session gets the gist flavor (the rendered gist draft), an
+  // `objective-refine` session gets the refinement flavor (the review surface renders the
+  // (draft, context) pair), and every other stage `isPlanGuidanceStage` admits gets the plan
+  // flavor (so the `audit` door — and a runner child, fenced in the shared helper — get
+  // nothing). Every flavor sits behind the same gate check: a refinement stage left on the
+  // branch after the approved save exited the gate selects nothing. The gate signal is the
   // persisted `perk:workflow-state.mode` (the gate's state twin) — never the gate itself.
   //
   // Once-only PER FLAVOR: the dedup key is the SELECTED flavor's marker (not the shared
@@ -444,36 +440,33 @@ export function installPlannotatorPlanAdapter(
   // another flavor sits on the branch. Retention follows selection: the shared helper removes
   // obsolete sibling flavors (a warm `/objective-refine` after a plan-mode turn leaves only the
   // refinement flavor directing the model) and every owned copy once nothing is selected.
-  installInjectedContext(pi, {
-    customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
-    flavors: {
-      [PLAN_ADAPTER_PLANNOTATOR_MARKER]: () => PLAN_ADAPTER_PLANNOTATOR_CONTEXT,
-      [OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER]: () => OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT,
-      [GIST_ADAPTER_PLANNOTATOR_MARKER]: () => GIST_ADAPTER_PLANNOTATOR_CONTEXT,
-      [REFINEMENT_ADAPTER_PLANNOTATOR_MARKER]: () => REFINEMENT_ADAPTER_PLANNOTATOR_CONTEXT,
+  installInjectedContext(
+    pi,
+    {
+      customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
+      flavors: {
+        [PLAN_ADAPTER_PLANNOTATOR_MARKER]: () => PLAN_ADAPTER_PLANNOTATOR_CONTEXT,
+        [OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER]: () => OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT,
+        [GIST_ADAPTER_PLANNOTATOR_MARKER]: () => GIST_ADAPTER_PLANNOTATOR_CONTEXT,
+        [REFINEMENT_ADAPTER_PLANNOTATOR_MARKER]: () => REFINEMENT_ADAPTER_PLANNOTATOR_CONTEXT,
+      },
+      select: (ctx, branch) => {
+        if (!isPlannotatorPlanSelected(ctx.cwd)) return null;
+        const state = rebuildWorkflowState(branch);
+        if (state.mode !== "read-only") return null;
+        switch (state.stage) {
+          case OBJECTIVE_AUTHOR_STAGE:
+          case OBJECTIVE_SAVE_STAGE:
+            return OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER;
+          case GIST_AUTHOR_STAGE:
+            return GIST_ADAPTER_PLANNOTATOR_MARKER;
+          case REFINE_STAGE:
+            return REFINEMENT_ADAPTER_PLANNOTATOR_MARKER;
+          default:
+            return isPlanGuidanceStage(state.stage) ? PLAN_ADAPTER_PLANNOTATOR_MARKER : null;
+        }
+      },
     },
-    select: (ctx, branch) => {
-      if (!isPlannotatorPlanSelected(ctx.cwd)) return null;
-      const state = rebuildWorkflowState(branch);
-      switch (
-        classifyAuthoringContext({
-          gateActive: readOnlyModeOf(state),
-          runnerChild: contextPolicy.runnerChild(),
-          state,
-        })
-      ) {
-        case "plan":
-          return PLAN_ADAPTER_PLANNOTATOR_MARKER;
-        case "objective-author":
-        case "objective-save":
-          return OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER;
-        case "gist-author":
-          return GIST_ADAPTER_PLANNOTATOR_MARKER;
-        case "objective-refine":
-          return REFINEMENT_ADAPTER_PLANNOTATOR_MARKER;
-        default:
-          return null;
-      }
-    },
-  });
+    runnerChild,
+  );
 }

@@ -12,6 +12,8 @@ import { sharedDir } from "./resources.ts";
 export interface RegistryStage {
   id: string;
   command: string;
+  /** `read-only` | `read-write` — the gate the cold claim persists as `perk:workflow-state.mode`. */
+  mode: string;
   doors: Record<string, boolean>;
   predecessors: string[];
   successors: string[];

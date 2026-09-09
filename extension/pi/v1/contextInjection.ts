@@ -1,10 +1,11 @@
 // The one marker-dedup'd context-injection mechanism (contracts §8.31 semantics) behind the
-// five injected authoring/adapter contexts: gist, plan, objective-authoring, and the
+// six injected authoring/adapter contexts: gist, plan, objective-authoring, refinement and the
 // plannotator/tombell plan adapters all register the same `before_agent_start` + `context` hook
 // pair around one injected, marker-dedup'd context. The MECHANICS live here — the live-evidence
-// dedup, the selection-driven retention filter, the guarded reads; feature POLICY (eligibility,
-// flavor selection, content construction, the customType/marker vocabulary) stays with each
-// caller's `InjectedContextSpec` closures.
+// dedup, the selection-driven retention filter, the guarded reads, the runner fence. Callers keep
+// flavor selection + content construction (the customType/marker vocabulary) in their
+// `InjectedContextSpec` closures; `isPlanGuidanceStage` is the one shared stage predicate (the
+// plan context and the two plan-adapter plan flavors).
 //
 // ONE decision drives both hooks: `spec.select` (the flavor to deliver this turn, or null). It
 // reads the FULL branch (`branchOf` — eligibility/state survive compaction), while the dedup
@@ -42,12 +43,39 @@
 // and `hunkFeedback/receiver.ts`.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { GIST_AUTHOR_STAGE } from "../../authoring/gist/draft.ts";
+import { OBJECTIVE_AUTHOR_STAGE, OBJECTIVE_SAVE_STAGE } from "../../authoring/objective/prose.ts";
+import { REFINE_STAGE } from "../../authoring/refinement/context.ts";
 import { type BranchEntry, branchOf } from "../../substrate/workflowState.ts";
 import {
   activeContextMessages,
   type ContextMessage,
   contextCarriesMarker,
 } from "./contextEvidence.ts";
+
+/**
+ * The stages plan guidance is withheld from, for one of two reasons: another authoring context
+ * OWNS the stage (the objective/gist/refinement installers inject their own contexts;
+ * `objective-save` rides `plan_review`'s objective-arm routing), or the stage is read-only but
+ * authors nothing (`audit`, the dev-only `perk-dev audit judge` door — a literal: it has no
+ * authoring module). The registry guard test pins the set against the read-only stages.
+ */
+const PLAN_GUIDANCE_EXCLUDED_STAGES: ReadonlySet<string> = new Set([
+  OBJECTIVE_AUTHOR_STAGE,
+  OBJECTIVE_SAVE_STAGE,
+  GIST_AUTHOR_STAGE,
+  REFINE_STAGE,
+  "audit",
+]);
+
+/**
+ * Plan guidance rides the read-only gate in every stage not excluded above: the stage-less warm
+ * `/plan` (`undefined`), the cold `plan`/`objective-plan` claims, and any other (unknown or
+ * read-write) stage id — fail-open like the stage tool filter.
+ */
+export function isPlanGuidanceStage(stage: string | undefined): boolean {
+  return stage === undefined || !PLAN_GUIDANCE_EXCLUDED_STAGES.has(stage);
+}
 
 /**
  * One marker-dedup'd injected context: the owned customType + the flavor table. Each flavor is
@@ -114,23 +142,31 @@ function carriesMarker(content: unknown, marker: string): boolean {
  * ordering is frozen by each installer's internal sequence.
  *
  * - `before_agent_start`: guarded branch read (a failed read short-circuits — no `select` call,
- *   no injection) → `spec.select` (null → no injection) → the submitting prompt carrying the
- *   SELECTED marker suppresses (cold delivery before persistence; another flavor's marker does
- *   not) → guarded projection read (a failed read returns — nothing constructed, nothing
- *   injected) → a live owned copy of the selected marker suppresses (the content thunk is never
- *   invoked) → inject `{ customType, content, display: false }`.
- * - `context`: guarded branch read + `spec.select` (a failed read or a throwing selector fails
- *   closed to null) → retain the owned customType's copies carrying the selected flavor's marker
- *   only; remove every other owned copy (all of them on null). No other message is inspected.
+ *   no injection) → the runner fence (a runner child selects nothing — no `select` call) →
+ *   `spec.select` (null → no injection) → the submitting prompt carrying the SELECTED marker
+ *   suppresses (cold delivery before persistence; another flavor's marker does not) → guarded
+ *   projection read (a failed read returns — nothing constructed, nothing injected) → a live
+ *   owned copy of the selected marker suppresses (the content thunk is never invoked) → inject
+ *   `{ customType, content, display: false }`.
+ * - `context`: guarded branch read + the same fence + `spec.select` (a failed read or a throwing
+ *   selector fails closed to null) → retain the owned customType's copies carrying the selected
+ *   flavor's marker only; remove every other owned copy (all of them on null). No other message
+ *   is inspected.
+ *
+ * `runnerChild` is the composition root's per-`session_start` runner bit (§8.3): suppression
+ * only, never a grant — and ahead of `spec.select`, so a runner child performs no selector reads.
  */
 export function installInjectedContext<K extends string>(
   pi: ExtensionAPI,
   spec: InjectedContextSpec<K>,
+  runnerChild: () => boolean,
 ): void {
   // Defensive over a widened K (string): an off-table key names no flavor — never inject or
   // retain on it.
   const flavorOf = (key: K | null): string | null =>
     key !== null && spec.flavors[key] !== undefined ? key : null;
+  const selectedMarker = (ctx: ExtensionContext, branch: readonly BranchEntry[]): string | null =>
+    runnerChild() ? null : flavorOf(spec.select(ctx, branch));
 
   pi.on("before_agent_start", async (event, ctx) => {
     let branch: readonly BranchEntry[];
@@ -139,7 +175,7 @@ export function installInjectedContext<K extends string>(
     } catch {
       return;
     }
-    const marker = flavorOf(spec.select(ctx, branch));
+    const marker = selectedMarker(ctx, branch);
     if (marker === null) return;
     const content = spec.flavors[marker as K];
     if (event.prompt.includes(marker)) return;
@@ -162,7 +198,7 @@ export function installInjectedContext<K extends string>(
   pi.on("context", async (event, ctx) => {
     let selected: string | null;
     try {
-      selected = flavorOf(spec.select(ctx, branchOf(ctx)));
+      selected = selectedMarker(ctx, branchOf(ctx));
     } catch {
       selected = null;
     }

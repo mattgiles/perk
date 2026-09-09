@@ -38,7 +38,6 @@
 // selected — only perk's own authoring surface (the mode tier above) steps aside.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { isPlanAuthoringEligible } from "../../authoring/context/eligibility.ts";
 import { PLAN_DRAFT_ARTIFACT, revisePlanDraft } from "../../authoring/plan/draft.ts";
 import {
   PLAN_CONTEXT_TYPE,
@@ -65,7 +64,6 @@ import {
 } from "../../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../../substrate/command.ts";
 import { loadPerkConfig } from "../../substrate/config.ts";
-import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
 // Re-resolved here (not imported from providers/selection.ts) would drift — import the probe
 // and compare against the provider registry ids at install time.
 import { PERK_PLAN_PROVIDER_ID, PLANNOTATOR_PLAN_PROVIDER_ID } from "../../substrate/providers.ts";
@@ -78,7 +76,7 @@ import { report, type Severity } from "../../surfaces/report.ts";
 // `Key` via the surfaces re-export (keybinding vocabulary, not rich UI) — keeps pi-tui imports
 // structurally confined to the surfaces module (the surfacesGuard pi-tui import rule).
 import { Key } from "../../surfaces/surfaces.ts";
-import { installInjectedContext } from "./contextInjection.ts";
+import { installInjectedContext, isPlanGuidanceStage } from "./contextInjection.ts";
 import { type DraftReviewSlot, recordSaveOutcome } from "./draftReview.ts";
 import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
 import {
@@ -410,10 +408,10 @@ export function installPlanBindings(
   pi: ExtensionAPI,
   gating: ToolGating,
   reviews: DraftReviewSlot,
-  contextPolicy: ContextPolicyInputs,
+  runnerChild: () => boolean,
   wave?: WaveLaunch,
 ): void {
-  installPlanMode(pi, gating, contextPolicy);
+  installPlanMode(pi, gating, runnerChild);
 
   // ------------------------------------------------------------------- the plan_draft tool
   // The working-draft file tool: the first session-data PRODUCER and the narrow structural
@@ -737,11 +735,7 @@ export function installPlanBindings(
  * + `Ctrl+Alt+P`) under the augment-posture plannotator selection, and a full vacate under any
  * other foreign selection (tombell).
  */
-function installPlanMode(
-  pi: ExtensionAPI,
-  gating: ToolGating,
-  contextPolicy: ContextPolicyInputs,
-): void {
+function installPlanMode(pi: ExtensionAPI, gating: ToolGating, runnerChild: () => boolean): void {
   const providerId = resolvedPlanProviderId(process.cwd());
   const plannotatorSelected = providerId === PLANNOTATOR_PLAN_PROVIDER_ID;
   if (providerId !== PERK_PLAN_PROVIDER_ID && !plannotatorSelected) return;
@@ -761,16 +755,12 @@ function installPlanMode(
     report(ctx, "plan-mode", "info", message);
   }
 
-  // Every perk-owned plan-mode entry (`/plan`, the shortcut, `--plan`) is an EXPLICIT
-  // plan-authoring enter: the gate records `plan_authoring: true` beside `mode: "read-only"`
-  // (§8.3), which is the positive evidence the authoring-context policy selects on — intent is
-  // never inferred from the bare gate.
   function toggle(ctx: ExtensionContext): void {
     if (gating.isActive()) {
       gating.exit(ctx);
       announce(ctx, false);
     } else {
-      gating.enter(ctx, { planAuthoring: true });
+      gating.enter(ctx);
       announce(ctx, true);
     }
   }
@@ -793,32 +783,30 @@ function installPlanMode(
     // along with the flag itself (the flag no longer exists on perk's side).
     pi.on("session_start", async (_event, ctx) => {
       if (pi.getFlag("plan") === true && !gating.isActive()) {
-        gating.enter(ctx, { planAuthoring: true });
+        gating.enter(ctx);
       }
     });
   }
 
-  // Inject the plan-authoring context for ELIGIBLE plan authors only (display:false): the
-  // effective gate active, not a runner child, and positive plan evidence on the FULL branch — a
-  // plan-family stage (the cold `plan`/`save`/`objective-plan` claims) or the warm
-  // `plan_authoring: true` intent the entries above record (`authoring/context/eligibility.ts`).
-  // The dedicated objective/gist/refinement stages keep precedence (their installers own those
-  // sessions), so plan guidance never falls through to them — an ad-hoc plan-mode turn followed
-  // by a warm `/objective-refine` retires the plan context there; a bare read-only gate with no
-  // evidence (a legacy stage-less session, an adopted child) selects nothing. Selection is also
-  // the retention decision: the shared helper strips the owned custom once selection turns null.
-  installInjectedContext(pi, {
-    customType: PLAN_CONTEXT_TYPE,
-    flavors: {
-      [PLAN_MARKER]: (ctx) => planAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
+  // Inject the plan-authoring context while the read-only gate is active (display:false) for
+  // every stage no other authoring context owns (`isPlanGuidanceStage` over the FULL-branch
+  // stage): the stage-less warm `/plan`, the cold `plan`/`objective-plan` claims, a worktree stage
+  // with `/plan` toggled on. The objective/gist/refinement installers own their stages, so a
+  // plan-mode turn followed by a warm `/objective-refine` retires the plan context there
+  // (selection is also the retention decision — the shared helper strips the owned custom once
+  // selection turns null). The runner fence lives in the shared helper.
+  installInjectedContext(
+    pi,
+    {
+      customType: PLAN_CONTEXT_TYPE,
+      flavors: {
+        [PLAN_MARKER]: (ctx) => planAuthoringContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
+      },
+      select: (_ctx, branch) =>
+        gating.isActive() && isPlanGuidanceStage(rebuildWorkflowState(branch).stage)
+          ? PLAN_MARKER
+          : null,
     },
-    select: (_ctx, branch) =>
-      isPlanAuthoringEligible({
-        gateActive: gating.isActive(),
-        runnerChild: contextPolicy.runnerChild(),
-        state: rebuildWorkflowState(branch),
-      })
-        ? PLAN_MARKER
-        : null,
-  });
+    runnerChild,
+  );
 }

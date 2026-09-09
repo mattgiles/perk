@@ -16,7 +16,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { classifyAuthoringContext } from "../../authoring/context/eligibility.ts";
 import {
   importColdRefinementContext,
   importRefinementContext,
@@ -72,7 +71,6 @@ import {
 } from "../../substrate/coldDoor.ts";
 import { registerPerkCommand } from "../../substrate/command.ts";
 import { loadPerkConfig } from "../../substrate/config.ts";
-import type { ContextPolicyInputs } from "../../substrate/contextPolicy.ts";
 import { failFor, ok, type Result } from "../../substrate/result.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { paramsOf, stringParam } from "../../substrate/toolParams.ts";
@@ -589,27 +587,25 @@ export function installObjectiveRefinementBindings(
   pi: ExtensionAPI,
   gating: ToolGating,
   reviews: DraftReviewSlot,
-  contextPolicy: ContextPolicyInputs,
+  runnerChild: () => boolean,
 ): void {
-  // The refinement context is selected by the shared authoring-context policy's dedicated
-  // `objective-refine` kind (`authoring/context/eligibility.ts`): the effective gate active, not
-  // a runner child, and the refinement stage on the FULL branch. A runner child inheriting a
-  // refinement session's history receives no refinement guidance; once the approved save exits
-  // the gate the selection turns null and the shared helper retires the owned copy.
-  installInjectedContext(pi, {
-    customType: REFINEMENT_CONTEXT_TYPE,
-    flavors: {
-      [REFINEMENT_MARKER]: (ctx) => refinementContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
+  // The refinement context is keyed off (the gate active AND the refinement stage on the FULL
+  // branch — the module's own `isRefinementSession`); once the approved save exits the gate the
+  // selection turns null and the shared helper retires the owned copy. The runner fence lives in
+  // the shared helper.
+  installInjectedContext(
+    pi,
+    {
+      customType: REFINEMENT_CONTEXT_TYPE,
+      flavors: {
+        [REFINEMENT_MARKER]: (ctx) =>
+          refinementContextContent(loadPerkConfig(ctx.cwd).planAuthoring),
+      },
+      select: (_ctx, branch) =>
+        gating.isActive() && isRefinementSession(branch) ? REFINEMENT_MARKER : null,
     },
-    select: (_ctx, branch) =>
-      classifyAuthoringContext({
-        gateActive: gating.isActive(),
-        runnerChild: contextPolicy.runnerChild(),
-        state: rebuildWorkflowState(branch),
-      }) === "objective-refine"
-        ? REFINEMENT_MARKER
-        : null,
-  });
+    runnerChild,
+  );
 
   pi.registerTool({
     name: "objective_refinement_draft",

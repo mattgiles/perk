@@ -14,12 +14,11 @@
 //     review-first discipline: keep the draft current with `plan_draft`, then call
 //     `plan_review` — which (for any non-plannotator selection, tombell included) runs the
 //     first-party in-TUI editor review, and whose APPROVED outcome auto-saves via the
-//     `approvalSave` seam. The injection is CONDITIONED: it fires only for an ELIGIBLE Perk plan
-//     author (the persisted `perk:workflow-state.mode` read-only twin plus positive plan
-//     evidence — a plan-family stage or the warm `plan_authoring` intent, per the shared
-//     authoring-context policy) OR when tombell's own persisted `plan-mode-state` entry says plan
-//     mode is enabled — never for a runner child and never in a dedicated objective/gist
-//     authoring stage (those installers own their authoring contexts).
+//     `approvalSave` seam. The injection is CONDITIONED: it fires only when perk's read-only gate
+//     is active (per the persisted `perk:workflow-state.mode`, the gate's state twin) OR tombell's
+//     own persisted `plan-mode-state` entry says plan mode is enabled — never in a stage another
+//     authoring context owns (`isPlanGuidanceStage`), never for a runner child (the shared
+//     helper's fence).
 //   - The present + `/plan-save` flow is the explicit FAIL-OPEN fallback, not the primary path:
 //     it applies when the review reports skipped/unavailable, or when `@tombell/pi-plan`'s own
 //     interactive `/plan` `setActiveTools` restriction hides `plan_draft`/`plan_review` from the
@@ -37,15 +36,9 @@
 //     stages bind only to the provider-agnostic plan-ref and are unchanged.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-  isDedicatedAuthoringStage,
-  isPlanAuthoringEligible,
-  readOnlyModeOf,
-} from "../../../authoring/context/eligibility.ts";
-import type { ContextPolicyInputs } from "../../../substrate/contextPolicy.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { type BranchEntry, rebuildWorkflowState } from "../../../substrate/workflowState.ts";
-import { installInjectedContext } from "../contextInjection.ts";
+import { installInjectedContext, isPlanGuidanceStage } from "../contextInjection.ts";
 import { isTombellPlanSelected } from "./selection.ts";
 
 /** The tombell plan-adapter bridge customType (distinct from the `perk:plan-context`). */
@@ -82,36 +75,33 @@ export function isTombellPlanModeEnabled(branch: readonly BranchEntry[]): boolea
  * Install the tombell plan adapter: an injection-only bridge, inert unless `[providers] plan =
  * "tombell-plan"`. It NEVER touches tool gating / setActiveTools (Invariant 1) and never throws.
  */
-export function installTombellPlanAdapter(
-  pi: ExtensionAPI,
-  contextPolicy: ContextPolicyInputs,
-): void {
+export function installTombellPlanAdapter(pi: ExtensionAPI, runnerChild: () => boolean): void {
   // Inject the bridge context while the foreign tombell-plan provider is selected AND a plan
-  // authoring intent is established — ELIGIBLE Perk plan intent under the shared
-  // authoring-context policy (`authoring/context/eligibility.ts`: the persisted
-  // `perk:workflow-state.mode` read-only twin — never the gate object — plus positive plan
-  // evidence) OR tombell's own latest valid persisted `plan-mode-state.enabled === true` entry
-  // (the ad-hoc interactive `/plan` arm, preserved where Perk's own gate is off). Runner children
-  // and the dedicated objective/gist/refinement stages never receive it (their own installers
-  // own those sessions; the tombell REPLACE posture covers the plan surface only). Retention
+  // authoring mode is on — perk's read-only gate (per the persisted `perk:workflow-state.mode`,
+  // the gate's state twin — never the gate object) OR tombell's own latest valid persisted
+  // `plan-mode-state.enabled === true` entry (the ad-hoc interactive `/plan` arm, preserved where
+  // perk's own gate is off). A stage another authoring context owns never receives it
+  // (`isPlanGuidanceStage` — those installers own their sessions; the tombell REPLACE posture
+  // covers the plan surface only), nor does a runner child (the shared helper's fence). Retention
   // follows selection: a null selection strips the owned copy, so the marker never lingers across
   // a deselect, a stage transition or once authoring ends; the inject/strip mechanics live in
   // the shared helper.
-  installInjectedContext(pi, {
-    customType: PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE,
-    flavors: {
-      [PLAN_ADAPTER_TOMBELL_MARKER]: () => PLAN_ADAPTER_TOMBELL_CONTEXT,
+  installInjectedContext(
+    pi,
+    {
+      customType: PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE,
+      flavors: {
+        [PLAN_ADAPTER_TOMBELL_MARKER]: () => PLAN_ADAPTER_TOMBELL_CONTEXT,
+      },
+      select: (ctx, branch) => {
+        if (!isTombellPlanSelected(ctx.cwd)) return null;
+        const state = rebuildWorkflowState(branch);
+        if (!isPlanGuidanceStage(state.stage)) return null;
+        return state.mode === "read-only" || isTombellPlanModeEnabled(branch)
+          ? PLAN_ADAPTER_TOMBELL_MARKER
+          : null;
+      },
     },
-    select: (ctx, branch) => {
-      if (!isTombellPlanSelected(ctx.cwd)) return null;
-      const runnerChild = contextPolicy.runnerChild();
-      if (runnerChild) return null;
-      const state = rebuildWorkflowState(branch);
-      if (isDedicatedAuthoringStage(state.stage)) return null;
-      if (isPlanAuthoringEligible({ gateActive: readOnlyModeOf(state), runnerChild, state })) {
-        return PLAN_ADAPTER_TOMBELL_MARKER;
-      }
-      return isTombellPlanModeEnabled(branch) ? PLAN_ADAPTER_TOMBELL_MARKER : null;
-    },
-  });
+    runnerChild,
+  );
 }

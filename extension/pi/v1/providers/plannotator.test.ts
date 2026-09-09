@@ -1,6 +1,7 @@
 // The plannotator plan adapter (augment posture, injection + bridge only):
-// injection only when (an ELIGIBLE authoring context AND plannotator-plan selected) — three
-// content flavors, one customType (the plan bridge context for an eligible plan author; the
+// injection only when (the read-only mode twin AND plannotator-plan selected) — stage-dispatched
+// content flavors, one customType (the plan bridge context for every stage `isPlanGuidanceStage`
+// admits; the
 // objective flavor in an objective-authoring session — objective-author OR objective-save; the
 // gist flavor in a gist-author session) — owned-copy retention following selection (every flavor
 // retired on deselect; user turns preserved), and the pure event-bus bridge core — the bounded handshake

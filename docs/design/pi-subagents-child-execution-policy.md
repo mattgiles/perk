@@ -64,7 +64,10 @@ remains active`) and startup continues — enforcement never depended on the ref
 as `!gating.isActive() && !runnerChild`. A runner child — every perk report child — never
 provisions `.perk/workflow/scratch/runs/<run_id>/agent/` or receives the hidden scratch block, even
 without a floor; the module knows nothing about agent names. Authoring and plan-adapter guidance
-suppression rides the same runner bit through `extension/substrate/contextPolicy.ts`.
+suppression rides the same runner bit through `installInjectedContext`'s runner fence
+(`extension/pi/v1/contextInjection.ts`): every injected authoring/adapter context takes the
+composition root's `() => runnerChild` closure as its third argument, and a runner child selects
+nothing — no injection, every owned copy retired — before any caller's selector runs.
 
 ## Report definitions
 

@@ -1,7 +1,7 @@
 // The tombell plan adapter shim: review-first injection under a `tombell-plan`
-// selection when a plan authoring intent is on (an ELIGIBLE perk plan author OR tombell's own
-// persisted `plan-mode-state`; runner children and the dedicated objective/gist stages excepted),
-// inert (+ owned-copy retirement, user turns preserved) under the default selection. Driven through a REAL bound AgentSession (offline) via the shared harness. See
+// selection when a plan authoring mode is on (perk's read-only mode twin OR tombell's own
+// persisted `plan-mode-state`; the stages another authoring context owns excepted — the runner
+// fence is the shared helper's, pinned in contextInjection.test.ts), inert (+ owned-copy retirement, user turns preserved) under the default selection. Driven through a REAL bound AgentSession (offline) via the shared harness. See
 // tombell.ts. The suite doubles as the contracts.md §8.57 seeded-plan-shape proof
 // for the REPLACE-posture flow-carrier claim: under `tombell-plan` the adapter block is the
 // designated plan-authoring flow carrier, and these cases verify it per adapter-visible shape.

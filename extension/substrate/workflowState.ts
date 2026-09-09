@@ -38,17 +38,6 @@ export interface WorkflowState {
   /** The registry stage id this run is acting on (recorded at cold claim from the handoff). */
   stage?: string;
   /**
-   * Warm plan-authoring INTENT (§8.3) — the guidance bit the warm plan entries (`/plan`, its
-   * shortcut, `--plan`, `/objective-plan`) record alongside `mode: "read-only"` so the
-   * plan-authoring context can be selected without inferring intent from the bare gate.
-   * Guidance only: never a tool permission, a stage transition, review authority or save
-   * authorization, and it never rewrites `stage`. Only literal `true` establishes intent (the
-   * rebuilt value is unvalidated — absent/malformed reads as no intent); a generic read-only
-   * enter records `false`, and an actual gate exit records `false` with `mode: "read-write"`.
-   * Per-field LWW; best-effort tier.
-   */
-  plan_authoring?: boolean;
-  /**
    * The running @mgiles/perk version stamped when run identity is established (§8.3) —
    * claim/fork/adopt/mint in session_start. The session-audit vintage layer's exact basis;
    * omitted when only the perkVersion() failure sentinel is available. Best-effort tier.

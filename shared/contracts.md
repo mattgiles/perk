@@ -532,7 +532,6 @@ end of the section).
 | `pi_session_id` | string | the current session handle — the basename of Pi's session file; the **fork discriminator** (§8.2) and the key to resume via `SessionManager.open`/`continueRecent` |
 | `mode` | string | the active registry stage `mode` (`read-only` / `read-write`) — **structurally gates tools** (see below) |
 | `stage` | string | the registry stage id this run is acting on, recorded at cold **claim** from the handoff — or, for the ONE warm exception, appended by the stage-only `enter-refinement-stage` change when `/objective-refine` enters a refinement pass in an unbound session (§8.68); lets the interior distinguish read-only stages (e.g. `objective-author` vs `plan` vs `objective-refine`) and inject the right authoring context |
-| `plan_authoring` | boolean | the **explicit warm plan-authoring intent**, distinct from the restriction: recorded by the gate's `enter(ctx, { planAuthoring: true })` beside `mode: "read-only"` in the SAME append (every perk-owned plan-mode entry — `/plan`, its shortcut, `--plan`, `/objective-plan`; an already-gated `/objective-plan` appends the bit alone, only when not already on the branch), reset to `false` by `exit` beside `mode: "read-write"` (a floor-refused exit appends nothing), and recorded `false` by a generic read-only enter. Only the literal `true` counts. It is positive evidence for the authoring-context policy below — never a grant: the gate is identical with or without it, and intent is NEVER inferred from a bare read-only `mode` (an older stage-less session stays restricted but receives no plan guidance until the human exits and re-enters `/plan` or invokes an authoring factory) |
 | `active_plan_ref` | object \| null | the provider-agnostic plan ref (§8.4); null during early `plan` |
 | `active_objective` | string \| null | the active objective id (`/objective <id>` sets it, `/objective clear` nulls it) |
 | `last_review_batch` | object \| null | the last fully processed review batch, appended by `finalize_address` only after publication and thread resolution succeed: `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
@@ -730,31 +729,22 @@ and **strips** it from `context` when off (its retention is independent of every
 context: the reviewer/runner restriction guidance stays delivered after authoring guidance is
 removed). The allowlist is restored on both `session_start` and `session_tree` (re-sync
 from the rebuilt `mode`). **Fail-closed:** a failed state-rebuild never opens the gate, and
-`tool_call` blocks on any internal error. The `enter(ctx?, { planAuthoring? })`/`exit(ctx?)`
-surface is the API the interior consumers (plan mode, the authoring installers, the CI executor)
-compose — the gate is the single read-only authority; the optional `planAuthoring` records the
-`plan_authoring` intent bit in the same mode append and changes nothing about the restriction.
-Beside the gate, the same rebuild points apply **stage-scoped active tools** keyed off the
+`tool_call` blocks on any internal error. The `enter(ctx?)`/`exit(ctx?)` surface is the API the
+interior consumers (plan mode, the authoring installers, the CI executor) compose — the gate is
+the single read-only authority. Beside the gate, the same rebuild points apply **stage-scoped active tools** keyed off the
 `stage` field (§8.40) — fail-open where the gate is fail-closed.
 
-**The authoring-context eligibility policy (`extension/authoring/context/eligibility.ts`).** ONE
-pure policy, consumed by every Perk-owned authoring/adapter injection, decides on the
-FULL-branch rebuilt state (never the compacted message window) plus two activation-local inputs:
-the effective read-only gate and the **runner bit** (`extension/substrate/contextPolicy.ts` —
-startup's `PI_SUBAGENT_CHILD === "1"`, captured in `session_start` before lifecycle work and
-reset on shutdown; a suppression signal only — never a tool grant or save authority). The kinds:
-`objective-author` / `objective-save` / `gist-author` / `gist-save` / `objective-refine` for
-those exact dedicated stages (they take precedence and never fall through to plan guidance —
-a stray `plan_authoring: true` left by an earlier `/plan` turn cannot direct a refinement
-session to the plan draft/save flow); `plan` for **positive plan evidence** — `stage ∈ {plan,
-save, objective-plan}` (the cold claims) OR `plan_authoring === true` (the warm intent, which
-authorizes plan guidance in an otherwise unscoped/non-authoring parent stage without rewriting
-that stage); `null` otherwise — a gate that is off, a runner child (even over inherited
-authoring history), a bare gate with no plan evidence (a legacy stage-less session, an adopted
-child), an unknown or worktree stage. A runner
-child receives NO Perk authoring or plan-adapter custom guidance; its restrictions, the
-`[READ-ONLY MODE]` guidance and the engine's child tools (`structured_output`/`contact_supervisor`)
-are untouched.
+**Authoring guidance selection.** Plan guidance rides the read-only gate for every stage
+`isPlanGuidanceStage` admits (`extension/pi/v1/contextInjection.ts`). Excluded, for one of two
+reasons: the stages another context OWNS (the dedicated objective/gist/refinement stages, plus
+`objective-save` via `plan_review`'s objective-arm routing), and the read-only `audit` door,
+which authors nothing. Admitted: a stage-less warm `/plan`, the cold `plan`/`objective-plan`
+claims, a worktree stage with `/plan` on. The objective/gist/refinement contexts key on (gate AND
+their exact stage). NO injected authoring or adapter context reaches a runner child: the fence is
+`installInjectedContext`'s third argument, fed the composition root's `runnerChild` closure (the
+`isRunnerChild` bit of the runner restriction floor below, re-read every `session_start`) —
+suppression only, never a grant; the `[READ-ONLY MODE]` guidance and the engine's child tools
+(`structured_output`/`contact_supervisor`) are untouched.
 
 **The audit-wave write binding (`audit_bundle_dir`, §8.50).** The `perk-dev audit judge` cold
 door stashes `handoff_extra={"audit_bundle_dir": <absolute bundle dir>}` in its launch handoff
@@ -4544,24 +4534,21 @@ emitted remains unrecoverable — the human re-runs the door.
   | `plannotator-plan` | `PLAN_ADAPTER_PLANNOTATOR_CONTEXT` | browser bridge | present + `/plan-save` |
   | `tombell-plan` | `PLAN_ADAPTER_TOMBELL_CONTEXT` (conditioned injection) | first-party in-TUI review | present + `/plan-save` (incl. tombell's own interactive `/plan` `setActiveTools` restriction arm) |
 
-  Every authoring context is selected by the ONE §8.3 eligibility policy (positive evidence,
-  never inferred from the bare gate; runner children excluded): `PLAN_AUTHORING_CONTEXT` for an
-  eligible plan author (a plan-family cold stage or the warm `plan_authoring` intent); the
-  objective/gist/refinement contexts for their exact dedicated stages. Under the plannotator
-  selection the bridge context is **flavor-dispatched by the same policy** (one customType, four
-  contents — §8.42's per-flavor marker dedup): the plan flavor for an ELIGIBLE plan author, the
-  **objective** flavor in **both** objective stages (`objective-author` **and** `objective-save`
-  — matching `plan_review`'s objective-arm stage routing), the gist flavor in `gist-author`, the
-  refinement flavor in `objective-refine` (§8.68), and nothing otherwise (a bare gate, a runner
-  child, `gist-save`). Under the tombell selection the bridge context requires eligible Perk
-  plan intent OR tombell's own latest valid persisted `plan-mode-state.enabled === true` entry
-  (the foreign-mode-only arm, preserved where Perk's gate is off), still excluding runner
-  children and the dedicated objective/gist/refinement stages. Provider registration ownership
-  is unchanged: Perk vacates `--plan`/the shortcut under plannotator and every mode registration
-  under tombell; neither foreign package's prompts, tools or enforcement are touched — the
-  policy governs Perk-owned injection only. Retention follows selection (§8.31): once a session
-  stops being eligible, its Perk-owned custom guidance is retired from the outgoing context
-  while the human's own turns (cold seeds and quotations included) stay.
+  `PLAN_AUTHORING_CONTEXT` and the plannotator/tombell plan flavors follow §8.3's authoring
+  guidance selection (the gate, in every stage `isPlanGuidanceStage` admits). Under the
+  plannotator selection the bridge context is **flavor-dispatched by stage** (one customType, four
+  contents — §8.42's per-flavor marker dedup): the **objective** flavor in **both** objective
+  stages (`objective-author` **and** `objective-save` — matching `plan_review`'s objective-arm
+  stage routing), the gist flavor in `gist-author`, the refinement flavor in `objective-refine`
+  (§8.68), the plan flavor for every other admitted stage, and nothing on a read-write mode twin.
+  Under the tombell selection the bridge context requires perk's read-only mode twin OR tombell's
+  own latest valid persisted `plan-mode-state.enabled === true` entry (the foreign-mode-only arm,
+  preserved where perk's gate is off), never in a stage another context owns. Runner children
+  receive none of them (§8.3's fence). Provider registration ownership is unchanged: Perk vacates
+  `--plan`/the shortcut under plannotator and every mode registration under tombell; neither
+  foreign package's prompts, tools or enforcement are touched. Retention follows selection
+  (§8.31): once nothing is selected, the Perk-owned custom guidance is retired from the outgoing
+  context while the human's own turns (cold seeds and quotations included) stay.
 
 - **Plannotator "Direct Edits" (browser edits of the reviewed document).** Plannotator's
   plan-review browser lets the reviewer edit the reviewed document directly; the edits arrive as
@@ -5599,8 +5586,9 @@ nothing, the subset being shared).
   summaries quoting the marker never count. So the session carries ONE live copy per flavor, a
   compaction that drops the copy from Pi's projection naturally re-injects, and another flavor's
   live copy under a shared customType never suppresses the selected flavor. Installer order:
-  guarded full-branch read (failure → return, `select` never called) → `select` (eligibility +
-  flavor from full-branch state) → off-table key refused → the submitting `event.prompt` carrying
+  guarded full-branch read (failure → return, `select` never called) → the runner fence (a runner
+  child selects nothing — `select` never called) → `select` (eligibility + flavor from
+  full-branch state) → off-table key refused → the submitting `event.prompt` carrying
   the **selected** marker suppresses (cold delivery before persistence; another flavor's marker
   does not) → guarded projection read (failure → return, nothing constructed) → the typed live
   check → the content thunk runs only on a miss. **Retention follows selection** — `spec.select`
@@ -5614,12 +5602,12 @@ nothing, the subset being shared).
   arrays survive byte-for-byte, `<untrusted_draft>` bodies, marker quotations and historical cold
   seeds included — and assistant/tool messages and other features' customs are never inspected.
   This filters the outgoing model context only: persisted transcripts and compaction summaries
-  are never rewritten. Each caller's selection is the §8.3 eligibility policy (plan: positive
-  plan evidence, never one of the dedicated stages — a plan context injected before a warm
-  `/objective-refine` is retired there; objective/gist/refinement: their exact stages;
-  plannotator: the policy's kind → one of its four flavors — plan / objective / gist /
-  refinement; tombell: eligible Perk intent or its persisted foreign-mode fallback, minus runner
-  children and the dedicated stages); the read-only mode context's own retention
+  are never rewritten. Each caller's `select` is its own stage policy (§8.3's authoring guidance
+  selection: plan guidance in every stage `isPlanGuidanceStage` admits — a plan context injected
+  before a warm `/objective-refine` is retired there; objective/gist/refinement: their exact
+  stages; plannotator's four stage-dispatched flavors — plan / objective / gist / refinement;
+  tombell: perk's mode twin or its persisted foreign-mode fallback); the runner fence sits in the
+  helper ahead of every `select`; the read-only mode context's own retention
   (`substrate/toolGating.ts`) is independent and unchanged.
 
 **Fail loudly on a missing var.** jinja2 uses `StrictUndefined` (raises `jinja2.UndefinedError`);
@@ -11933,10 +11921,9 @@ snapshots):
   `stages/objective-refine/seed.md` (cold: the door; warm: `refinementGuidance` over the
   validated context — same template, same `<untrusted_objective>` DATA fence); the
   state/pointer carrier is `contexts/objective-refinement.md` (`perk:objective-refinement-context`,
-  marker `[OBJECTIVE REFINEMENT]`, via `installInjectedContext`, selected by the §8.3
-  eligibility policy's `objective-refine` kind — gate-active, not a runner child, AND stage
-  match); plan mode and tombell yield to the dedicated kind, plannotator maps it to its
-  refinement flavor `contexts/adapters/plannotator-refinement.md`; the judgment detail is the bound skill
+  marker `[OBJECTIVE REFINEMENT]`, via `installInjectedContext`, gate-active AND stage match);
+  plan mode, tombell and plannotator defer to it (plannotator injects its refinement flavor
+  `contexts/adapters/plannotator-refinement.md`); the judgment detail is the bound skill
   `perk-objective-refine` (`stage:objective-refine`, nudge — cold via the stage trigger, warm via
   `bindingSuffix`).
 

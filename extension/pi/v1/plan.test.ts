@@ -47,6 +47,7 @@ import {
 } from "../../testing/harness.ts";
 import { approvalSave, decodePlanDraftParams, decodePlanSaveParams } from "./plan.ts";
 import { implementHereGuidance } from "./planReview.ts";
+import { PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE } from "./providers/plannotator.ts";
 
 /** Plant a draft artifact (file + verified pointer) through the branch session seam. */
 function writeSessionArtifact(
@@ -318,15 +319,60 @@ test("--plan cold start enters read-only on session_start", async () => {
     h.setFlag("plan", true);
     await h.reload();
     assert.equal(h.workflowState().mode, "read-only", "--plan enters read-only on session_start");
-    assert.equal(h.workflowState().plan_authoring, true, "--plan is an explicit authoring enter");
     assert.equal((await h.emitToolCall("write", { path: "x", content: "y" }))?.block, true);
     assert.ok(
       (await h.emitBeforeAgentStart()).some((m) => m.customType === PLAN_CONTEXT_TYPE),
-      "plan guidance follows the recorded intent",
+      "plan guidance rides the gate",
     );
   } finally {
     h.dispose();
     process.chdir(savedCwd);
+  }
+});
+
+test("a cold audit claim under the plannotator selection: [READ-ONLY MODE] delivers, but neither the plan context nor any adapter flavor — and both owned copies are stripped", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "audit" } });
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".perk", "config.toml"),
+    '[providers]\nplan = "plannotator-plan"\n',
+    "utf8",
+  );
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.inMemory(cwd),
+    env: { PERK_RUN_ID: "01RID" },
+  });
+  try {
+    assert.equal(h.workflowState().mode, "read-only", "the cold claim persisted the gate");
+    assert.equal(h.workflowState().stage, "audit");
+    const injected = await h.emitBeforeAgentStart();
+    assert.ok(
+      injected.some((m) => m.customType === "perk:mode-context"),
+      "the read-only mode guidance still delivers under the gate",
+    );
+    assert.equal(
+      injected.some((m) => m.customType === PLAN_CONTEXT_TYPE),
+      false,
+      "the audit door is excluded (read-only, authors nothing) — no plan context",
+    );
+    assert.equal(
+      injected.some((m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE),
+      false,
+      "no plannotator adapter flavor falls through to the audit door",
+    );
+    const userQuote = { role: "user", content: "[PLAN AUTHORING] quoted by the human" };
+    const surviving = await h.emitContext([
+      { customType: PLAN_CONTEXT_TYPE, content: "[PLAN AUTHORING]\nstale plan copy" },
+      {
+        customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
+        content: "[PLAN ADAPTER: PLANNOTATOR]\nstale adapter copy",
+      },
+      structuredClone(userQuote),
+    ]);
+    assert.deepEqual(surviving, [userQuote], "both owned copies retired; user input survives");
+  } finally {
+    h.dispose();
   }
 });
 
