@@ -735,15 +735,16 @@ the single read-only authority. Beside the gate, the same rebuild points apply *
 `stage` field (§8.40) — fail-open where the gate is fail-closed.
 
 **Authoring guidance selection.** Plan guidance rides the read-only gate for every stage
-`isPlanGuidanceStage` admits (`extension/pi/v1/contextInjection.ts`): the dedicated
-objective/gist/refinement stages, `objective-save`, and the read-only `audit` door are owned
-elsewhere; a stage-less warm `/plan`, the cold `plan`/`objective-plan` claims and a worktree
-stage with `/plan` on are admitted. The objective/gist/refinement contexts key on (gate AND
+`isPlanGuidanceStage` admits (`extension/pi/v1/contextInjection.ts`). Excluded, for one of two
+reasons: the stages another context OWNS (the dedicated objective/gist/refinement stages, plus
+`objective-save` via `plan_review`'s objective-arm routing), and the read-only `audit` door,
+which authors nothing. Admitted: a stage-less warm `/plan`, the cold `plan`/`objective-plan`
+claims, a worktree stage with `/plan` on. The objective/gist/refinement contexts key on (gate AND
 their exact stage). NO injected authoring or adapter context reaches a runner child: the fence is
 `installInjectedContext`'s third argument, fed the composition root's `runnerChild` closure (the
 `isRunnerChild` bit of the runner restriction floor below, re-read every `session_start`) —
-suppression only, never a grant; the `[READ-ONLY MODE]` guidance and the
-engine's child tools (`structured_output`/`contact_supervisor`) are untouched.
+suppression only, never a grant; the `[READ-ONLY MODE]` guidance and the engine's child tools
+(`structured_output`/`contact_supervisor`) are untouched.
 
 **The audit-wave write binding (`audit_bundle_dir`, §8.50).** The `perk-dev audit judge` cold
 door stashes `handoff_extra={"audit_bundle_dir": <absolute bundle dir>}` in its launch handoff

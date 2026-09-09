@@ -354,7 +354,7 @@ test("a cold audit claim under the plannotator selection: [READ-ONLY MODE] deliv
     assert.equal(
       injected.some((m) => m.customType === PLAN_CONTEXT_TYPE),
       false,
-      "the audit door is owned elsewhere — no plan context",
+      "the audit door is excluded (read-only, authors nothing) — no plan context",
     );
     assert.equal(
       injected.some((m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE),

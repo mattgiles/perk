@@ -394,8 +394,8 @@ export function renderObjectiveApprovalSave(
 
 /**
  * Whether the current branch is an objective-author session (read-only gate AND stage match).
- * Fail-open: a throwing state rebuild reports false. (The runner fence lives in the shared
- * injection helper.)
+ * Fail-closed: a throwing state rebuild reports false, so no objective-authoring guidance is
+ * selected. (The runner fence lives in the shared injection helper.)
  */
 function isObjectiveAuthoring(gating: ToolGating, branch: readonly BranchEntry[]): boolean {
   if (!gating.isActive()) return false;

@@ -2,12 +2,10 @@
 // six injected authoring/adapter contexts: gist, plan, objective-authoring, refinement and the
 // plannotator/tombell plan adapters all register the same `before_agent_start` + `context` hook
 // pair around one injected, marker-dedup'd context. The MECHANICS live here — the live-evidence
-// dedup, the selection-driven retention filter, the guarded reads. Callers keep flavor selection
-// + content construction (the customType/marker vocabulary) in their `InjectedContextSpec`
-// closures; two cross-cutting rules live here — the runner fence (`installInjectedContext`'s
-// third argument: a runner child selects nothing for every owned context) and
-// `isPlanGuidanceStage` (the one stage predicate behind the plan context and the two
-// plan-adapter plan flavors).
+// dedup, the selection-driven retention filter, the guarded reads, the runner fence. Callers keep
+// flavor selection + content construction (the customType/marker vocabulary) in their
+// `InjectedContextSpec` closures; `isPlanGuidanceStage` is the one shared stage predicate (the
+// plan context and the two plan-adapter plan flavors).
 //
 // ONE decision drives both hooks: `spec.select` (the flavor to deliver this turn, or null). It
 // reads the FULL branch (`branchOf` — eligibility/state survive compaction), while the dedup
@@ -56,14 +54,13 @@ import {
 } from "./contextEvidence.ts";
 
 /**
- * The stages whose authoring guidance another context owns, so plan guidance never falls
- * through to them: the three dedicated authoring stages (their installers inject their own
- * contexts) plus `objective-save` (mirroring `plan_review`'s objective-arm routing — both
- * objective stages route there, and plannotator's objective flavor covers both), and `audit` —
- * the dev-only `perk-dev audit judge` door, a read-only registry stage that authors nothing (a
- * literal: the stage has no authoring module; the registry guard test pins it).
+ * The stages plan guidance is withheld from, for one of two reasons: another authoring context
+ * OWNS the stage (the objective/gist/refinement installers inject their own contexts;
+ * `objective-save` rides `plan_review`'s objective-arm routing), or the stage is read-only but
+ * authors nothing (`audit`, the dev-only `perk-dev audit judge` door — a literal: it has no
+ * authoring module). The registry guard test pins the set against the read-only stages.
  */
-const PLAN_GUIDANCE_OWNED_ELSEWHERE: ReadonlySet<string> = new Set([
+const PLAN_GUIDANCE_EXCLUDED_STAGES: ReadonlySet<string> = new Set([
   OBJECTIVE_AUTHOR_STAGE,
   OBJECTIVE_SAVE_STAGE,
   GIST_AUTHOR_STAGE,
@@ -72,16 +69,12 @@ const PLAN_GUIDANCE_OWNED_ELSEWHERE: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Whether plan-authoring guidance rides the read-only gate in `stage`: every stage no other
- * guidance owns is admitted — the stage-less warm `/plan` (`undefined`), the cold
- * `plan`/`objective-plan` claims, a worktree stage with `/plan` toggled on. The
- * objective/gist/refinement installers own their stages (plannotator's matching flavors follow
- * `plan_review`'s objective-arm routing, both objective stages included). An unknown stage id is
- * admitted (fail-open, like the stage tool filter); read-write stages (`save`, the worktree
- * family) are admitted but only reached when the human toggles `/plan` on in such a session.
+ * Plan guidance rides the read-only gate in every stage not excluded above: the stage-less warm
+ * `/plan` (`undefined`), the cold `plan`/`objective-plan` claims, and any other (unknown or
+ * read-write) stage id — fail-open like the stage tool filter.
  */
 export function isPlanGuidanceStage(stage: string | undefined): boolean {
-  return stage === undefined || !PLAN_GUIDANCE_OWNED_ELSEWHERE.has(stage);
+  return stage === undefined || !PLAN_GUIDANCE_EXCLUDED_STAGES.has(stage);
 }
 
 /**
@@ -157,14 +150,11 @@ function carriesMarker(content: unknown, marker: string): boolean {
  *   `{ customType, content, display: false }`.
  * - `context`: guarded branch read + the same fence + `spec.select` (a failed read or a throwing
  *   selector fails closed to null) → retain the owned customType's copies carrying the selected
- *   flavor's marker only; remove every other owned copy (all of them on null — a runner child
- *   included). No other message is inspected.
+ *   flavor's marker only; remove every other owned copy (all of them on null). No other message
+ *   is inspected.
  *
- * `runnerChild` is the composition root's per-`session_start` runner bit (§8.3) — a SUPPRESSION
- * signal only: it never grants tools or save authority. Every perk report child is a runner
- * child, so this one fence is the whole "no authoring or adapter guidance for children" rule;
- * it runs BEFORE `spec.select`, so a runner child never performs the selector's config/branch
- * reads.
+ * `runnerChild` is the composition root's per-`session_start` runner bit (§8.3): suppression
+ * only, never a grant — and ahead of `spec.select`, so a runner child performs no selector reads.
  */
 export function installInjectedContext<K extends string>(
   pi: ExtensionAPI,
@@ -175,7 +165,6 @@ export function installInjectedContext<K extends string>(
   // retain on it.
   const flavorOf = (key: K | null): string | null =>
     key !== null && spec.flavors[key] !== undefined ? key : null;
-  // ONE selection helper for both hooks: the fence, then the caller's policy.
   const selectedMarker = (ctx: ExtensionContext, branch: readonly BranchEntry[]): string | null =>
     runnerChild() ? null : flavorOf(spec.select(ctx, branch));
 

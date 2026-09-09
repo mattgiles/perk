@@ -10,25 +10,35 @@
 // pinned in each feature's own suite.
 
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import {
   type ExtensionAPI,
   type ExtensionContext,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { GIST_AUTHOR_CONTEXT_TYPE } from "../../authoring/gist/prose.ts";
+import {
+  OBJECTIVE_AUTHOR_CONTEXT_TYPE,
+  OBJECTIVE_SAVE_STAGE,
+} from "../../authoring/objective/prose.ts";
 import {
   PLAN_CONTEXT_TYPE,
   PLAN_MARKER,
   planAuthoringContextContent,
 } from "../../authoring/plan/prose.ts";
+import { REFINEMENT_CONTEXT_TYPE } from "../../authoring/refinement/prose.ts";
 import { loadRegistry } from "../../substrate/registry.ts";
 import type { BranchEntry } from "../../substrate/workflowState.ts";
-import { loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
+import { loadPerkSession, plantSession, scaffoldRepo } from "../../testing/harness.ts";
 import {
   type InjectedContextSpec,
   installInjectedContext,
   isPlanGuidanceStage,
 } from "./contextInjection.ts";
+import { PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE } from "./providers/plannotator.ts";
+import { PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE } from "./providers/tombell.ts";
 
 const CONTEXT_TYPE = "perk:test-context";
 const MARKER = "[TEST CONTEXT]";
@@ -436,7 +446,7 @@ test("a runner child selects nothing for every owned context: select is never ca
 
 // --- the plan-guidance stage predicate (the registry guard) -----------------------------------
 
-test("isPlanGuidanceStage: every read-only registry stage outside plan/objective-plan is owned elsewhere; the stage-less session and a worktree stage are admitted", () => {
+test("isPlanGuidanceStage: every read-only registry stage outside plan/objective-plan is excluded, as is the read-write objective-save; the stage-less session and a worktree stage are admitted", () => {
   const visited: string[] = [];
   for (const stage of loadRegistry().stages) {
     if (stage.mode !== "read-only") continue;
@@ -450,9 +460,98 @@ test("isPlanGuidanceStage: every read-only registry stage outside plan/objective
   // Vacuity control: the loop visited the plan claim AND the non-authoring read-only door.
   assert.ok(visited.includes("plan"), "the registry's plan stage was visited");
   assert.ok(visited.includes("audit"), "the registry's audit stage was visited");
+  // The one read-write exclusion (outside the loop above): `plan_review` routes objective-save
+  // to the objective arm, so plan guidance is withheld there too.
+  assert.equal(isPlanGuidanceStage(OBJECTIVE_SAVE_STAGE), false, "objective-save is excluded");
   assert.equal(isPlanGuidanceStage(undefined), true, "the stage-less warm /plan session");
   assert.equal(isPlanGuidanceStage("implement"), true, "a worktree stage with /plan toggled on");
 });
+
+// --- composition: the runner bit reaches every installer's fence -----------------------------
+
+/**
+ * One row per gated stage/provider pairing, naming the owned customType(s) a parent session
+ * receives there — together the rows exercise all six `installInjectedContext` callers through
+ * the composition root's REAL `() => runnerChild` closure (a constant supplier at any call site
+ * would fail its row).
+ */
+const RUNNER_FENCE_ROWS: { stage: string; provider: string; owned: string[] }[] = [
+  {
+    stage: "plan",
+    provider: "plannotator-plan",
+    owned: [PLAN_CONTEXT_TYPE, PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE],
+  },
+  { stage: "plan", provider: "tombell-plan", owned: [PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE] },
+  {
+    stage: "objective-author",
+    provider: "plannotator-plan",
+    owned: [OBJECTIVE_AUTHOR_CONTEXT_TYPE, PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE],
+  },
+  {
+    stage: "gist-author",
+    provider: "plannotator-plan",
+    owned: [GIST_AUTHOR_CONTEXT_TYPE, PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE],
+  },
+  {
+    stage: "objective-refine",
+    provider: "plannotator-plan",
+    owned: [REFINEMENT_CONTEXT_TYPE, PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE],
+  },
+];
+
+for (const row of RUNNER_FENCE_ROWS) {
+  test(`composition: a runner child (PI_SUBAGENT_CHILD=1) in a gated ${row.stage} session under ${row.provider} receives none of the owned contexts and retains none; a parent over the same session receives them all`, async () => {
+    const cwd = scaffoldRepo();
+    mkdirSync(join(cwd, ".perk"), { recursive: true });
+    writeFileSync(
+      join(cwd, ".perk", "config.toml"),
+      `[providers]\nplan = "${row.provider}"\n`,
+      "utf8",
+    );
+    const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-only", stage: row.stage }]);
+    const has = (injected: { customType?: string }[], customType: string) =>
+      injected.some((m) => m.customType === customType);
+
+    const runner = await loadPerkSession({
+      cwd,
+      sessionManager: SessionManager.open(file),
+      env: { PERK_RUN_ID: undefined, PI_SUBAGENT_CHILD: "1" },
+    });
+    try {
+      assert.equal(runner.workflowState().mode, "read-only", "the gate is on");
+      assert.equal(runner.workflowState().stage, row.stage);
+      const injected = await runner.emitBeforeAgentStart();
+      assert.ok(has(injected, "perk:mode-context"), "[READ-ONLY MODE] still delivers");
+      for (const customType of row.owned) {
+        assert.equal(has(injected, customType), false, `${customType} is fenced off the runner`);
+      }
+      const userQuote = { role: "user", content: `${PLAN_MARKER} quoted by the human` };
+      const surviving = await runner.emitContext([
+        ...row.owned.map((customType) => ({ customType, content: "an inherited owned copy" })),
+        structuredClone(userQuote),
+      ]);
+      assert.deepEqual(surviving, [userQuote], "every owned copy retired; the user turn survives");
+    } finally {
+      runner.dispose();
+    }
+
+    // The control: a parent over the SAME session receives every owned context — the fence, not
+    // the gate or the stage, suppressed them above.
+    const parent = await loadPerkSession({
+      cwd,
+      sessionManager: SessionManager.open(file),
+      env: { PERK_RUN_ID: undefined, PI_SUBAGENT_CHILD: undefined },
+    });
+    try {
+      const injected = await parent.emitBeforeAgentStart();
+      for (const customType of row.owned) {
+        assert.ok(has(injected, customType), `${customType} is delivered to a parent`);
+      }
+    } finally {
+      parent.dispose();
+    }
+  });
+}
 
 // --- composition smoke: the REAL registered extension rides the projection leaf -----------------
 
