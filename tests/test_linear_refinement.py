@@ -1703,3 +1703,107 @@ def test_phase1_gate_linear_refinement_persistence(
     )
     header = after.header
     assert (header.get("delivery") == "stacked") is (delivery is objective.DeliveryPolicy.STACKED)
+
+
+# --------------------------------------------------------------------------- node-context assembly
+
+
+def test_node_context_assembly_over_linear_is_read_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The selected-node advisory assembly (§8.26) composes the two existing reads over the REAL
+    Linear store + adapter: a present refinement renders the full Markdown verbatim and
+    snapshots to disk, with zero mutations and zero non-comment/roadmap/comment-count drift;
+    a later source change reads as ``source_changed: yes`` with the full body still delivered;
+    the GitHub and dormant stores report ``unsupported`` quietly without any network."""
+    from perk.cli.commands.objective.node_context import (
+        assemble_node_context,
+        refinement_path,
+        snapshot_refinement,
+    )
+    from perk.github import _exec as gh_exec
+
+    ws, store, issues = _harness()
+    obj_id = _seed(store)
+    node_issue = _node_issue(ws, obj_id, "1.2")
+    ws.add_human_comment(str(node_issue["identifier"]), "please keep the scope tight")
+    read = service.select_refinement_target(store, issues, objective_id=obj_id, node_id="1.2")
+    saved = service.save_node_refinement(
+        store,
+        issues,
+        request=RefinementSaveRequest(
+            document=_document(read.target, LONG_MARKDOWN), expected=read.expected
+        ),
+    )
+    roadmap_before = store.get_objective(objective_id=obj_id)
+    state_before = _non_comment_state(ws)
+    comment_count_before = len(ws.comments_of(node_issue))
+    start = len(ws.requests)
+
+    context = assemble_node_context(
+        store, objective_id=obj_id, node_id="1.2", issues=lambda: issues
+    )
+    assert context.engagement_status == "present"
+    assert context.engagement_block is not None
+    assert "please keep the scope tight" in context.engagement_block
+    assert context.refinement_status == "present"
+    assert context.refinement_comment_id == saved.comment.id
+    assert context.refinement_block is not None
+    assert LONG_MARKDOWN in context.refinement_block
+    assert "source_changed: no" in context.refinement_block
+    assert f"comment_id: {saved.comment.id}" in context.refinement_block
+    assert context.warnings == ()
+
+    snapped = snapshot_refinement(context, repo_root=tmp_path, run_id="01CTXRUN")
+    assert snapped.refinement_status == "present"
+    assert snapped.refinement_file is not None
+    expected_path = refinement_path(tmp_path, "01CTXRUN", objective_id=obj_id, node_id="1.2")
+    assert snapped.refinement_file.path == expected_path
+    assert expected_path.read_text(encoding="utf-8") == context.refinement_block + "\n"
+    assert snapped.refinement_file.bytes == len((context.refinement_block + "\n").encode())
+
+    # Zero effects: no mutation, roadmap + non-comment state + comment count untouched.
+    assert _mutations(ws, start) == []
+    assert store.get_objective(objective_id=obj_id) == roadmap_before
+    assert _non_comment_state(ws) == state_before
+    assert len(ws.comments_of(node_issue)) == comment_count_before
+
+    # A later source change is advisory: the block flips to "yes" with both digests, full body.
+    store.update_objective_node(objective_id=obj_id, node_id="1.2", description="changed")
+    changed = assemble_node_context(
+        store, objective_id=obj_id, node_id="1.2", issues=lambda: issues
+    )
+    assert changed.refinement_status == "present"
+    assert changed.refinement_block is not None
+    assert "source_changed: yes" in changed.refinement_block
+    stored = saved.document.source_digest
+    current = _target(store, obj_id, "1.2").source_digest
+    assert stored != current
+    assert f"source_digest: stored {stored} · current {current}" in changed.refinement_block
+    assert LONG_MARKDOWN in changed.refinement_block
+
+    # GitHub: unsupported, quiet, and no gh invocation at all.
+    def no_gh(*args: object, **kwargs: object) -> object:
+        raise AssertionError("gh must not be invoked by the node-context assembly")
+
+    monkeypatch.setattr(gh_exec, "_run", no_gh)
+    github = assemble_node_context(
+        GitHubObjectiveStore(tmp_path),
+        objective_id="1",
+        node_id="1.1",
+        issues=lambda: GitHubIssueBackend(tmp_path),
+    )
+    assert github.refinement_status == "unsupported"
+    assert github.engagement_status == "absent"
+    assert github.warnings == ()
+
+    # The dormant issue-backed Linear store: unsupported before any request.
+    dormant_ws = FakeLinearWorkspace()
+    dormant = LinearObjectiveStore(dormant_ws, team_key=_TEAM_KEY, repo_root=REPO)
+    dormant_issues = LinearIssueBackend(dormant_ws, team_key=_TEAM_KEY, repo_root=REPO)
+    dormant_context = assemble_node_context(
+        dormant, objective_id="ENG-1", node_id="1.1", issues=lambda: dormant_issues
+    )
+    assert dormant_context.refinement_status == "unsupported"
+    assert dormant_context.warnings == ()
+    assert dormant_ws.requests == []
