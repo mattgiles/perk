@@ -102,56 +102,23 @@ waivers remain separately scoped; no case is retroactively passed.
 
 ## Foreground resolver delegation (bounded offline compatibility)
 
-Both submit/address PR resolution and retained stack resolution use public structured foreground
-delegation, not async RPC, ReportWave or model-authored scripts. Retained invocations are awaited
-inside `objective_stack_sync`, with their own activation-local authorization after canonical
-preparation; they target the retained worktree, not the parent checkout. Its sole transport/public-loader carrier is
-`extension/pi/v1/delivery/conflictResolverEngine.ts`. The loader starts from the registered
-`subagent` tool's `sourceInfo.path`, walks real package ancestry, requires manifest-declared
-`./preflight` and `./delegation`, and loads only the realpath-contained public preflight using the
-engine's own jiti. These exports and the installed `docs/extension-api.md` are the public
-integration contract. Private parser/bridge/result adapter sources are separately inspected and
-loaded only by compatibility tests, never production. Missing/malformed/escaping exports fail
-unavailable; no installation or global fallback is authorized.
-
-Run these **offline**, with no model/rebase/push experiment:
+Both resolver surfaces (PR and retained) emit on pi-subagents' public delegation event family
+(`./delegation` constants carried as literals in `conflictResolverEngine.ts`, confined there by the
+import guard) — no loader, preflight or profile evidence; presence is Pi's tool census (no
+`subagent` tool → `unavailable`, no lock). Run offline, with no model/rebase/push experiment:
 
 ```bash
-node --test extension/pi/v1/delivery/conflictResolverEngineCompat.test.ts
-node --test extension/pi/v1/delivery/conflictResolverEngine.test.ts extension/pi/v1/delivery/submitConflict.test.ts extension/pi/v1/delivery/stackConflictResolver.test.ts extension/pi/v1/delivery/stackSyncNative.test.ts
-node --test extension/substrate/worktreeResolverLock.test.ts extension/substrate/resolverLease.test.ts
+node --test extension/pi/v1/delivery/conflictResolverEngine.test.ts extension/pi/v1/delivery/submitConflict.test.ts extension/pi/v1/delivery/stackConflictResolver.test.ts extension/pi/v1/delivery/stackSyncNative.test.ts extension/substrate/worktreeResolverLock.test.ts extension/substrate/resolverLease.test.ts
 ```
 
-The installed suite must actually execute in an implementing checkout; only an absent optional
-installation on clean CI is a skip. A present incompatible installation fails. Check the public
-export event literals/full correlation tuple, actual-cwd canonical profile discovery, native model
-selection/fallbacks, foreground-only behavior against background defaults, acceptance-disable and
-mode-specific plain-JSON schema and submit-conflict/retained-conflict node-ID forwarding, config-path parity with native `getConfigPath`, result projection and
-exact-tuple cancellation. The cancellation leg must reach real `runSync` with a fake
-ChildSessionFactory for both modes, not only a simulated bridge. Exercise retained linked-worktree
-cwd, exact sentinel task, no PR push field/aborted outcome, completed/passed offer-only classification,
-shared target exclusion and parent-context invalidation. Private installed imports remain test-only.
-TypeBox's non-enumerable metadata must not enter the native plain-JSON request.
-
-The narrow `worktree` setting comes from `join(getAgentDir(), "extensions/subagent/config.json")`.
-Missing/absent/false are compatible; true, nonboolean, malformed/unreadable or activation-changed
-settings refuse, stamping `nativeWorktreeConfig {path, observed, atActivation}` on the receipt.
-The adapter never rewrites settings or allocates a second worktree; the repair is the Python
-plane's `subagent-worktree-default` managed convergence (`perk init` / `perk doctor --fix`),
-which targets the launch-precedence agent dir (`PI_CODING_AGENT_DIR` → `[pi] agent_dir` →
-`~/.pi/agent`, the `launch_pi_agent_dir` resolver shared with `launch_stage`) — then reload. Preflight/config observations are not atomic against concurrent source edits.
-The persistent canonical Git-directory execution lock survives reload and process death; do not
-use compatibility testing as an unlock gesture. See the
-[human-only recovery procedure](../user-docs/how-to/recover-a-dirty-worktree.md#recover-a-retained-submit-conflict-lock).
-
-These checks corroborate launch/result plumbing and conservative ownership, not a live resolver,
-independent verification, or remote mergeability certificate. They do **not** advance the full
-compatibility baseline/doctor stamp, change Pi pins, or change the
-retained-operation session-claim policy. That claim stays held across child completion and cannot
-bypass the execution lock. Post-result render/send failures must preserve explicit resolution or
-the original automatic cold refusal and append one delivery-unconfirmed tool diagnostic; a
-secondary warning failure must not erase that result. Consent tests are scripted actions, not
-autonomous model evidence. Canonical Python continuation is separately approved and revalidated.
+The global `worktree` default (the agent dir's `extensions/subagent/config.json`, read once at
+engine activation) refuses every dispatch unless missing/absent/`false`, naming path, observation
+and fix; perk never rewrites it. Protocol drift in a newer pi-subagents shows as a no-ack
+cancellation with a retained lock (`doctor subagent-compat`'s version warning is the early signal).
+Checks corroborate plumbing, not a live resolver; the session claim never bypasses the execution
+lock, delivery failures keep the settled result plus one delivery-unconfirmed diagnostic, and
+consent tests are scripted. The lock survives reload and process death: see [human-only
+recovery](../user-docs/how-to/recover-a-dirty-worktree.md#recover-a-retained-submit-conflict-lock).
 
 ## Native partial report settlement (additive offline compatibility)
 

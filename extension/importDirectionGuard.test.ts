@@ -630,12 +630,11 @@ test("Rule H: storage-free feature homes never import the storage interior", () 
 
 // Native foreground conflict dispatch is deliberately independent of the report-wave family.
 const CONFLICT_ENGINE = "pi/v1/delivery/conflictResolverEngine.ts";
-const CONFLICT_TRANSPORT_TOKEN =
-  /prompt-template:subagent:|resolveSubagentLaunchContract|["']\.\/(?:preflight|delegation)["']/;
+const CONFLICT_TRANSPORT_TOKEN = /prompt-template:subagent:/;
 const PRIVATE_CONFLICT_EXECUTOR =
   /src\/runs\/foreground|\brunSync\b|\bexecuteDelegated\b|workflowScript/;
 
-test("Rule I: foreground delegation/public loading is confined, conflicts never use waves or private execution", () => {
+test("Rule I: the delegation event family is confined to the engine; conflicts never use waves or private execution", () => {
   const { files, edges } = scan();
   assert.deepEqual(
     files.filter((file) => CONFLICT_TRANSPORT_TOKEN.test(readProductionFile(file))),
@@ -664,19 +663,10 @@ test("Rule I: foreground delegation/public loading is confined, conflicts never 
     [],
   );
   assert.ok(edges.get(CONFLICT_ENGINE)?.includes("substrate/worktreeResolverLock.ts"));
-  assert.deepEqual(
-    files.filter((file) => /loadResolverPreflight\s*\(/.test(readProductionFile(file))),
-    [CONFLICT_ENGINE],
-  );
 });
 
-test("Rule I controls: raw channels/public loader/private execution and conflict→wave edges bite", () => {
-  for (const source of [
-    'events.emit("prompt-template:subagent:request", data)',
-    "module.resolveSubagentLaunchContract(input)",
-    'exports["./preflight"]',
-  ])
-    assert.ok(CONFLICT_TRANSPORT_TOKEN.test(source));
+test("Rule I controls: raw channels/private execution and conflict→wave edges bite", () => {
+  assert.ok(CONFLICT_TRANSPORT_TOKEN.test('events.emit("prompt-template:subagent:request", data)'));
   for (const source of [
     "runSync()",
     "executeDelegated()",

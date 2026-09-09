@@ -221,3 +221,23 @@ A report-only code-improvement lead surfaced during a dream, citing a **survivin
 (a final-`keep`/`revise` doc, or a cluster named by one); never curation-roadmap work and never
 a minted issue.
 _Avoid_: code TODO, side quest
+
+**Execution lock**:
+The per-worktree `perk-submit-conflict.lock` (`worktreeResolverLock.ts`) that serializes
+participating conflict resolvers on one canonical Git directory; busy for any incumbent, never
+reclaimed; released by a correlated native `completed` terminal or a pre-launch refusal
+(`invalid_request`/`unavailable_context`/`duplicate_node`) with no start evidence, otherwise
+retained for a human.
+_Avoid_: resolver lock, file claim, lease
+
+**Resolver session claim**:
+The `<manifest>.resolver-lock` lease (`resolverLease.ts`) a `/objective-sync` invocation holds for
+the retained operation; same-PID reacquire and dead-PID reclamation permitted; never bypasses the
+execution lock.
+_Avoid_: lock, resolver lock
+
+**Native worktree default**:
+pi-subagents' global `worktree` setting in `<agent dir>/extensions/subagent/config.json`, applied
+to every delegation that omits the field and read by both engines once at activation; perk
+observes and refuses, never converges it.
+_Avoid_: worktree allocation default, perk-managed worktree setting

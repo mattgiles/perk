@@ -1,12 +1,10 @@
-// Sole carrier of the optional source-bound public loader and native foreground delegation.
-// No report-wave transport, private executor, task interpolation by the parent, or fallback.
+// Sole carrier of the public delegation event literals: one foreground request per authorized
+// dispatch with no restriction packet and no fallback transport.
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { readFileSync, statSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
-  type CONFLICT_RESOLUTION_SCHEMA,
   type ConflictResolutionFailure,
   type ConflictResolutionReceipt,
   type ConflictResolutionRequest,
@@ -15,13 +13,9 @@ import {
   classifyConflictResolution,
   conflictResolutionSchema,
   conflictResolutionTask,
-  type NativeWorktreeDefault,
   retainedConflictResolutionTask,
 } from "../../../delivery/conflictResolution.ts";
-import {
-  acquireWorktreeResolverLock,
-  type WorktreeResolverClaim,
-} from "../../../substrate/worktreeResolverLock.ts";
+import { acquireWorktreeResolverLock } from "../../../substrate/worktreeResolverLock.ts";
 
 export const DELEGATION_EVENTS = {
   request: "prompt-template:subagent:request",
@@ -31,7 +25,6 @@ export const DELEGATION_EVENTS = {
   cancel: "prompt-template:subagent:cancel",
 } as const;
 export const RESOLVER_AGENT = "perk.conflict-resolver";
-const WRITER_TOOLS = ["read", "grep", "find", "ls", "bash", "edit", "write"];
 const STATUSES = new Set([
   "completed",
   "failed",
@@ -54,24 +47,10 @@ export interface DelegationEvents {
   on(event: string, handler: (data: unknown) => void): () => void;
   emit(event: string, data: unknown): void;
 }
-export interface ResolverPreflightInput {
-  agent: string;
-  task: string;
-  cwd: string;
-  context: "fresh";
-  model?: string;
-  outputSchema: typeof CONFLICT_RESOLUTION_SCHEMA;
-  availableModels: readonly { provider: string; id: string; reasoning?: boolean }[];
-  parentModel?: { provider: string; id: string };
-}
-export type ResolverPreflight = (input: ResolverPreflightInput) => Promise<unknown>;
 function object(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
-}
-function strings(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((v) => typeof v === "string");
 }
 function identifier(value: unknown): value is string {
   return (
@@ -79,133 +58,48 @@ function identifier(value: unknown): value is string {
   );
 }
 
-/** The only accepted dependency root is the real registered subagent tool's ancestry. */
-export async function loadResolverPreflight(
-  entry: string | undefined,
-): Promise<ResolverPreflight | null> {
-  if (!entry) return null;
-  try {
-    let root = dirname(realpathSync(entry));
-    for (;;) {
-      const manifestPath = join(root, "package.json");
-      if (existsSync(manifestPath)) {
-        const manifest = object(JSON.parse(readFileSync(manifestPath, "utf8")));
-        if (manifest?.name === "pi-subagents") {
-          const exports = object(manifest.exports);
-          let preflightPath: string | undefined;
-          for (const name of ["./preflight", "./delegation"]) {
-            const target = exports?.[name];
-            if (typeof target !== "string" || !target.startsWith("./")) return null;
-            const file = realpathSync(resolve(root, target));
-            const rel = relative(root, file);
-            if (
-              rel === ".." ||
-              rel.startsWith(`..${sep}`) ||
-              isAbsolute(rel) ||
-              !statSync(file).isFile()
-            )
-              return null;
-            if (name === "./preflight") preflightPath = file;
-          }
-          // Only preflight is loaded in production. The public delegation export pins these
-          // local event literals in installed compatibility tests, not another runtime loader.
-          const require = createRequire(manifestPath);
-          const loader: unknown = require("jiti");
-          if (
-            (typeof loader !== "object" && typeof loader !== "function") ||
-            loader === null ||
-            !("createJiti" in loader) ||
-            typeof loader.createJiti !== "function" ||
-            preflightPath === undefined
-          )
-            return null;
-          const jiti = loader.createJiti(manifestPath) as {
-            import?: (path: string) => Promise<unknown>;
-          };
-          if (typeof jiti.import !== "function") return null;
-          const module = object(await jiti.import(preflightPath));
-          if (typeof module?.resolveSubagentLaunchContract !== "function") return null;
-          const preflight = module.resolveSubagentLaunchContract;
-          return async (input) => preflight(input);
-        }
-      }
-      const next = dirname(root);
-      if (next === root) return null;
-      root = next;
-    }
-  } catch {
-    return null;
-  }
-}
-
 export function nativeWorktreeConfigPath(): string {
   return join(getAgentDir(), "extensions/subagent/config.json");
 }
-export function nativeWorktreeDefault(path: string): NativeWorktreeDefault {
-  try {
-    const config = object(JSON.parse(readFileSync(path, "utf8")));
-    if (config === null) return "incompatible";
-    if (!("worktree" in config)) return "absent";
-    return config.worktree === false ? "false" : "incompatible";
-  } catch (error) {
-    return object(error)?.code === "ENOENT" ? "missing" : "incompatible";
-  }
-}
 
-function profileEvidence(
-  value: unknown,
-  cwd: string,
-): ConflictResolutionReceipt["preflight"] | null {
-  const result = object(value);
-  const c = object(result?.contract);
-  const agent = object(c?.agent);
-  const tools = object(c?.tools);
-  const roots = object(c?.roots);
-  if (result?.ok !== true || !c || !agent || !tools || !roots) return null;
-  const declared = tools.declaredBuiltin;
-  const effective = tools.effectiveAllowlist;
-  const internal = tools.internalTools;
-  if (
-    agent.name !== RESOLVER_AGENT ||
-    agent.source !== "project" ||
-    (agent.disabled !== undefined && agent.disabled !== false) ||
-    !Array.isArray(agent.shadowedCandidates) ||
-    agent.shadowedCandidates.length !== 0 ||
-    typeof agent.filePath !== "string" ||
-    typeof agent.definitionDigest !== "string" ||
-    c.systemPromptMode !== "replace" ||
-    c.inheritProjectContext !== true ||
-    c.inheritSkills !== true ||
-    c.inheritGlobalContext !== false ||
-    c.context !== "fresh" ||
-    !identifier(c.model) ||
-    !strings(c.modelCandidates) ||
-    c.modelCandidates.length === 0 ||
-    roots.cwd !== resolve(cwd) ||
-    !strings(declared) ||
-    declared.length !== WRITER_TOOLS.length ||
-    !WRITER_TOOLS.every((t) => declared.includes(t)) ||
-    !strings(effective) ||
-    !strings(internal) ||
-    tools.fanoutAuthorized !== false ||
-    tools.explicitAllowlist !== true ||
-    effective.some((t) => !WRITER_TOOLS.includes(t) && !internal.includes(t)) ||
-    WRITER_TOOLS.some((t) => !effective.includes(t)) ||
-    !Array.isArray(c.diagnostics) ||
-    c.diagnostics.some((d) => object(d)?.severity === "error") ||
-    !identifier(c.launchContractDigest)
-  )
-    return null;
-  for (const field of ["configuredExtensions", "toolExtensionPaths", "effectiveMcpTools"]) {
-    if (!Array.isArray(tools[field]) || tools[field].length !== 0) return null;
-  }
+type NativeWorktreeVerdict = { compatible: true } | { compatible: false; observed: string };
+
+/**
+ * pi-subagents applies its global `worktree` default to every delegation that omits the field
+ * and reads that file once at ITS activation, so perk reads it once at engine activation too.
+ * Deliberately stricter than the engine's own fallback: only a missing file, an absent key or
+ * an explicit `false` lets a writer launch; any other state is refused with what was observed,
+ * because perk will not infer from pi-subagents' private fallback rules what a broken config
+ * file will do — and perk never rewrites the file. The observation reaches the receipt and the
+ * model-facing diagnostics, so it is bounded and never content-bearing: only JSON scalars that
+ * cannot carry text (booleans, numbers, null) are rendered; a string, array or object is named
+ * by type alone.
+ */
+function readNativeWorktreeDefault(path: string): NativeWorktreeVerdict {
+  let text: string;
   try {
-    const canonical = realpathSync(join(cwd, ".pi/agents/perk/conflict-resolver.md"));
-    if (realpathSync(agent.filePath) !== canonical) return null;
-    return { source: canonical, digest: c.launchContractDigest };
-  } catch {
-    return null;
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    const code = object(error)?.code;
+    if (code === "ENOENT") return { compatible: true };
+    const errno = typeof code === "string" && /^[A-Z0-9_]{1,32}$/.test(code) ? code : "unknown";
+    return { compatible: false, observed: `unreadable (${errno})` };
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { compatible: false, observed: "unparseable JSON" };
+  }
+  const config = object(parsed);
+  if (config === null) return { compatible: false, observed: "not a JSON object" };
+  if (!("worktree" in config) || config.worktree === false) return { compatible: true };
+  const value = config.worktree;
+  const observed =
+    value === null || typeof value === "boolean" || typeof value === "number"
+      ? `worktree=${JSON.stringify(value)}`
+      : `worktree is ${Array.isArray(value) ? "an array" : typeof value === "object" ? "an object" : `a ${typeof value}`}`;
+  return { compatible: false, observed };
 }
 
 interface Terminal {
@@ -214,11 +108,10 @@ interface Terminal {
   runId?: string;
   agent?: string;
   exitCode?: number;
-  launchContractDigest?: string;
 }
 function terminal(value: Record<string, unknown>): Terminal | null {
   if (typeof value.status !== "string" || !STATUSES.has(value.status)) return null;
-  for (const key of ["runId", "agent", "launchContractDigest"]) {
+  for (const key of ["runId", "agent"]) {
     if (value[key] !== undefined && !identifier(value[key])) return null;
   }
   if (
@@ -262,51 +155,40 @@ function terminal(value: Record<string, unknown>): Terminal | null {
     ...(typeof value.runId === "string" ? { runId: value.runId } : {}),
     ...(typeof value.agent === "string" ? { agent: value.agent } : {}),
     ...(typeof value.exitCode === "number" ? { exitCode: value.exitCode } : {}),
-    ...(typeof value.launchContractDigest === "string"
-      ? { launchContractDigest: value.launchContractDigest }
-      : {}),
   };
 }
 
 export interface ConflictResolverEngineOptions {
   events: DelegationEvents;
-  engineEntry: () => string | undefined;
+  /**
+   * Pi's public tool census says pi-subagents' `subagent` tool is registered — the only
+   * engine-presence fact perk reads; a false answer refuses before any lock.
+   */
+  enginePresent: () => boolean;
   readOnly: () => boolean;
   authorized: (request: ConflictResolutionRequest) => boolean;
-  availableModels: () => ResolverPreflightInput["availableModels"];
-  parentModel?: () => ResolverPreflightInput["parentModel"];
   /** Offline seams are construction-only, never model/tool input. */
-  preflight?: ResolverPreflight;
   configPath?: string;
   acquire?: typeof acquireWorktreeResolverLock;
-}
-
-/** Stop waiting for read-only preflight on abort; a late result can never cause dispatch. */
-async function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T | undefined> {
-  if (signal.aborted) return undefined;
-  let abort = () => {};
-  const cancelled = new Promise<undefined>((settle) => {
-    abort = () => settle(undefined);
-    signal.addEventListener("abort", abort, { once: true });
-  });
-  try {
-    return await Promise.race([promise, cancelled]);
-  } finally {
-    signal.removeEventListener("abort", abort);
-  }
 }
 
 export function createConflictResolverEngine(
   options: ConflictResolverEngineOptions,
 ): ConflictResolver & { shutdown(): Promise<void> } {
   const configPath = options.configPath ?? nativeWorktreeConfigPath();
-  const configAtActivation = nativeWorktreeDefault(configPath);
-  let loaded: Promise<ResolverPreflight | null> | undefined;
+  const nativeWorktree = readNativeWorktreeDefault(configPath);
   let disposed = false;
   const active = new Map<AbortController, Promise<ConflictResolutionResult>>();
   function allowed(request: ConflictResolutionRequest): boolean {
     try {
       return !disposed && !options.readOnly() && options.authorized(request);
+    } catch {
+      return false;
+    }
+  }
+  function present(): boolean {
+    try {
+      return options.enginePresent();
     } catch {
       return false;
     }
@@ -321,27 +203,11 @@ export function createConflictResolverEngine(
       requestId: randomUUID(),
       nodeId: request.mode === "pr-rebase" ? "submit-conflict" : "retained-conflict",
       cwd: request.worktree,
-      disposition: "preflight",
       termination: "not-requested",
       lock: { disposition: "not-acquired" },
     };
     function failed(reason: ConflictResolutionFailure): ConflictResolutionResult {
-      receipt.disposition = reason;
       return { kind: "failed", reason, receipt };
-    }
-    /**
-     * Re-read the native worktree default at a gate. Every refusal names the file and both
-     * observations on the receipt, so the diagnostic points at the exact path to repair.
-     */
-    function worktreeRefusal(): "incompatible-worktree-default" | null {
-      const observed = nativeWorktreeDefault(configPath);
-      if (observed !== "incompatible" && observed === configAtActivation) return null;
-      receipt.nativeWorktreeConfig = {
-        path: configPath,
-        observed,
-        atActivation: configAtActivation,
-      };
-      return "incompatible-worktree-default";
     }
     if (signal.aborted) return failed("cancelled");
     if (!allowed(request)) return failed("unauthorized");
@@ -355,43 +221,11 @@ export function createConflictResolverEngine(
     } catch {
       return failed("invalid-worktree");
     }
-    const preRefusal = worktreeRefusal();
-    if (preRefusal) return failed(preRefusal);
-    let proof: ConflictResolutionReceipt["preflight"];
-    try {
-      loaded ??= options.preflight
-        ? Promise.resolve(options.preflight)
-        : loadResolverPreflight(options.engineEntry());
-      const preflight = await untilAborted(loaded, signal);
-      if (signal.aborted) return failed("cancelled");
-      if (!preflight) return failed("unavailable");
-      const parentModel = options.parentModel?.();
-      proof =
-        profileEvidence(
-          await untilAborted(
-            preflight({
-              agent: RESOLVER_AGENT,
-              cwd: request.worktree,
-              task,
-              context: "fresh",
-              outputSchema: conflictResolutionSchema(request.mode),
-              availableModels: options.availableModels(),
-              ...(parentModel ? { parentModel } : {}),
-              ...(request.model !== undefined ? { model: request.model } : {}),
-            }),
-            signal,
-          ),
-          request.worktree,
-        ) ?? undefined;
-    } catch {
-      return failed("unavailable");
+    if (!present()) return failed("unavailable");
+    if (!nativeWorktree.compatible) {
+      receipt.nativeWorktreeConfig = { path: configPath, observed: nativeWorktree.observed };
+      return failed("incompatible-worktree-default");
     }
-    if (signal.aborted) return failed("cancelled");
-    if (!allowed(request)) return failed("unauthorized");
-    if (!proof) return failed("incompatible-profile");
-    receipt.preflight = proof;
-    const postRefusal = worktreeRefusal();
-    if (postRefusal) return failed(postRefusal);
     const acquisition = (options.acquire ?? acquireWorktreeResolverLock)(request.worktree, {
       ...request.parent,
       requestId: receipt.requestId,
@@ -420,27 +254,11 @@ export function createConflictResolverEngine(
           ? "lock-io"
           : null;
     }
-    // Post-lock gate: the lock is released first (its failure wins), then the gate's own
-    // reason — cancelled, else the stamped worktree refusal, else unauthorized.
-    const lockedRefusal = signal.aborted
-      ? "cancelled"
-      : (worktreeRefusal() ??
-        (!allowed(request) || claim.check() !== "owned" ? "unauthorized" : null));
-    if (lockedRefusal) return failed(finishLock(true) ?? lockedRefusal);
-    const result = await waitForTerminal(
-      options.events,
-      request,
-      task,
-      receipt,
-      claim,
-      signal,
-      () => (allowed(request) ? worktreeRefusal() : "unauthorized"),
-    );
+    const result = await waitForTerminal(options.events, request, task, receipt, signal);
     const lockFailure = finishLock(result.release);
     if (lockFailure) return failed(lockFailure);
     if (result.failure) return failed(result.failure);
     if (!result.terminal) return failed("termination-unconfirmed");
-    receipt.disposition = "terminal";
     return classifyConflictResolution(
       request.mode,
       result.terminal.status,
@@ -475,9 +293,7 @@ function waitForTerminal(
   request: ConflictResolutionRequest,
   task: string,
   receipt: ConflictResolutionReceipt,
-  claim: WorktreeResolverClaim,
   signal: AbortSignal,
-  refusal: () => ConflictResolutionFailure | null,
 ): Promise<WaitResult> {
   return new Promise((resolveResult) => {
     const tuple = {
@@ -540,13 +356,11 @@ function waitForTerminal(
       const release = t.status === "completed" || (PRELAUNCH.has(t.status) && !started);
       receipt.nativeStatus = t.status;
       receipt.termination = release ? "confirmed" : "unconfirmed";
-      for (const key of ["runId", "agent", "exitCode", "launchContractDigest"] as const) {
+      for (const key of ["runId", "agent", "exitCode"] as const) {
         // Construct each whitelisted field explicitly, never spread native data.
         if (key === "runId" && t.runId !== undefined) receipt.runId = t.runId;
         if (key === "agent" && t.agent !== undefined) receipt.agent = t.agent;
         if (key === "exitCode" && t.exitCode !== undefined) receipt.exitCode = t.exitCode;
-        if (key === "launchContractDigest" && t.launchContractDigest !== undefined)
-          receipt.launchContractDigest = t.launchContractDigest;
       }
       settle({ terminal: t, ...(cancellation ? { failure: cancellation } : {}), release });
     }
@@ -581,15 +395,6 @@ function waitForTerminal(
         }),
       );
       signal.addEventListener("abort", abort, { once: true });
-      // The pre-emit gate settles with the gate's own reason (a config flip between the lock
-      // and the emission is `incompatible-worktree-default`, never collapsed to `unauthorized`).
-      const preEmit = signal.aborted
-        ? "cancelled"
-        : (refusal() ?? (claim.check() !== "owned" ? "unauthorized" : null));
-      if (preEmit) {
-        settle({ failure: preEmit, release: true });
-        return;
-      }
       ack = setTimeout(() => cancel("termination-unconfirmed"), START_ACK_MS);
       deadline = setTimeout(() => cancel("termination-unconfirmed"), REQUEST_TIMEOUT_MS);
       emitted = true;

@@ -74,18 +74,6 @@ thinking = "high"
 > absent. To opt out, set `"tuiMode": "regular"` in `.pi/settings.json`; the value survives init
 > and doctor. Pi's `/settings` toggle writes the global settings file, which the committed project
 > key overrides, so the durable opt-out is the project key itself.
->
-> **pi-subagents' native worktree default (agent dir, not the repo):** the `/submit` conflict
-> resolver drives pi-subagents through an API with no per-request `worktree` field, so the
-> engine applies its native default from `<agent dir>/extensions/subagent/config.json`. A
-> `"worktree": true` there would run the resolver in a separate managed worktree instead of the
-> conflicted one, so perk refuses the launch. `perk init`'s `subagent-worktree-default`
-> convergence (mirrored by the doctor check of the same name and `perk doctor --fix`) sets that
-> one key to `false` in place — sibling keys survive, the file is written atomically, and it is
-> **never created** when absent (an absent file or key is already compatible). The agent dir it
-> targets is the one a perk session launches with: `PI_CODING_AGENT_DIR` → `[pi] agent_dir` →
-> `~/.pi/agent`. A path perk cannot read as a JSON object (invalid JSON or UTF-8, an unreadable
-> file, a directory) fails `perk init` (`invalid_subagent_config`) and is left untouched. A fix applied while a session is open takes effect after that session reloads.
 
 ## `[models.stages.<id>]`
 
@@ -244,11 +232,11 @@ This is not a models-only overlay: Pi's **whole config directory** moves, includ
   `~/.pi/agent/sessions` default; pass `--session-root` for redirected logs.
 - **Settings:** the global settings tier moves too; the repo's `.pi/settings.json` remains the
   project tier and still overrides global settings.
-- **pi-subagents' config:** the borrowed engine's `extensions/subagent/config.json` (its native
-  `worktree` default) moves with the directory. perk's `subagent-worktree-default` convergence
-  and its `subagent-bridge-config` check follow the redirect — operator `PI_CODING_AGENT_DIR`
-  first, then the configured `agent_dir`, then `~/.pi/agent` — so they act on exactly the store
-  a perk session's engine reads.
+- **pi-subagents' config:** the borrowed engine's `extensions/subagent/config.json` moves with
+  the directory. perk's `/submit` conflict resolver reads its `worktree` default there once at
+  extension activation and refuses to launch while it is anything but absent or `false` (naming
+  the file); the `subagent-bridge-config` check follows the same redirect — operator
+  `PI_CODING_AGENT_DIR` first, then the configured `agent_dir`, then `~/.pi/agent`.
 
 ### Diagnostics and git safety
 

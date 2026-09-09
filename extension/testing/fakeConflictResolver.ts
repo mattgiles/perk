@@ -1,10 +1,8 @@
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   DELEGATION_EVENTS,
   type DelegationEvents,
-  type ResolverPreflightInput,
 } from "../pi/v1/delivery/conflictResolverEngine.ts";
 
 export const completedResolution = {
@@ -30,53 +28,6 @@ export function retainedDispatch(worktree: string) {
     node: "2.1",
     branch: "plan-91",
     pr: 91,
-  };
-}
-export function fakeResolverProfile(cwd: string) {
-  const path = join(cwd, ".pi/agents/perk/conflict-resolver.md");
-  mkdirSync(join(cwd, ".pi/agents/perk"), { recursive: true });
-  writeFileSync(path, "offline fixture (public preflight is injected)\n");
-  return {
-    ok: true,
-    contract: {
-      agent: {
-        name: "perk.conflict-resolver",
-        source: "project",
-        filePath: realpathSync(path),
-        definitionDigest: "definition",
-        shadowedCandidates: [],
-      },
-      context: "fresh",
-      model: "offline/model",
-      modelCandidates: ["offline/model"],
-      systemPromptMode: "replace",
-      inheritProjectContext: true,
-      inheritGlobalContext: false,
-      inheritSkills: true,
-      tools: {
-        declaredBuiltin: ["read", "grep", "find", "ls", "bash", "edit", "write"],
-        effectiveAllowlist: [
-          "read",
-          "grep",
-          "find",
-          "ls",
-          "bash",
-          "edit",
-          "write",
-          "structured_output",
-        ],
-        internalTools: ["structured_output"],
-        fanoutAuthorized: false,
-        explicitAllowlist: true,
-        disableAmbientExtensions: true,
-        configuredExtensions: [],
-        toolExtensionPaths: [],
-        effectiveMcpTools: [],
-      },
-      roots: { cwd: resolve(cwd) },
-      diagnostics: [],
-      launchContractDigest: "preflight-digest",
-    },
   };
 }
 export class FakeDelegationBus implements DelegationEvents {
@@ -105,24 +56,29 @@ export function deferred<T>() {
   });
   return { promise, resolve };
 }
+/**
+ * The fake engine: answers on the public delegation event bus and registers an inert `subagent`
+ * tool so the production presence predicate (Pi's tool census) composes through every harness
+ * session. The tool itself is never the transport.
+ */
 export function fakeConflictResolver(
   cwd: string,
   script?: (bus: DelegationEvents, request: Record<string, unknown>) => void,
 ) {
-  const profile = fakeResolverProfile(cwd);
   const requests: Record<string, unknown>[] = [];
-  const preflights: ResolverPreflightInput[] = [];
   return {
     requests,
-    preflights,
-    resolverEngine: {
-      configPath: join(cwd, "absent-native-config.json"),
-      preflight: async (input: ResolverPreflightInput) => {
-        preflights.push(input);
-        return profile;
-      },
-    },
+    resolverEngine: { configPath: join(cwd, "absent-native-config.json") },
     extension(pi: ExtensionAPI) {
+      pi.registerTool({
+        name: "subagent",
+        label: "subagent",
+        description: "fake pi-subagents tool (test) — presence only",
+        parameters: { type: "object", properties: {} },
+        async execute() {
+          throw new Error("the fake engine answers on the event bus, never through the tool");
+        },
+      });
       pi.events.on(DELEGATION_EVENTS.request, (data) => {
         const r = data as Record<string, unknown>;
         requests.push(r);

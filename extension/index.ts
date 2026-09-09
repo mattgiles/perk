@@ -10,7 +10,7 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createDraftReviewWaveState } from "./authoring/review/draftContext.ts";
 import { createHunkFeedbackReceiver, type HunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
 import { installAutomatedReviewBindings } from "./pi/v1/codeReview/automated.ts";
@@ -147,7 +147,7 @@ function writeT3Sentinel(
 export default function perk(
   pi: ExtensionAPI,
   options: {
-    resolverEngine?: Pick<ConflictResolverEngineOptions, "preflight" | "configPath" | "acquire">;
+    resolverEngine?: Pick<ConflictResolverEngineOptions, "configPath" | "acquire">;
     stackResolutionDelivery?: StackResolutionDelivery;
     /**
      * Construction-only: the hunk feedback receiver factory (default `createHunkFeedbackReceiver`).
@@ -207,23 +207,14 @@ export default function perk(
   // Pi registration, order-safe.
   const reportWave = createReportWave(pi.events);
 
-  let resolverContext: ExtensionContext | undefined;
   const conflictResolver = createConflictResolverEngine({
     events: pi.events,
-    engineEntry: () => pi.getAllTools().find((tool) => tool.name === "subagent")?.sourceInfo.path,
+    enginePresent: () => pi.getAllTools().some((tool) => tool.name === "subagent"),
     readOnly: () => gating.isActive(),
     authorized: (request) =>
       request.mode === "pr-rebase"
         ? submitConflict.authorized(request)
         : stackConflict.authorized(request),
-    availableModels: () =>
-      resolverContext?.modelRegistry
-        .getAvailable()
-        .map(({ provider, id, reasoning }) => ({ provider, id, reasoning })) ?? [],
-    parentModel: () => {
-      const model = resolverContext?.model;
-      return model ? { provider: model.provider, id: model.id } : undefined;
-    },
     ...options.resolverEngine,
   });
   const submitConflict = installSubmitConflictBindings(pi, conflictResolver, () =>
@@ -326,7 +317,6 @@ export default function perk(
   pi.on("session_shutdown", async () => {
     submitConflict.shutdown();
     stackConflict.shutdown();
-    resolverContext = undefined;
     await conflictResolver.shutdown();
     feedbackReceiver.close();
   });
@@ -338,7 +328,6 @@ export default function perk(
 
     submitConflict.setContext(ctx);
     stackConflict.setContext(ctx);
-    resolverContext = ctx;
     const sessionFile = ctx.sessionManager.getSessionFile();
     const currentSessionId = sessionFile ? basename(sessionFile) : null;
 
@@ -525,7 +514,6 @@ export default function perk(
   // Non-negotiable: rebuild on branch navigation too, or state goes stale after /tree (§8.3).
   pi.on("session_tree", async (_event, ctx) => {
     stackConflict.setContext(ctx);
-    resolverContext = ctx;
     // ONE fresh full-branch rebuild; the navigation facts derive purely from it (no handoff/
     // checkout read, claim, linkage, or capture on navigation — session/lifecycle.ts owns the
     // asymmetry with startup).

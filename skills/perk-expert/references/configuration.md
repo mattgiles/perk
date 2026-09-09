@@ -334,14 +334,11 @@ review-classifier = "anthropic/claude-haiku-4-5"
 
 Both submit/address and retained stack conflict resolution consume this existing override from
 the parent session configuration through native foreground structured delegation (including `inherit` and native ordered fallbacks), not model-authored
-launch text. No new config key is added. The native engine setting `worktree` in
-`join(getAgentDir(), "extensions/subagent/config.json")` must be absent/false (or the file missing).
-True, nonboolean, malformed/unreadable or activation-changed settings refuse, naming the exact
-file and the observed state; it is perk-managed — `perk init`'s `subagent-worktree-default`
-convergence (the doctor check + `--fix` arm of the same name) sets `worktree: false` in the
-launch-precedence agent dir (`PI_CODING_AGENT_DIR` → `[pi] agent_dir` → `~/.pi/agent`) without
-creating the file; reload afterwards rather than allocating a second worktree or switching mode.
-Reload does not clear retained
+launch text. No new config key is added. pi-subagents' global `worktree` default
+(`<agent dir>/extensions/subagent/config.json`) must be absent or `false`; it is read once at
+extension activation and anything else refuses every launch of that activation, naming the file,
+the observation and the fix (set it to `false` or delete the key, then quit and resume). perk never
+rewrites that file — no init convergence or doctor check exists for it. Reload does not clear retained
 `perk-submit-conflict.lock` files in the canonical per-worktree Git directory. Recovery is human-
 only after all sessions/writers/subprocesses are quiescent; PID death alone is insufficient.
 Retained mode locks the retained target, not the parent checkout. Its manifest-side session claim

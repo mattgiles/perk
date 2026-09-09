@@ -318,11 +318,10 @@ def _fix_linear_labels(root: Path) -> tuple[list[str], list[str]]:
 def _apply_fixes(root: Path, self_repo: bool, checks: list[Check]) -> tuple[list[str], list[str]]:
     """Apply every repairable ``fail``: managed re-converge, config re-seed, install, migrations.
 
-    A managed piece the convergence cannot verify (a malformed ``.pi/settings.json`` or
-    pi-subagents ``config.json``) raises ``UserFacingCliError`` from ``converge(True)`` exactly
-    as it did from the ``apply=False`` check; it is recorded on the returned errors (rendered on
-    ``fix_errors``) instead of aborting the whole ``--fix`` — the file is untouched and every
-    other fix still runs.
+    A managed piece the convergence cannot verify (a malformed ``.pi/settings.json``) raises
+    ``UserFacingCliError`` from ``converge(True)`` exactly as it did from the ``apply=False``
+    check; it is recorded on the returned errors (rendered on ``fix_errors``) instead of
+    aborting the whole ``--fix`` — the file is untouched and every other fix still runs.
     """
     fixed: list[str] = []
     errors: list[str] = []
