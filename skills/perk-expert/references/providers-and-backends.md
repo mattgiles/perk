@@ -200,7 +200,7 @@ installation failure; selection fallback is a warning. Package drift is repaired
 | Selection | default when absent or `github` | `backend = "linear"` plus a team key |
 | Auth | authenticated `gh` CLI | personal `LINEAR_API_KEY` as plain `Authorization` |
 | Plan/learn/gist | GitHub Issues | Linear issues; objective-scoped gist may be a light Project |
-| Objective | one Issue plus first comment | one Project, node-issues, milestones, relations, metadata sentinel |
+| Objective | one Issue plus its metadata-referenced objective-body comment | one Project, node-issues, milestones, relations, metadata sentinel |
 | PR/review/CI/merge | GitHub | still GitHub |
 | Identifiers | numeric issue ids / `#42` | issue ids such as `ENG-123`; opaque Project ids |
 | Metadata | readable HTML-comment blocks | machine envelopes in native issue attachments |
@@ -229,7 +229,8 @@ as a PR), admitted only when the plan's recorded plan-header `pr` corroborates i
 id-taking commands still reject `.../pull/42` URLs.
 
 A GitHub objective is one Issue. The issue body owns the objective header and canonical roadmap;
-its first comment owns the rendered roadmap table and Reconcilable prose. Metadata remains readable
+the objective-body comment its metadata references (`objective_comment_id`) owns the rendered
+roadmap table and Reconcilable prose. Metadata remains readable
 as marker-bounded blocks inspectable with `gh issue view`. The roadmap block is the authoritative
 manifest.
 
@@ -305,7 +306,9 @@ The latter checks report workspace readiness; they do not mutate Project scopes 
 A Linear objective is a Project, not an issue. Its overview contains the copyable command callout
 and human Reconcilable prose. Each roadmap node is an issue attached to the Project, each phase is
 a Project Milestone, and explicit dependencies are Linear blocking relations. The Project's opaque
-id is perk's objective id.
+id is perk's objective id. `perk objective show <id> --full` prints that overview as an
+`<untrusted_objective_body>` block (on GitHub the same flag prints the metadata-referenced
+objective-body comment), with the roadmap table re-rendered from the current node state.
 
 Native attributes and fail-open mirrors include:
 

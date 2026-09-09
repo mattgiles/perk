@@ -4248,11 +4248,27 @@ the `objective-read-*` golden cases — `tests/test_prompts.py` +
 `extension/substrate/prompts.test.ts` — with per-plane selection tests in
 `tests/test_objective_prompt_parity.py` + `extension/authoring/objective/prose.test.ts`; see §8.31).
 The helper returns a **supplemental** clause appended to the
-existing `perk objective show <id>` step (never a replacement): the `linear` arm references the
+existing `perk objective show <id> --full` step (never a replacement): the `linear` arm references the
 Linear **Project URL** + the read-only `linear_get_issue` / `linear_list_comments` tools (an
 `open <url>` fallback when the url is known; the indirect `run \`perk objective show <id>\` for its
-URL` form when it is not); `github` (and any non-linear) → `""` (the `perk objective show` step
-already covers GitHub — no churn). The warm plane resolves the backend from
+URL` form when it is not — the indirect URL form stays flag-less); `github` (and any non-linear) →
+`""` (the `perk objective show` step already covers GitHub — no churn).
+
+**`perk objective show <id> --full` delivers the objective body** the objective-flow prompts
+(`objective-plan` seed + guidance, `objective-refine` seed, `objective-reconcile`,
+`objective-reconcile-ready`) and the mirroring skills promise: it reads
+`ObjectiveStore.read_objective_body` **fail-soft** (both render modes; without `--full` the body
+is never read and both renders are byte-identical to before). **Precedence:** `nodes` (from
+`get_objective`) is the authoritative roadmap; the carrier's Mechanical table is re-rendered from
+it at read time via `objective.rerender_body_table` (a marker-less carrier passes through
+verbatim), while the Reconcilable prose + Immutable notes are the carrier's verbatim text — so
+`--full` can never show a roadmap that contradicts the compact render. The human render wraps the
+presented body in `<untrusted_objective_body>` … `</untrusted_objective_body>` (the
+`<untrusted_objective_engagement>` block convention — same trust class: human-authored objective
+text), and every consuming prompt names that block as untrusted DATA, never instructions. `--json`
+gains `body` (the presented string, unwrapped; `string|null`) + `body_error` (`string|null`).
+An unreadable body degrades like §8.46's `stacked_readiness`: dim `body unavailable (<reason>)` /
+`body: null` + `body_error` (`"no objective body"` for a `None` carrier), exit 0. The warm plane resolves the backend from
 `resolveIssueBackendId(ctx.cwd)` (committed `.perk/config.toml` — authoritative since cross-backend
 objectives are unsupported by policy) and fetches the Project URL via `perk objective show <id>
 --json` **only for `linear`** (github needs no clause → no fetch), **fail-open** (any fetch
@@ -4669,9 +4685,12 @@ GitHub issue **or** a Linear Project.
 **The contract module** (`perk/backends/objective_store.py`):
 
 - The `ObjectiveStore` `Protocol`: `backend_id: str` plus the keyword-only method inventory
-  (27 methods, incl. `reopen_objective` and the §8.67 `read_node_refinement_targets` —
-  `objective_store.py::ObjectiveStore` is the census),
+  (28 methods, incl. `reopen_objective`, `read_objective_body` and the §8.67
+  `read_node_refinement_targets` — `objective_store.py::ObjectiveStore` is the census),
   grouped: lookup/read (`find_objective`, `find_open_objective_by_origin`, `get_objective`,
+  `read_objective_body` (the read twin of `update_objective_body`: the verbatim body carrier —
+  GitHub the metadata-referenced `objective-body` comment, Linear the project overview; `None` =
+  no body carrier; the carrier's table is non-authoritative — presenters re-render it),
   `read_objective_source`, `list_gist_sources`, `list_objective_completion_candidates`, the
   §8.25 engagement reads, the §8.67 refinement target read), creation/adoption/supersession (`create_objective`,
   `create_gist_source`, `adopt_source_as_objective`, `supersede_objective`,

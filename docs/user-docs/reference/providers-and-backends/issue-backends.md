@@ -19,7 +19,7 @@ requests, review, CI, or merge away from GitHub.
 | Selection / default | Default when `[issues] backend` is absent or `"github"`; no team key | `[issues] backend = "linear"` plus a committed Linear team key |
 | Auth | Authenticated `gh` CLI with repository access | Personal `LINEAR_API_KEY`, sent as a plain `Authorization` value |
 | Plan / learn / gist storage | GitHub Issues | Linear issues; an objective-scoped gist is a light Linear Project |
-| Objective storage | One GitHub Issue plus its first body comment | One Linear Project, node-issues, milestones, relations, and a metadata sentinel issue |
+| Objective storage | One GitHub Issue plus its metadata-referenced objective-body comment | One Linear Project, node-issues, milestones, relations, and a metadata sentinel issue |
 | Pull request / review / CI / merge | GitHub | Still GitHub; Linear only receives links and bookkeeping |
 | Identifiers | Numeric issue ids, commonly written `#42`, and GitHub issue URLs | Human issue identifiers such as `ENG-123`; objective refs are Linear Project ids/URLs |
 | Labels | Relevant `perk:*` repository labels are ensured lazily as writes need them | Six `perk:*` workspace labels are checked or ensured by readiness |
@@ -53,8 +53,9 @@ network readiness runs.
 
 Plans, learnings, and plan-scoped gists are GitHub Issues. Objective-scoped gists also fall back to
 GitHub Issues because GitHub has no separate project-tier gist surface. A GitHub objective is one
-GitHub Issue: its body owns the objective header and canonical roadmap, while its first comment owns
-the rendered roadmap table and Reconcilable prose.
+GitHub Issue: its body owns the objective header and canonical roadmap, while the objective-body
+comment its metadata references (`objective_comment_id`) owns the rendered roadmap table and
+Reconcilable prose (`perk objective show N --full` prints it).
 
 Each write lazily ensures the relevant repository label, including the `perk:plan`, `perk:learn`,
 `perk:gist`, `perk:consolidated`, and objective labels. Issue identifiers are numeric and are often

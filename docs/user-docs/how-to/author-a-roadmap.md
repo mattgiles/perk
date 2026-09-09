@@ -29,7 +29,7 @@ This runs in a **read-only** authoring session and is **local-only**.
 5. **Inspect it.** Run
    [`perk objective show N`](../reference/cli/objective.md#perk-objective-show-number-alias-s) (alias
    `perk objective s N`) to print the objective's status summary and next actionable node (add
-   `--json` for the full roadmap).
+   `--json` for the full roadmap, `--full` for the design prose).
 
 > **Roadmap shape.** Every node starts `pending`. Leave `depends_on` unset for **sequential**
 > dependencies (each node depends on the previous), use `[]` for **no** dependencies, or list node
