@@ -7,12 +7,15 @@ metadata-referenced ``objective-body`` comment, Linear the project overview) and
 its Mechanical table **re-rendered from the authoritative nodes** — the carrier's mirrored table is
 best-effort and may have drifted — while the Reconcilable prose and Immutable notes pass through
 verbatim. The human render wraps the presented body in ``<untrusted_objective_body>`` tags (the
-engagement-block convention: human-authored objective text is DATA, never instructions). The body
-read is fail-soft (contracts.md §8.21): an unreadable/missing body degrades to ``body: null`` +
+engagement-block convention: human-authored objective text is DATA, never instructions), with any
+literal wrapper tag embedded in the body neutralized so the block cannot be terminated early; the
+``--json`` ``body`` is the unwrapped presented string (JSON is its own boundary). The body read is
+fail-soft (contracts.md §8.21): an unreadable/missing body degrades to ``body: null`` +
 ``body_error`` / a dim ``body unavailable`` line, exit 0 — mirroring ``stacked_readiness``.
 """
 
 import json
+import re
 
 import click
 
@@ -33,6 +36,11 @@ from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.substrate.output import machine_output, user_output
 
+# The fixed wrapper tag every consuming prompt names (the `<untrusted_objective_engagement>`
+# convention). Fixed means attacker-known, so the body is guarded against delimiter collisions
+# rather than the tag made unpredictable.
+_BODY_TAG = "untrusted_objective_body"
+
 
 @alias("s")
 @click.command("show")
@@ -43,8 +51,9 @@ from perk.substrate.output import machine_output, user_output
     "full",
     is_flag=True,
     help=(
-        "Also print the objective body (roadmap table, design prose, notes) as an "
-        "<untrusted_objective_body> block."
+        "Also print the objective body (roadmap table, design prose, notes): wrapped in an "
+        "<untrusted_objective_body> block on the human render; as the unwrapped `body` string "
+        "(plus `body_error`) with --json."
     ),
 )
 @click.pass_context
@@ -52,9 +61,10 @@ def show_objective(ctx: click.Context, *, number: str, as_json: bool, full: bool
     """Show an objective's header, roadmap, summary, and next actionable node.
 
     With ``--full``, also the objective body — its roadmap table re-rendered from the current
-    node state (the authoritative roadmap), the design prose and any notes verbatim — wrapped as
-    an ``<untrusted_objective_body>`` block; an unreadable body degrades to a dim
-    ``body unavailable`` line (``body: null`` + ``body_error`` under ``--json``) and exit 0.
+    node state (the authoritative roadmap), the design prose and any notes verbatim. The human
+    render wraps it in an ``<untrusted_objective_body>`` block; ``--json`` carries it unwrapped as
+    the ``body`` string plus ``body_error``. An unreadable body degrades to a dim
+    ``body unavailable`` line (``body: null`` + the reason in ``body_error``) and exit 0.
     """
     try:
         repo_root = require_repo(ctx)
@@ -120,7 +130,11 @@ def show_objective(ctx: click.Context, *, number: str, as_json: bool, full: bool
             if carrier is None:
                 body_error = "no objective body"
             else:
-                body = _present_objective_body(carrier, nodes)
+                # Present with the Mechanical table re-rendered from the authoritative `nodes`
+                # (the carrier's mirrored table is best-effort and may have drifted); prose and
+                # notes stay verbatim. A marker-less legacy carrier has no table block to
+                # re-render and passes through whole.
+                body = objective.rerender_body_table(carrier, nodes) or carrier
 
     payload: dict[str, object] = {
         "success": True,
@@ -198,17 +212,17 @@ def show_objective(ctx: click.Context, *, number: str, as_json: bool, full: bool
     if full:
         if body is not None:
             user_output("")
-            user_output("<untrusted_objective_body>")
-            # Verbatim bytes; the close tag lands on its own line either way.
-            user_output(body, nl=not body.endswith("\n"))
-            user_output("</untrusted_objective_body>")
+            user_output(f"<{_BODY_TAG}>")
+            # The close tag lands on its own line either way.
+            guarded = _neutralize_body_tags(body)
+            user_output(guarded, nl=not guarded.endswith("\n"))
+            user_output(f"</{_BODY_TAG}>")
         else:
             user_output(click.style(f"  body unavailable ({body_error})", dim=True))
 
 
-def _present_objective_body(carrier: str, nodes: list[objective.ObjectiveNode]) -> str:
-    """The body as presented: the carrier's Mechanical table re-rendered from the authoritative
-    ``nodes`` (the mirrored table is best-effort and may have drifted), the Reconcilable prose and
-    Immutable notes verbatim. A marker-less carrier (legacy, no table block to re-render) passes
-    through verbatim."""
-    return objective.rerender_body_table(carrier, nodes) or carrier
+def _neutralize_body_tags(body: str) -> str:
+    """Defang any literal wrapper tag (open or close, any case) embedded in the untrusted body so
+    the block cannot be terminated early and smuggle text outside it. Only the tag's ``<`` is
+    escaped (``&lt;``) — every other byte stays verbatim."""
+    return re.sub(rf"<(/?{_BODY_TAG})>", r"&lt;\1>", body, flags=re.IGNORECASE)

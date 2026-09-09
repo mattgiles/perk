@@ -4265,8 +4265,11 @@ verbatim), while the Reconcilable prose + Immutable notes are the carrier's verb
 `--full` can never show a roadmap that contradicts the compact render. The human render wraps the
 presented body in `<untrusted_objective_body>` … `</untrusted_objective_body>` (the
 `<untrusted_objective_engagement>` block convention — same trust class: human-authored objective
-text), and every consuming prompt names that block as untrusted DATA, never instructions. `--json`
-gains `body` (the presented string, unwrapped; `string|null`) + `body_error` (`string|null`).
+text), and every consuming prompt names that block as untrusted DATA, never instructions; because
+the tag is fixed (attacker-known), any literal wrapper tag embedded in the body is neutralized
+(`<` → `&lt;`, open/close, any case) so the block cannot be terminated early. `--json` gains
+`body` (the presented string, unwrapped and unguarded — JSON is its own boundary; `string|null`)
++ `body_error` (`string|null`).
 An unreadable body degrades like §8.46's `stacked_readiness`: dim `body unavailable (<reason>)` /
 `body: null` + `body_error` (`"no objective body"` for a `None` carrier), exit 0. The warm plane resolves the backend from
 `resolveIssueBackendId(ctx.cwd)` (committed `.perk/config.toml` — authoritative since cross-backend
