@@ -2,20 +2,49 @@
 
 `objectives.get_objective` + `objectives.update_objective_node` + `launch.launch_stage` are
 stubbed (no
-GitHub, no `exec pi`), mirroring test_implement_cmd.py / test_objective_cmd.py.
+GitHub, no `exec pi`), mirroring test_implement_cmd.py / test_objective_cmd.py. The node-context
+arms install a Linear-shaped store fake + a matching issues fake (the refinement service checks
+the two backend ids agree before its target read) and parse `result.stdout` (JSON) and
+`result.stderr` (narration) separately.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
 
 from perk import github, objective
+from perk.backends import engagement, resolve
 from perk.backends.github import objectives
+from perk.backends.github.objective_store import GitHubObjectiveStore
+from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.cli import cli
+from perk.cli.commands.objective import node_context
+from perk.cli.commands.objective.node_context import (
+    refinement_boundary,
+    render_node_refinement,
+)
+from perk.objective import NodeStatus
+from perk.objective.refinement import codec
+from perk.objective.refinement.models import (
+    RefinementCodeBasis,
+    RefinementDocument,
+    RefinementIdentity,
+    RefinementObjectiveSnapshot,
+    RefinementProvenance,
+    RefinementRead,
+    RefinementSource,
+    RefinementTarget,
+)
 from perk.run import launch
+from perk.state import cache
+from perk.state import run_id as run_id_mod
+from perk.substrate import git
 
 N = objective.NodeStatus
+REFINEMENT_MARKDOWN = "## Approach\n\nDo it carefully.\n"
+SEPARATOR_LINE = "--- refinement markdown (the entire decoded body, unchanged) ---"
 
 
 def _nodes():
@@ -44,11 +73,14 @@ def _authed(monkeypatch) -> None:
     )
 
 
-def _stub_launch(monkeypatch, sink: dict) -> None:
-    monkeypatch.setattr(
-        launch,
-        "launch_stage",
-        lambda **k: sink.update(
+def _stub_launch(monkeypatch, sink: dict, *, on_launch=None) -> None:
+    """Record the launch kwargs into ``sink``; ``on_launch()`` (when given) runs first — the
+    ordering tests use it to observe the world at launch time."""
+
+    def _launch(**k):
+        if on_launch is not None:
+            on_launch()
+        sink.update(
             stage=k["stage"].id,
             stage_worktree=k["stage"].worktree,
             prompt=k.get("prompt_override"),
@@ -56,8 +88,22 @@ def _stub_launch(monkeypatch, sink: dict) -> None:
             sync_main=k.get("sync_main"),
             plan_id=k.get("plan_id"),
             worktree=k.get("worktree"),
-        ),
+            run_id_override=k.get("run_id_override"),
+        )
+
+    monkeypatch.setattr(launch, "launch_stage", _launch)
+
+
+def _no_mint(monkeypatch) -> None:
+    """The no-mint arms: the door must leave the run-id mint to the launch."""
+    monkeypatch.setattr(
+        run_id_mod, "mint", lambda: pytest.fail("the door must not mint without a refinement")
     )
+
+
+def _node_context_written(repo_root: Path) -> bool:
+    runs = cache.scratch_dir(repo_root) / "runs"
+    return runs.exists() and any(runs.rglob("node-context"))
 
 
 def test_blank_node_is_typed_invalid_input_before_authority_access(
@@ -128,10 +174,13 @@ def test_selects_next_node_marks_planning_and_launches(monkeypatch, unborn_git_r
         assert "\u2713 found objective #7 \u2014 node 1.2" in err  # the lookup resolves on select
         # The real-run-only node-mark write and engagement read are narrated too (gap coverage).
         assert "marking node 1.2 planning" in err and "\u2713 marked node 1.2 planning" in err
-        assert "reading node engagement" in err
+        assert "reading node context" in err
+        # GitHub: the refinement read is a quiet typed `unsupported` (no warning, no network).
+        assert "read node context \u2014 refinement unsupported" in err
     # The next actionable node (1.2) is selected + marked planning, then launched with the seed.
     assert marked["node_id"] == "1.2" and marked["status"] is N.PLANNING
     assert launched["stage"] == "objective-plan"
+    assert launched["run_id_override"] is None  # no refinement → the launch mints
     assert "1.2" in (launched["prompt"] or "") and "objective_id" in (launched["prompt"] or "")
     # The objective link is also ferried through the handoff so plan-save recovers it even
     # when the model saves via the /plan-save command (which forwards only {plan, title}).
@@ -164,32 +213,13 @@ def test_github_call_site_seeds_no_linear_fragments(monkeypatch, unborn_git_repo
 def test_linear_call_site_forwards_backend_id_and_url(monkeypatch, unborn_git_repo_factory):
     """The call site forwards `store.backend_id` + `state.url` into `_seed_prompt`, so a
     project-backed (linear) objective seeds the backend-aware Project-URL/tools clause."""
-    from perk.backends import resolve
-
     url = "https://linear.app/acme/project/objective-7"
-
-    class _FakeLinearStore:
-        backend_id = "linear"
-
-        def get_objective(self, *, objective_id):
-            return objectives.ObjectiveState(
-                number=7, url=url, title="Ship it", header={"run_id": "01RID"}, nodes=_nodes()
-            )
-
-        def update_objective_node(self, **k):
-            return objectives.ObjectiveNodeUpdate(
-                number=7, node_id=k["node_id"], comment_updated=True, dry_run=False
-            )
-
-        def read_node_engagement(self, *, objective_id, node_id):
-            from perk.backends.engagement import EMPTY_NODE_ENGAGEMENT
-
-            return EMPTY_NODE_ENGAGEMENT
-
-    _authed(monkeypatch)
-    monkeypatch.setattr(resolve, "resolve_objective_store", lambda root: _FakeLinearStore())
-    launched: dict = {}
-    _stub_launch(monkeypatch, launched)
+    launched = _node_context_store(
+        monkeypatch,
+        state=objectives.ObjectiveState(
+            number=7, url=url, title="Ship it", header={"run_id": "01RID"}, nodes=_nodes()
+        ),
+    )
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
@@ -201,43 +231,159 @@ def test_linear_call_site_forwards_backend_id_and_url(monkeypatch, unborn_git_re
     assert "linear_get_issue" in prompt and "linear_list_comments" in prompt
 
 
-# --- cold seed injects node-issue engagement (fail-soft) ----------------------------
+# --- the node-context fixtures (a Linear-shaped store + issues pair) ----------------------
 
 
-def _engagement_store(monkeypatch, *, engagement_result, raises=None):
-    """Install a fake project store whose `read_node_engagement` returns `engagement_result`
-    (or raises `raises`). Returns the launch sink dict."""
-    from perk.backends import resolve
-    from perk.backends.objective_store import ObjectiveStoreError
+HEAD = "b" * 40
+TS = "2026-09-07T12:34:56Z"
+
+
+def _identity(node_id: str = "1.2") -> RefinementIdentity:
+    return RefinementIdentity(
+        backend="linear",
+        objective_id="7",
+        objective_run_id="01RID",
+        node_id=node_id,
+        carrier_id=f"iss-node{node_id.replace('.', '')}",
+    )
+
+
+def _source(description: str = "B") -> RefinementSource:
+    return RefinementSource(
+        description=description,
+        slug=None,
+        comment=None,
+        depends_on=None,
+        effective_depends_on=(),
+        issue_description=description,
+    )
+
+
+def _document(node_id: str = "1.2", markdown: str = REFINEMENT_MARKDOWN) -> RefinementDocument:
+    source = _source()
+    return RefinementDocument(
+        identity=_identity(node_id),
+        source=source,
+        source_digest=codec.source_digest(source),
+        provenance=RefinementProvenance(
+            authoring_run_id="01AUTHRUN",
+            authored_at=TS,
+            code_basis=RefinementCodeBasis(head_sha=HEAD, dirty=False, captured_at=TS),
+        ),
+        markdown=markdown,
+    )
+
+
+def _target(node_id: str = "1.2") -> RefinementTarget:
+    source = _source()
+    return RefinementTarget(
+        identity=_identity(node_id),
+        source=source,
+        source_digest=codec.source_digest(source),
+        carrier_identifier=f"ENG-{node_id.replace('.', '')}",
+        carrier_url=f"https://linear.app/test/issue/ENG-{node_id.replace('.', '')}",
+        status=NodeStatus.PENDING,
+        plan_ref=None,
+        has_plan_metadata=False,
+    )
+
+
+def _snapshot() -> RefinementObjectiveSnapshot:
+    return RefinementObjectiveSnapshot(
+        backend="linear",
+        objective_id="7",
+        objective_run_id="01RID",
+        objective_url="https://linear.app/test/project/7",
+        targets=(_target("1.2"), _target("1.3")),
+    )
+
+
+def _refinement_comment(node_id: str = "1.2") -> engagement.EngagementComment:
+    return engagement.EngagementComment(
+        id="c-ref",
+        body=codec.render_refinement(_document(node_id)),
+        created_at="2026-09-07T12:00:00.123Z",
+        edited_at=None,
+        author=engagement.EngagementAuthor(kind="perk", display_name="perk", id=None),
+    )
+
+
+def _expected_block(node_id: str = "1.2") -> str:
+    saved = codec.parse_refinement_comment(_refinement_comment(node_id))
+    assert saved is not None
+    return render_node_refinement(RefinementRead(target=_target(node_id), saved=saved))
+
+
+def _node_context_store(
+    monkeypatch,
+    *,
+    engagement_result=None,
+    engagement_raises=None,
+    targets=None,
+    comments=(),
+    state=None,
+    order=None,
+):
+    """Install a Linear-shaped store fake (via `resolve.resolve_objective_store`) plus a matching
+    Linear-shaped issues fake (via `resolve.resolve_issue_backend`) and the launch stub.
+
+    `engagement_result` defaults to the empty engagement; `engagement_raises` (a message) makes
+    the engagement read raise `ObjectiveStoreError`. `targets` is the refinement snapshot (default:
+    both nodes, no saved comment → `absent`) or an exception to raise from the target read;
+    `comments` are the carrier comments the issues fake serves. Each seam appends its label to
+    `order` when given. Returns the launch sink dict."""
+    snapshot = _snapshot() if targets is None else targets
+
+    def _record(label):
+        if order is not None:
+            order.append(label)
 
     class _Store:
         backend_id = "linear"
 
         def get_objective(self, *, objective_id):
-            return objectives.ObjectiveState(
-                number=7, url="u/7", title="Ship it", header={"run_id": "01RID"}, nodes=_nodes()
-            )
+            return state if state is not None else _state()
 
         def update_objective_node(self, **k):
+            _record("mark")
             return objectives.ObjectiveNodeUpdate(
                 number=7, node_id=k["node_id"], comment_updated=True, dry_run=False
             )
 
         def read_node_engagement(self, *, objective_id, node_id):
-            if raises is not None:
-                raise ObjectiveStoreError(raises)
-            return engagement_result
+            _record("engagement")
+            if engagement_raises is not None:
+                raise ObjectiveStoreError(engagement_raises)
+            return (
+                engagement_result
+                if engagement_result is not None
+                else engagement.EMPTY_NODE_ENGAGEMENT
+            )
+
+        def read_node_refinement_targets(self, *, objective_id):
+            _record("refinement")
+            if isinstance(snapshot, Exception):
+                raise snapshot
+            return snapshot
+
+    class _Issues:
+        backend_id = "linear"
+
+        def read_comments(self, *, issue_id):
+            return tuple(comments)
 
     _authed(monkeypatch)
     monkeypatch.setattr(resolve, "resolve_objective_store", lambda root: _Store())
+    monkeypatch.setattr(resolve, "resolve_issue_backend", lambda root: _Issues())
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     return launched
 
 
-def test_cold_seed_injects_node_engagement_block(monkeypatch, unborn_git_repo_factory):
-    from perk.backends import engagement
+# --- cold seed injects node-issue engagement (fail-soft) ----------------------------
 
+
+def test_cold_seed_injects_node_engagement_block(monkeypatch, unborn_git_repo_factory):
     ne = engagement.NodeEngagement(
         comments=(
             engagement.EngagementComment(
@@ -250,7 +396,7 @@ def test_cold_seed_injects_node_engagement_block(monkeypatch, unborn_git_repo_fa
         ),
         description_edits=(),
     )
-    launched = _engagement_store(monkeypatch, engagement_result=ne)
+    launched = _node_context_store(monkeypatch, engagement_result=ne)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
@@ -263,9 +409,7 @@ def test_cold_seed_injects_node_engagement_block(monkeypatch, unborn_git_repo_fa
 
 
 def test_cold_seed_omits_block_when_no_engagement(monkeypatch, unborn_git_repo_factory):
-    from perk.backends import engagement
-
-    launched = _engagement_store(monkeypatch, engagement_result=engagement.EMPTY_NODE_ENGAGEMENT)
+    launched = _node_context_store(monkeypatch, engagement_result=engagement.EMPTY_NODE_ENGAGEMENT)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
@@ -278,20 +422,30 @@ def test_cold_seed_omits_block_when_no_engagement(monkeypatch, unborn_git_repo_f
 
 def test_cold_seed_failsoft_when_read_raises(monkeypatch, unborn_git_repo_factory):
     # A Linear hiccup in read_node_engagement must never break the factory launch: the seed has
-    # no engagement block but the launch still happens.
-    launched = _engagement_store(monkeypatch, engagement_result=None, raises="linear boom")
+    # no engagement block but the launch still happens — and the degraded read rides the seed as
+    # a compact notice (status + code), the full message as a stderr `⚠` line.
+    launched = _node_context_store(monkeypatch, engagement_raises="linear boom")
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 0, result.output
+        err = result.stderr
     assert launched["stage"] == "objective-plan"
-    assert "<untrusted_node_engagement>" not in (launched["prompt"] or "")
+    prompt = launched["prompt"] or ""
+    assert "<untrusted_node_engagement>" not in prompt
+    assert (
+        "Node-context notice (refinement status: absent; advisory warnings: "
+        "engagement/engagement_read_failed)" in prompt
+    )
+    assert "linear boom" not in prompt
+    assert "\u26a0 [engagement/engagement_read_failed]" in err and "linear boom" in err
 
 
 def test_github_seed_byte_unchanged_vs_no_engagement_param(monkeypatch, unborn_git_repo_factory):
-    # The github default store returns EMPTY_NODE_ENGAGEMENT → the seed equals _seed_prompt with no
-    # node_engagement param (byte-unchanged; no churn).
+    # The github default store returns EMPTY_NODE_ENGAGEMENT and a quiet `unsupported` refinement
+    # → the seed equals _seed_prompt with no node_engagement/node_context params (byte-unchanged;
+    # no churn), the door mints nothing and writes no node-context artifact.
     from perk.cli.commands.objective.plan_cmd import _seed_prompt
 
     _authed(monkeypatch)
@@ -303,6 +457,7 @@ def test_github_seed_byte_unchanged_vs_no_engagement_param(monkeypatch, unborn_g
             number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
         ),
     )
+    _no_mint(monkeypatch)
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
@@ -310,8 +465,221 @@ def test_github_seed_byte_unchanged_vs_no_engagement_param(monkeypatch, unborn_g
         _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 0, result.output
+        repo_root = git.repo_root(Path(d))
+        assert repo_root is not None
+        assert not _node_context_written(repo_root)
     node = next(n for n in _nodes() if n.id == "1.2")
     assert launched["prompt"] == _seed_prompt("7", node, "Ship it")
+    assert launched["run_id_override"] is None
+
+
+# --- cold node-context consumption (contracts.md §8.26) ----------------------------------
+
+
+def _refinement_path(repo_root: Path, rid: str, node_id: str = "1.2") -> Path:
+    return cache.run_scratch_dir(repo_root, rid) / "node-context" / "7" / node_id / "refinement.md"
+
+
+def test_cold_linear_absent_refinement_seed_byte_identical_no_mint_no_file(
+    monkeypatch, unborn_git_repo_factory
+):
+    # Linear with no saved refinement (the default snapshot): the byte-identical no-advice arm —
+    # no pointer, no notice, launch-owned mint, no artifact.
+    from perk.cli.commands.objective.plan_cmd import _seed_prompt
+
+    launched = _node_context_store(monkeypatch)
+    _no_mint(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
+        assert result.exit_code == 0, result.output
+        repo_root = git.repo_root(Path(d))
+        assert repo_root is not None
+        assert not _node_context_written(repo_root)
+        assert "read node context \u2014 refinement absent" in result.stderr
+    node = next(n for n in _nodes() if n.id == "1.2")
+    assert launched["prompt"] == _seed_prompt("7", node, "Ship it", backend="linear", url="u/7")
+    assert launched["run_id_override"] is None
+
+
+def test_cold_present_refinement_mints_first_snapshots_and_seeds_pointer(
+    monkeypatch, unborn_git_repo_factory
+):
+    launched = _node_context_store(monkeypatch, comments=[_refinement_comment()])
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
+        assert result.exit_code == 0, result.output
+        assert "read node context \u2014 refinement present" in result.stderr
+        rid = launched["run_id_override"]
+        assert rid is not None and run_id_mod.is_run_id(rid)
+        repo_root = git.repo_root(Path(d))
+        assert repo_root is not None
+        path = _refinement_path(repo_root, rid)
+        assert path.exists()
+        block = _expected_block()
+        on_disk = path.read_bytes()
+        assert on_disk == (block + "\n").encode("utf-8")
+        lines = (block + "\n").splitlines()
+        pointer = (
+            f"`{path}` (bytes={len(on_disk)}, lines={len(lines)}, "
+            f"max_line_bytes={max(len(line.encode('utf-8')) for line in lines)})"
+        )
+    prompt = launched["prompt"] or ""
+    assert pointer in prompt
+    assert "snapshotted at launch" in prompt and "same boundary token" in prompt
+    # The seed carries ONLY the pointer: never the rendered tags, the separator, or the body.
+    assert f"<untrusted_node_refinement:{refinement_boundary(REFINEMENT_MARKDOWN)}>" not in prompt
+    assert SEPARATOR_LINE not in prompt
+    assert "Do it carefully" not in prompt
+    assert "Node-context notice" not in prompt
+
+
+def test_cold_ordering_stacked_positioned_pointer_is_absolute_invoking_root_path(
+    monkeypatch, unborn_git_repo_factory
+):
+    # The ordering pin (claim before read; both reads before the snapshot; the artifact exists
+    # at launch time) on the positioned arm: the session runs in the predecessor's checkout, but
+    # the artifact is anchored at the INVOKING checkout's run scratch — the pointer is absolute
+    # so `read`/`sed` reach it from the predecessor cwd. The mark → reads → write → launch
+    # sequence is selection-independent, so this one case covers the incremental arm too.
+    order: list[str] = []
+    launched = _node_context_store(
+        monkeypatch,
+        comments=[_refinement_comment("1.3")],
+        state=_stacked_state(),
+        order=order,
+    )
+    candidate = objective.ObjectiveNode(
+        id="1.3", description="C", status=N.PENDING, depends_on=("1.1",)
+    )
+    _stub_planning_prepare(monkeypatch, _decision("ready", candidate, context=_child_context()))
+    _no_plan_reads(monkeypatch)
+    real_write = node_context.write_text_file
+    written: list[Path] = []
+
+    def _write(path, text):
+        order.append("write")
+        written.append(path)
+        return real_write(path, text)
+
+    monkeypatch.setattr(node_context, "write_text_file", _write)
+
+    def _on_launch():
+        order.append("launch")
+        assert written and written[0].exists()
+
+    _stub_launch(monkeypatch, launched, on_launch=_on_launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
+        assert result.exit_code == 0, result.output
+        repo_root = git.repo_root(Path(d))
+        assert repo_root is not None
+        rid = launched["run_id_override"]
+        assert rid is not None and run_id_mod.is_run_id(rid)
+        path = _refinement_path(repo_root, rid, "1.3")
+        assert path.exists() and path.is_absolute()
+        predecessor_checkout = repo_root / ".worktrees" / "plan-101"
+    assert order == ["mark", "engagement", "refinement", "write", "launch"]
+    assert launched["stage_worktree"] == "reuse"
+    assert launched["plan_id"] == "101"
+    prompt = launched["prompt"] or ""
+    assert f"`{path}` (bytes=" in prompt
+    assert str(path).startswith(str(cache.run_scratch_dir(repo_root, rid)))
+    assert not str(path).startswith(str(predecessor_checkout))
+    assert "<stacked_layer_context>" in prompt
+
+
+def test_cold_warning_only_arm_seeds_notice_without_mint_or_file(
+    monkeypatch, unborn_git_repo_factory
+):
+    # The target read fails (a Linear hiccup → the service's `backend_error`): no refinement, no
+    # mint, no file — the seed carries the status + code, stderr the full message; the claim
+    # still happened.
+    order: list[str] = []
+    launched = _node_context_store(
+        monkeypatch, targets=ObjectiveStoreError("linear boom"), order=order
+    )
+    _no_mint(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
+        assert result.exit_code == 0, result.output
+        err = result.stderr
+        repo_root = git.repo_root(Path(d))
+        assert repo_root is not None
+        assert not _node_context_written(repo_root)
+    prompt = launched["prompt"] or ""
+    assert (
+        "Node-context notice (refinement status: unavailable; advisory warnings: "
+        "refinement/backend_error)" in prompt
+    )
+    assert "linear boom" not in prompt
+    assert "\u26a0 [refinement/backend_error]" in err and "linear boom" in err
+    assert "1 advisory warning(s)" in err
+    assert launched["run_id_override"] is None
+    assert "mark" in order
+
+
+def test_cold_engagement_warning_with_present_refinement(monkeypatch, unborn_git_repo_factory):
+    # Both arms at once: the engagement read degrades while the refinement is present — the
+    # notice names the present status + the engagement code, the pointer still rides.
+    launched = _node_context_store(
+        monkeypatch, engagement_raises="linear boom", comments=[_refinement_comment()]
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
+        assert result.exit_code == 0, result.output
+    prompt = launched["prompt"] or ""
+    assert (
+        "Node-context notice (refinement status: present; advisory warnings: "
+        "engagement/engagement_read_failed)" in prompt
+    )
+    assert "refinement.md` (bytes=" in prompt
+    assert "<untrusted_node_engagement>" not in prompt
+    assert run_id_mod.is_run_id(launched["run_id_override"])
+
+
+def test_cold_failed_snapshot_keeps_claim_and_minted_run_without_pointer(
+    monkeypatch, unborn_git_repo_factory
+):
+    # A present refinement whose write fails downgrades to `unavailable` + the snapshot code: no
+    # pointer, no inline text, the claim kept, the already-minted run id still launches.
+    order: list[str] = []
+    launched = _node_context_store(monkeypatch, comments=[_refinement_comment()], order=order)
+
+    def _boom(path, text):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(node_context, "write_text_file", _boom)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
+        assert result.exit_code == 0, result.output
+        err = result.stderr
+        repo_root = git.repo_root(Path(d))
+        assert repo_root is not None
+        rid = launched["run_id_override"]
+        assert rid is not None and run_id_mod.is_run_id(rid)
+        assert not _refinement_path(repo_root, rid).exists()
+    prompt = launched["prompt"] or ""
+    assert (
+        "Node-context notice (refinement status: unavailable; advisory warnings: "
+        "refinement/node_context_snapshot_failed)" in prompt
+    )
+    assert "bytes=" not in prompt
+    assert f"<untrusted_node_refinement:{refinement_boundary(REFINEMENT_MARKDOWN)}>" not in prompt
+    assert "Do it carefully" not in prompt
+    assert "[refinement/node_context_snapshot_failed]" in err and "disk full" in err
+    assert "mark" in order
 
 
 def test_explicit_node_selects_it(monkeypatch, unborn_git_repo_factory):
@@ -349,6 +717,23 @@ def test_dry_run_marks_nothing_launches_nothing(monkeypatch, unborn_git_repo_fac
 
     monkeypatch.setattr(objectives, "update_objective_node", boom_update)
     monkeypatch.setattr(launch, "launch_stage", boom_launch)
+    # A dry run performs NO advisory read, mint, or write (resolve-only, offline).
+    monkeypatch.setattr(
+        GitHubObjectiveStore,
+        "read_node_engagement",
+        lambda self, **k: pytest.fail("dry run must not read engagement"),
+    )
+    monkeypatch.setattr(
+        GitHubObjectiveStore,
+        "read_node_refinement_targets",
+        lambda self, **k: pytest.fail("dry run must not read refinement targets"),
+    )
+    monkeypatch.setattr(
+        resolve,
+        "resolve_issue_backend",
+        lambda root: pytest.fail("dry run must not resolve the issue backend"),
+    )
+    _no_mint(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
@@ -358,11 +743,21 @@ def test_dry_run_marks_nothing_launches_nothing(monkeypatch, unborn_git_repo_fac
         assert payload["success"] is True and payload["dry_run"] is True
         assert payload["node"] == "1.2" and payload["marked_status"] == "planning"
         assert payload["skipped_claims"] == []  # always present, empty when no claims exist
+        # The payload keys are byte-stable: dry-run reads nothing, so no node-context key.
+        assert list(payload) == [
+            "success",
+            "error_type",
+            "objective",
+            "node",
+            "marked_status",
+            "skipped_claims",
+            "dry_run",
+        ]
         # The lookup runs on the dry-run path too, so the wait IS narrated (to stderr).
         assert "looking up objective #7" in result.stderr
-        # The node-mark write and engagement read do NOT run on a dry run — neither is narrated.
+        # The node-mark write and advisory reads do NOT run on a dry run — neither is narrated.
         assert "marking node" not in result.stderr
-        assert "node engagement" not in result.stderr
+        assert "node context" not in result.stderr
 
 
 def test_real_launch_banner_precedes_lookup(monkeypatch, unborn_git_repo_factory):
@@ -726,6 +1121,56 @@ def test_seed_prompt_instructs_the_file_first_loop():
     # The failsafe + never-implement mandate survive.
     assert "Manual failsafe: `/plan-save`" in primed
     assert "ALWAYS save, NEVER implement directly from this session" in primed
+
+
+def test_seed_prompt_node_context_blocks_point_without_the_recipe():
+    """The two node-context variables are data-only: empty → byte-identical; set → the pointer
+    + the boundary rule + the notice ride the seed, while the byte-slice recipe stays in the
+    skill (§8.57: elaboration behind the skill pointer)."""
+    from perk.cli.commands.objective.plan_cmd import _seed_prompt
+
+    node = _nodes()[1]
+    assert _seed_prompt("7", node, "Ship it") == _seed_prompt(
+        "7", node, "Ship it", node_context_reference="", node_context_notice=""
+    )
+    pointer = (
+        "`/r/.perk/workflow/scratch/runs/01RID/node-context/7/1.2/refinement.md` "
+        "(bytes=1, lines=1, max_line_bytes=1)"
+    )
+    seed = _seed_prompt(
+        "7",
+        node,
+        "Ship it",
+        node_context_reference=pointer,
+        node_context_notice="refinement status: present; advisory warnings: engagement/x",
+    )
+    assert pointer in seed
+    assert (
+        "Node-context notice (refinement status: present; advisory warnings: engagement/x)" in seed
+    )
+    assert "same boundary token" in seed
+    assert "sed -n" not in seed  # the recipe lives in the skill
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("/repo/refinement.md", "`/repo/refinement.md`"),
+        ("/repo/we`ird/refinement.md", "``/repo/we`ird/refinement.md``"),
+        ("/repo/we``ird/refinement.md", "```/repo/we``ird/refinement.md```"),
+        ("`/repo/refinement.md", "`` `/repo/refinement.md ``"),
+    ],
+)
+def test_node_context_reference_code_span_cannot_be_closed_by_the_path(path, expected):
+    """The pointer's path is a filesystem string, not a closed vocabulary: the code span uses a
+    backtick run longer than any inside the path (and pads a leading/trailing backtick), so an
+    odd checkout name can never close the span and spill into the seed prose. Plain paths keep
+    the single-backtick form the command tests pin."""
+    from perk.cli.commands.objective.plan_cmd import _node_context_reference
+    from perk.cli.paged_files import TextFileRef
+
+    ref = _node_context_reference(TextFileRef(Path(path), bytes=3, lines=1, max_line_bytes=3))
+    assert ref == f"{expected} (bytes=3, lines=1, max_line_bytes=3)"
 
 
 # --- stacked selection (readiness-derived; contracts.md §8.46) -----------------------

@@ -207,7 +207,10 @@ Show, set (`<id>`), or clear (`clear`) the active objective and its session budg
 Start the objective plan factory: select the next node and author a bounded plan. Pass an objective
 id (otherwise the active objective) and optional `--node ID`. If neither an argument nor an active
 objective exists, the command refuses and points to `/objective-plan <id>` or `/objective <id>`.
-The command enters the read-only gate before driving the factory turn. Paired tools:
+The command enters the read-only gate before driving the factory turn. After the `objective_node`
+planning transition the factory reads the node's advisory DATA with
+`perk objective node-engagement N --node <id> --json` and pages a present refinement from its file
+pointer (dated untrusted DATA, re-verified against the live tree). Paired tools:
 
 - **`objective_node`** — link a saved plan to its node, change a node status, or update its
   description. A `status:"done"` call requires a non-trivial requirement→evidence audit; malformed

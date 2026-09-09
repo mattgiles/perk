@@ -59,6 +59,17 @@ before launch (`--no-sync` opts out) — except on a **positioned** stacked laun
 runs in the predecessor's worktree instead of the main checkout and skips the fast-forward (the
 train reconstruction already fetched).
 
+After marking the node `planning`, the door reads the node's **advisory DATA** (see
+`perk objective node-engagement`): its pre-planning human engagement and any saved
+**refinement**. A present refinement is snapshotted under the launched run's scratch dir
+(`.perk/workflow/scratch/runs/<run>/node-context/<objective>/<node>/refinement.md`, in the
+checkout the command is invoked from) and the seed carries **only a pointer** (path + byte/line
+measurements) the session pages with `read` — never the refinement text. An advisory read that
+degrades prints a `⚠` line per warning and puts a compact **node-context notice** (the refinement
+status + `surface/code` tokens, never the messages) in the seed; the launch still proceeds. With
+no refinement — including every GitHub objective, whose refinement read is a quiet `unsupported`
+— the seed is unchanged. `--dry-run` reads none of it.
+
 For a **stacked** objective, node selection is **build-readiness- and handoff-derived** (a live
 delivery-train reconstruction): the single plannable candidate is the next unpublished layer in
 delivery order — which permits planning the next layer while its predecessor is
@@ -175,8 +186,9 @@ plus its saved **refinement** (see `perk objective refine`) as the full dated
 `<untrusted_node_refinement:…>` block (its opening and closing tags carry a token derived from the
 body's own digest, so the untrusted body can never forge the block's end). `--node` selects the
 node id (required; an unknown node is
-`node_not_found`). Read-only against the backend; the `/objective-plan` factory uses it to fold
-human feedback and the refinement into the authored plan.
+`node_not_found`). Read-only against the backend; the warm `/objective-plan` factory runs it with
+`--json` after the `objective_node` planning transition and pages a present refinement from its
+file pointer, while the cold `perk objective plan` consumes the same assembly directly at launch.
 
 The human form prints the engagement block (or a no-engagement note), then the full refinement
 block and `refinement: <path>` (or `refinement: absent|unsupported|unavailable`), then one

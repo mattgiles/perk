@@ -121,15 +121,28 @@ test("factoryGuidance instructs the file-first loop (draft → review → approv
   assert.match(text, /ALWAYS save, NEVER implement directly/);
 });
 
-test("factoryGuidance instructs the node-engagement fetch (backend-neutral, both backends)", () => {
-  // The warm seed instructs the model to fetch the node-issue's pre-planning engagement
-  // once it knows the node. The instruction is backend-neutral (harmless on github) so it appears
-  // for both linear and github seeds.
+test("factoryGuidance instructs the node-context read (backend-neutral, both backends)", () => {
+  // The warm seed instructs the model to read the node's advisory DATA with the JSON worker AFTER
+  // the planning transition, page a present refinement with `read` (the 51,200-byte trigger points
+  // at the skill; the byte-slice recipe itself never rides the guidance), honour the boundary-token
+  // rule, and report other statuses honestly without retrying. Backend-neutral (harmless on github)
+  // so it appears for both linear and github seeds.
   const linear = factoryGuidance("7", "1.2", "linear", LINEAR_URL);
   const github = factoryGuidance("7", "1.2");
   for (const text of [linear, github]) {
-    assert.match(text, /perk objective node-engagement 7 --node <id>/);
+    assert.match(text, /perk objective node-engagement 7 --node <id> --json/);
     assert.match(text, /untrusted\s+DATA/);
+    assert.match(text, /refinement\.status/);
+    assert.match(text, /`read`/);
+    assert.match(text, /51,200/);
+    assert.match(text, /same boundary token/);
+    assert.match(text, /untrusted_node_refinement/);
+    assert.match(text, /no auto-retry/);
+    assert.doesNotMatch(text, /sed -n/);
+    // Read AFTER the transition: the worker instruction follows the unconditional planning mark.
+    const markAt = text.indexOf("even if it is already `planning`");
+    const readAt = text.indexOf("perk objective node-engagement 7 --node <id> --json");
+    assert.ok(markAt >= 0 && readAt > markAt, "the --json read follows the planning transition");
   }
 });
 

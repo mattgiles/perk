@@ -226,12 +226,15 @@ def launch_stage(
     fire ``stage:plan``.
 
     ``run_id_override``: when given, the launched session uses this ``run_id`` instead of one
-    minted here — a deliberate, documented exception to the registry's "cold mints" default, with
-    two callers. ``perk replan`` re-enters an *existing* run: it re-launches the ``plan`` stage
-    with the target plan's original ``run_id`` so the warm ``plan_save`` upserts the SAME plan
-    issue in place (preserving its ``plan-header`` and objective link). ``perk learn harvest``
-    pre-mints a *fresh* id at gather time so its run-scoped manifest path and the launched
-    session agree on one ``run_id``. Every other caller passes ``None`` and mints as before.
+    minted here — a deliberate, documented exception to the registry's "cold mints" default, in
+    two caller classes. *Re-enter an existing run*: ``perk plan replan`` re-launches the ``plan``
+    stage with the target plan's original ``run_id`` so the warm ``plan_save`` upserts the SAME
+    plan issue in place (preserving its ``plan-header`` and objective link). *Pre-mint so a
+    run-scoped artifact path and the launched session agree on one id*: a door that writes a
+    run-scoped artifact at gather time (the learn harvest/dream manifests, the refine context,
+    objective plan's refinement snapshot) mints a *fresh* id first and hands it here. Derive the
+    current callers with ``grep -rn run_id_override= src/perk/cli/commands/`` rather than
+    trusting a count. Every other caller passes ``None`` and mints as before.
 
     ``preview``: the cold ``perk pr address --preview`` flag — shapes the ``address``
     seed prompt to classify-only (take no action). Local-launch only: the remote dispatch path
