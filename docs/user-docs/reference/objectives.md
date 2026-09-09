@@ -45,7 +45,7 @@ Each row links to its authoritative entry in the [CLI reference](./cli.md) or th
 | [`perk objective node`](./cli/objective.md#perk-objective-node-number) | Update one node with an explicit status or backlink change. |
 | [`perk objective node-add`](./cli/objective.md#perk-objective-node-add-number) | Add a genuinely-new node and assign its next phase-local id. |
 | [`perk objective engagement`](./cli/objective.md#perk-objective-engagement-number) | Read objective and node-issue human engagement as untrusted data. |
-| [`perk objective node-engagement`](./cli/objective.md#perk-objective-node-engagement-number) | Read one node-issue's pre-planning engagement. |
+| [`perk objective node-engagement`](./cli/objective.md#perk-objective-node-engagement-number) | Read one node's pre-planning engagement plus its saved refinement. |
 | [`perk objective refine`](./cli/objective.md#perk-objective-refine-number) | Author an advisory refinement of a future node in a read-only session (Linear only). |
 | [`perk objective reconcile`](./cli/objective.md#perk-objective-reconcile-number-alias-rec) (`rec`) | Rewrite only the Reconcilable prose region after a merge. |
 | [`perk objective replan`](./cli/objective.md#perk-objective-replan-number) | Re-author unfinished work as a superseding objective. |
@@ -267,7 +267,8 @@ description) **before** perk ever plans it. When you run `/objective-plan`, perk
 engagement and folds it into the plan-authoring context as an **untrusted-DATA** block (comments +
 description edits, with distinguishable authorship; perk's own machinery comments are skipped) — so
 the authored plan comprehends your feedback. You can inspect it directly with
-[`perk objective node-engagement N --node <id>`](./cli/objective.md#perk-objective-node-engagement-number).
+[`perk objective node-engagement N --node <id>`](./cli/objective.md#perk-objective-node-engagement-number),
+which also reads the node's saved refinement (below) as a second, independent advisory surface.
 GitHub single-issue objectives have no per-node issues, so this is a Linear-first behavior (empty on
 GitHub).
 

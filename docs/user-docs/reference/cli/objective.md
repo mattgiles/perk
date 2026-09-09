@@ -169,11 +169,23 @@ carry that signal). Empty → `no human engagement on objective <N>`.
 
 ### `perk objective node-engagement NUMBER`
 
-Read a roadmap node-issue's **pre-planning human engagement** — comments + description edits left on
-the node-issue *before* perk planned it — as an untrusted-DATA block. `--node` selects the node id
-(required); `--json` emits the machine payload (`comments`, `description_edits`). Read-only; the
-`/objective-plan` factory uses it to fold human feedback into the authored plan. **Linear-first** —
-GitHub single-issue objectives (and the dormant issue-backed Linear store) report no engagement.
+Read a roadmap node's advisory DATA for planning: its **pre-planning human engagement** — comments
++ description edits left on the node-issue *before* perk planned it — as an untrusted-DATA block,
+plus its saved **refinement** (see `perk objective refine`) as the full dated
+`<untrusted_node_refinement>` block. `--node` selects the node id (required; an unknown node is
+`node_not_found`). Read-only against the backend; the `/objective-plan` factory uses it to fold
+human feedback and the refinement into the authored plan.
+
+The human form prints the engagement block (or a no-engagement note), then the full refinement
+block and `refinement: <path>` (or `refinement: absent|unsupported|unavailable`), then one
+`warning:` line per advisory failure. `--json` reports `comments`, `description_edits`,
+`engagement_status` (`present` / `absent` / `unavailable`), `refinement` — `{status: "present",
+file: {path, bytes, lines, max_line_bytes}}`, a pointer to the full rendered refinement written under
+the run scratch dir (the only thing the command writes; nothing is written for the other arms), or
+`{status: "absent" | "unsupported" | "unavailable"}` — and `warnings` (`surface`, `code`, `message`,
+`comment_ids`). An advisory read failure is **partial success**: exit 0 with a warning, never a
+failure envelope. **Linear-first** — GitHub single-issue objectives (and the dormant issue-backed
+Linear store) report no engagement and a quiet `unsupported` refinement.
 
 ### `perk objective refine NUMBER`
 

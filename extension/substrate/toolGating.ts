@@ -709,7 +709,9 @@ const SAFE_PATTERNS = [
   // perk's own read-only objective queries (show/next + their s/n aliases, plus the non-mutating
   // node-engagement read the objective-plan factory needs). The trailing \b keeps the `n` alias
   // from matching the mutating `node` subcommand; node-engagement allowed; create/node/reconcile
-  // stay blocked.
+  // stay blocked. node-engagement materializes a present refinement under the run scratch dir —
+  // the same accepted leniency as `perk pr review-context` below (the CLI writes its own
+  // gitignored scratch file; the destructive veto still blocks `> file` redirects).
   /^\s*perk\s+(objective|obj)\s+(show|s|next|n|node-engagement)\b/i,
   // Report children need exactly these query forms, not arbitrary PR operations: plan-bound
   // children (`/pr-review`, `/address`) use the `--expected-pr` form; the human-triage doors'
