@@ -43,6 +43,7 @@ the judgment (scope bounding, the completion audit) lives in the ``perk-objectiv
 
 import dataclasses
 import functools
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -342,11 +343,25 @@ def _refinement_status(refinement: SnapshotRefinement) -> str:
     return "present" if isinstance(refinement, RefinementSnapshotted) else refinement.status
 
 
+def _code_span(text: str) -> str:
+    """A CommonMark code span ``text`` cannot terminate: the delimiter is one backtick longer
+    than the longest backtick run inside it (a single space pads a text that starts or ends
+    with a backtick, which CommonMark strips). A path with no backticks renders as the plain
+    single-backtick span."""
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    fence = "`" * (longest + 1)
+    pad = " " if text.startswith("`") or text.endswith("`") else ""
+    return f"{fence}{pad}{text}{pad}{fence}"
+
+
 def _node_context_reference(file: TextFileRef) -> str:
     """The seed's pointer to the snapshotted refinement: the absolute path + measurements,
-    never the text (the session pages the file)."""
+    never the text (the session pages the file). The path is the operator's own checkout root
+    plus safe components, but it is a filesystem string, not a closed vocabulary — it rides a
+    code span it cannot close, so an odd directory name can never spill out of the pointer
+    into the surrounding prose."""
     return (
-        f"`{file.path}` (bytes={file.bytes}, lines={file.lines}, "
+        f"{_code_span(str(file.path))} (bytes={file.bytes}, lines={file.lines}, "
         f"max_line_bytes={file.max_line_bytes})"
     )
 

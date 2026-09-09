@@ -389,7 +389,7 @@ test("/objective-plan (linear) fails open to the indirect form when the fetch fa
   }
 });
 
-test("/objective-plan (github) injects no linear clause and runs no fetch", async () => {
+test("/objective-plan (github) injects no linear clause, runs no fetch, and carries the node-context read", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   writeBackend(cwd, "github");
   // A throwing PERK_BIN proves no fetch happens for the github arm (no objective show call).
@@ -400,22 +400,8 @@ test("/objective-plan (github) injects no linear clause and runs no fetch", asyn
     await h.invokeCommand("objective-plan", "7");
     const msg = seen.join("\n");
     assert.ok(!msg.includes("Linear Project"), "no linear clause on the github arm");
-  } finally {
-    h.dispose();
-  }
-});
-
-test("/objective-plan injects the node-context read (the --json worker + the refinement pointer)", async () => {
-  // The wiring pin: the injected guidance carries the JSON worker form and the refinement-status
-  // branch (the prose module's own tests pin the rest of the clause).
-  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  writeBackend(cwd, "github");
-  const bin = fakePerk(cwd, { stdout: "", code: 1 });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
-  const seen = spyInjections(h);
-  try {
-    await h.invokeCommand("objective-plan", "7");
-    const msg = seen.join("\n");
+    // The wiring pin: the injected guidance carries the JSON worker form and the
+    // refinement-status branch (the prose module's own tests pin the rest of the clause).
     assert.ok(
       msg.includes("perk objective node-engagement 7 --node <id> --json"),
       "the --json worker",

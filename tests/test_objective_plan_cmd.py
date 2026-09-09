@@ -537,10 +537,26 @@ def test_cold_present_refinement_mints_first_snapshots_and_seeds_pointer(
     assert "Node-context notice" not in prompt
 
 
-def test_cold_ordering_incremental_mark_reads_write_launch(monkeypatch, unborn_git_repo_factory):
-    # Claim before read; both reads before the snapshot; the artifact exists at launch time.
+def test_cold_ordering_stacked_positioned_pointer_is_absolute_invoking_root_path(
+    monkeypatch, unborn_git_repo_factory
+):
+    # The ordering pin (claim before read; both reads before the snapshot; the artifact exists
+    # at launch time) on the positioned arm: the session runs in the predecessor's checkout, but
+    # the artifact is anchored at the INVOKING checkout's run scratch — the pointer is absolute
+    # so `read`/`sed` reach it from the predecessor cwd. The mark → reads → write → launch
+    # sequence is selection-independent, so this one case covers the incremental arm too.
     order: list[str] = []
-    launched = _node_context_store(monkeypatch, comments=[_refinement_comment()], order=order)
+    launched = _node_context_store(
+        monkeypatch,
+        comments=[_refinement_comment("1.3")],
+        state=_stacked_state(),
+        order=order,
+    )
+    candidate = objective.ObjectiveNode(
+        id="1.3", description="C", status=N.PENDING, depends_on=("1.1",)
+    )
+    _stub_planning_prepare(monkeypatch, _decision("ready", candidate, context=_child_context()))
+    _no_plan_reads(monkeypatch)
     real_write = node_context.write_text_file
     written: list[Path] = []
 
@@ -556,40 +572,6 @@ def test_cold_ordering_incremental_mark_reads_write_launch(monkeypatch, unborn_g
         assert written and written[0].exists()
 
     _stub_launch(monkeypatch, launched, on_launch=_on_launch)
-    runner = CliRunner()
-    with runner.isolated_filesystem() as d:
-        _git_init(d, unborn_git_repo_factory)
-        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
-        assert result.exit_code == 0, result.output
-    assert order == ["mark", "engagement", "refinement", "write", "launch"]
-
-
-def test_cold_ordering_stacked_positioned_pointer_is_absolute_invoking_root_path(
-    monkeypatch, unborn_git_repo_factory
-):
-    # The positioned arm: the session runs in the predecessor's checkout, but the artifact is
-    # anchored at the INVOKING checkout's run scratch — the pointer is absolute so `read`/`sed`
-    # reach it from the predecessor cwd.
-    order: list[str] = []
-    launched = _node_context_store(
-        monkeypatch,
-        comments=[_refinement_comment("1.3")],
-        state=_stacked_state(),
-        order=order,
-    )
-    candidate = objective.ObjectiveNode(
-        id="1.3", description="C", status=N.PENDING, depends_on=("1.1",)
-    )
-    _stub_planning_prepare(monkeypatch, _decision("ready", candidate, context=_child_context()))
-    _no_plan_reads(monkeypatch)
-    real_write = node_context.write_text_file
-
-    def _write(path, text):
-        order.append("write")
-        return real_write(path, text)
-
-    monkeypatch.setattr(node_context, "write_text_file", _write)
-    _stub_launch(monkeypatch, launched, on_launch=lambda: order.append("launch"))
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d, unborn_git_repo_factory)
@@ -1168,6 +1150,27 @@ def test_seed_prompt_node_context_blocks_point_without_the_recipe():
     )
     assert "same boundary token" in seed
     assert "sed -n" not in seed  # the recipe lives in the skill
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("/repo/refinement.md", "`/repo/refinement.md`"),
+        ("/repo/we`ird/refinement.md", "``/repo/we`ird/refinement.md``"),
+        ("/repo/we``ird/refinement.md", "```/repo/we``ird/refinement.md```"),
+        ("`/repo/refinement.md", "`` `/repo/refinement.md ``"),
+    ],
+)
+def test_node_context_reference_code_span_cannot_be_closed_by_the_path(path, expected):
+    """The pointer's path is a filesystem string, not a closed vocabulary: the code span uses a
+    backtick run longer than any inside the path (and pads a leading/trailing backtick), so an
+    odd checkout name can never close the span and spill into the seed prose. Plain paths keep
+    the single-backtick form the command tests pin."""
+    from perk.cli.commands.objective.plan_cmd import _node_context_reference
+    from perk.cli.paged_files import TextFileRef
+
+    ref = _node_context_reference(TextFileRef(Path(path), bytes=3, lines=1, max_line_bytes=3))
+    assert ref == f"{expected} (bytes=3, lines=1, max_line_bytes=3)"
 
 
 # --- stacked selection (readiness-derived; contracts.md §8.46) -----------------------

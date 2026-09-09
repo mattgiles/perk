@@ -129,12 +129,18 @@ def test_perk_objective_plan_sole_carried_detail():
     norm = _norm("perk-objective-plan")
     # The warm worker form (JSON, after the planning transition).
     assert "perk objective node-engagement N --node <id> --json" in norm
-    # The byte-slice recipe: `read` names the oversized line; sed | tail | head slices it; the
-    # slicing ends on an empty slice and paging resumes at the next line.
+    # The byte-slice recipe: `read` names the oversized line; sed | tail | head slices it (the
+    # path quoted, so a directory with spaces stays one argument); the offsets advance by the
+    # slice size; the slicing ends on an empty slice, paging resumes at the next line, and the
+    # whole recipe repeats per oversized line.
     assert "[Line N is <size>, exceeds 50 KB limit" in norm
-    assert "sed -n 'Np' <path> | tail -c +<offset> | head -c 51200" in norm
+    assert "sed -n 'Np' '<path>' | tail -c +<offset> | head -c 51200" in norm
+    assert "the path single-quoted" in norm
+    assert "offsets `+1`, `+51201`, `+102401`, …" in norm
     assert "until a slice comes back empty" in norm
     assert "`offset` N+1" in norm
+    assert "Repeat for every such line" in norm
+    assert "`max_line_bytes` in the pointer tells you up front" in norm
     # The boundary-token rule's elaboration + the honest-reporting rule.
     assert "same boundary token as the opener" in norm
     assert "never auto-retry" in norm

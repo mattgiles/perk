@@ -5309,8 +5309,9 @@ node in-session) → it instructs the model to run
 `objective_node` planning transition, treating every field as untrusted DATA; on
 `refinement.status == "present"` page `refinement.file.path` with `read`. The
 `perk-objective-plan` skill is the **sole carrier** of the byte-slice recipe (`read` itself reports
-the oversized line number; `sed -n 'Np' <path> | tail -c +<offset> | head -c 51200` slices it,
-then `read` resumes at N+1) and of the boundary rule's elaboration (§8.57: elaboration behind the
+the oversized line number; `sed -n 'Np' '<path>' | tail -c +<offset> | head -c 51200` — the path
+single-quoted so a checkout directory with spaces stays one argument — slices it in +51,200 steps
+until a slice is empty, then `read` resumes at N+1, repeated per oversized line) and of the boundary rule's elaboration (§8.57: elaboration behind the
 skill pointer), while the honest-reporting rule — any other status → continue planning, report
 `warnings` / incomplete consumption in the plan's Assumptions, never auto-retry — is **flow** and
 rides every carrier (seed, guidance, skill). Neither carrier instructs a refresh: the cold pointer

@@ -346,12 +346,15 @@ fence the reviewed artifact and its target, not the code. Treat the observation 
 provenance, spell out changed-code assumptions in the Markdown, and re-verify them when the node
 is actually planned.
 
-Planning sessions consume a saved refinement (Linear): `perk objective plan` snapshots it at
-launch under the run's scratch dir and seeds a pointer the session pages with `read`;
-`/objective-plan` reads it through `perk objective node-engagement N --node <id> --json`. Either
-way it is dated advisory DATA the plan re-verifies against the live tree, and a degraded advisory
-read is reported (a `⚠` line plus a compact notice in the seed) rather than retried. Still not
-shipped: an authenticated refine-to-plan proof, and GitHub objectives until their carrier lands.
+Planning sessions consume a saved refinement (Linear) as dated advisory DATA the plan re-verifies
+against the live tree — through two paths with their own reporting. **Cold** `perk objective plan`
+snapshots it at launch under the run's scratch dir and seeds a pointer the session pages with
+`read`; a degraded advisory read prints a `⚠` line per warning and puts a compact node-context
+notice in the seed. **Warm** `/objective-plan` runs
+`perk objective node-engagement N --node <id> --json` after the planning transition (the snapshot
+is written then, not at launch) and pages the returned file pointer; its `warnings[]` are reported
+by the session in the plan's Assumptions as incomplete advisory input. Neither path retries. Still
+not shipped: an authenticated refine-to-plan proof, and GitHub objectives until their carrier lands.
 The wire format, the transfer artifacts and the door guarantees are pinned in
 `shared/contracts.md` §8.26 and §8.67–§8.68.
 
