@@ -1429,6 +1429,22 @@ class TestLinearProjectObjectiveStore:
             store.add_objective_node(objective_id="proj-1", phase=2, description="Gamma")
         assert not _queries(fake, "issueCreate(")
 
+    # ----------------------------------------------------------------- read_objective_body
+
+    def test_read_objective_body_returns_overview_verbatim(self) -> None:
+        overview = _overview_with_region("01RUN", "design prose")
+        store, fake = _make_project_store({"project(id": [{"project": {"content": overview}}]})
+        assert store.read_objective_body(objective_id="proj-1") == overview
+        assert not _queries(fake, "projectUpdate(")
+
+    def test_read_objective_body_absent_project_is_none(self) -> None:
+        store, _ = _make_project_store({"project(id": [_project_not_found()]})
+        assert store.read_objective_body(objective_id="p-gone") is None
+
+    def test_read_objective_body_empty_overview_is_none(self) -> None:
+        store, _ = _make_project_store({"project(id": [{"project": {"content": ""}}]})
+        assert store.read_objective_body(objective_id="proj-1") is None
+
     # ----------------------------------------------------------------- update_objective_body
 
     def test_update_objective_body_splices_overview(self) -> None:

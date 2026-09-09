@@ -16,9 +16,11 @@ An **objective** is a multi-plan goal. Its roadmap advances by emitting one boun
 The committed `[issues]` selection chooses the objective store as well as the plan/learning issue
 backend, so both tiers stay in the same tracker family while using distinct protocols.
 
-Under the default **GitHub** backend, an objective is a GitHub Issue plus its first comment. The
-issue body carries the compact header and canonical roadmap in metadata blocks; the first comment
-carries the rendered roadmap table and Reconcilable prose. Under **Linear**, an objective is a
+Under the default **GitHub** backend, an objective is a GitHub Issue plus its objective-body
+comment. The issue body carries the compact header and canonical roadmap in metadata blocks; the
+objective-body comment — referenced by the header's `objective_comment_id`, not located by comment
+order — carries the rendered roadmap table and Reconcilable prose (`perk objective show N --full`
+prints it). Under **Linear**, an objective is a
 Linear Project. Its overview carries the copyable command callout and human Reconcilable prose;
 the objective header and manifest live as attachments on a metadata sentinel issue, and per-node
 state lives as attachments on node-issues. Phases are Project Milestones and explicit dependencies
@@ -41,7 +43,7 @@ Each row links to its authoritative entry in the [CLI reference](./cli.md) or th
 | [`perk objective save`](./cli/objective.md#perk-objective-save) | Persist an authored objective at the read-only → read-write boundary. |
 | [`perk objective plan`](./cli/objective.md#perk-objective-plan-number) | Select the next node and author a bounded plan. |
 | [`perk objective create`](./cli/objective.md#perk-objective-create-alias-new) (`new`) | Create an objective directly from structured input. |
-| [`perk objective show`](./cli/objective.md#perk-objective-show-number-alias-s) (`s`) | Show the header, roadmap, summary, and next node. |
+| [`perk objective show`](./cli/objective.md#perk-objective-show-number-alias-s) (`s`) | Show the header, roadmap, summary, and next node; `--full` adds the objective body. |
 | [`perk objective node`](./cli/objective.md#perk-objective-node-number) | Update one node with an explicit status or backlink change. |
 | [`perk objective node-add`](./cli/objective.md#perk-objective-node-add-number) | Add a genuinely-new node and assign its next phase-local id. |
 | [`perk objective engagement`](./cli/objective.md#perk-objective-engagement-number) | Read objective and node-issue human engagement as untrusted data. |
@@ -223,7 +225,8 @@ fields ride native **attachments** instead — see
   (`{schema_version: "1", nodes: [...]}`), deterministically re-rendered on every node update.
   `depends_on` / `comment` columns are omitted from serialization unless some node specifies them.
   Marked by `<!-- perk:metadata-block:objective-roadmap -->`.
-- **`objective-body`** (first comment) — the human-readable rendered roadmap **table**
+- **`objective-body`** (the comment referenced by the header's `objective_comment_id`) — the
+  human-readable rendered roadmap **table**
   (marker-bounded by `<!-- perk:roadmap-table -->`, re-rendered from the canonical roadmap) **plus
   prose**, where the prose is the marker-bounded **Reconcilable** region. Reconcile rewrites only
   this Reconcilable region; the table and any **Immutable** notes are never touched.

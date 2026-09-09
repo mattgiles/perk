@@ -1,6 +1,21 @@
-"""`perk objective show` — header + roadmap + summary + next-node."""
+"""`perk objective show` — header + roadmap + summary + next-node; `--full` adds the objective
+body.
+
+The compact readout is graph-derived from ``get_objective`` (the authoritative roadmap). ``--full``
+additionally reads the objective body carrier (``ObjectiveStore.read_objective_body``: GitHub the
+metadata-referenced ``objective-body`` comment, Linear the project overview) and presents it with
+its Mechanical table **re-rendered from the authoritative nodes** — the carrier's mirrored table is
+best-effort and may have drifted — while the Reconcilable prose and Immutable notes pass through
+verbatim. The human render wraps the presented body in ``<untrusted_objective_body>`` tags (the
+engagement-block convention: human-authored objective text is DATA, never instructions), with any
+literal wrapper tag embedded in the body neutralized so the block cannot be terminated early; the
+``--json`` ``body`` is the unwrapped presented string (JSON is its own boundary). The body read is
+fail-soft (contracts.md §8.21): an unreadable/missing body degrades to ``body: null`` +
+``body_error`` / a dim ``body unavailable`` line, exit 0 — mirroring ``stacked_readiness``.
+"""
 
 import json
+import re
 
 import click
 
@@ -21,18 +36,41 @@ from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
 from perk.substrate.output import machine_output, user_output
 
+# The fixed wrapper tag every consuming prompt names (the `<untrusted_objective_engagement>`
+# convention). Fixed means attacker-known, so the body is guarded against delimiter collisions
+# rather than the tag made unpredictable.
+_BODY_TAG = "untrusted_objective_body"
+
 
 @alias("s")
 @click.command("show")
 @click.argument("number", shell_complete=completions.complete_objective_id)
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+@click.option(
+    "--full",
+    "full",
+    is_flag=True,
+    help=(
+        "Also print the objective body (roadmap table, design prose, notes): wrapped in an "
+        "<untrusted_objective_body> block on the human render; as the unwrapped `body` string "
+        "(plus `body_error`) with --json."
+    ),
+)
 @click.pass_context
-def show_objective(ctx: click.Context, *, number: str, as_json: bool) -> None:
-    """Show an objective's header, roadmap, summary, and next actionable node."""
+def show_objective(ctx: click.Context, *, number: str, as_json: bool, full: bool) -> None:
+    """Show an objective's header, roadmap, summary, and next actionable node.
+
+    With ``--full``, also the objective body — its roadmap table re-rendered from the current
+    node state (the authoritative roadmap), the design prose and any notes verbatim. The human
+    render wraps it in an ``<untrusted_objective_body>`` block; ``--json`` carries it unwrapped as
+    the ``body`` string plus ``body_error``. An unreadable body degrades to a dim
+    ``body unavailable`` line (``body: null`` + the reason in ``body_error``) and exit 0.
+    """
     try:
         repo_root = require_repo(ctx)
         number = parse_objective_id(number)
-        state = resolve.resolve_objective_store(repo_root).get_objective(objective_id=number)
+        store = resolve.resolve_objective_store(repo_root)
+        state = store.get_objective(objective_id=number)
         if state is None:
             raise UserFacingCliError(
                 f"Objective #{number} not found", error_type="objective_not_found"
@@ -78,6 +116,26 @@ def show_objective(ctx: click.Context, *, number: str, as_json: bool) -> None:
     next_node = (
         (live.node if live.kind == "plannable" else None) if live is not None else graph_next
     )
+
+    # `--full` pays the extra body read; fail-soft like `stacked_readiness` — the compact readout
+    # the caller also needs must survive an unreadable body.
+    body: str | None = None
+    body_error: str | None = None
+    if full:
+        try:
+            carrier = store.read_objective_body(objective_id=number)
+        except ObjectiveStoreError as exc:
+            body_error = str(exc)
+        else:
+            if carrier is None:
+                body_error = "no objective body"
+            else:
+                # Present with the Mechanical table re-rendered from the authoritative `nodes`
+                # (the carrier's mirrored table is best-effort and may have drifted); prose and
+                # notes stay verbatim. A marker-less legacy carrier has no table block to
+                # re-render and passes through whole.
+                body = objective.rerender_body_table(carrier, nodes) or carrier
+
     payload: dict[str, object] = {
         "success": True,
         "error_type": None,
@@ -110,6 +168,9 @@ def show_objective(ctx: click.Context, *, number: str, as_json: bool) -> None:
                 "reason": live_error,
                 "blockers": [],
             }
+    if full:
+        payload["body"] = body
+        payload["body_error"] = body_error
     if as_json:
         machine_output(json.dumps(payload))
         return
@@ -148,3 +209,20 @@ def show_objective(ctx: click.Context, *, number: str, as_json: bool) -> None:
                 dim=True,
             )
         )
+    if full:
+        if body is not None:
+            user_output("")
+            user_output(f"<{_BODY_TAG}>")
+            # The close tag lands on its own line either way.
+            guarded = _neutralize_body_tags(body)
+            user_output(guarded, nl=not guarded.endswith("\n"))
+            user_output(f"</{_BODY_TAG}>")
+        else:
+            user_output(click.style(f"  body unavailable ({body_error})", dim=True))
+
+
+def _neutralize_body_tags(body: str) -> str:
+    """Defang any literal wrapper tag (open or close, any case) embedded in the untrusted body so
+    the block cannot be terminated early and smuggle text outside it. Only the tag's ``<`` is
+    escaped (``&lt;``) — every other byte stays verbatim."""
+    return re.sub(rf"<(/?{_BODY_TAG})>", r"&lt;\1>", body, flags=re.IGNORECASE)

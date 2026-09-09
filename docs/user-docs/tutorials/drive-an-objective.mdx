@@ -199,12 +199,14 @@ Confirm the closed loop:
 
 ```bash
 perk objective show <N>          # node 1.1 = done; node 1.2 = pending (next)
-gh issue view <N> --comments     # show the objective's reconcilable prose
+perk objective show <N> --full   # show the objective's body, including its reconcilable prose
 ```
 
-The objective's reconcilable prose lives in its first body comment, so the `--comments` flag
-is necessary. When reconciliation changed stale prose, this view shows the updated comment.
-When nothing drifted, the reconcile turn instead reports its explicit no-op result.
+On GitHub the objective's prose lives in the objective-body comment that the objective's metadata
+references (not in the issue body, so plain `gh issue view` misses it) — `--full` reads it for you
+and prints it as an `<untrusted_objective_body>` block. When reconciliation changed stale prose,
+this view shows the updated body. When nothing drifted, the reconcile turn instead reports its
+explicit no-op result.
 
 `perk objective show <N>` now reports node `1.1` done and node `1.2` as the next pending node:
 

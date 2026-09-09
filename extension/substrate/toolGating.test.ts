@@ -366,6 +366,7 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
     `ls tests/ | grep -iE 'doc|user|cli|link'; echo "---"; grep -rl "user-docs" tests/ 2>/dev/null`, // reported example 3 (quoted | does not split; 2>/dev/null allowed)
     `find tests -name '*.py' | grep -iE 'doc|user|cli' ; echo --- ; grep -rl "user-docs" tests 2>/dev/null`, // reported example 4
     "perk objective show", // perk's read-only objective queries
+    "perk objective show 7 --full", // the body read rides the same read-only verb
     "perk objective next",
     "perk obj show 42",
     "perk objective s", // s/n aliases

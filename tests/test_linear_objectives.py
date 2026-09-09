@@ -666,6 +666,39 @@ class TestAddObjectiveNode:
         assert not _queries(fake, "issueUpdate(")
 
 
+class TestReadObjectiveBody:
+    def test_returns_the_body_comment(self) -> None:
+        description = _inline_objective_description("01B", comment_id="cmt-1")
+        comment_body = to_linear_markdown(
+            objective.render_body_comment(_objective_nodes(), prose="Old.")
+        )
+        store, fake = _make_store(
+            {
+                "issue(id": [_objective_issue_response(description)],
+                "comment(id": [{"comment": {"body": comment_body}}],
+            }
+        )
+        assert store.read_objective_body(objective_id="obj-1") == comment_body
+        [(_, variables)] = _queries(fake, "comment(id")
+        assert variables["id"] == "cmt-1"
+
+    def test_missing_comment_id_is_none(self) -> None:
+        description = _inline_objective_description("01B", comment_id=None)
+        store, fake = _make_store({"issue(id": [_objective_issue_response(description)]})
+        assert store.read_objective_body(objective_id="obj-1") is None
+        assert not _queries(fake, "comment(id")
+
+    def test_vanished_comment_is_none(self) -> None:
+        description = _inline_objective_description("01B", comment_id="cmt-gone")
+        store, _ = _make_store(
+            {
+                "issue(id": [_objective_issue_response(description)],
+                "comment(id": [_not_found_error()],
+            }
+        )
+        assert store.read_objective_body(objective_id="obj-1") is None
+
+
 class TestUpdateObjectiveBody:
     def test_missing_comment_id_raises(self) -> None:
         description = _inline_objective_description("01B", comment_id=None)

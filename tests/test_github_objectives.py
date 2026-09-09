@@ -1230,6 +1230,44 @@ def test_update_objective_body_no_region_raises(monkeypatch):
         objectives.update_objective_body(number=123, prose="x", repo_root=ROOT)
 
 
+def test_get_objective_body_reads_the_body_comment(monkeypatch):
+    nodes = [objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.DONE)]
+    issue_body = _obj_body("01RID", nodes, comment_id=777)
+    comment_body = objective.render_body_comment(nodes, prose="Old prose.")
+    rec = _GhDispatch(
+        [
+            (_has("issues/comments/777", ".body"), _Proc(0, comment_body)),
+            (_has("issues/123", ".body"), _Proc(0, issue_body)),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert objectives.get_objective_body(number=123, repo_root=ROOT) == comment_body
+    assert rec.method_calls("PATCH") == 0
+
+
+def test_get_objective_body_none_without_comment_id(monkeypatch):
+    nodes = [objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.DONE)]
+    issue_body = _obj_body("01RID", nodes, comment_id=None)  # no objective_comment_id
+    rec = _GhDispatch([(_has("issues/123", ".body"), _Proc(0, issue_body))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert objectives.get_objective_body(number=123, repo_root=ROOT) is None
+    # no comment fetch is attempted without a referenced comment id
+    assert not any("comments" in tok for call in rec.calls for tok in call)
+
+
+def test_get_objective_body_none_when_comment_vanished(monkeypatch):
+    nodes = [objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.DONE)]
+    issue_body = _obj_body("01RID", nodes, comment_id=777)
+    rec = _GhDispatch(
+        [
+            (_has("issues/comments/777", ".body"), _Proc(1, stderr="Not Found (404)")),
+            (_has("issues/123", ".body"), _Proc(0, issue_body)),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert objectives.get_objective_body(number=123, repo_root=ROOT) is None
+
+
 def test_update_objective_header_rejects_unknown_field(monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Proc(0, _obj_header("01RID")))
     with pytest.raises(github.GitHubError, match="unknown objective-header field"):

@@ -372,6 +372,19 @@ class LinearObjectiveStore:
                 dry_run=False,
             )
 
+    def read_objective_body(self, *, objective_id: str) -> str | None:
+        """The metadata-referenced objective-body comment verbatim (the read twin of
+        ``update_objective_body``). ``None`` when the header carries no ``objective_comment_id``
+        or the comment has vanished."""
+        with _translate_objective():
+            issue = self._ops._get_issue(objective_id, "id description")
+            body = _opt_str(issue.get("description")) or ""
+            header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
+            comment_id = header.get("objective_comment_id")
+            if not isinstance(comment_id, str | int) or not str(comment_id).strip():
+                return None
+            return self._ops._comment_body_or_none(str(comment_id))
+
     def update_objective_body(
         self, *, objective_id: str, prose: str, dry_run: bool = False
     ) -> objective_store.ObjectiveBodyUpdate:

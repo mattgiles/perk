@@ -166,6 +166,10 @@ class _FakeObjectiveStore:
             nodes=obj.nodes,
         )
 
+    def read_objective_body(self, *, objective_id: str) -> str | None:
+        obj = self._objectives.get(objective_id)
+        return None if obj is None else obj.body
+
     def journal_carrier_id(self, *, objective_id: str) -> str | None:
         # The minimal fake's carrier is the objective itself (the GitHub-shaped canned id).
         return objective_id if objective_id in self._objectives else None
@@ -380,6 +384,14 @@ class TestFakeStoreConformance:
         update = store.update_objective_node(objective_id=ref.id, node_id="1.1")
         assert isinstance(update.objective_id, str)
         assert update.objective_id == ref.id
+
+    def test_read_objective_body_round_trip(self) -> None:
+        store = _make_store()
+        ref = store.create_objective(
+            title="t", body="Design prose.", run_id="RUN8", roadmap_nodes=[_node()]
+        )
+        assert store.read_objective_body(objective_id=ref.id) == "Design prose."
+        assert store.read_objective_body(objective_id="missing") is None
 
     def test_add_objective_node_assigns_next_id(self) -> None:
         store = _make_store()
