@@ -8,7 +8,7 @@ its Mechanical table **re-rendered from the authoritative nodes** — the carrie
 best-effort and may have drifted — while the Reconcilable prose and Immutable notes pass through
 verbatim. The human render wraps the presented body in ``<untrusted_objective_body>`` tags (the
 engagement-block convention: human-authored objective text is DATA, never instructions). The body
-read is fail-soft (contracts.md §8.31): an unreadable/missing body degrades to ``body: null`` +
+read is fail-soft (contracts.md §8.21): an unreadable/missing body degrades to ``body: null`` +
 ``body_error`` / a dim ``body unavailable`` line, exit 0 — mirroring ``stacked_readiness``.
 """
 

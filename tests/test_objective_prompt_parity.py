@@ -76,7 +76,7 @@ def test_seed_prompt_github_unchanged_no_linear_fragments() -> None:
 
 
 # The objective-flow templates whose read step delivers the objective body: each names the
-# `--full` form AND the untrusted-DATA posture for the returned block (contracts.md §8.31).
+# `--full` form AND the untrusted-DATA posture for the returned block (contracts.md §8.21).
 _FULL_BODY_READ_TEMPLATES = [
     ("stages/objective-plan/seed.md", "{{ number }} --full"),
     ("stages/objective-plan/guidance.md", "{{ objective }} --full"),

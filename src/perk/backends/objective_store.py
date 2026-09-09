@@ -553,7 +553,7 @@ class ObjectiveStore(Protocol):
     def read_objective_body(self, *, objective_id: str) -> str | None:
         """Read the objective body carrier verbatim — the Mechanical roadmap table, the
         Reconcilable prose and any Immutable notes — as untrusted DATA (the read twin of
-        ``update_objective_body``; contracts.md §8.31). GitHub: the ``objective-body`` comment the
+        ``update_objective_body``; contracts.md §8.21). GitHub: the ``objective-body`` comment the
         header's ``objective_comment_id`` references; Linear: the project overview. The carrier's
         table is best-effort mirrored and NOT authoritative — presenters re-render it from
         ``get_objective``'s nodes. ``None`` when the objective has no body carrier (no
