@@ -9,7 +9,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-const INSTALL_ROOT_SPELLING = /\.pi\/npm\/node_modules\/|["']npm["']\s*,\s*["']node_modules["']/g;
+// Whole path tokens: the exception matches exactly (not by prefix); its presence keeps the scan live.
+const INSTALL_ROOT_SPELLING =
+  /\.pi\/npm\/node_modules\/[^"'`\s]*|["']npm["']\s*,\s*["']node_modules["']/g;
 const SANCTIONED_FILE = "waves/ponytail.ts";
 const SANCTIONED_ROOT = ".pi/npm/node_modules/@dietrichgebert/ponytail";
 const VIOLATION_MESSAGE =
@@ -29,17 +31,17 @@ test("no extension source spells a path into .pi/npm/node_modules/ except Ponyta
   assert.ok(files.includes("index.ts") && files.includes(SANCTIONED_FILE), "scan misaimed");
   const violations: string[] = [];
   for (const file of files) {
-    const source = readFileSync(path.join(import.meta.dirname, file), "utf8");
-    const spellings = installRootSpellings(source);
-    if (file === SANCTIONED_FILE) {
-      assert.ok(spellings.length >= 1, "the sanctioned exception vanished — the scan is not live");
-      assert.deepEqual(installRootSpellings(source.replaceAll(SANCTIONED_ROOT, "")), []);
-    } else violations.push(...spellings.map((spelling) => `${file}: ${spelling}`));
+    const spellings = installRootSpellings(readFileSync(`${import.meta.dirname}/${file}`, "utf8"));
+    if (file === SANCTIONED_FILE) assert.deepEqual(spellings, [SANCTIONED_ROOT]);
+    else violations.push(...spellings.map((spelling) => `${file}: ${spelling}`));
   }
   assert.deepEqual(violations, [], VIOLATION_MESSAGE);
-  // Synthetic controls through the same classifier: both spellings hit, neither non-spelling does.
-  const hit =
-    'resolve(import.meta.dirname, "../../.pi/npm/node_modules/pi-subagents") + join(cwd, ".pi", "npm", "node_modules", "pi-subagents")';
-  assert.deepEqual(installRootSpellings(hit), [".pi/npm/node_modules/", '"npm", "node_modules"']);
-  assert.deepEqual(installRootSpellings("join(cwd, PONYTAIL_ROOT) // .pi/npm/node_modules/x"), []);
+  // Same-classifier controls: full literals (a root prefix-match is NOT the root); no false hits.
+  for (const [control, expected] of [
+    ['"../../.pi/npm/node_modules/pi-subagents"', [".pi/npm/node_modules/pi-subagents"]],
+    ['join(cwd, ".pi", "npm", "node_modules", "pi-subagents")', ['"npm", "node_modules"']],
+    [`"${SANCTIONED_ROOT}-fork/private"`, [`${SANCTIONED_ROOT}-fork/private`]],
+    ["join(cwd, PONYTAIL_ROOT) // .pi/npm/node_modules/x", []],
+  ] as const)
+    assert.deepEqual(installRootSpellings(control), expected, control);
 });

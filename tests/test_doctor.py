@@ -1009,12 +1009,26 @@ def test_subagent_compat_version_mismatch_is_warn_never_fail(scaffolded_perk_rep
     assert "subagent-compat" not in run_doctor(scaffolded_perk_repo, fix=True, verify=False).fixed
 
 
-def test_subagent_compat_unreadable_package_json_is_warn(scaffolded_perk_repo):
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        "not json{",
+        "[]",
+        '{"name": "pi-subagents"}',
+        '{"version": 123}',
+        '{"version": {}}',
+        '{"version": ""}',
+    ],
+)
+def test_subagent_compat_unreadable_package_json_is_warn(scaffolded_perk_repo, manifest):
+    # Malformed JSON, a missing field, and a wrong-typed or empty `version` are all the same
+    # unreadable manifest — never a "mismatch" carrying the re-verify/stamp-bump remediation.
     pkg = _plant_subagents_package(scaffolded_perk_repo, version="0.0.0")
-    (pkg / "package.json").write_text("not json{", encoding="utf-8")
+    (pkg / "package.json").write_text(manifest, encoding="utf-8")
     compat = _subagent_compat_check(scaffolded_perk_repo)
     assert compat.status == "warn"
     assert "unreadable" in compat.message
+    assert "_SUBAGENTS_GUIDANCE_VERIFIED_VERSION" not in compat.remediation
 
 
 def test_subagent_compat_verified_version_stamp_is_pinned():

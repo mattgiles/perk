@@ -730,14 +730,16 @@ _SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.65.1"
 def _installed_subagents_version(pkg_dir: Path) -> str | None:
     """The ``version`` of the installed pi-subagents package, or ``None``.
 
-    Best-effort, never raises: ``None`` when the file is absent or the JSON / ``version`` is
-    unreadable. Mirrors ``installed_perk_version``'s posture (TypeError: valid JSON that is a
-    non-dict — indexing it raises, but an unparseable version still means "unverifiable").
+    Best-effort, never raises: ``None`` when the file is absent, the JSON / ``version`` is
+    unreadable, or ``version`` is not a non-empty string (a wrong-typed field is an unreadable
+    manifest, never a "mismatched" version). Mirrors ``installed_perk_version``'s posture
+    (TypeError: valid JSON that is a non-dict — indexing it raises).
     """
     try:
-        return json.loads((pkg_dir / "package.json").read_text(encoding="utf-8"))["version"]
+        version = json.loads((pkg_dir / "package.json").read_text(encoding="utf-8"))["version"]
     except (OSError, ValueError, KeyError, TypeError):
         return None
+    return version if isinstance(version, str) and version else None
 
 
 def _subagent_compat_check(root: Path) -> Check:
