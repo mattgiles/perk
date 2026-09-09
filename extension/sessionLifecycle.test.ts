@@ -356,7 +356,9 @@ test("composition: a consuming cold start orders gate → verified linkage → c
     // The real effect sequence from the claim on: the ONE combined claim entry, the gate sync
     // (the stage-scoped tool set), the ONE verified link append, then the receiver — nothing
     // else touched workflow-state or the tool set in between. (Pi's own initial tool
-    // installation precedes the handler; nothing of perk's does.)
+    // installation precedes the handler; nothing of perk's does.) The trailing `tools` is the
+    // gate's one `resources_discover` re-apply of the same stage set, which Pi fires after every
+    // extension's `session_start` has run (contracts.md §8.40) — the only effect after the receiver.
     const claim = events.indexOf("append:mode,perk_version,pi_session_id,run_id,stage");
     assert.ok(claim >= 0, JSON.stringify(events));
     assert.ok(
@@ -368,8 +370,10 @@ test("composition: a consuming cold start orders gate → verified linkage → c
       "tools",
       "append:active_plan_ref",
       "receiver",
+      "tools",
     ]);
-    assert.ok(toolSets.at(-1)?.includes("submit"), "implement scoping installed before linkage");
+    assert.ok(toolSets.at(-1)?.includes("submit"), "implement scoping re-applied at startup");
+    assert.ok(toolSets.at(-2)?.includes("submit"), "implement scoping installed before linkage");
     assert.equal(receiver.constructed(), 1, "one receiver per activation, like production");
     assert.equal(receiver.syncs.length, 1);
     const sync = receiver.syncs[0];

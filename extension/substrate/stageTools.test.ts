@@ -4,7 +4,12 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
+import {
+  type ExtensionAPI,
+  type ExtensionContext,
+  SessionManager,
+} from "@earendil-works/pi-coding-agent";
 import { reconcileGuidance } from "../authoring/objective/prose.ts";
 import { prReviewGuidance } from "../pi/v1/codeReview/automated.ts";
 import { stackReviewGuidance } from "../pi/v1/codeReview/stack.ts";
@@ -20,6 +25,7 @@ import {
 } from "../pi/v1/delivery/stackSync.ts";
 import { retainedDispatch } from "../testing/fakeConflictResolver.ts";
 import {
+  fauxModelRuntime,
   loadPerkSession,
   type PerkSession,
   plantSession,
@@ -345,24 +351,66 @@ test("tree navigation: gate/stage recompute across mode entries", async () => {
 
 // --- borrowed-package scoping (the fake-borrowed-package idiom, mirroring fakePlannotator) -------
 
+/** The one shared fake tool body every fake borrowed registrar uses (a no-op tool). */
+function registerFakeTool(pi: ExtensionAPI, name: string): void {
+  pi.registerTool({
+    name,
+    label: name,
+    description: `fake borrowed tool ${name} (test)`,
+    parameters: { type: "object", properties: {} },
+    async execute() {
+      return { content: [{ type: "text", text: "ok" }], details: {} };
+    },
+  });
+}
+
 /**
- * A fake borrowed-package extension registering LOAD-TIME tools with the given names (the
- * pi-subagents / rpiv-todo / pi-web-access / pi-mono-linear / plannotator registration shape).
- * Bound after perk via extraExtensions, so the tools exist before perk's session_start sync.
+ * A fake borrowed-package extension registering tools with the given names. `at: "load"` (the
+ * default) registers at load time — the pi-subagents / rpiv-todo / pi-web-access / pi-mono-linear
+ * / plannotator shape; bound after perk via extraExtensions, so the tools exist before perk's
+ * session_start sync. `at: "session_start"` registers inside a `session_start` handler (the
+ * pi-subagents `subagent_supervisor` shape — AFTER perk's sync, before `resources_discover`);
+ * `deactivate` then has the owner deliberately deactivate its own late tool(s) right after
+ * registering them (register-then-strip, before perk ever sees them active).
  */
-function fakeBorrowedPackage(names: readonly string[]): (pi: ExtensionAPI) => void {
+function fakeBorrowedPackage(
+  names: readonly string[],
+  opts: { at?: "load" | "session_start"; deactivate?: readonly string[] } = {},
+): (pi: ExtensionAPI) => void {
   return (pi) => {
-    for (const name of names) {
-      pi.registerTool({
-        name,
-        label: name,
-        description: `fake borrowed tool ${name} (test)`,
-        parameters: { type: "object", properties: {} },
-        async execute() {
-          return { content: [{ type: "text", text: "ok" }], details: {} };
-        },
-      });
+    if ((opts.at ?? "load") === "load") {
+      for (const name of names) registerFakeTool(pi, name);
+      return;
     }
+    pi.on("session_start", async () => {
+      for (const name of names) registerFakeTool(pi, name);
+      const deactivate = opts.deactivate;
+      if (deactivate !== undefined) {
+        pi.setActiveTools(pi.getActiveTools().filter((n) => !deactivate.includes(n)));
+      }
+    });
+  };
+}
+
+/**
+ * A stand-in for `@juicesharp/rpiv-ask-user-question`'s `hasUI` reconcile: registers
+ * `ask_user_question` at load and, on the named hook, strips it when `!ctx.hasUI`. The package's
+ * real hook is `before_agent_start` (exercised by the headless prompt-turn row); the
+ * `session_start` variant exists so a foreign strip can PRECEDE perk's first engagement — the
+ * precondition the inactive-at-snapshot row needs.
+ */
+function fakeQuestionnaire(
+  strip: "before_agent_start" | "session_start",
+): (pi: ExtensionAPI) => void {
+  return (pi) => {
+    registerFakeTool(pi, "ask_user_question");
+    const reconcile = async (_event: unknown, ctx: ExtensionContext): Promise<void> => {
+      if (ctx.hasUI) return;
+      pi.setActiveTools(pi.getActiveTools().filter((n) => n !== "ask_user_question"));
+    };
+    // Two literal registrations: `pi.on`'s typed overloads take no union event name.
+    if (strip === "session_start") pi.on("session_start", reconcile);
+    else pi.on("before_agent_start", reconcile);
   };
 }
 
@@ -424,33 +472,238 @@ test("plan stage (read-write): delegation + todo scoped off; research passes", a
   }
 });
 
-test("late registration leaks past rebuild-point filtering (the accepted supervisor-pair leak)", async () => {
-  // Mirrors pi-subagents' parent intercom pair: registered inside its own session_start handler,
-  // bound AFTER perk (the real load order — perk is the first `packages` entry), so registration
-  // lands after perk's sync. Pi activation semantics: a tool registered after a setActiveTools
-  // call becomes active — the pair leaks at launch (accepted + documented in BORROWED_TOOLS; a
-  // later tree-navigation re-apply filters over the original snapshot and drops it).
-  const runId = "01STAGETOOLLEAK";
-  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-write", stage: "implement" } });
-  const lateRegistrar = (pi: ExtensionAPI): void => {
-    pi.on("session_start", async () => {
-      pi.registerTool({
-        name: "subagent_supervisor",
-        label: "subagent_supervisor",
-        description: "fake late-registered parent intercom (test)",
-        parameters: { type: "object", properties: {} },
-        async execute() {
-          return { content: [{ type: "text", text: "ok" }], details: {} };
-        },
-      });
-    });
-  };
-  const h = await loadAt(cwd, { env: { PERK_RUN_ID: runId }, extraExtensions: [lateRegistrar] });
+// --- late registrants: the `resources_discover` re-apply + the admission rule ------------------
+
+test("late registration: filtered at resources_discover in an authoring stage; admitted in a worktree stage and re-admitted after an authoring-branch detour", async () => {
+  // pi-subagents' `subagent_supervisor` registers inside its own session_start handler, bound
+  // AFTER perk (the real load order — perk is the first `packages` entry), so registration lands
+  // after perk's sync and Pi activates it by default. The `resources_discover` re-apply (fired
+  // after every extension's session_start) is where it meets the stage diet.
+  const late = fakeBorrowedPackage(["subagent_supervisor"], { at: "session_start" });
+
+  // Arm A: an authoring stage carries no delegation — the startup re-apply filters it.
+  const cwdA = scaffoldRepo();
+  const fileA = plantSession(cwdA, [{ stage: "plan", mode: "read-write" }]);
+  const a = await loadAt(cwdA, {
+    sessionManager: SessionManager.open(fileA),
+    env: { PERK_RUN_ID: undefined },
+    extraExtensions: [late],
+  });
   try {
     assert.ok(
-      h.session.getActiveToolNames().includes("subagent_supervisor"),
-      "a tool registered after perk's sync stays active (the documented launch leak)",
+      !a.session.getActiveToolNames().includes("subagent_supervisor"),
+      "a late registrant outside the plan list is filtered at resources_discover",
     );
+  } finally {
+    a.dispose();
+  }
+
+  // Arm B: a worktree stage carries it — admitted at resources_discover; perk's own authoring
+  // filter never evicts the admission, so navigating back restores it (sticky admission).
+  const cwdB = scaffoldRepo();
+  const fileB = plantSession(cwdB, [
+    { mode: "read-write" },
+    { stage: "plan" },
+    { stage: "implement" },
+  ]);
+  const b = await loadAt(cwdB, {
+    sessionManager: SessionManager.open(fileB),
+    env: { PERK_RUN_ID: undefined },
+    extraExtensions: [late],
+  });
+  try {
+    const [noStageId, planId, implementId] = b.entryIds() as [string, string, string];
+    let active = b.session.getActiveToolNames();
+    assert.ok(active.includes("subagent_supervisor"), "admitted at resources_discover (implement)");
+    assert.ok(!active.includes("plan_draft"), "the diet itself is intact on the implement branch");
+
+    await b.navigateTo(planId);
+    active = b.session.getActiveToolNames();
+    assert.ok(!active.includes("subagent_supervisor"), "perk's own plan filter scopes it off");
+    assert.ok(active.includes("plan_draft"), "the plan-stage tool is active on the plan branch");
+
+    await b.navigateTo(implementId);
+    active = b.session.getActiveToolNames();
+    assert.ok(
+      active.includes("subagent_supervisor"),
+      "sticky admission: the implement re-apply restores the admitted late tool (a snapshot-only or while-active rule drops it here)",
+    );
+    assert.ok(!active.includes("plan_draft"));
+
+    await b.navigateTo(noStageId);
+    active = b.session.getActiveToolNames();
+    for (const name of ["subagent_supervisor", "edit", "write"]) {
+      assert.ok(active.includes(name), `the no-stage restore includes admitted names: ${name}`);
+    }
+  } finally {
+    b.dispose();
+  }
+});
+
+test("gated session: allowlisted subagent_supervisor stays active across navigation; a late non-allowlisted tool is inactive from startup and not restored at gate exit", async () => {
+  const runId = "01STAGETOOLGLAT";
+  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-only", stage: "objective-plan" } });
+  const h = await loadAt(cwd, {
+    env: { PERK_RUN_ID: runId },
+    extraExtensions: [
+      fakeBorrowedPackage(["subagent"]),
+      fakeBorrowedPackage(["subagent_supervisor", "late_foreign_tool"], { at: "session_start" }),
+    ],
+  });
+  try {
+    const assertGated = (when: string) => {
+      const active = h.session.getActiveToolNames();
+      assert.ok(active.includes("subagent_supervisor"), `allowlisted late tool active ${when}`);
+      for (const name of ["late_foreign_tool", "edit", "write"]) {
+        assert.ok(!active.includes(name), `${name} must be inactive while gated ${when}`);
+      }
+    };
+    // Gate ON is by name: the resources_discover re-apply installs the allowlist over the late
+    // registrations — schema-invisible from the first turn, not from the first navigation.
+    assertGated("after startup");
+    await h.emitLifecycle({
+      type: "session_tree",
+      newLeafId: h.entryIds().at(-1) ?? null,
+      oldLeafId: null,
+    });
+    assertGated("after a tree navigation");
+
+    // Gate OFF (`exit()` → the objective-plan stage filter over the baseline): the late tool the
+    // gate kept inactive was never seen active by a gate-OFF reconciliation, so it is not
+    // admitted and not restored — the accepted residual, pinned.
+    await h.invokeCommand("plan");
+    const active = h.session.getActiveToolNames();
+    assert.ok(
+      !active.includes("late_foreign_tool"),
+      "accepted residual: not restored at gate exit",
+    );
+    for (const name of ["edit", "write", "plan_draft"]) {
+      assert.ok(active.includes(name), `restored once the gate is off: ${name}`);
+    }
+  } finally {
+    h.dispose();
+  }
+});
+
+test("inactive at snapshot: a tool the host started inactive is never re-activated by a perk restore (the headless questionnaire strip)", async () => {
+  // Bare headless session: the questionnaire strips its tool in session_start, BEFORE perk's
+  // first engagement (the warm /plan toggle), so the snapshot lacks it while the census has it.
+  const cwd = scaffoldRepo();
+  const h = await loadAt(cwd, {
+    env: { PERK_RUN_ID: undefined },
+    headful: false,
+    extraExtensions: [fakeQuestionnaire("session_start")],
+  });
+  try {
+    const inactiveAtStart = ["ask_user_question", "grep", "find", "ls"];
+    let active = h.session.getActiveToolNames();
+    for (const name of inactiveAtStart) {
+      assert.ok(!active.includes(name), `precondition: inactive before perk engages: ${name}`);
+    }
+    // Gate ON names them (READ_ONLY_TOOLS) — pre-existing gate-ON behavior, asserted only so the
+    // restore assertion below is non-vacuous.
+    await h.invokeCommand("plan");
+    active = h.session.getActiveToolNames();
+    for (const name of ["ask_user_question", "grep"]) {
+      assert.ok(active.includes(name), `gate ON activates the allowlisted ${name}`);
+    }
+    // Gate OFF → restore the baseline: the census saw these names, so they are never admitted —
+    // a census-less `snapshot ∪ currentlyActive` would have kept them on.
+    await h.invokeCommand("plan");
+    active = h.session.getActiveToolNames();
+    for (const name of inactiveAtStart) {
+      assert.ok(!active.includes(name), `the restore never re-activates ${name}`);
+    }
+    for (const name of ["read", "bash", "edit", "write"]) {
+      assert.ok(active.includes(name), `the starting set is restored: ${name}`);
+    }
+  } finally {
+    h.dispose();
+  }
+});
+
+test("foreign deactivation: a late tool its owner deactivated before perk saw it active is never admitted; an admitted tool follows the recorded reconciliation interplay", async () => {
+  const runId = "01STAGETOOLFDEA";
+  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-write", stage: "implement" } });
+  let foreignPi: ExtensionAPI | undefined;
+  const h = await loadAt(cwd, {
+    env: { PERK_RUN_ID: runId },
+    extraExtensions: [
+      fakeBorrowedPackage(["subagent_supervisor", "late_tool_x"], {
+        at: "session_start",
+        deactivate: ["late_tool_x"],
+      }),
+      (pi) => {
+        foreignPi = pi;
+      },
+    ],
+  });
+  try {
+    const navigate = () =>
+      h.emitLifecycle({
+        type: "session_tree",
+        newLeafId: h.entryIds().at(-1) ?? null,
+        oldLeafId: null,
+      });
+    let active = h.session.getActiveToolNames();
+    assert.ok(active.includes("subagent_supervisor"), "the late tool seen active is admitted");
+    assert.ok(!active.includes("late_tool_x"), "the owner-deactivated late tool is respected");
+    await navigate();
+    active = h.session.getActiveToolNames();
+    assert.ok(active.includes("subagent_supervisor"));
+    assert.ok(!active.includes("late_tool_x"), "never seen active → never admitted");
+
+    // The owner deactivates the ADMITTED tool between reconciliations: the toggle wins until the
+    // next reconciliation re-installs perk's set — exactly as for a snapshot member (sticky
+    // admission; pinned so a later move to ownership tracking is deliberate).
+    assert.ok(foreignPi);
+    foreignPi.setActiveTools(foreignPi.getActiveTools().filter((n) => n !== "subagent_supervisor"));
+    assert.ok(!h.session.getActiveToolNames().includes("subagent_supervisor"));
+    await navigate();
+    assert.ok(
+      h.session.getActiveToolNames().includes("subagent_supervisor"),
+      "the reconciliation re-installs the admitted tool over the foreign toggle",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("headless prompt turn: the model-visible census after startup", async () => {
+  // One real (faux-runtime) prompt turn: `context.tools` IS the model-visible census, so this
+  // pins what the model actually sees after the startup re-apply — the admitted late tool
+  // inside the diet, the scoped-off authoring tool absent, and the questionnaire's own
+  // `before_agent_start` strip honored (perk adds no `before_agent_start` re-apply).
+  const runId = "01STAGETOOLTURN";
+  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-write", stage: "implement" } });
+  const reg = await fauxModelRuntime();
+  const seen: string[][] = [];
+  reg.setResponses([
+    (context: { tools?: { name: string }[] }) => {
+      seen.push((context.tools ?? []).map((t) => t.name));
+      return fauxAssistantMessage([fauxText("census read")], { stopReason: "stop" });
+    },
+  ]);
+  const h = await loadAt(cwd, {
+    env: { PERK_RUN_ID: runId },
+    headful: false,
+    model: reg.getModel(),
+    modelRuntime: reg.modelRuntime,
+    extraExtensions: [
+      fakeBorrowedPackage(["subagent_supervisor"], { at: "session_start" }),
+      fakeQuestionnaire("before_agent_start"),
+    ],
+  });
+  try {
+    await h.session.prompt("census");
+    assert.equal(seen.length, 1, "exactly one model request");
+    const tools = new Set(seen[0]);
+    for (const name of ["subagent_supervisor", "submit", "read", "bash", "edit", "write"]) {
+      assert.ok(tools.has(name), `model-visible after startup: ${name}`);
+    }
+    for (const name of ["plan_draft", "ask_user_question"]) {
+      assert.ok(!tools.has(name), `not model-visible after startup: ${name}`);
+    }
   } finally {
     h.dispose();
   }

@@ -264,6 +264,7 @@ test("btw retries scratch availability; a controller floor invalidates the side 
   const pi = {
     appendEntry: () => {},
     getActiveTools: () => ["read", "write"],
+    getAllTools: () => [],
     setActiveTools: () => {},
     getThinkingLevel: () => "off",
     on: () => {},

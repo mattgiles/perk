@@ -566,6 +566,11 @@ export async function loadPerkSession(opts: {
   /** Session model override (e.g. a faux-provider model); defaults to the keyless anthropic model. */
   model?: unknown;
   /**
+   * The session's canonical model/auth runtime — e.g. `fauxModelRuntime().modelRuntime`, so a
+   * real prompt turn runs offline; defaults to the SDK's agentDir-derived runtime.
+   */
+  modelRuntime?: ModelRuntime;
+  /**
    * Extra extension factories bound AFTER perk (e.g. a fake plannotator registering its
    * `plannotator-review` command so presence probes see it). Offline like everything here.
    */
@@ -633,6 +638,7 @@ export async function loadPerkSession(opts: {
     cwd,
     agentDir,
     model,
+    ...(opts.modelRuntime !== undefined ? { modelRuntime: opts.modelRuntime } : {}),
     resourceLoader: loader,
     sessionManager: opts.sessionManager ?? SessionManager.inMemory(cwd),
     settingsManager: SettingsManager.inMemory({
