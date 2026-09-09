@@ -19,6 +19,7 @@ import {
   isDraftReviewAngle,
   startDraftReviewWave,
 } from "./draftReviewWave.ts";
+import { PONYTAIL_CORE_SKILL } from "./ponytail.ts";
 import { reportWaveOver } from "./reportWave.ts";
 
 const TWO_ANGLES: DraftReviewAngle[] = ["grounding", "scope"];
@@ -69,10 +70,7 @@ test("buildDraftReviewAssignments: key = label = slug, the fixed agent/phase, th
       phase: "draft-review",
       task: "Angle: ponytail.\nDraft type: plan.\n\n<untrusted_draft>\n# The draft\n</untrusted_draft>",
       skill: "ponytail",
-      requiredSkill: {
-        skill: "ponytail",
-        skillFile: ".pi/npm/node_modules/@dietrichgebert/ponytail/skills/ponytail/SKILL.md",
-      },
+      requiredSkill: PONYTAIL_CORE_SKILL,
     },
   ]);
 });

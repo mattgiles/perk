@@ -27,6 +27,7 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../../testing/harness.ts";
+import { PONYTAIL_PACKAGE_ROOT } from "../../waves/ponytail.ts";
 import {
   createAnnotationState,
   executePushAnnotations,
@@ -50,7 +51,7 @@ function markedFake(marker: string): FakeSubagents {
 }
 
 function installPonytailSkill(cwd: string, skillName: string): void {
-  const root = join(cwd, ".pi", "npm", "node_modules", "@dietrichgebert", "ponytail");
+  const root = join(cwd, PONYTAIL_PACKAGE_ROOT);
   const skillDir = join(root, "skills", skillName);
   mkdirSync(skillDir, { recursive: true });
   writeFileSync(

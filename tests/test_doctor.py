@@ -39,10 +39,7 @@ from perk.convergence.doctor import (
     run_doctor,
 )
 from perk.convergence.doctor import checks as doctor_checks
-from perk.convergence.doctor.checks import (
-    _SUBAGENT_COMPAT_PROBES,
-    _SUBAGENTS_GUIDANCE_VERIFIED_VERSION,
-)
+from perk.convergence.doctor.checks import _SUBAGENTS_GUIDANCE_VERIFIED_VERSION
 from perk.convergence.init import run_init
 from perk.substrate import git, paths
 
@@ -973,17 +970,11 @@ def test_subagent_engine_signal_and_defs_dir(scaffolded_perk_repo):
     assert defs.status == "ok"
 
 
-def _plant_subagents_tree(root, *, version=_SUBAGENTS_GUIDANCE_VERIFIED_VERSION):
-    """A fake installed pi-subagents tree built FROM the probe table, so the tests stay in
-    lockstep with any future probe-table change. Returns the planted package dir."""
+def _plant_subagents_package(root, *, version):
+    """A fake installed pi-subagents package: only its ``package.json`` (doctor reads nothing
+    else). Returns the planted package dir."""
     pkg = root / ".pi" / "npm" / "node_modules" / "pi-subagents"
-    markers_by_file: dict[str, list[str]] = {}
-    for _label, relpath, required in _SUBAGENT_COMPAT_PROBES:
-        markers_by_file.setdefault(relpath, []).extend(required)
-    for relpath, markers in markers_by_file.items():
-        path = pkg / relpath
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(markers) + "\n", encoding="utf-8")
+    pkg.mkdir(parents=True, exist_ok=True)
     (pkg / "package.json").write_text(json.dumps({"version": version}), encoding="utf-8")
     return pkg
 
@@ -996,336 +987,39 @@ def test_subagent_compat_absent_is_info(scaffolded_perk_repo):
     assert "not installed" in compat.message
 
 
-def test_subagent_compat_compatible_tree_is_ok(scaffolded_perk_repo):
-    _plant_subagents_tree(scaffolded_perk_repo, version=_SUBAGENTS_GUIDANCE_VERIFIED_VERSION)
-    compat = _subagent_compat_check(scaffolded_perk_repo)
-    assert compat.status == "ok"
-    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION in compat.message
-    # At the guidance-verified version the detail carries no mismatch note.
-    assert "guidance-verified" not in compat.detail
-
-
-def test_subagent_compat_newer_version_is_ok_with_note(scaffolded_perk_repo):
-    # A version bump with an unchanged surface stays `ok` (the package is unpinned) but the
-    # detail carries the re-verify note.
-    _plant_subagents_tree(scaffolded_perk_repo, version="9.9.9")
-    compat = _subagent_compat_check(scaffolded_perk_repo)
-    assert compat.status == "ok" and "9.9.9" in compat.message
-    assert "guidance-verified" in compat.detail
-
-
-def test_subagent_compat_divergence_is_warn_never_fail(scaffolded_perk_repo):
-    # A probe file present but missing its marker is the loud warn — never a fail (the exit
-    # code is unaffected; do NOT assert report.healthy, other checks own that).
-    pkg = _plant_subagents_tree(scaffolded_perk_repo)
-    wake_label, wake_relpath, _required = next(
-        row for row in _SUBAGENT_COMPAT_PROBES if row[0] == "async completion notification wake"
-    )
-    (pkg / wake_relpath).write_text("// markers gone\n", encoding="utf-8")
-    compat = _subagent_compat_check(scaffolded_perk_repo)
-    assert compat.status == "warn" and compat.status != "fail"
-    assert "diverges" in compat.message
-    assert wake_label in compat.detail
-    assert compat.remediation
-
-
-def test_subagent_compat_probe_table_covers_verified_surfaces():
-    # Presence (superset, not exact-set) guard for the probe-table growth at each verified
-    # version: the surfaces stay probed, without pinning the table shut against future rows.
-    probed_files = {relpath for _label, relpath, _required in _SUBAGENT_COMPAT_PROBES}
-    assert probed_files >= {
-        "src/extension/rpc.ts",
-        "src/runs/background/retained-children.ts",
-        "src/workflows/scripted-workflow.ts",
-        # The 0.45.0 completion-receipt surfaces.
-        "src/runs/background/wait-completions.ts",
-        "src/runs/background/subagent-wait.ts",
-        "src/runs/foreground/subagent-executor.ts",
-        # The async completion-wake surface (the native wake the streaming relay rides).
-        "src/runs/background/notify.ts",
-        "src/runs/background/result-watcher.ts",
-        # The streaming-wave delivery-chain surfaces (typed child config since v0.65.0).
-        "src/runs/shared/child-runtime-config.ts",
-        "src/intercom/native-supervisor-channel.ts",
-        "src/intercom/supervisor-ui.ts",
-        # The intercom-bridge tool-delivery surface.
-        "src/intercom/intercom-bridge.ts",
-        # The 0.46.0 report-wave acceptance-suppression surface.
-        "src/runs/shared/acceptance.ts",
-    }
-
-
-def test_subagent_compat_acceptance_probe_is_pinned_exactly():
-    # The 0.65.1 re-verify pins: the guidance-verified version itself, the load-bearing
-    # acceptance-disable probe row IN FULL (label + file + both markers), and the
-    # intercom-bridge delivery row IN FULL (the path perk's streaming reviewers ride). The
-    # generated fake tree derives from the probe table, so without these exact pins the suite
-    # would stay green if the version bump, a row's label, or any marker were dropped.
-    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.65.1"
-    assert (
-        "explicit acceptance disable",
-        "src/runs/shared/acceptance.ts",
-        ("explicitAcceptanceCanDisable", "formatAcceptancePrompt"),
-    ) in _SUBAGENT_COMPAT_PROBES
-    assert (
-        "intercom bridge tool delivery",
-        "src/intercom/intercom-bridge.ts",
-        ("resolveIntercomBridge", "applyIntercomBridgeToAgent", '["contact_supervisor"]'),
-    ) in _SUBAGENT_COMPAT_PROBES
-
-
-def test_subagent_compat_exact_skill_injection_probes_are_pinned():
-    expected = {
-        (
-            "workflow item skill override",
-            "src/shared/settings.ts",
-            (
-                "const taskSkillInput = normalizeSkillInput(task.skill);",
-                "skills = [...taskSkillInput];",
-            ),
-        ),
-        (
-            "agent skillPath parsing",
-            "src/agents/agents.ts",
-            (
-                "const skillPath = parseFrontmatterList(frontmatter.skillPath);",
-                "...(skillPath?.length ? { skillPath } : {}),",
-            ),
-        ),
-        (
-            "invocation-local skill precedence",
-            "src/agents/skills.ts",
-            (
-                "const local = localByName.get(trimmed);",
-                "let skill = local ? readSkill(trimmed, local.filePath, local.source) : undefined;",
-            ),
-        ),
-        (
-            "async workflow skill injection",
-            "src/runs/background/async-execution.ts",
-            ("a.skillPath,", "const injection = buildSkillInjection(resolvedSkills);"),
-        ),
-    }
-    assert expected <= set(_SUBAGENT_COMPAT_PROBES)
-
-
-# Literal full-row pins are independent of the table-derived synthetic installation. Removing
-# a production row must fail even if the remaining table plants a superficially healthy tree.
-_PARTIAL_COMPAT_ROWS = (
-    (
-        "partial workflow terminal vocabulary",
-        "src/shared/types.ts",
-        ("WorkflowTerminalOutcome", 'state: "partial"', '"budget_exhausted"', '"timeout"'),
-    ),
-    (
-        "partial workflow result projection",
-        "src/runs/foreground/subagent-executor.ts",
-        (
-            "workflowFailureTerminalOutcome",
-            "terminalOutcome",
-            "results: partial.children.map",
-            "workflowKey: child.key",
-            "structuredOutput: child.structuredOutput",
-            "success: child.ok",
-        ),
-    ),
-    (
-        "partial workflow completion forwarding",
-        "src/runs/background/result-watcher.ts",
-        ("SUBAGENT_ASYNC_COMPLETE_EVENT", "...data", "...data.results![index]"),
-    ),
-)
-
-
-def test_subagent_compat_partial_rows_are_pinned_in_full():
-    assert set(_PARTIAL_COMPAT_ROWS) <= set(_SUBAGENT_COMPAT_PROBES)
-
-
-def test_subagent_compat_partial_ok_detail_without_node(scaffolded_perk_repo, monkeypatch):
-    _plant_subagents_tree(scaffolded_perk_repo)
-    monkeypatch.setattr(doctor_checks.proc, "which_absolute", lambda binary: None)
+def test_subagent_compat_verified_version_is_ok(scaffolded_perk_repo):
+    _plant_subagents_package(scaffolded_perk_repo, version=_SUBAGENTS_GUIDANCE_VERIFIED_VERSION)
     compat = _subagent_compat_check(scaffolded_perk_repo)
     assert compat.status == "ok" and compat.group == "package"
-    for surface in (
-        "partial terminal vocabulary",
-        "keyed structured-result projection",
-        "completion forwarding",
-    ):
-        assert surface in compat.detail
-    assert "behavior probe skipped (node not on PATH)" in compat.detail
-    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.65.1"
+    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION in compat.message
+    assert not compat.remediation
 
 
-@pytest.mark.parametrize(
-    ("label", "relpath", "dropped"),
-    [(label, path, marker) for label, path, markers in _PARTIAL_COMPAT_ROWS for marker in markers],
-)
-def test_subagent_compat_partial_missing_marker_warns_without_node(
-    scaffolded_perk_repo, monkeypatch, label, relpath, dropped
-):
-    pkg = _plant_subagents_tree(scaffolded_perk_repo)
-    path = pkg / relpath
-    original = path.read_text(encoding="utf-8")
-    assert dropped in original
-    # Shared files contain several rows' markers: remove EVERY occurrence, including substrings.
-    path.write_text(original.replace(dropped, ""), encoding="utf-8")
-    assert dropped not in path.read_text(encoding="utf-8")
-    monkeypatch.setattr(doctor_checks.proc, "which_absolute", lambda binary: None)
+def test_subagent_compat_version_mismatch_is_warn_never_fail(scaffolded_perk_repo):
+    # The package is unpinned: installed != guidance-verified is the loud early drift signal —
+    # a warn that never affects health/exit code and has no --fix arm.
+    _plant_subagents_package(scaffolded_perk_repo, version="9.9.9")
     compat = _subagent_compat_check(scaffolded_perk_repo)
     assert compat.status == "warn" and compat.group == "package"
-    assert label in compat.detail and dropped in compat.detail
-    assert "behavior probe skipped (node not on PATH)" in compat.detail
-    assert compat.remediation
+    assert "9.9.9" in compat.message and _SUBAGENTS_GUIDANCE_VERIFIED_VERSION in compat.message
+    assert "pi-subagents-reverify.md" in compat.remediation
+    assert "_SUBAGENTS_GUIDANCE_VERIFIED_VERSION" in compat.remediation
     report = DoctorReport(checks=[compat], fixed=[], self_repo=False)
     assert report.healthy and report.exit_code == 0
-
-
-@pytest.mark.parametrize(("label", "relpath", "_markers"), _PARTIAL_COMPAT_ROWS)
-def test_subagent_compat_partial_missing_file_warns_without_fix(
-    scaffolded_perk_repo, monkeypatch, label, relpath, _markers
-):
-    pkg = _plant_subagents_tree(scaffolded_perk_repo)
-    path = pkg / relpath
-    path.unlink()
-    monkeypatch.setattr(doctor_checks.proc, "which_absolute", lambda binary: None)
-    report = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
-    compat = next(check for check in report.checks if check.name == "subagent-compat")
-    assert compat.status == "warn" and compat.group == "package"
-    assert f"{label}: {relpath} missing" in compat.detail
-    assert compat.remediation
-    assert not path.exists()
-    assert "subagent-compat" not in report.fixed
-
-
-def test_subagent_compat_ok_detail_names_the_acceptance_surface(scaffolded_perk_repo):
-    _plant_subagents_tree(scaffolded_perk_repo)
-    compat = _subagent_compat_check(scaffolded_perk_repo)
-    assert compat.status == "ok"
-    assert "explicit acceptance disable" in compat.detail
-
-
-def test_subagent_compat_missing_acceptance_marker_is_warn(scaffolded_perk_repo):
-    # Each acceptance marker individually vanishing must trip the loud warn — the tripwire for
-    # the report-wave acceptance-none spawn contract on future unpinned bumps.
-    label, relpath, required = next(
-        row for row in _SUBAGENT_COMPAT_PROBES if row[0] == "explicit acceptance disable"
-    )
-    for dropped in required:
-        pkg = _plant_subagents_tree(scaffolded_perk_repo)
-        kept = [marker for marker in required if marker != dropped]
-        (pkg / relpath).write_text("\n".join(kept) + "\n", encoding="utf-8")
-        compat = _subagent_compat_check(scaffolded_perk_repo)
-        assert compat.status == "warn", f"dropping {dropped!r} must warn"
-        assert label in compat.detail
-        assert dropped in compat.detail
+    assert "subagent-compat" not in run_doctor(scaffolded_perk_repo, fix=True, verify=False).fixed
 
 
 def test_subagent_compat_unreadable_package_json_is_warn(scaffolded_perk_repo):
-    pkg = _plant_subagents_tree(scaffolded_perk_repo)
+    pkg = _plant_subagents_package(scaffolded_perk_repo, version="0.0.0")
     (pkg / "package.json").write_text("not json{", encoding="utf-8")
     compat = _subagent_compat_check(scaffolded_perk_repo)
     assert compat.status == "warn"
-    assert "version unreadable" in compat.detail
+    assert "unreadable" in compat.message
 
 
-# --- the workflow-script validation behavior arm --------------------------------------------
-
-
-def _fake_probe_run(stdout="", returncode=0, stderr=""):
-    """A canned `run_captured` double for the behavior arm (records nothing — the probe's
-    outcome mapping is what these tests pin)."""
-
-    def fake_run_captured(argv, **kwargs):
-        return subprocess.CompletedProcess(list(argv), returncode, stdout=stdout, stderr=stderr)
-
-    return fake_run_captured
-
-
-def test_subagent_compat_behavior_arm_node_missing_is_skip_note(scaffolded_perk_repo, monkeypatch):
-    _plant_subagents_tree(scaffolded_perk_repo)
-    monkeypatch.setattr(doctor_checks.proc, "which_absolute", lambda binary: None)
-    compat = _subagent_compat_check(scaffolded_perk_repo)
-    assert compat.status == "ok"  # the skip never affects status
-    assert "behavior probe skipped (node not on PATH)" in compat.detail
-
-
-def test_subagent_compat_behavior_arm_fixture_missing_is_skip_note(
-    scaffolded_perk_repo, monkeypatch, tmp_path
-):
-    _plant_subagents_tree(scaffolded_perk_repo)
-    empty_shared = tmp_path / "empty-shared"
-    empty_shared.mkdir()
-    monkeypatch.setattr(doctor_checks._resources, "shared_dir", lambda: empty_shared)
-    compat = _subagent_compat_check(scaffolded_perk_repo)
-    assert compat.status == "ok"
-    assert "behavior probe skipped (fixture missing" in compat.detail
-
-
-def test_subagent_compat_behavior_arm_ok_true_names_the_probe(scaffolded_perk_repo, monkeypatch):
-    _plant_subagents_tree(scaffolded_perk_repo)
-    monkeypatch.setattr(
-        doctor_checks.proc,
-        "run_captured",
-        _fake_probe_run(stdout='{"ok": true, "errors": []}'),
-    )
-    compat = _subagent_compat_check(scaffolded_perk_repo)
-    assert compat.status == "ok"
-    assert "workflow script validation" in compat.detail
-    assert "behavior probe skipped" not in compat.detail
-
-
-def test_subagent_compat_behavior_arm_ok_false_is_warn_divergence(
-    scaffolded_perk_repo, monkeypatch
-):
-    _plant_subagents_tree(scaffolded_perk_repo)
-    monkeypatch.setattr(
-        doctor_checks.proc,
-        "run_captured",
-        _fake_probe_run(stdout='{"ok": false, "errors": [{"message": "Unexpected token"}]}'),
-    )
-    compat = _subagent_compat_check(scaffolded_perk_repo)
-    assert compat.status == "warn"
-    assert "workflow script validation: Unexpected token" in compat.detail
-
-
-def test_subagent_compat_behavior_arm_nonzero_exit_is_skip_note(scaffolded_perk_repo, monkeypatch):
-    _plant_subagents_tree(scaffolded_perk_repo)
-    monkeypatch.setattr(
-        doctor_checks.proc,
-        "run_captured",
-        _fake_probe_run(returncode=1, stderr="Error: Cannot find module 'jiti'"),
-    )
-    compat = _subagent_compat_check(scaffolded_perk_repo)
-    assert compat.status == "ok"
-    assert "behavior probe skipped (Error: Cannot find module 'jiti')" in compat.detail
-
-
-def test_subagent_compat_behavior_arm_garbage_stdout_is_skip_note(
-    scaffolded_perk_repo, monkeypatch
-):
-    _plant_subagents_tree(scaffolded_perk_repo)
-    monkeypatch.setattr(
-        doctor_checks.proc, "run_captured", _fake_probe_run(stdout="not json at all")
-    )
-    compat = _subagent_compat_check(scaffolded_perk_repo)
-    assert compat.status == "ok"
-    assert "behavior probe skipped (unparseable validator output)" in compat.detail
-
-
-def test_subagent_compat_behavior_arm_skip_note_rides_the_warn_detail_too(
-    scaffolded_perk_repo, monkeypatch
-):
-    # A substring divergence and an unevaluable behavior probe are independent facts — the
-    # warn detail carries both (the skip is never silent, whatever the status).
-    pkg = _plant_subagents_tree(scaffolded_perk_repo)
-    _label, relpath, _required = next(
-        row for row in _SUBAGENT_COMPAT_PROBES if row[0] == "async completion notification wake"
-    )
-    (pkg / relpath).write_text("// markers gone\n", encoding="utf-8")
-    monkeypatch.setattr(doctor_checks.proc, "which_absolute", lambda binary: None)
-    compat = _subagent_compat_check(scaffolded_perk_repo)
-    assert compat.status == "warn"
-    assert "behavior probe skipped (node not on PATH)" in compat.detail
+def test_subagent_compat_verified_version_stamp_is_pinned():
+    # Only a full re-verify (docs/developers/pi-subagents-reverify.md) moves the stamp.
+    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.65.1"
 
 
 def _plant_ponytail_tree(root):

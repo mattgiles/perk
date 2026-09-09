@@ -25,6 +25,7 @@ import {
   loadPerkSession,
   scaffoldRepo,
 } from "../../../testing/harness.ts";
+import { PONYTAIL_PACKAGE_ROOT } from "../../../waves/ponytail.ts";
 import { decodePostParams, decodeWaveParams, prReviewGuidance } from "./automated.ts";
 
 // --- prReviewGuidance: judgment-bearing inputs over the flow-scoped wave tool ----------------
@@ -235,7 +236,7 @@ test("decodePostParams rejects a missing/invalid verdict or summary", () => {
 // --- run_pr_review_wave: the flow tool over a fake pi-subagents RPC responder ----------------
 
 function installPonytailReviewSkill(cwd: string): void {
-  const root = join(cwd, ".pi", "npm", "node_modules", "@dietrichgebert", "ponytail");
+  const root = join(cwd, PONYTAIL_PACKAGE_ROOT);
   const skillDir = join(root, "skills", "ponytail-review");
   mkdirSync(skillDir, { recursive: true });
   writeFileSync(

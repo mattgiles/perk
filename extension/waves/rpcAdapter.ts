@@ -11,8 +11,8 @@
 // names — `events.asyncComplete` is the ADVERTISED async-complete channel, deliberately NOT
 // pinned here (only the versioned request/reply literals are; that is what the versioned
 // envelope is for). `pi-subagents` is not an allowed bare import (`bareImportGuard.test.ts`), so
-// its constants/types cannot be imported — the doctor `subagent-compat` probes are the drift
-// tripwire, and every pi-subagents bump warrants an adapter re-verify.
+// its constants/types cannot be imported — the doctor `subagent-compat` version warning is the
+// drift tripwire, and every pi-subagents bump warrants an adapter re-verify.
 //
 // COMPLETION PAYLOAD (source-read-derived, 0.45.0 `src/runs/background/result-watcher.ts` +
 // `src/runs/foreground/subagent-executor.ts`): the async-complete event spreads the result-file

@@ -32,6 +32,7 @@ import {
 } from "../../testing/harness.ts";
 import { createMemoryWaveAdapter } from "../../testing/memoryAdapter.ts";
 import type { DraftReviewAngle } from "../../waves/draftReviewWave.ts";
+import { PONYTAIL_PACKAGE_ROOT } from "../../waves/ponytail.ts";
 import { reportWaveOver } from "../../waves/reportWave.ts";
 import {
   decodeStartDraftReviewWaveParams,
@@ -886,7 +887,7 @@ test("registered start_draft_review_wave: a bad selection decodes to bad_input b
 // does: through the REAL /plan-review-browser door over a fake plannotator peer.
 
 function installPonytailCoreSkill(cwd: string): void {
-  const root = join(cwd, ".pi", "npm", "node_modules", "@dietrichgebert", "ponytail");
+  const root = join(cwd, PONYTAIL_PACKAGE_ROOT);
   const skillDir = join(root, "skills", "ponytail");
   mkdirSync(skillDir, { recursive: true });
   writeFileSync(

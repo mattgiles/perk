@@ -2367,14 +2367,9 @@ second `--fix` at `fixed == []`).
 - `package` — the wiring/install/version surfaces: `settings-wiring`, `extension-install`, the
   `required-perk-version` managed check, and the report-only probes `cli-version`
   (CLI-vs-repo-pin warn), `resource-overrides` (pi overrides touching perk's own resources),
-  `subagent-compat` (the pi-subagents orchestration surfaces perk's guidance assumes —
-  file-scoped presence-only substring probes, including native partial terminal vocabulary,
-  keyed structured-result projection and async-completion forwarding, plus one behavior arm:
-  the installed engine's `validateWorkflowScript`
-  run over the shared representative-script fixture
-  `shared/subagents/representative-wave-script.js`, an `ok: false` joining the divergences
-  while an unevaluable probe degrades to a visible `behavior probe skipped (…)` note in the
-  detail, never affecting status; `info` when not installed), `ponytail-compat` (exact
+  `subagent-compat` (installed pi-subagents version vs the guidance-verified version — `warn`
+  on mismatch or an unreadable version, `info` when not installed; no source probes),
+  `ponytail-compat` (exact
   package/`pi.skills`/skill-file/frontmatter;
   known-good remediation `npm:@dietrichgebert/ponytail@4.9.0` + `perk init` + session restart),
   and `subagent-bridge-config` (warns when either settings scope — the project
