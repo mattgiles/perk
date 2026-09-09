@@ -12,7 +12,7 @@
 //
 // Substrate only: perk-owned plan mode and the read-only CI executor are the consumers of the
 // `enter`/`exit` surface; the allowlist-restore is wired into the existing
-// `session_start`/`session_tree` rebuild points.
+// `session_start`/`session_tree` rebuild points plus one `resources_discover` re-apply.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { render } from "./prompts.ts";
@@ -84,12 +84,12 @@ export const LINEAR_MUTATING_TOOLS: readonly string[] = [
 ];
 
 /**
- * pi-subagents' delegation family. `subagent`/`wait` register at load time; the parent intercom
- * pair (`subagent_supervisor`, `intercom`) registers during `session_start` — AFTER perk's sync
- * (perk is the first `packages` entry), so it LEAKS past rebuild-point filtering at launch
- * (≈830 schema chars — accepted, documented, test-pinned). A later `session_tree` re-apply
- * filters over the original snapshot (which lacks the late names), so a tree navigation drops
- * them — the pre-existing snapshot behavior, unchanged. Child-side tools (`contact_supervisor`,
+ * pi-subagents' delegation family. `subagent`/`wait` register at load time; the parent supervisor
+ * tool `subagent_supervisor` registers during pi-subagents' own `session_start` — AFTER perk's
+ * sync (perk is the first `packages` entry) — and is admitted by the `resources_discover`
+ * re-apply as a late registrant (see `admitLate`): inside the diet at launch, kept where a stage
+ * list carries it. `intercom` is the separate pi-intercom bridge's tool name — a static census
+ * entry, inert unless that package is present. Child-side tools (`contact_supervisor`,
  * `structured_output`) are out of scope for the STAGE census — spawned children stay
  * stage-unscoped by design (§8.40 adopt-never-impersonates) — but they DO ride READ_ONLY_TOOLS,
  * because the read-only gate IS inherited by adopted children (see SUBAGENT_CHILD_TOOLS).
@@ -143,8 +143,8 @@ export const FFF_SEARCH_TOOLS: readonly string[] = [
  * stage filter (fail-open — enumeration here is diet-completeness, not correctness).
  *
  * Audit records (the per-package census):
- *  - Registration timing: every census name registers at load time EXCEPT pi-subagents' parent
- *    supervisor pair (see SUBAGENT_TOOLS — session_start, leaks past rebuild-point filtering).
+ *  - Registration timing: every census name registers at load time EXCEPT pi-subagents'
+ *    `subagent_supervisor` (SUBAGENT_TOOLS — session_start; admitted at `resources_discover`).
  *  - Foreign `setActiveTools` owners: plannotator's phase machinery and @tombell/pi-plan's plan
  *    mode run their OWN toggles — perk re-applies only at rebuild points, so a foreign toggle
  *    between rebuilds wins (fail-open direction), and a mid-session rebuild re-installs perk's
@@ -217,9 +217,9 @@ export const READ_ONLY_TOOLS = [
   // FFF local search belongs in read-only exploration (the override names find/grep are
   // already present above; these are the additive tools-and-ui names + multi_grep).
   ...FFF_SEARCH_TOOLS,
-  // The delegation carve-in: `subagent`/`wait` (+ the parent supervisor pair, which already
-  // leaks active into cold-door gated sessions via late registration — keeping warm-entered
-  // gates consistent, and letting the parent answer child `contact_supervisor` asks) stay
+  // The delegation carve-in: `subagent`/`wait` (+ pi-subagents' late-registered
+  // `subagent_supervisor`, kept by every gate-ON re-apply because it is allowlisted here —
+  // letting the parent answer child `contact_supervisor` asks) stay
   // reachable while gated for the other delegation flows (the gated objective-plan guidance now
   // names the `explore_objective_node` tool below, not a direct spawn). ACCEPTED LENIENCY,
   // deliberately documented: spawned children are unscoped by design (§8.40
@@ -829,6 +829,10 @@ function isReadOnlyMode(mode: string | undefined): boolean {
   return mode === "read-only";
 }
 
+/** The engagement record: the host's active starting set (the restore authority — never
+ * `getAllTools()`), the registry census at snapshot time, and the late registrants admitted so far. */
+type Engaged = { snapshot: readonly string[]; census: ReadonlySet<string>; admitted: Set<string> };
+
 export function registerToolGating(
   pi: ExtensionAPI,
   readOnlyFloor: () => boolean = () => false,
@@ -839,9 +843,9 @@ export function registerToolGating(
   // The branch-LWW stage id this session is scoped to (null = unscoped). Fail-open by contrast
   // with `active`: no stage / unknown stage / any lookup miss → no filtering.
   let stageId: string | null = null;
-  // Pre-engagement tool snapshot, taken ONCE on the first engagement of either concern (the
-  // preset.ts discipline, shared by the gate and stage scoping).
-  let snapshot: string[] | null = null;
+  // Taken ONCE on the first engagement of either concern (the preset.ts discipline, shared by the
+  // gate and stage scoping); cleared when neither is engaged any more.
+  let engaged: Engaged | null = null;
 
   function hasFloor(): boolean {
     try {
@@ -864,10 +868,10 @@ export function registerToolGating(
    *    `/objective-plan` carve-out and recreate the seed/gate contradiction class). "The gate
    *    never widens a stage's set and vice versa" still holds: engaging the gate only ever
    *    narrows, and stage scoping never adds a tool.
-   *  - gate OFF + stage scoped → a SUBTRACTIVE filter over the snapshot: names outside the
-   *    scoped universe (builtins, un-enumerated foreign tools) pass through untouched; scoped
-   *    names (PERK_TOOLS ∪ BORROWED_TOOLS) survive only when the stage's list carries them.
-   *  - neither engaged → restore the snapshot if one exists (a session that never engages gets
+   *  - gate OFF + stage scoped → a SUBTRACTIVE filter over the baseline (`admitLate`): names
+   *    outside the scoped universe (builtins, un-enumerated foreign tools) pass through untouched;
+   *    scoped names (PERK_TOOLS ∪ BORROWED_TOOLS) survive only when the stage's list carries them.
+   *  - neither engaged → restore the baseline and forget it (a session that never engages gets
    *    ZERO setActiveTools calls — bare warm sessions stay byte-identical).
    * While engaged the set is re-installed on every sync (tree navigation across mode entries
    * must recompute correctly).
@@ -876,30 +880,55 @@ export function registerToolGating(
   // un-enumerated foreign names pass through every stage filter untouched (fail-open).
   const SCOPED_TOOL_NAMES: ReadonlySet<string> = new Set([...PERK_TOOLS, ...BORROWED_TOOLS]);
 
+  /**
+   * The gate-OFF reconciliation baseline `snapshot ∪ admitted`. A tool the census never saw
+   * (pi-subagents' `subagent_supervisor` registers in its own `session_start`, after perk's sync)
+   * is admitted the first time it is seen active and stays admitted through perk's own filtering
+   * (so a navigation back to an admitting stage restores it); an owner that deactivates its late
+   * tool before perk ever sees it active is respected; a tool the census saw inactive is never
+   * re-activated. Gate-OFF paths only (the gate-ON set is by name — no bookkeeping there).
+   */
+  function admitLate(e: Engaged): string[] {
+    for (const name of pi.getActiveTools()) if (!e.census.has(name)) e.admitted.add(name);
+    return [...new Set([...e.snapshot, ...e.admitted])];
+  }
+
   function apply(nextActive: boolean, nextStage: string | null): void {
     const effective = nextActive || hasFloor();
     const stageList = nextStage === null ? undefined : STAGE_TOOLS[nextStage];
-    // First engagement of either concern: take the one snapshot.
-    if ((effective || stageList !== undefined) && snapshot === null) {
-      snapshot = pi.getActiveTools();
+    // First engagement of either concern: ONE literal (a throwing read records no half state).
+    if ((effective || stageList !== undefined) && engaged === null) {
+      engaged = {
+        snapshot: pi.getActiveTools(),
+        census: new Set(pi.getAllTools().map((t) => t.name)),
+        admitted: new Set(),
+      };
     }
     if (effective) {
       pi.setActiveTools([...gatedToolsFor(nextStage)]);
-    } else if (stageList !== undefined) {
-      // The snapshot-missing fallback mirrors the restore path below: the FULL configured tool
-      // set (pi.getAllTools()), never a hardcoded list that would silently drop grep/find/ls
-      // and perk's custom tools (plan_save/submit/land/learn).
-      const base = snapshot ?? pi.getAllTools().map((t) => t.name);
-      pi.setActiveTools(
-        base.filter((name) => !SCOPED_TOOL_NAMES.has(name) || stageList.includes(name)),
-      );
-    } else if (snapshot !== null) {
-      pi.setActiveTools(snapshot);
-      snapshot = null;
+    } else if (engaged !== null) {
+      const base = admitLate(engaged);
+      if (stageList !== undefined) {
+        pi.setActiveTools(
+          base.filter((name) => !SCOPED_TOOL_NAMES.has(name) || stageList.includes(name)),
+        );
+      } else {
+        pi.setActiveTools(base);
+        engaged = null;
+      }
     }
     active = nextActive;
     stageId = nextStage;
   }
+
+  // Pi fires `resources_discover` after EVERY extension's `session_start` has run (pi-subagents
+  // registers `subagent_supervisor` there, after perk's sync) — the one point where startup-late
+  // registrants meet the gate/stage diet: re-apply the in-memory mode/stage (no rebuild, no other
+  // checkpoint). A throw is caught + reported by Pi's handler boundary and never opens the gate
+  // (nothing follows it here). Idempotent on `reason: "reload"` (`session_start(reload)` synced).
+  pi.on("resources_discover", async () => {
+    apply(active, stageId);
+  });
 
   // Enforce the whole allowlist even if toolset narrowing failed or foreign tools registered late.
   pi.on("tool_call", async (event) => {

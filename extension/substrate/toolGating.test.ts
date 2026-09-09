@@ -46,6 +46,7 @@ function gateFixture(floor: () => boolean) {
       if (fail === "snapshot") throw new Error("snapshot");
       return ["read", "write", "plan_save"];
     },
+    getAllTools: () => ["read", "write", "plan_save"].map((name) => ({ name })),
     setActiveTools: (names: string[]) => {
       if (fail === "toolset") throw new Error("toolset");
       installed.push(names);
