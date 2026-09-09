@@ -1,10 +1,12 @@
 // The pure OWNING suite for `session/lifecycle.ts`: the identity arms (claim / unclaimed / fork /
 // adopt / mint / keep), the pre-gate tool-scope slice, the post-gate facts (the lazy linkage
-// reconciliation with its capture/feedback inputs) and the navigation twin — every behavior
-// pinned exactly once here, over ONE memory `SessionStateStore` fake and recording ports, with
-// REAL identities driving the facts (one `startup()` runs identity → scope → facts as production
-// does). `extension/sessionLifecycle.test.ts` proves only the composition through the real
-// wiring; it re-proves no arm.
+// reconciliation with its capture/feedback inputs) and the navigation twin. Each behavior's
+// owning pin — the exact append payload, the exact store/read trace, the resolved facts — lives
+// here, over ONE memory `SessionStateStore` fake and recording ports, with REAL identities
+// driving the facts (one `startup()` runs identity → scope → facts as production does).
+// `extension/sessionLifecycle.test.ts` never duplicates this matrix: it proves the composition
+// (effect order through the real Pi wiring) plus a few wiring regressions that touch an arm only
+// as far as the real ports are what they pin.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -127,12 +129,7 @@ function makeStore(initial: WorkflowState[] = []) {
  * consumption and scratch isolation are observed through `consumed`/`scratched`, the mint and the
  * version stamp through the appended payloads.
  */
-function fakePorts(opts: {
-  handoff?: Handoff | null;
-  runIds?: string[];
-  scratchThrows?: boolean;
-  mintedId?: string;
-}) {
+function fakePorts(opts: { handoff?: Handoff | null; runIds?: string[]; scratchThrows?: boolean }) {
   const consumed: { runId: string; piSessionId?: string }[] = [];
   const scratched: string[] = [];
   const ports: SessionIdentityPorts = {
@@ -145,7 +142,7 @@ function fakePorts(opts: {
       if (opts.scratchThrows === true) throw new Error("scratch refused");
       scratched.push(runId);
     },
-    mintRunId: () => opts.mintedId ?? "01MINT",
+    mintRunId: () => "01MINT",
     versionStamp: "1.2.3",
   };
   return { ports, consumed, scratched };
@@ -215,7 +212,6 @@ interface StartupOpts {
   sessionId?: string | null;
   runIds?: string[];
   scratchThrows?: boolean;
-  mintedId?: string;
   planRef?: PlanRef | null;
   /** `null` runs the facts with a failed-to-load registry; otherwise the fake registry. */
   registry?: null;
@@ -614,18 +610,23 @@ test("mint: a warm session with no identity and no (or a blank) env run id mints
 });
 
 test("keep: a run whose recorded pi_session_id matches (or is absent) appends nothing — no version backfill", () => {
-  const seed: WorkflowState = { run_id: "01RID", pi_session_id: "me.jsonl", mode: "read-only" };
-  const keep = startup({ seed: [seed] });
-  assert.equal(keep.identity.arm, "kept");
-  assert.deepEqual(keep.identityCalls, ["rebuild"]);
-  assert.deepEqual(keep.appends, [], "reload-generation reconstruction IS the LWW rebuild");
-  assert.deepEqual(keep.identity.resolved, seed);
-  assert.equal(keep.identity.resolved.perk_version, undefined, "no version backfill (§8.3)");
-  assert.deepEqual(keep.consumed, []);
-  assert.deepEqual(keep.scratched, []);
-
-  const legacy = startup({ seed: [{ run_id: "01RID", mode: "read-only" }] });
-  assert.equal(legacy.identity.arm, "kept");
+  // A matching recorded session id, and the legacy pre-stamp entry with none: both keep, both
+  // stay append-free and unstamped.
+  const seeds: WorkflowState[] = [
+    { run_id: "01RID", pi_session_id: "me.jsonl", mode: "read-only" },
+    { run_id: "01RID", mode: "read-only" },
+  ];
+  for (const seed of seeds) {
+    const label = seed.pi_session_id === undefined ? "legacy (no pi_session_id)" : "matching id";
+    const keep = startup({ seed: [seed] });
+    assert.equal(keep.identity.arm, "kept", label);
+    assert.deepEqual(keep.identityCalls, ["rebuild"], label);
+    assert.deepEqual(keep.appends, [], `${label}: reload-generation reconstruction IS the rebuild`);
+    assert.deepEqual(keep.identity.resolved, seed, label);
+    assert.equal(keep.identity.resolved.perk_version, undefined, `${label}: no backfill (§8.3)`);
+    assert.deepEqual(keep.consumed, [], label);
+    assert.deepEqual(keep.scratched, [], label);
+  }
 });
 
 // --- the two-phase startup facts -------------------------------------------------------------------

@@ -1,10 +1,12 @@
 // Live composition tests over a REAL bound AgentSession (offline — no LLM, no network): the
 // ORDERED Pi effects (gate → verified linkage → capture → receiver sync on a consuming cold start;
 // gate → receiver on navigation), gate-before-fallible-read, the LOADED registry gating linkage,
-// and three lifecycle regressions through the real ports (the env-child adopt, the corrupt-handoff
-// gate, the first-write-wins capture). The owning behavior matrices — every identity arm, the tool
-// scope, the lazy linkage and its capture/feedback facts — live in `session/lifecycle.test.ts`;
-// nothing here re-proves an arm. The two runner-floor tests at the top stay as they are.
+// and three wiring regressions through the real ports (the env-child adopt, the corrupt-handoff
+// gate, the first-write-wins capture). The owning behavior matrix — every identity arm's exact
+// append/trace, the tool scope, the lazy linkage and its capture/feedback facts — lives in
+// `session/lifecycle.test.ts` and is not duplicated here: where a regression below touches an arm
+// (adopt, the failed claim, keep), what it pins is the real ports/gate wiring around that arm, not
+// the arm's decision table. The two runner-floor tests at the top stay as they are.
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
