@@ -46,27 +46,21 @@ names the **issue backend**, not the plan-provider id.
 
 #### When perk injects authoring guidance
 
-Perk's own authoring guidance (`[PLAN AUTHORING]`, the objective/gist/refinement authoring
-contexts) and the plan-adapter bridge contexts are injected on **explicit authoring eligibility**,
-never on the bare read-only gate. A session is an eligible plan author when the gate is on, the session is not a
-native subagent runner, and there is positive plan evidence: a plan-family cold stage (`plan`,
-`save`, `objective-plan`) or the explicit warm intent that `/plan`, its shortcut, `--plan` and
-`/objective-plan` record beside the read-only mode. The dedicated `objective-author`,
-`objective-save`, `gist-author`, `gist-save` and `objective-refine` stages keep their own contexts
-and never receive plan guidance (an ad-hoc `/plan` turn followed by `/objective-refine` retires
-the plan guidance). Under `plannotator-plan` the bridge flavor follows the same rule (plan flavor
-for an eligible plan author, objective flavor in both objective stages, gist flavor in
-`gist-author`, refinement flavor in `objective-refine`, nothing otherwise); under `tombell-plan` the bridge additionally honors tombell's own persisted
+Perk's plan-authoring guidance (`[PLAN AUTHORING]`) rides the read-only gate: `/plan`, its
+shortcut, `--plan`, `/objective-plan` and the cold `plan`/`objective-plan` doors all put the
+session under the gate, and every gated session receives the guidance except one another context
+owns — the objective/gist/refinement authoring sessions keep their own contexts (an ad-hoc `/plan`
+turn followed by `/objective-refine` retires the plan guidance) — or a non-authoring read-only
+door. Under `plannotator-plan` the bridge flavor follows the stage (objective flavor in both
+objective stages, gist flavor in `gist-author`, refinement flavor in `objective-refine`, plan
+flavor otherwise); under `tombell-plan` the bridge additionally honors tombell's own persisted
 plan-mode state when perk's gate is off. Reviewer and other subagent children never receive perk's
 authoring or adapter guidance, even when their session history carries it; their read-only
 restrictions and engine tools are unaffected.
 
 Consequences worth knowing:
 
-- **Legacy warm sessions.** An older session that carries only `mode: read-only` (no stage, no
-  recorded intent) stays restricted but receives no plan guidance. Re-enter with `/plan` (off,
-  then on) or invoke an authoring factory; perk never guesses intent from history.
-- **Owned-context cleanup.** When a session stops being eligible — `/plan` off, a stage change
+- **Owned-context cleanup.** When nothing is selected any more — `/plan` off, a stage change
   under plannotator, navigating to an earlier branch — perk retires only its own injected
   guidance from the outgoing model context. Your own messages are never removed or edited for
   quoting a marker, and persisted transcripts and compaction summaries are never rewritten.

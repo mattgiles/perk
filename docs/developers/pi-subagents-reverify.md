@@ -79,6 +79,15 @@ a runner child a monotone read-only floor and no agent scratch; a malformed or u
 packet fails closed. Its regression table names the owning suites (`childRestrictions.test.ts`,
 `sessionLifecycle.test.ts`, `agentScratch.test.ts`, `reportWave.test.ts`, `waveIsolation.test.ts`).
 
+On a pi-subagents bump, also confirm by reading the installed agent-definition parser that
+`completionGuard: false` is still read from report definitions and that a report-only lane
+completes on a valid `structured_output` report without edits (and still fails a missing or
+invalid report). The automated engine-level proof (`reportOnlyCompletionCompat.test.ts`) was
+retired because it imported pi-subagents' private source (the objective's rule 3: tests reach
+pi-subagents only through its public exports, or not at all); the frontmatter stays pinned by the
+pytest rows and `perk doctor`'s `subagent-compat` installed-vs-verified version warning signals
+upstream drift — `run_ci` will not catch an upstream change to the guard semantics.
+
 The linked [capability characterization](../design/archive/pi-subagents-child-capability-characterization.md)
 records the pi-subagents 0.65.1 / five-package Pi 0.85.1 matrix, actual tool denials and writer
 cancellation, preserved failed attempts, and independent teardown. Its finite launch budget
