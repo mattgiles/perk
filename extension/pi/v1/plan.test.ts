@@ -5,7 +5,7 @@
 // tool harness cases (read-only carve-out, decode strictness, cold-door delegation, node-link
 // surfacing), the `/plan-save` severity mapping, the `approvalSave` seam, and the
 // `/implement-here` command arms. Driven through a REAL bound AgentSession (offline): a fake
-// `perk` (PERK_BIN) stands in for the GitHub write, so no LLM / network / gh / Python runs.
+// `perk` (PERK_BIN) stands in for the GitHub write, so no network / gh / Python runs.
 
 import assert from "node:assert/strict";
 import {
@@ -821,9 +821,9 @@ test("tool: plan_save threads the link/learn/title params into the perk argv", a
   }
 });
 
-test("tool: plan_save omits every absent optional flag (incl. --title under the LLM gate)", async () => {
-  // The harness sets PERK_NO_LLM=1 by default, so no model call fires and the cold door's
-  // derive_title stays in control — proven by the absence of --title.
+test("tool: plan_save omits every absent optional flag (no explicit title ⇒ no --title ⇒ the cold door derives)", async () => {
+  // No explicit title ⇒ no `--title` flag — the cold door's `derive_title` (the plan's first `# `
+  // heading) is the only fallback.
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const argvFile = join(cwd, "argv.txt");
   const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
@@ -1537,62 +1537,46 @@ function fakeApprovalPi(
   } as unknown as ExtensionAPI;
 }
 
-/** Run `fn` with PERK_NO_LLM pinned on (deterministic: no title generation path). */
-async function withNoLlm(fn: () => Promise<void>): Promise<void> {
-  const prev = process.env.PERK_NO_LLM;
-  process.env.PERK_NO_LLM = "1";
-  try {
-    await fn();
-  } finally {
-    if (prev === undefined) delete process.env.PERK_NO_LLM;
-    else process.env.PERK_NO_LLM = prev;
-  }
-}
-
 test("approvalSave: no artifact/param/transcript → no-plan, no exec, gate untouched", async () => {
-  await withNoLlm(async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
-    try {
-      const branch: unknown[] = [runIdEntry("RID")];
-      const argvs: string[][] = [];
-      const pi = fakeApprovalPi(branch, { stdout: PLAN_JSON, argvs });
-      const ctx = reportableCtx(cwd, branch) as unknown as ExtensionContext;
-      const gating = fakeGating(true);
-      const outcome = await approvalSave(pi, ctx, gating);
-      assert.deepEqual(outcome, { status: "no-plan" });
-      assert.equal(argvs.length, 0, "no cold-door exec");
-      assert.equal(gating.exits, 0, "the gate was untouched");
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  });
+  const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
+  try {
+    const branch: unknown[] = [runIdEntry("RID")];
+    const argvs: string[][] = [];
+    const pi = fakeApprovalPi(branch, { stdout: PLAN_JSON, argvs });
+    const ctx = reportableCtx(cwd, branch) as unknown as ExtensionContext;
+    const gating = fakeGating(true);
+    const outcome = await approvalSave(pi, ctx, gating);
+    assert.deepEqual(outcome, { status: "no-plan" });
+    assert.equal(argvs.length, 0, "no cold-door exec");
+    assert.equal(gating.exits, 0, "the gate was untouched");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test("approvalSave: reviewedPlan fallback saves while read-only → gate exited", async () => {
-  await withNoLlm(async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
-    try {
-      const branch: unknown[] = [runIdEntry("RID")];
-      const argvs: string[][] = [];
-      const pi = fakeApprovalPi(branch, { stdout: PLAN_JSON, argvs });
-      const ctx = reportableCtx(cwd, branch) as unknown as ExtensionContext;
-      const gating = fakeGating(true);
-      const outcome = await approvalSave(pi, ctx, gating, { reviewedPlan: "# Reviewed plan" });
-      assert.equal(outcome.status, "saved");
-      assert.equal(outcome.status === "saved" && outcome.gateExited, true, "gateExited reported");
-      assert.equal(gating.exits, 1, "the gate was exited once");
-      const argv = argvs[0] ?? [];
-      const planFile = argv[argv.indexOf("--plan-file") + 1] ?? "";
-      assert.equal(readFileSync(planFile, "utf8"), "# Reviewed plan", "the reviewed plan staged");
-      const result = outcome.status === "saved" ? outcome.result : null;
-      assert.equal(result?.terminate, true, "the SaveResult keeps terminate for tool callers");
-      // The param-path success message stays byte-stable (no source suffix); details carry it.
-      const details = result?.details as { plan_source?: string } | undefined;
-      assert.equal(details?.plan_source, "param");
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  });
+  const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
+  try {
+    const branch: unknown[] = [runIdEntry("RID")];
+    const argvs: string[][] = [];
+    const pi = fakeApprovalPi(branch, { stdout: PLAN_JSON, argvs });
+    const ctx = reportableCtx(cwd, branch) as unknown as ExtensionContext;
+    const gating = fakeGating(true);
+    const outcome = await approvalSave(pi, ctx, gating, { reviewedPlan: "# Reviewed plan" });
+    assert.equal(outcome.status, "saved");
+    assert.equal(outcome.status === "saved" && outcome.gateExited, true, "gateExited reported");
+    assert.equal(gating.exits, 1, "the gate was exited once");
+    const argv = argvs[0] ?? [];
+    const planFile = argv[argv.indexOf("--plan-file") + 1] ?? "";
+    assert.equal(readFileSync(planFile, "utf8"), "# Reviewed plan", "the reviewed plan staged");
+    const result = outcome.status === "saved" ? outcome.result : null;
+    assert.equal(result?.terminate, true, "the SaveResult keeps terminate for tool callers");
+    // The param-path success message stays byte-stable (no source suffix); details carry it.
+    const details = result?.details as { plan_source?: string } | undefined;
+    assert.equal(details?.plan_source, "param");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test("approvalSave: an identity-less save omits --run-id; the save and linkage still land", async () => {
@@ -1600,137 +1584,127 @@ test("approvalSave: an identity-less save omits --run-id; the save and linkage s
   // over a branch with NO run_id: the identity-less arm must stay legal end to end — the argv
   // omits `--run-id` entirely (never `--run-id null`), the save succeeds, and the branch-backed
   // `active_plan_ref` linkage still appends (workflow-state ops are identity-independent).
-  await withNoLlm(async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
-    try {
-      const branch: unknown[] = [];
-      const argvs: string[][] = [];
-      const pi = fakeApprovalPi(branch, { stdout: PLAN_JSON, argvs });
-      const ctx = reportableCtx(cwd, branch) as unknown as ExtensionContext;
-      const gating = fakeGating(true);
-      const outcome = await approvalSave(pi, ctx, gating, { reviewedPlan: "# Reviewed plan" });
-      assert.equal(outcome.status, "saved");
-      const argv = argvs[0] ?? [];
-      assert.deepEqual(argv.slice(0, 3), ["plan", "save", "--json"]);
-      assert.equal(argv.includes("--run-id"), false, "the identity-less argv omits --run-id");
-      assert.equal(argv.includes("null"), false, "no stringified null rides the argv");
-      const linked = rebuildWorkflowState(
-        branch as Parameters<typeof rebuildWorkflowState>[0],
-      ).active_plan_ref;
-      assert.deepEqual(
-        linked,
-        {
-          provider: "github",
-          pr_id: "42",
-          url: "https://gh/o/r/issues/42",
-          labels: ["perk:plan"],
-          objective_id: null,
-          base: undefined,
-        },
-        "the identity-less save still links active_plan_ref on the branch",
-      );
-      assert.equal(gating.exits, 1, "the D1a gate exit still fires on the verified save");
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  });
+  const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
+  try {
+    const branch: unknown[] = [];
+    const argvs: string[][] = [];
+    const pi = fakeApprovalPi(branch, { stdout: PLAN_JSON, argvs });
+    const ctx = reportableCtx(cwd, branch) as unknown as ExtensionContext;
+    const gating = fakeGating(true);
+    const outcome = await approvalSave(pi, ctx, gating, { reviewedPlan: "# Reviewed plan" });
+    assert.equal(outcome.status, "saved");
+    const argv = argvs[0] ?? [];
+    assert.deepEqual(argv.slice(0, 3), ["plan", "save", "--json"]);
+    assert.equal(argv.includes("--run-id"), false, "the identity-less argv omits --run-id");
+    assert.equal(argv.includes("null"), false, "no stringified null rides the argv");
+    const linked = rebuildWorkflowState(
+      branch as Parameters<typeof rebuildWorkflowState>[0],
+    ).active_plan_ref;
+    assert.deepEqual(
+      linked,
+      {
+        provider: "github",
+        pr_id: "42",
+        url: "https://gh/o/r/issues/42",
+        labels: ["perk:plan"],
+        objective_id: null,
+        base: undefined,
+      },
+      "the identity-less save still links active_plan_ref on the branch",
+    );
+    assert.equal(gating.exits, 1, "the D1a gate exit still fires on the verified save");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test("approvalSave: a successful save while already read-write never exits the gate", async () => {
-  await withNoLlm(async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
-    try {
-      const branch: unknown[] = [runIdEntry("RID")];
-      const pi = fakeApprovalPi(branch, { stdout: PLAN_JSON });
-      const ctx = reportableCtx(cwd, branch) as unknown as ExtensionContext;
-      const gating = fakeGating(false);
-      const outcome = await approvalSave(pi, ctx, gating, { reviewedPlan: "# Reviewed plan" });
-      assert.equal(outcome.status, "saved");
-      assert.equal(outcome.status === "saved" && outcome.gateExited, false);
-      assert.equal(gating.exits, 0, "no gating.exit call");
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  });
+  const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
+  try {
+    const branch: unknown[] = [runIdEntry("RID")];
+    const pi = fakeApprovalPi(branch, { stdout: PLAN_JSON });
+    const ctx = reportableCtx(cwd, branch) as unknown as ExtensionContext;
+    const gating = fakeGating(false);
+    const outcome = await approvalSave(pi, ctx, gating, { reviewedPlan: "# Reviewed plan" });
+    assert.equal(outcome.status, "saved");
+    assert.equal(outcome.status === "saved" && outcome.gateExited, false);
+    assert.equal(gating.exits, 0, "no gating.exit call");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test("approvalSave: a failed save leaves the gate on", async () => {
-  await withNoLlm(async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
-    try {
-      const branch: unknown[] = [runIdEntry("RID")];
-      const pi = fakeApprovalPi(branch, { stdout: FAIL_ENVELOPE, code: 1 });
-      const ctx = reportableCtx(cwd, branch) as unknown as ExtensionContext;
-      const gating = fakeGating(true);
-      const outcome = await approvalSave(pi, ctx, gating, { reviewedPlan: "# Reviewed plan" });
-      assert.equal(outcome.status, "save-failed");
-      assert.equal(outcome.status === "save-failed" && outcome.gateExited, false);
-      assert.equal(gating.exits, 0, "the gate stays on");
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  });
+  const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
+  try {
+    const branch: unknown[] = [runIdEntry("RID")];
+    const pi = fakeApprovalPi(branch, { stdout: FAIL_ENVELOPE, code: 1 });
+    const ctx = reportableCtx(cwd, branch) as unknown as ExtensionContext;
+    const gating = fakeGating(true);
+    const outcome = await approvalSave(pi, ctx, gating, { reviewedPlan: "# Reviewed plan" });
+    assert.equal(outcome.status, "save-failed");
+    assert.equal(outcome.status === "save-failed" && outcome.gateExited, false);
+    assert.equal(gating.exits, 0, "the gate stays on");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test("approvalSave: the artifact wins over a differing reviewedPlan (paramMismatch)", async () => {
-  await withNoLlm(async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
-    try {
-      const branch: unknown[] = [runIdEntry("RID")];
-      const argvs: string[][] = [];
-      const pi = fakeApprovalPi(branch, { stdout: PLAN_JSON, argvs });
-      const ctx = reportableCtx(cwd, branch);
-      assert.ok(
-        writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
-        "the draft artifact landed",
-      );
-      const gating = fakeGating(false);
-      const outcome = await approvalSave(pi, ctx as unknown as ExtensionContext, gating, {
-        reviewedPlan: "# A different reviewed plan",
-      });
-      assert.equal(outcome.status, "saved");
-      const text = outcome.status === "saved" ? (outcome.result.content[0]?.text ?? "") : "";
-      assert.match(text, /plan source: plan-draft artifact/);
-      assert.match(text, /⚠ differing plan param ignored/);
-      const argv = argvs[0] ?? [];
-      const planFile = argv[argv.indexOf("--plan-file") + 1] ?? "";
-      assert.equal(readFileSync(planFile, "utf8"), "# The draft", "the artifact bytes staged");
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  });
+  const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
+  try {
+    const branch: unknown[] = [runIdEntry("RID")];
+    const argvs: string[][] = [];
+    const pi = fakeApprovalPi(branch, { stdout: PLAN_JSON, argvs });
+    const ctx = reportableCtx(cwd, branch);
+    assert.ok(
+      writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+      "the draft artifact landed",
+    );
+    const gating = fakeGating(false);
+    const outcome = await approvalSave(pi, ctx as unknown as ExtensionContext, gating, {
+      reviewedPlan: "# A different reviewed plan",
+    });
+    assert.equal(outcome.status, "saved");
+    const text = outcome.status === "saved" ? (outcome.result.content[0]?.text ?? "") : "";
+    assert.match(text, /plan source: plan-draft artifact/);
+    assert.match(text, /⚠ differing plan param ignored/);
+    const argv = argvs[0] ?? [];
+    const planFile = argv[argv.indexOf("--plan-file") + 1] ?? "";
+    assert.equal(readFileSync(planFile, "utf8"), "# The draft", "the artifact bytes staged");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test("approvalSave: a planted claim is recovered into the argv and cleared on success", async () => {
-  await withNoLlm(async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
-    try {
-      const branch: unknown[] = [
-        {
-          type: "custom",
-          customType: WORKFLOW_STATE_TYPE,
-          data: { run_id: "RID", objective_node_claim: CLAIM },
-        },
-      ];
-      const argvs: string[][] = [];
-      const pi = fakeApprovalPi(branch, { stdout: PLAN_NODE_OK_JSON, argvs });
-      const ctx = reportableCtx(cwd, branch);
-      assert.ok(
-        writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
-        "the draft artifact landed",
-      );
-      const gating = fakeGating(true);
-      const outcome = await approvalSave(pi, ctx as unknown as ExtensionContext, gating);
-      assert.equal(outcome.status, "saved");
-      const argv = argvs[0] ?? [];
-      assert.equal(argv[argv.indexOf("--objective-id") + 1], "115", "objective recovered");
-      assert.equal(argv[argv.indexOf("--node-id") + 1], "1.2", "node recovered");
-      const rebuilt = rebuildWorkflowState(branch as BranchEntry[]);
-      assert.equal(rebuilt.objective_node_claim, null, "the claim was cleared");
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  });
+  const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
+  try {
+    const branch: unknown[] = [
+      {
+        type: "custom",
+        customType: WORKFLOW_STATE_TYPE,
+        data: { run_id: "RID", objective_node_claim: CLAIM },
+      },
+    ];
+    const argvs: string[][] = [];
+    const pi = fakeApprovalPi(branch, { stdout: PLAN_NODE_OK_JSON, argvs });
+    const ctx = reportableCtx(cwd, branch);
+    assert.ok(
+      writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+      "the draft artifact landed",
+    );
+    const gating = fakeGating(true);
+    const outcome = await approvalSave(pi, ctx as unknown as ExtensionContext, gating);
+    assert.equal(outcome.status, "saved");
+    const argv = argvs[0] ?? [];
+    assert.equal(argv[argv.indexOf("--objective-id") + 1], "115", "objective recovered");
+    assert.equal(argv[argv.indexOf("--node-id") + 1], "1.2", "node recovered");
+    const rebuilt = rebuildWorkflowState(branch as BranchEntry[]);
+    assert.equal(rebuilt.objective_node_claim, null, "the claim was cleared");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 // ------------------------------------------------------------------------------ /implement-here

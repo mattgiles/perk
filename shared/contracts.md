@@ -813,10 +813,9 @@ generic custom entries (no renderer, no shim). The `perk` status slot is **singl
 State key (registry vocabulary): `session.workflow-state`.
 
 **Owning modules (single-plane interior mechanics).** Single-plane interior mechanics live in
-the owning modules' headers: approval→save orchestration + plan-title
-generation (`extension/authoring/plan/save.ts` / `extension/pi/v1/plan.ts` / `planTitle.ts` /
-`planReview.ts`; §8.23 keeps the review-backend contract); objective budget + threshold compaction
-(`extension/pi/v1/objective.ts`); the objective authoring loop
+the owning modules' headers: approval→save orchestration (`extension/authoring/plan/save.ts` /
+`extension/pi/v1/plan.ts` / `planReview.ts`; §8.23 keeps the review-backend contract); objective
+budget + threshold compaction (`extension/pi/v1/objective.ts`); the objective authoring loop
 (`extension/pi/v1/objectiveAuthoring.ts` / `extension/authoring/objective/save.ts`; §8.23/§8.24
 own the save/store contracts); the objective plan factory + node-lifecycle selection
 (`extension/pi/v1/objectivePlanning.ts` / `extension/authoring/objective/planning.ts`,

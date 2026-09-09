@@ -102,12 +102,6 @@ export type SelectorRecord =
       site: SelectorSite;
     }
   | {
-      kind: "complete-structured";
-      owner: string;
-      catalogOwner: string;
-      fields: ToolFragmentSite[];
-    }
-  | {
       kind: "event-handler";
       owner: string;
       catalogOwner: string;
@@ -408,40 +402,6 @@ export function enumerateSelectorSites(
           },
           [site],
         );
-      }
-    }
-
-    if (
-      ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === "completeStructured"
-    ) {
-      const options = node.arguments[0];
-      if (options !== undefined && ts.isObjectLiteralExpression(options)) {
-        const owner = enclosingSymbol(node);
-        const catalogOwner = "module";
-        const fields: ToolFragmentSite[] = [];
-        for (const field of ["toolDescription", "system", "instruction", "schema"] as const) {
-          for (const member of properties(options, field)) {
-            fields.push({
-              id: field,
-              label: `completeStructured ${field}`,
-              site: expressionSite(
-                `symbol:${owner}/call:completeStructured/${field}`,
-                member,
-                propertyInitializer(member),
-                "prose-expression",
-                `symbol:${catalogOwner}/call:completeStructured/${field}`,
-              ),
-            });
-          }
-        }
-        if (fields.length > 0) {
-          addRecord(
-            { kind: "complete-structured", owner, catalogOwner, fields },
-            fields.map((field) => field.site),
-          );
-        }
       }
     }
 
@@ -765,8 +725,6 @@ const CANONICAL_ORDINAL = "(?:0|[1-9][0-9]*)";
 const MODEL_CALL_SELECTOR = new RegExp(
   `^symbol:(.+)/call:(?:sendUserMessage|complete|prompt)/${CANONICAL_ORDINAL}/argument:0$`,
 );
-const COMPLETE_STRUCTURED_SELECTOR =
-  /^symbol:(.+)\/call:completeStructured\/(?:toolDescription|system|instruction|schema)$/;
 const EVENT_HANDLER_SELECTOR = new RegExp(
   `^symbol:(.+)/event:before_agent_start/${CANONICAL_ORDINAL}/handler$`,
 );
@@ -781,7 +739,6 @@ function isMissingSupportedSelector(selector: string): boolean {
   }
   return (
     MODEL_CALL_SELECTOR.test(selector) ||
-    COMPLETE_STRUCTURED_SELECTOR.test(selector) ||
     EVENT_HANDLER_SELECTOR.test(selector) ||
     WORKFLOW_PROPERTY_SELECTOR.test(selector)
   );

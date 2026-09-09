@@ -200,18 +200,6 @@ function assistantEntry(text: string): unknown {
   return { type: "message", message: { role: "assistant", content: text } };
 }
 
-/** Run `fn` with PERK_NO_LLM pinned on (deterministic: no title generation path). */
-async function withNoLlm(fn: () => Promise<void>): Promise<void> {
-  const prev = process.env.PERK_NO_LLM;
-  process.env.PERK_NO_LLM = "1";
-  try {
-    await fn();
-  } finally {
-    if (prev === undefined) delete process.env.PERK_NO_LLM;
-    else process.env.PERK_NO_LLM = prev;
-  }
-}
-
 const APPROVED: ReviewOutcome = { status: "completed", approved: true, reviewId: "rev-a" };
 const DENIED: ReviewOutcome = {
   status: "completed",
@@ -426,237 +414,222 @@ test("dispatch: a foreign non-plannotator selection (tombell) -> first-party run
 // --------------------------------- the plannotator execute path (byte-stable)
 
 test("execute: the artifact wins over a differing param; the ignored param is flagged", async () => {
-  await withNoLlm(async () => {
-    const cwd = scaffoldRepo();
-    selectPlanProvider(cwd, "plannotator-plan");
-    const branch: unknown[] = [stateEntry({ run_id: "RID" })];
-    const ctx = headfulCtx(cwd, branch);
-    assert.ok(
-      writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
-      "the draft artifact landed",
-    );
-    const bridge = cannedBridge(APPROVED);
-    const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
-    const gating = fakeGating(true);
-    const result = await executePlanReview(
-      pi,
-      ctx as unknown as ExtensionContext,
-      gating,
-      bridge,
-      depsFor(pi, ctx, gating),
-      { plan: "# A different param plan" },
-    );
-    assert.deepEqual(bridge.reviewed, ["# The draft\n"], "the artifact bytes were reviewed");
-    assert.match(String(result.content[0]?.text), /APPROVED/);
-    assert.match(
-      String(result.content[0]?.text),
-      /differing plan param ignored — the validated draft was reviewed and saved/,
-    );
-  });
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry({ run_id: "RID" })];
+  const ctx = headfulCtx(cwd, branch);
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+    "the draft artifact landed",
+  );
+  const bridge = cannedBridge(APPROVED);
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    bridge,
+    depsFor(pi, ctx, gating),
+    { plan: "# A different param plan" },
+  );
+  assert.deepEqual(bridge.reviewed, ["# The draft\n"], "the artifact bytes were reviewed");
+  assert.match(String(result.content[0]?.text), /APPROVED/);
+  assert.match(
+    String(result.content[0]?.text),
+    /differing plan param ignored — the validated draft was reviewed and saved/,
+  );
 });
 
 test("execute: approved (bridge) -> auto-save runs, gate exits, result terminates", async () => {
-  await withNoLlm(async () => {
-    const cwd = scaffoldRepo();
-    selectPlanProvider(cwd, "plannotator-plan");
-    const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
-    const ctx = headfulCtx(cwd, branch);
-    assert.ok(
-      writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
-      "the draft artifact landed",
-    );
-    const argvs: string[][] = [];
-    const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
-    const gating = fakeGating(true);
-    const result = await executePlanReview(
-      pi,
-      ctx as unknown as ExtensionContext,
-      gating,
-      cannedBridge(APPROVED),
-      depsFor(pi, ctx, gating),
-      {},
-    );
-    const argv = argvs[0] ?? [];
-    assert.deepEqual(
-      argv.slice(0, 2),
-      ["plan", "save"],
-      "the cold door ran the merged `perk plan save`",
-    );
-    assert.ok(argv.includes("--json"), "json mode");
-    assert.ok(argv.includes("--plan-file"), "the plan rode the stdin channel");
-    assert.equal(result.terminate, true, "a saved approval terminates the turn");
-    const details = result.details as {
-      ok?: boolean;
-      saved?: boolean;
-      gateExited?: boolean;
-      edited?: boolean;
-    };
-    assert.equal(details.ok, true);
-    assert.equal(details.saved, true);
-    assert.equal(details.gateExited, true);
-    assert.equal(details.edited, undefined, "no edited flag on the bridge path");
-    assert.equal(gating.exits, 1, "the gate was exited once (via the approval-save seam)");
-    assert.match(String(result.content[0]?.text), /Saved plan #42/);
-    assert.doesNotMatch(String(result.content[0]?.text), /human edits were written back/);
-  });
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ctx = headfulCtx(cwd, branch);
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+    "the draft artifact landed",
+  );
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(APPROVED),
+    depsFor(pi, ctx, gating),
+    {},
+  );
+  const argv = argvs[0] ?? [];
+  assert.deepEqual(
+    argv.slice(0, 2),
+    ["plan", "save"],
+    "the cold door ran the merged `perk plan save`",
+  );
+  assert.ok(argv.includes("--json"), "json mode");
+  assert.ok(argv.includes("--plan-file"), "the plan rode the stdin channel");
+  assert.equal(result.terminate, true, "a saved approval terminates the turn");
+  const details = result.details as {
+    ok?: boolean;
+    saved?: boolean;
+    gateExited?: boolean;
+    edited?: boolean;
+  };
+  assert.equal(details.ok, true);
+  assert.equal(details.saved, true);
+  assert.equal(details.gateExited, true);
+  assert.equal(details.edited, undefined, "no edited flag on the bridge path");
+  assert.equal(gating.exits, 1, "the gate was exited once (via the approval-save seam)");
+  assert.match(String(result.content[0]?.text), /Saved plan #42/);
+  assert.doesNotMatch(String(result.content[0]?.text), /human edits were written back/);
 });
 
 test("execute: approved but the save fails -> non-terminating, gate stays on, the latch pauses the next approval", async () => {
-  await withNoLlm(async () => {
-    const cwd = scaffoldRepo();
-    selectPlanProvider(cwd, "plannotator-plan");
-    const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
-    const ctx = headfulCtx(cwd, branch);
-    assert.ok(
-      writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
-      "the draft artifact landed",
-    );
-    const pi = fakeColdDoorPi(branch, { stdout: FAIL_ENVELOPE, code: 1 });
-    const gating = fakeGating(true);
-    const slot = scriptedRemotesSlot(pi);
-    const result = await executePlanReview(
-      pi,
-      ctx as unknown as ExtensionContext,
-      gating,
-      cannedBridge(APPROVED),
-      depsFor(pi, ctx, gating),
-      {},
-      undefined,
-      undefined,
-      slot,
-    );
-    assert.equal(result.terminate, undefined, "a failed auto-save never terminates");
-    const details = result.details as { ok?: boolean; saved?: boolean; error_type?: string };
-    assert.equal(details.ok, false);
-    assert.equal(details.error_type, "save_failed");
-    assert.equal(details.saved, false);
-    assert.equal(gating.exits, 0, "the gate stays on");
-    const text = String(result.content[0]?.text);
-    assert.match(text, /APPROVED/);
-    assert.match(text, /auto-save FAILED/);
-    assert.match(text, /gh exploded/);
-    assert.match(text, /automatic saves are paused for this session/);
-    assert.match(text, /\/plan-save \(the deliberate retry\)/);
-    // The unconfirmed-save latch: the next approval in the same activation is paused before
-    // the cold door — the human checks the backend for run id RID, then /plan-save retries.
-    assert.equal(slot.unconfirmed()?.subject, "plan");
-    const argvs: string[][] = [];
-    const again = await executePlanReview(
-      fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs }),
-      ctx as unknown as ExtensionContext,
-      gating,
-      cannedBridge(APPROVED),
-      depsFor(pi, ctx, gating),
-      {},
-      undefined,
-      undefined,
-      slot,
-    );
-    assert.deepEqual(again.details, {
-      ok: false,
-      error_type: "save_unconfirmed",
-      status: "refused",
-      subject: "plan",
-    });
-    assert.match(String(again.content[0]?.text), /run id RID/);
-    assert.match(String(again.content[0]?.text), /\/plan-save \(the deliberate retry\)/);
-    assert.match(String(again.content[0]?.text), /gh exploded/, "the first failure's detail");
-    assert.equal(argvs.length, 0, "the paused approval never reaches the cold door");
-    assert.equal(gating.exits, 0);
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ctx = headfulCtx(cwd, branch);
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+    "the draft artifact landed",
+  );
+  const pi = fakeColdDoorPi(branch, { stdout: FAIL_ENVELOPE, code: 1 });
+  const gating = fakeGating(true);
+  const slot = scriptedRemotesSlot(pi);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(APPROVED),
+    depsFor(pi, ctx, gating),
+    {},
+    undefined,
+    undefined,
+    slot,
+  );
+  assert.equal(result.terminate, undefined, "a failed auto-save never terminates");
+  const details = result.details as { ok?: boolean; saved?: boolean; error_type?: string };
+  assert.equal(details.ok, false);
+  assert.equal(details.error_type, "save_failed");
+  assert.equal(details.saved, false);
+  assert.equal(gating.exits, 0, "the gate stays on");
+  const text = String(result.content[0]?.text);
+  assert.match(text, /APPROVED/);
+  assert.match(text, /auto-save FAILED/);
+  assert.match(text, /gh exploded/);
+  assert.match(text, /automatic saves are paused for this session/);
+  assert.match(text, /\/plan-save \(the deliberate retry\)/);
+  // The unconfirmed-save latch: the next approval in the same activation is paused before
+  // the cold door — the human checks the backend for run id RID, then /plan-save retries.
+  assert.equal(slot.unconfirmed()?.subject, "plan");
+  const argvs: string[][] = [];
+  const again = await executePlanReview(
+    fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs }),
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(APPROVED),
+    depsFor(pi, ctx, gating),
+    {},
+    undefined,
+    undefined,
+    slot,
+  );
+  assert.deepEqual(again.details, {
+    ok: false,
+    error_type: "save_unconfirmed",
+    status: "refused",
+    subject: "plan",
   });
+  assert.match(String(again.content[0]?.text), /run id RID/);
+  assert.match(String(again.content[0]?.text), /\/plan-save \(the deliberate retry\)/);
+  assert.match(String(again.content[0]?.text), /gh exploded/, "the first failure's detail");
+  assert.equal(argvs.length, 0, "the paused approval never reaches the cold door");
+  assert.equal(gating.exits, 0);
 });
 
 // ------------------------------------------- the first-party execute path (approve/deny/edit)
 
 test("first-party approve, no edits -> the approval save runs with the reviewed bytes, terminating", async () => {
-  await withNoLlm(async () => {
-    const cwd = scaffoldRepo();
-    const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
-    const ui = fakeUI({ editor: ["# The draft\n"], select: [APPROVE] });
-    const ctx = headfulCtx(cwd, branch, ui);
-    assert.ok(
-      writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
-      "the draft artifact landed",
-    );
-    const argvs: string[][] = [];
-    const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
-    const gating = fakeGating(true);
-    const result = await executePlanReview(
-      pi,
-      ctx as unknown as ExtensionContext,
-      gating,
-      cannedBridge(DENIED),
-      depsFor(pi, ctx, gating),
-      {},
-    );
-    assert.equal(result.terminate, true, "a saved approval terminates the turn");
-    const details = result.details as {
-      ok?: boolean;
-      saved?: boolean;
-      gateExited?: boolean;
-      edited?: boolean;
-    };
-    assert.equal(details.ok, true);
-    assert.equal(details.saved, true);
-    assert.equal(details.gateExited, true);
-    assert.equal(details.edited, undefined, "no edit -> no edited flag");
-    assert.equal(gating.exits, 1);
-    const planFile = argvs[0]?.[argvs[0].indexOf("--plan-file") + 1];
-    assert.ok(planFile, "the plan rode the stdin channel");
-    assert.equal(
-      readFileSync(planFile, "utf8"),
-      "# The draft",
-      "the reviewed bytes were saved (savePlan trims)",
-    );
-    assert.doesNotMatch(String(result.content[0]?.text), /human edits were written back/);
-  });
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ui = fakeUI({ editor: ["# The draft\n"], select: [APPROVE] });
+  const ctx = headfulCtx(cwd, branch, ui);
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+    "the draft artifact landed",
+  );
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(DENIED),
+    depsFor(pi, ctx, gating),
+    {},
+  );
+  assert.equal(result.terminate, true, "a saved approval terminates the turn");
+  const details = result.details as {
+    ok?: boolean;
+    saved?: boolean;
+    gateExited?: boolean;
+    edited?: boolean;
+  };
+  assert.equal(details.ok, true);
+  assert.equal(details.saved, true);
+  assert.equal(details.gateExited, true);
+  assert.equal(details.edited, undefined, "no edit -> no edited flag");
+  assert.equal(gating.exits, 1);
+  const planFile = argvs[0]?.[argvs[0].indexOf("--plan-file") + 1];
+  assert.ok(planFile, "the plan rode the stdin channel");
+  assert.equal(
+    readFileSync(planFile, "utf8"),
+    "# The draft",
+    "the reviewed bytes were saved (savePlan trims)",
+  );
+  assert.doesNotMatch(String(result.content[0]?.text), /human edits were written back/);
 });
 
 test("first-party approve with edits -> write-back to the draft, edited bytes saved + flagged", async () => {
-  await withNoLlm(async () => {
-    const cwd = scaffoldRepo();
-    const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
-    const ui = fakeUI({ editor: ["# The draft, edited by the human\n"], select: [APPROVE] });
-    const ctx = headfulCtx(cwd, branch, ui);
-    const drafted = writeSessionArtifact(
-      fakeSink(branch),
-      ctx,
-      PLAN_DRAFT_ARTIFACT,
-      "# The draft\n",
-    );
-    assert.ok(drafted, "the draft artifact landed");
-    const argvs: string[][] = [];
-    const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
-    const gating = fakeGating(true);
-    const result = await executePlanReview(
-      pi,
-      ctx as unknown as ExtensionContext,
-      gating,
-      cannedBridge(DENIED),
-      depsFor(pi, ctx, gating),
-      {},
-    );
-    assert.equal(
-      readFileSync(drafted, "utf8"),
-      "# The draft, edited by the human\n",
-      "the edits were written back to the draft artifact BEFORE the verdict",
-    );
-    const planFile = argvs[0]?.[argvs[0].indexOf("--plan-file") + 1];
-    assert.ok(planFile, "the plan rode the stdin channel");
-    assert.equal(
-      readFileSync(planFile, "utf8"),
-      "# The draft, edited by the human",
-      "the approval save received the edited bytes (savePlan trims)",
-    );
-    const details = result.details as { ok?: boolean; edited?: boolean; saved?: boolean };
-    assert.equal(details.ok, true);
-    assert.equal(details.edited, true);
-    assert.equal(details.saved, true);
-    assert.match(
-      String(result.content[0]?.text),
-      /human edits were written back to the draft and saved/,
-    );
-  });
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ui = fakeUI({ editor: ["# The draft, edited by the human\n"], select: [APPROVE] });
+  const ctx = headfulCtx(cwd, branch, ui);
+  const drafted = writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n");
+  assert.ok(drafted, "the draft artifact landed");
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(DENIED),
+    depsFor(pi, ctx, gating),
+    {},
+  );
+  assert.equal(
+    readFileSync(drafted, "utf8"),
+    "# The draft, edited by the human\n",
+    "the edits were written back to the draft artifact BEFORE the verdict",
+  );
+  const planFile = argvs[0]?.[argvs[0].indexOf("--plan-file") + 1];
+  assert.ok(planFile, "the plan rode the stdin channel");
+  assert.equal(
+    readFileSync(planFile, "utf8"),
+    "# The draft, edited by the human",
+    "the approval save received the edited bytes (savePlan trims)",
+  );
+  const details = result.details as { ok?: boolean; edited?: boolean; saved?: boolean };
+  assert.equal(details.ok, true);
+  assert.equal(details.edited, true);
+  assert.equal(details.saved, true);
+  assert.match(
+    String(result.content[0]?.text),
+    /human edits were written back to the draft and saved/,
+  );
 });
 
 test("first-party: missing identity refuses to open the review BEFORE the editor, nothing saved", async () => {
@@ -971,206 +944,194 @@ function directEditsScaffold(draft = DE_BASE): {
 }
 
 test("plannotator approve + Direct Edits -> applied, written back, edited bytes saved, remainder-only feedback", async () => {
-  await withNoLlm(async () => {
-    const { ctx, pi, gating, argvs, drafted } = directEditsScaffold();
-    const outcome: ReviewOutcome = {
-      status: "completed",
-      approved: true,
-      reviewId: "rev-de",
-      feedback: DE_FEEDBACK_WITH_ANNOTATIONS,
-    };
-    const result = await executePlanReview(
-      pi,
-      ctx as unknown as ExtensionContext,
-      gating,
-      cannedBridge(outcome),
-      depsFor(pi, ctx, gating),
-      {},
-    );
-    assert.equal(
-      readFileSync(drafted, "utf8"),
-      DE_PATCHED,
-      "the applied edits were written back to the draft artifact BEFORE the save",
-    );
-    const argv = argvs[0] ?? [];
-    const planFile = argv[argv.indexOf("--plan-file") + 1];
-    assert.ok(planFile, "the plan rode the stdin channel");
-    assert.equal(
-      readFileSync(planFile, "utf8"),
-      DE_PATCHED.trimEnd(),
-      "the save received the PATCHED plan (savePlan trims)",
-    );
-    assert.equal(result.terminate, true, "a saved approval terminates the turn");
-    const details = result.details as Record<string, unknown>;
-    assert.equal(details.ok, true);
-    assert.equal(details.saved, true);
-    assert.equal(details.edited, true, "the applied edits ride the edited detail");
-    assert.equal(details.direct_edits_applied, undefined, "no failure flag on the applied arm");
-    assert.equal(details.feedback, DE_ANNOTATIONS, "only the remainder survives as feedback");
-    const text = String(result.content[0]?.text);
-    assert.match(text, /human edits were written back to the draft and saved/);
-    assert.match(text, /Also add a rollback note\./, "the annotation remainder is surfaced");
-    assert.doesNotMatch(text, /# Direct Edits/, "the applied diff never renders as guidance");
-    assert.doesNotMatch(text, /```diff/);
-    assert.equal(gating.exits, 1, "the gate exited via the approval-save seam");
-  });
+  const { ctx, pi, gating, argvs, drafted } = directEditsScaffold();
+  const outcome: ReviewOutcome = {
+    status: "completed",
+    approved: true,
+    reviewId: "rev-de",
+    feedback: DE_FEEDBACK_WITH_ANNOTATIONS,
+  };
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(outcome),
+    depsFor(pi, ctx, gating),
+    {},
+  );
+  assert.equal(
+    readFileSync(drafted, "utf8"),
+    DE_PATCHED,
+    "the applied edits were written back to the draft artifact BEFORE the save",
+  );
+  const argv = argvs[0] ?? [];
+  const planFile = argv[argv.indexOf("--plan-file") + 1];
+  assert.ok(planFile, "the plan rode the stdin channel");
+  assert.equal(
+    readFileSync(planFile, "utf8"),
+    DE_PATCHED.trimEnd(),
+    "the save received the PATCHED plan (savePlan trims)",
+  );
+  assert.equal(result.terminate, true, "a saved approval terminates the turn");
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, true);
+  assert.equal(details.saved, true);
+  assert.equal(details.edited, true, "the applied edits ride the edited detail");
+  assert.equal(details.direct_edits_applied, undefined, "no failure flag on the applied arm");
+  assert.equal(details.feedback, DE_ANNOTATIONS, "only the remainder survives as feedback");
+  const text = String(result.content[0]?.text);
+  assert.match(text, /human edits were written back to the draft and saved/);
+  assert.match(text, /Also add a rollback note\./, "the annotation remainder is surfaced");
+  assert.doesNotMatch(text, /# Direct Edits/, "the applied diff never renders as guidance");
+  assert.doesNotMatch(text, /```diff/);
+  assert.equal(gating.exits, 1, "the gate exited via the approval-save seam");
 });
 
 test("plannotator approve + edits-only Direct Edits -> no remainder, no reviewer-feedback block", async () => {
-  await withNoLlm(async () => {
-    const { ctx, pi, gating, argvs, drafted } = directEditsScaffold();
-    const outcome: ReviewOutcome = {
-      status: "completed",
-      approved: true,
-      reviewId: "rev-de2",
-      feedback: DE_SECTION,
-    };
-    const result = await executePlanReview(
-      pi,
-      ctx as unknown as ExtensionContext,
-      gating,
-      cannedBridge(outcome),
-      depsFor(pi, ctx, gating),
-      {},
-    );
-    assert.equal(readFileSync(drafted, "utf8"), DE_PATCHED, "edits written back");
-    const argv = argvs[0] ?? [];
-    assert.equal(
-      readFileSync(argv[argv.indexOf("--plan-file") + 1] ?? "", "utf8"),
-      DE_PATCHED.trimEnd(),
-    );
-    const details = result.details as Record<string, unknown>;
-    assert.equal(details.edited, true);
-    assert.equal(details.feedback, null, "edits-only feedback leaves no remainder");
-    assert.doesNotMatch(String(result.content[0]?.text), /Reviewer feedback/);
-  });
+  const { ctx, pi, gating, argvs, drafted } = directEditsScaffold();
+  const outcome: ReviewOutcome = {
+    status: "completed",
+    approved: true,
+    reviewId: "rev-de2",
+    feedback: DE_SECTION,
+  };
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(outcome),
+    depsFor(pi, ctx, gating),
+    {},
+  );
+  assert.equal(readFileSync(drafted, "utf8"), DE_PATCHED, "edits written back");
+  const argv = argvs[0] ?? [];
+  assert.equal(
+    readFileSync(argv[argv.indexOf("--plan-file") + 1] ?? "", "utf8"),
+    DE_PATCHED.trimEnd(),
+  );
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.edited, true);
+  assert.equal(details.feedback, null, "edits-only feedback leaves no remainder");
+  assert.doesNotMatch(String(result.content[0]?.text), /Reviewer feedback/);
 });
 
 test("plannotator approve + unapplyable Direct Edits -> verbatim save + loud warning + details flag", async () => {
-  await withNoLlm(async () => {
-    // The diff targets different base bytes than the reviewed draft -> strict apply -> null.
-    const { ctx, pi, gating, argvs, drafted } = directEditsScaffold("# A different draft\n");
-    const outcome: ReviewOutcome = {
-      status: "completed",
-      approved: true,
-      reviewId: "rev-de3",
-      feedback: DE_FEEDBACK_WITH_ANNOTATIONS,
-    };
-    const result = await executePlanReview(
-      pi,
-      ctx as unknown as ExtensionContext,
-      gating,
-      cannedBridge(outcome),
-      depsFor(pi, ctx, gating),
-      {},
-    );
-    assert.equal(readFileSync(drafted, "utf8"), "# A different draft\n", "the draft is untouched");
-    const argv = argvs[0] ?? [];
-    assert.equal(
-      readFileSync(argv[argv.indexOf("--plan-file") + 1] ?? "", "utf8"),
-      "# A different draft",
-      "the ORIGINAL reviewed bytes were saved verbatim",
-    );
-    assert.equal(result.terminate, true, "the verbatim save still terminates");
-    const details = result.details as Record<string, unknown>;
-    assert.equal(details.ok, true);
-    assert.equal(details.edited, undefined, "nothing was applied");
-    assert.equal(details.direct_edits_applied, false, "the failure flag is mirrored in details");
-    assert.equal(details.feedback, DE_FEEDBACK_WITH_ANNOTATIONS, "the FULL feedback survives");
-    const text = String(result.content[0]?.text);
-    assert.match(text, /Direct Edits could NOT be auto-applied/);
-    assert.match(text, /saved WITHOUT them/);
-    assert.match(text, /# Direct Edits/, "the diff remains in the surfaced feedback");
-  });
+  // The diff targets different base bytes than the reviewed draft -> strict apply -> null.
+  const { ctx, pi, gating, argvs, drafted } = directEditsScaffold("# A different draft\n");
+  const outcome: ReviewOutcome = {
+    status: "completed",
+    approved: true,
+    reviewId: "rev-de3",
+    feedback: DE_FEEDBACK_WITH_ANNOTATIONS,
+  };
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(outcome),
+    depsFor(pi, ctx, gating),
+    {},
+  );
+  assert.equal(readFileSync(drafted, "utf8"), "# A different draft\n", "the draft is untouched");
+  const argv = argvs[0] ?? [];
+  assert.equal(
+    readFileSync(argv[argv.indexOf("--plan-file") + 1] ?? "", "utf8"),
+    "# A different draft",
+    "the ORIGINAL reviewed bytes were saved verbatim",
+  );
+  assert.equal(result.terminate, true, "the verbatim save still terminates");
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.ok, true);
+  assert.equal(details.edited, undefined, "nothing was applied");
+  assert.equal(details.direct_edits_applied, false, "the failure flag is mirrored in details");
+  assert.equal(details.feedback, DE_FEEDBACK_WITH_ANNOTATIONS, "the FULL feedback survives");
+  const text = String(result.content[0]?.text);
+  assert.match(text, /Direct Edits could NOT be auto-applied/);
+  assert.match(text, /saved WITHOUT them/);
+  assert.match(text, /# Direct Edits/, "the diff remains in the surfaced feedback");
 });
 
 test("plannotator approve + heading but unparseable section -> verbatim save + warning", async () => {
-  await withNoLlm(async () => {
-    const { ctx, pi, gating, drafted } = directEditsScaffold();
-    const outcome: ReviewOutcome = {
-      status: "completed",
-      approved: true,
-      reviewId: "rev-de4",
-      feedback: "# Direct Edits\n\nthe fence never arrived",
-    };
-    const result = await executePlanReview(
-      pi,
-      ctx as unknown as ExtensionContext,
-      gating,
-      cannedBridge(outcome),
-      depsFor(pi, ctx, gating),
-      {},
-    );
-    assert.equal(readFileSync(drafted, "utf8"), DE_BASE, "the draft is untouched");
-    const details = result.details as Record<string, unknown>;
-    assert.equal(details.direct_edits_applied, false);
-    assert.match(String(result.content[0]?.text), /Direct Edits could NOT be auto-applied/);
-  });
+  const { ctx, pi, gating, drafted } = directEditsScaffold();
+  const outcome: ReviewOutcome = {
+    status: "completed",
+    approved: true,
+    reviewId: "rev-de4",
+    feedback: "# Direct Edits\n\nthe fence never arrived",
+  };
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(outcome),
+    depsFor(pi, ctx, gating),
+    {},
+  );
+  assert.equal(readFileSync(drafted, "utf8"), DE_BASE, "the draft is untouched");
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.direct_edits_applied, false);
+  assert.match(String(result.content[0]?.text), /Direct Edits could NOT be auto-applied/);
 });
 
 test("plannotator parameter approval without identity refuses to open before the bridge", async () => {
-  await withNoLlm(async () => {
-    // Every arm opens the slot at entry; without a run identity there is nothing to review under.
-    const cwd = scaffoldRepo();
-    selectPlanProvider(cwd, "plannotator-plan");
-    const branch: unknown[] = [stateEntry({})];
-    const ctx = headfulCtx(cwd, branch);
-    const argvs: string[][] = [];
-    const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
-    const outcome: ReviewOutcome = {
-      status: "completed",
-      approved: true,
-      reviewId: "rev-de5",
-      feedback: DE_SECTION,
-    };
-    const gating = fakeGating(true);
-    const result = await executePlanReview(
-      pi,
-      ctx as unknown as ExtensionContext,
-      gating,
-      cannedBridge(outcome),
-      depsFor(pi, ctx, gating),
-      { plan: DE_BASE },
-    );
-    assert.equal(argvs.length, 0);
-    assert.equal(gating.exits, 0);
-    assert.equal(result.details.status, "refused");
-    assert.equal(result.details.error_type, "review_open_refused");
-    assert.equal(result.details.reason, "no-identity");
-  });
+  // Every arm opens the slot at entry; without a run identity there is nothing to review under.
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry({})];
+  const ctx = headfulCtx(cwd, branch);
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+  const outcome: ReviewOutcome = {
+    status: "completed",
+    approved: true,
+    reviewId: "rev-de5",
+    feedback: DE_SECTION,
+  };
+  const gating = fakeGating(true);
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(outcome),
+    depsFor(pi, ctx, gating),
+    { plan: DE_BASE },
+  );
+  assert.equal(argvs.length, 0);
+  assert.equal(gating.exits, 0);
+  assert.equal(result.details.status, "refused");
+  assert.equal(result.details.error_type, "review_open_refused");
+  assert.equal(result.details.reason, "no-identity");
 });
 
 test("plannotator approve + ordinary feedback -> byte-stable (no edits machinery engaged)", async () => {
-  await withNoLlm(async () => {
-    const { ctx, pi, gating, argvs, drafted } = directEditsScaffold();
-    const outcome: ReviewOutcome = {
-      status: "completed",
-      approved: true,
-      reviewId: "rev-de6",
-      feedback: "ship it; also note the edge case",
-    };
-    const result = await executePlanReview(
-      pi,
-      ctx as unknown as ExtensionContext,
-      gating,
-      cannedBridge(outcome),
-      depsFor(pi, ctx, gating),
-      {},
-    );
-    assert.equal(readFileSync(drafted, "utf8"), DE_BASE, "the draft is untouched");
-    const argv = argvs[0] ?? [];
-    assert.equal(
-      readFileSync(argv[argv.indexOf("--plan-file") + 1] ?? "", "utf8"),
-      DE_BASE.trimEnd(),
-    );
-    const details = result.details as Record<string, unknown>;
-    assert.equal(details.edited, undefined);
-    assert.equal(details.direct_edits_applied, undefined);
-    assert.equal(details.feedback, "ship it; also note the edge case");
-    const text = String(result.content[0]?.text);
-    assert.match(text, /Reviewer feedback \(implementation guidance/);
-    assert.doesNotMatch(text, /Direct Edits/);
-  });
+  const { ctx, pi, gating, argvs, drafted } = directEditsScaffold();
+  const outcome: ReviewOutcome = {
+    status: "completed",
+    approved: true,
+    reviewId: "rev-de6",
+    feedback: "ship it; also note the edge case",
+  };
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(outcome),
+    depsFor(pi, ctx, gating),
+    {},
+  );
+  assert.equal(readFileSync(drafted, "utf8"), DE_BASE, "the draft is untouched");
+  const argv = argvs[0] ?? [];
+  assert.equal(
+    readFileSync(argv[argv.indexOf("--plan-file") + 1] ?? "", "utf8"),
+    DE_BASE.trimEnd(),
+  );
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.edited, undefined);
+  assert.equal(details.direct_edits_applied, undefined);
+  assert.equal(details.feedback, "ship it; also note the edge case");
+  const text = String(result.content[0]?.text);
+  assert.match(text, /Reviewer feedback \(implementation guidance/);
+  assert.doesNotMatch(text, /Direct Edits/);
 });
 
 test("plannotator deny + Direct Edits -> feedback passes through untouched (model-mediated)", async () => {
@@ -1754,70 +1715,68 @@ test("index.ts composition: the REAL root wiring reaches wave_launched through p
 // ------------------------------------------------------------- the draft-review guards (one case)
 
 test("plannotator arm: the ladder runs before the completion — a destination drift during the review refuses the approval, nothing saved; a steady destination saves once", async () => {
-  await withNoLlm(async () => {
-    const cwd = scaffoldRepo();
-    selectPlanProvider(cwd, "plannotator-plan");
-    const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
-    const ctx = headfulCtx(cwd, branch);
-    assert.ok(
-      writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
-      "the draft artifact landed",
-    );
-    const argvs: string[][] = [];
-    const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
-    const gating = fakeGating(true);
-    const remotes = { current: SCRIPTED_ORIGIN };
-    const slot = scriptedRemotesSlot(pi, remotes);
-    // `git remote set-url origin …` lands while the browser review is open.
-    const scripted = cannedBridge(APPROVED);
-    const bridge = {
-      ...scripted,
-      async review(...args: Parameters<typeof scripted.review>): Promise<ReviewOutcome> {
-        const outcome = await scripted.review(...args);
-        remotes.current = "remote.origin.url\nhttps://github.com/acme/forked.git";
-        return outcome;
-      },
-    };
-    const result = await executePlanReview(
-      pi,
-      ctx as unknown as ExtensionContext,
-      gating,
-      bridge,
-      depsFor(pi, ctx, gating),
-      {},
-      undefined,
-      undefined,
-      slot,
-    );
-    assert.deepEqual(result.details, {
-      ok: true,
-      status: "destination-changed",
-      subject: "plan",
-      changed: ["remotes"],
-    });
-    const text = String(result.content[0]?.text);
-    assert.match(text, /save destination changed while the review was open \(changed: remotes\)/);
-    assert.doesNotMatch(text, /forked/, "component names only — never values");
-    assert.match(text, /a fresh human approval is required before any save/);
-    assert.equal(result.terminate, undefined);
-    assert.equal(argvs.length, 0, "nothing saved");
-    assert.equal(gating.exits, 0, "the gate stays on");
-    // A fresh review against the (now steady) destination saves once.
-    const fresh = await executePlanReview(
-      pi,
-      ctx as unknown as ExtensionContext,
-      gating,
-      cannedBridge(APPROVED),
-      depsFor(pi, ctx, gating),
-      {},
-      undefined,
-      undefined,
-      slot,
-    );
-    assert.equal((fresh.details as { saved?: boolean }).saved, true);
-    assert.equal(argvs.length, 1, "exactly one save call");
-    assert.equal(gating.exits, 1);
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ctx = headfulCtx(cwd, branch);
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+    "the draft artifact landed",
+  );
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+  const gating = fakeGating(true);
+  const remotes = { current: SCRIPTED_ORIGIN };
+  const slot = scriptedRemotesSlot(pi, remotes);
+  // `git remote set-url origin …` lands while the browser review is open.
+  const scripted = cannedBridge(APPROVED);
+  const bridge = {
+    ...scripted,
+    async review(...args: Parameters<typeof scripted.review>): Promise<ReviewOutcome> {
+      const outcome = await scripted.review(...args);
+      remotes.current = "remote.origin.url\nhttps://github.com/acme/forked.git";
+      return outcome;
+    },
+  };
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    bridge,
+    depsFor(pi, ctx, gating),
+    {},
+    undefined,
+    undefined,
+    slot,
+  );
+  assert.deepEqual(result.details, {
+    ok: true,
+    status: "destination-changed",
+    subject: "plan",
+    changed: ["remotes"],
   });
+  const text = String(result.content[0]?.text);
+  assert.match(text, /save destination changed while the review was open \(changed: remotes\)/);
+  assert.doesNotMatch(text, /forked/, "component names only — never values");
+  assert.match(text, /a fresh human approval is required before any save/);
+  assert.equal(result.terminate, undefined);
+  assert.equal(argvs.length, 0, "nothing saved");
+  assert.equal(gating.exits, 0, "the gate stays on");
+  // A fresh review against the (now steady) destination saves once.
+  const fresh = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    gating,
+    cannedBridge(APPROVED),
+    depsFor(pi, ctx, gating),
+    {},
+    undefined,
+    undefined,
+    slot,
+  );
+  assert.equal((fresh.details as { saved?: boolean }).saved, true);
+  assert.equal(argvs.length, 1, "exactly one save call");
+  assert.equal(gating.exits, 1);
 });
 
 test("plannotator arm: an APPROVE arriving after a newer review opened is superseded — ignored loudly, nothing saved, the newer review stays current", async () => {

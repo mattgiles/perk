@@ -416,7 +416,7 @@ routes:
     role: tool-contract
     priority: 90
   - id: ts-plan
-    match: { paths: ["extension/pi/v1/plan.ts", "extension/pi/v1/planTitle.ts", "extension/authoring/plan/**"] }
+    match: { paths: ["extension/pi/v1/plan.ts", "extension/authoring/plan/**"] }
     capability: planning.plan
     audience: shipped
     role: tool-contract

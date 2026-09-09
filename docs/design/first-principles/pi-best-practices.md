@@ -290,7 +290,7 @@ On pi ≥ 0.84 prefer **registry dispatch** — `ctx.modelRegistry.complete(mode
 { signal, timeoutMs })` (feature-detect the method) — which owns final request assembly
 (resolved auth, nullable headers, credential-resolved `baseUrl`, provider `env`); the
 `getApiKeyAndHeaders` + compat `complete` shape above stays the older-host fallback (it cannot
-carry `baseUrl`). See `extension/substrate/structuredOutput.ts`.
+carry `baseUrl`).
 
 Useful exported helpers: `complete` (one-shot inference), `convertToLlm` /
 `serializeConversation` (turn a branch into prompt text), `compact`, `getMarkdownTheme`,
