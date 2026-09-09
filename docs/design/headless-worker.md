@@ -197,8 +197,10 @@ anchored to real symbols.
   fallback (verified in `address.ts`, `submit.ts`, `land.ts`, `learn.ts`, `objective.ts`,
   `checkpoints.ts`, `planMode.ts`, `lifecycleGates.ts`, `objectivePlanning.ts`,
   `objectiveAuthoring.ts`, `learnDocs.ts`, `ready.ts`, `selfcheck.ts`). The session-lifecycle linkage error path is
-  explicitly headless-safe (`extension/index.ts` `reportError`; test `sessionLifecycle.test.ts` "a
-  missing handoff is reported, not thrown"). The CI executor **fails closed headless**
+  explicitly headless-safe (`extension/index.ts` `reportError`; tests
+  `extension/session/lifecycle.test.ts` "unclaimed: …" (the loud problem, nothing consumed) +
+  `extension/surfaces/report.test.ts` "headless writes the complete value to stderr exactly once
+  without notifying or sinking"). The CI executor **fails closed headless**
   (`decideCiScope` → `"refuse"` when `!hasUI && !flag`).
 - **The gaps to record:**
   1. **`ctx.mode` is undefined in a bare SDK drive.** `extension/index.ts` already writes
@@ -396,8 +398,8 @@ engages for a planted handoff + `PERK_RUN_ID` (the rebuilt `perk:workflow-state.
 retired as superseded — the pin now lives in the real-factory tier + the named suites:
 `extension/worker/stageExecutionE2e.test.ts` (the implement/address HAPPY scenarios complete only
 if the real extension registered the terminal tools; the NO-EXTENSION-TOOLS scenario pins the
-negative), `extension/sessionLifecycle.test.ts` ("claim: fresh session with PERK_RUN_ID + handoff
-claims the run"), and `extension/pi/v1/delivery/address.test.ts` (registration parity, including
+negative), `extension/sessionLifecycle.test.ts` ("composition: a consuming cold start orders gate →
+verified linkage → capture → receiver sync"), and `extension/pi/v1/delivery/address.test.ts` (registration parity, including
 the `resolve_review_threads` absence).*
 
 **Deferred, as planned:** the live model-driven e2e (Node 4.1), the structured event stream (Node

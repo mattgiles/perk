@@ -1,113 +1,32 @@
-// The session identity lifecycle's pure decision units (`decideClaim` / `deriveForkRunId` /
-// `resolveRunStage`) — moved with the definitions from `substrate/workflowState.test.ts` — the
-// two-store `establishSessionIdentity` suite, and (at the end) the two-phase startup facts:
-// `sessionStartToolScope`'s pure scope table, `resolveSessionStartFacts`' authority + lazy-read
-// matrix (recorded port sequence, registry admission, the exact verified-link append, the
-// kept-versus-claimed posture on a failed append, establish-before-consume observed through
-// linkage), and `sessionTreeFacts`' read-only navigation twin. Each arm has a live wiring twin
-// in `extension/sessionLifecycle.test.ts` (the harness suite proving the composition preserved
-// behavior end-to-end); here we prove the operations themselves over fakes.
+// The pure OWNING suite for `session/lifecycle.ts`: the identity arms (claim / unclaimed / fork /
+// adopt / mint / keep), the pre-gate tool-scope slice, the post-gate facts (the lazy linkage
+// reconciliation with its capture/feedback inputs) and the navigation twin — every behavior
+// pinned exactly once here, over ONE memory `SessionStateStore` fake and recording ports, with
+// REAL identities driving the facts (one `startup()` runs identity → scope → facts as production
+// does). `extension/sessionLifecycle.test.ts` proves only the composition through the real
+// wiring; it re-proves no arm.
 
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { test } from "node:test";
 import type { Handoff, PlanRef } from "../substrate/cache.ts";
 import type { Registry } from "../substrate/registry.ts";
-import type { SessionArtifactCtx } from "../substrate/sessionData.ts";
+import { planRefsEqual, type WorkflowState } from "../substrate/workflowState.ts";
 import {
-  type EntrySink,
-  planRefsEqual,
-  WORKFLOW_STATE_TYPE,
-  type WorkflowState,
-} from "../substrate/workflowState.ts";
-import {
-  branchSessionStateStore,
-  decideClaim,
-  deriveForkRunId,
   type EstablishIdentityOutcome,
   establishSessionIdentity,
   refinementHandoffContamination,
   reflectSessionReadOnlyFloor,
-  resolveRunStage,
   resolveSessionStartFacts,
   type SessionIdentityPorts,
-  type SessionIdentityReads,
   type SessionStartFactReads,
   type SessionStateStore,
   sessionStartToolScope,
   sessionTreeFacts,
 } from "./lifecycle.ts";
 
-test("floor reflection is mode-only, honest across outcomes, and contains unexpected append failures", () => {
-  const state: WorkflowState = {
-    run_id: "RID",
-    pi_session_id: "session.jsonl",
-    stage: "implement",
-    predecessor: "parent",
-    perk_version: "1.2.3",
-  };
-  const base = { resolved: state, problems: ["original problem"], warnings: ["original warning"] };
-  const outcomes: EstablishIdentityOutcome[] = [
-    { ...base, arm: "claimed", decision: { action: "claim", source: "env", runId: "RID" } },
-    { ...base, arm: "kept", decision: { action: "keep", source: "session", state } },
-    {
-      ...base,
-      arm: "forked",
-      decision: { action: "fork", source: "fork", state, childRunId: "RID", parentRunId: "parent" },
-    },
-    {
-      ...base,
-      arm: "adopted",
-      decision: { action: "adopt", source: "env-child", childRunId: "RID", parentRunId: "parent" },
-    },
-    { ...base, arm: "minted", decision: { action: "none", source: "none", state } },
-    { ...base, arm: "unclaimed", decision: { action: "claim", source: "env", runId: "RID" } },
-    { ...base, arm: "unclaimed", decision: { action: "none", source: "none", state } },
-  ];
-  for (const outcome of outcomes) {
-    for (const mode of [undefined, "read-write", "read-only"]) {
-      const input = { ...outcome, resolved: { ...state, mode } };
-      for (const status of ["applied", "rejected", "unverified", "throws"] as const) {
-        let appends = 0;
-        const store: SessionStateStore = {
-          rebuild: () => {
-            throw new Error("must not rebuild");
-          },
-          append: () => {
-            throw new Error("must not plain append");
-          },
-          appendVerified: (opts) => {
-            appends++;
-            assert.deepEqual(opts.data, { mode: "read-only" });
-            assert.equal(opts.field, "mode");
-            assert.equal(opts.expected, "read-only");
-            assert.equal(opts.scope, "child restriction");
-            if (status === "throws") throw Object.create(null);
-            return status === "applied" ? { status } : { status, problem: "already reported" };
-          },
-        };
-        const result = reflectSessionReadOnlyFloor(store, input);
-        const skipped = outcome.arm === "unclaimed" || mode === "read-only";
-        assert.equal(appends, skipped ? 0 : 1);
-        assert.equal(result.unexpectedFailure, !skipped && status === "throws");
-        if (!skipped && status === "applied") {
-          assert.deepEqual(result.outcome, {
-            ...input,
-            resolved: { ...input.resolved, mode: "read-only" },
-          });
-          assert.equal(result.outcome.decision, input.decision);
-          assert.equal(result.outcome.problems, input.problems);
-          assert.equal(result.outcome.warnings, input.warnings);
-        } else assert.equal(result.outcome, input);
-        assert.equal(input.resolved.mode, mode, "input never mutated");
-      }
-    }
-  }
-});
+// --- fixtures ------------------------------------------------------------------------------------
 
-/** A handoff blob (optionally carrying `stage`/`consumed`/claim fields) for the claim tests. */
+/** A handoff blob (optionally carrying `stage`/`consumed`/claim fields). */
 function handoffBlob(
   runId: string,
   stage?: string,
@@ -122,651 +41,6 @@ function handoffBlob(
   };
 }
 
-/** Deterministic `SessionIdentityReads` — the decision tier never touches disk. */
-function fakeReads(
-  opts: { handoff?: Handoff | null; runIds?: string[] } = {},
-): SessionIdentityReads {
-  return {
-    readHandoff: () => opts.handoff ?? null,
-    listRunIds: () => opts.runIds ?? [],
-  };
-}
-
-test("decideClaim: cold env claim when no prior state", () => {
-  const d = decideClaim({
-    state: {},
-    currentSessionId: "s1",
-    envRunId: "01RID",
-    reads: fakeReads(),
-  });
-  assert.deepEqual(d, { action: "claim", source: "env", runId: "01RID" });
-});
-
-test("decideClaim: none when no state and no env", () => {
-  const d = decideClaim({ state: {}, currentSessionId: "s1", envRunId: null, reads: fakeReads() });
-  assert.equal(d.action, "none");
-});
-
-test("decideClaim: keep (reload) when pi_session_id matches the current session", () => {
-  const d = decideClaim({
-    state: { run_id: "01RID", pi_session_id: "s1" },
-    currentSessionId: "s1",
-    envRunId: null,
-    reads: fakeReads(),
-  });
-  assert.equal(d.action, "keep");
-  assert.equal(d.source, "session");
-});
-
-test("decideClaim: fork when run_id was inherited from a different session", () => {
-  const d = decideClaim({
-    state: { run_id: "01RID", pi_session_id: "parent" },
-    currentSessionId: "child",
-    envRunId: null,
-    reads: fakeReads(),
-  });
-  assert.equal(d.action, "fork");
-  if (d.action === "fork") {
-    assert.equal(d.parentRunId, "01RID");
-    assert.equal(d.childRunId, "01RID.1");
-  }
-});
-
-test("decideClaim: a consumed handoff claimed by a DIFFERENT session adopts a child identity", () => {
-  const reads = fakeReads({
-    handoff: handoffBlob("01RID", "implement", {
-      consumed: true,
-      piSessionId: "parent.jsonl",
-      mode: "read-write",
-    }),
-  });
-  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", reads });
-  assert.deepEqual(d, {
-    action: "adopt",
-    source: "env-child",
-    childRunId: "01RID.1",
-    parentRunId: "01RID",
-    mode: "read-write",
-  });
-});
-
-test("decideClaim: a consumed handoff with NO recorded pi_session_id adopts (unrecorded claimer)", () => {
-  const reads = fakeReads({
-    handoff: handoffBlob("01RID", "implement", { consumed: true, mode: "read-only" }),
-  });
-  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", reads });
-  assert.equal(d.action, "adopt");
-  if (d.action === "adopt") {
-    assert.equal(d.childRunId, "01RID.1");
-    assert.equal(d.mode, "read-only");
-  }
-});
-
-test("decideClaim: a consumed handoff claimed by the CURRENT session re-claims (idempotent)", () => {
-  const reads = fakeReads({
-    handoff: handoffBlob("01RID", "implement", { consumed: true, piSessionId: "me.jsonl" }),
-  });
-  const d = decideClaim({ state: {}, currentSessionId: "me.jsonl", envRunId: "01RID", reads });
-  assert.deepEqual(d, { action: "claim", source: "env", runId: "01RID" });
-});
-
-test("decideClaim: an unconsumed handoff stays the normal cold claim", () => {
-  const reads = fakeReads({ handoff: handoffBlob("01RID", "implement", { consumed: false }) });
-  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", reads });
-  assert.deepEqual(d, { action: "claim", source: "env", runId: "01RID" });
-});
-
-test("decideClaim: adopt derives past existing siblings", () => {
-  const reads = fakeReads({
-    handoff: handoffBlob("01RID", "implement", { consumed: true, piSessionId: "parent.jsonl" }),
-    runIds: ["01RID.1"],
-  });
-  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", reads });
-  assert.equal(d.action, "adopt");
-  if (d.action === "adopt") assert.equal(d.childRunId, "01RID.2");
-});
-
-test("resolveRunStage: adopt carries no launched stage", () => {
-  const reads = fakeReads({
-    handoff: handoffBlob("01RID", "implement", { consumed: true, piSessionId: "parent.jsonl" }),
-  });
-  const d = decideClaim({ state: {}, currentSessionId: "child.jsonl", envRunId: "01RID", reads });
-  assert.equal(d.action, "adopt");
-  assert.equal(resolveRunStage(d, reads), null);
-});
-
-test("resolveRunStage: claim reads the stage from the run's handoff", () => {
-  const reads = fakeReads({ handoff: handoffBlob("01RID", "implement") });
-  const d = decideClaim({ state: {}, currentSessionId: "s1", envRunId: "01RID", reads });
-  assert.equal(resolveRunStage(d, reads), "implement");
-});
-
-test("resolveRunStage: claim with a stage-less handoff is null", () => {
-  const reads = fakeReads({ handoff: handoffBlob("01RID") });
-  const d = decideClaim({ state: {}, currentSessionId: "s1", envRunId: "01RID", reads });
-  assert.equal(d.action, "claim");
-  assert.equal(resolveRunStage(d, reads), null);
-});
-
-test("resolveRunStage: keep reads the stage from the kept run's handoff", () => {
-  const reads = fakeReads({ handoff: handoffBlob("01RID", "submit") });
-  const d = decideClaim({
-    state: { run_id: "01RID", pi_session_id: "s1" },
-    currentSessionId: "s1",
-    envRunId: null,
-    reads,
-  });
-  assert.equal(d.action, "keep");
-  assert.equal(resolveRunStage(d, reads), "submit");
-});
-
-test("resolveRunStage: keep with no handoff file is null", () => {
-  const reads = fakeReads();
-  const d = decideClaim({
-    state: { run_id: "01RID", pi_session_id: "s1" },
-    currentSessionId: "s1",
-    envRunId: null,
-    reads,
-  });
-  assert.equal(d.action, "keep");
-  assert.equal(resolveRunStage(d, reads), null);
-});
-
-test("resolveRunStage: fork and none carry no launched stage", () => {
-  const reads = fakeReads({ handoff: handoffBlob("01RID", "implement") });
-  const fork = decideClaim({
-    state: { run_id: "01RID", pi_session_id: "parent" },
-    currentSessionId: "child",
-    envRunId: null,
-    reads,
-  });
-  assert.equal(fork.action, "fork");
-  assert.equal(resolveRunStage(fork, reads), null);
-  const none = decideClaim({ state: {}, currentSessionId: "s1", envRunId: null, reads });
-  assert.equal(none.action, "none");
-  assert.equal(resolveRunStage(none, reads), null);
-});
-
-test("deriveForkRunId: increments past existing siblings", () => {
-  const runIds = ["01RID.1", "01RID.2", "unrelated"];
-  assert.equal(deriveForkRunId("01RID", runIds), "01RID.3");
-  assert.equal(deriveForkRunId("01OTHER", runIds), "01OTHER.1");
-});
-
-// --- establishSessionIdentity over BOTH stores ---------------------------------------------------
-//
-// The branch store is the production `branchSessionStateStore` (live branch array + a
-// no-op-notify ctx); the memory store is a knobbed fake. Each proves the same arm matrix:
-// claim (with/without the handoff node-claim carrier; blank/half ids persist no claim),
-// unclaimed (missing/mismatched handoff; a failed read-back does NOT consume), fork (derived
-// child + tolerated scratch warning), adopt (no stage impersonation, inherited mode, never
-// re-consumes), mint (verified; a failed read-back leaves the session unidentified), and
-// keep (NO append, no version backfill).
-
-interface StoreHarness {
-  store: SessionStateStore;
-  /** Every appended entry payload, in order (the observation channel). */
-  appends: WorkflowState[];
-  /** Make the NEXT verified append miss its read-back (`unverified`). */
-  induceReadBackMiss(): void;
-  /** Make the NEXT verified append refuse before any effect (`rejected`). */
-  induceAppendRefusal(): void;
-}
-
-interface StoreBacking {
-  label: string;
-  make(cwd: string, initial: WorkflowState[]): StoreHarness;
-}
-
-function branchStoreBacking(): StoreBacking {
-  return {
-    label: "branch store",
-    make(cwd, initial) {
-      const branch: unknown[] = initial.map((data) => ({
-        type: "custom",
-        customType: WORKFLOW_STATE_TYPE,
-        data,
-      }));
-      const appends: WorkflowState[] = [];
-      let dropNext = false;
-      let throwNext = false;
-      const sink: EntrySink = {
-        appendEntry: (customType, data) => {
-          appends.push(data as WorkflowState);
-          if (throwNext) {
-            throwNext = false;
-            throw new Error("append refused (induced)"); // the classified seam proves `rejected`
-          }
-          if (dropNext) {
-            dropNext = false;
-            return; // dropped on the floor — the read-back proof misses
-          }
-          branch.push({ type: "custom", customType, data });
-        },
-      };
-      const ctx: SessionArtifactCtx = {
-        cwd,
-        sessionManager: { getBranch: () => branch },
-        hasUI: false,
-        ui: { notify() {} },
-      };
-      return {
-        store: branchSessionStateStore(sink, ctx),
-        appends,
-        induceReadBackMiss: () => {
-          dropNext = true;
-        },
-        induceAppendRefusal: () => {
-          throwNext = true;
-        },
-      };
-    },
-  };
-}
-
-function memoryStoreBacking(): StoreBacking {
-  return {
-    label: "memory store",
-    make(_cwd, initial) {
-      const state: WorkflowState = {};
-      const merge = (data: WorkflowState) => {
-        for (const [key, value] of Object.entries(data)) {
-          if (value !== undefined) (state as Record<string, unknown>)[key] = value;
-        }
-      };
-      for (const data of initial) merge(data);
-      const appends: WorkflowState[] = [];
-      let failNext = false;
-      let refuseNext = false;
-      return {
-        store: {
-          rebuild: () => ({ ...state }),
-          append: (data) => {
-            appends.push(data);
-            merge(data);
-          },
-          appendVerified: (opts) => {
-            appends.push(opts.data);
-            if (refuseNext) {
-              refuseNext = false;
-              return { status: "rejected", problem: `${String(opts.field)} append threw` };
-            }
-            if (failNext) {
-              failNext = false;
-              return { status: "unverified", problem: opts.failure };
-            }
-            merge(opts.data);
-            return { status: "applied" };
-          },
-        },
-        appends,
-        induceReadBackMiss: () => {
-          failNext = true;
-        },
-        induceAppendRefusal: () => {
-          refuseNext = true;
-        },
-      };
-    },
-  };
-}
-
-/** Deterministic `SessionIdentityPorts` with observation channels. */
-function fakePorts(opts: {
-  handoff?: Handoff | null;
-  runIds?: string[];
-  scratchThrows?: boolean;
-  mintedId?: string;
-  stamp?: string | undefined;
-}): {
-  ports: SessionIdentityPorts;
-  consumed: { runId: string; piSessionId?: string }[];
-  scratched: string[];
-} {
-  const consumed: { runId: string; piSessionId?: string }[] = [];
-  const scratched: string[] = [];
-  return {
-    ports: {
-      readHandoff: () => opts.handoff ?? null,
-      listRunIds: () => opts.runIds ?? [],
-      markHandoffConsumed: (runId, o) => {
-        consumed.push({ runId, ...o });
-      },
-      ensureRunScratch: (runId) => {
-        if (opts.scratchThrows === true) throw new Error("scratch refused");
-        scratched.push(runId);
-      },
-      mintRunId: () => opts.mintedId ?? "01MINTED",
-      versionStamp: "stamp" in opts ? opts.stamp : "1.2.3",
-    },
-    consumed,
-    scratched,
-  };
-}
-
-/** Capture console.error for the duration of `fn` (the strict seam's loud failure channel). */
-function quietly<T>(fn: () => T): T {
-  const original = console.error;
-  console.error = () => {};
-  try {
-    return fn();
-  } finally {
-    console.error = original;
-  }
-}
-
-for (const backing of [branchStoreBacking(), memoryStoreBacking()]) {
-  test(`${backing.label}: claim — one combined verified entry, consumed only after success`, () => {
-    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
-    const h = backing.make(cwd, []);
-    const { ports, consumed } = fakePorts({
-      handoff: { run_id: "01RID", consumed: false, mode: "read-only", stage: "objective-author" },
-    });
-    const outcome = establishSessionIdentity(h.store, ports, {
-      currentSessionId: "me.jsonl",
-      envRunId: "01RID",
-    });
-    assert.equal(outcome.arm, "claimed");
-    assert.equal(h.appends.length, 1);
-    assert.deepEqual(h.appends[0], {
-      run_id: "01RID",
-      pi_session_id: "me.jsonl",
-      mode: "read-only",
-      perk_version: "1.2.3",
-      stage: "objective-author",
-    });
-    assert.deepEqual(outcome.resolved, h.appends[0]);
-    assert.deepEqual(consumed, [{ runId: "01RID", piSessionId: "me.jsonl" }]);
-    assert.deepEqual(outcome.problems, []);
-    assert.deepEqual(outcome.warnings, []);
-  });
-
-  test(`${backing.label}: claim — the handoff node link rides as the objective_node_claim carrier`, () => {
-    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
-    const h = backing.make(cwd, []);
-    const { ports } = fakePorts({
-      handoff: {
-        run_id: "01RID",
-        consumed: false,
-        mode: "read-only",
-        stage: "plan",
-        objective_id: "7",
-        node_id: "1.1",
-      },
-    });
-    const outcome = establishSessionIdentity(h.store, ports, {
-      currentSessionId: "me.jsonl",
-      envRunId: "01RID",
-    });
-    assert.equal(outcome.arm, "claimed");
-    assert.deepEqual(h.appends[0]?.objective_node_claim, { objective: "7", node: "1.1" });
-  });
-
-  test(`${backing.label}: claim — blank or half-specified handoff ids persist NO claim`, () => {
-    for (const extra of [
-      { objective_id: "  ", node_id: "1.1" },
-      { objective_id: "7" },
-      { node_id: "1.1" },
-      { objective_id: "7", node_id: "" },
-    ]) {
-      const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
-      const h = backing.make(cwd, []);
-      const { ports } = fakePorts({
-        handoff: { run_id: "01RID", consumed: false, ...extra },
-      });
-      const outcome = establishSessionIdentity(h.store, ports, {
-        currentSessionId: "me.jsonl",
-        envRunId: "01RID",
-      });
-      assert.equal(outcome.arm, "claimed");
-      assert.equal(h.appends[0] !== undefined && "objective_node_claim" in h.appends[0], false);
-    }
-  });
-
-  test(`${backing.label}: claim — a clean objective-refine handoff claims stage-only (namespaced block, no node claim)`, () => {
-    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
-    const h = backing.make(cwd, []);
-    const { ports, consumed } = fakePorts({
-      handoff: {
-        run_id: "01RID",
-        consumed: false,
-        mode: "read-only",
-        stage: "objective-refine",
-        objective_refinement: { context_digest: "sha256:abc" },
-        consumed_learn: [],
-        adopt_from: null,
-      },
-    });
-    const outcome = establishSessionIdentity(h.store, ports, {
-      currentSessionId: "me.jsonl",
-      envRunId: "01RID",
-    });
-    assert.equal(outcome.arm, "claimed");
-    assert.deepEqual(h.appends[0], {
-      run_id: "01RID",
-      pi_session_id: "me.jsonl",
-      mode: "read-only",
-      perk_version: "1.2.3",
-      stage: "objective-refine",
-    });
-    assert.deepEqual(consumed, [{ runId: "01RID", piSessionId: "me.jsonl" }]);
-  });
-
-  test(`${backing.label}: claim — a contaminated objective-refine handoff refuses before claiming and is NOT consumed`, () => {
-    for (const [extra, named] of [
-      [{ objective_id: "7", node_id: "1.1" }, "objective_id, node_id"],
-      [{ objective_id: "7" }, "objective_id"],
-      [{ adopt_from: "12" }, "adopt_from"],
-      [{ supersedes: "9" }, "supersedes"],
-      [{ gist_scope: "plan" }, "gist_scope"],
-      [{ consumed_learn: ["L1"] }, "consumed_learn"],
-    ] as const) {
-      const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
-      const h = backing.make(cwd, []);
-      const { ports, consumed } = fakePorts({
-        handoff: {
-          run_id: "01RID",
-          consumed: false,
-          mode: "read-only",
-          stage: "objective-refine",
-          ...extra,
-        },
-      });
-      const outcome = establishSessionIdentity(h.store, ports, {
-        currentSessionId: "me.jsonl",
-        envRunId: "01RID",
-      });
-      assert.equal(outcome.arm, "unclaimed", named);
-      assert.equal(outcome.problems.length, 1);
-      assert.ok(outcome.problems[0]?.includes(`it carries ${named}`), outcome.problems[0]);
-      assert.deepEqual(outcome.resolved, {});
-      assert.equal(h.appends.length, 0, "nothing recorded — no claim, no stage");
-      assert.equal(consumed.length, 0, "the contaminated handoff is not consumed");
-    }
-    // The same keys on an ordinary objective-plan handoff still claim normally.
-    assert.equal(
-      refinementHandoffContamination({
-        run_id: "01RID",
-        consumed: false,
-        stage: "objective-plan",
-        objective_id: "7",
-        node_id: "1.1",
-      }),
-      null,
-    );
-  });
-
-  test(`${backing.label}: claim — a missing or mismatched handoff is unclaimed (never mints)`, () => {
-    for (const handoff of [null, { run_id: "01OTHER", consumed: false }]) {
-      const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
-      const h = backing.make(cwd, []);
-      const { ports, consumed } = fakePorts({ handoff });
-      const outcome = establishSessionIdentity(h.store, ports, {
-        currentSessionId: "me.jsonl",
-        envRunId: "01RID",
-      });
-      assert.equal(outcome.arm, "unclaimed");
-      assert.deepEqual(outcome.problems, ["handoff missing or mismatched for run 01RID"]);
-      assert.deepEqual(outcome.resolved, {});
-      assert.equal(h.appends.length, 0);
-      assert.equal(consumed.length, 0);
-    }
-  });
-
-  test(`${backing.label}: claim — a failed read-back is unclaimed and does NOT consume`, () => {
-    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
-    const h = backing.make(cwd, []);
-    const { ports, consumed } = fakePorts({
-      handoff: { run_id: "01RID", consumed: false, mode: "read-only" },
-    });
-    h.induceReadBackMiss();
-    const outcome = quietly(() =>
-      establishSessionIdentity(h.store, ports, {
-        currentSessionId: "me.jsonl",
-        envRunId: "01RID",
-      }),
-    );
-    assert.equal(outcome.arm, "unclaimed");
-    assert.equal(consumed.length, 0, "establish-before-consume: unverified claim never consumes");
-    assert.deepEqual(outcome.resolved, {});
-    // no problems of its own — the strict-append seam already reported through its channel
-    assert.deepEqual(outcome.problems, []);
-  });
-
-  test(`${backing.label}: fork — derived child identity, inherited mode, honest-tier append`, () => {
-    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
-    const h = backing.make(cwd, [
-      { run_id: "01RID", pi_session_id: "parent.jsonl", mode: "read-only" },
-    ]);
-    const { ports, consumed, scratched } = fakePorts({});
-    const outcome = establishSessionIdentity(h.store, ports, {
-      currentSessionId: "child.jsonl",
-      envRunId: null,
-    });
-    assert.equal(outcome.arm, "forked");
-    assert.equal(h.appends.length, 1);
-    assert.deepEqual(h.appends[0], {
-      run_id: "01RID.1",
-      pi_session_id: "child.jsonl",
-      predecessor: "01RID",
-      mode: "read-only",
-      perk_version: "1.2.3",
-    });
-    assert.deepEqual(scratched, ["01RID.1"]);
-    assert.equal(consumed.length, 0);
-    assert.deepEqual(outcome.warnings, []);
-    assert.equal(outcome.resolved.run_id, "01RID.1");
-  });
-
-  test(`${backing.label}: fork — a scratch failure is a warning; identity still settles`, () => {
-    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
-    const h = backing.make(cwd, [{ run_id: "01RID", pi_session_id: "parent.jsonl" }]);
-    const { ports } = fakePorts({ scratchThrows: true });
-    const outcome = establishSessionIdentity(h.store, ports, {
-      currentSessionId: "child.jsonl",
-      envRunId: null,
-    });
-    assert.equal(outcome.arm, "forked");
-    assert.deepEqual(outcome.warnings, [
-      "could not create fork run root for 01RID.1: Error: scratch refused",
-    ]);
-    assert.equal(h.appends.length, 1, "the derived-identity append still lands");
-  });
-
-  test(`${backing.label}: adopt — inherited mode, no stage impersonation, never re-consumes`, () => {
-    // decideClaim's env-child probe reads the SAME injected port as the claim arm — a consumed
-    // handoff claimed by a different session routes to adopt.
-    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
-    const h = backing.make(cwd, []);
-    const { ports, consumed, scratched } = fakePorts({
-      handoff: handoffBlob("01RID", "implement", {
-        consumed: true,
-        piSessionId: "parent.jsonl",
-        mode: "read-write",
-      }),
-      scratchThrows: true,
-    });
-    const outcome = establishSessionIdentity(h.store, ports, {
-      currentSessionId: "child.jsonl",
-      envRunId: "01RID",
-    });
-    assert.equal(outcome.arm, "adopted");
-    assert.deepEqual(h.appends[0], {
-      run_id: "01RID.1",
-      pi_session_id: "child.jsonl",
-      predecessor: "01RID",
-      mode: "read-write",
-      perk_version: "1.2.3",
-    });
-    assert.equal(
-      h.appends[0] !== undefined && "stage" in h.appends[0] && h.appends[0].stage !== undefined,
-      false,
-      "adopt never impersonates the launched stage",
-    );
-    assert.equal(consumed.length, 0, "adopt never re-consumes the handoff");
-    assert.deepEqual(scratched, []);
-    assert.deepEqual(outcome.warnings, [
-      "could not create adopted run root for 01RID.1: Error: scratch refused",
-    ]);
-  });
-
-  test(`${backing.label}: mint — verified append; a failed read-back leaves the session unidentified`, () => {
-    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
-    const minted = backing.make(cwd, []);
-    const { ports } = fakePorts({ mintedId: "01MINT" });
-    const outcome = establishSessionIdentity(minted.store, ports, {
-      currentSessionId: "me.jsonl",
-      envRunId: null,
-    });
-    assert.equal(outcome.arm, "minted");
-    assert.deepEqual(minted.appends[0], {
-      run_id: "01MINT",
-      pi_session_id: "me.jsonl",
-      perk_version: "1.2.3",
-    });
-    assert.equal(outcome.resolved.run_id, "01MINT");
-
-    const failed = backing.make(cwd, []);
-    failed.induceReadBackMiss();
-    const failedOutcome = quietly(() =>
-      establishSessionIdentity(failed.store, fakePorts({ mintedId: "01MINT" }).ports, {
-        currentSessionId: "me.jsonl",
-        envRunId: null,
-      }),
-    );
-    assert.equal(failedOutcome.arm, "unclaimed");
-    assert.equal(failedOutcome.resolved.run_id, undefined, "re-mints next session_start");
-  });
-
-  test(`${backing.label}: keep (reload) — NO append, no version backfill`, () => {
-    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
-    const h = backing.make(cwd, [
-      { run_id: "01RID", pi_session_id: "me.jsonl", mode: "read-only" },
-    ]);
-    const { ports, consumed, scratched } = fakePorts({});
-    const outcome = establishSessionIdentity(h.store, ports, {
-      currentSessionId: "me.jsonl",
-      envRunId: null,
-    });
-    assert.equal(outcome.arm, "kept");
-    assert.equal(h.appends.length, 0, "reload-generation reconstruction IS the LWW rebuild");
-    assert.equal(outcome.resolved.run_id, "01RID");
-    assert.equal(outcome.resolved.perk_version, undefined, "no version backfill (§8.3)");
-    assert.equal(consumed.length, 0);
-    assert.deepEqual(scratched, []);
-  });
-}
-
-// --- the two-phase startup facts -----------------------------------------------------------------
-//
-// PHASE 1 (`sessionStartToolScope`) is pure over the established identity. PHASE 2
-// (`resolveSessionStartFacts`) runs over BOTH stores with recording ports: the operation
-// sequence is pinned per arm (rebuild → allowed handoff read → registry admission → checkout
-// read on the consuming arm only → the one verified link), every forbidden port throws, and the
-// three authorities — the branch-LWW stage (tool scope), the launched handoff stage
-// (implementation capture / feedback), and the checkout ref (linkage) — are deliberately made to
-// DISAGREE so the tests prove they are never interchangeable.
-
 function ref(prId: string, extra: Partial<PlanRef> = {}): PlanRef {
   return {
     provider: "github",
@@ -776,6 +50,105 @@ function ref(prId: string, extra: Partial<PlanRef> = {}): PlanRef {
     objective_id: null,
     ...extra,
   };
+}
+
+/** The observable slice of one verified append (the generic opts, flattened for pins). */
+interface RecordedAppend {
+  data: WorkflowState;
+  field: string;
+  expected: unknown;
+  scope: string;
+  failure: string;
+  equals: unknown;
+}
+
+type InducedStatus = "rejected" | "unverified";
+
+/**
+ * The ONE store fake: a per-field-LWW memory state (undefined never clobbers), every store touch
+ * recorded in `calls` (`rebuild` / `append` / `appendVerified:<field>`), every appended payload in
+ * `appends`, every verified append's opts in `verified`, and `induce(status)` arming the NEXT
+ * verified append to classify as `rejected` (nothing merged) or `unverified` (nothing merged).
+ */
+function makeStore(initial: WorkflowState[] = []) {
+  const state: WorkflowState = {};
+  const merge = (data: WorkflowState) => {
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) (state as Record<string, unknown>)[key] = value;
+    }
+  };
+  for (const data of initial) merge(data);
+  const appends: WorkflowState[] = [];
+  const calls: string[] = [];
+  const verified: RecordedAppend[] = [];
+  let induced: InducedStatus | null = null;
+  const store: SessionStateStore = {
+    rebuild: () => {
+      calls.push("rebuild");
+      return { ...state };
+    },
+    append: (data) => {
+      calls.push("append");
+      appends.push(data);
+      merge(data);
+    },
+    appendVerified: (opts) => {
+      calls.push(`appendVerified:${String(opts.field)}`);
+      appends.push(opts.data);
+      verified.push({
+        data: opts.data,
+        field: String(opts.field),
+        expected: opts.expected,
+        scope: opts.scope,
+        failure: opts.failure,
+        equals: opts.equals,
+      });
+      const status = induced;
+      induced = null;
+      if (status === "rejected") return { status, problem: `${String(opts.field)} append threw` };
+      if (status === "unverified") return { status, problem: opts.failure };
+      merge(opts.data);
+      return { status: "applied" };
+    },
+  };
+  return {
+    store,
+    appends,
+    calls,
+    verified,
+    induce: (status: InducedStatus) => {
+      induced = status;
+    },
+  };
+}
+
+/**
+ * Deterministic `SessionIdentityPorts`. The identity-phase ports record nothing into `calls`:
+ * consumption and scratch isolation are observed through `consumed`/`scratched`, the mint and the
+ * version stamp through the appended payloads.
+ */
+function fakePorts(opts: {
+  handoff?: Handoff | null;
+  runIds?: string[];
+  scratchThrows?: boolean;
+  mintedId?: string;
+}) {
+  const consumed: { runId: string; piSessionId?: string }[] = [];
+  const scratched: string[] = [];
+  const ports: SessionIdentityPorts = {
+    readHandoff: () => opts.handoff ?? null,
+    listRunIds: () => opts.runIds ?? [],
+    markHandoffConsumed: (runId, o) => {
+      consumed.push({ runId, ...o });
+    },
+    ensureRunScratch: (runId) => {
+      if (opts.scratchThrows === true) throw new Error("scratch refused");
+      scratched.push(runId);
+    },
+    mintRunId: () => opts.mintedId ?? "01MINT",
+    versionStamp: "1.2.3",
+  };
+  return { ports, consumed, scratched };
 }
 
 /** A minimal registry: implement/submit consume `cache.plan-ref`; plan does not. */
@@ -805,767 +178,736 @@ function fakeRegistry(calls: string[]): Registry {
   };
 }
 
-/** Recording fact reads: every touch lands in `calls`; a forbidden touch throws. */
+/** Recording post-gate fact reads: every touch lands in `calls`. */
 function factReads(
   calls: string[],
-  opts: { handoff?: Handoff | null; planRef?: PlanRef | null; forbid?: ("handoff" | "plan-ref")[] },
+  opts: { handoff?: Handoff | null; planRef?: PlanRef | null },
 ): SessionStartFactReads {
   return {
     readHandoff(runId) {
-      if (opts.forbid?.includes("handoff")) throw new Error(`forbidden handoff read (${runId})`);
       calls.push(`handoff:${runId}`);
       return opts.handoff ?? null;
     },
     readPlanRef() {
-      if (opts.forbid?.includes("plan-ref")) throw new Error("forbidden checkout plan-ref read");
       calls.push("plan-ref");
       return opts.planRef ?? null;
     },
   };
 }
 
-/** The observable slice of one verified append (the generic opts, flattened for pins). */
-interface RecordedAppend {
-  data: WorkflowState;
-  field: string;
-  expected: unknown;
-  scope: string;
-  failure: string;
-  equals: unknown;
+/** The receiver-shaped feedback object startup derives (defaults: not adopted, this session). */
+function fb(
+  stage: string | null,
+  runId: string | null,
+  activePlanRef: PlanRef | null,
+  extra: { adopted?: boolean; piSessionId?: string } = {},
+) {
+  return { stage, adopted: false, runId, piSessionId: "me.jsonl", activePlanRef, ...extra };
 }
 
-/** Wrap a store harness so every store touch lands in `calls` (and the verified opts are kept). */
-function recordingStore(
-  h: StoreHarness,
-  calls: string[],
-): { store: SessionStateStore; verified: RecordedAppend[] } {
-  const verified: RecordedAppend[] = [];
+interface StartupOpts {
+  seed?: WorkflowState[];
+  /** ONE handoff authority: serves the identity ports AND the post-gate fact reads. */
+  handoff?: Handoff | null;
+  /** Default null (no `PERK_RUN_ID`). */
+  envRunId?: string | null;
+  /** Default "me.jsonl"; null allowed. */
+  sessionId?: string | null;
+  runIds?: string[];
+  scratchThrows?: boolean;
+  mintedId?: string;
+  planRef?: PlanRef | null;
+  /** `null` runs the facts with a failed-to-load registry; otherwise the fake registry. */
+  registry?: null;
+  /** Arms the identity phase's verified append (claim/mint) to fail. */
+  identityFailure?: InducedStatus;
+  /** Arms the post-gate linkage append to fail. */
+  linkFailure?: InducedStatus;
+}
+
+/**
+ * One production-shaped startup over ONE store and ONE ports fake: identity → tool scope → the
+ * post-gate facts. The store trace is split at the gate: `identityCalls` is what identity
+ * establishment touched; `calls` is everything from `resolveSessionStartFacts` on (store touches,
+ * the post-gate handoff/plan-ref reads, the registry read) — pinned exactly, so a forbidden read
+ * fails the pin.
+ */
+function startup(opts: StartupOpts) {
+  const s = makeStore(opts.seed);
+  const p = fakePorts(opts);
+  const currentSessionId = opts.sessionId === undefined ? "me.jsonl" : opts.sessionId;
+  if (opts.identityFailure !== undefined) s.induce(opts.identityFailure);
+  const identity = establishSessionIdentity(s.store, p.ports, {
+    currentSessionId,
+    envRunId: opts.envRunId ?? null,
+  });
+  const scope = sessionStartToolScope(identity);
+  const identityCalls = [...s.calls];
+  s.calls.length = 0;
+  if (opts.linkFailure !== undefined) s.induce(opts.linkFailure);
+  const registry = opts.registry === null ? null : fakeRegistry(s.calls);
+  const facts = resolveSessionStartFacts(s.store, factReads(s.calls, opts), {
+    identity,
+    registry,
+    currentSessionId,
+  });
   return {
-    verified,
-    store: {
-      rebuild: () => {
-        calls.push("rebuild");
-        return h.store.rebuild();
-      },
-      append: () => {
-        throw new Error("the post-gate facts never plain-append");
-      },
-      appendVerified: (opts) => {
-        calls.push(`appendVerified:${String(opts.field)}`);
-        verified.push({
-          data: opts.data,
-          field: String(opts.field),
-          expected: opts.expected,
-          scope: opts.scope,
-          failure: opts.failure,
-          equals: opts.equals,
-        });
-        return h.store.appendVerified(opts);
-      },
-    },
+    identity,
+    scope,
+    facts,
+    identityCalls,
+    calls: s.calls,
+    appends: s.appends,
+    verified: s.verified,
+    consumed: p.consumed,
+    scratched: p.scratched,
   };
 }
 
-const CLAIM_RESOLVED: WorkflowState = {
+const IMPL = handoffBlob("01RID", "implement", { mode: "read-write" });
+const KEPT: WorkflowState = {
   run_id: "01RID",
   pi_session_id: "me.jsonl",
   mode: "read-write",
-  perk_version: "1.2.3",
+  stage: "plan",
+  active_plan_ref: ref("41"),
+};
+const KEPT_IMPL: WorkflowState = { ...KEPT, stage: "implement" };
+const PARENT: WorkflowState = {
+  run_id: "01RID",
+  pi_session_id: "parent.jsonl",
+  mode: "read-write",
   stage: "implement",
+  active_plan_ref: ref("41"),
 };
-const claimed = (resolved: WorkflowState = CLAIM_RESOLVED): EstablishIdentityOutcome => ({
-  arm: "claimed",
-  resolved,
-  decision: { action: "claim", source: "env", runId: "01RID" },
-  problems: [],
-  warnings: [],
-});
-const kept = (state: WorkflowState): EstablishIdentityOutcome => ({
-  arm: "kept",
-  resolved: state,
-  decision: { action: "keep", source: "session", state },
-  problems: [],
-  warnings: [],
-});
-const forked = (parent: WorkflowState): EstablishIdentityOutcome => {
-  const resolved: WorkflowState = {
-    run_id: "01RID.1",
-    pi_session_id: "child.jsonl",
-    predecessor: "01RID",
-    mode: parent.mode,
-    perk_version: "1.2.3",
-  };
-  return {
-    arm: "forked",
-    resolved,
-    decision: {
-      action: "fork",
-      source: "fork",
-      childRunId: "01RID.1",
-      parentRunId: "01RID",
-      state: parent,
+
+// --- the floor reflection --------------------------------------------------------------------------
+
+test("floor reflection: skipped for an unclaimed or already read-only outcome; otherwise a mode-only verified append — reflected on applied, unchanged on rejected/unverified, contained on a throw", () => {
+  const eligible: Extract<EstablishIdentityOutcome, { arm: "claimed" }> = {
+    arm: "claimed",
+    decision: { action: "claim", source: "env", runId: "RID" },
+    resolved: {
+      run_id: "RID",
+      pi_session_id: "session.jsonl",
+      stage: "implement",
+      mode: "read-write",
     },
-    problems: [],
-    warnings: [],
+    problems: ["p"],
+    warnings: ["w"],
   };
-};
-const adopted = (resolved: WorkflowState): EstablishIdentityOutcome => ({
-  arm: "adopted",
-  resolved,
-  decision: {
-    action: "adopt",
-    source: "env-child",
-    childRunId: "01RID.1",
-    parentRunId: "01RID",
-    mode: resolved.mode,
-  },
-  problems: [],
-  warnings: [],
-});
-const minted = (state: WorkflowState): EstablishIdentityOutcome => ({
-  arm: "minted",
-  resolved: { ...state, run_id: "01MINT", pi_session_id: "me.jsonl", perk_version: "1.2.3" },
-  decision: { action: "none", source: "none", state },
-  problems: [],
-  warnings: [],
-});
-const unclaimedClaim = (): EstablishIdentityOutcome => ({
-  arm: "unclaimed",
-  resolved: {},
-  decision: { action: "claim", source: "env", runId: "01RID" },
-  problems: ["handoff missing or mismatched for run 01RID"],
-  warnings: [],
-});
-const unclaimedMint = (state: WorkflowState): EstablishIdentityOutcome => ({
-  arm: "unclaimed",
-  resolved: state,
-  decision: { action: "none", source: "none", state },
-  problems: [],
-  warnings: [],
+  /** A store whose only legal touch is the ONE exact mode append, classified as `status`. */
+  const floorStore = (status: "applied" | InducedStatus | "throws") => {
+    let appends = 0;
+    const store: SessionStateStore = {
+      rebuild: () => {
+        throw new Error("must not rebuild");
+      },
+      append: () => {
+        throw new Error("must not plain append");
+      },
+      appendVerified: (opts) => {
+        appends++;
+        assert.deepEqual(opts.data, { mode: "read-only" });
+        assert.equal(opts.field, "mode");
+        assert.equal(opts.expected, "read-only");
+        assert.equal(opts.scope, "child restriction");
+        if (status === "throws") throw Object.create(null);
+        return status === "applied" ? { status } : { status, problem: "already reported" };
+      },
+    };
+    return { store, appends: () => appends };
+  };
+  // The eligible outcome across the four append results.
+  for (const status of ["applied", "rejected", "unverified", "throws"] as const) {
+    const { store, appends } = floorStore(status);
+    const result = reflectSessionReadOnlyFloor(store, eligible);
+    assert.equal(appends(), 1, status);
+    assert.equal(result.unexpectedFailure, status === "throws", status);
+    if (status === "applied") {
+      assert.deepEqual(result.outcome, {
+        ...eligible,
+        resolved: { ...eligible.resolved, mode: "read-only" },
+      });
+      assert.equal(result.outcome.decision, eligible.decision);
+      assert.equal(result.outcome.problems, eligible.problems);
+      assert.equal(result.outcome.warnings, eligible.warnings);
+    } else assert.equal(result.outcome, eligible, status);
+    assert.equal(eligible.resolved.mode, "read-write", "input never mutated");
+  }
+  // The two skips: no append at all, the outcome handed back by identity.
+  const skipped: EstablishIdentityOutcome[] = [
+    { ...eligible, arm: "unclaimed", resolved: {} },
+    { ...eligible, resolved: { ...eligible.resolved, mode: "read-only" } },
+  ];
+  for (const input of skipped) {
+    const { store, appends } = floorStore("applied");
+    const result = reflectSessionReadOnlyFloor(store, input);
+    assert.equal(appends(), 0, input.arm);
+    assert.equal(result.unexpectedFailure, false, input.arm);
+    assert.equal(result.outcome, input, input.arm);
+  }
 });
 
-test("sessionStartToolScope: pure per-arm mode/stage slice — branch stage is the key, adopt is unscoped, only fork inherits", () => {
-  const parent: WorkflowState = {
+// --- the identity arms -----------------------------------------------------------------------------
+
+test("claim: one combined verified entry, consumed only after success; the handoff node link rides as objective_node_claim; a clean objective-refine handoff claims stage-only", () => {
+  // (a) the cold claim
+  const claim = startup({
+    handoff: { run_id: "01RID", consumed: false, mode: "read-only", stage: "objective-author" },
+    envRunId: "01RID",
+  });
+  assert.equal(claim.identity.arm, "claimed");
+  assert.deepEqual(claim.identityCalls, ["rebuild", "appendVerified:run_id"]);
+  assert.deepEqual(claim.appends, [
+    {
+      run_id: "01RID",
+      pi_session_id: "me.jsonl",
+      mode: "read-only",
+      perk_version: "1.2.3",
+      stage: "objective-author",
+    },
+  ]);
+  assert.deepEqual(claim.identity.resolved, claim.appends[0]);
+  assert.deepEqual(claim.consumed, [{ runId: "01RID", piSessionId: "me.jsonl" }]);
+  assert.deepEqual(claim.identity.problems, []);
+  assert.deepEqual(claim.identity.warnings, []);
+
+  // (b) idempotent re-claim by the session that already consumed it (lost branch state)
+  const again = startup({
+    handoff: {
+      run_id: "01RID",
+      consumed: true,
+      pi_session_id: "me.jsonl",
+      mode: "read-only",
+      stage: "objective-author",
+    },
+    envRunId: "01RID",
+  });
+  assert.equal(again.identity.arm, "claimed");
+  assert.equal(again.consumed.length, 1, "consumed re-marked once");
+
+  // (c) the objective-plan door's node link persists as the objective_node_claim carrier
+  const linked = startup({
+    handoff: {
+      run_id: "01RID",
+      consumed: false,
+      mode: "read-only",
+      stage: "objective-plan",
+      objective_id: "7",
+      node_id: "1.1",
+    },
+    envRunId: "01RID",
+  });
+  assert.equal(linked.identity.arm, "claimed");
+  assert.deepEqual(linked.appends[0]?.objective_node_claim, { objective: "7", node: "1.1" });
+
+  // (d) blank / half-specified / non-string ids persist NO claim
+  for (const extra of [
+    { objective_id: "  ", node_id: "1.1" },
+    { objective_id: "7" },
+    { node_id: "1.1" },
+    { objective_id: "7", node_id: "" },
+    { objective_id: 7, node_id: 1.1 },
+  ]) {
+    const label = JSON.stringify(extra);
+    const r = startup({
+      handoff: { run_id: "01RID", consumed: false, ...extra },
+      envRunId: "01RID",
+    });
+    assert.equal(r.identity.arm, "claimed", label);
+    assert.equal(
+      r.appends[0] !== undefined && "objective_node_claim" in r.appends[0],
+      false,
+      label,
+    );
+  }
+
+  // (e) a clean objective-refine handoff (namespaced block, empty/null link keys) claims stage-only
+  const refine = startup({
+    handoff: {
+      run_id: "01RID",
+      consumed: false,
+      mode: "read-only",
+      stage: "objective-refine",
+      objective_refinement: { context_digest: "sha256:abc" },
+      consumed_learn: [],
+      adopt_from: null,
+    },
+    envRunId: "01RID",
+  });
+  assert.equal(refine.identity.arm, "claimed");
+  assert.deepEqual(refine.appends[0], {
+    run_id: "01RID",
+    pi_session_id: "me.jsonl",
+    mode: "read-only",
+    perk_version: "1.2.3",
+    stage: "objective-refine",
+  });
+  assert.deepEqual(refine.consumed, [{ runId: "01RID", piSessionId: "me.jsonl" }]);
+});
+
+test("unclaimed: a missing, mismatched, or contaminated handoff and a failed read-back all leave the run unclaimed and NEVER consume", () => {
+  // (a) missing; (b) mismatched — consumed AND foreign, so the adopt probe is proven to check
+  // `run_id` first (a mismatched blob is never adopted).
+  for (const handoff of [
+    null,
+    { run_id: "01OTHER", consumed: true, pi_session_id: "parent.jsonl" },
+  ]) {
+    const label = JSON.stringify(handoff);
+    const r = startup({ handoff, envRunId: "01RID" });
+    assert.equal(r.identity.arm, "unclaimed", label);
+    assert.deepEqual(r.identity.problems, ["handoff missing or mismatched for run 01RID"], label);
+    assert.deepEqual(r.identity.resolved, {}, label);
+    assert.deepEqual(r.appends, [], label);
+    assert.deepEqual(r.consumed, [], label);
+  }
+
+  // (c) a contaminated objective-refine handoff is refused before any claim and not consumed
+  for (const [extra, named] of [
+    [{ objective_id: "7", node_id: "1.1" }, "objective_id, node_id"],
+    [{ objective_id: "7" }, "objective_id"],
+    [{ adopt_from: "12" }, "adopt_from"],
+    [{ supersedes: "9" }, "supersedes"],
+    [{ gist_scope: "plan" }, "gist_scope"],
+    [{ consumed_learn: ["L1"] }, "consumed_learn"],
+  ] as const) {
+    const r = startup({
+      handoff: {
+        run_id: "01RID",
+        consumed: false,
+        mode: "read-only",
+        stage: "objective-refine",
+        ...extra,
+      },
+      envRunId: "01RID",
+    });
+    assert.equal(r.identity.arm, "unclaimed", named);
+    assert.equal(r.identity.problems.length, 1, named);
+    const problem = r.identity.problems[0] ?? "";
+    assert.ok(problem.includes(`it carries ${named}`), problem);
+    assert.ok(problem.includes("refusing the objective-refine handoff for run 01RID"), problem);
+    assert.deepEqual(r.appends, [], named);
+    assert.deepEqual(r.consumed, [], named);
+  }
+  // The same keys on an ordinary objective-plan handoff are a legitimate node link.
+  assert.equal(
+    refinementHandoffContamination({
+      run_id: "01RID",
+      consumed: false,
+      stage: "objective-plan",
+      objective_id: "7",
+      node_id: "1.1",
+    }),
+    null,
+  );
+
+  // (d) a failed read-back: the attempt landed, the seam reported, nothing consumed
+  const failed = startup({ handoff: IMPL, envRunId: "01RID", identityFailure: "unverified" });
+  assert.equal(failed.identity.arm, "unclaimed");
+  assert.deepEqual(failed.consumed, [], "establish-before-consume");
+  assert.deepEqual(failed.identity.problems, [], "the strict-append seam reports, not the arm");
+  assert.equal(failed.appends.length, 1, "the one attempt");
+  assert.deepEqual(failed.identity.resolved, {});
+});
+
+test("fork: a derived <parent>.<n> identity past existing siblings, inherited mode and NO stage, a plain append, isolated scratch; a scratch failure is a warning", () => {
+  const seed: WorkflowState = {
     run_id: "01RID",
     pi_session_id: "parent.jsonl",
     mode: "read-only",
     stage: "plan",
   };
-  const cases: { label: string; identity: EstablishIdentityOutcome; expected: unknown }[] = [
+  const fork = startup({
+    seed: [seed],
+    sessionId: "child.jsonl",
+    runIds: ["01RID.1", "01RID.2", "unrelated", "01RID.x"],
+  });
+  assert.equal(fork.identity.arm, "forked");
+  assert.deepEqual(fork.identityCalls, ["rebuild", "append"]);
+  assert.deepEqual(fork.appends, [
     {
-      label: "claim → the handoff-recorded stage just appended",
-      identity: claimed(),
-      expected: { mode: "read-write", stage: "implement" },
+      run_id: "01RID.3",
+      pi_session_id: "child.jsonl",
+      predecessor: "01RID",
+      mode: "read-only",
+      perk_version: "1.2.3",
     },
-    {
-      label: "claim with a stage-less handoff → unscoped",
-      identity: claimed({ ...CLAIM_RESOLVED, stage: undefined }),
-      expected: { mode: "read-write", stage: undefined },
-    },
-    {
-      label: "claim passes an unknown stage id through unvalidated",
-      identity: claimed({ ...CLAIM_RESOLVED, stage: "weird-stage" }),
-      expected: { mode: "read-write", stage: "weird-stage" },
-    },
-    {
-      label: "keep → the branch-LWW stage (never a handoff read)",
-      identity: kept({ ...parent, pi_session_id: "me.jsonl", stage: "implement" }),
-      expected: { mode: "read-only", stage: "implement" },
-    },
-    {
-      label: "fork INHERITS the parent's stage when its own entry has none",
-      identity: forked(parent),
-      expected: { mode: "read-only", stage: "plan" },
-    },
-    {
-      label: "fork: a null-coalesced resolved stage also falls back to the parent's",
-      identity: {
-        ...forked(parent),
-        resolved: { ...forked(parent).resolved, stage: null as unknown as string },
-      },
-      expected: { mode: "read-only", stage: "plan" },
-    },
-    {
-      label: "fork of a stage-less parent stays unscoped",
-      identity: forked({ ...parent, stage: undefined }),
-      expected: { mode: "read-only", stage: undefined },
-    },
-    {
-      label: "adopt NEVER impersonates a stage — even one smuggled onto the resolved entry",
-      identity: adopted({ run_id: "01RID.1", mode: "read-only", stage: "implement" }),
-      expected: { mode: "read-only", stage: undefined },
-    },
-    {
-      label: "mint → the branch-LWW stage/mode the warm session already carried",
-      identity: minted({ mode: "read-only", stage: "objective-author" }),
-      expected: { mode: "read-only", stage: "objective-author" },
-    },
-    {
-      label: "unclaimed (failed claim) → empty resolved → unscoped, gate off",
-      identity: unclaimedClaim(),
-      expected: { mode: undefined, stage: undefined },
-    },
-    {
-      label: "unclaimed (failed mint) → the warm branch state passes through",
-      identity: unclaimedMint({ mode: "read-only", stage: "plan" }),
-      expected: { mode: "read-only", stage: "plan" },
-    },
-    {
-      label: "the reflected floor's mode is exactly what the gate sees",
-      identity: { ...claimed(), resolved: { ...CLAIM_RESOLVED, mode: "read-only" } },
-      expected: { mode: "read-only", stage: "implement" },
-    },
-  ];
-  for (const { label, identity, expected } of cases) {
-    const before = JSON.stringify(identity);
-    assert.deepEqual(sessionStartToolScope(identity), expected, label);
-    assert.equal(JSON.stringify(identity), before, `input never mutated: ${label}`);
-  }
+  ]);
+  assert.deepEqual(fork.scratched, ["01RID.3"]);
+  assert.deepEqual(fork.consumed, []);
+  assert.deepEqual(fork.identity.warnings, []);
+  assert.equal(fork.identity.resolved.run_id, "01RID.3");
+
+  const refused = startup({
+    seed: [seed],
+    sessionId: "child.jsonl",
+    runIds: [],
+    scratchThrows: true,
+  });
+  assert.equal(refused.identity.arm, "forked");
+  assert.deepEqual(refused.identity.warnings, [
+    "could not create fork run root for 01RID.1: Error: scratch refused",
+  ]);
+  assert.equal(refused.appends.length, 1, "the derived-identity append still lands");
 });
 
-for (const backing of [branchStoreBacking(), memoryStoreBacking()]) {
-  /** One post-gate run over a seeded store with recording ports; returns everything observable. */
-  function run(opts: {
-    identity: EstablishIdentityOutcome;
-    seed?: WorkflowState[];
-    handoff?: Handoff | null;
-    planRef?: PlanRef | null;
-    registry?: "fake" | null;
-    forbid?: ("handoff" | "plan-ref")[];
-    before?: (h: StoreHarness) => void;
-    currentSessionId?: string | null;
-  }) {
-    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-facts-"));
-    const h = backing.make(cwd, opts.seed ?? []);
-    opts.before?.(h);
-    const calls: string[] = [];
-    const registry = opts.registry === null ? null : fakeRegistry(calls);
-    const { store, verified } = recordingStore(h, calls);
-    const reads = factReads(calls, {
-      handoff: opts.handoff,
-      planRef: opts.planRef,
-      forbid: opts.forbid,
-    });
-    const facts = quietly(() =>
-      resolveSessionStartFacts(store, reads, {
-        identity: opts.identity,
-        registry,
-        currentSessionId: opts.currentSessionId === undefined ? "me.jsonl" : opts.currentSessionId,
-      }),
-    );
-    return { facts, calls, verified, appends: h.appends, harness: h };
-  }
-
-  test(`${backing.label}: post-gate facts — a consuming cold claim runs rebuild → handoff → registry → checkout → ONE verified link, in that order`, () => {
-    const r = run({
-      identity: claimed(),
-      seed: [CLAIM_RESOLVED],
-      handoff: handoffBlob("01RID", "implement"),
-      planRef: ref("42"),
-    });
-    assert.deepEqual(r.calls, [
-      "rebuild",
-      "handoff:01RID",
-      "registry",
-      "plan-ref",
-      "appendVerified:active_plan_ref",
-    ]);
-    // The exact append: field / comparator / scope / failure text — the same classified
-    // mechanism that sat beneath the old boolean wrapper.
-    assert.equal(r.verified.length, 1);
-    const opts = r.verified[0];
-    assert.ok(opts);
-    assert.deepEqual(opts.data, { active_plan_ref: ref("42") });
-    assert.equal(opts.field, "active_plan_ref");
-    assert.deepEqual(opts.expected, ref("42"));
-    assert.equal(opts.scope, "workflow-state linkage error");
-    assert.equal(opts.failure, "plan-ref read-back failed for github:42");
-    assert.equal(opts.equals, planRefsEqual);
-    assert.deepEqual(r.appends, [{ active_plan_ref: ref("42") }]);
-    assert.deepEqual(r.facts.resolved, { ...CLAIM_RESOLVED, active_plan_ref: ref("42") });
-    assert.deepEqual(r.facts.implementationCapture, { runId: "01RID", parentSessionId: null });
-    assert.deepEqual(r.facts.feedback, {
-      stage: "implement",
-      adopted: false,
-      runId: "01RID",
-      piSessionId: "me.jsonl",
-      activePlanRef: ref("42"),
-    });
-  });
-
-  test(`${backing.label}: post-gate facts — equal (provider, pr_id) keeps the LINKED object's metadata with no append`, () => {
-    const linked = ref("42", { labels: ["perk:plan", "linked-metadata"], objective_id: "7" });
-    const r = run({
-      identity: claimed(),
-      seed: [CLAIM_RESOLVED, { active_plan_ref: linked }],
-      handoff: handoffBlob("01RID", "implement"),
-      planRef: ref("42", { labels: ["checkout-metadata"] }),
-    });
-    assert.deepEqual(r.calls, ["rebuild", "handoff:01RID", "registry", "plan-ref"]);
-    assert.deepEqual(r.appends, [], "no duplicate append on equal identity");
-    assert.deepEqual(
-      r.facts.resolved.active_plan_ref,
-      linked,
-      "the linked object, not the cache's",
-    );
-    assert.deepEqual(r.facts.feedback.activePlanRef, linked);
-  });
-
-  test(`${backing.label}: post-gate facts — a DIFFERENT checkout ref performs one strict append and folds in only on applied`, () => {
-    const applied = run({
-      identity: claimed(),
-      seed: [CLAIM_RESOLVED, { active_plan_ref: ref("41") }],
-      handoff: handoffBlob("01RID", "submit"),
-      planRef: ref("42"),
-    });
-    assert.deepEqual(applied.calls, [
-      "rebuild",
-      "handoff:01RID",
-      "registry",
-      "plan-ref",
-      "appendVerified:active_plan_ref",
-    ]);
-    assert.deepEqual(applied.facts.resolved.active_plan_ref, ref("42"));
-    assert.equal(applied.facts.implementationCapture, null, "submit is not implement");
-    assert.equal(applied.facts.feedback.stage, "submit");
-
-    // Rejected / unverified: the incoming resolved result is left EXACTLY as it arrived — a
-    // fresh claim carries no ref (never flattened onto the branch's #41), and nothing is rebuilt
-    // again to manufacture success or a fallback.
-    for (const failure of ["rejected", "unverified"] as const) {
-      const failed = run({
-        identity: claimed(),
-        seed: [CLAIM_RESOLVED, { active_plan_ref: ref("41") }],
-        handoff: handoffBlob("01RID", "implement"),
-        planRef: ref("42"),
-        before: (h) => (failure === "rejected" ? h.induceAppendRefusal() : h.induceReadBackMiss()),
-      });
-      assert.deepEqual(
-        failed.calls,
-        ["rebuild", "handoff:01RID", "registry", "plan-ref", "appendVerified:active_plan_ref"],
-        `${failure}: exactly one attempt, no retry rebuild`,
-      );
-      assert.deepEqual(failed.facts.resolved, CLAIM_RESOLVED, `${failure}: resolved as it arrived`);
-      assert.equal(failed.facts.feedback.activePlanRef, null, `${failure}: no guessed ref`);
-      assert.deepEqual(
-        failed.facts.implementationCapture,
-        { runId: "01RID", parentSessionId: null },
-        `${failure}: capture follows the launched stage, not the link`,
-      );
-    }
-  });
-
-  test(`${backing.label}: post-gate facts — a KEPT session keeps its LWW ref on a failed append (never flattened to a claim's none)`, () => {
-    const state: WorkflowState = {
+test("adopt: an env-inherited run whose handoff another (or an unrecorded) session consumed derives a child identity — inherited handoff mode, no stage or claim impersonation, never re-consumed", () => {
+  // No `pi_session_id` on the consumed handoff: the unrecorded claimer counts as foreign.
+  const adopt = startup({
+    handoff: {
       run_id: "01RID",
-      pi_session_id: "me.jsonl",
+      consumed: true,
       mode: "read-write",
       stage: "implement",
-      active_plan_ref: ref("41"),
-    };
-    for (const failure of ["rejected", "unverified"] as const) {
-      const r = run({
-        identity: kept(state),
-        seed: [state],
-        handoff: handoffBlob("01RID", "implement"),
-        planRef: ref("42"),
-        before: (h) => (failure === "rejected" ? h.induceAppendRefusal() : h.induceReadBackMiss()),
-      });
-      assert.deepEqual(r.facts.resolved, state, `${failure}: the kept resolved ref survives`);
-      assert.deepEqual(r.facts.feedback.activePlanRef, ref("41"));
-    }
-    // …and applies normally when the append lands.
-    const ok = run({
-      identity: kept(state),
-      seed: [state],
-      handoff: handoffBlob("01RID", "implement"),
-      planRef: ref("42"),
-    });
-    assert.deepEqual(ok.facts.resolved, { ...state, active_plan_ref: ref("42") });
+      objective_id: "7",
+      node_id: "1.1",
+    },
+    envRunId: "01RID",
+    sessionId: "child.jsonl",
   });
-
-  test(`${backing.label}: post-gate facts — no cached ref preserves a non-null linked ref; nothing links when both are absent`, () => {
-    const preserved = run({
-      identity: claimed(),
-      seed: [CLAIM_RESOLVED, { active_plan_ref: ref("41") }],
-      handoff: handoffBlob("01RID", "implement"),
-      planRef: null,
-    });
-    assert.deepEqual(preserved.calls, ["rebuild", "handoff:01RID", "registry", "plan-ref"]);
-    assert.deepEqual(preserved.appends, []);
-    assert.deepEqual(preserved.facts.resolved.active_plan_ref, ref("41"));
-
-    const none = run({
-      identity: claimed(),
-      seed: [CLAIM_RESOLVED],
-      handoff: handoffBlob("01RID", "implement"),
-      planRef: null,
-    });
-    assert.deepEqual(none.calls, ["rebuild", "handoff:01RID", "registry", "plan-ref"]);
-    assert.deepEqual(none.facts.resolved, CLAIM_RESOLVED);
-    assert.equal(none.facts.feedback.activePlanRef, null);
-  });
-
-  test(`${backing.label}: post-gate facts — a non-consuming or unknown launched stage never reads the checkout, preserving linkage via LWW`, () => {
-    for (const stage of ["plan", "weird-stage"]) {
-      const r = run({
-        identity: claimed({ ...CLAIM_RESOLVED, stage }),
-        seed: [{ ...CLAIM_RESOLVED, stage }, { active_plan_ref: ref("41") }],
-        handoff: handoffBlob("01RID", stage),
-        planRef: ref("42"),
-        forbid: ["plan-ref"],
-      });
-      assert.deepEqual(r.calls, ["rebuild", "handoff:01RID", "registry"], stage);
-      assert.deepEqual(r.appends, []);
-      assert.deepEqual(
-        r.facts.resolved.active_plan_ref,
-        ref("41"),
-        "the root selector never leaks in",
-      );
-      assert.equal(r.facts.implementationCapture, null);
-      assert.equal(r.facts.feedback.stage, stage, "the launched stage still rides to the receiver");
-    }
-  });
-
-  test(`${backing.label}: post-gate facts — registry-null is permissive WITH a launched stage and inert without one`, () => {
-    const permissive = run({
-      identity: claimed(),
-      seed: [CLAIM_RESOLVED],
-      handoff: handoffBlob("01RID", "plan"),
-      planRef: ref("42"),
-      registry: null,
-    });
-    assert.deepEqual(permissive.calls, [
-      "rebuild",
-      "handoff:01RID",
-      "plan-ref",
-      "appendVerified:active_plan_ref",
-    ]);
-    assert.deepEqual(permissive.facts.resolved.active_plan_ref, ref("42"));
-
-    const stageless = run({
-      identity: claimed({ ...CLAIM_RESOLVED, stage: undefined }),
-      seed: [{ ...CLAIM_RESOLVED, stage: undefined }, { active_plan_ref: ref("41") }],
-      handoff: handoffBlob("01RID"),
-      planRef: ref("42"),
-      registry: null,
-      forbid: ["plan-ref"],
-    });
-    assert.deepEqual(stageless.calls, ["rebuild", "handoff:01RID"]);
-    assert.deepEqual(stageless.facts.resolved.active_plan_ref, ref("41"));
-    assert.equal(stageless.facts.implementationCapture, null);
-    assert.equal(stageless.facts.feedback.stage, null);
-  });
-
-  test(`${backing.label}: post-gate facts — keep reads its run's handoff; branch stage and handoff stage are NOT interchangeable`, () => {
-    // Branch says implement, handoff says submit: tool scope (phase 1) follows the branch;
-    // capture/feedback (phase 2) follow the launched handoff stage.
-    const state: WorkflowState = {
-      run_id: "01RID",
-      pi_session_id: "me.jsonl",
-      mode: "read-write",
-      stage: "implement",
-      active_plan_ref: ref("41"),
-    };
-    const disagree = run({
-      identity: kept(state),
-      seed: [state],
-      handoff: handoffBlob("01RID", "submit"),
-      planRef: ref("42"),
-    });
-    assert.deepEqual(sessionStartToolScope(kept(state)), {
-      mode: "read-write",
-      stage: "implement",
-    });
-    assert.deepEqual(disagree.calls, [
-      "rebuild",
-      "handoff:01RID",
-      "registry",
-      "plan-ref",
-      "appendVerified:active_plan_ref",
-    ]);
-    assert.equal(disagree.facts.implementationCapture, null, "submit ≠ implement");
-    assert.equal(disagree.facts.feedback.stage, "submit");
-    assert.deepEqual(
-      disagree.facts.resolved.active_plan_ref,
-      ref("42"),
-      "reload re-reads the binding",
-    );
-
-    // …and the converse: branch says plan, handoff says implement → capture fires.
-    const planBranch: WorkflowState = { ...state, stage: "plan" };
-    const converse = run({
-      identity: kept(planBranch),
-      seed: [planBranch],
-      handoff: handoffBlob("01RID", "implement"),
-      planRef: ref("41"),
-    });
-    assert.deepEqual(sessionStartToolScope(kept(planBranch)), {
-      mode: "read-write",
-      stage: "plan",
-    });
-    assert.deepEqual(converse.facts.implementationCapture, {
-      runId: "01RID",
-      parentSessionId: null,
-    });
-    assert.equal(converse.facts.feedback.stage, "implement");
-
-    // Keep WITHOUT a handoff: no launched stage → no checkout read, no capture, the LWW ref stays.
-    const noHandoff = run({
-      identity: kept(state),
-      seed: [state],
-      handoff: null,
-      planRef: ref("42"),
-      forbid: ["plan-ref"],
-    });
-    assert.deepEqual(noHandoff.calls, ["rebuild", "handoff:01RID"]);
-    assert.deepEqual(noHandoff.facts.resolved, state);
-    assert.equal(noHandoff.facts.implementationCapture, null);
-    assert.deepEqual(noHandoff.facts.feedback, {
-      stage: null,
-      adopted: false,
-      runId: "01RID",
-      piSessionId: "me.jsonl",
-      activePlanRef: ref("41"),
-    });
-  });
-
-  test(`${backing.label}: post-gate facts — fork never reads a handoff or the checkout; capture inherits the parent's stage + session provenance`, () => {
-    const parent: WorkflowState = {
-      run_id: "01RID",
-      pi_session_id: "parent.jsonl",
-      mode: "read-write",
-      stage: "implement",
-      active_plan_ref: ref("41"),
-    };
-    const identity = forked(parent);
-    const r = run({
-      identity,
-      seed: [parent, identity.resolved],
-      handoff: handoffBlob("01RID", "submit"), // present but MUST NOT be read
-      planRef: ref("42"), // present but MUST NOT be read
-      forbid: ["handoff", "plan-ref"],
-      currentSessionId: "child.jsonl",
-    });
-    assert.deepEqual(r.calls, ["rebuild"], "the linked-state rebuild only");
-    assert.deepEqual(r.appends, []);
-    assert.deepEqual(r.facts.resolved, { ...identity.resolved, active_plan_ref: ref("41") });
-    assert.deepEqual(r.facts.implementationCapture, {
-      runId: "01RID.1",
-      parentSessionId: "parent.jsonl",
-    });
-    assert.deepEqual(r.facts.feedback, {
-      stage: "implement",
-      adopted: false,
-      runId: "01RID.1",
-      piSessionId: "child.jsonl", // startup's CURRENT handle, never the inherited parent's
-      activePlanRef: ref("41"),
-    });
-    // A fork of a non-implement parent captures nothing.
-    const planFork = forked({ ...parent, stage: "plan" });
-    const none = run({
-      identity: planFork,
-      seed: [{ ...parent, stage: "plan" }, planFork.resolved],
-      forbid: ["handoff", "plan-ref"],
-      currentSessionId: "child.jsonl",
-    });
-    assert.equal(none.facts.implementationCapture, null);
-    assert.equal(none.facts.feedback.stage, "plan");
-  });
-
-  test(`${backing.label}: post-gate facts — adopt and mint never read a handoff or the checkout and never capture`, () => {
-    const adoptedIdentity = adopted({
+  assert.equal(adopt.identity.arm, "adopted");
+  assert.deepEqual(adopt.identityCalls, ["rebuild", "append"]);
+  assert.deepEqual(adopt.appends, [
+    {
       run_id: "01RID.1",
       pi_session_id: "child.jsonl",
       predecessor: "01RID",
       mode: "read-write",
       perk_version: "1.2.3",
-    });
-    const adopt = run({
-      identity: adoptedIdentity,
-      seed: [adoptedIdentity.resolved],
-      handoff: handoffBlob("01RID", "implement", { consumed: true, piSessionId: "parent.jsonl" }),
-      planRef: ref("42"),
-      forbid: ["handoff", "plan-ref"],
-      currentSessionId: "child.jsonl",
-    });
-    assert.deepEqual(adopt.calls, ["rebuild"]);
-    assert.deepEqual(adopt.facts.resolved, adoptedIdentity.resolved);
-    assert.equal(adopt.facts.implementationCapture, null, "no parent-stage impersonation");
-    assert.deepEqual(adopt.facts.feedback, {
-      stage: null,
-      adopted: true,
-      runId: "01RID.1",
-      piSessionId: "child.jsonl",
-      activePlanRef: null,
-    });
+    },
+  ]);
+  assert.deepEqual(adopt.consumed, [], "adopt never re-consumes the handoff");
+  assert.deepEqual(adopt.scratched, ["01RID.1"]);
 
-    const mintedIdentity = minted({
+  const sibling = startup({
+    handoff: handoffBlob("01RID", "implement", {
+      consumed: true,
+      piSessionId: "parent.jsonl",
       mode: "read-only",
-      stage: "implement",
-      active_plan_ref: ref("41"),
-    });
-    const mint = run({
-      identity: mintedIdentity,
-      seed: [mintedIdentity.resolved],
-      planRef: ref("42"),
-      forbid: ["handoff", "plan-ref"],
-    });
-    assert.deepEqual(mint.calls, ["rebuild"]);
-    assert.equal(mint.facts.implementationCapture, null, "a warm mint has no launched stage");
-    assert.deepEqual(mint.facts.feedback, {
-      stage: null,
-      adopted: false,
-      runId: "01MINT",
-      piSessionId: "me.jsonl",
-      activePlanRef: ref("41"),
-    });
+    }),
+    envRunId: "01RID",
+    sessionId: "child.jsonl",
+    runIds: ["01RID.1"],
+    scratchThrows: true,
   });
+  assert.equal(sibling.identity.arm, "adopted");
+  assert.equal(sibling.appends[0]?.run_id, "01RID.2");
+  assert.equal(sibling.appends[0]?.mode, "read-only");
+  assert.deepEqual(sibling.identity.warnings, [
+    "could not create adopted run root for 01RID.2: Error: scratch refused",
+  ]);
+});
 
-  test(`${backing.label}: post-gate facts — both unclaimed shapes keep the existing downstream path (no early return, no capture)`, () => {
-    // A failed cold claim still resolves the launched stage from the (mismatched-or-missing)
-    // handoff exactly as before; with no run id nothing is captured and the receiver sees no run.
-    const missing = run({ identity: unclaimedClaim(), handoff: null, planRef: ref("42") });
-    assert.deepEqual(missing.calls, ["rebuild", "handoff:01RID"]);
-    assert.deepEqual(missing.facts.resolved, {});
-    assert.equal(missing.facts.implementationCapture, null);
-    assert.deepEqual(missing.facts.feedback, {
-      stage: null,
-      adopted: false,
-      runId: null,
-      piSessionId: "me.jsonl",
-      activePlanRef: null,
-    });
+test("mint: a warm session with no identity and no (or a blank) env run id mints a verified run_id; a failed read-back leaves it unidentified", () => {
+  const mint = startup({ envRunId: "" });
+  assert.equal(mint.identity.arm, "minted");
+  assert.deepEqual(mint.identityCalls, ["rebuild", "appendVerified:run_id"]);
+  assert.deepEqual(mint.appends, [
+    { run_id: "01MINT", pi_session_id: "me.jsonl", perk_version: "1.2.3" },
+  ]);
+  assert.equal(mint.identity.resolved.run_id, "01MINT");
 
-    const failedMint = run({
-      identity: unclaimedMint({ mode: "read-only", stage: "implement" }),
-      seed: [{ mode: "read-only", stage: "implement" }],
-      planRef: ref("42"),
-      forbid: ["handoff", "plan-ref"],
-    });
-    assert.deepEqual(failedMint.calls, ["rebuild"]);
-    assert.equal(failedMint.facts.implementationCapture, null, "no run id → no capture");
-    assert.deepEqual(failedMint.facts.feedback, {
-      stage: null,
-      adopted: false,
-      runId: null,
-      piSessionId: "me.jsonl",
-      activePlanRef: null,
-    });
-  });
+  const failed = startup({ identityFailure: "unverified" });
+  assert.equal(failed.identity.arm, "unclaimed");
+  assert.equal(failed.identity.resolved.run_id, undefined, "re-mints next session_start");
+});
 
-  test(`${backing.label}: post-gate facts — a throwing linked-state rebuild propagates before any handoff/checkout read`, () => {
-    const cwd = mkdtempSync(join(tmpdir(), "perk-lifecycle-facts-"));
-    const h = backing.make(cwd, [CLAIM_RESOLVED]);
-    const calls: string[] = [];
-    const reads = factReads(calls, {
-      handoff: handoffBlob("01RID", "implement"),
-      planRef: ref("42"),
-      forbid: ["handoff", "plan-ref"],
-    });
-    const store: SessionStateStore = {
-      rebuild: () => {
-        throw new Error("unreadable branch");
-      },
-      append: h.store.append,
-      appendVerified: h.store.appendVerified,
-    };
-    assert.throws(
-      () =>
-        resolveSessionStartFacts(store, reads, {
-          identity: claimed(),
-          registry: fakeRegistry(calls),
-          currentSessionId: "me.jsonl",
-        }),
-      /unreadable branch/,
-    );
-    assert.deepEqual(calls, [], "no guessed facts — nothing else was touched");
-    assert.deepEqual(h.appends, []);
-  });
+test("keep: a run whose recorded pi_session_id matches (or is absent) appends nothing — no version backfill", () => {
+  const seed: WorkflowState = { run_id: "01RID", pi_session_id: "me.jsonl", mode: "read-only" };
+  const keep = startup({ seed: [seed] });
+  assert.equal(keep.identity.arm, "kept");
+  assert.deepEqual(keep.identityCalls, ["rebuild"]);
+  assert.deepEqual(keep.appends, [], "reload-generation reconstruction IS the LWW rebuild");
+  assert.deepEqual(keep.identity.resolved, seed);
+  assert.equal(keep.identity.resolved.perk_version, undefined, "no version backfill (§8.3)");
+  assert.deepEqual(keep.consumed, []);
+  assert.deepEqual(keep.scratched, []);
 
-  test(`${backing.label}: establish-before-consume observed through linkage — a failed claim retains its handoff; a link failure never consumes or un-consumes`, () => {
-    // (a) A missing handoff: unclaimed, not consumed; the post-gate facts read the handoff again
-    // (null), link nothing, and consumption stays untouched.
-    const cwdA = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
-    const a = backing.make(cwdA, []);
-    const portsA = fakePorts({ handoff: null });
-    const identityA = establishSessionIdentity(a.store, portsA.ports, {
-      currentSessionId: "me.jsonl",
-      envRunId: "01RID",
-    });
-    assert.equal(identityA.arm, "unclaimed");
-    const callsA: string[] = [];
-    const factsA = quietly(() =>
-      resolveSessionStartFacts(
-        recordingStore(a, callsA).store,
-        { readHandoff: portsA.ports.readHandoff, readPlanRef: () => ref("42") },
-        { identity: identityA, registry: fakeRegistry(callsA), currentSessionId: "me.jsonl" },
-      ),
-    );
-    assert.deepEqual(callsA, ["rebuild"]);
-    assert.deepEqual(portsA.consumed, [], "a failed claim is never consumed by linkage");
-    assert.deepEqual(factsA.resolved, {});
-    assert.deepEqual(a.appends, []);
+  const legacy = startup({ seed: [{ run_id: "01RID", mode: "read-only" }] });
+  assert.equal(legacy.identity.arm, "kept");
+});
 
-    // (b) A claim whose read-back missed: unclaimed and NOT consumed; a later link failure on
-    // the same session neither consumes it nor changes the empty resolved facts.
-    const cwdB = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
-    const b = backing.make(cwdB, []);
-    const portsB = fakePorts({ handoff: handoffBlob("01RID", "implement") });
-    b.induceReadBackMiss();
-    const identityB = quietly(() =>
-      establishSessionIdentity(b.store, portsB.ports, {
-        currentSessionId: "me.jsonl",
+// --- the two-phase startup facts -------------------------------------------------------------------
+//
+// PHASE 1 (`sessionStartToolScope`) is pure over the established identity. PHASE 2
+// (`resolveSessionStartFacts`) is pinned by its exact post-gate trace (rebuild → the allowed
+// handoff read → registry admission → the checkout read on the consuming arm only → the one
+// verified link). The three authorities — the branch-LWW stage (tool scope), the launched handoff
+// stage (capture / feedback), and the checkout ref (linkage) — are made to DISAGREE so the rows
+// prove they are never interchangeable.
+
+test("startup matrix: per-arm tool scope (pure), the post-gate port sequence, linkage, capture and feedback", () => {
+  const CONSUMING = [
+    "rebuild",
+    "handoff:01RID",
+    "registry",
+    "plan-ref",
+    "appendVerified:active_plan_ref",
+  ];
+  const rows: {
+    label: string;
+    opts: StartupOpts;
+    scope: Pick<WorkflowState, "mode" | "stage">;
+    calls: string[];
+    ref: PlanRef | null;
+    capture: { runId: string; parentSessionId: string | null } | null;
+    feedback: ReturnType<typeof fb>;
+  }[] = [
+    {
+      label: "claim, consuming stage → one verified link, capture",
+      opts: { handoff: IMPL, envRunId: "01RID", planRef: ref("42") },
+      scope: { mode: "read-write", stage: "implement" },
+      calls: CONSUMING,
+      ref: ref("42"),
+      capture: { runId: "01RID", parentSessionId: null },
+      feedback: fb("implement", "01RID", ref("42")),
+    },
+    ...["plan", "weird-stage"].map((stage) => ({
+      label: `claim, non-consuming or unknown stage (${stage}) never reads the checkout — the root selector never leaks in`,
+      opts: {
+        seed: [{ active_plan_ref: ref("41") }],
+        handoff: handoffBlob("01RID", stage, { mode: "read-write" }),
         envRunId: "01RID",
-      }),
-    );
-    assert.equal(identityB.arm, "unclaimed");
-    assert.deepEqual(portsB.consumed, []);
-    b.induceReadBackMiss();
-    const factsB = quietly(() =>
-      resolveSessionStartFacts(
-        b.store,
-        { readHandoff: portsB.ports.readHandoff, readPlanRef: () => ref("42") },
-        { identity: identityB, registry: null, currentSessionId: "me.jsonl" },
-      ),
-    );
-    assert.deepEqual(portsB.consumed, [], "a later link failure never consumes a failed claim");
-    assert.deepEqual(factsB.resolved, {}, "unchanged: no run id, no guessed ref");
-    assert.equal(factsB.implementationCapture, null);
-    assert.equal(factsB.feedback.runId, null);
+        planRef: ref("42"),
+      },
+      scope: { mode: "read-write", stage },
+      calls: ["rebuild", "handoff:01RID", "registry"],
+      ref: ref("41"),
+      capture: null,
+      feedback: fb(stage, "01RID", ref("41")),
+    })),
+    {
+      label: "claim, null registry is permissive with a launched stage",
+      opts: {
+        handoff: handoffBlob("01RID", "plan", { mode: "read-write" }),
+        envRunId: "01RID",
+        planRef: ref("42"),
+        registry: null,
+      },
+      scope: { mode: "read-write", stage: "plan" },
+      calls: ["rebuild", "handoff:01RID", "plan-ref", "appendVerified:active_plan_ref"],
+      ref: ref("42"),
+      capture: null,
+      feedback: fb("plan", "01RID", ref("42")),
+    },
+    {
+      label: "claim, null registry + stage-less handoff is inert",
+      opts: {
+        seed: [{ active_plan_ref: ref("41") }],
+        handoff: handoffBlob("01RID", undefined, { mode: "read-write" }),
+        envRunId: "01RID",
+        planRef: ref("42"),
+        registry: null,
+      },
+      scope: { mode: "read-write", stage: undefined },
+      calls: ["rebuild", "handoff:01RID"],
+      ref: ref("41"),
+      capture: null,
+      feedback: fb(null, "01RID", ref("41")),
+    },
+    {
+      label:
+        "keep, branch stage and handoff stage disagree — scope follows the branch, capture/feedback the handoff, linkage re-reads the checkout",
+      opts: { seed: [KEPT], handoff: IMPL, planRef: ref("42") },
+      scope: { mode: "read-write", stage: "plan" },
+      calls: CONSUMING,
+      ref: ref("42"),
+      capture: { runId: "01RID", parentSessionId: null },
+      feedback: fb("implement", "01RID", ref("42")),
+    },
+    {
+      label: "keep, no handoff → no launched stage, no checkout read, LWW ref stays",
+      opts: { seed: [KEPT], handoff: null, planRef: ref("42") },
+      scope: { mode: "read-write", stage: "plan" },
+      calls: ["rebuild", "handoff:01RID"],
+      ref: ref("41"),
+      capture: null,
+      feedback: fb(null, "01RID", ref("41")),
+    },
+    {
+      label:
+        "fork of an implement parent inherits scope + capture with fork provenance; never reads",
+      opts: { seed: [PARENT], sessionId: "child.jsonl", handoff: IMPL, planRef: ref("42") },
+      scope: { mode: "read-write", stage: "implement" },
+      calls: ["rebuild"],
+      ref: ref("41"),
+      capture: { runId: "01RID.1", parentSessionId: "parent.jsonl" },
+      feedback: fb("implement", "01RID.1", ref("41"), { piSessionId: "child.jsonl" }),
+    },
+    {
+      label: "adopt is unscoped, flagged, uncaptured; never reads",
+      opts: {
+        handoff: handoffBlob("01RID", "implement", {
+          consumed: true,
+          piSessionId: "parent.jsonl",
+          mode: "read-only",
+        }),
+        envRunId: "01RID",
+        sessionId: "child.jsonl",
+        planRef: ref("42"),
+      },
+      scope: { mode: "read-only", stage: undefined },
+      calls: ["rebuild"],
+      ref: null,
+      capture: null,
+      feedback: fb(null, "01RID.1", null, { adopted: true, piSessionId: "child.jsonl" }),
+    },
+    {
+      label: "mint carries the branch's LWW scope and ref; no launched stage, no reads",
+      opts: {
+        seed: [{ mode: "read-only", stage: "implement", active_plan_ref: ref("41") }],
+        planRef: ref("42"),
+      },
+      scope: { mode: "read-only", stage: "implement" },
+      calls: ["rebuild"],
+      ref: ref("41"),
+      capture: null,
+      feedback: fb(null, "01MINT", ref("41")),
+    },
+    {
+      label: "unclaimed (missing handoff) keeps the downstream path — unscoped, gate off",
+      opts: { handoff: null, envRunId: "01RID", planRef: ref("42") },
+      scope: { mode: undefined, stage: undefined },
+      calls: ["rebuild", "handoff:01RID"],
+      ref: null,
+      capture: null,
+      feedback: fb(null, null, null),
+    },
+    {
+      label: "unclaimed (mint read-back miss) passes the warm branch state through",
+      opts: {
+        seed: [{ mode: "read-only", stage: "plan" }],
+        identityFailure: "unverified",
+        planRef: ref("42"),
+      },
+      scope: { mode: "read-only", stage: "plan" },
+      calls: ["rebuild"],
+      ref: null,
+      capture: null,
+      feedback: fb(null, null, null),
+    },
+  ];
+  for (const row of rows) {
+    const r = startup(row.opts);
+    assert.deepEqual(r.scope, row.scope, row.label);
+    assert.deepEqual(r.calls, row.calls, row.label);
+    assert.deepEqual(r.facts.resolved.active_plan_ref ?? null, row.ref, row.label);
+    assert.deepEqual(r.facts.implementationCapture, row.capture, row.label);
+    assert.deepEqual(r.facts.feedback, row.feedback, row.label);
+  }
+});
 
-    // (c) A VERIFIED claim consumed its handoff; a subsequent link failure does not undo that
-    // consumption and leaves the claim's resolved facts (no ref) exactly as they arrived.
-    const cwdC = mkdtempSync(join(tmpdir(), "perk-lifecycle-"));
-    const c = backing.make(cwdC, []);
-    const portsC = fakePorts({ handoff: handoffBlob("01RID", "implement") });
-    const identityC = establishSessionIdentity(c.store, portsC.ports, {
-      currentSessionId: "me.jsonl",
-      envRunId: "01RID",
-    });
-    assert.equal(identityC.arm, "claimed");
-    assert.deepEqual(portsC.consumed, [{ runId: "01RID", piSessionId: "me.jsonl" }]);
-    c.induceAppendRefusal();
-    const factsC = quietly(() =>
-      resolveSessionStartFacts(
-        c.store,
-        { readHandoff: portsC.ports.readHandoff, readPlanRef: () => ref("42") },
-        { identity: identityC, registry: null, currentSessionId: "me.jsonl" },
-      ),
-    );
-    assert.deepEqual(
-      portsC.consumed,
-      [{ runId: "01RID", piSessionId: "me.jsonl" }],
-      "consumption history is untouched by the link failure",
-    );
-    assert.deepEqual(factsC.resolved, identityC.resolved, "the claim's facts, no repaired linkage");
-    assert.equal(factsC.feedback.activePlanRef, null);
-    assert.deepEqual(factsC.implementationCapture, { runId: "01RID", parentSessionId: null });
-    assert.equal(c.appends.length, 2, "the claim entry + the ONE refused link attempt — no retry");
+test("linkage outcomes: equal (provider, pr_id) keeps the linked object without appending — on a claim and on a kept session's reload alike; a different ref is ONE exact verified append folded in only on applied; a failed append leaves resolved as it arrived — a claim's none, a kept session's LWW ref; no cached ref preserves the link", () => {
+  const NO_APPEND = ["rebuild", "handoff:01RID", "registry", "plan-ref"];
+  const ONE_APPEND = [...NO_APPEND, "appendVerified:active_plan_ref"];
+
+  // (a) equal identity keeps the LINKED object's metadata (not the checkout's), no append
+  const linked = ref("42", { labels: ["perk:plan", "linked-metadata"], objective_id: "7" });
+  const equal = startup({
+    seed: [{ active_plan_ref: linked }],
+    handoff: IMPL,
+    envRunId: "01RID",
+    planRef: ref("42", { labels: ["checkout-metadata"] }),
   });
-}
+  assert.deepEqual(equal.calls, NO_APPEND);
+  assert.deepEqual(equal.facts.resolved.active_plan_ref, linked);
+  // …and a kept session's reload with the same ref appends nothing (no duplicate link entry).
+  const reload = startup({
+    seed: [{ ...KEPT_IMPL, active_plan_ref: linked }],
+    handoff: IMPL,
+    planRef: ref("42"),
+  });
+  assert.deepEqual(reload.calls, NO_APPEND);
+  assert.deepEqual(reload.appends, []);
+  assert.deepEqual(reload.facts.resolved.active_plan_ref, linked);
 
-test("sessionTreeFacts: pure over the supplied selected-branch state — its own session id, adopted false, no capture, no reads", () => {
+  // (b) a different ref: the exact append — field / comparator / scope / failure text
+  const applied = startup({
+    seed: [{ active_plan_ref: ref("41") }],
+    handoff: handoffBlob("01RID", "submit", { mode: "read-write" }),
+    envRunId: "01RID",
+    planRef: ref("42"),
+  });
+  assert.deepEqual(applied.verified.at(-1), {
+    data: { active_plan_ref: ref("42") },
+    field: "active_plan_ref",
+    expected: ref("42"),
+    scope: "workflow-state linkage error",
+    failure: "plan-ref read-back failed for github:42",
+    equals: planRefsEqual,
+  });
+  assert.deepEqual(applied.appends.at(-1), { active_plan_ref: ref("42") });
+  assert.deepEqual(applied.facts.resolved.active_plan_ref, ref("42"));
+  assert.equal(applied.facts.implementationCapture, null, "submit is not implement");
+  assert.equal(applied.facts.feedback.stage, "submit");
+
+  // (c) a failed append on a claim: exactly one attempt, resolved EXACTLY as it arrived (no ref —
+  // never flattened onto the branch's #41, never rebuilt again to manufacture a fallback)
+  for (const linkFailure of ["rejected", "unverified"] as const) {
+    const failed = startup({
+      seed: [{ active_plan_ref: ref("41") }],
+      handoff: IMPL,
+      envRunId: "01RID",
+      planRef: ref("42"),
+      linkFailure,
+    });
+    assert.deepEqual(failed.calls, ONE_APPEND, linkFailure);
+    assert.deepEqual(failed.facts.resolved, failed.identity.resolved, linkFailure);
+    assert.equal(failed.facts.feedback.activePlanRef, null, `${linkFailure}: no guessed ref`);
+    assert.deepEqual(
+      failed.facts.implementationCapture,
+      { runId: "01RID", parentSessionId: null },
+      `${linkFailure}: capture follows the launched stage, not the link`,
+    );
+  }
+  // (d) …and on a kept session the LWW ref survives (never flattened to a claim's none)
+  for (const linkFailure of ["rejected", "unverified"] as const) {
+    const kept = startup({ seed: [KEPT_IMPL], handoff: IMPL, planRef: ref("42"), linkFailure });
+    assert.deepEqual(kept.facts.resolved, KEPT_IMPL, linkFailure);
+    assert.deepEqual(kept.facts.feedback.activePlanRef, ref("41"), linkFailure);
+  }
+
+  // (e) no cached ref preserves a non-null linked ref; nothing links when both are absent
+  const preserved = startup({
+    seed: [{ active_plan_ref: ref("41") }],
+    handoff: IMPL,
+    envRunId: "01RID",
+    planRef: null,
+  });
+  assert.deepEqual(preserved.calls, NO_APPEND);
+  assert.equal(preserved.appends.length, 1, "the claim entry only");
+  assert.deepEqual(preserved.facts.resolved.active_plan_ref, ref("41"));
+  const none = startup({ handoff: IMPL, envRunId: "01RID", planRef: null });
+  assert.equal(none.facts.feedback.activePlanRef, null);
+});
+
+test("a throwing linked-state rebuild propagates before any handoff or checkout read", () => {
+  const s = makeStore();
+  const identity = establishSessionIdentity(s.store, fakePorts({ handoff: IMPL }).ports, {
+    currentSessionId: "me.jsonl",
+    envRunId: "01RID",
+  });
+  const calls: string[] = [];
+  assert.throws(
+    () =>
+      resolveSessionStartFacts(
+        {
+          ...s.store,
+          rebuild: () => {
+            throw new Error("unreadable branch");
+          },
+        },
+        factReads(calls, { handoff: IMPL, planRef: ref("42") }),
+        { identity, registry: fakeRegistry(calls), currentSessionId: "me.jsonl" },
+      ),
+    /unreadable branch/,
+  );
+  assert.deepEqual(calls, [], "no guessed facts — nothing else was touched");
+  assert.equal(s.appends.length, 1, "the claim entry only");
+});
+
+test("sessionTreeFacts: pure over the selected-branch state — its own session id, adopted false, no capture, only the five facts read", () => {
   const state: WorkflowState = {
     run_id: "01RID.1",
     pi_session_id: "branch.jsonl",
@@ -1608,9 +950,5 @@ test("sessionTreeFacts: pure over the supplied selected-branch state — its own
       piSessionId: "child.jsonl",
       activePlanRef: null,
     },
-  });
-  assert.deepEqual(sessionTreeFacts({}), {
-    toolScope: { mode: undefined, stage: undefined },
-    feedback: { stage: null, adopted: false, runId: null, piSessionId: null, activePlanRef: null },
   });
 });
