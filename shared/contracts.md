@@ -4434,25 +4434,34 @@ discipline); this section keeps the unique cross-cutting rules.
   `extension/pi/v1/reviewRecord.ts`, threaded from the composition root into the plan installer's
   `PlanReviewBridge.current` and both browser doors) fences every Plannotator review: both doors
   open it right after the browser start succeeds (a start that throws never supersedes an earlier
-  review) and the four Plannotator `plan_review` arms open it around the bridge await. Opening
-  mints a local UUID, SUPERSEDES the previous record and resets `saved`; every decision — APPROVE
-  or DENY, door or arm — first passes an `isCurrent` check, and a decision for a superseded record
-  is ignored loudly (`superseded`: a warning report for the doors, `{status: "stale"}` for the
-  arms; feedback retained as DATA only). DENY never consults the approve gate. A plain APPROVE runs
-  the gate in this order: `already-saved` → `source-changed` (the artifact named at open is
-  re-read through the session and compared byte for byte; absent/invalid never equals; a `null`
-  source — the param-tier plan, refinement — skips this arm and the subject's own seam compares) →
-  `destination-unreadable` → `destination-changed`. The **save destination** is exactly three
-  readings taken at open and re-taken at approve: the main checkout's committed `[issues]
-  backend`/`team` (`substrate/config.ts::issueDestination`; absence is a value) and the sorted
-  `remote.*.url` set (`substrate/git.ts::remoteUrls`; `[]` is a value, `null` = git unreadable
-  and refuses at either end). Nothing else is fingerprinted — unrelated `.perk/*.toml` or `git
-  config` changes never invalidate a review. On `ok` the record marks itself saved BEFORE the save
-  runs (a repeated decision cannot duplicate a save); the check-to-save window is the accepted
-  residual. Nothing is persisted: a crash or reload loses the browser decision and the human
-  re-runs the door. The bridge (`providers/plannotator.ts`) subscribes to
-  `plannotator:review-result` BEFORE emitting the request and buffers decisions until the
-  handshake names the `reviewId` (foreign ids dropped; every handshake failure unsubscribes).
+  review) and the four Plannotator `plan_review` arms open it around the bridge await. The record
+  object itself is the identity (no minted id — `isCurrent` is reference equality); opening
+  SUPERSEDES the previous record and resets `saved`. Every decision — APPROVE or DENY, door or
+  arm — first passes an `isCurrent` check, and a decision for a superseded record is ignored
+  loudly (`superseded`: a warning report for the doors, `{status: "stale"}` for the arms; a
+  Direct-Edits APPROVE is never routed as a revise round; feedback retained as DATA only). The
+  doors' readiness observers carry the same fence: a superseded review's observer never announces
+  its server, degrades, clears the companion surfaces or flips its door session — those belong to
+  the newer review. DENY never consults the approve gate. A plain APPROVE runs the gate in this
+  order: `already-saved` → `source-changed` (the artifact named at open is re-read through the
+  session and compared byte for byte; absent/invalid never equals; a `null` source — the
+  param-tier plan, refinement — skips this arm and the subject's own seam compares) →
+  `destination-unreadable` → `destination-changed`. The baseline bytes and the view the reviewer
+  sees come from ONE artifact read per open (the objective and gist arms render from the same
+  bytes they store; the objective wave's `artifactRaw` is the same read). The **save
+  destination** is exactly three readings taken at open and re-taken at approve: the main
+  checkout's committed `[issues] backend`/`team` (`substrate/config.ts::issueDestination`;
+  absence is a value; the TOML subset reads every valid spelling of that table — literal/basic
+  strings, quoted keys and headers, a root dotted key or inline table — as `tomllib` does, so the
+  reading agrees with the Python save plane) and the sorted `remote.*.url` set
+  (`substrate/git.ts::remoteUrls`; `[]` is a value, `null` = git unreadable and refuses at either
+  end). Nothing else is fingerprinted — unrelated `.perk/*.toml` or `git config` changes never
+  invalidate a review. On `ok` the record marks itself saved BEFORE the save runs (a repeated
+  decision cannot duplicate a save); the check-to-save window is the accepted residual. Nothing is
+  persisted: a crash or reload loses the browser decision and the human re-runs the door. The
+  bridge (`providers/plannotator.ts`) subscribes to `plannotator:review-result` BEFORE emitting
+  the request and buffers decisions until the handshake names the `reviewId` (foreign ids
+  dropped; every handshake failure unsubscribes).
 
 - **Link/`consumed_learn` recovery carriers → §8.3.** Approval-triggered saves carry **no model
   params**; the **cold** `handoff_extra` carrier (→ §8.2) and the **warm**

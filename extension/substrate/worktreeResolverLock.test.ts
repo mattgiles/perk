@@ -75,6 +75,39 @@ test("exclusive private record, same-PID contention, release then reacquisition,
   c.finish("release");
 });
 
+test("an independently authored schema-1 record is honored: busy with the exact owner projection (token withheld, extra keys tolerated), bytes untouched", (t) => {
+  const cwd = fixture(t);
+  const path = lockPath(cwd);
+  // Hand-written rather than produced by the code under test: the on-disk schema is a
+  // cross-build contract (an older perk's claim must stay busy to a newer one), so the decode
+  // policy — token syntax, unknown keys, the diagnostic projection — is pinned from the outside.
+  const bytes = JSON.stringify({
+    schema: 1,
+    token: "legacy-token",
+    pid: 2147483647,
+    parentSessionId: "legacy-parent",
+    ownerRunId: "legacy-run",
+    requestId: "legacy-request",
+    worktreeIdentity: join(cwd, ".git"),
+    createdAt: "1900-01-01T00:00:00Z",
+    extra: true,
+  });
+  writeFileSync(path, bytes);
+  assert.deepEqual(acquireWorktreeResolverLock(cwd, parent), {
+    kind: "busy",
+    path,
+    owner: {
+      pid: 2147483647,
+      parentSessionId: "legacy-parent",
+      ownerRunId: "legacy-run",
+      requestId: "legacy-request",
+      worktreeIdentity: join(cwd, ".git"),
+      createdAt: "1900-01-01T00:00:00Z",
+    },
+  });
+  assert.equal(readFileSync(path, "utf8"), bytes);
+});
+
 test("retention closes resources and never reclaims on a later acquisition", (t) => {
   const cwd = fixture(t);
   let closes = 0;
