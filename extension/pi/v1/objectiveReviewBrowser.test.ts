@@ -351,6 +351,44 @@ test("observer: ready for a superseded review → no announce", async () => {
   clearDraftReviewContext(draftReview);
 });
 
+test("observer: superseded WHILE the bridge wait is pending → the post-await currency re-check stays silent (no report, no notice, surfaces untouched)", async () => {
+  // The review is still current when readiness settles `bridge_settled` (the first fence
+  // passes), a newer review opens while the observer awaits the bridge, then the bridge settles
+  // `unavailable`: the SECOND fence — after the await — must stop the degrade.
+  primeBoth();
+  let checks = 0;
+  const session: ObjectiveReviewDoorSession = {
+    degraded: false,
+    current: () => {
+      checks += 1;
+      return checks === 1; // current at the first fence, superseded by the second
+    },
+  };
+  let settleBridge: (out: ReviewOutcome) => void = () => {};
+  const started: StartedSurface<ReviewOutcome> = {
+    url: "http://127.0.0.1:45001",
+    port: 45001,
+    bridgePromise: new Promise<ReviewOutcome>((resolve) => {
+      settleBridge = resolve;
+    }),
+    readiness: Promise.resolve("bridge_settled"),
+  };
+  const observing = observe(started, { session });
+  // Let the observer pass the first fence and park on the bridge await before superseding.
+  await new Promise((r) => setImmediate(r));
+  assert.equal(checks, 1, "the observer passed the first fence while still current");
+  settleBridge({ status: "unavailable", warning: "boom" });
+  const { notifies, sent } = await observing;
+  assert.equal(checks, 2, "the post-await re-check ran");
+  assert.equal(notifies.length, 0, "no error report");
+  assert.equal(sent.length, 0, "no degrade notice");
+  assert.equal(await annotationMode(), "plan", "the newer review's annotation surface survives");
+  assert.equal(await draftContextPrimed(), true, "…and its draft-review context");
+  assert.equal(session.degraded, false, "the superseded session is never flipped");
+  clearAnnotationSurface(annotations);
+  clearDraftReviewContext(draftReview);
+});
+
 // --------------------------------------------------------------- routeObjectiveReviewDecision
 
 const PROSE = "# Ship retries\n\nThe gateway needs retries.\n";
