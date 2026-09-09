@@ -31,7 +31,7 @@ import { type BranchEntry, WORKFLOW_STATE_TYPE } from "../../substrate/workflowS
 import { scriptedDraftReviewBridge } from "../../testing/draftReview.ts";
 import { gitInit, loadPerkSession, scaffoldRepo, spyInjections } from "../../testing/harness.ts";
 import type { ReportWave } from "../../waves/reportWave.ts";
-import { createDraftReviewSlot } from "./draftReview.ts";
+import { createDraftReviewSlot, type OpenDraftReview } from "./draftReview.ts";
 import { installGistBindings } from "./gist.ts";
 import { installObjectiveAuthoringBindings } from "./objectiveAuthoring.ts";
 import { installObjectivePlanningBindings } from "./objectivePlanning.ts";
@@ -1039,6 +1039,7 @@ function plannotatorArm(
   const slot = createDraftReviewSlot(pi);
   return {
     cwd,
+    ctx,
     session,
     calls,
     bridge,
@@ -1293,6 +1294,51 @@ test("plannotator arm: a failed worker surfaces the feature's typed save failure
     assert.equal(again.details.status, "refused", JSON.stringify(again.details));
     assert.equal(again.details.error_type, "save_unconfirmed");
     assert.equal(arm.calls.length, 1, "no further worker call");
+  } finally {
+    arm.dispose();
+  }
+});
+
+test("plannotator arm: an APPROVE arriving after a newer review opened is superseded — ignored loudly, worker never invoked, the newer review stays current", async () => {
+  // The wiring pin: the arm calls the ladder BEFORE acting (an APPROVE — the arm whose miss
+  // would save). The ladder's own `superseded` coverage lives in draftReview.test.ts.
+  let arm: ReturnType<typeof plannotatorArm> | undefined;
+  let newer: OpenDraftReview | null = null;
+  arm = plannotatorArm(
+    { status: "completed", approved: true, reviewId: "rev-late" },
+    {
+      duringReview: () => {
+        // Another surface opens a review on the same slot while this decision is outstanding.
+        const live = arm as NonNullable<typeof arm>;
+        const opened = live.slot.open(live.ctx, {
+          subject: "refinement",
+          source: "artifact",
+          raw: "# a newer review\n",
+          markdown: "# a newer review\n",
+        });
+        if (!opened.ok) throw new Error(`the superseding open refused: ${opened.detail}`);
+        newer = opened.review;
+      },
+    },
+  );
+  try {
+    const result = await arm.run();
+    assert.equal(arm.bridge.reviewed.length, 1, "the bridge reviewed the rendered pair");
+    assert.deepEqual(result.details, {
+      ok: false,
+      error_type: "review_superseded",
+      status: "superseded",
+      subject: "refinement",
+    });
+    assert.match(String(result.content[0]?.text), /superseded by a newer review/);
+    assert.equal(result.terminate, undefined, "non-terminating");
+    assert.equal(arm.calls.length, 0, "the worker is never invoked");
+    assert.equal(arm.exits, 0, "the gate stays on");
+    assert.equal(
+      (newer as OpenDraftReview | null)?.isCurrent(),
+      true,
+      "the newer review is the current one",
+    );
   } finally {
     arm.dispose();
   }

@@ -34,7 +34,11 @@ import {
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
-import { scriptedDraftReviewBridge, scriptedRemotesSlot } from "../../testing/draftReview.ts";
+import {
+  scriptedDraftReviewBridge,
+  scriptedRemotesSlot,
+  supersedingDraftReviewBridge,
+} from "../../testing/draftReview.ts";
 import {
   fakePerk,
   loadPerkSession,
@@ -1180,6 +1184,39 @@ test("gist arm: approved but the draft vanished during the review -> stale-appro
   assert.match(String(result.content[0]?.text), /working draft changed after the review opened/);
   assert.match(String(result.content[0]?.text), /Nothing was saved/);
   assert.equal(argvs.length, 0, "the cold door was never invoked");
+});
+
+test("gist arm: an APPROVE arriving after a newer review opened is superseded — ignored loudly, nothing saved, the newer review stays current", async () => {
+  // The wiring pin: the arm calls the ladder BEFORE acting (an APPROVE — the arm whose miss
+  // would save). The ladder's own `superseded` coverage lives in draftReview.test.ts.
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry(GIST_STATE)];
+  const ctx = headfulCtx(cwd, branch);
+  const extCtx = ctx as unknown as ExtensionContext;
+  plantGistDraft(ctx, branch);
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: GIST_JSON, argvs });
+  const gating = fakeGating(true);
+  const slot = scriptedRemotesSlot(pi);
+  const bridge = supersedingDraftReviewBridge(slot, extCtx, "gist", {
+    status: "completed",
+    approved: true,
+    reviewId: "rev-late",
+  });
+  const result = await runGistReviewV1(pi, extCtx, gating, bridge, undefined, slot);
+  assert.equal(bridge.reviewed.length, 1, "the bridge reviewed the rendered draft");
+  assert.deepEqual(result.details, {
+    ok: false,
+    error_type: "review_superseded",
+    status: "superseded",
+    subject: "gist",
+  });
+  assert.match(String(result.content[0]?.text), /superseded by a newer review/);
+  assert.equal(result.terminate, undefined, "non-terminating");
+  assert.equal(argvs.length, 0, "nothing saved");
+  assert.equal(gating.exits, 0, "the gate stays on");
+  assert.equal(bridge.opened?.isCurrent(), true, "the newer review is the current one");
 });
 
 test("gist arm: denied + feedback -> gist_draft redirect, no save", async () => {

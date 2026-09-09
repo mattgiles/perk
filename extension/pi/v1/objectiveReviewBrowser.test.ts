@@ -590,6 +590,39 @@ test("decision: a superseded review's decision is ignored loudly — one TUI war
   assert.equal(s.argvs.length, 1, "the current review still saves");
 });
 
+test("decision: a superseded Direct-Edits APPROVE is ignored loudly — never routed as the revise round, no injection, no save", async () => {
+  // The one classification the shared ladder does not pin: `objectiveEffectOf` runs BEFORE the
+  // ladder (a Direct-Edits APPROVE is a `revision` effect), so the door must still hand the
+  // superseded review to the ladder rather than inject the revise round.
+  const s = decisionScaffold();
+  const first = s.open();
+  const second = s.open();
+  assert.equal(first.isCurrent(), false);
+  const out: ReviewOutcome = {
+    status: "completed",
+    approved: true,
+    reviewId: "rev-de-late",
+    feedback: DE_FEEDBACK,
+  };
+  await s.route(out, first);
+  assert.equal(s.argvs.length, 0, "nothing saved");
+  assert.equal(s.gating.exits, 0);
+  assert.equal(s.injected.length, 0, "never routed as the revise round — nothing injected");
+  assert.equal(s.notified.length, 1, "exactly one TUI warning");
+  assert.equal(s.notified[0]?.severity, "warning");
+  assert.ok(s.notified[0]?.message.endsWith(SUPERSEDED_DECISION_WARNING));
+  assert.ok(
+    s.notified.every((n) => !/APPROVED with direct browser edits/.test(n.message)),
+    "no revise-round report either",
+  );
+  // The current (second) review's plain APPROVE routes and saves once.
+  await s.route(APPROVE_OUT, second);
+  assert.equal(s.argvs.length, 1, "the current review still saves");
+  assert.equal(s.gating.exits, 1);
+  assert.equal(s.injected.length, 1);
+  assert.match(s.injected[0]?.message ?? "", /objective APPROVED by reviewer/);
+});
+
 test("decision: APPROVE + Direct Edits heading → NO save, revise inject, gate untouched", async () => {
   // Even a heading-only/malformed diff routes revise — the heading check suffices (the diff
   // goes to the model verbatim either way).

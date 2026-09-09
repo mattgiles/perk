@@ -7,11 +7,12 @@
 // `testing/` home).
 
 import { execFileSync } from "node:child_process";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   createDraftReviewSlot,
   type DraftReviewSlot,
   type DraftReviewSubject,
+  type OpenDraftReview,
   REVIEW_SUBJECT_ARTIFACTS,
 } from "../pi/v1/draftReview.ts";
 import type { ReviewOutcome } from "../pi/v1/reviewOutcome.ts";
@@ -35,6 +36,46 @@ export function scriptedDraftReviewBridge(outcome: ReviewOutcome): {
       return outcome;
     },
   };
+}
+
+/**
+ * A bridge that models "another surface opened while the decision was outstanding": `review`
+ * records the plan, opens a SECOND review on `slot` (superseding the caller's), stores the
+ * returned review in `opened` (the slot has no current-review getter — tests read
+ * `opened.isCurrent()` for the newer review's currency assertion), then returns `outcome`. A
+ * slot refusal throws: the fixture must never silently leave the caller current.
+ */
+export function supersedingDraftReviewBridge(
+  slot: DraftReviewSlot,
+  ctx: ExtensionContext,
+  subject: DraftReviewSubject,
+  outcome: ReviewOutcome,
+): {
+  review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome>;
+  reviewed: string[];
+  opened: OpenDraftReview | null;
+} {
+  const reviewed: string[] = [];
+  const bridge = {
+    reviewed,
+    opened: null as OpenDraftReview | null,
+    async review(plan: string) {
+      reviewed.push(plan);
+      const newer = slot.open(ctx, {
+        subject,
+        source: "artifact",
+        raw: "# a newer review\n",
+        markdown: "# a newer review\n",
+      });
+      if (!newer.ok)
+        throw new Error(
+          `supersedingDraftReviewBridge: the superseding open refused (${newer.detail})`,
+        );
+      bridge.opened = newer.review;
+      return outcome;
+    },
+  };
+  return bridge;
 }
 
 /** The scripted `git config remote.*` read a fresh `scriptedRemotesSlot` starts from. */

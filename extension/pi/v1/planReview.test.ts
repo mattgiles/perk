@@ -28,6 +28,7 @@ import {
   SCRIPTED_ORIGIN,
   scriptedDraftReviewBridge,
   scriptedRemotesSlot,
+  supersedingDraftReviewBridge,
 } from "../../testing/draftReview.ts";
 import { gitInit, loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
 import type { DraftReviewSlot } from "./draftReview.ts";
@@ -1411,9 +1412,9 @@ test("chooser: an abort landing during the awaited opener -> aborted, never wave
 // ---------------------------------------------------- the objective wave arm (baseline ordering)
 
 /**
- * Measure how many `getBranch` calls the production baseline prefix makes — the session open
- * plus ONE validated artifact read (self-adapting to seam refactors) — so the ordering pin
- * below can swap the world exactly between the baseline read and the validated re-read.
+ * Measure how many `getBranch` calls the production resume prefix makes — the session open
+ * plus ONE validated artifact read (self-adapting to seam refactors) — so the single-read pin
+ * below can swap the world exactly AFTER that one read (where a second read would land).
  */
 function measureArtifactReadCalls(): number {
   const cwd = scaffoldRepo();
@@ -1443,7 +1444,12 @@ function measureArtifactReadCalls(): number {
 const OBJ_V1 = JSON.stringify({ schema_version: 1, prose: "Baseline prose (v1)." });
 const OBJ_V2 = JSON.stringify({ schema_version: 1, prose: "Newer prose (v2)." });
 
-test("objective wave arm: the stale-guard baseline is captured BEFORE the validated read (ordering pin)", async () => {
+test("objective wave arm: the stale-guard baseline and the render derive from ONE read — a concurrent write landing right after it splits nothing", async () => {
+  // The single-read pin: the reviewed-bytes baseline (`artifactRaw`) and the rendering the
+  // human sees come from the SAME validated read. A concurrent objective_draft write (-> v2,
+  // file + pointer together) fires exactly where a second read would begin; were there one,
+  // the render would be v2 while the baseline stayed v1 (the human reviews A, the record
+  // says B — at approval live = B = baseline passes and unreviewed bytes save).
   const cwd = scaffoldRepo();
   selectPlanProvider(cwd, "plannotator-plan");
   const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
@@ -1456,8 +1462,8 @@ test("objective wave arm: the stale-guard baseline is captured BEFORE the valida
     "v2 landed",
   );
   const branchV2 = [...branch];
-  // Rewind the world to v1; a concurrent objective_draft write (-> v2, file + pointer together)
-  // fires between the two reads — after exactly one full artifact read's worth of branch reads.
+  // Rewind the world to v1; the write to v2 fires after exactly one full artifact read's worth
+  // of branch reads.
   writeFileSync(path ?? "", OBJ_V1, "utf8");
   const perRead = measureArtifactReadCalls();
   let calls = 0;
@@ -1486,17 +1492,13 @@ test("objective wave arm: the stale-guard baseline is captured BEFORE the valida
   );
   assert.equal(wave.objectiveCalls.length, 1, "the objective opener launched");
   const call = wave.objectiveCalls[0];
-  assert.equal(
-    call?.artifactRaw,
-    OBJ_V1,
-    "artifactRaw is the FIRST read's bytes — the pre-validated-read baseline, never a re-read",
-  );
+  assert.equal(call?.artifactRaw, OBJ_V1, "artifactRaw is the one read's bytes");
   assert.match(
     call?.rendered ?? "",
-    /Newer prose \(v2\)\./,
-    "the render derives from the later read",
+    /Baseline prose \(v1\)\./,
+    "the render derives from the SAME read — never a re-read that could see the newer write",
   );
-  assert.doesNotMatch(call?.rendered ?? "", /Baseline prose/);
+  assert.doesNotMatch(call?.rendered ?? "", /Newer prose/);
   assert.equal(bridge.reviewed.length, 0, "no blocking review on the wave arm");
   assert.equal(result.terminate, undefined, "non-terminating");
   const details = result.details as Record<string, unknown>;
@@ -1820,6 +1822,53 @@ test("plannotator arm: the ladder runs before the completion — a destination d
     assert.equal(argvs.length, 1, "exactly one save call");
     assert.equal(gating.exits, 1);
   });
+});
+
+test("plannotator arm: an APPROVE arriving after a newer review opened is superseded — ignored loudly, nothing saved, the newer review stays current", async () => {
+  // The wiring pin: the arm calls the ladder BEFORE acting. The ladder's own `superseded`
+  // coverage of save + revision lives in draftReview.test.ts; here an APPROVE (the arm whose
+  // miss would save) must reach `supersededReviewResult`, never the save path.
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ctx = headfulCtx(cwd, branch);
+  const extCtx = ctx as unknown as ExtensionContext;
+  assert.ok(
+    writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+    "the draft artifact landed",
+  );
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+  const gating = fakeGating(true);
+  const slot = scriptedRemotesSlot(pi);
+  const bridge = supersedingDraftReviewBridge(slot, extCtx, "plan", {
+    status: "completed",
+    approved: true,
+    reviewId: "rev-late",
+  });
+  const result = await executePlanReview(
+    pi,
+    extCtx,
+    gating,
+    bridge,
+    depsFor(pi, ctx, gating),
+    {},
+    undefined,
+    undefined,
+    slot,
+  );
+  assert.equal(bridge.reviewed.length, 1, "the bridge reviewed the draft");
+  assert.deepEqual(result.details, {
+    ok: false,
+    error_type: "review_superseded",
+    status: "superseded",
+    subject: "plan",
+  });
+  assert.match(String(result.content[0]?.text), /superseded by a newer review/);
+  assert.equal(result.terminate, undefined, "non-terminating");
+  assert.equal(argvs.length, 0, "nothing saved");
+  assert.equal(gating.exits, 0, "the gate stays on");
+  assert.equal(bridge.opened?.isCurrent(), true, "the newer review is the current one");
 });
 
 test("/implement-here supersedes the open review: a browser decision arriving afterwards is ignored", async () => {

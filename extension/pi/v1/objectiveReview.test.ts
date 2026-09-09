@@ -21,6 +21,7 @@ import {
   SCRIPTED_ORIGIN,
   scriptedDraftReviewBridge,
   scriptedRemotesSlot,
+  supersedingDraftReviewBridge,
 } from "../../testing/draftReview.ts";
 import { scaffoldRepo } from "../../testing/harness.ts";
 import type { DraftReviewSlot, DraftReviewSnapshot } from "./draftReview.ts";
@@ -950,6 +951,49 @@ test("objective arm: the first-party review opens the slot (superseding a prior 
   assert.equal((steady.details as { saved?: boolean }).saved, true);
   assert.equal(argvs.length, 1, "one save call");
   assert.equal(gating.exits, 1);
+});
+
+test("objective arm: an APPROVE arriving after a newer review opened is superseded — ignored loudly, nothing saved, the newer review stays current", async () => {
+  // The wiring pin: the arm calls the ladder BEFORE acting (an APPROVE — the arm whose miss
+  // would save). The ladder's own `superseded` coverage lives in draftReview.test.ts.
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
+  const ctx = headfulCtx(cwd, branch);
+  const extCtx = ctx as unknown as ExtensionContext;
+  plantObjectiveDraft(ctx, branch);
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: OBJECTIVE_JSON, argvs });
+  const gating = fakeGating(true);
+  const slot = scriptedRemotesSlot(pi);
+  const bridge = supersedingDraftReviewBridge(slot, extCtx, "objective", {
+    status: "completed",
+    approved: true,
+    reviewId: "rev-late",
+  });
+  const result = await executePlanReview(
+    pi,
+    extCtx,
+    gating,
+    bridge,
+    stubDeps(pi, ctx),
+    {},
+    undefined,
+    undefined,
+    slot,
+  );
+  assert.equal(bridge.reviewed.length, 1, "the bridge reviewed the rendered draft");
+  assert.deepEqual(result.details, {
+    ok: false,
+    error_type: "review_superseded",
+    status: "superseded",
+    subject: "objective",
+  });
+  assert.match(String(result.content[0]?.text), /superseded by a newer review/);
+  assert.equal(result.terminate, undefined, "non-terminating");
+  assert.equal(argvs.length, 0, "nothing saved");
+  assert.equal(gating.exits, 0, "the gate stays on");
+  assert.equal(bridge.opened?.isCurrent(), true, "the newer review is the current one");
 });
 
 // ---------------------------------------------------------------------------------- wrappers
