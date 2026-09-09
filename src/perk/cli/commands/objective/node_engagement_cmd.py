@@ -1,33 +1,62 @@
-"""``perk objective node-engagement <NUMBER> --node ID [--json]`` — read a node-issue's
-pre-planning human engagement.
+"""``perk objective node-engagement <NUMBER> --node ID [--json]`` — read one roadmap node's
+advisory DATA: its pre-planning human engagement plus its saved refinement (§8.26).
 
-The **warm path's fetch surface** + a human/CI affordance: a roadmap node-issue may carry human
-comments / description edits made **before** perk ever plans it. This read worker surfaces that
-engagement as the rendered ``<untrusted_node_engagement>`` DATA block (or a "no engagement" note).
-Read-only — consistent with the model already shelling ``perk objective show`` from the seed (a
-read worker, never a mutation affordance).
+The **warm path's fetch surface** + a human/CI affordance over the shared selected-node
+assembly (:mod:`perk.cli.commands.objective.node_context`). The two advisory reads are
+independent and each typed on its own outcome: the bounded engagement block (``present`` /
+``absent`` / ``unavailable``) and the full dated ``<untrusted_node_refinement>`` block
+(``present`` / ``absent`` / ``unsupported`` / ``unavailable``). A present refinement is written
+under the run's scratch dir (``$PERK_RUN_ID`` or a minted run id — the ``pr review-context``
+rule; a launched session's bash inherits the live run id) and the payload carries a pointer
+``{path, bytes, lines, max_line_bytes}`` — never the inline text, whose full body can exceed
+what a model's ``read`` tool accepts. Nothing is written for the other arms.
 
-Linear-first: GitHub single-issue objectives + the dormant issue-backed Linear store return the
-empty bundle (the block is ``None``, the human/JSON surface says "no pre-planning engagement").
+Authoritative failures stay hard (not a repo, invalid input, store resolution/lookup, an unknown
+node → ``node_not_found``); advisory failures are **partial success** — exit 0 with typed
+``warnings``. Read-only against the backend (a read worker, never a mutation affordance); its
+only write is the gitignored scratch file.
+
+Linear-first: GitHub single-issue objectives + the dormant issue-backed Linear store report the
+refinement as ``unsupported`` quietly and the engagement as ``absent`` (their engagement read
+returns the empty bundle).
 
 Supervisor surface: ``--json`` → stdout machine payload, human text → stderr,
 stable exits (``0`` ok · ``1`` invalid/op-failure · ``2`` not-a-repo).
 """
 
-import dataclasses
-import json
+import functools
+import os
+from typing import Annotated, Literal
 
 import click
+from pydantic import Field
 
 from perk.backends import resolve
-from perk.backends.engagement import render_node_engagement
+from perk.backends.engagement import (
+    AuthorKind,
+    DescriptionEdit,
+    EngagementAuthor,
+    EngagementComment,
+)
+from perk.backends.issue_backend import IssueBackendError
 from perk.backends.objective_store import ObjectiveStoreError
+from perk.boundary import OutputModel
 from perk.cli import completions
+from perk.cli.commands.objective.node_context import (
+    EngagementStatus,
+    NodeContext,
+    NodeContextWarning,
+    WarningSurface,
+    assemble_node_context,
+    snapshot_refinement,
+)
 from perk.cli.commands.objective.shared import parse_objective_id
 from perk.cli.context import require_repo
-from perk.cli.emit import fail
+from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
-from perk.substrate.output import machine_output, user_output
+from perk.cli.paged_files import TextFileRefOut
+from perk.state import run_id as run_id_mod
+from perk.substrate.output import user_output
 
 
 @click.command("node-engagement")
@@ -38,26 +67,36 @@ from perk.substrate.output import machine_output, user_output
 def node_engagement_objective(
     ctx: click.Context, *, number: str, node_id: str, as_json: bool
 ) -> None:
-    """Read a roadmap node-issue's pre-planning human engagement (comments + description edits).
+    """Read a roadmap node's advisory DATA: pre-planning human engagement + saved refinement.
 
     \b
     Examples:
-      perk objective node-engagement 7 --node 2.1          # rendered untrusted-DATA block (stderr)
+      perk objective node-engagement 7 --node 2.1          # rendered untrusted-DATA blocks (stderr)
       perk objective node-engagement 7 --node 2.1 --json   # machine payload (stdout)
     """
     try:
         repo_root = require_repo(ctx)
         number = parse_objective_id(number)
-        store = resolve.resolve_objective_store(repo_root)
-        state = store.get_objective(objective_id=number)
+        node_id = node_id.strip()
+        if not node_id:
+            raise UserFacingCliError("--node must not be blank.", error_type="invalid_input")
+        try:
+            store = resolve.resolve_objective_store(repo_root)
+            state = store.get_objective(objective_id=number)
+        except (ObjectiveStoreError, IssueBackendError) as exc:
+            # The worker's store-failure vocabulary; the IssueBackendError arm covers a bad
+            # ``[issues]`` selection surfacing from the resolver.
+            fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
+            return
         if state is None:
             raise UserFacingCliError(
                 f"Objective #{number} not found", error_type="objective_not_found"
             )
-        engagement = store.read_node_engagement(objective_id=number, node_id=node_id)
-    except ObjectiveStoreError as exc:
-        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
-        return
+        if node_id not in {node.id for node in state.nodes}:
+            raise UserFacingCliError(
+                f"Node {node_id!r} not found on objective #{number}.",
+                error_type="node_not_found",
+            )
     except UserFacingCliError as exc:
         fail(
             ctx,
@@ -67,23 +106,178 @@ def node_engagement_objective(
         )
         return
 
-    block = render_node_engagement(engagement)
-    if as_json:
-        machine_output(
-            json.dumps(
-                {
-                    "success": True,
-                    "error_type": None,
-                    "objective": number,
-                    "node": node_id,
-                    "comments": [dataclasses.asdict(c) for c in engagement.comments],
-                    "description_edits": [
-                        dataclasses.asdict(e) for e in engagement.description_edits
-                    ],
-                }
-            )
-        )
-    elif block is not None:
-        user_output(block)
+    # Advisory from here on: failures become warnings, never a non-zero exit.
+    context = assemble_node_context(
+        store,
+        objective_id=number,
+        node_id=node_id,
+        issues=functools.partial(resolve.resolve_issue_backend, repo_root),
+    )
+    if context.refinement_status == "present":
+        effective_run_id = os.environ.get("PERK_RUN_ID") or run_id_mod.mint()
+        context = snapshot_refinement(context, repo_root=repo_root, run_id=effective_run_id)
+
+    emit(
+        as_json=as_json,
+        payload=ObjectiveNodeEngagementOut.from_domain(context).model_dump(mode="json"),
+        render=lambda: _render_human(context),
+    )
+
+
+def _render_human(context: NodeContext) -> None:
+    if context.engagement_block is not None:
+        user_output(context.engagement_block)
     else:
-        user_output(f"no pre-planning engagement on node {node_id}")
+        user_output(f"no pre-planning engagement on node {context.node_id}")
+    if context.refinement_status == "present":
+        # The serializer's precondition guarantees a snapshotted context here (block + file).
+        if context.refinement_block is not None:
+            user_output(context.refinement_block)
+        if context.refinement_file is not None:
+            user_output(f"refinement: {context.refinement_file.path}")
+    else:
+        user_output(f"refinement: {context.refinement_status}")
+    for warning in context.warnings:
+        user_output(f"warning: [{warning.surface}/{warning.code}] {warning.message}")
+
+
+# --------------------------------------------------------------------------- --json boundary
+# Field order is load-bearing. The engagement models mirror the ``engagement.py`` dataclasses
+# field-for-field so the ``comments`` / ``description_edits`` arrays serialize exactly as the
+# earlier ``dataclasses.asdict`` payload did.
+
+
+class EngagementAuthorOut(OutputModel):
+    """The classified author of one engagement item (``kind`` + best-available label/id)."""
+
+    kind: AuthorKind
+    display_name: str | None
+    id: str | None
+
+    @classmethod
+    def from_domain(cls, author: EngagementAuthor) -> "EngagementAuthorOut":
+        return cls(kind=author.kind, display_name=author.display_name, id=author.id)
+
+
+class EngagementCommentOut(OutputModel):
+    """One node-issue comment; ``body`` is untrusted DATA."""
+
+    id: str
+    body: str
+    created_at: str
+    edited_at: str | None
+    author: EngagementAuthorOut
+
+    @classmethod
+    def from_domain(cls, comment: EngagementComment) -> "EngagementCommentOut":
+        return cls(
+            id=comment.id,
+            body=comment.body,
+            created_at=comment.created_at,
+            edited_at=comment.edited_at,
+            author=EngagementAuthorOut.from_domain(comment.author),
+        )
+
+
+class DescriptionEditOut(OutputModel):
+    """One node-issue description edit; ``diff`` is untrusted DATA (null when the backend
+    exposes no inline diff)."""
+
+    created_at: str
+    author: EngagementAuthorOut
+    diff: str | None
+
+    @classmethod
+    def from_domain(cls, edit: DescriptionEdit) -> "DescriptionEditOut":
+        return cls(
+            created_at=edit.created_at,
+            author=EngagementAuthorOut.from_domain(edit.author),
+            diff=edit.diff,
+        )
+
+
+class NodeContextWarningOut(OutputModel):
+    """One advisory failure: the ``surface`` that failed, a stable ``code``, a human
+    ``message``, and the carrier comment ids the outcome rests on."""
+
+    surface: WarningSurface
+    code: str
+    message: str
+    comment_ids: tuple[str, ...]
+
+    @classmethod
+    def from_domain(cls, warning: NodeContextWarning) -> "NodeContextWarningOut":
+        return cls(
+            surface=warning.surface,
+            code=warning.code,
+            message=warning.message,
+            comment_ids=warning.comment_ids,
+        )
+
+
+class NodeRefinementPresentOut(OutputModel):
+    """A saved refinement was read, rendered and written: ``file`` points at the full dated
+    ``<untrusted_node_refinement>`` block under the run scratch dir."""
+
+    status: Literal["present"]
+    file: TextFileRefOut
+
+
+class NodeRefinementStatusOut(OutputModel):
+    """No refinement pointer: none is saved (``absent``), the backend has no refinement read
+    (``unsupported``), or the read/snapshot failed (``unavailable`` — see ``warnings``)."""
+
+    status: Literal["absent", "unsupported", "unavailable"]
+
+
+class ObjectiveNodeEngagementOut(OutputModel):
+    """The ``--json`` serialization boundary of a snapshotted :class:`NodeContext` (field order
+    load-bearing; the pre-existing keys come first). ``refinement`` is discriminated on
+    ``status``: ``present`` always carries a ``file`` pointer — in the payload it means "the
+    file is on disk", never merely "a record was read"."""
+
+    success: bool
+    error_type: str | None
+    objective: str
+    node: str
+    comments: tuple[EngagementCommentOut, ...]
+    description_edits: tuple[DescriptionEditOut, ...]
+    engagement_status: EngagementStatus
+    refinement: Annotated[
+        NodeRefinementPresentOut | NodeRefinementStatusOut, Field(discriminator="status")
+    ]
+    warnings: tuple[NodeContextWarningOut, ...]
+
+    @classmethod
+    def from_domain(cls, context: NodeContext) -> "ObjectiveNodeEngagementOut":
+        """Precondition: a ``present`` context must be snapshotted (``refinement_file`` set).
+        The assembled-only state is never a wire state — reaching here with it is a programmer
+        error, refused with ``ValueError`` rather than serialized as a pointer-less ``present``.
+        """
+        refinement: NodeRefinementPresentOut | NodeRefinementStatusOut
+        if context.refinement_status == "present":
+            if context.refinement_file is None:
+                raise ValueError(
+                    "a present refinement must be snapshotted before serialization "
+                    "(refinement_file is None)"
+                )
+            refinement = NodeRefinementPresentOut(
+                status="present", file=TextFileRefOut.from_domain(context.refinement_file)
+            )
+        else:
+            refinement = NodeRefinementStatusOut(status=context.refinement_status)
+        return cls(
+            success=True,
+            error_type=None,
+            objective=context.objective_id,
+            node=context.node_id,
+            comments=tuple(
+                EngagementCommentOut.from_domain(c) for c in context.engagement.comments
+            ),
+            description_edits=tuple(
+                DescriptionEditOut.from_domain(e) for e in context.engagement.description_edits
+            ),
+            engagement_status=context.engagement_status,
+            refinement=refinement,
+            warnings=tuple(NodeContextWarningOut.from_domain(w) for w in context.warnings),
+        )
