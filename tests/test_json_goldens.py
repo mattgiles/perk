@@ -495,3 +495,112 @@ def test_golden_learn_skip() -> None:
     from perk.cli.commands.learn.skip_cmd import _result_to_dict
 
     assert_golden("learn_skip", _result_to_dict(_learn_skip_result()))
+
+
+# --- objective node-engagement ------------------------------------------------------------
+
+
+def _node_engagement_sample():
+    from perk.backends import engagement
+
+    ada = engagement.EngagementAuthor(kind="human", display_name="Ada", id="u-1")
+    return engagement.NodeEngagement(
+        comments=(
+            engagement.EngagementComment(
+                id="c-1",
+                body="please scope this down",
+                created_at="2026-03-01",
+                edited_at=None,
+                author=ada,
+            ),
+        ),
+        description_edits=(
+            engagement.DescriptionEdit(created_at="2026-03-02", author=ada, diff=None),
+        ),
+    )
+
+
+def _objective_node_engagement_context():
+    """A snapshotted present context at a fixed refinement path (no filesystem)."""
+    from pathlib import Path
+
+    from perk.backends.engagement import render_node_engagement
+    from perk.cli.commands.objective.node_context import NodeContext, RefinementSnapshotted
+    from perk.cli.paged_files import TextFileRef
+
+    sample = _node_engagement_sample()
+    block = "<untrusted_node_refinement>\n…\n</untrusted_node_refinement>"
+    text = block + "\n"
+    return NodeContext(
+        objective_id="7",
+        node_id="2.1",
+        engagement=sample,
+        engagement_status="present",
+        engagement_block=render_node_engagement(sample),
+        refinement=RefinementSnapshotted(
+            block=block,
+            comment_id="c-9",
+            file=TextFileRef(
+                path=Path("/repo/.perk/workflow/scratch/runs/RUN/node-context/7/2.1/refinement.md"),
+                bytes=len(text.encode("utf-8")),
+                lines=len(text.splitlines()),
+                max_line_bytes=max(len(line.encode("utf-8")) for line in text.splitlines()),
+            ),
+        ),
+        warnings=(),
+    )
+
+
+def _objective_node_engagement_unavailable_context():
+    """Both surfaces failed: empty arrays, no pointer, two warnings in read order."""
+    from perk.backends.engagement import EMPTY_NODE_ENGAGEMENT
+    from perk.cli.commands.objective.node_context import (
+        ENGAGEMENT_READ_FAILED,
+        NodeContext,
+        NodeContextWarning,
+        RefinementMissing,
+    )
+
+    return NodeContext(
+        objective_id="7",
+        node_id="2.1",
+        engagement=EMPTY_NODE_ENGAGEMENT,
+        engagement_status="unavailable",
+        engagement_block=None,
+        refinement=RefinementMissing("unavailable"),
+        warnings=(
+            NodeContextWarning(
+                surface="engagement",
+                code=ENGAGEMENT_READ_FAILED,
+                message="node engagement unavailable: linear boom",
+            ),
+            NodeContextWarning(
+                surface="refinement",
+                code="backend_error",
+                message="could not read comments on ENG-21: 502",
+                comment_ids=("c-9",),
+            ),
+        ),
+    )
+
+
+def test_golden_objective_node_engagement() -> None:
+    from perk.cli.commands.objective.node_engagement_cmd import ObjectiveNodeEngagementOut
+
+    assert_golden(
+        "objective_node_engagement",
+        ObjectiveNodeEngagementOut.from_domain(_objective_node_engagement_context()).model_dump(
+            mode="json"
+        ),
+    )
+
+
+def test_golden_objective_node_engagement_unavailable() -> None:
+    from perk.cli.commands.objective.node_engagement_cmd import ObjectiveNodeEngagementOut
+
+    assert_golden(
+        "objective_node_engagement_unavailable",
+        ObjectiveNodeEngagementOut.from_domain(
+            _objective_node_engagement_unavailable_context()
+        ).model_dump(mode="json"),
+    )

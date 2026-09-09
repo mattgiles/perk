@@ -19,9 +19,10 @@ Layout (under a per-invocation directory — concurrent lanes never share one):
 Text is written byte-exact (no trimming, no newline normalization): a reformatted diff would
 break the `line` anchors and hunk headers the reviewers report against.
 
-A stdlib-only leaf beside the cache seam: imports `perk.state.cache` (the run scratch dir is the
-one sanctioned scratch path root) and `perk.substrate.fs` (the atomic writer) — never the
-command module.
+A leaf beside the cache seam: imports `perk.state.cache` (the run scratch dir is the one
+sanctioned scratch path root) and `perk.cli.paged_files` (the shared byte-exact paged-file
+writer + `TextFileRef` measurement — the same leaf the objective node context writes through)
+— never the command module.
 """
 
 import uuid
@@ -30,23 +31,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from perk.cli.paged_files import TextFileRef, write_text_file
 from perk.state import cache
-from perk.substrate.fs import atomic_write_text
-
-
-@dataclass(frozen=True)
-class TextFileRef:
-    """A materialized text section: where it lives plus the sizes a pager needs up front.
-
-    ``bytes`` is the UTF-8 length, ``lines`` the ``splitlines()`` count, and ``max_line_bytes``
-    the UTF-8 length of the longest line — the number a reviewer child compares against Pi's
-    per-line ``read`` bound (51,200 bytes) to decide whether a byte-slice fallback is needed.
-    """
-
-    path: Path
-    bytes: int
-    lines: int
-    max_line_bytes: int
 
 
 @dataclass(frozen=True)
@@ -104,28 +90,13 @@ def context_dir_for(repo_root: Path, *, pr_number: int, stack: bool, run_id: str
     )
 
 
-def _measure(path: Path, text: str) -> TextFileRef:
-    lines = text.splitlines()
-    return TextFileRef(
-        path=path,
-        bytes=len(text.encode("utf-8")),
-        lines=len(lines),
-        max_line_bytes=max((len(line.encode("utf-8")) for line in lines), default=0),
-    )
-
-
-def _write(path: Path, text: str) -> TextFileRef:
-    atomic_write_text(path, text)
-    return _measure(path, text)
-
-
 def _write_sections(directory: Path, sections: ContextSections) -> MaterializedSections:
     directory.mkdir(parents=True, exist_ok=True)
     plan_body = sections.plan_body
     return MaterializedSections(
-        body=_write(directory / "body.md", sections.body),
-        diff=_write(directory / "diff.patch", sections.diff),
-        plan_body=None if plan_body is None else _write(directory / "plan.md", plan_body),
+        body=write_text_file(directory / "body.md", sections.body),
+        diff=write_text_file(directory / "diff.patch", sections.diff),
+        plan_body=None if plan_body is None else write_text_file(directory / "plan.md", plan_body),
     )
 
 
@@ -171,5 +142,5 @@ def materialize_review_context(
         context_dir=context_dir,
         top=written[-1],
         members=written,
-        combined_diff=_write(context_dir / "combined.patch", combined_diff),
+        combined_diff=write_text_file(context_dir / "combined.patch", combined_diff),
     )

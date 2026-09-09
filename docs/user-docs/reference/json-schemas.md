@@ -74,6 +74,7 @@ category directory.
 | `objective-stack-recover.schema.json` | `ObjectiveStackRecoverOut` | `serialization` | Interrupted-operation classification and recovery result. |
 | `objective-stack-land.schema.json` | `ObjectiveStackLandOut` | `serialization` | Atomic train readiness or landing result. |
 | `objective-doctor.schema.json` | `ObjectiveDoctorOut` | `serialization` | Objective manifest, cancellation, and train diagnosis. |
+| `objective-node-engagement.schema.json` | `ObjectiveNodeEngagementOut` | `serialization` | Node pre-planning engagement plus the refinement pointer and advisory warnings. |
 <!-- perk:reference-facts:schemas-outputs:end -->
 
 The `validation` mode records what a parser accepts. The `serialization` mode records what a JSON

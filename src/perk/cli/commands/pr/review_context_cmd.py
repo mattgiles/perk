@@ -59,6 +59,7 @@ from perk.cli.commands.pr.review.stack_resolve import ResolvedStack, resolve_sta
 from perk.cli.context import require_repo
 from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
+from perk.cli.paged_files import TextFileRefOut
 from perk.github import GitHubError
 from perk.run import launch
 from perk.state import cache
@@ -462,26 +463,6 @@ def _resolve_plan_body(repo_root: Path, plan_ref: plan.PlanRef) -> str | None:
     if not pr_id:
         return None
     return _fetch_plan_body(repo_root, pr_id)
-
-
-class TextFileRefOut(OutputModel):
-    """One materialized text section: its absolute ``path`` plus the sizes a reviewer pages
-    against — ``max_line_bytes`` is the longest line's UTF-8 length (compared against Pi's
-    per-line ``read`` bound to pick the byte-slice fallback)."""
-
-    path: str
-    bytes: int
-    lines: int
-    max_line_bytes: int
-
-    @classmethod
-    def from_domain(cls, ref: TextFileRef) -> "TextFileRefOut":
-        return cls(
-            path=str(ref.path),
-            bytes=ref.bytes,
-            lines=ref.lines,
-            max_line_bytes=ref.max_line_bytes,
-        )
 
 
 def _optional_ref(ref: TextFileRef | None) -> TextFileRefOut | None:
