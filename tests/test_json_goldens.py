@@ -525,7 +525,7 @@ def _objective_node_engagement_context():
     from pathlib import Path
 
     from perk.backends.engagement import render_node_engagement
-    from perk.cli.commands.objective.node_context import NodeContext
+    from perk.cli.commands.objective.node_context import NodeContext, RefinementSnapshotted
     from perk.cli.paged_files import TextFileRef
 
     sample = _node_engagement_sample()
@@ -537,14 +537,15 @@ def _objective_node_engagement_context():
         engagement=sample,
         engagement_status="present",
         engagement_block=render_node_engagement(sample),
-        refinement_status="present",
-        refinement_block=block,
-        refinement_comment_id="c-9",
-        refinement_file=TextFileRef(
-            path=Path("/repo/.perk/workflow/scratch/runs/RUN/node-context/7/2.1/refinement.md"),
-            bytes=len(text.encode("utf-8")),
-            lines=len(text.splitlines()),
-            max_line_bytes=max(len(line.encode("utf-8")) for line in text.splitlines()),
+        refinement=RefinementSnapshotted(
+            block=block,
+            comment_id="c-9",
+            file=TextFileRef(
+                path=Path("/repo/.perk/workflow/scratch/runs/RUN/node-context/7/2.1/refinement.md"),
+                bytes=len(text.encode("utf-8")),
+                lines=len(text.splitlines()),
+                max_line_bytes=max(len(line.encode("utf-8")) for line in text.splitlines()),
+            ),
         ),
         warnings=(),
     )
@@ -557,6 +558,7 @@ def _objective_node_engagement_unavailable_context():
         ENGAGEMENT_READ_FAILED,
         NodeContext,
         NodeContextWarning,
+        RefinementMissing,
     )
 
     return NodeContext(
@@ -565,10 +567,7 @@ def _objective_node_engagement_unavailable_context():
         engagement=EMPTY_NODE_ENGAGEMENT,
         engagement_status="unavailable",
         engagement_block=None,
-        refinement_status="unavailable",
-        refinement_block=None,
-        refinement_comment_id=None,
-        refinement_file=None,
+        refinement=RefinementMissing("unavailable"),
         warnings=(
             NodeContextWarning(
                 surface="engagement",

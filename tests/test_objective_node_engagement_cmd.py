@@ -5,6 +5,7 @@ refinement arm matters, the resolved issue backend (no network)."""
 import json
 import subprocess
 from pathlib import Path
+from typing import cast
 
 import pytest
 from click.testing import CliRunner
@@ -17,6 +18,10 @@ from perk.backends.objective_store import ObjectiveStoreError, RefinementTargetR
 from perk.cli.cli import cli
 from perk.cli.commands.objective.node_context import (
     NodeContext,
+    RefinementMissing,
+    RefinementPresent,
+    RefinementSnapshotted,
+    SnapshotRefinement,
     render_node_refinement,
 )
 from perk.cli.commands.objective.node_engagement_cmd import ObjectiveNodeEngagementOut
@@ -498,7 +503,7 @@ def test_present_arm_human_output_order(monkeypatch):
     assert result.exit_code == 0, result.output
     text = result.stderr
     engagement_at = text.index("<untrusted_node_engagement>")
-    refinement_at = text.index("<untrusted_node_refinement>")
+    refinement_at = text.index("<untrusted_node_refinement:")
     pointer_at = text.index("refinement: /")
     assert engagement_at < refinement_at < pointer_at
     assert _expected_block() in text
@@ -579,39 +584,37 @@ def test_get_objective_store_error_is_github_error(monkeypatch):
     assert json.loads(result.stdout)["error_type"] == "github_error"
 
 
-def test_serializer_refuses_an_assembled_only_present_context():
-    context = NodeContext(
+def _context(refinement) -> NodeContext:
+    return NodeContext(
         objective_id="7",
         node_id="2.1",
         engagement=engagement.EMPTY_NODE_ENGAGEMENT,
         engagement_status="absent",
         engagement_block=None,
-        refinement_status="present",
-        refinement_block="<untrusted_node_refinement>\n…\n</untrusted_node_refinement>",
-        refinement_comment_id="c-ref",
-        refinement_file=None,
+        refinement=refinement,
         warnings=(),
     )
-    with pytest.raises(ValueError, match="snapshotted"):
-        ObjectiveNodeEngagementOut.from_domain(context)
+
+
+def test_serializer_backstop_refuses_an_assembled_only_present_context():
+    """The phase type forbids this statically (``ty`` gates CI); the ``TypeError`` backstops an
+    untyped caller — the cast is the only way to reach it."""
+    assembled = _context(RefinementPresent(block="block", comment_id="c-ref"))
+    with pytest.raises(TypeError, match="snapshotted before serialization"):
+        ObjectiveNodeEngagementOut.from_domain(cast("NodeContext[SnapshotRefinement]", assembled))
 
 
 def test_serializer_present_carries_the_pointer():
     ref = TextFileRef(path=Path("/repo/x/refinement.md"), bytes=10, lines=2, max_line_bytes=6)
-    context = NodeContext(
-        objective_id="7",
-        node_id="2.1",
-        engagement=engagement.EMPTY_NODE_ENGAGEMENT,
-        engagement_status="absent",
-        engagement_block=None,
-        refinement_status="present",
-        refinement_block="block",
-        refinement_comment_id="c-ref",
-        refinement_file=ref,
-        warnings=(),
-    )
+    context = _context(RefinementSnapshotted(block="block", comment_id="c-ref", file=ref))
     payload = ObjectiveNodeEngagementOut.from_domain(context).model_dump(mode="json")
     assert payload["refinement"] == {
         "status": "present",
         "file": {"path": "/repo/x/refinement.md", "bytes": 10, "lines": 2, "max_line_bytes": 6},
     }
+
+
+@pytest.mark.parametrize("status", ["absent", "unsupported", "unavailable"])
+def test_serializer_missing_carries_only_the_status(status):
+    payload = ObjectiveNodeEngagementOut.from_domain(_context(RefinementMissing(status)))
+    assert payload.model_dump(mode="json")["refinement"] == {"status": status}

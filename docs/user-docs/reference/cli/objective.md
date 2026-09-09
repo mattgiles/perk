@@ -172,7 +172,9 @@ carry that signal). Empty → `no human engagement on objective <N>`.
 Read a roadmap node's advisory DATA for planning: its **pre-planning human engagement** — comments
 + description edits left on the node-issue *before* perk planned it — as an untrusted-DATA block,
 plus its saved **refinement** (see `perk objective refine`) as the full dated
-`<untrusted_node_refinement>` block. `--node` selects the node id (required; an unknown node is
+`<untrusted_node_refinement:…>` block (its opening and closing tags carry a token derived from the
+body's own digest, so the untrusted body can never forge the block's end). `--node` selects the
+node id (required; an unknown node is
 `node_not_found`). Read-only against the backend; the `/objective-plan` factory uses it to fold
 human feedback and the refinement into the authored plan.
 

@@ -226,7 +226,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "The ``--json`` serialization boundary of a snapshotted :class:`NodeContext` (field order\nload-bearing; the pre-existing keys come first). ``refinement`` is discriminated on\n``status``: ``present`` always carries a ``file`` pointer \u2014 in the payload it means \"the\nfile is on disk\", never merely \"a record was read\".",
+  "description": "The ``--json`` serialization boundary of a snapshotted :class:`NodeContext` (field order\nload-bearing; the pre-existing keys come first). ``refinement`` is discriminated on\n``status``: ``present`` always carries a ``file`` pointer \u2014 the file is on disk.",
   "properties": {
     "success": {
       "title": "Success",

@@ -46,6 +46,9 @@ from perk.cli.commands.objective.node_context import (
     EngagementStatus,
     NodeContext,
     NodeContextWarning,
+    RefinementMissing,
+    RefinementSnapshotted,
+    SnapshotRefinement,
     WarningSurface,
     assemble_node_context,
     snapshot_refinement,
@@ -106,16 +109,18 @@ def node_engagement_objective(
         )
         return
 
-    # Advisory from here on: failures become warnings, never a non-zero exit.
-    context = assemble_node_context(
-        store,
-        objective_id=number,
-        node_id=node_id,
-        issues=functools.partial(resolve.resolve_issue_backend, repo_root),
+    # Advisory from here on: failures become warnings, never a non-zero exit. The snapshot is
+    # a no-op (no I/O) unless a refinement is present.
+    context = snapshot_refinement(
+        assemble_node_context(
+            store,
+            objective_id=number,
+            node_id=node_id,
+            issues=functools.partial(resolve.resolve_issue_backend, repo_root),
+        ),
+        repo_root=repo_root,
+        run_id=os.environ.get("PERK_RUN_ID") or run_id_mod.mint(),
     )
-    if context.refinement_status == "present":
-        effective_run_id = os.environ.get("PERK_RUN_ID") or run_id_mod.mint()
-        context = snapshot_refinement(context, repo_root=repo_root, run_id=effective_run_id)
 
     emit(
         as_json=as_json,
@@ -124,19 +129,17 @@ def node_engagement_objective(
     )
 
 
-def _render_human(context: NodeContext) -> None:
+def _render_human(context: NodeContext[SnapshotRefinement]) -> None:
     if context.engagement_block is not None:
         user_output(context.engagement_block)
     else:
         user_output(f"no pre-planning engagement on node {context.node_id}")
-    if context.refinement_status == "present":
-        # The serializer's precondition guarantees a snapshotted context here (block + file).
-        if context.refinement_block is not None:
-            user_output(context.refinement_block)
-        if context.refinement_file is not None:
-            user_output(f"refinement: {context.refinement_file.path}")
-    else:
-        user_output(f"refinement: {context.refinement_status}")
+    match context.refinement:
+        case RefinementSnapshotted(block=block, file=file):
+            user_output(block)
+            user_output(f"refinement: {file.path}")
+        case RefinementMissing(status=status):
+            user_output(f"refinement: {status}")
     for warning in context.warnings:
         user_output(f"warning: [{warning.surface}/{warning.code}] {warning.message}")
 
@@ -233,8 +236,7 @@ class NodeRefinementStatusOut(OutputModel):
 class ObjectiveNodeEngagementOut(OutputModel):
     """The ``--json`` serialization boundary of a snapshotted :class:`NodeContext` (field order
     load-bearing; the pre-existing keys come first). ``refinement`` is discriminated on
-    ``status``: ``present`` always carries a ``file`` pointer — in the payload it means "the
-    file is on disk", never merely "a record was read"."""
+    ``status``: ``present`` always carries a ``file`` pointer — the file is on disk."""
 
     success: bool
     error_type: str | None
@@ -249,23 +251,21 @@ class ObjectiveNodeEngagementOut(OutputModel):
     warnings: tuple[NodeContextWarningOut, ...]
 
     @classmethod
-    def from_domain(cls, context: NodeContext) -> "ObjectiveNodeEngagementOut":
-        """Precondition: a ``present`` context must be snapshotted (``refinement_file`` set).
-        The assembled-only state is never a wire state — reaching here with it is a programmer
-        error, refused with ``ValueError`` rather than serialized as a pointer-less ``present``.
-        """
+    def from_domain(cls, context: NodeContext[SnapshotRefinement]) -> "ObjectiveNodeEngagementOut":
+        """Only a snapshotted context is a wire state (the phase type forbids an assembled-only
+        present refinement statically; the ``TypeError`` backstops untyped callers)."""
         refinement: NodeRefinementPresentOut | NodeRefinementStatusOut
-        if context.refinement_status == "present":
-            if context.refinement_file is None:
-                raise ValueError(
-                    "a present refinement must be snapshotted before serialization "
-                    "(refinement_file is None)"
+        match context.refinement:
+            case RefinementSnapshotted(file=file):
+                refinement = NodeRefinementPresentOut(
+                    status="present", file=TextFileRefOut.from_domain(file)
                 )
-            refinement = NodeRefinementPresentOut(
-                status="present", file=TextFileRefOut.from_domain(context.refinement_file)
-            )
-        else:
-            refinement = NodeRefinementStatusOut(status=context.refinement_status)
+            case RefinementMissing(status=status):
+                refinement = NodeRefinementStatusOut(status=status)
+            case other:
+                raise TypeError(
+                    f"a present refinement must be snapshotted before serialization, got {other!r}"
+                )
         return cls(
             success=True,
             error_type=None,

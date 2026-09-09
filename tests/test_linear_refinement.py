@@ -1717,11 +1717,14 @@ def test_node_context_assembly_over_linear_is_read_only(
     a later source change reads as ``source_changed: yes`` with the full body still delivered;
     the GitHub and dormant stores report ``unsupported`` quietly without any network."""
     from perk.cli.commands.objective.node_context import (
+        RefinementMissing,
+        RefinementPresent,
+        RefinementSnapshotted,
         assemble_node_context,
-        refinement_path,
         snapshot_refinement,
     )
     from perk.github import _exec as gh_exec
+    from perk.state import cache
 
     ws, store, issues = _harness()
     obj_id = _seed(store)
@@ -1746,21 +1749,27 @@ def test_node_context_assembly_over_linear_is_read_only(
     assert context.engagement_status == "present"
     assert context.engagement_block is not None
     assert "please keep the scope tight" in context.engagement_block
-    assert context.refinement_status == "present"
-    assert context.refinement_comment_id == saved.comment.id
-    assert context.refinement_block is not None
-    assert LONG_MARKDOWN in context.refinement_block
-    assert "source_changed: no" in context.refinement_block
-    assert f"comment_id: {saved.comment.id}" in context.refinement_block
+    present = context.refinement
+    assert isinstance(present, RefinementPresent)
+    assert present.comment_id == saved.comment.id
+    assert LONG_MARKDOWN in present.block
+    assert "source_changed: no" in present.block
+    assert f"comment_id: {saved.comment.id}" in present.block
     assert context.warnings == ()
 
     snapped = snapshot_refinement(context, repo_root=tmp_path, run_id="01CTXRUN")
-    assert snapped.refinement_status == "present"
-    assert snapped.refinement_file is not None
-    expected_path = refinement_path(tmp_path, "01CTXRUN", objective_id=obj_id, node_id="1.2")
-    assert snapped.refinement_file.path == expected_path
-    assert expected_path.read_text(encoding="utf-8") == context.refinement_block + "\n"
-    assert snapped.refinement_file.bytes == len((context.refinement_block + "\n").encode())
+    written = snapped.refinement
+    assert isinstance(written, RefinementSnapshotted)
+    expected_path = (
+        cache.run_scratch_dir(tmp_path, "01CTXRUN")
+        / "node-context"
+        / obj_id
+        / "1.2"
+        / "refinement.md"
+    )
+    assert written.file.path == expected_path
+    assert expected_path.read_text(encoding="utf-8") == present.block + "\n"
+    assert written.file.bytes == len((present.block + "\n").encode())
 
     # Zero effects: no mutation, roadmap + non-comment state + comment count untouched.
     assert _mutations(ws, start) == []
@@ -1773,14 +1782,13 @@ def test_node_context_assembly_over_linear_is_read_only(
     changed = assemble_node_context(
         store, objective_id=obj_id, node_id="1.2", issues=lambda: issues
     )
-    assert changed.refinement_status == "present"
-    assert changed.refinement_block is not None
-    assert "source_changed: yes" in changed.refinement_block
+    assert isinstance(changed.refinement, RefinementPresent)
+    assert "source_changed: yes" in changed.refinement.block
     stored = saved.document.source_digest
     current = _target(store, obj_id, "1.2").source_digest
     assert stored != current
-    assert f"source_digest: stored {stored} · current {current}" in changed.refinement_block
-    assert LONG_MARKDOWN in changed.refinement_block
+    assert f"source_digest: stored {stored} · current {current}" in changed.refinement.block
+    assert LONG_MARKDOWN in changed.refinement.block
 
     # GitHub: unsupported, quiet, and no gh invocation at all.
     def no_gh(*args: object, **kwargs: object) -> object:
@@ -1793,7 +1801,7 @@ def test_node_context_assembly_over_linear_is_read_only(
         node_id="1.1",
         issues=lambda: GitHubIssueBackend(tmp_path),
     )
-    assert github.refinement_status == "unsupported"
+    assert github.refinement == RefinementMissing("unsupported")
     assert github.engagement_status == "absent"
     assert github.warnings == ()
 
@@ -1804,6 +1812,6 @@ def test_node_context_assembly_over_linear_is_read_only(
     dormant_context = assemble_node_context(
         dormant, objective_id="ENG-1", node_id="1.1", issues=lambda: dormant_issues
     )
-    assert dormant_context.refinement_status == "unsupported"
+    assert dormant_context.refinement == RefinementMissing("unsupported")
     assert dormant_context.warnings == ()
     assert dormant_ws.requests == []
