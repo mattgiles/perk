@@ -205,7 +205,7 @@ function fakeStarted(
 
 async function observe(
   started: StartedSurface<ReviewOutcome>,
-  opts?: { idle?: boolean },
+  opts?: { idle?: boolean; current?: () => boolean; session?: { degraded: boolean } },
 ): Promise<{
   notifies: { message: string; severity?: string }[];
   sent: { message: string; options?: { deliverAs?: string } }[];
@@ -226,6 +226,8 @@ async function observe(
     started,
     draftReview,
     annotations,
+    opts?.session,
+    opts?.current ?? (() => true),
   );
   return { notifies, sent };
 }
@@ -298,6 +300,26 @@ test("observer: bridge settled unavailable → degrade + clear; completed/aborte
   assert.equal(turnAborted.notifies.length, 0, "an aborted turn stays silent");
   assert.equal(turnAborted.sent.length, 0);
   assert.equal(await annotationMode(), "plan", "aborted arms leave the surfaces primed");
+  clearAnnotationSurface(annotations);
+  clearDraftReviewContext(draftReview);
+});
+
+test("observer: a superseded review's observer never degrades, clears or announces on the newer review's behalf", async () => {
+  // The newer review re-primed both surfaces; this (older) observer's readiness settles later.
+  primeBoth();
+  for (const started of [
+    fakeStarted("timeout"),
+    fakeStarted("bridge_settled", { status: "unavailable", warning: "boom" }),
+    fakeStarted("ready"),
+  ]) {
+    const session = { degraded: false };
+    const { notifies, sent } = await observe(started, { current: () => false, session });
+    assert.equal(notifies.length, 0, "no report for a superseded review");
+    assert.equal(sent.length, 0, "no fallback notice for a superseded review");
+    assert.equal(session.degraded, false, "the stale observer never flips its session");
+    assert.equal(await annotationMode(), "plan", "the newer review's surfaces stay primed");
+    assert.equal(await draftContextPrimed(), true);
+  }
   clearAnnotationSurface(annotations);
   clearDraftReviewContext(draftReview);
 });
@@ -865,7 +887,10 @@ function busScaffold(opts: { destination?: (cwd: string) => ReviewDestination } 
   injected: string[];
   notified: { message: string; severity?: string }[];
   requests: { planContent?: string }[];
-  open(draft: string, deps?: { pickFreePort?: () => Promise<number> }): Promise<string | null>;
+  open(
+    draft: string,
+    deps?: { pickFreePort?: () => Promise<number>; probe?: () => Promise<boolean> },
+  ): Promise<string | null>;
 } {
   const cwd = scaffoldRepo();
   const bus = fakeBus();
@@ -929,7 +954,7 @@ function busScaffold(opts: { destination?: (cwd: string) => ReviewDestination } 
     open: (draft, deps = {}) =>
       openPlanReviewSurface(pi, ctx, gating, { draft }, draftReview, annotations, reviews, {
         pickFreePort: deps.pickFreePort ?? (async () => 45003),
-        probe: async () => true,
+        probe: deps.probe ?? (async () => true),
         intervalMs: 1,
         budgetMs: 50,
         sleep: async () => {},
@@ -945,12 +970,27 @@ async function until(done: () => boolean | Promise<boolean>, ms = 2000): Promise
   }
 }
 
-test("record: a newer open supersedes — the first review's DENY is ignored loudly, the second review's surfaces stay primed", async () => {
+test("record: a newer open supersedes — the first review's DENY is ignored loudly, its late readiness failure never degrades, the second review's surfaces stay primed", async () => {
   const s = busScaffold();
-  assert.ok(await s.open("# The first draft\n"));
+  // The FIRST review's readiness probe is held until after the second open, then fails: its
+  // observer's timeout must find the review superseded and do nothing.
+  let releaseProbe: (ready: boolean) => void = () => {};
+  const probe = new Promise<boolean>((resolve) => {
+    releaseProbe = resolve;
+  });
+  assert.ok(await s.open("# The first draft\n", { probe: () => probe }));
   assert.ok(await s.open("# The second draft\n"));
   assert.equal(s.requests.length, 2, "two browser reviews opened over the bus");
   assert.equal(await annotationMode(), "plan");
+  releaseProbe(false);
+  await new Promise((r) => setTimeout(r, 120)); // past the first open's 50ms readiness budget
+  assert.equal(
+    s.injected.some((m) => m.includes("plan-review browser is unavailable")),
+    false,
+    "the superseded review's readiness failure injects no fallback notice",
+  );
+  assert.equal(await annotationMode(), "plan", "…and clears nothing");
+  assert.equal(await draftContextPrimed(), true);
 
   // The FIRST review's decision lands after the second open superseded it.
   s.bus.emit("plannotator:review-result", { reviewId: "r-1", approved: false, feedback: "old" });

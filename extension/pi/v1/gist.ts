@@ -584,17 +584,14 @@ export async function runGistReviewV1(
   const session = openSession(pi, ctx);
   if (isPlannotatorPlanSelected(ctx.cwd)) {
     if (sig?.aborted) return subjectReviewOutcomeResult(GIST_SUBJECT, { status: "aborted" });
-    // The record's source is the raw artifact read beside the resume (the approve gate re-reads
-    // and compares those bytes); the rendered draft is what the browser shows.
+    // ONE validated read serves both the rendering the browser shows and the record's re-read
+    // baseline (`resumed.raw` is the exact bytes the rendered draft was decoded from) — a second
+    // read could baseline bytes the human never saw.
     const resumed = resumeGistDraft(session);
     if (resumed.kind === "absent") return noGistDraftResult();
     if (resumed.kind === "refused")
       return renderGistReviewResult(ctx, { status: "refusedDraft", problem: resumed.problem });
-    const raw = session.readArtifact(GIST_DRAFT_ARTIFACT);
-    const review = bridge.current.open(
-      ctx,
-      raw.status === "found" ? { name: GIST_DRAFT_ARTIFACT, raw: raw.content } : null,
-    );
+    const review = bridge.current.open(ctx, { name: GIST_DRAFT_ARTIFACT, raw: resumed.raw });
     try {
       const outcome = await bridge.review(renderGistDraft(resumed.draft), sig);
       if (sig?.aborted) return subjectReviewOutcomeResult(GIST_SUBJECT, { status: "aborted" });

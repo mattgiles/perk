@@ -47,7 +47,11 @@ import {
 } from "./objectiveRefinement.ts";
 import { installPlanBindings } from "./plan.ts";
 import type { ReviewOutcome, ToolResult } from "./review.ts";
-import { createCurrentReviewRuntime, type PlanReviewBridge } from "./reviewRecord.ts";
+import {
+  type CurrentReviewRuntime,
+  createCurrentReviewRuntime,
+  type PlanReviewBridge,
+} from "./reviewRecord.ts";
 
 const MARKDOWN = "## Refinement\n\nWhat 2.3 must deliver — and the seams as observed now.\n";
 /** The refinement approval verdict label: names the Linear node comment, never GitHub. */
@@ -907,7 +911,10 @@ test("plan_review first-party: an approval never saves a replacement — draft r
  */
 function plannotatorArm(
   outcome: ReviewOutcome,
-  opts: { save?: { json: unknown; code?: number }; duringReview?: () => void } = {},
+  opts: {
+    save?: { json: unknown; code?: number };
+    duringReview?: (arm: { ctx: ExtensionContext; reviews: CurrentReviewRuntime }) => void;
+  } = {},
 ) {
   const cwd = scaffoldRepo();
   gitInit(cwd, { dirty: false });
@@ -965,14 +972,15 @@ function plannotatorArm(
   );
   assert.equal(reviseRefinementDraft({ markdown: MARKDOWN }, session).status, "revised");
   const reviewed: string[] = [];
+  const reviews = createCurrentReviewRuntime(pi);
   const bridge: PlanReviewBridge & { reviewed: string[] } = {
     reviewed,
-    current: createCurrentReviewRuntime(pi),
+    current: reviews,
     async review(plan: string): Promise<ReviewOutcome> {
       reviewed.push(plan);
-      // The record is open and the decision outstanding: the exact window a concurrent writer
-      // (or a destination change) can land in.
-      opts.duringReview?.();
+      // The record is open and the decision outstanding: the exact window a concurrent writer,
+      // a destination change or a superseding open can land in.
+      opts.duringReview?.({ ctx, reviews });
       return outcome;
     },
   };
@@ -1051,6 +1059,39 @@ test("plannotator arm: approval carrying Direct Edits is one revise round — no
     assert.equal(arm.exits, 0);
   } finally {
     arm.dispose();
+  }
+});
+
+test("plannotator arm: a record superseded before the decision -> stale/superseded for APPROVE, DENY and a Direct-Edits APPROVE; worker never invoked", async () => {
+  const outcomes: ReviewOutcome[] = [
+    { status: "completed", approved: true, reviewId: "rev-ok" },
+    { status: "completed", approved: false, reviewId: "rev-no", feedback: "too vague" },
+    { status: "completed", approved: true, reviewId: "rev-de", feedback: DIRECT_EDITS },
+  ];
+  for (const outcome of outcomes) {
+    const arm = plannotatorArm(outcome, {
+      duringReview: ({ ctx, reviews }) => {
+        reviews.open(ctx, null);
+      },
+    });
+    try {
+      const result = await arm.run();
+      const details = result.details as Record<string, unknown>;
+      assert.equal(details.status, "stale", JSON.stringify(details));
+      assert.equal(details.reason, "superseded");
+      assert.equal(details.subject, "refinement");
+      assert.equal(details.approved, outcome.status === "completed" ? outcome.approved : undefined);
+      assert.equal(result.terminate, undefined);
+      assert.match(
+        String(result.content[0]?.text),
+        /refinement review decision arrived, but a newer review superseded this one/,
+      );
+      assert.doesNotMatch(String(result.content[0]?.text), /Fold|revise|DENIED/);
+      assert.equal(arm.calls.length, 0, "the worker is never invoked");
+      assert.equal(arm.exits, 0);
+    } finally {
+      arm.dispose();
+    }
   }
 });
 

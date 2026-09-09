@@ -14,7 +14,7 @@ import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
 import { scaffoldRepo } from "../../testing/harness.ts";
-import { testReviewRuntime } from "../../testing/reviewRecord.ts";
+import { supersedingBridge, testReviewRuntime } from "../../testing/reviewRecord.ts";
 import type { ObjectiveApprovalSaveV1Outcome, ObjectiveSaveResult } from "./objectiveAuthoring.ts";
 import {
   approvedObjectiveSaveResult,
@@ -508,6 +508,55 @@ test("objective arm: approved via the plannotator bridge -> the same seam path s
   assert.equal(result.terminate, true);
   assert.equal(gating.exits, 1);
   assert.equal((result.details as { saved?: boolean }).saved, true);
+});
+
+test("objective arm: a record superseded before the decision -> stale/superseded for APPROVE, DENY and a Direct-Edits APPROVE; nothing saved", async () => {
+  const outcomes: ReviewOutcome[] = [
+    APPROVED,
+    DENIED,
+    { status: "completed", approved: true, reviewId: "rev-de", feedback: "# Direct Edits\n\nx" },
+  ];
+  for (const outcome of outcomes) {
+    const cwd = scaffoldRepo();
+    selectPlanProvider(cwd, "plannotator-plan");
+    const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
+    const ctx = headfulCtx(cwd, branch);
+    plantObjectiveDraft(ctx, branch);
+    const argvs: string[][] = [];
+    const pi = fakeColdDoorPi(branch, { stdout: OBJECTIVE_JSON, argvs });
+    const gating = fakeGating(true);
+    const bridge = supersedingBridge(outcome, ctx as unknown as ExtensionContext);
+    const result = await executePlanReview(
+      pi,
+      ctx as unknown as ExtensionContext,
+      gating,
+      bridge,
+      stubDeps(pi, ctx),
+      {},
+    );
+    assert.equal(bridge.reviewed.length, 1);
+    assert.equal(result.terminate, undefined, "non-terminating");
+    assert.match(
+      String(result.content[0]?.text),
+      /objective review decision arrived, but a newer review superseded this one \(the decision is ignored\) — nothing was saved/,
+    );
+    const feedback = outcome.status === "completed" ? outcome.feedback : undefined;
+    assert.deepEqual(result.details, {
+      ok: false,
+      status: "stale",
+      reason: "superseded",
+      approved: outcome.status === "completed" ? outcome.approved : undefined,
+      ...(feedback !== undefined ? { feedback } : {}),
+      subject: "objective",
+    });
+    assert.doesNotMatch(
+      String(result.content[0]?.text),
+      /revise round|Fold the Direct Edits|objective_draft rewrite/,
+      "a superseded Direct-Edits approval is not routed as a revise round",
+    );
+    assert.equal(argvs.length, 0, "nothing saved");
+    assert.equal(gating.exits, 0, "the gate stays on");
+  }
 });
 
 test("objective arm: denied + feedback -> objective_draft redirect, no save", async () => {

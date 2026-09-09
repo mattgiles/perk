@@ -7,7 +7,8 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { readReviewDestination } from "../pi/v1/reviewRecord.ts";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { createCurrentReviewRuntime } from "../pi/v1/reviewRecord.ts";
 import {
   issueDestination,
   loadPerkConfig,
@@ -17,6 +18,7 @@ import {
   resolveIssueDestination,
   resolveIssueRouting,
   subagentModel,
+  type TomlScalar,
 } from "./config.ts";
 
 // Map the legacy config filenames the cases still pass to the `.perk/` target locations, so the
@@ -217,6 +219,52 @@ test("parseTomlSubset: non-scalar values are still ignored (subset only)", () =>
   assert.equal(t.tables.workflow?.date, undefined);
   assert.equal(t.tables.workflow?.list, undefined);
   assert.equal(t.tables.workflow?.inline, undefined);
+});
+
+// Every valid TOML spelling of the SAME `[issues]` table must read as `tomllib` reads it (the
+// save plane): the expectations below are the `tomllib.loads(...)["issues"]` results.
+test("parseTomlSubset: literal strings, quoted keys/headers, root dotted keys, root inline tables and escapes read like tomllib", () => {
+  const cases: Array<[string, string, Record<string, TomlScalar>]> = [
+    [
+      "literal strings",
+      "[issues]\nbackend = 'linear'\nteam = 'ENG' # c\n",
+      { backend: "linear", team: "ENG" },
+    ],
+    [
+      "quoted keys",
+      '[issues]\n"backend" = "linear"\n\'team\' = "ENG"\n',
+      { backend: "linear", team: "ENG" },
+    ],
+    ["quoted header", '["issues"]\nbackend = "linear"\n', { backend: "linear" }],
+    [
+      "root dotted keys",
+      'issues.backend = "linear"\nissues."team" = "ENG"\n',
+      { backend: "linear", team: "ENG" },
+    ],
+    ["quoted first segment", '"issues".backend = "linear"\n', { backend: "linear" }],
+    [
+      "root inline table",
+      "issues = { backend = \"linear\", team = 'E,N}G' }\n",
+      { backend: "linear", team: "E,N}G" },
+    ],
+    [
+      "basic-string escapes",
+      '[issues]\nbackend = "\\u006cinear"\nteam = "a\\\\b\\"c"\n',
+      { backend: "linear", team: 'a\\b"c' },
+    ],
+    ["multi-line literal", "[issues]\nbackend = '''\nlinear'''\n", { backend: "linear" }],
+    ["multi-line literal one line", "[issues]\nbackend = '''linear'''\n", { backend: "linear" }],
+  ];
+  for (const [name, text, expected] of cases) {
+    assert.deepEqual(parseTomlSubset(text).tables.issues, expected, name);
+  }
+  // A quoted key containing a dot is ONE key, never a section split; a section-level inline
+  // table stays out of the subset; an unterminated root inline table lands nothing.
+  const t = parseTomlSubset('"a.b" = "v"\n[s]\ninline = { x = 1 }\nbroken = { y = 1\n');
+  assert.equal(t.tables[""]?.["a.b"], "v");
+  assert.equal(t.tables.s?.inline, undefined);
+  assert.equal(t.tables.s?.broken, undefined);
+  assert.equal(t.tables.a, undefined);
 });
 
 test("parseTomlSubset: [[bindings]] array-of-tables -> arrays.bindings", () => {
@@ -739,29 +787,49 @@ test("issueDestination: unrelated [models]/[compaction] edits never change the r
   assert.deepEqual(before, { backend: "github", team: null });
 });
 
-test("readReviewDestination composes the two injected readers into one snapshot", () => {
-  const calls: string[] = [];
-  const destination = readReviewDestination("/repo", {
-    issues: (cwd) => {
-      calls.push(`issues:${cwd}`);
-      return { backend: "linear", team: "ENG" };
-    },
-    remotes: (cwd) => {
-      calls.push(`remotes:${cwd}`);
-      return ["remote.origin.url https://example.com/a.git"];
-    },
-  });
-  assert.deepEqual(destination, {
+test("issueDestination: every valid spelling of the table reads the same value, so a change between spellings is drift, never a shared null", () => {
+  const spellings = [
+    '[issues]\nbackend = "linear"\n',
+    "[issues]\nbackend = 'linear'\n",
+    '[issues]\n"backend" = "linear"\n',
+    'issues.backend = "linear"\n',
+    'issues = { backend = "linear" }\n',
+  ];
+  for (const text of spellings) {
+    const cwd = repoWith({ "perk.toml": text });
+    assert.deepEqual(issueDestination(cwd), { backend: "linear", team: null }, text);
+  }
+  const drift = repoWith({ "perk.toml": "[issues]\nbackend = 'github'\n" });
+  const before = issueDestination(drift);
+  writeFileSync(join(drift, ".perk", "config.toml"), "[issues]\nbackend = 'linear'\n", "utf8");
+  assert.notDeepEqual(
+    issueDestination(drift),
+    before,
+    "a literal-string routing change is visible",
+  );
+});
+
+test("createCurrentReviewRuntime's default destination composes issueDestination + remoteUrls", () => {
+  const cwd = repoWith({ "perk.toml": '[issues]\nbackend = "linear"\nteam = "ENG"\n' });
+  const git = (...args: string[]) => execFileSync("git", args, { cwd, stdio: "ignore" });
+  git("init", "-q");
+  git("remote", "add", "origin", "https://example.com/a.git");
+  const ctx = { cwd, sessionManager: { getBranch: () => [] } } as unknown as ExtensionContext;
+  const opened = createCurrentReviewRuntime({} as ExtensionAPI).open(ctx, null);
+  assert.deepEqual(opened.destination, {
     backend: "linear",
     team: "ENG",
     remotes: ["remote.origin.url https://example.com/a.git"],
   });
-  assert.deepEqual(calls, ["issues:/repo", "remotes:/repo"]);
-  assert.deepEqual(
-    readReviewDestination("/repo", {
-      issues: () => ({ backend: null, team: null }),
-      remotes: () => null,
-    }),
-    { backend: null, team: null, remotes: null },
-  );
+  // Outside a repository the remotes reading is UNREADABLE (null), never an empty value.
+  const bare = repoWith({});
+  const bareCtx = {
+    cwd: bare,
+    sessionManager: { getBranch: () => [] },
+  } as unknown as ExtensionContext;
+  assert.deepEqual(createCurrentReviewRuntime({} as ExtensionAPI).open(bareCtx, null).destination, {
+    backend: null,
+    team: null,
+    remotes: null,
+  });
 });

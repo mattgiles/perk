@@ -1,5 +1,6 @@
-// Unit tests for the current-review record: the id fence, the approve gate's ordered reasons,
-// the destination comparator (through the gate — it is module-private) and the save dedupe.
+// Unit tests for the current-review record: the identity fence, the approve gate's ordered
+// reasons, the destination comparator (through the gate — it is module-private) and the save
+// dedupe.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -19,24 +20,25 @@ const DEST: ReviewDestination = {
 };
 const SOURCE = { name: "plan-draft.md", raw: "# plan\n" };
 
-function mint(): () => string {
-  let n = 0;
-  return () => `id-${++n}`;
-}
-
-test("openCurrentReview mints an id, supersedes the previous record and resets saved", () => {
+test("openCurrentReview returns a fresh record that supersedes the previous one and resets saved", () => {
   const state = createCurrentReviewState();
-  const a = openCurrentReview(state, { source: SOURCE, destination: DEST }, mint());
-  assert.equal(a.id, "id-1");
+  const a = openCurrentReview(state, { source: SOURCE, destination: DEST });
   assert.equal(isCurrentReview(state, a), true);
   assert.deepEqual(gateApprovedSave(state, a, { source: SOURCE.raw, destination: DEST }), {
     ok: true,
   });
   assert.equal(state.saved, true);
 
-  const b = openCurrentReview(state, { source: SOURCE, destination: DEST }, () => "id-2");
+  // Identical inputs still open a DISTINCT record: identity is the object, not its contents.
+  const b = openCurrentReview(state, { source: SOURCE, destination: DEST });
+  assert.notEqual(a, b);
   assert.equal(isCurrentReview(state, a), false);
   assert.equal(isCurrentReview(state, b), true);
+  assert.equal(
+    isCurrentReview(state, { source: SOURCE, destination: DEST }),
+    false,
+    "a structurally equal copy is not the current record",
+  );
   assert.equal(state.saved, false, "a new open resets the dedupe");
   assert.deepEqual(gateApprovedSave(state, a, { source: SOURCE.raw, destination: DEST }), {
     ok: false,

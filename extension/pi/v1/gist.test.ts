@@ -36,7 +36,7 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../../testing/harness.ts";
-import { testReviewRuntime } from "../../testing/reviewRecord.ts";
+import { supersedingBridge, testReviewRuntime } from "../../testing/reviewRecord.ts";
 import {
   decodeGistSaveParams,
   gistSaveGuidance,
@@ -1164,6 +1164,44 @@ test("gist arm: approved but the draft vanished before the approve re-read -> th
     subject: "gist",
   });
   assert.equal(argvs.length, 0, "the cold door was never invoked");
+});
+
+test("gist arm: a record superseded before the decision -> stale/superseded for APPROVE, DENY and a Direct-Edits APPROVE; nothing saved", async () => {
+  const outcomes: ReviewOutcome[] = [
+    APPROVED,
+    DENIED,
+    { status: "completed", approved: true, reviewId: "rev-de", feedback: "# Direct Edits\n\nx" },
+  ];
+  for (const outcome of outcomes) {
+    const cwd = scaffoldRepo();
+    selectPlanProvider(cwd, "plannotator-plan");
+    const branch: unknown[] = [stateEntry(GIST_STATE)];
+    const ctx = headfulCtx(cwd, branch);
+    plantGistDraft(ctx, branch);
+    const argvs: string[][] = [];
+    const pi = fakeColdDoorPi(branch, { stdout: GIST_JSON, argvs });
+    const gating = fakeGating(true);
+    const bridge = supersedingBridge(outcome, ctx as unknown as ExtensionContext);
+    const result = await runGistReviewV1(pi, ctx as unknown as ExtensionContext, gating, bridge);
+    assert.equal(bridge.reviewed.length, 1);
+    assert.equal(result.terminate, undefined, "non-terminating");
+    assert.match(
+      String(result.content[0]?.text),
+      /gist review decision arrived, but a newer review superseded this one \(the decision is ignored\) — nothing was saved/,
+    );
+    const feedback = outcome.status === "completed" ? outcome.feedback : undefined;
+    assert.deepEqual(result.details, {
+      ok: false,
+      status: "stale",
+      reason: "superseded",
+      approved: outcome.status === "completed" ? outcome.approved : undefined,
+      ...(feedback !== undefined ? { feedback } : {}),
+      subject: "gist",
+    });
+    assert.doesNotMatch(String(result.content[0]?.text), /revise|fold/i);
+    assert.equal(argvs.length, 0, "nothing saved");
+    assert.equal(gating.exits, 0, "the gate stays on");
+  }
 });
 
 test("gist arm: denied + feedback -> gist_draft redirect, no save", async () => {

@@ -138,8 +138,9 @@ export interface ObjectiveReviewDoorSession {
  * report PLUS the degrade notice injected to the model (idle → immediate, streaming →
  * followUp), both door surfaces cleared (idempotent beside the decision task's clears), AND the
  * door session marked `degraded` so the still-live decision task ignores any later bridge
- * decision (loudly — never a silent late save). Structural param slices keep it
- * offline-testable; exported for the door tests.
+ * decision (loudly — never a silent late save). `current` is the record fence (the door passes
+ * `reviews.isCurrent(review)`): a superseded review's observer does nothing. Structural param
+ * slices keep it offline-testable; exported for the door tests.
  */
 export async function observeObjectiveReviewReadiness(
   pi: RespondSink,
@@ -148,9 +149,14 @@ export async function observeObjectiveReviewReadiness(
   draftReview: DraftReviewWaveState,
   annotations: AnnotationState,
   session?: ObjectiveReviewDoorSession,
+  current: () => boolean = () => true,
 ): Promise<void> {
   const surface = annotations.surface;
   const state = await started.readiness;
+  // The record fence for the observer: once a newer review superseded this one, its companion
+  // surfaces belong to that review — a stale observer must neither announce this review's
+  // server nor degrade (clear the surfaces, inject the fallback notice) on its behalf.
+  if (!current()) return;
   if (state === "ready") {
     report(ctx, SCOPE, "info", `plannotator is up at ${started.url} — browser opening`);
     resumeAnnotationDelivery(annotations, surface, pi, ctx);
@@ -160,6 +166,7 @@ export async function observeObjectiveReviewReadiness(
   if (state === "bridge_settled") {
     const out = await started.bridgePromise;
     if (out.status !== "unavailable") return; // the decision task routes the settled outcome
+    if (!current()) return;
   }
   report(
     ctx,
@@ -392,7 +399,9 @@ export async function openObjectiveReviewSurface(
   // routes a post-degrade decision through the save path (a readiness false-negative must not
   // let a late approval auto-save after the human followed the fallback).
   const session: ObjectiveReviewDoorSession = { degraded: false };
-  void observeObjectiveReviewReadiness(pi, ctx, started, draftReview, annotations, session);
+  void observeObjectiveReviewReadiness(pi, ctx, started, draftReview, annotations, session, () =>
+    reviews.isCurrent(review),
+  );
 
   // The decision task: the wait is open-ended (exactly the model-called `plan_review` bridge
   // semantics — a turn abort settles `aborted` via the bridge's abort handling).

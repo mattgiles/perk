@@ -176,7 +176,8 @@ export function reviseGistDraft(
 /** The classified resume outcome: a refused draft is a fail-closed STOP at every consumer —
  * it never takes the no-draft fallbacks' side effects (gate exit, driven turn). */
 export type ResumeGistDraftResult =
-  | { kind: "valid"; draft: GistDraft }
+  /** `raw` is the exact artifact bytes `draft` was decoded from — the one read serves both. */
+  | { kind: "valid"; draft: GistDraft; raw: string }
   | { kind: "absent" }
   | { kind: "refused"; problem: string };
 
@@ -192,5 +193,5 @@ export function resumeGistDraft(session: WorkflowSession): ResumeGistDraftResult
   if (read.status === "invalid") return { kind: "refused", problem: read.problem };
   const decoded = decodeGistDraft(read.content);
   if (!decoded.ok) return { kind: "refused", problem: decoded.problem };
-  return { kind: "valid", draft: decoded.draft };
+  return { kind: "valid", draft: decoded.draft, raw: read.content };
 }

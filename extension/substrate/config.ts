@@ -116,20 +116,139 @@ interface TomlSubset {
   arrays: Record<string, Array<Record<string, TomlScalar>>>;
 }
 
+/** Decode the escapes a TOML basic string permits (`\b \t \n \f \r \" \\ \uXXXX \UXXXXXXXX`). */
 function unescapeBasic(raw: string): string {
-  return raw
-    .replace(/\\n/g, "\n")
-    .replace(/\\t/g, "\t")
-    .replace(/\\"/g, '"')
-    .replace(/\\\\/g, "\\");
+  return raw.replace(/\\(u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|[btnfr"\\])/g, (_, esc: string) => {
+    switch (esc[0]) {
+      case "b":
+        return "\b";
+      case "t":
+        return "\t";
+      case "n":
+        return "\n";
+      case "f":
+        return "\f";
+      case "r":
+        return "\r";
+      case '"':
+        return '"';
+      case "\\":
+        return "\\";
+      default:
+        return String.fromCodePoint(Number.parseInt(esc.slice(1), 16));
+    }
+  });
+}
+
+/**
+ * A key or table-header name: a basic-quoted (`"…"`, escapes decoded) or literal-quoted (`'…'`)
+ * name is unquoted; a bare name is kept as written (dotted bare names stay literal — the
+ * `ScalarTable` shape keeps `[models.subagents]` as one section).
+ */
+function unquoteName(raw: string): string {
+  const trimmed = raw.trim();
+  const basic = trimmed.match(/^"((?:[^"\\]|\\.)*)"$/);
+  if (basic) return unescapeBasic(basic[1] ?? "");
+  const literal = trimmed.match(/^'([^']*)'$/);
+  if (literal) return literal[1] ?? "";
+  return trimmed;
+}
+
+/**
+ * A single-line subset scalar — a basic string, a literal string, a native boolean or a number —
+ * with any trailing inline comment ignored; `null` for every other value shape.
+ */
+function parseScalar(value: string): TomlScalar | null {
+  const basic = value.match(/^"((?:[^"\\]|\\.)*)"/);
+  if (basic) return unescapeBasic(basic[1] ?? "");
+  const literal = value.match(/^'([^']*)'/);
+  if (literal) return literal[1] ?? "";
+  const hash = value.indexOf("#");
+  const bare = (hash === -1 ? value : value.slice(0, hash)).trim();
+  if (bare === "true" || bare === "false") return bare === "true";
+  if (/^[+-]?\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?$/.test(bare)) {
+    const parsed = Number(bare.replace(/_/g, ""));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+/** The index of the last `.` outside quotes in a raw key (a dotted key's section/key split), or -1. */
+function lastUnquotedDot(rawKey: string): number {
+  let quote: '"' | "'" | null = null;
+  let last = -1;
+  for (let i = 0; i < rawKey.length; i++) {
+    const ch = rawKey[i];
+    if (quote !== null) {
+      if (ch === "\\" && quote === '"') i++;
+      else if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === ".") {
+      last = i;
+    }
+  }
+  return last;
+}
+
+/**
+ * A root-level inline table `{ key = scalar, … }` — TOML's one-line twin of a `[name]` header —
+ * as a scalar table; `null` when the braces do not close on the line, an entry is not
+ * `key = <subset scalar>`, or a table nests. Quote-aware on commas and the closing brace.
+ */
+function parseInlineTable(value: string): Record<string, TomlScalar> | null {
+  if (!value.startsWith("{")) return null;
+  const entries: string[] = [];
+  let entry = "";
+  let quote: '"' | "'" | null = null;
+  let closed = false;
+  for (let i = 1; i < value.length; i++) {
+    const ch = value[i] ?? "";
+    if (quote !== null) {
+      entry += ch;
+      if (ch === "\\" && quote === '"') entry += value[++i] ?? "";
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      entry += ch;
+    } else if (ch === "{") {
+      return null;
+    } else if (ch === ",") {
+      entries.push(entry);
+      entry = "";
+    } else if (ch === "}") {
+      entries.push(entry);
+      closed = true;
+      break;
+    } else {
+      entry += ch;
+    }
+  }
+  if (!closed) return null;
+  const table: Record<string, TomlScalar> = {};
+  for (const raw of entries) {
+    if (raw.trim() === "") continue;
+    const eq = raw.indexOf("=");
+    if (eq === -1) return null;
+    const scalar = parseScalar(raw.slice(eq + 1).trim());
+    if (scalar === null) return null;
+    table[unquoteName(raw.slice(0, eq))] = scalar;
+  }
+  return table;
 }
 
 /**
  * Parse the narrow TOML subset perk consumes. Returns `{ tables, arrays }`: `tables` is a
  * `{ section: { key: scalar } }` map (top-level keys under the `""` section); `arrays` is a
- * `{ name: [{ key: scalar }, ...] }` map fed by `[[name]]` array-of-tables. Scalars are quoted
- * strings, native `true`/`false` booleans, and numeric literals; anything else is skipped —
- * this is intentionally NOT a full TOML parser.
+ * `{ name: [{ key: scalar }, ...] }` map fed by `[[name]]` array-of-tables. Scalars are basic
+ * and literal strings (single- and multi-line), native `true`/`false` booleans, and numeric
+ * literals; keys and headers may be bare or quoted; at the ROOT a dotted bare key
+ * (`issues.backend = …`) and an inline table (`issues = { … }`) land in their section table
+ * exactly as their `[issues]` spelling would — the save-destination readings must agree with
+ * `tomllib` for every valid spelling of the same table. Anything else is skipped — this is
+ * intentionally NOT a full TOML parser.
  */
 export function parseTomlSubset(text: string): TomlSubset {
   const root: Record<string, TomlScalar> = {};
@@ -159,7 +278,7 @@ export function parseTomlSubset(text: string): TomlSubset {
 
     const header = line.match(/^\[([^\]]+)\]$/);
     if (header) {
-      const section = (header[1] ?? "").trim();
+      const section = unquoteName(header[1] ?? "");
       if (!tables[section]) tables[section] = {};
       dest = tables[section];
       continue;
@@ -167,9 +286,27 @@ export function parseTomlSubset(text: string): TomlSubset {
 
     const eq = line.indexOf("=");
     if (eq === -1) continue;
-    const key = line.slice(0, eq).trim();
+    const rawKey = line.slice(0, eq).trim();
     const value = line.slice(eq + 1).trim();
-    if (key === "") continue;
+    if (rawKey === "") continue;
+    let key = unquoteName(rawKey);
+    let target = dest;
+    if (dest === root) {
+      // The root-level spellings of a section: `a.b = v` (a dotted bare key — the last segment
+      // is the key, the rest the section) and `a = { … }` (an inline table).
+      const inline = parseInlineTable(value);
+      if (inline !== null) {
+        tables[key] = { ...(tables[key] ?? {}), ...inline };
+        continue;
+      }
+      const dot = lastUnquotedDot(rawKey);
+      if (dot !== -1) {
+        const section = unquoteName(rawKey.slice(0, dot));
+        if (!tables[section]) tables[section] = {};
+        target = tables[section];
+        key = unquoteName(rawKey.slice(dot + 1));
+      }
+    }
 
     // Multi-line basic string: """ ... """ (possibly spanning lines).
     if (value.startsWith('"""')) {
@@ -194,29 +331,38 @@ export function parseTomlSubset(text: string): TomlSubset {
         // A leading newline immediately after the opening delimiter is trimmed (TOML rule).
         if (body.startsWith("\n")) body = body.slice(1);
       }
-      dest[key] = unescapeBasic(body);
+      target[key] = unescapeBasic(body);
       continue;
     }
 
-    // Single-line basic string: "..." (strip a trailing inline comment outside the quotes).
-    const basic = value.match(/^"((?:[^"\\]|\\.)*)"/);
-    if (basic) {
-      dest[key] = unescapeBasic(basic[1] ?? "");
+    // Multi-line literal string: ''' ... ''' (no escapes; the same leading-newline trim).
+    if (value.startsWith("'''")) {
+      let body = value.slice(3);
+      if (body.endsWith("'''") && body.length >= 3) {
+        body = body.slice(0, -3);
+      } else {
+        const parts: string[] = [body];
+        i++;
+        for (; i < lines.length; i++) {
+          const raw = lines[i] ?? "";
+          const end = raw.indexOf("'''");
+          if (end !== -1) {
+            if (end > 0) parts.push(raw.slice(0, end));
+            break;
+          }
+          parts.push(raw);
+        }
+        body = parts.join("\n");
+        if (body.startsWith("\n")) body = body.slice(1);
+      }
+      target[key] = body;
       continue;
     }
 
-    // Unquoted scalar: strip an inline `#` comment, then read native booleans and numbers.
-    const hash = value.indexOf("#");
-    const bare = (hash === -1 ? value : value.slice(0, hash)).trim();
-    if (bare === "true" || bare === "false") {
-      dest[key] = bare === "true";
-      continue;
-    }
-    if (/^[+-]?\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?$/.test(bare)) {
-      const parsed = Number(bare.replace(/_/g, ""));
-      if (Number.isFinite(parsed)) dest[key] = parsed;
-    }
-    // Other value shapes (dates, arrays, inline tables) are intentionally ignored.
+    // Single-line scalars (strings, booleans, numbers); other value shapes (dates, arrays,
+    // section-level inline tables) are intentionally ignored.
+    const scalar = parseScalar(value);
+    if (scalar !== null) target[key] = scalar;
   }
   return { tables, arrays };
 }

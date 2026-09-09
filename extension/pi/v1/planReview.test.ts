@@ -1489,7 +1489,7 @@ function measureArtifactReadCalls(): number {
 const OBJ_V1 = JSON.stringify({ schema_version: 1, prose: "Baseline prose (v1)." });
 const OBJ_V2 = JSON.stringify({ schema_version: 1, prose: "Newer prose (v2)." });
 
-test("objective wave arm: the stale-guard baseline is captured BEFORE the validated read (ordering pin)", async () => {
+test("objective wave arm: the record baseline and the rendered draft derive from ONE artifact read (a concurrent write lands after both)", async () => {
   const cwd = scaffoldRepo();
   selectPlanProvider(cwd, "plannotator-plan");
   const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
@@ -1503,7 +1503,8 @@ test("objective wave arm: the stale-guard baseline is captured BEFORE the valida
   );
   const branchV2 = [...branch];
   // Rewind the world to v1; a concurrent objective_draft write (-> v2, file + pointer together)
-  // fires between the two reads — after exactly one full artifact read's worth of branch reads.
+  // fires right AFTER exactly one full artifact read's worth of branch reads — a second read
+  // anywhere in the arm would observe v2 and split the baseline from the rendering.
   writeFileSync(path ?? "", OBJ_V1, "utf8");
   const perRead = measureArtifactReadCalls();
   let calls = 0;
@@ -1532,17 +1533,13 @@ test("objective wave arm: the stale-guard baseline is captured BEFORE the valida
   );
   assert.equal(wave.objectiveCalls.length, 1, "the objective opener launched");
   const call = wave.objectiveCalls[0];
-  assert.equal(
-    call?.artifactRaw,
-    OBJ_V1,
-    "artifactRaw is the FIRST read's bytes — the pre-validated-read baseline, never a re-read",
-  );
+  assert.equal(call?.artifactRaw, OBJ_V1, "artifactRaw is the one read's bytes");
   assert.match(
     call?.rendered ?? "",
-    /Newer prose \(v2\)\./,
-    "the render derives from the later read",
+    /Baseline prose \(v1\)\./,
+    "the render derives from the SAME read as the baseline",
   );
-  assert.doesNotMatch(call?.rendered ?? "", /Baseline prose/);
+  assert.doesNotMatch(call?.rendered ?? "", /Newer prose/, "no second read reached v2");
   assert.equal(bridge.reviewed.length, 0, "no blocking review on the wave arm");
   assert.equal(result.terminate, undefined, "non-terminating");
   const details = result.details as Record<string, unknown>;

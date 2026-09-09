@@ -125,6 +125,7 @@ test("revise: a whole-value rewrite replaces everything; identical bytes short-c
   assert.deepEqual(resumeGistDraft(session), {
     kind: "valid",
     draft: { scope: "objective", prose: "# v2\n" },
+    raw: encodeGistDraft({ prose: "# v2\n", scope: "objective" }),
   });
 
   const identical = reviseGistDraft({ prose: "# v2\n", scope: "objective" }, session);
@@ -196,5 +197,6 @@ test("resume: round-trips a revise", () => {
       scope: "objective",
       prose: PROSE,
     },
+    raw: encodeGistDraft({ prose: PROSE, title: "Faster reviews", scope: "objective" }),
   });
 });

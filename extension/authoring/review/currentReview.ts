@@ -3,13 +3,11 @@
 // storage-free: nothing is persisted, so a crash loses the browser decision and the human re-runs
 // the door (contracts.md §8.23).
 //
-// The record is a FENCE, not a copy of the review: it carries a locally minted id (a newer open
-// supersedes the previous record; a decision for a superseded record is ignored loudly), the
-// artifact baseline the approve gate re-reads against (`source`), and the save-destination
-// snapshot taken at open. Every door/arm keeps its displayed draft in a local and passes it to
-// the completion seam itself — `source.raw` is the only content the fence needs.
-
-import { randomUUID } from "node:crypto";
+// The record is a FENCE, not a copy of the review: the record OBJECT is the identity (a newer
+// open supersedes the previous record; a decision for a superseded record is ignored loudly), it
+// carries the artifact baseline the approve gate re-reads against (`source`), and the
+// save-destination snapshot taken at open. Every door/arm keeps its displayed draft in a local
+// and passes it to the completion seam itself — `source.raw` is the only content the fence needs.
 
 /**
  * The three readings that select WHERE a save goes. Absence is a VALUE — a repo without remotes
@@ -25,9 +23,11 @@ export interface ReviewDestination {
   remotes: readonly string[] | null;
 }
 
+/**
+ * The record handed back by `openCurrentReview`. Its identity is the object reference — decisions
+ * are checked against the record the caller holds, never against Plannotator's `reviewId`.
+ */
 export interface CurrentReview {
-  /** Locally minted UUID — the fence. Decisions are checked against it, never Plannotator's `reviewId`. */
-  readonly id: string;
   /**
    * The artifact re-read baseline; null when the subject's save seam owns the compare (refinement
    * compares the reviewed (draft, context) pair itself) or there is no artifact (a param-tier plan).
@@ -56,24 +56,16 @@ export function createCurrentReviewState(): CurrentReviewState {
   return { current: null, saved: false };
 }
 
-/** Open a review: mints an id, SUPERSEDES the previous current review, resets `saved`. */
-export function openCurrentReview(
-  state: CurrentReviewState,
-  input: Omit<CurrentReview, "id">,
-  mintId: () => string = randomUUID,
-): CurrentReview {
-  const review: CurrentReview = {
-    id: mintId(),
-    source: input.source,
-    destination: input.destination,
-  };
+/** Open a review: a fresh record SUPERSEDES the previous current review and resets `saved`. */
+export function openCurrentReview(state: CurrentReviewState, input: CurrentReview): CurrentReview {
+  const review: CurrentReview = { source: input.source, destination: input.destination };
   state.current = review;
   state.saved = false;
   return review;
 }
 
 export function isCurrentReview(state: CurrentReviewState, review: CurrentReview): boolean {
-  return state.current !== null && state.current.id === review.id;
+  return state.current === review;
 }
 
 /**

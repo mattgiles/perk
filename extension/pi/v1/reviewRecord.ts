@@ -31,23 +31,9 @@ export type {
   StaleReason,
 } from "../../authoring/review/currentReview.ts";
 
-/** The two destination readers, injectable so tests drive drift without touching git or config. */
-export interface DestinationReaders {
-  issues: (cwd: string) => { backend: string | null; team: string | null };
-  remotes: (cwd: string) => string[] | null;
-}
-
-export const DEFAULT_DESTINATION_READERS: DestinationReaders = {
-  issues: issueDestination,
-  remotes: remoteUrls,
-};
-
-/** Compose the three readings into one snapshot; nothing else is fingerprinted. */
-export function readReviewDestination(
-  cwd: string,
-  readers: DestinationReaders = DEFAULT_DESTINATION_READERS,
-): ReviewDestination {
-  return { ...readers.issues(cwd), remotes: readers.remotes(cwd) };
+/** The production save-destination snapshot: the three readings, nothing else is fingerprinted. */
+function readReviewDestination(cwd: string): ReviewDestination {
+  return { ...issueDestination(cwd), remotes: remoteUrls(cwd) };
 }
 
 /**
@@ -74,6 +60,10 @@ export interface CurrentReviewRuntime {
   close(review: CurrentReview): void;
 }
 
+/**
+ * `deps.destination` is the injectable destination snapshot (tests drive drift without touching
+ * git or config); `deps.session` is the artifact re-read seam. Both default to production.
+ */
 export function createCurrentReviewRuntime(
   pi: ExtensionAPI,
   deps: {

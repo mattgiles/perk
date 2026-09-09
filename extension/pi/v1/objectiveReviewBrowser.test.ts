@@ -215,7 +215,7 @@ function fakeStarted(
 
 async function observe(
   started: StartedSurface<ReviewOutcome>,
-  opts?: { idle?: boolean },
+  opts?: { idle?: boolean; current?: () => boolean; session?: { degraded: boolean } },
 ): Promise<{
   notifies: { message: string; severity?: string }[];
   sent: { message: string; options?: { deliverAs?: string } }[];
@@ -236,6 +236,8 @@ async function observe(
     started,
     draftReview,
     annotations,
+    opts?.session,
+    opts?.current ?? (() => true),
   );
   return { notifies, sent };
 }
@@ -309,6 +311,26 @@ test("observer: bridge settled unavailable → degrade + clear; completed/aborte
   assert.equal(turnAborted.notifies.length, 0, "an aborted turn stays silent");
   assert.equal(turnAborted.sent.length, 0);
   assert.equal(await annotationMode(), "plan", "aborted arms leave the surfaces primed");
+  clearAnnotationSurface(annotations);
+  clearDraftReviewContext(draftReview);
+});
+
+test("observer: a superseded review's observer never degrades, clears or announces on the newer review's behalf", async () => {
+  // The newer review re-primed both surfaces; this (older) observer's readiness settles later.
+  primeBoth();
+  for (const started of [
+    fakeStarted("timeout"),
+    fakeStarted("bridge_settled", { status: "unavailable", warning: "boom" }),
+    fakeStarted("ready"),
+  ]) {
+    const session = { degraded: false };
+    const { notifies, sent } = await observe(started, { current: () => false, session });
+    assert.equal(notifies.length, 0, "no report for a superseded review");
+    assert.equal(sent.length, 0, "no fallback notice for a superseded review");
+    assert.equal(session.degraded, false, "the stale observer never flips its session");
+    assert.equal(await annotationMode(), "plan", "the newer review's surfaces stay primed");
+    assert.equal(await draftContextPrimed(), true);
+  }
   clearAnnotationSurface(annotations);
   clearDraftReviewContext(draftReview);
 });
@@ -895,6 +917,117 @@ test("open core: primes BOTH surfaces (plan mode + objective draft type), RETURN
   );
   // The env preset was restored once the poll ended.
   assert.equal(process.env.PLANNOTATOR_PORT, undefined);
+});
+
+// ------------------------------------------------- the current-review record over the fake bus
+
+test("record: a newer open supersedes — the first review's Direct-Edits APPROVE and DENY are ignored loudly (no revise round, no save), the second review's surfaces stay primed", async () => {
+  const cwd = scaffoldRepo();
+  const bus = fakeBus();
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const argvs: string[][] = [];
+  const injected: string[] = [];
+  const notified: { message: string; severity?: string }[] = [];
+  const requests: unknown[] = [];
+  bus.on("plannotator:request", (raw) => {
+    const req = raw as { respond: (r: unknown) => void };
+    requests.push(raw);
+    req.respond({
+      status: "handled",
+      result: { status: "pending", reviewId: `r-${requests.length}` },
+    });
+  });
+  const pi = {
+    events: bus,
+    sendUserMessage(message: string) {
+      injected.push(message);
+    },
+    appendEntry(customType: string, data?: unknown) {
+      branch.push({ type: "custom", customType, data });
+    },
+    async exec(_cmd: string, args: string[]) {
+      argvs.push(args);
+      return { stdout: CREATE_JSON, stderr: "", code: 0, killed: false };
+    },
+  } as unknown as ExtensionAPI;
+  const ctx = {
+    cwd,
+    sessionManager: { getBranch: () => branch },
+    hasUI: true,
+    ui: { notify: (message: string, severity?: string) => notified.push({ message, severity }) },
+    isIdle: () => true,
+    signal: undefined,
+  } as unknown as ExtensionContext;
+  assert.ok(
+    writeSessionArtifact(
+      { appendEntry: (t, d) => branch.push({ type: "custom", customType: t, data: d }) },
+      ctx as unknown as SessionDataCtx & ReportTarget,
+      OBJECTIVE_DRAFT_ARTIFACT,
+      DRAFT_PAYLOAD,
+    ),
+  );
+  const gating = fakeGating(true);
+  const reviews = testReviewRuntime();
+  const open = () =>
+    openObjectiveReviewSurface(
+      pi,
+      ctx,
+      gating,
+      { rendered: RENDERED, artifactRaw: DRAFT_PAYLOAD },
+      draftReview,
+      annotations,
+      reviews,
+      {
+        pickFreePort: async () => 45004,
+        probe: async () => true,
+        intervalMs: 1,
+        budgetMs: 50,
+        sleep: async () => {},
+      },
+    );
+  const until = async (done: () => boolean | Promise<boolean>) => {
+    const start = Date.now();
+    while (!(await done()) && Date.now() - start < 2000) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  };
+  for (const decision of [
+    { reviewId: "r-1", approved: true, feedback: DE_FEEDBACK },
+    { reviewId: "r-3", approved: false, feedback: "old feedback" },
+  ]) {
+    // Two opens: the FIRST is superseded by the second before its decision lands.
+    assert.ok(await open());
+    assert.ok(await open());
+    const superseded = notified.filter((n) =>
+      n.message.includes("a newer review superseded"),
+    ).length;
+    bus.emit("plannotator:review-result", decision);
+    await until(
+      () =>
+        notified.filter((n) => n.message.includes("a newer review superseded")).length > superseded,
+    );
+    assert.ok(
+      notified.some(
+        (n) =>
+          n.severity === "warning" &&
+          n.message.includes(
+            "objective review decision arrived, but a newer review superseded this one",
+          ),
+      ),
+      "the superseded decision is ignored loudly",
+    );
+    assert.equal(injected.length, 0, "no revise round, no feedback for a superseded review");
+    assert.equal(argvs.length, 0, "nothing saved");
+    assert.equal(gating.exits, 0);
+    assert.equal(await annotationMode(), "plan", "the newer review's surfaces stay primed");
+    assert.equal(await draftContextPrimed(), true);
+    // The CURRENT review settles normally (DENY) and clears its surfaces.
+    const current = `r-${requests.length}`;
+    bus.emit("plannotator:review-result", { reviewId: current, approved: false, feedback: "new" });
+    await until(async () => (await annotationMode()) === null);
+    assert.ok(injected.some((m) => m.includes("DENIED") && m.includes("new")));
+    injected.length = 0;
+  }
 });
 
 // ------------------------------------------------- the command flow through the harness
