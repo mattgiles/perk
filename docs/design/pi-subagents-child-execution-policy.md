@@ -25,8 +25,7 @@ child item, together with `worktree: false` (caller-checkout placement, so the p
 readers — `/pr-review`, the `/address` classifier — keep working without a per-request policy).
 Nothing is sampled from the parent gate, handoff, task or assignment data; explicit field
 selection plus whole-array `JSON.stringify` keep hostile task text and extra assignment
-properties inert. `createReportWave(bus)` takes no supplier and has no capture-failure arm. The
-byte-pinned golden is `shared/subagents/representative-wave-script.js`.
+properties inert. `createReportWave(bus)` takes no supplier and has no capture-failure arm.
 
 ## Consumer
 
@@ -114,7 +113,7 @@ writes by design.
 | Runner + packet ⇒ monotone floor incl. backstop | `extension/sessionLifecycle.test.ts` "runner floor: latched for the activation, backstopped, and invisible to a sibling activation"; `extension/substrate/toolGating.test.ts` floor tests |
 | No packet ⇒ no floor; malformed (incl. unsupported family version) ⇒ floor | `extension/substrate/childRestrictions.test.ts` decoder table |
 | Runner children provision no scratch | `extension/substrate/agentScratch.test.ts` "a runner child provisions no scratch even without a floor" |
-| Plan-bound readers run in the caller checkout; the packet is constant | `extension/waves/reportWave.test.ts` profile + hostile-fields tests; `reportWaveRpc.test.ts` round-trip; the regenerated golden (doctor's `validateWorkflowScript` arm reads it) |
+| Plan-bound readers run in the caller checkout; the packet is constant | `extension/waves/reportWave.test.ts` profile + hostile-fields tests; `reportWaveRpc.test.ts` round-trip |
 | Producer → consumer composition | `extension/pi/v1/waveIsolation.test.ts` "real composition: the rendered packet floors a child…" (fake RPC bus → rendered item → child session → `write` blocked, parent and handoff untouched) |
 | Report agents keep async/fresh/mission/acceptance posture | `tests/test_subagent_agents.py::test_native_child_profile` (the nine delivered defs); `tests/test_repo_local_agents.py::test_auditor_is_the_tenth_background_report_outside_delivery` (`perk-dev.session-auditor`); `reportWave.test.ts` spawn pins |
 | Reflection failure stays loud | `extension/sessionLifecycle.test.ts` "escaping reflection exception reports safely…" |

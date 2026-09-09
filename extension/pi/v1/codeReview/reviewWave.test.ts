@@ -21,6 +21,7 @@ import {
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
 import { createMemoryWaveAdapter } from "../../../testing/memoryAdapter.ts";
 import type { AdversarialReviewAngle } from "../../../waves/adversarialReviewWave.ts";
+import { PONYTAIL_PACKAGE_ROOT } from "../../../waves/ponytail.ts";
 import { reportWaveOver } from "../../../waves/reportWave.ts";
 import {
   createAnnotationState,
@@ -835,7 +836,7 @@ test("registered start_review_wave: a bad selection decodes to bad_input before 
 // --- the registered pair end-to-end (real session, fake RPC responder) ------------------------
 
 function installPonytailReviewSkill(cwd: string): void {
-  const root = join(cwd, ".pi", "npm", "node_modules", "@dietrichgebert", "ponytail");
+  const root = join(cwd, PONYTAIL_PACKAGE_ROOT);
   const skillDir = join(root, "skills", "ponytail-review");
   mkdirSync(skillDir, { recursive: true });
   writeFileSync(

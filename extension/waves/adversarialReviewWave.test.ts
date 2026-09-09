@@ -20,6 +20,7 @@ import {
   isAdversarialReviewAngle,
   startAdversarialReviewWave,
 } from "./adversarialReviewWave.ts";
+import { PONYTAIL_REVIEW_SKILL } from "./ponytail.ts";
 import { type ReportWave, type ReportWaveRef, reportWaveOver } from "./reportWave.ts";
 
 const TWO_ANGLES: AdversarialReviewAngle[] = ["claimed-intent", "correctness"];
@@ -93,10 +94,7 @@ test("buildAdversarialReviewAssignments: key = label = slug, the fixed agent/pha
       phase: "review",
       task: "Angle: ponytail. Review PR #42 at /abs/wt.",
       skill: "ponytail-review",
-      requiredSkill: {
-        skill: "ponytail-review",
-        skillFile: ".pi/npm/node_modules/@dietrichgebert/ponytail/skills/ponytail-review/SKILL.md",
-      },
+      requiredSkill: PONYTAIL_REVIEW_SKILL,
     },
   ]);
 });

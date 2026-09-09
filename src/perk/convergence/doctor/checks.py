@@ -13,7 +13,7 @@ from perk.convergence.doctor.data import _MANAGED_GROUP, Check, Status
 from perk.convergence.init.settings import PONYTAIL_NPM_NAME
 from perk.convergence.managed_state import ArtifactHealth, HealthStatus
 from perk.state import cache, gc
-from perk.substrate import bindings, git, paths, proc, providers, registry
+from perk.substrate import bindings, git, paths, providers, registry
 from perk.substrate.config import (
     PI_THINKING_LEVELS,
     ConfigError,
@@ -726,301 +726,31 @@ _SUBAGENTS_PACKAGE_DIRNAME = "pi-subagents"
 # deliberate re-verify of the guidance (never a pin — the package stays unpinned).
 _SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.65.1"
 
-# One row per surface expectation perk's subagent guidance assumes:
-# (label, relative file path in the installed package, required substrings). Probes are
-# file-scoped with NO tree-wide fallback — a moved/renamed file IS a surface change worth a
-# re-verify (the early-warning posture). Each row follows the tripwire-marker pattern: pin
-# the positive literal whose DISAPPEARANCE signals the architectural change worth a
-# re-verify, never just any stable string. The full guidance baseline is recorded above;
-# additive source-verified probes do not claim a full baseline re-verification.
-_SUBAGENT_COMPAT_PROBES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("workflowScript orchestration", "src/extension/schemas.ts", ("workflowScript",)),
-    ("outputSchema param", "src/extension/schemas.ts", ("outputSchema",)),
-    ("structuredOutput results", "src/shared/types.ts", ("structuredOutput",)),
-    # Presence-only tripwires for the native partial report carrier, not semantic proof of
-    # delivery/retention. Source-verified on installed 0.66.0 without advancing the baseline.
-    (
-        "partial workflow terminal vocabulary",
-        "src/shared/types.ts",
-        ("WorkflowTerminalOutcome", 'state: "partial"', '"budget_exhausted"', '"timeout"'),
-    ),
-    (
-        "partial workflow result projection",
-        "src/runs/foreground/subagent-executor.ts",
-        (
-            "workflowFailureTerminalOutcome",
-            "terminalOutcome",
-            "results: partial.children.map",
-            "workflowKey: child.key",
-            "structuredOutput: child.structuredOutput",
-            "success: child.ok",
-        ),
-    ),
-    (
-        "partial workflow completion forwarding",
-        "src/runs/background/result-watcher.ts",
-        ("SUBAGENT_ASYNC_COMPLETE_EVENT", "...data", "...data.results![index]"),
-    ),
-    # The native completion wake the streaming relay rides: async completion notifications
-    # are injected as `customType: "subagent-notify"` messages with per-item `triggerTurn`
-    # (default true). If either literal vanishes the completion-wake mechanic moved — re-verify
-    # before trusting async collect. The wait tool itself (`bg_wait`, the renamed
-    # `subagent_wait` — upstream scopes it to work WITHOUT native completion notification) is
-    # deliberately unprobed: perk does not adopt it.
-    (
-        "async completion notification wake",
-        "src/runs/background/notify.ts",
-        ('"subagent-notify"', "triggerTurn"),
-    ),
-    (
-        "supervisor channel",
-        "src/intercom/native-supervisor-channel.ts",
-        ('"contact_supervisor"', "SUPERVISOR_REQUEST_MESSAGE_TYPE", "triggerTurn"),
-    ),
-    # The injected-message customType literal moved out of the channel file at the v0.65.0
-    # native-session transition — the channel imports `SUPERVISOR_REQUEST_MESSAGE_TYPE` from
-    # supervisor-ui.ts, where the `"subagent_supervisor_request"` literal now lives. If it
-    # vanishes, the supervisor injection envelope changed shape.
-    (
-        "supervisor request message type",
-        "src/intercom/supervisor-ui.ts",
-        ('"subagent_supervisor_request"',),
-    ),
-    # Public execution is deliberately unprobed: upstream restored NATIVE structured direct
-    # `{agent, task}` single-child execution (>= 0.49 — no workflowScript conversion), so no
-    # stable load-bearing literal distinguishes a compatible surface in public-execution.ts.
-    # The guidance relies on workflowScript orchestration (probed via
-    # schemas.ts/scripted-workflow.ts), not on any public-execution cutover.
-    (
-        "v1 extension RPC events",
-        "src/extension/rpc.ts",
-        ("subagents:rpc:v1:request", "subagents:rpc:v1:ready", "subagents:rpc:v1:reply"),
-    ),
-    (
-        "retained children",
-        "src/runs/background/retained-children.ts",
-        ("listRetainedChildren",),
-    ),
-    (
-        "statement-body explicit-return scripts",
-        "src/workflows/scripted-workflow.ts",
-        ("(async () => {",),
-    ),
-    (
-        "retained-child resume",
-        "src/workflows/scripted-workflow.ts",
-        ("resume and agent are mutually exclusive",),
-    ),
-    # The 0.45.0 completion-receipt surfaces (contracts.md §8.35's output-free attempt
-    # receipts + the wait tool's `details.completions` — the tool is `bg_wait` since the
-    # v0.61 rename): observability capabilities — their absence degrades correlation only,
-    # same warn-never-fail posture.
-    (
-        "wait completion projection",
-        "src/runs/background/wait-completions.ts",
-        ("toWaitCompletion", "recordWaitCompletion"),
-    ),
-    (
-        "bg_wait details completions",
-        "src/runs/background/subagent-wait.ts",
-        ("completions",),
-    ),
-    (
-        "workflow child runId in results",
-        "src/runs/foreground/subagent-executor.ts",
-        ("runId: child.runId",),
-    ),
-    # The streaming-wave delivery chain (live supervisor-channel progress from RPC-spawned
-    # async workflowScript waves): session-scoped supervisor delivery, the typed child
-    # runtime config, the in-process async workflow host, and the omitted-async await
-    # semantics. A vanished marker = re-verify the chain —
-    # e.g. `pid: process.pid` is deliberately the async-workflow-status literal: if workflows
-    # ever move to a detached runner, it vanishes and the check warns.
-    (
-        "supervisor session-scoped delivery",
-        "src/intercom/native-supervisor-channel.ts",
-        ("orchestratorSessionId",),
-    ),
-    # The v0.65.0 native-session transition replaced the env/argv launch protocol
-    # (PI_SUBAGENT_ORCHESTRATOR_SESSION_ID / PI_SUBAGENT_SUPERVISOR_CHANNEL_DIR in the deleted
-    # pi-args.ts) with typed child runtime config: these two fields are what routes
-    # supervisor-channel delivery to the orchestrating session. If they vanish, the child
-    # launch protocol changed again.
-    (
-        "typed child supervisor-channel config",
-        "src/runs/shared/child-runtime-config.ts",
-        ("orchestratorSessionId", "supervisorChannelDir"),
-    ),
-    (
-        "in-process async workflow host",
-        "src/runs/foreground/subagent-executor.ts",
-        ("pid: process.pid",),
-    ),
-    # The v0.65.1 omitted-child-async repair: with child `async` omitted (and no workflow
-    # default), mode honors agent/global defaults — globally background — while the workflow
-    # AWAITS the async child (`workflowAwaitAsync: true`). Its disappearance means child-mode
-    # policy moved again (it previously lived in scripted-workflow.ts as
-    # `async: params.async ?? false` — workflow children defaulted foreground).
-    (
-        "workflow child omitted-async await",
-        "src/runs/foreground/subagent-executor.ts",
-        ("asyncOmitted", "workflowAwaitAsync: true"),
-    ),
-    # The intercom-bridge delivery path perk's streaming reviewers ride instead of agent-def
-    # edits: `resolveIntercomBridge*` defaults the mode to "always" and
-    # `applyIntercomBridgeToAgent` appends `["contact_supervisor"]` to an explicit agent tool
-    # allowlist (plus the bridge instruction to the system prompt). If these vanish,
-    # read-only reviewer defs may stop receiving `contact_supervisor`.
-    (
-        "intercom bridge tool delivery",
-        "src/intercom/intercom-bridge.ts",
-        ("resolveIntercomBridge", "applyIntercomBridgeToAgent", '["contact_supervisor"]'),
-    ),
-    # The report-wave acceptance suppression (contracts.md §8.35): every wave spawn carries
-    # `acceptance: {level: "none", reason}` — the sanctioned disable shape — so pi-subagents'
-    # auto-inferred acceptance contract (a competing fenced completion instruction) never
-    # reaches a lane child. Load-bearing since the classify/explore flow migration.
-    (
-        "explicit acceptance disable",
-        "src/runs/shared/acceptance.ts",
-        ("explicitAcceptanceCanDisable", "formatAcceptancePrompt"),
-    ),
-    # Exact-path skill injection relied on by Ponytail review lanes. The invocation's `skill`
-    # is resolved against the agent-local `skillPath` before any global same-named skill; async
-    # workflow execution carries that path and injects the resolved skill content.
-    (
-        "workflow item skill override",
-        "src/shared/settings.ts",
-        (
-            "const taskSkillInput = normalizeSkillInput(task.skill);",
-            "skills = [...taskSkillInput];",
-        ),
-    ),
-    (
-        "agent skillPath parsing",
-        "src/agents/agents.ts",
-        (
-            "const skillPath = parseFrontmatterList(frontmatter.skillPath);",
-            "...(skillPath?.length ? { skillPath } : {}),",
-        ),
-    ),
-    (
-        "invocation-local skill precedence",
-        "src/agents/skills.ts",
-        (
-            "const local = localByName.get(trimmed);",
-            "let skill = local ? readSkill(trimmed, local.filePath, local.source) : undefined;",
-        ),
-    ),
-    (
-        "async workflow skill injection",
-        "src/runs/background/async-execution.ts",
-        ("a.skillPath,", "const injection = buildSkillInjection(resolvedSkills);"),
-    ),
-)
-
 
 def _installed_subagents_version(pkg_dir: Path) -> str | None:
     """The ``version`` of the installed pi-subagents package, or ``None``.
 
-    Best-effort, never raises: ``None`` when the file is absent or the JSON / ``version`` is
-    unreadable. Mirrors ``installed_perk_version``'s posture (TypeError: valid JSON that is a
-    non-dict — indexing it raises, but an unparseable version still means "unverifiable").
+    Best-effort, never raises: ``None`` when the file is absent, the JSON / ``version`` is
+    unreadable, or ``version`` is not a non-empty string (a wrong-typed field is an unreadable
+    manifest, never a "mismatched" version). Mirrors ``installed_perk_version``'s posture
+    (TypeError: valid JSON that is a non-dict — indexing it raises).
     """
     try:
-        return json.loads((pkg_dir / "package.json").read_text(encoding="utf-8"))["version"]
+        version = json.loads((pkg_dir / "package.json").read_text(encoding="utf-8"))["version"]
     except (OSError, ValueError, KeyError, TypeError):
         return None
-
-
-# The inline node module the workflow-script behavior probe runs: resolve `jiti` from the
-# installed pi-subagents package (a declared dependency — the package ships TS source only
-# and plain node refuses type-stripping under node_modules), `await`-import the installed
-# scripted-workflow.ts through it, call `validateWorkflowScript` over the fixture text, and
-# print the JSON result to stdout. The package dir and fixture path arrive via environment
-# variables (never argv splicing).
-_WORKFLOW_SCRIPT_PROBE_SOURCE = """\
-const { createRequire } = require("node:module");
-const { readFileSync } = require("node:fs");
-const path = require("node:path");
-(async () => {
-  const pkgDir = process.env.PERK_SUBAGENTS_PKG_DIR;
-  const fixturePath = process.env.PERK_WAVE_FIXTURE_PATH;
-  const pkgRequire = createRequire(path.join(pkgDir, "package.json"));
-  const { createJiti } = pkgRequire(pkgRequire.resolve("jiti"));
-  const jiti = createJiti(path.join(pkgDir, "package.json"));
-  const mod = await jiti.import(path.join(pkgDir, "src", "workflows", "scripted-workflow.ts"));
-  const script = readFileSync(fixturePath, "utf8");
-  process.stdout.write(JSON.stringify(mod.validateWorkflowScript(script)));
-})().catch((err) => {
-  console.error(String(err));
-  process.exit(1);
-});
-"""
-
-# The behavior probe is an offline module load + a pure validation call — 60s is generous
-# headroom for a cold jiti transform, never a live model wait.
-_WORKFLOW_SCRIPT_PROBE_TIMEOUT = 60
-
-
-def _workflow_script_behavior_probe(pkg_dir: Path) -> tuple[str | None, str | None]:
-    """Run the installed engine's ``validateWorkflowScript`` over the shared fixture.
-
-    Returns ``(divergence, skip_note)`` — at most one is non-``None`` (the honest split:
-    "evaluated and failed" is a divergence; "couldn't evaluate" is a visible skip note that
-    never affects status — the substring probes remain the tripwire, and the skip is never
-    silent). The fixture is the representative rendered wave script
-    (``shared/subagents/representative-wave-script.js``, written by the exact-render golden
-    in ``extension/waves/reportWave.test.ts``), so the probe checks the engine accepts what
-    perk's renderer actually emits.
-    """
-    fixture = _resources.shared_dir() / "subagents" / "representative-wave-script.js"
-    if not fixture.is_file():
-        return None, f"behavior probe skipped (fixture missing: {fixture})"
-    node = proc.which_absolute("node")
-    if node is None:
-        return None, "behavior probe skipped (node not on PATH)"
-    try:
-        result = proc.run_captured(
-            [node, "-e", _WORKFLOW_SCRIPT_PROBE_SOURCE],
-            timeout=_WORKFLOW_SCRIPT_PROBE_TIMEOUT,
-            env_overlay={
-                "PERK_SUBAGENTS_PKG_DIR": str(pkg_dir),
-                "PERK_WAVE_FIXTURE_PATH": str(fixture),
-            },
-        )
-    except proc.ProcFailure as exc:
-        return None, f"behavior probe skipped ({exc})"
-    if result.returncode != 0:
-        reason = result.stderr.strip() or f"node exited {result.returncode}"
-        return None, f"behavior probe skipped ({reason})"
-    try:
-        outcome = json.loads(result.stdout)
-        ok = outcome["ok"]
-        errors = outcome.get("errors", [])
-    except (ValueError, TypeError, KeyError):
-        return None, "behavior probe skipped (unparseable validator output)"
-    if ok is True:
-        return None, None
-    messages = "; ".join(
-        str(e.get("message", e)) if isinstance(e, dict) else str(e) for e in errors
-    )
-    return f"workflow script validation: {messages or 'validator returned ok: false'}", None
+    return version if isinstance(version, str) and version else None
 
 
 def _subagent_compat_check(root: Path) -> Check:
-    """Informational pi-subagents surface-compatibility probe (``package``; warn, never fail).
+    """Report the installed pi-subagents version against the guidance-verified one.
 
-    perk's subagent orchestration guidance (the pr-review door prompts, contracts.md's streaming
-    fan-out spec, docs/learned/pi/subagents.md) assumes specific pi-subagents surfaces, but the
-    package is deliberately **unpinned** — so this check is the early-warning tripwire: it reads
-    the installed version and probes the installed source for the assumed surfaces, warning
-    **loudly** on divergence without ever failing (``report.healthy`` and the exit code are
-    never affected). No pin, no enforced range, no ``--fix`` arm. The substring probes are
-    presence-only; one behavior arm additionally runs the installed engine's
-    ``validateWorkflowScript`` over the shared representative wave script (degrading to a
-    visible skip note when it cannot evaluate) — mechanics beyond these probes stay
-    source-read-derived.
+    perk consumes pi-subagents only through public surfaces (the v1 RPC envelope, the
+    delegation events, agent-def frontmatter) and the package is deliberately **unpinned**, so
+    doctor never reads its source: it reports the installed version and **warns** when it
+    differs from the version perk's guidance was last re-verified against (the early drift
+    signal). Report-only — no ``--fix`` arm, never ``fail`` (``report.healthy`` and the exit
+    code are never affected).
     """
     pkg_dir = init.consumer_npm_install_root(root) / "node_modules" / _SUBAGENTS_PACKAGE_DIRNAME
     if not pkg_dir.is_dir():
@@ -1035,73 +765,35 @@ def _subagent_compat_check(root: Path) -> Check:
         )
 
     version = _installed_subagents_version(pkg_dir)
-    divergences: list[str] = []
-    for label, relpath, required in _SUBAGENT_COMPAT_PROBES:
-        probe_file = pkg_dir / relpath
-        try:
-            content = probe_file.read_text(encoding="utf-8")
-        except OSError:
-            divergences.append(f"{label}: {relpath} missing")
-            continue
-        missing = [marker for marker in required if marker not in content]
-        if missing:
-            divergences.append(f"{label}: marker(s) {', '.join(missing)} absent from {relpath}")
     if version is None:
-        divergences.append("package.json version unreadable")
-
-    behavior_divergence, behavior_skip = _workflow_script_behavior_probe(pkg_dir)
-    if behavior_divergence is not None:
-        divergences.append(behavior_divergence)
-
-    if divergences:
-        detail = "; ".join(divergences)
-        if behavior_skip is not None:
-            detail += f"; {behavior_skip}"
         return Check(
             "subagent-compat",
             "package",
             "warn",
-            f"pi-subagents {version or 'version unreadable'} — installed surface diverges "
-            f"from perk's guidance ({len(divergences)} expectation(s) unmet)",
-            detail,
-            "Informational (no pin): re-verify perk's subagent guidance against the installed "
-            "pi-subagents source and reconcile docs/learned/pi/subagents.md, "
-            "shared/contracts.md's streaming fan-out spec, and the pr-review door prompts.",
+            "pi-subagents installed but its version is unreadable",
+            f"{pkg_dir / 'package.json'} is missing or carries no readable version",
+            "Reinstall the borrowed package (pi lazy-installs npm:pi-subagents at launch) or "
+            "inspect the file.",
         )
-
-    detail = (
-        "probed surfaces: workflowScript + outputSchema/structuredOutput + "
-        "partial terminal vocabulary, keyed structured-result projection "
-        "and completion forwarding + "
-        "async completion notification wake (subagent-notify, triggerTurn) + "
-        "supervisor channel (contact_supervisor, SUPERVISOR_REQUEST_MESSAGE_TYPE, "
-        "triggerTurn) + supervisor request message type (subagent_supervisor_request) + "
-        "v1 RPC events (subagents:rpc:v1:*) + "
-        "retained children/resume + statement-body explicit-return scripts + "
-        "completion receipts (wait-completion projection, bg_wait details.completions, "
-        "serialized workflow child runId) + streaming-wave delivery chain (session-scoped "
-        "supervisor delivery, typed child supervisor-channel config, in-process async "
-        "workflow host, workflow child omitted-async await) + intercom bridge tool delivery + "
-        "explicit acceptance disable (the report-wave acceptance-none spawn contract) + "
-        "exact-path skill injection (workflow item override, agent skillPath parsing, "
-        "invocation-local precedence, async injection) + workflow script validation (the "
-        "installed validateWorkflowScript over the shared representative wave script); "
-        "report-only — the package stays unpinned"
-    )
-    if behavior_skip is not None:
-        detail += f"; {behavior_skip}"
-    if version != _SUBAGENTS_GUIDANCE_VERIFIED_VERSION:
-        detail += (
-            f"; installed {version} != guidance-verified "
-            f"{_SUBAGENTS_GUIDANCE_VERIFIED_VERSION} — mechanics beyond these markers are "
-            "source-read-derived; re-verify perk's subagent guidance on bumps"
+    verified = _SUBAGENTS_GUIDANCE_VERIFIED_VERSION
+    if version != verified:
+        return Check(
+            "subagent-compat",
+            "package",
+            "warn",
+            f"pi-subagents {version} installed — perk's guidance was verified against {verified}",
+            "the package is unpinned; mechanics perk's guidance leans on are "
+            "source-read-derived at the verified version and unverified at the installed one",
+            "Re-verify perk's subagent guidance against the installed pi-subagents "
+            "(docs/developers/pi-subagents-reverify.md), then bump "
+            "_SUBAGENTS_GUIDANCE_VERIFIED_VERSION in src/perk/convergence/doctor/checks.py.",
         )
     return Check(
         "subagent-compat",
         "package",
         "ok",
-        f"pi-subagents {version} — installed orchestration surface matches perk's guidance",
-        detail,
+        f"pi-subagents {version} — the guidance-verified version",
+        "report-only — the package stays unpinned",
     )
 
 

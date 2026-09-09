@@ -1,4 +1,4 @@
-// The report-wave module's own suite: the exact rendered-script pin (the tested workflowScript
+// The report-wave module's own suite: the rendered-script shape pins (the tested workflowScript
 // is the module's headline artifact — observed through the adapter seam's spawn params, since the
 // renderer is module-private), the hostile-task embedding proof, and the full lifecycle
 // normalization matrix driven through the in-memory adapter (wrapped via `reportWaveOver`) —
@@ -10,9 +10,7 @@
 // ONE grace seam), instance-owned pending state, and delete-as-claim drain-once.
 
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import { createMemoryWaveAdapter, type MemoryWaveAdapter } from "../testing/memoryAdapter.ts";
 import { PONYTAIL_CORE_SKILL } from "./ponytail.ts";
@@ -346,10 +344,10 @@ test("partial collection preserves requested/runnable/preflight denominator and 
 });
 
 /**
- * The representative wave request behind the shared fixture — the renderer's optional-field
- * branches in one request: a plain assignment (default label + phase), one with a
- * per-assignment `outputSchema` override + explicit label, and one with a `skill` opt-in;
- * the small workflow-level `outputSchema` rides the spawn params (never the script).
+ * The representative wave request — the renderer's optional-field branches in one request: a
+ * plain assignment (default label + phase), one with a per-assignment `outputSchema` override +
+ * explicit label, and one with a `skill` opt-in; the small workflow-level `outputSchema` rides
+ * the spawn params (never the script).
  */
 const REPRESENTATIVE_ASSIGNMENTS: ReportAssignment[] = [
   {
@@ -378,24 +376,6 @@ const REPRESENTATIVE_OUTPUT_SCHEMA = {
   properties: { verdict: { type: "string" } },
 };
 
-/**
- * The exact rendered script for `REPRESENTATIVE_ASSIGNMENTS` — the module's headline
- * artifact, byte-pinned as the SHARED fixture `shared/subagents/representative-wave-script.js`:
- * this suite's exact-render test writes it under `PERK_UPDATE_GOLDEN=1` and asserts against it
- * otherwise; the doctor `subagent-compat` behavior arm reads it at runtime (the
- * installed-engine `validateWorkflowScript` probe). Loaded lazily (memoized) so a
- * regeneration run against a missing file still reaches the writer test.
- */
-const REPRESENTATIVE_SCRIPT_FIXTURE = fileURLToPath(
-  new URL("../../shared/subagents/representative-wave-script.js", import.meta.url),
-);
-
-let fixtureBytes: string | undefined;
-function representativeWaveScript(): string {
-  fixtureBytes ??= readFileSync(REPRESENTATIVE_SCRIPT_FIXTURE, "utf8");
-  return fixtureBytes;
-}
-
 const PREFLIGHT_OK = async (): Promise<{ ok: true }> => ({ ok: true });
 
 /**
@@ -411,19 +391,6 @@ async function renderedScript(overrides: Partial<ReportWaveRequest>): Promise<st
 }
 
 // ---------------------------------------------------- the rendered script (through the seam)
-
-test("the wave renders the exact representative script — the shared fixture, byte-pinned", async () => {
-  const rendered = await renderedScript({
-    assignments: REPRESENTATIVE_ASSIGNMENTS,
-    outputSchema: REPRESENTATIVE_OUTPUT_SCHEMA,
-  });
-  if (process.env.PERK_UPDATE_GOLDEN) {
-    writeFileSync(REPRESENTATIVE_SCRIPT_FIXTURE, rendered);
-    fixtureBytes = undefined;
-  }
-  // Always re-read and assert (the tests/_golden.py discipline): a regen run still compares.
-  assert.equal(rendered, representativeWaveScript());
-});
 
 const REPORT_ROLES = [
   "perk.pr-reviewer",
@@ -709,8 +676,14 @@ test("wave.run: spawn params carry the fixed module contract + spec fields", asy
   });
   await reportWaveOver(adapter).run(spec);
   assert.equal(adapter.calls.spawn.length, 1);
-  assert.deepEqual(adapter.calls.spawn[0], {
-    workflowScript: representativeWaveScript(),
+  const spawned = adapter.calls.spawn[0];
+  assert.ok(spawned !== undefined);
+  const { workflowScript, ...params } = spawned;
+  assert.deepEqual(
+    waveScriptItems(workflowScript).map((item) => item.key),
+    ["plan-fidelity", "custom-scope", "ponytail"],
+  );
+  assert.deepEqual(params, {
     async: true,
     mission: false,
     context: "fresh",
@@ -1290,7 +1263,7 @@ test("receipt data never alters complete/reports/failures (behavior parity)", as
 function makeScriptSpec(overrides: Partial<WaveScriptSpec> = {}): WaveScriptSpec {
   return {
     flow: "adversarial-review",
-    workflowScript: representativeWaveScript(),
+    workflowScript: "return runs.all([]);",
     outputSchema: { type: "object", properties: { angle: { type: "string" } } },
     timeoutMs: 5_000,
     ...overrides,
