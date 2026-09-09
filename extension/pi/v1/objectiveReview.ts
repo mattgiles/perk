@@ -21,11 +21,7 @@
 // ladder on a completed verdict before anything is saved.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import {
-  OBJECTIVE_DRAFT_ARTIFACT,
-  renderObjectiveDraft,
-  resumeObjectiveDraft,
-} from "../../authoring/objective/draft.ts";
+import { renderObjectiveDraft, resumeObjectiveDraft } from "../../authoring/objective/draft.ts";
 import {
   completeObjectiveReview,
   type ObjectiveReviewOutcome,
@@ -301,10 +297,10 @@ function recordObjectiveSaveOutcome(
 
 /**
  * The objective review arm, mirroring the plan arm's shape: the headless skip, the wave arm's
- * fail-closed baseline ordering + launch chooser, the slot open (both arms — the raw artifact
- * bytes are the reviewed bytes, the rendered markdown what the reviewer saw), the review, the
- * decision ladder on a completed verdict, then the subject completion with the save reported
- * into the latch.
+ * launch chooser, the slot open (both arms — the resume's raw artifact bytes are the reviewed
+ * bytes, the rendered markdown what the reviewer saw; ONE validated read serves both), the
+ * review, the decision ladder on a completed verdict, then the subject completion with the
+ * save reported into the latch.
  */
 export async function executeObjectiveReview(
   pi: ExtensionAPI,
@@ -318,22 +314,20 @@ export async function executeObjectiveReview(
   // 1. Headless → soft skip (fail-open; never wedges CI/supervisor runs on an interactive UI).
   if (!ctx.hasUI) return skipResult();
   const sig = signal ?? ctx.signal;
-  // 2. The raw artifact bytes are read BEFORE the validated resume (fail-closed ordering): the
-  //    reviewed bytes always derive from a read at or after this baseline, so a concurrent
-  //    objective_draft write between the two reads makes the browsed render NEWER than the
-  //    reviewed bytes and the reviewed-bytes guard refuses the approval — the reverse order
-  //    would fail open (approve unreviewed bytes). Raw artifact bytes on purpose: the
-  //    save-authoritative surface catches render-invisible changes.
+  // 2. ONE validated read serves both the rendering and the reviewed-bytes baseline (the
+  //    resume carries the exact bytes it decoded), so the baseline can never be newer than
+  //    what the human saw — a second read could straddle a concurrent objective_draft write
+  //    and let an approval save bytes nobody reviewed. Raw artifact bytes as the baseline on
+  //    purpose: the save-authoritative surface catches render-invisible changes.
   const session = openBranchWorkflowSession(pi, ctx);
-  const baseline = session.readArtifact(OBJECTIVE_DRAFT_ARTIFACT);
   // 3. Backend dispatch (mirrors the plan path): plannotator-selected → the bridge; ANY other
   //    selection → the first-party editor, view-only.
   const plannotator = isPlannotatorPlanSelected(ctx.cwd);
-  if (plannotator && wave?.present() && baseline.status === "found") {
+  if (plannotator && wave?.present()) {
     // The launch chooser (contracts.md §8.23): every eligible round the human picks with/without
     // the streamed reviewer wave BEFORE anything launches. Eligibility is drafts-only — the wave
-    // door stale-guards the raw artifact bytes, so a null baseline keeps the plain path
-    // (silently: there is no forced mode to warn about). A non-`valid` resume (raw bytes
+    // door stale-guards the raw artifact bytes, so an absent draft keeps the plain path
+    // (silently: there is no forced mode to warn about). A `refused` resume (raw bytes
     // present but refused) also skips the wave arm — the plain review below renders the
     // refused-draft skip exactly once.
     const resumed = resumeObjectiveDraft(session);
@@ -343,9 +337,9 @@ export async function executeObjectiveReview(
       if (choice.launch === "wave") {
         const guidance = await wave.objective(ctx, {
           // The reviewed bytes are the RENDERED markdown (prose + roadmap table) — never raw
-          // JSON.
+          // JSON; the stale-guard baseline is the SAME read's raw bytes.
           rendered: renderObjectiveDraft(resumed.draft),
-          artifactRaw: baseline.content,
+          artifactRaw: resumed.raw,
           ...(choice.custom !== undefined ? { custom: choice.custom } : {}),
         });
         // Abort outranks the opener result too: a turn interrupted during the awaited open must
@@ -360,19 +354,18 @@ export async function executeObjectiveReview(
   }
 
   if (sig?.aborted) return objectiveReviewOutcomeResult({ status: "aborted" });
-  // 4. Resolve the reviewed bytes: the validated resume for the render, the raw artifact read
-  //    for the guard (never the rendered bytes — the save re-reads the STRUCTURED artifact).
+  // 4. Resolve the reviewed bytes: a fresh validated resume (the chooser above was a human
+  //    wait) — its draft for the render, its raw bytes for the guard (never the rendered bytes
+  //    — the save re-reads the STRUCTURED artifact).
   const resumed = resumeObjectiveDraft(session);
   if (resumed.kind === "absent") return noObjectiveDraftResult();
   if (resumed.kind === "refused")
     return renderObjectiveReviewResult({ status: "refusedDraft", problem: resumed.problem });
-  const raw = session.readArtifact(OBJECTIVE_DRAFT_ARTIFACT);
-  if (raw.status !== "found") return noObjectiveDraftResult();
   const rendered = renderObjectiveDraft(resumed.draft);
   const opened = slot.open(ctx, {
     subject: "objective",
     source: plannotator ? "artifact" : "editor",
-    raw: raw.content,
+    raw: resumed.raw,
     markdown: rendered,
   });
   if (!opened.ok) return openRefusedResult(opened);

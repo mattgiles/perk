@@ -7,7 +7,11 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { OBJECTIVE_DRAFT_ARTIFACT } from "../../authoring/objective/draft.ts";
+import {
+  decodeObjectiveDraft,
+  OBJECTIVE_DRAFT_ARTIFACT,
+  renderObjectiveDraft,
+} from "../../authoring/objective/draft.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
@@ -17,9 +21,10 @@ import {
   SCRIPTED_ORIGIN,
   scriptedDraftReviewBridge,
   scriptedRemotesSlot,
+  supersedingDraftReviewBridge,
 } from "../../testing/draftReview.ts";
 import { scaffoldRepo } from "../../testing/harness.ts";
-import type { DraftReviewSlot } from "./draftReview.ts";
+import type { DraftReviewSlot, DraftReviewSnapshot } from "./draftReview.ts";
 import type { ObjectiveApprovalSaveV1Outcome, ObjectiveSaveResult } from "./objectiveAuthoring.ts";
 import {
   approvedObjectiveSaveResult,
@@ -368,7 +373,7 @@ test("objective-save stage: plan_review routes to the objective arm too (never t
   assert.match(String(result.content[0]?.text), /write the working objective with objective_draft/);
 });
 
-test("objective arm: plannotator selected -> the bridge receives the RENDERED markdown", async () => {
+test("objective arm: plannotator selected -> the bridge receives the RENDERED markdown; the slot's baseline and rendering derive from ONE read", async () => {
   const cwd = scaffoldRepo();
   selectPlanProvider(cwd, "plannotator-plan");
   const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
@@ -376,6 +381,7 @@ test("objective arm: plannotator selected -> the bridge receives the RENDERED ma
   plantObjectiveDraft(ctx, branch);
   const bridge = cannedBridge(DENIED);
   const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const { slot, snapshots } = spiedSlot(scriptedRemotesSlot(pi));
   const result = await executePlanReview(
     pi,
     ctx as unknown as ExtensionContext,
@@ -383,9 +389,20 @@ test("objective arm: plannotator selected -> the bridge receives the RENDERED ma
     bridge,
     stubDeps(pi, ctx),
     {},
+    undefined,
+    undefined,
+    slot,
   );
   assert.equal(bridge.reviewed.length, 1, "the bridge reviewed once");
   const reviewed = String(bridge.reviewed[0]);
+  // The reviewed-bytes baseline is the planted artifact bytes and the rendering is derived
+  // from those SAME bytes — a second read could never straddle a concurrent draft write.
+  assert.equal(snapshots.length, 1, "the slot opened once");
+  assert.equal(snapshots[0]?.raw, OBJECTIVE_PAYLOAD, "the baseline is the planted bytes");
+  const decoded = decodeObjectiveDraft(snapshots[0]?.raw ?? "");
+  assert.ok(decoded.kind === "valid");
+  assert.equal(snapshots[0]?.markdown, renderObjectiveDraft(decoded.draft));
+  assert.equal(reviewed, snapshots[0]?.markdown, "the bridge saw the slot's markdown");
   assert.match(reviewed, /# Conform planning/);
   assert.match(reviewed, /The why and the design\./);
   assert.match(reviewed, /\| 1\.1 \| first node \| 0\.9 \| pending \|/, "a roadmap table row");
@@ -396,6 +413,92 @@ test("objective arm: plannotator selected -> the bridge receives the RENDERED ma
   );
   assert.doesNotMatch(reviewed, /schema_version/, "never raw JSON");
   assert.match(String(result.content[0]?.text), /objective DENIED/);
+});
+
+/**
+ * Measure how many `getBranch` calls one session open + ONE validated artifact read makes
+ * (self-adapting to seam refactors), so the single-read pin can swap the world exactly where a
+ * second read would begin.
+ */
+function measureArtifactReadCalls(): number {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
+  const setup = headfulCtx(cwd, branch);
+  assert.ok(writeSessionArtifact(fakeSink(branch), setup, OBJECTIVE_DRAFT_ARTIFACT, "{}"));
+  let calls = 0;
+  const counting = {
+    cwd,
+    sessionManager: {
+      getBranch: () => {
+        calls += 1;
+        return branch;
+      },
+    },
+    hasUI: false,
+    ui: { notify() {} },
+  } as unknown as SessionArtifactCtx;
+  const read = openBranchWorkflowSession(fakeSink(branch), counting).readArtifact(
+    OBJECTIVE_DRAFT_ARTIFACT,
+  );
+  assert.equal(read.status, "found");
+  assert.ok(calls > 0, "the read consults the branch");
+  return calls;
+}
+
+const OBJECTIVE_PAYLOAD_V2 = `${JSON.stringify({
+  schema_version: 1,
+  title: "Conform planning (v2)",
+  prose: "Newer prose nobody reviewed.\n",
+  roadmap: [],
+})}\n`;
+
+test("objective arm (plain path): the slot's baseline and the render derive from ONE read — a concurrent write landing right after it splits nothing", async () => {
+  // The interleaved-write pin: a concurrent objective_draft write (-> v2, file + pointer
+  // together) fires exactly where a second read would begin. With two reads the human would
+  // review v1 while the record's baseline was v2 — at approval live = v2 = baseline passes and
+  // unreviewed bytes save. With one read both derive from v1.
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
+  const setup = headfulCtx(cwd, branch);
+  const path = plantObjectiveDraft(setup, branch);
+  const branchV1 = [...branch];
+  plantObjectiveDraft(setup, branch, OBJECTIVE_PAYLOAD_V2);
+  const branchV2 = [...branch];
+  // Rewind the world to v1; the v2 write fires after exactly one artifact read's branch reads.
+  writeFileSync(path, OBJECTIVE_PAYLOAD, "utf8");
+  const perRead = measureArtifactReadCalls();
+  let calls = 0;
+  const ctx = {
+    cwd,
+    sessionManager: {
+      getBranch: () => {
+        calls += 1;
+        if (calls === perRead + 1) writeFileSync(path, OBJECTIVE_PAYLOAD_V2, "utf8");
+        return calls <= perRead ? branchV1 : branchV2;
+      },
+      getSessionId: () => "policy-session",
+    },
+    hasUI: true,
+    ui: { notify() {} },
+  } as unknown as ExtensionContext;
+  const bridge = cannedBridge(DENIED);
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const { slot, snapshots } = spiedSlot(scriptedRemotesSlot(pi));
+  // The arm directly (the dispatcher's own stage read would shift the swap point).
+  await executeObjectiveReview(pi, ctx, fakeGating(true), bridge, undefined, undefined, slot);
+  assert.ok(calls > perRead, "the world moved after the one read");
+  assert.equal(snapshots.length, 1, "the slot opened once");
+  assert.equal(snapshots[0]?.raw, OBJECTIVE_PAYLOAD, "the baseline is the one read's bytes");
+  const decoded = decodeObjectiveDraft(OBJECTIVE_PAYLOAD);
+  assert.ok(decoded.kind === "valid");
+  assert.equal(
+    snapshots[0]?.markdown,
+    renderObjectiveDraft(decoded.draft),
+    "the render derives from the SAME read — never a re-read that could see the newer write",
+  );
+  assert.doesNotMatch(snapshots[0]?.markdown ?? "", /Newer prose/);
+  assert.equal(bridge.reviewed[0], snapshots[0]?.markdown, "the bridge saw exactly that render");
 });
 
 test("objective arm: default selection -> first-party VIEW-ONLY; approval auto-saves the artifact", async () => {
@@ -936,7 +1039,66 @@ test("objective arm: the first-party review opens the slot (superseding a prior 
   assert.equal(gating.exits, 1);
 });
 
+test("objective arm: an APPROVE arriving after a newer review opened is superseded — ignored loudly, nothing saved, the newer review stays current", async () => {
+  // The wiring pin: the arm calls the ladder BEFORE acting (an APPROVE — the arm whose miss
+  // would save). The ladder's own `superseded` coverage lives in draftReview.test.ts.
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
+  const ctx = headfulCtx(cwd, branch);
+  const extCtx = ctx as unknown as ExtensionContext;
+  plantObjectiveDraft(ctx, branch);
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: OBJECTIVE_JSON, argvs });
+  const gating = fakeGating(true);
+  const slot = scriptedRemotesSlot(pi);
+  const bridge = supersedingDraftReviewBridge(slot, extCtx, "objective", {
+    status: "completed",
+    approved: true,
+    reviewId: "rev-late",
+  });
+  const result = await executePlanReview(
+    pi,
+    extCtx,
+    gating,
+    bridge,
+    stubDeps(pi, ctx),
+    {},
+    undefined,
+    undefined,
+    slot,
+  );
+  assert.equal(bridge.reviewed.length, 1, "the bridge reviewed the rendered draft");
+  assert.deepEqual(result.details, {
+    ok: false,
+    error_type: "review_superseded",
+    status: "superseded",
+    subject: "objective",
+  });
+  assert.match(String(result.content[0]?.text), /superseded by a newer review/);
+  assert.equal(result.terminate, undefined, "non-terminating");
+  assert.equal(argvs.length, 0, "nothing saved");
+  assert.equal(gating.exits, 0, "the gate stays on");
+  assert.equal(bridge.opened?.isCurrent(), true, "the newer review is the current one");
+});
+
 // ---------------------------------------------------------------------------------- wrappers
+
+/** Wrap a slot so every `open` snapshot is captured (the single-read baseline pin). */
+function spiedSlot(inner: DraftReviewSlot): {
+  slot: DraftReviewSlot;
+  snapshots: DraftReviewSnapshot[];
+} {
+  const snapshots: DraftReviewSnapshot[] = [];
+  const slot: DraftReviewSlot = {
+    ...inner,
+    open(ctx, snapshot) {
+      snapshots.push(snapshot);
+      return inner.open(ctx, snapshot);
+    },
+  };
+  return { slot, snapshots };
+}
 
 /** The dispatcher over a fresh scripted-remotes slot unless the case threads its own. */
 function executePlanReview(

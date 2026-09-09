@@ -38,7 +38,9 @@
 // Accepted edges (the /pr-review-browser posture — noted, not engineered around):
 //  - concurrent double-open: a second /plan-review-browser re-primes both surfaces and takes the
 //    slot (a new review supersedes everything); the FIRST bridge's later decision is ignored
-//    loudly by the ladder and its `finally` leaves the second session's surfaces alone.
+//    loudly by the ladder, its `finally` leaves the second session's surfaces alone, and its
+//    readiness observer is fenced too (a superseded review's observer neither announces nor
+//    degrades — it can never clear the second session's surfaces or flip its door session).
 //  - an early human decision mid-wave is authoritative — the save proceeds; the cleared surface
 //    makes any late `push_annotations` refuse `no_surface`; a still-pending wave stays
 //    collectable (the wave module's timeout is the orphan insurance).
@@ -118,14 +120,17 @@ const DEGRADE_NOTICE =
   "review door) or `/plan-save` (the manual failsafe).";
 
 /**
- * One door open's shared liveness token: the degrade arm flips `degraded` and the decision task
- * refuses to route a later bridge decision through the save path — without it, a readiness
- * false-negative (endpoint/version drift while the browser is actually open) could let a
- * post-degrade approval auto-save and exit the gate AFTER the human already followed the
- * fallback path.
+ * One door open's shared token carrying its liveness AND its currency. Liveness: the degrade
+ * arm flips `degraded` and the decision task refuses to route a later bridge decision through
+ * the save path — without it, a readiness false-negative (endpoint/version drift while the
+ * browser is actually open) could let a post-degrade approval auto-save and exit the gate AFTER
+ * the human already followed the fallback path. Currency: `current` is the review's
+ * `isCurrent` — the observer consults it before announcing readiness and before degrading, so a
+ * review superseded by a newer open never disturbs the newer one's surfaces.
  */
 export interface PlanReviewDoorSession {
   degraded: boolean;
+  readonly current: () => boolean;
 }
 
 /**
@@ -138,8 +143,12 @@ export interface PlanReviewDoorSession {
  * to the model (idle → immediate, streaming → followUp), both door surfaces cleared (the
  * annotation surface + the threaded `draftReview` state's context — idempotent beside the
  * decision task's clears), AND the door session marked `degraded` so the still-live decision
- * task ignores any later bridge decision (loudly — never a silent late save). Structural param
- * slices keep it offline-testable; exported for the door tests.
+ * task ignores any later bridge decision (loudly — never a silent late save). A superseded
+ * review's observer is inert — it neither announces readiness nor degrades, so a still-starting
+ * review A can never clear the surfaces or flip the session of the review B that replaced it
+ * (`session.current` is consulted after every await; `session` is required so a forgotten
+ * token can never silently unfence). Structural param slices keep it offline-testable;
+ * exported for the door tests.
  */
 export async function observePlanReviewReadiness(
   pi: RespondSink,
@@ -147,10 +156,12 @@ export async function observePlanReviewReadiness(
   started: StartedSurface<ReviewOutcome>,
   draftReview: DraftReviewWaveState,
   annotations: AnnotationState,
-  session?: PlanReviewDoorSession,
+  session: PlanReviewDoorSession,
 ): Promise<void> {
   const surface = annotations.surface;
   const state = await started.readiness;
+  // A superseded review's observer is inert: no announce, no delivery resume, no degrade.
+  if (!session.current()) return;
   if (state === "ready") {
     report(ctx, SCOPE, "info", `plannotator is up at ${started.url} — browser opening`);
     resumeAnnotationDelivery(annotations, surface, pi, ctx);
@@ -159,7 +170,9 @@ export async function observePlanReviewReadiness(
   if (state === "aborted") return; // the turn was interrupted — no-op
   if (state === "bridge_settled") {
     const out = await started.bridgePromise;
-    if (out.status !== "unavailable") return; // the decision task routes the settled outcome
+    // The decision task routes a settled outcome; the bridge wait can outlast a superseding
+    // open, so re-check currency before degrading.
+    if (out.status !== "unavailable" || !session.current()) return;
   }
   report(
     ctx,
@@ -180,7 +193,7 @@ export async function observePlanReviewReadiness(
   // the degrade authoritative for the decision task too — a later bridge decision is ignored.
   clearAnnotationSurface(annotations);
   clearDraftReviewContext(draftReview);
-  if (session !== undefined) session.degraded = true;
+  session.degraded = true;
 }
 
 /** The model-facing DENY revision result (the feedback delimited as untrusted DATA). */
@@ -359,10 +372,12 @@ export async function openPlanReviewSurface(
     ...(opts.custom !== undefined ? { custom: opts.custom } : {}),
   });
 
-  // The shared liveness token: the observer's degrade arm flips it so the decision task never
-  // routes a post-degrade decision through the save path (a readiness false-negative must not
-  // let a late approval auto-save after the human followed the fallback).
-  const session: PlanReviewDoorSession = { degraded: false };
+  // The shared door-session token: the observer's degrade arm flips `degraded` so the decision
+  // task never routes a post-degrade decision through the save path (a readiness false-negative
+  // must not let a late approval auto-save after the human followed the fallback), and
+  // `current` fences the observer itself to this review (a superseding open must not be
+  // degraded by this one's late timeout).
+  const session: PlanReviewDoorSession = { degraded: false, current: review.isCurrent };
   void observePlanReviewReadiness(pi, ctx, started, draftReview, annotations, session);
 
   // The decision task: the wait is open-ended (exactly the model-called `plan_review` bridge

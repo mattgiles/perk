@@ -46,6 +46,7 @@ import {
 } from "./draftReview.ts";
 import { executeStartDraftReviewWave } from "./draftReviewWaveTools.ts";
 import {
+  type ObjectiveReviewDoorSession,
   objectiveReviewBrowserGuidance,
   observeObjectiveReviewReadiness,
   openObjectiveReviewAndGuide,
@@ -201,9 +202,14 @@ function fakeStarted(
   };
 }
 
+/** The always-current door-session token (the default `observe()` session). */
+function currentSession(): ObjectiveReviewDoorSession {
+  return { degraded: false, current: () => true };
+}
+
 async function observe(
   started: StartedSurface<ReviewOutcome>,
-  opts?: { idle?: boolean },
+  opts?: { idle?: boolean; session?: ObjectiveReviewDoorSession },
 ): Promise<{
   notifies: { message: string; severity?: string }[];
   sent: { message: string; options?: { deliverAs?: string } }[];
@@ -224,7 +230,7 @@ async function observe(
     started,
     draftReview,
     annotations,
-    { degraded: false },
+    opts?.session ?? currentSession(),
   );
   return { notifies, sent };
 }
@@ -298,6 +304,87 @@ test("observer: bridge settled unavailable → degrade + clear; completed/aborte
   assert.equal(turnAborted.notifies.length, 0, "an aborted turn stays silent");
   assert.equal(turnAborted.sent.length, 0);
   assert.equal(await annotationMode(), "plan", "aborted arms leave the surfaces primed");
+  clearAnnotationSurface(annotations);
+  clearDraftReviewContext(draftReview);
+});
+
+test("observer: a superseded review's observer is inert — timeout → no report, no notice, both surfaces untouched, session not degraded", async () => {
+  // Review A's observer times out AFTER review B opened (and re-primed the surfaces for ITS
+  // session): A must not inject the fallback, clear B's surfaces, or flip its own session.
+  primeBoth();
+  const session: ObjectiveReviewDoorSession = { degraded: false, current: () => false };
+  const { notifies, sent } = await observe(fakeStarted("timeout"), { session });
+  assert.equal(notifies.length, 0, "no error report");
+  assert.equal(sent.length, 0, "no degrade notice");
+  assert.equal(await annotationMode(), "plan", "the newer review's annotation surface survives");
+  assert.equal(await draftContextPrimed(), true, "…and its draft-review context");
+  assert.equal(session.degraded, false, "the superseded session is never flipped");
+  clearAnnotationSurface(annotations);
+  clearDraftReviewContext(draftReview);
+});
+
+test("observer: bridge settled unavailable for a superseded review → silent (no report, no notice, surfaces untouched)", async () => {
+  primeBoth();
+  const session: ObjectiveReviewDoorSession = { degraded: false, current: () => false };
+  const { notifies, sent } = await observe(
+    fakeStarted("bridge_settled", { status: "unavailable", warning: "boom" }),
+    { session },
+  );
+  assert.equal(notifies.length, 0);
+  assert.equal(sent.length, 0);
+  assert.equal(await annotationMode(), "plan");
+  assert.equal(await draftContextPrimed(), true);
+  assert.equal(session.degraded, false);
+  clearAnnotationSurface(annotations);
+  clearDraftReviewContext(draftReview);
+});
+
+test("observer: ready for a superseded review → no announce", async () => {
+  primeBoth();
+  const { notifies, sent } = await observe(fakeStarted("ready"), {
+    session: { degraded: false, current: () => false },
+  });
+  assert.equal(notifies.length, 0, "a superseded review never announces 'plannotator is up'");
+  assert.equal(sent.length, 0);
+  assert.equal(await annotationMode(), "plan", "the ready arm never clears either way");
+  clearAnnotationSurface(annotations);
+  clearDraftReviewContext(draftReview);
+});
+
+test("observer: superseded WHILE the bridge wait is pending → the post-await currency re-check stays silent (no report, no notice, surfaces untouched)", async () => {
+  // The review is still current when readiness settles `bridge_settled` (the first fence
+  // passes), a newer review opens while the observer awaits the bridge, then the bridge settles
+  // `unavailable`: the SECOND fence — after the await — must stop the degrade.
+  primeBoth();
+  let checks = 0;
+  const session: ObjectiveReviewDoorSession = {
+    degraded: false,
+    current: () => {
+      checks += 1;
+      return checks === 1; // current at the first fence, superseded by the second
+    },
+  };
+  let settleBridge: (out: ReviewOutcome) => void = () => {};
+  const started: StartedSurface<ReviewOutcome> = {
+    url: "http://127.0.0.1:45001",
+    port: 45001,
+    bridgePromise: new Promise<ReviewOutcome>((resolve) => {
+      settleBridge = resolve;
+    }),
+    readiness: Promise.resolve("bridge_settled"),
+  };
+  const observing = observe(started, { session });
+  // Let the observer pass the first fence and park on the bridge await before superseding.
+  await new Promise((r) => setImmediate(r));
+  assert.equal(checks, 1, "the observer passed the first fence while still current");
+  settleBridge({ status: "unavailable", warning: "boom" });
+  const { notifies, sent } = await observing;
+  assert.equal(checks, 2, "the post-await re-check ran");
+  assert.equal(notifies.length, 0, "no error report");
+  assert.equal(sent.length, 0, "no degrade notice");
+  assert.equal(await annotationMode(), "plan", "the newer review's annotation surface survives");
+  assert.equal(await draftContextPrimed(), true, "…and its draft-review context");
+  assert.equal(session.degraded, false, "the superseded session is never flipped");
   clearAnnotationSurface(annotations);
   clearDraftReviewContext(draftReview);
 });
@@ -539,6 +626,39 @@ test("decision: a superseded review's decision is ignored loudly — one TUI war
   assert.ok(s.notified[0]?.message.endsWith(SUPERSEDED_DECISION_WARNING));
   await s.route(APPROVE_OUT, second);
   assert.equal(s.argvs.length, 1, "the current review still saves");
+});
+
+test("decision: a superseded Direct-Edits APPROVE is ignored loudly — never routed as the revise round, no injection, no save", async () => {
+  // The one classification the shared ladder does not pin: `objectiveEffectOf` runs BEFORE the
+  // ladder (a Direct-Edits APPROVE is a `revision` effect), so the door must still hand the
+  // superseded review to the ladder rather than inject the revise round.
+  const s = decisionScaffold();
+  const first = s.open();
+  const second = s.open();
+  assert.equal(first.isCurrent(), false);
+  const out: ReviewOutcome = {
+    status: "completed",
+    approved: true,
+    reviewId: "rev-de-late",
+    feedback: DE_FEEDBACK,
+  };
+  await s.route(out, first);
+  assert.equal(s.argvs.length, 0, "nothing saved");
+  assert.equal(s.gating.exits, 0);
+  assert.equal(s.injected.length, 0, "never routed as the revise round — nothing injected");
+  assert.equal(s.notified.length, 1, "exactly one TUI warning");
+  assert.equal(s.notified[0]?.severity, "warning");
+  assert.ok(s.notified[0]?.message.endsWith(SUPERSEDED_DECISION_WARNING));
+  assert.ok(
+    s.notified.every((n) => !/APPROVED with direct browser edits/.test(n.message)),
+    "no revise-round report either",
+  );
+  // The current (second) review's plain APPROVE routes and saves once.
+  await s.route(APPROVE_OUT, second);
+  assert.equal(s.argvs.length, 1, "the current review still saves");
+  assert.equal(s.gating.exits, 1);
+  assert.equal(s.injected.length, 1);
+  assert.match(s.injected[0]?.message ?? "", /objective APPROVED by reviewer/);
 });
 
 test("decision: APPROVE + Direct Edits heading → NO save, revise inject, gate untouched", async () => {

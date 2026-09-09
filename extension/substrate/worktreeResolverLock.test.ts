@@ -75,7 +75,7 @@ test("exclusive private record, same-PID contention, release then reacquisition,
   c.finish("release");
 });
 
-test("pre-extraction schema-1 metadata remains readable with identical diagnostic projection", (t) => {
+test("an independently authored schema-1 incumbent is honored as busy with the exact owner projection, bytes untouched", (t) => {
   const cwd = fixture(t);
   const path = lockPath(cwd);
   // Independently authored incumbent: token syntax and extra keys retain the legacy decode policy.
@@ -206,6 +206,27 @@ test("initialization failure cleans only identity-matched fresh file, reports re
   });
   assert.deepEqual(b, { kind: "io-error", path: lockPath(cwd), residue: true });
   assert.equal(readFileSync(lockPath(cwd), "utf8"), "successor");
+});
+
+test("a token-minting failure after the exclusive create is a typed io-error that unlinks the fresh file and closes — never a wedged lock", (t) => {
+  const cwd = fixture(t);
+  let closes = 0;
+  const a = acquireWorktreeResolverLock(cwd, parent, {
+    token: fault,
+    fs: {
+      close(fd) {
+        closes++;
+        closeSync(fd);
+      },
+    },
+  });
+  assert.deepEqual(a, { kind: "io-error", path: lockPath(cwd), residue: false });
+  assert.equal(closes, 1, "the descriptor is closed");
+  assert.equal(existsSync(lockPath(cwd)), false, "the empty fresh file is gone");
+  // The lock is not wedged: the next acquisition succeeds.
+  const b = claim(acquireWorktreeResolverLock(cwd, parent));
+  assert.equal(b.check(), "owned");
+  assert.equal(b.finish("release").kind, "released");
 });
 
 test("non-contention and release IO failures are typed, never success", (t) => {

@@ -49,6 +49,7 @@ import {
   observePlanReviewReadiness,
   openPlanReviewAndGuide,
   openPlanReviewSurface,
+  type PlanReviewDoorSession,
   planReviewBrowserGuidance,
   routePlanReviewDecision,
 } from "./planReviewBrowser.ts";
@@ -194,9 +195,14 @@ function fakeStarted(
   };
 }
 
+/** The always-current door-session token (the default `observe()` session). */
+function currentSession(): PlanReviewDoorSession {
+  return { degraded: false, current: () => true };
+}
+
 async function observe(
   started: StartedSurface<ReviewOutcome>,
-  opts?: { idle?: boolean },
+  opts?: { idle?: boolean; session?: PlanReviewDoorSession },
 ): Promise<{
   notifies: { message: string; severity?: string }[];
   sent: { message: string; options?: { deliverAs?: string } }[];
@@ -217,7 +223,7 @@ async function observe(
     started,
     draftReview,
     annotations,
-    { degraded: false },
+    opts?.session ?? currentSession(),
   );
   return { notifies, sent };
 }
@@ -290,6 +296,87 @@ test("observer: bridge settled unavailable → degrade + clear; completed/aborte
   assert.equal(turnAborted.notifies.length, 0, "an aborted turn stays silent");
   assert.equal(turnAborted.sent.length, 0);
   assert.equal(await annotationMode(), "plan", "aborted arms leave the surfaces primed");
+  clearAnnotationSurface(annotations);
+  clearDraftReviewContext(draftReview);
+});
+
+test("observer: a superseded review's observer is inert — timeout → no report, no notice, both surfaces untouched, session not degraded", async () => {
+  // Review A's observer times out AFTER review B opened (and re-primed the surfaces for ITS
+  // session): A must not inject the fallback, clear B's surfaces, or flip its own session.
+  primeBoth();
+  const session: PlanReviewDoorSession = { degraded: false, current: () => false };
+  const { notifies, sent } = await observe(fakeStarted("timeout"), { session });
+  assert.equal(notifies.length, 0, "no error report");
+  assert.equal(sent.length, 0, "no degrade notice");
+  assert.equal(await annotationMode(), "plan", "the newer review's annotation surface survives");
+  assert.equal(await draftContextPrimed(), true, "…and its draft-review context");
+  assert.equal(session.degraded, false, "the superseded session is never flipped");
+  clearAnnotationSurface(annotations);
+  clearDraftReviewContext(draftReview);
+});
+
+test("observer: bridge settled unavailable for a superseded review → silent (no report, no notice, surfaces untouched)", async () => {
+  primeBoth();
+  const session: PlanReviewDoorSession = { degraded: false, current: () => false };
+  const { notifies, sent } = await observe(
+    fakeStarted("bridge_settled", { status: "unavailable", warning: "boom" }),
+    { session },
+  );
+  assert.equal(notifies.length, 0);
+  assert.equal(sent.length, 0);
+  assert.equal(await annotationMode(), "plan");
+  assert.equal(await draftContextPrimed(), true);
+  assert.equal(session.degraded, false);
+  clearAnnotationSurface(annotations);
+  clearDraftReviewContext(draftReview);
+});
+
+test("observer: ready for a superseded review → no announce", async () => {
+  primeBoth();
+  const { notifies, sent } = await observe(fakeStarted("ready"), {
+    session: { degraded: false, current: () => false },
+  });
+  assert.equal(notifies.length, 0, "a superseded review never announces 'plannotator is up'");
+  assert.equal(sent.length, 0);
+  assert.equal(await annotationMode(), "plan", "the ready arm never clears either way");
+  clearAnnotationSurface(annotations);
+  clearDraftReviewContext(draftReview);
+});
+
+test("observer: superseded WHILE the bridge wait is pending → the post-await currency re-check stays silent (no report, no notice, surfaces untouched)", async () => {
+  // The review is still current when readiness settles `bridge_settled` (the first fence
+  // passes), a newer review opens while the observer awaits the bridge, then the bridge settles
+  // `unavailable`: the SECOND fence — after the await — must stop the degrade.
+  primeBoth();
+  let checks = 0;
+  const session: PlanReviewDoorSession = {
+    degraded: false,
+    current: () => {
+      checks += 1;
+      return checks === 1; // current at the first fence, superseded by the second
+    },
+  };
+  let settleBridge: (out: ReviewOutcome) => void = () => {};
+  const started: StartedSurface<ReviewOutcome> = {
+    url: "http://127.0.0.1:45001",
+    port: 45001,
+    bridgePromise: new Promise<ReviewOutcome>((resolve) => {
+      settleBridge = resolve;
+    }),
+    readiness: Promise.resolve("bridge_settled"),
+  };
+  const observing = observe(started, { session });
+  // Let the observer pass the first fence and park on the bridge await before superseding.
+  await new Promise((r) => setImmediate(r));
+  assert.equal(checks, 1, "the observer passed the first fence while still current");
+  settleBridge({ status: "unavailable", warning: "boom" });
+  const { notifies, sent } = await observing;
+  assert.equal(checks, 2, "the post-await re-check ran");
+  assert.equal(notifies.length, 0, "no error report");
+  assert.equal(sent.length, 0, "no degrade notice");
+  assert.equal(await annotationMode(), "plan", "the newer review's annotation surface survives");
+  assert.equal(await draftContextPrimed(), true, "…and its draft-review context");
+  assert.equal(session.degraded, false, "the superseded session is never flipped");
   clearAnnotationSurface(annotations);
   clearDraftReviewContext(draftReview);
 });
@@ -848,6 +935,187 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
     !injected.some((m) => m.includes("APPROVED")),
     "no approval text reaches the model post-degrade",
   );
+});
+
+test("open: a still-starting review's late timeout never degrades the review that superseded it (observer record-fence); the newer review saves, the older decision is ignored loudly", async () => {
+  await withNoLlm(async () => {
+    const cwd = scaffoldRepo();
+    const bus = fakeBus();
+    const injected: string[] = [];
+    const notified: { message: string; severity?: string }[] = [];
+    const argvs: string[][] = [];
+    // The fake plannotator answers the handshake pending: r-a for the first request, r-b for the
+    // second.
+    const reviewIds = ["r-a", "r-b"];
+    bus.on("plannotator:request", (raw) => {
+      const req = raw as { respond: (r: unknown) => void };
+      req.respond({
+        status: "handled",
+        result: { status: "pending", reviewId: reviewIds.shift() ?? "r-unexpected" },
+      });
+    });
+    const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only", stage: "plan" })];
+    const pi = {
+      events: bus,
+      sendUserMessage(message: string | { type: "text"; text: string }[]) {
+        injected.push(
+          typeof message === "string" ? message : message.map((b) => b.text).join("\n"),
+        );
+      },
+      appendEntry(customType: string, data?: unknown) {
+        branch.push({ type: "custom", customType, data });
+      },
+      async exec(_cmd: string, args: string[]) {
+        argvs.push(args);
+        return { stdout: PLAN_JSON, stderr: "", code: 0, killed: false };
+      },
+    } as unknown as ExtensionAPI;
+    const ctx = {
+      cwd,
+      sessionManager: { getBranch: () => branch },
+      hasUI: true,
+      ui: { notify: (message: string, severity?: string) => notified.push({ message, severity }) },
+      isIdle: () => true,
+      signal: undefined,
+    } as unknown as ExtensionContext;
+    const gating = fakeGating(true);
+    // ONE slot across both opens — the second open supersedes the first review.
+    const slot = seedBrowserReview(pi, ctx, "plan", "# The draft\n");
+
+    // Review A: its single readiness probe is a gate the test releases later (budget = one
+    // attempt, so one `false` probe = timeout).
+    let releaseA: (ready: boolean) => void = () => {};
+    const gateA = new Promise<boolean>((resolve) => {
+      releaseA = resolve;
+    });
+    await openPlanReviewAndGuide(
+      pi,
+      ctx,
+      gating,
+      { draft: "# The draft\n" },
+      draftReview,
+      annotations,
+      slot,
+      {
+        pickFreePort: async () => 45011,
+        probe: () => gateA,
+        intervalMs: 1,
+        budgetMs: 1,
+        sleep: async () => {},
+      },
+    );
+    // Review B opens while A is still starting: it re-primes both surfaces for ITS session and
+    // comes up immediately.
+    await openPlanReviewAndGuide(
+      pi,
+      ctx,
+      gating,
+      { draft: "# The draft\n" },
+      draftReview,
+      annotations,
+      slot,
+      {
+        pickFreePort: async () => 45012,
+        probe: async () => true,
+        intervalMs: 1,
+        budgetMs: 50,
+        sleep: async () => {},
+      },
+    );
+    const readyStart = Date.now();
+    while (
+      !notified.some((n) => n.message.includes("plannotator is up at http://127.0.0.1:45012")) &&
+      Date.now() - readyStart < 2000
+    ) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.ok(
+      notified.some((n) => n.message.includes("plannotator is up at http://127.0.0.1:45012")),
+      "B announced readiness",
+    );
+
+    // A's readiness now times out — AFTER B superseded it. Fenced: no degrade.
+    releaseA(false);
+    // Give A's observer every chance to (wrongly) fire before asserting it stayed inert.
+    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5));
+    assert.ok(
+      !injected.some((m) => m.includes("plan-review browser is unavailable")),
+      "A's timeout never injects the degrade notice",
+    );
+    assert.ok(
+      !notified.some((n) => n.message.includes("did not become ready")),
+      "A's timeout never reports the error",
+    );
+    // B's surfaces survive A's timeout: the annotation surface still primed with B's URL, the
+    // draft-review context still primed.
+    assert.equal(await annotationMode(), "plan", "B's annotation surface is still primed");
+    const target = { hasUI: false, ui: undefined } as unknown as Parameters<
+      typeof executePushAnnotations
+    >[1];
+    const seen: string[] = [];
+    const fetchLike: FetchLike = async (url) => {
+      seen.push(url);
+      return { ok: true, status: 201, text: async () => "{}" };
+    };
+    await executePushAnnotations(
+      annotations,
+      target,
+      {
+        angle: "probe",
+        findings: [
+          {
+            phrase: "The draft",
+            severity: "minor",
+            confidence: "high",
+            body: "a finding",
+          },
+        ],
+      },
+      { fetchLike },
+    );
+    assert.ok(
+      seen.some((u) => u.startsWith("http://127.0.0.1:45012")),
+      `the surface targets B's URL: ${JSON.stringify(seen)}`,
+    );
+    assert.equal(await draftContextPrimed(), true, "B's draft-review context is still primed");
+
+    // B's approval routes and saves exactly once.
+    bus.emit("plannotator:review-result", { reviewId: "r-b", approved: true });
+    const saveStart = Date.now();
+    while (argvs.length === 0 && Date.now() - saveStart < 4000) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.equal(argvs.length, 1, "exactly one save");
+    assert.ok(
+      notified.some(
+        (n) => n.severity === "info" && n.message.includes("plan APPROVED in the browser — saved"),
+      ),
+      "B's approval saved",
+    );
+    assert.equal(gating.exits, 1);
+
+    // A's late approval: superseded — ignored loudly, never a second save.
+    bus.emit("plannotator:review-result", { reviewId: "r-a", approved: true });
+    const lateStart = Date.now();
+    while (
+      !notified.some((n) => n.message.endsWith(SUPERSEDED_DECISION_WARNING)) &&
+      Date.now() - lateStart < 2000
+    ) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.ok(
+      notified.some(
+        (n) => n.severity === "warning" && n.message.endsWith(SUPERSEDED_DECISION_WARNING),
+      ),
+      "A's late decision is ignored loudly",
+    );
+    assert.ok(
+      !notified.some((n) => n.message.includes("after the review degraded")),
+      "never the post-degrade arm — A's session was never degraded",
+    );
+    assert.equal(argvs.length, 1, "still exactly one save");
+    assert.equal(process.env.PLANNOTATOR_PORT, undefined, "the env preset was restored");
+  });
 });
 
 test("open core: primes BOTH surfaces with the deterministic URL/plan mode, RETURNS URL-free guidance (nothing sent), clears on settle", async () => {

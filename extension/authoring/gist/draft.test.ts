@@ -125,6 +125,7 @@ test("revise: a whole-value rewrite replaces everything; identical bytes short-c
   assert.deepEqual(resumeGistDraft(session), {
     kind: "valid",
     draft: { scope: "objective", prose: "# v2\n" },
+    raw: encodeGistDraft({ prose: "# v2\n", scope: "objective" }),
   });
 
   const identical = reviseGistDraft({ prose: "# v2\n", scope: "objective" }, session);
@@ -186,9 +187,12 @@ test("resume: absent → absent (silent); invalid seam read and refused payload 
   );
 });
 
-test("resume: round-trips a revise", () => {
+test("resume: round-trips a revise; raw is the exact stored bytes", () => {
   const session = memorySession();
   reviseGistDraft({ prose: PROSE, title: "Faster reviews", scope: "objective" }, session);
+  const stored = session.readArtifact(GIST_DRAFT_ARTIFACT);
+  assert.equal(stored.status, "found");
+  // `raw` is the exact stored bytes — the reviewed-bytes baseline rides the same read.
   assert.deepEqual(resumeGistDraft(session), {
     kind: "valid",
     draft: {
@@ -196,5 +200,6 @@ test("resume: round-trips a revise", () => {
       scope: "objective",
       prose: PROSE,
     },
+    raw: stored.status === "found" ? stored.content : null,
   });
 });

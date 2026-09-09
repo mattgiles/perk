@@ -10,7 +10,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { GIST_DRAFT_ARTIFACT, GIST_SCOPES } from "../../authoring/gist/draft.ts";
+import {
+  decodeGistDraft,
+  GIST_DRAFT_ARTIFACT,
+  GIST_SCOPES,
+  renderGistDraft,
+} from "../../authoring/gist/draft.ts";
 import {
   GIST_AUTHOR_CONTEXT_TYPE,
   GIST_DRAFT_TOOL_GUIDELINES,
@@ -29,7 +34,11 @@ import {
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
-import { scriptedDraftReviewBridge, scriptedRemotesSlot } from "../../testing/draftReview.ts";
+import {
+  scriptedDraftReviewBridge,
+  scriptedRemotesSlot,
+  supersedingDraftReviewBridge,
+} from "../../testing/draftReview.ts";
 import {
   fakePerk,
   loadPerkSession,
@@ -37,7 +46,11 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../../testing/harness.ts";
-import { createDraftReviewSlot, type DraftReviewSlot } from "./draftReview.ts";
+import {
+  createDraftReviewSlot,
+  type DraftReviewSlot,
+  type DraftReviewSnapshot,
+} from "./draftReview.ts";
 import {
   decodeGistSaveParams,
   gistSaveGuidance,
@@ -923,7 +936,7 @@ test("gist arm: a refused draft -> the bad_state soft skip; nothing reviewed, ga
   assert.equal(gating.exits, 0, "the gate stays untouched");
 });
 
-test("gist arm: plannotator selected -> the bridge receives the RENDERED markdown", async () => {
+test("gist arm: plannotator selected -> the bridge receives the RENDERED markdown; the slot's baseline and rendering derive from ONE read", async () => {
   const cwd = scaffoldRepo();
   selectPlanProvider(cwd, "plannotator-plan");
   const branch: unknown[] = [stateEntry(GIST_STATE)];
@@ -931,11 +944,22 @@ test("gist arm: plannotator selected -> the bridge receives the RENDERED markdow
   plantGistDraft(ctx, branch);
   const bridge = cannedBridge(DENIED);
   const pi = fakeColdDoorPi(branch, { stdout: GIST_JSON });
+  const snapshots: DraftReviewSnapshot[] = [];
+  const inner = scriptedRemotesSlot(pi);
+  const slot: DraftReviewSlot = {
+    ...inner,
+    open(c, snapshot) {
+      snapshots.push(snapshot);
+      return inner.open(c, snapshot);
+    },
+  };
   const result = await runGistReviewV1(
     pi,
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     bridge,
+    undefined,
+    slot,
   );
   assert.equal(bridge.reviewed.length, 1, "the bridge reviewed once");
   const reviewed = String(bridge.reviewed[0]);
@@ -944,6 +968,107 @@ test("gist arm: plannotator selected -> the bridge receives the RENDERED markdow
   assert.match(reviewed, /The intent and the why\./);
   assert.doesNotMatch(reviewed, /schema_version/, "never raw JSON");
   assert.match(String(result.content[0]?.text), /gist DENIED/);
+  // The reviewed-bytes baseline is the planted artifact bytes and the rendering is derived
+  // from those SAME bytes — a second read could never straddle a concurrent draft write.
+  assert.equal(snapshots.length, 1, "the slot opened once");
+  assert.equal(snapshots[0]?.raw, GIST_PAYLOAD, "the baseline is the planted bytes");
+  const decoded = decodeGistDraft(snapshots[0]?.raw ?? "");
+  assert.ok(decoded.ok);
+  assert.equal(snapshots[0]?.markdown, renderGistDraft(decoded.draft));
+  assert.equal(reviewed, snapshots[0]?.markdown, "the bridge saw the slot's markdown");
+});
+
+/**
+ * Measure how many `getBranch` calls one session open + ONE validated artifact read makes
+ * (self-adapting to seam refactors), so the single-read pin can swap the world exactly where a
+ * second read would begin.
+ */
+function measureArtifactReadCalls(): number {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry(GIST_STATE)];
+  const setup = headfulCtx(cwd, branch);
+  assert.ok(writeSessionArtifact(fakeSink(branch), setup, GIST_DRAFT_ARTIFACT, "{}"));
+  let calls = 0;
+  const counting = {
+    cwd,
+    sessionManager: {
+      getBranch: () => {
+        calls += 1;
+        return branch;
+      },
+    },
+    hasUI: false,
+    ui: { notify() {} },
+  } as unknown as SessionArtifactCtx;
+  const read = openBranchWorkflowSession(fakeSink(branch), counting).readArtifact(
+    GIST_DRAFT_ARTIFACT,
+  );
+  assert.equal(read.status, "found");
+  assert.ok(calls > 0, "the read consults the branch");
+  return calls;
+}
+
+const GIST_PAYLOAD_V2 = `${JSON.stringify({
+  schema_version: 1,
+  title: "Faster reviews (v2)",
+  prose: "Newer prose nobody reviewed.\n",
+})}\n`;
+
+test("gist arm: the slot's baseline and the render derive from ONE read — a concurrent write landing right after it splits nothing", async () => {
+  // The interleaved-write pin: a concurrent gist_draft write (-> v2, file + pointer together)
+  // fires exactly where a second read would begin. With two reads the human would review v1
+  // while the record's baseline was v2 — at approval live = v2 = baseline passes and unreviewed
+  // bytes save. With one read both derive from v1.
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry(GIST_STATE)];
+  const setup = headfulCtx(cwd, branch);
+  const path = plantGistDraft(setup, branch);
+  const branchV1 = [...branch];
+  plantGistDraft(setup, branch, GIST_PAYLOAD_V2);
+  const branchV2 = [...branch];
+  // Rewind the world to v1; the v2 write fires after exactly one artifact read's branch reads.
+  writeFileSync(path, GIST_PAYLOAD, "utf8");
+  const perRead = measureArtifactReadCalls();
+  let calls = 0;
+  const ctx = {
+    cwd,
+    sessionManager: {
+      getBranch: () => {
+        calls += 1;
+        if (calls === perRead + 1) writeFileSync(path, GIST_PAYLOAD_V2, "utf8");
+        return calls <= perRead ? branchV1 : branchV2;
+      },
+      getSessionId: () => "policy-session",
+    },
+    hasUI: true,
+    ui: { notify() {} },
+  } as unknown as ExtensionContext;
+  const bridge = cannedBridge(DENIED);
+  const pi = fakeColdDoorPi(branch, { stdout: GIST_JSON });
+  const snapshots: DraftReviewSnapshot[] = [];
+  const inner = scriptedRemotesSlot(pi);
+  const slot: DraftReviewSlot = {
+    ...inner,
+    open(c, snapshot) {
+      snapshots.push(snapshot);
+      return inner.open(c, snapshot);
+    },
+  };
+  // The arm directly (the dispatcher's own stage read would shift the swap point).
+  await runGistReviewV1(pi, ctx, fakeGating(true), bridge, undefined, slot);
+  assert.ok(calls > perRead, "the world moved after the one read");
+  assert.equal(snapshots.length, 1, "the slot opened once");
+  assert.equal(snapshots[0]?.raw, GIST_PAYLOAD, "the baseline is the one read's bytes");
+  const decoded = decodeGistDraft(GIST_PAYLOAD);
+  assert.ok(decoded.ok);
+  assert.equal(
+    snapshots[0]?.markdown,
+    renderGistDraft(decoded.draft),
+    "the render derives from the SAME read — never a re-read that could see the newer write",
+  );
+  assert.doesNotMatch(snapshots[0]?.markdown ?? "", /Newer prose/);
+  assert.equal(bridge.reviewed[0], snapshots[0]?.markdown, "the bridge saw exactly that render");
 });
 
 test("gist arm: ordinary plannotator approval (no Direct Edits) saves, exits the gate, terminates", async () => {
@@ -1152,6 +1277,39 @@ test("gist arm: approved but the draft vanished during the review -> stale-appro
   assert.match(String(result.content[0]?.text), /working draft changed after the review opened/);
   assert.match(String(result.content[0]?.text), /Nothing was saved/);
   assert.equal(argvs.length, 0, "the cold door was never invoked");
+});
+
+test("gist arm: an APPROVE arriving after a newer review opened is superseded — ignored loudly, nothing saved, the newer review stays current", async () => {
+  // The wiring pin: the arm calls the ladder BEFORE acting (an APPROVE — the arm whose miss
+  // would save). The ladder's own `superseded` coverage lives in draftReview.test.ts.
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry(GIST_STATE)];
+  const ctx = headfulCtx(cwd, branch);
+  const extCtx = ctx as unknown as ExtensionContext;
+  plantGistDraft(ctx, branch);
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: GIST_JSON, argvs });
+  const gating = fakeGating(true);
+  const slot = scriptedRemotesSlot(pi);
+  const bridge = supersedingDraftReviewBridge(slot, extCtx, "gist", {
+    status: "completed",
+    approved: true,
+    reviewId: "rev-late",
+  });
+  const result = await runGistReviewV1(pi, extCtx, gating, bridge, undefined, slot);
+  assert.equal(bridge.reviewed.length, 1, "the bridge reviewed the rendered draft");
+  assert.deepEqual(result.details, {
+    ok: false,
+    error_type: "review_superseded",
+    status: "superseded",
+    subject: "gist",
+  });
+  assert.match(String(result.content[0]?.text), /superseded by a newer review/);
+  assert.equal(result.terminate, undefined, "non-terminating");
+  assert.equal(argvs.length, 0, "nothing saved");
+  assert.equal(gating.exits, 0, "the gate stays on");
+  assert.equal(bridge.opened?.isCurrent(), true, "the newer review is the current one");
 });
 
 test("gist arm: denied + feedback -> gist_draft redirect, no save", async () => {
