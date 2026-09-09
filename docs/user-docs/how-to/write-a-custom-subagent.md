@@ -70,18 +70,15 @@ annotations are cleared rather than finalized, and a failed lane is never a clea
 own custom agents keep the engine default; an agent override that re-enables the guard on a Perk
 report profile reintroduces the failure and is a documented compatibility limit.
 
-The conflict resolver keeps writer tools and project/skill inheritance; its definition is the
-git-tracked `.pi/agents/perk/conflict-resolver.md` perk reconverges. `/submit` and `/address`
-dispatch it through `resolve_submit_conflicts`: one code-owned foreground delegation at the worktree
-cwd with a strict structured record and one per-worktree execution lock, and **no restriction
-packet** (so the read-only floor never binds it). Without pi-subagents' `subagent` tool loaded the
-tool refuses `unavailable` before any lock. If pi-subagents' global `worktree` default
-(`<agent dir>/extensions/subagent/config.json`) is anything but absent or `false`, the launch is
-refused naming the file, the observation and the fix (set `"worktree": false` or delete the key,
-then quit and resume) — perk never edits that file. Reload never clears a retained lock
-([human-only recovery](recover-a-dirty-worktree.md#recover-a-retained-submit-conflict-lock)).
-Retained continuation reuses the adapter as an offer only (new human approval precedes canonical
-continuation); a follow-up delivery-unconfirmed diagnostic means stop for human direction.
+The conflict resolver (git-tracked `.pi/agents/perk/conflict-resolver.md`, perk-reconverged) keeps
+writer tools and project/skill inheritance. `/submit`/`/address` dispatch it via
+`resolve_submit_conflicts`: one code-owned foreground delegation at the worktree cwd, a strict
+structured record, one per-worktree execution lock and **no restriction packet** (no read-only
+floor). No `subagent` tool → `unavailable`, no lock; an agent-dir `extensions/subagent/config.json`
+`worktree` default (read once at activation) other than absent/`false` refuses, naming file,
+observation and fix (`false`/delete the key, quit and resume); perk never edits it. Retained
+continuation is offer-only; delivery-unconfirmed means stop for human direction. Reload never clears
+a retained lock ([recovery](recover-a-dirty-worktree.md#recover-a-retained-submit-conflict-lock)).
 
 Every code-owned report child receives the constant `perk.parent-restrictions/1 = {readOnly: true}`
 binding and `worktree: false`. A pi-subagents runner child carrying the packet has an in-memory

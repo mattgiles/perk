@@ -102,29 +102,23 @@ waivers remain separately scoped; no case is retroactively passed.
 
 ## Foreground resolver delegation (bounded offline compatibility)
 
-Both submit/address PR resolution and retained stack resolution emit directly on pi-subagents'
-public delegation event family (the `./delegation` constants, carried as literals in
-`extension/pi/v1/delivery/conflictResolverEngine.ts` and confined there by the import-direction
-guard) — not async RPC, ReportWave or model-authored scripts. There is no loader, preflight or
-profile evidence; the only presence check is Pi's tool census (a missing `subagent` tool refuses
-`unavailable` before any lock). Run these **offline**, with no model/rebase/push experiment:
+Both resolver surfaces (PR and retained) emit on pi-subagents' public delegation event family
+(`./delegation` constants carried as literals in `conflictResolverEngine.ts`, confined there by the
+import guard) — no loader, preflight or profile evidence; presence is Pi's tool census (no
+`subagent` tool → `unavailable`, no lock). Run offline, with no model/rebase/push experiment:
 
 ```bash
 node --test extension/pi/v1/delivery/conflictResolverEngine.test.ts extension/pi/v1/delivery/submitConflict.test.ts extension/pi/v1/delivery/stackConflictResolver.test.ts extension/pi/v1/delivery/stackSyncNative.test.ts extension/substrate/worktreeResolverLock.test.ts extension/substrate/resolverLease.test.ts
 ```
 
-pi-subagents' global `worktree` default (`join(getAgentDir(), "extensions/subagent/config.json")`)
-is read once at engine activation; anything but a missing file, an absent key or `false` refuses
-every dispatch naming the path, the observation and the fix — perk never rewrites it. An
-event-protocol change in a newer pi-subagents surfaces as a no-ack cancellation with a retained
-lock (the `doctor subagent-compat` version warning is the early signal). The execution lock
-survives reload and process death; see the
-[human-only recovery procedure](../user-docs/how-to/recover-a-dirty-worktree.md#recover-a-retained-submit-conflict-lock).
-
-These checks corroborate launch/result plumbing and conservative ownership, not a live resolver.
-The retained-operation session claim stays held across child completion and cannot bypass the
-execution lock; post-result render/send failures preserve the settled result and append one
-delivery-unconfirmed diagnostic; consent tests are scripted actions, not autonomous model evidence.
+The global `worktree` default (the agent dir's `extensions/subagent/config.json`, read once at
+engine activation) refuses every dispatch unless missing/absent/`false`, naming path, observation
+and fix; perk never rewrites it. Protocol drift in a newer pi-subagents shows as a no-ack
+cancellation with a retained lock (`doctor subagent-compat`'s version warning is the early signal).
+Checks corroborate plumbing, not a live resolver; the session claim never bypasses the execution
+lock, delivery failures keep the settled result plus one delivery-unconfirmed diagnostic, and
+consent tests are scripted. The lock survives reload and process death: see [human-only
+recovery](../user-docs/how-to/recover-a-dirty-worktree.md#recover-a-retained-submit-conflict-lock).
 
 ## Native partial report settlement (additive offline compatibility)
 

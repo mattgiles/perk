@@ -70,7 +70,10 @@ type NativeWorktreeVerdict = { compatible: true } | { compatible: false; observe
  * Deliberately stricter than the engine's own fallback: only a missing file, an absent key or
  * an explicit `false` lets a writer launch; any other state is refused with what was observed,
  * because perk will not infer from pi-subagents' private fallback rules what a broken config
- * file will do — and perk never rewrites the file.
+ * file will do — and perk never rewrites the file. The observation reaches the receipt and the
+ * model-facing diagnostics, so it is bounded and never content-bearing: only JSON scalars that
+ * cannot carry text (booleans, numbers, null) are rendered; a string, array or object is named
+ * by type alone.
  */
 function readNativeWorktreeDefault(path: string): NativeWorktreeVerdict {
   let text: string;
@@ -78,9 +81,9 @@ function readNativeWorktreeDefault(path: string): NativeWorktreeVerdict {
     text = readFileSync(path, "utf8");
   } catch (error) {
     const code = object(error)?.code;
-    return code === "ENOENT"
-      ? { compatible: true }
-      : { compatible: false, observed: `unreadable (${String(code)})` };
+    if (code === "ENOENT") return { compatible: true };
+    const errno = typeof code === "string" && /^[A-Z0-9_]{1,32}$/.test(code) ? code : "unknown";
+    return { compatible: false, observed: `unreadable (${errno})` };
   }
   let parsed: unknown;
   try {
@@ -91,7 +94,12 @@ function readNativeWorktreeDefault(path: string): NativeWorktreeVerdict {
   const config = object(parsed);
   if (config === null) return { compatible: false, observed: "not a JSON object" };
   if (!("worktree" in config) || config.worktree === false) return { compatible: true };
-  return { compatible: false, observed: `worktree=${JSON.stringify(config.worktree)}` };
+  const value = config.worktree;
+  const observed =
+    value === null || typeof value === "boolean" || typeof value === "number"
+      ? `worktree=${JSON.stringify(value)}`
+      : `worktree is ${Array.isArray(value) ? "an array" : typeof value === "object" ? "an object" : `a ${typeof value}`}`;
+  return { compatible: false, observed };
 }
 
 interface Terminal {

@@ -218,7 +218,7 @@ test("retained execution lock: uncertain termination retains it and withholds th
 });
 
 test("retained refusal on the native worktree default names the file, the observation and the fix", async () => {
-  const w = await setup({ nativeConfig: '{"worktree":"false"}' });
+  const w = await setup({ nativeConfig: '{"worktree":"SECRET false"}' });
   try {
     const r = await w.h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
     assert.equal(details(r).ok, false);
@@ -231,7 +231,8 @@ test("retained refusal on the native worktree default names the file, the observ
       ...w.injected,
     ].join("\n");
     assert.ok(rendered.includes(w.engine.resolverEngine.configPath), rendered);
-    assert.ok(rendered.includes('worktree="false"'), rendered);
+    assert.ok(rendered.includes("worktree is a string"), rendered);
+    assert.doesNotMatch(rendered, /SECRET/, "a string default is named by type, never by content");
     assert.ok(rendered.includes("quit and resume this Pi session"), rendered);
     assert.equal(w.engine.requests.length, 0);
     assert.equal(existsSync(w.lock), false);

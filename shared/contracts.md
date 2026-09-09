@@ -853,34 +853,23 @@ once at entry. Active writers exclude replacement priming. Later submit/valid fi
 malformed finalizer input does not. Address still publishes, resolves all threads, then decides
 conflicts; only full finalization can prime. No counter mutation or automatic retry in the tool.
 
-The engine carries the public delegation event literals and emits directly on Pi's event bus —
-no loader, no pre-launch preflight, no profile evidence or launch-contract digest. The only
-engine-presence fact it reads is Pi's public tool census: a missing `subagent` tool refuses
-`unavailable` before any lock. The resolver definition is the perk-managed, git-tracked
-`.pi/agents/perk/conflict-resolver.md` (the profile policy below; `subagent-agents` reconverges
-it) and its resolution is the engine's — profile drift is a reviewed repo change, not a
-dispatch-time check. Cwd controls NUL/CR/LF are refused; other shell bytes are POSIX-single-quoted
-in the code-built `cd` reminder. Flagless `perk pr review-context --json` owns the authoritative
-`base_ref`; the parent's displayed base is advisory. Rebase, verification, PR-only abort and
-force-with-lease authority remain the resolver's, not cleanup's.
+The engine carries the public delegation event literals and emits on Pi's bus — no loader,
+preflight, profile evidence or digest; presence is Pi's tool census (no `subagent` tool →
+`unavailable`, no lock). The resolver definition, git-tracked `.pi/agents/perk/conflict-resolver.md`
+(reconverged by `subagent-agents`), drifts only by reviewed repo change — no dispatch check. Cwd
+NUL/CR/LF refused, other bytes single-quoted in the built `cd`; flagless `perk pr review-context
+--json` owns `base_ref`; rebase/verify/abort/push authority is the resolver's.
 
-One fresh owned-leaf request per dispatch rides native foreground structured delegation,
-correlated by fresh request UUID + real parent `ownerRunId` + mode-selected `nodeId:
-submit-conflict` (PR) or `retained-conflict`. It carries `agent`, the code-built `task`, the
-trusted worktree `cwd`, `context: "fresh"`, `timeoutMs`, `result: {kind: "structured", schema}`
-(the requested mode's exact plain-JSON schema) and the optional configured model — and **no
-`extensionBindings`** (no `perk.parent-restrictions/…` packet: the writer never receives the
-read-only floor; pinned by one fake-bus assertion). No async, mission, worktree or acceptance keys
-are sent. pi-subagents' global `worktree` default is read **once at engine activation** from
-`join(getAgentDir(), "extensions/subagent/config.json")`: a missing file, an absent key or `false`
-is compatible; anything else (true, non-boolean, unparseable, non-object, unreadable) refuses
-every dispatch of the activation with `incompatible-worktree-default` — deliberately stricter than
-the engine's own fallback — stamping `nativeWorktreeConfig {path, observed}` on the receipt (a
-diagnostic location like `lock.path`), and both surfaces render `nativeWorktreeRefusal`: the exact
-path, the observation and the one-line fix (set `"worktree": false` there or delete the key, then
-quit and resume the session). perk never rewrites that file — no convergence, doctor check or
-`--fix` arm exists for it. The two engines' activation snapshots are independent and taken inside
-one extension-loading pass.
+One fresh owned-leaf request per dispatch (UUID, parent `ownerRunId`, `nodeId`
+submit-conflict|retained-conflict) carries `agent`, code-built `task`, worktree `cwd`, `context:
+"fresh"`, `timeoutMs`, the mode's plain-JSON `result` schema and the optional model — **no
+`extensionBindings`** (no read-only floor; fake-bus-pinned), no async/mission/worktree/acceptance
+keys. pi-subagents' global `worktree` default (`<agent dir>/extensions/subagent/config.json`) is
+read **once at engine activation**: missing/absent/`false` passes; anything else refuses every
+dispatch as `incompatible-worktree-default` (stricter than the engine's fallback) stamping
+`nativeWorktreeConfig {path, observed}` (a text-free scalar or type name), rendered by both surfaces
+via `nativeWorktreeRefusal` with the fix (set `"worktree": false`/delete the key, quit and resume).
+perk never rewrites that file; engines snapshot independently in one loading pass.
 
 Draft reviews take no file lock: their guards are in-memory (§8.23 "Draft-review guards").
 Neither atomic file replacement nor fsync claims power-loss durability or exactly-once delivery.

@@ -369,6 +369,11 @@ for (const mode of ["pr-rebase", "retained-continuation"] as const) {
       assert.ok(result.kind === "failed" && result.reason === "incompatible-worktree-default");
       assert.deepEqual(result.receipt.nativeWorktreeConfig, { path, observed });
       assert.deepEqual(result.receipt.lock, { disposition: "not-acquired" });
+      assert.doesNotMatch(
+        JSON.stringify(result),
+        /SECRET/,
+        "the observation never carries content",
+      );
       assert.equal(w.bus.sent.length, sent, "no writer request or cancellation was emitted");
       assert.equal(existsSync(w.lockPath), false);
     }
@@ -380,7 +385,11 @@ for (const mode of ["pr-rebase", "retained-continuation"] as const) {
     }
     for (const [content, observed] of [
       ['{"worktree":true}', "worktree=true"],
-      ['{"worktree":"false"}', 'worktree="false"'],
+      ['{"worktree":1}', "worktree=1"],
+      ['{"worktree":null}', "worktree=null"],
+      ['{"worktree":"SECRET false"}', "worktree is a string"],
+      ['{"worktree":["SECRET"]}', "worktree is an array"],
+      ['{"worktree":{"SECRET":true}}', "worktree is an object"],
       ["{", "unparseable JSON"],
       ["null", "not a JSON object"],
     ] as const) {

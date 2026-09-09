@@ -102,9 +102,9 @@ repeated, stale or read-only calls refuse. Full address finalization uses the sa
 only after publication and thread resolution succeed. Without pi-subagents' `subagent` tool loaded
 the resolver refuses `unavailable` before taking any lock. A pi-subagents global `worktree` default
 other than `false` is incompatible with perk's own worktree: the refusal names the exact
-`extensions/subagent/config.json` read at session start, what it observed, and the fix (set
-`"worktree": false` there or delete the key, then quit and resume the session). perk never edits
-that file.
+`extensions/subagent/config.json` read once when the extension activated (a `/reload` or a new
+session start does not re-read it), what it observed, and the fix (set `"worktree": false` there
+or delete the key, then quit and resume the session). perk never edits that file.
 
 A persistent `perk-submit-conflict.lock` in the worktree's canonical Git directory excludes other
 participating submit/address resolvers across sessions/processes. Contention does not refund an

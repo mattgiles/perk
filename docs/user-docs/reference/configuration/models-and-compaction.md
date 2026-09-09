@@ -233,10 +233,10 @@ This is not a models-only overlay: Pi's **whole config directory** moves, includ
 - **Settings:** the global settings tier moves too; the repo's `.pi/settings.json` remains the
   project tier and still overrides global settings.
 - **pi-subagents' config:** the borrowed engine's `extensions/subagent/config.json` moves with
-  the directory. perk's `/submit` conflict resolver reads its `worktree` default there once per
-  session and refuses to launch while it is anything but absent or `false` (naming the file); the
-  `subagent-bridge-config` check follows the same redirect — operator `PI_CODING_AGENT_DIR` first,
-  then the configured `agent_dir`, then `~/.pi/agent`.
+  the directory. perk's `/submit` conflict resolver reads its `worktree` default there once at
+  extension activation and refuses to launch while it is anything but absent or `false` (naming
+  the file); the `subagent-bridge-config` check follows the same redirect — operator
+  `PI_CODING_AGENT_DIR` first, then the configured `agent_dir`, then `~/.pi/agent`.
 
 ### Diagnostics and git safety
 

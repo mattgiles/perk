@@ -225,7 +225,9 @@ _Avoid_: code TODO, side quest
 **Execution lock**:
 The per-worktree `perk-submit-conflict.lock` (`worktreeResolverLock.ts`) that serializes
 participating conflict resolvers on one canonical Git directory; busy for any incumbent, never
-reclaimed, released only by confirmed native completion or a human.
+reclaimed; released by a correlated native `completed` terminal or a pre-launch refusal
+(`invalid_request`/`unavailable_context`/`duplicate_node`) with no start evidence, otherwise
+retained for a human.
 _Avoid_: resolver lock, file claim, lease
 
 **Resolver session claim**:
