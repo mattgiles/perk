@@ -1,0 +1,28 @@
+{
+  "success": true,
+  "error_type": null,
+  "objective": "7",
+  "node": "2.1",
+  "comments": [],
+  "description_edits": [],
+  "engagement_status": "unavailable",
+  "refinement": {
+    "status": "unavailable"
+  },
+  "warnings": [
+    {
+      "surface": "engagement",
+      "code": "engagement_read_failed",
+      "message": "node engagement unavailable: linear boom",
+      "comment_ids": []
+    },
+    {
+      "surface": "refinement",
+      "code": "backend_error",
+      "message": "could not read comments on ENG-21: 502",
+      "comment_ids": [
+        "c-9"
+      ]
+    }
+  ]
+}

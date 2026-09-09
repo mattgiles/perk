@@ -1,0 +1,318 @@
+{
+  "$defs": {
+    "DescriptionEditOut": {
+      "additionalProperties": false,
+      "description": "One node-issue description edit; ``diff`` is untrusted DATA (null when the backend\nexposes no inline diff).",
+      "properties": {
+        "created_at": {
+          "title": "Created At",
+          "type": "string"
+        },
+        "author": {
+          "$ref": "#/$defs/EngagementAuthorOut"
+        },
+        "diff": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Diff"
+        }
+      },
+      "required": [
+        "created_at",
+        "author",
+        "diff"
+      ],
+      "title": "DescriptionEditOut",
+      "type": "object"
+    },
+    "EngagementAuthorOut": {
+      "additionalProperties": false,
+      "description": "The classified author of one engagement item (``kind`` + best-available label/id).",
+      "properties": {
+        "kind": {
+          "enum": [
+            "human",
+            "perk",
+            "other_agent",
+            "unknown"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "display_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Display Name"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        }
+      },
+      "required": [
+        "kind",
+        "display_name",
+        "id"
+      ],
+      "title": "EngagementAuthorOut",
+      "type": "object"
+    },
+    "EngagementCommentOut": {
+      "additionalProperties": false,
+      "description": "One node-issue comment; ``body`` is untrusted DATA.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "created_at": {
+          "title": "Created At",
+          "type": "string"
+        },
+        "edited_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Edited At"
+        },
+        "author": {
+          "$ref": "#/$defs/EngagementAuthorOut"
+        }
+      },
+      "required": [
+        "id",
+        "body",
+        "created_at",
+        "edited_at",
+        "author"
+      ],
+      "title": "EngagementCommentOut",
+      "type": "object"
+    },
+    "NodeContextWarningOut": {
+      "additionalProperties": false,
+      "description": "One advisory failure: the ``surface`` that failed, a stable ``code``, a human\n``message``, and the carrier comment ids the outcome rests on.",
+      "properties": {
+        "surface": {
+          "enum": [
+            "engagement",
+            "refinement"
+          ],
+          "title": "Surface",
+          "type": "string"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "comment_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Comment Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "surface",
+        "code",
+        "message",
+        "comment_ids"
+      ],
+      "title": "NodeContextWarningOut",
+      "type": "object"
+    },
+    "NodeRefinementPresentOut": {
+      "additionalProperties": false,
+      "description": "A saved refinement was read, rendered and written: ``file`` points at the full dated\n``<untrusted_node_refinement>`` block under the run scratch dir.",
+      "properties": {
+        "status": {
+          "const": "present",
+          "title": "Status",
+          "type": "string"
+        },
+        "file": {
+          "$ref": "#/$defs/TextFileRefOut"
+        }
+      },
+      "required": [
+        "status",
+        "file"
+      ],
+      "title": "NodeRefinementPresentOut",
+      "type": "object"
+    },
+    "NodeRefinementStatusOut": {
+      "additionalProperties": false,
+      "description": "No refinement pointer: none is saved (``absent``), the backend has no refinement read\n(``unsupported``), or the read/snapshot failed (``unavailable`` \u2014 see ``warnings``).",
+      "properties": {
+        "status": {
+          "enum": [
+            "absent",
+            "unsupported",
+            "unavailable"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "NodeRefinementStatusOut",
+      "type": "object"
+    },
+    "TextFileRefOut": {
+      "additionalProperties": false,
+      "description": "One materialized text section: its absolute ``path`` plus the sizes a reviewer pages\nagainst \u2014 ``max_line_bytes`` is the longest line's UTF-8 length (compared against Pi's\nper-line ``read`` bound to pick the byte-slice fallback).",
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "lines": {
+          "title": "Lines",
+          "type": "integer"
+        },
+        "max_line_bytes": {
+          "title": "Max Line Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "bytes",
+        "lines",
+        "max_line_bytes"
+      ],
+      "title": "TextFileRefOut",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The ``--json`` serialization boundary of a snapshotted :class:`NodeContext` (field order\nload-bearing; the pre-existing keys come first). ``refinement`` is discriminated on\n``status``: ``present`` always carries a ``file`` pointer \u2014 in the payload it means \"the\nfile is on disk\", never merely \"a record was read\".",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "objective": {
+      "title": "Objective",
+      "type": "string"
+    },
+    "node": {
+      "title": "Node",
+      "type": "string"
+    },
+    "comments": {
+      "items": {
+        "$ref": "#/$defs/EngagementCommentOut"
+      },
+      "title": "Comments",
+      "type": "array"
+    },
+    "description_edits": {
+      "items": {
+        "$ref": "#/$defs/DescriptionEditOut"
+      },
+      "title": "Description Edits",
+      "type": "array"
+    },
+    "engagement_status": {
+      "enum": [
+        "present",
+        "absent",
+        "unavailable"
+      ],
+      "title": "Engagement Status",
+      "type": "string"
+    },
+    "refinement": {
+      "discriminator": {
+        "mapping": {
+          "absent": "#/$defs/NodeRefinementStatusOut",
+          "present": "#/$defs/NodeRefinementPresentOut",
+          "unavailable": "#/$defs/NodeRefinementStatusOut",
+          "unsupported": "#/$defs/NodeRefinementStatusOut"
+        },
+        "propertyName": "status"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/NodeRefinementPresentOut"
+        },
+        {
+          "$ref": "#/$defs/NodeRefinementStatusOut"
+        }
+      ],
+      "title": "Refinement"
+    },
+    "warnings": {
+      "items": {
+        "$ref": "#/$defs/NodeContextWarningOut"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "objective",
+    "node",
+    "comments",
+    "description_edits",
+    "engagement_status",
+    "refinement",
+    "warnings"
+  ],
+  "title": "ObjectiveNodeEngagementOut",
+  "type": "object"
+}
