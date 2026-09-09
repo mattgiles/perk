@@ -70,46 +70,14 @@ open between model turns. The implementing session predates its dependencies/bin
 not a valid live host. See the scoped [native streaming record](../design/archive/pi-subagents-native-streaming-dogfood.md)
 for the background baseline and the five human-operated streaming legs; unobserved legs are not passes.
 
-## Child execution and scratch-identity decision
+## Child execution policy
 
-The [binding child-policy record](../design/pi-subagents-child-execution-policy.md) defines
-owner-accepted behavior: its [approval pointer](../design/pi-subagents-child-execution-policy.md#approval-pointer)
-records acceptance by the unchanged PR #2231 owner merge, not a separate formal review or local
-attestation. Profiles, the restriction producer, bounded advisory identity, the independent floor
-consumer and exact ten-report scratch suppression are implemented. Both producer and consumer
-are required for the full selected report profile. The bounded
-[consumer source/offline reconciliation](../design/pi-subagents-child-execution-policy.md#consumer-sourceoffline-reconciliation)
-records resolved roots, actual package versions, implementation commit and concise command outcomes.
-Its [owning regression suites](../design/pi-subagents-child-execution-policy.md#owning-consumer-regression-suites)
-allocate input matrices, lifecycle/gate/scratch checks, SDK wiring, warm producer→consumer, side
-session and optional installed interoperability checks without repeating every cross-product.
-The earlier [0.66.0 producer record](../design/pi-subagents-child-execution-policy.md#0660-sourceoffline-reconciliation)
-retains its C1–C6/hash ledger verbatim as history; that ledger and a trailing evidence-only commit
-are not requirements for this consumer's bounded verification. Use the normal PR validation summary
-for detailed execution. Neither record is a new full compatibility certification: the doctor
-stamp, Pi dev pins and unpinned engine policy stay unchanged. The warm
-path is source/offline corroborated, not a native-matrix PASS. Later changes must reconcile the
-policy rather than choose a new profile implicitly.
-
-For consumer changes, re-read the worktree-resolved Pi startup/rebuild/reload path and the installed
-engine's prefix escaping, runner stamp, runner-only binding delivery and child loader. Relevant
-source behavior, not version equality, is the compatibility bar. Stop on incompatibility for owner
-disposition—no install, mode or composition fallback. Private imports remain test-only; the optional
-installed test must execute in an implementing checkout, while clean CI may honestly skip a missing
-engine. Mandatory offline SDK harness coverage remains independent of that installation.
-
-The consumer deliberately hardens **every effective read-only session**, parents included, with a
-full `READ_ONLY_TOOLS` tool-call check independent of toolset synchronization. The existing bash
-argument policy and allowlisted carve-outs do not become an OS sandbox. Same-key startup ORs the
-floor; unreadable keys retain the last known comparison key, carrying an anonymous floor into first
-readable recovery. Only shutdown/new activation or positively different known-key capture resets
-it. Known-key warning buckets survive retries; separate anonymous buckets survive recovery until
-shutdown. Invalid runner packets warn with fixed messages; non-runner packets are ignored silently.
-Mode reflection is verified and mode-only, never identity repair. Classified failures keep the
-honest outcome; an escaping append exception reports the fixed persistence failure once and
-continues startup with the in-memory floor. Normal reload uses the original packet plus branch
-mode—loss of both is unsupported. Foreground/manual and arbitrary cross-cwd cases remain outside
-this bounded profile.
+The [child-policy record](../design/pi-subagents-child-execution-policy.md) is binding: two
+booleans — the runner bit (`PI_SUBAGENT_CHILD=1`) and the constant report restriction packet
+(`perk.parent-restrictions/1 = {readOnly: true}` + `worktree: false` on every report child) — give
+a runner child a monotone read-only floor and no agent scratch; a malformed or unsupported-version
+packet fails closed. Its regression table names the owning suites (`childRestrictions.test.ts`,
+`sessionLifecycle.test.ts`, `agentScratch.test.ts`, `reportWave.test.ts`, `waveIsolation.test.ts`).
 
 The linked [capability characterization](../design/archive/pi-subagents-child-capability-characterization.md)
 records the pi-subagents 0.65.1 / five-package Pi 0.85.1 matrix, actual tool denials and writer

@@ -228,41 +228,11 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
 
   The extension provisions the directory before every eligible model turn and injects one hidden
   `customType: "perk:agent-scratch"` block naming the repository-relative current-run path. A
-  turn first consults effective read-only gating (§8.3), including the runner restriction floor.
-  Otherwise eligibility uses only the activation-local advisory identity captured at `session_start`
-  by `extension/substrate/childIdentity.ts`, before tool activation rebuilds the prompt:
-
-  | Advisory identity | Captured runner bit | Scratch eligible |
-  | --- | --- | --- |
-  | Any of the ten report names below | either | no |
-  | `perk.conflict-resolver` or valid custom/unknown name | either | yes |
-  | Absent/malformed/unreadable/stale | true | no; bounded warning |
-  | Absent/malformed/unreadable/stale | false | yes; parent/unidentified-foreground fallback |
-  | Legacy-only or bindings-only name claim | either | ignored; applicable unavailable row |
-
-  The exact report set is `perk.adversarial-reviewer`, `perk.draft-reviewer`, `perk.dream-analyst`,
-  `perk.dream-reducer`, `perk.harvest-analyst`, `perk.learn-analyst`, `perk.objective-explorer`,
-  `perk.pr-reviewer`, `perk.review-classifier`, and `perk-dev.session-auditor`. The writer,
-  `perk-dev.analyst`, custom agents and builtins are excluded; Ponytail is an invocation variant.
-
-  Advisory identity is a spoofable prompt claim, never authority or Perk run identity. Inspect only
-  the first LF-delimited line of `ctx.getSystemPrompt()` with a bounded scan (4096 UTF-8 bytes;
-  longer is malformed regardless of content). Accept exactly `<active_agent name="VALUE"/>`,
-  without padding, CR removal, extra attributes/tags or literal unescaped `&`, `"`, `<`, `>` in
-  VALUE. Decode only `&amp;`, `&quot;`, `&lt;`, `&gt;`, once; canonical re-encoding must reproduce
-  the attribute bytes. The decoded name is nonempty, at most 256 UTF-8 bytes, has no Unicode Cc
-  controls, and compares case-sensitively. For a within-limit line that is not valid, classify as
-  malformed iff it contains the literal `<active_agent` anywhere, otherwise absent. Later lines,
-  task/history/compaction prose, legacy env names and every binding namespace are not identity.
-
-  Each startup replaces advice; lookup checks the full SDK UUID and full file path (or null),
-  never a basename/cwd/run-id substitute and never a fresh prompt/env read. Unreadable keys/prompts
-  are unavailable; a different lookup key is stale, retaining only the captured runner fallback.
-  Shutdown clears the snapshot. Known-key reason buckets survive same-key captures and reset on
-  positively different known-key capture; unreadable-key reasons use a separate anonymous
-  activation-local set retained through readable recovery, cleared only on shutdown/discard.
-  Stale warnings belong to the captured scope. Warn only on unavailable runner identity, through
-  fixed `report(..., {alsoLog: true})` messages, never raw names/prompts or thrown payloads.
+  turn is eligible iff the effective gate (§8.3, floor included) is off **and** the activation is
+  not a runner child (`PI_SUBAGENT_CHILD === "1"` at `session_start`). Every perk report child is
+  a runner child, so no per-role census, prompt-prefix identity or agent-name reader exists; the
+  composition root supplies the one `eligible` predicate (`!gate && !runner`). Foreground writers
+  and hand-launched agents are outside the channel; suppression is never a write grant or a mode.
 
   Neither ineligible hook calls the provisioner: suppression means no `agent/` creation or direct
   guidance, not zero lifecycle filesystem activity or deletion of existing directories. The context
@@ -670,28 +640,15 @@ CLI↔extension version-skew lesson). The objective node→plan link outcome is 
 swallowed**: a failed advance shows a visible `⚠ … NOT advanced — re-run /plan-save` warning
 (the node↔plan link — the objective transition surface below).
 
-**Runner restriction floor.** `extension/substrate/childRestrictions.ts` is independent of advisory
-identity and role classification. `index.ts` captures it before lifecycle establishment or gate sync,
-sharing only startup's `PI_SUBAGENT_CHILD === "1"` boolean and the stateless full SDK session-key
-helper with the identity reader. Only runner-hosted captures consume `PI_SUBAGENT_EXTENSION_BINDINGS`;
-non-runners ignore even malformed packets silently. Undefined raw input is legacy absence; empty or
-whitespace input is invalid. Bound to 16384 UTF-8 bytes before standard `JSON.parse` into `unknown`;
-require a non-null, non-array object. Inspect own namespace keys: any reserved-family
-`perk.parent-restrictions/` key except exact v1 is unsupported and restrictive, even beside valid v1.
-Unrelated namespaces stay opaque. V1 must be a non-null non-array object with exactly one own key,
-boolean `readOnly`; no coercion/extra fields. No reserved-family key is silent legacy absence.
-Invalid/oversized JSON or envelope, invalid v1, unsupported version, or unreadable runner capture
-latches a floor. True restricts; false/absence is never a write grant or proof of warm inheritance.
-
-A full known `{sessionId, sessionFile}` identifies this physical session. Same-key capture ORs the
-floor across changed runner/packet values. Only shutdown/new activation or a positively different
-known-key capture resets it. Unreadable keys retain the last known comparison key and a conservative
-runner floor; an anonymous floor carries to the first readable key because recovery is not proof of
-a different session. No isolation guarantee is claimed while SDK key access is broken. Known-key
-finite warning sets reset on positive difference, not same-key retry; a separate anonymous reason
-set survives recovery and resets only on shutdown/discard. Invalid runner restrictions warn with
-fixed `report(..., {alsoLog: true})` messages, never raw bindings/names or arbitrary exceptions.
-No unbounded key map or durable floor field is added.
+**Runner restriction floor.** `extension/substrate/childRestrictions.ts` exports two pure booleans:
+`isRunnerChild(env)` (`PI_SUBAGENT_CHILD === "1"`) and `decodeReadOnlyFloor(runner, raw)` over
+`PI_SUBAGENT_EXTENSION_BINDINGS`. A non-runner never gets a floor. For a runner: `undefined` raw or
+an object envelope with no `perk.parent-restrictions/…` key is **no packet** (`false`); invalid JSON,
+a non-object envelope, any family key other than exactly `/1` (an unsupported version, even beside a
+valid `/1`), or `/1` with anything but exactly one own `readOnly: boolean` is **malformed** (`true`,
+fail closed); `/1 = {readOnly: b}` is **valid** (`b`). Unrelated namespaces are opaque. `index.ts`
+reads both at the top of every `session_start` and **latches** the floor for the activation (`||=`)
+before lifecycle or gate sync; no session-key binding, status vocabulary, size bound or warning.
 
 After unchanged `establishSessionIdentity`, `reflectSessionReadOnlyFloor` runs only for a latched
 floor. Unclaimed/already-read-only outcomes append nothing. Other established outcomes use one
@@ -713,8 +670,7 @@ application) uses the effective restriction; a throwing optional composition-onl
 restrictive for that observation. A floor works without successful tool snapshot/installation, branch
 read or persistence. With a floor, `exit()` skips the read-write append and reapplies restriction,
 leaving persisted mode unchanged after failed reflection. Without a floor, ordinary enter/exit and
-stage/snapshot semantics remain. `/btw` and ReportWave's existing `gating.isActive()` suppliers see the
-same restriction. While effectively read-only the interior (`extension/substrate/toolGating.ts`): (1) restricts the
+stage/snapshot semantics remain. `/btw`'s `gating.isActive()` supplier sees the same restriction. While effectively read-only the interior (`extension/substrate/toolGating.ts`): (1) restricts the
 active tool set to `READ_ONLY_TOOLS` (`read`/`grep`/`find`/`ls`/`bash` + `ask_user_question` +
 `plan_review` + the `plan_draft`/`objective_draft`/`gist_draft` session-data carve-outs + `objective_node`
 (delegates a bounded node transition to the canonical Python plane) + the **`web` seam**
@@ -786,8 +742,7 @@ pure policy, consumed by every Perk-owned authoring/adapter injection, decides o
 FULL-branch rebuilt state (never the compacted message window) plus two activation-local inputs:
 the effective read-only gate and the **runner bit** (`extension/substrate/contextPolicy.ts` —
 startup's `PI_SUBAGENT_CHILD === "1"`, captured in `session_start` before lifecycle work and
-reset on shutdown; a suppression signal only — never a tool grant or save authority, and distinct
-from the advisory `<active_agent>` parser and the runner restriction floor). The kinds:
+reset on shutdown; a suppression signal only — never a tool grant or save authority). The kinds:
 `objective-author` / `objective-save` / `gist-author` / `gist-save` / `objective-refine` for
 those exact dedicated stages (they take precedence and never fall through to plan guidance —
 a stray `plan_authoring: true` left by an earlier `/plan` turn cannot direct a refinement
@@ -6201,37 +6156,16 @@ default). The manifest write rule above and the DECISION vocabulary are unchange
 fixed mission/acceptance above. Every runnable child intentionally omits `async`: definition
 background defaults apply while native omitted-async awaiting collects the report. No child cwd,
 extension lists, private `workflowAwaitAsync`, or extra collector is emitted.
-`createReportWave(bus, { parentReadOnly })` requires a lazy supplier; `index.ts`
-passes `() => gating.isActive()`. After required-skill
-preflight and the all-skipped early return, each attempt samples that supplier exactly once,
-immediately before rendering, even when the request itself requires read-only execution.
-`ReportWaveRequest.execution?: "caller-read-only"` is code-owned Perk metadata, not a native
-engine field. Exactly two callers opt in: automated `/pr-review` and `/address` classification,
-both of which need the caller's local plan-ref. For these requests every runnable child (Ponytail
-and retries included) renders `worktree: false` and a true restriction packet. The native RPC
-context supplies the caller cwd; plan authority is never copied into a new worktree. Other
-requests omit worktree and preserve native defaults and the captured parent boolean, including
-false. Every item receives exactly `extensionBindings: {"perk.parent-restrictions/1":
-{"readOnly": boolean}}`, meaning the captured parent restriction **strengthened by the
-caller-read-only request**, not an assertion that the parent itself is read-only. No parent mode,
-handoff, identity/stage/run data, root binding, arbitrary cwd/profile registry or model-tool
-parameter is added. Explicit field selection and JSON serialization
-keep task text and extra runtime assignment properties from overriding this channel. Retries sample
-anew; this is not continuous revocation or a handoff read. Capture exceptions return non-retryable
-wave-level `unavailable`, `key: null`, receipt `{state: "unavailable", children: []}`, a
-parent-restriction capture diagnostic, and the normal manifest, preserving keyed preflight failures.
-No adapter construction/ping/spawn or ref mint occurs; best-effort completeness remains false.
-The public `ReportWave` lifecycle, assignments, results and controls are unchanged; only the
-optional request policy above is added.
-The test-only `reportWaveOver(adapter, parentReadOnly = () => false)` default is not production
-permission policy. False is not a write grant. Producer and consumer are both implemented and both
-required with normal background-child Perk loading for the selected report profile. User-shadowed
-definitions, foreground overrides and installations missing the consumer are not certified.
-The independent runner decoder, monotone effective-gate floor and verified mode reflection are §8.3; bounded advisory identity and exact ten-role scratch
-suppression are §8.1. This is a spawn-time restriction snapshot for Perk-owned report waves, not
-continuous revocation, certification of manual subagent calls, foreground Perk enforcement, arbitrary
-cross-cwd handoff transport, or a universal OS sandbox. Ordinary offline/source checks do not create
-a native warm-path PASS or update the full-baseline doctor compatibility stamp.
+Every rendered child item carries exactly `extensionBindings: {"perk.parent-restrictions/1":
+{"readOnly": true}}` and `worktree: false` — a constant, never sampled from the parent gate,
+handoff, task or assignment data (explicit field selection + whole-array `JSON.stringify` keep
+hostile fields inert). The native RPC context supplies the caller cwd, so plan-bound readers
+(`/pr-review`, the `/address` classifier) keep their local plan-ref; there is no `execution`
+opt-in or other placement. `createReportWave(bus)` takes no supplier and has no capture-failure
+arm; the consumer is §8.3's floor and §8.1's runner-child scratch suppression. No parent mode,
+handoff, identity/stage/run data or model-tool parameter is added. This is spawn-time policy for
+Perk-owned report waves, not continuous revocation, foreground Perk enforcement, certification of
+manual subagent calls, cross-cwd handoff transport, or an OS sandbox.
 
 **Report authority and native partial settlement.** Ordinary durable `state: "complete"`
 uses only `status.json.workflow.value`; completion metadata never supplements or replaces it.
@@ -10718,7 +10652,7 @@ structurally assignable to its `LanedDocs` parameter, pinned by test), invoked p
 execute time (§8.61) and threaded here.
 
 **The agent.** `perk.dream-analyst` (`agents/dream-analyst.md`): report-only
-(`REPORT_ONLY_CHILD_AGENTS` + the §8.1 report-only children list), read-only tool posture
+(§8.1), read-only tool posture
 (`read, grep, find, ls, bash`), fresh context, engine-injected `structured_output` completion
 (never fenced JSON), delivered via `PERK_AGENTS` into `.pi/agents/perk/`.
 
@@ -10828,8 +10762,7 @@ cycles and retiring merge targets), `currency-accuracy` (challenge claims agains
 repository truth, distinguish obsolete knowledge from still-valid rationale, prioritize
 misleading guidance), `knowledge-architecture` (document boundaries, clusters, routing cues,
 distillation/read cost, harvest-follow-up quality). **The agent:** `perk.dream-reducer`
-(`agents/dream-reducer.md`): report-only (`REPORT_ONLY_CHILD_AGENTS` + the §8.1 report-only
-children list), read-only tool posture (`read, grep, find, ls, bash`), fresh context,
+(`agents/dream-reducer.md`): report-only (§8.1), read-only tool posture (`read, grep, find, ls, bash`), fresh context,
 engine-injected `structured_output` completion (never fenced JSON), stronger-tier default
 model (`anthropic/claude-fable-5`, fallback `anthropic/claude-sonnet-4-5` — the reducers are
 the judgment-heaviest lanes), delivered via `PERK_AGENTS` into `.pi/agents/perk/`.

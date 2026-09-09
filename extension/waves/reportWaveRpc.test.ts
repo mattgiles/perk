@@ -66,62 +66,51 @@ const DERIVE_REPORTS = async (script: string): Promise<unknown> =>
     report: { angle: key, verdict: "clean" },
   }));
 
-for (const execution of [undefined, "caller-read-only"] as const) {
-  for (const parentReadOnly of [false, true]) {
-    test(`rpc round-trip: ${execution ?? "default"} over parent ${parentReadOnly}`, async () => {
-      const bus = createFakeBus();
-      const fake = createFakeSubagents([{ executeScript: DERIVE_REPORTS }]);
-      fake.attach(bus);
-      const spec = makeSpec({ model: "anthropic/claude-sonnet-4", execution });
-      const result = await createReportWave(bus, { parentReadOnly: () => parentReadOnly }).run(
-        spec,
-      );
+test("rpc round-trip: every child carries the constant packet and caller-checkout placement", async () => {
+  const bus = createFakeBus();
+  const fake = createFakeSubagents([{ executeScript: DERIVE_REPORTS }]);
+  fake.attach(bus);
+  const spec = makeSpec({ model: "anthropic/claude-sonnet-4" });
+  const result = await createReportWave(bus).run(spec);
 
-      // The spawn crossed the real v1 envelope with the fixed module contract.
-      assert.equal(fake.spawns.length, 1);
-      const spawn = fake.spawns[0] as {
-        workflowScript?: string;
-        async?: boolean;
-        mission?: boolean;
-        context?: string;
-        acceptance?: unknown;
-        outputSchema?: unknown;
-        model?: string;
-        timeoutMs?: number;
-      };
-      assert.equal(spawn.async, true);
-      assert.equal(spawn.mission, false);
-      assert.equal(spawn.context, "fresh");
-      assert.deepEqual(spawn.acceptance, WAVE_ACCEPTANCE);
-      assert.deepEqual(spawn.outputSchema, spec.outputSchema);
-      assert.equal(spawn.model, "anthropic/claude-sonnet-4");
-      assert.equal(spawn.timeoutMs, 5_000);
-      assert.deepEqual(
-        waveScriptItems(String(spawn.workflowScript ?? "")).map(({ key }) => key),
-        ["plan-fidelity", "correctness"],
-      );
+  // The spawn crossed the real v1 envelope with the fixed module contract.
+  assert.equal(fake.spawns.length, 1);
+  const spawn = fake.spawns[0] as {
+    workflowScript?: string;
+    async?: boolean;
+    mission?: boolean;
+    context?: string;
+    acceptance?: unknown;
+    outputSchema?: unknown;
+    model?: string;
+    timeoutMs?: number;
+  };
+  assert.equal(spawn.async, true);
+  assert.equal(spawn.mission, false);
+  assert.equal(spawn.context, "fresh");
+  assert.deepEqual(spawn.acceptance, WAVE_ACCEPTANCE);
+  assert.deepEqual(spawn.outputSchema, spec.outputSchema);
+  assert.equal(spawn.model, "anthropic/claude-sonnet-4");
+  assert.equal(spawn.timeoutMs, 5_000);
+  assert.deepEqual(
+    waveScriptItems(String(spawn.workflowScript ?? "")).map(({ key }) => key),
+    ["plan-fidelity", "correctness"],
+  );
 
-      for (const item of waveScriptItems(String(spawn.workflowScript))) {
-        assert.deepEqual(item.extensionBindings, {
-          "perk.parent-restrictions/1": {
-            readOnly: execution === "caller-read-only" || parentReadOnly,
-          },
-        });
-        if (execution === "caller-read-only") assert.equal(item.worktree, false);
-        else assert.equal("worktree" in item, false);
-      }
-
-      // The aggregate was read from the run's REAL temp status.json through the adapter.
-      assert.equal(result.complete, true);
-      assert.deepEqual(result.reports, [
-        { key: "plan-fidelity", report: { angle: "plan-fidelity", verdict: "clean" } },
-        { key: "correctness", report: { angle: "correctness", verdict: "clean" } },
-      ]);
-      assert.deepEqual(result.failures, []);
-      assert.equal(result.receipt.state, "complete");
-    });
+  for (const item of waveScriptItems(String(spawn.workflowScript))) {
+    assert.deepEqual(item.extensionBindings, { "perk.parent-restrictions/1": { readOnly: true } });
+    assert.equal(item.worktree, false);
   }
-}
+
+  // The aggregate was read from the run's REAL temp status.json through the adapter.
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.reports, [
+    { key: "plan-fidelity", report: { angle: "plan-fidelity", verdict: "clean" } },
+    { key: "correctness", report: { angle: "correctness", verdict: "clean" } },
+  ]);
+  assert.deepEqual(result.failures, []);
+  assert.equal(result.receipt.state, "complete");
+});
 
 for (const shape of [
   "current",
@@ -135,7 +124,7 @@ for (const shape of [
     const bus = createFakeBus();
     const fake = createFakeSubagents([{ executeScript: DERIVE_REPORTS, delivery: "manual" }]);
     fake.attach(bus);
-    const wave = createReportWave(bus, { parentReadOnly: () => false });
+    const wave = createReportWave(bus);
     const start = await wave.start(makeSpec());
     assert.ok(start.ok);
     if (!start.ok) return;
@@ -205,7 +194,7 @@ test("rpc integration: a failed aggregate row stays failed despite a report and 
     },
   ]);
   fake.attach(bus);
-  const wave = createReportWave(bus, { parentReadOnly: () => true });
+  const wave = createReportWave(bus);
   const start = await wave.start(makeSpec());
   assert.ok(start.ok);
   fake.emit({
@@ -232,7 +221,7 @@ test("rpc integration: a FOREIGN completion is ignored; the matching manual deli
   const bus = createFakeBus();
   const fake = createFakeSubagents([{ executeScript: DERIVE_REPORTS, delivery: "manual" }]);
   fake.attach(bus);
-  const wave = createReportWave(bus, { parentReadOnly: () => false });
+  const wave = createReportWave(bus);
   const start = await wave.start(makeSpec());
   assert.equal(start.ok, true);
   if (!start.ok) return;
@@ -266,9 +255,7 @@ test("rpc integration: timeout stops the real run best-effort (the recorded stop
     { delivery: "never", executeSettlement: async () => partialFixture() },
   ]);
   fake.attach(bus);
-  const result = await createReportWave(bus, { parentReadOnly: () => false }).run(
-    makeSpec({ timeoutMs: 30 }),
-  );
+  const result = await createReportWave(bus).run(makeSpec({ timeoutMs: 30 }));
   assert.deepEqual(
     result.failures.map((f) => [f.key, f.reason]),
     [[null, "timeout"]],
@@ -356,7 +343,7 @@ for (const value of [
       },
     ]);
     fake.attach(bus);
-    const wave = createReportWave(bus, { parentReadOnly: () => false });
+    const wave = createReportWave(bus);
     const start = await wave.start(makeSpec());
     assert.ok(start.ok);
     const status = JSON.parse(readFileSync(join(start.asyncDir, "status.json"), "utf8"));
@@ -403,7 +390,7 @@ test("report-bearing pre-reply events select only the first match, before the st
     },
   ]);
   fake.attach(bus);
-  const wave = createReportWave(bus, { parentReadOnly: () => false });
+  const wave = createReportWave(bus);
   const start = await wave.start(makeSpec());
   assert.ok(start.ok);
   const collected = await wave.collect(start.ref);
@@ -429,7 +416,7 @@ test("fake legacy evaluator still receives one argument, supersedes value, and r
     },
   ]);
   fake.attach(bus);
-  const wave = createReportWave(bus, { parentReadOnly: () => false });
+  const wave = createReportWave(bus);
   for (let i = 0; i < 2; i++) assert.equal((await wave.run(makeSpec())).complete, true);
   assert.equal(calls, 2);
 });
@@ -469,7 +456,7 @@ for (const mode of ["executeScript", "executeSettlement", "write-preparation"] a
         : { [mode]: reject },
     ]);
     fake.attach(bus);
-    const start = await createReportWave(bus, { parentReadOnly: () => false }).start(makeSpec());
+    const start = await createReportWave(bus).start(makeSpec());
     assert.equal(start.ok, false);
     if (start.ok) return;
     assert.equal(start.result.failures[0]?.reason, "spawn-failed");
@@ -517,7 +504,7 @@ test("overlapping partial waves ignore foreign/duplicate reports and collect aft
     fixtures.map((fixture) => ({ delivery: "manual", executeSettlement: async () => fixture })),
   );
   fake.attach(bus);
-  const wave = createReportWave(tracked, { parentReadOnly: () => false });
+  const wave = createReportWave(tracked);
   const a = await wave.start(makeSpec());
   const b = await wave.start(makeSpec());
   assert.ok(a.ok && b.ok);
@@ -569,7 +556,7 @@ for (const results of [
     fixture.completion.results = results;
     const fake = createFakeSubagents([{ executeSettlement: async () => fixture }]);
     fake.attach(bus);
-    const result = await createReportWave(bus, { parentReadOnly: () => false }).run(makeSpec());
+    const result = await createReportWave(bus).run(makeSpec());
     assert.deepEqual(result.reports, []);
     assert.deepEqual(
       result.failures.map((failure) => failure.reason),
@@ -585,7 +572,7 @@ test("partial event never bypasses a missing or malformed durable aggregate", as
       { delivery: "manual", executeSettlement: async () => partialFixture() },
     ]);
     fake.attach(bus);
-    const wave = createReportWave(bus, { parentReadOnly: () => false });
+    const wave = createReportWave(bus);
     const start = await wave.start(makeSpec());
     assert.ok(start.ok);
     const path = join(start.asyncDir, "status.json");
@@ -653,7 +640,7 @@ test("rpc integration: two OVERLAPPING waves through one factory correlate out o
   };
   const fake = createFakeSubagents([{ executeScript: DERIVE_REPORTS, delivery: "manual" }]);
   fake.attach(bus);
-  const wave = createReportWave(countingBus, { parentReadOnly: () => false });
+  const wave = createReportWave(countingBus);
   const a = await wave.start(
     makeSpec({
       assignments: [

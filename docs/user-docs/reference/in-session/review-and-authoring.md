@@ -89,28 +89,14 @@ Companion tools:
 Perk-owned report children select background mode through their definitions; calls omit child
 `async` so the native workflow awaits each report. Root scheduling remains async/fresh with the
 fixed report-only acceptance contract. Review-head paths are task data, not agent/extension
-discovery roots: the native RPC context supplies the trusted calling session cwd, subject to
-native worktree defaults for requests that do not opt into caller placement.
+discovery roots: the native RPC context supplies the trusted calling session cwd.
 
-After exact-source skill preflight, each attempt captures the current parent read-only gate and
-puts a `perk.parent-restrictions/1` boolean packet on every runnable child. Automated `/pr-review`
-and `/address` classification opt into the code-owned `caller-read-only` policy: every child
-(including Ponytail and review retries) gets `worktree: false` and a true restriction, strengthening
-the captured parent value without changing the parent or handoff. Both read the actual caller's
-local plan reference; Perk never copies plan authority into an allocated worktree. The classifier
-still has no retry and stops on failure. Other report requests retain native placement defaults
-and the captured boolean, including false; their schemas are unchanged. There is no new user
-configuration key. Retries still sample the parent anew even under the stronger policy. Capture failure returns non-retryable `unavailable` before launch,
-retaining any skill-preflight failures; all-skipped attempts do not capture. False grants no
-write authority. The implemented runner consumer latches true or invalid packets as an effective
-read-only floor before lifecycle work, independent of handoff mode and successful persistence.
-Gate exit and branch navigation cannot clear it; the full tool-call allowlist backstop remains
-active even when toolset narrowing fails. All ten report identities also suppress agent-scratch
-provisioning and direct guidance through the separate advisory startup-prefix reader. Both producer
-and consumer must be present with normal background-child Perk loading for this profile. It does
-not certify user-shadowed definitions, foreground overrides, or missing consumer installations. Manual subagent calls and uninstrumented foreground
-children are outside this channel, which is neither continuous revocation nor an OS sandbox.
-Streaming and final-report coverage rules below are unchanged.
+Every report child carries the constant `perk.parent-restrictions/1 = {readOnly: true}` packet and
+`worktree: false` (it runs in the caller checkout, so `/pr-review` and the `/address` classifier read
+the caller's local plan reference). A runner child with the packet is read-only for its activation —
+gate exit and branch navigation cannot clear it; the tool-call allowlist backstop stays — and gets no
+agent scratch. Both halves are perk-owned; a malformed packet fails closed. Manual subagent calls and
+foreground children are outside this channel. Streaming and coverage rules below are unchanged.
 
 ## Human-triaged PR review
 

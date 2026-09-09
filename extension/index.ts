@@ -85,8 +85,7 @@ import {
   setMarker,
   workflowDir,
 } from "./substrate/cache.ts";
-import { createChildIdentity } from "./substrate/childIdentity.ts";
-import { createChildRestrictions } from "./substrate/childRestrictions.ts";
+import { decodeReadOnlyFloor, isRunnerChild } from "./substrate/childRestrictions.ts";
 import { createContextPolicyInputs } from "./substrate/contextPolicy.ts";
 import { loadRegistry, type Registry } from "./substrate/registry.ts";
 import { perkVersion, sharedDir, versionStamp } from "./substrate/resources.ts";
@@ -163,20 +162,22 @@ export default function perk(
 
   // The read-only tool-gating primitive. Attaches to perk:workflow-state.mode; synced on
   // both session_start AND session_tree below. enter/exit are the surface the gated stages consume.
-  const childIdentity = createChildIdentity();
-  const childRestrictions = createChildRestrictions();
-  const gating = registerToolGating(pi, childRestrictions.hasFloor);
+  // The two native-child booleans (§8.3), re-read at every session_start: the runner bit, and the
+  // read-only floor a runner child derives from the report restriction packet — latched for the
+  // activation (`||=`) so no later session_start, gate exit, or tree navigation can clear it.
+  let runnerChild = false;
+  let readOnlyFloor = false;
+  const gating = registerToolGating(pi, () => readOnlyFloor);
   // The activation-local authoring-context policy input (§8.3): the startup runner bit, captured
   // in session_start before lifecycle work and consumed by the authoring/adapter installers as a
-  // suppression signal only — never a tool grant or save authority, and distinct from the
-  // advisory `<active_agent>` name parser and the runner restriction floor above.
+  // suppression signal only — never a tool grant or save authority.
   const contextPolicy = createContextPolicyInputs();
 
   // Run-owned disposable scratch guidance for every eligible write-capable model turn. One
   // activation-scoped provisioner shares retry/warning suppression with the isolated /btw side
   // session; no model tool or process-global temp environment is introduced.
   const agentScratch = createAgentScratchProvisioner();
-  registerAgentScratch(pi, agentScratch, childIdentity.lookup, gating.isActive);
+  registerAgentScratch(pi, agentScratch, () => !gating.isActive() && !runnerChild);
 
   // Vendored `btw`: a `/btw` human-only side-chat popover backed by an isolated in-memory
   // AgentSession. Takes `gating` for the gate-mirror — its side-session toolset + cache key follow
@@ -207,9 +208,7 @@ export default function perk(
   // pi's event bus) and pending execution (instance-owned refs), and is threaded into every
   // wave-consuming installer — no installer touches the transport tier. Plain construction, no
   // Pi registration, order-safe.
-  const reportWave = createReportWave(pi.events, {
-    parentReadOnly: () => gating.isActive(),
-  });
+  const reportWave = createReportWave(pi.events);
 
   let resolverContext: ExtensionContext | undefined;
   const conflictResolver = createConflictResolverEngine({
@@ -332,19 +331,15 @@ export default function perk(
     stackConflict.shutdown();
     resolverContext = undefined;
     await conflictResolver.shutdown();
-    childIdentity.clear();
-    childRestrictions.clear();
     contextPolicy.clear();
     feedbackReceiver.close();
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    // Capture the original loader prompt and runner packet before lifecycle work or tool rebuilds.
-    // Neither advisory failure nor a failed workflow claim may prevent the independent floor.
-    const runner = process.env.PI_SUBAGENT_CHILD === "1";
-    childRestrictions.capture(ctx, runner, () => process.env.PI_SUBAGENT_EXTENSION_BINDINGS);
-    childIdentity.capture(ctx, runner);
-    contextPolicy.capture(runner);
+    // Read the two native-child booleans and latch the floor before lifecycle work or tool rebuilds.
+    runnerChild = isRunnerChild(process.env);
+    readOnlyFloor ||= decodeReadOnlyFloor(runnerChild, process.env.PI_SUBAGENT_EXTENSION_BINDINGS);
+    contextPolicy.capture(runnerChild);
 
     submitConflict.setContext(ctx);
     stackConflict.setContext(ctx);
@@ -385,7 +380,7 @@ export default function perk(
       currentSessionId,
       envRunId: process.env.PERK_RUN_ID ?? null,
     });
-    if (childRestrictions.hasFloor()) {
+    if (readOnlyFloor) {
       const reflected = reflectSessionReadOnlyFloor(stateStore, identity);
       identity = reflected.outcome;
       if (reflected.unexpectedFailure) {

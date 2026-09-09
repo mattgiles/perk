@@ -1,9 +1,8 @@
 // Test-only fixture for the OPTIONAL installed pi-subagents engine: boot the real executor,
 // RPC bridge and result watcher over an isolated scratch HOME with a scripted child-session
 // factory, and tear the detached native runners down under a bounded deadline. Shared by the
-// installed-engine compat suites (`waves/planBoundReviewCompat.test.ts`,
-// `waves/reportOnlyCompletionCompat.test.ts`); each suite keeps its own assertions and its own
-// network prohibition (`t.mock` needs the test context). Production has NO dependency on these
+// installed-engine compat suite (`waves/reportOnlyCompletionCompat.test.ts`), which keeps its own
+// assertions and its own network prohibition (`t.mock` needs the test context). Production has NO dependency on these
 // engine-internal module paths — a missing installation is a skip, an incompatible one a failure.
 
 import assert from "node:assert/strict";

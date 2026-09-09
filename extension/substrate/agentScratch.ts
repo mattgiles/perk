@@ -14,30 +14,13 @@
 // reporting; no guessed copy is injected.
 
 import { relative, sep } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { activeContextMessages, type ContextMessage } from "../pi/v1/contextEvidence.ts";
 import { type ReportTarget, report } from "../surfaces/report.ts";
 import { agentScratchDir, ensureAgentScratch } from "./cache.ts";
-import type { ChildIdentitySnapshot } from "./childIdentity.ts";
 import { activeSessionRunId, type SessionDataCtx } from "./sessionData.ts";
 
 export const AGENT_SCRATCH_CONTEXT_TYPE = "perk:agent-scratch";
-
-/** Perk-owned children whose canonical definitions are report-only. */
-export const REPORT_ONLY_CHILD_AGENTS = [
-  "perk.adversarial-reviewer",
-  "perk.draft-reviewer",
-  "perk.dream-analyst",
-  "perk.dream-reducer",
-  "perk.harvest-analyst",
-  "perk.learn-analyst",
-  "perk.objective-explorer",
-  "perk.pr-reviewer",
-  "perk.review-classifier",
-  "perk-dev.session-auditor",
-] as const;
-
-const REPORT_ONLY_CHILD_SET = new Set<string>(REPORT_ONLY_CHILD_AGENTS);
 
 export interface AgentScratchBlock {
   runId: string;
@@ -59,17 +42,6 @@ export function renderAgentScratchBlock(cwd: string, runId: string): AgentScratc
     "Use descriptive, non-colliding names. These files are non-authoritative: re-read canonical repository or backend sources before making durable decisions.",
   ].join("\n");
   return { runId, path, marker, content };
-}
-
-/** Effective restriction wins; unavailable non-runner identity is only a scratch fallback. */
-export function isAgentScratchEligible(
-  readOnly: boolean,
-  snapshot: ChildIdentitySnapshot,
-): boolean {
-  if (readOnly) return false;
-  return snapshot.identity.status === "available"
-    ? !REPORT_ONLY_CHILD_SET.has(snapshot.identity.name)
-    : !snapshot.runner;
 }
 
 export interface AgentScratchProvisioner {
@@ -129,17 +101,18 @@ function contextHasBlock(messages: readonly ContextMessage[], block: AgentScratc
   );
 }
 
-/** Register eligible-turn delivery and direct scratch-custom context hygiene. */
+/**
+ * Register eligible-turn delivery and direct scratch-custom context hygiene. `eligible` is the
+ * composition root's `!gate && !runner` — a runner child (every perk report child) never
+ * provisions scratch; the module knows nothing about agent names.
+ */
 export function registerAgentScratch(
   pi: ExtensionAPI,
   provisioner: AgentScratchProvisioner,
-  identity: (ctx: ExtensionContext) => ChildIdentitySnapshot,
-  isReadOnly: () => boolean,
+  eligible: () => boolean,
 ): void {
-  const eligible = (ctx: ExtensionContext) =>
-    !isReadOnly() && isAgentScratchEligible(false, identity(ctx));
   pi.on("before_agent_start", async (_event, ctx) => {
-    if (!eligible(ctx)) return;
+    if (!eligible()) return;
 
     // Provision before dedup: an externally deleted directory is repaired even while live
     // context still carries this run's exact guidance block (and before any projection read).
@@ -156,7 +129,7 @@ export function registerAgentScratch(
   });
 
   pi.on("context", async (event, ctx) => {
-    const block = eligible(ctx) ? provisioner.resolve(ctx) : null;
+    const block = eligible() ? provisioner.resolve(ctx) : null;
     let keptCurrent = false;
     return {
       messages: event.messages.filter((message) => {

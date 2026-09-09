@@ -236,7 +236,7 @@ test("installed engine: report-only lanes complete through the real supplier on 
   );
   process.env.PERK_TEST_REPORT_ONLY_FIXTURE = fixturePath;
 
-  const wave = createReportWave(engine.events, { parentReadOnly: () => true });
+  const wave = createReportWave(engine.events);
   const request = {
     flow: "report-only-completion-compat",
     completeness: "strict" as const,

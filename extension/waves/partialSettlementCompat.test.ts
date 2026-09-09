@@ -274,7 +274,7 @@ test("installed engine: native timeout retains validated sibling through report-
     },
   ]);
   fake.attach(bus);
-  const wave = createReportWave(bus, { parentReadOnly: () => true });
+  const wave = createReportWave(bus);
   const start = await wave.start({
     flow: "partial-compat",
     assignments: ["finished", "pending"].map((key) => ({
