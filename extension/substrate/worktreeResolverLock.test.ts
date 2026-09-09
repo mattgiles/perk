@@ -75,7 +75,7 @@ test("exclusive private record, same-PID contention, release then reacquisition,
   c.finish("release");
 });
 
-test("pre-extraction schema-1 metadata remains readable with identical diagnostic projection", (t) => {
+test("an independently authored schema-1 incumbent is honored as busy with the exact owner projection, bytes untouched", (t) => {
   const cwd = fixture(t);
   const path = lockPath(cwd);
   // Independently authored incumbent: token syntax and extra keys retain the legacy decode policy.

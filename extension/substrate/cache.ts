@@ -18,9 +18,10 @@
 // — the worker's `events.ndjson` (worker/stageExecution.ts) and the §8.58 hunk-watch `outbox.ndjson` /
 // `delivered.ndjson` (hunkFeedback/perkFeedback.ts / hunkFeedback/store.ts) — where O_APPEND
 // appends cannot truncate-tear and whole-file replace would introduce a read-modify-write race
-// between independent processes. The exclusiveFileClaim.ts primitive separately writes/fsyncs
-// only freshly wx-created descriptors: atomic replacement would destroy exclusion. Atomicity
-// alone is not mutual exclusion — ordinary artifact writes remain whole-file last-writer-wins.
+// between independent processes. The §8.3 worktree resolver lock (`worktreeResolverLock.ts`)
+// separately writes/fsyncs only freshly wx-created descriptors: atomic replacement would destroy
+// exclusion. Atomicity alone is not mutual exclusion — ordinary artifact writes remain
+// whole-file last-writer-wins.
 
 import { randomBytes } from "node:crypto";
 import {
