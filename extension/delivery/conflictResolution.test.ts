@@ -14,7 +14,6 @@ const receipt: ConflictResolutionReceipt = {
   requestId: "request",
   nodeId: "submit-conflict",
   cwd: "/wt",
-  disposition: "terminal",
   termination: "confirmed",
   lock: { disposition: "released" },
 };

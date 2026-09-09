@@ -104,13 +104,13 @@ def _reset_launch_banner_guard():
 def isolated_pi_agent_dir(monkeypatch, tmp_path) -> Path:
     """Point pi's agent dir at a throwaway directory for every test.
 
-    perk's init/doctor convergences and the launch lock sweep act on files INSIDE the
-    launch-precedence agent dir (``launch_pi_agent_dir``: env → `[pi] agent_dir` → ``~/.pi/agent``),
-    so without this every ``run_init``/``run_doctor`` in the suite would read — and ``--fix``
-    would rewrite — the developer's real store. The env arm wins the precedence, so setting it
-    here is the hermetic default; tests that exercise the config/default arms ``delenv`` it
-    explicitly (and isolate ``Path.home`` themselves). The directory is NOT created (tests
-    asserting an untouched ``tmp_path`` must keep passing) — consumers ``mkdir`` as needed.
+    doctor's ``subagent-bridge-config`` check reads, and the launch lock sweep deletes, files
+    INSIDE the launch-precedence agent dir (``launch_pi_agent_dir``: env → `[pi] agent_dir` →
+    ``~/.pi/agent``), so without this the suite would touch the developer's real store. The env
+    arm wins the precedence, so setting it here is the hermetic default; tests that exercise the
+    config/default arms ``delenv`` it explicitly (and isolate ``Path.home`` themselves). The
+    directory is NOT created (tests asserting an untouched ``tmp_path`` must keep passing) —
+    consumers ``mkdir`` as needed.
     """
     agent_dir = tmp_path / "pi-agent"
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(agent_dir))

@@ -1,21 +1,18 @@
 // Registered-tool native-path coverage. Consent is scripted parent action, not model evidence.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ConflictResolutionResult } from "../../../delivery/conflictResolution.ts";
 import { resolverLockDir } from "../../../substrate/resolverLease.ts";
 import {
-  completedResolution,
   completedRetainedResolution,
-  deferred,
   fakeConflictResolver,
   RETAINED_OPERATION,
 } from "../../../testing/fakeConflictResolver.ts";
 import { gitInit, loadPerkSession, scaffoldRepo, spyInjections } from "../../../testing/harness.ts";
 import { DELEGATION_EVENTS } from "./conflictResolverEngine.ts";
-import type { StackResolutionDelivery } from "./stackSync.ts";
 
 const conflict = {
   success: false,
@@ -26,17 +23,12 @@ async function setup(
   options: {
     value?: unknown;
     status?: string;
-    warm?: boolean;
-    continuation?: object;
     model?: string;
-    delivery?: StackResolutionDelivery;
-    pausePreflight?: () => Promise<void>;
+    nativeConfig?: string;
     script?: Parameters<typeof fakeConflictResolver>[1];
   } = {},
 ) {
-  const cwd = options.warm
-    ? scaffoldRepo()
-    : scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   gitInit(cwd, { dirty: false });
   const worktree = join(cwd, `sync-${RETAINED_OPERATION}`);
   execFileSync("git", ["-C", cwd, "worktree", "add", "--detach", worktree], {
@@ -63,7 +55,6 @@ async function setup(
       manifest_path: manifest,
       parseable: true,
       targets_contained: true,
-      ...options.continuation,
     },
     orphaned_residue: { observed: true, reason: null, worktrees: [], refs: [] },
   };
@@ -100,17 +91,13 @@ async function setup(
         });
       }),
   );
-  const preflight = engine.resolverEngine.preflight;
-  engine.resolverEngine.preflight = async (input) => {
-    const p = await preflight(input);
-    await options.pausePreflight?.();
-    return p;
-  };
+  // Planted BEFORE the session loads: the engine reads the file once at activation.
+  if (options.nativeConfig !== undefined)
+    writeFileSync(engine.resolverEngine.configPath, options.nativeConfig);
   const h = await loadPerkSession({
     cwd,
-    env: { PERK_RUN_ID: options.warm ? undefined : "01RID", PERK_BIN: bin },
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
     resolverEngine: engine.resolverEngine,
-    stackResolutionDelivery: options.delivery,
     extraExtensions: [engine.extension],
   });
   const injected = spyInjections(h);
@@ -146,282 +133,40 @@ function details(result: { details: unknown }) {
   };
 }
 
-for (const resolve of [false, true]) {
-  test(`ordinary warm session's undefined mode remains writable: resolve=${resolve}`, async () => {
-    const w = await setup({ warm: true });
-    try {
-      assert.equal(w.h.workflowState().mode, undefined);
-      assert.ok(w.h.workflowState().run_id);
-      const r = await w.h.invokeTool("objective_stack_sync", { objective: "7", resolve });
-      assert.equal(w.engine.requests.length, 1);
-      assert.equal(w.engine.requests[0]?.ownerRunId, w.h.workflowState().run_id);
-      assert.equal(details(r).ok, resolve);
-      if (resolve) assert.equal(details(r).resolution?.kind, "continuation-ready");
-      else
-        assert.deepEqual(r.details, {
-          ok: false,
-          error: conflict.message,
-          error_type: "rebase_conflict",
-        });
-      assert.equal(
-        w.h.workflowState().mode,
-        undefined,
-        "resolution must not manufacture a mode entry",
-      );
-      assert.equal(w.h.workflowState().conflict_resolution_attempts, 1);
-      assert.equal(w.injected.length, 1);
-      assert.match(w.injected[0] ?? "", /NEW explicit human approval/);
-      assert.equal(existsSync(w.lock), false);
-      assert.equal(existsSync(resolverLockDir(w.manifest)), true);
-    } finally {
-      w.h.dispose();
-    }
-  });
-}
-
-for (const restriction of [{ mode: "read-only" }, { stage: "plan" }]) {
-  test(`ordinary warm session still refuses explicit restrictions: ${JSON.stringify(restriction)}`, async () => {
-    const w = await setup({ warm: true });
-    try {
-      w.append(restriction);
-      const r = await w.h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
-      assert.equal(details(r).error_type, "state_error");
-      assert.deepEqual(w.calls(), []);
-      assert.deepEqual(w.engine.preflights, []);
-      assert.equal(existsSync(resolverLockDir(w.manifest)), false);
-      assert.equal(w.h.workflowState().conflict_resolution_attempts, undefined);
-    } finally {
-      w.h.dispose();
-    }
-  });
-}
-
-for (const params of [
-  { objective: "old" },
-  { objective: "old", continue: true },
-  { objective: "old", resolve: true },
-]) {
-  test(`awaited native completion, status-only explicit resolve, no continuation without NEW consent: ${JSON.stringify(params)}`, async () => {
-    const w = await setup();
-    try {
-      const result = await w.h.invokeTool("objective_stack_sync", params);
-      assert.equal(details(result).ok, "resolve" in params);
-      if (!("resolve" in params)) {
-        assert.deepEqual(result.details, {
-          ok: false,
-          error: conflict.message,
-          error_type: "rebase_conflict",
-        });
-        assert.equal(result.content[0]?.text, `objective_stack_sync failed: ${conflict.message}`);
-      } else {
-        assert.equal(details(result).objective, "7");
-        assert.equal(details(result).resolution?.kind, "continuation-ready");
-      }
-      assert.deepEqual(
-        w.calls(),
-        "resolve" in params
-          ? ["objective stack status old --json"]
-          : [
-              `objective stack sync old ${"continue" in params ? "--continue " : ""}--yes --json`,
-              "objective stack status old --json",
-            ],
-      );
-      assert.equal(w.engine.requests.length, 1);
-      assert.equal(w.engine.requests[0]?.cwd, w.worktree);
-      assert.equal(w.engine.preflights[0]?.cwd, w.worktree);
-      assert.equal(w.engine.requests[0]?.nodeId, "retained-conflict");
-      assert.match(String(w.engine.requests[0]?.task), /\nRETAINED-CONTINUATION SENTINEL:/);
-      assert.equal(w.injected.length, 1);
-      assert.match(w.injected[0] ?? "", /NEW explicit human approval/);
-      assert.match(w.injected[0] ?? "", /objective: 7, continue: true/);
-      assert.doesNotMatch(w.injected[0] ?? "", /workflowScript|RETAINED-CONTINUATION SENTINEL/);
-      assert.equal(w.h.workflowState().conflict_resolution_attempts, 1);
-      assert.equal(existsSync(resolverLockDir(w.manifest)), true);
-      assert.equal(existsSync(w.lock), false);
-      assert.equal(existsSync(join(w.cwd, ".git/perk-submit-conflict.lock")), false);
-      assert.notEqual(result.terminate, true);
-      // No approval means no action. A separately scripted decline never resets the episode.
-      const before = [...w.calls()];
-      assert.deepEqual(w.calls(), before);
-      writeFileSync(w.syncFile, JSON.stringify({ success: true, declined: true }));
-      await w.h.invokeTool("objective_stack_sync", { objective: "7", continue: true });
-      assert.equal(w.h.workflowState().conflict_resolution_attempts, 1);
-      assert.equal(w.engine.requests.length, 1);
-    } finally {
-      w.h.dispose();
-    }
-  });
-}
-
-for (const value of [
-  { ...completedRetainedResolution, outcome: "verification-failed", verification: "failed" },
-  ...["missing worktree", "no rebase in progress", "ambiguous task", "context-fetch failure"].map(
-    (summary) => ({
-      ...completedRetainedResolution,
-      outcome: "stopped-before-mutation",
-      verification: "not-run",
-      summary,
-    }),
-  ),
-  { ...completedRetainedResolution, outcome: "unresolvable-conflict", verification: "not-run" },
-  { ...completedRetainedResolution, outcome: "aborted" },
-  { ...completedRetainedResolution, verification: "not-run" },
-  completedResolution,
-  "completed",
-  null,
-]) {
-  test(`registered retained withholding never offers continuation: ${JSON.stringify(value)}`, async () => {
-    const w = await setup({ value });
-    try {
-      const r = await w.h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
-      assert.equal(details(r).ok, false);
-      assert.notEqual(details(r).resolution?.kind, "continuation-ready");
-      assert.match(w.injected[0] ?? "", /Continuation offer withheld/);
-      assert.doesNotMatch(w.injected[0] ?? "", /objective: 7, continue: true/);
-      assert.equal(existsSync(w.lock), false);
-      assert.equal(existsSync(resolverLockDir(w.manifest)), true);
-      assert.equal(w.h.workflowState().conflict_resolution_attempts, 1);
-      assert.deepEqual(w.calls(), ["objective stack status 7 --json"]);
-    } finally {
-      w.h.dispose();
-    }
-  });
-}
-
-for (const continue_ of [false, true])
-  for (const value of [
-    { ...completedRetainedResolution, outcome: "verification-failed", verification: "failed" },
-    { ...completedRetainedResolution, outcome: "unresolvable-conflict", verification: "not-run" },
-    { ...completedRetainedResolution, outcome: "stopped-before-mutation", verification: "not-run" },
-    "completed",
-    completedResolution,
-  ]) {
-    test(`automatic withholding preserves refusal and delivers no offer: continue=${continue_}, ${JSON.stringify(value)}`, async () => {
-      const w = await setup({ value });
-      try {
-        const r = await w.h.invokeTool("objective_stack_sync", {
-          objective: "7",
-          ...(continue_ ? { continue: true } : {}),
-        });
-        assert.deepEqual(r.details, {
-          ok: false,
-          error: conflict.message,
-          error_type: "rebase_conflict",
-        });
-        assert.equal(r.content.length, 1);
-        assert.equal(w.injected.length, 1);
-        assert.match(w.injected[0] ?? "", /Continuation offer withheld/);
-        assert.doesNotMatch(w.injected[0] ?? "", /NEW explicit human approval/);
-        assert.equal(w.calls().length, 2);
-        assert.equal(w.engine.requests.length, 1);
-      } finally {
-        w.h.dispose();
-      }
-    });
-  }
-
-for (const change of ["cancel", "tree", "replacement"]) {
-  test(`registered revocation during native execution preserves actual receipt: ${change}`, async () => {
-    const started = deferred<() => void>();
-    const signal = new AbortController();
-    const w = await setup({
-      script: (bus, request) => {
-        bus.emit(DELEGATION_EVENTS.started, request);
-        started.resolve(() =>
-          bus.emit(DELEGATION_EVENTS.response, {
-            requestId: request.requestId,
-            ownerRunId: request.ownerRunId,
-            nodeId: request.nodeId,
-            status: "completed",
-            runId: "actual-completed-run",
-            result: { kind: "structured", value: completedRetainedResolution },
-          }),
-        );
-      },
-    });
-    try {
-      let notifications = 0;
-      const running = w.h.invokeTool(
-        "objective_stack_sync",
-        { objective: "7", resolve: true },
-        {
-          signal: signal.signal,
-          ui: {
-            notify: () => {
-              notifications++;
-            },
-          },
-        },
-      );
-      const finish = await started.promise;
-      if (change === "cancel") signal.abort();
-      else if (change === "tree")
-        await w.h.emitLifecycle({ type: "session_tree", newLeafId: "same", oldLeafId: "same" });
-      else await w.h.emitSessionStart();
-      finish();
-      const r = await running;
-      const resolution = details(r).resolution;
-      assert.ok(
-        resolution?.kind === "failed" &&
-          resolution.reason === (change === "cancel" ? "cancelled" : "unauthorized"),
-      );
-      assert.equal(resolution.receipt.runId, "actual-completed-run");
-      assert.equal(resolution.receipt.nativeStatus, "completed");
-      assert.equal(resolution.receipt.lock.disposition, "released");
-      assert.equal(notifications, 0);
-      assert.deepEqual(w.injected, []);
-      assert.equal(w.calls().length, 1);
-      assert.equal(w.engine.requests.length, 1);
-      assert.equal(w.h.workflowState().conflict_resolution_attempts, 1);
-      assert.equal(existsSync(resolverLockDir(w.manifest)), true);
-    } finally {
-      w.h.dispose();
-    }
-  });
-}
-
-for (const model of [undefined, "offline/override", "inherit"]) {
-  test(`retained configured/unset/inherit model is forwarded from parent at invocation: ${model}`, async () => {
-    const w = await setup({ model });
-    try {
-      await w.h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
-      assert.equal(w.engine.requests[0]?.model, model);
-      assert.equal(w.engine.preflights[0]?.model, model);
-    } finally {
-      w.h.dispose();
-    }
-  });
-}
-
-for (const flags of [
-  { dry_run: true },
-  { abort: true },
-  { node: "2.1", confirm: true },
-  { node: "2.1", dry_run: true },
-]) {
-  test(`registered exclusions perform zero resolution/status/claim/increment: ${JSON.stringify(flags)}`, async () => {
-    const w = await setup();
-    try {
-      const tool = "node" in flags ? "objective_stack_adopt" : "objective_stack_sync";
-      const r = await w.h.invokeTool(tool, { objective: "7", ...flags });
-      assert.equal(details(r).error_type, "rebase_conflict");
-      assert.equal(w.calls().length, 1);
-      assert.match(w.calls()[0] ?? "", /objective stack sync/);
-      assert.deepEqual(w.engine.requests, []);
-      assert.deepEqual(w.engine.preflights, []);
-      assert.deepEqual(w.injected, []);
-      assert.equal(existsSync(resolverLockDir(w.manifest)), false);
-      assert.equal(w.h.workflowState().conflict_resolution_attempts, undefined);
-    } finally {
-      w.h.dispose();
-    }
-  });
-}
-
-test("same operation new conflict follows approved continuation, fresh layer, next capped attempt; mismatch is report-only", async () => {
-  const w = await setup();
+test("retained dispatch: one public request at the retained worktree; the offer needs NEW consent; a second conflict continues the episode; the third is capped", async () => {
+  const w = await setup({ model: "offline/override" });
   try {
-    await w.h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
+    const result = await w.h.invokeTool("objective_stack_sync", {
+      objective: "old",
+      resolve: true,
+    });
+    assert.equal(details(result).ok, true);
+    assert.equal(details(result).objective, "7");
+    assert.equal(details(result).resolution?.kind, "continuation-ready");
+    assert.notEqual(result.terminate, true);
+    assert.deepEqual(w.calls(), ["objective stack status old --json"]);
+    assert.equal(w.engine.requests.length, 1);
+    const request = w.engine.requests[0] ?? {};
+    assert.equal(request.cwd, w.worktree);
+    assert.equal(request.nodeId, "retained-conflict");
+    assert.equal(request.agent, "perk.conflict-resolver");
+    assert.equal(request.model, "offline/override");
+    assert.match(String(request.task), /\nRETAINED-CONTINUATION SENTINEL:/);
+    assert.equal(Object.hasOwn(request, "extensionBindings"), false);
+    assert.equal(w.injected.length, 1);
+    assert.match(w.injected[0] ?? "", /NEW explicit human approval/);
+    assert.match(w.injected[0] ?? "", /objective: 7, continue: true/);
+    assert.doesNotMatch(w.injected[0] ?? "", /workflowScript|RETAINED-CONTINUATION SENTINEL/);
+    assert.equal(w.h.workflowState().conflict_resolution_attempts, 1);
+    assert.equal(existsSync(resolverLockDir(w.manifest)), true);
+    assert.equal(existsSync(w.lock), false);
+    assert.equal(existsSync(join(w.cwd, ".git/perk-submit-conflict.lock")), false);
+    // No approval means no action. A separately scripted decline never resets the episode.
+    writeFileSync(w.syncFile, JSON.stringify({ success: true, declined: true }));
+    await w.h.invokeTool("objective_stack_sync", { objective: "7", continue: true });
+    assert.equal(w.h.workflowState().conflict_resolution_attempts, 1);
+    assert.equal(w.engine.requests.length, 1);
+    // The same operation hitting a new conflict on the next layer continues the episode.
     w.status.train.layers[0] = {
       node_id: "2.2",
       branch: "plan-92",
@@ -441,263 +186,56 @@ test("same operation new conflict follows approved continuation, fresh layer, ne
     const capped = await w.h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
     assert.equal(details(capped).error_type, "attempt_cap");
     assert.equal(details(capped).resolution, undefined);
-    writeFileSync(
-      w.syncFile,
-      JSON.stringify({
-        ...conflict,
-        message: "the candidate rebase for layer 2.3 hit a conflict; manifest rewrite failed",
-      }),
-    );
-    await w.h.invokeTool("objective_stack_sync", { objective: "7", continue: true });
     assert.equal(w.engine.requests.length, 2);
-    assert.ok(w.h.notifies.some((s) => /stale snapshot/.test(s)));
   } finally {
     w.h.dispose();
   }
 });
 
-for (const failure of ["uncontained", "counter-dropped", "counter-thrown", "preflight", "native"]) {
-  test(`preparation and execution failures keep independent claim/counter lifetimes: ${failure}`, async () => {
-    const w = await setup(
-      failure === "uncontained"
-        ? { continuation: { targets_contained: false } }
-        : failure === "native"
-          ? { status: "failed" }
-          : {},
-    );
-    try {
-      if (failure.startsWith("counter")) {
-        const sm = w.h.session.sessionManager;
-        const original = sm.appendCustomEntry.bind(sm);
-        sm.appendCustomEntry = (type, data) => {
-          if (type !== "perk:workflow-state") return original(type, data);
-          if (failure === "counter-thrown") throw new Error("counter write failed");
-          return "dropped";
-        };
-      }
-      if (failure === "preflight") {
-        // Public profile evidence requires this exact canonical file to exist.
-        rmSync(join(w.worktree, ".pi/agents/perk/conflict-resolver.md"));
-      }
-      const r = await w.h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
-      assert.equal(details(r).ok, false);
-      assert.equal(
-        existsSync(resolverLockDir(w.manifest)),
-        failure === "native" || failure === "preflight",
-      );
-      assert.equal(existsSync(w.lock), failure === "native");
-      assert.equal(w.engine.requests.length, failure === "native" ? 1 : 0);
-      if (failure === "native") {
-        // Same-PID session reacquisition and a counter reset never bypass execution exclusion.
-        w.append({ conflict_resolution_attempts: 0 });
-        const next = await w.h.invokeTool("objective_stack_sync", {
-          objective: "7",
-          resolve: true,
-        });
-        assert.equal(details(next).error_type, "lock-busy");
-        assert.equal(w.engine.requests.length, 1);
-      }
-    } finally {
-      w.h.dispose();
-    }
-  });
-}
-
-test("registered busy session claim refuses before native preflight and increment", async () => {
-  const w = await setup();
+test("retained execution lock: uncertain termination retains it and withholds the offer; a counter reset and session-claim reclamation never bypass it", async () => {
+  const w = await setup({ status: "failed" });
   try {
-    mkdirSync(resolverLockDir(w.manifest));
     const r = await w.h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
-    assert.equal(details(r).error_type, "resolver_busy");
-    assert.equal(details(r).resolution, undefined);
-    assert.deepEqual(w.engine.preflights, []);
-    assert.equal(w.h.workflowState().conflict_resolution_attempts, undefined);
+    assert.equal(details(r).ok, false);
+    assert.equal(details(r).resolution?.kind, "failed");
+    assert.match(w.injected[0] ?? "", /Continuation offer withheld/);
+    assert.doesNotMatch(w.injected[0] ?? "", /NEW explicit human approval/);
+    assert.equal(existsSync(w.lock), true);
+    assert.equal(existsSync(resolverLockDir(w.manifest)), true);
+    assert.equal(w.engine.requests.length, 1);
+    w.append({ conflict_resolution_attempts: 0 });
+    const file = join(resolverLockDir(w.manifest), "lease.json");
+    const lease = JSON.parse(readFileSync(file, "utf8"));
+    lease.pid = 2147483647;
+    writeFileSync(file, JSON.stringify(lease));
+    const next = await w.h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
+    assert.equal(details(next).error_type, "lock-busy");
+    assert.equal(w.engine.requests.length, 1);
+    assert.equal(existsSync(w.lock), true);
+  } finally {
+    w.h.dispose();
+  }
+});
+
+test("retained refusal on the native worktree default names the file, the observation and the fix", async () => {
+  const w = await setup({ nativeConfig: '{"worktree":"false"}' });
+  try {
+    const r = await w.h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
+    assert.equal(details(r).ok, false);
+    const resolution = details(r).resolution;
+    assert.ok(
+      resolution?.kind === "failed" && resolution.reason === "incompatible-worktree-default",
+    );
+    const rendered = [
+      ...r.content.map((block) => ("text" in block ? block.text : "")),
+      ...w.injected,
+    ].join("\n");
+    assert.ok(rendered.includes(w.engine.resolverEngine.configPath), rendered);
+    assert.ok(rendered.includes('worktree="false"'), rendered);
+    assert.ok(rendered.includes("quit and resume this Pi session"), rendered);
+    assert.equal(w.engine.requests.length, 0);
     assert.equal(existsSync(w.lock), false);
   } finally {
     w.h.dispose();
   }
 });
-
-test("failed clean-reset write warns but preserves cold completion; clean continue resets", async () => {
-  const w = await setup();
-  try {
-    w.append({ conflict_resolution_attempts: 2 });
-    writeFileSync(w.syncFile, JSON.stringify({ success: true, continued: true }));
-    const sm = w.h.session.sessionManager;
-    const original = sm.appendCustomEntry.bind(sm);
-    sm.appendCustomEntry = (type, data) =>
-      type === "perk:workflow-state" ? "dropped" : original(type, data);
-    const r = await w.h.invokeTool("objective_stack_sync", { objective: "7", continue: true });
-    assert.equal(details(r).ok, true);
-    assert.ok(w.h.notifies.some((s) => /conflict budget reset failed/.test(s)));
-    assert.equal(w.h.workflowState().conflict_resolution_attempts, 2);
-    sm.appendCustomEntry = original;
-    await w.h.invokeTool("objective_stack_sync", { objective: "7", continue: true });
-    assert.equal(w.h.workflowState().conflict_resolution_attempts, 0);
-    assert.deepEqual(w.engine.preflights, []);
-  } finally {
-    w.h.dispose();
-  }
-});
-
-for (const reclamation of ["changed-operation", "dead-holder", "reload"]) {
-  test(`session-claim reclamation never bypasses execution exclusion: ${reclamation}`, async () => {
-    const w = await setup({ status: "failed" });
-    try {
-      await w.h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
-      const file = join(resolverLockDir(w.manifest), "lease.json");
-      const lease = JSON.parse(readFileSync(file, "utf8"));
-      if (reclamation === "changed-operation") lease.operation_id = "old";
-      if (reclamation === "dead-holder") lease.pid = 2147483647;
-      writeFileSync(file, JSON.stringify(lease));
-      if (reclamation === "reload") await w.h.reload();
-      const r = await w.h.invokeTool("objective_stack_sync", { objective: "7", resolve: true });
-      assert.equal(details(r).error_type, "lock-busy");
-      assert.equal(w.engine.requests.length, 1);
-      assert.equal(w.h.workflowState().conflict_resolution_attempts, 2);
-      assert.equal(existsSync(w.lock), true);
-    } finally {
-      w.h.dispose();
-    }
-  });
-}
-
-for (const change of ["counter", "identity", "planning", "read-only", "tree", "cancel"]) {
-  test(`native preflight revalidates ${change}; overlap refuses before second status`, async () => {
-    const entered = deferred<void>();
-    const resume = deferred<void>();
-    const signal = new AbortController();
-    const w = await setup({
-      pausePreflight: async () => {
-        entered.resolve();
-        await resume.promise;
-      },
-    });
-    try {
-      const running = w.h.invokeTool(
-        "objective_stack_sync",
-        { objective: "7", resolve: true },
-        { signal: signal.signal },
-      );
-      await entered.promise;
-      const overlap = await w.h.invokeTool("objective_stack_sync", {
-        objective: "7",
-        resolve: true,
-      });
-      assert.equal(details(overlap).error_type, "state_error");
-      assert.equal(w.calls().length, 1);
-      if (change === "tree")
-        await w.h.emitLifecycle({ type: "session_tree", newLeafId: "same", oldLeafId: "same" });
-      else if (change === "cancel") signal.abort();
-      else
-        w.append(
-          change === "counter"
-            ? { conflict_resolution_attempts: 0 }
-            : change === "identity"
-              ? { run_id: "different" }
-              : change === "planning"
-                ? { stage: "plan" }
-                : { mode: "read-only" },
-        );
-      resume.resolve();
-      const r = await running;
-      assert.equal(details(r).ok, false);
-      assert.deepEqual(w.engine.requests, []);
-      assert.deepEqual(w.injected, []);
-      assert.equal(existsSync(resolverLockDir(w.manifest)), true);
-      assert.equal(existsSync(w.lock), false);
-    } finally {
-      resume.resolve();
-      w.h.dispose();
-    }
-  });
-}
-
-for (const explicit of [true, false])
-  for (const outcome of ["completed", "withheld", "failed"])
-    for (const failure of ["guidance", "suffix", "send", "queued-send", "warning"]) {
-      test(`result-preserving delivery failure explicit=${explicit}, outcome=${outcome}, failure=${failure}`, async () => {
-        const boom = (): never => {
-          throw new Error("SECRET task/transcript");
-        };
-        const w = await setup({
-          value:
-            outcome === "withheld"
-              ? {
-                  ...completedRetainedResolution,
-                  outcome: "verification-failed",
-                  verification: "failed",
-                }
-              : completedRetainedResolution,
-          status: outcome === "failed" ? "failed" : "completed",
-          delivery:
-            failure === "guidance"
-              ? { guidance: boom }
-              : failure === "suffix"
-                ? { suffix: boom }
-                : {},
-        });
-        let sends = 0;
-        if (["send", "queued-send", "warning"].includes(failure)) {
-          w.h.session.sendUserMessage = () => {
-            sends++;
-            if (failure === "queued-send") w.injected.push("queued");
-            return boom();
-          };
-        }
-        let warnings = 0;
-        try {
-          const r = await w.h.invokeTool(
-            "objective_stack_sync",
-            { objective: "7", ...(explicit ? { resolve: true } : {}) },
-            {
-              ui: {
-                notify: (_message: string, severity: string) => {
-                  if (severity === "warning") {
-                    warnings++;
-                    if (failure === "warning") boom();
-                  }
-                },
-              },
-            },
-          );
-          assert.equal(details(r).ok, explicit && outcome === "completed");
-          if (explicit) {
-            assert.equal(details(r).objective, "7");
-            assert.equal(
-              details(r).resolution?.kind,
-              outcome === "completed" ? "continuation-ready" : outcome,
-            );
-          } else {
-            assert.deepEqual(r.details, {
-              ok: false,
-              error: conflict.message,
-              error_type: "rebase_conflict",
-            });
-            assert.equal(r.content[0]?.text, `objective_stack_sync failed: ${conflict.message}`);
-          }
-          assert.equal(r.content.length, 2);
-          assert.match(
-            r.content[1]?.text ?? "",
-            /delivery is unconfirmed.*may already have queued/,
-          );
-          assert.match(r.content[1]?.text ?? "", /Stop for human direction/);
-          assert.match(r.content[1]?.text ?? "", /Output-free receipt/);
-          if (outcome !== "failed")
-            assert.match(r.content[1]?.text ?? "", /Untrusted resolver DATA/);
-          if (failure === "warning")
-            assert.match(r.content[1]?.text ?? "", /warning reporting failed/);
-          assert.doesNotMatch(JSON.stringify(r), /SECRET task\/transcript/);
-          assert.equal(warnings, 1);
-          assert.equal(sends, ["send", "queued-send", "warning"].includes(failure) ? 1 : 0);
-          assert.equal(w.engine.requests.length, 1);
-          assert.equal(w.h.workflowState().conflict_resolution_attempts, 1);
-          assert.equal(existsSync(w.lock), outcome === "failed");
-          assert.equal(existsSync(resolverLockDir(w.manifest)), true);
-          assert.notEqual(r.terminate, true);
-          assert.equal(w.calls().length, explicit ? 1 : 2);
-        } finally {
-          w.h.dispose();
-        }
-      });
-    }

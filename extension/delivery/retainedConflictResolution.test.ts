@@ -16,7 +16,6 @@ const record = {
 const receipt: ConflictResolutionReceipt = {
   nodeId: "retained-conflict",
   cwd: "/wt",
-  disposition: "terminal",
   termination: "confirmed",
   lock: { disposition: "released" },
 };

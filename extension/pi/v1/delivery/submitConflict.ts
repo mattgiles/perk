@@ -1,10 +1,11 @@
 // A drive is a single-use parent authorization, not a persisted/resumable child request.
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type {
-  ConflictResolutionReceipt,
-  ConflictResolutionRequest,
-  ConflictResolver,
-  PrConflictResolutionRequest,
+import {
+  type ConflictResolutionReceipt,
+  type ConflictResolutionRequest,
+  type ConflictResolver,
+  nativeWorktreeRefusal,
+  type PrConflictResolutionRequest,
 } from "../../../delivery/conflictResolution.ts";
 import type { ConflictFollowUp } from "../../../delivery/submit.ts";
 import { planningStageRefusal } from "../../../session/lifecycleGates.ts";
@@ -127,7 +128,6 @@ export function installSubmitConflictBindings(
         const receipt: ConflictResolutionReceipt = {
           nodeId: "submit-conflict",
           cwd: ctx.cwd,
-          disposition: "unauthorized",
           termination: "not-requested",
           lock: { disposition: "not-acquired" },
         };
@@ -167,16 +167,10 @@ export function installSubmitConflictBindings(
             result,
           );
         const reason = result.reason;
-        // Every engine refusal on the worktree default carries the exact file + observations;
-        // the generic sentence remains only for a receipt without the field.
-        const worktreeConfig = result.receipt.nativeWorktreeConfig;
+        const fix = nativeWorktreeRefusal(result.receipt);
         const diagnostic =
           `Resolver ${result.kind}: ${reason}. Stop and report; no local conflict edits, automatic unlock, or another launch.` +
-          (reason === "incompatible-worktree-default"
-            ? worktreeConfig
-              ? ` Native subagent config ${worktreeConfig.path} has an incompatible worktree default (observed ${worktreeConfig.observed}; ${worktreeConfig.atActivation} at activation). Run perk doctor --fix (or perk init) to set "worktree": false there, then reload the session.`
-              : " Inspect native subagent worktree defaults and reload after correction."
-            : "") +
+          (fix ? ` ${fix}` : "") +
           (result.receipt.nativeStatus ? ` Native status: ${result.receipt.nativeStatus}.` : "") +
           (result.receipt.runId ? ` Native run: ${result.receipt.runId}.` : "") +
           (result.receipt.lock.path

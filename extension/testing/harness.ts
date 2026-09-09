@@ -570,7 +570,7 @@ export async function loadPerkSession(opts: {
    * `plannotator-review` command so presence probes see it). Offline like everything here.
    */
   extraExtensions?: ((pi: Parameters<typeof perk>[0]) => void | Promise<void>)[];
-  /** Construction-only fake public preflight/lock/config inputs for foreground resolver tests. */
+  /** Construction-only fake lock/config inputs for foreground resolver tests. */
   resolverEngine?: NonNullable<Parameters<typeof perk>[1]>["resolverEngine"];
   stackResolutionDelivery?: NonNullable<Parameters<typeof perk>[1]>["stackResolutionDelivery"];
   /** Construction-only recording receiver for the startup/navigation sync-order pins. */

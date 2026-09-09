@@ -587,7 +587,6 @@ const DRIVE_COVERAGE: readonly {
         receipt: {
           nodeId: "retained-conflict",
           cwd: "/tmp/wt",
-          disposition: "terminal",
           termination: "confirmed",
           lock: { disposition: "released" },
         },

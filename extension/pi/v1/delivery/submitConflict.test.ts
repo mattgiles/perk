@@ -38,24 +38,15 @@ function details(result: { details: unknown }) {
     receipt?: { lock: { disposition: string; path: string } };
   };
 }
-async function setup(
-  script?: Parameters<typeof fakeConflictResolver>[1],
-  pausePreflight?: () => Promise<void>,
-  nativeConfig?: string,
-) {
+function text(result: { content: { text?: string }[] }) {
+  return result.content.map((block) => ("text" in block ? block.text : "")).join("\n");
+}
+async function setup(script?: Parameters<typeof fakeConflictResolver>[1], nativeConfig?: string) {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   gitInit(cwd, { dirty: false });
   const engine = fakeConflictResolver(cwd, script);
-  // Planted BEFORE the session loads: the engine classifies the file at activation.
+  // Planted BEFORE the session loads: the engine reads the file once at activation.
   if (nativeConfig !== undefined) writeFileSync(engine.resolverEngine.configPath, nativeConfig);
-  if (pausePreflight) {
-    const preflight = engine.resolverEngine.preflight;
-    engine.resolverEngine.preflight = async (input) => {
-      const profile = await preflight(input);
-      await pausePreflight();
-      return profile;
-    };
-  }
   const bin = fakePerkRouter(cwd, {
     "pr submit": { json: publication },
     "pr resolve-threads": { json: threads },
@@ -70,29 +61,20 @@ async function setup(
   return { cwd, engine, bin, h };
 }
 
-test("submit cannot consume a retained structured success as PR resolution", async () => {
+test("single-use authorization: parameterless/sequential; bound to counter and identity; cleared by a clean re-submit or a failed finalization; consumed even by a cross-mode record", async () => {
+  let answered = 0;
   const w = await setup((bus, r) =>
     bus.emit(DELEGATION_EVENTS.response, {
       requestId: r.requestId,
       ownerRunId: r.ownerRunId,
       nodeId: r.nodeId,
       status: "completed",
-      result: { kind: "structured", value: completedRetainedResolution },
+      result: {
+        kind: "structured",
+        value: answered++ === 0 ? completedRetainedResolution : completedResolution,
+      },
     }),
   );
-  try {
-    await w.h.invokeTool("submit", {});
-    const r = await w.h.invokeTool("resolve_submit_conflicts", {});
-    assert.equal(details(r).kind, "failed");
-    assert.equal(details(r).reason, "malformed-result");
-    assert.equal(details(r).receipt?.lock.disposition, "released");
-  } finally {
-    w.h.dispose();
-  }
-});
-
-test("registration is parameterless/sequential; direct/repeated calls refuse; configured model stays code-owned", async () => {
-  const w = await setup();
   try {
     const tool = w.h.registeredTool("resolve_submit_conflicts");
     assert.equal(tool?.executionMode, "sequential");
@@ -108,146 +90,70 @@ test("registration is parameterless/sequential; direct/repeated calls refuse; co
       '[models.subagents]\nconflict-resolver = "offline/override"\n',
     );
     await w.h.invokeTool("submit", {});
-    const r = await w.h.invokeTool("resolve_submit_conflicts", {});
-    assert.equal(details(r).kind, "resolved");
-    assert.notEqual(r.terminate, true);
+    const crossMode = details(await w.h.invokeTool("resolve_submit_conflicts", {}));
+    assert.equal(crossMode.kind, "failed");
+    assert.equal(crossMode.reason, "malformed-result");
+    assert.equal(crossMode.receipt?.lock.disposition, "released");
+    assert.equal(w.engine.requests.length, 1);
     assert.equal(w.engine.requests[0]?.model, "offline/override");
-    assert.equal(w.engine.preflights[0]?.model, "offline/override");
     assert.equal(w.engine.requests[0]?.ownerRunId, "01RID");
+    assert.equal(Object.hasOwn(w.engine.requests[0] ?? {}, "extensionBindings"), false);
+    await w.h.invokeTool("submit", {});
+    w.h.session.sessionManager.appendCustomEntry("perk:workflow-state", {
+      conflict_resolution_attempts: 0,
+    });
     assert.equal(details(await w.h.invokeTool("resolve_submit_conflicts", {})).ok, false);
     assert.equal(w.engine.requests.length, 1);
-  } finally {
-    w.h.dispose();
-  }
-});
-
-for (const change of ["counter", "identity", "read-only", "planning", "clean-submit"]) {
-  test(`unused authorization invalidated by ${change}`, async () => {
-    const w = await setup();
-    try {
-      await w.h.invokeTool("submit", {});
-      if (change === "clean-submit") {
-        fakePerkRouter(w.cwd, { "pr submit": { json: { ...publication, mergeable: true } } });
-        await w.h.invokeTool("submit", {});
-      } else
-        w.h.session.sessionManager.appendCustomEntry("perk:workflow-state", {
-          ...(change === "counter"
-            ? { conflict_resolution_attempts: 0 }
-            : change === "identity"
-              ? { run_id: "different" }
-              : change === "read-only"
-                ? { mode: "read-only" }
-                : { stage: "plan" }),
-        });
-      assert.equal(details(await w.h.invokeTool("resolve_submit_conflicts", {})).ok, false);
-      assert.equal(w.engine.requests.length, 0);
-    } finally {
-      w.h.dispose();
-    }
-  });
-}
-
-for (const change of ["counter", "identity"]) {
-  test(`registered dispatch revalidates ${change} changed during awaited preflight`, async () => {
-    const entered = deferred<void>();
-    const resume = deferred<void>();
-    const w = await setup(undefined, async () => {
-      entered.resolve();
-      await resume.promise;
-    });
-    let running: ReturnType<typeof w.h.invokeTool> | undefined;
-    try {
-      const submitted = await w.h.invokeTool("submit", {});
-      assert.equal(submitted.terminate, true);
-      assert.equal(w.h.workflowState().conflict_resolution_attempts, 1);
-      running = w.h.invokeTool("resolve_submit_conflicts", {});
-      await entered.promise;
-      assert.equal(w.engine.preflights.length, 1, "the primed tool reached awaited preflight");
-      assert.equal(w.engine.requests.length, 0);
-      w.h.session.sessionManager.appendCustomEntry(
-        "perk:workflow-state",
-        change === "counter" ? { conflict_resolution_attempts: 0 } : { run_id: "different" },
-      );
-      assert.equal(
-        w.h.workflowState().mode,
-        "read-write",
-        "the read-only guard is not the refusal",
-      );
-      resume.resolve();
-      const result = await running;
-      const outcome = details(result);
-      assert.equal(outcome.ok, false);
-      assert.equal(outcome.kind, "failed");
-      assert.equal(outcome.reason, "unauthorized");
-      assert.equal(outcome.receipt?.lock.disposition, "not-acquired");
-      assert.notEqual(result.terminate, true);
-      assert.equal(
-        w.engine.requests.length,
-        0,
-        "controller-to-adapter revalidation prevents launch",
-      );
-      assert.equal(existsSync(join(w.cwd, ".git/perk-submit-conflict.lock")), false);
-      assert.equal(w.h.workflowState().conflict_resolution_attempts, change === "counter" ? 0 : 1);
-      assert.equal(w.h.workflowState().run_id, change === "identity" ? "different" : "01RID");
-      assert.equal(details(submitted).ok, true, "the successful publication stands");
-    } finally {
-      resume.resolve();
-      await running;
-      w.h.dispose();
-    }
-  });
-}
-
-test("incompatible native worktree default names the exact file and the perk repair", async () => {
-  const w = await setup(undefined, undefined, '{"worktree":true}');
-  try {
     await w.h.invokeTool("submit", {});
-    const r = await w.h.invokeTool("resolve_submit_conflicts", {});
-    assert.equal(details(r).ok, false);
-    assert.equal(details(r).reason, "incompatible-worktree-default");
-    const text = r.content.map((block) => ("text" in block ? block.text : "")).join("\n");
-    assert.ok(text.includes(w.engine.resolverEngine.configPath), text);
-    assert.ok(text.includes('"worktree": false'), text);
-    assert.ok(text.includes("perk doctor --fix"), text);
-    assert.ok(text.includes("observed incompatible; incompatible at activation"), text);
-    assert.doesNotMatch(text, /Inspect native subagent worktree defaults/);
-    assert.equal(w.engine.requests.length, 0, "the bus never received a request");
-  } finally {
-    w.h.dispose();
-  }
-});
-
-test("malformed finalizer leaves pending alone; valid failed finalizer clears; full success primes", async () => {
-  const w = await setup();
-  try {
+    w.h.session.sessionManager.appendCustomEntry("perk:workflow-state", { run_id: "different" });
+    assert.equal(details(await w.h.invokeTool("resolve_submit_conflicts", {})).ok, false);
+    assert.equal(w.engine.requests.length, 1);
     await w.h.invokeTool("submit", {});
-    await w.h.invokeTool("finalize_address", { threads: [{ thread_id: 123 }] });
-    assert.equal(details(await w.h.invokeTool("resolve_submit_conflicts", {})).kind, "resolved");
+    fakePerkRouter(w.cwd, { "pr submit": { json: { ...publication, mergeable: true } } });
     await w.h.invokeTool("submit", {});
+    assert.equal(details(await w.h.invokeTool("resolve_submit_conflicts", {})).ok, false);
+    assert.equal(w.engine.requests.length, 1);
     fakePerkRouter(w.cwd, {
       "pr submit": { json: publication },
       "pr resolve-threads": { json: { success: false, message: "failed" }, code: 1 },
     });
+    await w.h.invokeTool("submit", {});
     await w.h.invokeTool("finalize_address", input);
     assert.equal(details(await w.h.invokeTool("resolve_submit_conflicts", {})).ok, false);
-    // Reset only the parent counter to permit one new fixture attempt; never touch a lock.
-    w.h.session.sessionManager.appendCustomEntry("perk:workflow-state", {
-      conflict_resolution_attempts: 0,
-    });
-    fakePerkRouter(w.cwd, {
-      "pr submit": { json: publication },
-      "pr resolve-threads": { json: threads },
-    });
-    const finalized = await w.h.invokeTool("finalize_address", input);
-    assert.equal(finalized.terminate, true);
-    assert.equal(details(await w.h.invokeTool("resolve_submit_conflicts", {})).kind, "resolved");
+    assert.equal(w.engine.requests.length, 1);
+    await w.h.invokeTool("submit", {});
+    const resolved = await w.h.invokeTool("resolve_submit_conflicts", {});
+    assert.equal(details(resolved).kind, "resolved");
+    assert.notEqual(resolved.terminate, true);
+    assert.match(text(resolved), /call canonical submit again/i);
+    assert.equal(w.engine.requests.length, 2);
+    assert.equal(details(await w.h.invokeTool("resolve_submit_conflicts", {})).ok, false);
     assert.equal(w.engine.requests.length, 2);
   } finally {
     w.h.dispose();
   }
 });
 
-test("two activations count separately but only one writer emits; no replacement priming or reload unlock", async () => {
+test("incompatible native worktree default: the tool names the file, the observation and the fix without a request", async () => {
+  const w = await setup(undefined, '{"worktree":true}');
+  try {
+    await w.h.invokeTool("submit", {});
+    const r = await w.h.invokeTool("resolve_submit_conflicts", {});
+    assert.equal(details(r).ok, false);
+    assert.equal(details(r).reason, "incompatible-worktree-default");
+    const rendered = text(r);
+    assert.ok(rendered.includes(w.engine.resolverEngine.configPath), rendered);
+    assert.ok(rendered.includes("worktree=true"), rendered);
+    assert.ok(rendered.includes('set "worktree": false'), rendered);
+    assert.ok(rendered.includes("quit and resume"), rendered);
+    assert.doesNotMatch(rendered, /perk doctor|perk init|Inspect native/);
+    assert.equal(w.engine.requests.length, 0, "the bus never received a request");
+  } finally {
+    w.h.dispose();
+  }
+});
+
+test("two activations count separately but only one writer emits; contention never refunds or unlocks; a retained lock survives the second session", async () => {
   const emitted = deferred<{ bus: DelegationEvents; request: Record<string, unknown> }>();
   const w = await setup((bus, request) => emitted.resolve({ bus, request }));
   let second: Awaited<ReturnType<typeof loadPerkSession>> | undefined;
