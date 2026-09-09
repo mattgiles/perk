@@ -415,6 +415,92 @@ test("objective arm: plannotator selected -> the bridge receives the RENDERED ma
   assert.match(String(result.content[0]?.text), /objective DENIED/);
 });
 
+/**
+ * Measure how many `getBranch` calls one session open + ONE validated artifact read makes
+ * (self-adapting to seam refactors), so the single-read pin can swap the world exactly where a
+ * second read would begin.
+ */
+function measureArtifactReadCalls(): number {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
+  const setup = headfulCtx(cwd, branch);
+  assert.ok(writeSessionArtifact(fakeSink(branch), setup, OBJECTIVE_DRAFT_ARTIFACT, "{}"));
+  let calls = 0;
+  const counting = {
+    cwd,
+    sessionManager: {
+      getBranch: () => {
+        calls += 1;
+        return branch;
+      },
+    },
+    hasUI: false,
+    ui: { notify() {} },
+  } as unknown as SessionArtifactCtx;
+  const read = openBranchWorkflowSession(fakeSink(branch), counting).readArtifact(
+    OBJECTIVE_DRAFT_ARTIFACT,
+  );
+  assert.equal(read.status, "found");
+  assert.ok(calls > 0, "the read consults the branch");
+  return calls;
+}
+
+const OBJECTIVE_PAYLOAD_V2 = `${JSON.stringify({
+  schema_version: 1,
+  title: "Conform planning (v2)",
+  prose: "Newer prose nobody reviewed.\n",
+  roadmap: [],
+})}\n`;
+
+test("objective arm (plain path): the slot's baseline and the render derive from ONE read — a concurrent write landing right after it splits nothing", async () => {
+  // The interleaved-write pin: a concurrent objective_draft write (-> v2, file + pointer
+  // together) fires exactly where a second read would begin. With two reads the human would
+  // review v1 while the record's baseline was v2 — at approval live = v2 = baseline passes and
+  // unreviewed bytes save. With one read both derive from v1.
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
+  const setup = headfulCtx(cwd, branch);
+  const path = plantObjectiveDraft(setup, branch);
+  const branchV1 = [...branch];
+  plantObjectiveDraft(setup, branch, OBJECTIVE_PAYLOAD_V2);
+  const branchV2 = [...branch];
+  // Rewind the world to v1; the v2 write fires after exactly one artifact read's branch reads.
+  writeFileSync(path, OBJECTIVE_PAYLOAD, "utf8");
+  const perRead = measureArtifactReadCalls();
+  let calls = 0;
+  const ctx = {
+    cwd,
+    sessionManager: {
+      getBranch: () => {
+        calls += 1;
+        if (calls === perRead + 1) writeFileSync(path, OBJECTIVE_PAYLOAD_V2, "utf8");
+        return calls <= perRead ? branchV1 : branchV2;
+      },
+      getSessionId: () => "policy-session",
+    },
+    hasUI: true,
+    ui: { notify() {} },
+  } as unknown as ExtensionContext;
+  const bridge = cannedBridge(DENIED);
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const { slot, snapshots } = spiedSlot(scriptedRemotesSlot(pi));
+  // The arm directly (the dispatcher's own stage read would shift the swap point).
+  await executeObjectiveReview(pi, ctx, fakeGating(true), bridge, undefined, undefined, slot);
+  assert.ok(calls > perRead, "the world moved after the one read");
+  assert.equal(snapshots.length, 1, "the slot opened once");
+  assert.equal(snapshots[0]?.raw, OBJECTIVE_PAYLOAD, "the baseline is the one read's bytes");
+  const decoded = decodeObjectiveDraft(OBJECTIVE_PAYLOAD);
+  assert.ok(decoded.kind === "valid");
+  assert.equal(
+    snapshots[0]?.markdown,
+    renderObjectiveDraft(decoded.draft),
+    "the render derives from the SAME read — never a re-read that could see the newer write",
+  );
+  assert.doesNotMatch(snapshots[0]?.markdown ?? "", /Newer prose/);
+  assert.equal(bridge.reviewed[0], snapshots[0]?.markdown, "the bridge saw exactly that render");
+});
+
 test("objective arm: default selection -> first-party VIEW-ONLY; approval auto-saves the artifact", async () => {
   const cwd = scaffoldRepo();
   const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
