@@ -359,8 +359,9 @@ snapshots it at launch under the run's scratch dir and seeds a pointer the sessi
 notice in the seed. **Warm** `/objective-plan` runs
 `perk objective node-engagement N --node <id> --json` after the planning transition (the snapshot
 is written then, not at launch) and pages the returned file pointer; its `warnings[]` are reported
-by the session in the plan's Assumptions as incomplete advisory input. Neither path retries. GitHub
-objectives stay unsupported until their carrier lands.
+by the session in the plan's Assumptions as incomplete advisory input. Neither path retries. On
+GitHub the read runs over the objective issue and reports `absent` until the refine doors are
+enabled there.
 The wire format, the transfer artifacts and the door guarantees are pinned in
 `shared/contracts.md` §8.26 and §8.67–§8.68.
 

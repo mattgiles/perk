@@ -213,8 +213,8 @@ as the node's plan comment. Refinements are authored with `perk objective refine
 authentication, network, sync or launch, and again at save, until the GitHub carrier lands.
 Planning sessions consume a saved refinement as dated advisory DATA behind a file pointer —
 snapshotted at launch by `perk objective plan`, or when `/objective-plan` runs the
-`node-engagement` worker after the planning transition (Linear only until the GitHub carrier
-lands). For the operator path — pick, author, review, inspect, then plan — see
+`node-engagement` worker after the planning transition (on GitHub the read runs over the
+objective issue and is `absent` until refinements can be authored there). For the operator path — pick, author, review, inspect, then plan — see
 [How to refine future nodes before planning](../../how-to/refine-future-nodes.md). See
 [Objectives — Node refinements](../objectives.md#node-refinements-linear-project-objectives-only).
 

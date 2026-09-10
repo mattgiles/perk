@@ -16,7 +16,8 @@ from click.testing import CliRunner
 
 from perk import github, objective
 from perk.backends import engagement, resolve
-from perk.backends.github import objectives
+from perk.backends.github import engagement as gh_engagement
+from perk.backends.github import objectives, plans
 from perk.backends.github.objective_store import GitHubObjectiveStore
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.cli import cli
@@ -67,10 +68,31 @@ def _git_init(path: str, factory) -> None:
     factory(path)
 
 
+def _issue_read() -> plans.IssueRead:
+    """The objective issue as the GitHub refinement read sees it: the header (run_id) + the same
+    roadmap `_state()` carries — every node's carrier on GitHub."""
+    from perk import plan
+
+    header = plan.render_metadata_block(
+        objective.OBJECTIVE_HEADER_KEY,
+        objective.render_header_block(objective.ObjectiveHeader(run_id="01RID", created="t")),
+    )
+    roadmap = plan.render_metadata_block(
+        objective.OBJECTIVE_ROADMAP_KEY, objective.render_roadmap_block(list(_nodes()))
+    )
+    return plans.IssueRead(
+        number=7, url="u/7", title="Ship it", body=f"{header}\n\n{roadmap}\n", state="OPEN"
+    )
+
+
 def _authed(monkeypatch) -> None:
+    """Auth + the GitHub refinement read (live over the objective issue; `absent` with no saved
+    record and no comments) — every GitHub-arm door test goes through here."""
     monkeypatch.setattr(
         github, "check_auth", lambda: github.AuthStatus(True, "octocat", ("repo",), None)
     )
+    monkeypatch.setattr(plans, "read_issue", lambda **k: _issue_read())
+    monkeypatch.setattr(gh_engagement, "read_issue_comments", lambda **k: [])
 
 
 def _stub_launch(monkeypatch, sink: dict, *, on_launch=None) -> None:
@@ -175,8 +197,9 @@ def test_selects_next_node_marks_planning_and_launches(monkeypatch, unborn_git_r
         # The real-run-only node-mark write and engagement read are narrated too (gap coverage).
         assert "marking node 1.2 planning" in err and "\u2713 marked node 1.2 planning" in err
         assert "reading node context" in err
-        # GitHub: the refinement read is a quiet typed `unsupported` (no warning, no network).
-        assert "read node context \u2014 refinement unsupported" in err
+        # GitHub: the refinement read is live over the objective issue and reads `absent` (no
+        # saved record; no warning).
+        assert "read node context \u2014 refinement absent" in err
     # The next actionable node (1.2) is selected + marked planning, then launched with the seed.
     assert marked["node_id"] == "1.2" and marked["status"] is N.PLANNING
     assert launched["stage"] == "objective-plan"
@@ -443,9 +466,10 @@ def test_cold_seed_failsoft_when_read_raises(monkeypatch, unborn_git_repo_factor
 
 
 def test_github_seed_byte_unchanged_vs_no_engagement_param(monkeypatch, unborn_git_repo_factory):
-    # The github default store returns EMPTY_NODE_ENGAGEMENT and a quiet `unsupported` refinement
-    # → the seed equals _seed_prompt with no node_engagement/node_context params (byte-unchanged;
-    # no churn), the door mints nothing and writes no node-context artifact.
+    # The github default store returns EMPTY_NODE_ENGAGEMENT and the live refinement read over
+    # the objective issue reads `absent` → the seed equals _seed_prompt with no
+    # node_engagement/node_context params (byte-unchanged; no churn), the door mints nothing and
+    # writes no node-context artifact.
     from perk.cli.commands.objective.plan_cmd import _seed_prompt
 
     _authed(monkeypatch)
@@ -1535,8 +1559,6 @@ def _stub_mark(monkeypatch) -> None:
 
 
 def _no_plan_reads(monkeypatch) -> None:
-    from perk.backends.github import plans
-
     monkeypatch.setattr(
         plans,
         "get_plan",

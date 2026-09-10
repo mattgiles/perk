@@ -5,6 +5,13 @@ from perk import objective, plan
 from perk.backends import objective_store
 from perk.backends.github import plans
 from perk.github import _exec
+from perk.objective.refinement import codec as refinement_codec
+from perk.objective.refinement.models import (
+    RefinementIdentity,
+    RefinementObjectiveSnapshot,
+    RefinementSource,
+    RefinementTarget,
+)
 from perk.substrate.output import user_output
 
 # ===========================================================================
@@ -824,3 +831,126 @@ def update_objective_body(
         )
     plans._patch_comment_body(comment_id, spliced, repo_root)
     return ObjectiveBodyUpdate(number=number, comment_id=comment_id, updated=True, dry_run=False)
+
+
+# ===========================================================================
+# The refinement target read (contracts.md §8.67, the GitHub arm).
+#
+# Every node's refinement carrier is the objective issue itself; per-node records are told apart
+# by the marker key (which hashes `node_id`). The classifier is pure so the store stays a thin
+# delegate and the precedence can be pinned without `gh`.
+# ===========================================================================
+
+
+def refinement_targets_from_issue(
+    *, number: int, url: str, body: str, backend_id: str
+) -> RefinementObjectiveSnapshot | None:
+    """Classify one objective issue's body as the refinement target snapshot (contracts.md
+    §8.67, the GitHub arm) — pure, no ``gh``. ``None`` = not a perk objective (no
+    objective-header block). Every node's carrier is the objective issue itself; per-node
+    records are told apart by the marker key (which hashes ``node_id``). Cardinality of the two
+    identity-bearing blocks is checked BEFORE any parse: ``plan.find_metadata_block`` reads only
+    the first block, and a damaged carrier with two must never key or digest a refinement
+    against whichever comes first.
+
+    Precedence: header cardinality → header parse → run id → roadmap cardinality → roadmap parse
+    → node-id uniqueness, so an ambiguous carrier is refused before any block content is
+    trusted. A roadmap-free objective is a supported objective with zero targets. Targets are
+    in natural node order with ``depends_on`` normalized (unique, ``node_sort_key``-sorted,
+    ``None`` preserved); ``has_plan_metadata`` is always ``False`` on GitHub (the node's ``pr``
+    backlink is the only plan linkage) and ``status`` is the stored status (GitHub has no native
+    cancellation). ``backend_id`` is passed in by the store so its literal stays single-sourced.
+    """
+
+    def malformed(message: str) -> objective_store.RefinementTargetReadError:
+        return objective_store.RefinementTargetReadError(
+            "malformed_target", f"objective #{number}: {message}"
+        )
+
+    def ambiguous(message: str) -> objective_store.RefinementTargetReadError:
+        return objective_store.RefinementTargetReadError(
+            "ambiguous_target", f"objective #{number}: {message}"
+        )
+
+    header_count = plan.count_metadata_blocks(body, objective.OBJECTIVE_HEADER_KEY)
+    if header_count == 0:
+        return None
+    if header_count > 1:
+        raise ambiguous(f"carries {header_count} objective-header blocks")
+    header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY)
+    if header is None:
+        raise malformed("objective-header block is present but malformed")
+    run_id = header.get("run_id")
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise malformed("objective-header carries no readable run_id")
+    roadmap_count = plan.count_metadata_blocks(body, objective.OBJECTIVE_ROADMAP_KEY)
+    if roadmap_count > 1:
+        raise ambiguous(f"carries {roadmap_count} objective-roadmap blocks")
+    nodes, errors = objective.parse_roadmap_nodes(body)
+    if errors:
+        raise malformed("invalid objective roadmap: " + "; ".join(errors))
+    seen: set[str] = set()
+    for node in nodes:
+        if node.id in seen:
+            raise ambiguous(f"node {node.id!r} appears more than once in the roadmap block")
+        seen.add(node.id)
+    ordered = sorted(nodes, key=lambda n: objective.node_sort_key(n.id))
+    effective = {
+        resolved.id: tuple(sorted(set(resolved.depends_on or ()), key=objective.node_sort_key))
+        for resolved in objective.build_graph(ordered).nodes
+    }
+    carrier_id = str(number)
+    targets: list[RefinementTarget] = []
+    for node in ordered:
+        identity = RefinementIdentity(
+            backend=backend_id,
+            objective_id=carrier_id,
+            objective_run_id=run_id,
+            node_id=node.id,
+            carrier_id=carrier_id,
+        )
+        source = RefinementSource(
+            description=node.description,
+            slug=node.slug,
+            comment=node.comment,
+            depends_on=(
+                None
+                if node.depends_on is None
+                else tuple(sorted(set(node.depends_on), key=objective.node_sort_key))
+            ),
+            effective_depends_on=effective[node.id],
+            issue_description="",
+        )
+        targets.append(
+            RefinementTarget(
+                identity=identity,
+                source=source,
+                source_digest=refinement_codec.source_digest(source),
+                carrier_identifier=f"#{number}",
+                carrier_url=url,
+                status=node.status,
+                plan_ref=node.pr,
+                has_plan_metadata=False,
+            )
+        )
+    return RefinementObjectiveSnapshot(
+        backend=backend_id,
+        objective_id=carrier_id,
+        objective_run_id=run_id,
+        objective_url=url,
+        targets=tuple(targets),
+    )
+
+
+def read_node_refinement_targets(
+    *, number: int, repo_root: Path, backend_id: str
+) -> RefinementObjectiveSnapshot | None:
+    """The GitHub refinement target read: ``plans.read_issue`` (``None`` for a missing issue),
+    then :func:`refinement_targets_from_issue`. A pure read — no mutation, no comment read (the
+    service reads the carrier's comments itself). Raises ``GitHubError`` on an infra failure."""
+    src = plans.read_issue(number=number, repo_root=repo_root)
+    if src is None:
+        return None
+    return refinement_targets_from_issue(
+        number=number, url=src.url, body=src.body, backend_id=backend_id
+    )

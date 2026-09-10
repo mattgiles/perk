@@ -23,8 +23,6 @@ from _linear_fakes import _TEAM_KEY, FakeLinearWorkspace, selects_attachment_pag
 
 from perk import objective, plan
 from perk.backends import resolve
-from perk.backends.github.backend import GitHubIssueBackend
-from perk.backends.github.objective_store import GitHubObjectiveStore
 from perk.backends.issue_backend import (
     CommentResult,
     IssueBackendError,
@@ -555,26 +553,27 @@ class TestSnapshotRead:
         assert not isinstance(info.value, RefinementTargetReadError)
         assert "rate limited" in str(info.value)
 
-    def test_unsupported_stores_refuse_before_network(self, tmp_path: Path) -> None:
-        github_store = GitHubObjectiveStore(tmp_path)
-        with pytest.raises(RefinementTargetReadError) as info:
-            github_store.read_node_refinement_targets(objective_id="")
-        assert info.value.code == "unsupported_backend"
+    def test_dormant_store_refuses_before_network(self) -> None:
+        # The dormant issue-backed Linear store is the ONE store without a refinement read (the
+        # GitHub store reads the objective issue — tests/test_github_refinement.py).
         ws = FakeLinearWorkspace()
         dormant = LinearObjectiveStore(ws, team_key=_TEAM_KEY, repo_root=REPO)
-        with pytest.raises(RefinementTargetReadError) as info2:
+        with pytest.raises(RefinementTargetReadError) as info:
             dormant.read_node_refinement_targets(objective_id="ENG-1")
-        assert info2.value.code == "unsupported_backend"
+        assert info.value.code == "unsupported_backend"
         assert ws.requests == []
         # Through the service: no capability flag, no dummy-node request, no comment read.
         err = _err(
             lambda: service.select_refinement_target(
-                github_store, GitHubIssueBackend(tmp_path), objective_id="1"
+                dormant,
+                LinearIssueBackend(ws, team_key=_TEAM_KEY, repo_root=REPO),
+                objective_id="ENG-1",
             ),
             RefinementErrorCode.UNSUPPORTED_BACKEND,
             write_attempted=False,
         )
         assert isinstance(err.__cause__, RefinementTargetReadError)
+        assert ws.requests == []
 
 
 # --------------------------------------------------------------------------- guarded upsert
@@ -841,33 +840,6 @@ class TestGuardedUpsert:
             ).verified_comment
             is None
         )
-
-    def test_github_guarded_arm_refuses_before_any_operation(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from perk.backends.github import plans
-
-        calls: list[object] = []
-        monkeypatch.setattr(
-            plans, "upsert_marked_comment", lambda **k: calls.append(k) or _Posted()
-        )
-        backend = GitHubIssueBackend(tmp_path)
-        for dry in (True, False):
-            _guard_err(
-                lambda d=dry: backend.upsert_marked_comment(
-                    issue_id="1",
-                    marker=MARKER,
-                    body=_body("x"),
-                    dry_run=d,
-                    expected=MarkedCommentExpectation(None, None),
-                ),
-                "unsupported_backend",
-                write_attempted=False,
-            )
-        assert calls == []
-        # Ordinary forwarding unchanged.
-        result = backend.upsert_marked_comment(issue_id="1", marker=MARKER, body=_body("x"))
-        assert result.posted is True and result.verified_comment is None and len(calls) == 1
 
     def test_mutation_landed_then_raised_is_success(self) -> None:
         ws, _store, issues = _harness()
@@ -1136,10 +1108,6 @@ class TestGuardedUpsert:
             "stale_comment",
             write_attempted=False,
         )
-
-
-class _Posted:
-    posted = True
 
 
 # --------------------------------------------------------------------------- service over Linear
@@ -1708,14 +1676,13 @@ def test_phase1_gate_linear_refinement_persistence(
 # --------------------------------------------------------------------------- node-context assembly
 
 
-def test_node_context_assembly_over_linear_is_read_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_node_context_assembly_over_linear_is_read_only(tmp_path: Path) -> None:
     """The selected-node advisory assembly (§8.26) composes the two existing reads over the REAL
     Linear store + adapter: a present refinement renders the full Markdown verbatim and
     snapshots to disk, with zero mutations and zero non-comment/roadmap/comment-count drift;
     a later source change reads as ``source_changed: yes`` with the full body still delivered;
-    the GitHub and dormant stores report ``unsupported`` quietly without any network."""
+    the dormant issue-backed store reports ``unsupported`` quietly without any network (the
+    GitHub arm reads the objective issue — ``tests/test_github_refinement.py``)."""
     from perk.cli.commands.objective.node_context import (
         RefinementMissing,
         RefinementPresent,
@@ -1723,7 +1690,6 @@ def test_node_context_assembly_over_linear_is_read_only(
         assemble_node_context,
         snapshot_refinement,
     )
-    from perk.github import _exec as gh_exec
     from perk.state import cache
 
     ws, store, issues = _harness()
@@ -1789,21 +1755,6 @@ def test_node_context_assembly_over_linear_is_read_only(
     assert stored != current
     assert f"source_digest: stored {stored} · current {current}" in changed.refinement.block
     assert LONG_MARKDOWN in changed.refinement.block
-
-    # GitHub: unsupported, quiet, and no gh invocation at all.
-    def no_gh(*args: object, **kwargs: object) -> object:
-        raise AssertionError("gh must not be invoked by the node-context assembly")
-
-    monkeypatch.setattr(gh_exec, "_run", no_gh)
-    github = assemble_node_context(
-        GitHubObjectiveStore(tmp_path),
-        objective_id="1",
-        node_id="1.1",
-        issues=lambda: GitHubIssueBackend(tmp_path),
-    )
-    assert github.refinement == RefinementMissing("unsupported")
-    assert github.engagement_status == "absent"
-    assert github.warnings == ()
 
     # The dormant issue-backed Linear store: unsupported before any request.
     dormant_ws = FakeLinearWorkspace()

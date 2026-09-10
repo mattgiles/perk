@@ -361,8 +361,9 @@ human failsafe and the deliberate retry. Consumption: `perk objective plan` snap
 refinement under the launched run's scratch dir and seeds only a pointer; `/objective-plan` reads
 it through `perk objective node-engagement N --node <id> --json` after the planning transition;
 degraded advisory reads are reported, never retried. GitHub objectives refuse
-`unsupported_backend` at every door until their carrier lands. Contracts: `shared/contracts.md`
-§8.26, §8.67–§8.68.
+`unsupported_backend` at both refine doors and at save until the rollout allowlist is lifted;
+their planning-time read already runs over the objective issue (the GitHub carrier) and reports
+`absent`. Contracts: `shared/contracts.md` §8.26, §8.67–§8.68.
 
 ### The dream-report companion
 

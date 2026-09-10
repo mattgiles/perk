@@ -366,6 +366,34 @@ def test_has_metadata_block_both_encodings():
     assert plan.has_metadata_block(inline, plan.PLAN_HEADER_KEY)
 
 
+def test_count_metadata_blocks_both_encodings():
+    # The cardinality twin of has_metadata_block: presence-only over the OPEN delimiter in either
+    # encoding, so a reader can fail closed on a damaged carrier carrying two blocks of one kind
+    # (find_metadata_block silently parses only the first).
+    key = plan.PLAN_HEADER_KEY
+    html = plan.render_metadata_block(key, {"run_id": "x"})
+    inline = plan.render_metadata_block(key, {"run_id": "x"}, style="inline-code")
+    other = plan.render_metadata_block("learn-header", {"run_id": "x"})
+    broken_html = "<!-- perk:metadata-block:plan-header -->\n```yaml\nrun_id: x"
+    cases = {
+        "no blocks here": 0,
+        other: 0,
+        html: 1,
+        inline: 1,
+        broken_html: 1,  # malformed but present still counts once
+        f"{html}\n\nprose\n\n{html}": 2,
+        f"{html}\n\n{inline}": 2,
+        f"{other}\n\n{html}": 1,  # a different key's block never counts
+    }
+    for text, expected in cases.items():
+        assert plan.count_metadata_blocks(text, key) == expected, text
+        assert plan.has_metadata_block(text, key) == (plan.count_metadata_blocks(text, key) > 0)
+    # Two blocks read as whichever comes first — the trap the cardinality check exists for.
+    two = f"{plan.render_metadata_block(key, {'run_id': 'first'})}\n\n{html}"
+    assert plan.find_metadata_block(two, key) == {"run_id": "first"}
+    assert plan.count_metadata_blocks(two, key) == 2
+
+
 def test_has_metadata_block_absent_is_false():
     assert not plan.has_metadata_block("no blocks here", plan.PLAN_HEADER_KEY)
     # a different key's block never matches

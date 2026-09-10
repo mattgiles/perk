@@ -6,6 +6,7 @@ from perk import objective, plan
 from perk.backends.issue_backend import parse_plan_pr
 from perk.boundary import LenientParseModel, translate_validation_errors
 from perk.github import _exec, prs
+from perk.objective.refinement.codec import is_refinement_comment
 
 # ===========================================================================
 # Mutation operations (the first GitHub *writes*; contracts.md §8.4).
@@ -893,31 +894,64 @@ def _find_plan_body_comment_id(issue: int, repo_root: Path) -> int | None:
     for c in raw if isinstance(raw, list) else []:
         if not isinstance(c, dict) or "id" not in c:
             continue
-        if plan.extract_plan_body(str(c.get("body", ""))) is not None:
+        body = str(c.get("body", ""))
+        # A refinement-owned comment (even a damaged one, even one embedding a complete plan-body
+        # example) is never a plan candidate (contracts.md §8.67 coexistence).
+        if is_refinement_comment(body):
+            continue
+        if plan.extract_plan_body(body) is not None:
             return int(c["id"])
     return None
 
 
 def find_comment_id_by_marker(*, issue: int, marker: str, repo_root: Path) -> int | None:
-    """Find the integer id of the first issue comment whose body contains ``marker`` (REST list).
+    """Find the integer id of the first issue comment whose body contains ``marker`` — exhaustive
+    over **every** REST comment page.
 
-    Mirrors :func:`_find_plan_body_comment_id` (the REST list + integer-``id`` discipline — the
-    GraphQL node id from ``gh issue view`` is not usable for the comment-PATCH endpoint). Used by
-    :func:`upsert_marked_comment` to evolve a single marker-keyed comment (e.g. the per-run
-    ``run-report`` note). ``None`` when no comment matches; raises ``GitHubError`` on infra failure.
+    The same REST list endpoint :func:`_find_plan_body_comment_id` reads (the integer ``id`` is
+    the comment-PATCH identity — the GraphQL node id from ``gh issue view`` is not), walked to
+    completion via ``gh api``'s native ``--paginate --slurp`` (the
+    :func:`_list_label_issues_all_pages` census shape; needs ``gh >= 2.48.0`` for ``--slurp`` —
+    documented, not probed, exactly as the label census). Completeness is the point: a marker
+    placed late in a long objective-issue thread must be found, or the upsert mints a duplicate.
+    Fail-closed on an unexpected slurped shape — a non-list payload or page raises ``GitHubError``
+    (no empty-stdout default: only a genuinely parsed empty page reads as empty). Stays on the
+    REST quota by the module convention. A refinement-owned comment is never a marker candidate
+    (contracts.md §8.67 coexistence). Used by :func:`upsert_marked_comment` to evolve a single
+    marker-keyed comment (e.g. the per-run ``run-report`` note) and by the objective-body
+    recovery. ``None`` when no comment matches; a missing issue or an infra failure raises
+    ``GitHubError``.
     """
-    raw = _exec._run_json(
-        ["api", f"repos/{{owner}}/{{repo}}/issues/{issue}/comments"],
-        what=f"failed to list comments on issue #{issue}",
-        source="issue comments",
-        cwd=repo_root,
-        default="[]",
-    )
-    for c in raw if isinstance(raw, list) else []:
-        if not isinstance(c, dict) or "id" not in c:
-            continue
-        if marker in str(c.get("body", "")):
-            return int(c["id"])
+    args = [
+        *_exec._rest_args(
+            f"repos/{{owner}}/{{repo}}/issues/{issue}/comments",
+            method="GET",
+            fields={"per_page": "100"},
+        ),
+        "--paginate",
+        "--slurp",
+    ]
+    what = f"failed to list comments on issue #{issue}"
+    pages = _exec._run_json(args, what=what, source="`gh api issues/{n}/comments`", cwd=repo_root)
+    if not isinstance(pages, list):
+        raise _exec.GitHubError(
+            f"{what}: unexpected slurped comments payload: expected an array of pages, "
+            f"got {type(pages).__name__}"
+        )
+    for page in pages:
+        if not isinstance(page, list):
+            raise _exec.GitHubError(
+                f"{what}: unexpected slurped comments page: expected a page array, "
+                f"got {type(page).__name__}"
+            )
+        for c in page:
+            if not isinstance(c, dict) or "id" not in c:
+                continue
+            body = str(c.get("body", ""))
+            if is_refinement_comment(body):
+                continue  # a refinement-owned comment is never a marker candidate (§8.67)
+            if marker in body:
+                return int(c["id"])
     return None
 
 
@@ -1109,7 +1143,13 @@ def get_plan_body(*, number: int, repo_root: Path) -> str | None:
     candidates = [str(data.get("body", ""))]
     comments = data.get("comments")
     if isinstance(comments, list):
-        candidates.extend(str(c.get("body", "")) for c in comments if isinstance(c, dict))
+        # The issue body itself is never a refinement; a refinement-owned comment (even one
+        # embedding a complete plan-body example) is never a plan candidate (§8.67 coexistence).
+        candidates.extend(
+            body
+            for body in (str(c.get("body", "")) for c in comments if isinstance(c, dict))
+            if not is_refinement_comment(body)
+        )
     for text in candidates:
         body = plan.extract_plan_body(text)
         if body:

@@ -42,6 +42,17 @@ def _lists_comments(issue: int):
     return lambda gh: "POST" not in gh and any(endpoint in token for token in gh)
 
 
+def _lists_label_issues(gh) -> bool:
+    """The label-scoped issue LIST (`labels=` field) — distinct from the comment list, which is
+    also a paginated GET under `issues/` since the marker finder became exhaustive."""
+    return "GET" in gh and any(token.startswith("labels=") for token in gh)
+
+
+def _comment_pages(*rows: dict) -> str:
+    """A `--paginate --slurp` comment census: one page array of rows (`[[]]` for none)."""
+    return json.dumps([list(rows)])
+
+
 class _Once:
     """A dispatch predicate that matches only its FIRST hit — for scripting two different
     responses to byte-identical calls (e.g. supersede's origin-carry read of the old issue body
@@ -577,9 +588,9 @@ def test_supersede_deferred_close_found_arm_heals_a_missing_body_comment(monkeyp
     existing = [{"number": 200, "html_url": "u/200", "body": _obj_header("01RID")}]
     rec = _GhDispatch(
         [
-            (_has("issues", "GET"), _Proc(0, json.dumps([existing]))),
+            (_lists_label_issues, _Proc(0, json.dumps([existing]))),
             (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes))),
-            (_lists_comments(200), _Proc(0, "[]")),
+            (_lists_comments(200), _Proc(0, _comment_pages())),
             (_has("comments", "POST"), _Proc(0, json.dumps({"id": 777}))),
             (_has("issues/200", "PATCH"), _Proc(0, "{}")),
         ]
@@ -614,11 +625,57 @@ def test_supersede_deferred_close_found_arm_recovers_post_before_backfill(monkey
     prior_comment = objective.render_body_comment(nodes, prose="replan prose")
     rec = _GhDispatch(
         [
-            (_has("issues", "GET"), _Proc(0, json.dumps([existing]))),
+            (_lists_label_issues, _Proc(0, json.dumps([existing]))),
             (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes))),
             (
                 _lists_comments(200),
-                _Proc(0, json.dumps([{"id": 777, "body": prior_comment}])),
+                _Proc(0, _comment_pages({"id": 777, "body": prior_comment})),
+            ),
+            (_has("issues/200", "PATCH"), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    created = objectives.supersede_objective_issue(
+        old_number=42,
+        title="t",
+        prose="replan prose",
+        repo_root=ROOT,
+        run_id="01RID",
+        roadmap_nodes=nodes,
+        close_predecessor=False,
+    )
+    assert created.number == 200 and created.existed is True
+    assert not any("POST" in call for call in rec.calls)
+    patched = rec.body_files[-1]
+    header = plan.find_metadata_block(patched, objective.OBJECTIVE_HEADER_KEY)
+    assert header is not None and header["objective_comment_id"] == 777
+
+
+def test_supersede_found_arm_recovery_skips_a_refinement_quoting_the_table_marker(monkeypatch):
+    # A refinement-OWNED comment (family marker on its first line) quoting the roadmap-table
+    # marker text is never the objective-body comment (§8.67 coexistence): the recovery skips it
+    # and backfills the REAL marker-bearing comment that follows it — no POST.
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    existing = [{"number": 200, "html_url": "u/200", "body": _obj_header("01RID")}]
+    prior_comment = objective.render_body_comment(nodes, prose="replan prose")
+    refinement = (
+        f"<!-- perk:objective-refinement:v1:{'a' * 64} -->\n\n"
+        f"Never edit the `{objective.ROADMAP_TABLE_MARKER_START}` region by hand.\n"
+    )
+    rec = _GhDispatch(
+        [
+            (_lists_label_issues, _Proc(0, json.dumps([existing]))),
+            (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes))),
+            (
+                _lists_comments(200),
+                _Proc(
+                    0,
+                    _comment_pages(
+                        {"id": 555, "body": refinement}, {"id": 777, "body": prior_comment}
+                    ),
+                ),
             ),
             (_has("issues/200", "PATCH"), _Proc(0, "{}")),
         ]
@@ -648,10 +705,10 @@ def test_supersede_deferred_close_found_arm_heals_a_vanished_comment(monkeypatch
     existing = [{"number": 200, "html_url": "u/200", "body": _obj_header("01RID", 9)}]
     rec = _GhDispatch(
         [
-            (_has("issues", "GET"), _Proc(0, json.dumps([existing]))),
+            (_lists_label_issues, _Proc(0, json.dumps([existing]))),
             (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes, comment_id=9))),
             (_has("comments/9"), _Proc(1, stderr="Not Found (404)")),
-            (_lists_comments(200), _Proc(0, "[]")),
+            (_lists_comments(200), _Proc(0, _comment_pages())),
             (_has("comments", "POST"), _Proc(0, json.dumps({"id": 778}))),
             (_has("issues/200", "PATCH"), _Proc(0, "{}")),
         ]

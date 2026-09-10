@@ -195,6 +195,37 @@ def test_malformed_marked_comment_is_corruption():
         _persist(issues, ["part one"])
 
 
+@pytest.mark.parametrize(
+    "marker_line",
+    [
+        f"<!-- perk:objective-refinement:v1:{'a' * 64} -->",
+        f"`perk:objective-refinement:v1:{'a' * 64}`",
+    ],
+    ids=["html", "inline"],
+)
+def test_refinement_owned_comment_quoting_the_marker_is_skipped(marker_line: str):
+    # The one exception to the fail-closed marker-text rule: a comment OWNED by the refinement
+    # family (a family marker on its first physical line, either encoding) is unrelated DATA even
+    # when its Markdown quotes the companion marker text — on GitHub the report carrier IS the
+    # objective issue, which is also every node's refinement carrier. Parts land; no conflict; a
+    # re-run converges.
+    issues, fake = _issues()
+    fake.seed(
+        _CARRIER,
+        f"{marker_line}\n\n# Objective node refinement (advisory)\n\n"
+        "Do not hand-edit the `perk:learn-dream-report` companion comments.\n",
+    )
+    _persist(issues, ["part one", "part two"])
+    bodies = [c.body for c in fake.comments[_CARRIER]]
+    assert bodies[1:] == [
+        f"<!-- perk:learn-dream-report:{_RUN}:1 -->\n\npart one",
+        f"<!-- perk:learn-dream-report:{_RUN}:2 -->\n\npart two",
+    ]
+    posted = len(fake.post_calls)
+    _persist(issues, ["part one", "part two"])
+    assert len(fake.post_calls) == posted
+
+
 def test_leading_blank_line_before_marker_is_corruption():
     # The marker must sit on the PHYSICAL first line — a leading blank line is never
     # normalized away into acceptance.

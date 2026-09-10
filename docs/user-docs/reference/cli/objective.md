@@ -67,8 +67,9 @@ checkout the command is invoked from) and the seed carries **only a pointer** (p
 measurements) the session pages with `read` — never the refinement text. An advisory read that
 degrades prints a `⚠` line per warning and puts a compact **node-context notice** (the refinement
 status + `surface/code` tokens, never the messages) in the seed; the launch still proceeds. With
-no refinement — including every GitHub objective, whose refinement read is a quiet `unsupported`
-— the seed is unchanged. `--dry-run` reads none of it.
+no refinement the seed is unchanged. GitHub objectives are read too — their carrier is the
+objective issue itself, so the read is `absent` until a refinement is saved there (which the
+refine doors do not yet allow on GitHub). `--dry-run` reads none of it.
 
 For a **stacked** objective, node selection is **build-readiness- and handoff-derived** (a live
 delivery-train reconstruction): the single plannable candidate is the next unpublished layer in
@@ -211,8 +212,9 @@ file: {path, bytes, lines, max_line_bytes}}`, a pointer to the full rendered ref
 the run scratch dir (the only thing the command writes; nothing is written for the other arms), or
 `{status: "absent" | "unsupported" | "unavailable"}` — and `warnings` (`surface`, `code`, `message`,
 `comment_ids`). An advisory read failure is **partial success**: exit 0 with a warning, never a
-failure envelope. **Linear-first** — GitHub single-issue objectives (and the dormant issue-backed
-Linear store) report no engagement and a quiet `unsupported` refinement.
+failure envelope. GitHub single-issue objectives report no engagement (no per-node issues) and
+read the refinement over the objective issue (`absent` until one is saved there); the dormant
+issue-backed Linear store reports a quiet `unsupported` refinement.
 
 ### `perk objective refine NUMBER`
 

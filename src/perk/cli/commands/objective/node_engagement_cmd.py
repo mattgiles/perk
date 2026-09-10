@@ -16,9 +16,10 @@ node → ``node_not_found``); advisory failures are **partial success** — exit
 ``warnings``. Read-only against the backend (a read worker, never a mutation affordance); its
 only write is the gitignored scratch file.
 
-Linear-first: GitHub single-issue objectives + the dormant issue-backed Linear store report the
-refinement as ``unsupported`` quietly and the engagement as ``absent`` (their engagement read
-returns the empty bundle).
+GitHub single-issue objectives report the engagement as ``absent`` (no per-node issues — their
+engagement read returns the empty bundle) and read the refinement over the objective issue
+itself (``absent`` until a record exists there; contracts.md §8.67); only the dormant
+issue-backed Linear store reports the refinement as ``unsupported`` quietly.
 
 Supervisor surface: ``--json`` → stdout machine payload, human text → stderr,
 stable exits (``0`` ok · ``1`` invalid/op-failure · ``2`` not-a-repo).

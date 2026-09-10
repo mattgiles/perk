@@ -25,6 +25,17 @@ Adapter disciplines:
 - **Error mapping at the boundary.** Every delegate call wraps ``GitHubError`` into
   ``IssueBackendError(str(exc)) from exc`` — message text preserved verbatim (consumers map on
   substrings, and tests assert messages).
+- **The guarded marked-comment seams (contracts.md §8.67).** ``GitHubIssueBackend`` IS the
+  ``issue_backend.MarkedCommentSeams`` the shared guarded driver runs over: ``scan`` reads every
+  comment page through the GraphQL engagement read (comment ``id`` = the stringified
+  ``databaseId``), ``create``/``update`` are the REST comment POST / PATCH, and ``transcode`` is
+  the identity — GitHub stores bodies verbatim, so convergence is byte equality with the rendered
+  envelope. GitHub's native refusals — the 65,536-character issue-comment cap's HTTP 422, auth,
+  rate limit — surface from ``create``/``update`` as ``IssueBackendError`` carrying ``gh``'s
+  diagnostics, which the driver turns into a typed ``backend_error`` after its verification scan
+  proves the unchanged baseline; nothing is truncated or retried. ``_number`` /
+  ``_comment_number`` raise ``IssueBackendError`` directly, which the driver normalizes to
+  ``backend_error`` at preflight.
 """
 
 from collections.abc import Iterator
@@ -54,6 +65,15 @@ def _number(issue_id: str) -> int:
         return int(issue_id)
     except ValueError as exc:
         raise IssueBackendError(f"GitHub issue ids are numeric; got {issue_id!r}") from exc
+
+
+def _comment_number(comment_id: str) -> int:
+    """Convert a boundary string comment id to GitHub's numeric comment ``databaseId`` (honest
+    failure on junk — the guarded driver normalizes it to ``backend_error``)."""
+    try:
+        return int(comment_id)
+    except ValueError as exc:
+        raise IssueBackendError(f"GitHub comment ids are numeric; got {comment_id!r}") from exc
 
 
 def _issue_ref(found: plans.PlanIssue) -> issue_backend.IssueRef:
@@ -412,11 +432,13 @@ class GitHubIssueBackend:
         expected: issue_backend.MarkedCommentExpectation | None = None,
     ) -> issue_backend.CommentResult:
         if expected is not None:
-            # No guarded arm on GitHub yet (contracts.md §8.67): a typed refusal before any
-            # operation, dry run included. Ordinary forwarding below is unchanged.
-            raise issue_backend.MarkedCommentError(
-                "unsupported_backend",
-                "guarded marked-comment upserts are not supported on the GitHub issue backend",
+            return issue_backend.guarded_upsert_marked_comment(
+                self,
+                issue_id=issue_id,
+                marker=marker,
+                body=body,
+                dry_run=dry_run,
+                expected=expected,
             )
         number = _number(issue_id)
         with _translate():
@@ -424,6 +446,47 @@ class GitHubIssueBackend:
                 issue=number, marker=marker, body=body, repo_root=self._repo_root, dry_run=dry_run
             )
         return issue_backend.CommentResult(posted=result.posted)
+
+    # --- guarded marked-comment seams (contracts.md §8.67) ---
+    # `GitHubIssueBackend` IS the `issue_backend.MarkedCommentSeams` the shared guarded driver runs
+    # over: the scan reads through `gh_engagement.read_issue_comments` (every page) so every
+    # observed value is the real `EngagementComment` (databaseId / stored body / author / native
+    # timestamps); create/update are the same REST primitives the ordinary path uses; the
+    # transcoder is the identity (bodies are stored verbatim). These four are the driver's seams,
+    # not a general comment API: `create`/`update` take a body ALREADY in stored form and know
+    # nothing of `dry_run` — callers wanting a marked comment go through `upsert_marked_comment`,
+    # which owns validation, dry runs, and verification.
+
+    def scan(self, issue_id: str, forms: tuple[str, ...]) -> issue_backend.MarkedCommentScan:
+        """Seam: classify ALL comment pages against the accepted marker encodings ``forms``. A
+        missing issue scans as no comments — the driver's following ``create`` raises the 404 and
+        the verification scan proves the absent baseline (``backend_error`` with the diagnostic)."""
+        number = _number(issue_id)
+        with _translate():
+            rows = gh_engagement.read_issue_comments(issue=number, repo_root=self._repo_root)
+        return issue_backend.scan_marked_comments(
+            [_engagement_comment(row) for row in rows], forms=forms
+        )
+
+    def create(self, issue_id: str, body: str) -> None:
+        """Seam: post ``body`` verbatim as a new comment; no dry-run gate — the guarded driver
+        owns dry runs. GitHub's refusals (the comment cap's 422, auth, rate limit) raise with
+        ``gh``'s diagnostics."""
+        number = _number(issue_id)
+        with _translate():
+            plans.add_issue_comment(issue=number, body=body, repo_root=self._repo_root)
+
+    def update(self, comment_id: str, body: str) -> None:
+        """Seam: replace the whole body of the comment whose ``databaseId`` is ``comment_id``
+        (REST PATCH); no dry-run gate — the guarded driver owns dry runs."""
+        number = _comment_number(comment_id)
+        with _translate():
+            plans._patch_comment_body(number, body, self._repo_root)
+
+    def transcode(self, body: str) -> str:
+        """Seam: the identity — GitHub stores bodies verbatim, so convergence is byte equality
+        with the rendered envelope (never raises)."""
+        return body
 
     # --- human-engagement reads ---
     # Honest where GitHub exposes the primitive: comments + description edits via read-only

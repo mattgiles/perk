@@ -61,10 +61,11 @@ RefinementTargetReadCode = Literal["unsupported_backend", "malformed_target", "a
 class RefinementTargetReadError(ObjectiveStoreError):
     """``read_node_refinement_targets`` cannot answer for this store or this objective.
 
-    ``unsupported_backend`` — the store has no refinement read (raised immediately, no network);
-    ``malformed_target`` — required node/objective metadata is unreadable, or an attachment
-    connection is incomplete so plan absence cannot be proven; ``ambiguous_target`` —
-    duplicate sentinel / objective-header / node-identity metadata.
+    ``unsupported_backend`` — the store has no refinement read (raised immediately, no network;
+    only the dormant issue-backed Linear store); ``malformed_target`` — required node/objective
+    metadata is unreadable, or an attachment connection is incomplete so plan absence cannot be
+    proven; ``ambiguous_target`` — duplicate sentinel / objective-header / node-identity
+    metadata, or (on GitHub) duplicate identity-bearing body blocks.
     """
 
     def __init__(self, code: RefinementTargetReadCode, message: str) -> None:
@@ -783,10 +784,13 @@ class ObjectiveStore(Protocol):
         still counts as present).
 
         Raises :class:`RefinementTargetReadError` — ``unsupported_backend`` immediately and
-        without network for a store with no refinement read (GitHub; the dormant issue-backed
-        Linear store), ``ambiguous_target`` on duplicate identity metadata, ``malformed_target``
-        on unreadable required metadata or an attachment connection whose completeness cannot
-        be proven (plan absence is never inferred from truncation). Transport / malformed outer
-        API responses raise plain ``ObjectiveStoreError``. Pure read: no readiness check,
-        mutation, repair, or objective-prose hashing."""
+        without network for a store with no refinement read (only the dormant issue-backed
+        Linear store), ``ambiguous_target`` on duplicate identity metadata (on GitHub also a
+        duplicate ``objective-header`` / ``objective-roadmap`` body block or a duplicate node
+        id), ``malformed_target`` on unreadable required metadata or an attachment connection
+        whose completeness cannot be proven (plan absence is never inferred from truncation).
+        The GitHub store reads the objective issue's header + roadmap block: every node's
+        carrier is the objective issue itself. Transport / malformed outer API responses raise
+        plain ``ObjectiveStoreError``. Pure read: no readiness check, mutation, repair, or
+        objective-prose hashing."""
         ...

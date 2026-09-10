@@ -626,6 +626,14 @@ def has_metadata_block(text: str, key: str) -> bool:
     return _OPEN.format(key=key) in text or _INLINE_OPEN.format(key=key) in text
 
 
+def count_metadata_blocks(text: str, key: str) -> int:
+    """Presence-only count of a perk metadata block's **open** delimiter, in either encoding —
+    the cardinality twin of :func:`has_metadata_block`. :func:`find_metadata_block` parses only
+    the FIRST delimited segment, so a reader that must fail closed on a damaged carrier carrying
+    two blocks of one kind checks this before parsing."""
+    return text.count(_OPEN.format(key=key)) + text.count(_INLINE_OPEN.format(key=key))
+
+
 def find_metadata_block(text: str, key: str) -> dict[str, object] | None:
     """Parse a single structured perk metadata block by key. None if absent or malformed.
 

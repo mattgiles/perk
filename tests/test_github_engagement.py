@@ -51,21 +51,21 @@ def _edits_payload(nodes, *, has_next=False, end_cursor=None):
 def test_read_issue_comments_parses_and_orders(monkeypatch):
     nodes = [
         {
-            "id": "IC_3",
+            "databaseId": 3,
             "body": "later human",
             "createdAt": "2026-03-03T00:00:00Z",
             "lastEditedAt": "2026-03-04T00:00:00Z",
             "author": _actor_node(login="alice", database_id=11),
         },
         {
-            "id": "IC_1",
+            "databaseId": 1,
             "body": "earliest human",
             "createdAt": "2026-03-01T00:00:00Z",
             "lastEditedAt": None,
             "author": _actor_node(login="bob", database_id=22),
         },
         {
-            "id": "IC_2",
+            "databaseId": 2,
             "body": "bot beep",
             "createdAt": "2026-03-02T00:00:00Z",
             "lastEditedAt": None,
@@ -80,7 +80,8 @@ def test_read_issue_comments_parses_and_orders(monkeypatch):
     )
     monkeypatch.setattr(subprocess, "run", rec)
     rows = gh_engagement.read_issue_comments(issue=42, repo_root=ROOT)
-    assert [r.id for r in rows] == ["IC_1", "IC_2", "IC_3"]  # ascending createdAt
+    # Ascending createdAt; every id is the stringified databaseId (the comment-PATCH identity).
+    assert [r.id for r in rows] == ["1", "2", "3"]
     assert rows[0].edited_at is None and rows[0].author_is_bot is False
     assert rows[0].author_login == "bob" and rows[0].author_id == "22"
     assert rows[1].author_is_bot is True  # the bot comment
@@ -91,7 +92,7 @@ def test_read_issue_comments_paginates(monkeypatch):
     page1 = _comments_payload(
         [
             {
-                "id": "IC_1",
+                "databaseId": 1,
                 "body": "p1",
                 "createdAt": "2026-03-01T00:00:00Z",
                 "lastEditedAt": None,
@@ -104,7 +105,7 @@ def test_read_issue_comments_paginates(monkeypatch):
     page2 = _comments_payload(
         [
             {
-                "id": "IC_2",
+                "databaseId": 2,
                 "body": "p2",
                 "createdAt": "2026-03-02T00:00:00Z",
                 "lastEditedAt": None,
@@ -125,9 +126,36 @@ def test_read_issue_comments_paginates(monkeypatch):
     rec = _GhDispatch([])
     monkeypatch.setattr(subprocess, "run", dispatch)
     rows = gh_engagement.read_issue_comments(issue=42, repo_root=ROOT)
-    assert [r.id for r in rows] == ["IC_1", "IC_2"]
+    assert [r.id for r in rows] == ["1", "2"]
     # the second graphql call carried the cursor
     assert any(any("cursor=CUR2" in tok for tok in c) for c in rec.calls)
+
+
+@pytest.mark.parametrize(
+    "database_id", [None, "IC_1", True, 1.5], ids=["missing", "node-id", "bool", "float"]
+)
+def test_read_issue_comments_requires_database_id(monkeypatch, database_id):
+    """Identity-required: a comment node without an integer ``databaseId`` cannot be addressed
+    by the guarded upsert or the comment PATCH, so the read refuses (naming the field) rather
+    than minting a blank id; a real comment always carries one."""
+    node = {
+        "body": "hello",
+        "createdAt": "2026-03-01T00:00:00Z",
+        "lastEditedAt": None,
+        "author": _actor_node(login="a", database_id=1),
+    }
+    if database_id is not None:
+        node["databaseId"] = database_id
+    rec = _GhDispatch(
+        [
+            (_has("repo", "view", "nameWithOwner"), _Proc(0, "octo/repo\n")),
+            (_has("graphql", "comments"), _Proc(0, _comments_payload([node]))),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError) as info:
+        gh_engagement.read_issue_comments(issue=42, repo_root=ROOT)
+    assert "databaseId" in str(info.value) and "#42" in str(info.value)
 
 
 def test_read_description_edits_parses_diff_passthrough_and_orders(monkeypatch):
