@@ -188,6 +188,7 @@ def _layer(node_id: str, plan_id: str, pr: int, parent: str, head: str) -> Train
     )
 
 
+@pytest.mark.slow
 def test_amended_bottom_layer_cascades_with_exact_transplants(tmp_path):
     # --- a real three-layer train pushed to a bare origin -------------------------------
     work = tmp_path / "work"
@@ -274,6 +275,7 @@ def test_amended_bottom_layer_cascades_with_exact_transplants(tmp_path):
     assert not list((work / ".worktrees").glob("sync-*"))
 
 
+@pytest.mark.slow
 def test_conflicted_cascade_resolves_through_the_real_continue_arc(tmp_path):
     """The full §8.49 continue arc with production git seams: a real conflicted rebase stop
     (residue retained under the manifest), a human-style resolution (`git rebase

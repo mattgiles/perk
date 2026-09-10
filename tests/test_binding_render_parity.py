@@ -78,6 +78,7 @@ def _scaffold(root: Path) -> None:
     (perk_dir / "config.toml").write_text(_CONFIG, encoding="utf-8")
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_binding_render_cross_plane_byte_parity(tmp_path) -> None:
     _scaffold(tmp_path)
