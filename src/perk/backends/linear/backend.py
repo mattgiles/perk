@@ -714,8 +714,13 @@ class LinearIssueBackend:
         expected: issue_backend.MarkedCommentExpectation | None = None,
     ) -> issue_backend.CommentResult:
         if expected is not None:
-            return self._guarded_upsert_marked_comment(
-                issue_id=issue_id, marker=marker, body=body, dry_run=dry_run, expected=expected
+            return issue_backend.guarded_upsert_marked_comment(
+                self,
+                issue_id=issue_id,
+                marker=marker,
+                body=body,
+                dry_run=dry_run,
+                expected=expected,
             )
         if dry_run:
             return issue_backend.CommentResult(posted=False)
@@ -727,150 +732,36 @@ class LinearIssueBackend:
             self._ops._create_comment(issue_id, transcoded)
         return issue_backend.CommentResult(posted=True)
 
-    # ------------------------------------------------------------------ guarded marked comment
-    # The exact-ownership, one-attempt, read-back-verified arm of `upsert_marked_comment`
-    # (contracts.md §8.67). Shares the transcoder and the create/update primitives with the
-    # ordinary path; scans through `_comments_with_authors` so every observed value is the real
-    # `EngagementComment` (id / stored body / author / native timestamps).
+    # ----------------------------------------------------------------- guarded marked-comment seams
+    # `LinearIssueBackend` IS the `issue_backend.MarkedCommentSeams` the shared guarded driver
+    # (contracts.md §8.67) runs over: the scan reads through `_comments_with_authors` so every
+    # observed value is the real `EngagementComment` (id / stored body / author / native
+    # timestamps); create/update are the same primitives the ordinary path uses; the transcoder
+    # is the pure rewrite every Linear comment body passes through. These four are the driver's
+    # seams, not a general comment API: `create`/`update` take a body ALREADY in stored form and
+    # know nothing of `dry_run` — callers wanting a marked comment go through
+    # `upsert_marked_comment`, which owns validation, dry runs, and verification.
 
-    def _scan_marked(
-        self, issue_id: str, forms: tuple[str, ...]
-    ) -> issue_backend.MarkedCommentScan:
+    def scan(self, issue_id: str, forms: tuple[str, ...]) -> issue_backend.MarkedCommentScan:
+        """Seam: classify ALL comment pages against the accepted marker encodings ``forms``."""
         comments = [
             _engagement_comment(node) for node in self._ops._comments_with_authors(issue_id)
         ]
         return issue_backend.scan_marked_comments(comments, forms=forms)
 
-    def _guarded_upsert_marked_comment(
-        self,
-        *,
-        issue_id: str,
-        marker: str,
-        body: str,
-        dry_run: bool,
-        expected: issue_backend.MarkedCommentExpectation,
-    ) -> issue_backend.CommentResult:
-        problem = expected.validation_problem()
-        if problem is not None:
-            raise issue_backend.MarkedCommentError("invalid_input", problem)
-        if not marker.strip() or "\n" in marker:
-            raise issue_backend.MarkedCommentError(
-                "invalid_input", "marker must be one nonblank line"
-            )
-        if issue_backend.first_line(body) != marker or body.count(marker) != 1:
-            raise issue_backend.MarkedCommentError(
-                "invalid_input",
-                "body must own its marker: the exact marker as the first line, occurring once",
-            )
-        if dry_run:
-            return issue_backend.CommentResult(posted=False)
-        # The accepted encodings: the marker as given (HTML) and its stored inline-code rewrite.
-        forms = (marker, to_linear_markdown(marker))
-        desired = to_linear_markdown(body)
+    def create(self, issue_id: str, body: str) -> None:
+        """Seam: post ``body`` (already Linear stored form) as a new comment; no transcoding,
+        no dry-run gate — the guarded driver has done both before reaching here."""
+        self._ops._create_comment(issue_id, body)
 
-        # 1. Preflight: the complete scan; duplicates before malformed placement.
-        try:
-            scan = self._scan_marked(issue_id, forms)
-        except IssueBackendError as exc:
-            raise issue_backend.MarkedCommentError(
-                "backend_error", f"marked-comment preflight scan failed: {exc}"
-            ) from exc
-        self._refuse_unowned(scan, write_attempted=False)
-        observed = scan.owned[0] if scan.owned else None
+    def update(self, comment_id: str, body: str) -> None:
+        """Seam: replace the whole body of ``comment_id`` with ``body`` (already Linear stored
+        form); no transcoding, no dry-run gate — the guarded driver has done both."""
+        self._ops._update_comment(comment_id, body)
 
-        # 2. Convergence without a write beats any expectation; otherwise the observed state
-        #    must match exactly what the caller expected.
-        if observed is not None and observed.body == desired:
-            return issue_backend.CommentResult(posted=True, verified_comment=observed)
-        if expected.expects_absence:
-            if observed is not None:
-                raise issue_backend.MarkedCommentError(
-                    "stale_comment",
-                    f"expected no marked comment but observed {observed.id}",
-                    comment_ids=(observed.id,),
-                )
-        elif (
-            observed is None
-            or observed.id != expected.comment_id
-            or issue_backend.body_digest(observed.body) != expected.body_digest
-        ):
-            raise issue_backend.MarkedCommentError(
-                "stale_comment",
-                "the marked comment changed since it was read"
-                + (f" (observed {observed.id})" if observed is not None else " (now absent)"),
-                comment_ids=(observed.id,) if observed is not None else (),
-            )
-
-        # 3. Exactly one mutation attempt; a raise is ambiguous until the read-back decides.
-        mutation_error: IssueBackendError | None = None
-        try:
-            if observed is not None:
-                self._ops._update_comment(observed.id, desired)
-            else:
-                self._ops._create_comment(issue_id, desired)
-        except IssueBackendError as exc:
-            mutation_error = exc
-
-        # 4. Verification: one full scan, precedence fixed by the contract.
-        try:
-            after = self._scan_marked(issue_id, forms)
-        except IssueBackendError as exc:
-            raise issue_backend.MarkedCommentError(
-                "write_unverified",
-                f"marked-comment write could not be verified: {exc}",
-                write_attempted=True,
-            ) from exc
-        self._refuse_unowned(after, write_attempted=True)
-        now = after.owned[0] if after.owned else None
-        if now is not None and now.body == desired:
-            return issue_backend.CommentResult(posted=True, verified_comment=now)
-        baseline_unchanged = (now is None and observed is None) or (
-            now is not None
-            and observed is not None
-            and now.id == observed.id
-            and now.body == observed.body
-        )
-        if mutation_error is not None and baseline_unchanged:
-            raise issue_backend.MarkedCommentError(
-                "backend_error",
-                f"marked-comment write failed and did not land: {mutation_error}",
-                comment_ids=(now.id,) if now is not None else (),
-                write_attempted=True,
-            ) from mutation_error
-        if now is not None and not baseline_unchanged:
-            raise issue_backend.MarkedCommentError(
-                "stale_comment",
-                f"the marked comment {now.id} carries different bytes than were written",
-                comment_ids=(now.id,),
-                write_attempted=True,
-            )
-        raise issue_backend.MarkedCommentError(
-            "write_unverified",
-            "marked comment is absent or unchanged after the write attempt"
-            + (f": {mutation_error}" if mutation_error is not None else ""),
-            comment_ids=(now.id,) if now is not None else (),
-            write_attempted=True,
-        )
-
-    @staticmethod
-    def _refuse_unowned(scan: issue_backend.MarkedCommentScan, *, write_attempted: bool) -> None:
-        """Duplicate ownership refuses before malformed placement (identical duplicates
-        included) — the same precedence at preflight and at verification."""
-        if len(scan.owned) > 1:
-            raise issue_backend.MarkedCommentError(
-                "ambiguous_comment",
-                f"{len(scan.owned)} comments own the marker",
-                comment_ids=tuple(comment.id for comment in scan.owned),
-                write_attempted=write_attempted,
-            )
-        if scan.malformed:
-            raise issue_backend.MarkedCommentError(
-                "malformed_comment",
-                "marker misplaced or repeated in comment(s) "
-                + ", ".join(comment.id for comment in scan.malformed),
-                comment_ids=tuple(comment.id for comment in scan.malformed),
-                write_attempted=write_attempted,
-            )
+    def transcode(self, body: str) -> str:
+        """Seam: the pure HTML-marker → Linear stored-form rewrite (never raises)."""
+        return to_linear_markdown(body)
 
     # ------------------------------------------------------------------ human-engagement reads
     # The honest READ surface. All returned `body`/`diff`/activity
