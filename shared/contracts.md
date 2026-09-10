@@ -8239,10 +8239,19 @@ string `commit_sha`, non-empty lanes with unique non-empty ids (the duplicate-id
 manifest invariant — analysts select lanes byte-exact by id — independent of the code-owned
 key's ordinal uniqueness) that pass the §8.35
 routing-token fence (an unsafe id refuses with a named detail) and non-empty docs, lexical
-`docs/learned/` containment on every doc path PLUS resolved-symlink containment for existing
-doc paths (realpath'd against the resolved corpus root, which must itself resolve inside the
-resolved checkout — mirroring the gather core's symlinked-corpus-root guard; nonexistent doc
-paths skip the resolved layer, and doc existence itself is not required).
+`docs/learned/` containment on every doc path, every doc path in **canonical POSIX-normalized
+form** (equal to its own `posix.normalize` — containment judges the normalized path while the
+uniqueness check and the analyst's doc selection compare raw strings, so an alias spelling like
+`docs/learned/a/../x.md` refuses rather than entering as a second spelling of a listed path) and
+**globally unique across the whole manifest** (lanes partition the corpus — uniqueness is
+canonical path-STRING identity: two distinct canonical paths that are symlinks/hardlinks to one
+file are not deduplicated, only contained by the resolved layer; the same two arms §8.60's dream
+decoder holds — the refusal arms converge, the two decoders stay separate), PLUS
+resolved-symlink containment for existing doc paths (realpath'd against the resolved corpus
+root, which must itself resolve inside the resolved checkout — mirroring the gather core's
+symlinked-corpus-root guard; nonexistent doc paths skip the resolved layer, and doc existence
+itself is not required). Per-doc decode order: containment → canonical form → uniqueness →
+`title`/`read_when` shape.
 Multi-lane only: a single-lane manifest is refused `bad_input` toward the seed's
 direct-analysis path (the fallback state table's first row, enforced in code). One
 `perk.harvest-analyst` lane per manifest lane; keyed by the §8.35 orchestration key

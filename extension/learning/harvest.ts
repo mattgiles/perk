@@ -112,8 +112,13 @@ function stringOrNull(value: unknown): value is string | null {
  * never reaching a task) and is unique across lanes (semantic uniqueness is a manifest
  * invariant — analysts select lanes byte-exact by id — independent of the code-owned key's
  * ordinal uniqueness), and non-empty `docs`, each doc `{path, title, read_when}` with
- * `title`/`read_when` string-or-null and `path` passing the LEXICAL containment layer. Unknown
- * extra keys are ignored (forward-compat rides `schema_version`).
+ * `title`/`read_when` string-or-null and `path` passing the LEXICAL containment layer, in
+ * canonical POSIX-normalized form (`posix.normalize(path) === path` — the uniqueness check
+ * compares raw strings, so canonical form is what makes 'unique' mean one canonical path string
+ * rather than one spelling; resolved-target identity — symlinks/hardlinks — is not deduplicated,
+ * only contained), and globally unique across the whole manifest (lanes partition the corpus —
+ * the two arms `decodeDreamManifest` already holds; the decoders stay separate, the arms
+ * converge). Unknown extra keys are ignored (forward-compat rides `schema_version`).
  */
 export function decodeHarvestManifest(
   raw: unknown,
@@ -135,6 +140,7 @@ export function decodeHarvestManifest(
   }
   const lanes: HarvestManifestLane[] = [];
   const seenIds = new Set<string>();
+  const seenPaths = new Set<string>();
   for (const rawLane of raw.lanes) {
     if (!isRecord(rawLane)) {
       return { ok: false, detail: "a manifest lane is not an object" };
@@ -171,6 +177,25 @@ export function decodeHarvestManifest(
       if (violation !== null) {
         return { ok: false, detail: `lane '${id}' doc path '${path}' ${violation}` };
       }
+      if (posix.normalize(path) !== path) {
+        // Canonical form required: containment judges the NORMALIZED path, but every identity
+        // compare downstream — the uniqueness check below and the analyst's byte-exact doc
+        // selection — uses the raw string. Admitting an alias spelling would let one doc path
+        // enter the manifest under two spellings. Uniqueness here is canonical path-STRING
+        // identity: symlink/hardlink targets are the resolved layer's concern, and that layer
+        // contains, never deduplicates (the dream decoder's arm; §8.48/§8.60).
+        return {
+          ok: false,
+          detail: `lane '${id}' doc path '${path}' is not in canonical POSIX-normalized form`,
+        };
+      }
+      if (seenPaths.has(path)) {
+        return {
+          ok: false,
+          detail: `duplicate doc path '${path}' in the manifest (lanes partition the corpus)`,
+        };
+      }
+      seenPaths.add(path);
       if (!stringOrNull(rawDoc.title) || !stringOrNull(rawDoc.read_when)) {
         return {
           ok: false,
