@@ -547,7 +547,7 @@ test("diagnostic locations honor every TypeScript line break and EOF insertion",
 
 test("real discovery output stays resolver-covered and all resolved ranges recompose", async () => {
   const catalog = scanRepository(ROOT);
-  assert.equal(catalog.candidates.length, 94);
+  assert.equal(catalog.candidates.length, 95);
   assert.ok(
     catalog.candidates.some(
       (candidate) => candidate.id === "typescript-tool:resolve_submit_conflicts",

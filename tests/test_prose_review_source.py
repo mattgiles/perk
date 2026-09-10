@@ -1516,7 +1516,7 @@ def test_every_real_typescript_fragment_is_batch_covered_through_the_python_adap
             selectors.append(routed_fragment.fragment.selector)
             total += 1
 
-    assert total == 302
+    assert total == 311
     assert "extension/pi/v1/delivery/submitConflict.ts" in selectors_by_path
     adapter = _typescript_adapter()
     for relative, selectors in selectors_by_path.items():

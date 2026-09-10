@@ -82,13 +82,13 @@ ten are pinned by `tests/test_subagent_agents.py::test_native_child_profile`; th
 
 **Spawn-level (the perk-owned wave owns it).** Every `ReportWave` spawn adds `context: "fresh"`,
 `mission: false`, `WAVE_ACCEPTANCE` (acceptance disabled) and the report restriction packet —
-pinned by `extension/waves/reportWave.test.ts` for the agents that wave spawns. `perk.scout` is
-the one delivered report with **no perk-owned wave yet**: it is reached only through a direct
-`subagent` call (the contracts §8.3 leniency), which injects none of those spawn-level facts, so the
-caller supplies `context: "fresh"` and the sanctioned acceptance disable itself (the def's
-description says so) and `reportWave.test.ts` does not pin it. Until a launcher exists, a
-`perk.scout` child runs under the runner bit alone — no packet, no floor (see "Not claimed").
-The former repo-local `perk-dev.analyst`, which carried `defaultContext: fresh` and an `acceptance`
+pinned by `extension/waves/reportWave.test.ts` for the agents that wave spawns — `perk.scout`
+included: it is spawned by the perk-owned `run_scout_wave` wave (`extension/waves/scoutWave.ts`,
+contracts §8.70), so its lanes carry the spawn-level facts and `REPORT_ROLES` pins it. A direct
+`subagent` spawn of `perk.scout` (the contracts §8.3 leniency) remains reachable but sits OUTSIDE
+the channel: the caller supplies `context: "fresh"` and the sanctioned acceptance disable itself
+(the def's description says so), and such a child runs under the runner bit alone — no packet, no
+floor (see "Not claimed"). The former repo-local `perk-dev.analyst`, which carried `defaultContext: fresh` and an `acceptance`
 block in its frontmatter, was retired when it was promoted into `perk.scout`; those two facts moved
 from the def to the caller so the def fits the closed profile.
 

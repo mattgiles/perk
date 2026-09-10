@@ -403,6 +403,7 @@ const REPORT_ROLES = [
   "perk-dev.session-auditor",
   "perk.adversarial-reviewer",
   "perk.draft-reviewer",
+  "perk.scout",
 ];
 
 const REPORT_CHILD_RESTRICTIONS = { "perk.parent-restrictions/1": { readOnly: true } };

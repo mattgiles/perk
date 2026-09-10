@@ -333,6 +333,12 @@ routes:
     audience: shipped
     role: subagent-instruction
     priority: 85
+  - id: ts-scout-wave
+    match: { paths: ["extension/pi/v1/scoutWave.ts"] }
+    capability: foundation.tools
+    audience: shipped
+    role: tool-contract
+    priority: 85
 
   - id: py-plan-seed-data
     match: { paths: ["src/perk/cli/seed_file.py", "src/perk/cli/commands/plan/from_cmd.py"] }
