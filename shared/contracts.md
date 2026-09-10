@@ -12198,3 +12198,68 @@ parameterized `contexts/read-only.md` are all in `prompts/_fixtures/live.yaml`. 
 entries and the `perk-expert` mirror. Automatic later-plan consumption of a saved refinement is
 §8.26; authenticated refine-to-plan evidence is the archive record named in §8.67; a GitHub
 refinement carrier is NOT shipped by this section — a later increment.
+
+## §8.69 · Bash scan timeout (gitignore-blind recursive grep / unbounded find)
+
+A performance guard on Pi's `bash` tool, applied by the extension in **every** perk session — gated
+or not, any stage or none, runner children included (the extension loads in spawned children, so
+they inherit it). Recursive `grep -r…` and `find` without `-maxdepth` ignore `.gitignore`: from a
+checkout carrying `node_modules/`, `.venv/`, `.worktrees/` and the like they walk everything and
+were observed running for minutes to the better part of an hour with no `timeout` on the call. perk
+does not own `bash`/`grep`/`find` (§8.3 posture: builtins are never redefined) — this is argument
+patching through Pi's documented `tool_call` in-place mutation, plus a `tool_result` note.
+
+1. **Injection (`tool_call`).** A `bash` call whose input carries **no** `timeout` and whose
+   `command` classifies as a scan gets `timeout = 30` (seconds) patched onto its input. The
+   classifier is regex-only over the command text: per physical line, per quote-aware top-level
+   segment (the read-only gate's segment splitter, reused — so a flag belonging to a LATER
+   pipeline stage, `grep -n foo f | sort -r`, is never attributed to the grep), the first segment
+   that classifies decides. Within a segment the command word is matched at **any command
+   boundary** (segment start, whitespace, a quote, a backtick, `(` as in `$(`, or a `\` alias
+   bypass; an optional `dir/` path prefix), so wrapper prefixes (`env`/`nice`/`time`/`nohup`/
+   `xargs`, `LC_ALL=C …`), nested `sh -c '…'`/`bash -lc "…"` forms and `$(…)` substitutions are
+   covered without enumerating wrappers. A segment is a **recursive grep** when a grep-family word
+   (`grep`/`egrep`/`fgrep`/`zgrep`/`zegrep`/`zfgrep`/`bzgrep`/`xzgrep`) is followed in its
+   segment by a whitespace-delimited short cluster containing `r`/`R` (`-r`, `-rn`, `-rniE`,
+   `-Rl`, `-nr`, `-rnA3`), by `--recursive`/`--dereference-recursive`, or by `-d recurse`/
+   `--directories=recurse` — or when the word is `rgrep`; an **unbounded find** when the word is
+   `find` and no **unquoted** standalone `-maxdepth` sits in that find's **own window** — its
+   tail up to the next command word, with quoted spans blanked, cut at the first sequencing
+   operator that survived the top-level split (a quoted nested shell's `;`/`|`/`&`). So a later
+   bounded find never exempts an earlier unbounded one (`sh -c 'find . -type f; find .
+   -maxdepth 1'` is capped), a `-maxdepth` inside a quoted argument never exempts (`find .
+   -printf 'x -maxdepth y'` and `find . -name "-maxdepth"` are capped), and a quoted `;` in a
+   pattern does not end the window (`find . -name 'a;b' -maxdepth 1` is exempt). The asymmetry
+   is deliberate: a grep's recursion flag is searched over its full, unblanked tail because a
+   window or blanking could only MISS a permuted `-r` (`grep -n "find . -maxdepth 1" -r .` is a
+   recursive grep), whereas the find exemption removes a cap and so must be scoped tightly
+   (shrinking it can only add caps). Nothing else exempts a scan (`-prune`, `--exclude-dir`,
+   `-not -path` still walk untracked trees in the common case). **Over-matching on fast commands
+   is accepted; under-matching is the defect** — `echo grep -r`, `git grep -rn foo`, `rg -n
+   'grep -rn foo' src/` and `grep -n "x -r y" f` receive a harmless cap and are pinned as
+   accepted in the tests, so any tightening is a deliberate change. `rg`, `fd`, `ast-grep`,
+   `grep -n foo file`, `find … -maxdepth N` and quote-adjacent flags (`"-r"`, `'grep -r'`) never
+   classify.
+2. **The override.** An explicit `timeout` of **any** value on the call is the model's override:
+   it is never rewritten, capped or raised. No magic command-string flag exists.
+3. **Posture.** The hook never blocks (it returns no `block`), consults neither the gate, the
+   stage nor the runner-child bit, and is **fail-OPEN** — unlike the read-only gate's fail-closed
+   backstop, a hook error is reported (`console.error`) and the call proceeds unmodified. It
+   registers immediately after the gate's `tool_call` hook, so a gate block short-circuits before
+   injection matters.
+4. **The expiry note (`tool_result`).** For an `isError` `bash` result whose `command` classifies
+   as a scan and whose **last** text block **ends** with Pi's terminal status
+   `Command timed out after N seconds` (Pi's `appendStatus` always places the status last; the
+   match is end-of-string, so the literal printed mid-output followed by `Command exited with code
+   1` is NOT an expiry), the hook appends one trailing text block: the perk note naming the kind
+   (`recursive grep` / `unbounded find`), the `N`s timeout, the gitignore-aware alternatives (the
+   `grep`/`find` tools, `rg`/`fd`) and the explicit-`timeout` override. Stateless — no per-call
+   bookkeeping — so it also fires (with wording that stays correct) when the model's own explicit
+   timeout expired. Partial output is kept; no note on successful scans.
+5. **The cross-plane constant.** The number is the extension's `SCAN_TIMEOUT_SECONDS` (the one
+   source of truth) and is mirrored **verbatim** in the managed `AGENTS.md` bullet the Python
+   plane writes (`_agents_inner()` — "perk caps them at a 30s `timeout` unless the bash call
+   passes its own"), which also steers literal search to the `grep`/`find` tools or `rg`/`fd`.
+   The Python parity test reads the TS source and pins the mirror; changing one changes both in
+   the same turn (and reconverges the committed `AGENTS.md`; consumer repos pick the bullet up on
+   their next `perk init`). No config knob.

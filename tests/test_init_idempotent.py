@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -151,6 +152,10 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert "GitHub access goes through the `gh` CLI" in agents_md
     # ...and the ambient ast-grep code-search steer.
     assert "Prefer ast-grep for code search" in agents_md
+    # ...which now routes literal search to the gitignore-aware tools and names the bash
+    # scan-timeout cap (each fragment sits on ONE physical line of the wrapped bullet).
+    assert "`grep`/`find` tools or `rg`/`fd`" in agents_md
+    assert "caps them at a 30s `timeout`" in agents_md
 
     # ast-grep is a registered perk skill (SSOT for the manifest + delivery).
     from perk.convergence.init import PERK_SKILLS
@@ -162,6 +167,23 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert run_init(tmp_path, verify=False).ok
     after = _snapshot(tmp_path)
     assert before == after
+
+
+def test_managed_agents_scan_timeout_matches_extension_constant():
+    """The bash scan-timeout number is a cross-plane constant (contracts §8.69).
+
+    The extension's `SCAN_TIMEOUT_SECONDS` is the one source of truth; the managed AGENTS bullet
+    the Python plane renders mirrors it verbatim. Reading the TS source here is the drift guard.
+    """
+    from perk.convergence.init import _agents_inner
+
+    repo_root = Path(__file__).resolve().parents[1]
+    ts_source = (repo_root / "extension" / "substrate" / "bashScanTimeout.ts").read_text(
+        encoding="utf-8"
+    )
+    matches = re.findall(r"^export const SCAN_TIMEOUT_SECONDS = (\d+);$", ts_source, re.MULTILINE)
+    assert len(matches) == 1, matches
+    assert f"caps them at a {matches[0]}s `timeout`" in _agents_inner()
 
 
 def test_init_records_managed_state(tmp_path):
