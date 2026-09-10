@@ -6,7 +6,7 @@ version = "3.2.0"
 path = "AGENTS.md"
 kind = "block"
 version = "3.2.0"
-hash = "sha256:a80a6717036bd11d4bd7f191a8828caab2c34b174ec1083b5e84e5e9afca2f72"
+hash = "sha256:7457b15449c5f4a882cc3ba92b1dd1b935b19113df64b321e80ae7cd043aa9e4"
 
 [managed.artifacts.gitignore-block]
 path = ".gitignore"
