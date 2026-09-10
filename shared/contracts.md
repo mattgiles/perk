@@ -6338,7 +6338,16 @@ compact public child-result projection (`workflowKey`, `success`, optional strin
 `structuredOutput` → `{key, ok, error, report}`). The sources are never merged or hole-filled.
 Keys must be nonempty `workflowKey` strings, not agent names, receipt identities, array order or
 artifact paths. Duplicate keys or a child run ID shared across keys withhold those reports as
-keyed malformed entries. Unknown keys are ignored by the expected-assignment normalizer.
+keyed malformed entries at the transport. The expected-assignment normalizer
+(`normalizeAssignments`) restates that rule at the logical tier for whatever array it is
+handed — the durable `workflow.value` aggregate and the retained projection alike: more than
+one row for one expected key is ambiguous identity, so that key is `malformed-report` with a
+detail naming the count (`lane '<k>' appears <N> times in the wave aggregate — ambiguous
+identity, evidence withheld`), no row is chosen (never first- or last-wins), and the evidence
+is withheld; there is no distinct failure reason — the detail carries the distinction. On the
+retained path the transport has already collapsed duplicates into one `ok: null` row, which the
+normalizer classifies `malformed-report` (its no-boolean-`ok` detail) — the two tiers agree on
+reason and withholding. Unknown keys are ignored by the normalizer.
 
 Partial evidence reuses that normalizer, with the wave-level `run-failed` first (naming the
 native reason), then assignment failures in request order, then preflight failures as before.

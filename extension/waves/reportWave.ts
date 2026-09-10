@@ -132,7 +132,7 @@ export interface AssignmentReport {
 export type AssignmentFailureReason =
   | "lane-failed" // assignment resolved ok: false / null report
   | "skill-unavailable" // exact required-skill source failed preflight (non-retryable)
-  | "malformed-report" // aggregate entry for this key has unusable shape
+  | "malformed-report" // aggregate entry for this key has unusable shape, or the key appears more than once
   | "missing-lane"; // expected key absent from the aggregate
 
 /**
@@ -296,7 +296,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Normalize the aggregate's entries against the expected assignment keys (defensive — the
  * module rendered the script, but the aggregate crossed a process boundary). Unknown extra keys
  * are ignored: the module owns the script, so extras cannot occur without upstream drift, and
- * the per-assignment reasons below already make the wave incomplete under `strict`.
+ * the per-assignment reasons below already make the wave incomplete under `strict`. A key
+ * appearing more than once is ambiguous identity: `malformed-report`, every row withheld (§8.35).
  * Module-private: the wave's settle is the only consumer.
  */
 function normalizeAssignments(
@@ -306,8 +307,18 @@ function normalizeAssignments(
   const reports: AssignmentReport[] = [];
   const failures: ReportWaveFailure[] = [];
   for (const key of keys) {
-    const entry = entries.find((e) => isRecord(e) && e.key === key);
-    if (!isRecord(entry)) {
+    const rows = entries.filter((e): e is Record<string, unknown> => isRecord(e) && e.key === key);
+    if (rows.length > 1) {
+      // Duplicate expected keys are ambiguous identity: withhold every row (§8.35).
+      failures.push({
+        key,
+        reason: "malformed-report",
+        detail: `lane '${key}' appears ${rows.length} times in the wave aggregate — ambiguous identity, evidence withheld`,
+      });
+      continue;
+    }
+    const entry = rows[0];
+    if (entry === undefined) {
       failures.push({
         key,
         reason: "missing-lane",

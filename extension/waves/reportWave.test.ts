@@ -883,6 +883,32 @@ test("wave.run: unusable entry shapes are malformed-report", async () => {
   );
 });
 
+test("wave.run: a duplicated lane key in the durable aggregate is malformed-report — ambiguous identity, no row wins", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: [
+        okEntry("plan-fidelity", { verdict: "clean", copy: 1 }),
+        okEntry("plan-fidelity", { verdict: "clean", copy: 2 }),
+        okEntry("correctness", { verdict: "clean" }),
+      ],
+    },
+  });
+  const result = await reportWaveOver(adapter).run(makeSpec());
+  assert.equal(result.complete, false);
+  // Neither the first nor the last copy is admitted — the copies differ so a first-/last-wins
+  // regression is distinguishable.
+  assert.deepEqual(result.reports, [{ key: "correctness", report: { verdict: "clean" } }]);
+  assert.deepEqual(result.failures, [
+    {
+      key: "plan-fidelity",
+      reason: "malformed-report",
+      detail:
+        "lane 'plan-fidelity' appears 2 times in the wave aggregate — ambiguous identity, evidence withheld",
+    },
+  ]);
+});
+
 test("wave.run: an absent lane key is missing-lane; unknown extra keys are ignored", async () => {
   const adapter = createMemoryWaveAdapter({
     aggregate: {

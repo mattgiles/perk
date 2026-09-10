@@ -334,6 +334,64 @@ test("rpc integration: native partial settlement retains the validated sibling r
   assert.equal(fake.stops.length, 0);
 });
 
+/** A native partial settlement whose `results` carry TWO rows for one workflowKey (distinct
+ * child runs, different reports) beside one valid sibling row. */
+function duplicatePartialFixture(): FakeSettlement {
+  return {
+    aggregate: { state: "failed", error: "native failure", value: undefined },
+    completion: {
+      state: "failed",
+      success: false,
+      terminalOutcome: { state: "partial", reason: "timeout" },
+      results: [
+        {
+          workflowKey: "plan-fidelity",
+          runId: "child-a",
+          success: true,
+          structuredOutput: { verdict: "clean", copy: 1 },
+        },
+        {
+          workflowKey: "plan-fidelity",
+          runId: "child-a2",
+          success: true,
+          structuredOutput: { verdict: "clean", copy: 2 },
+        },
+        {
+          workflowKey: "correctness",
+          runId: "child-b",
+          success: true,
+          structuredOutput: { verdict: "clean" },
+        },
+      ],
+    },
+  };
+}
+
+test("rpc integration: duplicate native results rows for one key collapse at the transport and classify malformed-report at the normalizer — evidence withheld end to end", async () => {
+  const bus = createFakeBus();
+  const fake = createFakeSubagents([{ executeSettlement: async () => duplicatePartialFixture() }]);
+  fake.attach(bus);
+  const result = await createReportWave(bus).run(makeSpec());
+  assert.equal(result.complete, false);
+  // Neither plan-fidelity report survives; the valid sibling does.
+  assert.deepEqual(result.reports, [{ key: "correctness", report: { verdict: "clean" } }]);
+  assert.deepEqual(
+    result.failures.map(({ key, reason }) => [key, reason]),
+    [
+      [null, "run-failed"],
+      ["plan-fidelity", "malformed-report"],
+    ],
+  );
+  // The collapse happened at the transport tier: the normalizer saw ONE `ok: null` row, so its
+  // own duplicate-count arm never fired — the classification and withholding still agree.
+  const duplicateDetail = result.failures[1]?.detail ?? "";
+  assert.match(duplicateDetail, /aggregate entry has no boolean 'ok'/);
+  assert.doesNotMatch(duplicateDetail, /appears \d+ times/);
+  assert.equal(result.receipt.state, "failed");
+  assert.doesNotMatch(JSON.stringify(result.receipt), /verdict|structuredOutput|copy/);
+  assert.equal(fake.stops.length, 0);
+});
+
 test("rpc integration: two OVERLAPPING waves through one factory correlate out of launch order", async () => {
   // NEW coverage (not a port): the behavioral half of per-launch freshness (the structural
   // half is the source pin above) — two overlapping launches each ping, and completions
