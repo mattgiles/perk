@@ -13,6 +13,20 @@ bounded **untrusted DATA**, so the model can take human steering into account wi
 arbitrary body content as instructions. This is the durable reasoning behind that subsystem,
 end to end.
 
+## Distillation
+
+- Engagement vocabulary is a decoupled leaf; issue-keyed and node-keyed reads are two seams never
+  reused across keying — "The decoupled-vocabulary leaf", "Two keyings, two seams".
+- Growing the contract is a ty-static conformance ripple; empty/no-op conformers share frozen
+  constants — "Growing the contract", "The empty/no-op conformer family".
+- The renderer family is pure and bounded; each extraction stays byte-identical; a fixed wrapper
+  tag is a delimiter-escape surface — escape only the tag (human render, never `--json`) or use a
+  digest-derived boundary token — "The renderer family (untrusted-DATA bounded blocks)".
+- `node_context.py` phase-types its context so an impossible serialized state is a type error,
+  keeps one private write seam, and tests every member of a caught tuple — "Node-context
+  assembly".
+- Cold doors inject, warm doors instruct — "Cold-injects / warm-instructs asymmetry".
+
 ## The decoupled-vocabulary leaf
 
 `src/perk/backends/issue_backend.py` (issue-keyed) and `src/perk/backends/objective_store.py`
@@ -117,6 +131,42 @@ The renderer family is pure and dependency-free (so unit-testable): `render_node
 - **The byte-stable extraction discipline.** Each deeper extraction (now three-deep:
   `render_node_engagement` → `_render_engagement` → `_engagement_item_lines`) MUST keep the prior
   renderers byte-identical — pin every pre-existing surface with explicit byte-equality asserts.
+- **Delimiter safety.** A fixed wrapper tag is attacker-known: body content can embed the literal
+  closing tag and end the DATA fence early, smuggling the rest of the body outside the
+  treat-as-DATA framing (the classic delimiter escape). Two hardened approaches are now in tree:
+  1. **Escape only the wrapper tag** — `src/perk/cli/commands/objective/show_cmd.py::_neutralize_body_tags`
+     rewrites the `<` of any literal open/close wrapper tag (any case) to `&lt;`, leaving every
+     other byte verbatim, on the **human render only**. `--json` stays verbatim: JSON encoding is
+     its own boundary, and defanging there would double-escape a body a consumer decodes.
+  2. **Digest-derived boundary token** — `node_context.py::refinement_boundary` tags the block
+     `<untrusted_node_refinement:{sha256(body)[:16]}>` on both ends, so a body cannot forge its own
+     closing tag without being a hash preimage; the preamble states the block ends only at the
+     matching token.
+
+  The fixed-tag `_render_engagement` / `render_objective_engagement` siblings in
+  `backends/engagement.py` have neither treatment: they are safe only while their content stays
+  bounded (the ~1500-char truncation), and a literal `</untrusted_node_engagement>` inside a
+  comment would still end their fence early — the sweep to a shared neutralizer is an open
+  follow-up. Any new fixed-tag renderer should adopt one of the two approaches at birth.
+
+## Node-context assembly (`node_context.py`)
+
+`src/perk/cli/commands/objective/node_context.py` assembles the per-node context the refinement
+door injects; three craft points generalize beyond it:
+
+- **Prefer a variant model over a "this state can't be serialized" runtime guard.** `NodeContext[R]`
+  is phase-typed: `NodeContext[AssembledRefinement]` (a present record is rendered, not on disk)
+  becomes `NodeContext[SnapshotRefinement]` (present means the file exists) **only** through
+  `snapshot_refinement`. That made a pointer-less `present` in the serialized shape a **ty type
+  error** instead of a runtime check the plan had reached for — when a plan asks for a guard that
+  says "this combination can't happen here", ask whether a second type can say it statically.
+- **A primitive with a containment/downgrade contract gets no public back door.**
+  `snapshot_refinement` is the **sole** write seam; the path derivation and the materializer stay
+  private so nothing else can write the snapshot without the downgrade-to-`unavailable` behavior.
+- **When a `catch` names a tuple, exercise every member.** The write's `(OSError, UnicodeError)`
+  arm needed a lone-surrogate body to prove the `UnicodeEncodeError` member actually downgrades
+  (the digest uses `surrogatepass` so it stays total; the writer refuses) — a tuple with an
+  untested member is a claim, not a test.
 
 ## Cold-injects / warm-instructs asymmetry
 
