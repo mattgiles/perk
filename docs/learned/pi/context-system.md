@@ -1,10 +1,29 @@
 ---
-title: Pi context system — no transclusion, ambient index split, bash allowlist
-read_when: You are surfacing information to a session, debugging a blocked bash command in read-only, extending the read-only bash allowlist (five-surface lockstep), or the worktree AGENTS.md double-load.
+title: Pi context system — no transclusion, ambient index split, bash allowlist, the scan-timeout guard
+read_when: You are surfacing info to a session, debugging a blocked/timed-out bash call, extending the read-only bash allowlist or scan-timeout guard, or hit the worktree AGENTS.md double-load.
 cluster: pi-extension
 ---
 
 # Pi context system
+
+## Distillation
+
+- Pi context files load verbatim — no `@`-transclusion; the ambient index is a two-layer split
+  (compressed routing in `.pi/APPEND_SYSTEM.md`, the full catalog on demand) — "No in-file
+  `@`-transclusion", "Ambient index must be a real two-layer split".
+- A linked worktree double-loads `AGENTS.md` (main + worktree) — "Linked-worktree AGENTS.md
+  double-load".
+- The read-only bash inventory is `SAFE_PATTERNS` in `toolGating.ts` (never mirror it into prose);
+  the gate is allowlist-AND-not-destructive, applied per top-level segment; extending it is a
+  five-surface lockstep and a def-taught shell recipe must be tested for gate admissibility AND
+  byte semantics (`sed -n 'Np' | tail -c +<offset> | head -c`) — "Bash allowlist in read-only
+  plan sessions" and its subsections.
+- The second always-on `tool_call` hook injects `timeout = 30` onto gitignore-blind scans and
+  fails OPEN (a performance guard, the opposite of the gate); pure policy under `substrate/`, Pi
+  glue under `pi/v1/`; match rules loose, exemption rules tight — "The bash scan-timeout guard".
+- Latch the fail-closed gate state BEFORE any new fallible read in `apply()` — a throw after a
+  census read left the gate open under read-only — "Gate engagement: latch the fail-closed
+  state BEFORE any new fallible read".
 
 ## No in-file `@`-transclusion
 
@@ -162,9 +181,81 @@ tool, so there is no tool to swap or remove. Steering toward a structural-search
 the managed `AGENTS.md` bullet (ambient every session) + a bundled ambient skill + the read-only
 allowlist entry — **no** custom tool, no `READ_ONLY_TOOLS`/active-tools change, no default binding.
 
+**A five-surface instance with a sixth carrier:** widening the reviewer children's
+`perk pr review-context` entry to one anchored alternation admitting exactly `--expected-pr N --json`,
+`--pr N --json` and `--pr N --stack --json` (`SAFE_PATTERNS` in `toolGating.ts`) walked the five
+surfaces — and a **sixth** the plan missed: `docs/design/pi-subagents-child-execution-policy.md`
+stated the old exact command form. Design records that quote a gated command are carriers too;
+grep them for the old spelling.
+
+### A def-taught shell recipe needs two tests — gate admissibility AND byte semantics
+
+Pi's own oversized-line hint — `sed -n 'Np' <path> | head -c 51200` — is **not a slicer**: it
+re-exposes the same first 51,200 bytes of the line on every call. The offset-capable, gate-admitted
+form the review defs teach is `sed -n 'Np' <path> | tail -c +<offset> | head -c 51200` (offsets `+1`,
+`+51201`, …). A `toolGating.test.ts` case pins that exact pipeline as allowed (and its
+`> slice.txt` redirect as blocked), so the allowlist cannot silently drop a pipeline segment out from
+under the defs. Rule: when an agent def teaches a shell recipe, test both that the gate admits it and
+that it does what the prose claims byte-for-byte — a recipe that passes the gate but pages nothing
+fails silently in every lane.
+
+## The bash scan-timeout guard (the second always-on `tool_call` hook)
+
+Recursive `grep -r…` and `find` without `-maxdepth` are gitignore-blind: from a checkout carrying
+`node_modules/`, `.venv/`, `.worktrees/` they walk everything and were observed running for minutes
+to the better part of an hour with no `timeout` on the call. The guard (contracts §8.69) is two
+modules following the reusable convention **Pi-event glue under `extension/pi/v1/`, pure logic under
+`extension/substrate/`**:
+
+- `extension/substrate/bashScanTimeout.ts` — `SCAN_TIMEOUT_SECONDS` (= 30, the ONE source of the
+  number), `classifyScanCommand` (→ `recursive-grep` | `unbounded-find` | `null`),
+  `expiredAfterSeconds` (matches only Pi's **terminal** `Command timed out after N seconds` status
+  line, never a line the command printed), `scanTimeoutNote`.
+- `extension/pi/v1/bashScanTimeout.ts::registerBashScanTimeout` — the `tool_call` hook injects
+  `timeout = 30` onto a classified scan that carries no explicit `timeout` (an explicit value of ANY
+  size is the model's override, never rewritten or capped); the `tool_result` hook appends a steer
+  note when the terminal status appears.
+
+Facts worth carrying:
+
+- **Fail-OPEN.** A throwing `tool_call` handler would escape Pi's dispatch and abort the call, so the
+  hook catches, reports, and lets the call proceed unmodified — correct for a *performance* guard and
+  the exact opposite of the read-only gate's fail-closed posture. Decide which a new hook is before
+  writing its catch.
+- **One splitter for both hooks.** The classifier reuses the gate's exported
+  `toolGating.ts::splitTopLevelSegments`, so both hooks agree on segment boundaries and a flag in a
+  later pipeline stage (`grep -n foo f | sort -r`) is never attributed to the grep.
+- **In an over-match-tolerant classifier, match rules may be loose but exemption rules must be
+  tight.** A grep's recursion flag is searched over its full tail (an over-match costs a harmless 30 s
+  cap on a fast command — the accepted over-matches are pinned as such in the tests); a find's
+  `-maxdepth` exemption is searched only inside that find's **own** quote-blanked window, cut at the
+  next command word or a quoted-in sequencing operator — because a wider exemption search could only
+  wrongly *remove* a cap from an unbounded find.
+- **The cross-plane pin.** The managed `AGENTS.md` bullet the Python plane renders mirrors the 30 s
+  literal verbatim; `tests/test_init_idempotent.py::test_managed_agents_scan_timeout_matches_extension_constant`
+  reads the extension source and pins the mirror — lighter than a `shared/` data file for one
+  integer, and the right weight for a single constant two planes must agree on.
+
+## Gate engagement: latch the fail-closed state BEFORE any new fallible read
+
+`toolGating.ts::apply()`'s first-engagement path grew a second fallible read — the `getAllTools()`
+census that feeds late-tool admission (`workflow/borrowed-packages.md`) — placed *before* the
+trailing `active = nextActive` assignment. A throw there left `active === false`; the startup
+`resources_discover` re-apply then re-ran the same path, re-installed the census, and the
+`tool_call` backstop **failed open under read-only** for the whole session. The fix is one line at the
+top of `apply()`: `if (nextActive) active = true` — engage the in-memory gate before any read or
+install, released only by the trailing assignment. Deliberately NOT over-corrected to "set the
+desired state first" unconditionally: a failing read-only→read-write sync must keep the gate
+closed, so only the engaging direction is latched early. The test lesson: the failure-path fixture
+had hard-coded the new read as infallible — every new fallible read inside a fail-closed path needs
+its own failure-mode case.
+
 ## Cross-references
 
-- `extension/substrate/toolGating.ts` — `SAFE_PATTERNS` implementation
+- `extension/substrate/toolGating.ts` — `SAFE_PATTERNS`, `splitTopLevelSegments`, `apply()`'s engagement latch
+- `extension/substrate/bashScanTimeout.ts` + `extension/pi/v1/bashScanTimeout.ts` — the scan-timeout guard (policy + Pi glue)
+- `shared/contracts.md` §8.69 — the bash scan-timeout contract
+- `docs/learned/workflow/borrowed-packages.md` — the late-tool admission model the census read serves
 - `docs/learned/workflow/plan-factories.md` — inbox-over-gh pattern using this constraint
 - `.pi/APPEND_SYSTEM.md` — the live ambient routing index
 - `docs/learned/index.md` — the full on-demand catalog

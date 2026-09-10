@@ -1,6 +1,6 @@
 ---
 title: perk's subagent orchestration — project vs builtin agents, the two mutation shapes, and agent-def delivery to consumer repos
-read_when: You are spawning a subagent, an agent's model, re-enabling a builtin, supervisor streaming, the two-boolean child floor, the 0.67.0 host-tool intersection, scout lanes, /pr-review, /address, agent defs.
+read_when: You are spawning a subagent, picking an agent's model, re-enabling a builtin, on supervisor streaming, the two-boolean child floor, the 0.67.0 host-tool intersection, scout lanes, or agent defs.
 cluster: subagent-orchestration
 ---
 
