@@ -1,6 +1,6 @@
 ---
 title: perk's subagent orchestration — project vs builtin agents, the two mutation shapes, and agent-def delivery to consumer repos
-read_when: You are spawning a subagent, an agent's model, re-enabling a builtin, supervisor streaming, child execution profiles/the restriction floor, installed-engine harness, /pr-review, /address, agent defs.
+read_when: You are spawning a subagent, picking an agent's model, re-enabling a builtin, on supervisor streaming, the two-boolean child floor, the 0.67.0 host-tool intersection, scout lanes, or agent defs.
 cluster: subagent-orchestration
 ---
 
@@ -28,36 +28,48 @@ non-obvious rules an agent can't derive from any single file.
 > `docs/developers/pi-subagents-reverify.md`. Every **other** version number in this doc names
 > an upstream **event** (when a behavior changed), never verification currency.
 
+> **Second anchor — the ≥ 0.67.0 host-builtin intersection.** pi-subagents ≥ 0.67.0
+> (`getHostBuiltinToolNames` / `resolvePiLaunchToolPlan`) intersects a child's declared tools with
+> the HOST session's tools whose `sourceInfo.source === "builtin"`. Agents whose name matches
+> `/\b(reviewer|scout)\b/i` **fail closed at launch** when `grep`/`find` are host-unavailable; every
+> other child **silently loses the tool** (a `warnings` entry that reaches only the runner's
+> `console.warn`, never the RPC reply). The trigger was pi-fff `override` mode re-registering
+> `grep`/`find` as extension tools — perk's own injected default until the flip to
+> `PI_FFF_MODE=tools-and-ui` (`workflow/cold-door-launch.md`). Doctor's `subagent-host-tools` row
+> (`_subagent_host_tools_check`) gates on `_SUBAGENTS_HOST_INTERSECTION_AFFECTED = ("0.67.0", None)`
+> — an **open upper bound** that only the re-verify ritual closes; the 0.65.1 guidance stamp did
+> NOT move for it. The borrowed package is unpinned and refreshes at every pi launch, so the
+> installed version can bump mid-session.
+
 ## Distillation
 
 - Since 0.64.0, `subagents.agentOverrides` applies the FULL override set to custom agents too
   (an override can displace a frontmatter-pinned `model:`). perk's knob stays `[models.subagents]`
   + the workflow-level `model` (spawn-time — wins over the def model) — its own section below.
-- Builtins are OFF in every perk repo (re-enable precedence: "Builtins are OFF in every perk
-  repo — and the re-enable precedence"); `context: "fresh"` = clean session (independent
-  judgment), `"fork"` branches parent history — "Isolation knob".
-- Mutation shapes: read-only child + PARENT posts once after reconciling (/address always;
-  /pr-review since its report-only reshape); child-posts-own-mutation has no live example.
-- Def-level `acceptance` frontmatter (level "none" + reason) immunizes children against
-  acceptance auto-inference; `completionGuard: false` is the report-only escape when `bash`
-  makes a child count as mutation-capable — "Def-level acceptance and completionGuard".
+- Two version anchors: guidance is source-read at 0.65.1 (`subagent-compat` warns on any other
+  installed version — a version tripwire, never a source probe); ≥ 0.67.0 intersects child tools
+  with HOST builtins (reviewer/scout lanes fail closed on a shadowed `grep`/`find`; doctor
+  `subagent-host-tools`) — the two blockquotes above.
+- Builtins are OFF in every perk repo ("Builtins are OFF … re-enable precedence"); `context:
+  "fresh"` = clean session, `"fork"` branches parent history — "Isolation knob".
+- Mutation shapes: read-only child + PARENT posts once after reconciling; child-posts-own-mutation
+  has no live example. Def-level `acceptance` (level "none" + reason) immunizes children against
+  auto-inference; `completionGuard: false` is the report-only escape — "Def-level acceptance".
 - perk's agent defs (the sorted `PERK_AGENTS` tuple, the SSOT — never restate counts) are
-  delivered to consumer repos by `perk init` — "Agent-def delivery to consumer repos".
-- The enabled native bridge supplies `contact_supervisor` without allowlist edits; bridge-off is
-  a separate unavailable-streaming condition ("Supervisor-channel streaming"). `outputSchema`
+  delivered to consumer repos by `perk init`; audit design-doc universals for def-level vs
+  spawn-level truth; scout lanes can return a confident false refutation (slash-glob `grep`,
+  `worktree: none` parents run in `main`) — "Agent-def delivery", "Lane evidence pitfalls".
+- The enabled native bridge supplies `contact_supervisor` without allowlist edits; `outputSchema`
   injects an engine-validated `structured_output` call, yet an engine-valid report is not always
-  a completed assessment (the PR-review wave reclassifies a typed `blocked` verdict as
-  `lane-failed` before coverage); every wave spawn disables acceptance — "Workflow structured output".
-- A child inherits the parent's read-only gate (engine child tools must ride `READ_ONLY_TOOLS`);
-  report roles run background with definition-owned async, the writer foreground; the
-  parent-restriction floor — spoof-proof authorization, distinct from advisory `<active_agent>`
-  identity — composes into every gate observation and the `tool_call` backstop — "Native child
-  execution profiles", "Advisory child identity vs the authorization floor".
-- Scripted native children must run the real lifecycle protocol (result watcher, tool-execution
-  events, terminal `agent_end`); probe-setup omissions look like lane failures — "Installed-engine
-  harness craft".
-- Historical: the correction blocks and landed-arc passages (the agent-def delivery arc, the
-  reconverge ritual chronicle) record settled history — read them as records, not open work.
+  a completed assessment (`blocked` reclassifies to `lane-failed`); every wave spawn disables
+  acceptance — "Supervisor-channel streaming", "Workflow structured output".
+- A child's authorization is TWO booleans — the runner bit `PI_SUBAGENT_CHILD=1` + the constant
+  packet `perk.parent-restrictions/1 = {readOnly: true}` — decoded fail-closed, latched per
+  activation, composed into every gate observation; plan guidance rides the gate behind
+  `isPlanGuidanceStage` + the runner fence — "Native child execution — the two-boolean policy".
+- perk touches pi-subagents only through public surfaces; the installed-engine harnesses are
+  deleted and the coverage reduction is accepted and named — "Engine-coupling posture".
+- Historical correction blocks and landed-arc passages are records, not open work.
 
 ## `subagents.agentOverrides` — full overrides for builtins and (since 0.64) custom agents
 
@@ -343,6 +355,14 @@ verbatim on real additions (most recently the agent since renamed `adversarial-r
 the source and a reconverge that prunes the old delivered def) — the only
 thing that ever drifted was this doc's hard counts, hence the listing-without-a-count discipline.
 
+**The prose layer the census guards don't cover.** Every cohort-wide invariant written in a design
+doc must be audited for def-level vs spawn-level truth: a def with no launcher (a dev-only agent, a
+def between delivery and its door) breaks any "every spawn adds X" universal, and `ReportWave` owns
+`context: "fresh"` / `mission: false` / the acceptance disable **at spawn time**, so a def-level
+claim about them is a category error. Coexistence/independence claims (the builtin `scout` beside
+`perk.scout`) are characterized by actually flipping the builtin on and listing + spawning both —
+not merely written down.
+
 ### A committed managed convergence
 
 A `PERK_AGENTS` SSOT tuple drives a content convergence (`_converge_subagent_agents`) that delivers
@@ -370,6 +390,22 @@ agent def** AND **validate-or-fail-closed use**: the def instructs a byte-exact 
 trusted manifest and an empty report on no-match — never improvising. The `harvest-analyst` def
 (`agents/harvest-analyst.md`) is the precedent: its lane id is named an untrusted routing token,
 used only to select the matching manifest lane byte-exact.
+
+### Lane evidence pitfalls (scout waves)
+
+Three traps observed in live `perk.scout` lanes (`docs/design/archive/scout-launcher-*`), each of
+which produced a confident wrong answer rather than a failure:
+
+- **The pi `grep` tool returns "No matches found" for a slash-containing glob** (`perk-*/SKILL.md`)
+  against an absolute or prefixed path — use `**/…` or a bare filename glob. A lane trusted the
+  empty result and reported a *false refutation* with `basis: "verified"`.
+- **A `verified` basis can be wrong.** It records how the lane believes it looked, not that it
+  looked correctly — re-read every `pointer` a lane returns before a plan relies on it, and treat a
+  no-match search as "not found by that query", never as evidence of absence (the lane-side rule
+  belongs in the def; routed as a follow-up).
+- **A parent on a `worktree: none` stage runs in the MAIN checkout**, even when the door was invoked
+  from a linked worktree (`workflow/cold-door-launch.md`). Briefs must name the target worktree by
+  **absolute path** or every lane silently inspects `main` and reports on the wrong tree.
 
 ### The first repo-local agent-def namespace (`perk-dev`)
 
@@ -402,10 +438,9 @@ The reviewer rubric is **entirely** in the agent **system prompt** — SSOT `age
 (`extension/pi/v1/codeReview/automated.ts`) **defer** to it — **don't look there for review logic**. After
 editing the source, **re-run `perk init`** to reconverge and commit **both** copies byte-identical
 (the init-idempotency + doctor `subagent-agents` checks expect consistency). **Stale-path gotcha:**
-the materialized copy is the `perk/`-namespaced `.pi/agents/perk/pr-reviewer.md`, **not** the old
-`.pi/agents/pr-reviewer.md` the skill once cited — a deliberately dead path kept byte-exact here
-(it must stay greppable as the warning's subject; the docs-check broken-path flag on it is the
-accepted intentional residual). Grep for the stale path when touching agent docs.
+the materialized copy is the `perk/`-namespaced `.pi/agents/perk/pr-reviewer.md`, **not** the
+pre-namespace flat path directly under `.pi/agents/` that the skill once cited. When touching agent
+docs, grep for any flat `.pi/agents/<name>.md` spelling — it is always stale.
 
 ### Two `perk init` worktree gotchas (reality, not aspiration)
 
@@ -619,42 +654,17 @@ this failure mode: it live-broke both review doors with no test tripping). Since
 watcher platforms (e.g. linux) use per-request-dir + root fs-watchers plus a 5s safety poller,
 with a ≤500ms poll fallback on watcher failure; darwin uses only a demand-gated ≤500ms poller;
 win32 an always-on ≤500ms poller — these are upstream delivery internals, not parent polling prescriptions. The
-doctor `subagent-compat` check is now the
-early-warning tripwire for **surface-level** drift: it probes the installed source for marker
-presence (`workflowScript`, `outputSchema`/`structuredOutput`, the async completion
-notification wake (`"subagent-notify"`/`triggerTurn`), the supervisor-channel trio
-`"contact_supervisor"`/`SUPERVISOR_REQUEST_MESSAGE_TYPE`/`triggerTurn` plus the
-`"subagent_supervisor_request"` literal's new home in `supervisor-ui.ts`, the v1 RPC
-events (`subagents:rpc:v1:*`), retained children (`listRetainedChildren`) + the retained-child
-resume contract (`resume and agent are mutually exclusive`), the statement-body
-explicit-return vm wrapper (`(async () => {`), the 0.45.0 completion-receipt surfaces —
-the wait-completion projection (`toWaitCompletion`/`recordWaitCompletion`), `bg_wait`'s
-`completions` details, and the serialized workflow child `runId: child.runId` — the
-streaming-wave delivery chain (session-scoped delivery, the typed child supervisor-channel
-config `orchestratorSessionId`/`supervisorChannelDir`, the in-process async workflow host,
-the omitted-async await), and the intercom-bridge tool delivery
-(`resolveIntercomBridge`/`applyIntercomBridgeToAgent`/`["contact_supervisor"]`)) and warns
-loudly on divergence; public execution is deliberately unprobed since the 0.49 restoration —
-no stable load-bearing literal distinguishes a compatible surface there. Substring
-presence plus ONE behavior arm — doctor also runs the installed engine's
-`validateWorkflowScript` over the shared representative wave script
-(`shared/subagents/representative-wave-script.js`), degrading to a visible skip note when it
-cannot evaluate — the deeper wait/streaming mechanics remain source-read-derived and still
-warrant a manual re-verify on bumps (`docs/developers/pi-subagents-reverify.md`).
-
-**The tripwire-marker pattern (for extending `_SUBAGENT_COMPAT_PROBES`):** choose the literal
-whose *disappearance signals the architectural change you care about*, not just any stable string
-— e.g. `pid: process.pid` is deliberately the async-workflow-status literal: if workflows ever
-move to a detached runner it vanishes and doctor warns, which is exactly the re-verify signal.
-File-scoped probes (no tree-wide fallback) make a *moved* file warn too — a wanted tripwire, not
-noise. Because pi-subagents is a vendored *source snapshot*, the rows are **presence-only
-architectural drift tripwires**, never semantic proof of a delivery chain. Additive probe
-maintenance must NOT advance `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` — only a full baseline
-re-verify does (0.66.0 rests on a bounded per-node source/offline record in
-`docs/design/pi-subagents-child-execution-policy.md`, not on the stamp). `tests/test_doctor.py`
-needs *literal* full-row pins authored independently of the table (the fixture is table-derived,
-so a table-only pin is vacuous), and each substring must be proven absent before its warning is
-asserted (shared files carry markers from several rows).
+doctor `subagent-compat` check is a **version tripwire**, nothing more: `info` when the package is
+absent ("compatibility not evaluated"), `warn` when its `package.json` version is unreadable OR
+differs from `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`, `ok` at the verified version. It **never reads a
+borrowed package's source** — the old marker-presence probe table (`_SUBAGENT_COMPAT_PROBES`), the
+`validateWorkflowScript` behavior arm over a shared representative wave script, and every other
+installed-tree read are gone with the public-surfaces-only posture (below). The replacement early-drift
+signal is that `warn` plus the manual re-verify how-to (`docs/developers/pi-subagents-reverify.md`):
+the deeper wait/streaming mechanics are source-read-derived at the verified version and simply
+unverified at any other. One decode detail worth knowing: `_installed_subagents_version` narrows to a
+**non-empty string**, so a wrong-typed `{"version": 123}` takes the *unreadable* arm, never the
+*mismatch* arm — a wrong-typed field is an unreadable manifest, not a version.
 
 The repeatable success pattern: when a feature depends on subtle dependency runtime behavior, the
 **planning session** should read the dependency source and pre-digest the mechanics into the plan
@@ -706,7 +716,7 @@ schemas are module constants, nothing prompt-transcribed):
   `extension/waves/transport.ts` — the sanctioned shape: `explicitAcceptanceCanDisable`;
   `formatAcceptancePrompt` emits nothing at level none); delivery to each lane child rides the
   workflow-defaults spread (`prepareWorkflowLaunchParams`). Module-wide, no opt-out; the doctor
-  `subagent-compat` probe row "explicit acceptance disable" is the drift tripwire.
+  `subagent-compat` version `warn` is the drift tripwire (no probe reads the engine's source).
 
 ## The inherited read-only gate vs the engine's child-side tools
 
@@ -733,83 +743,65 @@ physically unable to make the engine-REQUIRED `structured_output` completion cal
   ("never edit, never push") — never softened with an explicit-task exception ("unless the task
   says otherwise"): task text is data-adjacent, and a poisoned task would satisfy the exception.
 
-## Native child execution profiles — background reports, foreground writer
+## Native child execution — the two-boolean policy (background reports, foreground writer)
 
-Measured at 0.65.1 and source-read at installed 0.66.0 (source/offline corroborated, not the
-verified baseline); `docs/design/pi-subagents-child-execution-policy.md` is the binding record and
-`docs/design/archive/pi-subagents-child-capability-characterization.md` the evidence.
+`docs/design/pi-subagents-child-execution-policy.md` is the **binding record**; this section is the
+map, not a copy. Two booleans decide everything a perk child may do:
 
-**Child execution mode is orthogonal to workflow scheduling — never infer one from the other.**
-An omitted child `async` under the engine's `workflowAwaitAsync: true` selects *background*; an
-explicit child `async: true` is *detached launch* (materially different, never a substitute); the
-root workflow's async flag says nothing about child mode.
+- **The runner bit** — `PI_SUBAGENT_CHILD === "1"`, read at every `session_start`
+  (`extension/substrate/childRestrictions.ts::isRunnerChild`). pi-subagents stamps it on every
+  background (runner-hosted) child — the only kind of child in which perk's extension activates.
+- **The report restriction packet** — the constant `extensionBindings`
+  `{"perk.parent-restrictions/1": {readOnly: true}}` (`extension/waves/reportWave.ts::
+  REPORT_CHILD_RESTRICTIONS`), embedded on every rendered report child together with
+  `worktree: false` (caller-checkout placement so the plan-ref-dependent readers keep working).
+  Nothing is sampled from the parent gate, handoff, task or assignment data.
 
-**Extension selection: omitted vs `[]` vs an explicit list are not interchangeable.** Omitted
-means ambient runner discovery, so perk activates only in background/runner-hosted children
-(`host: "runner"`, `PI_SUBAGENT_CHILD === "1"`). **Foreground children have no ambient discovery**
-— no perk gate, scratch, or ambient-provider capability — and the `extensionBindings` transport is
-runner-only, so it cannot serve as a two-mode identity channel.
+`decodeReadOnlyFloor(runner, raw)` is the consumer: no packet ⇒ no floor (the
+delegation-dispatched writer's case); malformed — invalid JSON, a non-object envelope, any
+`perk.parent-restrictions/` key other than exactly `/1`, or `/1` with anything but exactly
+`{readOnly: boolean}` — ⇒ **floor (fail closed)**; valid ⇒ the boolean. A non-runner never gets a
+floor. `extension/index.ts` reads both at the top of every `session_start` and **latches** the floor
+for the activation (a re-emitted `session_start`, a gate `exit()`, or a `session_tree` navigation
+cannot clear it); it composes into `toolGating.ts` as `isActive = active || hasFloor()` plus the
+all-names `tool_call` backstop, and a throwing floor supplier is restrictive for that observation.
 
-That drove the split:
+**The JSON-boundary gotcha:** "exactly one own key" ≠ "the expected key". The decoder asserts the
+named key with `Object.hasOwn` *before* honoring the value — a polluted `Object.prototype.readOnly`
+would otherwise have satisfied a `keys.length === 1 && value.readOnly === false` check and un-floored
+the child. Any decoder that reads a named property off a parsed-JSON object should do the same.
 
-- **All report roles run background** (they need ambient perk + inherited enforcement): `async:
-  true` in the agent **definition**, and child calls that deliberately OMIT `async` —
-  definition-owned async, not child-call async. Never add child-call async to report waves.
-- **The writer (`conflict-resolver`) runs foreground** (it needs builtins/edit/write and a real
-  spawn `cwd`, and tolerates absent perk scratch): definition async ABSENT, and the code-owned
-  dispatch sets child `async: false` plus the worktree as the request's typed `cwd`; the task
-  text carries a separately rendered POSIX-quoted `cd` reminder — never hand-quote a path into
-  JS or shell.
+**What the two booleans replaced** (all deleted — do not look for them): the advisory
+`<active_agent name="…"/>` system-prompt prefix parser and `childIdentity.ts`, the
+physical-session-key binding (`nativeSessionKey.ts`), the sampled `parentReadOnly` snapshot supplier
+with its `unavailable` capture arm, `ReportWaveRequest.execution`, the six-reason envelope
+classification, and the ten-name report-only scratch census (every perk report child is a runner
+child — the runner bit IS the census).
 
-Three distinctions to keep apart: workflow/root scheduling ≠ child mode; explicit assignment
-skills ≠ discovered-skill inheritance; a `false` restriction ≠ a write grant. Every role sets
-`inheritGlobalContext: false` and OMITS both `extensions` and `subagentOnlyExtensions` (an empty
-array ≠ omitted); report roles keep `inheritProjectContext: false` / `inheritSkills: false` /
-`systemPromptMode: replace` / read-only tools; the writer keeps project + skill inheritance and
-edit/write. Test convention: assert a **closed census independent of `PERK_AGENTS`** (deriving
-expectations from the production set would miss a dropped role); the repo-local
-`perk-dev.session-auditor` is a report role living OUTSIDE `PERK_AGENTS` and is tested separately.
-The restriction-snapshot channel the parent stamps on each child is documented from the producer
-side in `workflow/report-waves.md`.
+**Runner children provision no scratch and receive no authoring guidance — the gate-riding model.**
+Plan guidance rides the read-only gate behind ONE predicate,
+`extension/pi/v1/contextInjection.ts::isPlanGuidanceStage` over `PLAN_GUIDANCE_EXCLUDED_STAGES`
+(stages another authoring context owns, plus read-only stages that author nothing), fenced by
+`installInjectedContext`'s `runnerChild: () => boolean` supplier — no `plan_authoring` bit, no
+eligibility module. Two lessons from wiring it: when ONE fence protects many call sites, prove the
+real composition-root wiring end-to-end at least once (a constant `() => false` supplier at any site
+compiles and passes every unit test); and pin set members directly rather than through a filtered
+iteration — the read-write `OBJECTIVE_SAVE_STAGE` exclusion is invisible to a test that iterates
+only the read-only registry stages.
 
-## Advisory child identity vs the authorization floor (the consumer half)
+**Execution profile (one remains):** child execution mode is orthogonal to workflow scheduling —
+an omitted child `async` under the engine's `workflowAwaitAsync: true` selects *background*; an
+explicit child `async: true` is *detached launch*. All report roles run background (definition-owned
+`async: true`, child calls OMIT `async`); the writer (`conflict-resolver`) runs foreground through
+the delegation bridge with `async: false` and the worktree as the request's typed `cwd` — it has
+**no perk activation** (foreground children have no ambient discovery) and receives no packet, so
+it is floor-less by construction. Every role sets `inheritGlobalContext: false` and OMITS both
+`extensions` and `subagentOnlyExtensions` (an empty array ≠ omitted). Test convention: assert a
+**closed census independent of `PERK_AGENTS`**; the repo-local `perk-dev.session-auditor` lives
+outside the tuple and is tested separately.
 
-Two readers, two purposes, no cross-grant:
-
-- **Identity is advisory.** The carrier is the engine-authored system-prompt prefix
-  `<active_agent name="…"/>` (from `buildInProcessChildLaunch`, `systemPromptMode: replace`),
-  read at `session_start` via `ctx.getSystemPrompt()` — a **spoofable prompt claim, never an
-  auth principal**, used only for scratch policy (`extension/substrate/childIdentity.ts`).
-- **The floor restricts.** `extension/substrate/childRestrictions.ts` decodes the
-  `perk.parent-restrictions/1` packet and is the only thing that restricts. The two readers share
-  only a neutral stateless `{sessionId, sessionFile}` key helper and startup's runner boolean — no
-  cross-import, no cross-grant; an identity failure must not block floor capture (each is
-  classified independently at startup).
-
-**Fail-closed is a composition discipline.** The floor threads into `registerToolGating` as an
-optional `readOnlyFloor: () => boolean` supplier composed with the activation's child restrictions;
-every gate observation reads `active || hasFloor()`; a **throwing supplier is restrictive, never
-permissive** (try/catch → `true`); an unreadable branch in `before_agent_start` must not suppress
-required read-only guidance (catch → inject).
-
-**The `tool_call` backstop.** An allowlist enforced only via `setActiveTools` is not enforced —
-toolset sync can fail and a foreign tool can register late. The hook denies **every** name outside
-a set derived from `READ_ONLY_TOOLS` (save/delivery tools, unknown/late mutators) for all effective
-read-only sessions including ordinary parents, keeping `bash`'s argument check.
-
-**Capture-before-rebuild.** Both readers capture at the very top of `session_start`, before
-identity establishment or toolset sync can rebuild the loader prompt — which let scratch
-eligibility become a pure `(readOnly, snapshot) => boolean`. The general move: capture volatile
-ambient state once at a known-clean point, then thread typed snapshots.
-
-**Physical-session keying.** Distinguish sessions by the SDK `getSessionId()` + `getSessionFile()`
-(or null) — never the persisted `pi_session_id` (a `session.jsonl` basename shared by many
-children) or the perk run id (aliases). The runner bit (`PI_SUBAGENT_CHILD === "1"`, captured once
-at `session_start`) only ever **suppresses** perk authoring/adapter guidance over inherited branch
-history; it never grants tools or save authority.
-
-Bounded posture: not an OS sandbox, not authentication between malicious host extensions; loss of
-both the runner packet and persisted mode across reload is an explicit unsupported case.
+Bounded posture: not an OS sandbox, not authentication between malicious host extensions; a manual
+`subagent` call is outside the channel; losing the runner env across a `/reload` is unsupported.
 
 ## The v1 extension RPC seam (`extension/waves/reportWave.ts` is the consumer)
 
@@ -817,8 +809,8 @@ pi-subagents exposes an extension-to-extension RPC bridge on pi's in-process eve
 perk's report-wave module (`extension/waves/reportWave.ts` + `rpcAdapter.ts`) launches report
 waves through it — the mechanics below are source-read in
 `.pi/npm/node_modules/pi-subagents/src/extension/rpc.ts` (same upstream-drift caveat: re-verify
-the adapter on every pi-subagents bump; the doctor `subagent-compat` probes grown over `rpc.ts`
-are the drift tripwire):
+the adapter on every pi-subagents bump; the doctor `subagent-compat` version `warn` is the only
+automated tripwire — nothing reads `rpc.ts`):
 
 - **The envelope**: requests arrive on `subagents:rpc:v1:request` as
   `{version: 1, requestId, method, params?, source?}`; the reply is emitted once on
@@ -846,9 +838,8 @@ are the drift tripwire):
   present-but-malformed, mismatched, or ambiguous inventory **withholds** correlation; only
   inventory-absent legacy payloads fall back to the overloaded `agent` mapping. Receipts stay
   output-free telemetry — missing correlation changes neither report coverage nor posting
-  authority; `status.json.workflow.value` remains the report source. The discovery shape: the
-  installed-engine test exposed a receipt keyed `perk.pr-reviewer` where the assignment key was
-  `protected`. And
+  authority; `status.json.workflow.value` remains the report source. The discovery shape: a
+  live receipt keyed `perk.pr-reviewer` where the assignment key was `protected`. And
   the historical `subagent_wait` surfaced slim `details.completions` (identity/artifact trail — never
   output; that is historical wait-tool behavior, not the current parent collection protocol).
 - **The durable aggregate**: `<asyncDir>/status.json` survives completion; `state` is the
@@ -867,41 +858,30 @@ are the drift tripwire):
   `extension/pi/v1/providers/plannotator.ts`; `createPlannotatorBridge` is its thin
   wrapper).
 
-## Installed-engine harness craft (scripted native children)
+## Engine-coupling posture — public surfaces only
 
-A scripted native child must exercise the **real lifecycle protocol**. Executor + RPC bridge alone
-did not deliver perk's expected completion: the fixture also starts the installed native **result
-watcher** and disposes it at teardown. A captured `structured_output` value is still rejected as a
-missing tool call until the scripted session emits `tool_execution_start`, executes the real
-registered hook with `{value}`, then `tool_execution_end` and a terminal `agent_end` — never a
-direct capture callback or a fabricated aggregate. Native `worktreeSetupHook` expects an existing
-**executable path** (not a shell string) and JSON-object stdout (`{}`), writing any sentinel to a
-separate test-owned log — engine-harness guidance distinct from perk's `[worktree] setup`
-shell-command array (`docs/user-docs/how-to/run-a-worktree-setup-hook.md`); do not merge the two
-contracts. Landed exemplars: `extension/waves/planBoundReviewCompat.test.ts` +
-`extension/testing/planBoundReviewChildFactory.mjs`, and `extension/waves/childExecutionCompat.test.ts`
-(loads the installed engine through its own jiti loader offline — a named skip when absent, a
-failure when present-but-unloadable; `RunSyncOptions.childSessionFactory` per-call injection proves
-cancellation propagation as offline evidence, not a live observation). The shared fixture is
-`extension/testing/installedEngine.ts`.
+perk reaches pi-subagents only through **public surfaces**: the v1 RPC envelope, the delegation
+events, agent-def frontmatter, and the engine's public package exports. The installed-engine
+harnesses that loaded `.pi/npm/node_modules/pi-subagents/src/**` through a replacement jiti loader
+(scripted native children, the plan-bound review and child-execution compat suites, the shared
+fixture) are **deleted** — they proved mechanisms that no longer exist and coupled `just ci` to an
+unpinned package's private tree. Two guards keep the posture honest:
 
-- **Probe-setup omissions masquerade as verification failures.** A scripted `runSubagent` replay
-  against installed pi-subagents hard-requires `agentName` (acceptance resolution) and a nonempty
-  `sessionId` (async-result publication) — both fail before any child runs and surface as "0
-  covered / lane-failed", indistinguishable from the defect under test. Read field names off the
-  installed signatures first; a `complete: false` aggregate is not evidence about the engine until
-  the config-construction layer is cleared.
-- **Never correlate native child events by task-prose prefix** (the engine prepends `Task: `) —
-  correlate on engine-published identifiers: workflow key, session path, effective mode, PID, the
-  final tool-call id.
-- `stopChild` / the `stopped` flag is set at abort-*request* time — not proof of tool cancellation
-  or shutdown; verify real cancellation, the native terminal status, and absent trailing bytes over
-  the settlement window.
-- A scratch fixture that navigates to its already-current leaf emits no `session_tree` event
-  (false-negative resync assertions) — navigate to a genuinely different node. `loadPerkSession`
-  takes a `systemPrompt` input to drive the real replacement loader prompt.
+- `extension/bareImportGuard.test.ts` — `pi-subagents` is not an allowed bare import; the versioned
+  envelope literals are perk module constants (`extension/waves/rpcAdapter.ts`).
+- `extension/installedPackageGuard.test.ts` — no extension source spells a path into
+  `.pi/npm/node_modules/` except Ponytail's manifest-declared preflight root. The guard matches the
+  **whole path token** and asserts **equality** with the one sanctioned root: a prefix-strip residue
+  check would have admitted a prefix-matching fork of that root (`…/ponytail-evil`), so the test
+  carries a synthetic prefix-match control that must NOT be classified as the sanctioned root.
 
-These are bounded installed-version measurements, not a compatibility certificate.
+**The accepted coverage reduction, stated plainly:** there is no automated engine-level proof that
+`completionGuard: false` still completes a report-only lane, that the runner stamps
+`PI_SUBAGENT_CHILD=1`, or that `extensionBindings` reaches the child env; `run_ci` will not catch an
+upstream semantics change in any of these. The mitigations are the `subagent-compat` version `warn`
+(above), the fake-RPC composition proofs (`workflow/report-waves.md` § "Test machinery"), and — as the
+re-verify step on every version bump — a live report wave from a read-write session with the
+per-child artifacts inspected (`docs/developers/pi-subagents-reverify.md`).
 
 ## Parent-prepare large evidence lanes
 
@@ -917,11 +897,12 @@ Where to look when you need a subagent child's token or provider-cache numbers:
 
 - **Child session files persist only when opted into** — `sessionFile`/`sessionDir`/`share` on the
   spawn config; otherwise the cwd-encoded sessions dir gets nothing for the child.
-- **The always-present usage surface is the per-child artifact pair**
-  `.pi-subagents/artifacts/<runId>_<agent>_<i>_transcript.jsonl` + `_meta.json` (since 0.43
-  `getArtifactPaths` also yields a written `<base>.jsonl`, but the usage instrument remains the
-  transcript + meta pair). Assistant records in the transcript carry per-message `usage`
-  (`input`/`cacheRead`/`cacheWrite`); `_meta.json` carries aggregate usage, model, and duration.
+- **The always-present usage surface is the per-child artifact set.** Since 0.66.0 it lives under
+  the **pi session directory**, not the cwd:
+  `<pi session dir>/subagent-artifacts/<runId>_<agent>_{input,meta,output,transcript}.*` — no
+  `_<i>` index, no `.pi-subagents/` directory in the checkout. Assistant records in the transcript
+  carry per-message `usage` (`input`/`cacheRead`/`cacheWrite`); `_meta.json` carries aggregate
+  usage and model but **no duration** — `status.json`'s `steps[0].durationMs` is the timing source.
 - Measured through that surface: back-to-back spawns of the same agent show spawn-time
   **cross-process provider-cache prefix affinity** — later spawns read the shared agent prefix as
   `cacheRead` on their first assistant message.
@@ -937,10 +918,11 @@ Two cleanup traps for anything that sweeps up after a wave:
 
 - **A wave receipt is an identity trail, not a complete artifact inventory.** Since pi-subagents
   0.45.2, `children[].artifactPaths` names child session JSONLs under the **parent session store**,
-  while the metadata/transcript quads + structured-output captures live **separately**,
-  run-id-keyed, under `.pi-subagents/artifacts/`. Exact cleanup derives BOTH sets, validates every
-  resolved path against approved roots, and deletes only that union — never treat one receipt
-  field as exhaustive, and never glob-delete.
+  while the metadata/transcript/input/output set + structured-output captures live **separately**,
+  run-id-keyed (since 0.66.0 under `<pi session dir>/subagent-artifacts/`; earlier under a cwd
+  `.pi-subagents/artifacts/`). Exact cleanup derives BOTH sets, validates every resolved path
+  against approved roots, and deletes only that union — never treat one receipt field as
+  exhaustive, and never glob-delete.
 - **Temporary-agent wave residue blocks submit.** A successful wave can leave an untracked
   `.pi/subagents/` runtime directory that the repo's ignore rules (`/.pi-subagents/`) don't cover.
   Wave cleanup = delete the temp agent def AND sweep the runtime artifacts, then check
@@ -966,9 +948,13 @@ the `post_pr_review` tool turn + the `last_pr_review` record have existed since 
 - `docs/learned/workflow/report-waves.md` — the perk-side report-wave module doc (flow migrations, lane semantics, guard state, wave test machinery); this doc keeps the upstream mechanics
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the `/submit` orchestration that drives the `conflict-resolver` agent
 - `extension/pi/v1/delivery/conflictResolverEngine.ts` — the foreground structured-delegation dispatch the writer role rides
-- `extension/substrate/childIdentity.ts` / `extension/substrate/childRestrictions.ts` — advisory identity vs the runner-only restriction floor
-- `docs/design/pi-subagents-child-execution-policy.md` — the binding record for the native child execution profiles
-- `extension/waves/planBoundReviewCompat.test.ts` / `extension/waves/childExecutionCompat.test.ts` — the installed-engine harness exemplars
+- `extension/substrate/childRestrictions.ts` — `isRunnerChild` + `decodeReadOnlyFloor` (the two booleans' consumer)
+- `docs/design/pi-subagents-child-execution-policy.md` — the binding record for the two-boolean child policy
+- `extension/pi/v1/contextInjection.ts` — `isPlanGuidanceStage` + the `runnerChild` fence (the gate-riding model)
+- `extension/installedPackageGuard.test.ts` / `extension/bareImportGuard.test.ts` — the public-surfaces-only guards
+- `extension/waves/scoutWave.ts` / `extension/pi/v1/scoutWave.ts` — the `perk.scout` wave mechanism + installer (`run_scout_wave`)
+- `docs/design/archive/scout-launcher-*` — the scout launcher gate record (lane evidence pitfalls)
+- `src/perk/convergence/doctor/checks.py` — `_subagent_compat_check` (version tripwire), `_subagent_host_tools_check` (the 0.67.0 range gate)
 - `agents/*.md` — the SSOT agent-def sources (delivered into `.pi/agents/perk/` by `perk init`); `agents/pr-reviewer.md` carries the entire reviewer rubric
 - `skills/perk-pr-review/SKILL.md` — the orchestration skill that defers to the agent prompt (not where review logic lives)
 - `extension/waves/reviewClassifierWave.ts` / `extension/waves/objectiveExplorerWave.ts` — the single-lane wave entrypoints (schema SSOT constants) behind the flow-scoped `classify_review_feedback` / `explore_objective_node` tools

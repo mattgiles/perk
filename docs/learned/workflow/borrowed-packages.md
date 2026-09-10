@@ -32,9 +32,14 @@ a capability is a borrow at all.
   skill/doc prose — "When upstream's own surfaces disagree".
 - Lazy install/restart, filter security limits, and attempted-vs-covered bookkeeping remain explicit
   residuals — "Residuals".
-- A parser needed by the bare-clone extension is vendored as a byte-pinned module *closure* (a
-  devDependency exists only for the identity test), not borrowed as a runtime dependency — "Vendor a
-  parser closure, not a runtime dependency".
+- A parser needed by the bare-clone extension would be vendored as a byte-pinned module *closure*,
+  not borrowed as a runtime dependency — the one instance (smol-toml) retired with the draft-review
+  protocol — "Vendor a parser closure, not a runtime dependency".
+- Late-registering borrowed tools are ADMITTED (sticky `snapshot ∪ admitted` baseline + the
+  `resources_discover` re-apply), not leaked — "Borrowed-tool stage scoping".
+- Read a borrowed engine's config once at activation (fix = quit and resume), refuse-don't-converge
+  its private config, and expect builtin-shadowing packages to break other packages' host
+  intersections (`PI_FFF_MODE=tools-and-ui`) — "Borrowed-engine stances".
 
 ## The lockstep-surfaces recipe
 
@@ -187,10 +192,19 @@ Two invariants worth knowing before touching the census:
   questionnaire is the sole registrant since the first-party tool was deleted, so
   the name lives in the borrowed census, not `PERK_TOOLS` (hygiene-tested). `READ_ONLY_TOOLS`
   and the `STAGE_TOOLS` lists keep it name-keyed/universal.
-- **Registration timing**: a borrowed package registering tools during `session_start` *after*
-  perk's sync (perk is the first packages entry) leaks past rebuild-point filtering at launch
-  (accepted, test-pinned; a tree-navigation re-apply drops it — pi activation semantics: a tool
-  registered after `setActiveTools` becomes active).
+- **Registration timing — the admission model**: a borrowed package registering tools during its
+  own `session_start` *after* perk's sync (perk is the first `packages` entry) is not in the
+  first-engagement `getAllTools()` census. `extension/substrate/toolGating.ts` handles this by
+  **admission**, not by accepting a leak: the baseline for every gate-OFF reconciliation is
+  `snapshot ∪ admitted`; `admitted` grows the first time a gate-OFF path sees an active tool the
+  census never had (`admitLate`); and a one-shot `resources_discover` re-apply — Pi fires it after
+  EVERY extension's `session_start` — applies the mode/stage diet at the one point where
+  startup-late registrants meet it. So pi-subagents' `subagent_supervisor` is inside the diet at
+  launch, and admission is **sticky** (first sighting; perk's own filtering never evicts it, so a
+  navigation back to an admitting stage restores it). Edges: a late tool its owner deactivated
+  before perk ever saw it active is never admitted; a tool the census saw inactive is never
+  re-activated; gate-ON paths do no admission bookkeeping (the gate-ON set is by name — an
+  accepted residual); the snapshot stays the restore authority.
 
 ## The read-only bar is repo non-mutation, not zero side effects
 
@@ -212,19 +226,44 @@ source), actively maintained, license, and the package's pi-version floor vs per
 ## Vendor a parser *closure*, not a runtime dependency
 
 The bare-clone extension must load with **no `node_modules`**, so a library it needs at load time
-cannot be a runtime dependency (`tests/test_packaging.py` pins that invariant). The
-`extension/vendor/smol-toml/` shape is the answer, and it is a different bar from the
-lockstep-surfaces recipe above (which governs Pi *packages* converged into `settings.json`):
+cannot be a runtime dependency (`tests/test_packaging.py` pins that invariant). The one realized
+instance — a vendored `smol-toml` parse-side closure for the persisted draft-review protocol's
+routing-input reader — was **removed with that protocol** (`workflow/plan-review-flow.md` § "Replaced
+by four in-memory guards"); no vendored parser closure exists in the tree today. The selection
+reasoning stays as a retired precedent for the next one: copy only the needed module closure (parse
+side only) plus its `.d.ts`, the upstream `LICENSE`, and a provenance `README.md`; pin the upstream as
+a **devDependency** solely so a test can assert byte identity against `node_modules` (provenance
+proof, not a runtime edge); exclude the directory from Biome; give the source-scan guards the
+widen/carve-out/prove-live treatment (`workflow/source-scan-guards.md`); cover the shipped file set in
+`tests/test_packaging.py` and `perk_dev/build.py`. The surviving cross-plane config path needs no
+parser at all: `extension/session/saveDestination.ts`'s conservative subset scanner vouches for a
+`[issues]` spelling or widens to the verbatim document, with the dialect gap pinned by
+`shared/fixtures/issues-table.json` (`workflow/shared-contracts.md`).
 
-- Copy only the needed module closure (the parse side — `stringify` is excluded) plus its `.d.ts`,
-  the upstream `LICENSE`, and a `README.md` naming provenance and version.
-- Pin the upstream as a **devDependency** solely so a test can assert byte identity against
-  `node_modules` (`extension/vendor/smolToml.test.ts`) — the pin is provenance proof, not a runtime
-  edge.
-- Exclude the directory from Biome (`biome.json`); the source-scan guards need the widen/carve-out/
-  prove-live treatment in `workflow/source-scan-guards.md`.
-- Cover the shipped file set in `tests/test_packaging.py` and `perk_dev/build.py` so the closure
-  reaches the published artifact and nothing outside it leaks in.
+## Borrowed-engine stances (config, private state, and builtin shadowing)
+
+Three stances toward a borrowed *engine* (pi-subagents, pi-fff) that go beyond the package-entry
+recipe:
+
+- **Read a borrowed engine's config once, at its activation — never per-dispatch.** pi-subagents
+  applies its `loadConfig()` once at its own activation, so a mid-session edit to its `config.json`
+  is invisible until Pi restarts. perk mirrors that: the conflict-resolver engine reads the native
+  `worktree` default once at activation (`readNativeWorktreeDefault`), and the surfaced refusal's
+  fix is "quit and resume this Pi session" — not `/reload` (which re-runs perk's factory but not
+  the borrowed engine's config load), not a doctor `--fix`.
+- **Observe-and-refuse a borrowed tool's private config; never converge it.** perk used to rewrite
+  pi-subagents' `config.json` (`worktree: false`) through init/doctor; that arm is gone. The
+  refusal (`extension/delivery/conflictResolution.ts::nativeWorktreeRefusal`) names the path, the
+  observed value, and a one-line fix for the operator — the operator owns the file
+  (`workflow/mergeability-and-conflict-resolution.md`).
+- **Vetting a package that shadows a builtin by name has a cross-package consequence.** pi-fff's
+  `override` mode re-registers `grep`/`find` as *extension* tools; pi-subagents ≥ 0.67.0 intersects a
+  child's declared tools with the host's `sourceInfo.source === "builtin"` tools and reads that as
+  "host lacks grep/find" — reviewer/scout lanes fail closed at launch (`pi/subagents.md`). perk
+  injects `PI_FFF_MODE=tools-and-ui` at both launch seams (`launch.FFF_MODE_ENV`,
+  `workflow/cold-door-launch.md`): additive — the builtins stay beside `fffind`/`ffgrep`, and
+  `toolGating.ts::FFF_SEARCH_TOOLS` already enumerates both name-sets. Doctor's
+  `subagent-host-tools` row reports the operator-owned remainder (`workflow/init-doctor.md`).
 
 ## Residuals
 
@@ -252,3 +291,7 @@ lockstep-surfaces recipe above (which governs Pi *packages* converged into `sett
 - `docs/learned/workflow/warm-door-commands.md` — the drive-coverage guard over the stage-scoped
   universe
 - `docs/learned/pi/tui-surfaces.md` — the perk-owned footer the setFooter rule protects
+- `extension/substrate/toolGating.ts` — `admitLate` + the `resources_discover` re-apply; `FFF_SEARCH_TOOLS`
+- `docs/learned/pi/subagents.md` — the 0.67.0 host-builtin intersection anchor
+- `docs/learned/workflow/cold-door-launch.md` — `FFF_MODE_ENV` at both launch seams
+- `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the native `worktree` refusal

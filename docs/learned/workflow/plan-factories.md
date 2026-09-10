@@ -25,6 +25,9 @@ cluster: doors-and-launch
 - A new sibling factory is a multi-surface LOCKSTEP (bindings.yaml, deliverable targets, skill
   set + manifest fragment, …) or delivery silently breaks — "Parallel-factory wiring is a
   multi-surface lockstep".
+- Seed interpolation is judged closed-vocabulary vs open-value (a door-derived path is still
+  open); open values need an uncloseable container — over-fenced code span in prose, single quotes
+  in a shell recipe — "The seed-interpolation rule".
 
 ## Inbox-over-gh: a discipline, not a structural constraint
 
@@ -32,9 +35,9 @@ A seeded read-only plan-mode session historically **could not run `gh`/`perk` in
 `extension/substrate/toolGating.ts` `SAFE_PATTERNS` allowed only
 `cat`/`head`/`tail`/`grep`/`find`/`ls`/`git status|log|diff`/`jq`/`curl`.
 So every cold-door factory did its GitHub reads up front and materialized the result into a
-file the session reads via the `read` tool (e.g. `.perk/workflow/scratch/learn-docs-inbox.md` —
-a run-scoped **gitignored scratch path**, absent in fresh checkouts, so its `docs-check`
-broken-doc-ref row is checkout-dependent and deliberately accepted),
+file the session reads via the `read` tool (e.g. the harvest inbox Markdown under the run-scoped,
+**gitignored** `.perk/workflow/scratch/` tree — never spell such a scratch file's full path in a
+learned doc, or `docs-check` reports a checkout-dependent broken doc reference),
 with untrusted fetched bodies wrapped in a marker (`<untrusted_learning>…</untrusted_learning>`).
 
 Since #416 the read-only gate allowlists read-shaped `gh` *query* subcommands, so the constraint
@@ -148,12 +151,21 @@ validation raises, fail-soft engagement reads, scratch writes, seed rendering, a
 keys and their order). **Resisting the urge to normalize per-door payload differences is what made
 byte-preservation possible.**
 
-**The seed-interpolation rule.** Door-derived values (run-scoped paths, counts) may interpolate
-into the seed prompt; **repository-derived strings must ride the materialized artifact** (the
-manifest), where the session reads them as DATA. Interpolating a repo-derived name — e.g. a lane
-id built from a directory name — into instruction text is a prompt-injection surface. The harvest
-seed interpolates only the manifest path, the doc count, and the lane count (all door-derived)
-and tells the session the lane ids are in the manifest.
+**The seed-interpolation rule.** The safe/unsafe test is **closed vocabulary vs open value**, not
+door-derived vs repository-derived. A count, a stage id, an enum member is closed: it can be
+interpolated bare. Anything whose bytes an operator or repository ultimately chooses is open — and a
+*door-derived absolute path is still an open value* (its leaf names come from the operator's
+checkout; a `.worktrees/plan-N` sibling can be named anything). Repository-derived strings that are
+whole texts (a lane id built from a directory name, an issue body) must ride the materialized
+artifact (the manifest), where the session reads them as DATA — interpolating them into
+instruction text is a prompt-injection surface. An open value that *must* appear inline needs an
+**uncloseable container**: for Markdown prose, an over-fenced code span one backtick longer than
+the longest backtick run inside the value (`objective/plan_cmd.py::_code_span`, with CommonMark's
+single-space padding for a value that starts or ends with a backtick — pinned by a backtick-bearing
+parametrized test); for a shell recipe the model will fill and run, single-quote the path (the
+`sed -n 'Np' '<path>' | tail -c +<offset> | head -c 51200` recipe in `skills/perk-objective-plan`
+and contracts §8.26). The harvest seed interpolates only the manifest path, the doc count, and the
+lane count and tells the session the lane ids are in the manifest.
 
 **Gather closures that perform real I/O must convert expected failures to `UserFacingCliError`
 themselves.** The seeded-door boundary catches only backend errors and `UserFacingCliError` — an
@@ -161,10 +173,14 @@ themselves.** The seeded-door boundary catches only backend errors and `UserFaci
 `manifest_write_failed` (contracts §8.48); any door whose gather touches the filesystem or network
 owns the same conversion.
 
-**Door-emitted copyable callouts must be shell-quoted.** Any "copy-paste this command" seed
-callout with an interpolated path goes through `shlex.join` (the audit door's
-`perk-dev audit fold --bundle <dir>` callout in `packages/perk-dev/src/perk_dev/cli.py` is the
-precedent) — unquoted interpolation breaks on spaces/metacharacters.
+**Any open value interpolated into model-facing text needs an uncloseable container.** The two
+techniques: a "copy-paste this command" callout with an interpolated path goes through `shlex.join`
+(the audit door's `perk-dev audit fold --bundle <dir>` callout in
+`packages/perk-dev/src/perk_dev/cli.py` is the precedent — unquoted interpolation breaks on
+spaces/metacharacters and lets a hostile leaf name inject a command); a path or name rendered into
+Markdown prose goes through an over-fenced code span (`_code_span`) so no backtick inside the value
+can close the span and turn the remainder into instructions. Pick by the surface the model will
+treat the text as: shell → quote; prose → over-fence.
 
 ### Monkeypatch seams survive by construction
 

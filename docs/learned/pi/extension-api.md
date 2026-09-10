@@ -255,7 +255,7 @@ if you don't know it.
 - CI is unaffected (no perk session env). Run locally with `env -u PERK_RUN_ID node --test …` for
   representative output.
 - Hardening candidate (not done): default `PERK_RUN_ID: undefined` in `loadPerkSession`'s
-  `applyEnv` baseline (alongside `PERK_SELFCHECK`/`PERK_NO_LLM`), with claim tests opting in
+  `applyEnv` baseline (alongside `PERK_SELFCHECK`), with claim tests opting in
   explicitly.
 
 ## Strict-mode index access in tests

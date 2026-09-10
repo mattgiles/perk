@@ -34,7 +34,10 @@ the session-data path guards in both planes.
   findings; adoption of a corpus guard includes the normalization sweep — "Compile-time census
   pins" and "Guard-adoption ripple".
 - Import-graph guards fail on unresolvable specifiers, freeze birth censuses, and pin direction
-  prefix arrays to literal contract lists — "Import-graph guard vacuity holes". Vendored upstream
+  prefix arrays to literal contract lists — "Import-graph guard vacuity holes"; a textual rule
+  that matches only docstrings has rotted (liveness test + strict-superset widening), and
+  "everything found was excluded" is as empty as an empty walk — "Guards that pass while proving
+  nothing". Vendored upstream
   JS = widen the bare-import corpus + declare the closure an opaque leaf + prove the exemption
   live — "Vendored upstream JS: widen, carve out, prove live".
 
@@ -129,6 +132,23 @@ and a no-extras sweep (declared tokens not bound by the blueprint fail).
   assertions that exercise the consumer, not only in unit tests of the exported module.
 - **Prefer live-corpus facts to frozen enumerations.** A fixed member list can remain internally
   valid while concurrent work grows the real set beyond it.
+- **Rule rot: a textual rule that matches only docstrings/comments.** A distinct vacuity class. The
+  consumer-boundary guard's dotted-path substring (`perk.backends.github.plans`) was satisfied for
+  years by prose in the adapters' *docstrings*, while every real import used the package-level
+  `from perk.backends.github import plans` shape it never matched — green, and blind to the one
+  statement it existed to catch. Two fixes travel together: a **liveness test** asserting the rule
+  bites a real *statement* (not a docstring line) in each module it guards
+  (`tests/test_resolve.py::TestConsumerBoundary::test_rule_matches_the_adapters_own_substrate_imports`),
+  and **widening as a strict superset** — keep the old predicate verbatim and OR in the new regex
+  (`_reaches_substrate` = dotted substring ∨ `SUBSTRATE_FROM_IMPORT`) so no previously-caught
+  shape is released while the guard is repaired.
+- **"Everything found was excluded" is as vacuous as finding nothing.** A discovery helper that
+  filters an excluded package must fail closed when the *filtered* result is empty, not only when
+  the walk is — a tree whose only file lives under the excluded package would otherwise scan
+  nothing and pass. The empty-discovery control plants exactly that tree and asserts the raise
+  (`test_checker_fails_closed_on_empty_discovery`), and it routes through the **same** discovery
+  helper (`_production_files`) as the live guard — a control over a private re-implementation
+  proves nothing about the guard.
 
 ### Making a reconciliation rule structural
 
@@ -251,6 +271,9 @@ holes (#2168):
 - **Direction rules over prefix arrays:** pin the arrays to literal contract lists (deepEqual)
   and drive the full source×target cross-product — a prefix array that silently gains or loses a
   member changes the rule without failing any test.
+- **Textual import rules rot toward docstrings**, and an exclusion filter can empty the corpus
+  silently — both are catalogued with their controls under "Guards that pass while proving
+  nothing" (rule rot; everything-found-was-excluded).
 
 ## Vendored upstream JS: widen, carve out, prove live
 

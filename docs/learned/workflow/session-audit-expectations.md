@@ -27,8 +27,9 @@ curation semantics that entry prose and the schema can't express on their own.
 - Evidence-packet bounding: file adjacency ≠ causal adjacency — window over the `parentId` tree,
   descendant-restricted — "Bounding judgment-tier evidence packets".
 - The verdicts-write path: a strict wholesale consumer demands a per-record sanitizing producer
-  (one bad lane degrades honestly, never poisons the bundle) — "The verdicts-write hardening
-  patterns".
+  (one bad lane degrades honestly, never poisons the bundle); the fold identity is the cross-plane
+  join key, so an identity-rewriting degrade needs the contested-identity pre-dispatch arm — "The
+  verdicts-write hardening patterns".
 - "Known open edges for checker work" lists the declared-but-unvalidated edges — check it before
   extending the catalog.
 
@@ -223,6 +224,17 @@ a reusable pattern set:
 - **Uniqueness invariants span the whole artifact** — the fold keys cells by
   `(expectation_id, session_path)` with one `seen` set across all result rows; a per-row scope
   lets cross-row duplicates double-fold.
+- **The verdicts identity is the cross-plane join key, and a degrade can manufacture the collision
+  it must then guard.** `fold.py` rejects a duplicate `(enclosing expectation id, session_path)`
+  **wholesale** (`bad_bundle`). Any TS-side degrade that rewrites a pair's identity onto its
+  enclosing id (the id-mismatch arm) can therefore collide with a sibling pair that legitimately
+  owns that identity — hence the **contested-fold-identity** pre-dispatch arm in
+  `extension/learning/audit.ts` (`foldIdentityCounts` over `foldIdentityKey`): more than one claimant
+  ⇒ ALL claimants consolidate into ONE `lane-failed` record and nothing is dispatched for them. A
+  plan Assumption that a rewritten identity "can't collide" is false unless checked against the
+  Python validators AND the fold join together — the two planes' uniqueness rules compose. The
+  lane routing-token fence that keeps identities out of orchestration keys is in
+  `workflow/report-waves.md`.
 - **The zero-lane arm is narrow**: `lanes: []` holds only when no packetized pair *degraded* —
   pre-dispatch degrades (basename collision, missing packet path) still ride `lanes` as
   `lane-failed`.

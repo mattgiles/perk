@@ -26,6 +26,10 @@ narrowing helpers, and the migration playbook that keeps door tests green.
 - Envelope edge semantics (exit/parse/scratch arms) — "Envelope edge semantics"; the legacy
   `label` reproduces pre-migration fallback texts byte-exactly during migrations — "Label choice
   is the byte-compat lever".
+- Reviewer children shell bare `perk`, so `PATH` selects their CLI (`PERK_BIN` reaches only
+  `runColdDoor`); same-version parity hides an editable install pointed at `main`, and a PR that
+  changes the CLI↔def contract fails its own review until it lands — "Version skew between the
+  planes".
 
 ## Rollout COMPLETE — the substrate is mandatory
 
@@ -124,6 +128,20 @@ and the perk extension may be version-skewed"), and the `unexpected payload` sub
 deliberately preserved so the door-test `/unexpected payload/` regexes needed zero edits. **The
 substring-preserving reword is the general lever for hardening shared error text** without
 assertion churn.
+
+**Reviewer children make `PATH` the effective CLI selector.** The review agent defs run
+`perk pr review-context …` as a literal bare `bash` command — `PERK_BIN` is honored only by
+`runColdDoor` (the extension's own cold-door calls), and an absolute path in the def would be blocked
+by the read-only gate's `SAFE_PATTERNS` allowlist. So a lane's CLI is whatever `perk` resolves to on
+the child's `PATH`. The `PERK_CLI_VERSION` parity signal is **silent** when both installs report the
+same version — exactly the dev case: a `uv tool install --editable` pointed at `main` beside a
+worktree whose defs expect a newer CLI↔def contract. Two failure shapes, one cause: the old CLI's
+single-line JSON hits Pi's `bash` tail truncation and the lane sees "(no output)"; a diligent lane
+that reads the spill file sees the *legacy* envelope and correctly refuses. Consequence: **any PR
+that changes the CLI↔def contract fails its own review until it lands.** Workaround today: launch
+via `uv run perk implement` from the worktree (its `.venv` CLI leads `PATH`) or repoint the editable
+install. The durable fix — inject `PERK_BIN` and prepend the launching CLI's bin dir at
+`_build_exec_env`, plus a `cli-source-skew` doctor check — is an open follow-up, not done.
 
 ## The fail-arm payload narrowing pattern
 

@@ -36,9 +36,10 @@ hit.
   review doors — three race classes".
 - Finding→annotation mechanics for both plannotator modes live in the `push_annotations`
   module, not curl — "The annotation-push module (`push_annotations`)".
-- Background draft reviews now ride a persisted closed-state-machine artifact (`draft-review.json`)
-  with a run-scoped exclusive claim, verified dispatch intent, and a routing-inputs fingerprint
-  (v2) — "Hardened into a persisted protocol", "The routing-target fingerprint (v2)".
+- The persisted draft-review protocol is GONE — four in-memory guards (`draftReview.ts`: the
+  activation's current-review slot + the decision ladder superseded → latch → reviewed bytes →
+  destination fence) and a per-component save-destination digest (`saveDestination.ts`; a mirror
+  parser is not a fence input) — "Replaced by four in-memory guards", "The save-destination fence".
 - "Footguns" and "Testing recipes" are reference sections — scan them before touching any
   review backend.
 
@@ -301,62 +302,88 @@ friction: module-private delimiter helpers duplicated, a local door-session twin
 rule-of-three deferral of a generic door core — **the third door (gist) is the extraction
 trigger**.
 
-### Hardened into a persisted protocol (`draft-review.json`)
+### Replaced by four in-memory guards (contracts §8.23 "Draft-review guards")
 
-The three race classes were later closed by a persisted protocol rather than more in-memory
-tokens: one closed-state-machine artifact per session (`extension/session/draftReviewState.ts` —
-the invalidation, uncertainty, refusal, and status vocabularies), a run-scoped machine-local
-exclusive claim (`extension/substrate/draftReviewLock.ts`), subscribe-then-status catch-up closing
-the missed-event window, and verified dispatch intent guarding every effect: identity-bound
-activation (`extension/pi/v1/draftReviewActivation.ts`), subject effects (`draftReviewEffects.ts`),
-stale-reference rendering (`draftReviewRendering.ts`), operator diagnostics → how-to linkage
-(`draftReviewDiagnostics.ts`), with the provider split into `plannotator.ts` + the handshake module
-`plannotatorHandoff.ts` (its transport behaviors pinned by `plannotatorTransport.test.ts`).
-Planning lesson: a closed transition table this size under-estimates module count by roughly 2× —
-expect activation/effects/rendering/diagnostics to want their own files and the transport provider
-to split once registration hooks and status catch-up land.
+The three race classes were first closed by a persisted closed-state-machine protocol
+(`draft-review.json`, a run-scoped exclusive file claim, a routing-inputs fingerprint) and then
+**replaced** by four in-memory guards — nothing persisted, no lock, no state file; a browser
+decision does not survive a Pi restart and recovery is "re-run the door". The protocol's modules
+(`draftReviewState.ts`, `draftReviewBinding.ts`, `draftReviewActivation.ts`, `draftReviewLock.ts`,
+`draftReviewConfig.ts`, the reconcile-a-stop how-to) are gone; do not look for them.
 
-The disciplines:
+`extension/pi/v1/draftReview.ts` owns two things:
 
-- **Correlation ≠ authority; intent ≠ completion.** Delivery is proven only by persisted branch
-  evidence (the persisted-evidence rule — `workflow/lease-outbox-delivery.md` § "Observation-acked
-  delivery"), never by a spy on the send.
-- **Fail-closed everywhere; a stop is not a retry.** A persistence or ownership failure overrides
-  every transition row; failing to persist *uncertainty* is itself a stop; and
-  `docs/user-docs/how-to/reconcile-a-draft-review-stop.md` supplies an EXIT, not an in-place repair
-  — an orphan, a dead PID, or a missing message can never prove no effects happened, so a blind
-  restart is prohibited.
-- **Failure/readiness path coordination.** A browser handshake or subscription failure could lose
-  the advertised fallback because the decision-cleanup path aborts the readiness observer, or
-  because degradation refuses an already-invalidated record. Coordinate teardown ordering for BOTH
-  the plan and objective browser reviews — a degradation invalidation must not swallow an
-  already-decided outcome.
-- **Dead-helper trap.** A "universal" helper extracted during a large refactor shipped with zero
-  callers — verify every caller routes through it before exporting.
+- **The activation's current-review slot** — `createDraftReviewSlot(pi, ports)`, one per
+  activation, shared by EVERY review surface (the blocking `plan_review` tool's Plannotator and
+  first-party arms, both browser doors). `slot.open(ctx, snapshot)` verifies the session identity
+  and the stage-derived subject (`DraftReviewSubject = plan | objective | gist | refinement`),
+  captures the save destination, and makes this review current (superseding any other). Identity
+  is enforced **at `open`, before any editor or Plannotator bridge starts** — a missing run id
+  refuses `review_open_refused` / `no-identity` (`openRefusedResult`), so no review is ever shown
+  for a draft that could not be saved.
+- **The decision ladder** — `checkDraftReviewDecision(slot, ctx, review, effect)`, run before a
+  completed review's verdict has any effect: **superseded** (the slot moved on, or the live run
+  id / subject differ) → **unconfirmed-save latch** (`save` effects only) → **reviewed bytes**
+  (`artifact` source only; refinement also compares its grounding-context digest; a not-found
+  artifact counts as changed; `save` + changed → `stale-approval`) → **destination fence**
+  (`save` only, every source — first-party included) → `proceed { draftChanged }`.
 
-Guarantees cover participating local handlers plus checked routing inputs only (at-most-once local
-dispatch, not exactly-once delivery); recovery dogfood against a real crash/restart is deferred.
+Semantics worth knowing before touching a surface:
 
-## The routing-target fingerprint (v2) — hash routing inputs, not file bytes
+- **The latch is for a save that reached the backend with no typed receipt** (`recordSaveOutcome`
+  — the `confirmed` arm is the subject's typed saved/approvedSaved result; anything else latches,
+  first writer wins, nothing clears it). Denials, Direct-Edits revision rounds, and the
+  `approvedNoPlan`/`approvedNoDraft` defensive arms neither confirm nor latch. Manual save
+  commands never consult the latch (they ARE the deliberate human retry) but a failed manual
+  save latches too. Linear's create→marker crash window is why a blind automatic retry is refused.
+- **Direct Edits on a moved objective/gist draft is a revision effect**, never a stale refusal:
+  the ladder returns `proceed { draftChanged: true }` and the result is prefixed with
+  `DRAFT_CHANGED_NOTE` (`withDraftChangedNote`) — the human's feedback still applies, weighed
+  against the current draft.
+- **A superseded decision is ignored loudly on the TUI only** (`SUPERSEDED_DECISION_WARNING` via
+  `report()`), never injected into the model's context.
+- **The doors' readiness observers are fenced by the slot.** `PlanReviewDoorSession.current` is
+  the review's `isCurrent()`; the observer consults it after *every* await — proven by a
+  fence-**between**-awaits case (a deferred promise, a `current` spy true-then-false, a supersede
+  while pending; see `toolchain/node-test-async-determinism.md`).
+- **One validated read is the baseline.** The objective/gist browser arms take `raw` from the
+  same validated resume read the rendering uses (`ResumeObjectiveDraftResult` /
+  `ResumeGistDraftResult` carry `raw`) — a second read of the artifact for the stale-bytes
+  baseline would open an interleaved-write window; see "Testing recipes" for the race pin.
 
-A draft review stays valid only while a save would still go where the reviewer saw it going, so the
-binding fingerprints the **routing inputs**, not config file bytes: a fixed-order projection of only
-the fields that select a destination — `[issues] backend`/`team` from the MAIN checkout; committed +
-local `[workflow] base` from the INVOKING checkout (plan/objective subjects only); the `[linear]
-api_key` from main-local, hashed — each leaf `absent` or the digest of the exact decoded string (no
-stripping, defaulting, or precedence reproduced, so the projection is conservatively sensitive).
-The encoding prefix is versioned (`perk/draft-review-target/v2`,
-`extension/session/draftReviewBinding.ts`) and v1 records are never migrated — a v2 capture simply
-never matches. Drift explanations compare fixed-name component digests between two
-already-captured snapshots (never a second read) with at most one activation-local baseline
-(cleared on abandon/end); a mismatch reports `unavailable` rather than reconstructing authority;
-eligibility rides the aggregate digest alone.
+## The save-destination fence — digest per routing component, never file bytes
 
-The TS reader (`extension/substrate/draftReviewConfig.ts`) parses TOML through the vendored
-`extension/vendor/smol-toml/` closure; its dialect gap against Python's `tomllib` is pinned as a
-fixture fact (contracts §8.23; `workflow/shared-contracts.md` § on cross-plane fixtures). Accepted
-limit: all `git config --list --show-origin` output is still fingerprinted, so unrelated Git-config
-edits still invalidate reviews.
+A draft review stays valid only while a save would still go where the reviewer saw it going.
+`extension/session/saveDestination.ts` captures WHERE an approved draft would be written as
+**per-component digests** (`DESTINATION_COMPONENTS = issues | remotes | node_claim`), so a
+decision can tell "the destination moved" from unrelated config noise without retaining or
+reporting a raw routing value; `changedDestinationComponents(reviewed, current)` names the
+components that differ (a key present on one side only counts as changed). Exactly three inputs
+route a save; everything else (`branch.*`, `user.*`, `[workflow] base`, credentials, the process
+environment, the run handoff) is deliberately NOT a component — none of it decides where the
+artifact lands, so none of it may strand an approval.
+
+- **`issues`** — `[issues] backend`/`team` via `substrate/config.ts::resolveIssueRouting`. The
+  extension's TOML subset reader digests the two keys (`kind: "keys"`) **only when a conservative
+  scanner proves the document spells the table exactly as Python's `tomllib` reads it**; any
+  spelling it cannot vouch for (dotted keys, an inline table, quoted keys, escapes, a commented
+  header) widens the component to the verbatim document (`kind: "document"`). Widening
+  **over-fences** (an unrelated edit to that file then reads as "issues changed"); it never
+  under-fences.
+- **`remotes`** — `remote.*.url` / `remote.*.gh-resolved` via `substrate/git.ts::remoteConfig`,
+  captured whenever the read backend is anything but exactly `"linear"`. The earlier
+  `null || "github"` default skipped GitHub's remotes for an escaped spelling like
+  `"\u0067ithub"` (the subset reader sees the escape verbatim while Python saves to GitHub) — a
+  fail-safe default in a fence must be "capture more", not "assume the common case". A failed
+  remotes read returns `null` → the ladder's `destination-changed: "unverifiable"`, never
+  "unchanged".
+- **`node_claim`** — the objective node a plan save would link.
+
+The lesson: a fail-safe mirror parser is fine for **prompt rendering** but is **not a fence
+input** — either prove parity per document (the conservative scanner) or widen to the whole
+document. The cross-plane fixture that pins the mirror's dialect gap (`shared/fixtures/issues-table.json`,
+`tests/test_issues_config_parity.py` — "divergent ⇒ unproven") is described in
+`workflow/shared-contracts.md`.
 
 ## Footguns (each documented at its site; collected here)
 
@@ -385,8 +412,8 @@ edits still invalidate reviews.
 - **Type injected dependencies as the minimal structural slice** (e.g. `{ review(plan, signal) }`),
   not the concrete bridge — a recording fake bridge (canned `ReviewOutcome` + a reviewed-plans
   capture) collapses bus + envelope + timers per test.
-- An in-memory `exec` recorder (the pi/v1/plan.test.ts `fakeApprovalPi` recipe, with `PERK_NO_LLM=1`
-  pinned per-test) asserts cold-door argv (`plan-save`/`--json`/`--plan-file`) fully offline — no
+- An in-memory `exec` recorder (the pi/v1/plan.test.ts `fakeApprovalPi` recipe) asserts cold-door
+  argv (`plan-save`/`--json`/`--plan-file`) fully offline — no
   scaffolded fake binary, no harness session.
 - **Forcing a draft write-back failure:** a branch with no `run_id` fails the artifact-tier
   write-back (`no_run_id`) while a `plan` *param* still resolves as the review source (the artifact
@@ -426,9 +453,18 @@ edits still invalidate reviews.
   Pi's *real* prompt/follow-up persistence and assert whole-content evidence (the digest plus the
   exact code-authored marker outside the final `</untrusted_reviewer_feedback>`); the sanctioned
   observation seam is a **forwarding wrapper** on the session instance, not method replacement
-  (`extension/pi/v1/draftReviewUserDelivery.test.ts`); marker-only or altered-feedback entries must
-  never acknowledge. The SDK recipe (the newline-join contract, the streaming barrier) is in
+  (`extension/pi/v1/draftReview.test.ts` — the `injectDraftReviewResult` idle→plain /
+  busy→followUp / joined-with-`\n` case); marker-only or altered-feedback entries must never
+  acknowledge. The SDK recipe (the newline-join contract, the streaming barrier) is in
   `pi/headless-session-drive.md`.
+- **The interleaved-read race pin** (`extension/pi/v1/planReview.test.ts::measureArtifactReadCalls`):
+  a spy asserting `markdown === render(decode(raw))` pins nothing when the artifact never changes.
+  Count the artifact reads one resume performs (`perRead`), swap the world at call `perRead + 1`,
+  and drive the **arm** directly (`resumeObjectiveDraft`/`resumeGistDraft`) — driving the
+  dispatcher shifts the swap point by its own read. The guard tests themselves live in
+  `extension/pi/v1/draftReview.test.ts` (slot + ladder) and
+  `extension/session/saveDestination.test.ts` (the fence's per-component capture; the Linear arm
+  never forks git).
 
 ## The second event-bus bridge: the `code-review` request (`plannotatorHandoff.ts`)
 
@@ -529,8 +565,6 @@ detected only at push time as `push_rejected` — loud but late, by design.
 - `docs/learned/pi/extension-api.md` — `ctx.ui.editor` facts + the `headfulUIContext` gap
 - `docs/learned/pi/tool-param-decode.md` — the tri-state param decode the door's `plan` param uses
 - `docs/learned/pi/extension-seams.md` — minimal structural slices + the type-only-import cycle break
-- `extension/session/draftReviewState.ts` / `draftReviewBinding.ts` — the persisted state machine + the v2 routing fingerprint
-- `extension/pi/v1/draftReviewActivation.ts` (+ `draftReviewEffects.ts`, `draftReviewRendering.ts`, `draftReviewDiagnostics.ts`) — the verified-intent effect surfaces
-- `extension/substrate/draftReviewLock.ts` / `draftReviewConfig.ts` — the run-scoped claim + the TOML routing-input reader
-- `docs/user-docs/how-to/reconcile-a-draft-review-stop.md` — the human-only exit from a stopped review
+- `extension/pi/v1/draftReview.ts` (+ `draftReview.test.ts`) — the current-review slot + the decision ladder
+- `extension/session/saveDestination.ts` (+ `saveDestination.test.ts`) — the per-component save-destination fence
 - `docs/learned/workflow/lease-outbox-delivery.md` — the persisted-evidence rule + the exclusion-primitive table

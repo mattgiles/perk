@@ -176,6 +176,16 @@ via `.default is ...`) — the same idiom already used to pin production probe d
 strict type checker, signature contracts are pinned by introspection, never by executing
 intentionally-invalid calls.
 
+## ty type-checks the tests: shared fakes vs `subprocess.CompletedProcess[str]` parameters
+
+`typecheck-py` covers `tests/` too. Passing the shared `_Proc` fake (`tests/_github_fakes.py`) to a
+helper whose parameter is typed `subprocess.CompletedProcess[str]` fails on a **direct** call —
+`_Proc` is structurally similar but not a subclass, and ty checks the nominal type. The same fake
+reaching that helper through a parametrized, untyped fixture slips through unchecked, which is why
+the failure appears only when a test calls the helper directly. Use a real
+`subprocess.CompletedProcess(args, returncode, stdout=…, stderr=…)` for direct calls; keep `_Proc` for
+the monkeypatched `subprocess.run` routing where nothing is typed against it.
+
 ## Cross-references
 
 - `perk/substrate/providers.py`, `perk/convergence/init.py` — settings.json `packages` handling

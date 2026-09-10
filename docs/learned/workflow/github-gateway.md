@@ -33,6 +33,11 @@ accepted.
 - Reads split by completeness contract — bounded browse vs full census; "every open X" readers
   use `gh api --paginate --slurp` and fail closed on shape — "List-read completeness contracts
   (label-scoped reads)".
+- Three hard limits: comment ids are `fullDatabaseId` (a `BigInt` string — `databaseId` is Int32),
+  `gh pr diff` 406s at 20k lines (local merge-base fallback, `diff_source` disclosed, too-large
+  checked BEFORE the not-found fold), PR bodies 422 at 64 KiB (the plan embed yields, footer
+  reserved on both passes); submit recomposes the body wholesale — "GitHub hard limits that bite
+  perk", "Mutation-posting policies".
 
 ## The five-function helper family — and why it's five, not four
 
@@ -107,6 +112,10 @@ was later **reshaped** from a single posting child to a parent-driven classify-t
   fallback ladder (a review must never be lost), while the reaction poster is hard-fail with no
   fallback (nothing review-shaped is lost if it fails). Record the rationale in the section
   banner and pin both policies in tests.
+- **`perk pr submit` recomposes the PR body wholesale.** Every publish and re-publish renders the
+  body from scratch (`_compose_pr_body` → `update_pr_body`), so anything a human or a tool typed
+  into the PR description is **overwritten** on the next submit. A plan that requires evidence "on
+  the PR" must say **PR comment** — comments survive re-publish; the description does not.
 - **In-session-only fields are enforced structurally**: the gateway functions simply have no
   parameter for the in-session `fyi` channel, so it *cannot* reach a GitHub payload. Prefer that
   shape over prompt-level "don't post it" policy.
@@ -220,6 +229,34 @@ that differ from REST `gh api`:
 - **Lesson:** extending a shared gateway helper to a NEW transport (REST→GraphQL) requires confirming
   the error shape against **live** output (`gh api graphql -F number=<bogus>` reproduces it), not a
   guessed fixture.
+
+## GitHub hard limits that bite perk — Int32 ids, 20k-line diffs, 64 KiB bodies
+
+Three platform ceilings perk has hit live; each has a durable handling shape.
+
+- **Comment identity is `fullDatabaseId`, never `databaseId`.** GraphQL's `databaseId` is an `Int`
+  (signed 32-bit), and real issue-comment ids already exceed 2³¹ — the field silently returns
+  `null` or a wrong value past that. `fullDatabaseId` is a `BigInt` encoded **on the wire as a
+  decimal string**; `backends/github/engagement.py::_database_id` accepts an ASCII-digit string or a
+  plain non-bool int and `read_issue_comments` raises a labelled `GitHubError` for a node without a
+  parseable id rather than minting a blank one. Rule: treat any id-like GraphQL `Int` as a 32-bit
+  trap and select the full-width sibling.
+- **`gh pr diff` is capped at 20,000 lines / 300 files** — GitHub answers HTTP 406 with the durable
+  token `PullRequest.diff too_large` (`reviews.py::_is_diff_too_large`; the older "exceeded the
+  maximum number of" wording is kept as a second match). That token does **not** match
+  `_is_not_found`, so the too-large check must run **before** the not-found fold or the reader
+  silently returns "no PR". Both diff readers (`get_pr_review_context`, `get_pr_diff`) fall back to
+  `substrate.git.pr_merge_base_diff` over the PR's base ref; provenance is disclosed per artifact as
+  `diff_source ∈ {github, local-git}` (a trailing, defaulted field — existing goldens stay valid), and
+  every diagnostic carries the trigger (`LocalDiffReason = too-large | forced`) so a forced `--local`
+  never claims a 406. Presence guards are strip-aware (`base_ref is None or not base_ref.strip()`).
+  The git mechanics (config-pinned diff, temp-ref fetch) live in `workflow/git-substrate.md`.
+- **A PR body over 65,536 characters is refused with 422 on both create and PATCH.**
+  `pr/submit_cmd.py` treats the `<details>` plan embed as best-effort: `_plan_embed_fits` judges the
+  footer-inclusive body **with the footer reserved on both passes** (`_FOOTER_RESERVE` — the create
+  pass does not yet know the PR number the update pass appends), so create and update can never
+  disagree about whether the embed fits; when it does not, the body carries a one-line pointer and
+  the result reports `plan_embedded: false`.
 
 ## GitHub `Closes #N` autoclose fires ONLY on a default-branch merge (#694)
 

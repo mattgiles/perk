@@ -20,13 +20,18 @@ launcher that emits its own JSON.
 - pi parses args last-wins: inject perk defaults BEFORE pass-through args so the user's flag
   wins free — "Last-wins arg injection".
 - Launch-seam env layering is merge order — injected defaults < operator env < perk stamps — no
-  conditionals — "Env setdefault via merge order". The agent dir has ONE precedence
+  conditionals; `FFF_MODE_ENV` (`PI_FFF_MODE=tools-and-ui`) rides both spawn sites, and a
+  pre-flip session inherits the OLD default (judge from a relaunch or `env -u`) — "Env setdefault
+  via merge order". The agent dir has ONE precedence
   implementation (`launch_pi_agent_dir`: env → main-checkout `[pi] agent_dir` → `~/.pi/agent`),
   and a blank inherited `PI_CODING_AGENT_DIR` is scrubbed from the child env, not forwarded —
   "The launch-precedence agent dir", "Precedence normalization must reach the child environment".
 - A linked-worktree session sees zero skills unless the cold door mirrors `.agents/skills/` at
   positioning time (gitignored → never checked out) — "Worktree positioning must mirror
-  `.agents/skills/`".
+  `.agents/skills/`". A `worktree: none` stage runs in the MAIN checkout even when invoked from a
+  linked worktree (`main_repo_root`) — name target worktrees by absolute path — "A shared
+  `--worktree` option does not imply positioning".
+
 - A **path-probing** launcher seam resolves the absolute executable path BEFORE `os.chdir` —
   a bare-name exec after chdir can select a binary from the inspected tree. Both probing seams
   (the pi launch and the hunk watch) now share this safe shape via the one shared
@@ -108,6 +113,18 @@ vars into this layering rather than writing `env.setdefault()` loops.
   (`_launch_and_capture_env`) — reuse it for any child-env claim.
 - **The two spawn sites diverge on purpose:** `run_worker.spawn` (remote/CI) deliberately does
   NOT get the quiet vars — CI logs keep full npm output.
+- **`FFF_MODE_ENV` rides BOTH sites.** The second injected default, `PI_FFF_MODE=tools-and-ui`
+  (`launch.FFF_MODE_ENV`), is merged at `launch._build_exec_env` AND `run_worker._spawn_worker`
+  (execution-path parity — a worker's reviewer lanes need host `grep`/`find` exactly as an
+  interactive session's do; `pi/subagents.md`'s 0.67.0 anchor). Unlike the npm quiet vars it is
+  a correctness default, not a cosmetic one, which is why it does not share their single-site rule.
+- **The inherited-env trap.** A session launched by the *pre-flip* launcher carries the old value
+  (`override`) in its environment, and the operator tier sits above the injected tier — so judging
+  a changed injected default from inside such a session is judging the old default. Relaunch, or
+  run the probe with `env -u PI_FFF_MODE`. Diagnostic rule: when a session-level symptom looks
+  shell-attributable (a reviewer lane failing closed on "host lacks `[grep, find]`"), read the
+  launch seam's merge **first** — that failure was perk's own injected tier, not the developer's
+  shell profile.
 - **Fail-soft:** the quieting is advisory; if pi ever sanitizes the child env before spawning npm,
   the noise returns silently (no breakage, no detection).
 - **#654 — Linear key seed.** `_exec_pi`/`_build_exec_env` seed `env["LINEAR_API_KEY"]` from
@@ -136,8 +153,8 @@ source (the env arm already carries the value; the default is Pi's own); the lau
 targets the resolution and is skipped when it is `None`; and the launch context carries the
 resolution beside the injected value because the exec step cannot safely recompute precedence after
 `chdir`. Every consumer that acts on files *inside* the agent dir — doctor's `subagent-bridge-config`
-user scope, the `subagent-worktree-default` convergence (`workflow/init-doctor.md`) — resolves
-through this same function, never a parallel copy.
+user scope today; historically the since-retired `subagent-worktree-default` convergence
+(`workflow/init-doctor.md`) — resolves through this same function, never a parallel copy.
 
 ## Running a repo-configured setup hook before exec (#652)
 
@@ -276,10 +293,16 @@ handoff, never resuming one.
 
 ## A shared `--worktree` option does not imply positioning for a `worktree: none` stage policy
 
-The resolver returns the invoking repo root *before* considering the supplied value on a
-`worktree: none` stage — so auditing another checkout means invoking the door **from** that
-checkout, not passing `--worktree`. Shared option factories can expose intentionally-inert
-options; don't assume an accepted flag positions the session.
+The resolver ignores the supplied value on a `worktree: none` stage — and, for the two-roots
+plan-selecting doors, invoking the door **from** another checkout does not position there either.
+`src/perk/cli/plan_selection.py::main_repo_root` anchors a `worktree: none` stage at the **main
+checkout** (`git.main_worktree_root(invocation_root) or invocation_root`) even when the door is
+invoked from inside a linked worktree; the invocation root governs only the no-argument cache
+fallback (which plan is selected), never where the session runs. Consequence: a `perk plan
+--no-sync` run from a `.worktrees/plan-N` checkout launches in `main`, and every scout lane it
+spawns inspects `main` — briefs that target the worktree must name it by **absolute path**
+(`pi/subagents.md` § "Lane evidence pitfalls"). Shared option factories can expose
+intentionally-inert options; don't assume an accepted flag — or the cwd — positions the session.
 
 > **Update (the stacked objective-plan positioning shipped).** The registry policy is no longer
 > the whole story: every positioning gate keys off the **launched stage instance**, so a door

@@ -60,9 +60,13 @@ guesses from bytes. This retires the old fragility where a live tool result quot
 false-positive the dedup.
 
 Two authorities stay distinct. Full-branch history (`branchOf` + `branchCarries` in
-`extension/substrate/workflowState.ts`) serves eligibility and state rebuild, and the strict
-once-per-selected-branch read-only marker — `toolGating` deliberately keeps the full-branch scan,
-a historical latch rather than a model-context-bound delivery. The new leaf answers only "is the
+`extension/substrate/workflowState.ts`) serves state rebuild and the strict once-per-selected-branch
+read-only marker — `toolGating` deliberately keeps the full-branch scan, a historical latch rather
+than a model-context-bound delivery. (Whether plan guidance is injected at all is no longer a
+branch-derived "eligibility" question: plan guidance **rides the read-only gate** behind one stage
+predicate, `extension/pi/v1/contextInjection.ts::isPlanGuidanceStage`, plus `installInjectedContext`'s
+`runnerChild` fence — there is no `plan_authoring` bit and no eligibility/context-policy module;
+`pi/subagents.md` § "Native child execution — the two-boolean policy".) The new leaf answers only "is the
 delivery live in model context *now*". Projection failures propagate to the consumer (a read
 failure is never manufactured into a falsely clean empty projection).
 
