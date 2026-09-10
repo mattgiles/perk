@@ -287,8 +287,8 @@ never RPC/ReportWave. The orchestration that drives it lives in
 
 perk's subagent defs — the `PERK_AGENTS` tuple (kept sorted), currently `adversarial-reviewer`,
 `conflict-resolver`, `draft-reviewer`, `dream-analyst`, `dream-reducer`, `harvest-analyst`, `learn-analyst`,
-`objective-explorer`, `pr-reviewer`, `review-classifier` (`review-angle-selector` was retired
-with `/pr-review-dynamic`, PR #2109) — reach
+`objective-explorer`, `pr-reviewer`, `review-classifier`, `scout` (`review-angle-selector` was
+retired with `/pr-review-dynamic`, PR #2109) — reach
 consumer repos via the Python wheel + `perk init`. This closed the former "known gap." (Don't
 restate a hard count in prose — counts are drift magnets per
 `workflow/doc-reconciliation.md`; `PERK_AGENTS` is the SSOT.)
@@ -379,10 +379,8 @@ the `.pi/agents/perk/` pruning convergence (which owns only that subdir), yet st
 via `[models.subagents]` (`session-auditor` — dev-only, dormant in consumer repos). Use this
 namespace shape for future dev-only agents rather than growing the delivered set.
 
-`perk-dev.analyst` (`.pi/agents/perk-dev/analyst.md`) sits beside `session-auditor` in the same
-repo-local namespace. It is absent from `PERK_AGENTS` (guarded — `tests/test_repo_local_agents.py`
-asserts `"analyst" not in PERK_AGENTS`) and absent from both planes' `[models.subagents]` key
-sets (a verified fact, NOT guarded by that test).
+The former `perk-dev.analyst` was promoted into the delivered `perk.scout` (`agents/scout.md`, in
+`PERK_AGENTS`) and retired without alias; `session-auditor` is the namespace's sole member.
 
 ### Process note
 

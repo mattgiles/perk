@@ -18,6 +18,7 @@ PERK_AGENTS: tuple[str, ...] = (
     "objective-explorer",
     "pr-reviewer",
     "review-classifier",
+    "scout",
 )
 
 

@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **229** canonical source units
-- **1231** logical fragments
+- **230** canonical source units
+- **1233** logical fragments
 - **16** session shapes and **12** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -128,11 +128,15 @@ Model-visible tools and injected controls shared across workflow families.
 
 | Unit | Role | Audience | Canonical source | Consumed by |
 | --- | --- | --- | --- | --- |
+| `markdown:agents/scout.md` | `subagent-instruction` | `shipped` | [`agents/scout.md`](../../agents/scout.md) · `file` | — |
 | `typescript-model-call:extension/substrate/agentScratch.ts:module:before-agent-start:0` | `context` | `shipped` | [`extension/substrate/agentScratch.ts`](../../extension/substrate/agentScratch.ts) · `symbol:module/event:before_agent_start/0` | — |
 
 <details>
 <summary>Logical fragments</summary>
 
+- `markdown:agents/scout.md`
+  - `frontmatter:description` — Discovery description (`frontmatter.description`)
+  - `section:what-you-do` — What you do (`heading:what-you-do`)
 - `typescript-model-call:extension/substrate/agentScratch.ts:module:before-agent-start:0`
   - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
 

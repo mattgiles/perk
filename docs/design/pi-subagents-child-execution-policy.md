@@ -70,14 +70,27 @@ nothing — no injection, every owned copy retired — before any caller's selec
 
 ## Report definitions
 
-Every report agent — the nine delivered `agents/*.md` definitions other than the writer, plus the
-repo-local `perk-dev.session-auditor` at `.pi/agents/perk-dev/session-auditor.md` — is `async:
-true`, `completionGuard: false`, `systemPromptMode: replace`, inherits no global/project context or
-skills, and has the read-only tool posture `read, grep, find, ls, bash`. The delivered nine are
-pinned by `tests/test_subagent_agents.py::test_native_child_profile`; the auditor by
-`tests/test_repo_local_agents.py::test_auditor_is_the_tenth_background_report_outside_delivery`.
-Every spawn adds `context: "fresh"`, `mission: false` and `WAVE_ACCEPTANCE` (acceptance disabled) —
-pinned by `extension/waves/reportWave.test.ts`.
+Two layers of invariant apply, and they have different owners.
+
+**Definition-level (the def owns it).** Every report agent — the ten delivered `agents/*.md`
+definitions other than the writer, plus the repo-local `perk-dev.session-auditor` at
+`.pi/agents/perk-dev/session-auditor.md` — is `async: true`, `completionGuard: false`,
+`systemPromptMode: replace`, inherits no global/project context or skills, sets no
+`defaultContext`, and has the read-only tool posture `read, grep, find, ls, bash`. The delivered
+ten are pinned by `tests/test_subagent_agents.py::test_native_child_profile`; the auditor by
+`tests/test_repo_local_agents.py::test_auditor_is_a_background_report_outside_delivery`.
+
+**Spawn-level (the perk-owned wave owns it).** Every `ReportWave` spawn adds `context: "fresh"`,
+`mission: false`, `WAVE_ACCEPTANCE` (acceptance disabled) and the report restriction packet —
+pinned by `extension/waves/reportWave.test.ts` for the agents that wave spawns. `perk.scout` is
+the one delivered report with **no perk-owned wave yet**: it is reached only through a direct
+`subagent` call (the contracts §8.3 leniency), which injects none of those spawn-level facts, so the
+caller supplies `context: "fresh"` and the sanctioned acceptance disable itself (the def's
+description says so) and `reportWave.test.ts` does not pin it. Until a launcher exists, a
+`perk.scout` child runs under the runner bit alone — no packet, no floor (see "Not claimed").
+The former repo-local `perk-dev.analyst`, which carried `defaultContext: fresh` and an `acceptance`
+block in its frontmatter, was retired when it was promoted into `perk.scout`; those two facts moved
+from the def to the caller so the def fits the closed profile.
 
 ## The writer
 
@@ -115,5 +128,5 @@ writes by design.
 | Runner children provision no scratch | `extension/substrate/agentScratch.test.ts` "a runner child provisions no scratch even without a floor" |
 | Plan-bound readers run in the caller checkout; the packet is constant | `extension/waves/reportWave.test.ts` profile + hostile-fields tests; `reportWaveRpc.test.ts` round-trip |
 | Producer → consumer composition | `extension/pi/v1/waveIsolation.test.ts` "real composition: the rendered packet floors a child…" (fake RPC bus → rendered item → child session → `write` blocked, parent and handoff untouched) |
-| Report agents keep async/fresh/mission/acceptance posture | `tests/test_subagent_agents.py::test_native_child_profile` (the nine delivered defs); `tests/test_repo_local_agents.py::test_auditor_is_the_tenth_background_report_outside_delivery` (`perk-dev.session-auditor`); `reportWave.test.ts` spawn pins |
+| Report agents keep async/fresh/mission/acceptance posture | `tests/test_subagent_agents.py::test_native_child_profile` (the ten delivered defs); `tests/test_repo_local_agents.py::test_auditor_is_a_background_report_outside_delivery` (`perk-dev.session-auditor`); `reportWave.test.ts` spawn pins |
 | Reflection failure stays loud | `extension/sessionLifecycle.test.ts` "escaping reflection exception reports safely…" |

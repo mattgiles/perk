@@ -327,6 +327,12 @@ routes:
     audience: shipped
     role: subagent-instruction
     priority: 85
+  - id: agent-scout
+    match: { paths: ["agents/scout.md"] }
+    capability: foundation.tools
+    audience: shipped
+    role: subagent-instruction
+    priority: 85
 
   - id: py-plan-seed-data
     match: { paths: ["src/perk/cli/seed_file.py", "src/perk/cli/commands/plan/from_cmd.py"] }
