@@ -60,6 +60,21 @@ The activation-latched restriction a runner child derives from the packet; it co
 tool gate and cannot be cleared by gate exit, tree navigation or a same-activation restart.
 _Avoid_: child mode, inherited mode
 
+### Report-wave lane identity
+
+**Semantic lane id**:
+The producer-owned identity a learn-flow manifest gives one lane (a harvest `<category>-<n>`, a
+dream cluster id, an audit `expectation_id`) — what analysts match byte-exact against the manifest
+and what typed outcomes report on.
+_Avoid_: lane key, run key, label
+
+**Routing token**:
+Any producer-owned identity rendered into a report child's task prose for byte-exact lane
+selection or verbatim echo — usually the semantic lane id, plus the audit wave's pair-level
+`session_basename` (a token, not a lane id) — untrusted DATA, never an instruction; admitted only
+through the `waves/laneIdentity.ts` fence (a refusal rule, never escaping).
+_Avoid_: escaped id, sanitized id, lane key
+
 ### Review
 
 **Approval guidance**:

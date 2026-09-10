@@ -6281,6 +6281,23 @@ handoff, identity/stage/run data or model-tool parameter is added. This is spawn
 Perk-owned report waves, not continuous revocation, foreground Perk enforcement, certification of
 manual subagent calls, cross-cwd handoff transport, or an OS sandbox.
 
+**The routing-token fence.** A *routing token* is any producer-owned identity rendered into a
+report child's task prose for byte-exact lane selection or verbatim echo — untrusted DATA, never
+an instruction. Usually it is the *semantic lane id* (a harvest `<category>-<n>`, a dream cluster
+id, an audit `expectation_id`); the audit wave additionally renders a pair-level token — the
+`session_basename` the child echoes verbatim — which is a routing token but not a lane id.
+`extension/waves/laneIdentity.ts` exports the fence: `isRoutingToken(token)` is
+`true` iff the token is non-empty and carries none of C0 U+0000–U+001F, DEL U+007F, C1
+U+0080–U+009F, U+2028/U+2029, or `"`; `renderRoutingToken(token)` is the asserting identity
+helper — it returns an accepted token UNCHANGED and throws on a refused one as a programmer
+error (the `validateAssignments` posture: a caller rendered a token it never fenced), never an
+operational failure arm. The fence is a REFUSAL rule, never an escaping rule — tokens must
+survive byte-exact matching against the manifest, so any escaping would break selection by
+construction. There is no length bound: an oversized id fails as availability at the transport
+(a wave-level failure), never as a silent success. The learn flows' `laneTask` sites render
+through the helper, and their decoders (§8.48, §8.60 — refuse) and planner (§8.50 — degrade)
+apply the predicate upstream, so the throw is unreachable in production.
+
 **Report authority and native partial settlement.** Ordinary durable `state: "complete"`
 uses only `status.json.workflow.value`; completion metadata never supplements or replaces it.
 A matched completion with top-level `state: "failed" | "partial"` and an explicit native
@@ -8193,7 +8210,8 @@ module): blocking, `best-effort` completeness, ONE attempt, NO retry — a faile
 is an explicitly-reported skipped lane; only a wave-level failure fails the call (a loud
 soft-fail whose `error_type` is the wave-level reason). Strict pre-spawn validation (any
 deviation refuses before spawn with a named detail): byte-identical `schema_version: "1"`,
-string `commit_sha`, non-empty lanes with unique non-empty ids and non-empty docs, lexical
+string `commit_sha`, non-empty lanes with unique non-empty ids that pass the §8.35
+routing-token fence (an unsafe id refuses with a named detail) and non-empty docs, lexical
 `docs/learned/` containment on every doc path PLUS resolved-symlink containment for existing
 doc paths (realpath'd against the resolved corpus root, which must itself resolve inside the
 resolved checkout — mirroring the gather core's symlinked-corpus-root guard; nonexistent doc
@@ -8780,7 +8798,18 @@ launch state (§8.3's `audit_bundle_dir` binding); missing/blank binding or a mi
 pi-subagents' `runs.all` key contract, which the wave renderer also enforces up front; the
 path-qualified pair identity `<expectation_id>@<session_path>` rides the lane label — basenames
 are not globally unique — and the fold joins reports back to pairs through the code-owned lane
-plan, never by parsing keys). Packetized pairs sharing `(expectation_id, session_basename)` share
+plan, never by parsing keys). Every verdicts record is written under the FOLD identity
+`(enclosing result id, session_path)` — the fold's join key — and the file carries each identity
+at most once (the fold rejects a duplicate wholesale): a fold identity claimed by more than one
+packetized pair (e.g. a pair and a mismatched sibling sharing a `session_path`, or byte-identical
+twins) dispatches NO lane for any claimant and is recorded as ONE consolidated `lane-failed`
+("fold identity … is claimed by N packetized pairs — ambiguous identity"; the first claimant's
+`session_basename`). A packetized pair whose `expectation_id` differs from its enclosing result
+`id` (ambiguous identity — the rubric would come from one expectation and the verdicts identity
+from another), or whose rendered routing tokens — the enclosing `id` and its `session_basename`
+— fail the §8.35 fence, dispatches as NO lane and is recorded `lane-failed` with a named detail
+(the mismatch record's identity substitutes the enclosing id; every other record's pair id IS
+the enclosing id). Packetized pairs sharing `(expectation_id, session_basename)` share
 a stem-keyed packet file, so their evidence is ambiguous — such pairs dispatch as NO lanes and
 are recorded `lane-failed` ("duplicate session basename in bundle — ambiguous packet identity")
 while unaffected lanes still dispatch. The per-lane `outputSchema` is the tri-state verdict
@@ -8791,9 +8820,11 @@ report-wave policy (`best-effort`, ONE attempt, no retry); the
 `[models.subagents] session-auditor` key rides as the workflow-level model
 default. **Zero-lane short-circuit**: no dispatched lanes ⇒ the wave is never launched (a
 synthetic complete result) and the tool still writes `verdicts.json` — its `lanes` carry only
-the pre-dispatch degrades (`lane-failed`: a basename collision / a missing `packet_path`), so
-`lanes: []` only when no packetized pair degraded. **verdicts.json is
-written in every arm in which the wave was launched (and the zero-lane arm)**: engine-validated
+the pre-dispatch degrades (`lane-failed`: a contested fold identity / an id mismatch / an unsafe
+routing token / a basename collision / a missing `packet_path`), so `lanes: []` only when no
+packetized pair degraded.
+**verdicts.json is written in every arm in which the wave was launched (and the zero-lane
+arm)**: engine-validated
 reports are re-sanitized before the write (an out-of-vocabulary shape degrades to
 `malformed-report`; an echoed `expectation_id`/`session_basename` mismatch degrades to
 `lane-failed` with the mismatch recorded — the Python fold's `validate()` rejects unknown
@@ -10700,9 +10731,9 @@ byte-identical the string `"1"` (dream's own version line); string `commit_sha`;
 with `structural`/`advisory` records each carrying its four/five pinned family keys **as
 arrays** — rows deliberately NOT deep-validated (TS consumes findings only via the manifest
 file the analysts read; the Python `OutputModel` renderer owns row shapes; the shallow check
-catches truncation/gross drift); non-empty `lanes`, each with a non-empty unique string `id`,
-string-or-null `rollup`, and a non-empty `docs` array of **at most `laneDocs` (8)** entries — a
-larger lane is structurally unwinnable under the report schema's per-lane doc cap, refused
+catches truncation/gross drift); non-empty `lanes`, each with a non-empty unique string `id`
+passing the §8.35 routing-token fence, string-or-null `rollup`, and a non-empty `docs` array of
+**at most `laneDocs` (8)** entries — a larger lane is structurally unwinnable under the report schema's per-lane doc cap, refused
 pre-spawn with a named detail; each doc with a non-empty string `path` passing the LEXICAL
 containment layer (`lexicalContainmentError`, shared from `learning/containment.ts`), equal to its own
 POSIX normalization (**canonical form required** — an alias spelling like
@@ -10718,7 +10749,9 @@ whole wave pre-spawn with a named detail; unknown extra keys are ignored (forwar
 stem clamped, global 1-based ordinal); the SEMANTIC manifest lane id rides the lane `label`,
 the module-private lane plan, and the task text — producer lane ids are deliberately NOT
 run-key-bounded (category-fallback and long-cluster ids never fail the run-key contract), so
-the decoder performs no run-key conformance check. Lane planning is module-private: callers
+the decoder performs no run-key conformance check (the routing-token fence is the one, narrower
+id rule — it refuses only characters that would break task-prose framing). Lane planning is
+module-private: callers
 see only the entrypoint's typed outcome, never orchestration keys or the plan shape.
 
 **The closed report schema.** `DREAM_ANALYST_REPORT_SCHEMA`: `additionalProperties: false` at
