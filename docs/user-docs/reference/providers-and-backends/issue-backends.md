@@ -200,17 +200,21 @@ re-created or re-saved before current perk can manage them.
 ### Node refinements
 
 A roadmap node's **refinement** (a dated advisory elaboration written ahead of planning) is stored
-as a single marked comment on the node-issue: the first line is the exact
-`perk:objective-refinement:v1:<key>` marker (keyed on the node's identity, including the
-node-issue's UUID), then a one-line JSON header with the node source and authoring provenance,
-then the Markdown. The node-issue description, its attachments, the roadmap, the manifest, and
-the Project are never written by a refinement; re-refining replaces the same comment. Saves make
-one write attempt and verify it by reading the comment back, refusing on concurrent edits,
-duplicate records, or a damaged record instead of retrying. A refinement comment is never read
-as the node's plan comment. Refinements are authored with `perk objective refine` /
-`/objective-refine` and saved by an approved `plan_review` or the human's
-`/objective-refinement-save` — **Linear only**: a GitHub objective store refuses before
-authentication, network, sync or launch, and again at save, until the GitHub carrier lands.
+as a single marked comment on the node's **carrier**: on Linear the node-issue (the key includes
+the node-issue's UUID); on GitHub the objective issue itself, shared by every node of the
+objective (the key includes the node id, so each node's record is distinct). The first line is
+the exact `perk:objective-refinement:v1:<key>` marker, then a one-line JSON header with the node
+source and authoring provenance, then the Markdown. The carrier's description, its attachments,
+the roadmap, the manifest, and the Project are never written by a refinement; re-refining
+replaces the same comment. Saves make one write attempt and verify it by reading the comment
+back, refusing on concurrent edits, duplicate records, or a damaged record instead of retrying.
+A refinement comment is never read as the node's plan comment or as any other perk marker
+comment. Refinements are authored with `perk objective refine` / `/objective-refine` and saved
+by an approved `plan_review` or the human's `/objective-refinement-save` — **authoring is Linear
+only** in this release: the refine doors are gated by a rollout allowlist that admits Linear, so
+a GitHub objective store refuses `unsupported_backend` before authentication, network, sync or
+launch, and again at save (the GitHub carrier itself stores and reads refinements; only the
+authoring doors are not yet enabled there).
 Planning sessions consume a saved refinement as dated advisory DATA behind a file pointer —
 snapshotted at launch by `perk objective plan`, or when `/objective-plan` runs the
 `node-engagement` worker after the planning transition (on GitHub the read runs over the

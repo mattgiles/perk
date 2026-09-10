@@ -27,8 +27,9 @@ Adapter disciplines:
   substrings, and tests assert messages).
 - **The guarded marked-comment seams (contracts.md §8.67).** ``GitHubIssueBackend`` IS the
   ``issue_backend.MarkedCommentSeams`` the shared guarded driver runs over: ``scan`` reads every
-  comment page through the GraphQL engagement read (comment ``id`` = the stringified
-  ``databaseId``), ``create``/``update`` are the REST comment POST / PATCH, and ``transcode`` is
+  comment page through the GraphQL engagement read (comment ``id`` = the full-width
+  ``fullDatabaseId`` in canonical decimal — never the 32-bit ``databaseId``), ``create``/``update``
+  are the REST comment POST / PATCH on that integer, and ``transcode`` is
   the identity — GitHub stores bodies verbatim, so convergence is byte equality with the rendered
   envelope. GitHub's native refusals — the 65,536-character issue-comment cap's HTTP 422, auth,
   rate limit — surface from ``create``/``update`` as ``IssueBackendError`` carrying ``gh``'s
@@ -68,8 +69,9 @@ def _number(issue_id: str) -> int:
 
 
 def _comment_number(comment_id: str) -> int:
-    """Convert a boundary string comment id to GitHub's numeric comment ``databaseId`` (honest
-    failure on junk — the guarded driver normalizes it to ``backend_error``)."""
+    """Convert a boundary string comment id to GitHub's integer comment database id (the
+    ``fullDatabaseId`` the engagement read surfaces; honest failure on junk — the guarded driver
+    normalizes it to ``backend_error``)."""
     try:
         return int(comment_id)
     except ValueError as exc:
@@ -450,8 +452,9 @@ class GitHubIssueBackend:
     # --- guarded marked-comment seams (contracts.md §8.67) ---
     # `GitHubIssueBackend` IS the `issue_backend.MarkedCommentSeams` the shared guarded driver runs
     # over: the scan reads through `gh_engagement.read_issue_comments` (every page) so every
-    # observed value is the real `EngagementComment` (databaseId / stored body / author / native
-    # timestamps); create/update are the same REST primitives the ordinary path uses; the
+    # observed value is the real `EngagementComment` (full-width database id / stored body /
+    # author / native timestamps); create/update are the same REST primitives the ordinary path
+    # uses; the
     # transcoder is the identity (bodies are stored verbatim). These four are the driver's seams,
     # not a general comment API: `create`/`update` take a body ALREADY in stored form and know
     # nothing of `dry_run` — callers wanting a marked comment go through `upsert_marked_comment`,
@@ -477,8 +480,8 @@ class GitHubIssueBackend:
             plans.add_issue_comment(issue=number, body=body, repo_root=self._repo_root)
 
     def update(self, comment_id: str, body: str) -> None:
-        """Seam: replace the whole body of the comment whose ``databaseId`` is ``comment_id``
-        (REST PATCH); no dry-run gate — the guarded driver owns dry runs."""
+        """Seam: replace the whole body of the comment whose database id is ``comment_id`` (REST
+        PATCH on the integer); no dry-run gate — the guarded driver owns dry runs."""
         number = _comment_number(comment_id)
         with _translate():
             plans._patch_comment_body(number, body, self._repo_root)

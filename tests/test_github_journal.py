@@ -60,9 +60,10 @@ def _prepared(operation_id: str = _OP, *, objective_id: str = "252") -> journal.
 def _comment_node(
     cid: str, body: str, created_at: str, edited_at: str | None = None
 ) -> dict[str, object]:
-    # The comments selection surfaces the integer `databaseId` (derived from the `IC_<n>` suffix).
+    # The comments selection surfaces the BigInt `fullDatabaseId` (a decimal string on the wire;
+    # derived from the `IC_<n>` suffix).
     return {
-        "databaseId": int(cid.removeprefix("IC_")),
+        "fullDatabaseId": cid.removeprefix("IC_"),
         "body": body,
         "createdAt": created_at,
         "lastEditedAt": edited_at,

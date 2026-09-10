@@ -125,17 +125,23 @@ def _not_found_issue_proc(number: int) -> _Proc:
     )
 
 
+# The first minted comment id sits past the signed 32-bit range a GraphQL `Int` can carry: real
+# GitHub comment ids already exceed it, which is why the identity is `fullDatabaseId` (`BigInt`).
+_FIRST_COMMENT_ID = 2**31 + 1000
+
+
 class FakeGitHubIssues:
     """A stateful `gh` fake over ONE repository's issues + comments (installed with
     ``monkeypatch.setattr(subprocess, "run", fake)``).
 
     State: ``issues[number] = {title, body, state, url}``; ``comments[number]`` = ordered rows
-    ``{id, body, created_at, edited_at, login, bot}`` where ``id`` is the integer ``databaseId``
-    (the ONE comment identity — REST list ``id`` == GraphQL ``databaseId`` == the PATCH path
-    id). ``page_size`` (default 2) chunks BOTH the GraphQL comments connection and the REST
-    ``--paginate`` census so three comments exercise both cursor loops. ``comment_max_chars``
-    is GitHub's 65,536-character issue-comment cap (a longer POST/PATCH body is the real 422).
-    ``calls`` records every `gh` argv (sans ``gh``).
+    ``{id, body, created_at, edited_at, login, bot}`` where ``id`` is the integer database key
+    (the ONE comment identity — REST list ``id`` == GraphQL ``fullDatabaseId`` (a ``BigInt``,
+    encoded as a decimal string) == the PATCH path id); ids are minted past the signed 32-bit
+    range so every scan exercises the full-width identity. ``page_size`` (default 2) chunks BOTH
+    the GraphQL comments connection and the REST ``--paginate`` census so three comments exercise
+    both cursor loops. ``comment_max_chars`` is GitHub's 65,536-character issue-comment cap (a
+    longer POST/PATCH body is the real 422). ``calls`` records every `gh` argv (sans ``gh``).
     """
 
     def __init__(self, *, page_size: int = 2, comment_max_chars: int = 65_536) -> None:
@@ -145,7 +151,7 @@ class FakeGitHubIssues:
         self.issues: dict[int, dict[str, object]] = {}
         self.comments: dict[int, list[dict[str, object]]] = {}
         self.calls: list[list[str]] = []
-        self._next_comment_id = 1000
+        self._next_comment_id = _FIRST_COMMENT_ID
         self._clock = 0
 
     # ------------------------------------------------------------------ seeding
@@ -324,7 +330,7 @@ class FakeGitHubIssues:
             has_next = start + self.page_size < len(rows)
             nodes = [
                 {
-                    "databaseId": c["id"],
+                    "fullDatabaseId": str(c["id"]),  # BigInt: a decimal string on the wire
                     "body": c["body"],
                     "createdAt": c["created_at"],
                     "lastEditedAt": c["edited_at"],

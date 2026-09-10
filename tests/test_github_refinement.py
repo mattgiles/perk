@@ -12,7 +12,7 @@ the same fake.
 Assertions are semantic (complete pagination, correct mutation identity, full replacement, typed
 outcomes, zero forbidden effects, at-most-one mutation attempt) — never frozen argv or total call
 counts. The **offline persistence gate** at the bottom is an ordinary pytest case over a temp repo
-+ the actual resolvers. Live GitHub behavior (byte preservation, the 422 shape, ``databaseId``
++ the actual resolvers. Live GitHub behavior (byte preservation, the 422 shape, ``fullDatabaseId``
 presence, ``--paginate --slurp`` on the comments endpoint) is deliberately unobserved here.
 """
 
@@ -408,13 +408,14 @@ class TestGuardedUpsertOverGitHub:
         verified = result.verified_comment
         assert fake.mutations(start) == [f"POST issues/{OBJ}/comments"]
         [comment] = [c for c in fake.comments[OBJ] if c["body"] == long_body]
-        assert verified.id == str(comment["id"])  # the databaseId, as str
+        assert verified.id == str(comment["id"])  # the full-width database id, as str
+        assert int(verified.id) > 2**31 - 1  # past what a 32-bit GraphQL Int could carry
         assert verified.body == long_body  # stored verbatim: HTML marker + <details> preserved
         assert issues.transcode(long_body) == long_body
         assert verified.created_at == comment["created_at"] and verified.edited_at is None
         assert verified.author.kind == "perk"
 
-        # Update: expectation = observed id + digest → one PATCH on the databaseId.
+        # Update: expectation = observed id + digest → one PATCH on the database id.
         start = len(fake.calls)
         short_body = _body("short")
         expected = MarkedCommentExpectation(verified.id, body_digest(verified.body))

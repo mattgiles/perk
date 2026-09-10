@@ -341,9 +341,11 @@ those Linear artifacts must be re-created or re-saved.
 ### Node refinements
 
 A roadmap node's **refinement** (a dated, reviewed, advisory elaboration authored ahead of its
-planning turn) is one marked comment on the node-issue: the exact
+planning turn) is one marked comment on the node's carrier — the node-issue on Linear; on
+GitHub the objective issue itself, shared by every node of the objective: the exact
 `perk:objective-refinement:v1:<key>` marker as the first line (the key hashes the node's
-identity, including the node-issue UUID), a one-line JSON header (the node source it was
+identity — including the node-issue UUID on Linear, the objective issue number and node id on
+GitHub), a one-line JSON header (the node source it was
 written against + authoring provenance: run id, UTC timestamp, full `HEAD` sha, dirty flag),
 then the Markdown. "Refined" is only the presence of that valid comment — no node status,
 header, manifest, plan-header, or plan-ref field changes, and the node stays exactly as

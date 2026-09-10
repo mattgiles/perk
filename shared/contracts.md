@@ -5167,11 +5167,14 @@ instructions**:
 
 **Issue-backend coverage.** `LinearIssueBackend` is honest. `GitHubIssueBackend` is honest for
 comments + description edits, both via read-only `gh api graphql`: comments from
-`IssueComment` selecting `databaseId body createdAt lastEditedAt author{…}` — `EngagementComment.id`
-is the stringified `databaseId` (the REST id the comment-PATCH endpoint needs; the GraphQL node
-id is never surfaced; a node without an integer `databaseId` is a labelled `GitHubError`),
-`lastEditedAt` → the `edited_at` flag, `author { __typename databaseId login }` → the bot/human
-discriminator + opaque id; description edits from `Issue.userContentEdits`
+`IssueComment` selecting `fullDatabaseId body createdAt lastEditedAt author{…}` —
+`EngagementComment.id` is the full-width `fullDatabaseId` (a `BigInt`, encoded by GitHub as a
+decimal string because comment ids exceed a 32-bit `Int`) in canonical decimal — the REST id the
+comment-PATCH endpoint needs; neither the 32-bit `databaseId` nor the GraphQL node id is
+surfaced for comments; a node without a parseable `fullDatabaseId` (a decimal string, or a JSON
+integer) is a labelled `GitHubError`; `lastEditedAt` → the `edited_at` flag,
+`author { __typename databaseId login }` → the bot/human discriminator + opaque id; description
+edits from `Issue.userContentEdits`
 (`editedAt` / `editor` / a best-effort `diff` — GitHub may return null). `gh api graphql` does not
 auto-template `{owner}/{repo}`, so the queries pass explicit `owner`/`name`/`number` variables
 (cursor-paginated); a not-found issue folds to `()`. `perk_bot_ids` stays empty (perk has no
@@ -11876,10 +11879,10 @@ convergence (no-write success included).
 `to_linear_markdown` (so convergence means equality to the complete Linear rendering, and
 update targets the observed comment UUID). `GitHubIssueBackend` implements `MarkedCommentSeams`
 itself — `scan` = `gh_engagement.read_issue_comments` (every page; the comment `id` is the
-stringified `databaseId`) mapped through `_engagement_comment` into `scan_marked_comments`;
-`create` = `plans.add_issue_comment`; `update` = the REST comment PATCH on the integer
-`databaseId` (a non-numeric id refuses as `IssueBackendError`, normalized by the driver to
-`backend_error`); `transcode` = identity (bodies are stored verbatim, so convergence is byte
+full-width `fullDatabaseId` in canonical decimal) mapped through `_engagement_comment` into
+`scan_marked_comments`; `create` = `plans.add_issue_comment`; `update` = the REST comment PATCH
+on the integer database id (a non-numeric id refuses as `IssueBackendError`, normalized by the
+driver to `backend_error`); `transcode` = identity (bodies are stored verbatim, so convergence is byte
 equality with the rendered envelope). GitHub's native refusals — the 65,536-character
 issue-comment cap's HTTP 422, auth, rate limit — surface from `create`/`update` as
 `backend_error` chaining `gh`'s diagnostics after the verification scan proves the unchanged
@@ -11984,7 +11987,7 @@ the stored record unchanged); plan/refinement interleaving on the single-issue c
 roadmap block and body-comment table re-render while the refinement comment stays
 byte-untouched); unchanged roadmap block / header / objective-body comment; refinement comments
 filtered from engagement renders. Live GitHub behavior (byte preservation, the 422 shape,
-`databaseId` presence, `--paginate --slurp` on the comments endpoint) remains unobserved by
+`fullDatabaseId` presence, `--paginate --slurp` on the comments endpoint) remains unobserved by
 design — the enablement slice's archive record lists the live checks as unobserved.
 
 ## §8.68 · Objective-node refinement authoring and reviewed save (the `objective-refine` doors)
