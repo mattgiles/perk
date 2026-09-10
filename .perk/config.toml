@@ -33,7 +33,11 @@ trusted = true
 # `just ci`'s verification targets (lint/typecheck/test/changelog-check) plus the scope-aware
 # `docs-check` docs gate (every surface it runs is also reached through lint/typecheck/test, so
 # a docs-only change still verifies when the code-suffix globs all skip); `setup` is environment
-# prep, not a verification check — it is owned by the [worktree] setup hook below.
+# prep, not a verification check — it is owned by the [worktree] setup hook below. The Python
+# test target is carried as the two complementary tier rows (`test-py-fast` + `test-py-slow`,
+# same glob) so the concurrent run overlaps the slow build/integration cohort with the rest:
+# their union is exactly what `just test-py` collects (`tests/test_pytest_tiers.py` guards both
+# the selection and this wiring), so the gate's scope is unchanged — no case is skipped.
 [[ci.checks]]
 name = "lint-py"
 command = "just lint-py"
@@ -55,8 +59,13 @@ command = "just typecheck-js"
 glob = "*.ts,*.tsx,*.js,*.jsx"
 
 [[ci.checks]]
-name = "test-py"
-command = "just test-py"
+name = "test-py-fast"
+command = "just test-py-fast"
+glob = "*.py"
+
+[[ci.checks]]
+name = "test-py-slow"
+command = "just test-py-slow"
 glob = "*.py"
 
 [[ci.checks]]

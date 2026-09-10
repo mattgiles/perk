@@ -14,8 +14,14 @@ and all four run the **full default Python suite** — every case ordinarily col
 - `just test-py` — pytest alone.
 - `just test` — pytest, then node:test, then the docs-site check.
 - GitHub CI (`.github/workflows/ci.yml`) — `just lint`, `just typecheck`, `just test`.
-- perk's in-session `run_ci` — the `[[ci.checks]]` `test-py` row in `.perk/config.toml` runs
-  `just test-py` (skipped on the run-all path only when no changed `*.py` file matches its glob).
+- perk's in-session `run_ci` — two `[[ci.checks]]` rows in `.perk/config.toml`, `test-py-fast`
+  (`just test-py-fast`) and `test-py-slow` (`just test-py-slow`), both on the same `*.py` glob
+  (both skipped on the run-all path only when no changed `*.py` file matches). `run_ci` runs its
+  checks concurrently, so the slow build/integration cohort overlaps the rest instead of trailing
+  it; the two rows are complementary selections whose union is exactly `just test-py`'s
+  collection, so the gate's scope is unchanged — no case is skipped. This is a wiring choice, not a
+  measured speedup: the two rows are independent xdist pools (see [Parallelism](#parallelism))
+  and no combined-time benefit has been measured.
 
 The perk-dev prose suites (`tests/test_prose_review_*.py`, `tests/test_prose_map*.py`) are a
 deliberate opt-in carve-out: `tests/conftest.py` ignores them unless `PERK_PROSE_REVIEW_TESTS=1`,
@@ -38,8 +44,8 @@ rule). A tier is a focused local selection while iterating — never a substitut
 `test-py-fast` and `test-py-slow` are complementary selections of the same suite: together they
 collect exactly what `test-py` collects, and neither is a different regression standard.
 `tests/test_pytest_tiers.py` regression-tests this wiring (no marker filter on the full
-entrypoints, the complementary quoted expressions on the tier recipes, the config row, and this
-guide naming every recipe).
+entrypoints, the complementary quoted expressions on the tier recipes, the two same-glob config
+rows being the whole in-session Python gate, and this guide naming every recipe).
 
 ## What `slow` means
 
@@ -100,10 +106,10 @@ tier's own selection.
 sharing an `xdist_group` — the build consumers share `xdist_group("wheel_build")`, so they land on
 one worker and `uv build` runs once per selecting run.
 
-Running `just test-py-fast` and `just test-py-slow` concurrently in two shells creates two
-independent xdist pools (up to twelve workers, two collections, two basetemps). It is **not** an
-optimised combined runner and no combined-time benefit is claimed; `just test-py` is the combined
-run.
+Running `just test-py-fast` and `just test-py-slow` concurrently — in two shells, or as perk's
+in-session `run_ci` does with its two rows — creates two independent xdist pools (up to twelve
+workers, two collections, two basetemps). It is **not** an optimised combined runner and no
+combined-time benefit is claimed; `just test-py` is the combined run.
 
 ## Timing a tier
 

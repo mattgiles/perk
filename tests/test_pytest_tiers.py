@@ -1,13 +1,16 @@
 """Python test-tier wiring proof: the full gates run the whole suite, the tiers complement it.
 
-`just test-py`, `just test`, GitHub CI (`just test`) and perk's in-session `run_ci` (the
-`[[ci.checks]]` `test-py` row) all run the **full default Python suite** — slow cases included.
-`just test-py-fast` (`-m "not slow"`) and `just test-py-slow` (`-m slow`) are complementary
-*selections* of that same suite, never a skip or a different regression standard. The wiring is
-regression-tested because a stray `-m` on `test-py` or `test` would silently narrow every gate
-while everything stays green, and an unquoted compound expression on a tier recipe would break
-that recipe for every caller. Marker *validity* (a misspelt `slow`) is enforced natively by strict
-collection (`strict_markers` in `pyproject.toml`) and is deliberately not mirrored here.
+`just test-py`, `just test` and GitHub CI (`just test`) run the **full default Python suite** in one
+process — slow cases included. `just test-py-fast` (`-m "not slow"`) and `just test-py-slow`
+(`-m slow`) are complementary *selections* of that same suite, never a skip or a different
+regression standard; perk's in-session `run_ci` carries the suite as exactly those two
+`[[ci.checks]]` rows under one shared glob, so the concurrent run overlaps the slow cohort with the
+rest while the union stays the whole suite. The wiring is regression-tested because a stray `-m`
+on `test-py` or `test` would silently narrow every gate while everything stays green, an unquoted
+compound expression on a tier recipe would break that recipe for every caller, and a dropped or
+re-globbed tier row would silently narrow the in-session gate. Marker *validity* (a misspelt
+`slow`) is enforced natively by strict collection (`strict_markers` in `pyproject.toml`) and is
+deliberately not mirrored here.
 
 Self-contained by design: its own recipe parser, no import from another test module, and not part
 of the `docs-check` pytest line (this is a gate-scope guard, not a docs gate).
@@ -16,11 +19,16 @@ of the `docs-check` pytest line (this is a gate-scope guard, not a docs gate).
 import re
 import shlex
 import tomllib
+from itertools import pairwise
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 FULL_GATE_RECIPES = ("test-py", "test")
+TIER_RECIPES = ("test-py-fast", "test-py-slow")
+# Every recipe whose invocation runs (part of) the default Python suite — a [[ci.checks]] row
+# calling any of these is a Python-gate row.
+PYTHON_SUITE_RECIPES = FULL_GATE_RECIPES + TIER_RECIPES
 GUIDE_NAMED_RECIPES = (
     "just test-py",
     "just test-py-fast",
@@ -96,14 +104,38 @@ def test_tier_recipes_select_complementary_markers():
         assert line.rstrip().endswith("{{args}}"), line
 
 
-def test_perk_python_gate_runs_the_full_recipe():
-    # ci.yml's `run: just test` is pinned by
-    # tests/test_docs_gates.py::test_github_ci_runs_the_gate_recipes; this is the in-session twin.
+def _just_recipes(command: str) -> set[str]:
+    """Every recipe a `[[ci.checks]]` command hands to `just` (compound `a && b` included)."""
+    return {recipe for tool, recipe in pairwise(shlex.split(command)) if tool == "just"}
+
+
+def test_perk_python_gate_runs_the_complementary_tiers():
+    # ci.yml's `run: just test` (the whole suite in one process) is pinned by
+    # tests/test_docs_gates.py::test_github_ci_runs_the_gate_recipes. The in-session gate carries
+    # the same suite as the two tier rows so run_ci overlaps the slow cohort with the rest. That
+    # union is the full suite ONLY while (a) the recipes stay complementary
+    # (test_tier_recipes_select_complementary_markers), (b) both rows share one glob — a single
+    # change set selects both or neither — and (c) no other row runs the suite a third time.
     config = tomllib.loads((REPO_ROOT / ".perk/config.toml").read_text(encoding="utf-8"))
-    rows = [row for row in config["ci"]["checks"] if row["name"] == "test-py"]
-    assert len(rows) == 1, "expected exactly one test-py [[ci.checks]] row"
-    assert rows[0]["command"] == "just test-py"
-    assert rows[0]["glob"] == "*.py"
+    checks = config["ci"]["checks"]
+    names = [row["name"] for row in checks]
+    assert len(names) == len(set(names)), f"duplicate [[ci.checks]] names: {names!r}"
+    rows = {row["name"]: row for row in checks}
+    for tier in TIER_RECIPES:
+        assert tier in rows, f"expected a {tier} [[ci.checks]] row"
+        assert rows[tier]["command"] == f"just {tier}"
+        assert rows[tier]["glob"] == "*.py", (
+            f"{tier} must keep the suite's `*.py` glob — a different glob would let one change set "
+            "run one tier without the other, silently narrowing the gate"
+        )
+    python_gate_rows = sorted(
+        name
+        for name, row in rows.items()
+        if _just_recipes(row["command"]) & set(PYTHON_SUITE_RECIPES)
+    )
+    assert python_gate_rows == sorted(TIER_RECIPES), (
+        f"the in-session Python gate must be exactly the two tier rows, got {python_gate_rows!r}"
+    )
 
 
 def test_testing_guide_names_every_tier_recipe():
