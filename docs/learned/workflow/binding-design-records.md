@@ -110,6 +110,23 @@ bounded re-verification) added the record disciplines below. The binding record 
   table, a SHA-256 source census before/after over a fixed closed file list (raw bytes, lowercase
   hex, package-relative paths), semantic-check rows citing durable anchors, and a fixed
   command/disposition table; do not advance the doctor full-baseline stamp on its strength.
+- **Gate-record evidence pins a committed revision + per-path blob hashes** (`git rev-parse
+  <sha>:<path>` for each cited file), never "base + uncommitted diff" — an uncommitted diff is not
+  reproducible evidence, and a bare SHA does not survive a later force-push of the branch.
+- **The "offline-proven only" closure genre.** When a node's live check cannot be run in-session,
+  close with a criteria table that marks each offline criterion *offline-pinned (test id)* and each
+  live check *unobserved — NOT PASSED*, uses the same wording across the design record, contracts,
+  and CHANGELOG, and leaves the live run as an explicit named residual. Never let "the tests pass"
+  read as "the live behaviour was observed".
+- **Measurement honesty** (the Python test-suite speed-up records under
+  `docs/design/archive/python-test-suite-speedup-*`): classify the change (safety / ownership /
+  selection vs speed) **before** measuring, so a non-speed change is never judged by a speed
+  metric; pre-commit a validity gate and a closed verdict vocabulary ("faster", "within observed
+  noise", "slower") so the verdict cannot be re-worded after the data arrives; re-take a stale seed
+  baseline at the current revision rather than comparing against a number measured on another
+  tree; run long series detached from the session and budget for laptop-contention outliers; and
+  let a "speed" objective close honestly with a **no-speedup verdict** when that is what the series
+  shows — the record's value is the measured truth, not the hoped-for headline.
 
 ## Cross-references
 

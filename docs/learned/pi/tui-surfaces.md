@@ -1,5 +1,5 @@
 ---
-title: perk TUI surfaces — surfaces module, the single-value perk status slot, the perk-owned footer
+title: perk TUI surfaces — surfaces module, the composed perk status slot, the perk-owned footer
 read_when: You are touching extension/surfaces/surfaces.ts or any perk-rendered TUI surface (footer, status slot), adding a rich-UI call, or testing footer rendering through the harness.
 cluster: pi-extension
 ---
@@ -7,7 +7,7 @@ cluster: pi-extension
 # perk TUI surfaces
 
 Objective #251's charter convergence built perk's TUI presence in four moves: the surfaces module
-(node 2.1), the themed/windowed checkpoints widget (2.2), the composed single `perk` status slot
+(node 2.1), the themed/windowed checkpoints widget (2.2), the composed `perk` status slot
 (2.3), and the perk-owned `setFooter` footer (3.1). This doc consolidates the cross-cutting laws,
 pi API facts, and test recipes those turns established.
 
@@ -17,8 +17,10 @@ pi API facts, and test recipes those turns established.
   (pi-tui imports confined there, with the vendored `extension/vendor/btw/` as the one
   allowlisted exception); `surfaces.ts` stays dependency-free (structural params, no controller
   imports) — "The surfaces module = `surfaces.ts` + `report.ts`".
-- perk publishes ONE composed `perk` status slot, not per-feature slots — "The composed single
-  `perk` status slot".
+- perk publishes ONE composed `perk` status slot (`<objective> · <activity>`, either half
+  optional), not per-feature slots; activity waits are a Set of per-holder tokens, never a scalar
+  ref-count (a reset with live holders makes a stale `end` inert, not destructive) — "The composed
+  single `perk` status slot".
 - The RPC dual-publish LAW: RPC mode drops factory widgets and `setFooter`; every themed surface
   keeps a `setStatus`/string twin — "The RPC dual-publish law".
 - The footer facts (lifecycle, slot filtering, verified pi versions inline) — "`setFooter`
@@ -48,10 +50,14 @@ Two structural invariants to preserve:
 
 ## The composed single `perk` status slot
 
-*(Since Objective #1416 the slot is **single-value** — objective only; the segment map, keys,
-order, and separator were removed with the checkpoints retirement. The alphabetical-slot-ordering
-fact and the compose-in-one-slot pattern below stay recorded as the lever for any future
-multi-segment need.)*
+The slot is **composed**: `<objective> · <activity>`, either half optional, `undefined` when both
+are absent (`createPerkStatus` in `surfaces.ts`). The objective publisher owns the first half via
+`set`; activity owners hold waits via `beginActivity(target, text)` → `end`. The one activity today
+is `ACTIVITY_BROWSER_REVIEW` ("waiting on browser review"), begun by the two plannotator browser
+paths (`planReviewBrowser.ts`, `objectiveReviewBrowser.ts`, plus the plan door's bridge in `plan.ts`)
+and ended when each wait settles; `session_shutdown` in `extension/index.ts` calls `clearActivity`
+because a browser wait cannot outlive the session. Headless calls are FULL no-ops (record nothing).
+The RPC dual-publish and the footer's own-slot filtering are unchanged by the composition.
 
 Pi's default footer sorts extension statuses **alphabetically by slot key**, so an extension
 cannot order multiple slots. The only ordering lever is collapsing into ONE slot and composing the
@@ -59,15 +65,23 @@ segments yourself: a fixed segment order, two-space join, and an empty compositi
 `undefined` to clear the slot. (This composition is exactly what the custom footer reused while
 the slot was multi-segment.)
 
-- **Shared handle (live, now single-value)**: the handle is created once in `extension/index.ts`
-  and threaded into its publisher (objective; historically also checkpoints). This preserves the
-  extension's zero-module-level-mutable-state invariant — and, in the multi-segment era, the
-  shared map meant one controller's recompose preserved the other's segment regardless of
-  controller registration order.
-- **Headless `set` must be a FULL no-op** — it must never record state (today the single value;
-  historically the segment map). If a headless set recorded text, a later *headful* set — of the
-  **other** segment, in the multi-segment era — would resurrect ghost headless-era text into the
-  composed line. A test pins this.
+- **A scalar ref-count is unsafe when the pool can be reset with live holders.** The activity is a
+  `Set` of per-holder tokens, not a counter: with a counter, `clearActivity` at shutdown followed by
+  a stale wait's late `end` would decrement past a fresh acquisition and blank it. With tokens,
+  `live.delete(token)` returning `false` means "already ended or reset" and the `end` is inert — a
+  wait begun after a reset can never be consumed by a stale `end`. The newest live wait's text shows
+  while any is unended; ending one restores the remainder.
+- **Thread the narrowest structural slice.** Activity owners receive
+  `ActivityHandle = Pick<PerkStatusHandle, "beginActivity">`, never the full handle; and the sink is
+  a **required** parameter at the leaf seam, so a door that forgets to thread it is a compile error,
+  not a silently status-less wait. (There is no gist browser door — gist review is a warm
+  `plan_review` arm — so only the two plannotator paths and the plan door carry the sink.)
+- **Shared handle**: created once in `extension/index.ts` and threaded into its publisher and the
+  activity owners — the extension's zero-module-level-mutable-state invariant.
+- **Headless `set`/`beginActivity` must be FULL no-ops** — never record state. If a headless call
+  recorded text, a later *headful* publish of the other half would resurrect ghost headless-era text
+  into the composed line. A test pins this.
+- The two bridges' rejection semantics differ only over a non-pi bus (recorded, not hardened).
 - No width handling is needed in the publication: pi's footer truncates the status line
   itself.
 
@@ -76,8 +90,8 @@ the slot was multi-segment.)
 Pi's RPC mode drops component-factory widgets and `setFooter` entirely; only `string[]` widgets
 and `setStatus` forward. Any perk surface moving to a themed factory or the custom footer must
 keep a `setStatus`/string twin as the RPC-visible fallback. The custom footer filters its own slot
-key out of `getExtensionStatuses()` to avoid double display (the single-value `perk` slot keeps
-publishing via `setStatus` even though the footer renders the objective segment directly).
+key out of `getExtensionStatuses()` to avoid double display (the composed `perk` slot keeps
+publishing via `setStatus` even though the footer renders the composed value directly).
 
 ## `setFooter` adoption facts (verified against pi 0.78.1; footer-lifecycle bullets re-verified at pi 0.84.1)
 
@@ -138,7 +152,7 @@ widget consumer remains; the patterns stand for future bounded surfaces.)*
   `setStatus` calls inside the handler are invisible to `h.statuses`. The real prompt path binds
   the capturing UI.
 - **"Slot never touched" asserts don't survive a shared slot** (the assert-shape lesson stands on
-  today's single-value slot): a controller clearing an absent value still publishes
+  today's composed slot): a controller clearing an absent value still publishes
   `setStatus("perk", undefined)` on every `session_start` — the
   assert must become "no *defined* value ever set".
 - **The startup banner lands in `h.notifies` in every headful session** — count-based notify
@@ -238,7 +252,7 @@ the first production console-swap; prior swaps were all test-local):
 
 - `extension/surfaces/surfaces.ts`, `extension/surfaces/report.ts` — the surfaces module (the only sanctioned
   rich-UI call sites)
-- `extension/index.ts` — single-value perk-status handle creation, per-`session_start` footer install
+- `extension/index.ts` — perk-status handle creation, `session_shutdown` → `clearActivity`, per-`session_start` footer install
 - `extension/testing/harness.ts` — factory-widget/placement capture, `invokeCommand`
 - `shared/contracts.md` P2.T2c — the RPC dual-publish contract
 - `docs/design/tui-charter.md` — the charter the surfaces converge to

@@ -17,9 +17,10 @@ adapters, wire protocol, and edit workspace evolve.
   no-websocket-route posture, rebuilds from disk, and has one `dist/` writer — "Launcher security
   and the development loop".
 - Catalog failures are fail-closed according to result trustworthiness; policy-definition errors
-  prevent discovery while registration-shape errors become typed findings; a new described param
-  moves multiple count pins (verify via the living-map check) — "Prose-map catalog
-  governance".
+  prevent discovery while registration-shape errors become typed findings; `sync` is
+  whole-projection (sweep foreign `unmapped-unit` drift, re-measure count pins from the catalog);
+  a new governed tool bumps three pins under the opt-in suites `run_ci` never runs — "Prose-map
+  catalog governance".
 - Closed adapter vocabularies are exhaustive at domain/DTO/route boundaries; syntax validation
   precedes selectors and subprocess adapters are bounded — "Source-adapter contract craft".
 - PyYAML merge tags, inherited values, and comment-suffixed document markers require lexical and
@@ -85,6 +86,22 @@ the SDK tool type) and its runtime unknown-field finding form the two-layer guar
 A governed tool gaining a described param moves multiple prose-map count pins at once (governed
 tools / TS fragments / discovery candidates) — verify with the living-map check, never assume
 the outcome (#1992).
+
+**`perk-dev prose-map sync` is whole-projection and drift-intolerant.** `sync` validates the entire
+catalog and refuses (exit 1, no write) while ANY finding stands — including `unmapped-unit` findings
+for routes a concurrently-landed feature never mapped. So a PR editing one route inherits every
+sibling's unrouted drift: sweep the foreign `unmapped-unit` findings to their own sibling routes in
+the same PR (they are not "someone else's"), then **re-measure every count pin from the real
+catalog after `sync`** — never compute the new pin from your own delta, because the sweep moved
+counts you did not author.
+
+**Adding a governed `promptGuidelines`-bearing tool bumps three pins** at once: the governed-tool
+count in `tests/test_prose_map.py`, the fragment total in `tests/test_prose_review_source.py`, and
+the discovery-candidate count in `tools/prose-map/selector.test.ts`. They live under
+`just prose-review-test` + `just prose-review-check`, which `run_ci` / `just ci` do **NOT** run — the
+default gate reports green while all three are stale. Run the carve-out suites explicitly in any PR
+that touches a governed tool's prose. `typescript-symbol` is a valid catalog kind (`ProseKind` in
+`tools/prose-map/catalog.ts`) that no adapter currently produces — do not "fix" its absence.
 
 ## Source-adapter contract craft
 
