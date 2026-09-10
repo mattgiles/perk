@@ -96,6 +96,22 @@ pi-subagents version. `info` when the package is not installed (pi lazy-installs
 perk's guidance was verified against (`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`). pi-subagents stays
 unpinned, so the check is an early-warning surface, not a gate: a mismatch says "re-verify"
 (`docs/developers/pi-subagents-reverify.md`), not "broken".
+The `package` group also carries the report-only `subagent-host-tools` check: it reads the
+installed pi-subagents version, the `PI_FFF_MODE` environment variable, and `pi-fff.json` in the
+launch-precedence agent dir (named by its absolute path in the detail). pi-subagents ≥ 0.67.0
+intersects a child agent's declared tools with the tools the **host** session reports as builtin,
+so a pi-fff running in `override` mode — which re-registers `grep`/`find` under its own name —
+makes every `perk.scout`/`perk.*-reviewer` lane fail at launch and silently strips `grep`/`find`
+from the other report agents. perk-launched sessions inject `PI_FFF_MODE=tools-and-ui` to avoid
+this, so the check names only the operator-owned residue and warns (never fails, no `--fix` arm)
+when the installed version is in the affected range and pi-fff resolves to `override`: an
+exported `PI_FFF_MODE=override` (wins over the injected default — every perk-launched **and**
+warm session is affected; unset it or set it to `tools-and-ui`), or a `"mode": "override"` in
+that `pi-fff.json` with no valid env value (warm/bare `pi` sessions only — where the browser
+review doors and `/pr-review` also spawn waves; remove the key or set it to `tools-and-ui`).
+FFF stays available as `fffind`/`ffgrep` in either remedy. `info` when pi-subagents is not
+installed or its version is unreadable (`subagent-compat` owns that complaint); `ok` on a
+version outside the range or a non-override mode.
 The package group also carries a report-only `ponytail-compat` check for the managed internal
 review dependency. A lazy install that is not present yet is `info`. When installed, doctor verifies
 package identity, the `./skills` export, both exact `SKILL.md` files, and their `ponytail` /

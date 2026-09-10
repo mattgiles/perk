@@ -7,7 +7,9 @@ re-verify ritual — never on a version constraint and never on reading the inst
 tests or doctor.
 
 **When to re-verify:** `perk doctor`'s `subagent-compat` check **warns** (installed version ≠
-`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`), or you are about to build on new engine mechanics.
+`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`), its `subagent-host-tools` check **warns** (the installed
+version is in the host-tool-intersection affected range and pi-fff resolves to `override`), or
+you are about to build on new engine mechanics.
 
 ## Steps
 
@@ -20,6 +22,19 @@ tests or doctor.
    output, the v1 RPC envelope, the partial-settlement projection — and the agent-definition
    parser's `completionGuard: false` handling: a report-only lane must complete on a valid
    `structured_output` report and still fail a missing/invalid one (`run_ci` cannot catch this).
+   Also re-read the **host-tool intersection**: `getHostBuiltinToolNames` /
+   `resolvePiLaunchToolPlan` / `isReviewOrScoutLaneAgent` in
+   `src/runs/shared/child-tool-plan.ts` and the `hostAvailableBuiltins` call sites in
+   `src/runs/background/async-execution.ts`. Since 0.67.0 the engine intersects a child's declared
+   tools with the tools the *host* session reports as builtin-sourced, so an extension that
+   re-registers a builtin by name (pi-fff `override` mode shadows `grep`/`find`) fails
+   review/scout-named agents closed at launch — which is why perk's launches inject
+   `PI_FFF_MODE=tools-and-ui` (`FFF_MODE_ENV`). If the installed release counts a same-name
+   replacement as providing the builtin (or no longer intersects background children), set the
+   upper bound of `_SUBAGENTS_HOST_INTERSECTION_AFFECTED` in
+   `src/perk/convergence/doctor/checks.py` (and its exact pin,
+   `tests/test_doctor.py::test_subagent_host_tools_affected_range_is_pinned`) and decide whether
+   to restore `FFF_MODE_ENV` to `override`.
 3. **Run `just ci`.**
 4. **Bump the stamp**: `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` and
    `tests/test_doctor.py::test_subagent_compat_verified_version_stamp_is_pinned`.
