@@ -77,6 +77,18 @@ typecheck: typecheck-py typecheck-js
 test-py *args:
     uv run pytest {{args}}
 
+# run the FAST tier of the python suite: default cases selected by `-m "not slow"`. A selection,
+# not a different regression standard — `just test-py`, `just test`, CI and run_ci still run every
+# case, slow ones included. Extra args pass through (`-n0`, `-n 4`, `-k expr`, file paths); for a
+# compound `-m` expression call pytest directly (see docs/developers/testing.md).
+test-py-fast *args:
+    uv run pytest -m "not slow" {{args}}
+
+# run the SLOW tier of the python suite: default cases selected by `-m slow` (the wheel/sdist build
+# cohort plus the measured >= 1 s cases); the complement of `test-py-fast`. Same arg passthrough.
+test-py-slow *args:
+    uv run pytest -m slow {{args}}
+
 # run the node:test suite (extension TS + docs-site plugin .mjs). Mild 2x core
 # oversubscription: session construction is I/O-bound, so more in-flight files overlap
 # their I/O waits.

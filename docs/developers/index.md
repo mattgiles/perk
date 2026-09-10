@@ -21,3 +21,4 @@ subdirectory per kind.
 | [How to re-verify pi-subagents after an upstream bump](./pi-subagents-reverify.md) | How-to | the doctor `subagent-compat` check warns (installed ≠ guidance-verified), or you are about to build on new engine mechanics |
 | [Release checklist](./release-checklist.md) | How-to | you are doing the one-time publishing setup (accounts, npm scope + `NPM_TOKEN`, GitHub environments, trusted publishers) or the TestPyPI rehearsal |
 | [Changelog categorizer instruction](./changelog-categorizer.md) | Reference | you (or a classifying agent) need the canonical rules for turning `perk-dev changelog-commits` facts into a reviewed changelog proposal |
+| [Testing perk](./testing.md) | How-to | you are running or timing the Python test tiers (`just test-py` / `test-py-fast` / `test-py-slow`), passing pytest args through `just`, or checking what the full gates run |
