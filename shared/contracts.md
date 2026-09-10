@@ -2056,7 +2056,12 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
 
 - **The two-target split.** The HTML-enhanced body — a best-effort `<details>` embed of the
   verbatim plan (via `get_plan_body`; `None` → no embed, no raise) + the checkout footer — goes
-  **only** into the GitHub PR body (`update_pr_body`). The squash **commit message** is the OTHER
+  **only** into the GitHub PR body (`update_pr_body`). **Size guard:** GitHub caps a PR body at
+  65,536 characters (create and PATCH alike); when the embed would push the footer-inclusive
+  body over that cap, the embed is replaced by a one-line pointer at the plan issue, the closing
+  keyword / plan link / footer are unchanged, the submit succeeds, and `plan_embedded` reports
+  `false`. The fit is judged with the footer reserved on both passes, so create and update
+  never disagree. The squash **commit message** is the OTHER
   target: plain text, set at land, so HTML never leaks into `git log`.
 - **Mergeability probe.** **After** the PR is created + the body validated, `perk pr submit` runs
   a deterministic **local** `git merge-tree --write-tree origin/<base> <head-ref>` probe (no GitHub

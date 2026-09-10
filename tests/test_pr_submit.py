@@ -274,6 +274,45 @@ def test_real_submit_embeds_plan_when_available(monkeypatch):
     assert "`gh pr checkout 42`" in body  # footer stays plain even with the HTML embed
 
 
+def test_real_submit_drops_the_embed_when_the_plan_exceeds_githubs_body_cap(monkeypatch):
+    # GitHub refuses a PR body above 65,536 chars (create and PATCH alike). The embed is
+    # best-effort: an oversize plan yields to a one-line pointer, the closing keyword / plan
+    # link / footer survive, the submit succeeds, and `plan_embedded` reports the truth.
+    _authed(monkeypatch)
+    huge = "# Big plan\n\n" + ("x" * 120 + "\n") * 600  # ~72,600 chars — over the cap alone
+    calls = _stub_gh(monkeypatch, plan_body=huge)
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["success"] is True and data["plan_embedded"] is False
+    body = str(calls["pr_body"])
+    assert len(body) <= submit_cmd._PR_BODY_MAX_CHARS
+    assert "<details>" not in body and "# Big plan" not in body
+    assert body.startswith("Closes #7\n\nPlan: #7\n\n")
+    assert "too large to embed" in body and "`gh pr checkout 42`" in body
+    assert not github.validate_pr_body(body, pr_number=42)
+
+
+def test_plan_embed_fit_is_judged_with_the_footer_reserved():
+    # Exactly at the boundary the create pass (no PR number yet) and the update pass (footer
+    # appended) must agree, so the fit is judged with the footer reserved on both.
+    issue = "7"
+    fixed = len(
+        submit_cmd._join_pr_body(
+            issue=issue, embed=submit_cmd._plan_embed(issue=issue, plan_body="")
+        )
+    )
+    room = submit_cmd._PR_BODY_MAX_CHARS - fixed - submit_cmd._FOOTER_RESERVE
+    fits, too_big = "p" * room, "p" * (room + 1)
+    assert submit_cmd._plan_embed_fits(issue=issue, plan_body=fits)
+    assert not submit_cmd._plan_embed_fits(issue=issue, plan_body=too_big)
+    for plan_body in (fits, too_big):
+        create = submit_cmd._compose_pr_body(issue=issue, plan_body=plan_body)
+        update = submit_cmd._compose_pr_body(issue=issue, plan_body=plan_body, pr_number=42)
+        assert ("<details>" in create) == ("<details>" in update)
+        assert len(update) <= submit_cmd._PR_BODY_MAX_CHARS
+
+
 def test_real_submit_idempotent_existing_pr(monkeypatch):
     _authed(monkeypatch)
     calls = _stub_gh(monkeypatch, existed=True)

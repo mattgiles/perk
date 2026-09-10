@@ -713,6 +713,15 @@ each): `.pi/npm/node_modules/@mgiles/perk/` (219 file hashes — the released 3.
   bans the word “dogfood” anywhere in `shared/contracts.md` (no allowlist), so §8.67 points at
   “the `objective-refinement-linear-planning-*` gate record under `docs/design/archive/`” rather
   than at this file's literal name.
+- **One out-of-scope code fix, operator-authorized.** `/submit` for this plan failed with GitHub's
+  `422 body is too long`: `perk pr submit` embedded the verbatim plan (67,901 characters) in the PR
+  body with no size guard, so a plan over ~64KB was unsubmittable. The plan ruled `src/` changes
+  out of scope; the operator explicitly authorized the minimal fix in this PR (the embed yields
+  to a one-line pointer when the footer-inclusive body would exceed 65,536 characters;
+  `plan_embedded` reports `false`; contracts amended in the same turn; pinned by
+  `tests/test_pr_submit.py::test_real_submit_drops_the_embed_when_the_plan_exceeds_githubs_body_cap`).
+  Unrelated to the gate's code under test (the objective/refinement path), which stays
+  byte-identical to `main`.
 - **No planner nudge.** The one permitted nudge (“State explicitly which refinement assumption
   you discard and why”) was not needed — the plan discarded the `greet` assumption unprompted.
 
