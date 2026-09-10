@@ -110,6 +110,11 @@ just ci
 managed by [prek](https://prek.j178.dev) and runs `ruff check` on staged Python. Re-run
 `just hooks` after a fresh clone if hooks are missing.
 
+Focused Python selections while iterating — `just test-py-fast` (`-m "not slow"`) and
+`just test-py-slow` (`-m slow`) — and how to time a tier are documented in
+[docs/developers/testing.md](docs/developers/testing.md); `just test`, `just ci`, GitHub CI and
+perk's in-session `run_ci` always run the whole Python suite.
+
 Without `just`: `uv run …` for Python (`uv run perk init`, `uv run pytest`,
 `uv run ruff check perk tests`, `uv run ty check`) and `npm run …` for TypeScript
 (`npm run lint`, `npm run typecheck`).
