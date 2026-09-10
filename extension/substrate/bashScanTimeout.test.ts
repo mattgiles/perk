@@ -26,8 +26,16 @@ const RECURSIVE_GREPS = [
   `grep --dereference-recursive foo .`,
   `grep -d recurse foo .`,
   `grep --directories=recurse foo .`,
+  // the spaced long-directory form
+  `grep --directories recurse foo .`,
+  // every grep-family executable the command-word regex admits (a dropped alternative must fail)
   `egrep -r foo .`,
   `fgrep -R foo .`,
+  `zgrep -r foo .`,
+  `zegrep -rn foo .`,
+  `zfgrep -R foo .`,
+  `bzgrep -r foo .`,
+  `xzgrep -rn foo .`,
   `rgrep foo .`,
   // chained
   `cd /repo && grep -rn foo . | grep -v test`,
@@ -66,6 +74,11 @@ const UNBOUNDED_FINDS = [
   // a `-maxdepth` after a quoted sequencing operator belongs to the NEXT command
   `sh -c 'find . -type f; echo -maxdepth'`,
   `sh -c 'find . -type f | grep -maxdepth'`,
+  // a `-maxdepth` INSIDE a quoted argument is not the find's option
+  `find . -printf 'x -maxdepth y'`,
+  `find . -name "-maxdepth"`,
+  `find . -newermt '-maxdepth 1' -type f`,
+  `sh -c "find . -printf 'x -maxdepth y'"`,
 ];
 
 const NOT_SCANS = [
@@ -85,6 +98,11 @@ const NOT_SCANS = [
   `find src -name x -maxdepth 1`,
   `sh -c 'find . -maxdepth 1 -type f'`,
   `sh -c 'find . -maxdepth 1; find . -maxdepth 2'`,
+  // a REAL `-maxdepth` still exempts beside quoted arguments (quoted spans are blanked, not the
+  // whole window) — and a quoted `;` in a pattern does not end the window early
+  `find . -printf 'x -maxdepth y' -maxdepth 1`,
+  `find . -name 'a;b' -maxdepth 1`,
+  `sh -c "find . -name '*.py' -maxdepth 1"`,
   `fd foo`,
   `ls -R`,
   `cat docs/find.md`,
@@ -99,8 +117,6 @@ const ACCEPTED_OVER_MATCHES = [
   `git grep -rn foo`,
   `rg -n 'grep -rn foo' src/`,
   `grep -n "x -r y" f`,
-  // a quoted sequencing operator BEFORE `-maxdepth` ends the find's exemption window early
-  `find . -name 'a;b' -maxdepth 1`,
 ];
 
 test("classifyScanCommand: recursive greps", () => {

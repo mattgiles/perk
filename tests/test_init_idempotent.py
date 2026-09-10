@@ -178,7 +178,9 @@ def test_managed_agents_scan_timeout_matches_extension_constant():
     from perk.convergence.init import _agents_inner
 
     repo_root = Path(__file__).resolve().parents[1]
-    ts_source = (repo_root / "extension" / "substrate" / "bashScanTimeout.ts").read_text()
+    ts_source = (repo_root / "extension" / "substrate" / "bashScanTimeout.ts").read_text(
+        encoding="utf-8"
+    )
     matches = re.findall(r"^export const SCAN_TIMEOUT_SECONDS = (\d+);$", ts_source, re.MULTILINE)
     assert len(matches) == 1, matches
     assert f"caps them at a {matches[0]}s `timeout`" in _agents_inner()

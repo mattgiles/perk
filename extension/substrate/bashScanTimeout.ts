@@ -18,12 +18,12 @@
 // wrapper prefixes (`env`/`nice`/`time`/`nohup`/`xargs`), nested shells (`sh -c '…'`) and `$(…)`
 // substitutions are covered without enumerating wrappers. A grep's recursion flag is searched over
 // its full tail (over-matches only); a find's `-maxdepth` exemption is searched only in the find's
-// OWN window — up to the next command word or a quoted-in sequencing operator — so a later bounded
-// find never exempts an earlier unbounded one. Over-matching is tolerated by design — a spurious
-// 30s cap on a fast command is harmless, a missed scan is the bug. The accepted over-matches
-// (pinned as such in the tests, so any future tightening is deliberate): `echo grep -r`,
-// `git grep -rn foo`, `rg -n 'grep -rn foo' src/`, `grep -n "x -r y" f`, `find . -name 'a;b'
-// -maxdepth 1`.
+// OWN window — up to the next command word or a quoted-in sequencing operator, quoted spans blanked
+// — so neither a later bounded find nor a quoted argument ever exempts an unbounded one.
+// Over-matching is tolerated by design — a spurious 30s cap on a fast command is harmless, a
+// missed scan is the bug. The accepted over-matches (pinned as such in the tests, so any future
+// tightening is deliberate): `echo grep -r`, `git grep -rn foo`, `rg -n 'grep -rn foo' src/`,
+// `grep -n "x -r y" f`.
 // Incidental precision, not a goal: a quote-adjacent cluster (`"-r"`, `'grep -r'`) is not a flag
 // position, so quoted flags do not match.
 
@@ -106,15 +106,42 @@ function occurrences(segment: string): Occurrence[] {
 }
 
 /**
- * The text in which THIS `find`'s `-maxdepth` may appear: its tail up to the next command word or
- * the first sequencing operator that survived the top-level split (a quoted nested shell). The
- * exemption is the inverse of a match — it REMOVES a cap — so its window must be tight: a later
- * bounded find (`sh -c 'find . -type f; find . -maxdepth 1'`) must never exempt an earlier
- * unbounded one. Shrinking the window can only add caps (a quoted `;` in a `-name` pattern before
- * `-maxdepth` over-caps a fast find — accepted, pinned in the tests).
+ * `text` with every single-/double-quoted span replaced by ONE space (token boundaries kept,
+ * quoted content gone). The same quote model as the segment splitter (no backslash-escape
+ * handling; an unterminated quote runs to the end).
+ */
+function blankQuoted(text: string): string {
+  let out = "";
+  let quote: '"' | "'" | null = null;
+  for (const ch of text) {
+    if (quote !== null) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += " ";
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+/**
+ * The text in which THIS `find`'s `-maxdepth` may appear: its tail up to the next command word,
+ * with quoted spans blanked, then cut at the first sequencing operator that survived the
+ * top-level split (a quoted nested shell's `;`/`|`/`&`). Blanking first means only an UNQUOTED
+ * standalone `-maxdepth` option counts (a `-printf 'x -maxdepth y'` format or a `-name
+ * "-maxdepth"` operand never exempts) and a quoted `;` inside a `-name` pattern never ends the
+ * window. The exemption is the inverse of a match — it REMOVES a cap — so its window must be
+ * tight: a later bounded find (`sh -c 'find . -type f; find . -maxdepth 1'`) or another command
+ * after a quoted-in operator must never exempt an earlier unbounded one; shrinking the window can
+ * only add caps. Residual: an UNQUOTED `-maxdepth` operand value (`-name -maxdepth`) still
+ * exempts — not a real-world shape.
  */
 function findWindow(segment: string, occurrence: Occurrence): string {
-  const tail = segment.slice(occurrence.tailStart, occurrence.nextStart);
+  const tail = blankQuoted(segment.slice(occurrence.tailStart, occurrence.nextStart));
   const operator = INNER_OPERATOR.exec(tail);
   return operator === null ? tail : tail.slice(0, operator.index);
 }
