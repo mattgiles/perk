@@ -272,6 +272,9 @@ test("decodeDreamManifest: unknown extra keys are ignored (forward-compat rides 
 });
 
 test("decodeDreamManifest: a run-key-hostile lane id DECODES fine (keys are code-owned)", () => {
+  // Run-key-hostile ≠ routing-token-unsafe: spaces and length break the pi-subagents run-key
+  // contract (which code-owned keys sidestep) but not task-prose framing, so the routing-token
+  // fence admits this id — the fence refuses only controls, line separators, and `"`.
   const hostileId = `category fallback ${"x".repeat(140)}`;
   const manifest = decoded(
     manifestOf([{ id: hostileId, rollup: null, docs: [dreamDoc("docs/learned/pi/a.md")] }]),
@@ -367,6 +370,23 @@ test("decodeDreamManifest: each refusal arm carries its named detail", () => {
     {
       raw: manifestOf([{ id: "", rollup: null, docs: [dreamDoc("docs/learned/pi/a.md")] }]),
       detail: /missing a non-empty string id/,
+    },
+    {
+      // ONE representative routing-token refusal (otherwise valid): the decoder calls the fence
+      // and names the diagnostic; the exhaustive character-class matrix lives ONLY in
+      // `waves/laneIdentity.test.ts`. The `\n` renders as two escaped characters in the
+      // JSON.stringify'd detail, so a regex is exact here.
+      raw: oneLane([dreamDoc("docs/learned/pi/a.md")], { id: "a-1\nrogue" }),
+      detail: /lane id "a-1\\nrogue" is not a safe routing token/,
+    },
+    {
+      // Precedence: the fence runs BEFORE the duplicate check — the same unsafe id twice is the
+      // routing-token detail, never `duplicate lane id`.
+      raw: manifestOf([
+        { id: "a-1\nrogue", rollup: null, docs: [dreamDoc("docs/learned/pi/a.md")] },
+        { id: "a-1\nrogue", rollup: null, docs: [dreamDoc("docs/learned/pi/b.md")] },
+      ]),
+      detail: /is not a safe routing token/,
     },
     {
       raw: manifestOf([
@@ -472,6 +492,8 @@ test("lane composition: code-owned keys, semantic labels, per-key task identity 
   for (const item of items) {
     assert.equal(item.agent, "perk.dream-analyst");
     assert.equal(item.phase, "dream");
+    // The routing-token fence is the IDENTITY on accepted tokens, so these raw bytes ARE the
+    // fenced form (the identity property itself is pinned in `waves/laneIdentity.test.ts`).
     assert.ok(
       item.task.startsWith(`Lane: ${item.label}\n`),
       `the task must open with the lane's OWN semantic id (got: ${item.task.slice(0, 40)})`,
@@ -506,11 +528,33 @@ test("lane composition: hostile ids sanitize to unique run-key-safe keys (ordina
   assert.equal(new Set(keys).size, keys.length, "identically-sanitizing ids stay unique");
   for (const [i, key] of keys.entries()) {
     assert.ok(RUN_KEY_PATTERN.test(key), `key '${key}' must satisfy the run-key contract`);
+    // Raw bytes: every one of these run-key-hostile ids is routing-safe, so the fence renders
+    // it byte-identical (the fenced form IS the raw token).
     assert.ok(
       items[i]?.task.startsWith(`Lane: ${items[i]?.label}\n`),
       "the task carries the SEMANTIC id even under a sanitized key",
     );
   }
+});
+
+test("runDreamAnalystWave: an unfenced unsafe id reaching laneTask throws (programmer-error backstop), no spawn", async () => {
+  // Bypass the decoder — as a buggy caller would — so the unsafe id reaches `laneTask`. A
+  // NON-C0 class (U+2028) proves the seam is not newline-specific; the message is matched
+  // exactly (a `.*` regex cannot cross the literal U+2028 that JSON.stringify leaves in place).
+  const manifest = decoded(TWO_LANE_RAW);
+  const rogue = "pi-extension-1\u2028";
+  const rogueManifest: DreamManifest = {
+    ...manifest,
+    lanes: [
+      { ...(manifest.lanes[0] as DreamManifest["lanes"][number]), id: rogue },
+      ...manifest.lanes.slice(1),
+    ],
+  };
+  const adapter = createMemoryWaveAdapter();
+  await assert.rejects(runDreamAnalystWave(reportWaveOver(adapter), { manifest: rogueManifest }), {
+    message: `renderRoutingToken: routing token ${JSON.stringify(rogue)} failed the fence — refuse or degrade it upstream`,
+  });
+  assert.equal(adapter.calls.spawn.length, 0, "the throw precedes any spawn");
 });
 
 // ------------------------------------------------------------- the schema↔caps lockstep
