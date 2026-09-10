@@ -251,7 +251,8 @@ prefixes or nested shells. Examples of capped commands:
   `--recursive`, `--directories=recurse`, `rgrep`)
 - `find . -name '*.py'` (no `-maxdepth`; `-prune` and `-not -path` do **not** exempt it)
 - `cd repo && LC_ALL=C grep -rn foo . | head`
-- `sh -c 'grep -rn foo .'`
+- `sh -c 'grep -rn foo .'`, `sh -c 'find . -type f; find . -maxdepth 1'` (each `find` needs its
+  own `-maxdepth`)
 
 Not capped: `grep -n foo file`, `find . -maxdepth 2 …`, `rg`, `fd`, `ast-grep`, and a `-r` that
 belongs to a later pipeline stage (`grep -n foo f | sort -r`).

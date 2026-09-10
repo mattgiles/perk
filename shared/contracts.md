@@ -12223,11 +12223,19 @@ patching through Pi's documented `tool_call` in-place mutation, plus a `tool_res
    segment by a whitespace-delimited short cluster containing `r`/`R` (`-r`, `-rn`, `-rniE`,
    `-Rl`, `-nr`, `-rnA3`), by `--recursive`/`--dereference-recursive`, or by `-d recurse`/
    `--directories=recurse` — or when the word is `rgrep`; an **unbounded find** when the word is
-   `find` and its segment carries no `-maxdepth`. Nothing exempts a scan (`-prune`,
-   `--exclude-dir`, `-not -path` still walk untracked trees in the common case). **Over-matching
-   on fast commands is accepted; under-matching is the defect** — `echo grep -r`, `git grep -rn
-   foo`, `rg -n 'grep -rn foo' src/` and `grep -n "x -r y" f` receive a harmless cap and are pinned
-   as accepted in the tests, so any tightening is a deliberate change. `rg`, `fd`, `ast-grep`,
+   `find` and no `-maxdepth` sits in that find's **own window** — its tail up to the next command
+   word or the first sequencing operator that survived the top-level split (a quoted nested
+   shell), so a later bounded find never exempts an earlier unbounded one
+   (`sh -c 'find . -type f; find . -maxdepth 1'` is capped). The asymmetry is deliberate: a
+   grep's recursion flag is searched over its full tail because a window could only MISS a
+   permuted `-r` (`grep -n "find . -maxdepth 1" -r .` is a recursive grep), whereas the find
+   exemption removes a cap and so must be scoped tightly (shrinking it can only add caps).
+   Nothing else exempts a scan (`-prune`, `--exclude-dir`, `-not -path` still walk untracked
+   trees in the common case). **Over-matching on fast commands is accepted; under-matching is the
+   defect** — `echo grep -r`, `git grep -rn foo`, `rg -n 'grep -rn foo' src/`, `grep -n "x -r y"
+   f` and `find . -name 'a;b' -maxdepth 1` (the quoted `;` ends the window before `-maxdepth`)
+   receive a harmless cap and are pinned as accepted in the tests, so any tightening is a
+   deliberate change. `rg`, `fd`, `ast-grep`,
    `grep -n foo file`, `find … -maxdepth N` and quote-adjacent flags (`"-r"`, `'grep -r'`) never
    classify.
 2. **The override.** An explicit `timeout` of **any** value on the call is the model's override:

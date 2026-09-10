@@ -46,6 +46,9 @@ const RECURSIVE_GREPS = [
   `\\grep -rn foo .`,
   `/usr/bin/grep -rn foo .`,
   `grep -rn foo . 2>/dev/null | head`,
+  // the recursion flag is searched over the grep's FULL tail: a permuted `-r` after a quoted
+  // pattern that itself carries a command word (+ `-maxdepth`) is still a recursive grep
+  `grep -n "find . -maxdepth 1" -r .`,
 ];
 
 const UNBOUNDED_FINDS = [
@@ -55,6 +58,14 @@ const UNBOUNDED_FINDS = [
   // a `-not -path` filter still walks the excluded tree
   `find . -name '*.ts' -not -path '*/node_modules/*'`,
   `time find . -type f`,
+  // a LATER bounded find inside a quoted nested shell must not exempt an EARLIER unbounded one
+  // (the `;` is quoted, so both stay in one top-level segment)
+  `sh -c 'find . -type f; find . -maxdepth 1'`,
+  `sh -c 'find . -maxdepth 1; find . -type f'`,
+  `bash -c "find . -maxdepth 1 && find . -name x"`,
+  // a `-maxdepth` after a quoted sequencing operator belongs to the NEXT command
+  `sh -c 'find . -type f; echo -maxdepth'`,
+  `sh -c 'find . -type f | grep -maxdepth'`,
 ];
 
 const NOT_SCANS = [
@@ -72,6 +83,8 @@ const NOT_SCANS = [
   `ast-grep run --pattern 'x' .`,
   `find . -maxdepth 2 -name x`,
   `find src -name x -maxdepth 1`,
+  `sh -c 'find . -maxdepth 1 -type f'`,
+  `sh -c 'find . -maxdepth 1; find . -maxdepth 2'`,
   `fd foo`,
   `ls -R`,
   `cat docs/find.md`,
@@ -86,6 +99,8 @@ const ACCEPTED_OVER_MATCHES = [
   `git grep -rn foo`,
   `rg -n 'grep -rn foo' src/`,
   `grep -n "x -r y" f`,
+  // a quoted sequencing operator BEFORE `-maxdepth` ends the find's exemption window early
+  `find . -name 'a;b' -maxdepth 1`,
 ];
 
 test("classifyScanCommand: recursive greps", () => {

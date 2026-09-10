@@ -16,10 +16,14 @@
 // stage — `grep -n foo f | sort -r` — is never attributed to the grep). The command word is
 // matched at ANY command boundary inside a segment rather than as the segment's leading word, so
 // wrapper prefixes (`env`/`nice`/`time`/`nohup`/`xargs`), nested shells (`sh -c '…'`) and `$(…)`
-// substitutions are covered without enumerating wrappers. Over-matching is tolerated by design —
-// a spurious 30s cap on a fast command is harmless, a missed scan is the bug. The accepted
-// over-matches (pinned as such in the tests, so any future tightening is deliberate):
-// `echo grep -r`, `git grep -rn foo`, `rg -n 'grep -rn foo' src/`, `grep -n "x -r y" f`.
+// substitutions are covered without enumerating wrappers. A grep's recursion flag is searched over
+// its full tail (over-matches only); a find's `-maxdepth` exemption is searched only in the find's
+// OWN window — up to the next command word or a quoted-in sequencing operator — so a later bounded
+// find never exempts an earlier unbounded one. Over-matching is tolerated by design — a spurious
+// 30s cap on a fast command is harmless, a missed scan is the bug. The accepted over-matches
+// (pinned as such in the tests, so any future tightening is deliberate): `echo grep -r`,
+// `git grep -rn foo`, `rg -n 'grep -rn foo' src/`, `grep -n "x -r y" f`, `find . -name 'a;b'
+// -maxdepth 1`.
 // Incidental precision, not a goal: a quote-adjacent cluster (`"-r"`, `'grep -r'`) is not a flag
 // position, so quoted flags do not match.
 
@@ -52,8 +56,15 @@ const COMMAND_WORD =
 const RECURSIVE_FLAG =
   /(?:^|\s)(?:--recursive|--dereference-recursive|--directories=recurse|(?:-d|--directories)\s+recurse|-[A-Za-z0-9]*[rR][A-Za-z0-9]*)(?=\s|$)/;
 
-/** A depth bound in a find's tail — the only thing that exempts a `find` (`-prune`/`-not -path` still walk). */
+/** A depth bound in a find's own window — the only thing that exempts a `find` (`-prune`/`-not -path` still walk). */
 const MAXDEPTH_FLAG = /(?:^|\s)-maxdepth(?=\s|$)/;
+
+/**
+ * A sequencing operator that survived the top-level split — i.e. one inside a quoted nested shell
+ * (`sh -c 'find . -type f; find . -maxdepth 1'`) or a lone `&`. It ends a `find`'s exemption
+ * window (see `findWindow`).
+ */
+const INNER_OPERATOR = /[;|&]/;
 
 /**
  * Pi's terminal status line for an expired bash call. No `m` flag — `$` is end-of-string, so the
@@ -77,20 +88,48 @@ export function classifyScanCommand(command: string): ScanKind | null {
   return null;
 }
 
-function classifySegment(segment: string): ScanKind | null {
+/** One command-word occurrence: the word, where its tail starts, and where the next occurrence begins. */
+type Occurrence = { word: string; tailStart: number; nextStart: number };
+
+function occurrences(segment: string): Occurrence[] {
   // A fresh matcher per segment: the shared regex is global (stateful `lastIndex`).
   const words = new RegExp(COMMAND_WORD.source, "g");
-  let match = words.exec(segment);
-  while (match !== null) {
+  const found: Occurrence[] = [];
+  for (const match of segment.matchAll(words)) {
     const word = match[1];
-    const tail = segment.slice(match.index + match[0].length);
-    if (word === "rgrep") return "recursive-grep";
-    if (word === "find") {
-      if (!MAXDEPTH_FLAG.test(tail)) return "unbounded-find";
-    } else if (RECURSIVE_FLAG.test(tail)) {
-      return "recursive-grep";
+    if (word === undefined) continue;
+    const previous = found.at(-1);
+    if (previous !== undefined) previous.nextStart = match.index;
+    found.push({ word, tailStart: match.index + match[0].length, nextStart: segment.length });
+  }
+  return found;
+}
+
+/**
+ * The text in which THIS `find`'s `-maxdepth` may appear: its tail up to the next command word or
+ * the first sequencing operator that survived the top-level split (a quoted nested shell). The
+ * exemption is the inverse of a match — it REMOVES a cap — so its window must be tight: a later
+ * bounded find (`sh -c 'find . -type f; find . -maxdepth 1'`) must never exempt an earlier
+ * unbounded one. Shrinking the window can only add caps (a quoted `;` in a `-name` pattern before
+ * `-maxdepth` over-caps a fast find — accepted, pinned in the tests).
+ */
+function findWindow(segment: string, occurrence: Occurrence): string {
+  const tail = segment.slice(occurrence.tailStart, occurrence.nextStart);
+  const operator = INNER_OPERATOR.exec(tail);
+  return operator === null ? tail : tail.slice(0, operator.index);
+}
+
+function classifySegment(segment: string): ScanKind | null {
+  for (const occurrence of occurrences(segment)) {
+    if (occurrence.word === "rgrep") return "recursive-grep";
+    if (occurrence.word === "find") {
+      if (!MAXDEPTH_FLAG.test(findWindow(segment, occurrence))) return "unbounded-find";
+      continue;
     }
-    match = words.exec(segment);
+    // A grep's recursion flag is searched over its FULL tail (not a window): a permuted `-r` may
+    // follow a quoted pattern that itself contains a command word (`grep -n "find . -maxdepth 1"
+    // -r .`), and for a grep the full tail can only over-match — never miss.
+    if (RECURSIVE_FLAG.test(segment.slice(occurrence.tailStart))) return "recursive-grep";
   }
   return null;
 }

@@ -18,6 +18,34 @@ type Hook = (
   ctx: ExtensionContext,
 ) => Promise<{ block?: boolean; content?: { type: string; text?: string }[] } | undefined>;
 
+/**
+ * Run `fn` with `console.error` captured (the fail-open path REPORTS, never throws); returns the
+ * captured lines. Restores the real `console.error` even when `fn` rejects.
+ */
+async function capturingErrors(fn: () => Promise<void>): Promise<string[]> {
+  const lines: string[] = [];
+  const real = console.error;
+  console.error = (...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  };
+  try {
+    await fn();
+  } finally {
+    console.error = real;
+  }
+  return lines;
+}
+
+/** A bash input whose `command` read throws — the induced failure that reaches a hook's `catch`. */
+function throwingInput(): Record<string, unknown> {
+  return Object.defineProperty({} as Record<string, unknown>, "command", {
+    enumerable: true,
+    get() {
+      throw new Error("induced");
+    },
+  });
+}
+
 function fixture() {
   const hooks = new Map<string, Hook>();
   const pi = {
@@ -79,6 +107,22 @@ test("tool_call: malformed input neither throws nor injects", async () => {
   const bare = Object.create(null) as Record<string, unknown>;
   assert.equal(await h.call("tool_call", { toolName: "bash", input: bare }), undefined);
   assert.equal("timeout" in bare, false);
+});
+
+test("tool_call: fail-OPEN — an internal error is reported, never thrown, and the call proceeds", async () => {
+  // A thrown `tool_call` handler would escape Pi's dispatch and abort the bash call; the hook
+  // must swallow + report instead (this is a performance guard, not a safety gate).
+  const h = fixture();
+  const input = throwingInput();
+  let result: unknown = "unset";
+  const lines = await capturingErrors(async () => {
+    result = await h.call("tool_call", { toolName: "bash", input });
+  });
+  assert.equal(result, undefined);
+  assert.equal("timeout" in input, false);
+  assert.equal(lines.length, 1);
+  assert.ok(lines[0]?.startsWith("perk: bash scan-timeout hook failed"), lines[0]);
+  assert.ok(lines[0]?.includes("induced"), lines[0]);
 });
 
 // --- tool_result note -------------------------------------------------------------------------
@@ -172,4 +216,21 @@ test("tool_result: malformed input neither throws nor patches", async () => {
     content: [{ type: "text", text: TIMED_OUT }],
   });
   assert.equal(result, undefined);
+});
+
+test("tool_result: fail-OPEN — an internal error is reported, never thrown, and the result stands", async () => {
+  const h = fixture();
+  let result: unknown = "unset";
+  const lines = await capturingErrors(async () => {
+    result = await h.call("tool_result", {
+      toolName: "bash",
+      isError: true,
+      input: throwingInput(),
+      content: [{ type: "text", text: TIMED_OUT }],
+    });
+  });
+  assert.equal(result, undefined);
+  assert.equal(lines.length, 1);
+  assert.ok(lines[0]?.startsWith("perk: bash scan-timeout note failed"), lines[0]);
+  assert.ok(lines[0]?.includes("induced"), lines[0]);
 });
