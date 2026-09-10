@@ -79,8 +79,8 @@ node's comments back) to the human; `/objective-refinement-save` is their delibe
 
 ## Availability and boundaries
 
-- Refinement is **Linear-only** in this increment; GitHub objectives refuse before authoring and
-  at save.
+- Refinement authoring runs on both issue backends — the comment lands on the node-issue (Linear)
+  or the objective issue (GitHub); GitHub support is offline-proven only.
 - Never: create a plan, claim a node, write a backlink, change node/objective state, position a
   worktree, or implement anything from this session. The plan-graph tools and commands refuse
   here by design.

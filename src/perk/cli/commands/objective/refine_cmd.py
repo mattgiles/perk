@@ -7,17 +7,19 @@ advisory refinement and saves ONLY the node's marked comment (contracts.md §8.6
 creates a plan, claims a node, writes a backlink, changes node/objective state, or provisions a
 predecessor checkout — the session explores the invoking checkout as-is, dirty changes included.
 
-**Linear-only in this rollout**: the door refuses GitHub with ``unsupported_backend`` before any
-authentication, network, sync, scratch write or launch (a temporary rollout refusal, not a
-capability probe).
+**Both issue backends**: the door acts on whatever objective store the committed ``[issues]``
+selection resolves after the sync — the Linear Project store (carrier: the node-issue) or the
+GitHub issue store (carrier: the objective issue itself). It never probes ``gh auth``: a GitHub
+transport or authentication failure surfaces from the adapter as ``backend_error`` carrying
+``gh``'s own diagnostic.
 
 **Cold ordering — sync first, then everything fresh** (the door owns the run's ONE sync):
-input + local-only + invoking-checkout restrictions and the initial rollout check → the guarded
-fast-forward (real launch only, unless ``--no-sync``) → a FULL Config reload from disk + the
-rollout check again → fresh store/issue adapters, target selection, identity binding, engagement
-and the capture-time provenance → run mint, context materialization, launch with that same
-post-sync Config (``SeededLaunch.config_override``) and ``sync_main=False``. Nothing selected,
-resolved or configured before the sync survives into the launch.
+input + local-only + invoking-checkout restrictions → the guarded fast-forward (real launch
+only, unless ``--no-sync``) → a FULL Config reload from disk → fresh store/issue adapters,
+target selection, identity binding, engagement and the capture-time provenance → run mint,
+context materialization, launch with that same post-sync Config
+(``SeededLaunch.config_override``) and ``sync_main=False``. Nothing selected, resolved or
+configured before the sync survives into the launch.
 
 The handoff carries only the namespaced ``objective_refinement: {context_digest}`` — never a
 top-level ``objective_id``/``node_id`` (the cold claim path reads those as a planning claim).
@@ -116,7 +118,7 @@ def refine_objective(
     no_sync: bool,
     pi_args: tuple[str, ...],
 ) -> None:
-    """Author an advisory refinement of a future objective node (read-only; Linear only).
+    """Author an advisory refinement of a future objective node (read-only).
 
     \b
     NUMBER is the objective id (required — a cold session has no active objective).
@@ -149,8 +151,6 @@ def refine_objective(
                 error_type="invalid_input",
             )
         launch.resolve_target(stage, remote)  # `remote_blocked` on this local-only stage
-        # The initial rollout check reads the committed config only — no client, no network.
-        _guard(lambda: authoring.require_supported_backend(repo_root))
 
         if dry_run:
             # Online read-only resolution: select against the configured route as-is and report.
@@ -201,13 +201,12 @@ def refine_objective(
         if not no_sync:
             launch._sync_main_checkout(repo_root)
 
-        # 3. Reload the COMPLETE Config from disk (never the pre-sync cache), repeat the rollout
-        # check, and only now build fresh adapters + select + capture provenance.
+        # 3. Reload the COMPLETE Config from disk (never the pre-sync cache), and only now build
+        # fresh adapters + select + capture provenance.
         try:
             fresh_config = load_config(repo_root)
         except ConfigError as exc:
             raise UserFacingCliError(str(exc), error_type="config_error") from exc
-        _guard(lambda: authoring.require_supported_backend(repo_root))
 
         # 4. Mint the run (provenance is bound to it), prepare, materialize, launch.
         rid = run_id.mint()

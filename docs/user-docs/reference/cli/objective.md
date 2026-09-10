@@ -224,19 +224,19 @@ session (the refinement is saved as the node's single marked comment; nothing el
 plan, no claim, no backlink, no status). `NUMBER` is required (a cold session has no active
 objective); `--node` refines a specific node id instead of the first refinable, unrefined future
 node (selection ignores dependency readiness; a node with a valid prior refinement is
-re-refinable, and a save replaces it whole). **Linear-only** in this release: a GitHub objective
-store refuses `unsupported_backend` before authentication, network, sync or launch. Local-only —
-remote operation and `--worktree` are refused: the session explores the checkout you invoke it
+re-refinable, and a save replaces it whole). Available on both issue backends (on GitHub the
+carrier is the objective issue; GitHub support is offline-proven only; an unauthenticated `gh`
+reports `backend_error` with `gh`'s message). Local-only — remote operation and `--worktree` are
+refused: the session explores the checkout you invoke it
 from, dirty changes included, and never positions another worktree.
 
 Ordering: a real launch first fast-forwards `main` once (`--no-sync` opts out; a checkout that
-cannot fast-forward is used as-is), then re-reads the config from disk and repeats the backend
-check, and only then selects the target and captures the **checkout observation** (`HEAD`, dirty
-flag, UTC time) — so selection follows the post-sync configuration; the launch never syncs again.
+cannot fast-forward is used as-is), then re-reads the config from disk, and only then selects
+the target and captures the **checkout observation** (`HEAD`, dirty flag, UTC time) — so selection follows the post-sync configuration; the launch never syncs again.
 `--dry-run [--json]` resolves eligibility online and reports the selected identity, its status,
 whether a prior refinement exists and the checkout observation — no sync, run mint, file write,
 claim, mutation or launch. Trailing arguments pass to `pi`. See
-[Objectives — Node refinements](../objectives.md#node-refinements-linear-project-objectives-only).
+[Objectives — Node refinements](../objectives.md#node-refinements).
 Operator path: [How to refine future nodes before planning](../../how-to/refine-future-nodes.md).
 
 ### `perk objective refine-context NUMBER`
@@ -244,16 +244,17 @@ Operator path: [How to refine future nodes before planning](../../how-to/refine-
 Internal worker behind the warm `/objective-refine` entry (not a user surface): prepare the
 refinement grounding context for the current run and emit it as a JSON **string** inside the
 `--json` envelope (`context_json` + its `sha256:` `context_digest`). `--node` selects a node;
-`--run-id` (required) binds the context to the session's run. Same target selection, backend
-refusal and checkout observation as the cold door; no sync, no files, no launch.
+`--run-id` (required) binds the context to the session's run. Same target selection and
+checkout observation as the cold door; no sync, no files, no launch.
 
 ### `perk objective refinement-save`
 
 Internal worker behind the approved `plan_review` save and `/objective-refinement-save` (not a
 user surface): `--draft-file FILE --run-id RID [--json]` strictly reads the session's grounding
 context and the transferred draft, requires their run id and context digest to match, and saves
-the refinement comment through the guarded service. Refuses `unsupported_backend` on GitHub;
-every refinement error code passes through with `comment_ids` / `write_attempted` diagnostics.
+the refinement comment through the guarded service. Every refinement error code passes through
+with `comment_ids` / `write_attempted` diagnostics; GitHub's 65,536-character comment cap
+surfaces as `backend_error` with `write_attempted: true` and the stored record unchanged.
 Metadata is not an approval credential — invoking it is the persistence gesture.
 
 ### `perk objective reconcile NUMBER` (alias `rec`)

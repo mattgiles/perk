@@ -5240,9 +5240,9 @@ token stays a review-context rule; node context is deterministic).
   (`ObjectiveStoreError`; the bundle is `EMPTY_NODE_ENGAGEMENT`). Refinement (§8.67):
   `service.read_node_refinement(store, issues(), …)` → `present` (a valid saved record) /
   `absent` (`saved is None`) / `unsupported` / `unavailable`. **`unsupported` is decided solely by
-  the service's typed `unsupported_backend` refusal** — never a backend-id fork or the rollout
-  allowlist — so GitHub single-issue objectives and the dormant issue-backed store stay quiet
-  (no warning) and a backend gaining refinement support flips to `present` with no change here.
+  the service's typed `unsupported_backend` refusal** — never a backend-id fork or a door-side
+  backend allowlist (there is none) — so the dormant issue-backed store stays quiet (no warning)
+  and a backend gaining refinement support (GitHub did) flips to `present` with no change here.
   Every other `RefinementError` code, and an `IssueBackendError` from the adapter callable, is
   `unavailable`. Warnings are `{surface ∈ engagement|refinement, code, message, comment_ids}`
   appended in read order (engagement, then refinement); codes = the `RefinementErrorCode` values
@@ -11691,9 +11691,11 @@ persistence gate. The public authoring/review doors (`perk objective refine` /
 `/objective-refinement-save`) are §8.68. Planning-seed consumption is §8.26 (shipped); the
 authenticated Linear refine→plan evidence is the `objective-refinement-linear-planning-*` gate
 record under `docs/design/archive/` (one dated run). The GitHub carrier's **persistence** is
-specified below and proven offline (`tests/test_github_refinement.py`); its authoring doors
-stay refused by §8.68's `SUPPORTED_REFINEMENT_BACKENDS` until the enablement slice lifts the
-allowlist.
+specified below and its authoring doors are enabled (§8.68); GitHub is **proven offline only** —
+`tests/test_github_refinement.py` (persistence) and `tests/test_refinement_cross_backend_gate.py`
+(the doors, consumption and cross-backend shape parity) over the stateful `gh` fake; the
+`objective-refinement-github-carrier` record under `docs/design/archive/` lists the live checks
+as unobserved.
 
 **Modules.** `perk/objective/refinement/{models,codec,service}.py` (`__init__` empty).
 `models.py` is the pure type leaf (frozen dataclasses + `RefinementError`; no Pydantic / Click /
@@ -12029,9 +12031,19 @@ paginated scan; the 65,536-character refusal path (typed `backend_error`, the di
 the stored record unchanged); plan/refinement interleaving on the single-issue carrier (the
 roadmap block and body-comment table re-render while the refinement comment stays
 byte-untouched); unchanged roadmap block / header / objective-body comment; refinement comments
-filtered from engagement renders. Live GitHub behavior (byte preservation, the 422 shape,
-`fullDatabaseId` presence, `--paginate --slurp` on the comments endpoint) remains unobserved by
-design — the enablement slice's archive record lists the live checks as unobserved.
+filtered from engagement renders.
+`tests/test_refinement_cross_backend_gate.py::test_phase2_gate_github_refinement_doors` is the
+GitHub arm's **doors** gate over the same fake: the cold door binds a GitHub context, the warm
+worker returns byte-identical bytes, the save worker reaches the objective issue with typed
+envelopes (`stale_refinement`, the 65,536-character `backend_error` with `write_attempted:
+true`, post-claim `node_ineligible`), warm and cold consumption over the objective issue (claim
+before read; the seed pointer), the claim leaves the refinement comment untouched, and
+`objective show` / the rendered `objective engagement` are unchanged; the same module pins
+GitHub error translation (never `github_error` / `github_unauthed`), the `node-engagement
+--json` shape + seed-pointer parity across backends, and the route flip. Live GitHub behavior
+remains unobserved by design — the `objective-refinement-github-carrier` archive record lists
+byte preservation, the 422 shape, `fullDatabaseId` presence and `--paginate --slurp` on the
+comments endpoint as unobserved.
 
 ## §8.68 · Objective-node refinement authoring and reviewed save (the `objective-refine` doors)
 
@@ -12039,12 +12051,15 @@ The public loop over §8.67's persistence: **select** a future node, **explore**
 **author** a target-bound advisory refinement, **review** it with `plan_review`, and **save only
 the refinement's marked comment**. Nothing in this section creates a plan, claims a node, writes
 a backlink, changes node/objective/roadmap/delivery state, or provisions a predecessor worktree.
-**Linear-only in this increment**: an initially configured GitHub objective store refuses
-`unsupported_backend` before authentication, network, sync, scratch writes or launch — at the
-cold door, the warm entry, the dry run and the save (a retained Linear draft in a now-GitHub
-checkout included). This is an explicit temporary rollout refusal, not a capability flag or a
-dummy-node probe; other unsupported stores keep the service's typed refusal; Linear uses its
-normal resolver/auth diagnostics and never requires `gh auth` solely for refinement.
+**Both configured backends.** The doors act on whatever objective store the committed `[issues]`
+selection resolves — the Linear Project store (carrier: the node-issue) or the GitHub issue store
+(carrier: the objective issue) — with no rollout allowlist; `unsupported_backend` is only the
+service's typed refusal from a store without the refinement read (the dormant issue-backed
+Linear store). No door or worker probes `gh auth`: Linear keeps its resolver/auth diagnostics
+and never requires `gh` solely for refinement; on GitHub an unauthenticated `gh` or a transport
+failure surfaces from the adapter as `backend_error` carrying `gh`'s diagnostic (never
+`github_error` / `github_unauthed`). A retained context whose identity names a different backend
+than the resolved store refuses `invalid_input` at the service before any read.
 
 **One disconnected stage.** `objective-refine` (registry): read-only, `worktree: none`, doors
 `warm` + `cold_local` (`perk objective refine`; remote disabled), normal warm-keep / cold-mint
@@ -12127,13 +12142,13 @@ or secondary comment write.
 [-- pi args…]`: an explicit objective (`parse_objective_id` / `complete_objective_id`),
 `--node` at most once and nonblank, `--worktree` refused, remote operation refused, the
 invoking checkout explored (dirty changes included), no predecessor checkout. Ordering: (1)
-parse + local restrictions + the initial rollout check without constructing a remote client; (2)
-a real launch without `--no-sync` calls the guarded `_sync_main_checkout` ONCE (best-effort; an
-unchanged checkout is the basis when it cannot fast-forward; dry run never syncs); (3) **reload
-the Config from disk** (`load_config(repo_root)`, never the cached command-context Config) and
-repeat the rollout check — only then construct fresh adapters, select and capture provenance
-(a sync that changed Linear config selects on the new route; one that changed to GitHub refuses
-before any target API read); (4) mint the run, serialize + materialize the context, launch
+parse + local restrictions (no remote client is constructed); (2) a real launch without
+`--no-sync` calls the guarded `_sync_main_checkout` ONCE (best-effort; an unchanged checkout is
+the basis when it cannot fast-forward; dry run never syncs); (3) **reload the Config from disk**
+(`load_config(repo_root)`, never the cached command-context Config) — only then construct fresh
+adapters, select and capture provenance (a sync that changed the committed `[issues]` route —
+team or backend — selects on the new route with fresh adapters and nothing from the pre-sync
+route); (4) mint the run, serialize + materialize the context, launch
 `objective-refine` with `run_id_override`, `sync_main=False`, `handoff_extra={objective_refinement:
 {context_digest}}` and the post-sync Config via the defaulted `SeededLaunch.config_override:
 Config | None = None` (the seeded tail passes it when present; only refinement sets it; every
@@ -12227,8 +12242,9 @@ snapshot is the pair: `raw` = the draft's exact bytes (the reviewed digest), `ma
 `renderRefinementDraft(pair)`, `contextDigest` = the strict session-data digest of the context
 artifact at open. The reviewed-bytes guard compares BOTH: a draft rewrite or a context
 re-prepared while the review is open makes an approval `stale-approval` even when the rendering
-is identical; the destination fence covers `[issues]` (Linear — no `remotes` component) — **this
-fences the reviewed artifact and save route, not the checkout contents.** `executePlanReview` routes the stage to
+is identical; the destination fence is the shared §8.23 capture — `[issues]` always, plus the git
+remotes for a GitHub-routed save; no node-claim component (the stage binds no warm claim) —
+**this fences the reviewed artifact and save route, not the checkout contents.** `executePlanReview` routes the stage to
 `runRefinementReviewV1` BEFORE the plan arm (decode-first bad-input behavior preserved; a
 well-typed `plan` param ignored). The rendering (`renderRefinementDraft`): objective/node
 header, description, carrier, "Authoring pass started" (`authored_at` + run), the prior/first
@@ -12250,8 +12266,10 @@ verbatim; identity/provenance are immutable review metadata.
   editor source) before the seam re-resumes the pair and compares it with the reviewed one
   (`source-changed`, `changed: "context"` first); abort wins before and after awaits; no
   replacement artifact is ever saved on an old approval. The approve verdict label names the actual
-  destination (`ReviewSubject.saveDestination` — "Linear (the node's refinement comment)"; the
-  plan/objective/gist arms keep their GitHub default).
+  destination (`ReviewSubject.saveDestination`, derived per review from the bound context's
+  `identity.backend` by `refinementSaveDestination`: `Linear (the node's refinement comment)` /
+  `GitHub (the objective issue's refinement comment)`; an unrecognized backend id renders
+  verbatim; the plan/objective/gist arms keep their GitHub default).
 - **The shared save seam** `refinementApprovalSave` (`authoring/refinement/save.ts`):
   strict-resume the pair (`absent` → no-draft; `no-context`; `refused`/`mismatch` →
   refused-draft — fail-closed stops, nothing invoked, the gate untouched); when the caller passed
@@ -12301,8 +12319,9 @@ parameterized `contexts/read-only.md` are all in `prompts/_fixtures/live.yaml`. 
 `workflow-commands` / `model-tools` / `review-and-authoring` references, the backend/provider
 entries and the `perk-expert` mirror. Automatic later-plan consumption of a saved refinement is
 §8.26; authenticated refine-to-plan evidence is the archive record named in §8.67; the GitHub
-refinement carrier's persistence is §8.67's GitHub arm, but its authoring doors are NOT enabled
-by this section — the enablement slice lifts `SUPPORTED_REFINEMENT_BACKENDS`.
+refinement carrier's persistence is §8.67's GitHub arm and its doors are this section's on both
+backends; GitHub is offline-proven only (the `objective-refinement-github-carrier` archive
+record).
 
 ## §8.69 · Bash scan timeout (gitignore-blind recursive grep / unbounded find)
 

@@ -265,7 +265,8 @@ The cold `perk objective author` door has no `/objective-author` twin.
 
 Enter an **objective-node refinement pass** in the current session: `/objective-refine [objective]
 [--node ID]` (otherwise the active objective; without `--node`, the first refinable, unrefined
-future node). **Linear-only** in this release. The session must be idle and **unbound**: a session
+future node). Both issue backends (GitHub offline-proven only). The session must be idle and
+**unbound**: a session
 already bound to a plan, carrying a planning claim, or launched as a plan-graph stage is refused
 (`bound_session`) with nothing cleared — the refusal names the equivalent
 `perk objective refine …` cold command. Extra, duplicate or value-less arguments refuse; unsafe or

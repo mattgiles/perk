@@ -50,7 +50,7 @@ operator-facing; each entry links to the page that owns the detail.
   the bounded pre-planning engagement block, the full dated refinement when one exists (behind a
   file pointer), and any advisory warnings. Degraded reads are reported as incomplete advisory
   input, never as absence. See
-  [Node refinements](./objectives.md#node-refinements-linear-project-objectives-only).
+  [Node refinements](./objectives.md#node-refinements).
 - **Objective.** A multi-plan goal whose roadmap emits one bounded plan per node as it advances.
   See [Gists, plans, and objectives](../explanation/gists-plans-and-objectives.md).
 - **Plan.** A written, reviewed, durable description of one bounded change, authored before code
@@ -67,12 +67,12 @@ operator-facing; each entry links to the page that owns the detail.
   the carrier comment alone — never a node status, header, manifest, or plan-ref field — and
   neither a claim, readiness, nor a freshness proof: a refined node is exactly as selectable for
   planning as before, and a changed node source reads as advisory drift, not absence. See
-  [Node refinements](./objectives.md#node-refinements-linear-project-objectives-only).
+  [Node refinements](./objectives.md#node-refinements).
 - **Refinement.** A dated, reviewed, advisory elaboration of one existing roadmap node, persisted
   as a single marked comment on the node's carrier with its authoring provenance and the node
   source it was written against. Content only: not an executable plan, node status, claim,
   readiness, or freshness proof; stored metadata never authenticates human approval. See
-  [Node refinements](./objectives.md#node-refinements-linear-project-objectives-only).
+  [Node refinements](./objectives.md#node-refinements).
 - **Roadmap node.** One bounded unit of objective work, with status, dependencies, and an optional
   plan/PR backlink. See [The roadmap node schema](./objectives.md#the-roadmap-node-schema).
 - **Run.** One identified workflow execution attempt, minted by a cold launch and used to correlate

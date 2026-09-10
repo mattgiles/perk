@@ -206,6 +206,7 @@ installation failure; selection fallback is a warning. Package drift is repaired
 | PR/review/CI/merge | GitHub | still GitHub |
 | Identifiers | numeric issue ids / `#42` | issue ids such as `ENG-123`; opaque Project ids |
 | Metadata | readable HTML-comment blocks | machine envelopes in native issue attachments |
+| Node refinement carrier | the objective issue (one marked comment per node); **offline-proven only** | the node-issue; live-validated 2026-09-10 |
 
 The `[issues]` table is read only from the **main checkout's committed** `.perk/config.toml`, even
 when a command runs in a linked worktree. `.perk/local.toml` cannot override backend or team. A
@@ -362,10 +363,14 @@ the marked comment (Direct Edits revise without saving); `/objective-refinement-
 human failsafe and the deliberate retry. Consumption: `perk objective plan` snapshots a present
 refinement under the launched run's scratch dir and seeds only a pointer; `/objective-plan` reads
 it through `perk objective node-engagement N --node <id> --json` after the planning transition;
-degraded advisory reads are reported, never retried. GitHub objectives refuse
-`unsupported_backend` at both refine doors and at save until the rollout allowlist is lifted;
-their planning-time read already runs over the objective issue (the GitHub carrier) and reports
-`absent`. Contracts: `shared/contracts.md` §8.26, §8.67–§8.68.
+degraded advisory reads are reported, never retried. Both doors and the save worker run on
+GitHub too (carrier: the objective issue, one comment per refined node); there is no `gh auth`
+probe — an unauthenticated `gh` or a transport failure is `backend_error` with `gh`'s
+diagnostic. GitHub is offline-proven only (`tests/test_github_refinement.py`,
+`tests/test_refinement_cross_backend_gate.py`; record
+`docs/design/archive/objective-refinement-github-carrier.md`); its planning-time read runs over
+the objective issue and reports `absent` until a refinement is saved, `present` once one is.
+Contracts: `shared/contracts.md` §8.26, §8.67–§8.68.
 
 ### The dream-report companion
 
@@ -458,6 +463,11 @@ a live workspace, so this is not part of ordinary Linear readiness.
   2026-09-10) against a disposable Project, recorded in
   `docs/design/archive/objective-refinement-linear-planning-dogfood.md`; treat that as a
   point-in-time proof, not a per-workspace guarantee.
+- Node refinements (GitHub) — persistence, both refine doors and planning-time consumption are
+  **offline-proven only**, over a stateful `gh` fake
+  (`docs/design/archive/objective-refinement-github-carrier.md`); no live GitHub run has been
+  recorded, so comment-body byte preservation, the 65,536-character 422 shape, `fullDatabaseId`
+  presence and `--paginate --slurp` on the comments endpoint are unobserved.
 - GitHub Issues Sync interactions are outside coverage; prefer a team without that two-way sync
   unless separately validated.
 - `pi-status-footer` hides extension status; non-default web providers have local credential or

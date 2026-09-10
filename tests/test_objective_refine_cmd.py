@@ -181,31 +181,6 @@ def _scratch_runs(root: Path) -> list[str]:
     return cache.list_run_ids(root)
 
 
-# --------------------------------------------------------------------------- rollout refusal
-
-
-def test_github_backend_refuses_before_any_auth_network_sync_or_launch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root = tmp_path / "repo"
-    _scaffold(root, backend="github")
-    _forbid(monkeypatch)
-    monkeypatch.setattr(linear_client, "client_from_env", lambda *a, **k: pytest.fail("no client"))
-    monkeypatch.setattr(resolve, "GitHubObjectiveStore", lambda *a, **k: pytest.fail("no store"))
-    for args in (
-        ["objective", "refine", "7", "--json"],
-        ["objective", "refine", "7", "--dry-run", "--json"],
-        ["objective", "refine-context", "7", "--run-id", "01RID", "--json"],
-        ["objective", "refinement-save", "--draft-file", "d.json", "--run-id", "01RID", "--json"],
-    ):
-        result = _invoke(monkeypatch, root, args)
-        assert result.exit_code == 1, result.output
-        payload = _payload(result)
-        assert payload["error_type"] == "unsupported_backend", payload
-        assert "Linear only" in str(payload["message"])
-    assert _scratch_runs(root) == []
-
-
 # --------------------------------------------------------------------------- input refusals
 
 
@@ -399,25 +374,6 @@ def test_real_launch_prepares_after_the_one_sync_and_launches_with_the_post_sync
     assert _non_comment_state(ws) == before
     assert cache.read_plan_ref(root) is None
     assert _scratch_runs(root) == [rid]
-
-
-def test_sync_to_github_refuses_before_target_read_files_or_launch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root = tmp_path / "repo"
-    _scaffold(root)
-    ws, store, _issues = _linear(monkeypatch, root)
-    obj_id = _seed(store)
-    monkeypatch.setattr(
-        launch, "_sync_main_checkout", lambda repo_root: _write_config(root, backend="github")
-    )
-    _forbid(monkeypatch, sync=False)
-    start = len(ws.requests)
-    result = _invoke(monkeypatch, root, ["objective", "refine", obj_id, "--json"])
-    assert result.exit_code == 1, result.output
-    assert _payload(result)["error_type"] == "unsupported_backend"
-    assert ws.requests[start:] == []  # no target API read after the route flipped
-    assert _scratch_runs(root) == []
 
 
 def test_no_sync_never_syncs_and_still_launches(
