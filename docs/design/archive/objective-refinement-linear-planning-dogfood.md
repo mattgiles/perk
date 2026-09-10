@@ -4,7 +4,8 @@
 refinements in planning and enable the GitHub carrier*, Phase 1 — the authenticated Linear
 refine→plan gate over the shipped doors (§8.68) + consumption (§8.26).
 
-**Gate verdict:** _pending — Part B not yet executed_
+**Gate verdict:** **PASS** — every L-criterion observed live (Part B) and every O-criterion's named
+tests green at the record's tree (below); executed 2026-09-10 (UTC 01:40–02:05).
 
 **What this record proves and what it does not.** The offline persistence gate
 ([objective-refinement-linear-persistence.md](objective-refinement-linear-persistence.md)) proved
@@ -22,15 +23,17 @@ guarantee.
 | item | value |
 |---|---|
 | record date | 2026-09-10 |
-| gate host | the operator's `savant` checkout (`/Users/mattgiles/dev/roivant/savant`, Linear team `SAV`, review provider `plannotator-plan`) — branch `staging`, HEAD _(Part B)_ |
-| `PERK_SRC` (the implementation worktree; THE provenance value) | HEAD _(Part B)_ · `git status --porcelain` _(Part B)_ |
-| code under test | byte-identical to `main` at `5150771066986218ccd3d61e8a255d9035ad15d8` (#2346; contains #2344 `5c392fa5`) in `src/`, `extension/`, `prompts/`, `shared/`, `skills/perk-objective-*` and `tests/` — this node is docs-only |
-| spoof tarball SHA-256 | _(Part B)_ |
+| gate host | the operator's `savant` checkout (`/Users/mattgiles/dev/roivant/savant`, Linear team `SAV`, review provider `plannotator-plan`) — branch `staging`, HEAD `42fb989c1cac872771321f88bf6eb401bf19f886`, `git status --porcelain` empty before and after |
+| `PERK_SRC` (the implementation worktree; THE provenance value) | `.worktrees/plan-2347` at HEAD `5aaecdabc017501706ef59bb9acc80c5bbdd3760` (this record's Part-A commit) · `git status --porcelain` empty · `merge-base --is-ancestor 5c392fa5 HEAD` → `contains #2344` |
+| code under test | byte-identical to `main` at `5150771066986218ccd3d61e8a255d9035ad15d8` (#2346; contains #2344 `5c392fa5`) in `src/`, `extension/`, `prompts/`, `tests/`, `skills/perk-objective-*`, `shared/{registry,bindings,providers}.yaml`, `shared/schemas/`, `shared/fixtures/`, `package.json`, `pyproject.toml` (`git diff --stat 51507710 -- <those paths>` empty at commit A and at this record's commit) — this node is docs-only |
+| spoof tarball SHA-256 | `12dcf7c54ee4f54bbaba65bb8eb195877e98db722dcdde3ab1f0f4da45c31d90  mgiles-perk-3.2.0.tgz` (`npm pack` of `PERK_SRC`) |
+| evidence dir | `/tmp/perk-linear-gate-evidence-20260910T014041Z` (`TS=20260910T014041Z`; deleted after this record's commit — every cited excerpt is transcribed below) |
+| sandbox objective | Linear Project `f61dd894-d891-4c7d-9ee0-b9978a5c4233` “SANDBOX perk refinement gate 20260910T014041Z — delete me”; node-issues `SAV-581` (1.1), `SAV-582` (1.2), sentinel `SAV-580` — all trashed at teardown |
 | `"$PERK_BIN" --version` | `perk 3.2.0` (== savant's `.perk/required-perk-version`) |
 | `pi --version` | `0.85.1` |
 | Node / uv / jq | `v26.3.0` / `uv 0.12.3` / `jq-1.7.1-apple` |
-| operator confirmation | _(Part B, quoted verbatim)_ |
-| deviations | (1) the gate host is the operator's Linear consumer repo with a two-plane spoof, not a clone; (2) prose-map routing already landed in #2346 — see Deviations for the one-line regeneration this node performed |
+| operator confirmation | asked before `perk objective create` with the Part-A wording (user `Matt Giles`, team `SAV`, the entities to be created and trashed); answered verbatim: “Confirm — create in SAV (Recommended)” |
+| deviations | (1) the gate host is the operator's Linear consumer repo with a two-plane spoof, not a clone; (2) prose-map routing already landed in #2346 — the one-line regeneration this node performed; (3) `doctor --verbose` in place of the nonexistent `--verify`; (4) the skill symlink, the executor run-id inheritance, the abandoned first refine launch — all in Deviations |
 
 ## Part A — the procedure (pre-committed before execution)
 
@@ -330,22 +333,258 @@ must stand without `$EVID` (deleted after the record's commit).
 
 ## Part B — evidence
 
-_Not yet executed. Filled per leg (verbatim excerpts) after the live gate runs._
+Executed 2026-09-10 exactly as Part A (deviations listed in their own section). Every excerpt
+below is verbatim from the evidence dir; secrets appear only as the `linear_gql` function name.
+
+### Steps 1–4 — drivers, snapshot, spoof, readiness
+
+```
+$ source "$EVID/env.sh"; "$PERK_BIN" --version; "$PERK_BIN" objective refine --help >/dev/null && echo "refine door present"
+perk 3.2.0
+refine door present
+$ git -C "$PERK_SRC" rev-parse HEAD; git -C "$PERK_SRC" status --porcelain
+5aaecdabc017501706ef59bb9acc80c5bbdd3760
+$ bash "$EVID/restore-savant.sh"; bash "$EVID/teardown-linear.sh"      # smoke on the untouched state
+restore-savant: done
+teardown-linear: no objective was created
+$ git -C "$SAVANT" rev-parse --abbrev-ref HEAD; git -C "$SAVANT" rev-parse HEAD
+staging
+42fb989c1cac872771321f88bf6eb401bf19f886
+$ bash "$EVID/snapshot-savant.sh" before
+snapshot before:      222 lines
+$ tail -3 "$EVID/snapshot-before.txt"
+ABSENT .agents/skills/perk-objective-refine
+4084c9ee12ca14b1022d5063a20ff05e7beac104d424c2ff66d9b34f67a4a9d9  .perk/workflow/plan-ref.json
+ABSENT sandbox-refinement-gate
+$ shasum -a 256 "$EVID/spoof/mgiles-perk-3.2.0.tgz"
+12dcf7c54ee4f54bbaba65bb8eb195877e98db722dcdde3ab1f0f4da45c31d90  .../spoof/mgiles-perk-3.2.0.tgz
+$ grep -c '"version": "3.2.0"' "$PKG/package.json"; test -f "$PKG/extension/pi/v1/objectiveRefinement.ts" && echo "refine extension present"; grep -c node_context_reference "$PKG/prompts/stages/objective-plan/seed.md"
+1
+refine extension present
+2
+$ # the backed-up released package, for contrast:
+$ test -f "$EVID/backup/perk-npm-3.2.0/extension/pi/v1/objectiveRefinement.ts" || echo "objectiveRefinement.ts ABSENT in released"; grep -c node_context_reference "$EVID/backup/perk-npm-3.2.0/prompts/stages/objective-plan/seed.md"
+objectiveRefinement.ts ABSENT in released
+0
+$ ls "$EVID/backup/skills"
+perk-objective-plan            # a symlink into .agents/cache/worktrees/savant-51f1a9872a34/perk/59f0f724…/skills/perk-objective-plan (moved as a link)
+perk-objective-refine.ABSENT
+$ shasum -a 256 "$SAVANT/sandbox-refinement-gate/fixture.py"
+53c82331dadbdaedf2b05c4461ffe384226ac083b20e59d1b48776c39374cbaa  .../sandbox-refinement-gate/fixture.py
+$ (cd "$SAVANT" && "$PERK_BIN" doctor --verbose)      # read-only; --verify is not a flag (see Deviations)
+   ✓ linear-auth: authenticated as Matt Giles
+   ✓ linear-team: team SAV found
+   ✓ linear-labels: perk labels present
+   ✓ linear-project-scopes: Linear Projects accessible
+   ✓ linear-workflow-states: workflow states cover the node-status mirror
+   ✓ extension-install: @mgiles/perk installed at the pinned version
+   ✓ cli-version: perk CLI 3.2.0 matches the repo's required version
+   ✗ subagent-agents: subagent-agents drift — .pi/agents/perk/…: updated; …review-angle-selector.md: removed
+   ✗ gitignore-block: gitignore-block drift — .gitignore: updated
+   ✗ skills-manifest: skills-manifest drift — .agents/manifest.d/perk.yaml: updated
+✗ 3 check(s) failed
+```
+
+(The three drift lines are the unreleased tree's managed artifacts differing from the released
+3.2.0 materialization in savant — expected under the spoof, recorded, never `--fix`ed; both door
+stages run at the repo root with `worktree == "none"`, so no launch re-converges them.)
+
+### Step 5 — create + claim + inventory
+
+```
+$ "$PERK_BIN" objective create --body "$EVID/objective-body.md" --title "SANDBOX perk refinement gate $TS — delete me" --roadmap "$ROADMAP" --json
+{"success": true, "error_type": null, "objective": {"id": "f61dd894-d891-4c7d-9ee0-b9978a5c4233", "url": "https://linear.app/savantbio/project/sandbox-perk-refinement-gate-20260910t014041z-delete-me-2323330610dc", "existed": false}, "dry_run": false}
+$ "$PERK_BIN" objective node "$OBJ" --node 1.1 --status planning --json
+{"success": true, "error_type": null, "objective": "f61dd894-d891-4c7d-9ee0-b9978a5c4233", "node": "1.1", "comment_updated": false, "dry_run": false}
+$ "$PERK_BIN" objective show "$OBJ" --json | jq -c '.nodes[] | {id, status, pr}'
+{"id":"1.1","status":"planning","pr":null}
+{"id":"1.2","status":"pending","pr":null}
+$ linear_gql "$EVID/q-project.json"
+{"data":{"project":{"id":"f61dd894-d891-4c7d-9ee0-b9978a5c4233","name":"SANDBOX perk refinement gate 20260910T014041Z — delete me","url":"…","issues":{"nodes":[{"id":"21170789-d411-45ff-890b-d30fb425c44a","identifier":"SAV-582","title":"1.2: sandbox-farewell"},{"id":"f607b831-84bb-4f91-884d-032cadf00b14","identifier":"SAV-581","title":"1.1: sandbox-greet"},{"id":"7d6c3f93-bc2f-4b41-bf03-b8965abece68","identifier":"SAV-580","title":"Perk: objective metadata"}]}}}}
+NODE12=SAV-582
+$ "$PERK_BIN" objective refine "$OBJ" --node 1.2 --dry-run --json      # preview only (extra, read-only)
+{"success": true, "error_type": null, "objective_id": "f61dd894-d891-4c7d-9ee0-b9978a5c4233", "objective_run_id": "01M24EEC3Z2H8T3MJ7NABHF8RN", "node_id": "1.2", "node_status": "pending", "carrier_identifier": "SAV-582", "carrier_url": "https://linear.app/savantbio/issue/SAV-582/12-sandbox-farewell", "has_prior_refinement": false, "source_changed": false, "advisory": true, "checkout": {"path": "/Users/mattgiles/dev/roivant/savant", "head_sha": "42fb989c1cac872771321f88bf6eb401bf19f886", "dirty": true}, "backend": "linear", "dry_run": true}
+```
+
+### Leg L1–L2 — the cold refine door (operator) + E1/E2
+
+`leg-refine.sh` as written (literals substituted):
+
+```bash
+#!/bin/bash
+cd "/Users/mattgiles/dev/roivant/savant"
+export PERK_BIN="/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-2347/.venv/bin/perk"
+exec "$PERK_BIN" objective refine "f61dd894-d891-4c7d-9ee0-b9978a5c4233" --node 1.2 --no-sync 2> >(tee "/tmp/perk-linear-gate-evidence-20260910T014041Z/refine-launch.stderr" >&2)
+```
+
+`refine-launch.stderr` (the saving launch):
+
+```
+ ┌─┐┌─┐┬─┐┬┌─
+ ├─┘├┤ ├┬┘├┴┐
+ ┴  └─┘┴└─┴ ┴   perk v3.2.0
+ 39 skills · 10 extensions ready
+  › preparing refinement context for objective f61dd894-d891-4c7d-9ee0-b9978a5c4233
+  ✓ prepared node 1.2 → objective-refinement-context.json
+```
+
+The operator steered the planted assumption in with the Part-A sentence, approved in
+Plannotator (plain approve), and the session saved. `REFINE_RID=01M24G8SYTV75RFYV4P3KBGQR2`
+(`data/objective-refinement-draft.json` present).
+
+**E1** (one `linear_gql` read of `SAV-582`'s comments, filtered by the Part-A snippet):
+
+```
+comments: 1 refinement: ['e2d7ad68-e105-4b7b-b082-f09e2116e40c'] plan-body: []
+2026-09-10T01:54:34.594Z e2d7ad68-e105-4b7b-b082-f09e2116e40c :: `perk:objective-refinement:v1:af2d5b08b17d8922da7035748dc248641d927e969eede4562803c81e39fa…
+```
+
+`REFINE_COMMENT=e2d7ad68-e105-4b7b-b082-f09e2116e40c`.
+
+**E2** (`refine-context` `prior.markdown` vs the reviewed draft artifact's `.markdown`):
+
+```
+$ "$PERK_BIN" objective refine-context "$OBJ" --node 1.2 --run-id "$REFINE_RID" --json > "$EVID/refine-context-readback.json"   # exit 0
+EQUAL readback b5ddc541ae90b9a8d0eb0be8c775795ebaa26f46a094e0ff180dcccd2e720527 reviewed b5ddc541ae90b9a8d0eb0be8c775795ebaa26f46a094e0ff180dcccd2e720527
+```
+
+The planted assumption as saved (the reviewed Markdown's “Assumptions a later plan must
+re-verify”, first bullet, verbatim):
+
+> **`sandbox-refinement-gate/fixture.py` still defines `greet(name: str) -> str`, and `farewell`
+> mirrors that exact signature** — the file was uncommitted at capture, so 1.1's landed version
+> may differ from what was observed here.
+
+### Step 8 — setup for the plan leg + E3a
+
+```
+$ shasum -a 256 "$SAVANT/sandbox-refinement-gate/fixture.py"; grep -n "def " "$SAVANT/sandbox-refinement-gate/fixture.py"
+f6725e55a6bc494d2bb5fd6460502f63dd687d586d189a18e825f986e84d2113  .../sandbox-refinement-gate/fixture.py
+4:def salute(name: str) -> str:
+$ "$PERK_BIN" objective node "$OBJ" --node 1.2 --description "SANDBOX: add farewell(name: str) -> str beside salute …" --json
+{"success": true, "error_type": null, "objective": "f61dd894-d891-4c7d-9ee0-b9978a5c4233", "node": "1.2", "comment_updated": false, "dry_run": false}
+$ "$PERK_BIN" objective node "$OBJ" --node 1.1 --status done --json
+{"success": true, "error_type": null, "objective": "f61dd894-d891-4c7d-9ee0-b9978a5c4233", "node": "1.1", "comment_updated": false, "dry_run": false}
+$ "$PERK_BIN" objective next "$OBJ" --json
+{"success":true,"error_type":null,"next_node":{"id":"1.2","description":"SANDBOX: add farewell(name: str) -> str beside salute in sandbox-refinement-gate/fixture.py (greet was renamed to salute), mirroring salute's signature and return shape.","status":"pending","pr":null,"phase":"Phase 1"}}
+$ "$PERK_BIN" objective node-engagement "$OBJ" --node 1.2 --json | jq -c '{engagement_status, refinement, warnings}'
+{"engagement_status":"absent","refinement":{"status":"present","file":{"path":"…/.perk/workflow/scratch/runs/01M24EEC3Z2H8T3MJ7NABHF8RN/node-context/f61dd894-d891-4c7d-9ee0-b9978a5c4233/1.2/refinement.md","bytes":3440,"lines":38,"max_line_bytes":574}},"warnings":[]}
+$ grep -n "source_changed:\|source_digest:\|saved_at:\|authored:" "$EVID/refinement-pre-plan.md"
+6:saved_at: 2026-09-10T01:54:34.594Z (the backend's native last-write time)
+7:authored: run 01M24G8SYTV75RFYV4P3KBGQR2 at 2026-09-10T01:52:45Z
+9:source_digest: stored f835beeb1080cbfa3eeb514e4e5ac6c537d0fd62e8c4d496643e3288a1b6567a · current 7f7a8f9548f77979400e4834501e4ac639136c5765dc5f537ab7381de57edcef
+10:source_changed: yes — the node's fenced source (description/slug/comment/dependencies) changed after this refinement was authored; parts of the advice may be obsolete (it is still delivered in full)
+```
+
+### Leg L3–L8 — the cold plan door (operator, default selection) + E3b/E5–E9
+
+`leg-plan.sh` as written:
+
+```bash
+#!/bin/bash
+cd "/Users/mattgiles/dev/roivant/savant"
+export PERK_BIN="/Users/mattgiles/dev/github/mattgiles/perk/.worktrees/plan-2347/.venv/bin/perk"
+exec "$PERK_BIN" objective plan "f61dd894-d891-4c7d-9ee0-b9978a5c4233" --no-sync 2> >(tee "/tmp/perk-linear-gate-evidence-20260910T014041Z/plan-launch.stderr" >&2)
+```
+
+`plan-launch.stderr` (numbered; **E5** = line 7 precedes line 9):
+
+```
+     1	 ┌─┐┌─┐┬─┐┬┌─
+     2	 ├─┘├┤ ├┬┘├┴┐
+     3	 ┴  └─┘┴└─┴ ┴   perk v3.2.0
+     4	 39 skills · 10 extensions ready
+     5	  › looking up objective #f61dd894-d891-4c7d-9ee0-b9978a5c4233
+     6	  ✓ found objective #f61dd894-d891-4c7d-9ee0-b9978a5c4233 — node 1.2
+     7	  › marking node 1.2 planning
+     8	  ✓ marked node 1.2 planning
+     9	  › reading node context
+    10	  ✓ read node context — refinement present
+```
+
+The operator answered savant's `plan_authoring` grill briefly, approved in Plannotator, and the
+plan saved. The one permitted nudge was **not used**: the planner discarded the `greet`
+assumption unprompted. `PLAN_RID=01M24GGZ1QEMG2GW985536STJK` (files: `plan.md`,
+`session-pointers.json`, `node-context/<obj>/1.2/refinement.md`, `data/plan-draft.md`).
+
+**E3b** (the snapshot the plan run itself minted):
+
+```
+$ grep -n "source_changed:" "$EVID/refinement-plan-run.md"
+10:source_changed: yes — the node's fenced source (description/slug/comment/dependencies) changed after this refinement was authored; parts of the advice may be obsolete (it is still delivered in full)
+```
+
+**E6** — the saved plan (`data/plan-draft.md`, titled “SANDBOX: add `farewell` beside `salute`
+in `sandbox-refinement-gate/fixture.py`”), verbatim:
+
+> - The node's advisory refinement (saved 2026-09-10T01:54Z) was authored against the pre-rename
+>   shape (`greet`); its `source_changed: yes` flag is confirmed — **the live function is
+>   `salute`, not `greet`**. All other refinement claims re-verified below.
+
+and its `## Assumptions / advisory-input status`:
+
+> - The node refinement was fully paged and read (single block, boundary token
+>   `b5ddc541ae90b9a8`, no over-limit lines); no advisory warnings were reported. Its
+>   `greet`-era observations were discarded as obsolete per its own `source_changed` flag; its
+>   remaining claims (file shape, lint scope, unlanded 1.1) were each re-verified against the
+>   live tree and configs above.
+> - The Linear node-issue (SAV-582) carries no pre-planning human comments beyond the refinement
+>   carrier itself.
+
+**E7 / E8 / E9:**
+
+```
+$ "$PERK_BIN" objective show "$OBJ" --json | jq -c '.nodes[] | {id, status, pr}'
+{"id":"1.1","status":"done","pr":null}
+{"id":"1.2","status":"in_progress","pr":"#SAV-582"}
+$ linear_gql "$EVID/q-comments.json" > "$EVID/comments-after-plan.json"; "$PY" - … (the Part-A snippet)
+comments: 2 refinement: ['e2d7ad68-e105-4b7b-b082-f09e2116e40c'] plan-body: ['7581564c-538a-45b6-b44a-2bbf9a603b6f'] distinct: True
+$ "$PERK_BIN" objective node-engagement "$OBJ" --node 1.2 --json | jq -r .refinement.status
+present
+```
+
+### Step 10 — teardown + restore + proof (L10)
+
+```
+$ bash "$EVID/teardown-linear.sh"
+{"data":{"issueDelete":{"success":true}}}
+{"data":{"issueDelete":{"success":true}}}
+{"data":{"issueDelete":{"success":true}}}
+{"data":{"projectDelete":{"success":true}}}
+{"data":{"issue":{"identifier":"SAV-582","trashed":true}}}
+{"data":{"issue":{"identifier":"SAV-581","trashed":true}}}
+{"data":{"issue":{"identifier":"SAV-580","trashed":true}}}
+{"data":{"project":{"id":"f61dd894-d891-4c7d-9ee0-b9978a5c4233","name":"SANDBOX perk refinement gate 20260910T014041Z — delete me","url":"…","trashed":true,"issues":{"nodes":[]}}}}
+$ bash "$EVID/restore-savant.sh"
+restore-savant: done
+$ bash "$EVID/snapshot-savant.sh" after
+snapshot after:      222 lines
+$ diff "$EVID/snapshot-before.txt" "$EVID/snapshot-after.txt" && echo "savant restored: snapshots identical"
+savant restored: snapshots identical
+$ test -f "$PKG/extension/pi/v1/objectiveRefinement.ts" || echo "released package restored (no objectiveRefinement.ts)"; ls "$SAVANT/sandbox-refinement-gate"
+released package restored (no objectiveRefinement.ts)
+ls: .../sandbox-refinement-gate: No such file or directory
+$ git -C "$SAVANT" status --porcelain | wc -l
+       0
+```
+
+`plan-ref.json` had been rewritten by the plan save (`cmp` against the backup differed) and was
+restored from the backup — its pre-gate hash `4084c9ee…` reappears in `snapshot-after.txt`.
 
 ## Criteria classification
 
 | id | criterion | classification | evidence pointer / named test |
 |---|---|---|---|
-| L1 | cold `perk objective refine --node 1.2` → approve → exactly one refinement comment | unobserved — NOT PASSED (provisional) | E1 |
-| L2 | full read-back equals the reviewed Markdown | unobserved — NOT PASSED (provisional) | E2 |
-| L3 | node description changed → `source_changed: yes` rendered | unobserved — NOT PASSED (provisional) | E3a / E3b |
-| L4 | node made plannable through `perk objective node` (human surface); default selection picks 1.2 | unobserved — NOT PASSED (provisional) | step 8 `next.json` + E5 |
-| L5 | planning transition observed before the advisory read | unobserved — NOT PASSED (provisional) | E5 |
-| L6 | the planner explicitly discards the planted obsolete assumption | unobserved — NOT PASSED (provisional) | E6 |
-| L7 | real `plan_draft` → `plan_review` → save | unobserved — NOT PASSED (provisional) | E7 |
-| L8 | distinct plan and refinement comments | unobserved — NOT PASSED (provisional) | E8 |
-| L9 | refinement still readable after the claim | unobserved — NOT PASSED (provisional) | E9 |
-| L10 | teardown with inventory: every created Linear entity trashed; the four restored savant surfaces + the fixture dir hash-identical to the pre-gate snapshot; retained run-scratch dirs inventoried | unobserved — NOT PASSED (provisional) | step 10 |
+| L1 | cold `perk objective refine --node 1.2` → approve → exactly one refinement comment | **observed-live** | E1: `comments: 1 refinement: ['e2d7ad68-…'] plan-body: []` |
+| L2 | full read-back equals the reviewed Markdown | **observed-live** | E2: `EQUAL readback b5ddc541… reviewed b5ddc541…` |
+| L3 | node description changed → `source_changed: yes` rendered | **observed-live** | E3a (node-engagement before the plan leg) and E3b (the plan run's own snapshot): `source_changed: yes — …` |
+| L4 | node made plannable through `perk objective node` (human surface); default selection picks 1.2 | **observed-live** | step 8: `--status done` on 1.1 → `next.json` → `1.2`; `plan-launch.stderr` line 6 `found objective … — node 1.2` with no `--node` |
+| L5 | planning transition observed before the advisory read | **observed-live** | E5: line 7 `marking node 1.2 planning` precedes line 9 `reading node context` |
+| L6 | the planner explicitly discards the planted obsolete assumption | **observed-live** (no nudge) | E6: “Its `greet`-era observations were discarded as obsolete per its own `source_changed` flag … **the live function is `salute`, not `greet`**” |
+| L7 | real `plan_draft` → `plan_review` → save | **observed-live** | E7: 1.2 `in_progress`, `pr: "#SAV-582"`; `data/plan-draft.md` present |
+| L8 | distinct plan and refinement comments | **observed-live** | E8: `refinement: ['e2d7ad68-…'] plan-body: ['7581564c-…'] distinct: True` |
+| L9 | refinement still readable after the claim | **observed-live** | E9: `present`, `warnings: []` |
+| L10 | teardown with inventory: every created Linear entity trashed; the four restored savant surfaces + the fixture dir hash-identical to the pre-gate snapshot; retained run-scratch dirs inventoried | **observed-live** | step 10: four `trashed: true`; `savant restored: snapshots identical`; inventory below |
 | O1 | denial saves nothing | offline-pinned | `objectiveRefinement.test.ts` "plannotator arm: a denial saves nothing and redirects to the draft tool", "plan_review first-party approval saves the artifact bytes through the worker and terminates; deny/skip never save" |
 | O2 | encodings / fences / long lines | offline-pinned | `test_select_save_read_replace_and_retry`, `test_phase1_gate_linear_refinement_persistence`, `test_canonical_json_escapes_non_ascii_and_line_separators`, `test_round_trip_html_and_inline_forms_with_full_field_conversion`, `TestSnapshotRefinement::{test_reports_a_line_above_the_pi_bound, test_multibyte_block_is_byte_exact, test_unicode_encode_error_arm_downgrades_the_same_way}`, `test_paged_files.py::test_measure_text_reports_a_line_above_the_pi_bound`, `test_perk_objective_plan_sole_carried_detail` |
 | O3 | warm re-refinement + stale-candidate refusal | offline-pinned | `objectiveRefinement.test.ts` "/objective-refine (warm): unbound session …", "…draft rewritten while the review is pending … stale-approval", "…context re-prepared … blocks the late approval"; `TestGuardedUpsert::test_stale_expectations_refuse_without_writing`; `TestServiceOverLinear::test_pre_write_changes_refuse_without_mutation`; `test_precheck_precedence_identity_then_eligibility_then_source`; `test_guarded_upsert_codes_pass_through`; `test_default_selection_skips_valid_and_stale_records_and_orders_1_2_before_1_10` |
@@ -357,8 +596,8 @@ _Not yet executed. Filled per leg (verbatim excerpts) after the live gate runs._
 
 ### The offline rows, shown green
 
-Re-run in `PERK_SRC` (whose code equals `main` `51507710` — see Context) with `-n0`; the O-row
-ids above map onto these cases:
+Run in `PERK_SRC` on the exact tree this record's commit snapshots (code byte-identical to `main`
+`51507710` — see Context) with `-n0`; the O-row ids above map onto these cases:
 
 ```
 $ uv run pytest -n0 -v <the 23 ids below>
@@ -393,7 +632,7 @@ tests/test_objective_node_engagement_cmd.py::test_present_arm_writes_the_file_un
 tests/test_objective_node_engagement_cmd.py::test_detail_contract_present PASSED
 tests/test_objective_plan_cmd.py::test_cold_ordering_stacked_positioned_pointer_is_absolute_invoking_root_path PASSED
 tests/test_skill_semantic_contracts.py::test_perk_objective_plan_sole_carried_detail PASSED
-============================== 31 passed in 3.51s ==============================
+============================== 31 passed in 3.93s ==============================
 ```
 
 ```
@@ -413,8 +652,28 @@ $ node --test extension/pi/v1/objectiveRefinement.test.ts extension/authoring/ob
 
 ## Inventory + teardown proof
 
-_Filled by Part B: Linear entities with `trashed` flags; the `snapshot-before` / `snapshot-after`
-diff result; retained run-scratch dirs by path._
+**Linear entities created → trashed** (`teardown-verify.json`, re-read independently after the
+mutations): Project `f61dd894-d891-4c7d-9ee0-b9978a5c4233` `trashed: true` (its `issues.nodes`
+empty); `SAV-582` (1.2) `trashed: true`; `SAV-581` (1.1) `trashed: true`; `SAV-580` (metadata
+sentinel) `trashed: true`. Comments written during the run: `e2d7ad68-…` (refinement) and
+`7581564c-…` (plan body) on `SAV-582` — gone with the issue.
+
+**Restored savant surfaces** (`diff snapshot-before.txt snapshot-after.txt` empty, 222 lines
+each): `.pi/npm/node_modules/@mgiles/perk/` (219 file hashes — the released 3.2.0 package),
+`.agents/skills/perk-objective-refine` (`ABSENT` before and after), `.agents/skills/perk-objective-plan`
+(a symlink — see Deviations; `readlink` + `SKILL.md` hash identical before/after),
+`.perk/workflow/plan-ref.json` (hash `4084c9ee…` before and after), `sandbox-refinement-gate/`
+(`ABSENT` before and after); `git status --porcelain` empty before and after.
+
+**Retained (regenerable, gitignored) run-scratch dirs** under
+`savant/.perk/workflow/scratch/runs/`, newer than the pre-gate newest (`01M1QBE4NYX8DXY454V271RD6J`):
+
+| dir | files | origin |
+|---|---|---|
+| `01M24G6KSVH30GW5G57K63MQX2` | 2 | a first refine-door launch (21:51:33Z) that prepared a grounding context and was closed before drafting — no draft, no save (E1 shows one comment) |
+| `01M24G8SYTV75RFYV4P3KBGQR2` (+ `.1`) | 4 (+0) | the saving refine-door run (`REFINE_RID`) |
+| `01M24EEC3Z2H8T3MJ7NABHF8RN` | 1 | the executor's `node-engagement` read before the plan leg (the run id inherited from the executor's shell — see Deviations) |
+| `01M24GGZ1QEMG2GW985536STJK` (+ `.1`) | 4 (+0) | the plan-door run (`PLAN_RID`) |
 
 ## Deviations
 
@@ -434,7 +693,28 @@ diff result; retained run-scratch dirs by path._
   Markdown from a base that lacked it — a merge skew, not a routing gap). This node ran the
   deterministic `perk-dev prose-map sync` (one line added; no yaml, taxonomy or pin change) and
   then recorded `just prose-review-test` (553 passed) + `just prose-review-check` (exit 0) green.
-- _(further deviations filled by Part B — e.g. whether the one permitted planner nudge was used)_
+- **`perk doctor --verify` does not exist.** Part A named a `--verify` flag; the CLI runs the
+  verify-gated live checks by default (`run_doctor(verify=True)`), so the readiness read was
+  `perk doctor --verbose` — read-only, same evidence, never `--fix`.
+- **The `perk-objective-plan` skill in savant is a symlink** into `.agents/cache/worktrees/…`
+  (delivered by the skills CLI), so the snapshot's `find -type f` records nothing for that
+  surface before or after. The spoof moved the link aside and restore moved it back; an
+  out-of-script `readlink` + `SKILL.md` hash before/after (identical) strengthens that row.
+- **Executor run-id inheritance.** The executor's tool shells run inside a perk session whose
+  `PERK_RUN_ID` is `01M24EEC3Z2H8T3MJ7NABHF8RN`; `perk objective create` therefore recorded that
+  as the sandbox objective's `objective_run_id`, and the executor's `node-engagement` read wrote
+  its snapshot under a scratch dir of that name in savant. An environment artifact of running
+  the executor in-session, not a behavior of the code under test; the door legs ran in the
+  operator's own terminal with fresh run ids.
+- **Two refine launches.** The operator launched `leg-refine.sh` twice about a minute apart
+  (the first closed before drafting, after unclear hand-off directions). The abandoned run wrote
+  nothing (E1: exactly one comment); it is inventoried above.
+- **Contracts name this record by stem, not filename.** `tests/test_contracts_anchors.py::test_no_provenance_vocabulary`
+  bans the word “dogfood” anywhere in `shared/contracts.md` (no allowlist), so §8.67 points at
+  “the `objective-refinement-linear-planning-*` gate record under `docs/design/archive/`” rather
+  than at this file's literal name.
+- **No planner nudge.** The one permitted nudge (“State explicitly which refinement assumption
+  you discard and why”) was not needed — the plan discarded the `greet` assumption unprompted.
 
 ## Unobserved / residuals
 

@@ -449,8 +449,10 @@ a live workspace, so this is not part of ordinary Linear readiness.
   has not exercised rate limiting.
 - AgentSession emission is off by default and not live-verified.
 - Node refinements (Linear) — persistence, both refine doors, and planning-time consumption —
-  have offline regression coverage only; no passing authenticated refine-to-plan run is recorded
-  yet — see `docs/design/archive/objective-refinement-linear-planning-dogfood.md`.
+  have offline regression coverage and one dated end-to-end live run (refine → approve → plan,
+  2026-09-10) against a disposable Project, recorded in
+  `docs/design/archive/objective-refinement-linear-planning-dogfood.md`; treat that as a
+  point-in-time proof, not a per-workspace guarantee.
 - GitHub Issues Sync interactions are outside coverage; prefer a team without that two-way sync
   unless separately validated.
 - `pi-status-footer` hides extension status; non-default web providers have local credential or

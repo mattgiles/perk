@@ -143,3 +143,8 @@ consumption of refinements, the authenticated Linear refine-to-plan gate, and th
 (`GitHubIssueBackend.upsert_marked_comment` with `expected` and
 `GitHubObjectiveStore.read_node_refinement_targets` both raise `unsupported_backend` until
 then).
+
+*Update (2026-09-10):* the planning-consumption slice landed (contracts §8.26) and its
+authenticated Linear gate is recorded in
+[objective-refinement-linear-planning-dogfood.md](objective-refinement-linear-planning-dogfood.md)
+(verdict: PASS); the GitHub carrier remains deferred.
