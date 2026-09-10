@@ -1,6 +1,6 @@
 ---
-title: Lease-fenced outboxes, exclusive file claims & observation-acked delivery
-read_when: You are touching extension/hunkFeedback/, designing a file-lease/lock protocol or an outbox-ack bridge, choosing between resolverLease and the exclusiveFileClaim wrappers, or reviewing check-then-act.
+title: Lease-fenced outboxes, exclusion primitives & observation-acked delivery
+read_when: You are touching extension/hunkFeedback/, designing a file-lease/lock protocol or an outbox-ack bridge, choosing between resolverLease and worktreeResolverLock, or reviewing check-then-act.
 cluster: quality-and-guards
 ---
 
@@ -45,19 +45,31 @@ perk now carries three machine-local exclusion shapes; pick by what a stale hold
 |---|---|---|---|---|
 | The hunk lease | `extension/hunkFeedback/store.ts` | quarantine-rename reclaim, inode fencing, grace window | via reclaim rules | a long-lived consumer role that must fail over |
 | The resolver lease (a session **claim**) | `extension/substrate/resolverLease.ts` | dead-PID reclamation via a reclaimability predicate | yes (same PID) | a retry inside the same session must reacquire |
-| The exclusive file claim | `extension/substrate/exclusiveFileClaim.ts` | **none** — no retries, no cleanup on death | no — an existing file is busy even for the same PID | a stale holder must force **manual** recovery |
+| The worktree resolver lock | `extension/substrate/worktreeResolverLock.ts` | **none** — no retries, no cleanup on death | no — an existing file is busy even for the same PID | a stale holder must force **manual** recovery |
 
-The shared primitive mints a UUID token, creates the file exclusively with an owner-only mode,
-fsyncs and reads the record back, and fences release on descriptor/path identity. Its thin
-wrappers own the path and metadata: `extension/substrate/worktreeResolverLock.ts` (keyed on the
-canonical per-worktree git dir — `workflow/mergeability-and-conflict-resolution.md`) and
-`extension/substrate/draftReviewLock.ts` (the run-scoped draft-review claim —
-`workflow/plan-review-flow.md`). The rule behind the table: reach for the *claim* when a
-same-session retry must reacquire; reach for the no-reclamation primitive when an orphan or dead
-PID can never prove that no effects happened, so a human must look. Extraction lesson: the
-worktree lock was refactored onto the primitive while preserving its exported API, record shape,
-filename, and its real child-process contention tests THROUGH the extraction — the preserved
-tests were the safety net that made the extraction reviewable.
+The worktree resolver lock is again the **single self-contained §8.3 lock** (keyed on the
+canonical per-worktree git dir — `workflow/mergeability-and-conflict-resolution.md`): it mints a
+UUID token, creates the file exclusively with an owner-only mode, fsyncs and reads the record
+back, and fences release on descriptor/path identity. It was briefly extracted onto a shared
+`exclusiveFileClaim` primitive with a `draftReviewLock` sibling; both left with the persisted
+draft-review protocol (`workflow/plan-review-flow.md`) and the lock was restored as one module.
+The rule behind the table: reach for the *claim* when a same-session retry must reacquire; reach
+for the no-reclamation lock when an orphan or dead PID can never prove that no effects happened,
+so a human must look.
+
+Two lessons from the round trip:
+
+- **Mint the token INSIDE the cleanup-protected init block, after the exclusive create.** The
+  pre-extraction lock minted its token before the try that owned the descriptor; a minting failure
+  left an open descriptor plus an empty lock file that wedged every later acquisition as `busy`.
+  The restored module mints via `opts.token` (the fault seam, defaulting to `randomUUID`) inside
+  the protected block, and a test proves a throwing minter yields a typed `io-error`, unlinks the
+  fresh file, closes the descriptor, and lets the next acquisition succeed.
+- **"Restore verbatim" bounds the diff, not the review.** The byte-for-byte restore of the
+  pre-extraction lock carried that pre-existing gap — which the intermediate extraction had
+  fixed. When a refactor is rolled back, compare the restored module against what the extraction
+  *improved*, not only against what it broke; a verbatim restore is a scope decision about the
+  diff, never evidence the old code was right.
 
 ## Observation-acked delivery
 
@@ -68,12 +80,11 @@ tests were the safety net that made the extraction reviewable.
   suppress.
 - **The only delivery evidence is the persisted entry** — `pi.sendUserMessage` is
   fire-and-forget (see `pi/extension-api.md`).
-- The draft-review dispatch surface applies the same shape: delivery is proven only by later
-  persisted branch evidence — a persisted `plan_review` tool result with the fixed toolCallId, or
-  the code-authored user-message marker `<!-- perk:draft-review-dispatch:<id> -->` outside the
-  untrusted block — never by `message_end`/`sendUserMessage` spies (fire-and-forget, or firing
-  before the append). `turn_end` sees persisted entries; `message_end` alone does not
-  (`workflow/plan-review-flow.md`).
+- The browser draft-review doors apply the same shape: a decision's delivery to the model is
+  proven only by later persisted branch evidence (the injected user message with its digest and
+  code-authored marker outside the untrusted block) — never by `message_end`/`sendUserMessage`
+  spies (fire-and-forget, or firing before the append). `turn_end` sees persisted entries;
+  `message_end` alone does not (`workflow/plan-review-flow.md` § "Testing recipes").
 
 ## Provenance fences for disposable local outboxes
 
@@ -105,6 +116,7 @@ hunk upgrade that ships one (the detail lives as a code comment at the guard in
 
 - `docs/learned/pi/extension-api.md` — `pi.sendUserMessage` fire-and-forget; `/reload` re-claims
 - `docs/learned/toolchain/node-test-async-determinism.md` — FakeTimers seams + race hooks
-- `extension/substrate/exclusiveFileClaim.ts` (+ `worktreeResolverLock.ts`, `draftReviewLock.ts`) — the no-reclamation primitive and its wrappers
+- `extension/substrate/worktreeResolverLock.ts` (+ `.test.ts`) — the no-reclamation §8.3 lock and its token-minting fault seam
+- `extension/substrate/resolverLease.ts` — the same-PID-reacquirable session claim
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the worktree-scoped execution lock
-- `docs/learned/workflow/plan-review-flow.md` — the persisted draft-review protocol the run-scoped claim serves
+- `docs/learned/workflow/plan-review-flow.md` — the in-memory draft-review guards that replaced the run-scoped claim

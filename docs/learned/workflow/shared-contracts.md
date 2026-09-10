@@ -32,8 +32,11 @@ This doc captures the repeatable recipe for both, because the ripple is wide and
   exceptions are exempted inline, and conditional fields name their exact carrying shapes —
   "Prose-contract maintenance & objective hygiene".
 - When a non-authoritative plane parses config the authoritative plane also parses, pin the
-  divergence as a `shared/fixtures/*.json` fact with per-plane expectations and document the
-  failure boundary — "A `shared/fixtures/*.json` cross-plane fixture with per-plane expectations".
+  divergence as a `shared/fixtures/*.json` fact with per-plane expectations ("divergent ⇒
+  unproven", `issues-table.json`) and document the failure boundary — "A `shared/fixtures/*.json`
+  cross-plane fixture with per-plane expectations".
+- Verify a `§` pointer against the live contracts file at edit time; the anchors test bans
+  provenance vocabulary (cite archive records by stem glob) — "Contract-edit mechanics".
 
 ## The six-seam recipe for a new parsed data file
 
@@ -263,24 +266,38 @@ validator strict.
   the **merged base** at implementation time: a sibling node consumed §8.67 while a plan that
   reserved it was in flight, and the content shipped as §8.68. Re-check every in-plan `§8.x`
   pointer (docs, comments, tests) against the final number in the same turn.
+- **Verify the target `§` of an EXISTING spec against the live file too**, not from planning
+  notes — a learn issue cited the draft-review guards as §8.31 while the spec had landed under
+  §8.23; a pointer written from memory of the plan lands on the wrong section silently, and
+  `test_contracts_anchors` proves anchors exist, not that your pointer names the right one.
+- **`tests/test_contracts_anchors.py::test_no_provenance_vocabulary` bans provenance words** —
+  roadmap nodes, `Objective #N`, phases, `Q#`, concrete `#NNN` numbers, and the word "dogfood"
+  (any case). Cite an archive gate record by **stem glob** under `docs/design/archive/`
+  (`scout-launcher-*`), never by a literal filename that carries the banned token.
 
 ## A `shared/fixtures/*.json` cross-plane fixture with per-plane expectations
 
-`shared/fixtures/draft-review-config.json` is **test-only** — read at runtime by neither plane
-(`shared/README.md` documents `fixtures/`). It carries one TOML document per case with `values` (the
-TS projection's exact decoded strings), an optional `refuse` (the code-owned TS refusal text; `"*"` =
-the whole document), `equivalent_to` (two spellings that must project identically), and a `python`
-override block (`str` / `null` / `{"raises": ...}`), consumed by
-`extension/substrate/draftReviewConfig.test.ts` and `tests/test_draft_review_config.py` against the
-**real** Python readers.
+`shared/fixtures/issues-table.json` is **test-only** — read at runtime by neither plane
+(`shared/README.md` documents `fixtures/`). It carries one TOML document per case with `expected`
+(the `[issues] backend`/`team` values the TS subset reader yields — stripped, blank/non-string/absent
+→ `null`), `provable` (whether that read is provably `tomllib`'s, i.e. `resolveIssueRouting` reads
+`kind: "keys"` rather than widening the save-destination fence to the whole document), and — when the
+planes diverge — a `tomllib` block carrying Python's reading. `extension/substrate/config.test.ts`
+consumes it against the TS reader; `tests/test_issues_config_parity.py` consumes it against the
+**real** `tomllib` and pins the one rule that matters: **"divergent ⇒ unproven"** — every case whose
+`tomllib` reading differs from `expected` MUST carry `provable: false`
+(`test_a_divergent_reading_is_never_proven`), and every divergent spelling the reader is known to
+mis-read is covered (`test_fixture_covers_every_divergent_spelling`).
 
-The override block is essential because the planes legitimately differ: Python strips and
-blanks→`None`; the Linear key loader is fail-soft; and there is a TOML 1.1-vs-1.0 dialect gap between
-the vendored smol-toml closure and `tomllib` (which has no strict mode). The principle: when a
+The cases the mirror silently mis-read before the fixture existed are the shape any
+TS-mirror-of-a-Python-reader fixture should start from: dotted keys (`issues.backend = …`), inline
+tables (`issues = { backend = … }`), quoted header segments, `[issues] # comment` headers, `\uXXXX`
+escapes, multi-line strings, sub-tables and arrays of tables. The principle: when a
 non-authoritative plane parses config the authoritative plane also parses, **pin the divergence as a
-fixture fact and document the failure boundary** — here the gap can *fail* a save
-(`backend-unconfirmed → unresolved-dispatch`) but never *misroute* one (contracts §8.23) — rather
-than making the non-authoritative parser certify validity.
+fixture fact and document the failure boundary** — here an unproven reading can only *over-fence* a
+save (the whole document is digested, so an unrelated edit reads as "destination changed") and
+never *misroute* one (contracts §8.23; `workflow/plan-review-flow.md` § "The save-destination
+fence") — rather than making the non-authoritative parser certify validity.
 
 ## Cross-references
 

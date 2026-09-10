@@ -20,8 +20,13 @@ from the right path instead of rediscovering it.
 - One live SDK construction recipe remains — the read-WRITE worker (`sdkAdapter.ts`) with the
   real extension; the fully-isolated read-only child was deleted (PR #2100) and survives only as
   a carrier-less recipe — "Two construction paths — pick by isolation axis".
-- Probe scripts launched from inside a perk session inherit `PERK_RUN_ID` — unset it or the
-  probe adopts the parent's run — "Probe scripts … inherit the run-id env — unset it".
+- Probe scripts AND cold doors launched from inside a perk session inherit `PERK_RUN_ID` — unset
+  it or the probe/objective adopts the parent's run — "Probe scripts … inherit the run-id env —
+  unset it".
+- `runStage` samples the external `AbortSignal` twice and subscribes once (a dispatched abort
+  never replays to a late listener); every rejecting await sits inside the outcome-owning try;
+  init failures classify on the bind boundary — "The structured run-event stream" → "The
+  `runStage` outcome boundary".
 - The drive is a SINGLE `session.prompt(...)` — the SDK owns turn iteration and the await spans
   settlement; never frame it as an iterate-until-terminal loop (idle ≠ done, premature idle has
   no in-drive re-engagement) — "Single-prompt drive, NOT a `loop.ts` loop".
@@ -66,6 +71,12 @@ there) and emits a loud-but-harmless `workflow-state linkage error`. Guard: laun
 family already documented in `pi/extension-api.md` (node-test harness runs, `pi --mode json -p`
 probes) — the guard belongs here because this doc carries the construction recipe probe authors
 copy.
+
+The same leak reaches **cold doors driven from an in-session shell**: `perk objective create` run
+inside a session stamps that session's `PERK_RUN_ID` as the objective's `objective_run_id`, and the
+node-engagement scratch writes then land under the *implement* run's directory. Run interactive door
+legs (objective create/refine, plan authoring) from a separate terminal, not from the session's
+`bash` tool.
 
 ## The runtime-factory path builds the loader internally
 
@@ -168,6 +179,31 @@ grammar for historical `events.ndjson` files (contracts §8.12). `RunOutcome`'s 
 
 Building the emitter hit a tsc gotcha — `Omit<RunEvent, "seq"|"t">` collapses the discriminated union
 — fixed with a distributive `Omit`; see `docs/learned/toolchain/biome.md`.
+
+### The `runStage` outcome boundary (`extension/worker/stageExecution.ts`)
+
+The drive later hardened its outcome boundary; four facts generalize to any never-throws driver
+over an external `AbortSignal`:
+
+1. **`AbortSignal` never replays an already-dispatched abort to a late listener** — so "sample
+   twice, subscribe once": sample `signal.aborted` at entry (return the `aborted`/`external_abort`
+   verdict with zero turns, nothing resolved/constructed/bound) and again **immediately before**
+   `prompt()` (an idle session has nothing to abort — no `session.abort()` call), then register the
+   listener synchronously with **no intervening `await`** (no check-then-subscribe window). Never
+   install the listener during init: an abort that lands mid-init takes effect when init completes,
+   in program order, via the pre-prompt sample.
+2. **Every await that can reject before a normalized outcome lives inside the try that owns the
+   outcome.** Auth resolution, runtime construction and `bind()` moved inside it; `run_started` is
+   hoisted to drive entry so one emit site + one `finish()` site guarantee the §8.11/§8.12
+   `run_started`/`run_finished` pair **by construction** on every path (pre-aborted, init failure,
+   no model, preflight, pre-prompt abort, the drive).
+3. **Init failures classify on the bind boundary**: a rejection before the session is bound →
+   `runtime_init`; after → `drive_error`. A single shared `EXTERNAL_ABORT_VERDICT` constant keeps
+   the three abort routes (entry sample, pre-prompt sample, the drive's abort termination)
+   byte-identical.
+4. **When abort semantics change, audit tests asserting the OLD side effect**, not just the
+   outcome — a pin on `abortCalls >= 1` encoded "we called `session.abort()` on an idle session",
+   which the pre-prompt sample deliberately stopped doing.
 
 ## Never default the model to `getAvailable()[0]` — leave it undefined
 
@@ -328,8 +364,9 @@ on both the idle path and the streaming follow-up path. Any digest/evidence sche
 *sent* block array can therefore never match its persisted evidence: construct the canonical single
 block *before* recording the expectation and send it unchanged; never normalize inside the digest.
 
-The real-transport regression recipe (`extension/pi/v1/draftReviewUserDelivery.test.ts`, the guard
-against a future join change — there is no separate version-aware guard):
+The real-transport regression recipe (`extension/pi/v1/draftReview.test.ts` — the
+`injectDraftReviewResult` idle→plain / busy→followUp / joined-with-`\n` case — is the guard against
+a future join change; there is no separate version-aware guard):
 
 - Observe the send with a **forwarding wrapper** assigned as an own property on the session
   instance (the runner's bound action calls `this.sendUserMessage(...)` dynamically): read retained
