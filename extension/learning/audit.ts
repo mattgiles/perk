@@ -248,9 +248,11 @@ function laneTask(
 }
 
 /** The verdicts-record identity the fold joins on — `(enclosing expectation id, session_path)`
- * — as one map key (NUL-joined, the same separator the basename-collision count uses). */
+ * — as one map key. An unambiguous tuple encoding, not a delimiter join: after the lenient decode
+ * either field may carry ANY character (NUL included), and a non-injective key would let one
+ * malformed pair falsely contest an unrelated pair's identity. */
 function foldIdentityKey(expectationId: string, sessionPath: string): string {
-  return `${expectationId}\u0000${sessionPath}`;
+  return JSON.stringify([expectationId, sessionPath]);
 }
 
 /**
@@ -572,8 +574,10 @@ function degradeLanes(plan: AuditLanePlan): AuditVerdictLane[] {
   return plan.degraded.map(({ identity, detail }) => failedLane(identity, "lane-failed", detail));
 }
 
-/** Assemble the verdicts.json lane records: one record per packetized pair (manifest order) —
- * planned lanes mapped from the wave result, pre-dispatch degrades appended `lane-failed`. */
+/** Assemble the verdicts.json lane records: one record per planned lane (manifest order) mapped
+ * from the wave result, then the plan's pre-dispatch degrades appended `lane-failed` — one per
+ * degraded pair, except that a contested fold identity's claimants share ONE record. Every
+ * record's `(expectation_id, session_path)` is unique (the fold's rule over the written file). */
 function assembleLanes(
   plan: AuditLanePlan,
   wave: AuditWaveStatus,

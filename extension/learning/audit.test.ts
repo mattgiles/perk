@@ -519,6 +519,53 @@ test("judgeAuditBundle: a mismatched pair sharing its session_path with a siblin
   assert.equal(new Set(identities).size, identities.length);
 });
 
+test("judgeAuditBundle: the fold-identity key is an injective tuple encoding — NUL-bearing fields never falsely contest an unrelated pair", async () => {
+  // `("a\0b", "c")` and `("a", "b\0c")` delimiter-join to the same NUL-separated string; with a
+  // non-injective key the second pair — routing-safe (NUL only in its UNFENCED session_path) —
+  // would be suppressed as contested. The identities are distinct, so it dispatches while the
+  // NUL-bearing id degrades on the fence under its own identity.
+  const nulId = "a\u0000b";
+  const m = manifest([
+    { id: nulId, pairs: [pair(nulId, "c.jsonl", { session_path: "c" })] },
+    { id: "a", pairs: [pair("a", "s1.jsonl", { session_path: "b\u0000c" })] },
+  ]);
+  const adapter = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: [
+        { key: "a.1", ok: true, error: null, report: report("s1.jsonl", { expectation_id: "a" }) },
+      ],
+    },
+  });
+  const writer = recordingWriter();
+  await judgeAuditBundle(reportWaveOver(adapter), {
+    bundleDir: BUNDLE_DIR,
+    manifest: m,
+    writeVerdicts: writer.write,
+  });
+  assert.equal(adapter.calls.spawn.length, 1, "the routing-safe pair dispatches");
+  const keys = (
+    waveScriptItems(adapter.calls.spawn[0]?.workflowScript ?? "") as Array<{ key: string }>
+  ).map((i) => i.key);
+  assert.deepEqual(keys, ["a.1"]);
+
+  const written = writtenVerdicts(writer.files);
+  assert.equal(written.lanes.length, 2);
+  for (const lane of written.lanes) {
+    assert.doesNotMatch(lane.detail, /claimed by .* packetized pairs/, "never contested");
+  }
+  const graded = written.lanes[0];
+  assert.ok(graded);
+  assert.equal(graded.status, "report");
+  assert.equal(graded.expectation_id, "a");
+  assert.equal(graded.session_path, "b\u0000c");
+  const nulLane = written.lanes[1];
+  assert.ok(nulLane);
+  assert.equal(nulLane.status, "lane-failed");
+  assert.equal(nulLane.expectation_id, nulId);
+  assert.match(nulLane.detail, /expectation id .* is not a safe routing token/);
+});
+
 test("judgeAuditBundle: identical twins (same basename AND session_path) consolidate to one record — the contested-identity arm precedes the basename-collision arm", async () => {
   // Two byte-identical packetized pairs share BOTH the stem-keyed packet and the fold identity;
   // the basename-collision arm alone would write two records under one identity (fold-invalid).
