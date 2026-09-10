@@ -1237,28 +1237,30 @@ def test_launch_injects_cli_version_env():
     assert captured["PERK_RUN_ID"] == "01TEST"
 
 
-def test_launch_injects_fff_override_env_default():
-    """The local launch seam injects the PI_FFF_MODE=override default (FFF replaces the builtin
-    find/grep in perk-launched sessions) when the operator environment does not set it."""
+def test_launch_injects_fff_mode_env_default():
+    """The local launch seam injects the PI_FFF_MODE=tools-and-ui default when the operator
+    environment does not set it: pi's builtin grep/find stay host-builtins for pi-subagents'
+    >= 0.67.0 host-tool intersection (an override-mode pi-fff shadows them by name and fails
+    review/scout lanes closed), with FFF still reachable as fffind/ffgrep."""
     captured = _build_exec_env(
         run_id="01TEST",
         environ={},
         fallback_linear_api_key=None,
         pi_agent_dir=None,
     )
-    assert captured["PI_FFF_MODE"] == "override"
+    assert captured["PI_FFF_MODE"] == "tools-and-ui"
 
 
-def test_launch_operator_env_wins_over_fff_override_default():
+def test_launch_operator_env_wins_over_fff_mode_default():
     """An operator-set PI_FFF_MODE wins over the injected default (merge order: os.environ is
-    spread after FFF_OVERRIDE_ENV), restoring pi-fff's additive default on demand."""
+    spread after FFF_MODE_ENV) — the opt-in direction back to FFF-as-find/grep."""
     captured = _build_exec_env(
         run_id="01TEST",
-        environ={"PI_FFF_MODE": "tools-and-ui"},
+        environ={"PI_FFF_MODE": "override"},
         fallback_linear_api_key=None,
         pi_agent_dir=None,
     )
-    assert captured["PI_FFF_MODE"] == "tools-and-ui"
+    assert captured["PI_FFF_MODE"] == "override"
 
 
 def test_reuse_does_not_fetch_or_rebase(git_repo_with_remote, monkeypatch):

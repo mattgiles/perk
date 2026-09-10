@@ -118,6 +118,18 @@ def isolated_pi_agent_dir(monkeypatch, tmp_path) -> Path:
 
 
 @pytest.fixture(autouse=True)
+def _no_operator_fff_mode(monkeypatch):
+    """Strip a developer shell's ``PI_FFF_MODE`` for every test.
+
+    doctor's ``subagent-host-tools`` check reads the variable at check time (its ``environ``
+    seam defaults to ``os.environ``), so an exported ``PI_FFF_MODE=override`` would flip
+    ``run_doctor`` arms on the developer's machine; tests exercising the env arm pass
+    ``environ=`` or ``setenv`` explicitly.
+    """
+    monkeypatch.delenv("PI_FFF_MODE", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _no_interactive_prompts(monkeypatch):
     """Fail fast with a clear message when a test reaches a real interactive prompt.
 

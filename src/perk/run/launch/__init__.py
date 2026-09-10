@@ -128,10 +128,15 @@ _NPM_QUIET_ENV = {
     "npm_config_audit": "false",
 }
 
-# perk-launched sessions run the borrowed pi-fff extension in override mode (FFF replaces
-# the builtin find/grep). Injected-default tier: operator env wins by merge order, so
-# PI_FFF_MODE=tools-and-ui in the environment restores pi-fff's additive default.
-FFF_OVERRIDE_ENV = {"PI_FFF_MODE": "override"}
+# perk-launched sessions run the borrowed pi-fff extension in its additive default mode so
+# pi's builtin grep/find stay host-builtins: pi-subagents >= 0.67.0 intersects a child's
+# declared tools with the HOST's builtin-sourced tools and fails review/scout lanes closed
+# when an extension shadows a builtin by name (override mode re-registers grep/find under
+# pi-fff's own source). FFF stays reachable as fffind/ffgrep. Injected-default tier: operator
+# env wins by merge order, so `export PI_FFF_MODE=override` opts back into FFF-as-grep/find —
+# at the cost of that launch failure on affected engine versions (the doctor
+# `subagent-host-tools` check names it).
+FFF_MODE_ENV = {"PI_FFF_MODE": "tools-and-ui"}
 
 
 @dataclass(frozen=True)
@@ -593,7 +598,7 @@ def _build_exec_env(
     """
     env = {
         **_NPM_QUIET_ENV,
-        **FFF_OVERRIDE_ENV,
+        **FFF_MODE_ENV,
         **environ,
         "PERK_RUN_ID": run_id,
         "PERK_CLI_VERSION": __version__,
@@ -746,7 +751,7 @@ def _emit_dry_run_preview(
 
 
 __all__ = [
-    "FFF_OVERRIDE_ENV",
+    "FFF_MODE_ENV",
     "_NPM_QUIET_ENV",
     "_PI_AGENT_LOCK_FILES",
     "_WORKTREE_SETUP_TIMEOUT_S",

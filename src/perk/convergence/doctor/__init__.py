@@ -59,6 +59,7 @@ from perk.convergence.doctor.checks import (
     _subagent_bridge_config_check,
     _subagent_compat_check,
     _subagent_engine_check,
+    _subagent_host_tools_check,
     _watch_feedback_asset_check,
 )
 from perk.convergence.doctor.data import _MANAGED_GROUP, Check, DoctorReport, Status
@@ -144,6 +145,7 @@ __all__ = [
     "_subagent_bridge_config_check",
     "_subagent_compat_check",
     "_subagent_engine_check",
+    "_subagent_host_tools_check",
     "_untrack_materialized_plan_cache",
     "_untrack_subagent_artifacts",
     "_watch_feedback_asset_check",
@@ -236,6 +238,10 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     # resource-overrides posture; beside subagent-engine for `package`-group adjacency. In
     # scaffolded unit-test repos the gitignored install tree is absent (deterministic `info`).
     checks.append(_subagent_compat_check(root))
+    # Same offline/report-only posture (file reads + one env read, warn at worst, no --fix arm),
+    # so NOT verify-gated — right after subagent-compat for `package`-group adjacency: the one
+    # known engine + pi-fff interaction that kills every review/scout lane at launch.
+    checks.append(_subagent_host_tools_check(root))
     # Ponytail is another lazy project install: absent is informational; a present incompatible
     # source warns without repair because settings convergence preserves operator pins.
     checks.append(_ponytail_compat_check(root))

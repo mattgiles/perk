@@ -233,10 +233,11 @@ def _spawn_worker(
     code. Routed through one wrapper so tests can monkeypatch the spawn.
     """
     argv = ["node", str(entry), stage_id, "--worktree", str(worktree)]
-    # FFF_OVERRIDE_ENV rides both spawn sites (execution-path parity with `_exec_pi`) because
-    # the FFF mode is behavioral; `_NPM_QUIET_ENV` stays local-only (cosmetic). Same
+    # FFF_MODE_ENV rides both spawn sites (execution-path parity with `_exec_pi`) because the
+    # FFF mode is behavioral — the additive mode keeps pi's builtin grep/find host-builtins for
+    # pi-subagents' host-tool intersection; `_NPM_QUIET_ENV` stays local-only (cosmetic). Same
     # override-respecting merge order: the GHA workflow / operator environ wins.
-    env = {**launch.FFF_OVERRIDE_ENV, **environ, "PERK_RUN_ID": run_id}
+    env = {**launch.FFF_MODE_ENV, **environ, "PERK_RUN_ID": run_id}
     try:
         proc = subprocess.run(argv, check=False, cwd=worktree, env=env, timeout=WORKER_TIMEOUT_S)
     except subprocess.TimeoutExpired as exc:
