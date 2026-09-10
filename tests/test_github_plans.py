@@ -641,7 +641,20 @@ def test_update_plan_header_dry_run_refuses_a_blockless_body(monkeypatch):
 
 
 def _comment_list(*bodies: str) -> str:
+    """One flat REST comment page (the plan-body scans' single unpaginated page)."""
     return json.dumps([{"id": 100 + i, "body": b} for i, b in enumerate(bodies)])
+
+
+def _comment_pages(*pages: tuple[str, ...]) -> str:
+    """A ``--paginate --slurp`` payload: an array of per-page row arrays (the marker finder's
+    exhaustive census shape); ids number the rows across pages from 100."""
+    rows = iter(range(100, 10_000))
+    return json.dumps([[{"id": next(rows), "body": b} for b in page] for page in pages])
+
+
+def _refinement_comment(markdown: str) -> str:
+    """A refinement-OWNED comment body: a family marker on the first physical line."""
+    return f"<!-- perk:objective-refinement:v1:{'a' * 64} -->\n\n{markdown}"
 
 
 def test_find_plan_body_comment_id_returns_matching_id(monkeypatch):
@@ -656,6 +669,24 @@ def test_find_plan_body_comment_id_none_when_no_match(monkeypatch):
     listing = _comment_list("nothing here", "still nothing")
     monkeypatch.setattr(
         subprocess, "run", _GhDispatch([(_has("issues/123/comments"), _Proc(0, listing))])
+    )
+    assert plans._find_plan_body_comment_id(123, ROOT) is None
+
+
+def test_find_plan_body_comment_id_skips_refinement_comment(monkeypatch):
+    """A refinement-owned comment embedding a COMPLETE plan-body example is never the plan
+    comment (§8.67 coexistence) — the real plan comment after it is found."""
+    example = plan.render_plan_body("# Example\n\nquoted")
+    listing = _comment_list(
+        _refinement_comment(example), plan.render_plan_body("# Real\n\nbody"), example
+    )
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issues/123/comments"), _Proc(0, listing))])
+    )
+    assert plans._find_plan_body_comment_id(123, ROOT) == 101
+    only_refinement = _comment_list("chatter", _refinement_comment(example))
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issues/123/comments"), _Proc(0, only_refinement))])
     )
     assert plans._find_plan_body_comment_id(123, ROOT) is None
 
@@ -863,24 +894,98 @@ def test_adopt_issue_as_plan_rejects_unknown_header_field(monkeypatch):
 MARKER = "<!-- perk:run-report:RID -->"
 
 
+def _list_call(rec: _GhDispatch) -> list[str]:
+    """The one comment-LIST argv (GET) the marker finder issued."""
+    [call] = [c for c in rec.calls if any("issues/42/comments" in t for t in c) and "POST" not in c]
+    return call
+
+
+def _assert_exhaustive_list(rec: _GhDispatch) -> None:
+    call = _list_call(rec)
+    assert "--paginate" in call and "--slurp" in call and "per_page=100" in call
+    assert call[call.index("-X") + 1] == "GET"
+
+
 def test_find_comment_id_by_marker_matches(monkeypatch):
-    listing = _comment_list("chatter", f"{MARKER}\nstarted note")
-    monkeypatch.setattr(
-        subprocess, "run", _GhDispatch([(_has("issues/42/comments"), _Proc(0, listing))])
-    )
+    listing = _comment_pages(("chatter", f"{MARKER}\nstarted note"))
+    rec = _GhDispatch([(_has("issues/42/comments"), _Proc(0, listing))])
+    monkeypatch.setattr(subprocess, "run", rec)
     assert plans.find_comment_id_by_marker(issue=42, marker=MARKER, repo_root=ROOT) == 101
+    _assert_exhaustive_list(rec)
 
 
 def test_find_comment_id_by_marker_no_match(monkeypatch):
-    listing = _comment_list("nothing", "still nothing")
+    listing = _comment_pages(("nothing", "still nothing"))
+    rec = _GhDispatch([(_has("issues/42/comments"), _Proc(0, listing))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert plans.find_comment_id_by_marker(issue=42, marker=MARKER, repo_root=ROOT) is None
+    _assert_exhaustive_list(rec)
+    # An issue with no comments slurps as one genuinely empty page.
     monkeypatch.setattr(
-        subprocess, "run", _GhDispatch([(_has("issues/42/comments"), _Proc(0, listing))])
+        subprocess, "run", _GhDispatch([(_has("issues/42/comments"), _Proc(0, "[[]]"))])
     )
     assert plans.find_comment_id_by_marker(issue=42, marker=MARKER, repo_root=ROOT) is None
 
 
+def test_find_comment_id_by_marker_walks_every_page(monkeypatch):
+    """The completeness rule: a marker placed late in a long thread (only in the second slurped
+    page) is found, so the upsert never mints a duplicate."""
+    listing = _comment_pages(("p1 a", "p1 b"), ("p2 a", f"{MARKER}\nlate note"))
+    rec = _GhDispatch([(_has("issues/42/comments"), _Proc(0, listing))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert plans.find_comment_id_by_marker(issue=42, marker=MARKER, repo_root=ROOT) == 103
+    _assert_exhaustive_list(rec)
+
+
+def test_find_comment_id_by_marker_skips_refinement_comment(monkeypatch):
+    """A refinement-owned comment quoting the marker is never a marker candidate (§8.67
+    coexistence): the real marker-bearing comment after it wins; alone it reads as no match."""
+    quoting = _refinement_comment(f"The run report marker is `{MARKER}` — do not touch it.")
+    listing = _comment_pages((quoting, f"{MARKER}\nstarted note"))
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issues/42/comments"), _Proc(0, listing))])
+    )
+    assert plans.find_comment_id_by_marker(issue=42, marker=MARKER, repo_root=ROOT) == 101
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch([(_has("issues/42/comments"), _Proc(0, _comment_pages((quoting,))))]),
+    )
+    assert plans.find_comment_id_by_marker(issue=42, marker=MARKER, repo_root=ROOT) is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        json.dumps([{"id": 100, "body": MARKER}]),  # a flat (non-paged) row array
+        json.dumps({"id": 100, "body": MARKER}),  # not a list at all
+        json.dumps([[{"id": 100, "body": "x"}], {"id": 101, "body": MARKER}]),  # non-list page
+        "",  # empty stdout is never an empty census
+    ],
+    ids=["flat", "object", "mixed", "empty-stdout"],
+)
+def test_find_comment_id_by_marker_fails_closed_on_unexpected_page_shape(monkeypatch, payload):
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issues/42/comments"), _Proc(0, payload))])
+    )
+    with pytest.raises(github.GitHubError) as info:
+        plans.find_comment_id_by_marker(issue=42, marker=MARKER, repo_root=ROOT)
+    assert "slurped comments" in str(info.value) or "unparseable" in str(info.value)
+
+
+def test_find_comment_id_by_marker_missing_issue_raises(monkeypatch):
+    """The unchanged edge: a missing issue is an infra failure for the finder (never None)."""
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch([(_has("issues/42/comments"), _Proc(1, stderr="gh: Not Found (HTTP 404)"))]),
+    )
+    with pytest.raises(github.GitHubError, match="failed to list comments on issue #42"):
+        plans.find_comment_id_by_marker(issue=42, marker=MARKER, repo_root=ROOT)
+
+
 def test_upsert_marked_comment_patches_existing(monkeypatch):
-    listing = _comment_list(f"{MARKER}\nstarted note")
+    listing = _comment_pages((f"{MARKER}\nstarted note",))
     rec = _GhDispatch(
         [
             (_has("issues/42/comments"), _Proc(0, listing)),
@@ -894,10 +999,11 @@ def test_upsert_marked_comment_patches_existing(monkeypatch):
     assert result.posted is True
     assert rec.method_calls("PATCH") == 1 and rec.method_calls("POST") == 0
     assert "terminal note" in rec.body_files[-1]
+    _assert_exhaustive_list(rec)
 
 
 def test_upsert_marked_comment_posts_new(monkeypatch):
-    listing = _comment_list("no marker here")
+    listing = _comment_pages(("no marker here",))
     rec = _GhDispatch(
         [
             (_has("issues/42/comments", "POST"), _Proc(0, "{}")),
@@ -910,6 +1016,7 @@ def test_upsert_marked_comment_posts_new(monkeypatch):
     )
     assert result.posted is True
     assert rec.method_calls("POST") == 1
+    _assert_exhaustive_list(rec)
 
 
 def test_upsert_marked_comment_dry_run_does_not_shell(monkeypatch):
@@ -1058,6 +1165,29 @@ def test_get_plan_body_none_when_no_block(monkeypatch):
     payload = json.dumps({"body": "just a header", "comments": []})
     monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: _Proc(0, payload))
     assert plans.get_plan_body(number=42, repo_root=ROOT) is None
+
+
+def test_get_plan_body_skips_refinement_comment(monkeypatch):
+    """A refinement-owned comment carrying a complete plan-body example is never the plan body
+    (§8.67 coexistence): alone it reads as ``None``; the real plan comment after it is read."""
+    example = plan.render_plan_body("# Example\n\nquoted")
+    header = "<!-- perk:metadata-block:plan-header -->"
+    only_refinement = json.dumps(
+        {"body": header, "comments": [{"body": _refinement_comment(example)}]}
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: _Proc(0, only_refinement))
+    assert plans.get_plan_body(number=42, repo_root=ROOT) is None
+    with_real = json.dumps(
+        {
+            "body": header,
+            "comments": [
+                {"body": _refinement_comment(example)},
+                {"body": plan.render_plan_body("# Real\n\nreal body")},
+            ],
+        }
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: _Proc(0, with_real))
+    assert plans.get_plan_body(number=42, repo_root=ROOT) == "# Real\n\nreal body"
 
 
 def test_get_plan_body_missing_issue_returns_none(monkeypatch):

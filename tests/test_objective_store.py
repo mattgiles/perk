@@ -300,7 +300,7 @@ class _FakeObjectiveStore:
         self, *, objective_id: str
     ) -> refinement_models.RefinementObjectiveSnapshot | None:
         # The minimal fake has no refinement carrier: the typed refusal, before any lookup (the
-        # GitHub / dormant-Linear posture; the refinement suites bring their own stores).
+        # dormant-Linear posture; the refinement suites bring their own stores).
         raise objective_store.RefinementTargetReadError(
             "unsupported_backend", "the minimal fake store has no refinement carrier"
         )

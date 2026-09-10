@@ -14,6 +14,12 @@ Mechanism notes (contracts.md §8.25):
 - A not-found issue surfaces as a non-zero ``gh`` exit ("Could not resolve to an Issue …"), folded
   to ``[]`` via ``_exec._is_not_found`` (the gateway's lookup convention); every other failure
   raises ``GitHubError``.
+- ``IssueComment.fullDatabaseId`` is the ONE comment identity perk surfaces: the full-width
+  database key (a ``BigInt`` — GitHub encodes it as a decimal string because it may exceed a
+  32-bit ``Int``; the 32-bit ``databaseId`` is never selected for comments, nor is the GraphQL
+  node id). It is the integer the REST comment ``PATCH`` endpoint takes, re-stringified in
+  canonical decimal. A node without a parseable ``fullDatabaseId`` is a labelled ``GitHubError``
+  (identity-required), while every other field keeps its tolerant read (rest-tolerant).
 - ``IssueComment.lastEditedAt`` gives the edited flag; ``author{__typename databaseId login}``
   gives the bot/human discriminator + opaque id. ``Issue.userContentEdits`` gives ``editedAt`` /
   ``editor`` / a best-effort ``diff`` (may be null).
@@ -36,7 +42,7 @@ _COMMENTS_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!, $cursor: String) { "
     "repository(owner: $owner, name: $name) { issue(number: $number) { "
     "comments(first: 100, after: $cursor) { "
-    "nodes { id body createdAt lastEditedAt author { " + _ACTOR_SELECTION + " } } "
+    "nodes { fullDatabaseId body createdAt lastEditedAt author { " + _ACTOR_SELECTION + " } } "
     "pageInfo { hasNextPage endCursor } } } } }"
 )
 
@@ -52,7 +58,10 @@ _DESCRIPTION_EDITS_QUERY = (
 @dataclass(frozen=True)
 class IssueCommentRow:
     """A github-native issue-comment row (raw author fields; mapped to the neutral contract by the
-    backend adapter). ``edited_at`` is ``None`` for an unedited comment."""
+    backend adapter). ``id`` is the canonical decimal spelling of ``fullDatabaseId`` — the ONE
+    comment identity: usable with the REST comment ``PATCH`` endpoint, equal (as ``str``) to the
+    REST list's ``id`` and, for an objective-body comment, to the header's
+    ``objective_comment_id``. ``edited_at`` is ``None`` for an unedited comment."""
 
     id: str
     body: str
@@ -88,6 +97,16 @@ def _actor_fields(node: object) -> tuple[str | None, str | None, bool]:
         actor_id,
         d.get("__typename") == "Bot",
     )
+
+
+def _database_id(value: object) -> int | None:
+    """Parse a GraphQL ``BigInt`` database key — documented as a decimal string (it may exceed a
+    32-bit ``Int``); a JSON integer is accepted too (``bool`` rejected). Anything else (absent,
+    ``null``, a node id, a float, a signed or blank string) is ``None``: the caller decides
+    whether identity is required."""
+    if isinstance(value, str):
+        return int(value) if value.isascii() and value.isdigit() else None
+    return _exec._opt_int(value)
 
 
 def _connection(obj: object, path: str) -> dict[str, object] | None:
@@ -157,10 +176,18 @@ def read_issue_comments(*, issue: int, repo_root: Path) -> list[IssueCommentRow]
     )
     rows: list[IssueCommentRow] = []
     for node in nodes:
+        # Identity-required: a comment without its full-width database id cannot be addressed by
+        # the guarded upsert or the comment PATCH, so the read refuses rather than mint a blank id.
+        database_id = _database_id(node.get("fullDatabaseId"))
+        if database_id is None:
+            raise _exec.GitHubError(
+                f"comment on issue #{issue} carries no parseable fullDatabaseId: "
+                f"{node.get('fullDatabaseId')!r}"
+            )
         login, actor_id, is_bot = _actor_fields(node.get("author"))
         rows.append(
             IssueCommentRow(
-                id=str(node.get("id", "")),
+                id=str(database_id),
                 body=str(node.get("body", "")),
                 created_at=str(node.get("createdAt", "")),
                 edited_at=_exec._opt_str(node.get("lastEditedAt")),

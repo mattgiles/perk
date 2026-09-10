@@ -278,14 +278,15 @@ GitHub).
 ### Node refinements (Linear-Project objectives only)
 
 A **refinement** is a dated, reviewed, advisory elaboration of one roadmap node, written ahead
-of its turn and stored as **one marked comment on the node-issue**
+of its turn and stored as **one marked comment on the node's carrier** — the node-issue on Linear;
+on GitHub the objective issue itself, shared by every node and told apart by the per-node key
 (`perk:objective-refinement:v1:<key>` on the comment's first line, followed by a JSON header and
 the Markdown). The header records the node source it was written against (description, slug,
-comment, observed and effective dependencies, the node-issue description) and its provenance
-(authoring run, UTC timestamp, the full `HEAD` commit and whether the tree was dirty). Nothing
-else changes: the node-issue description, its attachments (node and plan metadata), the roadmap,
-the manifest, statuses, dependencies, milestones, and the objective lifecycle are untouched, and
-re-refining replaces the same comment in place.
+comment, observed and effective dependencies, the node-issue description — empty on GitHub) and
+its provenance (authoring run, UTC timestamp, the full `HEAD` commit and whether the tree was
+dirty). Nothing else changes: the carrier's description, its attachments (node and plan
+metadata), the roadmap, the manifest, statuses, dependencies, milestones, and the objective
+lifecycle are untouched, and re-refining replaces the same comment in place.
 
 "Refined" is only the presence of a valid saved comment — never a node status or header field. A
 refined node stays exactly as plannable as before; a refinement never claims, unblocks, or
@@ -302,9 +303,10 @@ even when it quotes a complete plan-body example.
 For the operator path — pick, author, review, inspect, then plan — see
 [How to refine future nodes before planning](../how-to/refine-future-nodes.md).
 
-Two doors open a refinement pass — both **Linear-only** in this release (a GitHub objective
-store refuses with `unsupported_backend` before any authentication, network call, sync or
-launch, and again at save):
+Two doors open a refinement pass — both **Linear-only** in this release: the doors are gated
+by a rollout allowlist that admits Linear, so a GitHub objective store refuses with
+`unsupported_backend` before any authentication, network call, sync or launch, and again at
+save (the GitHub carrier stores and reads refinements; authoring there is not yet enabled):
 
 - **Cold:** `perk objective refine <objective> [--node <id>]` starts a fresh read-only
   `objective-refine` session on the checkout you invoke it from — dirty changes included; it
@@ -359,8 +361,9 @@ snapshots it at launch under the run's scratch dir and seeds a pointer the sessi
 notice in the seed. **Warm** `/objective-plan` runs
 `perk objective node-engagement N --node <id> --json` after the planning transition (the snapshot
 is written then, not at launch) and pages the returned file pointer; its `warnings[]` are reported
-by the session in the plan's Assumptions as incomplete advisory input. Neither path retries. GitHub
-objectives stay unsupported until their carrier lands.
+by the session in the plan's Assumptions as incomplete advisory input. Neither path retries. On
+GitHub the read runs over the objective issue and reports `absent` until the refine doors are
+enabled there.
 The wire format, the transfer artifacts and the door guarantees are pinned in
 `shared/contracts.md` §8.26 and §8.67–§8.68.
 

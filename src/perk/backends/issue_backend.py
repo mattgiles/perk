@@ -815,9 +815,10 @@ class IssueBackend(Protocol):
         :func:`guarded_upsert_marked_comment` driver over a backend's
         :class:`MarkedCommentSeams`. Refusals raise :class:`MarkedCommentError` (typed
         ``code``; ``write_attempted`` after the attempt). A guarded ``dry_run`` validates the
-        cheap inputs only and returns ``posted=False`` with no network. A backend without the
-        guarded arm raises ``MarkedCommentError("unsupported_backend")`` before any operation
-        (dry run included)."""
+        cheap inputs only and returns ``posted=False`` with no network. Both issue backends
+        bind the seams; a backend without the guarded arm would raise
+        ``MarkedCommentError("unsupported_backend")`` before any operation (dry run
+        included)."""
         ...
 
     # --- human-engagement reads ---

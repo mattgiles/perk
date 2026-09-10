@@ -341,9 +341,11 @@ those Linear artifacts must be re-created or re-saved.
 ### Node refinements
 
 A roadmap node's **refinement** (a dated, reviewed, advisory elaboration authored ahead of its
-planning turn) is one marked comment on the node-issue: the exact
+planning turn) is one marked comment on the node's carrier — the node-issue on Linear; on
+GitHub the objective issue itself, shared by every node of the objective: the exact
 `perk:objective-refinement:v1:<key>` marker as the first line (the key hashes the node's
-identity, including the node-issue UUID), a one-line JSON header (the node source it was
+identity — including the node-issue UUID on Linear, the objective issue number and node id on
+GitHub), a one-line JSON header (the node source it was
 written against + authoring provenance: run id, UTC timestamp, full `HEAD` sha, dirty flag),
 then the Markdown. "Refined" is only the presence of that valid comment — no node status,
 header, manifest, plan-header, or plan-ref field changes, and the node stays exactly as
@@ -361,8 +363,9 @@ human failsafe and the deliberate retry. Consumption: `perk objective plan` snap
 refinement under the launched run's scratch dir and seeds only a pointer; `/objective-plan` reads
 it through `perk objective node-engagement N --node <id> --json` after the planning transition;
 degraded advisory reads are reported, never retried. GitHub objectives refuse
-`unsupported_backend` at every door until their carrier lands. Contracts: `shared/contracts.md`
-§8.26, §8.67–§8.68.
+`unsupported_backend` at both refine doors and at save until the rollout allowlist is lifted;
+their planning-time read already runs over the objective issue (the GitHub carrier) and reports
+`absent`. Contracts: `shared/contracts.md` §8.26, §8.67–§8.68.
 
 ### The dream-report companion
 

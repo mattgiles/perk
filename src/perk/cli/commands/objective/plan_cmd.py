@@ -27,9 +27,9 @@ seed carries only a pointer (``path/bytes/lines/max_line_bytes``) the session pa
 — never the refinement text. Any advisory warning rides the seed as a compact status + code
 notice; the full messages are stderr narration. The artifact is anchored at the **invoking**
 checkout's run scratch and the pointer is absolute, so a positioned stacked session (whose cwd is
-the predecessor's worktree) still reaches it. No refinement (or GitHub's ``unsupported``) with no
-warning leaves the seed byte-identical and the mint launch-owned; ``--dry-run`` reads, mints and
-writes nothing.
+the predecessor's worktree) still reaches it. No refinement (or the dormant issue-backed store's
+``unsupported``) with no warning leaves the seed byte-identical and the mint launch-owned;
+``--dry-run`` reads, mints and writes nothing.
 
 A **dedicated** command (in ``DEDICATED_STAGES``), not the generic registry launcher: the generic
 launcher accepts only ``--worktree/--dry-run/--remote`` and could not select a node. Mirrors

@@ -14,8 +14,10 @@ the node-issue. A refinement is never a plan, a claim, an unblock, or a fast-tra
 exactly as plannable as before, and the later planning session reads the refinement as dated
 DATA it must re-verify.
 
-Refinements are for **Linear-Project objectives only** — a GitHub objective refuses with
-`unsupported_backend` before any network call. The pass runs in a **read-only** session.
+Refinement **authoring** is for **Linear-Project objectives only** in this release — a GitHub
+objective refuses with `unsupported_backend` before any network call (its carrier, the objective
+issue, stores and reads refinements, but the refine doors are not yet enabled there). The pass
+runs in a **read-only** session.
 
 ## Prerequisites
 
@@ -51,8 +53,9 @@ Refinements are for **Linear-Project objectives only** — a GitHub objective re
 
    Refusals at this step, with the recovery move:
 
-   - `unsupported_backend` — a GitHub objective; there is no refinement path until the GitHub
-     carrier exists.
+   - `unsupported_backend` — a GitHub objective; the refine doors admit Linear only in this
+     release (the GitHub carrier stores and reads refinements, but authoring there is not yet
+     enabled).
    - `node_ineligible` — the node is claimed, planned, or finished; pick a `pending`/`blocked`
      node without a plan.
    - `no_unrefined_node` — nothing is left to refine without `--node`; name a node explicitly to

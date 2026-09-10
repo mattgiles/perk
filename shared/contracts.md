@@ -3604,8 +3604,9 @@ reporting propagates.
   selected by the configured issue backend (the implementation PR is referenced by
   URL when known). A single comment carrying the marker `<!-- perk:run-report:<run_id> -->` is
   **upserted** started → terminal (the resolved backend's `upsert_marked_comment` →
-  `find_comment_id_by_marker` PATCH-if-found, else POST), so the started note evolves into the
-  terminal note (no two-comment spam; reruns are distinct `run_id`s). The plan issue is the only
+  `find_comment_id_by_marker` PATCH-if-found, else POST; the GitHub finder is exhaustive over
+  every comment page), so the started note evolves into the terminal note (no two-comment spam;
+  reruns are distinct `run_id`s). The plan issue is the only
   correlation anchor known at *started* time (for `implement` the PR does not exist until mid-drive).
 - **The GitHub Actions job summary** (`$GITHUB_STEP_SUMMARY`) is the "checks"/run-page half: the
   terminal step appends a self-contained `## perk remote <stage>` summary (status + budget + the
@@ -5166,8 +5167,14 @@ instructions**:
 
 **Issue-backend coverage.** `LinearIssueBackend` is honest. `GitHubIssueBackend` is honest for
 comments + description edits, both via read-only `gh api graphql`: comments from
-`IssueComment` (`lastEditedAt` → the `edited_at` flag; `author { __typename databaseId login }` →
-the bot/human discriminator + opaque id), description edits from `Issue.userContentEdits`
+`IssueComment` selecting `fullDatabaseId body createdAt lastEditedAt author{…}` —
+`EngagementComment.id` is the full-width `fullDatabaseId` (a `BigInt`, encoded by GitHub as a
+decimal string because comment ids exceed a 32-bit `Int`) in canonical decimal — the REST id the
+comment-PATCH endpoint needs; neither the 32-bit `databaseId` nor the GraphQL node id is
+surfaced for comments; a node without a parseable `fullDatabaseId` (a decimal string, or a JSON
+integer) is a labelled `GitHubError`; `lastEditedAt` → the `edited_at` flag,
+`author { __typename databaseId login }` → the bot/human discriminator + opaque id; description
+edits from `Issue.userContentEdits`
 (`editedAt` / `editor` / a best-effort `diff` — GitHub may return null). `gh api graphql` does not
 auto-template `{owner}/{repo}`, so the queries pass explicit `owner`/`name`/`number` variables
 (cursor-paginated); a not-found issue folds to `()`. `perk_bot_ids` stays empty (perk has no
@@ -5325,8 +5332,9 @@ advisory input, never absence". Any advisory warning → the seed's `node_contex
 + codes only) while the full messages are stderr `⚠ [surface/code] message` lines after the step
 (which resolves `warn` with the status + warning count, else `done` with the status).
 `absent` / `unsupported` with no warning → the seed is **byte-identical** to the no-advice seed
-(GitHub included — its refinement read is a quiet typed `unsupported` with no network) and the
-mint stays launch-owned (`run_id_override=None`). A failed snapshot → `unavailable` +
+(GitHub reads the objective issue and reports `absent` while no record exists; only the dormant
+issue-backed Linear store is `unsupported`) and the mint stays launch-owned
+(`run_id_override=None`). A failed snapshot → `unavailable` +
 `refinement/node_context_snapshot_failed` in the notice, no pointer, no inline text, the claim not
 rolled back, and the **already-minted** id still launches (a fresh id either way; a partially
 created run dir stays coherent with the session's own). `--dry-run` performs no advisory read,
@@ -11378,7 +11386,11 @@ Marker parsing is strict and fail-closed (the parser mechanics are `dream_compan
 own): a comment carrying the marker text must parse exactly — any deviation (a non-first-line
 marker, an edited marked comment, a duplicate marker in one body) is corruption, for
 foreign-run comments identically; an
-unmarked comment is unrelated untrusted DATA. A comment body is `marker + blank line + part`. **Dual-candidate
+unmarked comment is unrelated untrusted DATA. The one exception: a comment OWNED by the
+objective-node refinement family (`is_refinement_comment`, §8.67 — its first physical line is a
+refinement marker) is skipped BEFORE marker-text detection, so a refinement quoting the
+companion marker is DATA, never corruption (on GitHub the report carrier IS every node's
+refinement carrier). A comment body is `marker + blank line + part`. **Dual-candidate
 byte-identity:** a stored body converges iff byte-equal to the verbatim render OR the local
 transcode candidate (the marker-line inline-code rewrite derived by the same rule as
 `to_linear_markdown`, never imported from the Linear backend — with invariant content the only
@@ -11646,7 +11658,7 @@ tail, the drive warnings, the launch stderr), so the §8.40 objective-stage list
 unwidened — the zero-argument `ready` tool must never ride an unbound main-root session where
 it could act on the cached selector's plan instead of the continuation's.
 
-## §8.67 · Objective-node refinement persistence (the Linear marked-comment carrier)
+## §8.67 · Objective-node refinement persistence (the marked-comment carriers)
 
 A **refinement** is a dated, reviewed, advisory elaboration of one EXISTING roadmap node,
 persisted as a single marked comment on the node's carrier. It is content, never state: no
@@ -11660,8 +11672,10 @@ persistence gate. The public authoring/review doors (`perk objective refine` /
 `objective_refinement_draft` tool, the `plan_review` refinement arm and the human
 `/objective-refinement-save`) are §8.68. Planning-seed consumption is §8.26 (shipped); the
 authenticated Linear refine→plan evidence is the `objective-refinement-linear-planning-*` gate
-record under `docs/design/archive/` (one dated run); the GitHub carrier remains **deferred**
-(§8.67 GitHub arm, later slices).
+record under `docs/design/archive/` (one dated run). The GitHub carrier's **persistence** is
+specified below and proven offline (`tests/test_github_refinement.py`); its authoring doors
+stay refused by §8.68's `SUPPORTED_REFINEMENT_BACKENDS` until the enablement slice lifts the
+allowlist.
 
 **Modules.** `perk/objective/refinement/{models,codec,service}.py` (`__init__` empty).
 `models.py` is the pure type leaf (frozen dataclasses + `RefinementError`; no Pydantic / Click /
@@ -11693,11 +11707,15 @@ Derived properties, never duplicated fields: `RefinementTarget.eligible` (status
 `RefinementRead.source_changed` (False when absent, else stored `source_digest` ≠ current
 target digest — advisory, staleness never makes a record absent); `RefinementRead.expected`
 (`MarkedCommentExpectation(None, None)` when absent, else the saved comment id + body digest).
-Selection returns this same `RefinementRead`. The carrier identity is the Linear issue **UUID**;
-the human identifier/URL are addressing data outside the identity hash. Dependency tuples are
-unique + `node_sort_key`-sorted; Linear keeps its existing empty-relations→`None`
-reconstruction loss; effective dependencies come from `objective.build_graph` (graph inference,
-never readiness). Source hashes exclude statuses, backlinks, timestamps, display URLs,
+Selection returns this same `RefinementRead`. The carrier identity is per backend — Linear: the
+node-issue **UUID**; GitHub: the objective issue's normalized number string (every node of the
+objective shares that carrier; records are told apart by the target-key, which hashes
+`node_id`), with `carrier_identifier` `#N`, `carrier_url` the issue URL, and
+`RefinementSource.issue_description == ""` (no per-node issue, so objective prose edits never
+stale a refinement). The human identifier/URL are addressing data outside the identity hash.
+Dependency tuples are unique + `node_sort_key`-sorted (`None` preserved where the backend can
+observe it); Linear keeps its existing empty-relations→`None` reconstruction loss; effective
+dependencies come from `objective.build_graph` (graph inference, never readiness). Source hashes exclude statuses, backlinks, timestamps, display URLs,
 objective prose, and sibling progress (the **target-only source fence**). Provenance comes from
 real authoring inputs (`plan.now_iso()`, `git.resolve_commit(repo_root, "HEAD")`,
 `git.is_dirty(repo_root)`), is preserved verbatim across retries, and never proves human
@@ -11777,9 +11795,25 @@ selection, and saves (no capability flag, no dummy-node probe, no second capabil
 nodes (every status, plan-bearing nodes included — no eligibility restriction on the read),
 sorted naturally; an empty `targets` tuple = a supported objective with no nodes.
 `RefinementTargetReadError(ObjectiveStoreError)` carries `code ∈ unsupported_backend |
-malformed_target | ambiguous_target`. `GitHubObjectiveStore` and the dormant issue-backed
-`LinearObjectiveStore` raise `unsupported_backend` immediately, without network, even for an
-empty or invalidly addressed objective. `LinearProjectObjectiveStore`: reads the actual project
+malformed_target | ambiguous_target`. Only the dormant issue-backed `LinearObjectiveStore`
+raises `unsupported_backend` — immediately, without network, even for an empty or invalidly
+addressed objective. `GitHubObjectiveStore` (the GitHub arm: every node's carrier is the
+objective issue itself) delegates to `objectives.read_node_refinement_targets` —
+`plans.read_issue` (a missing issue → `None`) then the pure classifier
+`objectives.refinement_targets_from_issue`, in this precedence: no `objective-header` block →
+`None`; more than one `objective-header` block → `ambiguous_target`; a present-but-malformed
+header or a blank/missing header `run_id` → `malformed_target`; more than one
+`objective-roadmap` block → `ambiguous_target` — both cardinalities decided by the
+presence-only `plan.count_metadata_blocks` BEFORE any first-block parse (`find_metadata_block`
+reads only the first block, and a damaged carrier with two individually valid blocks must never
+key or digest a refinement against whichever comes first); a malformed/invalid roadmap block →
+`malformed_target`; a duplicate node id → `ambiguous_target`; a roadmap-free objective → empty
+targets. Targets are sorted naturally with `depends_on` normalized (unique,
+`node_sort_key`-sorted, `None` preserved), `effective_depends_on` from `objective.build_graph`,
+`status` as stored (GitHub has no native cancellation), `plan_ref` = the node's `pr` backlink,
+`has_plan_metadata = False` (GitHub plans are separate issues; the backlink is the only
+linkage). A pure read (no comment read, no mutation); transport failures stay the translated
+`ObjectiveStoreError`. `LinearProjectObjectiveStore`: reads the actual project
 id/URL and the sentinel's `objective-header` run id; enumerates every project-issue page through
 the narrow state-bearing sibling `_LinearProjectOps.project_issues_for_refinement` (full
 descriptions + native state + the attachment connection's `pageInfo { hasNextPage }`); resolves
@@ -11868,9 +11902,16 @@ convergence (no-write success included).
 `_comments_with_authors` mapped through `_engagement_comment` into `scan_marked_comments`,
 `create` = `_create_comment`, `update` = `_update_comment`, `transcode` = the pure
 `to_linear_markdown` (so convergence means equality to the complete Linear rendering, and
-update targets the observed comment UUID). `GitHubIssueBackend`'s non-null-`expected` arm still
-raises `unsupported_backend` before any operation (dry run included) until the GitHub carrier
-binds the seams; ordinary GitHub forwarding is unchanged.
+update targets the observed comment UUID). `GitHubIssueBackend` implements `MarkedCommentSeams`
+itself — `scan` = `gh_engagement.read_issue_comments` (every page; the comment `id` is the
+full-width `fullDatabaseId` in canonical decimal) mapped through `_engagement_comment` into
+`scan_marked_comments`; `create` = `plans.add_issue_comment`; `update` = the REST comment PATCH
+on the integer database id (a non-numeric id refuses as `IssueBackendError`, normalized by the
+driver to `backend_error`); `transcode` = identity (bodies are stored verbatim, so convergence is byte
+equality with the rendered envelope). GitHub's native refusals — the 65,536-character
+issue-comment cap's HTTP 422, auth, rate limit — surface from `create`/`update` as
+`backend_error` chaining `gh`'s diagnostics after the verification scan proves the unchanged
+baseline; no truncation, no retry. Ordinary GitHub forwarding (`expected=None`) is unchanged.
 
 **The service** (`service.py`) — callers resolve store + issues through the existing resolvers
 and supply the same backend (mismatch → `invalid_input`); one private target-discovery /
@@ -11927,9 +11968,18 @@ at the four Linear plan-comment selection sites — `LinearProjectObjectiveStore
 `LinearIssueBackend.get_plan_body`, `update_plan_issue`, `adopt_issue_as_plan` — so an advisory
 plan-body example inside a refinement (even under a damaged header) is never read or overwritten
 as the plan; a real plan with later refinement-marker discussion stays the plan; refinement's
-exact target matcher can never select the separate plan comment. Normal plan rendering, the
-mutation sequence, description/callout behavior, and the ordinary marker API defaults are
-unchanged. Refinement's ONLY remote mutation is creating or replacing its own comment: no claim,
+exact target matcher can never select the separate plan comment. The GitHub sites apply the
+same predicate before matching: `plans.find_comment_id_by_marker` (now exhaustive over every
+REST comment page via `gh api --paginate --slurp` — the label-census shape, fail-closed on an
+unexpected page shape, still on the REST quota; the objective-body recovery in
+`_converge_objective_subordinates` and the ordinary `upsert_marked_comment` ride it; a missing
+issue still raises), `plans._find_plan_body_comment_id`, and `plans.get_plan_body` — each
+skipping refinement-owned comments (a refinement quoting a marker or embedding a plan-body
+example is never misselected). The backend-neutral dream-companion carrier scan (§8.64) skips
+refinement-owned comments before its marker-text detection: a refinement quoting the companion
+marker is DATA, never corruption (on GitHub the report carrier IS the refinement carrier). Normal
+plan rendering, the mutation sequence, description/callout behavior, and the ordinary marker API
+defaults are unchanged. Refinement's ONLY remote mutation is creating or replacing its own comment: no claim,
 plan creation/linkage, issue-description or attachment write, native-state change,
 milestone/relation mutation, objective-lifecycle update, or delivery operation.
 
@@ -11953,6 +12003,17 @@ unchanged roadmap/manifest and every non-comment surface; the refinement mutatio
 comment-only; then a real claim + plan save proves historical reads stay available while new
 saves refuse `node_ineligible`, with no delivery operation. Authenticated refine-to-plan
 evidence is recorded in that archive record, not here.
+`tests/test_github_refinement.py::test_phase2_gate_github_refinement_persistence` (parameterized
+incremental/stacked) is the GitHub arm's gate: the real resolvers, `GitHubObjectiveStore` +
+`GitHubIssueBackend` + service over ONE stateful `FakeGitHubIssues` (the `gh` transport faked,
+never the service); select → save a long refinement → read → replace → retry; the exhaustive
+paginated scan; the 65,536-character refusal path (typed `backend_error`, the diagnostic kept,
+the stored record unchanged); plan/refinement interleaving on the single-issue carrier (the
+roadmap block and body-comment table re-render while the refinement comment stays
+byte-untouched); unchanged roadmap block / header / objective-body comment; refinement comments
+filtered from engagement renders. Live GitHub behavior (byte preservation, the 422 shape,
+`fullDatabaseId` presence, `--paginate --slurp` on the comments endpoint) remains unobserved by
+design — the enablement slice's archive record lists the live checks as unobserved.
 
 ## §8.68 · Objective-node refinement authoring and reviewed save (the `objective-refine` doors)
 
@@ -12221,8 +12282,9 @@ parameterized `contexts/read-only.md` are all in `prompts/_fixtures/live.yaml`. 
 `docs/user-docs/reference/cli/objective.md`, `reference/objectives.md`, the in-session
 `workflow-commands` / `model-tools` / `review-and-authoring` references, the backend/provider
 entries and the `perk-expert` mirror. Automatic later-plan consumption of a saved refinement is
-§8.26; authenticated refine-to-plan evidence is the archive record named in §8.67; a GitHub
-refinement carrier is NOT shipped by this section — a later increment.
+§8.26; authenticated refine-to-plan evidence is the archive record named in §8.67; the GitHub
+refinement carrier's persistence is §8.67's GitHub arm, but its authoring doors are NOT enabled
+by this section — the enablement slice lifts `SUPPORTED_REFINEMENT_BACKENDS`.
 
 ## §8.69 · Bash scan timeout (gitignore-blind recursive grep / unbounded find)
 

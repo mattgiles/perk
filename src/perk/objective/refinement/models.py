@@ -1,8 +1,9 @@
 """Objective-node refinement — the frozen domain types (contracts.md §8.67).
 
 A **refinement** is a dated, reviewed, advisory elaboration of one existing roadmap node,
-persisted as a single marked comment on the node's carrier (the Linear node-issue). It is
-content only: never a plan, a claim, a node status, a readiness signal, or a freshness proof.
+persisted as a single marked comment on the node's carrier (the Linear node-issue; on GitHub the
+objective issue itself). It is content only: never a plan, a claim, a node status, a readiness
+signal, or a freshness proof.
 
 This module is the pure type leaf: frozen dataclasses plus the typed error, with **no**
 Pydantic, Click, concrete-backend, or I/O dependency. It imports the existing ``NodeStatus``,
@@ -68,8 +69,9 @@ class RefinementError(Exception):
 @dataclass(frozen=True)
 class RefinementIdentity:
     """The stable target identity a refinement is bound to. ``carrier_id`` is the carrier's
-    stable backend id (the Linear issue UUID) — its human identifier/URL are addressing data
-    kept OUT of the identity hash. Every field is a nonblank string."""
+    stable backend id (the Linear node-issue UUID; on GitHub the objective issue's normalized
+    number string, shared by every node of the objective) — its human identifier/URL are
+    addressing data kept OUT of the identity hash. Every field is a nonblank string."""
 
     backend: str
     objective_id: str

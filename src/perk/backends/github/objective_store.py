@@ -22,7 +22,9 @@ Adapter disciplines (mirroring ``perk/backends/github/backend.py``):
 
 The ``read_issue``/``close_issue`` delegates reach the plan/issue substrate (``plans``): a GitHub
 objective **is** a single issue, so reading it for adoption and closing it on completion are
-plan-tier ops. ``backend_id`` is a module-level literal (``"github"``, exactly as
+plan-tier ops. The objective substrate (``objectives``) carries the roadmap/header mutations, the
+body-comment ops, and the refinement target read (contracts.md §8.67 — every node's carrier is
+the objective issue itself). ``backend_id`` is a module-level literal (``"github"``, exactly as
 ``GitHubIssueBackend.backend_id``) so this module imports nothing from ``resolve.py`` — the resolver
 imports this class, and a back-import would be circular.
 """
@@ -454,9 +456,11 @@ class GitHubObjectiveStore:
     def read_node_refinement_targets(
         self, *, objective_id: str
     ) -> RefinementObjectiveSnapshot | None:
-        # No GitHub refinement carrier yet (contracts.md §8.67): a typed refusal before any
-        # network call — even for an empty or invalidly addressed objective.
-        raise objective_store.RefinementTargetReadError(
-            "unsupported_backend",
-            "objective-node refinement is not supported on the GitHub objective store",
-        )
+        """The §8.67 GitHub arm: every node's carrier is this objective issue (normalized id,
+        ``#N`` identifier, the issue URL); typed refusals come from the substrate classifier and
+        pass through this translate CM untouched (they are ``ObjectiveStoreError`` subclasses)."""
+        number = _number(objective_id)
+        with _translate():
+            return objectives.read_node_refinement_targets(
+                number=number, repo_root=self._repo_root, backend_id=self.backend_id
+            )

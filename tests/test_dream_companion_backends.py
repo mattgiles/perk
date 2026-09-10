@@ -51,8 +51,10 @@ def _issue_view(number: int = 252) -> _Proc:
 
 
 def _comment_node(cid: str, body: str, created_at: str) -> dict[str, object]:
+    # The comments selection surfaces the BigInt `fullDatabaseId` (a decimal string on the wire;
+    # derived from the `IC_<n>` suffix).
     return {
-        "id": cid,
+        "fullDatabaseId": cid.removeprefix("IC_"),
         "body": body,
         "createdAt": created_at,
         "lastEditedAt": None,

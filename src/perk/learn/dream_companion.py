@@ -14,7 +14,11 @@ Fail-closed disciplines:
 - A comment with no ``perk:learn-dream-report`` marker text is unrelated untrusted DATA (never
   parsed). A comment carrying the marker text is perk's own region and MUST parse strictly — a
   malformed / edited / duplicated / out-of-range perk-marked companion comment raises
-  :class:`CompanionConflictError`, never a silent skip.
+  :class:`CompanionConflictError`, never a silent skip. The one exception: a comment OWNED by
+  the objective-node refinement family (decided by the shared ownership predicate
+  ``is_refinement_comment`` — its first physical line is a refinement marker) is unrelated DATA
+  even when its Markdown quotes the companion marker text; on GitHub the report carrier IS the
+  objective issue, which is also every node's refinement carrier (contracts.md §8.67).
 - Byte-identity for idempotency is **dual-candidate equality**: a stored body converges iff it
   byte-equals the verbatim rendered body OR its Linear-transcoded form (the inline-code marker
   rewrite) — the parts themselves are transcode-invariant by the shared rule, so the transcoded
@@ -22,8 +26,9 @@ Fail-closed disciplines:
 - **Read convergence over retries**: a raised POST is AMBIGUOUS; a complete rescan decides; only
   proven absence earns the one bounded retry (:class:`CompanionAppendAmbiguous` otherwise).
 
-Imports the backend *contracts* only (``perk.backends.issue_backend``) — no concrete backend, no
-store, no CLI.
+Imports the backend *contracts* only (``perk.backends.issue_backend``) plus the pure refinement
+codec predicate (``perk.objective.refinement.codec.is_refinement_comment``) — no concrete
+backend, no store, no CLI.
 """
 
 import contextlib
@@ -35,6 +40,7 @@ from pydantic import field_validator
 
 from perk.backends.issue_backend import IssueBackend, IssueBackendError
 from perk.boundary import StrictInputModel, StrTuple
+from perk.objective.refinement.codec import is_refinement_comment
 
 # The run-scoped scratch handoff the extension writes and the save door reads (the
 # `DREAM_MANIFEST_FILENAME` precedent — the TS mirror lives in
@@ -287,6 +293,11 @@ def _scan_carrier(
     """
     found: dict[int, str] = {}
     for comment in issues.read_comments(issue_id=carrier_id):
+        # A refinement-owned comment is unrelated DATA to the companion scan even when its
+        # Markdown quotes the companion marker text (on GitHub the report carrier IS the
+        # objective issue — the refinement carrier).
+        if is_refinement_comment(comment.body):
+            continue
         key = _parse_companion_comment(
             comment.body,
             comment_id=comment.id,
