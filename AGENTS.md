@@ -16,7 +16,7 @@ This repo is wired for the **perk** plan-oriented workflow on Pi.
   `.gitignore`. Recursive `grep -r…` and `find` without `-maxdepth` also walk `node_modules`,
   `.venv` and `.worktrees`; perk caps them at a 30s `timeout` unless the bash call passes its own.
 
-perk version: 3.2.0
+perk version: 3.3.0
 <!-- END perk managed -->
 
 ## Developing perk
