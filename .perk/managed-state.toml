@@ -1,51 +1,51 @@
 # Managed by perk convergence (perk init / perk doctor --fix) — do not edit by hand.
 [managed]
-version = "3.2.0"
+version = "3.3.0"
 
 [managed.artifacts.agents-block]
 path = "AGENTS.md"
 kind = "block"
-version = "3.2.0"
-hash = "sha256:7457b15449c5f4a882cc3ba92b1dd1b935b19113df64b321e80ae7cd043aa9e4"
+version = "3.3.0"
+hash = "sha256:68ed3467a3dcdaa3f19210a027a428f6333eb96d1fd0e9f290e32d0d6240c92d"
 
 [managed.artifacts.gitignore-block]
 path = ".gitignore"
 kind = "block"
-version = "3.2.0"
+version = "3.3.0"
 hash = "sha256:c8b300dc4de5ffb556cbc2b13842e32317bca232e3a63b3573e344bc082f3cc0"
 
 [managed.artifacts.remote-setup-action]
 path = ".github/actions/perk-remote-setup/action.yml"
 kind = "file"
-version = "3.2.0"
+version = "3.3.0"
 hash = "sha256:1cd0d6050e14a7e29e1a5c666366a29ba22f234a070f35b17835c7337fb9137d"
 
 [managed.artifacts.required-perk-version]
 path = ".perk/required-perk-version"
 kind = "file"
-version = "3.2.0"
-hash = "sha256:33bdaf9e2d6bcbde2e4e613e865e403f8fe21fc621078d34c30b0bdc7f68d903"
+version = "3.3.0"
+hash = "sha256:5eee6c0c5c6901f5e523f0a434bca4106e1ff7136deb451f982b0bb1a7b13716"
 
 [managed.artifacts.runner-workflow]
 path = ".github/workflows/perk-run.yml"
 kind = "file"
-version = "3.2.0"
+version = "3.3.0"
 hash = "sha256:0406c7c1a9bbbf39426d6d93020bf6f4baaac08e84fda322cfecb847c4bd4c28"
 
 [managed.artifacts.settings-wiring]
 path = ".pi/settings.json"
 kind = "block"
-version = "3.2.0"
+version = "3.3.0"
 hash = "sha256:9be401533087edac3cbbe14d55493b4bf4fe94d7ede23d06243452fb99ccbc6f"
 
 [managed.artifacts.skills-manifest]
 path = ".agents/manifest.d/perk.yaml"
 kind = "file"
-version = "3.2.0"
+version = "3.3.0"
 hash = "sha256:b6f1757bf4df3c3bd0ad0d38cdc22e5166a785a4f8c31b974ed4dcc8c76da098"
 
 [managed.artifacts.subagent-agents]
 path = ".pi/agents/perk/"
 kind = "directory"
-version = "3.2.0"
+version = "3.3.0"
 hash = "sha256:ce4b5c2e36eea6f0e06f13cf531f221c5a54965d29c6827f373fac77439d940a"
