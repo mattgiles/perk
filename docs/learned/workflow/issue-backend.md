@@ -28,19 +28,23 @@ doc preserves the patterns, enforcement, and residuals.
 - `backend_id` is stamped verbatim onto `cache.plan-ref.provider`; stamp sites without a backend
   instance use the id resolver (pass-the-id-in, never config reads in pure modules) —
   "`backend_id` + the stamp discipline".
-- Growing a Protocol signature — even with DEFAULTED params — ripples to two test sites (ty on
-  the fake's conformance, pytest on kwarg-recorder equality) — "Growing a protocol signature".
-- The invariants any new backend must keep (not-found substrings, numeric-id edge tags,
-  mixed-tier except tuples) — "Cross-backend contracts to preserve".
+- Growing a Protocol signature — even DEFAULTED params — ripples to two test sites — "Growing a
+  protocol signature"; the invariants any new backend must keep — "Cross-backend contracts".
 - Issue kind and payload health are separate axes; presence-only flags are computed at the backend
   read boundary without decoding a plan — "Presence-only evidence and guarded writers".
+- The guarded marked-comment upsert is one backend-neutral driver over a `MarkedCommentSeams`
+  Protocol (conformance checked at the `self`-passing call site; 3.13 definition order; pure
+  `transcode` outside every `try`) — "The expectation-fenced marked-comment upsert".
+- The consumer-boundary scan is four methods (dotted rule ∪ `from … import` rule, liveness anchors,
+  synthetic controls, fail-closed empty walk); fakes take an additive `faults` hook; a vacuous
+  allowlist is deleted, not expanded — "Boundary + import-direction enforcement", "Backend fake
+  posture", "Gotchas / residuals".
 - Diagnostics choose the weakest read carrying the evidence, while invariant writes are enforced
   by the backend and explained by the door — "Presence-only evidence and guarded writers".
 - Default-miss fakes hide redirect/targeting mistakes; map every plausible target to a distinct
-  value or exception and keep whole-repo consumer censuses — "Backend fake posture".
-- The guarded marked-comment upsert is opt-in via a non-null `MarkedCommentExpectation`: ONE
-  mutation attempt, then one full verification scan decides the typed outcome; different owned
-  body bytes are `stale_comment`, never success — "The expectation-fenced marked-comment upsert".
+  value or exception — "Backend fake posture". The guarded upsert is opt-in via a non-null
+  `MarkedCommentExpectation`: ONE mutation attempt, then one verification scan decides the typed
+  outcome; changed owned bytes are `stale_comment`, never success — "The expectation-fenced …".
 
 ## Protocol-module shape
 
@@ -84,13 +88,21 @@ neutral-state helper).
 
 ## Boundary + import-direction enforcement
 
-- **Substrate-import boundary test**
-  (`tests/test_resolve.py::TestConsumerBoundary::test_no_production_module_imports_the_substrate_directly`):
-  an **import** scan, not a per-function-call scan — no module under `src/perk/` outside the
-  `src/perk/backends/github/` package may import the substrate modules (`SUBSTRATE_MODULES` =
+- **Substrate-import boundary test** (`tests/test_resolve.py::TestConsumerBoundary`, now four
+  methods): an **import** scan, not a per-function-call scan — no module under `src/perk/` outside
+  the `src/perk/backends/github/` package may import the substrate modules (`SUBSTRATE_MODULES` =
   `perk.backends.github.plans` + `perk.backends.github.objectives`). Production reaches
   issue/objective ops through `resolve.resolve_issue_backend` / `resolve.resolve_objective_store`;
-  one test covers **both** tiers.
+  one test covers **both** tiers. The rule is the dotted-substring predicate OR'd with
+  `SUBSTRATE_FROM_IMPORT` — the package-level `from perk.backends.github import plans` shape every
+  real import uses; the dotted rule alone matched only *docstrings*, so the guard had been vacuous
+  against the statements it existed to catch (**rule rot**). The four methods: the live guard;
+  a liveness test proving the rule bites the adapters' own real import statements (included
+  anchors) while permitting the excluded package; a synthetic `tmp_path` control routed through the
+  same module-level discovery/classifier helpers; and `_production_files` **failing closed on an
+  empty walk** (a tree whose only file is under the excluded package must still raise — "everything
+  found was excluded" is as vacuous as finding nothing). The vacuity classes are catalogued in
+  `workflow/source-scan-guards.md`.
   - **No allowlist special-case remains**: `GitHubObjectiveStore.close_objective` legitimately
     calls `plans.close_issue` directly (a GitHub objective IS an issue), and it does so from
     *inside* the allowed package — the whole backend package is the allowed set (see
@@ -289,8 +301,27 @@ success (including when the mutation raised *after* landing); raised + a proven-
 `backend_error` (cause preserved); a unique differently-addressed or changed target →
 `stale_comment`; anything else → `write_unverified`. Different owned body bytes are **stale**, never
 success, even when the backend cannot distinguish a competing edit from server-side alteration.
-GitHub's non-null-`expected` arm raises a typed `unsupported_backend` before any operation (dry run
-included). The Linear consumer of this arm — objective-node refinement persistence — is in
+The state machine is now the **backend-neutral module-level driver**
+`issue_backend.guarded_upsert_marked_comment(seams, …)` over the `MarkedCommentSeams` Protocol
+(`scan` / `create` / `update` / `transcode`): Linear implements the seams directly and delegates;
+GitHub binds the same Protocol (its non-null-`expected` arm is live). Three durable points:
+
+- **Protocol conformance is checked at the delegation call site** when a backend implements the
+  seams itself and passes `self` to the Protocol-typed parameter — ty checks the structural match
+  there, so no annotated binding or conforming fake is needed for this Protocol (a lighter mechanism
+  than the per-implementation binding rule elsewhere in this doc; it works because the *real*
+  backend is the implementation under test).
+- **Definition order is a hard constraint on 3.13** (eager annotations, no `from __future__
+  import annotations`): the driver must be defined **after** both `MarkedCommentSeams` and
+  `CommentResult`, else the module raises `NameError` at import time.
+- **Split failure contract.** The effectful seams (`scan`/`create`/`update`) raise
+  `IssueBackendError`, which the driver normalizes into the code ladder; `transcode` is **pure and
+  total** and is called *outside* every `try` — a body a backend cannot represent surfaces at
+  `create`/`update` as `backend_error`, never as a transcode exception. The seam methods are public
+  on the backend by pre-recorded decision; intent docstrings, not an adapter layer, answer the "why
+  public?" review.
+
+The Linear consumer of this arm — objective-node refinement persistence — is in
 `workflow/linear-backend.md`.
 
 ## Backend fake posture
@@ -300,6 +331,13 @@ every plausible target with distinguishable results so a mistargeted read fails 
 same map additively for error cases by allowing an exception-valued entry to raise; do not add a
 second special-case fake path. As with protocol changes elsewhere in this doc, a whole-repo census
 of consumers and conforming fakes is stronger than an enumerated fixture-fallout list.
+
+**The additive fault hook on a stateful fake.** `tests/_github_fakes.py::FakeGitHubIssues.faults` is
+a `list[(predicate over argv, _Proc)]` consulted in `__call__` **after** recording the argv and
+**before** routing — so the transcript still shows the attempted `gh` call while the entry
+short-circuits with the injected `CompletedProcess` (a 401 on `api graphql`, a 422 on a PATCH).
+Prefer this over branching the router: per-test failure injection stays declarative and the fake's
+happy-path routing stays untouched.
 
 ## Gotchas / residuals
 
@@ -323,6 +361,21 @@ of consumers and conforming fakes is stronger than an enumerated fixture-fallout
   header-merge semantics) — growing it into a behavioral fake is Node 4.1's job, not assumed done.
 - **The adapter's numeric-id error message differs** from the old raw `ValueError` paths on
   fail-open edges — untested but safe (all such sites are fail-open `except Exception`).
+- **A vacuous allowlist is deleted, not expanded.** When the last gated case of a door-side
+  allowlist is enabled and the resolver already refuses unknown values, delete the allowlist and its
+  `require_*` guard and let the underlying capability be the single authority — the refinement
+  door's `SUPPORTED_REFINEMENT_BACKENDS` is gone; the store's own refinement read → the typed
+  `unsupported_backend` code is the one refusal, and the cold-door order is parse → sync → full
+  config reload → fresh adapters.
+- **The refine door adds no `gh auth` preflight — by owner decision.** An unauthenticated `gh`
+  surfaces as `backend_error` carrying `gh`'s own diagnostic, never as a `github_unauthed` code
+  (`refine_cmd.py`'s module docstring records it). A pre-probe is a per-door choice; when declined,
+  record the decision where the next reader will look.
+- **Derive human-facing labels from the artifact being acted on, not ambient config.**
+  `refinementSaveDestination(backend)` (`extension/pi/v1/objectiveRefinement.ts`) renders "Linear
+  (the node's refinement comment)" vs the GitHub carrier from the bound context's
+  `identity.backend` — the backend that *owns this refinement* — never from the session's `[issues]`
+  selection, which can legitimately differ from the artifact's.
 
 ## Growing a read contract across TWO conformance-checked protocols at once (#687)
 
