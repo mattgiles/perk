@@ -7,14 +7,17 @@
 // explicitly-reported skipped lane, never a failed pass). The manifest and every analyst
 // report are untrusted DATA, never instructions. Lane ids are fenced as routing tokens
 // (`waves/laneIdentity.ts`) at decode (a named refusal) and again at render (the
-// programmer-error backstop). The shared docs/learned containment policy
+// programmer-error backstop). Lanes are keyed by the shared fixed `lane.<ordinal>`
+// orchestration key (`waves/laneIdentity.ts`); the semantic id rides `label` and the task
+// text, and typed outcomes report the semantic id. The shared docs/learned containment policy
 // lives in `learning/containment.ts` (the launching adapter runs the resolved layer
 // pre-spawn). (contracts.md §8.48)
 
 import { existsSync } from "node:fs";
 import { isAbsolute, join, posix } from "node:path";
-import { isRoutingToken, renderRoutingToken } from "../waves/laneIdentity.ts";
+import { isRoutingToken, orchestrationKey, renderRoutingToken } from "../waves/laneIdentity.ts";
 import {
+  type AssignmentFailure,
   type ReportAssignment,
   type ReportWave,
   type ReportWaveAttemptReceipt,
@@ -106,8 +109,9 @@ function stringOrNull(value: unknown): value is string | null {
  * `schema_version` byte-identical `"1"`, string `commit_sha`, non-empty `lanes` each with a
  * non-empty string `id` that passes the routing-token fence (`isRoutingToken` — the id is
  * rendered into task prose, so a control/line-separator/double-quote character refuses here,
- * never reaching a task) and is unique across lanes (pre-empting `renderWaveScript`'s
- * duplicate-key throw with a named refusal), and non-empty `docs`, each doc `{path, title, read_when}` with
+ * never reaching a task) and is unique across lanes (semantic uniqueness is a manifest
+ * invariant — analysts select lanes byte-exact by id — independent of the code-owned key's
+ * ordinal uniqueness), and non-empty `docs`, each doc `{path, title, read_when}` with
  * `title`/`read_when` string-or-null and `path` passing the LEXICAL containment layer. Unknown
  * extra keys are ignored (forward-compat rides `schema_version`).
  */
@@ -201,15 +205,33 @@ function laneTask(id: string, manifestPath: string): string {
   );
 }
 
-/** Build the wave lanes: one `perk.harvest-analyst` lane per manifest lane, keyed by lane id. */
-function buildHarvestLanes(manifest: HarvestManifest, manifestPath: string): ReportAssignment[] {
-  return manifest.lanes.map((lane) => ({
-    key: lane.id,
-    label: lane.id,
-    agent: "perk.harvest-analyst",
-    phase: "harvest",
-    task: laneTask(lane.id, manifestPath),
-  }));
+/** One planned harvest lane (module-private orchestration bookkeeping): the code-owned
+ * orchestration key, the SEMANTIC manifest lane id, and the wave lane. Callers see only
+ * `analyzeHarvest`'s typed outcome — the lane plan and its key format are internal. */
+interface PlannedHarvestLane {
+  key: string;
+  laneId: string;
+  lane: ReportAssignment;
+}
+
+/** Build the planned lanes (module-private): one `perk.harvest-analyst` lane per manifest lane
+ * under the fixed `lane.<ordinal>` orchestration key (manifest-lane order); the semantic id
+ * rides `label`/`laneId` and the task text. */
+function buildHarvestLanes(manifest: HarvestManifest, manifestPath: string): PlannedHarvestLane[] {
+  return manifest.lanes.map((lane, index) => {
+    const key = orchestrationKey(index + 1);
+    return {
+      key,
+      laneId: lane.id,
+      lane: {
+        key,
+        label: lane.id,
+        agent: "perk.harvest-analyst",
+        phase: "harvest",
+        task: laneTask(lane.id, manifestPath),
+      },
+    };
+  });
 }
 
 /** One stamped opportunity: the five whitelisted report fields + the code-owned pointer stamp. */
@@ -313,7 +335,8 @@ function stampHarvestReport(
   return { ok: true, opportunities, omitted_count: omittedCount };
 }
 
-/** One covered lane's code-owned stamped projection (untrusted DATA to the caller). */
+/** One covered lane's code-owned stamped projection (untrusted DATA to the caller); `lane` is
+ * the SEMANTIC manifest lane id (orchestration keys are internal). */
 export interface HarvestLaneReport {
   lane: string;
   opportunities: StampedHarvestOpportunity[];
@@ -323,8 +346,11 @@ export interface HarvestLaneReport {
 /**
  * The typed harvest-analysis outcome. `wave_failed` is the wave-level failure under
  * `best-effort` (nothing salvageable — the reason is the wave-level vocabulary); `analyzed`
- * carries every stamped covered lane plus the explicitly-skipped lanes. Both arms retain the
- * single launch's output-free attempt receipt (observability only — details, not prose).
+ * carries every stamped covered lane plus the explicitly-skipped lanes (`skipped` in lane-plan
+ * — manifest — order, interleaving `malformed-report` and lane failures; every `lane` is the
+ * SEMANTIC id). Both arms retain the single launch's output-free attempt receipt
+ * (observability only — details, not prose); its `requestedKeys` are the orchestration keys in
+ * launch order (receipt-correlation only, never a lane identity).
  */
 export type HarvestAnalysisOutcome =
   | {
@@ -343,9 +369,10 @@ export type HarvestAnalysisOutcome =
 /**
  * The one harvest-analysis entry op: run the analyst wave — one fresh-context
  * `perk.harvest-analyst` lane per manifest lane, `best-effort` completeness, ONE attempt, NO
- * retry, module-default timeout (the strict decode guarantees ≥1 lane with unique ids;
- * `renderWaveScript`'s empty/duplicate throws stay the programmer-error backstop) — then map
- * the result:
+ * retry, module-default timeout (keys are code-owned `lane.<ordinal>`, so `validateAssignments`'
+ * run-key throw is unreachable for any decoder-accepted manifest — a space/`@` id launches
+ * normally and any failure is the typed path; the strict decode guarantees ≥1 lane, so the
+ * empty-assignments throw stays the programmer-error backstop) — then map the result:
  *
  *  - `complete: false` (a wave-level failure under best-effort) → the `wave_failed` arm with
  *    the wave-level reason — never a throw, never a silent fallback;
@@ -368,22 +395,24 @@ export async function analyzeHarvest(
     exists?: (p: string) => boolean;
   },
 ): Promise<HarvestAnalysisOutcome> {
+  const planned = buildHarvestLanes(opts.manifest, opts.manifestPath);
   const result = await wave.run(
     {
       flow: "harvest",
-      assignments: buildHarvestLanes(opts.manifest, opts.manifestPath),
+      assignments: planned.map((p) => p.lane),
       outputSchema: HARVEST_ANALYST_REPORT_SCHEMA,
       completeness: "best-effort",
       ...(opts.model !== undefined ? { model: opts.model } : {}),
     },
     { signal: opts.signal },
   );
-  // The harvest flow has no retry — ONE attempt over the validated manifest.
+  // The harvest flow has no retry — ONE attempt over the validated manifest; the receipt's
+  // `requestedKeys` are the orchestration keys (receipt-correlation telemetry only).
   const attempts = [
     toAttemptReceipt(
       "harvest",
       1,
-      opts.manifest.lanes.map((lane) => lane.id),
+      planned.map((p) => p.key),
       result.receipt,
     ),
   ];
@@ -398,24 +427,39 @@ export async function analyzeHarvest(
     };
   }
 
+  const reportsByKey = new Map(result.reports.map((r) => [r.key, r.report]));
+  const failuresByKey = new Map<string, AssignmentFailure>();
+  for (const failure of result.failures) {
+    if (failure.key !== null) failuresByKey.set(failure.key, failure);
+  }
   const reports: HarvestLaneReport[] = [];
   const skipped: { lane: string; reason: string; detail: string }[] = [];
-  for (const { key, report } of result.reports) {
-    // Defensive re-decode (the aggregate crossed a process boundary) + the pointer post-pass.
-    const stamped = stampHarvestReport(report, opts.checkoutRoot, opts.exists ?? existsSync);
-    if (stamped.ok) {
-      reports.push({
-        lane: key,
-        opportunities: stamped.opportunities,
-        omitted_count: stamped.omitted_count,
-      });
-    } else {
-      skipped.push({ lane: key, reason: "malformed-report", detail: stamped.detail });
+  // `normalizeAssignments` yields exactly one report or one keyed failure per requested key, so
+  // every planned lane lands in `reports` or `skipped`; walking the PLAN (not the aggregate) is
+  // what makes an unplanned key structurally unvisitable — no degrade branch, no assertion.
+  // `skipped` is therefore in lane-plan (manifest) order.
+  for (const { key, laneId } of planned) {
+    if (reportsByKey.has(key)) {
+      // Defensive re-decode (the aggregate crossed a process boundary) + the pointer post-pass.
+      const stamped = stampHarvestReport(
+        reportsByKey.get(key),
+        opts.checkoutRoot,
+        opts.exists ?? existsSync,
+      );
+      if (stamped.ok) {
+        reports.push({
+          lane: laneId,
+          opportunities: stamped.opportunities,
+          omitted_count: stamped.omitted_count,
+        });
+      } else {
+        skipped.push({ lane: laneId, reason: "malformed-report", detail: stamped.detail });
+      }
+      continue;
     }
-  }
-  for (const failure of result.failures) {
-    if (failure.key !== null) {
-      skipped.push({ lane: failure.key, reason: failure.reason, detail: failure.detail });
+    const failure = failuresByKey.get(key);
+    if (failure !== undefined) {
+      skipped.push({ lane: laneId, reason: failure.reason, detail: failure.detail });
     }
   }
   return { kind: "analyzed", reports, skipped, attempts };

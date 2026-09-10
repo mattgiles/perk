@@ -6300,7 +6300,20 @@ survive byte-exact matching against the manifest, so any escaping would break se
 construction. There is no length bound: an oversized id fails as availability at the transport
 (a wave-level failure), never as a silent success. The learn flows' `laneTask` sites render
 through the helper, and their decoders (§8.48, §8.60 — refuse) and planner (§8.50 — degrade)
-apply the predicate upstream, so the throw is unreachable in production.
+apply the predicate upstream, so the throw is unreachable in production. The module's other
+export is the fixed **orchestration-key** format `orchestrationKey(ordinal)` → `lane.<ordinal>`
+(a global 1-based ordinal in lane-plan order) — the `runs.all` item key the three
+**producer-lane** learn waves (§8.48 harvest, §8.50 audit, §8.60 dream analyst — lanes drawn
+from a producer-owned manifest) give their lanes; waves over a closed slug enum (this section's
+learn analyst angles, the §8.61 dream reducer angles) key by the slug itself and are out of its
+scope. The key is opaque, code-owned, never derived
+from producer bytes (no sanitizer — uniqueness lives in the ordinal; the semantic lane id rides
+`label` and the task text), trivially inside `RUN_KEY_PATTERN` so `validateAssignments`' run-key
+throw is unreachable for any planned lane, and never surfaced as a lane identity — it appears
+only in attempt receipts (`requestedKeys`, `children[*].key`) and failure `detail`s; typed
+outcomes join rows back to the SEMANTIC id through each flow's module-private lane plan, never
+by parsing keys. The module's exports are exactly `isRoutingToken`, `renderRoutingToken`, and
+`orchestrationKey`.
 
 **Report authority and native partial settlement.** Ordinary durable `state: "complete"`
 uses only `status.json.workflow.value`; completion metadata never supplements or replaces it.
@@ -8214,7 +8227,9 @@ module): blocking, `best-effort` completeness, ONE attempt, NO retry — a faile
 is an explicitly-reported skipped lane; only a wave-level failure fails the call (a loud
 soft-fail whose `error_type` is the wave-level reason). Strict pre-spawn validation (any
 deviation refuses before spawn with a named detail): byte-identical `schema_version: "1"`,
-string `commit_sha`, non-empty lanes with unique non-empty ids that pass the §8.35
+string `commit_sha`, non-empty lanes with unique non-empty ids (the duplicate-id refusal is a
+manifest invariant — analysts select lanes byte-exact by id — independent of the code-owned
+key's ordinal uniqueness) that pass the §8.35
 routing-token fence (an unsafe id refuses with a named detail) and non-empty docs, lexical
 `docs/learned/` containment on every doc path PLUS resolved-symlink containment for existing
 doc paths (realpath'd against the resolved corpus root, which must itself resolve inside the
@@ -8222,7 +8237,14 @@ resolved checkout — mirroring the gather core's symlinked-corpus-root guard; n
 paths skip the resolved layer, and doc existence itself is not required).
 Multi-lane only: a single-lane manifest is refused `bad_input` toward the seed's
 direct-analysis path (the fallback state table's first row, enforced in code). One
-`perk.harvest-analyst` lane per manifest lane; the
+`perk.harvest-analyst` lane per manifest lane; keyed by the §8.35 orchestration key
+`lane.<ordinal>` (manifest-lane order) with the semantic `<category>-<n>` id on the lane `label`
+and in the task text — a producer-valid id outside the run-key charset (a space, `@`) launches
+normally and any failure returns the typed path (`wave_failed` / a skipped lane), never a
+throw; the outcome's `reports[].lane`/`skipped[].lane` carry the SEMANTIC lane id (joined back
+through the module-private lane plan; `skipped` in manifest order), while the attempt receipt's
+`requestedKeys` are the orchestration keys in launch order (receipt-correlation telemetry only,
+never a lane identity); the
 per-lane report is the wrapper `{opportunities, omitted_count}` — `opportunities` an array of
 at most 5 items (`HARVEST_MAX_OPPORTUNITIES`, the one constant shared by the schema's
 `maxItems` and the sanitizer's over-cap arm), each item
@@ -8798,8 +8820,8 @@ string|null, citations: int[], rationale: string|null, detail: string}]}` — `s
 `extension/pi/v1/learning/audit.ts`). **No parameters** — the bundle dir comes ONLY from the
 launch state (§8.3's `audit_bundle_dir` binding); missing/blank binding or a missing
 `manifest.json`/`deterministic.json` → pre-launch `bad_state` (nothing written). One lane per
-**packetized** pair, keyed `<sanitized expectation id>.<ordinal>` (run-key-safe under
-pi-subagents' `runs.all` key contract, which the wave renderer also enforces up front; the
+**packetized** pair, keyed by the §8.35 orchestration key `lane.<ordinal>` (a global 1-based
+ordinal over the DISPATCHED lanes in plan order — the expectation id never enters the key; the
 path-qualified pair identity `<expectation_id>@<session_path>` rides the lane label — basenames
 are not globally unique — and the fold joins reports back to pairs through the code-owned lane
 plan, never by parsing keys). Every verdicts record is written under the FOLD identity
@@ -10748,9 +10770,9 @@ partition the corpus), string-or-null
 whole wave pre-spawn with a named detail; unknown extra keys are ignored (forward-compat rides
 `schema_version`).
 
-**Code-owned orchestration lane keys** (the §8.50 audit-wave pattern): the run key is
-`<sanitized lane id>.<ordinal>` (invalid chars collapsed to `-`, leading non-alnum stripped,
-stem clamped, global 1-based ordinal); the SEMANTIC manifest lane id rides the lane `label`,
+**Code-owned orchestration lane keys** (the §8.35 format shared with §8.48/§8.50): the run key
+is `lane.<ordinal>` (`orchestrationKey`, a global 1-based ordinal in manifest-lane order —
+opaque, never derived from producer bytes); the SEMANTIC manifest lane id rides the lane `label`,
 the module-private lane plan, and the task text — producer lane ids are deliberately NOT
 run-key-bounded (category-fallback and long-cluster ids never fail the run-key contract), so
 the decoder performs no run-key conformance check (the routing-token fence is the one, narrower
@@ -10792,8 +10814,11 @@ manifest carries its decode-time-bound `manifestPath`) runs `flow: "dream-analys
 — one failed/undecodable lane ⇒ `complete: false`; a schema-valid report failing the re-decode
 is a `malformed-report` failure. Failures surface in the dream-specific
 `DreamLaneFailure {lane, reason, detail}` shape — `lane` is the SEMANTIC manifest lane id, or
-`null` for wave-level failures and the defensive unplanned-key arm (a raw orchestration key is
-named only in `detail`, never surfaced as a lane identity). Decoded analyses are RETAINED even
+`null` for wave-level failures (an orchestration key is never surfaced as a lane identity);
+rows are joined back through the module-private lane plan by planned key — there is no
+unplanned-key arm (`normalizeAssignments` yields only requested keys) — and `failures` lists
+wave-level failures first, then each lane's keyed or re-decode failure in lane-plan order.
+Decoded analyses are RETAINED even
 when incomplete — honest coverage for the tool's refusal and the incomplete-analysis outcome.
 The outcome additionally carries `requestedKeys` — the code-owned orchestration keys in launch
 order, receipt-correlation telemetry ONLY (they correlate with `receipt.children[*].key`; the

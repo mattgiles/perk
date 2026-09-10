@@ -148,13 +148,13 @@ function analystReportOf(docs: unknown[]): Record<string, unknown> {
   };
 }
 
-/** A complete analyst aggregate for TWO_LANE_MANIFEST (keys are the code-owned `<id>.<n>`). */
+/** A complete analyst aggregate for TWO_LANE_MANIFEST (keys are the fixed `lane.<ordinal>`). */
 function completeAnalystAggregate(): { state: string; value: unknown } {
   return {
     state: "complete",
     value: [
       {
-        key: "pi-1.1",
+        key: "lane.1",
         ok: true,
         error: null,
         report: analystReportOf([
@@ -163,7 +163,7 @@ function completeAnalystAggregate(): { state: string; value: unknown } {
         ]),
       },
       {
-        key: "workflow-1.2",
+        key: "lane.2",
         ok: true,
         error: null,
         report: analystReportOf([docRow("docs/learned/workflow/report-waves.md")]),
@@ -533,7 +533,7 @@ test("executeDreamWave: the incomplete-analysis arm — the FULL rendered text +
       state: "complete",
       value: [
         {
-          key: "pi-1.1",
+          key: "lane.1",
           ok: true,
           error: null,
           report: analystReportOf([
@@ -541,7 +541,7 @@ test("executeDreamWave: the incomplete-analysis arm — the FULL rendered text +
             docRow("docs/learned/pi/subagents.md"),
           ]),
         },
-        { key: "workflow-1.2", ok: false, error: "analyst crashed", report: null },
+        { key: "lane.2", ok: false, error: "analyst crashed", report: null },
       ],
     },
   });
@@ -689,7 +689,7 @@ test("tool e2e: both configured models ride their wave's spawn; analyst complete
   });
   const analystAggregate = [
     {
-      key: "pi-1.1",
+      key: "lane.1",
       ok: true,
       error: null,
       report: analystReportOf([docRow("docs/learned/pi/subagents.md")]),
@@ -791,7 +791,7 @@ test("tool e2e: repository drift during the wave is caught by the REAL default b
   dreamRepoCommit(cwd, "drift: a commit after the manifest was stamped");
   const analystAggregate = [
     {
-      key: "pi-1.1",
+      key: "lane.1",
       ok: true,
       error: null,
       report: analystReportOf([docRow("docs/learned/pi/subagents.md")]),

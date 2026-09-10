@@ -16,10 +16,11 @@
 // Python fold's `validate()` rejects unknown vocabulary wholesale, so an unsanitized write
 // would poison the whole bundle.
 //
-// Lane keys are run-key-safe slugs `<sanitized expectation id>.<ordinal>` — the pi-subagents
-// run-key contract (reportWave's RUN_KEY_PATTERN) rejects `@`/`/` and long strings, so the pair
-// identity (session_path — basenames are not globally unique across encoded session dirs) rides
-// the lane `label` and the code-owned `PlannedAuditLane.pair`, never the key. Packetized pairs
+// Lane keys are the shared fixed orchestration key `lane.<ordinal>` (`waves/laneIdentity.ts`)
+// — opaque, code-owned, never derived from the expectation id (which the pi-subagents run-key
+// contract could reject: `@`/`/`/length), so the pair identity (session_path — basenames are
+// not globally unique across encoded session dirs) rides the lane `label` and the code-owned
+// `PlannedAuditLane.pair`, never the key. Packetized pairs
 // that DO share `(expectation_id, session_basename)` also share a stem-keyed packet file (the
 // bundle's packet layout), so their evidence is ambiguous — such pairs are dispatched as NO
 // lanes and degrade honestly (`lane-failed`, named detail) instead of grading the wrong
@@ -40,7 +41,7 @@
 // capability are the only mechanism edges; the adapter constructs and threads them.
 
 import { join } from "node:path";
-import { isRoutingToken, renderRoutingToken } from "../waves/laneIdentity.ts";
+import { isRoutingToken, orchestrationKey, renderRoutingToken } from "../waves/laneIdentity.ts";
 import type {
   AssignmentFailure,
   ReportAssignment,
@@ -256,21 +257,9 @@ function foldIdentityKey(expectationId: string, sessionPath: string): string {
 }
 
 /**
- * Compose one lane's run-key-safe key: the sanitized expectation id plus a global 1-based
- * ordinal. Uniqueness lives in the ordinal; the human-readable pair identity rides the lane
- * `label` and the code-owned `pair`. The manifest decode is lenient, so the id is sanitized
- * against the run-key charset (invalid runs → `-`, leading non-alnum stripped, clamped)
- * rather than trusted.
- */
-function laneKey(expectationId: string, ordinal: number): string {
-  const safe = expectationId.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[^A-Za-z0-9]+/, "");
-  const stem = safe === "" ? "lane" : safe.slice(0, 100);
-  return `${stem}.${ordinal}`;
-}
-
-/**
- * Build the lane plan: one lane per packetized pair, keyed `<sanitized expectation
- * id>.<ordinal>` (run-key-safe; see `laneKey`) and labeled `<expectation_id>@<session_path>`.
+ * Build the lane plan: one lane per packetized pair, keyed `lane.<ordinal>` (the shared
+ * `orchestrationKey` — a global 1-based ordinal over the dispatched lanes in plan order; the
+ * expectation id never enters the key) and labeled `<expectation_id>@<session_path>`.
  * Each packetized pair runs the pre-dispatch checks in a fixed order — identity before
  * evidence, the first failing check's detail wins: (1) the pair's FOLD identity `(enclosing
  * expectation id, session_path)` must be claimed by no other packetized pair (a contested
@@ -391,7 +380,7 @@ function buildAuditLanes(manifest: AuditManifest, bundleDir: string): AuditLaneP
         });
         continue;
       }
-      const key = laneKey(pair.expectation_id, planned.length + 1);
+      const key = orchestrationKey(planned.length + 1);
       planned.push({
         key,
         pair,

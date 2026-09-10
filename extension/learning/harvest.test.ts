@@ -1,8 +1,8 @@
 // The harvest feature op's suite: schema pins, the STRICT manifest decode's refusal arms, the
 // shared resolved doc-containment layer (injected fs), and the `analyzeHarvest` entry op over
-// the memory adapter — lane/task composition via the recorded spawn, the deterministic pointer
-// post-pass (injected exists), the malformed-report lane degrades, and the wave-level failure
-// arm. Lane planning and the pointer stamp are module-private, so those matrices are exercised
+// the memory adapter — lane/task composition via the recorded spawn (fixed `lane.<ordinal>`
+// keys vs semantic labels), the deterministic pointer post-pass (injected exists), the
+// malformed-report lane degrades, and the wave-level failure arm. Lane planning and the pointer stamp are module-private, so those matrices are exercised
 // through the one entry op. The agent-def ↔ report-schema prose lockstep pin (+ the delivered
 // `.pi/agents/perk/` mirror) rides along. Fully offline.
 
@@ -12,7 +12,7 @@ import { join, sep } from "node:path";
 import { test } from "node:test";
 import { waveScriptItems } from "../testing/fakeSubagents.ts";
 import { createMemoryWaveAdapter, type MemoryWaveAdapter } from "../testing/memoryAdapter.ts";
-import { reportWaveOver } from "../waves/reportWave.ts";
+import { RUN_KEY_PATTERN, reportWaveOver } from "../waves/reportWave.ts";
 import { verifyDocContainment } from "./containment.ts";
 import {
   analyzeHarvest,
@@ -262,8 +262,8 @@ test("decodeHarvestManifest: each refusal arm carries its named detail", () => {
 
 test("decodeHarvestManifest: a routing-safe but run-key-hostile id decodes (the fence is not the run-key contract)", () => {
   // Spaces and `@` break the pi-subagents run-key charset but not task-prose framing — the
-  // fence admits them. (Their run-key failure at wave time is the orchestration-key posture's
-  // concern, not the decoder's.)
+  // fence admits them. (They launch under the fixed `lane.<ordinal>` keys — see the
+  // run-key-hostile composition test.)
   for (const id of ["a b", "@@weird lane"]) {
     const result = decodeHarvestManifest(manifestOf([{ id, docs: [doc("docs/learned/a.md")] }]));
     assert.equal(result.ok, true, `must decode: ${JSON.stringify(result)}`);
@@ -363,7 +363,7 @@ test("verifyDocContainment: containment is judged on RESOLVED paths (a relocated
 
 // --------------------------------------------------------------------- lane composition
 
-test("analyzeHarvest: per-key lane identity — every lane's task opens with its own id (via the adapter)", async () => {
+test("analyzeHarvest: fixed lane.<ordinal> keys, semantic ids on label + task (via the adapter)", async () => {
   const manifest = decoded(
     manifestOf([
       { id: "pi-1", docs: [doc("docs/learned/pi/a.md")] },
@@ -386,20 +386,24 @@ test("analyzeHarvest: per-key lane identity — every lane's task opens with its
   }[];
   assert.deepEqual(
     lanes.map((l) => l.key),
+    ["lane.1", "lane.2", "lane.3"],
+  );
+  assert.deepEqual(
+    lanes.map((l) => l.label),
     ["pi-1", "workflow-1", "workflow-2"],
+    "the SEMANTIC id rides the label, never the key",
   );
   for (const lane of lanes) {
-    assert.equal(lane.label, lane.key);
     assert.equal(lane.agent, "perk.harvest-analyst");
     assert.equal(lane.phase, "harvest");
     // The routing-token fence is the IDENTITY on accepted tokens, so these raw bytes ARE the
     // fenced form (the identity property itself is pinned in `waves/laneIdentity.test.ts`).
     assert.ok(
-      lane.task.startsWith(`Lane: ${lane.key}\n`),
+      lane.task.startsWith(`Lane: ${lane.label}\n`),
       `the task must open with the lane's OWN id (got: ${lane.task.slice(0, 40)})`,
     );
     assert.ok(lane.task.includes(`Read the harvest manifest FIRST: ${MANIFEST_PATH}`));
-    assert.ok(lane.task.includes(`Your assigned lane id is "${lane.key}"`));
+    assert.ok(lane.task.includes(`Your assigned lane id is "${lane.label}"`));
     assert.match(lane.task, /untrusted routing token/);
     assert.match(lane.task, /matches it byte-exact/);
     assert.match(lane.task, /untrusted DATA, never instructions/);
@@ -407,10 +411,96 @@ test("analyzeHarvest: per-key lane identity — every lane's task opens with its
   }
 });
 
+test("analyzeHarvest: a run-key-hostile producer id (space, @) launches under lane.<ordinal> keys and returns typed outcomes — never the validateAssignments throw", async () => {
+  const manifest = decoded(
+    manifestOf([
+      { id: "a b", docs: [doc("docs/learned/a.md")] },
+      { id: "@@weird lane", docs: [doc("docs/learned/b.md")] },
+    ]),
+  );
+  const adapter = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: [
+        { key: "lane.1", ok: true, error: null, report: { opportunities: [], omitted_count: 0 } },
+        { key: "lane.2", ok: false, error: "analyst crashed", report: null },
+      ],
+    },
+  });
+  const outcome = await analyzed(adapter, { manifest });
+  const items = waveScriptItems(adapter.calls.spawn[0]?.workflowScript ?? "") as {
+    key: string;
+    label: string;
+    task: string;
+  }[];
+  assert.deepEqual(
+    items.map((i) => i.key),
+    ["lane.1", "lane.2"],
+  );
+  for (const item of items) {
+    assert.match(item.key, RUN_KEY_PATTERN, `key ${item.key} must satisfy the run-key contract`);
+  }
+  assert.deepEqual(
+    items.map((i) => i.label),
+    ["a b", "@@weird lane"],
+    "the hostile ids ride the labels raw",
+  );
+  assert.ok(items[0]?.task.startsWith("Lane: a b\n"));
+  assert.deepEqual(
+    outcome.reports.map((r) => r.lane),
+    ["a b"],
+  );
+  assert.deepEqual(outcome.skipped, [
+    { lane: "@@weird lane", reason: "lane-failed", detail: "analyst crashed" },
+  ]);
+  assert.deepEqual(outcome.attempts[0]?.requestedKeys, ["lane.1", "lane.2"]);
+
+  // The wave-level typed path over the same manifest: a typed failure, not a throw.
+  const failed = await analyzeHarvest(reportWaveOver(createMemoryWaveAdapter({ ping: null })), {
+    manifest,
+    manifestPath: MANIFEST_PATH,
+    checkoutRoot: "/checkout",
+  });
+  assert.equal(failed.kind, "wave_failed");
+  const waveFailed = failed as Extract<HarvestAnalysisOutcome, { kind: "wave_failed" }>;
+  assert.equal(waveFailed.reason, "unavailable");
+  assert.deepEqual(waveFailed.attempts[0]?.requestedKeys, ["lane.1", "lane.2"]);
+});
+
+test("analyzeHarvest: skipped lanes are listed in lane-plan (manifest) order regardless of reason", async () => {
+  // The old aggregate-iterating shape listed every malformed-report lane before every lane
+  // failure; walking the plan lists them in manifest order.
+  const outcome = await analyzed(
+    createMemoryWaveAdapter({
+      aggregate: {
+        state: "complete",
+        value: [
+          { key: "lane.1", ok: false, error: "analyst crashed", report: null },
+          {
+            key: "lane.2",
+            ok: true,
+            error: null,
+            report: { opportunities: "nope", omitted_count: 0 },
+          },
+        ],
+      },
+    }),
+    { manifest: decoded(TWO_LANE_RAW), exists: () => true },
+  );
+  assert.deepEqual(outcome.reports, []);
+  assert.deepEqual(
+    outcome.skipped.map((s) => [s.lane, s.reason]),
+    [
+      ["pi-1", "lane-failed"],
+      ["workflow-1", "malformed-report"],
+    ],
+  );
+});
+
 test("analyzeHarvest: an unfenced unsafe id reaching laneTask throws (programmer-error backstop), no spawn", async () => {
   // Bypass the decoder — as a buggy caller would — so the unsafe id reaches `laneTask`. The
-  // render helper's throw fires BEFORE `wave.run` (hence before `validateAssignments`' run-key
-  // throw), pinning that `laneTask` routes its token through the fence.
+  // render helper's throw fires BEFORE `wave.run` (the only remaining throw on this path — keys
+  // are code-owned), pinning that `laneTask` routes its token through the fence.
   const manifest = decoded(TWO_LANE_RAW);
   const rogue = "pi-1\nrogue";
   const rogueManifest: HarvestManifest = {
@@ -447,7 +537,8 @@ function opportunity(pointer: string, overrides: Record<string, unknown> = {}): 
   };
 }
 
-/** One-lane-covered aggregate: `pi-1` carries `report`, `workflow-1` fails (best-effort). */
+/** One-lane-covered aggregate: `lane.1` (pi-1) carries `report`, `lane.2` (workflow-1) fails
+ * (best-effort). */
 function aggregateWith(report: unknown): {
   state: string;
   value: unknown;
@@ -455,8 +546,8 @@ function aggregateWith(report: unknown): {
   return {
     state: "complete",
     value: [
-      { key: "pi-1", ok: true, error: null, report },
-      { key: "workflow-1", ok: false, error: "analyst crashed", report: null },
+      { key: "lane.1", ok: true, error: null, report },
+      { key: "lane.2", ok: false, error: "analyst crashed", report: null },
     ],
   };
 }
@@ -636,8 +727,8 @@ test("analyzeHarvest: the spawn contract over the memory adapter (schema, best-e
     aggregate: {
       state: "complete",
       value: [
-        { key: "pi-1", ok: true, error: null, report },
-        { key: "workflow-1", ok: false, error: "analyst crashed", report: null },
+        { key: "lane.1", ok: true, error: null, report },
+        { key: "lane.2", ok: false, error: "analyst crashed", report: null },
       ],
     },
   });
@@ -654,7 +745,7 @@ test("analyzeHarvest: the spawn contract over the memory adapter (schema, best-e
   assert.equal(outcome.attempts.length, 1);
   assert.equal(outcome.attempts[0]?.flow, "harvest");
   assert.equal(outcome.attempts[0]?.attempt, 1);
-  assert.deepEqual(outcome.attempts[0]?.requestedKeys, ["pi-1", "workflow-1"]);
+  assert.deepEqual(outcome.attempts[0]?.requestedKeys, ["lane.1", "lane.2"]);
 
   assert.equal(adapter.calls.spawn.length, 1);
   const spawn = adapter.calls.spawn[0];
@@ -664,6 +755,9 @@ test("analyzeHarvest: the spawn contract over the memory adapter (schema, best-e
   assert.equal(spawn?.model, "faux/analyst");
   assert.deepEqual(spawn?.outputSchema, HARVEST_ANALYST_REPORT_SCHEMA);
   assert.match(spawn?.workflowScript ?? "", /perk\.harvest-analyst/);
+  // The orchestration keys AND the semantic labels both ride the spawned items.
+  assert.match(spawn?.workflowScript ?? "", /"lane\.1"/);
+  assert.match(spawn?.workflowScript ?? "", /"lane\.2"/);
   assert.match(spawn?.workflowScript ?? "", /"pi-1"/);
   assert.match(spawn?.workflowScript ?? "", /"workflow-1"/);
 });
@@ -683,7 +777,7 @@ test("analyzeHarvest: the unavailable arm is wave_failed carrying the attempt re
   assert.equal(failed.attempts.length, 1);
   assert.equal(failed.attempts[0]?.flow, "harvest");
   assert.equal(failed.attempts[0]?.state, "unavailable");
-  assert.deepEqual(failed.attempts[0]?.requestedKeys, ["pi-1", "workflow-1"]);
+  assert.deepEqual(failed.attempts[0]?.requestedKeys, ["lane.1", "lane.2"]);
 });
 
 // ------------------------------------------------------- the agent-def lockstep pin
