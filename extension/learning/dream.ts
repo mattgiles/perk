@@ -3,8 +3,8 @@
 // STRICT §8.59 manifest decode (the manifest is the door's parent-prepared invariant — any
 // deviation refuses before spawn), which BINDS the run-scoped manifest path into the decoded
 // value (one authority — planning, validation, and the child task text can never diverge), the
-// code-owned run-key-safe orchestration keys (opaque `<sanitized id>.<ordinal>` slugs with the
-// semantic identity riding labels/code-owned metadata — producer lane ids are deliberately NOT
+// shared fixed `lane.<ordinal>` orchestration keys (`waves/laneIdentity.ts`; the semantic
+// identity rides labels/code-owned metadata — producer lane ids are deliberately NOT
 // run-key-bounded), the closed analyst report schema under the
 // `DREAM_ANALYST_CAPS` SSOT, the composed defensive re-decode (corpus-membership merge/overlap
 // rules), and **strict** completeness — one failed or undecodable lane forces
@@ -14,8 +14,9 @@
 // named refusal) and again at render (the programmer-error backstop). (contracts.md §8.60)
 
 import { posix } from "node:path";
-import { isRoutingToken, renderRoutingToken } from "../waves/laneIdentity.ts";
+import { isRoutingToken, orchestrationKey, renderRoutingToken } from "../waves/laneIdentity.ts";
 import {
+  type AssignmentFailure,
   type ReportAssignment,
   type ReportWave,
   type ReportWaveAttemptReceipt,
@@ -360,20 +361,6 @@ interface PlannedDreamLane {
 }
 
 /**
- * Compose one lane's run-key-safe orchestration key — an opaque slug whose uniqueness lives in
- * the ordinal, never in the semantic id: the
- * sanitized manifest lane id (invalid runs → `-`, leading non-alnum stripped, stem clamped)
- * plus a global 1-based ordinal. Uniqueness lives in the ordinal; the SEMANTIC lane id rides
- * the lane `label` and `PlannedDreamLane.laneId`, never the key — producer lane ids
- * (category fallback, long cluster ids) are deliberately NOT run-key-bounded.
- */
-function laneKey(laneId: string, ordinal: number): string {
-  const safe = laneId.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[^A-Za-z0-9]+/, "");
-  const stem = safe === "" ? "lane" : safe.slice(0, 100);
-  return `${stem}.${ordinal}`;
-}
-
-/**
  * Compose one lane's task text IN CODE (short — the audit rubric lives in the agent def): the
  * absolute manifest path plus the assigned SEMANTIC lane id as an untrusted routing token. The
  * id renders through the fence (`renderRoutingToken` — the identity on every decoder-accepted
@@ -391,11 +378,12 @@ function laneTask(id: string, manifestPath: string): string {
 }
 
 /** Build the planned lanes (module-private): one `perk.dream-analyst` lane per manifest lane,
- * under code-owned run-key-safe keys; the semantic lane id rides `label`/`laneId` and the task
- * text, and the task's manifest path is the decode-time-bound `manifest.manifestPath`. */
+ * under the fixed `lane.<ordinal>` orchestration keys; the semantic lane id rides
+ * `label`/`laneId` and the task text, and the task's manifest path is the decode-time-bound
+ * `manifest.manifestPath`. */
 function buildDreamLanes(manifest: DreamManifest): PlannedDreamLane[] {
   return manifest.lanes.map((lane, index) => {
-    const key = laneKey(lane.id, index + 1);
+    const key = orchestrationKey(index + 1);
     return {
       key,
       laneId: lane.id,
@@ -836,8 +824,9 @@ export interface DreamLaneAnalysis {
 /**
  * One dream failure — the dream-specific shape (deliberately NOT the wave's
  * `ReportWaveFailure`, whose `key` field would leak orchestration-key semantics): `lane` is the
- * SEMANTIC manifest lane id, or `null` for wave-level failures and the defensive unplanned-key
- * arm (whose raw key is named in `detail`, never surfaced as a lane identity).
+ * SEMANTIC manifest lane id, or `null` for wave-level failures (an orchestration key is never
+ * surfaced as a lane identity; rows are joined back through the lane plan by planned key, so
+ * there is no unplanned-key arm).
  */
 export interface DreamLaneFailure {
   lane: string | null;
@@ -860,18 +849,19 @@ export interface DreamWaveOutcome {
 
 /**
  * Run the dream analyst wave: one fresh-context `perk.dream-analyst` lane per manifest lane
- * under code-owned run-key-safe keys, **strict** completeness, ONE attempt, NO retry,
- * module-default timeout, the caller's `model?` as the workflow-level default (the configured
- * `[models.subagents] dream-analyst` resolution lands with the tool that consumes it). The
- * manifest is the ONE authority: the decoder bound `manifestPath` into it, so the lanes'
+ * under the fixed `lane.<ordinal>` orchestration keys, **strict** completeness, ONE attempt, NO
+ * retry, module-default timeout, the caller's `model?` as the workflow-level default (the
+ * configured `[models.subagents] dream-analyst` resolution lands with the tool that consumes
+ * it). The manifest is the ONE authority: the decoder bound `manifestPath` into it, so the lanes'
  * planning/validation data and the file the analysts read can never diverge. Every
  * schema-valid report is defensively re-decoded (`decodeDreamAnalystReport`) against its
  * lane's doc paths and the whole manifest corpus — an undecodable/over-cap/contradictory
  * report is a `malformed-report` lane failure; `complete` = the wave's completeness AND
  * zero decode failures, with decoded analyses retained even when incomplete (honest coverage
- * for the tool's refusal and the incomplete-analysis outcome). Single-lane manifests are
- * valid — dream has NO direct-analysis path (the harvest single-lane refusal is deliberately
- * not mirrored; §8.60).
+ * for the tool's refusal and the incomplete-analysis outcome). `failures` lists wave-level
+ * failures first, then each lane's keyed or re-decode failure in lane-plan order. Single-lane
+ * manifests are valid — dream has NO direct-analysis path (the harvest single-lane refusal is
+ * deliberately not mirrored; §8.60).
  *
  * Caller preconditions (discharged by the launching adapter, the exact harvest-binding
  * sequence): the manifest came from `decodeDreamManifest`, and
@@ -884,7 +874,6 @@ export async function runDreamAnalystWave(
   signal?: AbortSignal,
 ): Promise<DreamWaveOutcome> {
   const planned = buildDreamLanes(opts.manifest);
-  const byKey = new Map(planned.map((lane) => [lane.key, lane]));
   const corpusDocPaths: ReadonlySet<string> = new Set(
     opts.manifest.lanes.flatMap((lane) => lane.docs.map((doc) => doc.path)),
   );
@@ -899,37 +888,44 @@ export async function runDreamAnalystWave(
     { signal },
   );
 
-  // Failures surface SEMANTIC lane ids in the dream-specific shape: keyed wave failures are
-  // re-mapped from orchestration keys; wave-level (and any unmappable) failures carry
-  // `lane: null` — an orchestration key is never surfaced as a lane identity.
-  const failures: DreamLaneFailure[] = result.failures.map((failure) => ({
-    lane: failure.key === null ? null : (byKey.get(failure.key)?.laneId ?? null),
-    reason: failure.reason,
-    detail: failure.detail,
-  }));
+  // Failures surface SEMANTIC lane ids in the dream-specific shape: wave-level failures first
+  // (`lane: null` — an orchestration key is never surfaced as a lane identity), then each
+  // planned lane's keyed or re-decode failure in lane-plan order.
+  const failures: DreamLaneFailure[] = [];
+  for (const failure of result.failures) {
+    if (failure.key === null) {
+      failures.push({ lane: null, reason: failure.reason, detail: failure.detail });
+    }
+  }
+  const reportsByKey = new Map(result.reports.map((r) => [r.key, r.report]));
+  const failuresByKey = new Map<string, AssignmentFailure>();
+  for (const failure of result.failures) {
+    if (failure.key !== null) failuresByKey.set(failure.key, failure);
+  }
 
   const analyses: DreamLaneAnalysis[] = [];
   let decodeFailures = 0;
-  for (const waveReport of result.reports) {
-    const lane = byKey.get(waveReport.key);
-    if (lane === undefined) {
-      // Unreachable without upstream drift (normalizeAssignments only yields requested
-      // keys), but a defensive named failure beats a crash on an untrusted aggregate. The raw
-      // key rides the detail only — it is not a lane identity.
-      decodeFailures += 1;
-      failures.push({
-        lane: null,
-        reason: "malformed-report",
-        detail: `aggregate carries an unplanned lane key '${waveReport.key}'`,
-      });
+  // `normalizeAssignments` yields exactly one report or one keyed failure per requested key, so
+  // every planned lane lands in `analyses` or `failures`; walking the PLAN (not the aggregate)
+  // is what makes an unplanned key structurally unvisitable — no degrade branch, no assertion.
+  for (const lane of planned) {
+    if (reportsByKey.has(lane.key)) {
+      const decoded = decodeDreamAnalystReport(
+        reportsByKey.get(lane.key),
+        lane.docPaths,
+        corpusDocPaths,
+      );
+      if (decoded.ok) {
+        analyses.push({ lane: lane.laneId, report: decoded.report });
+      } else {
+        decodeFailures += 1;
+        failures.push({ lane: lane.laneId, reason: "malformed-report", detail: decoded.detail });
+      }
       continue;
     }
-    const decoded = decodeDreamAnalystReport(waveReport.report, lane.docPaths, corpusDocPaths);
-    if (decoded.ok) {
-      analyses.push({ lane: lane.laneId, report: decoded.report });
-    } else {
-      decodeFailures += 1;
-      failures.push({ lane: lane.laneId, reason: "malformed-report", detail: decoded.detail });
+    const failure = failuresByKey.get(lane.key);
+    if (failure !== undefined) {
+      failures.push({ lane: lane.laneId, reason: failure.reason, detail: failure.detail });
     }
   }
 

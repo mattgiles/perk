@@ -1,6 +1,6 @@
 // The dream analyst tier's suite (the learning/harvest.test.ts matrix shape): the STRICT
 // manifest decode's refusal arms (incl. the lane-size bound and global doc-path uniqueness),
-// the code-owned run-key-safe lane keys, the schema↔caps lockstep, the composed defensive
+// the fixed `lane.<ordinal>` orchestration keys, the schema↔caps lockstep, the composed defensive
 // re-decode (corpus-membership merge/overlap rules, manifest-order normalization, the
 // code-point measure), the strict-completeness runner over the memory adapter, the
 // verifyDocContainment structural-compatibility pin, and the agent-def ↔ report-schema prose
@@ -244,7 +244,7 @@ test("decodeDreamManifest: an exact-cap lane (laneDocs docs) is valid and launch
   const adapter = createMemoryWaveAdapter({
     aggregate: {
       state: "complete",
-      value: [{ key: "pi-1.1", ok: true, error: null, report: fullReport }],
+      value: [{ key: "lane.1", ok: true, error: null, report: fullReport }],
     },
   });
   const outcome = await runDreamAnalystWave(reportWaveOver(adapter), { manifest });
@@ -482,7 +482,7 @@ test("lane composition: code-owned keys, semantic labels, per-key task identity 
   const items = spawnedLaneItems(adapter.calls.spawn[0]?.workflowScript ?? "");
   assert.deepEqual(
     items.map((item) => item.key),
-    ["pi-extension-1.1", "workflow-1.2"],
+    ["lane.1", "lane.2"],
   );
   assert.deepEqual(
     items.map((item) => item.label),
@@ -510,7 +510,7 @@ test("lane composition: code-owned keys, semantic labels, per-key task identity 
   }
 });
 
-test("lane composition: hostile ids sanitize to unique run-key-safe keys (ordinal uniqueness)", async () => {
+test("lane composition: hostile ids never reach the key — fixed lane.<ordinal> keys, semantic ids on label + task", async () => {
   const longId = `category fallback ${"x".repeat(140)}`;
   const manifest = decoded(
     manifestOf([
@@ -524,15 +524,14 @@ test("lane composition: hostile ids sanitize to unique run-key-safe keys (ordina
   await runDreamAnalystWave(reportWaveOver(adapter), { manifest });
   const items = spawnedLaneItems(adapter.calls.spawn[0]?.workflowScript ?? "");
   const keys = items.map((item) => item.key);
-  assert.deepEqual(keys.slice(0, 3), ["a-b.1", "a-b.2", "weird-lane.3"]);
-  assert.equal(new Set(keys).size, keys.length, "identically-sanitizing ids stay unique");
+  assert.deepEqual(keys, ["lane.1", "lane.2", "lane.3", "lane.4"]);
   for (const [i, key] of keys.entries()) {
     assert.ok(RUN_KEY_PATTERN.test(key), `key '${key}' must satisfy the run-key contract`);
     // Raw bytes: every one of these run-key-hostile ids is routing-safe, so the fence renders
     // it byte-identical (the fenced form IS the raw token).
     assert.ok(
       items[i]?.task.startsWith(`Lane: ${items[i]?.label}\n`),
-      "the task carries the SEMANTIC id even under a sanitized key",
+      "the task carries the SEMANTIC id; the key carries none of its bytes",
     );
   }
 });
@@ -994,8 +993,8 @@ test("runDreamAnalystWave: all-valid multi-lane → complete, analyses under sem
     aggregate: {
       state: "complete",
       value: [
-        { key: "pi-extension-1.1", ok: true, error: null, report: laneOneReport() },
-        { key: "workflow-1.2", ok: true, error: null, report: LANE_TWO_REPORT },
+        { key: "lane.1", ok: true, error: null, report: laneOneReport() },
+        { key: "lane.2", ok: true, error: null, report: LANE_TWO_REPORT },
       ],
     },
   });
@@ -1024,8 +1023,11 @@ test("runDreamAnalystWave: all-valid multi-lane → complete, analyses under sem
   assert.equal(spawn?.model, "faux/dream", "the caller's model reaches the spawn params");
   assert.deepEqual(spawn?.outputSchema, DREAM_ANALYST_REPORT_SCHEMA);
   assert.match(spawn?.workflowScript ?? "", /perk\.dream-analyst/);
-  assert.match(spawn?.workflowScript ?? "", /"pi-extension-1\.1"/);
-  assert.match(spawn?.workflowScript ?? "", /"workflow-1\.2"/);
+  // The orchestration keys AND the semantic labels both ride the spawned items.
+  assert.match(spawn?.workflowScript ?? "", /"lane\.1"/);
+  assert.match(spawn?.workflowScript ?? "", /"lane\.2"/);
+  assert.match(spawn?.workflowScript ?? "", /"pi-extension-1"/);
+  assert.match(spawn?.workflowScript ?? "", /"workflow-1"/);
 });
 
 test("runDreamAnalystWave: STRICT — one failed lane ⇒ incomplete, surviving analyses retained", async () => {
@@ -1034,8 +1036,8 @@ test("runDreamAnalystWave: STRICT — one failed lane ⇒ incomplete, surviving 
     aggregate: {
       state: "complete",
       value: [
-        { key: "pi-extension-1.1", ok: true, error: null, report: laneOneReport() },
-        { key: "workflow-1.2", ok: false, error: "analyst crashed", report: null },
+        { key: "lane.1", ok: true, error: null, report: laneOneReport() },
+        { key: "lane.2", ok: false, error: "analyst crashed", report: null },
       ],
     },
   });
@@ -1063,8 +1065,8 @@ test("runDreamAnalystWave: a schema-valid but re-decode-failing report is malfor
     aggregate: {
       state: "complete",
       value: [
-        { key: "pi-extension-1.1", ok: true, error: null, report: laneOneReport() },
-        { key: "workflow-1.2", ok: true, error: null, report: badReport },
+        { key: "lane.1", ok: true, error: null, report: laneOneReport() },
+        { key: "lane.2", ok: true, error: null, report: badReport },
       ],
     },
   });
@@ -1080,6 +1082,44 @@ test("runDreamAnalystWave: a schema-valid but re-decode-failing report is malfor
   );
 });
 
+test("runDreamAnalystWave: failures list wave-level first, then lanes in plan order (a re-decode failure on lane 1 precedes a lane failure on lane 2)", async () => {
+  // The old shape listed every keyed wave failure before every re-decode failure; walking the
+  // plan lists the lanes in manifest order (wave-level failures, when any, still come first).
+  const manifest = decoded(TWO_LANE_RAW);
+  const adapter = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: [
+        {
+          key: "lane.1",
+          ok: true,
+          error: null,
+          report: laneOneReport({
+            docs: [
+              docRow(LANE_ONE_DOCS[0] as string, {
+                disposition: "merge-into",
+                merge_target: "docs/learned/not-in-corpus.md",
+              }),
+              docRow(LANE_ONE_DOCS[1] as string),
+            ],
+          }),
+        },
+        { key: "lane.2", ok: false, error: "analyst crashed", report: null },
+      ],
+    },
+  });
+  const outcome = await runDreamAnalystWave(reportWaveOver(adapter), { manifest });
+  assert.equal(outcome.complete, false);
+  assert.deepEqual(
+    outcome.failures.map((f) => [f.lane, f.reason]),
+    [
+      ["pi-extension-1", "malformed-report"],
+      ["workflow-1", "lane-failed"],
+    ],
+  );
+  assert.deepEqual(outcome.analyses, []);
+});
+
 test("runDreamAnalystWave: a single-lane manifest launches (no direct-analysis refusal)", async () => {
   const manifest = decoded(
     manifestOf([
@@ -1093,7 +1133,7 @@ test("runDreamAnalystWave: a single-lane manifest launches (no direct-analysis r
   const adapter = createMemoryWaveAdapter({
     aggregate: {
       state: "complete",
-      value: [{ key: "workflow-1.1", ok: true, error: null, report: LANE_TWO_REPORT }],
+      value: [{ key: "lane.1", ok: true, error: null, report: LANE_TWO_REPORT }],
     },
   });
   const outcome = await runDreamAnalystWave(reportWaveOver(adapter), { manifest });

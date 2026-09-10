@@ -1,6 +1,6 @@
 // The audit-judgment feature op's offline suite (memory adapter + a recording writer): the
 // verdict-schema pin, the lenient manifest decode (+ the code-owned detail fallback), lane
-// composition asserted through the recorded spawn (packetized-only, run-key-safe ordinal keys,
+// composition asserted through the recorded spawn (packetized-only, fixed `lane.<ordinal>` keys,
 // the per-lane task/label/agent contract), the degrade/skip routing (including the pre-dispatch
 // identity degrades: a contested fold identity consolidated to one record, id mismatch under
 // the enclosing id, unsafe routing tokens), the zero-lane short-circuits, the semantic verdicts-payload write matrix, the deterministic reduction
@@ -57,9 +57,10 @@ function manifest(results: { id: string; pairs: AuditManifestPair[] }[]): AuditM
   };
 }
 
-/** The op's composed run-key-safe lane key: `<expectation id>.<1-based planned ordinal>`. */
+/** The shared fixed orchestration key `lane.<1-based planned ordinal>` — the expectation id
+ * never enters it. */
 function laneKey(ordinal: number): string {
-  return `${GRILL}.${ordinal}`;
+  return `lane.${ordinal}`;
 }
 
 function report(basename: string, overrides: Record<string, unknown> = {}): unknown {
@@ -247,16 +248,18 @@ test("judgeAuditBundle: packetized pairs only, ordinal-keyed, per-lane task comp
   }>;
   assert.deepEqual(
     items.map((i) => i.key),
-    [`${GRILL}.1`, `${ROUTE}.2`],
+    ["lane.1", "lane.2"],
   );
-  const byId: Record<string, { basename: string; sessionPath: string }> = {
-    [GRILL]: { basename: "s1.jsonl", sessionPath: "/sessions/enc-main/s1.jsonl" },
-    [ROUTE]: { basename: "s1.jsonl", sessionPath: "/sessions/enc-main/s1.jsonl" },
-  };
-  for (const item of items) {
-    const expectationId = item.key.replace(/\.\d+$/, "");
-    const expected = byId[expectationId];
-    assert.ok(expected, `unexpected lane key ${item.key}`);
+  // Keys carry no id bytes, so lanes correlate to their pairs by INDEX (plan order).
+  const expectedLanes = [
+    { id: GRILL, basename: "s1.jsonl", sessionPath: "/sessions/enc-main/s1.jsonl" },
+    { id: ROUTE, basename: "s1.jsonl", sessionPath: "/sessions/enc-main/s1.jsonl" },
+  ];
+  assert.equal(items.length, expectedLanes.length);
+  items.forEach((item, i) => {
+    const expected = expectedLanes[i];
+    assert.ok(expected, `unexpected lane at index ${i}`);
+    const expectationId = expected.id;
     // The pair identity (path-qualified — basenames are not globally unique) rides the label.
     assert.equal(item.label, `${expectationId}@${expected.sessionPath}`);
     assert.equal(item.agent, "perk-dev.session-auditor");
@@ -275,16 +278,17 @@ test("judgeAuditBundle: packetized pairs only, ordinal-keyed, per-lane task comp
     assert.ok(item.task.includes(`session_basename "${expected.basename}"`));
     assert.ok(item.task.includes(`evidence prose for ${expectationId}`));
     assert.ok(item.task.includes(`violation prose for ${expectationId}`));
-  }
+  });
 });
 
-test("judgeAuditBundle: every composed lane key satisfies the pi-subagents run-key contract", async () => {
+test("judgeAuditBundle: hostile expectation ids never reach the fixed lane.<ordinal> keys (run-key-safe by construction)", async () => {
   // Regression pin for the live-only failure family: `runs.all` validates keys INSIDE the
   // workflow worker (`/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/`), so an invalid key fails the
   // whole wave at dispatch with no offline signal. The old `<expectation_id>@<session_path>`
-  // keys (`@`, `/`, >128 chars) did exactly that against the real corpus. Every hostile id here
-  // (`/`, `☃`, `:`, `@`, length) is run-key-hostile yet ROUTING-SAFE — the fence admits them
-  // all, so all five pairs still dispatch.
+  // keys (`@`, `/`, >128 chars) did exactly that against the real corpus, and the interim
+  // `<sanitized id>.<ordinal>` sanitizer is gone too — the key carries none of the id's bytes.
+  // Every hostile id here (`/`, `☃`, `:`, `@`, length) is run-key-hostile yet ROUTING-SAFE —
+  // the fence admits them all, so all five pairs still dispatch, with the ids on the labels.
   const hostileId = "weird id/\u2603:so@hostile";
   const longId = `x${"a-".repeat(120)}z`;
   const m = manifest([
@@ -301,14 +305,17 @@ test("judgeAuditBundle: every composed lane key satisfies the pi-subagents run-k
   });
   const spawn = adapter.calls.spawn[0];
   assert.ok(spawn);
-  const keys = (waveScriptItems(spawn.workflowScript) as Array<{ key: string }>).map((i) => i.key);
-  assert.equal(keys.length, 5);
+  const items = waveScriptItems(spawn.workflowScript) as Array<{ key: string; label: string }>;
+  const keys = items.map((i) => i.key);
+  assert.deepEqual(keys, ["lane.1", "lane.2", "lane.3", "lane.4", "lane.5"]);
   for (const key of keys) {
     assert.match(key, RUN_KEY_PATTERN, `lane key '${key}' must be run-key-safe`);
   }
-  // A fully-sanitized-away id falls back to the `lane` stem; ordinals keep keys unique.
-  assert.equal(keys[4], "lane.5");
-  assert.equal(new Set(keys).size, keys.length);
+  // The hostile ids ride the labels raw (the `pair()` default session_path is
+  // `/sessions/enc-main/<basename>`).
+  assert.equal(items[2]?.label, `${hostileId}@/sessions/enc-main/s3.jsonl`);
+  assert.ok(items[3]?.label.startsWith(`${longId}@`));
+  assert.equal(items[4]?.label, "\u2603@/sessions/enc-main/s5.jsonl");
 });
 
 test("judgeAuditBundle: the spawn contract — schema, best-effort, model forwarded or absent", async () => {
@@ -533,7 +540,12 @@ test("judgeAuditBundle: the fold-identity key is an injective tuple encoding —
     aggregate: {
       state: "complete",
       value: [
-        { key: "a.1", ok: true, error: null, report: report("s1.jsonl", { expectation_id: "a" }) },
+        {
+          key: "lane.1",
+          ok: true,
+          error: null,
+          report: report("s1.jsonl", { expectation_id: "a" }),
+        },
       ],
     },
   });
@@ -547,7 +559,7 @@ test("judgeAuditBundle: the fold-identity key is an injective tuple encoding —
   const keys = (
     waveScriptItems(adapter.calls.spawn[0]?.workflowScript ?? "") as Array<{ key: string }>
   ).map((i) => i.key);
-  assert.deepEqual(keys, ["a.1"]);
+  assert.deepEqual(keys, ["lane.1"]);
 
   const written = writtenVerdicts(writer.files);
   assert.equal(written.lanes.length, 2);

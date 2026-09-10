@@ -326,8 +326,8 @@ test("executeHarvestWave: the ok-arm mapping — the FULL rendered text, stamped
     aggregate: {
       state: "complete",
       value: [
-        { key: "pi-1", ok: true, error: null, report: goodReport },
-        { key: "workflow-1", ok: false, error: "analyst crashed", report: null },
+        { key: "lane.1", ok: true, error: null, report: goodReport },
+        { key: "lane.2", ok: false, error: "analyst crashed", report: null },
       ],
     },
   });
@@ -376,7 +376,7 @@ test("executeHarvestWave: the ok-arm mapping — the FULL rendered text, stamped
   const attempt = details.attempts?.[0];
   assert.equal(attempt?.flow, "harvest");
   assert.equal(attempt?.attempt, 1);
-  assert.deepEqual(attempt?.requestedKeys, ["pi-1", "workflow-1"]);
+  assert.deepEqual(attempt?.requestedKeys, ["lane.1", "lane.2"]);
   assert.equal(attempt?.state, "complete");
   // The FULL rendered text (the audit-adapter exact-text discipline): the untrusted-DATA
   // banner, one fenced-JSON block per covered lane, and the skipped-lane list.
@@ -394,7 +394,7 @@ test("executeHarvestWave: malformed reports degrade the LANE, never the wave", a
       state: "complete",
       value: [
         {
-          key: "pi-1",
+          key: "lane.1",
           ok: true,
           error: null,
           // Out-of-vocabulary kind — the defensive re-decode refuses it.
@@ -404,7 +404,7 @@ test("executeHarvestWave: malformed reports degrade the LANE, never the wave", a
           },
         },
         {
-          key: "workflow-1",
+          key: "lane.2",
           ok: true,
           error: null,
           // Cap+1 otherwise-valid opportunities — the over-cap arm.
@@ -467,7 +467,7 @@ test("executeHarvestWave: a wave-level failure soft-fails with its reason and ke
     {
       flow: "harvest",
       attempt: 1,
-      requestedKeys: ["pi-1", "workflow-1"],
+      requestedKeys: ["lane.1", "lane.2"],
       state: "unavailable",
       children: [],
     },
@@ -560,12 +560,12 @@ test("tool e2e: typed reports flow through, and the configured model rides the s
   writeFileSync(join(cwd, "src", "x.py"), "print()\n", "utf8");
   const aggregate = [
     {
-      key: "pi-1",
+      key: "lane.1",
       ok: true,
       error: null,
       report: { opportunities: [opportunity("src/x.py")], omitted_count: 0 },
     },
-    { key: "workflow-1", ok: false, error: "analyst crashed", report: null },
+    { key: "lane.2", ok: false, error: "analyst crashed", report: null },
   ];
   const fake = fakeSubagentsRpc(aggregate);
   const h = await loadPerkSession({

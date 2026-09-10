@@ -43,9 +43,10 @@ function manifestOf(pairs: AuditManifestPair[]): AuditManifest {
   };
 }
 
-/** The op's composed run-key-safe lane key: `<expectation id>.<1-based planned ordinal>`. */
+/** The shared fixed orchestration key `lane.<1-based planned ordinal>` — the expectation id
+ * never enters it. */
 function laneKey(ordinal: number): string {
-  return `${GRILL}.${ordinal}`;
+  return `lane.${ordinal}`;
 }
 
 function report(basename: string, overrides: Record<string, unknown> = {}): unknown {

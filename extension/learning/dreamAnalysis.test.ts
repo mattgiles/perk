@@ -127,13 +127,13 @@ function analystReportOf(
   };
 }
 
-/** A complete analyst aggregate for TWO_LANE_MANIFEST (keys are the code-owned `<id>.<n>`). */
+/** A complete analyst aggregate for TWO_LANE_MANIFEST (keys are the fixed `lane.<ordinal>`). */
 function completeAnalystAggregate(): { state: string; value: unknown } {
   return {
     state: "complete",
     value: [
       {
-        key: "pi-1.1",
+        key: "lane.1",
         ok: true,
         error: null,
         report: analystReportOf([
@@ -142,7 +142,7 @@ function completeAnalystAggregate(): { state: string; value: unknown } {
         ]),
       },
       {
-        key: "workflow-1.2",
+        key: "lane.2",
         ok: true,
         error: null,
         report: analystReportOf([docRow("docs/learned/workflow/report-waves.md")]),
@@ -264,7 +264,7 @@ test("analyzeDream: an incomplete first wave skips write + reducers (entry remov
       state: "complete",
       value: [
         {
-          key: "pi-1.1",
+          key: "lane.1",
           ok: true,
           error: null,
           report: analystReportOf([
@@ -272,7 +272,7 @@ test("analyzeDream: an incomplete first wave skips write + reducers (entry remov
             docRow("docs/learned/pi/subagents.md"),
           ]),
         },
-        { key: "workflow-1.2", ok: false, error: "analyst crashed", report: null },
+        { key: "lane.2", ok: false, error: "analyst crashed", report: null },
       ],
     },
   });
@@ -310,7 +310,7 @@ test("analyzeDream: an incomplete first wave skips write + reducers (entry remov
   assert.equal(adapter.calls.spawn.length, 1, "zero reducer lanes spawned");
   assert.equal(details.attempts.length, 1);
   assert.equal(details.attempts[0]?.flow, "dream-analyst");
-  assert.deepEqual(details.attempts[0]?.requestedKeys, ["pi-1.1", "workflow-1.2"]);
+  assert.deepEqual(details.attempts[0]?.requestedKeys, ["lane.1", "lane.2"]);
 });
 
 /** A big manifest + padded-at-caps analyst aggregate whose bundle exceeds the byte budget. */
@@ -328,7 +328,7 @@ function overBudgetFixture(): {
   }));
   const manifest = decodedManifest(lanes);
   const value = lanes.map((lane, i) => ({
-    key: `big-${i + 1}.${i + 1}`,
+    key: `lane.${i + 1}`,
     ok: true,
     error: null,
     report: analystReportOf(
@@ -541,8 +541,8 @@ test("analyzeDream: the happy path — analyst write, reducers read it, finalize
     ),
     [
       [
-        ["pi-1.1", "perk.dream-analyst"],
-        ["workflow-1.2", "perk.dream-analyst"],
+        ["lane.1", "perk.dream-analyst"],
+        ["lane.2", "perk.dream-analyst"],
       ],
       DREAM_REDUCER_ANGLES.map((key) => [key, "perk.dream-reducer"]),
     ],
@@ -571,7 +571,7 @@ test("analyzeDream: the happy path — analyst write, reducers read it, finalize
       ["dream-reducer", 1],
     ],
   );
-  assert.deepEqual(details.attempts[0]?.requestedKeys, ["pi-1.1", "workflow-1.2"]);
+  assert.deepEqual(details.attempts[0]?.requestedKeys, ["lane.1", "lane.2"]);
   assert.deepEqual(details.attempts[1]?.requestedKeys, [...DREAM_REDUCER_ANGLES]);
 });
 
