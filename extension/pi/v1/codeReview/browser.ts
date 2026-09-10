@@ -44,7 +44,7 @@ import { registerPerkCommand } from "../../../substrate/command.ts";
 import { interceptConsoleError } from "../../../substrate/consoleCapture.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { type ReportTarget, report } from "../../../surfaces/report.ts";
-import type { PerkStatusHandle } from "../../../surfaces/surfaces.ts";
+import type { ActivityHandle } from "../../../surfaces/surfaces.ts";
 import {
   type AnnotationState,
   clearAnnotationSurface,
@@ -202,7 +202,7 @@ export async function openReviewBrowserCore(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   annotations: AnnotationState,
-  status: PerkStatusHandle,
+  status: ActivityHandle,
   opts: ReviewBrowserCoreOpts,
 ): Promise<boolean> {
   let started: StartedBrowser;
@@ -260,7 +260,7 @@ async function openBrowserAndGuide(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   annotations: AnnotationState,
-  status: PerkStatusHandle,
+  status: ActivityHandle,
   opts: PrReviewBrowserGuidanceOpts,
 ): Promise<void> {
   await openReviewBrowserCore(pi, ctx, annotations, status, {
@@ -276,7 +276,7 @@ async function openBrowserAndGuide(
 export function installPrReviewBrowserBindings(
   pi: ExtensionAPI,
   annotations: AnnotationState,
-  status: PerkStatusHandle,
+  status: ActivityHandle,
 ): void {
   registerPerkCommand(pi, SCOPE, {
     description:

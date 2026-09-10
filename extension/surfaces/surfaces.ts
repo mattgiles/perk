@@ -41,6 +41,12 @@ export const MARK_OBJECTIVE = "🎯";
 export const ACTIVITY_BROWSER_REVIEW = "waiting on browser review";
 /** The slice an activity owner takes: begin a wait with its text, receive the matching `end`. */
 export type ActivitySink = (text: string) => () => void;
+/**
+ * The least-capable slice a wiring layer threads toward an activity owner: begin a wait against
+ * the live target, nothing else. The full `PerkStatusHandle` stays at the composition root, the
+ * objective publisher and the footer.
+ */
+export type ActivityHandle = Pick<PerkStatusHandle, "beginActivity">;
 
 // --- glyph vocabulary (charter §5 / D3) — charter-law data, pinned by tests ---
 export type GlyphKind = "done" | "current" | "pending" | "warning" | "failure";
@@ -118,8 +124,9 @@ export interface PerkStatusHandle {
   /** Set (or clear, with undefined) the objective half; publishes the slot. No-op headless. */
   set(target: StandingTarget, text: string | undefined): void;
   /**
-   * Begin one activity wait: the text shows while any begun wait is unended; returns this wait's
-   * `end` (idempotent). No-op headless (returns a no-op `end`, records nothing).
+   * Begin one activity wait: the newest live wait's text shows while any begun wait is unended;
+   * returns this wait's `end` (idempotent; inert after a reset — no publish). No-op headless
+   * (returns a no-op `end`, records nothing).
    */
   beginActivity(target: StandingTarget, text: string): () => void;
   /** Reset every wait (session shutdown); a late `end` of a reset wait is inert. No-op headless. */
@@ -137,17 +144,19 @@ export interface PerkStatusHandle {
  * Create the composed `perk` status handle (one per extension instance — created in index.ts
  * and passed to the objective publisher and the activity owners; no hidden module state).
  * Headless calls are full no-ops (never record text, so headless-era text can't resurrect in a
- * later headful render). The activity is a live-wait COUNT, not a set/clear: the browser doors
- * accept a concurrent double-open, so an older wait's settle must not blank a newer one — the
- * text clears only when the LAST wait ends (the latest begun text wins meanwhile; the count
- * clamps at 0 so a post-reset `end` is inert). No width handling: pi's footer truncates.
+ * later headful render). The activity is a SET of live wait tokens, not a set/clear: the browser
+ * doors accept a concurrent double-open, so an older wait's settle must not blank a newer one —
+ * the text clears only when the LAST wait ends (the newest live wait's text shows meanwhile, so
+ * ending one restores the remainder). An ended or reset token is simply absent, so its late `end`
+ * finds nothing to remove and publishes nothing — a wait begun after a reset can never be
+ * consumed by a stale `end`. No width handling: pi's footer truncates.
  */
 export function createPerkStatus(): PerkStatusHandle {
   let objective: string | undefined;
-  let activity: string | undefined;
-  let waits = 0;
+  const live = new Set<{ text: string }>(); // insertion-ordered: the last entry is the newest
   const listeners = new Set<() => void>();
   const compose = (): string | undefined => {
+    const activity = [...live].at(-1)?.text;
     const halves = [objective, activity].filter((half) => half !== undefined);
     return halves.length === 0 ? undefined : halves.join(" · ");
   };
@@ -163,22 +172,18 @@ export function createPerkStatus(): PerkStatusHandle {
     },
     beginActivity(target, text) {
       if (!target.hasUI) return () => {};
-      waits += 1;
-      activity = text;
+      const token = { text };
+      live.add(token);
       publish(target);
-      let ended = false;
       return () => {
-        if (ended) return;
-        ended = true;
-        waits = Math.max(0, waits - 1);
-        if (waits === 0) activity = undefined;
+        // Already ended, or reset by `clearActivity`: nothing to remove, nothing to publish.
+        if (!live.delete(token)) return;
         publish(target);
       };
     },
     clearActivity(target) {
       if (!target.hasUI) return;
-      waits = 0;
-      activity = undefined;
+      live.clear();
       publish(target);
     },
     get() {

@@ -781,8 +781,8 @@ the checklist is discipline, not enforcement. Legacy `perk:checkpoint` entries r
 generic custom entries (no renderer, no shim). The `perk` status slot carries **one composed
 value** — the objective segment plus, while a plannotator browser review is waiting on the human,
 the `waiting on browser review` activity (`<objective> · <activity>`, either half optional; a
-live-wait count, so overlapping browser waits keep it until the last ends) — and keeps its RPC
-`setStatus` dual-publish.
+set of live waits, so overlapping browser waits keep it until the last ends and a settled or
+reset wait's late end is inert) — and keeps its RPC `setStatus` dual-publish.
 
 **The objective transition surface (TS tool ↔ Python CLI).** The genuinely cross-plane shapes:
 

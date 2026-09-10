@@ -42,7 +42,7 @@ import { registerPerkCommand } from "../../../substrate/command.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { failFor, ok } from "../../../substrate/result.ts";
 import { report } from "../../../surfaces/report.ts";
-import type { PerkStatusHandle } from "../../../surfaces/surfaces.ts";
+import type { ActivityHandle } from "../../../surfaces/surfaces.ts";
 import type { AnnotationState } from "../providers/annotations.ts";
 import {
   LOCAL_REVIEW_DIFF_TYPE,
@@ -260,7 +260,7 @@ async function openStackBrowser(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   annotations: AnnotationState,
-  status: PerkStatusHandle,
+  status: ActivityHandle,
   opts: {
     checkoutPath: string;
     stackBaseRef: string;
@@ -290,7 +290,7 @@ async function openStackBrowser(
 function registerStackReviewBrowser(
   pi: ExtensionAPI,
   annotations: AnnotationState,
-  status: PerkStatusHandle,
+  status: ActivityHandle,
 ): void {
   registerPerkCommand(pi, SCOPE, {
     description:
@@ -486,7 +486,7 @@ export async function executeOpenStackReview(
   ctx: ExtensionContext,
   latch: OpenLatch,
   annotations: AnnotationState,
-  status: PerkStatusHandle,
+  status: ActivityHandle,
   open: StackBrowserOpen = openStackBrowser,
 ): Promise<ReturnType<typeof ok> | ReturnType<ReturnType<typeof failFor>>> {
   const fail = failFor(ctx, "open_stack_review");
@@ -565,7 +565,7 @@ export async function executeOpenStackReview(
 function registerOpenStackReview(
   pi: ExtensionAPI,
   annotations: AnnotationState,
-  status: PerkStatusHandle,
+  status: ActivityHandle,
 ): void {
   const latch: OpenLatch = { opened: false };
 
@@ -599,7 +599,7 @@ function registerOpenStackReview(
 export function installStackReviewBindings(
   pi: ExtensionAPI,
   annotations: AnnotationState,
-  status: PerkStatusHandle,
+  status: ActivityHandle,
 ): void {
   registerStackReviewBrowser(pi, annotations, status);
   registerOpenStackReview(pi, annotations, status);

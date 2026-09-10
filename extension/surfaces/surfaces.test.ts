@@ -200,12 +200,14 @@ test("createPerkStatus: the ref-counted activity composes with the objective int
   const endB = status.beginActivity(target, ACTIVITY_BROWSER_REVIEW);
   assert.equal(last(), "🎯 251 · waiting on browser review");
 
-  // Ending A leaves the text — B is still live; a second endA is idempotent.
+  // Ending A leaves the text — B is still live; a second endA is inert (no publish, no notify).
   endA();
   assert.equal(last(), "🎯 251 · waiting on browser review");
   const publishesAfterFirstEnd = calls.length;
+  const firedAfterFirstEnd = fired;
   endA();
-  assert.equal(calls.length, publishesAfterFirstEnd, "a repeated end is inert");
+  assert.equal(calls.length, publishesAfterFirstEnd, "a repeated end publishes nothing");
+  assert.equal(fired, firedAfterFirstEnd, "a repeated end notifies nobody");
   assert.equal(last(), "🎯 251 · waiting on browser review");
 
   // Either half optional: no objective → the activity alone; the last end → undefined.
@@ -217,19 +219,40 @@ test("createPerkStatus: the ref-counted activity composes with the objective int
   assert.equal(status.get(), undefined);
   assert.equal(fired, firedBeforeEndB + 1, "a subscriber fires on end");
 
-  // clearActivity resets every wait (session shutdown); a late end of a reset wait is inert.
+  // Each live wait keeps its own text: the newest shows, and ending it restores the remainder.
+  const endX = status.beginActivity(target, "waiting on X");
+  const endY = status.beginActivity(target, "waiting on Y");
+  assert.equal(last(), "waiting on Y");
+  endY();
+  assert.equal(last(), "waiting on X", "ending the newest restores the older live wait");
+  endX();
+  assert.equal(last(), undefined);
+
+  // clearActivity resets every wait (session shutdown). The reset wait's late end must be
+  // inert even when a NEW wait began after the reset: it neither consumes the new wait nor
+  // publishes/notifies (a bridge may settle after session_shutdown against a torn-down UI).
   status.set(target, "🎯 252");
   const endC = status.beginActivity(target, ACTIVITY_BROWSER_REVIEW);
   assert.equal(last(), "🎯 252 · waiting on browser review");
   status.clearActivity(target);
   assert.equal(last(), "🎯 252");
-  endC();
-  assert.equal(last(), "🎯 252");
-  assert.equal(status.get(), "🎯 252");
-  // A fresh wait after the reset still works (the clamp never went negative).
   const endD = status.beginActivity(target, ACTIVITY_BROWSER_REVIEW);
   assert.equal(last(), "🎯 252 · waiting on browser review");
+  const publishesBeforeLateEnd = calls.length;
+  const firedBeforeLateEnd = fired;
+  endC(); // the reset wait's late end
+  assert.equal(calls.length, publishesBeforeLateEnd, "a reset wait's late end publishes nothing");
+  assert.equal(fired, firedBeforeLateEnd, "a reset wait's late end notifies nobody");
+  assert.equal(last(), "🎯 252 · waiting on browser review", "the newer wait survives");
+  assert.equal(status.get(), "🎯 252 · waiting on browser review");
   endD();
+  assert.equal(last(), "🎯 252");
+  // A late end with nothing live after the reset is equally inert.
+  const endE = status.beginActivity(target, ACTIVITY_BROWSER_REVIEW);
+  status.clearActivity(target);
+  const publishesAfterClear = calls.length;
+  endE();
+  assert.equal(calls.length, publishesAfterClear);
   assert.equal(last(), "🎯 252");
 
   // Headless: no publish, get() unchanged, a no-op end.

@@ -75,7 +75,7 @@ import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts
 import { report, type Severity } from "../../surfaces/report.ts";
 // `Key` via the surfaces re-export (keybinding vocabulary, not rich UI) — keeps pi-tui imports
 // structurally confined to the surfaces module (the surfacesGuard pi-tui import rule).
-import { Key, type PerkStatusHandle } from "../../surfaces/surfaces.ts";
+import { type ActivityHandle, Key } from "../../surfaces/surfaces.ts";
 import { installInjectedContext, isPlanGuidanceStage } from "./contextInjection.ts";
 import { type DraftReviewSlot, recordSaveOutcome } from "./draftReview.ts";
 import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
@@ -397,17 +397,17 @@ export async function approvalSave(
  * Install every plan Pi binding. Hook order is the frozen composition sequence — the plan-mode
  * hook pair registers FIRST inside this installer (index.ts calls this at the slot the mode
  * surface always held; the tombell/plannotator adapters follow); every tool/command
- * registration is name-keyed and order-insensitive. `status` is the perk status handle the
- * plannotator arm's browser-wait activity rides. `wave` is the injected wave-launch deps
- * (index.ts composes them from the door open cores); absent ⇒ the chooser never appears and
- * every review path is byte-stable.
+ * registration is name-keyed and order-insensitive. `status` is the perk status handle's
+ * activity slice the plannotator arm's browser-wait activity rides. `wave` is the injected
+ * wave-launch deps (index.ts composes them from the door open cores); absent ⇒ the chooser never
+ * appears and every review path is byte-stable.
  */
 export function installPlanBindings(
   pi: ExtensionAPI,
   gating: ToolGating,
   reviews: DraftReviewSlot,
   runnerChild: () => boolean,
-  status: PerkStatusHandle,
+  status: ActivityHandle,
   wave?: WaveLaunch,
 ): void {
   installPlanMode(pi, gating, runnerChild);
