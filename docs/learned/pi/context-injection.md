@@ -6,10 +6,31 @@ cluster: pi-extension
 
 # Context injection and stripping
 
-perk injects context into sessions (plan-authoring guidance, objective-authoring guidance, skill
-bindings) and later strips it from the model window when it goes stale. The lifecycle has sharp
-edges because of how Pi's `context` event works (see `pi/extension-api.md`: it runs on **every**
-provider call over the full message list).
+perk injects context into sessions (the authoring-stage guidance contexts, the plan-adapter bridge
+contexts, skill bindings) and later strips it from the model window when it goes stale. The
+lifecycle has sharp edges because of how Pi's `context` event works (see `pi/extension-api.md`: it
+runs on **every** provider call over the full message list).
+
+## Distillation
+
+- Inject at `before_agent_start`, strip on the every-call `context` event, and let ONE `select`
+  decision drive both: retention touches only the owned `customType`, fails CLOSED on an unreadable
+  branch, and never removes user turns — "Inject-and-conditionally-strip", "Strip-scope
+  discipline: don't strip more than you own".
+- Dedup live delivery against Pi's own projection (`buildContextEntries()` →
+  `sessionEntryToContextMessages`, the typed predicates in `contextEvidence.ts`), never a
+  re-derived window; full-branch scans serve only historical latches — "Dedup against Pi's own
+  live projection".
+- Check the submitting `event.prompt` BEFORE the projection read — a cold launch's prompt is not
+  yet persisted on the launch turn — "Dedup against Pi's own live projection".
+- The census of injections is source-owned: the `installInjectedContext` call sites and the
+  `PLAN_GUIDANCE_EXCLUDED_STAGES` set (pinned by the registry guard test) — never a count in
+  prose — "Dedup against Pi's own live projection", "Stage-field disambiguation".
+- Persist the stage id and key each authoring injection on `(gate AND stage)`, never the mode
+  alone; a warm stage transition must strip the deselected flavor — "Stage-field
+  disambiguation", "Warm stage transitions must strip the deselected flavor".
+- `Compaction failed: … token cap` is Pi's summary budget (`[compaction] reserve_tokens`), not
+  perk context code — "Compaction callback lifecycle and data-shape discipline".
 
 ## Inject-and-conditionally-strip
 
@@ -74,10 +95,16 @@ Two invariants carried over unchanged: the dedup key is each block's **marker li
 customType (plannotator's flavors-share-one-customType case needs per-flavor markers so a stage
 transition can deliver the missing flavor), and the submitting `event.prompt` is checked BEFORE
 the projection read at `before_agent_start` — a cold launch's prompt is not yet persisted on the
-launch turn, so only that check sees a cold seed. All five flow injections — gist, plan,
-objective-authoring, plannotator's three flavors, the tombell bridge — consume the leaf through
-`installInjectedContext`; `extension/substrate/bindingDelivery.ts` and
-`extension/substrate/agentScratch.ts` consume it directly with their own strip semantics.
+launch turn, so only that check sees a cold seed.
+
+Every flow-owned injection — the authoring-stage guidance contexts and the plan-adapter bridge
+contexts alike — consumes the leaf through `installInjectedContext`. The census is the function's
+production call sites under `extension/pi/v1/` (grep `installInjectedContext(`; the header of
+`contextInjection.ts` names the deliberate non-callers), and the runner-fence composition rows in
+`extension/pi/v1/contextInjection.test.ts` drive every caller through the shared fence — a new
+authoring stage or plan adapter adds a caller and a row there, never a count here.
+`extension/substrate/bindingDelivery.ts` and `extension/substrate/agentScratch.ts` consume the leaf
+directly with their own strip semantics.
 
 An adjacent timing fact: slash commands do **not** fire `before_agent_start`, and a command
 handler reads the branch **as of the last completed turn**. A fresh session therefore shows 0–1
@@ -150,20 +177,27 @@ the gate alone is ambiguous. The fix: a `stage` field on `perk:workflow-state`, 
 reconciliation, but it was never written into workflow-state). Context injection keys on
 `(gate AND stage)`.
 
-The current shape is **three** read-only authoring contexts sharing the gate: plan mode
-(`extension/pi/v1/plan.ts::installPlanBindings`) defers to BOTH authoring stages — its select
-callback returns no marker when the launched stage is `objective-author` OR `gist-author` — while
-`extension/pi/v1/objectiveAuthoring.ts` and `extension/pi/v1/gist.ts` each gate their own injected
-context on `(gate AND stage === <their own stage>)`. Exactly one authoring context present, however
-many stages share the mode.
+The current shape: every stage-owning authoring installer — an `installInjectedContext` caller
+whose `select` is keyed `(gate AND stage === <its own stage>)` over the full branch — selects only
+in its own stage, and plan mode (`extension/pi/v1/plan.ts::installPlanBindings`) is the default
+arm: it selects the plan marker only where `isPlanGuidanceStage(stage)` holds — the stage is
+`undefined` (the stage-less warm `/plan`) or not in `PLAN_GUIDANCE_EXCLUDED_STAGES`
+(`extension/pi/v1/contextInjection.ts`), the stages plan guidance is withheld from because another
+authoring context owns them or because they are read-only but author nothing. Derive that set from
+the source, never from prose: the registry guard test in `contextInjection.test.ts` pins it against
+`loadRegistry().stages` (every read-only stage outside the plan claims is excluded), so a new
+read-only authoring stage fails the guard until it is added. The plan-adapter shims consult the
+same predicate for their plan flavor. Exactly one authoring context is present, however many
+stages share the mode.
 
 **Pattern:** when stages share a `mode`, persist the stage id so context injection can be keyed on
 `(gate AND stage)` rather than the mode alone.
 
 ## Cross-references
 
-- `extension/pi/v1/plan.ts` (plan mode), `extension/pi/v1/objectiveAuthoring.ts`, `extension/pi/v1/gist.ts` — the three read-only authoring injectors
-- `extension/pi/v1/contextInjection.ts` — the one inject/retain hook pair behind the five flow injections
+- `extension/pi/v1/plan.ts::installPlanBindings` — plan mode, the default arm behind `isPlanGuidanceStage`; the stage-owning authoring installers and the plan-adapter shims are the other `installInjectedContext` callers under `extension/pi/v1/` (grep the call sites — the census is source-owned)
+- `extension/pi/v1/contextInjection.ts` — `installInjectedContext`, the one inject/retain hook pair behind every flow-owned injection; `isPlanGuidanceStage` / `PLAN_GUIDANCE_EXCLUDED_STAGES`
+- `extension/pi/v1/contextInjection.test.ts` — the registry guard pinning the excluded-stage set and the runner-fence composition rows exercising every caller
 - `extension/pi/v1/contextEvidence.ts` — the typed live-projection predicates (`activeContextMessages`, `contextCarriesMarker`)
 - `extension/substrate/bindingDelivery.ts` — the narrowest strip (own custom type only)
 - `extension/substrate/workflowState.ts` — `branchCarries`, the full-branch history authority
