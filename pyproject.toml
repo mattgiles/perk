@@ -41,6 +41,11 @@ testpaths = ["tests"]
 # `--strict-markers` turns an unregistered marker spelling into a collection error, so a misspelt
 # `slow` can never silently land a case in the fast tier.
 addopts = "-n auto --dist loadgroup --strict-markers"
+# pytest 9.0.0–9.0.3 silently ignore `--strict-markers` when it arrives via `addopts` (the flag
+# became an ini override that is applied before `addopts` is read — pytest-dev/pytest#14442, fixed
+# in later 9.0.x); the ini key below is what actually bites on the pinned 9.0.3. The flag stays for
+# the declared `pytest>=8` floor, where this key is unknown (a config warning, never an error).
+strict_markers = true
 # The one project marker. `slow` is a SELECTION, not a skip: the full default suite (`just test-py`,
 # `just test`, CI, run_ci) still runs every slow case; `-m 'not slow'` / `-m slow` select the
 # complementary fast / slow tiers. Mark tests or parameter cases — never fixtures (pytest rejects
