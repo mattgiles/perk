@@ -27,8 +27,11 @@ cluster: config-and-convergence
 - Environment checks need fixture coverage at their actual primitive, required-only filtering in
   every derived diagnostic, and remediation for absent and version-invalid arms — "The optional
   `EnvCheck` tier".
-- Drift-tripwire probes pin positive load-bearing literals, never removal messages; unprobeable
-  surfaces stay unprobed with an intent comment — "Marker-probe table craft".
+- A report-only check gated on an unpinned package's version range parses strict semver against a
+  half-open range (non-semver ⇒ `info`, never a mismatch), mirrors the foreign tool's own
+  precedence, and takes an `environ` seam with autouse test hermeticity — "Report-only checks
+  gated on an installed package's version range"; the source-literal probe table is retired
+  precedent — "Marker-probe table craft".
 - Pieces acting on the user's agent dir resolve it through `launch_pi_agent_dir` (never a parallel
   `Path.home()` copy), rewrite in place without creating, and need autouse `PI_CODING_AGENT_DIR`
   hermeticity — "Managed pieces and checks that act on files OUTSIDE the repo"; whole-directory
@@ -368,9 +371,12 @@ and surfaced three reusable disciplines:
   `auth_ok && team_ok` (the same gate as doctor; both planes early-return on auth/team failure, so a
   degraded repo reports `project: None`).
 
-## Marker-probe table craft (#2005)
+## Marker-probe table craft (#2005) — retired precedent
 
-Drift-tripwire probes over a borrowed/upstream surface (the doctor `subagent-compat` table):
+The doctor `subagent-compat` marker-probe table (source-literal presence probes over the installed
+pi-subagents tree) is **gone**: doctor never reads a borrowed package's source any more
+(`pi/subagents.md` § "Engine-coupling posture"), and `subagent-compat` is a plain version tripwire.
+The craft survives for any future probe over a surface perk *does* own or vendor:
 
 - **Never pin a probe to a removal/cutover message** — upstream restoring the capability erases
   the marker and the probe warns on every later release. Pin POSITIVE load-bearing surface
@@ -379,6 +385,31 @@ Drift-tripwire probes over a borrowed/upstream surface (the doctor `subagent-com
   with an intent comment at the table site.
 - **The exact-pin test (version + one full row) is what forces bumps to be deliberate,
   reviewed re-verifies.**
+
+## Report-only checks gated on an installed package's version range
+
+`_subagent_host_tools_check(root, *, environ=None)` (`src/perk/convergence/doctor/checks.py`) is
+the precedent for a report-only check that fires only while an installed, **unpinned** package sits
+in a known-affected version range — here pi-subagents ≥ 0.67.0's host-builtin intersection
+(`pi/subagents.md`'s second version anchor). Four disciplines it settled:
+
+- **Gate on a strict `X.Y.Z` against a half-open `[lower, upper)` range**
+  (`_SUBAGENTS_HOST_INTERSECTION_AFFECTED = ("0.67.0", None)`; `_parse_strict_semver`). A
+  non-semver or unreadable version ⇒ `info` "not evaluated", **never** a mismatch — and the
+  sibling `subagent-compat` check owns the "unreadable manifest" complaint, so there is no
+  duplicate warn. An open upper bound stays open until a re-verify names the fixing release.
+- **Mirror the foreign extension's OWN precedence** (pi-fff: CLI flag → env → config file →
+  default, minus the unobservable CLI flag): a valid `PI_FFF_MODE` wins and an invalid value falls
+  through to the file exactly as pi-fff's own parser ignores it; the env arm reports "every
+  perk-launched AND warm session" while the file arm reports only warm/bare `pi` (perk's injected
+  env beats the file). Reproducing precedence *approximately* would make doctor disagree with the
+  tool it is diagnosing.
+- **An `environ: Mapping[str, str] | None` seam defaulting to `os.environ` at call time**, paired
+  with an autouse `monkeypatch.delenv("PI_FFF_MODE")` in `tests/conftest.py` — the check reads the
+  developer's real shell otherwise, and an exported `override` flips unrelated doctor tests.
+- **Parity between the doctor's literal detail and `launch.FFF_MODE_ENV` is pinned by a test, not
+  an import** (`tests/test_doctor.py` asserts the injected value appears in the detail): the
+  `convergence.doctor` package deliberately has no edge into `perk.run.launch`.
 
 ## Extending a report-only advisory warn silently flips fixture arms
 
@@ -403,12 +434,14 @@ Three rules govern them:
   `[pi] agent_dir` → `~/.pi/agent`; `None` on an unresolvable home; `ConfigError` /
   `TOMLDecodeError` propagate and each caller keeps its own posture). Never a parallel
   `Path.home()`/env copy: the check must act on exactly the store a perk session's engine reads.
-- **The `subagent-worktree-default` `ManagedConvergence`**
-  (`src/perk/convergence/init/subagent_config.py`) is the worked example of writing there: rewrite
-  ONE key in place via atomic replace (`fs.atomic_write_text`), **never create** the file, and let
-  only a genuinely **missing** path count as compatible — every other unreadable shape is the loud
-  arm (`workflow/broad-catch-narrowing.md`). The incident that forced it: a poisoned live file,
-  plausibly written by an earlier test or dogfood run against the real redirected store.
+- **The retired `subagent-worktree-default` `ManagedConvergence`** was the one worked example of
+  *writing* there (rewrite ONE key in place via atomic replace, never create the file, only a
+  genuinely missing path counts as compatible — every other unreadable shape is the loud arm,
+  `workflow/broad-catch-narrowing.md`). It is **gone**: perk now observes-and-refuses pi-subagents'
+  private `config.json` and never converges it (`workflow/borrowed-packages.md` § "Borrowed-engine
+  stances"; the refusal surface is in `workflow/mergeability-and-conflict-resolution.md`). The
+  read-side disciplines still apply to any check that inspects the user's agent dir — the
+  `subagent-host-tools` check's `pi-fff.json` read is the live instance.
 - **Doctor `--fix` catches `UserFacingCliError` from a managed `converge(True)`** and records
   `"<check>: <message>"` on `fix_errors` instead of aborting, so a refusal on one piece never
   blocks the rest of the repair pass.
@@ -529,7 +562,7 @@ the `again.fixed == []` idempotency tests.
 - `src/perk/cli/commands/doctor/render.py` — `GROUP_ORDER` (the human-render group allow-list)
 - `src/perk/convergence/capabilities.py` — `Capability`, `applicable()`
 - `src/perk/substrate/git.py` — `is_tracked`, `rm_cached`, `tracked_paths` (the `:(literal)` pathspec boundary)
-- `src/perk/substrate/config.py` — `launch_pi_agent_dir` (the one agent-dir precedence); `src/perk/convergence/init/subagent_config.py` — the `subagent-worktree-default` convergence
+- `src/perk/substrate/config.py` — `launch_pi_agent_dir` (the one agent-dir precedence); `src/perk/convergence/doctor/checks.py` — `_subagent_host_tools_check` (the version-range-gated report-only precedent), `_subagent_compat_check`
 - `docs/learned/workflow/cold-door-launch.md` — the launch side of the agent-dir precedence; `docs/learned/workflow/broad-catch-narrowing.md` — classifying every read outcome of a file perk does not own
 - `tests/test_doctor.py` — `test_every_required_capability_has_a_doctor_check`
 - `tests/test_init_t5.py` — `test_cli_idempotent_second_run`
