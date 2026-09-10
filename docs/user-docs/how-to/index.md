@@ -67,6 +67,9 @@ for exactly one goal.
   seeds a live, model-owned todo checklist.
 - [How to send feedback from a hunk watch](./send-feedback-from-hunk-watch.md) — save notes on
   the live `perk plan watch` diff and steer the implementing agent in place.
+- [How to delegate an investigation to perk.scout](./delegate-an-investigation-to-perk-scout.md) —
+  fan a wide, read-only investigation out to parallel `perk.scout` lanes from an authoring
+  session, then verify the reports before the plan relies on them.
 
 ## Objectives & learnings
 

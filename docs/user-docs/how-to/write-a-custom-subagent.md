@@ -116,3 +116,5 @@ agent's focused review output.
   — current agent and workflow guidance.
 - **Look up:** [`[models.subagents]`](../reference/configuration/models-and-compaction.md#modelssubagents) — perk-owned
   agent model configuration and builtin override rules.
+- **Do:** [How to delegate an investigation to perk.scout](delegate-an-investigation-to-perk-scout.md)
+  — fan a read-only investigation out to perk's delivered `perk.scout` from an authoring session.
