@@ -151,16 +151,27 @@ precedent is canonical; `_parse_created_session` was retyped to match it.
 
 ## A convergence reading a file perk does not own classifies EVERY read outcome
 
-A managed convergence over a foreign file (pi-subagents' native `config.json`,
-`src/perk/convergence/init/subagent_config.py`) met three misclassifications at once:
-`path.is_file()` misread a *directory* as "absent" while the TS engine reads it as `incompatible`
-via EISDIR (a refusal/repair loop doctor could neither see nor fix); `UnicodeDecodeError` is a
-`ValueError` outside a `(UserFacingCliError, OSError)` net and aborted read-only doctor; and
-`PermissionError` was caught by doctor's net but re-raised under `--fix`, whose net catches only
-`UserFacingCliError`. The fix pattern: split `exists()` from `is_file()`, split the read from the
-parse, and translate `(OSError, UnicodeDecodeError)` and `JSONDecodeError` into one path-naming
-`UserFacingCliError` *inside* the convergence, so both callers report and continue. The review wave
-found it — the plan's "malformed JSON" arm was too narrow for a file another program writes.
+*(Historical instance — the `subagent-worktree-default` managed convergence and its module
+`src/perk/convergence/init/subagent_config.py` were deleted with the conflict-resolver dispatch
+reduction (PR #2328); perk now observes-and-refuses pi-subagents' private `config.json` and never
+converges it (`workflow/init-doctor.md`). The classification rule stands.)*
+
+A managed convergence over a foreign file (pi-subagents' native `config.json`) met three
+misclassifications at once: `path.is_file()` misread a *directory* as "absent" while the TS engine
+read it as `incompatible` via EISDIR (a refusal/repair loop doctor could neither see nor fix);
+`UnicodeDecodeError` is a `ValueError` outside a `(UserFacingCliError, OSError)` net and aborted
+read-only doctor; and `PermissionError` was caught by doctor's net but re-raised under `--fix`,
+whose net caught only `UserFacingCliError`. The fix pattern: split `exists()` from `is_file()`,
+split the read from the parse, and translate `(OSError, UnicodeDecodeError)` and `JSONDecodeError`
+into one path-naming `UserFacingCliError` *inside* the convergence, so both callers reported and
+continued. The review wave found it — the plan's "malformed JSON" arm was too narrow for a file
+another program writes.
+
+The live read-side instances are doctor's report-only foreign-file readers —
+`_intercom_bridge_mode` and `_fff_file_mode` in `src/perk/convergence/doctor/checks.py` — under a
+different posture (best-effort `None`; the owning check or the foreign program carries the
+complaint), where one `(OSError, ValueError)` net is what covers the `UnicodeDecodeError` and
+`JSONDecodeError` arms the deleted convergence had to enumerate.
 
 ## Cross-references
 

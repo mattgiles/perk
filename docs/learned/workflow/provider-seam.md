@@ -41,6 +41,9 @@ historical exemplars — they remain the clearest illustrations of the two categ
 - Runtime config consumption is per-event and fail-safe (a bad read degrades that event, never
   the session) — "Runtime config consumption is per-event and fail-safe"; **Python stays the
   authoritative validator** of the parsed-YAML substrate — "Cross-plane mirror discipline".
+- `cache.plan-ref.provider` is the resolved issue backend's `backend_id` stamped verbatim — never
+  the seam id, never a hardcoded `"github"` — "Correction — `cache.plan-ref.provider` is the
+  issue backend, NOT the seam id".
 - Historical: the `askuser`/`todo` seam instances are DELETED modules (retired to required
   borrows — see the intro); their sections stand as pattern learnings, not live code pointers.
 
@@ -97,17 +100,33 @@ produced-contract substrate.
 
 ## Correction — `cache.plan-ref.provider` is the issue backend, NOT the seam id
 
-`docs/design/provider-contract.md` frames `cache.plan-ref.provider` as "== the plan provider id".
-That is **aspirational / false today**. The reality:
+`docs/design/provider-contract.md` originally framed `cache.plan-ref.provider` as "== the plan
+provider id". That equivalence never shipped — the design doc now carries a reconciling note
+pointing at contracts §8.10 — and the shipped rule is:
 
-- The field is the issue-backend string `"github"`. `src/perk/run/launch/prompts.py` branches on
-  `provider == "github"`; all the Python and TS save surfaces stamp `"github"`; `shared/contracts.md`
-  documents the shape as `provider: string  # e.g. "github"`.
-- The deferral work deliberately did **not** restamp it with the seam id — that would break
-  the launch prompts' backend branching.
+- The field is the **resolved issue backend's `backend_id`, stamped verbatim** — the
+  `IssueBackend` Protocol's `backend_id` attribute (`src/perk/backends/issue_backend.py`), whose
+  values are the `[issues] backend` vocabulary owned by `src/perk/backends/resolve.py`
+  (`GITHUB_BACKEND_ID` / `LINEAR_BACKEND_ID`). The Python stamp sites are `save_cmd.py`'s
+  `PlanRef(provider=backend.backend_id, …)` (`src/perk/cli/commands/plan/save_cmd.py`) and the
+  callers of `resume.reconstruct_plan_ref(state, provider=…)` (`src/perk/run/resume.py`), which
+  pass the resolved backend's id. The TS plane stamps nothing: every TS save surface — the
+  `plan_save` tool, `/plan-save`, the approval-driven save — routes through the
+  `perk plan save --json` cold door (the production `PlanBackend` in `extension/pi/v1/plan.ts`)
+  and decodes the returned `plan_ref`. `shared/contracts.md` pins both halves: the payload
+  ("Plan-ref payload (provider-agnostic)" under §8.4 — `provider` is "the resolved issue
+  backend") and the stamping rule (§8.21 — "the backend that wrote the issue is the backend that
+  gets stamped"; §8.10 — "`cache.plan-ref.provider` is the issue backend, not the seam id").
+- Consumers branch on the **stamped** value, never on config:
+  `src/perk/run/launch/prompts.py::_plan_read_instruction` picks the `github` / `linear` / `other`
+  plan-read template (its TS twin `extension/substrate/prompts.ts::planReadInstruction` is
+  byte-parity-tested). A Linear-backed repo therefore stamps and reads `"linear"` end to end.
+- The deferral work deliberately did **not** restamp it with the seam id — that would break the
+  launch prompts' backend branching.
 
 Anyone wiring a foreign plan adapter must not assume `provider-id == cache.plan-ref.provider`. They
-are different namespaces today.
+are different namespaces: the seam id lives only in the `[providers] plan` selection, the stamp
+only in the resolved issue backend.
 
 ## Cross-plane mirror discipline
 
@@ -639,9 +658,10 @@ guarantee in every mode — with the one novelty that the **web default's `packa
 - `docs/design/archive/provider-smoke-juicesharp-ask-user.md` — the askuser per-file mechanics + recorded select/deselect smoke
 - `extension/substrate/providers.ts` — `resolveProviders`, `PERK_PLAN_PROVIDER_ID`
 - `src/perk/substrate/providers.py` — `resolve_providers`, `ProvidersError`
-- `src/perk/run/launch/prompts.py` — the `provider == "github"` backend branch
+- `src/perk/backends/issue_backend.py` — the `IssueBackend.backend_id` Protocol attribute (the stamp's source); `src/perk/cli/commands/plan/save_cmd.py` — the `PlanRef(provider=backend.backend_id, …)` stamp site
+- `src/perk/run/launch/prompts.py` — `_plan_read_instruction`, the `github` / `linear` / `other` plan-read branch on the stamped backend id
 - `shared/providers.yaml` — the bundled reference defaults
-- `shared/contracts.md` — the `cache.plan-ref` shape (`provider: string  # e.g. "github"`)
+- `shared/contracts.md` — the `cache.plan-ref` payload ("Plan-ref payload (provider-agnostic)", §8.4), the §8.21 `backend_id` stamping rule, the §8.10 issue-backend-not-seam-id paragraph
 - `docs/learned/workflow/shared-contracts.md` — the cross-plane parsed-YAML recipe
 - `docs/learned/workflow/init-doctor.md` — managed-convergence SSOT
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the `cache.plan-ref` lifecycle
