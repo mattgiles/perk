@@ -741,7 +741,7 @@ const SAFE_PATTERNS = [
  * Known limitation: backslash-escaped quote characters are not handled. This is acceptable — the
  * whole-string destructive veto in isReadOnlyBashCommand remains the backstop.
  */
-function splitTopLevelSegments(command: string): string[] {
+export function splitTopLevelSegments(command: string): string[] {
   const segments: string[] = [];
   let current = "";
   let quote: '"' | "'" | null = null;

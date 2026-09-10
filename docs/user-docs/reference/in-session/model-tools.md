@@ -236,6 +236,41 @@ session, an unknown stage id, and an unenumerated foreign tool are not filtered.
 the opposite safety posture for worktree mutation: its tool-call backstop fails closed on internal
 errors.
 
+## Bash scan timeout
+
+Perk caps **gitignore-blind scans** issued through Pi's `bash` tool at a **30-second default
+`timeout`**. Recursive `grep -r…` and `find` without `-maxdepth` ignore `.gitignore`, so from a
+checkout that carries `node_modules/`, `.venv/` or `.worktrees/` they walk everything and can run for
+minutes to the better part of an hour; legitimately scoped searches finish in seconds.
+
+A `bash` call is capped when it carries **no** `timeout` and its command is a recursive grep or an
+unbounded find — in any pipeline stage, on any line of a multi-line command, and behind wrapper
+prefixes or nested shells. Examples of capped commands:
+
+- `grep -rn "foo" .` (any short cluster containing `r`/`R` — `-rniE`, `-Rl`, `-nr` — or
+  `--recursive`, `--directories=recurse`, `rgrep`)
+- `find . -name '*.py'` (no `-maxdepth`; `-prune` and `-not -path` do **not** exempt it)
+- `cd repo && LC_ALL=C grep -rn foo . | head`
+- `sh -c 'grep -rn foo .'`
+
+Not capped: `grep -n foo file`, `find . -maxdepth 2 …`, `rg`, `fd`, `ast-grep`, and a `-r` that
+belongs to a later pipeline stage (`grep -n foo f | sort -r`).
+
+**The explicit `timeout` on the call is the override.** Any value the model passes — larger or
+smaller — is honored as-is and never rewritten. When a capped (or explicitly timed) scan expires,
+Pi's partial output is kept and perk appends a short note to the result naming the kind of scan,
+the timeout it hit, the gitignore-aware alternatives (the `grep`/`find` tools, `rg`/`fd`) and the
+explicit-`timeout` override. Successful scans get no note.
+
+The cap applies in **every** perk session — read-only or read-write, any stage or none, spawned
+subagent children included — and never blocks a call: it is a performance guard, so an internal
+error is reported and the call proceeds unmodified (the opposite of the read-only gate's
+fail-closed posture). A few fast commands are deliberately over-capped because they look like
+scans (`git grep -r…`, `echo grep -r`); the 30s cap is harmless for them. The value is **not
+configurable**; it is the extension's `SCAN_TIMEOUT_SECONDS` constant, mirrored in the managed
+`AGENTS.md` block that `perk init` writes — the ambient steer every perk session reads, which now
+routes literal text search to the `grep`/`find` tools or `rg`/`fd` and names the cap.
+
 ## Related
 
 - **Look up:** [Stages and doors](./stages-and-doors.mdx) — see which stage/door posture activates

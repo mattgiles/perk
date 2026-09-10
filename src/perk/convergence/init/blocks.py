@@ -43,7 +43,9 @@ This repo is wired for the **perk** plan-oriented workflow on Pi.
   (curl/fetch) — private repos reject unauthenticated requests. Read-only `gh` query
   subcommands (view/list/diff/status/checks/search) work even in perk read-only sessions.
 - **Prefer ast-grep for code search.** Structural/AST queries go through `ast-grep` (see the
-  `ast-grep` skill); plain `grep` stays fine for literal text.
+  `ast-grep` skill). For literal text use the `grep`/`find` tools or `rg`/`fd` — they honor
+  `.gitignore`. Recursive `grep -r…` and `find` without `-maxdepth` also walk `node_modules`,
+  `.venv` and `.worktrees`; perk caps them at a 30s `timeout` unless the bash call passes its own.
 
 perk version: {__version__}"""
 

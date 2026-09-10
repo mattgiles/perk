@@ -13,6 +13,7 @@ import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createDraftReviewWaveState } from "./authoring/review/draftContext.ts";
 import { createHunkFeedbackReceiver, type HunkFeedbackReceiver } from "./hunkFeedback/receiver.ts";
+import { registerBashScanTimeout } from "./pi/v1/bashScanTimeout.ts";
 import { installAutomatedReviewBindings } from "./pi/v1/codeReview/automated.ts";
 import { installPrReviewBrowserBindings } from "./pi/v1/codeReview/browser.ts";
 import { installReviewWaveBindings } from "./pi/v1/codeReview/reviewWave.ts";
@@ -169,6 +170,12 @@ export default function perk(
   let runnerChild = false;
   let readOnlyFloor = false;
   const gating = registerToolGating(pi, () => readOnlyFloor);
+
+  // The bash scan-timeout guard: always on in every perk session — gated or not, runner children
+  // included (the slow gitignore-blind scans were observed in read-write sessions too). The gate's
+  // `tool_call` hook runs first only because it registers first; a gate block short-circuits
+  // before injection matters.
+  registerBashScanTimeout(pi);
 
   // Run-owned disposable scratch guidance for every eligible write-capable model turn. One
   // activation-scoped provisioner shares retry/warning suppression with the isolated /btw side
