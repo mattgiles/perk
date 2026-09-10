@@ -737,21 +737,30 @@ class LinearIssueBackend:
     # (contracts.md §8.67) runs over: the scan reads through `_comments_with_authors` so every
     # observed value is the real `EngagementComment` (id / stored body / author / native
     # timestamps); create/update are the same primitives the ordinary path uses; the transcoder
-    # is the pure rewrite every Linear comment body passes through.
+    # is the pure rewrite every Linear comment body passes through. These four are the driver's
+    # seams, not a general comment API: `create`/`update` take a body ALREADY in stored form and
+    # know nothing of `dry_run` — callers wanting a marked comment go through
+    # `upsert_marked_comment`, which owns validation, dry runs, and verification.
 
     def scan(self, issue_id: str, forms: tuple[str, ...]) -> issue_backend.MarkedCommentScan:
+        """Seam: classify ALL comment pages against the accepted marker encodings ``forms``."""
         comments = [
             _engagement_comment(node) for node in self._ops._comments_with_authors(issue_id)
         ]
         return issue_backend.scan_marked_comments(comments, forms=forms)
 
     def create(self, issue_id: str, body: str) -> None:
+        """Seam: post ``body`` (already Linear stored form) as a new comment; no transcoding,
+        no dry-run gate — the guarded driver has done both before reaching here."""
         self._ops._create_comment(issue_id, body)
 
     def update(self, comment_id: str, body: str) -> None:
+        """Seam: replace the whole body of ``comment_id`` with ``body`` (already Linear stored
+        form); no transcoding, no dry-run gate — the guarded driver has done both."""
         self._ops._update_comment(comment_id, body)
 
     def transcode(self, body: str) -> str:
+        """Seam: the pure HTML-marker → Linear stored-form rewrite (never raises)."""
         return to_linear_markdown(body)
 
     # ------------------------------------------------------------------ human-engagement reads
