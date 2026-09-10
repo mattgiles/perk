@@ -23,8 +23,8 @@
 // vocabulary split (contracts.md §8.35): the SEMANTIC LANE ID is the producer-owned identity a
 // typed outcome reports; a ROUTING TOKEN is that identity (or a pair-level token) rendered into
 // task prose for byte-exact selection/echo; an ORCHESTRATION KEY is the opaque code-owned
-// `runs.all` item key a wave gives one lane — never derived from producer bytes, never surfaced
-// as a lane identity.
+// `runs.all` item key a producer-lane wave gives one lane — never derived from producer bytes,
+// never surfaced as a lane identity.
 
 /**
  * The refused character classes as one reviewable single-line statement. No `g`/`u` flags: every
@@ -60,11 +60,13 @@ export function renderRoutingToken(token: string): string {
 }
 
 /**
- * The ONE fixed orchestration-key format every learn-flow wave uses for its `runs.all` item key:
- * `lane.<ordinal>` — opaque, code-owned, never derived from producer bytes. There is
- * deliberately NO sanitizer: uniqueness lives in the caller's ordinal, and the semantic lane id
- * rides `label` and the task text. `ordinal` is the caller's global 1-based counter in lane-plan
- * order. The format is trivially inside `RUN_KEY_PATTERN`, so `validateAssignments`' run-key
+ * The ONE fixed orchestration-key format the producer-lane learn waves — harvest, audit, and
+ * the dream analyst tier, whose lanes are drawn from a producer-owned manifest — use for their
+ * `runs.all` item keys: `lane.<ordinal>` — opaque, code-owned, never derived from producer
+ * bytes. (Waves over a closed slug enum — the learn analyst angles, the dream reducer angles —
+ * key by the slug itself and never need it.) There is deliberately NO sanitizer: uniqueness
+ * lives in the caller's ordinal, and the semantic lane id rides `label` and the task text.
+ * `ordinal` is the caller's global 1-based counter in lane-plan order. The format is trivially inside `RUN_KEY_PATTERN`, so `validateAssignments`' run-key
  * throw is unreachable for any planned lane. The key is never surfaced as a lane identity — it
  * appears only in attempt receipts (`requestedKeys`, `children[*].key`) and failure `detail`s;
  * typed outcomes join rows back to the SEMANTIC id through each flow's module-private lane plan,

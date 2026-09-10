@@ -6302,8 +6302,11 @@ construction. There is no length bound: an oversized id fails as availability at
 through the helper, and their decoders (§8.48, §8.60 — refuse) and planner (§8.50 — degrade)
 apply the predicate upstream, so the throw is unreachable in production. The module's other
 export is the fixed **orchestration-key** format `orchestrationKey(ordinal)` → `lane.<ordinal>`
-(a global 1-based ordinal in lane-plan order) — the `runs.all` item key every learn-flow wave
-(§8.48 harvest, §8.50 audit, §8.60 dream) gives its lanes: opaque, code-owned, never derived
+(a global 1-based ordinal in lane-plan order) — the `runs.all` item key the three
+**producer-lane** learn waves (§8.48 harvest, §8.50 audit, §8.60 dream analyst — lanes drawn
+from a producer-owned manifest) give their lanes; waves over a closed slug enum (this section's
+learn analyst angles, the §8.61 dream reducer angles) key by the slug itself and are out of its
+scope. The key is opaque, code-owned, never derived
 from producer bytes (no sanitizer — uniqueness lives in the ordinal; the semantic lane id rides
 `label` and the task text), trivially inside `RUN_KEY_PATTERN` so `validateAssignments`' run-key
 throw is unreachable for any planned lane, and never surfaced as a lane identity — it appears

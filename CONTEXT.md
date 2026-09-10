@@ -76,10 +76,11 @@ through the `waves/laneIdentity.ts` fence (a refusal rule, never escaping).
 _Avoid_: escaped id, sanitized id, lane key
 
 **Orchestration key**:
-The code-owned `runs.all` item key a report wave gives one lane — the fixed `lane.<ordinal>` (a
-global 1-based ordinal in lane-plan order) from `waves/laneIdentity.ts`; opaque, never derived
-from producer bytes, never surfaced as a lane identity (it appears only in attempt receipts'
-`requestedKeys`, receipt children, and failure details).
+The code-owned `runs.all` item key a producer-lane learn wave (harvest, audit, dream analyst) gives
+one lane — the fixed `lane.<ordinal>` (a global 1-based ordinal in lane-plan order) from
+`waves/laneIdentity.ts`; opaque, never derived from producer bytes, never surfaced as a lane
+identity (it appears only in attempt receipts' `requestedKeys`, receipt children, and failure
+details). Closed slug-enum waves (learn analyst, dream reducer) key by the slug and have none.
 _Avoid_: lane id, label, sanitized key, run key (when the identity is meant)
 
 ### Review

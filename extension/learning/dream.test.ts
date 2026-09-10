@@ -1082,6 +1082,19 @@ test("runDreamAnalystWave: a schema-valid but re-decode-failing report is malfor
   );
 });
 
+/** Lane 1's schema-valid but re-decode-failing report (a `merge_target` outside the corpus). */
+function laneOneBadMergeTarget(): Record<string, unknown> {
+  return laneOneReport({
+    docs: [
+      docRow(LANE_ONE_DOCS[0] as string, {
+        disposition: "merge-into",
+        merge_target: "docs/learned/not-in-corpus.md",
+      }),
+      docRow(LANE_ONE_DOCS[1] as string),
+    ],
+  });
+}
+
 test("runDreamAnalystWave: failures list wave-level first, then lanes in plan order (a re-decode failure on lane 1 precedes a lane failure on lane 2)", async () => {
   // The old shape listed every keyed wave failure before every re-decode failure; walking the
   // plan lists the lanes in manifest order (wave-level failures, when any, still come first).
@@ -1090,20 +1103,7 @@ test("runDreamAnalystWave: failures list wave-level first, then lanes in plan or
     aggregate: {
       state: "complete",
       value: [
-        {
-          key: "lane.1",
-          ok: true,
-          error: null,
-          report: laneOneReport({
-            docs: [
-              docRow(LANE_ONE_DOCS[0] as string, {
-                disposition: "merge-into",
-                merge_target: "docs/learned/not-in-corpus.md",
-              }),
-              docRow(LANE_ONE_DOCS[1] as string),
-            ],
-          }),
-        },
+        { key: "lane.1", ok: true, error: null, report: laneOneBadMergeTarget() },
         { key: "lane.2", ok: false, error: "analyst crashed", report: null },
       ],
     },
@@ -1118,6 +1118,43 @@ test("runDreamAnalystWave: failures list wave-level first, then lanes in plan or
     ],
   );
   assert.deepEqual(outcome.analyses, []);
+});
+
+test("runDreamAnalystWave: a native-partial wave lists the wave-level failure FIRST, then the lanes in plan order (one outcome, all three kinds)", async () => {
+  // The native-partial path (a timeout completion with retained lane entries) is the one
+  // outcome that carries a wave-level failure AND lane-level failures together — so the whole
+  // order is pinned in one place: wave-level (`lane: null`) first, then lane 1's re-decode
+  // failure, then lane 2's keyed failure. Appending the wave-level row after the lanes, or
+  // walking the aggregate instead of the plan, would each break this pin.
+  const manifest = decoded(TWO_LANE_RAW);
+  const adapter = createMemoryWaveAdapter({
+    aggregate: { state: "failed", value: undefined, error: "engine detail" },
+    completionDetail: {
+      state: "failed",
+      terminalOutcome: { state: "partial", reason: "timeout" },
+      retainedEntries: [
+        { key: "lane.1", ok: true, error: null, report: laneOneBadMergeTarget() },
+        { key: "lane.2", ok: false, error: "analyst crashed", report: null },
+      ],
+    },
+  });
+  const outcome = await runDreamAnalystWave(reportWaveOver(adapter), { manifest });
+  assert.equal(outcome.complete, false);
+  assert.deepEqual(
+    outcome.failures.map((f) => [f.lane, f.reason]),
+    [
+      [null, "run-failed"],
+      ["pi-extension-1", "malformed-report"],
+      ["workflow-1", "lane-failed"],
+    ],
+  );
+  assert.match(
+    outcome.failures[0]?.detail ?? "",
+    /native partial: timeout/,
+    "the wave-level row carries the native-partial detail, never an orchestration key",
+  );
+  assert.deepEqual(outcome.analyses, []);
+  assert.equal(outcome.attempt.state, "failed");
 });
 
 test("runDreamAnalystWave: a single-lane manifest launches (no direct-analysis refusal)", async () => {
