@@ -2385,6 +2385,13 @@ second `--fix` at `fixed == []`).
   (CLI-vs-repo-pin warn), `resource-overrides` (pi overrides touching perk's own resources),
   `subagent-compat` (installed pi-subagents version vs the guidance-verified version — `warn`
   on mismatch or an unreadable version, `info` when not installed; no source probes),
+  `subagent-host-tools` (warns — never fails, no `--fix` — when the installed pi-subagents is
+  in the affected range `[0.67.0, upper)` — the engine intersects a child's declared tools
+  with the host's builtin-sourced tools and fails review/scout lanes closed on a shadowed
+  builtin — and pi-fff resolves to `override`: the `PI_FFF_MODE` environment (every
+  perk-launched AND warm session), else `pi-fff.json` in the launch-precedence agent dir
+  (warm/bare sessions only — the injected env beats the file), mirroring pi-fff's precedence
+  minus the CLI flag; `info` when pi-subagents is not installed or its version is unreadable),
   `ponytail-compat` (exact
   package/`pi.skills`/skill-file/frontmatter;
   known-good remediation `npm:@dietrichgebert/ponytail@4.9.0` + `perk init` + session restart),
@@ -2956,10 +2963,13 @@ ignores the keys (the documented fail-safe posture, pinned by test on both plane
 **`perk init` two-directional settings wiring:** provider wiring composes on top of the static
 `_desired_packages` (perk + `BORROWED_PACKAGES`: `npm:@tombell/pi-diff`,
 `npm:pi-subagents`, `npm:@ff-labs/pi-fff`, `npm:@juicesharp/rpiv-ask-user-question`, `npm:@juicesharp/rpiv-todo`) layer within the same `_converge_settings` body —
-perk launches inject the env default `PI_FFF_MODE=override` at **both spawn sites** (local
-`_exec_pi`, remote `_spawn_worker`) with operator env winning by merge order, so stage sessions
-get FFF as `find`/`grep` while warm/bare sessions keep pi-fff's additive default mode
-(`fffind`/`ffgrep`) — `npm:pi-web-access` is **not
+perk launches inject the env default `PI_FFF_MODE=tools-and-ui` at **both spawn sites** (local
+`_exec_pi`, remote `_spawn_worker`) with operator env winning by merge order, so every session
+keeps pi's builtin `find`/`grep` beside FFF's additive `fffind`/`ffgrep` — pi-subagents ≥ 0.67.0
+intersects a child's declared tools with the **host's** builtin-sourced tools and fails
+review/scout lanes closed when an extension shadows a builtin by name (pi-fff `override` mode
+re-registers `grep`/`find`), so the injected mode stays additive; `export PI_FFF_MODE=override`
+is the operator opt-in the `subagent-host-tools` doctor check names — `npm:pi-web-access` is **not
 borrowed**: it is the `web` seam's `default: true` provider, converged via the
 provider path, so a default repo still installs it but deselecting `web`
 removes it like any provider package —

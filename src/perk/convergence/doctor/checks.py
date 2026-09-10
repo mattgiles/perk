@@ -1,7 +1,10 @@
 """The config/registry/managed/state group builders."""
 
 import json
+import os
+import re
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 
 from perk import __version__, _resources
@@ -793,6 +796,167 @@ def _subagent_compat_check(root: Path) -> Check:
         "package",
         "ok",
         f"pi-subagents {version} — the guidance-verified version",
+        "report-only — the package stays unpinned",
+    )
+
+
+# The half-open pi-subagents range ``[lower, upper)`` whose engine intersects a child's declared
+# tools with the HOST session's builtin-sourced tools (`getHostBuiltinToolNames` /
+# `resolvePiLaunchToolPlan` in `src/runs/shared/child-tool-plan.ts`): an extension that
+# re-registers a builtin by name (pi-fff in `override` mode shadows grep/find) makes the host
+# appear to lack it, so review/scout-named agents fail closed at launch and every other child
+# silently loses the tool. Lower bound inclusive (the release that introduced the intersection);
+# upper bound ``None`` (open) until an upstream release counts a same-name replacement as
+# providing the builtin (or scopes the intersection off background children) — set the upper
+# bound when that release ships (a re-verify item in `docs/developers/pi-subagents-reverify.md`).
+_SUBAGENTS_HOST_INTERSECTION_AFFECTED: tuple[str, str | None] = ("0.67.0", None)
+
+# Mirrors of pi-fff's `CONFIG_FILE_NAME` / `VALID_MODES` (`src/config.ts` in @ff-labs/pi-fff):
+# the per-agent-dir config file and the only mode values its `parseMode` accepts.
+_FFF_CONFIG_FILENAME = "pi-fff.json"
+_FFF_MODES = ("tools-and-ui", "tools-only", "override")
+_FFF_DEFAULT_MODE = "tools-and-ui"
+
+# pi-subagents versions are plain `X.Y.Z` semver; anything else is "not evaluable", never a
+# mismatch (a pre-release/build suffix would make the range comparison a guess).
+_STRICT_SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+
+
+def _parse_strict_semver(version: str) -> tuple[int, int, int] | None:
+    """``"X.Y.Z"`` → ``(X, Y, Z)``; ``None`` for anything that is not exactly that shape."""
+    match = _STRICT_SEMVER.match(version)
+    if match is None:
+        return None
+    major, minor, patch = match.groups()
+    return (int(major), int(minor), int(patch))
+
+
+def _fff_file_mode(agent_dir: Path) -> str | None:
+    """Best-effort read of ``mode`` from ``<agent_dir>/pi-fff.json``.
+
+    ``None`` when the file is absent/unreadable/invalid JSON/non-dict, the key is missing, or
+    the value is not one of pi-fff's valid modes — a malformed file is pi-fff's own load-time
+    complaint, never this reader's (the ``_intercom_bridge_mode`` posture).
+    """
+    try:
+        config = json.loads((agent_dir / _FFF_CONFIG_FILENAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(config, dict):
+        return None
+    mode = config.get("mode")
+    return mode if isinstance(mode, str) and mode in _FFF_MODES else None
+
+
+def _subagent_host_tools_check(root: Path, *, environ: Mapping[str, str] | None = None) -> Check:
+    """Report-only probe for the one known interaction that kills every review/scout lane.
+
+    pi-subagents in the affected range intersects a child's declared ``tools:`` with the tools
+    the **host** session reports as builtin-sourced, so a pi-fff running in ``override`` mode
+    (re-registering ``grep``/``find`` under its own source) makes ``perk.scout`` and every
+    ``perk.*-reviewer`` fail closed before a child starts and silently strips ``grep``/``find``
+    from the other report agents. perk's launches inject ``PI_FFF_MODE=tools-and-ui`` precisely
+    to avoid this, so what remains is operator-owned: the ``PI_FFF_MODE`` environment (wins
+    over the injected default — every perk-launched AND warm session is affected) or a
+    ``"mode": "override"`` in ``pi-fff.json`` under the launch-precedence agent dir (only
+    warm/bare ``pi`` sessions — the injected env beats the file on perk launches). The mode is
+    resolved the way pi-fff does minus the unobservable CLI flag: a valid env value, else the
+    file, else the default; an invalid env value is ignored exactly as pi-fff's ``parseMode``
+    ignores it. Warn-never-fail, no ``--fix`` arm (the inputs are operator-owned); ``info`` when
+    the engine is absent or its version unreadable (``subagent-compat`` owns that complaint).
+    ``environ`` is the injectable seam for tests (defaults to ``os.environ`` at call time).
+    """
+    if environ is None:
+        environ = os.environ
+    pkg_dir = init.consumer_npm_install_root(root) / "node_modules" / _SUBAGENTS_PACKAGE_DIRNAME
+    if not pkg_dir.is_dir():
+        return Check(
+            "subagent-host-tools",
+            "package",
+            "info",
+            "pi-subagents not installed — host-tool interaction not evaluated",
+            "pi lazy-installs the unpinned npm:pi-subagents borrowed package at launch "
+            "(.pi/npm/node_modules/pi-subagents)",
+        )
+    version = _installed_subagents_version(pkg_dir)
+    parsed = _parse_strict_semver(version) if version is not None else None
+    if parsed is None:
+        return Check(
+            "subagent-host-tools",
+            "package",
+            "info",
+            "pi-subagents version unreadable — host-tool interaction not evaluated",
+            f"{pkg_dir / 'package.json'} carries no strict X.Y.Z version "
+            "(the subagent-compat check reports the unreadable manifest)",
+        )
+    lower, upper = _SUBAGENTS_HOST_INTERSECTION_AFFECTED
+    lower_parsed = _parse_strict_semver(lower)
+    upper_parsed = _parse_strict_semver(upper) if upper is not None else None
+    in_range = (
+        lower_parsed is not None
+        and parsed >= lower_parsed
+        and (upper_parsed is None or parsed < upper_parsed)
+    )
+    if not in_range:
+        return Check(
+            "subagent-host-tools",
+            "package",
+            "ok",
+            f"pi-subagents {version} does not intersect child tools with host builtins",
+            "report-only — the package stays unpinned",
+        )
+
+    consequence = (
+        "pi-subagents >= 0.67.0 reads the host's builtin-sourced tools only: with pi-fff "
+        "shadowing the builtin grep/find by name it fails perk.scout / perk.*-reviewer closed "
+        "(`tool contract could not be satisfied … [grep, find]`) and silently drops grep/find "
+        "from every other perk agent; the same defect follows any extension that re-registers "
+        "a builtin by name (upstream nicobailon/pi-subagents #2132/#2133/#2135/#2140)."
+    )
+    env_mode = environ.get("PI_FFF_MODE")
+    if env_mode == "override":
+        return Check(
+            "subagent-host-tools",
+            "package",
+            "warn",
+            f"pi-subagents {version} + pi-fff override mode: review/scout lanes fail at launch",
+            "PI_FFF_MODE=override (environment) — the operator env wins over perk's injected "
+            f"PI_FFF_MODE={_FFF_DEFAULT_MODE} default, so every perk-launched AND warm session "
+            f"shadows the builtin grep/find. {consequence}",
+            f"Unset PI_FFF_MODE or set it to {_FFF_DEFAULT_MODE} (FFF stays available as "
+            "fffind/ffgrep), then relaunch.",
+        )
+    if env_mode in _FFF_MODES:
+        resolved_mode, file_path = env_mode, None
+    else:
+        # Unset or junk: pi-fff ignores the env and falls through to its config file.
+        try:
+            resolution = launch_pi_agent_dir(root)
+        except (ConfigError, tomllib.TOMLDecodeError):
+            resolution = None
+        file_path = None if resolution is None else resolution.path / _FFF_CONFIG_FILENAME
+        file_mode = None if resolution is None else _fff_file_mode(resolution.path)
+        resolved_mode = file_mode if file_mode is not None else _FFF_DEFAULT_MODE
+    if resolved_mode == "override":
+        return Check(
+            "subagent-host-tools",
+            "package",
+            "warn",
+            f"pi-subagents {version} + pi-fff override mode: review/scout lanes fail at launch",
+            f'{file_path}: "mode": "override" — warm/bare pi sessions (where the browser review '
+            "doors and /pr-review also spawn waves) shadow the builtin grep/find; perk-launched "
+            f"sessions are not affected because their injected PI_FFF_MODE={_FFF_DEFAULT_MODE} "
+            f"beats the file. {consequence}",
+            f'Remove "mode" from that file or set it to "{_FFF_DEFAULT_MODE}" (FFF stays '
+            "available as fffind/ffgrep), then relaunch.",
+        )
+    return Check(
+        "subagent-host-tools",
+        "package",
+        "ok",
+        f"pi-subagents {version} intersects child tools with host builtins; pi-fff resolves to "
+        f"{resolved_mode} — grep/find stay host builtins",
+        f"perk launches inject PI_FFF_MODE={_FFF_DEFAULT_MODE} (operator env wins); "
         "report-only — the package stays unpinned",
     )
 

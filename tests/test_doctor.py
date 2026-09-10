@@ -1036,6 +1036,213 @@ def test_subagent_compat_verified_version_stamp_is_pinned():
     assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.65.1"
 
 
+# --- subagent-host-tools: the pi-subagents >= 0.67.0 host-tool intersection x pi-fff mode ----
+
+
+def _plant_fff_config(agent_dir, text):
+    """Plant ``pi-fff.json`` (raw text) in the launch-precedence agent dir; returns its path."""
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    path = agent_dir / "pi-fff.json"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_subagent_host_tools_absent_is_info(scaffolded_perk_repo):
+    # No install tree (the scaffolded-repo default): the interaction is not evaluated, with the
+    # reason carried (no silent pass) — even with an offending operator env.
+    check = doctor_checks._subagent_host_tools_check(
+        scaffolded_perk_repo, environ={"PI_FFF_MODE": "override"}
+    )
+    assert check.name == "subagent-host-tools"
+    assert check.status == "info" and check.group == "package"
+    assert "not evaluated" in check.message
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    ["not json{", '{"name": "pi-subagents"}', '{"version": "0.67"}', '{"version": "v0.67.0"}'],
+)
+def test_subagent_host_tools_unreadable_version_is_info(scaffolded_perk_repo, manifest):
+    # Malformed JSON, a missing field, or a non-strict-semver version: not evaluable. The
+    # subagent-compat warn owns the unreadable complaint — no duplicate warn, no silent pass.
+    pkg = _plant_subagents_package(scaffolded_perk_repo, version="0.0.0")
+    (pkg / "package.json").write_text(manifest, encoding="utf-8")
+    check = doctor_checks._subagent_host_tools_check(
+        scaffolded_perk_repo, environ={"PI_FFF_MODE": "override"}
+    )
+    assert check.status == "info"
+    assert "not evaluated" in check.message
+
+
+def test_subagent_host_tools_predating_version_is_ok_even_in_override(scaffolded_perk_repo):
+    # 0.66.0 predates the host-tool intersection: an override-mode pi-fff is harmless there.
+    _plant_subagents_package(scaffolded_perk_repo, version="0.66.0")
+    check = doctor_checks._subagent_host_tools_check(
+        scaffolded_perk_repo, environ={"PI_FFF_MODE": "override"}
+    )
+    assert check.status == "ok"
+    assert "0.66.0" in check.message and "does not intersect" in check.message
+
+
+def test_subagent_host_tools_affected_version_default_mode_is_ok(scaffolded_perk_repo):
+    # In the affected range with no env and no file: pi-fff resolves to its additive default,
+    # so grep/find stay host builtins.
+    _plant_subagents_package(scaffolded_perk_repo, version="0.67.0")
+    check = doctor_checks._subagent_host_tools_check(scaffolded_perk_repo, environ={})
+    assert check.status == "ok"
+    assert "0.67.0" in check.message and "tools-and-ui" in check.message
+
+
+def test_subagent_host_tools_env_override_is_warn_never_fail(scaffolded_perk_repo):
+    # The operator env wins over perk's injected default, so every perk-launched AND warm
+    # session shadows grep/find — a warn that never affects health/exit code, no --fix arm.
+    _plant_subagents_package(scaffolded_perk_repo, version="0.67.0")
+    check = doctor_checks._subagent_host_tools_check(
+        scaffolded_perk_repo, environ={"PI_FFF_MODE": "override"}
+    )
+    assert check.status == "warn" and check.group == "package"
+    assert "0.67.0" in check.message and "override" in check.message
+    assert "PI_FFF_MODE=override (environment)" in check.detail
+    assert "tools-and-ui" in check.remediation
+    report = DoctorReport(checks=[check], fixed=[], self_repo=False)
+    assert report.healthy and report.exit_code == 0
+
+
+def test_subagent_host_tools_valid_env_beats_file_override(
+    scaffolded_perk_repo, isolated_pi_agent_dir
+):
+    # pi-fff's precedence: a valid env value wins over the file, so a file-level override is
+    # inert when the env says tools-and-ui (what every perk launch injects).
+    _plant_subagents_package(scaffolded_perk_repo, version="0.67.0")
+    _plant_fff_config(isolated_pi_agent_dir, '{"mode": "override"}')
+    check = doctor_checks._subagent_host_tools_check(
+        scaffolded_perk_repo, environ={"PI_FFF_MODE": "tools-and-ui"}
+    )
+    assert check.status == "ok"
+    assert "tools-and-ui" in check.message
+
+
+def test_subagent_host_tools_file_override_is_warn_naming_the_file(
+    scaffolded_perk_repo, isolated_pi_agent_dir
+):
+    # No env: the launch-precedence agent dir's pi-fff.json decides. The detail names the
+    # planted file by absolute path and scopes the blast radius to warm/bare sessions (perk
+    # launches inject the env, which beats the file) — never the environment arm's wording.
+    _plant_subagents_package(scaffolded_perk_repo, version="0.67.0")
+    planted = _plant_fff_config(isolated_pi_agent_dir, '{"mode": "override"}')
+    check = doctor_checks._subagent_host_tools_check(scaffolded_perk_repo, environ={})
+    assert check.status == "warn"
+    assert str(planted) in check.detail
+    assert "PI_FFF_MODE=override (environment)" not in check.detail
+    assert "warm" in check.detail
+    assert "tools-and-ui" in check.remediation
+
+
+def test_subagent_host_tools_invalid_env_falls_through_to_file(
+    scaffolded_perk_repo, isolated_pi_agent_dir
+):
+    # pi-fff's parseMode ignores an invalid env value and falls through to the file.
+    _plant_subagents_package(scaffolded_perk_repo, version="0.67.0")
+    planted = _plant_fff_config(isolated_pi_agent_dir, '{"mode": "override"}')
+    check = doctor_checks._subagent_host_tools_check(
+        scaffolded_perk_repo, environ={"PI_FFF_MODE": "bogus"}
+    )
+    assert check.status == "warn"
+    assert str(planted) in check.detail
+
+
+@pytest.mark.parametrize("text", ["not json{", "[]", '{"mode": 7}', '{"mode": "loud"}'])
+def test_subagent_host_tools_malformed_fff_config_is_ok(
+    scaffolded_perk_repo, isolated_pi_agent_dir, text
+):
+    # A malformed pi-fff.json is pi-fff's own load-time complaint, never this check's: the
+    # file arm reads no valid mode and the default applies.
+    _plant_subagents_package(scaffolded_perk_repo, version="0.67.0")
+    _plant_fff_config(isolated_pi_agent_dir, text)
+    check = doctor_checks._subagent_host_tools_check(scaffolded_perk_repo, environ={})
+    assert check.status == "ok"
+
+
+def test_subagent_host_tools_open_upper_bound_covers_later_releases(scaffolded_perk_repo):
+    # Upper bound None: every release at/above the lower bound is in the affected range until
+    # a re-verify closes it.
+    _plant_subagents_package(scaffolded_perk_repo, version="0.68.5")
+    check = doctor_checks._subagent_host_tools_check(
+        scaffolded_perk_repo, environ={"PI_FFF_MODE": "override"}
+    )
+    assert check.status == "warn"
+    assert "0.68.5" in check.message
+
+
+@pytest.mark.parametrize(
+    ("version", "expected_status"), [("0.68.0", "ok"), ("0.67.9", "warn"), ("0.66.9", "ok")]
+)
+def test_subagent_host_tools_upper_bound_is_exclusive(
+    scaffolded_perk_repo, monkeypatch, version, expected_status
+):
+    # The range is half-open `[lower, upper)`: once a re-verify sets the upper bound, the
+    # fixing release itself is outside it.
+    monkeypatch.setattr(
+        doctor_checks, "_SUBAGENTS_HOST_INTERSECTION_AFFECTED", ("0.67.0", "0.68.0")
+    )
+    _plant_subagents_package(scaffolded_perk_repo, version=version)
+    check = doctor_checks._subagent_host_tools_check(
+        scaffolded_perk_repo, environ={"PI_FFF_MODE": "override"}
+    )
+    assert check.status == expected_status
+
+
+@pytest.mark.parametrize("text", ["[pi", "[pi]\nagent_dir = 7\n"])
+def test_subagent_host_tools_bad_config_skips_file_arm(scaffolded_perk_repo, monkeypatch, text):
+    # A broken main-checkout config is the `config` check's complaint; the report-only check
+    # skips the file arm (fail-open) rather than crashing.
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    (scaffolded_perk_repo / ".perk/config.toml").write_text(text, encoding="utf-8")
+    _plant_subagents_package(scaffolded_perk_repo, version="0.67.0")
+    check = doctor_checks._subagent_host_tools_check(scaffolded_perk_repo, environ={})
+    assert check.status == "ok"
+
+
+def test_subagent_host_tools_affected_range_is_pinned():
+    # Only a re-verify (docs/developers/pi-subagents-reverify.md) moves the range — the upper
+    # bound stays open until an upstream release counts same-name replacements as builtins.
+    assert doctor_checks._SUBAGENTS_HOST_INTERSECTION_AFFECTED == ("0.67.0", None)
+
+
+def test_subagent_host_tools_detail_names_the_launch_injected_default(scaffolded_perk_repo):
+    # Parity pin: the detail spells the injected default literally, and it must match what the
+    # launch seam actually injects (no import edge from convergence.doctor into perk.run.launch).
+    from perk.run import launch
+
+    _plant_subagents_package(scaffolded_perk_repo, version="0.67.0")
+    check = doctor_checks._subagent_host_tools_check(
+        scaffolded_perk_repo, environ={"PI_FFF_MODE": "override"}
+    )
+    assert f"PI_FFF_MODE={launch.FFF_MODE_ENV['PI_FFF_MODE']}" in check.detail
+
+
+def test_subagent_host_tools_engine_story(scaffolded_perk_repo, monkeypatch):
+    # Registration in the report (package group, info on the scaffolded repo's absent install
+    # tree), the env-arm warn as the engine composes it from os.environ, warn-never-fail through
+    # the real exit mapping, and no --fix arm.
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    check = next((c for c in report.checks if c.name == "subagent-host-tools"), None)
+    assert check is not None
+    assert check.status == "info" and check.group == "package"
+    assert report.healthy and report.exit_code == 0
+
+    _plant_subagents_package(scaffolded_perk_repo, version="0.67.0")
+    monkeypatch.setenv("PI_FFF_MODE", "override")
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    check = next((c for c in report.checks if c.name == "subagent-host-tools"), None)
+    assert check is not None
+    assert check.status == "warn"
+    assert "PI_FFF_MODE=override (environment)" in check.detail
+    assert report.healthy and report.exit_code == 0
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False).fixed
+    assert "subagent-host-tools" not in fixed
+
+
 def _plant_ponytail_tree(root):
     package = root / ".pi" / "npm" / "node_modules" / "@dietrichgebert" / "ponytail"
     package.mkdir(parents=True, exist_ok=True)

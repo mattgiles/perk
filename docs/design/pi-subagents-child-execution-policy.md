@@ -106,6 +106,12 @@ writes by design.
 - Foreground children have no perk activation; manual `subagent` calls are outside the channel.
 - User-shadowed definitions and installations missing the consumer are not certified.
 - Losing the runner env across a `/reload` is unsupported (the reload re-reads what is there).
+- pi-subagents ≥ 0.67.0's host-side tool intersection is an upstream launch precondition, not
+  perk policy: the engine intersects the child's declared `read, grep, find, ls, bash` with the
+  **host** session's builtin-sourced tools and fails review/scout-named agents closed on a
+  shadowed builtin (pi-fff `override` mode re-registers `grep`/`find` by name). perk launches no
+  longer shadow them (they inject `PI_FFF_MODE=tools-and-ui`), and the doctor `subagent-host-tools`
+  check names the operator-owned residual; the floor described here neither causes nor cures it.
 
 ## Dropped mechanisms
 
