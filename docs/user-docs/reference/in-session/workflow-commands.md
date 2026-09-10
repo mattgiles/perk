@@ -35,8 +35,8 @@ Toggle perk plan mode — a read-only exploration and plan-authoring session. Pa
   and return one engine-validated report per brief (`scope`, `findings[{pointer, claim, basis,
   rationale}]`, `open_questions`, every string length-capped); one attempt, no retry; an
   incomplete wave soft-fails with the first failure and retains the completed siblings. Also active
-  in `objective-plan` and `objective-author` sessions and reachable in every read-only session;
-  reports are untrusted DATA. *Non-terminating.*
+  in `objective-plan` and `objective-author` sessions and reachable in every other read-only
+  session except `/objective-refine`; reports are untrusted DATA. *Non-terminating.*
 
 On an eligible matching review, the Plannotator browser can return a `# Direct Edits` unified diff. On the **plan** arm, approval
 applies the diff to the draft and saves the edited bytes; if application fails, perk saves the

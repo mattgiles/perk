@@ -170,6 +170,7 @@ node that creates them.
 | `docs/user-docs/how-to/run-a-worktree-setup-hook.md` | `/how-to/run-a-worktree-setup-hook/` | How-to › Core workflow |
 | `docs/user-docs/how-to/track-implement-progress.md` | `/how-to/track-implement-progress/` | How-to › Core workflow |
 | `docs/user-docs/how-to/send-feedback-from-hunk-watch.md` *(added 2026-08-12)* | `/how-to/send-feedback-from-hunk-watch/` | How-to › Core workflow |
+| `docs/user-docs/how-to/delegate-an-investigation-to-perk-scout.md` *(added 2026-09-10)* | `/how-to/delegate-an-investigation-to-perk-scout/` | How-to › Core workflow |
 | `docs/user-docs/how-to/author-a-roadmap.md` | `/how-to/author-a-roadmap/` | How-to › Objectives & learnings |
 | `docs/user-docs/how-to/refine-future-nodes.md` *(added 2026-09-10)* | `/how-to/refine-future-nodes/` | How-to › Objectives & learnings |
 | `docs/user-docs/how-to/replan-an-objective.md` | `/how-to/replan-an-objective/` | How-to › Objectives & learnings |
@@ -301,7 +302,8 @@ index order.
    adopt-an-existing-project, target-a-non-default-base-branch, run-ci-in-session,
    *configure-and-verify-ci-checks* (new), recover-a-dirty-worktree,
    *diagnose-a-perk-repo* (new), run-a-worktree-setup-hook, track-implement-progress,
-   *send-feedback-from-hunk-watch* (added 2026-08-12).
+   *send-feedback-from-hunk-watch* (added 2026-08-12), *delegate-an-investigation-to-perk-scout*
+   (added 2026-09-10).
 2. **Objectives & learnings** — author-a-roadmap, *refine-future-nodes* (added 2026-09-10),
    replan-an-objective, advance-or-skip-nodes,
    reconcile-an-objective, check-an-objective-for-drift,
@@ -426,6 +428,7 @@ batch node.
 | `docs/user-docs/how-to/run-a-worktree-setup-hook.md` | How-to | keep-and-polish | `/how-to/run-a-worktree-setup-hook/` | checklist | 3.4 |
 | `docs/user-docs/how-to/track-implement-progress.md` | How-to | keep-and-polish | `/how-to/track-implement-progress/` | checklist | 3.4 |
 | `docs/user-docs/how-to/send-feedback-from-hunk-watch.md` *(added 2026-08-12)* | How-to | keep-and-polish | `/how-to/send-feedback-from-hunk-watch/` | checklist | 3.4 |
+| `docs/user-docs/how-to/delegate-an-investigation-to-perk-scout.md` *(added 2026-09-10)* | How-to | keep-and-polish | `/how-to/delegate-an-investigation-to-perk-scout/` | checklist (satisfied at creation) | 3.1 (obj. #2353) |
 | `docs/user-docs/how-to/author-a-roadmap.md` | How-to | keep-and-polish | `/how-to/author-a-roadmap/` | checklist | 3.5 |
 | `docs/user-docs/how-to/refine-future-nodes.md` *(added 2026-09-10)* | How-to | keep-and-polish | `/how-to/refine-future-nodes/` | checklist (satisfied at creation) | 1.3 (obj. #2332) |
 | `docs/user-docs/how-to/replan-an-objective.md` | How-to | keep-and-polish | `/how-to/replan-an-objective/` | checklist | 3.5 |

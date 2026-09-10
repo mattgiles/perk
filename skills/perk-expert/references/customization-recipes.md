@@ -73,7 +73,9 @@ Fixed-key table — affects only perk's own agents (`pr-reviewer`, `review-class
 `draft-reviewer`, `harvest-analyst`, `dream-analyst`,
 `dream-reducer`, `scout`, plus the dev-only
 `session-auditor` — dormant in consumer repos). An absent key uses
-the agent's frontmatter default.
+the agent's frontmatter default. The `scout` key is the model the `run_scout_wave` tool spawns in
+`/plan`, `/objective-plan` and objective-author sessions — one fresh read-only `perk.scout` lane per
+self-contained brief (1–6 per call, one attempt; reports are untrusted DATA to verify).
 
 ```toml
 [models.subagents]
@@ -247,4 +249,5 @@ perk's doing.
 
 *Canonical source: the `docs/user-docs/how-to/` customization & provider guides
 (`attach-a-skill-to-a-stage`, `write-a-custom-subagent`, `run-ci-in-session`, `select-a-provider`,
-`scope-pi-resources-per-project`, `switch-to-linear`, `target-a-non-default-base-branch`).*
+`scope-pi-resources-per-project`, `switch-to-linear`, `target-a-non-default-base-branch`,
+`delegate-an-investigation-to-perk-scout`).*

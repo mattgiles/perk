@@ -3,12 +3,19 @@
 The rewritten skills (`perk-learn`, `perk-learn-docs`, `perk-learn-code`, `perk-implement`,
 `perk-address`) are the SOLE carriers of the operational detail their launch seeds shed — and
 skill bodies are otherwise CI-inert (no ceiling gate yet), so a drift there would be silent.
+The three authoring skills (`perk-plan`, `perk-objective-plan`, `perk-objective-author`) are
+likewise the sole carriers of the stage-specific judgment tier behind the `run_scout_wave` tool's
+`promptGuidelines` (when a scout wave is worth it at that stage, what its reports are worth, and
+how the call is recorded) — the shared mechanics stay in the tool and are deliberately NOT
+restated in any skill, so no pin here echoes them.
 Each test pins the newly sole-carried clauses of one skill: small, whitespace-normalized
 substring pins (the `test_learn_harvest_cmd.py::test_skill_semantic_contract` pattern), never
 full snapshots. `perk-learn-harvest` stays covered by its existing dedicated test.
 """
 
 from pathlib import Path
+
+from perk.substrate.skill_exposure import parse_skill_frontmatter
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -144,6 +151,64 @@ def test_perk_objective_plan_sole_carried_detail():
     # The boundary-token rule's elaboration + the honest-reporting rule.
     assert "same boundary token as the opener" in norm
     assert "never auto-retry" in norm
+    # The scout-wave delta this skill alone owns: the explorer-vs-wave positioning (the two
+    # gathering carriers sit side by side) and the plan-stage record rule for the call.
+    assert (
+        "`explore_objective_node` maps this one node through a single typed explorer lane" in norm
+    )
+    assert "brief keys, complete/incomplete, the model that ran" in norm
+
+
+def test_perk_plan_sole_carried_detail():
+    norm = _norm("perk-plan")
+    # The pointer-back that keeps the skill from becoming a second carrier of the wave mechanics.
+    assert "The `run_scout_wave` tool's guidelines carry the mechanics" in norm
+    # The plan-stage record rule: verified claims + failed/unanswered briefs land in Assumptions.
+    assert "record in `## Assumptions` which claims you verified" in norm
+
+
+def test_perk_objective_author_sole_carried_detail():
+    norm = _norm("perk-objective-author")
+    # The stage's never-delegate boundary for a scout wave.
+    assert (
+        "Never delegate the goal framing, the roadmap decomposition, or the user conversation"
+        in norm
+    )
+
+
+def test_scout_launcher_guidance_rides_exactly_the_three_authoring_skills():
+    """The dispatch-parity / negative-space pin for the scout launcher's guidance carriers.
+
+    `run_scout_wave` rides exactly the `plan` / `objective-plan` / `objective-author` `STAGE_TOOLS`
+    lists (contracts §8.70 item 6; pinned on the TS side by `extension/substrate/stageTools.test.ts`
+    "run_scout_wave rides exactly the three authoring stage lists"), and the skill guidance naming
+    it rides exactly the skills bound to those three stages — the two-carrier shape
+    `explore_objective_node` established (tool `promptGuidelines` for the mechanics, the bound
+    stage skill for the judgment). Consequence: no other `skills/perk-*/SKILL.md` (`perk-expert`,
+    `perk-grill`, `perk-replan`, …) may carry the literal `run_scout_wave`; the
+    `skills/perk-expert/references/*.md` mirror is outside this sweep and may.
+    """
+    expected_stage = {
+        "perk-plan": ["plan"],
+        "perk-objective-plan": ["objective-plan"],
+        "perk-objective-author": ["objective-author"],
+    }
+    carriers: dict[str, Path] = {}
+    for path in sorted((REPO_ROOT / "skills").glob("perk-*/SKILL.md")):
+        if "run_scout_wave" in path.read_text(encoding="utf-8"):
+            carriers[path.parent.name] = path
+    assert set(carriers) == set(expected_stage), (
+        "the skills naming `run_scout_wave` must be exactly the three authoring skills bound to "
+        "the stages the tool rides (plan / objective-plan / objective-author); got "
+        f"{sorted(carriers)}"
+    )
+    for skill, stages in expected_stage.items():
+        frontmatter, reason = parse_skill_frontmatter(carriers[skill].read_text(encoding="utf-8"))
+        assert reason is None, f"{skill}: {reason}"
+        assert frontmatter.get("stages") == stages, (
+            f"{skill} must be bound to exactly {stages} (the stage whose STAGE_TOOLS list carries "
+            f"run_scout_wave); got {frontmatter.get('stages')!r}"
+        )
 
 
 def test_review_skills_require_and_do_not_duplicate_ponytail_coverage():

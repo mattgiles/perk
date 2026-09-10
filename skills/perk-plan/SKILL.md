@@ -138,6 +138,15 @@ language, read the repo's house-style skill(s) for that language (check your ava
 before drafting — reviewers hold plans to those standards, and a denial-and-redraft costs far more
 than the read.
 
+**Delegate a wide investigation (optional).** The `run_scout_wave` tool's guidelines carry the
+mechanics; the judgment is when a wave is worth it and what its reports are worth. Delegate when a
+gathering step would otherwise pull bulk material into your context and every question can be
+answered from the checkout alone — one self-contained question per brief; a question that needs
+your running context, or whose answer decides the next question, is yours to explore directly.
+Before the plan relies on a scout finding, re-read its `pointer` yourself, and record in
+`## Assumptions` which claims you verified and which briefs failed or went unanswered. The plan's
+judgment and authoring stay with you.
+
 ## What the tool does (so you don't have to)
 
 `plan_save` derives the title, splits the queryable header from the full body, creates the GitHub
