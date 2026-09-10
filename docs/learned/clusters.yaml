@@ -7,7 +7,7 @@
 # validates the registry + every doc's declaration.
 clusters:
   - id: pi-extension
-    rollup: "Pi SDK/extension substrate craft — API facts, context injection/loading, seams, TUI surfaces, tool-param decode, structured output, headless session driving."
+    rollup: "Pi SDK/extension substrate craft — API facts, context injection/loading, seams, TUI surfaces, tool-param decode, headless session driving."
   - id: subagent-orchestration
     rollup: "Spawning and orchestrating subagents — pi-subagents mechanics, agent defs, report waves, lane semantics, streaming."
   - id: toolchain-gotchas
@@ -17,7 +17,7 @@ clusters:
   - id: doors-and-launch
     rollup: "CLI↔session plumbing — cold-door launch/client, warm-door commands, CLI command groups, factory/seeded doors, write-capable doors, the remote runner."
   - id: plan-lifecycle
-    rollup: "The plan artifact's life — plan-ref linkage, review→approval→save surfaces, worktree lifecycle, session data/run identity, mergeability + conflict resolution."
+    rollup: "The plan artifact's life — plan-ref linkage, review→approval→save, worktrees, run identity, mergeability + conflict resolution, git substrate, plan currency."
   - id: objective-system
     rollup: "Objectives — the node state machine and authoring loop, objective storage Protocol, stacked delivery trains."
   - id: backends-and-integrations
