@@ -13,12 +13,11 @@ condition that would make an incorrect implementation fail, then assert the full
 
 ## Distillation
 
-- Wire every plausible fake target with a distinguishable value so a wrong-target read is loud —
-  "Default-miss fakes hide targeting errors".
-- Fakes never pick the safety posture: keep production fail-closed and repair the fakes — "Fakes
-  must not pick the safety posture".
-- Seam conversions re-home every observer: audit each stubbed dependency for orphaned pins and
-  rebuild both threshold sides — "Seam conversions must re-home every observer".
+- Wire every fake target with a distinguishable value; fakes never pick the safety posture —
+  "Default-miss fakes hide targeting errors" / "Fakes must not pick the safety posture".
+- Seam conversions re-home every observer via an assertion-ownership ledger; ONE engine story owns
+  registration (`is not None`, fault-inject by deleting it) — "Seam conversions must re-home
+  every observer".
 - Dedup/uniqueness claims need manufactured collisions under the exact contract key —
   "Manufacture collisions for uniqueness and dedup claims".
 - Assert positive membership and full payloads; ordered effects flow through ONE recorder with a
@@ -29,15 +28,12 @@ condition that would make an incorrect implementation fail, then assert the full
   adjacent pair, throwing cases for fail-open reads — "Parametrize the whole declared surface".
 - Capture the exact request each parity fake receives (full argv, staged stdin) — "Capture exact
   requests from parity fakes".
-- Discriminating inputs live inside the measured scope; de-coincide coinciding fixture
-  identities — "Put discriminating inputs inside the measured scope".
+- Discriminating inputs live inside the measured scope — a race pin swaps the world inside the
+  counted read window (`measureArtifactReadCalls`) — "Put discriminating inputs inside the
+  measured scope".
 - Negative-space checks prove a live selector and fail under an injected offender; a
   regression pin names the mutation it catches; widen the TEST seed to `unknown`, never the
   production type — "Negative-space checks" / "Structural source pins".
-- Seam conversions keep an assertion-ownership ledger; ONE engine story owns registration
-  (`is not None`, fault-inject by deleting the registration) — "Seam conversions".
-- A race pin swaps the world inside the counted read window (`measureArtifactReadCalls`) — "Put
-  discriminating inputs inside the measured scope".
 - Never-execute seams need a live control that first FIRES unhardened (two-stage: git's external
   diff skips textconv) plus an argv pin — "Live controls for never-execute seams".
 - Keep one real default path through the deepest seam; pin composition via the CAPTURED
