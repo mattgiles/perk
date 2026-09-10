@@ -187,6 +187,36 @@ def scan_marked_comments(
     return MarkedCommentScan(owned=tuple(owned), malformed=tuple(malformed))
 
 
+class MarkedCommentSeams(Protocol):
+    """The four backend operations the guarded marked-comment driver is parameterized over
+    (contracts.md §8.67). A backend implements these with its own primitives; the driver owns
+    the state machine, so every backend gets the same precedence and the same typed outcomes.
+
+    Three effectful seams, each raising ``IssueBackendError`` on an infra failure (the driver
+    normalizes those into typed ``MarkedCommentError`` outcomes and decides every outcome from
+    its scans, never from a mutation's return value): ``scan`` classifies ALL of an issue's
+    comments (every page, oldest-first) against the unique accepted marker encodings
+    ``forms`` — normally ``scan_marked_comments`` over the backend's ``EngagementComment`` rows,
+    so every observed value (id / stored body / author / native timestamps) is real, never
+    reconstructed; ``create`` posts a new comment on the issue; ``update`` replaces the whole
+    body of the comment with the given id; both take the body already in stored form.
+
+    One pure seam: ``transcode`` maps a body from the caller's (HTML-marker) encoding to the
+    form the backend stores and reads back — the identity for a backend that stores bodies
+    verbatim. It is a total string function and MUST NOT raise: the driver calls it before and
+    outside its error normalization, so a body the backend cannot store is refused by
+    ``create``/``update`` (surfacing as ``backend_error``), never by ``transcode``.
+    """
+
+    def scan(self, issue_id: str, forms: tuple[str, ...]) -> MarkedCommentScan: ...
+
+    def create(self, issue_id: str, body: str) -> None: ...
+
+    def update(self, comment_id: str, body: str) -> None: ...
+
+    def transcode(self, body: str) -> str: ...
+
+
 @dataclass(frozen=True)
 class Label:
     """A label ensured to exist. ``created`` is False when it already existed (idempotent)."""
@@ -217,6 +247,154 @@ class CommentResult:
 
     posted: bool
     verified_comment: EngagementComment | None = None
+
+
+def _refuse_unowned(scan: MarkedCommentScan, *, write_attempted: bool) -> None:
+    """Duplicate ownership refuses before malformed placement (identical duplicates
+    included) — the same precedence at preflight and at verification."""
+    if len(scan.owned) > 1:
+        raise MarkedCommentError(
+            "ambiguous_comment",
+            f"{len(scan.owned)} comments own the marker",
+            comment_ids=tuple(comment.id for comment in scan.owned),
+            write_attempted=write_attempted,
+        )
+    if scan.malformed:
+        raise MarkedCommentError(
+            "malformed_comment",
+            "marker misplaced or repeated in comment(s) "
+            + ", ".join(comment.id for comment in scan.malformed),
+            comment_ids=tuple(comment.id for comment in scan.malformed),
+            write_attempted=write_attempted,
+        )
+
+
+def guarded_upsert_marked_comment(
+    seams: MarkedCommentSeams,
+    *,
+    issue_id: str,
+    marker: str,
+    body: str,
+    dry_run: bool,
+    expected: MarkedCommentExpectation,
+) -> CommentResult:
+    """The guarded arm of ``IssueBackend.upsert_marked_comment`` (contracts.md §8.67), shared by
+    every backend through ``seams``: exact first-line ownership, at most ONE mutation attempt,
+    then one read-back verification that decides the outcome.
+
+    Precedence, fixed by the contract: validation (``invalid_input``) → preflight scan
+    (unreadable → ``backend_error``; duplicates → ``ambiguous_comment`` before any
+    ``malformed_comment``) → convergence without a write when the unique observed body already
+    equals the stored form of ``body`` → the expectation must hold exactly (else
+    ``stale_comment``) → one create/update → verification scan (unreadable →
+    ``write_unverified``; the same ownership refusals; an exact candidate → success even when
+    the mutation raised; raised + proven-unchanged baseline → ``backend_error`` chaining the
+    cause; a changed unique target → ``stale_comment``; otherwise ``write_unverified``).
+    Every error after the attempt carries ``write_attempted=True``. A dry run validates the
+    cheap inputs only and touches no seam. Only ``scan``/``create``/``update`` failures are
+    normalized here; ``transcode`` is pure by contract and runs outside the guarded arms.
+    """
+    problem = expected.validation_problem()
+    if problem is not None:
+        raise MarkedCommentError("invalid_input", problem)
+    if not marker.strip() or "\n" in marker:
+        raise MarkedCommentError("invalid_input", "marker must be one nonblank line")
+    if first_line(body) != marker or body.count(marker) != 1:
+        raise MarkedCommentError(
+            "invalid_input",
+            "body must own its marker: the exact marker as the first line, occurring once",
+        )
+    if dry_run:
+        return CommentResult(posted=False)
+    # The accepted encodings: the marker as given (HTML) and its stored rewrite — unique, so a
+    # backend whose stored form IS the given form scans one encoding. `transcode` is pure, so
+    # these two calls need no normalization.
+    forms = tuple(dict.fromkeys((marker, seams.transcode(marker))))
+    desired = seams.transcode(body)
+
+    # 1. Preflight: the complete scan; duplicates before malformed placement.
+    try:
+        scan = seams.scan(issue_id, forms)
+    except IssueBackendError as exc:
+        raise MarkedCommentError(
+            "backend_error", f"marked-comment preflight scan failed: {exc}"
+        ) from exc
+    _refuse_unowned(scan, write_attempted=False)
+    observed = scan.owned[0] if scan.owned else None
+
+    # 2. Convergence without a write beats any expectation; otherwise the observed state
+    #    must match exactly what the caller expected.
+    if observed is not None and observed.body == desired:
+        return CommentResult(posted=True, verified_comment=observed)
+    if expected.expects_absence:
+        if observed is not None:
+            raise MarkedCommentError(
+                "stale_comment",
+                f"expected no marked comment but observed {observed.id}",
+                comment_ids=(observed.id,),
+            )
+    elif (
+        observed is None
+        or observed.id != expected.comment_id
+        or body_digest(observed.body) != expected.body_digest
+    ):
+        raise MarkedCommentError(
+            "stale_comment",
+            "the marked comment changed since it was read"
+            + (f" (observed {observed.id})" if observed is not None else " (now absent)"),
+            comment_ids=(observed.id,) if observed is not None else (),
+        )
+
+    # 3. Exactly one mutation attempt; a raise is ambiguous until the read-back decides.
+    mutation_error: IssueBackendError | None = None
+    try:
+        if observed is not None:
+            seams.update(observed.id, desired)
+        else:
+            seams.create(issue_id, desired)
+    except IssueBackendError as exc:
+        mutation_error = exc
+
+    # 4. Verification: one full scan, precedence fixed by the contract.
+    try:
+        after = seams.scan(issue_id, forms)
+    except IssueBackendError as exc:
+        raise MarkedCommentError(
+            "write_unverified",
+            f"marked-comment write could not be verified: {exc}",
+            write_attempted=True,
+        ) from exc
+    _refuse_unowned(after, write_attempted=True)
+    now = after.owned[0] if after.owned else None
+    if now is not None and now.body == desired:
+        return CommentResult(posted=True, verified_comment=now)
+    baseline_unchanged = (now is None and observed is None) or (
+        now is not None
+        and observed is not None
+        and now.id == observed.id
+        and now.body == observed.body
+    )
+    if mutation_error is not None and baseline_unchanged:
+        raise MarkedCommentError(
+            "backend_error",
+            f"marked-comment write failed and did not land: {mutation_error}",
+            comment_ids=(now.id,) if now is not None else (),
+            write_attempted=True,
+        ) from mutation_error
+    if now is not None and not baseline_unchanged:
+        raise MarkedCommentError(
+            "stale_comment",
+            f"the marked comment {now.id} carries different bytes than were written",
+            comment_ids=(now.id,),
+            write_attempted=True,
+        )
+    raise MarkedCommentError(
+        "write_unverified",
+        "marked comment is absent or unchanged after the write attempt"
+        + (f": {mutation_error}" if mutation_error is not None else ""),
+        comment_ids=(now.id,) if now is not None else (),
+        write_attempted=True,
+    )
 
 
 @dataclass(frozen=True)
@@ -633,7 +811,9 @@ class IssueBackend(Protocol):
         id + body digest), convergence without a write when the unique observed body already
         equals the backend-rendered ``body``, at most ONE create/update attempt, and a
         post-write verification scan whose observed comment is returned as
-        ``CommentResult.verified_comment``. Refusals raise :class:`MarkedCommentError` (typed
+        ``CommentResult.verified_comment``. The state machine is the shared
+        :func:`guarded_upsert_marked_comment` driver over a backend's
+        :class:`MarkedCommentSeams`. Refusals raise :class:`MarkedCommentError` (typed
         ``code``; ``write_attempted`` after the attempt). A guarded ``dry_run`` validates the
         cheap inputs only and returns ``posted=False`` with no network. A backend without the
         guarded arm raises ``MarkedCommentError("unsupported_backend")`` before any operation

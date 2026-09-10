@@ -11755,9 +11755,19 @@ callers keep `None`); the pure helpers `body_digest`, `is_canonical_digest`, `fi
 every comment whose first physical line IS the exact marker in any accepted encoding, counted
 by the header alone (so the duplicate set is always complete); `malformed` is every placement
 defect (misplaced = present but not first; repeated = an owner whose marker recurs, which
-therefore appears in BOTH tuples); callers apply duplicate-before-malformed precedence. The
-digest/SHA/timestamp scalar checks are whole-string (`fullmatch`) — a trailing newline is a
-noncanonical spelling.
+therefore appears in BOTH tuples); callers apply duplicate-before-malformed precedence; the
+`MarkedCommentSeams` `Protocol` — three effectful seams that raise `IssueBackendError` on an
+infra failure, `scan(issue_id, forms) -> MarkedCommentScan` (ALL comment pages against the
+unique accepted marker encodings), `create(issue_id, body)`, `update(comment_id, body)`
+(whole-body replacement by the observed id) — and one pure seam, `transcode(body) -> str` (the
+caller's HTML-marker encoding → the backend's stored form; identity where bodies are stored
+verbatim; a total string function that MUST NOT raise — the driver calls it outside its
+normalization, so an unstorable body is refused by `create`/`update` as `backend_error`, never
+by `transcode`); and the module-level driver `guarded_upsert_marked_comment(seams, *,
+issue_id, marker, body, dry_run, expected) -> CommentResult`, the ONE implementation of the
+guarded state machine — a backend's `upsert_marked_comment` non-null-`expected` arm delegates
+to it, passing itself (or an adapter) as the seams. The digest/SHA/timestamp scalar checks are
+whole-string (`fullmatch`) — a trailing newline is a noncanonical spelling.
 The signature becomes `upsert_marked_comment{issue_id, marker, body, dry_run=False,
 expected=None}`: `expected=None` keeps today's behavior byte-unchanged (substring, first hit,
 no verification; existing saves are NOT opted in); a non-null `expected` is the guarded path:
@@ -11765,19 +11775,19 @@ no verification; existing saves are NOT opted in); a non-null `expected` is the 
 1. Validate the expectation and the desired exact first-line ownership (`body`'s first line IS
    `marker`, occurring once). A guarded **dry run** validates these cheap inputs only and returns
    `posted=False`/`verified_comment=None` with no network. Scan ALL comment pages through
-   `_comments_with_authors` + the shared mapper; accept the exact marker in HTML or native
-   inline form — never prefixes or substring mentions; multiple owning comments →
-   `ambiguous_comment` (identical duplicates included); a misplaced/repeated marker →
-   `malformed_comment` (ambiguity refuses before malformed placement, at preflight and at
-   verification alike).
-2. If the unique observed body equals the complete desired Linear-rendered body →
-   `CommentResult(posted=True, verified_comment=observed)` with NO write, even when the original
-   expectation predates that convergent save. Otherwise the expectation must hold exactly
-   (absence, or the expected id + body digest); mismatch → `stale_comment`.
-3. At most ONE create or update attempt (update by the observed comment UUID; create on the
-   resolved issue id; the whole body replaced; the same `to_linear_markdown` +
-   `_create_comment`/`_update_comment` primitives). A mutation exception is captured and ONE
-   full verification scan follows — never a retry, never polling.
+   `seams.scan` against `forms = unique(marker, transcode(marker))` — the exact marker in the
+   given (HTML) form or its stored rewrite — never prefixes or substring mentions; multiple
+   owning comments → `ambiguous_comment` (identical duplicates included); a misplaced/repeated
+   marker → `malformed_comment` (ambiguity refuses before malformed placement, at preflight and
+   at verification alike).
+2. If the unique observed body equals `transcode(body)` — the complete desired body in the
+   backend's stored form → `CommentResult(posted=True, verified_comment=observed)` with NO
+   write, even when the original expectation predates that convergent save. Otherwise the
+   expectation must hold exactly (absence, or the expected id + body digest); mismatch →
+   `stale_comment`.
+3. At most ONE create or update attempt (`seams.update` by the observed comment id, or
+   `seams.create` on the issue id; the whole stored-form body replaced). A mutation exception
+   is captured and ONE full verification scan follows — never a retry, never polling.
 4. Verification precedence: unreadable scan → `write_unverified`; duplicate ownership →
    `ambiguous_comment`; malformed ownership → `malformed_comment`; one exact candidate →
    success with that `EngagementComment` (including when the mutation raised after landing);
@@ -11790,9 +11800,15 @@ no verification; existing saves are NOT opted in); a non-null `expected` is the 
 Every error after the attempt sets `write_attempted=True`; validation/preflight errors keep
 `False`. Native size/auth/rate-limit errors keep their diagnostics; no content is shortened and
 no size limit is introduced. `posted=False` only on a dry run; `posted=True` on verified
-convergence (no-write success included). `GitHubIssueBackend`'s non-null-`expected` arm raises
-`unsupported_backend` before any operation (dry run included) until the GitHub carrier lands;
-ordinary GitHub forwarding is unchanged.
+convergence (no-write success included).
+
+**Bindings.** `LinearIssueBackend` implements `MarkedCommentSeams` itself — `scan` =
+`_comments_with_authors` mapped through `_engagement_comment` into `scan_marked_comments`,
+`create` = `_create_comment`, `update` = `_update_comment`, `transcode` = the pure
+`to_linear_markdown` (so convergence means equality to the complete Linear rendering, and
+update targets the observed comment UUID). `GitHubIssueBackend`'s non-null-`expected` arm still
+raises `unsupported_backend` before any operation (dry run included) until the GitHub carrier
+binds the seams; ordinary GitHub forwarding is unchanged.
 
 **The service** (`service.py`) — callers resolve store + issues through the existing resolvers
 and supply the same backend (mismatch → `invalid_input`); one private target-discovery /
