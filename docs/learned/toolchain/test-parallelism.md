@@ -1,6 +1,6 @@
 ---
 title: Parallelizing the two test suites
-read_when: You are making `just test` / `just ci` faster, adding pytest-xdist config, or splitting a harness-heavy `node:test` file into siblings.
+read_when: You are speeding up `just test`/`just ci`, touching pytest xdist or the `slow`-marker tiers (`strict_markers`, `test-py-fast`/`-slow`, run_ci rows), or splitting a `node:test` file.
 cluster: toolchain-gotchas
 ---
 
@@ -13,8 +13,10 @@ levers are not interchangeable. Landed in #592 (PR #591) with no production code
 ## Python: xdist-by-default
 
 `pytest-xdist` in the dev dependency group + a `[tool.pytest.ini_options]` table with
-`addopts = "-n auto --dist loadgroup"` and `testpaths = ["tests"]` makes **EVERY** `uv run pytest`
-parallel — local, `just test-py`/`just test`, and CI — with **no justfile change**.
+`addopts = "-n auto --dist loadgroup --strict-markers"` and `testpaths = ["tests"]` makes **EVERY**
+`uv run pytest` parallel — local, `just test-py`/`just test`, and CI. The justfile carries the full
+recipes plus two **tier** recipes layered on top (below). The canonical developer guide is
+`docs/developers/testing.md`; this doc keeps the reasoning and the gotchas.
 
 - **`-n0` on the CLI overrides `addopts`** — the documented serial-debug escape hatch. Extra CLI
   args (`-k <expr>`) coexist with `addopts`.
@@ -27,6 +29,40 @@ parallel — local, `just test-py`/`just test`, and CI — with **no justfile ch
   `os.chdir` is a no-op `monkeypatch.setattr`, fixtures use `tmp_path`/`tmp_path_factory`).
   `testpaths` is **hygiene, not a fix** — pytest's default `norecursedirs` `.*` glob already
   excludes dotdirs like `.agents/cache/`.
+
+### The `slow` tiers — a selection marker, never a skip
+
+`just test-py-fast` (`-m "not slow"`) and `just test-py-slow` (`-m slow`) select complementary
+tiers over ONE registered marker: `fast ∪ slow = full`, `fast ∩ slow = ∅`, and every full gate
+(`just test-py`, `just test`, CI) still runs every slow case — `slow` selects, it never skips
+(`tests/test_pytest_tiers.py` pins both properties and that the guide names every recipe).
+
+- **`strict_markers = true` as an ini key beside the `--strict-markers` flag in `addopts`.** On
+  pytest 9.0.0–9.0.3 the flag inside `addopts` is silently ignored — it became an ini override that
+  is applied during the first arg parse, *before* `addopts` is read (pytest-dev/pytest#14442). Without
+  the ini key a misspelt `@pytest.mark.slwo` would silently move a case into the fast tier. General
+  rule: for any pytest option that behaves like an ini override, verify it bites on the **pinned**
+  version rather than trusting the docs' flag form.
+- **perk's in-session `run_ci` Python gate is two complementary rows** (`test-py-fast` +
+  `test-py-slow`, same `*.py` glob, in `.perk/config.toml`) while `just ci` / GitHub CI run one
+  pool — a union-preserving split, not a literal mirror, proven by
+  `tests/test_pytest_tiers.py::test_perk_python_gate_runs_the_complementary_tiers`.
+- **The reachability guard** `tests/test_packaging.py::test_every_build_consumer_is_slow` walks
+  `request.session.items` × `item.fixturenames` (the resolved fixture closure, so transitive
+  consumers of the wheel build count) — and because it runs post-deselection under `-m 'not slow'`,
+  it doubles as proof the fast tier never pays for the build. Keep an anchor arm asserting the
+  consumer set is non-empty under the full run, or a fixture rename empties it silently.
+- **xdist rewrites grouped nodeids**: under `--dist loadgroup` a grouped item's nodeid carries an
+  `@wheel_build` suffix; under `-n0` it is bare. Pin both forms in any test that compares nodeids.
+- **Per-fixture own-cost attribution**: to find what is actually slow, wrap `pytest_fixture_setup`
+  in a throwaway plugin. pytest resolves a fixture's dependencies *before* the hook fires for it, so a
+  session-scoped `uv build` is charged to itself, not to its first consumer; teardown stays raw.
+- **`{{args}}` in the justfile is space-joined and re-split** (no `set positional-arguments`), so a
+  compound `-k "a and b"` / `-m "not slow"` expression passed through `just test-py-fast …` shatters —
+  run compound selections via `uv run pytest` directly.
+- **Run multi-minute measurement series detached** from the session foreground (a `nohup`/background
+  runner writing to a scratch log), then read the log; a foreground timing series stalls the session
+  and contends with it.
 
 ### The build-once-under-parallelism idiom
 

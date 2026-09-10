@@ -361,6 +361,11 @@ facts that every mirror must reconcile.
   the same race: `docs-check` failing with `Failed to load Pagefind metadata: SyntaxError:
   Unexpected end of JSON input` across the `checks/pagefind.test.mjs` tests, passing on an
   isolated re-run — the Pagefind bundle was read mid-write. Same disposition: re-run first.
+  The contention is not site-specific: any lane calling `extension/substrate/git.ts::worktreeGitDir`
+  (a `git rev-parse --absolute-git-dir` under `execFileSync` with a **5 s** timeout; current caller
+  `worktreeResolverLock.test.ts`) can report `invalid-worktree` / `lock: not-acquired` when the
+  concurrent run-all starves git. Classify a failure there that took ~5 s as contention, run the
+  lane alone to confirm it passes, then re-run the gate.
 
 ## Cross-references
 

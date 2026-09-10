@@ -56,6 +56,18 @@ nested save/restore interleaves and restores the wrong value. Use per-session se
 plus ONE restore point (#2170). And abort paths must settle pending handshakes on every exit — a
 rejected/aborted arm that leaves a handshake pending deadlocks the suite (#2170).
 
+## Async currency fences need a fence-between-awaits case
+
+An observer that re-checks `current()` after each of two awaits (before announcing readiness, and
+again before degrading — `objectiveReviewBrowser.ts` / `planReviewBrowser.ts`'s door-session
+`current`) is proven only by a case where currency **flips between the fences**. A fixture whose
+`current` is constantly `true` or constantly `false` exercises one fence at most: a review that
+starts non-current returns at the first fence and never reaches the second. The discriminating
+shape (`objectiveReviewBrowser.test.ts`, "superseded WHILE the bridge wait is pending"): a deferred
+bridge promise the test settles by hand, a counting `current` spy that returns `true` then `false`,
+supersede while the observer is parked on the await, then assert **two** calls and no degrade. Any
+"re-check after the await" claim without this case is unpinned.
+
 ## Sequential "race" tests are fiction — use test-only race hooks
 
 A test that performs step A, then step B, then asserts "the race is handled" never ran a race —

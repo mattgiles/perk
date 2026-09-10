@@ -407,6 +407,13 @@ instance). The recipe:
   consumers **receive** → serialization mode. Nested sub-models ride along in `$defs`.
 - **`shared/` force-include bundles a new subdir into both planes for free** (wheel `perk/_shared`
   + npm `shared/` files entry) — just add one representative path to both packaging tests.
+- **PEP 695 aliases render as `$defs`, not inline enums.** A `type X = Literal["a", "b"]` alias used
+  as an `OutputModel` field type renders in the published schema as a named `$defs.X` enum plus a
+  property `$ref` — not an inline `"enum": [...]` on the property. Expect that shape when
+  regenerating a pinned schema after introducing such an alias; it is not drift.
+- **Reshaping an `OutputModel` touches two goldens**: the `shared/schemas/` schema golden (this
+  harness) AND the `tests/golden/json/` payload golden (`tests/test_json_goldens.py`). Adding a
+  trailing defaulted field regenerates both; forgetting the second fails only the JSON drift test.
 - **The doc-amendment rule's deliberate exception:** a node that **defers** the schema-publish +
   contract/doc amendments makes those same-turn amendments **mandatory**, not drift (five surfaces
   in lockstep: `contracts.md`, `shared/README.md`, a user-docs reference + index link, the
