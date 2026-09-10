@@ -67,6 +67,15 @@ Nonblocking advice accompanying an approval. It neither changes the verdict into
 changes nor establishes that a platform review was posted.
 _Avoid_: change request, posting confirmation
 
+**Activity**:
+The optional second half of perk's one composed `perk` status value (`<objective> · <activity>`):
+a short plain-text phrase naming a Perk-owned wait the operator cannot otherwise see — today only
+`waiting on browser review`, begun by the two plannotator browser waits (the browser doors' open
+core on readiness, the warm `plan_review` bridge on entry), ended when each wait settles, and
+shown while any begun wait is unended. Never a spinner, a working state, a liveness signal, or a
+per-interaction record.
+_Avoid_: status, working indicator, spinner, liveness
+
 ### Objective delivery
 
 **Incremental delivery**:

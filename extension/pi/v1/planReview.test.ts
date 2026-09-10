@@ -23,6 +23,7 @@ import type { SessionArtifactCtx, SessionDataCtx } from "../../substrate/session
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type EntrySink, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
+import { createPerkStatus } from "../../surfaces/surfaces.ts";
 import {
   SCRIPTED_ORIGIN,
   scriptedDraftReviewBridge,
@@ -1618,7 +1619,14 @@ test("installPlanBindings: the injected wave deps thread through the registered 
   process.chdir((s.ctx as { cwd: string }).cwd);
   try {
     const pi = recordingPi(defs);
-    installPlanBindings(pi, fakeGating(true), scriptedRemotesSlot(pi), () => false, wave);
+    installPlanBindings(
+      pi,
+      fakeGating(true),
+      scriptedRemotesSlot(pi),
+      () => false,
+      createPerkStatus(),
+      wave,
+    );
   } finally {
     process.chdir(savedCwd);
   }

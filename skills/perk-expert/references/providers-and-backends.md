@@ -130,8 +130,10 @@ The footer has no durable artifact and no adapter.
 - `perk-footer` installs perk's footer in a headful session.
 - `powerline-footer`, `pi-bar-footer`, and `pi-status-footer` make perk skip that installation so
   the selected package owns the single footer slot.
-- `powerline-footer` and `pi-bar-footer` render extension statuses, so objective progress remains
-  visible. `pi-status-footer` does not; hidden objective progress is its accepted limitation.
+- `powerline-footer` and `pi-bar-footer` render extension statuses, so perk's `perk` status — the
+  active objective and, while a plannotator browser review awaits your decision, `waiting on
+  browser review` — remains visible. `pi-status-footer` does not; hiding that status (objective
+  progress and the browser-wait activity) is its accepted limitation.
 - `pi-default` skips perk's footer and installs no replacement, leaving Pi's stock footer.
 
 ### Web seam: package selection

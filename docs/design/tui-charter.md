@@ -12,7 +12,11 @@ document only decides and records it.
 `checkpoints.ts` status/widget rows in §2's standing-surfaces table and the **D1** windowing
 decision describe a deleted surface; `setStandingWidget` and the widget line cap are gone (no
 standing widget consumer remains). The composed `perk` status is now **single-value** (objective
-only — `createPerkStatus` kept its name, lost the segment map). Implement progress is the borrowed
+only — `createPerkStatus` kept its name, lost the segment map) — re-composed under Objective
+#2331 R8 as `<objective> · <activity>` (either half optional): the objective segment plus an
+**activity** facet — a ref-counted wait whose only publisher is the `waiting on browser review`
+wait of the two plannotator browser paths (overlapping waits, the doors' accepted double-open,
+keep the text until the last one ends). Implement progress is the borrowed
 `@juicesharp/rpiv-todo` checklist.
 
 ## §1 Scope
@@ -132,7 +136,7 @@ never standing state.
 | Gate / deferral | notify (via `report()`) | warning | dirty-tree gate, provider deferral, handoff cancel |
 | Error | notify (via `report()`); `alsoLog` is only a headless/RPC diagnostic mirror | error | linkage failures, fail-soft tool paths |
 | Standing progress | footer segment / `belowEditor` widget | n/a (themed glyphs, §5) | checkpoint progress, objective budget |
-| Standing identity/state | footer | n/a | perk version, active objective, branch, model |
+| Standing identity/state | footer | n/a | perk version, active objective, browser-wait activity, branch, model |
 | Interactive prompt | `confirm` / `select` / `input` | n/a | CI scope confirmation, `ask_user_question` |
 | Headless / RPC mirror | `console.error` | n/a | complete report when `!hasUI`; explicit `alsoLog` only when headful RPC |
 
@@ -183,8 +187,8 @@ full `done/total` summary, so no information is lost — only standing screen he
   segments — guest extension statuses first (rightmost-first), then thinking, then model, then
   branch, then cache, then context usage, then the checkpoints segment (the node-3.1 extension
   for the new segments, plus the audit-§2.6 cache segment);
-  **never** drop perk identity + objective — if still over after all drops, `truncateToWidth`
-  as the last resort.
+  **never** drop perk identity + the composed objective · activity value — if still over after
+  all drops, `truncateToWidth` as the last resort.
 - **Widgets truncate with ellipsis rather than wrap.** One logical line = one rendered line.
 
 ## §5 Glyph + severity vocabulary
@@ -254,7 +258,11 @@ composing, in fixed order:
   replaced footer factory, and `resetExtensionUI` restores the built-in footer on `/reload` and
   before session replacement — the earlier once-only guard existed only while dispose-on-replace
   was unverified). The composed `perk` slot **keeps publishing**: it is the RPC-visible surface,
-  since `setFooter` is an RPC no-op.)
+  since `setFooter` is an RPC no-op. The browser-wait activity composes into the same slot
+  (`surfaces.ts createPerkStatus`, ` · `-joined with the objective segment), so RPC sees it
+  through the same dual-publish and the footer renders it in the same never-dropped segment; no
+  spinner, widget, working state, `ui_prompt_*` liveness, or per-interaction record — D5/D6
+  unchanged.)
 
 **Node-3.1 amendments (user-confirmed in the node-3.1 planning session):**
 

@@ -778,8 +778,11 @@ checklist, driven by prompt-carried discipline (the implement launch prompt + th
 skill): the plan's `## Steps` list is the **initial seed of a dynamic, model-owned checklist** (one
 item per step, in order; the implementer derives its own short checklist for a prose plan) —
 the checklist is discipline, not enforcement. Legacy `perk:checkpoint` entries render as
-generic custom entries (no renderer, no shim). The `perk` status slot is **single-value**
-(objective only) and keeps its RPC `setStatus` dual-publish.
+generic custom entries (no renderer, no shim). The `perk` status slot carries **one composed
+value** — the objective segment plus, while a plannotator browser review is waiting on the human,
+the `waiting on browser review` activity (`<objective> · <activity>`, either half optional; a
+set of live waits, so overlapping browser waits keep it until the last ends and a settled or
+reset wait's late end is inert) — and keeps its RPC `setStatus` dual-publish.
 
 **The objective transition surface (TS tool ↔ Python CLI).** The genuinely cross-plane shapes:
 

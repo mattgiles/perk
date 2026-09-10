@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { PLAN_CONTEXT_TYPE } from "../../../authoring/plan/prose.ts";
+import { ACTIVITY_BROWSER_REVIEW, type ActivitySink } from "../../../surfaces/surfaces.ts";
 import { loadPerkSession, plantRawSession, scaffoldRepo } from "../../../testing/harness.ts";
 import { reviewOutcomeResult } from "../planReview.ts";
 import {
@@ -31,6 +32,9 @@ import {
   requestPlannotatorPlanReview,
 } from "./plannotator.ts";
 import { isPlannotatorPlanSelected } from "./selection.ts";
+
+/** The inert activity sink for rows that do not observe the browser-wait activity. */
+const noActivity: ActivitySink = () => () => {};
 
 function selectPlannotator(cwd: string): void {
   mkdirSync(join(cwd, ".perk"), { recursive: true });
@@ -385,7 +389,7 @@ test("bridge: an `unavailable` handshake response -> unavailable outcome with th
   bus.on("plannotator:request", (data) => {
     (data as RequestEnvelope).respond({ status: "unavailable", error: "no browser" });
   });
-  const outcome = await createPlannotatorBridge(bus).review("# A plan");
+  const outcome = await createPlannotatorBridge(bus, noActivity).review("# A plan");
   assert.equal(outcome.status, "unavailable");
   assert.match((outcome as { warning: string }).warning, /unavailable: no browser/);
   const result = reviewOutcomeResult(outcome);
@@ -410,7 +414,7 @@ test("bridge: approved decision -> completed outcome (the execute path saves; no
       });
     }, 10);
   });
-  const outcome = await createPlannotatorBridge(bus).review("# A plan");
+  const outcome = await createPlannotatorBridge(bus, noActivity).review("# A plan");
   assert.deepEqual(outcome, {
     status: "completed",
     approved: true,
@@ -432,7 +436,7 @@ test("bridge: denied decision -> result says DENIED + revise + the feedback", as
       });
     }, 10);
   });
-  const outcome = await createPlannotatorBridge(bus).review("# A plan");
+  const outcome = await createPlannotatorBridge(bus, noActivity).review("# A plan");
   assert.equal(outcome.status, "completed");
   assert.equal((outcome as { approved: boolean }).approved, false);
   const result = reviewOutcomeResult(outcome);
@@ -453,7 +457,7 @@ test("bridge: a mismatched reviewId on the result channel is ignored (no resolut
       bus.emit("plannotator:review-result", { reviewId: "rev-3", approved: true });
     }, 10);
   });
-  const outcome = await createPlannotatorBridge(bus).review("# A plan");
+  const outcome = await createPlannotatorBridge(bus, noActivity).review("# A plan");
   assert.equal(outcome.status, "completed");
   assert.equal((outcome as { reviewId: string }).reviewId, "rev-3");
 });
@@ -469,7 +473,10 @@ test("bridge: a turn abort while awaiting the decision -> aborted outcome", asyn
     // No decision ever arrives — the turn is interrupted instead.
     setTimeout(() => controller.abort(), 10);
   });
-  const outcome = await createPlannotatorBridge(bus).review("# A plan", controller.signal);
+  const outcome = await createPlannotatorBridge(bus, noActivity).review(
+    "# A plan",
+    controller.signal,
+  );
   assert.deepEqual(outcome, { status: "aborted" });
   const result = reviewOutcomeResult(outcome);
   assert.equal((result.details as { status?: string }).status, "aborted");
@@ -483,9 +490,79 @@ test("bridge: an already-aborted signal short-circuits before emitting", async (
   });
   const controller = new AbortController();
   controller.abort();
-  const outcome = await createPlannotatorBridge(bus).review("# A plan", controller.signal);
+  const outcome = await createPlannotatorBridge(bus, noActivity).review(
+    "# A plan",
+    controller.signal,
+  );
   assert.deepEqual(outcome, { status: "aborted" });
   assert.equal(emitted, false, "no request emitted after an abort");
+});
+
+test("bridge activity: begun before delegating, ended in finally — decision, abort, unavailable", async () => {
+  const recorder = (begins: string[], ends: string[]): ActivitySink => {
+    return (text) => {
+      begins.push(text);
+      return () => ends.push(text);
+    };
+  };
+
+  // A pending handshake + a later approved decision: the wait spans the whole review.
+  {
+    const bus = fakeBus();
+    const begins: string[] = [];
+    const ends: string[] = [];
+    bus.on("plannotator:request", (data) => {
+      assert.deepEqual(begins, [ACTIVITY_BROWSER_REVIEW], "begun BEFORE delegating to the bus");
+      assert.deepEqual(ends, []);
+      const req = data as RequestEnvelope;
+      req.respond({ status: "handled", result: { status: "pending", reviewId: "rev-a" } });
+      setTimeout(() => {
+        bus.emit("plannotator:review-result", { reviewId: "rev-a", approved: true });
+      }, 10);
+    });
+    const outcome = await createPlannotatorBridge(bus, recorder(begins, ends)).review("# A plan");
+    assert.equal(outcome.status, "completed");
+    assert.deepEqual(begins, [ACTIVITY_BROWSER_REVIEW]);
+    assert.deepEqual(ends, [ACTIVITY_BROWSER_REVIEW]);
+  }
+
+  // A pending handshake + a turn abort during the decision wait.
+  {
+    const bus = fakeBus();
+    const begins: string[] = [];
+    const ends: string[] = [];
+    const controller = new AbortController();
+    bus.on("plannotator:request", (data) => {
+      assert.deepEqual(begins, [ACTIVITY_BROWSER_REVIEW]);
+      (data as RequestEnvelope).respond({
+        status: "handled",
+        result: { status: "pending", reviewId: "rev-b" },
+      });
+      setTimeout(() => controller.abort(), 10);
+    });
+    const outcome = await createPlannotatorBridge(bus, recorder(begins, ends)).review(
+      "# A plan",
+      controller.signal,
+    );
+    assert.deepEqual(outcome, { status: "aborted" });
+    assert.deepEqual(begins, [ACTIVITY_BROWSER_REVIEW]);
+    assert.deepEqual(ends, [ACTIVITY_BROWSER_REVIEW]);
+  }
+
+  // An `unavailable` handshake respond.
+  {
+    const bus = fakeBus();
+    const begins: string[] = [];
+    const ends: string[] = [];
+    bus.on("plannotator:request", (data) => {
+      assert.deepEqual(begins, [ACTIVITY_BROWSER_REVIEW]);
+      (data as RequestEnvelope).respond({ status: "unavailable", error: "no browser" });
+    });
+    const outcome = await createPlannotatorBridge(bus, recorder(begins, ends)).review("# A plan");
+    assert.equal(outcome.status, "unavailable");
+    assert.deepEqual(begins, [ACTIVITY_BROWSER_REVIEW]);
+    assert.deepEqual(ends, [ACTIVITY_BROWSER_REVIEW]);
+  }
 });
 
 // ------------------------------------- adversarial payload narrowing + emit containment
@@ -496,7 +573,7 @@ test("bridge: a malformed handshake payload degrades to the invalid-response arm
     bus.on("plannotator:request", (data) => {
       (data as RequestEnvelope).respond(payload);
     });
-    const outcome = await createPlannotatorBridge(bus).review("# A plan");
+    const outcome = await createPlannotatorBridge(bus, noActivity).review("# A plan");
     assert.equal(outcome.status, "unavailable");
     assert.match((outcome as { warning: string }).warning, /an invalid response/);
   }
@@ -513,7 +590,7 @@ test("bridge: an adversarial handshake getter is contained (fail-open, never a t
     });
     (data as RequestEnvelope).respond(trap);
   });
-  const outcome = await createPlannotatorBridge(bus).review("# A plan");
+  const outcome = await createPlannotatorBridge(bus, noActivity).review("# A plan");
   assert.equal(outcome.status, "unavailable");
   assert.match((outcome as { warning: string }).warning, /an invalid response/);
 });
@@ -541,7 +618,7 @@ test("bridge: malformed decision payloads are ignored; a later well-formed decis
       bus.emit("plannotator:review-result", { reviewId: "rev-m", approved: true });
     }, 10);
   });
-  const outcome = await createPlannotatorBridge(bus).review("# A plan");
+  const outcome = await createPlannotatorBridge(bus, noActivity).review("# A plan");
   assert.deepEqual(outcome, { status: "completed", approved: true, reviewId: "rev-m" });
 });
 
@@ -556,7 +633,7 @@ test("bridge: a malformed approved field never completes the review — the wait
       result: { status: "pending", reviewId: "rev-n" },
     });
   });
-  const bridge = createPlannotatorBridge(bus);
+  const bridge = createPlannotatorBridge(bus, noActivity);
   const pending = bridge.review("# A plan");
   let settled = false;
   void pending.then(() => {
@@ -598,7 +675,7 @@ test("bridge: a synchronous emit throw is contained as unavailable (timer actual
   bus.on("plannotator:request", () => {
     throw new Error("foreign handler exploded");
   });
-  const outcome = await createPlannotatorBridge(bus).review("# A plan");
+  const outcome = await createPlannotatorBridge(bus, noActivity).review("# A plan");
   assert.equal(outcome.status, "unavailable");
   assert.match((outcome as { warning: string }).warning, /request failed/);
   const allocated = setSpy.mock.calls.map((c) => c.result);
@@ -623,7 +700,7 @@ test("bridge: a turn abort DURING the handshake wait settles aborted promptly (t
     sawRequest = true; // never responds — the handshake stays pending
   });
   const controller = new AbortController();
-  const pending = createPlannotatorBridge(bus).review("# A plan", controller.signal);
+  const pending = createPlannotatorBridge(bus, noActivity).review("# A plan", controller.signal);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(sawRequest, true, "the request was emitted before the abort");
   controller.abort();
@@ -740,7 +817,7 @@ test("bridge: a decision emitted synchronously INSIDE the handshake respond stil
       feedback: "tighten step 2",
     });
   });
-  const outcome = await createPlannotatorBridge(bus).review("# A plan");
+  const outcome = await createPlannotatorBridge(bus, noActivity).review("# A plan");
   assert.deepEqual(outcome, {
     status: "completed",
     approved: false,
@@ -762,7 +839,7 @@ test("bridge: a decision emitted BEFORE the handshake respond (other order) also
     bus.emit("plannotator:review-result", { reviewId: "rev-pre", approved: true });
     req.respond({ status: "handled", result: { status: "pending", reviewId: "rev-pre" } });
   });
-  const outcome = await createPlannotatorBridge(bus).review("# A plan");
+  const outcome = await createPlannotatorBridge(bus, noActivity).review("# A plan");
   assert.deepEqual(outcome, { status: "completed", approved: true, reviewId: "rev-pre" });
 });
 
@@ -778,7 +855,7 @@ test("bridge: buffered decisions for OTHER reviews are discarded; the live match
       bus.emit("plannotator:review-result", { reviewId: "rev-live", approved: false });
     }, 5);
   });
-  const outcome = await createPlannotatorBridge(bus).review("# A plan");
+  const outcome = await createPlannotatorBridge(bus, noActivity).review("# A plan");
   assert.deepEqual(outcome, { status: "completed", approved: false, reviewId: "rev-live" });
   assert.deepEqual(bus.requests, ["plan-review"]);
 });
@@ -797,7 +874,7 @@ test("bridge: malformed early payloads are ignored; the first well-formed match 
     });
     req.respond({ status: "handled", result: { status: "pending", reviewId: "rev-e" } });
   });
-  const outcome = await createPlannotatorBridge(bus).review("# A plan");
+  const outcome = await createPlannotatorBridge(bus, noActivity).review("# A plan");
   assert.deepEqual(outcome, {
     status: "completed",
     approved: true,
@@ -816,7 +893,7 @@ test("bridge: no review-status request is ever emitted across the live-decision 
       5,
     );
   });
-  await createPlannotatorBridge(bus).review("# A plan");
+  await createPlannotatorBridge(bus, noActivity).review("# A plan");
   assert.deepEqual(bus.requests, ["plan-review"]);
 });
 

@@ -28,6 +28,7 @@ import { runScratchDir, sessionDataDir } from "../../substrate/cache.ts";
 import { digestSessionData } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { type BranchEntry, WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
+import { createPerkStatus } from "../../surfaces/surfaces.ts";
 import { scriptedDraftReviewBridge } from "../../testing/draftReview.ts";
 import { gitInit, loadPerkSession, scaffoldRepo, spyInjections } from "../../testing/harness.ts";
 import type { ReportWave } from "../../waves/reportWave.ts";
@@ -351,7 +352,7 @@ function fixture(
   } satisfies ToolGating;
   const reviews = createDraftReviewSlot(pi);
   const notARunner = () => false;
-  installPlanBindings(pi, gating, reviews, notARunner);
+  installPlanBindings(pi, gating, reviews, notARunner, createPerkStatus());
   installObjectiveAuthoringBindings(pi, gating, reviews, notARunner);
   installGistBindings(pi, gating, reviews, notARunner);
   installObjectivePlanningBindings(pi, gating, {} as ReportWave);

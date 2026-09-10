@@ -26,6 +26,7 @@ import { digestSessionData } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
+import { createPerkStatus } from "../../surfaces/surfaces.ts";
 import { seedBrowserReview } from "../../testing/draftReview.ts";
 import {
   fakePerk,
@@ -497,7 +498,10 @@ function decisionScaffold(opts: { saveJson?: string; saveCode?: number; idle?: b
     cwd,
     sessionManager: { getBranch: () => branch },
     hasUI: true,
-    ui: { notify: (message: string, severity?: string) => notified.push({ message, severity }) },
+    ui: {
+      notify: (message: string, severity?: string) => notified.push({ message, severity }),
+      setStatus: () => {},
+    },
     isIdle: () => opts.idle ?? true,
   } as unknown as ExtensionContext;
   const slot = seedBrowserReview(pi, ctx, "objective", DRAFT_PAYLOAD);
@@ -897,7 +901,10 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
     cwd,
     sessionManager: { getBranch: () => branch },
     hasUI: true,
-    ui: { notify: (message: string, severity?: string) => notified.push({ message, severity }) },
+    ui: {
+      notify: (message: string, severity?: string) => notified.push({ message, severity }),
+      setStatus: () => {},
+    },
     isIdle: () => true,
     signal: undefined,
   } as unknown as ExtensionContext;
@@ -911,6 +918,7 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
     draftReview,
     annotations,
     seedBrowserReview(pi, ctx, "objective", DRAFT_PAYLOAD),
+    createPerkStatus(),
     {
       pickFreePort: async () => 45002,
       probe: async () => false,
@@ -984,7 +992,10 @@ test("open core: primes BOTH surfaces (plan mode + objective draft type), RETURN
     cwd,
     sessionManager: { getBranch: () => branch },
     hasUI: true,
-    ui: { notify: (message: string, severity?: string) => notified.push({ message, severity }) },
+    ui: {
+      notify: (message: string, severity?: string) => notified.push({ message, severity }),
+      setStatus: () => {},
+    },
     isIdle: () => true,
     signal: undefined,
   } as unknown as ExtensionContext;
@@ -997,6 +1008,7 @@ test("open core: primes BOTH surfaces (plan mode + objective draft type), RETURN
     draftReview,
     annotations,
     seedBrowserReview(pi, ctx, "objective", DRAFT_PAYLOAD),
+    createPerkStatus(),
     {
       pickFreePort: async () => 45001,
       probe: async () => true,

@@ -1,6 +1,7 @@
 // Tests for the perk surfaces module: pins the charter-law
 // vocabulary (slot keys, marks, glyphs, height bounds — `docs/design/tui-charter.md` §4/§5),
-// unit-tests the single-value `createPerkStatus` handle (publish/clear + headless no-op), the
+// unit-tests the composed `createPerkStatus` handle (publish/clear + the ref-counted activity +
+// headless no-op), the
 // transcript marker renderers + `registerTranscriptRenderer` seam (audit §2.3), the footer
 // machinery, and the helpers.
 
@@ -8,6 +9,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import {
+  ACTIVITY_BROWSER_REVIEW,
   btwThreadEntryRenderer,
   btwThreadResetEntryRenderer,
   composeFooterLine,
@@ -173,6 +175,98 @@ test("createPerkStatus: subscribe fires per headful set; never on headless; unsu
   unsubscribe();
   status.set(headful.target, undefined);
   assert.equal(fired, 2);
+});
+
+// --- createPerkStatus activity (the ref-counted second half) ---------------------------------
+
+test("createPerkStatus: the ref-counted activity composes with the objective into the one slot (`<objective> · <activity>`, either half optional)", () => {
+  const { target, calls } = fakeTarget(true);
+  const status = createPerkStatus();
+  let fired = 0;
+  status.subscribe(() => {
+    fired += 1;
+  });
+  const last = (): string | undefined => calls.at(-1)?.value;
+
+  status.set(target, "🎯 251");
+  assert.equal(last(), "🎯 251");
+
+  const endA = status.beginActivity(target, ACTIVITY_BROWSER_REVIEW);
+  assert.equal(last(), "🎯 251 · waiting on browser review");
+  assert.equal(status.get(), "🎯 251 · waiting on browser review");
+  assert.equal(fired, 2, "a subscriber fires on begin");
+
+  // An overlapping wait (the doors' accepted double-open): unchanged, still one text.
+  const endB = status.beginActivity(target, ACTIVITY_BROWSER_REVIEW);
+  assert.equal(last(), "🎯 251 · waiting on browser review");
+
+  // Ending A leaves the text — B is still live; a second endA is inert (no publish, no notify).
+  endA();
+  assert.equal(last(), "🎯 251 · waiting on browser review");
+  const publishesAfterFirstEnd = calls.length;
+  const firedAfterFirstEnd = fired;
+  endA();
+  assert.equal(calls.length, publishesAfterFirstEnd, "a repeated end publishes nothing");
+  assert.equal(fired, firedAfterFirstEnd, "a repeated end notifies nobody");
+  assert.equal(last(), "🎯 251 · waiting on browser review");
+
+  // Either half optional: no objective → the activity alone; the last end → undefined.
+  status.set(target, undefined);
+  assert.equal(last(), "waiting on browser review");
+  const firedBeforeEndB = fired;
+  endB();
+  assert.equal(last(), undefined);
+  assert.equal(status.get(), undefined);
+  assert.equal(fired, firedBeforeEndB + 1, "a subscriber fires on end");
+
+  // Each live wait keeps its own text: the newest shows, and ending it restores the remainder.
+  const endX = status.beginActivity(target, "waiting on X");
+  const endY = status.beginActivity(target, "waiting on Y");
+  assert.equal(last(), "waiting on Y");
+  endY();
+  assert.equal(last(), "waiting on X", "ending the newest restores the older live wait");
+  endX();
+  assert.equal(last(), undefined);
+
+  // clearActivity resets every wait (session shutdown). The reset wait's late end must be
+  // inert even when a NEW wait began after the reset: it neither consumes the new wait nor
+  // publishes/notifies (a bridge may settle after session_shutdown against a torn-down UI).
+  status.set(target, "🎯 252");
+  const endC = status.beginActivity(target, ACTIVITY_BROWSER_REVIEW);
+  assert.equal(last(), "🎯 252 · waiting on browser review");
+  status.clearActivity(target);
+  assert.equal(last(), "🎯 252");
+  const endD = status.beginActivity(target, ACTIVITY_BROWSER_REVIEW);
+  assert.equal(last(), "🎯 252 · waiting on browser review");
+  const publishesBeforeLateEnd = calls.length;
+  const firedBeforeLateEnd = fired;
+  endC(); // the reset wait's late end
+  assert.equal(calls.length, publishesBeforeLateEnd, "a reset wait's late end publishes nothing");
+  assert.equal(fired, firedBeforeLateEnd, "a reset wait's late end notifies nobody");
+  assert.equal(last(), "🎯 252 · waiting on browser review", "the newer wait survives");
+  assert.equal(status.get(), "🎯 252 · waiting on browser review");
+  endD();
+  assert.equal(last(), "🎯 252");
+  // A late end with nothing live after the reset is equally inert.
+  const endE = status.beginActivity(target, ACTIVITY_BROWSER_REVIEW);
+  status.clearActivity(target);
+  const publishesAfterClear = calls.length;
+  endE();
+  assert.equal(calls.length, publishesAfterClear);
+  assert.equal(last(), "🎯 252");
+
+  // Headless: no publish, get() unchanged, a no-op end.
+  const headless = fakeTarget(false);
+  const publishes = calls.length;
+  const firedBeforeHeadless = fired;
+  const endHeadless = status.beginActivity(headless.target, ACTIVITY_BROWSER_REVIEW);
+  assert.deepEqual(headless.calls, []);
+  assert.equal(status.get(), "🎯 252");
+  endHeadless();
+  status.clearActivity(headless.target);
+  assert.deepEqual(headless.calls, []);
+  assert.equal(calls.length, publishes);
+  assert.equal(fired, firedBeforeHeadless);
 });
 
 // --- composeFooterLine (charter D2/D9) -------------------------------------------------

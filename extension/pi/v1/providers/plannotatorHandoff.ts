@@ -65,6 +65,7 @@ import {
   stringField,
 } from "../../../substrate/coldDoor.ts";
 import { type ReportTarget, report } from "../../../surfaces/report.ts";
+import { ACTIVITY_BROWSER_REVIEW, type ActivitySink } from "../../../surfaces/surfaces.ts";
 // Type-only (erased at runtime — no cycle): the outcome vocabulary lives with the shared
 // review-surface machinery.
 import type { ReviewOutcome } from "../reviewOutcome.ts";
@@ -558,12 +559,18 @@ export type StartedBrowser = StartedSurface<CodeReviewOutcome>;
  * value is ALWAYS restored (delete if previously unset) in a `finally` when the poll ends: after
  * the window the fixed port is released back to plannotator's own resolution (random port) for
  * any later server. A port-pick failure throws — the caller owns its failure surface.
+ *
+ * The `activity` sink carries the one perk-owned wait an operator cannot otherwise see: begun
+ * when readiness resolves `ready` while the bridge is still pending, ended when the bridge
+ * settles (fulfilled OR rejected). The handle's counter arbitrates the doors' accepted
+ * double-open (see the door headers) — this instance ends only ITS wait.
  */
 async function startPlannotatorSurface<T>(
   launch: (signal?: AbortSignal) => Promise<T>,
   probePath: string,
   signal: AbortSignal | undefined,
   deps: StartBrowserDeps,
+  activity: ActivitySink,
 ): Promise<StartedSurface<T>> {
   const pickPort = deps.pickFreePort ?? pickFreePort;
   const probe =
@@ -583,6 +590,7 @@ async function startPlannotatorSurface<T>(
   // Launch the bridge request while PLANNOTATOR_PORT is preset — plannotator's `listenOnPort`
   // reads it at bind time.
   let bridgeSettled = false;
+  let end: (() => void) | undefined;
   let bridgePromise: Promise<T>;
   try {
     bridgePromise = launch(signal);
@@ -591,9 +599,13 @@ async function startPlannotatorSurface<T>(
     else process.env.PLANNOTATOR_PORT = priorPort;
     throw error;
   }
-  void bridgePromise.then(() => {
+  // Any settlement stops the poll and ends the wait — a rejecting launch is reachable only over
+  // a non-pi bus (pi's event bus wraps every handler), but the generic seam must be robust to it.
+  const onSettle = (): void => {
     bridgeSettled = true;
-  });
+    end?.();
+  };
+  void bridgePromise.then(onSettle, onSettle);
 
   const readiness = (async (): Promise<BrowserReadiness> => {
     try {
@@ -603,7 +615,11 @@ async function startPlannotatorSurface<T>(
         // arm must win so the observer stays silent instead of degrading.
         if (signal?.aborted === true) return "aborted";
         if (bridgeSettled) return "bridge_settled";
-        if (await probe(url, signal)) return "ready";
+        if (await probe(url, signal)) {
+          // The bridge may have settled during the probe — begin only while it is still pending.
+          if (!bridgeSettled) end = activity(ACTIVITY_BROWSER_REVIEW);
+          return "ready";
+        }
         await sleep(intervalMs);
       }
       return "timeout";
@@ -638,6 +654,7 @@ export async function startPlannotatorBrowser(
     diffType?: string;
     defaultBranch?: string;
     signal?: AbortSignal;
+    activity: ActivitySink;
   },
   deps: StartBrowserDeps = {},
 ): Promise<StartedBrowser> {
@@ -653,6 +670,7 @@ export async function startPlannotatorBrowser(
     CODE_REVIEW_READINESS_PROBE_PATH,
     opts.signal,
     deps,
+    opts.activity,
   );
 }
 
@@ -667,7 +685,7 @@ export async function startPlannotatorBrowser(
  */
 export async function startPlannotatorPlanReview(
   bus: PlannotatorBus,
-  opts: { plan: string; signal?: AbortSignal },
+  opts: { plan: string; signal?: AbortSignal; activity: ActivitySink },
   deps: StartBrowserDeps = {},
 ): Promise<StartedSurface<ReviewOutcome>> {
   return await startPlannotatorSurface(
@@ -675,5 +693,6 @@ export async function startPlannotatorPlanReview(
     PLAN_REVIEW_READINESS_PROBE_PATH,
     opts.signal,
     deps,
+    opts.activity,
   );
 }

@@ -62,6 +62,7 @@ import {
 import { REFINE_STAGE } from "../../../authoring/refinement/context.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { rebuildWorkflowState } from "../../../substrate/workflowState.ts";
+import { ACTIVITY_BROWSER_REVIEW, type ActivitySink } from "../../../surfaces/surfaces.ts";
 import { installInjectedContext, isPlanGuidanceStage } from "../contextInjection.ts";
 import type { ReviewOutcome } from "../reviewOutcome.ts";
 import { isPlannotatorPlanSelected } from "./selection.ts";
@@ -353,12 +354,26 @@ export async function requestPlannotatorPlanReview(
 /**
  * Create the plannotator bridge over an event bus — the thin structural slice
  * (`{ review(plan, signal) }`) injected into the review door; the body lives in
- * `requestPlannotatorPlanReview`.
+ * `requestPlannotatorPlanReview`. The `activity` wait spans the whole blocking review (begun
+ * before delegating, ended in `finally` — decision, abort or unavailable alike): every warm
+ * arm (plan, objective, gist, refinement) reviews through here, so this one site covers them.
  */
-export function createPlannotatorBridge(bus: PlannotatorBus): {
+export function createPlannotatorBridge(
+  bus: PlannotatorBus,
+  activity: ActivitySink,
+): {
   review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome>;
 } {
-  return { review: (plan, signal) => requestPlannotatorPlanReview(bus, plan, signal) };
+  return {
+    async review(plan, signal) {
+      const end = activity(ACTIVITY_BROWSER_REVIEW);
+      try {
+        return await requestPlannotatorPlanReview(bus, plan, signal);
+      } finally {
+        end();
+      }
+    },
+  };
 }
 
 // ------------------------------------------------------------------ Direct Edits extraction

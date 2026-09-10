@@ -60,6 +60,7 @@ import { render } from "../../substrate/prompts.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { type ReportTarget, report } from "../../surfaces/report.ts";
+import type { ActivityHandle } from "../../surfaces/surfaces.ts";
 import {
   checkDraftReviewDecision,
   type DraftReviewSlot,
@@ -324,6 +325,7 @@ export async function openPlanReviewSurface(
   draftReview: DraftReviewWaveState,
   annotations: AnnotationState,
   slot: DraftReviewSlot,
+  status: ActivityHandle,
   deps: StartBrowserDeps = {},
 ): Promise<string | null> {
   // The slot open FIRST: no browser launches for a review that could never be routed (no run
@@ -346,7 +348,11 @@ export async function openPlanReviewSurface(
   try {
     started = await startPlannotatorPlanReview(
       pi.events,
-      { plan: opts.draft, signal: ctx.signal },
+      {
+        plan: opts.draft,
+        signal: ctx.signal,
+        activity: (text) => status.beginActivity(ctx, text),
+      },
       deps,
     );
   } catch (error) {
@@ -445,6 +451,7 @@ export async function openPlanReviewAndGuide(
   draftReview: DraftReviewWaveState,
   annotations: AnnotationState,
   slot: DraftReviewSlot,
+  status: ActivityHandle,
   deps: StartBrowserDeps = {},
 ): Promise<void> {
   const guidance = await openPlanReviewSurface(
@@ -455,6 +462,7 @@ export async function openPlanReviewAndGuide(
     draftReview,
     annotations,
     slot,
+    status,
     deps,
   );
   if (guidance !== null) pi.sendUserMessage(guidance);
@@ -469,6 +477,7 @@ export function registerPlanReviewBrowser(
   draftReview: DraftReviewWaveState,
   annotations: AnnotationState,
   slot: DraftReviewSlot,
+  status: ActivityHandle,
 ): void {
   registerPerkCommand(pi, SCOPE, {
     description:
@@ -535,6 +544,7 @@ export function registerPlanReviewBrowser(
         draftReview,
         annotations,
         slot,
+        status,
       );
     },
   });

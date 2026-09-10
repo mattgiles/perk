@@ -237,12 +237,37 @@ export default function perk(
   // per-activation current-review slot + unconfirmed-save latch every review surface shares
   // (§8.23 "Draft-review guards") — in-memory, nothing persisted.
   const draftReviews = createDraftReviewSlot(pi);
-  installPlanBindings(pi, gating, draftReviews, () => runnerChild, {
+
+  // The composed `perk` status handle (charter D2): one slot carrying the objective segment +
+  // the ref-counted browser-wait activity. Created once here (no hidden module state) and
+  // threaded into the objective publisher, the plan installer (the warm plannotator arm) and
+  // the browser doors; the footer reads it back via get/subscribe.
+  const perkStatus = createPerkStatus();
+
+  installPlanBindings(pi, gating, draftReviews, () => runnerChild, perkStatus, {
     present: () => plannotatorPresent(pi),
     plan: (ctx, opts) =>
-      openPlanReviewSurface(pi, ctx, gating, opts, draftReviewWave, annotations, draftReviews),
+      openPlanReviewSurface(
+        pi,
+        ctx,
+        gating,
+        opts,
+        draftReviewWave,
+        annotations,
+        draftReviews,
+        perkStatus,
+      ),
     objective: (ctx, opts) =>
-      openObjectiveReviewSurface(pi, ctx, gating, opts, draftReviewWave, annotations, draftReviews),
+      openObjectiveReviewSurface(
+        pi,
+        ctx,
+        gating,
+        opts,
+        draftReviewWave,
+        annotations,
+        draftReviews,
+        perkStatus,
+      ),
   });
 
   // The first 3rd-party plan adapter: a perk-owned, injection-only bridge that re-enables
@@ -298,11 +323,6 @@ export default function perk(
   }
   const registryOk = registryStages > 0;
 
-  // The single-value `perk` status handle (charter D2): one slot carrying the objective
-  // segment. Created once here (no hidden module state) and threaded into the objective
-  // publisher below; the footer reads it back via get/subscribe.
-  const perkStatus = createPerkStatus();
-
   // The generic full report-detail entry and the `perk:workflow-state` transition marker. Renderer
   // bodies live in surfaces.ts; registration is wiring through the pre-0.80.4-safe seam. The report
   // family is appended by command-attached sinks; one workflow registration covers every appender.
@@ -314,11 +334,13 @@ export default function perk(
   // consumer lease releases with the session. A stale /reload predecessor instance is retired
   // by the lease fencing (fresh token per same-identity reacquire + verify-before-inject).
   const feedbackReceiver = (options.feedbackReceiverFactory ?? createHunkFeedbackReceiver)(pi);
-  pi.on("session_shutdown", async () => {
+  pi.on("session_shutdown", async (_event, ctx) => {
     submitConflict.shutdown();
     stackConflict.shutdown();
     await conflictResolver.shutdown();
     feedbackReceiver.close();
+    // A browser-wait activity cannot outlive the session.
+    perkStatus.clearActivity(ctx);
   });
 
   pi.on("session_start", async (_event, ctx) => {
@@ -602,24 +624,31 @@ export default function perk(
   // The warm `/pr-review-browser` door: the browser review entry — plannotator always, opened
   // in the background (pre-PR it absorbs the since-base local browser review); posting is the
   // human's own platform-post from the UI, with `submit_pr_review` for request-changes only.
-  installPrReviewBrowserBindings(pi, annotations);
+  installPrReviewBrowserBindings(pi, annotations, perkStatus);
 
   // The warm `/stack-review-browser` door + its cold-launch twin (`open_stack_review`): the
   // stacked-PR browser review over the combined base→top diff — one reviewer wave with
   // `stack: true`, then judgment-routed per-PR posting through `submit_pr_review`.
-  installStackReviewBindings(pi, annotations);
+  installStackReviewBindings(pi, annotations, perkStatus);
 
   // The warm `/plan-review-browser` door: the summonable streaming draft review — the
   // plannotator plan-review browser on the working plan draft, draft reviewers streaming
   // phrase-anchored findings in; APPROVE auto-saves via the approvalSave seam, DENY returns a
   // model-mediated revision round.
-  registerPlanReviewBrowser(pi, gating, draftReviewWave, annotations, draftReviews);
+  registerPlanReviewBrowser(pi, gating, draftReviewWave, annotations, draftReviews, perkStatus);
 
   // The warm `/objective-review-browser` door: the summonable streaming objective-draft review
   // — the plannotator plan-review browser on the RENDERED working objective draft, draft
   // reviewers streaming phrase-anchored findings in; APPROVE auto-saves via the
   // objectiveApprovalSave seam, Direct Edits = a model-mediated revise round (never auto-saved).
-  registerObjectiveReviewBrowser(pi, gating, draftReviewWave, annotations, draftReviews);
+  registerObjectiveReviewBrowser(
+    pi,
+    gating,
+    draftReviewWave,
+    annotations,
+    draftReviews,
+    perkStatus,
+  );
 
   // The read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).

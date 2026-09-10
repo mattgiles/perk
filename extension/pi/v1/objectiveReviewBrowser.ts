@@ -71,6 +71,7 @@ import { render } from "../../substrate/prompts.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { branchOf, rebuildWorkflowState } from "../../substrate/workflowState.ts";
 import { type ReportTarget, report } from "../../surfaces/report.ts";
+import type { ActivityHandle } from "../../surfaces/surfaces.ts";
 import {
   checkDraftReviewDecision,
   type DraftReviewSlot,
@@ -364,6 +365,7 @@ export async function openObjectiveReviewSurface(
   draftReview: DraftReviewWaveState,
   annotations: AnnotationState,
   slot: DraftReviewSlot,
+  status: ActivityHandle,
   deps: StartBrowserDeps = {},
 ): Promise<string | null> {
   const opened = slot.open(ctx, {
@@ -386,7 +388,11 @@ export async function openObjectiveReviewSurface(
     // objective rides it unchanged (no plan-specific validation).
     started = await startPlannotatorPlanReview(
       pi.events,
-      { plan: opts.rendered, signal: ctx.signal },
+      {
+        plan: opts.rendered,
+        signal: ctx.signal,
+        activity: (text) => status.beginActivity(ctx, text),
+      },
       deps,
     );
   } catch (error) {
@@ -487,6 +493,7 @@ export async function openObjectiveReviewAndGuide(
   draftReview: DraftReviewWaveState,
   annotations: AnnotationState,
   slot: DraftReviewSlot,
+  status: ActivityHandle,
   deps: StartBrowserDeps = {},
 ): Promise<void> {
   const guidance = await openObjectiveReviewSurface(
@@ -497,6 +504,7 @@ export async function openObjectiveReviewAndGuide(
     draftReview,
     annotations,
     slot,
+    status,
     deps,
   );
   if (guidance !== null) pi.sendUserMessage(guidance);
@@ -511,6 +519,7 @@ export function registerObjectiveReviewBrowser(
   draftReview: DraftReviewWaveState,
   annotations: AnnotationState,
   slot: DraftReviewSlot,
+  status: ActivityHandle,
 ): void {
   registerPerkCommand(pi, SCOPE, {
     description:
@@ -608,6 +617,7 @@ export function registerObjectiveReviewBrowser(
         draftReview,
         annotations,
         slot,
+        status,
       );
     },
   });

@@ -67,7 +67,9 @@ Five small first-party features ride along inside the perk extension. None is a 
 door, or model tool; they are human-facing only.
 
 - **The perk footer** — the one-line footer perk owns in the interactive TUI (it supersedes Pi's
-  default footer wholesale): perk identity · 🎯 objective on the left; branch · model · thinking ·
+  default footer wholesale): perk identity · 🎯 objective (joined by ` · waiting on browser review`
+  while a plannotator browser review — plan, objective, gist or code — awaits your decision) on
+  the left; branch · model · thinking ·
   **cache-hit rate** · context · guest-extension statuses right-aligned. The cache segment
   (`CH42.3%`) restores Pi's default-footer `CH` prompt-cache-hit display and stays absent until the
   session shows cache activity. For per-miss detail, enable Pi's `showCacheMissNotices` setting

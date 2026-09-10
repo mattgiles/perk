@@ -26,6 +26,7 @@ import { digestSessionData } from "../../substrate/sessionData.ts";
 import type { ToolGating } from "../../substrate/toolGating.ts";
 import { WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
 import type { ReportTarget } from "../../surfaces/report.ts";
+import { createPerkStatus } from "../../surfaces/surfaces.ts";
 import { seedBrowserReview } from "../../testing/draftReview.ts";
 import {
   gitInit,
@@ -489,7 +490,10 @@ function decisionScaffold(opts: { saveJson?: string; saveCode?: number; idle?: b
     cwd,
     sessionManager: { getBranch: () => branch },
     hasUI: true,
-    ui: { notify: (message: string, severity?: string) => notified.push({ message, severity }) },
+    ui: {
+      notify: (message: string, severity?: string) => notified.push({ message, severity }),
+      setStatus: () => {},
+    },
     isIdle: () => opts.idle ?? true,
   } as unknown as ExtensionContext;
   const slot = seedBrowserReview(pi, ctx, "plan", DE_BASE);
@@ -779,7 +783,7 @@ test("decision: APPROVE + failed save → loud error naming /plan-save, gate ON,
     },
     on() {},
   } as unknown as ExtensionAPI;
-  installPlanBindings(registrar, s.gating, s.slot, () => false);
+  installPlanBindings(registrar, s.gating, s.slot, () => false, createPerkStatus());
   const planSave = commands.get("plan-save");
   assert.ok(planSave, "/plan-save registered");
   await planSave("", s.ctx);
@@ -855,7 +859,10 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
     cwd,
     sessionManager: { getBranch: () => branch },
     hasUI: true,
-    ui: { notify: (message: string, severity?: string) => notified.push({ message, severity }) },
+    ui: {
+      notify: (message: string, severity?: string) => notified.push({ message, severity }),
+      setStatus: () => {},
+    },
     isIdle: () => true,
     signal: undefined,
   } as unknown as ExtensionContext;
@@ -869,6 +876,7 @@ test("open: a post-degrade decision is ignored loudly (never routed into a save)
     draftReview,
     annotations,
     seedBrowserReview(pi, ctx, "plan", "# The draft\n"),
+    createPerkStatus(),
     {
       pickFreePort: async () => 45002,
       probe: async () => false,
@@ -945,7 +953,10 @@ test("open: a still-starting review's late timeout never degrades the review tha
     cwd,
     sessionManager: { getBranch: () => branch },
     hasUI: true,
-    ui: { notify: (message: string, severity?: string) => notified.push({ message, severity }) },
+    ui: {
+      notify: (message: string, severity?: string) => notified.push({ message, severity }),
+      setStatus: () => {},
+    },
     isIdle: () => true,
     signal: undefined,
   } as unknown as ExtensionContext;
@@ -967,6 +978,7 @@ test("open: a still-starting review's late timeout never degrades the review tha
     draftReview,
     annotations,
     slot,
+    createPerkStatus(),
     {
       pickFreePort: async () => 45011,
       probe: () => gateA,
@@ -985,6 +997,7 @@ test("open: a still-starting review's late timeout never degrades the review tha
     draftReview,
     annotations,
     slot,
+    createPerkStatus(),
     {
       pickFreePort: async () => 45012,
       probe: async () => true,
@@ -1117,7 +1130,10 @@ test("open core: primes BOTH surfaces with the deterministic URL/plan mode, RETU
     cwd,
     sessionManager: { getBranch: () => branch },
     hasUI: true,
-    ui: { notify: (message: string, severity?: string) => notified.push({ message, severity }) },
+    ui: {
+      notify: (message: string, severity?: string) => notified.push({ message, severity }),
+      setStatus: () => {},
+    },
     isIdle: () => true,
     signal: undefined,
   } as unknown as ExtensionContext;
@@ -1130,6 +1146,7 @@ test("open core: primes BOTH surfaces with the deterministic URL/plan mode, RETU
     draftReview,
     annotations,
     seedBrowserReview(pi, ctx, "plan", "# The draft\n"),
+    createPerkStatus(),
     {
       pickFreePort: async () => 45001,
       probe: async () => true,

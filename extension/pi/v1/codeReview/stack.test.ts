@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
 import { workflowDir } from "../../../substrate/cache.ts";
+import { createPerkStatus } from "../../../surfaces/surfaces.ts";
 import {
   fakePerk,
   loadPerkSession,
@@ -653,7 +654,7 @@ test("executeOpenStackReview: a browser-open failure is browser_failed and keeps
     cwd,
     hasUI: true,
     sessionManager: { getBranch: () => branch },
-    ui: { notify: () => {} },
+    ui: { notify: () => {}, setStatus: () => {} },
   } as unknown as Parameters<typeof executeOpenStackReview>[1];
 
   const latch = { opened: false };
@@ -663,7 +664,8 @@ test("executeOpenStackReview: a browser-open failure is browser_failed and keeps
     ctx,
     latch,
     createAnnotationState(),
-    (_pi, _ctx, _annotations, opts) => {
+    createPerkStatus(),
+    (_pi, _ctx, _annotations, _status, opts) => {
       opens.push(opts.checkoutPath);
       return Promise.resolve(false);
     },
@@ -676,14 +678,24 @@ test("executeOpenStackReview: a browser-open failure is browser_failed and keeps
   assert.equal(latch.opened, false, "a failed open never consumes the single-use latch");
 
   // The failure is retryable: the SAME latch accepts a later successful open…
-  const succeeded = await executeOpenStackReview(pi, ctx, latch, createAnnotationState(), () =>
-    Promise.resolve(true),
+  const succeeded = await executeOpenStackReview(
+    pi,
+    ctx,
+    latch,
+    createAnnotationState(),
+    createPerkStatus(),
+    () => Promise.resolve(true),
   );
   assert.equal((succeeded.details as { ok: boolean }).ok, true);
   assert.equal(latch.opened, true);
   // …and only then does single-use bite.
-  const third = await executeOpenStackReview(pi, ctx, latch, createAnnotationState(), () =>
-    Promise.resolve(true),
+  const third = await executeOpenStackReview(
+    pi,
+    ctx,
+    latch,
+    createAnnotationState(),
+    createPerkStatus(),
+    () => Promise.resolve(true),
   );
   const thirdDetails = third.details as { ok: boolean; error_type?: string };
   assert.equal(thirdDetails.ok, false);
