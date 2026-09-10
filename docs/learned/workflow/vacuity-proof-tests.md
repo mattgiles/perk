@@ -31,8 +31,15 @@ condition that would make an incorrect implementation fail, then assert the full
   requests from parity fakes".
 - Discriminating inputs live inside the measured scope; de-coincide coinciding fixture
   identities — "Put discriminating inputs inside the measured scope".
-- Negative-space checks prove a live selector and fail under an injected offender; unobservable
-  invariants pin structurally in source — "Negative-space checks" / "Structural source pins".
+- Negative-space checks prove a live selector and fail under an injected offender; a
+  regression pin names the mutation it catches; widen the TEST seed to `unknown`, never the
+  production type — "Negative-space checks" / "Structural source pins".
+- Seam conversions keep an assertion-ownership ledger; ONE engine story owns registration
+  (`is not None`, fault-inject by deleting the registration) — "Seam conversions".
+- A race pin swaps the world inside the counted read window (`measureArtifactReadCalls`) — "Put
+  discriminating inputs inside the measured scope".
+- Never-execute seams need a live control that first FIRES unhardened (two-stage: git's external
+  diff skips textconv) plus an argv pin — "Live controls for never-execute seams".
 - Keep one real default path through the deepest seam; pin composition via the CAPTURED
   registration, never a hand rebuild — "Keep one real default path and verify delegates".
 - Assert where values leave the subsystem, reading back through the production reconstruction
@@ -77,6 +84,17 @@ property observed through the old path needs a new observer:
   (#2155).
 - A contract preserved by doing nothing needs a pin as much as a changed one — "no change"
   claims regress silently without an assertion (#2183).
+- **Keep an assertion-ownership ledger.** Before deleting the old observers, write a table mapping
+  every pre-change observation → its post-change owner, and name the rows that move to a
+  pure-layer test so the retained engine story does not re-prove them. The **registration
+  discriminator**: exactly one real-engine story owns registration, composition, and exit mapping —
+  it locates the check with `next(…, None)` and asserts `is not None` (a `StopIteration` from a bare
+  `next()` is an accident, not a pin). Then fault-inject by deleting the registration line and
+  confirm **only** the engine story fails. Precedent: `tests/test_doctor.py`'s
+  `subagent-bridge-config` suite (`test_subagent_bridge_config_engine_story` plus the direct-seam
+  matrix) went 6 → 2 engine runs while keeping 10 → 10 cases. Shortcut: with `PI_CODING_AGENT_DIR`
+  set, a bare `tmp_path` is a complete input for the env-arm cases — only config-arm cases need a
+  scaffolded repo.
 
 ## Manufacture collisions for uniqueness and dedup claims
 
@@ -209,6 +227,31 @@ that fixture design generalizes to every conversion proof.
 - De-coincide fixture identities: when an output interpolates an identity present in several
   coinciding fixture sources, thread a divergent alias through one source and pin BOTH the
   presence of the resolved value AND the absence of the alias (#2154).
+- **The interleaved-read race pin.** A spy asserting `markdown === render(decode(raw))` pins
+  nothing when the artifact never changes between reads — it is true under the racy and the fixed
+  implementation alike. Put the world-swap *inside* the measured window: use the counting seam
+  (`extension/pi/v1/planReview.test.ts::measureArtifactReadCalls` reports how many branch reads one
+  artifact read costs), swap the on-disk artifact at call `perRead + 1`, and drive the **arm**
+  directly — going through the dispatcher adds its own read and shifts the swap point. Before
+  accepting "untestable" for a race, look for an existing counting seam.
+
+## Live controls for never-execute seams
+
+A "this must never run" seam (a diff that must not execute the user's `diff.external`/textconv
+against untrusted PR content) needs a control proving the dangerous fixture **fires** when the
+hardening is absent — otherwise a helper that never fires for an unrelated reason proves nothing.
+The shape (`tests/test_git.py::test_diff_range_never_executes_configured_diff_helpers`):
+
+1. Configure the dangerous driver to touch a canary; run the **unhardened** control (raw
+   `git diff`) and assert the canary exists.
+2. Delete the evidence; run the hardened seam (`diff_range`) and assert no canary.
+
+Git's precedence makes the control **two-stage**: once `diff.external` is set, git *skips textconv*
+entirely, so a single "both configured" control would prove the external hook live and the textconv
+hook nothing. Prove textconv alone (canary 1), then add external (canary 2), then run the seam with
+both. Pair every live control with an **argv-pin** test (`test_diff_range_and_fetch_refspecs_pin_their_argv`) —
+a dropped `--no-textconv` flag fails there even in an environment where the live control happens to
+be insensitive. The contract itself is in `workflow/git-substrate.md`.
 
 ## Negative-space checks need floors and mutation proofs
 
@@ -224,6 +267,17 @@ repository invariant into an empty scan.
 Mutation-proof ordering pins by temporarily reversing the implementation and watching the pin
 fail — but never restore with `git checkout <file>` while carrying uncommitted work (a HEAD
 reset wipes it); snapshot/stash first and revert only the temporary mutation (#1922).
+
+- **Name the mutation the pin catches.** A pin whose whole purpose is to block regression to a prior
+  shape should say so in a comment ("fails if X is reintroduced"): the hand-proof of temporarily
+  re-adding the bug lives only in the session transcript, and the next reader otherwise sees an
+  assertion with no visible reason to exist.
+- **Widen the test-binding seed, not the production type.** To exercise a fail-open decoder's
+  rejection table (absent / malformed / wrong-shape stored values), the *test* session builder
+  accepts the seed as `unknown` (`extension/testing/memoryWorkflowSession.ts`'s
+  `activePlanRef?: unknown` for `openMemoryWorkflowSession`) while the production field keeps its
+  narrow type — loosening the production type to make the test compile would delete the very
+  distinction the decoder exists to enforce.
 
 ## Structural source pins for unobservable invariants
 
