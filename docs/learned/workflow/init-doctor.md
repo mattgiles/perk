@@ -14,16 +14,12 @@ cluster: config-and-convergence
   check — "Managed convergence is the SSOT for doctor checks".
 - Any new `Check.group` value — managed or report-only — needs `GROUP_ORDER` inclusion plus a
   render-visibility test — "`doctor`'s human output renders only the `GROUP_ORDER` groups".
-- Growing `managed_artifacts()` requires the three-part eligibility test on the desired content —
-  "The managed-artifact set (`managed_artifacts()`) — the eligibility trio".
-- An unreadable config must make destructive reconciliation a NO-OP — substituting an empty
-  selection strips valid entries (contract §8.10) — "An unreadable config makes destructive
-  reconciliation a NO-OP".
-- Anything doing network I/O lives in the `fix AND verify`-gated repair gesture, never a
-  `ManagedConvergence` (which runs unconditionally in offline unit tests) — "Network repairs
-  live in the verify-gated repair gesture".
-- Removing a superseded substrate lifecycle follows the relocate-the-survivor recipe — "The
-  retire-an-orphaned-lifecycle recipe".
+- Growing `managed_artifacts()` requires the three-part eligibility test — "The managed-artifact
+  set"; an unreadable config makes destructive reconciliation a NO-OP (contract §8.10) — "An
+  unreadable config makes destructive reconciliation a NO-OP".
+- Network I/O lives in the `fix AND verify`-gated repair gesture, never a `ManagedConvergence` —
+  "Network repairs live in the verify-gated repair gesture"; retiring a superseded lifecycle
+  follows "The retire-an-orphaned-lifecycle recipe".
 - Environment checks need fixture coverage at their actual primitive, required-only filtering in
   every derived diagnostic, and remediation for absent and version-invalid arms — "The optional
   `EnvCheck` tier".
