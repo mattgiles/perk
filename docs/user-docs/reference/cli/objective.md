@@ -235,6 +235,7 @@ flag, UTC time) — so selection follows the post-sync configuration; the launch
 whether a prior refinement exists and the checkout observation — no sync, run mint, file write,
 claim, mutation or launch. Trailing arguments pass to `pi`. See
 [Objectives — Node refinements](../objectives.md#node-refinements-linear-project-objectives-only).
+Operator path: [How to refine future nodes before planning](../../how-to/refine-future-nodes.md).
 
 ### `perk objective refine-context NUMBER`
 

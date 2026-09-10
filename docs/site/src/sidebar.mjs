@@ -58,6 +58,7 @@ export const sidebar = [
         label: "Objectives & learnings",
         items: [
           "how-to/author-a-roadmap",
+          "how-to/refine-future-nodes",
           "how-to/replan-an-objective",
           "how-to/advance-or-skip-nodes",
           "how-to/reconcile-an-objective",

@@ -2059,7 +2059,12 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
 
 - **The two-target split.** The HTML-enhanced body — a best-effort `<details>` embed of the
   verbatim plan (via `get_plan_body`; `None` → no embed, no raise) + the checkout footer — goes
-  **only** into the GitHub PR body (`update_pr_body`). The squash **commit message** is the OTHER
+  **only** into the GitHub PR body (`update_pr_body`). **Size guard:** GitHub caps a PR body at
+  65,536 characters (create and PATCH alike); when the embed would push the footer-inclusive
+  body over that cap, the embed is replaced by a one-line pointer at the plan issue, the closing
+  keyword / plan link / footer are unchanged, the submit succeeds, and `plan_embedded` reports
+  `false`. The fit is judged with the footer reserved on both passes, so create and update
+  never disagree. The squash **commit message** is the OTHER
   target: plain text, set at land, so HTML never leaks into `git log`.
 - **Mergeability probe.** **After** the PR is created + the body validated, `perk pr submit` runs
   a deterministic **local** `git merge-tree --write-tree origin/<base> <head-ref>` probe (no GitHub
@@ -11591,8 +11596,10 @@ shared comment upsert, the backend-neutral service, plan/refinement coexistence,
 persistence gate. The public authoring/review doors (`perk objective refine` /
 `/objective-refine`, the `objective-refine` stage, the transfer artifacts, the
 `objective_refinement_draft` tool, the `plan_review` refinement arm and the human
-`/objective-refinement-save`) are §8.68. Planning-seed consumption is §8.26 (shipped);
-authenticated Linear evidence and the GitHub carrier remain **deferred** to later slices.
+`/objective-refinement-save`) are §8.68. Planning-seed consumption is §8.26 (shipped); the
+authenticated Linear refine→plan evidence is the `objective-refinement-linear-planning-*` gate
+record under `docs/design/archive/` (one dated run); the GitHub carrier remains **deferred**
+(§8.67 GitHub arm, later slices).
 
 **Modules.** `perk/objective/refinement/{models,codec,service}.py` (`__init__` empty).
 `models.py` is the pure type leaf (frozen dataclasses + `RefinementError`; no Pydantic / Click /
@@ -11867,7 +11874,7 @@ read → replace (same comment id, provenance preserved, old tail gone) → retr
 unchanged roadmap/manifest and every non-comment surface; the refinement mutation log is
 comment-only; then a real claim + plan save proves historical reads stay available while new
 saves refuse `node_ineligible`, with no delivery operation. Authenticated refine-to-plan
-evidence is NOT claimed here — it belongs to the planning-consumption slice's live Linear gate.
+evidence is recorded in that archive record, not here.
 
 ## §8.68 · Objective-node refinement authoring and reviewed save (the `objective-refine` doors)
 
@@ -12136,5 +12143,5 @@ parameterized `contexts/read-only.md` are all in `prompts/_fixtures/live.yaml`. 
 `docs/user-docs/reference/cli/objective.md`, `reference/objectives.md`, the in-session
 `workflow-commands` / `model-tools` / `review-and-authoring` references, the backend/provider
 entries and the `perk-expert` mirror. Automatic later-plan consumption of a saved refinement is
-§8.26; authenticated refine-to-plan evidence and a GitHub refinement carrier are NOT shipped by
-this section — each is a later increment.
+§8.26; authenticated refine-to-plan evidence is the archive record named in §8.67; a GitHub
+refinement carrier is NOT shipped by this section — a later increment.

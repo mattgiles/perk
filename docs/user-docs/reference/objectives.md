@@ -299,6 +299,9 @@ even when it quotes a complete plan-body example.
 
 #### Authoring a refinement
 
+For the operator path — pick, author, review, inspect, then plan — see
+[How to refine future nodes before planning](../how-to/refine-future-nodes.md).
+
 Two doors open a refinement pass — both **Linear-only** in this release (a GitHub objective
 store refuses with `unsupported_backend` before any authentication, network call, sync or
 launch, and again at save):
@@ -356,8 +359,8 @@ snapshots it at launch under the run's scratch dir and seeds a pointer the sessi
 notice in the seed. **Warm** `/objective-plan` runs
 `perk objective node-engagement N --node <id> --json` after the planning transition (the snapshot
 is written then, not at launch) and pages the returned file pointer; its `warnings[]` are reported
-by the session in the plan's Assumptions as incomplete advisory input. Neither path retries. Still
-not shipped: an authenticated refine-to-plan proof, and GitHub objectives until their carrier lands.
+by the session in the plan's Assumptions as incomplete advisory input. Neither path retries. GitHub
+objectives stay unsupported until their carrier lands.
 The wire format, the transfer artifacts and the door guarantees are pinned in
 `shared/contracts.md` §8.26 and §8.67–§8.68.
 

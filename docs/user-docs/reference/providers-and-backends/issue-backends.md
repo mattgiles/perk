@@ -214,7 +214,8 @@ authentication, network, sync or launch, and again at save, until the GitHub car
 Planning sessions consume a saved refinement as dated advisory DATA behind a file pointer —
 snapshotted at launch by `perk objective plan`, or when `/objective-plan` runs the
 `node-engagement` worker after the planning transition (Linear only until the GitHub carrier
-lands). See
+lands). For the operator path — pick, author, review, inspect, then plan — see
+[How to refine future nodes before planning](../../how-to/refine-future-nodes.md). See
 [Objectives — Node refinements](../objectives.md#node-refinements-linear-project-objectives-only).
 
 ### The dream-report companion

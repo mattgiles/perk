@@ -868,7 +868,10 @@ canonical timestamps `YYYY-MM-DDTHH:MM:SSZ`, and reads reject noncanonical spell
 normalizing. Residuals: this is observed-conflict detection, not synchronization — no remote CAS, so
 a writer can win after final verification, concurrent first saves can leave duplicate records, and a
 late refinement stays inert advice; authenticated Linear behavior is **unverified by design** at
-this writing (offline over `FakeLinearWorkspace`) — don't claim live verification.
+this writing (offline over `FakeLinearWorkspace`) — don't claim live verification. *(Since
+2026-09-10 one authenticated refine→plan run is recorded in
+`docs/design/archive/objective-refinement-linear-planning-dogfood.md` — a point-in-time proof of
+the persistence + consumption path, not a per-workspace guarantee.)*
 
 ## File upload + strict-parse boundary craft (#1996)
 

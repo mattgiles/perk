@@ -288,7 +288,7 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
         branch=branch,
         issue=issue,
         header_update=header_update,
-        plan_embedded=plan_body is not None,
+        plan_embedded=plan_body is not None and _plan_embed_fits(issue=issue, plan_body=plan_body),
         pr_checked=True,
         dry_run=False,
         base=base,
@@ -398,11 +398,44 @@ def _safe_plan_body(*, issue: str, repo_root: Path) -> str | None:
         return None
 
 
+# GitHub refuses a PR body above this many characters (`422 body is too long`), on create and
+# on PATCH alike. The plan embed is best-effort, so it yields rather than sinking the submit.
+_PR_BODY_MAX_CHARS = 65_536
+# The footer the update pass appends; reserved on the create pass (PR number still unknown) so
+# both passes judge the same size and never disagree about whether the embed fits.
+_FOOTER_RESERVE = len("\n\n`gh pr checkout 9999999`")
+
+
+def _plan_embed(*, issue: str, plan_body: str) -> str:
+    return f"<details><summary>Plan #{issue}</summary>\n\n{plan_body}\n\n</details>"
+
+
+def _plan_embed_fits(*, issue: str, plan_body: str) -> bool:
+    """Whether the verbatim `<details>` embed keeps the composed body (footer included) under
+    GitHub's cap — the one decision `_compose_pr_body` and the reported `plan_embedded` share."""
+    body = _join_pr_body(issue=issue, embed=_plan_embed(issue=issue, plan_body=plan_body))
+    return len(body) + _FOOTER_RESERVE <= _PR_BODY_MAX_CHARS
+
+
+def _join_pr_body(*, issue: str, embed: str | None, pr_number: int | None = None) -> str:
+    parts = [f"Closes #{issue}", f"Plan: #{issue}"]
+    if embed is not None:
+        parts.append(embed)
+    if pr_number is not None:
+        parts.append(f"`gh pr checkout {pr_number}`")
+    return "\n\n".join(parts) + "\n"
+
+
 def _compose_pr_body(
     *, issue: str, plan_body: str | None = None, pr_number: int | None = None
 ) -> str:
     """Compose the GitHub PR body: closing keyword + plan link + a best-effort
     `<details>` embed of the verbatim plan + the checkout footer.
+
+    Size guard: when the embed would push the body (footer included) over `_PR_BODY_MAX_CHARS`,
+    it is replaced by a one-line pointer at the plan issue — the closing keyword, plan link and
+    footer are untouched, and `plan_embedded` reports `false`. A plan too large to embed must
+    never make the plan unsubmittable.
 
     The two-target split: this HTML-enhanced body goes ONLY into the GitHub PR body (the
     `<details>` embed is fine here). The **footer** (not the embed) must stay a plain-backtick line
@@ -419,12 +452,16 @@ def _compose_pr_body(
     extra `Closes #N` beside the existing one, write back via `gh pr edit --body-file` — and
     track it as an explicit todo before calling `/submit` so it survives the turn boundary.
     """
-    parts = [f"Closes #{issue}", f"Plan: #{issue}"]
-    if plan_body:
-        parts.append(f"<details><summary>Plan #{issue}</summary>\n\n{plan_body}\n\n</details>")
-    if pr_number is not None:
-        parts.append(f"`gh pr checkout {pr_number}`")
-    return "\n\n".join(parts) + "\n"
+    if not plan_body:
+        return _join_pr_body(issue=issue, embed=None, pr_number=pr_number)
+    if _plan_embed_fits(issue=issue, plan_body=plan_body):
+        embed = _plan_embed(issue=issue, plan_body=plan_body)
+    else:
+        embed = (
+            f"_Plan #{issue} is too large to embed here ({len(plan_body):,} characters; GitHub "
+            f"caps a PR body at {_PR_BODY_MAX_CHARS:,}) — read it on the plan issue._"
+        )
+    return _join_pr_body(issue=issue, embed=embed, pr_number=pr_number)
 
 
 class SubmitPrOut(OutputModel):
