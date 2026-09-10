@@ -94,6 +94,10 @@ there is no name-based eligibility. Foreground mode does not discover ambient Pe
 ## Builtins in a perk repo
 
 pi-subagents currently ships `delegate`, `oracle`, `researcher`, `reviewer`, `scout`, and `worker`.
+The builtin `scout` is unrelated to perk's delivered `perk.scout` (`.pi/agents/perk/scout.md`; its
+runtime name is package-namespaced from the def's `package: perk` frontmatter): the builtin stays
+disabled under perk's bulk disable, `perk.scout` is always discoverable, and re-enabling the builtin
+does not change `perk.scout`.
 perk converges `subagents.disableBuiltins: true`, so those builtins are disabled by default in a
 perk-managed project. To re-enable one, add a project-level
 `subagents.agentOverrides.<name>.disabled = false` override in `.pi/settings.json`. A user-global

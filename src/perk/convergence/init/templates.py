@@ -70,6 +70,7 @@ PERK_TOML_TEMPLATE = """\
 # harvest-analyst = "openai/gpt-5.6-terra"
 # dream-analyst = "openai/gpt-5.6-terra"
 # dream-reducer = "anthropic/claude-fable-5"
+# scout = "openai/gpt-5.6-terra"
 
 # Project agent dir (optional, cold-local launches only) — redirects pi's WHOLE
 # config dir: models.json, but also auth.json, trust.json, sessions/, and global

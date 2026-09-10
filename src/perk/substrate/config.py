@@ -216,6 +216,7 @@ class SubagentsTable(LenientParseModel):
     harvest_analyst: StrippedStr = Field(default=None, alias="harvest-analyst")
     dream_analyst: StrippedStr = Field(default=None, alias="dream-analyst")
     dream_reducer: StrippedStr = Field(default=None, alias="dream-reducer")
+    scout: StrippedStr = None
     # Dev-only: the perk-dev session-audit judgment wave's auditor (the repo-local
     # `.pi/agents/perk-dev/session-auditor.md` def) — dormant in consumer repos.
     session_auditor: StrippedStr = Field(default=None, alias="session-auditor")
@@ -463,6 +464,7 @@ class ConfigFileModel(LenientParseModel):
                 ("harvest-analyst", self.models.subagents.harvest_analyst),
                 ("dream-analyst", self.models.subagents.dream_analyst),
                 ("dream-reducer", self.models.subagents.dream_reducer),
+                ("scout", self.models.subagents.scout),
                 ("session-auditor", self.models.subagents.session_auditor),
             )
             if value is not None

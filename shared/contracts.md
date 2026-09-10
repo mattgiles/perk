@@ -954,10 +954,10 @@ worker completion are unchanged. A completed child cannot finish a worker: only 
 with `mergeable !== false` can. §8.35's report-wave invariants remain unchanged.
 
 **Perk-owned child profiles and delivery.** `src/perk/convergence/init/agents.py::PERK_AGENTS`
-delivers canonical `agents/*.md` byte-identically into `.pi/agents/perk/`. Nine delivered reports
+delivers canonical `agents/*.md` byte-identically into `.pi/agents/perk/`. Ten delivered reports
 (`pr-reviewer`, `review-classifier`, `objective-explorer`, `learn-analyst`, `harvest-analyst`,
-`dream-analyst`, `dream-reducer`, `adversarial-reviewer`, `draft-reviewer`) plus the repo-local
-`perk-dev.session-auditor` select definition `async: true`. All ten keep replacement base prompts,
+`dream-analyst`, `dream-reducer`, `adversarial-reviewer`, `draft-reviewer`, `scout`) plus the repo-local
+`perk-dev.session-auditor` select definition `async: true`. All eleven keep replacement base prompts,
 read-only tools, `inheritProjectContext: false`, `inheritSkills: false` and the report-only
 completion policy `completionGuard: false` (the installed parser reads the literal `"false"` →
 `false`): the engine's completion **mutation** guard never fails a report-only lane for
@@ -966,13 +966,17 @@ saying "… must change …"), while the required `structured_output` report con
 (a missing/invalid report still fails the lane) and non-mutation stays enforced by Perk's
 restrictions + the rubric prohibitions, never by the guard. `conflict-resolver` leaves definition
 async absent and the guard field absent (the engine default — it IS expected to mutate),
-retaining writer tools and project/skill inheritance true. All eleven explicitly set `inheritGlobalContext: false` and omit both
+retaining writer tools and project/skill inheritance true. All twelve explicitly set `inheritGlobalContext: false` and omit both
 `extensions` and `subagentOnlyExtensions` (empty is not equivalent). Reports use ambient runner
 discovery; foreground writers have no ambient extensions or transported Perk handoff. Canonical
 models and ordered fallbacks stay intact, as do exact-source Ponytail skillPath exceptions
 (pr/adversarial `ponytail-review`, draft `ponytail`). Explicit assignment skills are not discovered
 skill inheritance. The auditor is not added to the delivered set; user/manual agents are outside
-this closed profile policy.
+this closed profile policy. `scout` (`agents/scout.md`) is the general-purpose read-only analysis
+lane — no fixed rubric; each spawn's task defines the scope and the report format, with
+`structured_output` honored when a schema is supplied. **Deferred:** no perk-owned tool spawns it
+under this contract; reaching it means the direct `subagent` leniency above. The former repo-local
+`perk-dev.analyst` it was promoted from is retired without alias.
 
 
 ---

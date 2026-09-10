@@ -312,6 +312,7 @@ test("loadPerkConfig: parses all [models.subagents] agent keys", () => {
       'harvest-analyst = "a/harvest"\n' +
       'dream-analyst = "a/dreamer"\n' +
       'dream-reducer = "a/reducer"\n' +
+      'scout = "a/scout"\n' +
       'session-auditor = "a/auditor"\n',
   });
   assert.deepEqual(loadPerkConfig(cwd).subagents, {
@@ -325,6 +326,7 @@ test("loadPerkConfig: parses all [models.subagents] agent keys", () => {
     "harvest-analyst": "a/harvest",
     "dream-analyst": "a/dreamer",
     "dream-reducer": "a/reducer",
+    scout: "a/scout",
     "session-auditor": "a/auditor",
   });
 });

@@ -496,6 +496,7 @@ def test_subagents_selection_parsed(tmp_path):
         'harvest-analyst = "a/harvest"\n'
         'dream-analyst = "a/dreamer"\n'
         'dream-reducer = "a/reducer"\n'
+        'scout = "a/scout"\n'
         'session-auditor = "a/auditor"\n',
     )
     # The RESOLVED domain mapping (not just model parsing): a key added to SubagentsTable
@@ -512,6 +513,7 @@ def test_subagents_selection_parsed(tmp_path):
         "harvest-analyst": "a/harvest",
         "dream-analyst": "a/dreamer",
         "dream-reducer": "a/reducer",
+        "scout": "a/scout",
         "session-auditor": "a/auditor",
     }
 
