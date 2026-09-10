@@ -25,8 +25,9 @@ install (the mirror of the git-clone lifecycle, and the four places that mirror 
   workflow" (+ the layered local `perk-dev release-*` commands beside it).
 - Install pinning is three-way: machine surfaces pin `__version__`, human docs stay unpinned,
   the self-repo is exempt — "The three-way install-pin policy".
-- Parity is enforced by the launch env var, the soft drift signal, and the pin-lockstep test —
-  "Version-parity enforcement".
+- Parity is enforced by the launch env var, the soft drift signal, and the pin-lockstep test;
+  every check is version-only, so a same-version worktree can spoof both planes into a consumer
+  repo — provenance is HEAD SHA + tarball hash, never the version — "Version-parity enforcement".
 - The extension wiring's reconcile discriminator flipped from PROTOCOL (git vs npm) to IDENTITY
   (perk's own package name) when both categories collapsed onto npm — "The git→npm
   extension-wiring flip".
@@ -246,10 +247,15 @@ The `__version__` SSOT is enforced into the *running session* by three deliberat
   Cross-ref `pi/extension-api.md` for the `session_start` handler facts.
 
 - **Reusable test patterns:**
-  - **Harness fact:** `sessionLifecycle.test.ts` loads the extension *from source*, so `perkVersion()`
-    resolves to the real repo `package.json` version. A fake `PERK_CLI_VERSION: "9.9.9-not-real"`
-    deterministically triggers the signal (assert `notifies` matches `/version parity/`); omitting the
-    env deterministically suppresses it — no need to read/inject the real version in-test.
+  - **Harness fact:** the two `version parity:` tests live in `extension/index.test.ts` (moved
+    verbatim from `sessionLifecycle.test.ts` when that file was split; the mechanism is unchanged).
+    The harness loads the extension *from source*, so `perkVersion()` resolves to the real repo
+    `package.json` version. A fake `PERK_CLI_VERSION: "9.9.9-not-real"` deterministically triggers
+    the signal (assert `notifies` matches `/version parity/`); omitting the env deterministically
+    suppresses it — no need to read/inject the real version in-test. Meta-lesson from the move:
+    automated pointer scans (`docs-check`'s stale-pointer pass) catch a path that no longer exists,
+    not prose that names a *still-existing* file whose contents moved elsewhere — after relocating
+    tests, grep the docs for the source file's name, not just the destination's.
   - **Launch-env capture pattern:** to assert what env `launch_stage` passes to exec, monkeypatch
     `perk.run.launch.os.execvpe` with a **recorder** (`lambda _f,_a,env: captured.update(env)`) rather
     than a discarding `_no_exec`, plus the usual `os.chdir`→no-op and `get_plan_body`→None stubs; then
@@ -259,6 +265,18 @@ The `__version__` SSOT is enforced into the *running session* by three deliberat
     pin (`settings._perk_npm_entry()`) and the npm-install pin (`extension_install._pinned_spec()`),
     with the install spec's name == `NPM_PACKAGE.removeprefix("npm:")`. Proves both pins track the
     version SSOT, not just each other.
+
+- **Every perk version check is version-only — a worktree at the released version can spoof both
+  planes.** `extension_install_status` compares the installed `@mgiles/perk` `package.json` version
+  against the pin; the launch hot path checks only that the install dir exists; pi's own
+  pinned-spec install skips when the version matches. None of them hash content. So a dev worktree
+  whose `pyproject.toml` version equals the release can stand in for the published artifacts inside
+  a real consumer repo, silently: `PERK_BIN=<worktree>/.venv/bin/perk` for the Python plane, an
+  `npm pack` tarball unpacked over `.pi/npm/node_modules/@mgiles/perk/` for the extension, and the
+  door skills copied into `.agents/skills/`. That is a legitimate pre-release smoke technique, but
+  **provenance is the worktree HEAD SHA + the tarball's SHA-256, never the version string** —
+  record both when you do it, and restore the consumer repo by hash-verified reinstall, not by
+  re-running `perk init` and trusting a green `extension-install`.
 
 ## The git→npm extension-wiring flip — protocol → identity discriminator
 
