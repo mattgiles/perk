@@ -51,7 +51,8 @@ export interface PerkConfig {
    * `learn-analyst`, `adversarial-reviewer`, `draft-reviewer`,
    * `harvest-analyst` — consumed by `run_harvest_wave` at execute time — `dream-analyst` and
    * `dream-reducer` — consumed by `run_dream_wave` at execute time — `scout` — the
-   * general-purpose read-only analysis lane (task-defined scope) — and the
+   * general-purpose read-only analysis lane (task-defined scope), consumed by `run_scout_wave`
+   * at execute time — and the
    * dev-only `session-auditor`, whose def is repo-local to perk's own repository
    * (`.pi/agents/perk-dev/session-auditor.md`, never delivered by `perk init`), so the key is
    * dormant in consumer repos). Each configured

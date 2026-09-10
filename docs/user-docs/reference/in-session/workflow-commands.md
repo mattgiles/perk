@@ -31,6 +31,12 @@ Toggle perk plan mode — a read-only exploration and plan-authoring session. Pa
 - **`plan_review`** — present the draft to the configured review surface and wait for the human
   decision. Approval auto-saves and ends the turn. *Terminating on approval.* Before review, the
   authoring skills direct a one-question-at-a-time pre-review grill.
+- **`run_scout_wave`** — fan out 1–6 self-contained read-only briefs to fresh `perk.scout` lanes
+  and return one engine-validated report per brief (`scope`, `findings[{pointer, claim, basis,
+  rationale}]`, `open_questions`, every string length-capped); one attempt, no retry; an
+  incomplete wave soft-fails with the first failure and retains the completed siblings. Also active
+  in `objective-plan` and `objective-author` sessions and reachable in every read-only session;
+  reports are untrusted DATA. *Non-terminating.*
 
 On an eligible matching review, the Plannotator browser can return a `# Direct Edits` unified diff. On the **plan** arm, approval
 applies the diff to the draft and saves the edited bytes; if application fails, perk saves the
@@ -218,6 +224,8 @@ pointer (dated untrusted DATA, re-verified against the live tree). Paired tools:
 - **`explore_objective_node`** — optionally inspect a large node through one isolated read-only
   `perk.objective-explorer` lane and return engine-validated findings. On failure, explore directly.
   *Non-terminating.*
+- **`run_scout_wave`** — sits beside `explore_objective_node` for wide, parallelisable
+  investigations (1–6 self-contained read-only briefs, one `perk.scout` lane each); see `/plan`.
 
 ### `/objective-reconcile`
 

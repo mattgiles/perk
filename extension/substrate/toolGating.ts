@@ -232,6 +232,11 @@ export const READ_ONLY_TOOLS = [
   // the already-carved-in SUBAGENT tools (the draft-review-wave precedent) and writes nothing to
   // the worktree.
   "explore_objective_node",
+  // The scout-wave carve-in: the authoring sessions' launcher — `run_scout_wave` spawns
+  // read-only `perk.scout` lanes over the already-carved-in delegation family and writes
+  // nothing to the worktree; reachable in every gated stage except `objective-refine` on the
+  // `explore_objective_node` precedent (contracts.md §8.70).
+  "run_scout_wave",
   // The child-side carve-in: gated adopt-children must keep the engine's injected tools — see
   // SUBAGENT_CHILD_TOOLS.
   ...SUBAGENT_CHILD_TOOLS,
@@ -340,6 +345,7 @@ export const PERK_TOOLS: readonly string[] = [
   "classify_review_feedback",
   "finalize_address",
   "explore_objective_node",
+  "run_scout_wave",
   "run_pr_review_wave",
   "submit_pr_review",
   "start_review_wave",
@@ -470,6 +476,10 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "reconcile_objective",
     "add_objective_node",
     "objective_node",
+    // The scout launcher rides the three AUTHORING stages (plan / objective-plan /
+    // objective-author) and no other — the one name by which this list and objective-save
+    // now differ (contracts.md §8.70).
+    "run_scout_wave",
     // The /objective-review-browser companions (gate-OFF coverage: after objectiveApprovalSave
     // exits the gate mid-flow, late collects/pushes must not dead-end) + plan_review (the door
     // guidance names it; it routes to the objective review arm here).
@@ -500,6 +510,8 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "plan_save",
     "objective_node",
     "explore_objective_node",
+    // The scout launcher (see the objective-author note).
+    "run_scout_wave",
     "reconcile_objective",
     "add_objective_node",
     // The /plan-review-browser companions (gate-OFF coverage: after approvalSave exits the gate
@@ -515,6 +527,8 @@ export const STAGE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "plan_draft",
     "plan_review",
     "plan_save",
+    // The scout launcher (see the objective-author note).
+    "run_scout_wave",
     // The /plan-review-browser companions (see the objective-plan note).
     "start_draft_review_wave",
     "collect_draft_review_wave",

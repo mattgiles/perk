@@ -80,8 +80,10 @@ test("STAGE_TOOLS: the two objective stage lists are pinned exactly (least privi
   // else. A presence check alone would let unrelated scoped tools ride these gate-OFF sessions
   // (e.g. the §8.66 ready-time reconcile guidance deliberately avoids naming `ready`, so the
   // zero-argument ready tool never rides an unbound main-root objective session where it could
-  // act on the cached selector's plan instead of the continuation's).
-  const expected = [
+  // act on the cached selector's plan instead of the continuation's). The two lists differ by
+  // exactly ONE name: the authoring session carries the scout launcher; the save session does
+  // not.
+  const pinned = [
     "ask_user_question",
     "objective_draft",
     "objective_save",
@@ -95,14 +97,33 @@ test("STAGE_TOOLS: the two objective stage lists are pinned exactly (least privi
     ...WEB_RESEARCH_TOOLS,
     ...LINEAR_READ_TOOLS,
     ...FFF_SEARCH_TOOLS,
-  ].sort();
-  for (const stage of ["objective-author", "objective-save"]) {
+  ];
+  const expected: Record<string, string[]> = {
+    "objective-author": [...pinned, "run_scout_wave"].sort(),
+    "objective-save": [...pinned].sort(),
+  };
+  for (const [stage, tools] of Object.entries(expected)) {
     assert.deepEqual(
       [...(STAGE_TOOLS[stage] ?? [])].sort(),
-      expected,
+      tools,
       `STAGE_TOOLS.${stage} must carry exactly the pinned objective-stage set`,
     );
   }
+});
+
+test("STAGE_TOOLS: run_scout_wave rides exactly the three authoring stage lists", () => {
+  // The scout launcher's gate-OFF placement (contracts.md §8.70): plan / objective-plan /
+  // objective-author and NO other stage — not the save stages, the gist stages, the worktree
+  // family, audit, stack-review, or the refinement row.
+  const authoring = new Set(["plan", "objective-plan", "objective-author"]);
+  for (const [stage, tools] of Object.entries(STAGE_TOOLS)) {
+    assert.equal(
+      tools.includes("run_scout_wave"),
+      authoring.has(stage),
+      `run_scout_wave ${authoring.has(stage) ? "must ride" : "must not ride"} STAGE_TOOLS.${stage}`,
+    );
+  }
+  assert.ok(PERK_TOOLS.includes("run_scout_wave"));
 });
 
 test("STAGE_TOOLS: keys set-equal the registry stage ids", () => {
@@ -199,7 +220,7 @@ test("implement claim: PR-loop family active, the 5 authoring tools scoped off",
     for (const name of ["read", "bash", "edit", "write"]) {
       assert.ok(active.includes(name), `builtin must pass through untouched: ${name}`);
     }
-    for (const name of AUTHORING_TOOLS) {
+    for (const name of [...AUTHORING_TOOLS, "run_scout_wave"]) {
       assert.ok(!active.includes(name), `authoring tool must be scoped off: ${name}`);
     }
   } finally {
@@ -226,7 +247,13 @@ test("gated stage: gate ON keeps exactly the READ_ONLY_TOOLS-available subset (n
       .filter((name) => READ_ONLY_TOOLS.includes(name))
       .sort();
     assert.deepEqual(active, expected);
-    for (const name of ["objective_node", "plan_draft", "plan_review", "subagent"]) {
+    for (const name of [
+      "objective_node",
+      "plan_draft",
+      "plan_review",
+      "subagent",
+      "run_scout_wave",
+    ]) {
       assert.ok(active.includes(name), `gated carve-out must stay active: ${name}`);
     }
     for (const name of ["edit", "write"]) {
@@ -341,6 +368,7 @@ test("tree navigation: gate/stage recompute across mode entries", async () => {
     await h.navigateTo(readWriteId);
     const scoped = h.session.getActiveToolNames();
     assert.ok(scoped.includes("plan_save"), "plan-stage tool active once the gate is off");
+    assert.ok(scoped.includes("run_scout_wave"), "the scout launcher rides the plan stage");
     assert.ok(!scoped.includes("submit"), "PR-loop tool scoped off in a plan-stage session");
     assert.ok(scoped.includes("edit"), "builtins restored once the gate is off");
     assert.ok(scoped.includes("write"));

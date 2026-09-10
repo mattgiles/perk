@@ -318,7 +318,7 @@ default.
 | `harvest-analyst` | string (model id) | _(frontmatter default)_ |
 | `dream-analyst` | string (model id) | _(frontmatter default)_ — consumed by the `run_dream_wave` tool at execute time |
 | `dream-reducer` | string (model id) | _(frontmatter default)_ — consumed by the `run_dream_wave` tool at execute time |
-| `scout` | string (model id) | _(frontmatter default)_ — the general-purpose read-only analysis lane `perk.scout` (task-defined scope) |
+| `scout` | string (model id) | _(frontmatter default)_ — the general-purpose read-only analysis lane `perk.scout` (task-defined scope) — consumed by the `run_scout_wave` tool at execute time |
 | `session-auditor` | string (model id) | _(frontmatter default)_ — **dev-only** (perk's own repo's session-audit judgment wave; dormant in consumer repos) |
 
 A value may carry a **`:thinking` suffix** setting that agent's thinking level

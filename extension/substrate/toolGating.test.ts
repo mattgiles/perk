@@ -230,6 +230,9 @@ test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
     "intercom",
     // The explorer-wave carve-in (the gated objective-plan explore tool).
     "explore_objective_node",
+    // The scout-wave carve-in (the authoring sessions' launcher; read-only perk.scout lanes over
+    // the delegation family, no worktree writes).
+    "run_scout_wave",
     // The child-side carve-in (gated adopt-children keep the engine's injected tools).
     "structured_output",
     "contact_supervisor",
@@ -641,6 +644,7 @@ test("REFINEMENT_READ_ONLY_TOOLS: the exact refinement gate-ON selection (no cla
     "objective_save",
     "gist_save",
     "explore_objective_node",
+    "run_scout_wave",
     "subagent",
     "edit",
     "write",
@@ -683,6 +687,7 @@ test("gate ON in the refinement stage: the active set, the tool_call backstop an
     "plan_save",
     "objective_save",
     "gist_save",
+    "run_scout_wave",
     "subagent",
     "edit",
     "write",

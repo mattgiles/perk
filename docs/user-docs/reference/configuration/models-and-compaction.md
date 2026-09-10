@@ -127,7 +127,7 @@ Per-agent model overrides for each perk-owned project agent.
 | `harvest-analyst` | string (model id) | _(agent frontmatter default)_ | Model for each `docs/learned` mining lane in `perk learn harvest`. |
 | `dream-analyst` | string (model id) | _(agent frontmatter default)_ | Model for each `docs/learned` cluster-audit lane in `perk learn dream`'s analyst wave, consumed by `run_dream_wave` at execute time. |
 | `dream-reducer` | string (model id) | _(agent frontmatter default)_ | Model for the three fixed reducer lanes in `perk learn dream`'s reducer wave, consumed by `run_dream_wave` at execute time. |
-| `scout` | string (model id) | _(agent frontmatter default)_ | Model for `perk.scout`, the general-purpose read-only analysis lane (the task defines its scope), applied when perk spawns it through a code-owned surface; a direct `subagent` spawn uses the frontmatter default. |
+| `scout` | string (model id) | _(agent frontmatter default)_ | Model for `perk.scout`, the general-purpose read-only analysis lane (the task defines its scope), consumed by `run_scout_wave` at execute time; a direct `subagent` spawn uses the frontmatter default. |
 | `session-auditor` | string (model id) | _(agent frontmatter default)_ | **Dev-only** — model for perk's own repository's session-audit judgment wave. The agent definition is repo-local, not delivered by `perk init`, so the key is dormant in consumer repos. |
 
 An absent key falls back to the agent's frontmatter default. The table is **fixed-key**: it

@@ -65,6 +65,7 @@ import { createAnnotationState, installAnnotationBindings } from "./pi/v1/provid
 import { installPlannotatorPlanAdapter } from "./pi/v1/providers/plannotator.ts";
 import { plannotatorPresent } from "./pi/v1/providers/plannotatorHandoff.ts";
 import { installTombellPlanAdapter } from "./pi/v1/providers/tombell.ts";
+import { installScoutWaveBindings } from "./pi/v1/scoutWave.ts";
 import { registerSelfcheck } from "./pi/v1/selfcheck.ts";
 import {
   branchSessionStateStore,
@@ -613,6 +614,11 @@ export default function perk(
   installAuditBindings(pi, reportWave);
   installHarvestBindings(pi, reportWave);
   installDreamBindings(pi, reportWave);
+
+  // The scout launcher (`run_scout_wave`, contracts.md §8.70): the authoring sessions' blocking
+  // fan-out of self-contained read-only briefs onto fresh `perk.scout` lanes — one attempt,
+  // no retry, reachable in every gated stage except refinement.
+  installScoutWaveBindings(pi, reportWave);
 
   // The flow-scoped draft-review-wave pair (`start_draft_review_wave`/
   // `collect_draft_review_wave`) the draft-review door drives: non-blocking draft-review

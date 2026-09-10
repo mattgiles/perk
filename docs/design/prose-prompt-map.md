@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **230** canonical source units
-- **1233** logical fragments
+- **231** canonical source units
+- **1242** logical fragments
 - **16** session shapes and **12** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -130,6 +130,7 @@ Model-visible tools and injected controls shared across workflow families.
 | --- | --- | --- | --- | --- |
 | `markdown:agents/scout.md` | `subagent-instruction` | `shipped` | [`agents/scout.md`](../../agents/scout.md) · `file` | — |
 | `typescript-model-call:extension/substrate/agentScratch.ts:module:before-agent-start:0` | `context` | `shipped` | [`extension/substrate/agentScratch.ts`](../../extension/substrate/agentScratch.ts) · `symbol:module/event:before_agent_start/0` | — |
+| `typescript-tool:run_scout_wave` | `tool-contract` | `shipped` | [`extension/pi/v1/scoutWave.ts`](../../extension/pi/v1/scoutWave.ts) · `tool:run_scout_wave` | — |
 
 <details>
 <summary>Logical fragments</summary>
@@ -139,6 +140,16 @@ Model-visible tools and injected controls shared across workflow families.
   - `section:what-you-do` — What you do (`heading:what-you-do`)
 - `typescript-model-call:extension/substrate/agentScratch.ts:module:before-agent-start:0`
   - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
+- `typescript-tool:run_scout_wave`
+  - `description` — description (`tool:run_scout_wave.description`)
+  - `promptSnippet` — promptSnippet (`tool:run_scout_wave.promptSnippet`)
+  - `promptGuidelines.0` — promptGuidelines item 1 (`tool:run_scout_wave.promptGuidelines.0`)
+  - `promptGuidelines.1` — promptGuidelines item 2 (`tool:run_scout_wave.promptGuidelines.1`)
+  - `promptGuidelines.2` — promptGuidelines item 3 (`tool:run_scout_wave.promptGuidelines.2`)
+  - `promptGuidelines.3` — promptGuidelines item 4 (`tool:run_scout_wave.promptGuidelines.3`)
+  - `parameters.properties.briefs.description` — parameters.properties.briefs.description (`tool:run_scout_wave.parameters.properties.briefs.description`)
+  - `parameters.properties.briefs.items.properties.key.description` — parameters.properties.briefs.items.properties.key.description (`tool:run_scout_wave.parameters.properties.briefs.items.properties.key.description`)
+  - `parameters.properties.briefs.items.properties.task.description` — parameters.properties.briefs.items.properties.task.description (`tool:run_scout_wave.parameters.properties.briefs.items.properties.task.description`)
 
 </details>
 
