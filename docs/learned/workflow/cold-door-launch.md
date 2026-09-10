@@ -153,8 +153,8 @@ source (the env arm already carries the value; the default is Pi's own); the lau
 targets the resolution and is skipped when it is `None`; and the launch context carries the
 resolution beside the injected value because the exec step cannot safely recompute precedence after
 `chdir`. Every consumer that acts on files *inside* the agent dir — doctor's `subagent-bridge-config`
-user scope, the `subagent-worktree-default` convergence (`workflow/init-doctor.md`) — resolves
-through this same function, never a parallel copy.
+user scope today; historically the since-retired `subagent-worktree-default` convergence
+(`workflow/init-doctor.md`) — resolves through this same function, never a parallel copy.
 
 ## Running a repo-configured setup hook before exec (#652)
 

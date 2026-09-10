@@ -35,9 +35,9 @@ A seeded read-only plan-mode session historically **could not run `gh`/`perk` in
 `extension/substrate/toolGating.ts` `SAFE_PATTERNS` allowed only
 `cat`/`head`/`tail`/`grep`/`find`/`ls`/`git status|log|diff`/`jq`/`curl`.
 So every cold-door factory did its GitHub reads up front and materialized the result into a
-file the session reads via the `read` tool (e.g. `.perk/workflow/scratch/learn-docs-inbox.md` —
-a run-scoped **gitignored scratch path**, absent in fresh checkouts, so its `docs-check`
-broken-doc-ref row is checkout-dependent and deliberately accepted),
+file the session reads via the `read` tool (e.g. the harvest inbox Markdown under the run-scoped,
+**gitignored** `.perk/workflow/scratch/` tree — never spell such a scratch file's full path in a
+learned doc, or `docs-check` reports a checkout-dependent broken doc reference),
 with untrusted fetched bodies wrapped in a marker (`<untrusted_learning>…</untrusted_learning>`).
 
 Since #416 the read-only gate allowlists read-shaped `gh` *query* subcommands, so the constraint
