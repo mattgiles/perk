@@ -349,10 +349,18 @@ plannable as before. Only `pending`/`blocked` nodes without a plan can be refine
 claim or plan save the historical refinement stays readable while new saves refuse. Saves are
 guarded (one write attempt, read-back verification; concurrent edits, duplicates, and damaged
 records refuse rather than retry or overwrite), and a refinement comment is never selected as
-the plan comment even when it quotes a plan-body example. Internal Linear persistence only in
-this release: no public `perk objective refine` command or `/objective-refine` door, no
-planning-time consumption, and GitHub objectives are unsupported until their carrier lands.
-Contract: `shared/contracts.md` §8.67.
+the plan comment even when it quotes a plan-body example. Authoring:
+`perk objective refine <objective> [--node <id>]` (cold — one `main` fast-forward unless
+`--no-sync`, then target selection and a capture-time checkout observation; `--dry-run [--json]`
+previews) and `/objective-refine [objective] [--node <id>]` (warm — idle, unbound sessions
+only); the single `objective_refinement_draft` model tool; an APPROVED `plan_review` saves only
+the marked comment (Direct Edits revise without saving); `/objective-refinement-save` is the
+human failsafe and the deliberate retry. Consumption: `perk objective plan` snapshots a present
+refinement under the launched run's scratch dir and seeds only a pointer; `/objective-plan` reads
+it through `perk objective node-engagement N --node <id> --json` after the planning transition;
+degraded advisory reads are reported, never retried. GitHub objectives refuse
+`unsupported_backend` at every door until their carrier lands. Contracts: `shared/contracts.md`
+§8.26, §8.67–§8.68.
 
 ### The dream-report companion
 
@@ -440,9 +448,9 @@ a live workspace, so this is not part of ordinary Linear readiness.
 - Linear `RATELIMITED` GraphQL failures are loud and have no retry/backoff. Low-volume validation
   has not exercised rate limiting.
 - AgentSession emission is off by default and not live-verified.
-- Node-refinement persistence and the refine doors are proven offline only (real
-  store/adapter/service over a fake Linear workspace; the interior over scripted workers);
-  authenticated refine-to-plan evidence is not yet claimed.
+- Node refinements (Linear) — persistence, both refine doors, and planning-time consumption —
+  have offline regression coverage only; no passing authenticated refine-to-plan run is recorded
+  yet — see `docs/design/archive/objective-refinement-linear-planning-dogfood.md`.
 - GitHub Issues Sync interactions are outside coverage; prefer a team without that two-way sync
   unless separately validated.
 - `pi-status-footer` hides extension status; non-default web providers have local credential or

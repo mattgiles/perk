@@ -2216,6 +2216,7 @@ Canonical carrier: `markdown:agents/pr-reviewer.md`
 - `python-symbol:src/perk/backends/engagement.py:render_plan_engagement` — Plan-engagement fence.
 - `python-symbol:src/perk/backends/engagement.py:render_adopted_engagement` — Adopted-source engagement fence.
 - `python-symbol:src/perk/backends/engagement.py:render_objective_engagement` — Aggregate objective-engagement fence.
+- `python-symbol:src/perk/cli/commands/objective/node_context.py:render_node_refinement` — Node-refinement boundary-tagged fence.
 
 ### Route, don't relay
 

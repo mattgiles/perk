@@ -271,7 +271,9 @@ grounding pass: an existing draft becomes rewrite evidence (never silently re-bo
   refinement session; refuses outside one (`wrong_stage`). *Non-terminating.*
 
 `plan_review` in a refinement session reviews the (draft, context) pair; APPROVE saves only the
-node's refinement comment. There is **no** model save tool.
+node's refinement comment. There is **no** model save tool. The operator path — pick, author,
+review, inspect, then plan — is
+[How to refine future nodes before planning](../../how-to/refine-future-nodes.md).
 
 ### `/objective-refinement-save`
 

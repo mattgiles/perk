@@ -46,6 +46,11 @@ operator-facing; each entry links to the page that owns the detail.
   [JSON Schema snapshots](./json-schemas.md).
 - **Layer.** One non-skipped roadmap node together with its plan, forming a delivery unit in a
   stacked train. See [Objectives — Delivery](./objectives.md#delivery).
+- **Node context.** The advisory DATA a planning session reads about the node it is about to plan:
+  the bounded pre-planning engagement block, the full dated refinement when one exists (behind a
+  file pointer), and any advisory warnings. Degraded reads are reported as incomplete advisory
+  input, never as absence. See
+  [Node refinements](./objectives.md#node-refinements-linear-project-objectives-only).
 - **Objective.** A multi-plan goal whose roadmap emits one bounded plan per node as it advances.
   See [Gists, plans, and objectives](../explanation/gists-plans-and-objectives.md).
 - **Plan.** A written, reviewed, durable description of one bounded change, authored before code

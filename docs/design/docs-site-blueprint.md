@@ -51,6 +51,17 @@ in-memory guards with no reconciliation procedure (`reference/in-session/review-
 `.mdx`), **77** routed pages and sidebar entries; `_authoring.md` remains excluded. Earlier dated
 totals above describe their respective snapshots, not the current corpus.
 
+*Amendment (2026-09-10, node 1.3, objective #2332):* the corpus has grown by one file —
+`how-to/refine-future-nodes.md` (the operator path for authoring, reviewing, inspecting and
+later planning over an advisory node refinement; Objectives & learnings, between
+`author-a-roadmap` and `replan-an-objective`) — now recorded in the §2 route table, the §3
+sidebar map, and the §4 inventory. This amendment records only its own page (other pages added
+since the previous amendment keep their existing rows or none). Corpus-wide totals re-derived
+fresh from the tree at this amendment's commit, as its own measurement: **75** files by the §1
+corpus selector (**79** total sources counting the four `.mdx` pages; `_authoring.md` stays the
+one excluded source), **78** routed pages, **78** sidebar entries (Home, the four section
+landings, and the 73 enumerated in §3 — counted from `docs/site/src/sidebar.mjs`).
+
 ## §1 Purpose & binding scope
 
 ### What this blueprint binds
@@ -160,6 +171,7 @@ node that creates them.
 | `docs/user-docs/how-to/track-implement-progress.md` | `/how-to/track-implement-progress/` | How-to › Core workflow |
 | `docs/user-docs/how-to/send-feedback-from-hunk-watch.md` *(added 2026-08-12)* | `/how-to/send-feedback-from-hunk-watch/` | How-to › Core workflow |
 | `docs/user-docs/how-to/author-a-roadmap.md` | `/how-to/author-a-roadmap/` | How-to › Objectives & learnings |
+| `docs/user-docs/how-to/refine-future-nodes.md` *(added 2026-09-10)* | `/how-to/refine-future-nodes/` | How-to › Objectives & learnings |
 | `docs/user-docs/how-to/replan-an-objective.md` | `/how-to/replan-an-objective/` | How-to › Objectives & learnings |
 | `docs/user-docs/how-to/advance-or-skip-nodes.md` | `/how-to/advance-or-skip-nodes/` | How-to › Objectives & learnings |
 | `docs/user-docs/how-to/reconcile-an-objective.md` | `/how-to/reconcile-an-objective/` | How-to › Objectives & learnings |
@@ -290,7 +302,8 @@ index order.
    *configure-and-verify-ci-checks* (new), recover-a-dirty-worktree,
    *diagnose-a-perk-repo* (new), run-a-worktree-setup-hook, track-implement-progress,
    *send-feedback-from-hunk-watch* (added 2026-08-12).
-2. **Objectives & learnings** — author-a-roadmap, replan-an-objective, advance-or-skip-nodes,
+2. **Objectives & learnings** — author-a-roadmap, *refine-future-nodes* (added 2026-09-10),
+   replan-an-objective, advance-or-skip-nodes,
    reconcile-an-objective, check-an-objective-for-drift,
    *recover-a-stacked-train* (added 2026-08-13), run-the-learn-docs-factory,
    run-the-learn-code-factory, run-the-learn-harvest-factory,
@@ -414,6 +427,7 @@ batch node.
 | `docs/user-docs/how-to/track-implement-progress.md` | How-to | keep-and-polish | `/how-to/track-implement-progress/` | checklist | 3.4 |
 | `docs/user-docs/how-to/send-feedback-from-hunk-watch.md` *(added 2026-08-12)* | How-to | keep-and-polish | `/how-to/send-feedback-from-hunk-watch/` | checklist | 3.4 |
 | `docs/user-docs/how-to/author-a-roadmap.md` | How-to | keep-and-polish | `/how-to/author-a-roadmap/` | checklist | 3.5 |
+| `docs/user-docs/how-to/refine-future-nodes.md` *(added 2026-09-10)* | How-to | keep-and-polish | `/how-to/refine-future-nodes/` | checklist (satisfied at creation) | 1.3 (obj. #2332) |
 | `docs/user-docs/how-to/replan-an-objective.md` | How-to | keep-and-polish | `/how-to/replan-an-objective/` | checklist | 3.5 |
 | `docs/user-docs/how-to/advance-or-skip-nodes.md` | How-to | keep-and-polish | `/how-to/advance-or-skip-nodes/` | checklist | 3.5 |
 | `docs/user-docs/how-to/reconcile-an-objective.md` | How-to | keep-and-polish | `/how-to/reconcile-an-objective/` | checklist | 3.5 |

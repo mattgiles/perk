@@ -91,6 +91,9 @@ during a review counts as a changed destination. Python remains the authority fo
   issue lifecycle, project-backed objectives, and attachment metadata. Workspace-specific auth,
   team, label, Project-scope, and workflow-state readiness still requires the verify-gated live
   checks; an offline green run cannot prove those workspace conditions.
+- Node refinements (Linear) — persistence, both refine doors, and planning-time consumption —
+  have offline regression coverage only; no passing authenticated refine-to-plan run is recorded
+  yet.
 - Linear rate limits arrive as `RATELIMITED` GraphQL errors. perk fails loudly and does not retry
   or back off; low-volume live validation has not exercised a rate limit.
 - Optional Linear AgentSession emission is off by default, requires a separate
