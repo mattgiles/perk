@@ -206,7 +206,9 @@ test("decodeHarvestManifest: each refusal arm carries its named detail", () => {
       detail: /doc path '\.\.\/secrets' escapes the checkout/,
     },
     {
-      // Normalizes to `x` — inside the checkout but outside the corpus.
+      // Normalizes to `x` — inside the checkout but outside the corpus. Also pins
+      // containment-before-canonical-form precedence: the path is non-canonical too, and the
+      // containment detail wins.
       raw: manifestOf([{ id: "a-1", docs: [doc("docs/learned/../../x")] }]),
       detail: /doc path 'docs\/learned\/\.\.\/\.\.\/x' is outside docs\/learned\//,
     },
@@ -218,6 +220,51 @@ test("decodeHarvestManifest: each refusal arm carries its named detail", () => {
     {
       raw: manifestOf([{ id: "a-1", docs: [doc("src/perk/cli.py")] }]),
       detail: /doc path 'src\/perk\/cli\.py' is outside docs\/learned\//,
+    },
+    {
+      // Contained after normalization, but an ALIAS spelling — canonical form is required so
+      // one doc path can never enter the manifest under two spellings (dream's arm; path-string
+      // identity — symlink/hardlink targets are not deduplicated).
+      raw: manifestOf([{ id: "a-1", docs: [doc("docs/learned/pi/../pi/a.md")] }]),
+      detail:
+        /lane 'a-1' doc path 'docs\/learned\/pi\/\.\.\/pi\/a\.md' is not in canonical POSIX-normalized form/,
+    },
+    {
+      raw: manifestOf([{ id: "a-1", docs: [doc("./docs/learned/pi/a.md")] }]),
+      detail: /is not in canonical POSIX-normalized form/,
+    },
+    {
+      // GLOBAL uniqueness: the same canonical path in two lanes (lanes partition the corpus).
+      raw: manifestOf([
+        { id: "a-1", docs: [doc("docs/learned/pi/a.md")] },
+        { id: "a-2", docs: [doc("docs/learned/pi/a.md")] },
+      ]),
+      detail:
+        /duplicate doc path 'docs\/learned\/pi\/a\.md' in the manifest \(lanes partition the corpus\)/,
+    },
+    {
+      // The one global set also catches a within-lane repeat — one arm, one detail.
+      raw: manifestOf([
+        { id: "a-1", docs: [doc("docs/learned/pi/a.md"), doc("docs/learned/pi/a.md")] },
+      ]),
+      detail: /duplicate doc path 'docs\/learned\/pi\/a\.md'/,
+    },
+    {
+      // Precedence: canonical form runs BEFORE the uniqueness check — the same alias twice is
+      // the canonical-form detail, never `duplicate doc path` (the set holds canonical strings only).
+      raw: manifestOf([
+        { id: "a-1", docs: [doc("docs/learned/pi/../pi/a.md")] },
+        { id: "a-2", docs: [doc("docs/learned/pi/../pi/a.md")] },
+      ]),
+      detail: /is not in canonical POSIX-normalized form/,
+    },
+    {
+      // Precedence: uniqueness runs BEFORE the title/read_when shape check.
+      raw: manifestOf([
+        { id: "a-1", docs: [doc("docs/learned/pi/a.md")] },
+        { id: "a-2", docs: [doc("docs/learned/pi/a.md", { title: 4 as never })] },
+      ]),
+      detail: /duplicate doc path/,
     },
     {
       raw: manifestOf([{ id: "a-1", docs: [doc("docs/learned/a.md", { title: 4 as never })] }]),
