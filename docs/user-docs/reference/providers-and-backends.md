@@ -95,6 +95,10 @@ during a review counts as a changed destination. Python remains the authority fo
   have offline regression coverage and one dated end-to-end live run (refine → approve → plan,
   2026-09-10) against a disposable Project; treat that as a point-in-time proof, not a
   per-workspace guarantee.
+- Node refinements (GitHub) — persistence, both refine doors and planning-time consumption are
+  **offline-proven only**, over a stateful `gh` fake; no live GitHub run has been recorded, so
+  comment-body byte preservation, the 65,536-character 422 shape, `fullDatabaseId` presence and
+  `--paginate --slurp` on the comments endpoint are unobserved.
 - Linear rate limits arrive as `RATELIMITED` GraphQL errors. perk fails loudly and does not retry
   or back off; low-volume live validation has not exercised a rate limit.
 - Optional Linear AgentSession emission is off by default, requires a separate

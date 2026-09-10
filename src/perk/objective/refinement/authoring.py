@@ -72,10 +72,6 @@ DRAFT_ARTIFACT = "objective-refinement-draft.json"
 # The registry stage the refinement doors act on.
 REFINE_STAGE_ID = "objective-refine"
 
-# The only backend the refinement doors admit in this rollout (§8.67: GitHub's carrier is a
-# later slice — the doors refuse it before any authentication, network, sync, or launch).
-SUPPORTED_REFINEMENT_BACKENDS: frozenset[str] = frozenset({resolve.LINEAR_BACKEND_ID})
-
 _DIGEST_PREFIX = "sha256:"
 
 
@@ -577,20 +573,6 @@ def load_draft_file(path: Path) -> RefinementDraft:
 # ------------------------------------------------------------------ preparation
 
 
-def require_supported_backend(repo_root: Path) -> str:
-    """The rollout refusal: resolve the configured objective-store id and refuse anything but a
-    supported refinement carrier with ``unsupported_backend`` — before authentication, network,
-    sync, scratch writes, or launch. Resolver/config failures propagate unchanged."""
-    backend_id = resolve.resolve_objective_store_id(repo_root)
-    if backend_id not in SUPPORTED_REFINEMENT_BACKENDS:
-        raise RefinementError(
-            RefinementErrorCode.UNSUPPORTED_BACKEND,
-            f"objective-node refinement is not available on the {backend_id!r} issue backend "
-            "yet (Linear only in this rollout)",
-        )
-    return backend_id
-
-
 def capture_provenance(repo_root: Path, *, run_id: str) -> RefinementProvenance:
     """Capture the authoring provenance ONCE: HEAD, the dirty flag, and one UTC timestamp that
     serves as both ``authored_at`` (the start of the pass) and ``captured_at``. An unresolvable
@@ -632,12 +614,13 @@ def select_bound_target(
     repo_root: Path, *, objective_id: str, node_id: str | None
 ) -> SelectedTarget:
     """Select the target against FRESH adapters (the caller has already done any sync and
-    config reload): refuse unsupported backends, resolve store + issue backend, select through
-    the service (explicit node or default walk), read the objective's addressing facts through
-    ``get_objective`` and compare its identity EXACTLY with the target's (mismatch →
-    ``refinement_binding_mismatch``, never a silent rebind). No `objective show`, no
-    delivery-readiness helper, no claim, no write, no clock, no git."""
-    require_supported_backend(repo_root)
+    config reload): resolve store + issue backend, select through the service (explicit node or
+    default walk), read the objective's addressing facts through ``get_objective`` and compare
+    its identity EXACTLY with the target's (mismatch → ``refinement_binding_mismatch``, never a
+    silent rebind). The resolved objective store's own refinement read is the support decision —
+    a store without one surfaces as the service's typed ``unsupported_backend``; there is no
+    door-side backend allowlist. No `objective show`, no delivery-readiness helper, no claim, no
+    write, no clock, no git."""
     store = resolve.resolve_objective_store(repo_root)
     issues = resolve.resolve_issue_backend(repo_root)
     read = service.select_refinement_target(
@@ -746,10 +729,11 @@ def compose_save_request(
 def save_refinement_draft(
     repo_root: Path, *, run_id: str, draft_file: Path
 ) -> RefinementSaveOutcome:
-    """The complete save conversion behind ``perk objective refinement-save``: rollout check →
-    strict draft read → strict current-run context read → exact binding → the service's guarded
-    save through fresh adapters. Every service refusal propagates as ``RefinementError``."""
-    require_supported_backend(repo_root)
+    """The complete save conversion behind ``perk objective refinement-save``: strict draft
+    read → strict current-run context read → exact binding → the service's guarded save through
+    fresh adapters. Every service refusal propagates as ``RefinementError``. A retained context
+    bound to a different backend than the resolved store refuses at the service as
+    ``invalid_input`` before any read — never a silent save elsewhere."""
     draft = load_draft_file(draft_file)
     context, digest = load_context_artifact(repo_root, run_id=run_id)
     request = compose_save_request(context, draft, context_digest=digest)

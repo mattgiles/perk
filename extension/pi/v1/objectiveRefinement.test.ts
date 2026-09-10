@@ -41,14 +41,22 @@ import {
   decodeRefinementDraftParams,
   installObjectiveRefinementBindings,
   parseRefineCommandArgs,
+  refinementSaveDestination,
   runRefinementReviewV1,
 } from "./objectiveRefinement.ts";
 import { installPlanBindings } from "./plan.ts";
 import type { ReviewOutcome, ToolResult } from "./review.ts";
 
 const MARKDOWN = "## Refinement\n\nWhat 2.3 must deliver — and the seams as observed now.\n";
-/** The refinement approval verdict label: names the Linear node comment, never GitHub. */
+/**
+ * The refinement approval verdict label for the Linear-bound golden context: the label names the
+ * bound context's carrier per backend (`refinementSaveDestination`), so a GitHub-bound pair
+ * approves only under the GitHub label (pinned below).
+ */
 const APPROVE = "Approve — auto-save to Linear (the node's refinement comment)";
+const APPROVE_GITHUB = "Approve — auto-save to GitHub (the objective issue's refinement comment)";
+/** The golden context with its ONE backend span rebound to GitHub (same run, same digest rule). */
+const GITHUB_CONTEXT = GOLDEN_CONTEXT.replace('"backend":"linear"', '"backend":"github"');
 
 const SAVE_JSON = {
   success: true,
@@ -813,6 +821,59 @@ test("plan_review first-party approval saves the artifact bytes through the work
     assert.equal(denied.exits, 0);
   } finally {
     denied.dispose();
+  }
+});
+
+test("refinementSaveDestination: Linear and GitHub carriers by name; an unrecognized backend id renders verbatim", () => {
+  assert.equal(refinementSaveDestination("linear"), "Linear (the node's refinement comment)");
+  assert.equal(
+    refinementSaveDestination("github"),
+    "GitHub (the objective issue's refinement comment)",
+  );
+  assert.equal(refinementSaveDestination("acme"), "acme (the node's refinement comment)");
+});
+
+test("first-party approve label names the bound carrier per backend — a GitHub-bound pair approves only under the GitHub label", async () => {
+  assert.notEqual(GITHUB_CONTEXT, GOLDEN_CONTEXT, "the golden carries exactly one backend span");
+  // The GitHub label approves and saves once through the worker.
+  const github = fixture({ grounded: false });
+  try {
+    const written = github.session.writeArtifact(REFINEMENT_CONTEXT_ARTIFACT, GITHUB_CONTEXT, {
+      provenance: "strict",
+    });
+    assert.equal(written.status, "applied", "the GitHub-bound context is grounded");
+    await github.draft();
+    github.verdict = APPROVE_GITHUB;
+    const approved = await github.invoke("plan_review", {});
+    const details = approved.details as Record<string, unknown>;
+    assert.equal(details.ok, true, JSON.stringify(details));
+    assert.equal(details.saved, true);
+    assert.equal(details.subject, "refinement");
+    assert.equal(approved.terminate, true);
+    assert.equal(github.calls.length, 1, "the save worker ran once");
+    assert.equal(github.exits, 1);
+  } finally {
+    github.dispose();
+  }
+  // The Linear label against the same GitHub-bound pair is NOT an approval: the select returns
+  // a string matching no offered verdict, so the outcome is a dismissal — nothing saved.
+  const mislabelled = fixture({ grounded: false });
+  try {
+    const written = mislabelled.session.writeArtifact(REFINEMENT_CONTEXT_ARTIFACT, GITHUB_CONTEXT, {
+      provenance: "strict",
+    });
+    assert.equal(written.status, "applied");
+    await mislabelled.draft();
+    mislabelled.verdict = APPROVE;
+    const result = await mislabelled.invoke("plan_review", {});
+    const details = result.details as Record<string, unknown>;
+    assert.equal(details.saved, undefined, JSON.stringify(details));
+    assert.equal(details.reason, "dismissed");
+    assert.equal(result.terminate, undefined);
+    assert.equal(mislabelled.calls.length, 0, "nothing saved, no worker call");
+    assert.equal(mislabelled.exits, 0);
+  } finally {
+    mislabelled.dispose();
   }
 });
 

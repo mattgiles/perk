@@ -12,8 +12,9 @@ plan handoff fields.
 
 Direct CLI invocation is a human/extension persistence gesture; metadata is not an approval
 credential. Every service refusal keeps its code, ``comment_ids`` and ``write_attempted`` (read
-back rather than blindly retry). Linear-only in this rollout — the check runs again here, so a
-retained Linear draft in a now-GitHub checkout refuses before any read.
+back rather than blindly retry). The worker is backend-neutral: the context's bound backend must
+equal the resolved store's — a retained draft whose context names another backend refuses
+``invalid_input`` at the service before any read, never a silent save elsewhere.
 """
 
 from pathlib import Path

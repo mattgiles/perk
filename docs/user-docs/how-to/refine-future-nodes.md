@@ -10,18 +10,19 @@ sidebarGroup: "Objectives & learnings"
 
 Sharpen a `pending` or `blocked` roadmap node that has no plan yet — **before** anyone plans it —
 by writing a dated **refinement**: a reviewed, advisory elaboration saved as one marked comment on
-the node-issue. A refinement is never a plan, a claim, an unblock, or a fast-track; the node stays
+the node's carrier — the node-issue on Linear, the objective issue itself on GitHub. A refinement
+is never a plan, a claim, an unblock, or a fast-track; the node stays
 exactly as plannable as before, and the later planning session reads the refinement as dated
 DATA it must re-verify.
 
-Refinement **authoring** is for **Linear-Project objectives only** in this release — a GitHub
-objective refuses with `unsupported_backend` before any network call (its carrier, the objective
-issue, stores and reads refinements, but the refine doors are not yet enabled there). The pass
-runs in a **read-only** session.
+Refinement **authoring** runs on either issue backend; GitHub support is **offline-proven only**
+(the doors run over a faked `gh` in the regression suite, with no live GitHub run recorded). The
+pass runs in a **read-only** session.
 
 ## Prerequisites
 
-- A Linear-backed objective (see [How to switch the issue backend to Linear](./switch-to-linear.md)).
+- An objective on your issue backend (GitHub by default; for Linear see
+  [How to switch the issue backend to Linear](./switch-to-linear.md)).
 - A roadmap node that is `pending` or `blocked` and has no plan — check with
   `perk objective show N`.
 - A configured review surface (the `plan` provider seam) — the refinement is approved there.
@@ -53,9 +54,8 @@ runs in a **read-only** session.
 
    Refusals at this step, with the recovery move:
 
-   - `unsupported_backend` — a GitHub objective; the refine doors admit Linear only in this
-     release (the GitHub carrier stores and reads refinements, but authoring there is not yet
-     enabled).
+   - `backend_error` — the backend refused or the transport failed; on GitHub an unauthenticated
+     `gh` lands here with `gh`'s own message (`gh auth login`).
    - `node_ineligible` — the node is claimed, planned, or finished; pick a `pending`/`blocked`
      node without a plan.
    - `no_unrefined_node` — nothing is left to refine without `--node`; name a node explicitly to
@@ -64,15 +64,16 @@ runs in a **read-only** session.
      claim; start `perk objective refine` cold instead.
 
 3. **Author with the model.** The model reads the grounding context — the target node as read,
-   the full prior refinement when one exists, the human engagement on the node-issue, the
-   capture-time checkout observation, and any warnings — then explores read-only and keeps the
+   the full prior refinement when one exists, the node's human engagement (Linear node-issues; a
+   GitHub objective has no per-node issues, so that block is empty), the capture-time checkout
+   observation, and any warnings — then explores read-only and keeps the
    working draft current with the `objective_refinement_draft` tool. Answer its questions and steer
    it. Anything a later plan must re-verify — a function signature, a file layout, a dependency —
    belongs in the text as an explicit assumption, not as a fact.
 
 4. **Review and save.** `plan_review` renders the refinement (identity header, advisory notice,
    checkout observation, then the Markdown) on your review surface. **APPROVE saves exactly one
-   marked comment on the node-issue** and ends the turn. DENY returns your feedback to the model
+   marked comment on the node's carrier** and ends the turn. DENY returns your feedback to the model
    for a rewrite. A Plannotator approval carrying Direct Edits saves nothing and returns one revise
    round — the header lines are bound metadata, so edit the Markdown through the model instead.
 
@@ -107,14 +108,14 @@ runs in a **read-only** session.
 
 ## Expected result
 
-- One refinement comment on the node-issue whose first line is the
-  `perk:objective-refinement:v1:<key>` marker.
+- One refinement comment on the node's carrier (the node-issue on Linear; the objective issue on
+  GitHub) whose first line is the `perk:objective-refinement:v1:<key>` marker.
 - The node exactly as plannable as before — no status, backlink, or roadmap change.
 - A later plan whose Assumptions name what the refinement got right and what it had to drop.
 
 ## Related
 
-- **Look up:** [Objectives — Node refinements](../reference/objectives.md#node-refinements-linear-project-objectives-only)
+- **Look up:** [Objectives — Node refinements](../reference/objectives.md#node-refinements)
   — the refinement model, its guarantees, and both consumption paths.
 - **Look up:** [`perk objective refine`](../reference/cli/objective.md#perk-objective-refine-number)
   — the door's flags, ordering, and refusals.

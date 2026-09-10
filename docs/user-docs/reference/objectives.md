@@ -48,7 +48,7 @@ Each row links to its authoritative entry in the [CLI reference](./cli.md) or th
 | [`perk objective node-add`](./cli/objective.md#perk-objective-node-add-number) | Add a genuinely-new node and assign its next phase-local id. |
 | [`perk objective engagement`](./cli/objective.md#perk-objective-engagement-number) | Read objective and node-issue human engagement as untrusted data. |
 | [`perk objective node-engagement`](./cli/objective.md#perk-objective-node-engagement-number) | Read one node's pre-planning engagement plus its saved refinement. |
-| [`perk objective refine`](./cli/objective.md#perk-objective-refine-number) | Author an advisory refinement of a future node in a read-only session (Linear only). |
+| [`perk objective refine`](./cli/objective.md#perk-objective-refine-number) | Author an advisory refinement of a future node in a read-only session. |
 | [`perk objective reconcile`](./cli/objective.md#perk-objective-reconcile-number-alias-rec) (`rec`) | Rewrite only the Reconcilable prose region after a merge. |
 | [`perk objective replan`](./cli/objective.md#perk-objective-replan-number) | Re-author unfinished work as a superseding objective. |
 | [`perk objective next`](./cli/objective.md#perk-objective-next-number-alias-n) (`n`) | Print the next plannable node. |
@@ -275,7 +275,7 @@ which also reads the node's saved refinement (below) as a second, independent ad
 GitHub single-issue objectives have no per-node issues, so this is a Linear-first behavior (empty on
 GitHub).
 
-### Node refinements (Linear-Project objectives only)
+### Node refinements
 
 A **refinement** is a dated, reviewed, advisory elaboration of one roadmap node, written ahead
 of its turn and stored as **one marked comment on the node's carrier** — the node-issue on Linear;
@@ -303,10 +303,10 @@ even when it quotes a complete plan-body example.
 For the operator path — pick, author, review, inspect, then plan — see
 [How to refine future nodes before planning](../how-to/refine-future-nodes.md).
 
-Two doors open a refinement pass — both **Linear-only** in this release: the doors are gated
-by a rollout allowlist that admits Linear, so a GitHub objective store refuses with
-`unsupported_backend` before any authentication, network call, sync or launch, and again at
-save (the GitHub carrier stores and reads refinements; authoring there is not yet enabled):
+Two doors open a refinement pass on **either issue backend** — on Linear the comment lands on
+the node-issue, on GitHub on the objective issue (one comment per refined node, told apart by
+the key); GitHub support is **offline-proven only** (see
+[Issue backends — Node refinements](./providers-and-backends/issue-backends.md#node-refinements)):
 
 - **Cold:** `perk objective refine <objective> [--node <id>]` starts a fresh read-only
   `objective-refine` session on the checkout you invoke it from — dirty changes included; it
@@ -354,7 +354,7 @@ fence the reviewed artifact and its target, not the code. Treat the observation 
 provenance, spell out changed-code assumptions in the Markdown, and re-verify them when the node
 is actually planned.
 
-Planning sessions consume a saved refinement (Linear) as dated advisory DATA the plan re-verifies
+Planning sessions consume a saved refinement as dated advisory DATA the plan re-verifies
 against the live tree — through two paths with their own reporting. **Cold** `perk objective plan`
 snapshots it at launch under the run's scratch dir and seeds a pointer the session pages with
 `read`; a degraded advisory read prints a `⚠` line per warning and puts a compact node-context
@@ -362,8 +362,8 @@ notice in the seed. **Warm** `/objective-plan` runs
 `perk objective node-engagement N --node <id> --json` after the planning transition (the snapshot
 is written then, not at launch) and pages the returned file pointer; its `warnings[]` are reported
 by the session in the plan's Assumptions as incomplete advisory input. Neither path retries. On
-GitHub the read runs over the objective issue and reports `absent` until the refine doors are
-enabled there.
+GitHub the read runs over the objective issue — `absent` until a refinement is saved there,
+`present` once one is.
 The wire format, the transfer artifacts and the door guarantees are pinned in
 `shared/contracts.md` §8.26 and §8.67–§8.68.
 

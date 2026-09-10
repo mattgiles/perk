@@ -728,7 +728,8 @@ each): `.pi/npm/node_modules/@mgiles/perk/` (219 file hashes — the released 3.
 ## Unobserved / residuals
 
 - The GitHub refinement carrier (Phase 2) — `unsupported_backend` at every door remains the
-  contract.
+  contract. **Resolved (2026-09-10):** the GitHub carrier's doors are enabled and proven offline
+  only — see [objective-refinement-github-carrier.md](objective-refinement-github-carrier.md).
 - Linear `RATELIMITED` behavior under refinement traffic.
 - A live **warm** refine pass (`/objective-refine`) — offline-pinned only (O3).
 - A live denial or a Plannotator Direct-Edits approval on a refinement — offline-pinned only

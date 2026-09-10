@@ -689,7 +689,7 @@ export function installObjectiveRefinementBindings(
   registerPerkCommand(pi, "objective-refine", {
     description:
       "Enter an objective-node refinement pass in this session: [objective] [--node ID] " +
-      "(else the active objective; the first refinable future node). Read-only; Linear only.",
+      "(else the active objective; the first refinable future node). Read-only.",
     handler: async (args, ctx) => {
       const warn = (message: string) => report(ctx, SCOPE_REFINE, "warning", message);
       const parsed = parseRefineCommandArgs(args ?? "");
@@ -941,6 +941,12 @@ function recordRefinementSaveOutcome(
 
 // ------------------------------------------------------------------------ the review arm
 
+/**
+ * The refinement review subject. It carries no static `saveDestination`: the first-party approve
+ * label names the bound context's carrier per backend (`refinementSaveDestination`), so every
+ * `verdictsFor` call for this subject spreads the derived destination in. The outcome texts read
+ * the other fields only.
+ */
 const REFINEMENT_SUBJECT: ReviewSubject = {
   noun: "refinement",
   present: "the complete refinement to the user",
@@ -950,8 +956,24 @@ const REFINEMENT_SUBJECT: ReviewSubject = {
   failsafeCmd: "/objective-refinement-save",
   detailsExtra: { subject: "refinement" },
   noSourceError: "no refinement draft resolved",
-  saveDestination: "Linear (the node's refinement comment)",
 };
+
+/**
+ * The save destination the first-party approve verdict names, derived from the bound context's
+ * `identity.backend` (the carrier the save is bound to — never the checkout's `[issues]`
+ * config, which the service fences separately). Pure; never throws: an unrecognized backend id
+ * renders verbatim so the label never lies about where the save lands.
+ */
+export function refinementSaveDestination(backend: string): string {
+  switch (backend) {
+    case "linear":
+      return "Linear (the node's refinement comment)";
+    case "github":
+      return "GitHub (the objective issue's refinement comment)";
+    default:
+      return `${backend} (the node's refinement comment)`;
+  }
+}
 
 const REFINEMENT_REVIEW_EDITOR_TITLE =
   "Refinement review (view only — edits are not saved) — Enter: continue to verdict · Esc: " +
@@ -1027,12 +1049,15 @@ function refinementOutcomeOf(outcome: ReviewOutcome): RefinementReviewOutcome {
 
 /**
  * The first-party reviewer: the in-TUI editor review, VIEW-ONLY (3 verdicts). Returns the door
- * vocabulary (`ReviewOutcome`) so both arms share one ladder + completion path.
+ * vocabulary (`ReviewOutcome`) so both arms share one ladder + completion path. The approve
+ * verdict names the bound context's carrier for `backend` (`refinementSaveDestination`), so the
+ * human approves a save to the place it actually lands.
  */
 async function firstPartyRefinementReview(
   ctx: ExtensionContext,
   rendered: string,
   signal: AbortSignal | undefined,
+  backend: string,
 ): Promise<ReviewOutcome> {
   const fp = await runFirstPartyReview({
     ui: ctx.ui,
@@ -1040,7 +1065,10 @@ async function firstPartyRefinementReview(
     writeDraft: () => true,
     signal,
     editorTitle: REFINEMENT_REVIEW_EDITOR_TITLE,
-    verdicts: verdictsFor(REFINEMENT_SUBJECT),
+    verdicts: verdictsFor({
+      ...REFINEMENT_SUBJECT,
+      saveDestination: refinementSaveDestination(backend),
+    }),
     viewOnly: true,
   });
   return fp.outcome;
@@ -1128,7 +1156,12 @@ export async function runRefinementReviewV1(
   const review = opened.review;
   const outcome = plannotator
     ? await bridge.review(rendered, sig)
-    : await firstPartyRefinementReview(ctx, rendered, sig);
+    : await firstPartyRefinementReview(
+        ctx,
+        rendered,
+        sig,
+        resumed.pair.context.context.target.identity.backend,
+      );
   if (sig?.aborted) return subjectReviewOutcomeResult(REFINEMENT_SUBJECT, { status: "aborted" });
   if (outcome.status !== "completed")
     return subjectReviewOutcomeResult(REFINEMENT_SUBJECT, outcome);

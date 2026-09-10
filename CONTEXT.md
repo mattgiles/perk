@@ -202,8 +202,8 @@ _Avoid_: partial land, broken stack
 
 **Refinement** (of a roadmap node):
 A dated, reviewed, advisory elaboration of one existing roadmap node, persisted as a single
-marked comment on the node's carrier (the Linear node-issue) with its authoring provenance and
-the node source it was written against. Content only: neither an executable plan, a node
+marked comment on the node's carrier (the Linear node-issue, or on GitHub the objective issue
+itself) with its authoring provenance and the node source it was written against. Content only: neither an executable plan, a node
 status, a claim, nor a readiness or freshness proof; stored metadata never authenticates human
 approval.
 _Avoid_: pre-plan, draft plan, node body, elaboration

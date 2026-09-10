@@ -24,6 +24,7 @@ requests, review, CI, or merge away from GitHub.
 | Identifiers | Numeric issue ids, commonly written `#42`, and GitHub issue URLs | Human issue identifiers such as `ENG-123`; objective refs are Linear Project ids/URLs |
 | Labels | Relevant `perk:*` repository labels are ensured lazily as writes need them | Six `perk:*` workspace labels are checked or ensured by readiness |
 | Metadata | Readable HTML-comment metadata blocks in issue bodies and comments | Machine metadata in native issue attachments; selected prose markers remain inline-code sentinels |
+| Node refinement carrier | The objective issue (one marked comment per node); **offline-proven only** | The node-issue; live-validated 2026-09-10 |
 | Readiness checks | `issues-backend`, `github-auth`, `github-repo` | `issues-backend`, `linear-auth`, `linear-team`, `linear-labels`, `linear-project-scopes`, `linear-workflow-states` |
 
 The `[issues]` table is read only from the main checkout's committed `.perk/config.toml`. A linked
@@ -210,17 +211,19 @@ replaces the same comment. Saves make one write attempt and verify it by reading
 back, refusing on concurrent edits, duplicate records, or a damaged record instead of retrying.
 A refinement comment is never read as the node's plan comment or as any other perk marker
 comment. Refinements are authored with `perk objective refine` / `/objective-refine` and saved
-by an approved `plan_review` or the human's `/objective-refinement-save` — **authoring is Linear
-only** in this release: the refine doors are gated by a rollout allowlist that admits Linear, so
-a GitHub objective store refuses `unsupported_backend` before authentication, network, sync or
-launch, and again at save (the GitHub carrier itself stores and reads refinements; only the
-authoring doors are not yet enabled there).
+by an approved `plan_review` or the human's `/objective-refinement-save`. Authoring runs on both
+backends. GitHub's refinement path is **offline-proven only**: the real store, adapter and
+service run over a stateful `gh` fake in the regression suite, and live behavior (comment-body
+byte preservation, the HTTP 422 shape for the 65,536-character cap, `fullDatabaseId` on every
+comment, `--paginate --slurp` on the comments endpoint) has not been observed against a live
+repository; the refine doors never probe `gh auth`, so an unauthenticated `gh` surfaces as
+`backend_error` with `gh`'s message.
 Planning sessions consume a saved refinement as dated advisory DATA behind a file pointer —
 snapshotted at launch by `perk objective plan`, or when `/objective-plan` runs the
-`node-engagement` worker after the planning transition (on GitHub the read runs over the
-objective issue and is `absent` until refinements can be authored there). For the operator path — pick, author, review, inspect, then plan — see
-[How to refine future nodes before planning](../../how-to/refine-future-nodes.md). See
-[Objectives — Node refinements](../objectives.md#node-refinements-linear-project-objectives-only).
+`node-engagement` worker after the planning transition (on GitHub over the objective issue —
+`absent` until a refinement is saved). For the operator path — pick, author, review, inspect,
+then plan — see [How to refine future nodes before planning](../../how-to/refine-future-nodes.md).
+See [Objectives — Node refinements](../objectives.md#node-refinements).
 
 ### The dream-report companion
 

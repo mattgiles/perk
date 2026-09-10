@@ -73,7 +73,7 @@ for exactly one goal.
 - [How to author an objective roadmap](./author-a-roadmap.md) — stand up a new objective + roadmap
   in a read-only authoring session.
 - [How to refine future nodes before planning](./refine-future-nodes.md) — write a dated advisory
-  refinement of a pending or blocked node before its planning turn (Linear objectives).
+  refinement of a pending or blocked node before its planning turn (either issue backend).
 - [How to replan an objective](./replan-an-objective.md) — re-author an objective as a superseding
   net-new objective that carries forward only the unfinished work and closes the old one.
 - [How to advance or skip roadmap nodes manually](./advance-or-skip-nodes.md) — change a node's

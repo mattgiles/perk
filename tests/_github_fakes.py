@@ -9,6 +9,7 @@ underscore so pytest does not collect this module.
 
 import json
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from perk import objective, plan
@@ -142,6 +143,12 @@ class FakeGitHubIssues:
     the GraphQL comments connection and the REST ``--paginate`` census so three comments exercise
     both cursor loops. ``comment_max_chars`` is GitHub's 65,536-character issue-comment cap (a
     longer POST/PATCH body is the real 422). ``calls`` records every `gh` argv (sans ``gh``).
+
+    ``faults`` is the additive fault hook: a ``(predicate, proc)`` entry short-circuits routing
+    for any matching `gh` argv (e.g. ``(_has("api", "graphql"), _Proc(1, stderr="gh: HTTP 401:
+    Bad credentials"))``), consulted AFTER the call is recorded so the transcript still shows
+    the attempt. Tests append and clear entries themselves — there is no second dispatch path
+    and no sleeping.
     """
 
     def __init__(self, *, page_size: int = 2, comment_max_chars: int = 65_536) -> None:
@@ -151,6 +158,7 @@ class FakeGitHubIssues:
         self.issues: dict[int, dict[str, object]] = {}
         self.comments: dict[int, list[dict[str, object]]] = {}
         self.calls: list[list[str]] = []
+        self.faults: list[tuple[Callable[[list[str]], bool], _Proc]] = []
         self._next_comment_id = _FIRST_COMMENT_ID
         self._clock = 0
 
@@ -289,6 +297,9 @@ class FakeGitHubIssues:
         return gh[gh.index("-X") + 1] if "-X" in gh else "GET"
 
     def _dispatch(self, gh: list[str]) -> _Proc:
+        for predicate, proc in self.faults:
+            if predicate(gh):
+                return proc
         if gh[:3] == ["repo", "view", "--json"]:
             return _Proc(0, "octo/repo\n")
         if gh[:2] == ["issue", "view"]:
