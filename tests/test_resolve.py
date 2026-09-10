@@ -5,10 +5,12 @@ The resolver (``perk/backends/resolve.py``) is the only door every backend consu
 selection and construct the matching backend; the local overlay is never read. The
 ``TestConsumerBoundary`` scans are the source-scan companions proving no production module reaches
 the GitHub substrate modules (``perk/backends/github/{plans,objectives}.py``) directly — both
-express "the resolver is the only door". (The objective-store tests folded in here from the
-retired ``test_objective_stores.py``.)
+express "the resolver is the only door"; the live scan and its synthetic controls share the same
+discovery and rule helpers, so the guard proves it inspected a live corpus and that its rule bites.
+(The objective-store tests folded in here from the retired ``test_objective_stores.py``.)
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -214,6 +216,54 @@ SUBSTRATE_MODULES: tuple[str, ...] = (
     "perk.backends.github.objectives",
 )
 
+# The package-level from-import shape production actually uses (`from perk.backends.github import
+# plans`), invisible to the dotted substring above. Single line only — a parenthesised multi-line
+# import list, a relative import, or attribute access through `from perk.backends import github`
+# all escape. A textual backstop, not a completeness proof
+# (docs/learned/workflow/source-scan-guards.md).
+SUBSTRATE_FROM_IMPORT = re.compile(
+    r"^\s*from\s+perk\.backends\.github\s+import\s+.*\b(plans|objectives)\b"
+)
+
+# Files the live scan must inspect: the door itself, a sibling backend package (the exclusion must
+# not swallow all of `backends/`), and the gateway package that shares the `github` name.
+LIVE_ANCHORS: tuple[Path, ...] = (
+    Path("backends/resolve.py"),
+    Path("backends/linear/backend.py"),
+    Path("github/__init__.py"),
+)
+
+# Exists on disk, must never be scanned — proves the exclusion is live.
+EXCLUDED_ANCHOR = Path("backends/github/plans.py")
+
+
+def _reaches_substrate(line: str) -> bool:
+    """The textual rule, one line at a time: the dotted module path anywhere on the line (the
+    original rule, kept verbatim) OR a package-level from-import naming a substrate module."""
+    return any(mod in line for mod in SUBSTRATE_MODULES) or bool(SUBSTRATE_FROM_IMPORT.search(line))
+
+
+def _production_files(perk_dir: Path) -> list[Path]:
+    """Package-root recursive discovery minus the GitHub backend package, evaluated at call time so
+    a newly created module is inspected on the next run. Fails closed: an empty walk raises rather
+    than yielding a vacuously clean scan."""
+    github_backend_dir = perk_dir / "backends" / "github"
+    files = [p for p in sorted(perk_dir.rglob("*.py")) if not p.is_relative_to(github_backend_dir)]
+    if not files:
+        raise AssertionError("production-file scan came up empty — guard is vacuous")
+    return files
+
+
+def _substrate_offenders(perk_dir: Path) -> list[str]:
+    """The checker the live guard and the synthetic controls share; the diagnostic format is
+    unchanged (`<path from the package parent>:<lineno>: <stripped line>`)."""
+    offenders: list[str] = []
+    for path in _production_files(perk_dir):
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if _reaches_substrate(line):
+                offenders.append(f"{path.relative_to(perk_dir.parent)}:{lineno}: {line.strip()}")
+    return offenders
+
 
 class TestConsumerBoundary:
     def test_no_production_module_imports_the_substrate_directly(self) -> None:
@@ -223,18 +273,80 @@ class TestConsumerBoundary:
         objective ops through resolve.resolve_issue_backend(...) / resolve.resolve_objective_store(
         ...). The adapters (backend.py, objective_store.py) and the sibling substrate
         (objectives.py importing plans) legitimately import it, so the whole perk/backends/github/
-        package is allowed."""
+        package is allowed. The anchors prove the scan inspected the intended corpus — and skipped
+        the excluded package — before cleanliness means anything."""
         perk_dir = Path(perk.__file__).parent
-        github_backend_dir = perk_dir / "backends" / "github"
-        offenders: list[str] = []
-        for path in sorted(perk_dir.rglob("*.py")):
-            if path.is_relative_to(github_backend_dir):
-                continue
-            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-                if any(mod in line for mod in SUBSTRATE_MODULES):
-                    offenders.append(
-                        f"{path.relative_to(perk_dir.parent)}:{lineno}: {line.strip()}"
-                    )
-        assert not offenders, (
-            "substrate imports must go through perk.backends.resolve:\n" + "\n".join(offenders)
+        scanned = {p.relative_to(perk_dir) for p in _production_files(perk_dir)}
+        missing = [str(a) for a in LIVE_ANCHORS if a not in scanned]
+        assert not missing, f"scan missed live anchors {missing} — guard is misaimed"
+        assert (perk_dir / EXCLUDED_ANCHOR).is_file(), (
+            f"{EXCLUDED_ANCHOR} no longer exists — re-aim EXCLUDED_ANCHOR"
         )
+        assert EXCLUDED_ANCHOR not in scanned, (
+            f"{EXCLUDED_ANCHOR} was scanned — the GitHub-package exclusion is broken"
+        )
+        offenders = _substrate_offenders(perk_dir)
+        assert not offenders, (
+            "substrate imports must go through perk.backends.resolve (resolve_issue_backend / "
+            "resolve_objective_store); only perk/backends/github/ may import "
+            "perk.backends.github.{plans,objectives}:\n" + "\n".join(offenders)
+        )
+
+    def test_rule_matches_the_adapters_own_substrate_imports(self) -> None:
+        """Liveness: the rule must bite a real import *statement* in the allowed package (docstring
+        mentions are deliberately excluded), else the rule has rotted or the adapters moved."""
+        perk_dir = Path(perk.__file__).parent
+        for rel in (
+            "backends/github/backend.py",
+            "backends/github/objective_store.py",
+            "backends/github/objectives.py",
+        ):
+            source = (perk_dir / rel).read_text(encoding="utf-8")
+            import_lines = [
+                line
+                for line in source.splitlines()
+                if line.lstrip().startswith(
+                    ("from perk.backends.github import", "import perk.backends.github.")
+                )
+            ]
+            assert any(_reaches_substrate(line) for line in import_lines), (
+                f"{rel}: no real substrate import statement matches the rule — "
+                "the rule has rotted or the adapter moved"
+            )
+
+    def test_checker_flags_prohibited_and_permits_neighbouring_synthetic_imports(
+        self, tmp_path: Path
+    ) -> None:
+        """The same helpers, over a planted tree: the from-import hole and the dotted shape are
+        flagged; the resolver, the adapter, a non-substrate sibling, and the excluded package are
+        not. Exact payload — path, line number, stripped line, sorted-file order."""
+        root = tmp_path / "perk"
+        (root / "cli").mkdir(parents=True)
+        (root / "cli" / "consumer.py").write_text(
+            '"""Reaches the substrate only through the resolver."""\n'
+            "from perk.backends.resolve import resolve_issue_backend\n"
+            "from perk.backends.github.backend import GitHubIssueBackend\n"
+            "from perk.backends.github import engagement as gh_engagement\n"
+            "from perk.backends.github import plans\n",
+            encoding="utf-8",
+        )
+        (root / "learn").mkdir(parents=True)
+        (root / "learn" / "exporter.py").write_text(
+            "import perk.backends.github.objectives\n", encoding="utf-8"
+        )
+        (root / "backends" / "github").mkdir(parents=True)
+        (root / "backends" / "github" / "backend.py").write_text(
+            "from perk.backends.github import plans\n", encoding="utf-8"
+        )
+        assert _substrate_offenders(root) == [
+            "perk/cli/consumer.py:5: from perk.backends.github import plans",
+            "perk/learn/exporter.py:1: import perk.backends.github.objectives",
+        ]
+
+    def test_checker_fails_closed_on_empty_discovery(self, tmp_path: Path) -> None:
+        """A walk where everything found was excluded is just as vacuous as finding nothing."""
+        root = tmp_path / "perk"
+        (root / "backends" / "github").mkdir(parents=True)
+        (root / "backends" / "github" / "plans.py").write_text("GITHUB = True\n", encoding="utf-8")
+        with pytest.raises(AssertionError, match="came up empty"):
+            _substrate_offenders(root)
