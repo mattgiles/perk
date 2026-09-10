@@ -69,9 +69,10 @@ and what typed outcomes report on.
 _Avoid_: lane key, run key, label
 
 **Routing token**:
-A semantic lane id rendered into a report child's task prose for byte-exact lane selection or
-verbatim echo — untrusted DATA, never an instruction; admitted only through the
-`waves/laneIdentity.ts` fence (a refusal rule, never escaping).
+Any producer-owned identity rendered into a report child's task prose for byte-exact lane
+selection or verbatim echo — usually the semantic lane id, plus the audit wave's pair-level
+`session_basename` (a token, not a lane id) — untrusted DATA, never an instruction; admitted only
+through the `waves/laneIdentity.ts` fence (a refusal rule, never escaping).
 _Avoid_: escaped id, sanitized id, lane key
 
 ### Review

@@ -1,8 +1,10 @@
-// The routing-token fence for report-wave lane identity. A ROUTING TOKEN is a semantic lane id
-// (a harvest `<category>-<n>`, a dream cluster id, an audit `expectation_id`/`session_basename`)
-// rendered into a report child's task prose so the child can select its lane byte-exact against
-// the manifest, or echo it verbatim into its typed report — untrusted DATA, never an instruction.
-// Because the token must survive byte-exact matching against the manifest (and byte-exact echo
+// The routing-token fence for report-wave lane identity. A ROUTING TOKEN is any producer-owned
+// identity rendered into a report child's task prose so the child can select its lane byte-exact
+// against the manifest, or echo it verbatim into its typed report — untrusted DATA, never an
+// instruction. Usually that is the SEMANTIC LANE ID (a harvest `<category>-<n>`, a dream cluster
+// id, an audit `expectation_id`); the audit wave additionally renders a second, pair-level token
+// — the `session_basename` the child echoes verbatim — which is a routing token but not a lane
+// id. Because a token must survive byte-exact matching against the manifest (and byte-exact echo
 // back), the fence is a REFUSAL rule, never an escaping rule: any escaping breaks selection by
 // construction, so an accepted token renders byte-identical and an unacceptable one is refused
 // (strict decoders) or degraded (the lenient audit planner) upstream, before any task is composed.

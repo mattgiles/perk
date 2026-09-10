@@ -24,14 +24,17 @@
 // bundle's packet layout), so their evidence is ambiguous — such pairs are dispatched as NO
 // lanes and degrade honestly (`lane-failed`, named detail) instead of grading the wrong
 // transcript. The same pre-dispatch degrade family covers identity the planner cannot trust:
-// a pair whose `expectation_id` differs from its enclosing result `id` (ambiguous identity —
-// the rubric would come from one expectation and the verdicts identity from another) and a
-// pair whose rendered routing tokens — the enclosing `id` and its `session_basename` — fail
-// the `waves/laneIdentity.ts` fence (the lenient decode admits any string, so the fence
-// degrades here rather than refusing). The mismatch record is keyed under the ENCLOSING id
-// (the fold joins verdict lanes on `(expectation_id, session_path)` from the enclosing result,
-// so only that identity lands the named degradation on the outer cell); every other degrade
-// keeps the pair's own identity.
+// a fold identity `(enclosing id, session_path)` claimed by more than one packetized pair (the
+// fold rejects a verdicts file carrying one identity twice, so the claimants consolidate into
+// ONE record and none dispatches); a pair whose `expectation_id` differs from its enclosing
+// result `id` (ambiguous identity — the rubric would come from one expectation and the
+// verdicts identity from another); and a pair whose rendered routing tokens — the enclosing
+// `id` and its `session_basename` — fail the `waves/laneIdentity.ts` fence (the lenient decode
+// admits any string, so the fence degrades here rather than refusing). Every record is written
+// under the fold identity `(enclosing id, session_path)`: the mismatch record by substitution
+// (the fold joins verdict lanes on that key from the enclosing result, so only that identity
+// lands the named degradation on the outer cell); every other record because its pair's
+// `expectation_id` IS the enclosing id.
 //
 // Pi-free by construction: the `ReportWave` seam and the function-shaped `writeVerdicts`
 // capability are the only mechanism edges; the adapter constructs and threads them.
@@ -191,8 +194,10 @@ interface PlannedAuditLane {
   lane: ReportAssignment;
 }
 
-/** The code-owned lane identity every verdicts record carries: copied from the manifest pair,
- * never child-echoed (contracts.md §8.50). */
+/** The code-owned lane identity every verdicts record carries — never child-echoed
+ * (contracts.md §8.50). Report and wave-failure records copy it from the manifest pair; the
+ * planner's identity degrades write it under the ENCLOSING expectation id (the fold's join key),
+ * which equals the pair's own id except on the mismatch and contested-identity arms. */
 interface AuditLaneIdentity {
   expectation_id: string;
   session_basename: string;
@@ -203,10 +208,10 @@ interface AuditLaneIdentity {
 interface AuditLanePlan {
   /** One lane per unambiguous packetized pair (manifest order). */
   planned: PlannedAuditLane[];
-  /** Packetized pairs degraded pre-dispatch (id mismatch / unsafe routing token / ambiguous
-   * packet identity / missing path), each under the FOLD identity its record is written with —
-   * the pair's own, except the mismatch arm's, which is the enclosing expectation's id (the
-   * fold's `(expectation_id, session_path)` join). */
+  /** Pre-dispatch degrades (contested fold identity / id mismatch / unsafe routing token /
+   * ambiguous packet identity / missing path), each under the FOLD identity its record is
+   * written with — `(enclosing expectation id, session_path)`, unique across the bucket and the
+   * planned lanes (a contested identity yields ONE record for all its claimants). */
   degraded: { identity: AuditLaneIdentity; detail: string }[];
   /** The manifest's non-packetized pairs (unboundable/unparsed/malformed/not-sampled). */
   skipped: AuditManifestPair[];
@@ -242,6 +247,12 @@ function laneTask(
   );
 }
 
+/** The verdicts-record identity the fold joins on — `(enclosing expectation id, session_path)`
+ * — as one map key (NUL-joined, the same separator the basename-collision count uses). */
+function foldIdentityKey(expectationId: string, sessionPath: string): string {
+  return `${expectationId}\u0000${sessionPath}`;
+}
+
 /**
  * Compose one lane's run-key-safe key: the sanitized expectation id plus a global 1-based
  * ordinal. Uniqueness lives in the ordinal; the human-readable pair identity rides the lane
@@ -259,19 +270,37 @@ function laneKey(expectationId: string, ordinal: number): string {
  * Build the lane plan: one lane per packetized pair, keyed `<sanitized expectation
  * id>.<ordinal>` (run-key-safe; see `laneKey`) and labeled `<expectation_id>@<session_path>`.
  * Each packetized pair runs the pre-dispatch checks in a fixed order — identity before
- * evidence, the first failing check's detail wins: (1) the pair's `expectation_id` must equal
- * its enclosing result `id` (a mismatch degrades under the ENCLOSING id — the fold's join
- * identity); (2) the enclosing id and (3) the `session_basename` must pass the routing-token
- * fence (they are rendered into task prose; the lenient decode admits `""`, so the fence's
- * non-empty arm is reachable here); (4) packetized pairs sharing `(expectation_id,
- * session_basename)` share a stem-keyed packet file, so their evidence is ambiguous — ALL such
- * pairs are degraded; (5) a missing `packet_path` cannot be graded. Degraded pairs dispatch as
- * NO lanes while unaffected lanes still dispatch. Non-packetized pairs land in `skipped`.
+ * evidence, the first failing check's detail wins: (1) the pair's FOLD identity `(enclosing
+ * expectation id, session_path)` must be claimed by no other packetized pair (a contested
+ * identity consolidates into ONE `lane-failed` record and dispatches nothing — see
+ * `foldIdentityKey`); (2) the pair's `expectation_id` must equal its enclosing result `id` (a
+ * mismatch degrades under the ENCLOSING id — the fold's join identity); (3) the enclosing id
+ * and (4) the `session_basename` must pass the routing-token fence (they are rendered into
+ * task prose; the lenient decode admits `""`, so the fence's non-empty arm is reachable here);
+ * (5) packetized pairs sharing `(expectation_id, session_basename)` share a stem-keyed packet
+ * file, so their evidence is ambiguous — ALL such pairs are degraded; (6) a missing
+ * `packet_path` cannot be graded. Degraded pairs dispatch as NO lanes while unaffected lanes
+ * still dispatch. Non-packetized pairs land in `skipped`.
  */
 function buildAuditLanes(manifest: AuditManifest, bundleDir: string): AuditLanePlan {
   const planned: PlannedAuditLane[] = [];
   const degraded: AuditLanePlan["degraded"] = [];
   const skipped: AuditManifestPair[] = [];
+
+  // Every record a packetized pair yields is written under the fold identity `(enclosing
+  // expectation id, session_path)` — the mismatch arm by substitution, every other arm because
+  // a non-mismatched pair's expectation_id IS the enclosing id. The fold rejects a verdicts
+  // file carrying one identity twice WHOLESALE, so count the claimants over the whole manifest
+  // up front (a collision can sit later in manifest order, or under a duplicate result id).
+  const foldIdentityCounts = new Map<string, number>();
+  for (const expectation of manifest.results) {
+    for (const pair of expectation.pairs) {
+      if (pair.status !== "packetized") continue;
+      const key = foldIdentityKey(expectation.id, pair.session_path);
+      foldIdentityCounts.set(key, (foldIdentityCounts.get(key) ?? 0) + 1);
+    }
+  }
+  const contestedRecorded = new Set<string>();
 
   for (const expectation of manifest.results) {
     // Count packetized pairs per (expectation_id, session_basename) to spot collisions.
@@ -284,6 +313,28 @@ function buildAuditLanes(manifest: AuditManifest, bundleDir: string): AuditLaneP
     for (const pair of expectation.pairs) {
       if (pair.status !== "packetized") {
         skipped.push(pair);
+        continue;
+      }
+      const foldKey = foldIdentityKey(expectation.id, pair.session_path);
+      const claimants = foldIdentityCounts.get(foldKey) ?? 0;
+      if (claimants > 1) {
+        // A contested fold identity can land only ONE record (the fold's uniqueness rule), and
+        // no claimant can be trusted to be the cell's grading — so none dispatches and the one
+        // record (the first claimant's basename, manifest order) names the ambiguity.
+        if (!contestedRecorded.has(foldKey)) {
+          contestedRecorded.add(foldKey);
+          degraded.push({
+            identity: {
+              expectation_id: expectation.id,
+              session_basename: pair.session_basename,
+              session_path: pair.session_path,
+            },
+            detail:
+              `fold identity ${JSON.stringify(expectation.id)} × ` +
+              `${JSON.stringify(pair.session_path)} is claimed by ${claimants} packetized ` +
+              "pairs — ambiguous identity",
+          });
+        }
         continue;
       }
       if (pair.expectation_id !== expectation.id) {
@@ -446,7 +497,8 @@ function waveStatusOf(result: ReportWaveResult): AuditWaveStatus {
 }
 
 /** A degraded lane record under a code-owned fold identity (a manifest pair is structurally
- * assignable; the planner's mismatch arm passes the enclosing-id identity instead). */
+ * assignable; the planner's mismatch and contested-identity arms pass the enclosing-id identity
+ * instead). */
 function failedLane(
   identity: AuditLaneIdentity,
   status: "lane-failed" | "malformed-report",
@@ -455,7 +507,7 @@ function failedLane(
   return {
     expectation_id: identity.expectation_id,
     session_basename: identity.session_basename,
-    // Code-owned identity: copied from the manifest pair, never child-echoed.
+    // Code-owned identity from the plan/pair, never child-echoed.
     session_path: identity.session_path,
     status,
     verdict: null,

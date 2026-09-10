@@ -6281,9 +6281,12 @@ handoff, identity/stage/run data or model-tool parameter is added. This is spawn
 Perk-owned report waves, not continuous revocation, foreground Perk enforcement, certification of
 manual subagent calls, cross-cwd handoff transport, or an OS sandbox.
 
-**The routing-token fence.** A *routing token* is a semantic lane id rendered into a report
-child's task prose for byte-exact lane selection or verbatim echo — untrusted DATA, never an
-instruction. `extension/waves/laneIdentity.ts` exports the fence: `isRoutingToken(token)` is
+**The routing-token fence.** A *routing token* is any producer-owned identity rendered into a
+report child's task prose for byte-exact lane selection or verbatim echo — untrusted DATA, never
+an instruction. Usually it is the *semantic lane id* (a harvest `<category>-<n>`, a dream cluster
+id, an audit `expectation_id`); the audit wave additionally renders a pair-level token — the
+`session_basename` the child echoes verbatim — which is a routing token but not a lane id.
+`extension/waves/laneIdentity.ts` exports the fence: `isRoutingToken(token)` is
 `true` iff the token is non-empty and carries none of C0 U+0000–U+001F, DEL U+007F, C1
 U+0080–U+009F, U+2028/U+2029, or `"`; `renderRoutingToken(token)` is the asserting identity
 helper — it returns an accepted token UNCHANGED and throws on a refused one as a programmer
@@ -8795,13 +8798,18 @@ launch state (§8.3's `audit_bundle_dir` binding); missing/blank binding or a mi
 pi-subagents' `runs.all` key contract, which the wave renderer also enforces up front; the
 path-qualified pair identity `<expectation_id>@<session_path>` rides the lane label — basenames
 are not globally unique — and the fold joins reports back to pairs through the code-owned lane
-plan, never by parsing keys). A packetized pair whose `expectation_id` differs from its enclosing
-result `id` (ambiguous identity — the rubric would come from one expectation and the verdicts
-identity from another), or whose rendered routing tokens — the enclosing `id` and its
-`session_basename` — fail the §8.35 fence, dispatches as NO lane and is recorded `lane-failed`
-with a named detail; the mismatch record is keyed under the ENCLOSING id (the fold's
-`(expectation_id, session_path)` join), the others under the pair's own identity. Packetized
-pairs sharing `(expectation_id, session_basename)` share
+plan, never by parsing keys). Every verdicts record is written under the FOLD identity
+`(enclosing result id, session_path)` — the fold's join key — and the file carries each identity
+at most once (the fold rejects a duplicate wholesale): a fold identity claimed by more than one
+packetized pair (e.g. a pair and a mismatched sibling sharing a `session_path`, or byte-identical
+twins) dispatches NO lane for any claimant and is recorded as ONE consolidated `lane-failed`
+("fold identity … is claimed by N packetized pairs — ambiguous identity"; the first claimant's
+`session_basename`). A packetized pair whose `expectation_id` differs from its enclosing result
+`id` (ambiguous identity — the rubric would come from one expectation and the verdicts identity
+from another), or whose rendered routing tokens — the enclosing `id` and its `session_basename`
+— fail the §8.35 fence, dispatches as NO lane and is recorded `lane-failed` with a named detail
+(the mismatch record's identity substitutes the enclosing id; every other record's pair id IS
+the enclosing id). Packetized pairs sharing `(expectation_id, session_basename)` share
 a stem-keyed packet file, so their evidence is ambiguous — such pairs dispatch as NO lanes and
 are recorded `lane-failed` ("duplicate session basename in bundle — ambiguous packet identity")
 while unaffected lanes still dispatch. The per-lane `outputSchema` is the tri-state verdict
@@ -8812,8 +8820,9 @@ report-wave policy (`best-effort`, ONE attempt, no retry); the
 `[models.subagents] session-auditor` key rides as the workflow-level model
 default. **Zero-lane short-circuit**: no dispatched lanes ⇒ the wave is never launched (a
 synthetic complete result) and the tool still writes `verdicts.json` — its `lanes` carry only
-the pre-dispatch degrades (`lane-failed`: an id mismatch / an unsafe routing token / a basename
-collision / a missing `packet_path`), so `lanes: []` only when no packetized pair degraded.
+the pre-dispatch degrades (`lane-failed`: a contested fold identity / an id mismatch / an unsafe
+routing token / a basename collision / a missing `packet_path`), so `lanes: []` only when no
+packetized pair degraded.
 **verdicts.json is written in every arm in which the wave was launched (and the zero-lane
 arm)**: engine-validated
 reports are re-sanitized before the write (an out-of-vocabulary shape degrades to

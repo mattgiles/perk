@@ -2,8 +2,8 @@
 // verdict-schema pin, the lenient manifest decode (+ the code-owned detail fallback), lane
 // composition asserted through the recorded spawn (packetized-only, run-key-safe ordinal keys,
 // the per-lane task/label/agent contract), the degrade/skip routing (including the pre-dispatch
-// identity degrades: id mismatch under the enclosing id, unsafe routing tokens), the zero-lane
-// short-circuits, the semantic verdicts-payload write matrix, the deterministic reduction
+// identity degrades: a contested fold identity consolidated to one record, id mismatch under
+// the enclosing id, unsafe routing tokens), the zero-lane short-circuits, the semantic verdicts-payload write matrix, the deterministic reduction
 // order, the wave-level failure arm, the cancellation contract (mid-flight + pre-aborted), and
 // the write-failed arm. The runner's own matrix lives in reportWave.test.ts — not re-tested
 // here beyond the wave-level arms the flow surfaces.
@@ -459,6 +459,89 @@ test("judgeAuditBundle: a pair whose expectation_id differs from its enclosing e
     degraded.detail,
     /pair expectation_id "objective-plan\.route-explorer-report" differs from its enclosing expectation "plan\.grill-before-review" — ambiguous identity/,
   );
+});
+
+test("judgeAuditBundle: a mismatched pair sharing its session_path with a sibling consolidates into ONE lane-failed under the contested fold identity (no lane); the fold-valid identity set stays unique", async () => {
+  // Both `pair(GRILL, "s1.jsonl")` and `pair(ROUTE, "s1.jsonl")` resolve to the fold identity
+  // `(GRILL, /sessions/enc-main/s1.jsonl)` under the GRILL result — two records there would
+  // make the fold reject the WHOLE verdicts file (`duplicate lane identity`), so neither
+  // dispatches and exactly one record names the ambiguity. The `s2.jsonl` sibling still runs.
+  const m = manifest([
+    {
+      id: GRILL,
+      pairs: [pair(GRILL, "s1.jsonl"), pair(GRILL, "s2.jsonl"), pair(ROUTE, "s1.jsonl")],
+    },
+  ]);
+  const adapter = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: [{ key: laneKey(1), ok: true, error: null, report: report("s2.jsonl") }],
+    },
+  });
+  const writer = recordingWriter();
+  const outcome = assertWritten(
+    await judgeAuditBundle(reportWaveOver(adapter), {
+      bundleDir: BUNDLE_DIR,
+      manifest: m,
+      writeVerdicts: writer.write,
+    }),
+  );
+  assert.deepEqual(outcome.wave, { complete: true });
+  assert.equal(adapter.calls.spawn.length, 1);
+  const items = waveScriptItems(adapter.calls.spawn[0]?.workflowScript ?? "") as Array<{
+    key: string;
+    task: string;
+  }>;
+  assert.deepEqual(
+    items.map((i) => i.key),
+    [laneKey(1)],
+    "only the uncontested sibling dispatches",
+  );
+  assert.ok(items[0]?.task.includes("Session: s2.jsonl"));
+
+  const written = writtenVerdicts(writer.files);
+  assert.equal(written.lanes.length, 2, "one report + ONE consolidated degrade (not two)");
+  assert.equal(written.lanes[0]?.status, "report");
+  assert.equal(written.lanes[0]?.session_basename, "s2.jsonl");
+  const contested = written.lanes[1];
+  assert.ok(contested);
+  assert.equal(contested.status, "lane-failed");
+  assert.equal(contested.expectation_id, GRILL);
+  assert.equal(contested.session_basename, "s1.jsonl", "the first claimant's basename");
+  assert.equal(contested.session_path, "/sessions/enc-main/s1.jsonl");
+  assert.match(
+    contested.detail,
+    /fold identity "plan\.grill-before-review" × "\/sessions\/enc-main\/s1\.jsonl" is claimed by 2 packetized pairs — ambiguous identity/,
+  );
+  assert.doesNotMatch(contested.detail, /differs from its enclosing expectation/);
+  // The fold's uniqueness rule over `(expectation_id, session_path)` holds on the written file.
+  const identities = written.lanes.map((l) => `${l.expectation_id}\u0000${l.session_path}`);
+  assert.equal(new Set(identities).size, identities.length);
+});
+
+test("judgeAuditBundle: identical twins (same basename AND session_path) consolidate to one record — the contested-identity arm precedes the basename-collision arm", async () => {
+  // Two byte-identical packetized pairs share BOTH the stem-keyed packet and the fold identity;
+  // the basename-collision arm alone would write two records under one identity (fold-invalid).
+  const adapter = createMemoryWaveAdapter({});
+  const writer = recordingWriter();
+  await judgeAuditBundle(reportWaveOver(adapter), {
+    bundleDir: BUNDLE_DIR,
+    manifest: manifest([
+      { id: GRILL, pairs: [pair(GRILL, "twin.jsonl"), pair(GRILL, "twin.jsonl")] },
+    ]),
+    writeVerdicts: writer.write,
+  });
+  assert.equal(adapter.calls.spawn.length, 0, "zero-lane short-circuit");
+  const written = writtenVerdicts(writer.files);
+  assert.equal(written.lanes.length, 1);
+  assert.equal(written.lanes[0]?.status, "lane-failed");
+  assert.equal(written.lanes[0]?.expectation_id, GRILL);
+  assert.equal(written.lanes[0]?.session_path, "/sessions/enc-main/twin.jsonl");
+  assert.match(
+    written.lanes[0]?.detail ?? "",
+    /claimed by 2 packetized pairs — ambiguous identity/,
+  );
+  assert.doesNotMatch(written.lanes[0]?.detail ?? "", /duplicate session basename/);
 });
 
 test("judgeAuditBundle: an unsafe OUTER expectation id degrades rather than throws; the id never reaches task prose", async () => {
