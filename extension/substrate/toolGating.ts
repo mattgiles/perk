@@ -694,7 +694,10 @@ const SAFE_PATTERNS = [
   /^\s*top\b/,
   /^\s*htop\b/,
   /^\s*free\b/,
-  /^\s*git\s+(status|log|diff|show|branch|remote|config\s+--get)/i,
+  // `git grep` reads the worktree/index and writes nothing — the second-opinion query the
+  // read-only report defs advertise. Its one arg-shaped hazard (`-O`/`--open-files-in-pager`
+  // hands hits to an editor) is already caught by the editor destructive veto (destructive-wins).
+  /^\s*git\s+(status|log|diff|show|grep|branch|remote|config\s+--get)/i,
   /^\s*git\s+ls-/i,
   /^\s*npm\s+(list|ls|view|info|search|outdated|audit)/i,
   /^\s*yarn\s+(list|info|why|audit)/i,
@@ -744,6 +747,16 @@ const SAFE_PATTERNS = [
   /^\s*gh\s+search\s+(issues|prs|code|commits|repos)\b/i,
   /^\s*gh\s+auth\s+status\b/i,
 ];
+
+/**
+ * The one fixed hint line appended to a read-only bash denial: it redirects a blocked command
+ * toward gate-admitted alternatives instead of dead-ending the lane. A runtime message, not
+ * prose — every alternative it names must itself pass `isReadOnlyBashCommand` (the gating suite
+ * pins one representative per alternative, so an allowlist removal fails there until this line
+ * is re-worded). Never mirrored into docs (SAFE_PATTERNS inventories drift).
+ */
+export const READ_ONLY_BASH_DENIAL_HINT =
+  "Allowlisted read-only alternatives: the read/grep/find/ls tools; bash grep, rg, ast-grep, sed -n, jq; git status/log/diff/show/grep; gh view/list/diff/status/checks/search.";
 
 /**
  * Split a command into top-level shell segments for the per-segment safe check. Walks the string
@@ -966,7 +979,7 @@ export function registerToolGating(
         if (!isReadOnlyBashCommand(command)) {
           return {
             block: true,
-            reason: `perk read-only mode: command blocked (not allowlisted).\nCommand: ${command}`,
+            reason: `perk read-only mode: command blocked (not allowlisted).\nCommand: ${command}\n${READ_ONLY_BASH_DENIAL_HINT}`,
           };
         }
       }

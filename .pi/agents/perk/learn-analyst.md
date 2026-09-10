@@ -89,6 +89,11 @@ subagents** — you analyze and report.
    code** — especially to decide whether a learning `SHOULD_BE_CODE` or maps onto an existing doc.
    **Do not run the test suite or build** (the worktree may lack deps) — reason, don't execute.
 
+   A search that returns no matches is not evidence of absence — it verifies only that *that
+   query* found nothing; before asserting that something is missing, confirm with a second,
+   independent method (`read` the named files, bash `grep -l`, `rg`, `git grep`) or downgrade
+   the claim and name the query that came back empty.
+
 5. **Classify each candidate with a reconciled decision from the full set.** For every learning you
    surface, choose the **single best** decision from the full set — **not** limited to your angle's
    typical decisions:

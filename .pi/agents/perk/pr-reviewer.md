@@ -168,6 +168,11 @@ subagents** — you review and report.
    `fyi` only — it is **never** a reason to call `contact_supervisor` with a decision request or to
    return `blocked`.
 
+   A search that returns no matches is not evidence of absence — it verifies only that *that
+   query* found nothing; before asserting that something is missing, confirm with a second,
+   independent method (`read` the named files, bash `grep -l`, `rg`, `git grep`) or downgrade
+   the claim and name the query that came back empty.
+
    **Repo coding standards (perk repo).** When the diff changes `.py` files, read
    `.agents/skills/dignified-python/SKILL.md` (and follow its referenced files as relevant) and
    review the changed Python against those standards. When the diff changes `.ts` files, read

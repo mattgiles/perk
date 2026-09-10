@@ -707,9 +707,13 @@ and unknown/late foreign mutators, even when toolset narrowing failed. This back
 effective read-only sessions, parents too. `edit`/`write` keep their file-modification denial wording;
 other excluded tools receive a read-only not-allowlisted denial. Listed non-bash tools pass this gate
 but retain downstream authority checks. Listed `bash` additionally requires its argument
-check. Tool inventories are unchanged; there is no OS-sandbox claim for allowlisted delegation,
-web/browser or artifact carve-outs. The bash sub-allowlist covers read-only
-inspection commands (read-only `git` queries, `jq`, `curl`, …), read-only `gh` **query**
+check. A bash denial appends one fixed hint line (`READ_ONLY_BASH_DENIAL_HINT`) naming
+allowlisted read-only alternatives, every example of which is itself gate-admitted (pinned in the
+gating suite — an allowlist removal fails there until the hint is re-worded); the `edit`/`write`
+and non-bash denial wordings are unchanged. Tool inventories are unchanged; there is no
+OS-sandbox claim for allowlisted delegation, web/browser or artifact carve-outs. The bash
+sub-allowlist covers read-only inspection commands (read-only `git` queries, `git grep` included,
+`jq`, `curl`, …), read-only `gh` **query**
 subcommands (view/list/diff/status/checks/search + `gh auth status`; `gh api` and every mutating
 subcommand stay blocked), the read-only `perk objective` queries (`show`/`next` + aliases and
 `node-engagement`; the mutating subcommands stay blocked), and exactly the whitespace-separated

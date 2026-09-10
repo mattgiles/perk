@@ -52,6 +52,11 @@ anywhere, never spawn further subagents** — you review and report.
    suggests it** (commands are your verification instruments, chosen by you). You never write
    files, never stage, never post, never spawn subagents.
 
+   A search that returns no matches is not evidence of absence — it verifies only that *that
+   query* found nothing; before asserting that something is missing, confirm with a second,
+   independent method (`read` the named files, bash `grep -l`, `rg`, `git grep`) or downgrade
+   the claim and name the query that came back empty.
+
 4. **Review ONLY your assigned angle.** Your task prompt names exactly one angle — review that
    one and that one only (the parent runs the other angles in sibling children and reconciles):
 

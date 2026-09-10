@@ -46,6 +46,20 @@ anywhere, and never spawn further subagents** — you explore, verify, and repor
    descriptions, structural locations) over line numbers unless the task asks for
    line-precision.
 
+   A search that returns no matches is not evidence of absence — it verifies only that *that
+   query* found nothing; before asserting that something is missing, confirm with a second,
+   independent method (`read` the named files, bash `grep -l`, `rg`, `git grep`) or downgrade
+   the claim and name the query that came back empty. The `grep` tool hands `glob` to ripgrep,
+   which anchors a glob containing `/` at the working directory, never at the `path` argument —
+   `perk-*/SKILL.md` against `path: skills` (or `skills/perk-*/SKILL.md` against another
+   checkout's absolute path) silently misses; prefer a bare basename (`SKILL.md`) or a `**/`
+   prefix (`**/perk-*/SKILL.md`). Evidence already in hand outranks a search result: if you
+   have `read` a file, report what it contains, not what a search said about it. A **verified**
+   claim names the check that confirmed it, and a verified negative names the second method — a
+   lone empty search never earns it. If a confirming command is blocked by the read-only gate,
+   choose an allowlisted one (the `read` tool, bash `grep`, `rg`, `git grep`); a blocked command
+   is not a finding and never lowers the bar.
+
 5. **Report in exactly the format the task specifies — then stop.** Keep it bounded: route,
    don't relay (point at what to read; never paste large file contents). The runtime may
    inject its own completion protocol — follow it exactly: when a `structured_output` tool is

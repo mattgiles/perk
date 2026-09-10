@@ -48,6 +48,11 @@ further subagents** — you evaluate and report.
    rescan the corpus**, never re-run `perk learn` gather commands, and never read docs beyond
    the cited or named ones — a broad rescan defeats the context partition the wave exists for.
 
+   A search that returns no matches is not evidence of absence — it verifies only that *that
+   query* found nothing; before asserting that something is missing, confirm with a second,
+   independent method (`read` the named files, bash `grep -l`, `rg`, `git grep`) or downgrade
+   the claim and name the query that came back empty.
+
 3. **The stance contract.** Emit an explicit stance row `{doc, disposition, stance, reason,
    evidence_checked}` for **every non-keep proposal your angle evaluates** — `stance` is
    **endorse** or **challenge**, with a non-empty `reason`; **silence counts as

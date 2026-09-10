@@ -56,6 +56,11 @@ report.
    `git show`, `git grep`) to ground every candidate in the actual code. **Never run the test
    suite or build** — reason, don't execute.
 
+   A search that returns no matches is not evidence of absence — it verifies only that *that
+   query* found nothing; before asserting that something is missing, confirm with a second,
+   independent method (`read` the named files, bash `grep -l`, `rg`, `git grep`) or downgrade
+   the claim and name the query that came back empty.
+
 4. **Dedupe — deterministic identity + merge policy.** Candidate identity = the **canonical
    pointer + kind**, compared case-sensitively after pointer canonicalization (step 3's form).
    Merge duplicates: **union** the evidence entries; **confidence = the highest** among the

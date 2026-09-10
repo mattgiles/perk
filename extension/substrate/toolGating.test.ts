@@ -19,6 +19,7 @@ import {
   gatedToolsFor,
   isReadOnlyBashCommand,
   LINEAR_READ_TOOLS,
+  READ_ONLY_BASH_DENIAL_HINT,
   READ_ONLY_CONTEXT,
   READ_ONLY_TOOLS,
   REFINEMENT_READ_ONLY_CONTEXT,
@@ -348,6 +349,9 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
     "git status",
     "git log --oneline -5",
     "git diff HEAD",
+    "git grep -n plan_draft -- 'skills/*/SKILL.md'", // the read-only defs' second-opinion query
+    "git grep -l run_scout_wave",
+    "cd repo && git grep -n foo", // per-segment acceptance with a cd prefix
     "rg pattern src",
     "ast-grep run --pattern 'console.log($A)' --lang js .", // structural code search
     "ast-grep run --pattern 'print($A)' --lang python .", // language-agnostic: the allowlist gates the `ast-grep` command, not its --lang
@@ -481,6 +485,9 @@ test("isReadOnlyBashCommand: blocks destructive / non-allowlisted commands", () 
     "chmod +x script.sh",
     "some-unknown-binary --flag", // not in the safe table at all
     "git status && rm file", // destructive wins over a safe prefix
+    "git grep foo > hits.txt", // >-redirect destructive veto wins over the new safe entry
+    "git grep foo && rm hits.txt", // destructive wins
+    "git grep -O vim foo", // the editor veto wins over the new safe entry (-O opens hits in an editor)
     "for f in a b c; do echo $f; done", // leading `for` segment non-safe → loops stay blocked
     "git status && some-unknown-binary", // per-segment tightening: second segment non-safe
     "ls | rm -rf x", // pipe whose second segment is destructive
@@ -506,6 +513,53 @@ test("isReadOnlyBashCommand: blocks destructive / non-allowlisted commands", () 
     "cat $(code y)", // …inside a command substitution
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
+  }
+});
+
+test("the bash denial carries the read-only hint and every alternative it names passes the gate", async () => {
+  const h = gateFixture(() => false);
+  h.gate.syncFromState("read-only", undefined);
+  const bash = await h.call("tool_call", { toolName: "bash", input: { command: "touch x" } });
+  assert.equal(bash?.block, true);
+  const reason = String((bash as { reason?: unknown } | undefined)?.reason ?? "");
+  assert.ok(reason.startsWith("perk read-only mode: command blocked (not allowlisted)."), reason);
+  assert.ok(reason.includes("Command: touch x"), reason);
+  assert.ok(reason.endsWith(READ_ONLY_BASH_DENIAL_HINT), reason);
+  // The hint rides the bash denial only: the edit/write wording is pinned by contracts §8.3.
+  const edit = await h.call("tool_call", { toolName: "edit", input: {} });
+  assert.equal(edit?.block, true);
+  assert.equal(
+    String((edit as { reason?: unknown } | undefined)?.reason ?? "").includes(
+      READ_ONLY_BASH_DENIAL_HINT,
+    ),
+    false,
+  );
+  // The self-check that keeps the hint honest against SAFE_PATTERNS drift: one representative
+  // command per alternative the hint names. A future allowlist removal fails here until the hint
+  // is re-worded.
+  for (const cmd of [
+    "grep -n foo file",
+    "rg foo",
+    "ast-grep run --pattern 'foo($A)' --lang ts .",
+    "sed -n '1,5p' file",
+    "jq . file.json",
+    "git status",
+    "git log -1",
+    "git diff",
+    "git show HEAD",
+    "git grep -n foo",
+    "gh pr view 1",
+    "gh issue list",
+    "gh pr diff 1",
+    "gh pr status",
+    "gh pr checks 1",
+    "gh search prs foo",
+  ]) {
+    assert.equal(
+      isReadOnlyBashCommand(cmd),
+      true,
+      `hint names an alternative the gate blocks: ${cmd}`,
+    );
   }
 });
 

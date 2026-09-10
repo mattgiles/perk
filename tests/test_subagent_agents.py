@@ -28,6 +28,18 @@ _PROFILES = {
     "scout": ("openai/gpt-5.6-terra", "openai/gpt-5.6-luna"),
 }
 
+# The one byte-identical negative-evidence sentence every read-only def that searches the repo
+# carries. Authored here independently (never derived from a def) so a drifting copy fails.
+_NEGATIVE_EVIDENCE_SENTENCE = (
+    "A search that returns no matches is not evidence of absence — it verifies only that *that"
+    " query* found nothing; before asserting that something is missing, confirm with a second,"
+    " independent method (`read` the named files, bash `grep -l`, `rg`, `git grep`) or downgrade"
+    " the claim and name the query that came back empty."
+)
+# Every delivered read-only report def that searches the repo: the writer never verifies absence,
+# and the classifier runs one fixed command (`perk pr feedback --json`) and never searches.
+_NEGATIVE_EVIDENCE_DEFS = set(PERK_AGENTS) - {"conflict-resolver", "review-classifier"}
+
 
 def test_closed_delivered_profile_census():
     assert set(PERK_AGENTS) == set(_PROFILES)
@@ -100,6 +112,36 @@ def test_scout_prose_invariants():
     assert "no surrounding prose" in compact
     assert "never print a fenced JSON block" in compact
     assert "final message is the report" in compact
+    # The scout-only elaboration of the negative-evidence rule: the `grep` tool's ripgrep glob
+    # anchoring, evidence-in-hand, the verified-negative bar, and the blocked-command rule.
+    assert (
+        "anchors a glob containing `/` at the working directory, never at the `path` argument"
+        in compact
+    )
+    assert "prefer a bare basename (`SKILL.md`) or a `**/` prefix (`**/perk-*/SKILL.md`)" in compact
+    assert "report what it contains, not what a search said about it" in compact
+    assert "a lone empty search never earns it" in compact
+    assert "a blocked command is not a finding and never lowers the bar" in compact
+
+
+def _compact_body(name):
+    return " ".join(_source_bytes(name).decode().split("---", 2)[2].split())
+
+
+def test_read_only_search_defs_carry_the_byte_identical_negative_evidence_sentence():
+    """Nine defs carry the sentence verbatim (whitespace-normalized); two deliberately do not.
+
+    The writer (`conflict-resolver`) never verifies absence; the classifier
+    (`review-classifier`) runs one fixed command and never searches the repo. Adding the
+    sentence to either is a conscious decision that must update this pin.
+    """
+    # The closed census, independent of the tuple's current length.
+    assert len(_NEGATIVE_EVIDENCE_DEFS) == 9
+    sentence = " ".join(_NEGATIVE_EVIDENCE_SENTENCE.split())
+    for name in sorted(_NEGATIVE_EVIDENCE_DEFS):
+        assert sentence in _compact_body(name), name
+    for name in ("conflict-resolver", "review-classifier"):
+        assert sentence not in _compact_body(name), name
 
 
 def test_fresh_delivery_writes_all_defs_byte_identical(tmp_path):

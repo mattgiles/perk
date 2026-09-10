@@ -169,6 +169,11 @@ and report.
    untouched code. Ground the findings you do report in the real surrounding code, not diff text
    alone.
 
+   A search that returns no matches is not evidence of absence — it verifies only that *that
+   query* found nothing; before asserting that something is missing, confirm with a second,
+   independent method (`read` the named files, bash `grep -l`, `rg`, `git grep`) or downgrade
+   the claim and name the query that came back empty.
+
 5. **Tag every finding — the bar is "worth a human reviewer's attention".** A human triages your
    findings downstream, so there is no binary act-before-landing bar and **no verdict**: report
    each concrete concern that a human reviewer of this PR would want to see, and tag it so the

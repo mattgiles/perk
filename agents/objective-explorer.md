@@ -30,6 +30,11 @@ and never act** — you explore and report.
    touch. Read prior-art / sibling implementations for the conventions to follow. Do **not** modify
    anything — you have no write tools and must not attempt mutations.
 
+   A search that returns no matches is not evidence of absence — it verifies only that *that
+   query* found nothing; before asserting that something is missing, confirm with a second,
+   independent method (`read` the named files, bash `grep -l`, `rg`, `git grep`) or downgrade
+   the claim and name the query that came back empty.
+
 3. **Form a bounded picture.** Identify what the node needs: the files to change, the key symbols
    and call sites, existing patterns to mirror, the test surface, and the open questions a planner
    must resolve. Stay scoped to **this one node** — do not design the whole objective.

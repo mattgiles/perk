@@ -184,10 +184,14 @@ own narrower refinement allowlist (read/research/question, `plan_review`, and
 `objective_refinement_draft` — no node claim, no other draft or save tool, no delegation) and
 whose hidden guidance is the `[READ-ONLY REFINEMENT MODE]` flavor naming that writer. Every excluded tool is denied, including `edit`, `write`, save/delivery
 tools and unknown or late-registered foreign mutators—even if toolset synchronization failed.
-Allowlisted `bash` also retains its command-segment sub-allowlist. Other listed tools pass this gate
-but still undergo their ordinary authority checks. The sanctioned artifact writers and
-review/exploration companions, research and delegation retain their existing carve-outs; this is
-not an OS sandbox or an argument-level certificate for delegation, browser automation or web tools.
+Allowlisted `bash` also retains its command-segment sub-allowlist (read-only `git` queries include
+`git grep`), and a blocked command's denial ends with one line naming allowlisted read-only
+alternatives — the `read`/`grep`/`find`/`ls` tools, bash `grep`/`rg`/`ast-grep`/`sed -n`/`jq`,
+read-only `git` and `gh` queries — so a blocked second-opinion command is redirected rather than
+dead-ended. Other listed tools pass this gate but still undergo their ordinary authority checks.
+The sanctioned artifact writers and review/exploration companions, research and delegation retain
+their existing carve-outs; this is not an OS sandbox or an argument-level certificate for
+delegation, browser automation or web tools.
 
 **Guidance lifetime versus the structural gate.** While the gate is on, perk also injects a hidden
 `[READ-ONLY MODE]` guidance message once per session-tree branch: the whole branch history decides,

@@ -57,6 +57,11 @@ objective, never post anywhere, and never spawn further subagents** — you audi
    (durability), and still belongs where it is (placement/overlap). Report exactly ONE
    `disposition` per doc: **keep | revise | merge-into | retire**.
 
+   A search that returns no matches is not evidence of absence — it verifies only that *that
+   query* found nothing; before asserting that something is missing, confirm with a second,
+   independent method (`read` the named files, bash `grep -l`, `rg`, `git grep`) or downgrade
+   the claim and name the query that came back empty.
+
 5. **The destructive evidence bar.** Propose `merge-into`/`retire` only on verified evidence —
    record what you actually checked in `evidence_checked` (pointers re-read, code compared,
    counterpart docs read under step 1's bounded exception). When unsure, prefer `revise`/`keep`
