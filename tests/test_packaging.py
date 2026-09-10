@@ -12,7 +12,10 @@ These promote the cross-plane packaging assertions formerly carried by the
   git repo — they are no longer in the `pi` manifest or the npm tarball),
 - the skill source quality (each `skills/*/SKILL.md` has frontmatter that parses and
   validates — Pi's loader rejects a skill whose YAML doesn't parse), with the `pi` manifest
-  and `files` list asserted to *not* carry skills.
+  and `files` list asserted to *not* carry skills,
+- every test whose fixture closure reaches the shared wheel/sdist build is `slow`, checked
+  against the live session's collected items (no recursive collection), so the fast tier
+  (`-m 'not slow'`) never pays for a `uv build`.
 
 Build/pack tests skip cleanly when `uv`/`npm` are absent so the suite stays
 CI-robust; in CI both toolchains are present so they actually run.
@@ -101,6 +104,11 @@ def built_distributions(tmp_path_factory):
 
     The consumers share an `@pytest.mark.xdist_group("wheel_build")`, so under
     `-n auto --dist loadgroup` they land on one worker and reuse this build.
+
+    Every consumer carries `@pytest.mark.slow`, so the fast tier (`-m 'not slow'`) never pays
+    for this build; `test_every_build_consumer_is_slow` enforces it on each consumer — a mark on
+    this fixture would protect nothing (pytest rejects marks on fixtures, and the selection is
+    decided per test).
     """
     if shutil.which("uv") is None:
         pytest.skip("uv not on PATH")
@@ -134,6 +142,7 @@ def built_sdist(built_distributions):
     return sdist
 
 
+@pytest.mark.slow
 @pytest.mark.xdist_group("wheel_build")
 def test_wheel_bundles_shared(built_wheel):
     with zipfile.ZipFile(built_wheel) as zf:
@@ -151,6 +160,7 @@ def test_wheel_bundles_shared(built_wheel):
     assert expected <= names, expected - names
 
 
+@pytest.mark.slow
 @pytest.mark.xdist_group("wheel_build")
 def test_wheel_bundles_prompts(built_wheel):
     # The canonical cross-plane prompt templates are bundled into the wheel as `perk/_prompts`
@@ -160,6 +170,7 @@ def test_wheel_bundles_prompts(built_wheel):
     assert "perk/_prompts/README.md" in names, names
 
 
+@pytest.mark.slow
 @pytest.mark.xdist_group("wheel_build")
 def test_wheel_bundles_changelog(built_wheel):
     # The changelog is bundled into the wheel as `perk/_data` package data so the Python CLI can
@@ -170,6 +181,7 @@ def test_wheel_bundles_changelog(built_wheel):
     assert "perk/_data/CHANGELOG.md" in names, names
 
 
+@pytest.mark.slow
 @pytest.mark.xdist_group("wheel_build")
 def test_sdist_includes_changelog(built_sdist):
     # Hatchling errors (`Forced include not found`) when building the wheel from an sdist that is
@@ -180,6 +192,7 @@ def test_sdist_includes_changelog(built_sdist):
     assert f"perk-{_pyproject_version()}/CHANGELOG.md" in names, names
 
 
+@pytest.mark.slow
 @pytest.mark.xdist_group("wheel_build")
 def test_wheel_bundles_hunk_feedback_extension(built_wheel):
     # The bundled Hunk feedback publisher (contracts §8.58) ships as the single file
@@ -191,6 +204,7 @@ def test_wheel_bundles_hunk_feedback_extension(built_wheel):
     assert not any(n.startswith("perk/_hunk/") and n.endswith(".test.ts") for n in names), names
 
 
+@pytest.mark.slow
 @pytest.mark.xdist_group("wheel_build")
 def test_sdist_includes_hunk_feedback_extension(built_sdist):
     # Same lockstep as the changelog: a wheel built FROM the sdist must be able to satisfy the
@@ -200,6 +214,7 @@ def test_sdist_includes_hunk_feedback_extension(built_sdist):
     assert f"perk-{_pyproject_version()}/extension/hunkFeedback/perkFeedback.ts" in names, names
 
 
+@pytest.mark.slow
 @pytest.mark.xdist_group("wheel_build")
 def test_wheel_excludes_perk_dev(built_wheel):
     # The never-published `perk-dev` workspace member must never leak into perk's published wheel.
@@ -209,6 +224,7 @@ def test_wheel_excludes_perk_dev(built_wheel):
     assert not offenders, offenders
 
 
+@pytest.mark.slow
 @pytest.mark.xdist_group("wheel_build")
 def test_sdist_excludes_perk_dev(built_sdist):
     # The never-published `perk-dev` member (and the whole `packages/` tree) must never leak into
@@ -244,6 +260,7 @@ def test_build_pins_and_all_packages_flag_present():
         )
 
 
+@pytest.mark.slow
 @pytest.mark.xdist_group("wheel_build")
 def test_wheel_bundles_agents(built_wheel):
     # perk's subagent defs are bundled into the wheel as `perk/_agents` (force-include) so
@@ -259,6 +276,7 @@ def test_wheel_bundles_agents(built_wheel):
     assert expected <= names, expected - names
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(shutil.which("npm") is None, reason="npm not on PATH")
 def test_npm_pack_lists_shipped_and_excludes_dev():
     result = subprocess.run(
@@ -348,6 +366,7 @@ def test_docs_site_publish_isolation():
     assert not any(entry.startswith("tools") for entry in root["files"]), root["files"]
 
 
+@pytest.mark.slow
 @pytest.mark.xdist_group("wheel_build")
 def test_wheel_and_sdist_exclude_docs_site(built_wheel, built_sdist):
     # Belt-and-suspenders: the wheel/sdist `packages`/`only-include` already exclude `docs/`
@@ -399,3 +418,33 @@ def test_perk_skills_matches_skills_dir():
     skills_dir = REPO_ROOT / "skills"
     on_disk = {d.name for d in skills_dir.iterdir() if d.is_dir()}
     assert on_disk == set(PERK_SKILLS), f"PERK_SKILLS {set(PERK_SKILLS)} != skills/ dirs {on_disk}"
+
+
+# --- suite-selection guard ---
+
+
+def test_every_build_consumer_is_slow(request: pytest.FixtureRequest) -> None:
+    """No test in the running session may reach the shared build without `@pytest.mark.slow`.
+
+    Under `-m 'not slow'` the session's items ARE the fast set, so a green run proves no
+    fast-selected test reaches the build; under the full run it proves every consumer is marked.
+    `fixturenames` is pytest's resolved closure (direct, transitive via `built_wheel` /
+    `built_sdist`, or `usefixtures`) — nothing is re-collected. The anchor arm is live exactly
+    when the anchor is collected (the full gates) and vacuous by design under a narrower
+    `-k` / `-m` selection.
+    """
+    functions = [item for item in request.session.items if isinstance(item, pytest.Function)]
+    consumers = [item for item in functions if built_distributions.name in item.fixturenames]
+    # Nodeids are reported raw: under `--dist loadgroup` xdist suffixes grouped items with
+    # `@wheel_build`; serially (`-n0`) they are bare.
+    unmarked = [item.nodeid for item in consumers if item.get_closest_marker("slow") is None]
+    assert not unmarked, (
+        f"these tests reach the shared wheel/sdist build ({built_distributions.name}) without "
+        "@pytest.mark.slow — a fast-tier run (-m 'not slow') would pay for a full `uv build`; "
+        "mark each test (a mark on the fixture protects nothing):\n" + "\n".join(unmarked)
+    )
+    anchor = [item for item in functions if item.function is test_wheel_bundles_shared]
+    assert all(item in consumers for item in anchor), (
+        "the closure walk no longer sees the anchor consumer — built_wheel stopped reaching "
+        "built_distributions, or fixturenames stopped carrying the closure"
+    )

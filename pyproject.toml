@@ -38,7 +38,16 @@ testpaths = ["tests"]
 # by load EXCEPT for tests sharing an `@pytest.mark.xdist_group(...)`, which are pinned to one
 # worker (used by the wheel-build sharing in tests/test_packaging.py).
 # Debug serially by overriding on the CLI: `uv run pytest -n0 ...`.
-addopts = "-n auto --dist loadgroup"
+# `--strict-markers` turns an unregistered marker spelling into a collection error, so a misspelt
+# `slow` can never silently land a case in the fast tier.
+addopts = "-n auto --dist loadgroup --strict-markers"
+# The one project marker. `slow` is a SELECTION, not a skip: the full default suite (`just test-py`,
+# `just test`, CI, run_ci) still runs every slow case; `-m 'not slow'` / `-m slow` select the
+# complementary fast / slow tiers. Mark tests or parameter cases — never fixtures (pytest rejects
+# marks on fixtures, and a fixture mark would protect nothing).
+markers = [
+    "slow: repeatedly expensive own cost (>= 1 s serial median) or a member of the shared wheel/sdist build cohort; part of the full default suite and never skipped; -m slow / -m 'not slow' select the tiers",
+]
 
 [tool.hatch.build.targets.wheel]
 # `src/perk` — hatchling strips the `src/` prefix, so the wheel still contains `perk/…`.

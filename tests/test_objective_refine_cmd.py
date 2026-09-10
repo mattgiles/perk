@@ -773,6 +773,7 @@ def _comment_counts(ws: FakeLinearWorkspace) -> dict[str, int]:
     return {uuid: len(ws.comments_of(issue)) for uuid, issue in ws.issues.items()}
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 def test_refinement_loop_end_to_end_over_a_fake_linear_objective(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
