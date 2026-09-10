@@ -22,12 +22,14 @@ data-format example).
 - The probe fails open everywhere; conflicts never flip submit's exit code — "Fail-open
   everywhere".
 - Both dispatch paths are code-owned native foreground delegation over a strict TypeBox record
-  schema (no prose parsing); the submit tool is single-use and re-guards at every await; the
-  worktree lock is manual-recovery-only — "The resolver record schema + the two code-owned
-  dispatch modes", "The transport", "The worktree-scoped execution lock", "Two authorization
-  gaps only review caught".
-- Check the native worktree-default config-compat gate BEFORE the first `/submit` on a
-  conflicted PR (refusals spend the attempt cap; a fix is invisible until Pi restarts); after a
+  schema (no prose parsing); `dispatch` is synchronous from authorization to emit (public
+  `getAllTools()` presence census, then the lock, no `extensionBindings`, no engine-source
+  preflight — writer-profile drift no longer fails closed); the worktree lock is
+  manual-recovery-only — "The resolver record schema", "The transport", "The worktree-scoped
+  execution lock", "Two authorization gaps only review caught".
+- Check the native worktree default BEFORE the first `/submit` on a conflicted PR — `/submit`
+  spends the attempt at publish time, the resolver's refusal cannot un-spend it, perk never
+  converges the engine's `config.json`, and the fix is "quit and resume" (not `/reload`); after a
   resolver rebase, diff intended-vs-rebased per file and re-gate the rebased head — "Native
   worktree default + the attempt cap", "Live conflict-loop findings".
 - The conflict loop is a textual-integrity mechanism, not a semantic-consistency one —
@@ -202,15 +204,28 @@ receipts are output-free and diagnostic only.
 
 Both obvious "call the engine synchronously" routes are dead ends: Pi's `getAllTools()` returns
 tool *metadata*, not callables, and the engine's RPC `spawn` rejects `async: false`. The working
-path is the engine's structured foreground delegation interface (`src/api/delegation.ts` publishes
-the event constants; the adapter fixes `async: false`, `foregroundOnly: true`, `clarify: false`,
-`acceptance: false`), driven by the `prompt-template:subagent:{request,started,update,response,
-cancel}` event family with exact `(requestId, ownerRunId, nodeId)` correlation
-(`extension/pi/v1/delivery/conflictResolverEngine.ts::DELEGATION_EVENTS`). The confined
-source-bound loader — walk the registered `subagent` tool's `sourceInfo.path` up to the
-`pi-subagents` manifest and load only its `./preflight` export — is a tested narrow exception to
-`bareImportGuard`, not a general escape hatch. The role split this implies (report roles
-background, the writer foreground) is in `pi/subagents.md` § "Native child execution profiles".
+path is the engine's structured foreground delegation interface, driven by the
+`prompt-template:subagent:{request,started,update,response,cancel}` event family with exact
+`(requestId, ownerRunId, nodeId)` correlation
+(`extension/pi/v1/delivery/conflictResolverEngine.ts::DELEGATION_EVENTS`) — public event names,
+no import of the engine.
+
+**The landed dispatch is synchronous from entry to `events.emit(request)`**: abort sample →
+authorization (`allowed`: not disposed, not read-only, the caller's `authorized(request)`) →
+task/worktree validation (absolute, existing directory) → `subagent`-tool presence via Pi's public
+`getAllTools()` census (`enginePresent`, wired at the composition root; `unavailable` is returned
+**before any lock**) → the activation-time native `worktree` verdict → `worktreeResolverLock` claim
+→ emit with **no `extensionBindings`** (the writer receives no restriction packet and, as a
+foreground child, has no perk activation — `pi/subagents.md` § "Native child execution"). The
+confined source-bound `./preflight` loader, the profile-evidence validator and the launch-contract
+digest that preceded this are **deleted**; nothing walks the registered tool's `sourceInfo.path`.
+
+The trade-off, stated: writer-profile drift (someone editing `conflict-resolver.md`'s tools or
+inheritance) no longer fails closed at dispatch. Mitigations are the git-tracked
+`.pi/agents/perk/conflict-resolver.md` mirror, `tests/test_subagent_agents.py::test_native_child_profile`
+(the closed per-role profile census), and doctor `subagent-agents`. Protocol drift on the unpinned engine is
+**silent** at dispatch: no `started` ack → `cancel` → the grace window → a **retained lock** that
+needs human recovery; the doctor `subagent-compat` version `warn` is the only early signal.
 
 ## The worktree-scoped execution lock
 
@@ -235,40 +250,49 @@ dead-PID reclamation; the primitive decision table is in `workflow/lease-outbox-
 2. **Re-guard at the synchronous mutation port.** A currency/cancellation check before an `await`
    is not sound for a claim or counter write after it. The retained resolver's `isCurrent()` check
    runs at the actual claim acquisition and attempt-counter increment, so a revoked invocation
-   cannot mutate budget or claim. Any single-use authorization spanning awaits must be revalidated
-   after every await boundary (preflight + lock acquisition), each with its own regression test
-   (the revocation-race tests).
+   cannot mutate budget or claim. Removing the awaited preflight retired the engine-side
+   "re-validate after every await boundary" gates — there is now **no await between authorization
+   and emission** inside `dispatch` — but the retained controller's recheck at its own claim/counter
+   ports stays: that is a genuinely separate await boundary (its own regression tests, the
+   revocation-race tests). The rule generalizes: count the awaits between an authorization read and
+   each mutation; each one needs a recheck or a proof it cannot exist.
 
 ## Native worktree default + the attempt cap — fix config BEFORE spending an attempt
 
 pi-subagents' delegation has no per-request `worktree` field, so the engine applies
 `<agent dir>/extensions/subagent/config.json`'s `worktree` default; `true` ⇒ the resolver child
-would run in a separate managed worktree, so the engine refuses with
-`incompatible-worktree-default`. Every such refusal — at all four gates (pre- and post-preflight,
-post-lock, and the pre-emit gate inside `waitForTerminal`, which settles with its own reason rather
-than collapsing to `unauthorized`) — stamps `receipt.nativeWorktreeConfig {path, observed,
-atActivation}` through one `worktreeRefusal()` closure, and the submit diagnostic renders the exact
-path plus `perk doctor --fix` (or `perk init`) plus a restart. Post-lock precedence: a lock-finish
-failure wins, then `cancelled` → the stamped worktree refusal → `unauthorized`. The repair is
-Python-owned (the `subagent-worktree-default` convergence, `workflow/init-doctor.md`), never the
-adapter's.
+would run in a separate managed worktree, so perk refuses with `incompatible-worktree-default`. The
+file is read **once, at engine activation** (`readNativeWorktreeDefault`) — the same moment
+pi-subagents applies its own `loadConfig()` — and the verdict is stricter than the engine's
+fallback: only a missing file, an absent key or an explicit `false` lets the writer launch. A refusal
+stamps `receipt.nativeWorktreeConfig = {path, observed}` (no `atActivation` — there is one read) and
+the surface renders `nativeWorktreeRefusal` (`extension/delivery/conflictResolution.ts`), whose fix
+is "set `"worktree": false` there (or delete the key), then **quit and resume** this Pi session" —
+not `/reload` (perk's factory re-runs; the engine's config load does not), and not `perk doctor
+--fix`: perk **never converges** pi-subagents' `config.json` any more (the Python
+`subagent-worktree-default` convergence/doctor/`--fix` arm is gone — `workflow/borrowed-packages.md`
+§ "Borrowed-engine stances"). Untrusted config values are **bounded before reaching a model-facing
+diagnostic**: only text-free JSON scalars (booleans, numbers, `null`) are stringified; a string,
+array or object is named by type alone; a read error's `errno` is validated against
+`^[A-Z0-9_]{1,32}$` or rendered as `unknown`.
 
 Two traps: the effective agent dir is `getAgentDir()` — perk redirects it to the **project-local**
-`.pi/agent`, not `~/.pi/agent` (time was lost editing the wrong file); and `configCompatible()`
-requires the current state `===` the value pinned at extension activation, so a fix is invisible
-until the Pi process is quit and the session resumed (`pi --session <file>` with
-`PI_CODING_AGENT_DIR` exported; resuming is the lifecycle `keep` arm, so `PERK_RUN_ID` need not be
-re-exported) — `/reload` is not enough. The cap counts pre-dispatch refusals: two config refusals
-(no child ever launched) consumed `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`, and because the counter is
-rebuilt only when the session file is opened, resetting it required in-place edits of persisted
-entries in the live session JSONL — unsafe surgery not to normalize. Rule: check the config-compat
-gate before the first `/submit` on a conflicted PR; treat a spent budget as "fresh session /
-explicit recovery", never "edit the JSONL".
+`.pi/agent`, not `~/.pi/agent` (time was lost editing the wrong file); and because both perk and the
+engine read once at activation, a fix is invisible until the Pi process is quit and the session
+resumed (`pi --session <file>` with `PI_CODING_AGENT_DIR` exported; resuming is the lifecycle
+`keep` arm, so `PERK_RUN_ID` need not be re-exported).
 
-Test note: to hit the pre-emit gate there is no async seam — mutate state from the `authorized`
-callback on its Nth read (the post-lock gate reads the native config before re-reading
-authorization, so poisoning on the third read leaves the pre-emit gate as the first observer;
-assert the read count) and use the `acquire` wrapper to hit the post-lock gate.
+**Attempt-cap ordering (verified against the source):** the counter is spent at `/submit`, not by
+the resolver. `extension/delivery/submit.ts::decideConflictFollowUp` runs immediately after a
+publish that reports `mergeable === false`: it inspects the budget and **writes the incremented
+attempt** (`attempts.write(budget.next)`) before returning the `drive` follow-up that primes
+`resolve_submit_conflicts`; the resolver's config refusal happens later, inside that tool's
+dispatch, and cannot un-spend it. So two config refusals (no child ever launched) consumed
+`CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`, and because the counter is rebuilt only when the session
+file is opened, resetting it required in-place edits of persisted entries in the live session
+JSONL — unsafe surgery not to normalize. Rule: check the native config **before the first
+`/submit` on a conflicted PR**; treat a spent budget as "fresh session / explicit recovery", never
+"edit the JSONL".
 
 ## Live conflict-loop findings (first retained-mode dogfood)
 
