@@ -1144,15 +1144,17 @@ def test_ponytail_compat_divergence_warns(scaffolded_perk_repo, mutate, expected
     assert expected in check.detail
 
 
+def _bridge_settings_text(mode: str) -> str:
+    """A pi ``settings.json`` body carrying only ``subagents.intercomBridge.mode``."""
+    return json.dumps({"subagents": {"intercomBridge": {"mode": mode}}})
+
+
 def _plant_user_bridge_mode(agent_dir, bridge_mode):
     """Plant the user-scope ``settings.json`` (inside the launch-precedence agent dir — the
     autouse ``isolated_pi_agent_dir`` in these tests) with the given bridge mode."""
     settings = agent_dir / "settings.json"
     settings.parent.mkdir(parents=True, exist_ok=True)
-    settings.write_text(
-        json.dumps({"subagents": {"intercomBridge": {"mode": bridge_mode}}}),
-        encoding="utf-8",
-    )
+    settings.write_text(_bridge_settings_text(bridge_mode), encoding="utf-8")
     return settings
 
 
@@ -1166,53 +1168,79 @@ def _set_project_bridge_mode(repo, mode):
     settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
 
 
-def test_subagent_bridge_config_default_is_ok(scaffolded_perk_repo):
-    # The scaffolded default (mode unset in both scopes) reports the bridge active.
+def test_subagent_bridge_config_engine_story(scaffolded_perk_repo):
+    # The one real-engine story for this check: it pins registration in the report, the
+    # ok/warn severities as the engine composes them, and warn-never-fail through the real
+    # exit mapping. The value/scope matrix lives on the direct seam below.
     report = run_doctor(scaffolded_perk_repo, verify=False)
-    bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
+    bridge = next((c for c in report.checks if c.name == "subagent-bridge-config"), None)
+    assert bridge is not None
     assert bridge.status == "ok" and bridge.group == "package"
     assert "bridge active" in bridge.message
+    assert report.healthy and report.exit_code == 0
 
-
-def test_subagent_bridge_config_project_off_is_warn(scaffolded_perk_repo):
     _set_project_bridge_mode(scaffolded_perk_repo, "off")
     report = run_doctor(scaffolded_perk_repo, verify=False)
-    bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
+    bridge = next((c for c in report.checks if c.name == "subagent-bridge-config"), None)
+    assert bridge is not None
     assert bridge.status == "warn"
     assert ".pi/settings.json" in bridge.detail and '"off"' in bridge.detail
     assert bridge.remediation
-    # Warn-never-fail: the finding never affects the exit code.
-    assert report.healthy
+    assert report.healthy and report.exit_code == 0
 
 
-def test_subagent_bridge_config_project_fork_only_is_warn(scaffolded_perk_repo):
-    # "fork-only" counts: perk's wave children run fresh-context, which deactivates a
-    # fork-only bridge — streaming silently degrades to completion-only.
-    _set_project_bridge_mode(scaffolded_perk_repo, "fork-only")
-    report = run_doctor(scaffolded_perk_repo, verify=False)
-    bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
-    assert bridge.status == "warn"
-    assert '"fork-only"' in bridge.detail
-    assert report.healthy
+@pytest.mark.parametrize(
+    ("settings_text", "expected_status", "expected_offender"),
+    [
+        pytest.param(
+            _bridge_settings_text("off"),
+            "warn",
+            '.pi/settings.json: subagents.intercomBridge.mode = "off"',
+            id="off",
+        ),
+        # "fork-only" counts: perk's wave children run fresh-context, which deactivates a
+        # fork-only bridge — streaming silently degrades to completion-only.
+        pytest.param(
+            _bridge_settings_text("fork-only"),
+            "warn",
+            '.pi/settings.json: subagents.intercomBridge.mode = "fork-only"',
+            id="fork-only",
+        ),
+        pytest.param(_bridge_settings_text("always"), "ok", None, id="always"),
+        # Invalid project settings are the settings-wiring check's complaint, not this one's —
+        # the bridge check stays ok/quiet on that scope.
+        pytest.param("not json{", "ok", None, id="invalid-json"),
+    ],
+)
+def test_subagent_bridge_config_project_scope_matrix(
+    tmp_path, settings_text, expected_status, expected_offender
+):
+    # Direct seam over the project scope. With PI_CODING_AGENT_DIR set (the autouse
+    # isolation), the user scope is a nonexistent directory and no git subprocess runs, so a
+    # bare tmp_path root is a complete input and only the project scope can produce an offender.
+    (tmp_path / ".pi").mkdir()
+    (tmp_path / ".pi" / "settings.json").write_text(settings_text, encoding="utf-8")
+    check = doctor_checks._subagent_bridge_config_check(tmp_path)
+    assert check.name == "subagent-bridge-config"
+    assert check.group == "package"
+    assert check.status == expected_status
+    if expected_offender is not None:
+        assert expected_offender in check.detail
+        assert check.remediation
+    else:
+        assert check.detail == ""
 
 
-def test_subagent_bridge_config_explicit_always_is_ok(scaffolded_perk_repo):
-    _set_project_bridge_mode(scaffolded_perk_repo, "always")
-    report = run_doctor(scaffolded_perk_repo, verify=False)
-    bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
-    assert bridge.status == "ok"
-
-
-def test_subagent_bridge_config_user_scope_off_is_warn(scaffolded_perk_repo, isolated_pi_agent_dir):
+def test_subagent_bridge_config_user_scope_off_is_warn(tmp_path, isolated_pi_agent_dir):
     # The user scope (settings.json in the launch-precedence agent dir) warns too — an explicit
     # off in EITHER scope disables streaming (perk does not reimplement pi's cross-scope merge
-    # semantics). The detail names the absolute planted path, not a `~/.pi/agent` assumption.
+    # semantics). The detail names the absolute planted path, not a `~/.pi/agent` assumption,
+    # and does not name the clean project scope.
     settings = _plant_user_bridge_mode(isolated_pi_agent_dir, "off")
-    report = run_doctor(scaffolded_perk_repo, verify=False)
-    bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
-    assert bridge.status == "warn"
-    assert str(settings) in bridge.detail
-    assert report.healthy
+    check = doctor_checks._subagent_bridge_config_check(tmp_path)
+    assert check.status == "warn"
+    assert str(settings) in check.detail
+    assert ".pi/settings.json" not in check.detail
 
 
 def test_subagent_bridge_config_user_scope_follows_configured_agent_dir(
@@ -1259,15 +1287,6 @@ def test_subagent_bridge_config_bad_config_skips_user_scope(
     (scaffolded_perk_repo / ".perk/config.toml").write_text(text, encoding="utf-8")
     check = doctor_checks._subagent_bridge_config_check(scaffolded_perk_repo)
     assert check.status == "ok"
-
-
-def test_subagent_bridge_config_invalid_settings_stays_quiet(scaffolded_perk_repo):
-    # Invalid project settings are the settings-wiring check's complaint, not this one's —
-    # the bridge check stays ok/quiet on that scope.
-    (scaffolded_perk_repo / ".pi" / "settings.json").write_text("not json{", encoding="utf-8")
-    report = run_doctor(scaffolded_perk_repo, verify=False)
-    bridge = next(c for c in report.checks if c.name == "subagent-bridge-config")
-    assert bridge.status == "ok"
 
 
 def test_edited_delivered_def_reports_drift_and_is_fixed(scaffolded_perk_repo):
