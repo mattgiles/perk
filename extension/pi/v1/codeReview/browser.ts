@@ -44,6 +44,7 @@ import { registerPerkCommand } from "../../../substrate/command.ts";
 import { interceptConsoleError } from "../../../substrate/consoleCapture.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { type ReportTarget, report } from "../../../surfaces/report.ts";
+import type { PerkStatusHandle } from "../../../surfaces/surfaces.ts";
 import {
   type AnnotationState,
   clearAnnotationSurface,
@@ -166,7 +167,7 @@ export async function observeBrowserReadiness(
 export interface ReviewBrowserCoreOpts {
   /** The invoking door's report scope. */
   scope: string;
-  /** The `startPlannotatorBrowser` opts minus `signal` (the core threads `ctx.signal`). */
+  /** The `startPlannotatorBrowser` opts minus `signal`/`activity` (both threaded by the core). */
   browserOpts: { cwd: string; prUrl?: string; diffType?: string; defaultBranch?: string };
   /** The fully composed guidance to inject (binding suffix included by the caller). */
   guidance: string;
@@ -201,6 +202,7 @@ export async function openReviewBrowserCore(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   annotations: AnnotationState,
+  status: PerkStatusHandle,
   opts: ReviewBrowserCoreOpts,
 ): Promise<boolean> {
   let started: StartedBrowser;
@@ -208,6 +210,7 @@ export async function openReviewBrowserCore(
     started = await startPlannotatorBrowser(pi.events, {
       ...opts.browserOpts,
       signal: ctx.signal,
+      activity: (text) => status.beginActivity(ctx, text),
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -257,9 +260,10 @@ async function openBrowserAndGuide(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   annotations: AnnotationState,
+  status: PerkStatusHandle,
   opts: PrReviewBrowserGuidanceOpts,
 ): Promise<void> {
-  await openReviewBrowserCore(pi, ctx, annotations, {
+  await openReviewBrowserCore(pi, ctx, annotations, status, {
     scope: SCOPE,
     browserOpts: { prUrl: opts.prUrl, cwd: ctx.cwd },
     guidance: prReviewBrowserGuidance(opts) + bindingSuffix(ctx.cwd, `command:${SCOPE}`),
@@ -272,6 +276,7 @@ async function openBrowserAndGuide(
 export function installPrReviewBrowserBindings(
   pi: ExtensionAPI,
   annotations: AnnotationState,
+  status: PerkStatusHandle,
 ): void {
   registerPerkCommand(pi, SCOPE, {
     description:
@@ -334,7 +339,7 @@ export function installPrReviewBrowserBindings(
             ? `PR #${parsed.pr} → adversarial reviewers (focus: ${parsed.directive}) → plannotator browser triage → you post from the browser`
             : `PR #${parsed.pr} → adversarial reviewers → plannotator browser triage → you post from the browser`,
         );
-        await openBrowserAndGuide(pi, ctx, annotations, {
+        await openBrowserAndGuide(pi, ctx, annotations, status, {
           mode: "foreign",
           pr: parsed.pr,
           prUrl: checkout.data.url,
@@ -370,7 +375,7 @@ export function installPrReviewBrowserBindings(
             ? `PR #${target.number} (active worktree) → adversarial reviewers (focus: ${parsed.directive}) → plannotator browser triage → you post from the browser`
             : `PR #${target.number} (active worktree) → adversarial reviewers → plannotator browser triage → you post from the browser`,
         );
-        await openBrowserAndGuide(pi, ctx, annotations, {
+        await openBrowserAndGuide(pi, ctx, annotations, status, {
           mode: "active",
           pr: target.number,
           prUrl: target.prUrl,

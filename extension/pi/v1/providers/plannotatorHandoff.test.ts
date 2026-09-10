@@ -9,6 +9,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { ACTIVITY_BROWSER_REVIEW, type ActivitySink } from "../../../surfaces/surfaces.ts";
 import type { PlannotatorBus } from "./plannotator.ts";
 import {
   CODE_REVIEW_READINESS_PROBE_PATH,
@@ -28,6 +29,9 @@ import {
   startPlannotatorBrowser,
   startPlannotatorPlanReview,
 } from "./plannotatorHandoff.ts";
+
+/** The inert activity sink for rows that do not observe the browser-wait activity. */
+const noActivity: ActivitySink = () => () => {};
 
 /** A minimal in-memory event bus (the fake `pi.events` for the pure bridge tests). */
 function fakeBus(): PlannotatorBus & { handlers: Map<string, ((data: unknown) => void)[]> } {
@@ -717,7 +721,7 @@ test("startPlannotatorBrowser: env preset while probing, PR-mode payload, ready 
   try {
     const started = await startPlannotatorBrowser(
       bus,
-      { prUrl: "https://gh/o/r/pull/77", cwd: "/repo" },
+      { prUrl: "https://gh/o/r/pull/77", cwd: "/repo", activity: noActivity },
       {
         pickFreePort: () => Promise.resolve(45001),
         probe: (url) => {
@@ -751,7 +755,7 @@ test("startPlannotatorBrowser: probe never true → timeout, env RESTORED-BY-DEL
   try {
     const started = await startPlannotatorBrowser(
       bus,
-      { prUrl: "u", cwd: "/repo" },
+      { prUrl: "u", cwd: "/repo", activity: noActivity },
       {
         pickFreePort: () => Promise.resolve(45002),
         probe: () => Promise.resolve(false),
@@ -777,7 +781,12 @@ test("startPlannotatorBrowser: local-mode fields render ONLY when defined (the s
   });
   const started = await startPlannotatorBrowser(
     bus,
-    { cwd: "/checkout", diffType: "since-base", defaultBranch: "origin/main" },
+    {
+      cwd: "/checkout",
+      diffType: "since-base",
+      defaultBranch: "origin/main",
+      activity: noActivity,
+    },
     {
       pickFreePort: () => Promise.resolve(45007),
       probe: () => Promise.resolve(true),
@@ -802,7 +811,7 @@ test("startPlannotatorBrowser: early bridge settle stops the poll → bridge_set
   let probes = 0;
   const started = await startPlannotatorBrowser(
     bus,
-    { prUrl: "u", cwd: "/repo" },
+    { prUrl: "u", cwd: "/repo", activity: noActivity },
     {
       pickFreePort: () => Promise.resolve(45003),
       probe: () => {
@@ -826,7 +835,7 @@ test("startPlannotatorBrowser: a turn abort stops the poll → aborted", async (
   let probes = 0;
   const started = await startPlannotatorBrowser(
     bus,
-    { prUrl: "u", cwd: "/repo", signal: controller.signal },
+    { prUrl: "u", cwd: "/repo", signal: controller.signal, activity: noActivity },
     {
       pickFreePort: () => Promise.resolve(45004),
       probe: () => {
@@ -848,7 +857,7 @@ test("startPlannotatorBrowser: a port-pick failure throws (the caller owns the s
   await assert.rejects(
     startPlannotatorBrowser(
       bus,
-      { prUrl: "u", cwd: "/repo" },
+      { prUrl: "u", cwd: "/repo", activity: noActivity },
       { pickFreePort: () => Promise.reject(new Error("no ports")) },
     ),
     /no ports/,
@@ -878,7 +887,7 @@ test("startPlannotatorPlanReview: env preset while probing, plan-review envelope
   try {
     const started = await startPlannotatorPlanReview(
       bus,
-      { plan: "# A plan" },
+      { plan: "# A plan", activity: noActivity },
       {
         pickFreePort: () => Promise.resolve(46001),
         probe: (url) => {
@@ -921,7 +930,7 @@ test("startPlannotatorPlanReview: a later review-result decision resolves the br
   });
   const started = await startPlannotatorPlanReview(
     bus,
-    { plan: "# A plan" },
+    { plan: "# A plan", activity: noActivity },
     {
       pickFreePort: () => Promise.resolve(46002),
       probe: () => Promise.resolve(true),
@@ -947,7 +956,7 @@ test("startPlannotatorPlanReview: an early handshake error settles the bridge �
   let probes = 0;
   const started = await startPlannotatorPlanReview(
     bus,
-    { plan: "# A plan" },
+    { plan: "# A plan", activity: noActivity },
     {
       pickFreePort: () => Promise.resolve(46003),
       probe: () => {
@@ -978,7 +987,7 @@ test("startPlannotatorPlanReview: a turn abort stops the poll → aborted (bridg
   let probes = 0;
   const started = await startPlannotatorPlanReview(
     bus,
-    { plan: "# A plan", signal: controller.signal },
+    { plan: "# A plan", signal: controller.signal, activity: noActivity },
     {
       pickFreePort: () => Promise.resolve(46004),
       probe: () => {
@@ -1001,11 +1010,170 @@ test("startPlannotatorPlanReview: a port-pick failure throws (the caller owns th
   await assert.rejects(
     startPlannotatorPlanReview(
       bus,
-      { plan: "# A plan" },
+      { plan: "# A plan", activity: noActivity },
       { pickFreePort: () => Promise.reject(new Error("no ports")) },
     ),
     /no ports/,
   );
+});
+
+test("startPlannotatorSurface activity: begun on `ready` while the bridge is pending, ended on settle; timeout / bridge_settled / aborted / a rejecting launch never begin", async () => {
+  const prior = process.env.PLANNOTATOR_PORT;
+  const recorder = (begins: string[], ends: string[]): ActivitySink => {
+    return (text) => {
+      begins.push(text);
+      return () => ends.push(text);
+    };
+  };
+  const fast = { intervalMs: 1, budgetMs: 100, sleep: () => Promise.resolve() };
+  try {
+    // (A) plan flavor: pending handshake → ready begins; the later decision settles → ended.
+    {
+      const bus = fakeBus();
+      const begins: string[] = [];
+      const ends: string[] = [];
+      bus.on("plannotator:request", (data) => {
+        (data as PlanReviewEnvelope).respond({
+          status: "handled",
+          result: { status: "pending", reviewId: "rev-act-a" },
+        });
+      });
+      const started = await startPlannotatorPlanReview(
+        bus,
+        { plan: "# A plan", activity: recorder(begins, ends) },
+        { ...fast, pickFreePort: () => Promise.resolve(47001), probe: () => Promise.resolve(true) },
+      );
+      assert.equal(await started.readiness, "ready");
+      assert.deepEqual(begins, [ACTIVITY_BROWSER_REVIEW], "begun on ready");
+      assert.deepEqual(ends, [], "still waiting on the decision");
+      bus.emit("plannotator:review-result", { reviewId: "rev-act-a", approved: true });
+      assert.equal((await started.bridgePromise).status, "completed");
+      assert.deepEqual(ends, [ACTIVITY_BROWSER_REVIEW], "ended on settle");
+    }
+
+    // (B) code-review flavor: no immediate respond → ready begins; the single respond → ended.
+    {
+      const bus = fakeBus();
+      const begins: string[] = [];
+      const ends: string[] = [];
+      let seen: CodeReviewEnvelope | undefined;
+      bus.on("plannotator:request", (data) => {
+        seen = data as CodeReviewEnvelope;
+      });
+      const started = await startPlannotatorBrowser(
+        bus,
+        { prUrl: "u", cwd: "/repo", activity: recorder(begins, ends) },
+        { ...fast, pickFreePort: () => Promise.resolve(47002), probe: () => Promise.resolve(true) },
+      );
+      assert.equal(await started.readiness, "ready");
+      assert.deepEqual(begins, [ACTIVITY_BROWSER_REVIEW]);
+      assert.deepEqual(ends, []);
+      seen?.respond({ status: "handled", result: { approved: true } });
+      assert.equal((await started.bridgePromise).status, "handled");
+      assert.deepEqual(ends, [ACTIVITY_BROWSER_REVIEW]);
+    }
+
+    // (C) timeout: the probe never answers → nothing begun.
+    {
+      const bus = fakeBus();
+      const begins: string[] = [];
+      const ends: string[] = [];
+      const started = await startPlannotatorBrowser(
+        bus,
+        { prUrl: "u", cwd: "/repo", activity: recorder(begins, ends) },
+        {
+          ...fast,
+          budgetMs: 3,
+          pickFreePort: () => Promise.resolve(47003),
+          probe: () => Promise.resolve(false),
+        },
+      );
+      assert.equal(await started.readiness, "timeout");
+      assert.deepEqual(begins, []);
+      assert.deepEqual(ends, []);
+    }
+
+    // (D) bridge_settled: an early error respond → nothing begun, nothing ended.
+    {
+      const bus = fakeBus();
+      const begins: string[] = [];
+      const ends: string[] = [];
+      bus.on("plannotator:request", (data) => {
+        (data as PlanReviewEnvelope).respond({ status: "error", error: "boom" });
+      });
+      const started = await startPlannotatorPlanReview(
+        bus,
+        { plan: "# A plan", activity: recorder(begins, ends) },
+        {
+          ...fast,
+          pickFreePort: () => Promise.resolve(47004),
+          probe: () => Promise.resolve(false),
+        },
+      );
+      assert.equal(await started.readiness, "bridge_settled");
+      assert.equal((await started.bridgePromise).status, "unavailable");
+      assert.deepEqual(begins, []);
+      assert.deepEqual(ends, []);
+    }
+
+    // (E) aborted: the controller aborts inside the first probe → nothing begun.
+    {
+      const bus = fakeBus();
+      const begins: string[] = [];
+      const ends: string[] = [];
+      const controller = new AbortController();
+      bus.on("plannotator:request", (data) => {
+        (data as PlanReviewEnvelope).respond({
+          status: "handled",
+          result: { status: "pending", reviewId: "rev-act-e" },
+        });
+      });
+      const started = await startPlannotatorPlanReview(
+        bus,
+        { plan: "# A plan", signal: controller.signal, activity: recorder(begins, ends) },
+        {
+          ...fast,
+          pickFreePort: () => Promise.resolve(47005),
+          probe: () => {
+            controller.abort();
+            return Promise.resolve(false);
+          },
+        },
+      );
+      assert.equal(await started.readiness, "aborted");
+      assert.deepEqual(await started.bridgePromise, { status: "aborted" });
+      assert.deepEqual(begins, []);
+      assert.deepEqual(ends, []);
+    }
+
+    // (F) a rejecting launch (a throwing listener over the generic bus — unreachable over pi's
+    // wrapped bus): the rejection settles the bridge → the poll ends bridge_settled, nothing begun.
+    {
+      const bus = fakeBus();
+      const begins: string[] = [];
+      const ends: string[] = [];
+      bus.on("plannotator:request", () => {
+        throw new Error("listener exploded");
+      });
+      const started = await startPlannotatorBrowser(
+        bus,
+        { prUrl: "u", cwd: "/repo", activity: recorder(begins, ends) },
+        {
+          ...fast,
+          budgetMs: 1000,
+          pickFreePort: () => Promise.resolve(47006),
+          probe: () => Promise.resolve(false),
+        },
+      );
+      assert.equal(await started.readiness, "bridge_settled");
+      await assert.rejects(started.bridgePromise, /listener exploded/);
+      assert.deepEqual(begins, []);
+      assert.deepEqual(ends, []);
+    }
+  } finally {
+    if (prior === undefined) delete process.env.PLANNOTATOR_PORT;
+    else process.env.PLANNOTATOR_PORT = prior;
+  }
 });
 
 test("readiness probe paths: each names a server-flavor-unique route (pinned @ 0.26.4)", () => {
@@ -1027,7 +1195,7 @@ test("default probe wiring: each wrapper's default probe fetches its own flavor'
     const codeBus = fakeBus(); // no respond — the review stays open; the probe settles readiness
     const code = await startPlannotatorBrowser(
       codeBus,
-      { prUrl: "u", cwd: "/repo" },
+      { prUrl: "u", cwd: "/repo", activity: noActivity },
       {
         pickFreePort: () => Promise.resolve(46005),
         intervalMs: 1,
@@ -1046,7 +1214,7 @@ test("default probe wiring: each wrapper's default probe fetches its own flavor'
     });
     const plan = await startPlannotatorPlanReview(
       planBus,
-      { plan: "# A plan" },
+      { plan: "# A plan", activity: noActivity },
       {
         pickFreePort: () => Promise.resolve(46006),
         intervalMs: 1,

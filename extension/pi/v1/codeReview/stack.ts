@@ -42,6 +42,7 @@ import { registerPerkCommand } from "../../../substrate/command.ts";
 import { render } from "../../../substrate/prompts.ts";
 import { failFor, ok } from "../../../substrate/result.ts";
 import { report } from "../../../surfaces/report.ts";
+import type { PerkStatusHandle } from "../../../surfaces/surfaces.ts";
 import type { AnnotationState } from "../providers/annotations.ts";
 import {
   LOCAL_REVIEW_DIFF_TYPE,
@@ -259,6 +260,7 @@ async function openStackBrowser(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   annotations: AnnotationState,
+  status: PerkStatusHandle,
   opts: {
     checkoutPath: string;
     stackBaseRef: string;
@@ -266,7 +268,7 @@ async function openStackBrowser(
     injectGuidance: boolean;
   },
 ): Promise<boolean> {
-  return await openReviewBrowserCore(pi, ctx, annotations, {
+  return await openReviewBrowserCore(pi, ctx, annotations, status, {
     scope: SCOPE,
     browserOpts: {
       cwd: opts.checkoutPath,
@@ -285,7 +287,11 @@ async function openStackBrowser(
 // ------------------------------------------------------------------------ the warm door
 
 /** Register the warm `/stack-review-browser` command (posting rides submit_pr_review). */
-function registerStackReviewBrowser(pi: ExtensionAPI, annotations: AnnotationState): void {
+function registerStackReviewBrowser(
+  pi: ExtensionAPI,
+  annotations: AnnotationState,
+  status: PerkStatusHandle,
+): void {
   registerPerkCommand(pi, SCOPE, {
     description:
       "Review a whole PR stack human-in-the-loop in the plannotator browser UI over the " +
@@ -378,7 +384,7 @@ function registerStackReviewBrowser(pi: ExtensionAPI, annotations: AnnotationSta
             : " → adversarial reviewers") +
           " → plannotator browser triage → judgment-routed per-PR posting",
       );
-      await openStackBrowser(pi, ctx, annotations, {
+      await openStackBrowser(pi, ctx, annotations, status, {
         checkoutPath: data.path,
         stackBaseRef: data.base_ref,
         guidance:
@@ -480,6 +486,7 @@ export async function executeOpenStackReview(
   ctx: ExtensionContext,
   latch: OpenLatch,
   annotations: AnnotationState,
+  status: PerkStatusHandle,
   open: StackBrowserOpen = openStackBrowser,
 ): Promise<ReturnType<typeof ok> | ReturnType<ReturnType<typeof failFor>>> {
   const fail = failFor(ctx, "open_stack_review");
@@ -530,7 +537,7 @@ export async function executeOpenStackReview(
     notes: binding.notes,
     ...(binding.focus !== null ? { directive: binding.focus } : {}),
   });
-  const started = await open(pi, ctx, annotations, {
+  const started = await open(pi, ctx, annotations, status, {
     checkoutPath: binding.checkout_path,
     stackBaseRef: bindingBaseRef(binding),
     guidance,
@@ -555,7 +562,11 @@ export async function executeOpenStackReview(
  * Register the parameterless `open_stack_review` tool (the `run_audit_wave` posture) over a
  * registration-owned single-use latch (a fresh activation is a fresh session).
  */
-function registerOpenStackReview(pi: ExtensionAPI, annotations: AnnotationState): void {
+function registerOpenStackReview(
+  pi: ExtensionAPI,
+  annotations: AnnotationState,
+  status: PerkStatusHandle,
+): void {
   const latch: OpenLatch = { opened: false };
 
   pi.registerTool({
@@ -575,7 +586,7 @@ function registerOpenStackReview(pi: ExtensionAPI, annotations: AnnotationState)
       properties: {},
     },
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      return await executeOpenStackReview(pi, ctx, latch, annotations);
+      return await executeOpenStackReview(pi, ctx, latch, annotations, status);
     },
   });
 }
@@ -585,7 +596,11 @@ function registerOpenStackReview(pi: ExtensionAPI, annotations: AnnotationState)
  * cold-launch twin (`open_stack_review`). Takes the threaded per-activation annotation state —
  * both openers prime it through `openReviewBrowserCore`.
  */
-export function installStackReviewBindings(pi: ExtensionAPI, annotations: AnnotationState): void {
-  registerStackReviewBrowser(pi, annotations);
-  registerOpenStackReview(pi, annotations);
+export function installStackReviewBindings(
+  pi: ExtensionAPI,
+  annotations: AnnotationState,
+  status: PerkStatusHandle,
+): void {
+  registerStackReviewBrowser(pi, annotations, status);
+  registerOpenStackReview(pi, annotations, status);
 }

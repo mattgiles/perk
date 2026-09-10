@@ -6,11 +6,11 @@
 // surfaces module" is surfaces.ts + report.ts for the surfaces guard).
 //
 // Perk status (charter §6 D2): perk presents ONE footer status under the single
-// `perk` slot — the single-value objective segment (the checkpoint substrate is retired, so
-// there is no composition step). The per-feature status slots and widgets are retired (D8
-// sanctioned). The perk-owned footer (`perkFooter`/`installPerkFooter` below) renders the value
-// directly; the `perk` status slot keeps publishing — it is the RPC-visible surface (setFooter
-// is an RPC no-op).
+// `perk` slot — the objective segment composed with the ref-counted activity facet
+// (`<objective> · <activity>`, either half optional). The per-feature status slots and widgets
+// are retired (D8 sanctioned). The perk-owned footer (`perkFooter`/`installPerkFooter` below)
+// renders the value directly; the `perk` status slot keeps publishing — it is the RPC-visible
+// surface (setFooter is an RPC no-op).
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ReportDetailSink } from "./report.ts";
@@ -34,6 +34,13 @@ export const STATUS_SLOT_PERK = "perk";
 
 // --- footer identity marks (charter §5 / D3: emoji are footer-only identity, 2 cells wide) ---
 export const MARK_OBJECTIVE = "🎯";
+
+// --- activity vocabulary (the optional second half of the composed `perk` status) ---
+// Plain text, no emoji (D3 keeps emoji as identity marks): a Perk-owned wait the operator
+// cannot otherwise see.
+export const ACTIVITY_BROWSER_REVIEW = "waiting on browser review";
+/** The slice an activity owner takes: begin a wait with its text, receive the matching `end`. */
+export type ActivitySink = (text: string) => () => void;
 
 // --- glyph vocabulary (charter §5 / D3) — charter-law data, pinned by tests ---
 export type GlyphKind = "done" | "current" | "pending" | "warning" | "failure";
@@ -101,41 +108,81 @@ export function setWorkingMessage(target: WorkingMessageTarget, message?: string
 // --- the perk status (charter D2) --------------------------------------------
 
 /**
- * The single-value status handle: the objective publisher sets the one value through `set`, and
- * the handle republishes the single `perk` status slot. The footer reads the value back via `get`
- * and repaints via `subscribe` — the slot's `setStatus` dual-publish is deliberate (RPC clients
- * see the slot; setFooter is an RPC no-op).
+ * The composed status handle: the objective publisher sets its half through `set`, activity
+ * owners hold ref-counted waits through `beginActivity`, and the handle republishes the single
+ * `perk` status slot with the composed value. The footer reads it back via `get` and repaints via
+ * `subscribe` — the slot's `setStatus` dual-publish is deliberate (RPC clients see the slot;
+ * setFooter is an RPC no-op).
  */
 export interface PerkStatusHandle {
-  /** Set (or clear, with undefined) the one value; publishes the slot. No-op headless. */
+  /** Set (or clear, with undefined) the objective half; publishes the slot. No-op headless. */
   set(target: StandingTarget, text: string | undefined): void;
-  /** The current text (undefined when unset). */
+  /**
+   * Begin one activity wait: the text shows while any begun wait is unended; returns this wait's
+   * `end` (idempotent). No-op headless (returns a no-op `end`, records nothing).
+   */
+  beginActivity(target: StandingTarget, text: string): () => void;
+  /** Reset every wait (session shutdown); a late `end` of a reset wait is inert. No-op headless. */
+  clearActivity(target: StandingTarget): void;
+  /** The composed value (`<objective> · <activity>`, either half optional; undefined when neither). */
   get(): string | undefined;
   /**
-   * Subscribe to publishes: the listener fires after every headful `set` (headless `set`
-   * calls are full no-ops, so nothing fires). Returns an unsubscribe.
+   * Subscribe to publishes: the listener fires after every headful `set`, begin, end and clear
+   * (headless calls are full no-ops, so nothing fires). Returns an unsubscribe.
    */
   subscribe(listener: () => void): () => void;
 }
 
 /**
- * Create the single-value `perk` status handle (one per extension instance — created in index.ts
- * and passed to the objective publisher; no hidden module state). Headless calls are full no-ops
- * (never record the text, so headless-era text can't resurrect in a later headful render).
- * `undefined` clears the slot. No width handling: pi's footer truncates the status line itself.
+ * Create the composed `perk` status handle (one per extension instance — created in index.ts
+ * and passed to the objective publisher and the activity owners; no hidden module state).
+ * Headless calls are full no-ops (never record text, so headless-era text can't resurrect in a
+ * later headful render). The activity is a live-wait COUNT, not a set/clear: the browser doors
+ * accept a concurrent double-open, so an older wait's settle must not blank a newer one — the
+ * text clears only when the LAST wait ends (the latest begun text wins meanwhile; the count
+ * clamps at 0 so a post-reset `end` is inert). No width handling: pi's footer truncates.
  */
 export function createPerkStatus(): PerkStatusHandle {
-  let value: string | undefined;
+  let objective: string | undefined;
+  let activity: string | undefined;
+  let waits = 0;
   const listeners = new Set<() => void>();
+  const compose = (): string | undefined => {
+    const halves = [objective, activity].filter((half) => half !== undefined);
+    return halves.length === 0 ? undefined : halves.join(" · ");
+  };
+  const publish = (target: StandingTarget): void => {
+    target.ui.setStatus(STATUS_SLOT_PERK, compose());
+    for (const listener of listeners) listener();
+  };
   return {
     set(target, text) {
       if (!target.hasUI) return;
-      value = text;
-      target.ui.setStatus(STATUS_SLOT_PERK, text);
-      for (const listener of listeners) listener();
+      objective = text;
+      publish(target);
+    },
+    beginActivity(target, text) {
+      if (!target.hasUI) return () => {};
+      waits += 1;
+      activity = text;
+      publish(target);
+      let ended = false;
+      return () => {
+        if (ended) return;
+        ended = true;
+        waits = Math.max(0, waits - 1);
+        if (waits === 0) activity = undefined;
+        publish(target);
+      };
+    },
+    clearActivity(target) {
+      if (!target.hasUI) return;
+      waits = 0;
+      activity = undefined;
+      publish(target);
     },
     get() {
-      return value;
+      return compose();
     },
     subscribe(listener) {
       listeners.add(listener);
@@ -155,7 +202,7 @@ export function createPerkStatus(): PerkStatusHandle {
 export interface FooterParts {
   /** e.g. `perk v0.0.1` — standing identity (D7), dim. */
   identity: string;
-  /** The 🎯 objective segment, verbatim (`handle.get()`). */
+  /** The composed perk status value (`handle.get()`), verbatim — it carries its own 🎯 mark. */
   objective?: string;
   /** Git branch (dim); omitted when not in a repo. */
   branch?: string;
@@ -329,9 +376,9 @@ export type PerkFooterFactory = (
 /**
  * The perk-owned footer factory (charter D2): replaces pi's default footer wholesale with one
  * line in the intended split layout. `render` gathers everything live per call (D10 stateless
- * render): the objective value via the handle, branch/guests via `footerData` (excluding perk's
- * own `STATUS_SLOT_PERK` — the slot keeps publishing for RPC, but the footer renders the value
- * directly), model/cache/context via the deps closures. Reactivity (the D2 contract): repaints on
+ * render): the composed status value via the handle, branch/guests via `footerData` (excluding
+ * perk's own `STATUS_SLOT_PERK` — the slot keeps publishing for RPC, but the footer renders the
+ * value directly), model/cache/context via the deps closures. Reactivity (the D2 contract): repaints on
  * every handle recompose and on branch change; `dispose` detaches both. Lifecycle (pi ≥ 0.84,
  * verified at 0.84.1): `setExtensionFooter` disposes a replaced factory's component, and pi's
  * `resetExtensionUI` restores the built-in footer (disposing this one) on /reload and before
