@@ -30,7 +30,8 @@ the borrowed `pi-subagents` package installs at launch.
    must not contain the `<untrusted_brief>` or `</untrusted_brief>` tags. Any malformed brief
    refuses the whole call (`bad_input`) before any lane starts — nothing partial runs.
 3. **Ask the agent to call `run_scout_wave` once with all the briefs.** The call blocks until
-   every lane reports. It is one attempt with no retry.
+   every lane settles — each either completes with a report or fails. It is one attempt with no
+   retry.
 4. **Read the result.** It opens with an untrusted-DATA preface, then one fenced JSON report per
    brief: `scope` (what the lane examined and what was out of reach), `findings` — an array of
    `{ pointer, claim, basis, rationale }` — and `open_questions`. Have the agent re-read every

@@ -13,11 +13,38 @@ substring pins (the `test_learn_harvest_cmd.py::test_skill_semantic_contract` pa
 full snapshots. `perk-learn-harvest` stays covered by its existing dedicated test.
 """
 
+import re
 from pathlib import Path
 
 from perk.substrate.skill_exposure import parse_skill_frontmatter
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# The scout launcher's judgment tier rides exactly these three skills (each bound to the one stage
+# whose STAGE_TOOLS list carries the tool).
+SCOUT_GUIDANCE_SKILLS: dict[str, list[str]] = {
+    "perk-plan": ["plan"],
+    "perk-objective-plan": ["objective-plan"],
+    "perk-objective-author": ["objective-author"],
+}
+
+# Mechanics the `run_scout_wave` tool's `promptGuidelines` (extension/pi/v1/scoutWave.ts) carry
+# ALONE — the brief shape and caps, pointer-not-paste, `inferred`-as-lead, the attempt policy and
+# the partial-wave fallback. Compared case-insensitively against the whitespace-normalized skill
+# bodies. Every entry must also occur in the tool's guidelines block, so this list can only name
+# facts the tool actually states (drop the entry when the tool drops the fact).
+SCOUT_TOOL_OWNED_MECHANICS: tuple[str, ...] = (
+    "self-contained",
+    "pointer-style",
+    "[a-z0-9]",
+    "8 kib",
+    "at most 6",
+    "pasting",
+    "inferred",
+    "one attempt",
+    "no retry",
+    "partial or failed wave",
+)
 
 
 def _norm(skill: str) -> str:
@@ -188,21 +215,16 @@ def test_scout_launcher_guidance_rides_exactly_the_three_authoring_skills():
     `perk-grill`, `perk-replan`, …) may carry the literal `run_scout_wave`; the
     `skills/perk-expert/references/*.md` mirror is outside this sweep and may.
     """
-    expected_stage = {
-        "perk-plan": ["plan"],
-        "perk-objective-plan": ["objective-plan"],
-        "perk-objective-author": ["objective-author"],
-    }
     carriers: dict[str, Path] = {}
     for path in sorted((REPO_ROOT / "skills").glob("perk-*/SKILL.md")):
         if "run_scout_wave" in path.read_text(encoding="utf-8"):
             carriers[path.parent.name] = path
-    assert set(carriers) == set(expected_stage), (
+    assert set(carriers) == set(SCOUT_GUIDANCE_SKILLS), (
         "the skills naming `run_scout_wave` must be exactly the three authoring skills bound to "
         "the stages the tool rides (plan / objective-plan / objective-author); got "
         f"{sorted(carriers)}"
     )
-    for skill, stages in expected_stage.items():
+    for skill, stages in SCOUT_GUIDANCE_SKILLS.items():
         frontmatter, reason = parse_skill_frontmatter(carriers[skill].read_text(encoding="utf-8"))
         assert reason is None, f"{skill}: {reason}"
         assert frontmatter.get("stages") == stages, (
@@ -228,3 +250,42 @@ def test_review_skills_require_and_do_not_duplicate_ponytail_coverage():
         assert "**required automatic** final `ponytail` lane" in norm
         assert "Scope owns goal boundaries plus missing/extraneous deliverables" in norm
         assert "Ponytail exclusively owns standalone deletion/YAGNI" in norm
+
+
+def _scout_prompt_guidelines() -> str:
+    """The `run_scout_wave` registration's `promptGuidelines` block, lowercased.
+
+    Sliced from the installer source rather than imported: the guidelines are in-place string
+    literals at the registration site (the prose-review TS adapter reads them there too), and the
+    Python suite must not depend on a TS build.
+    """
+    source = (REPO_ROOT / "extension" / "pi" / "v1" / "scoutWave.ts").read_text(encoding="utf-8")
+    match = re.search(r"promptGuidelines:\s*\[(.*?)\n\s*\],", source, re.DOTALL)
+    assert match is not None, "run_scout_wave's promptGuidelines block not found in scoutWave.ts"
+    return " ".join(match.group(1).split()).lower()
+
+
+def test_authoring_skills_do_not_restate_scout_wave_mechanics():
+    """The negative-space twin of the semantic pins: the single-carrier boundary.
+
+    The three skills carry the stage-specific judgment (when a wave is worth it, what its reports
+    are worth, how the call is recorded) and point back at the tool for the mechanics. A skill
+    that copies a tool-owned mechanic becomes a second prose carrier that can drift from the tool
+    contract — so each mechanic phrase must be absent from every guidance skill AND present in the
+    tool's `promptGuidelines` (the list may only name facts the tool actually states).
+    """
+    guidelines = _scout_prompt_guidelines()
+    for phrase in SCOUT_TOOL_OWNED_MECHANICS:
+        assert phrase in guidelines, (
+            f"{phrase!r} is not in run_scout_wave's promptGuidelines — the negative-space list may "
+            "only forbid mechanics the tool itself carries; drop or reword the entry"
+        )
+    for skill in SCOUT_GUIDANCE_SKILLS:
+        norm = _norm(skill).lower()
+        restated = [phrase for phrase in SCOUT_TOOL_OWNED_MECHANICS if phrase in norm]
+        assert restated == [], (
+            f"{skill} restates run_scout_wave mechanics {restated}: the tool's promptGuidelines "
+            "are the single carrier of the brief shape/caps, pointer-not-paste, inferred-as-lead, "
+            "the attempt policy and the partial-wave fallback — keep the skill to stage-specific "
+            "judgment and point back at the tool"
+        )
