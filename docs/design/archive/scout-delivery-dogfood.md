@@ -2,12 +2,13 @@
 
 **Status:** validation record (the `borrowed-askuser-todo-dogfood` / `remote-runner-consumer-dogfood`
 genre) — the **phase-1 delivery gate** of Objective #2353: the repo-local `perk-dev.analyst` promoted
-into the delivered `perk.scout` read-only analysis lane. Two legs: one dev-session `perk.scout`
+into the delivered `perk.scout` read-only analysis lane. Three legs: one dev-session `perk.scout`
 spawn through the direct `subagent` leniency (no perk-owned launcher exists yet — that is node 2.1),
-and one fresh-consumer `perk init` / idempotent re-init / clean `perk doctor` transcript in a scratch
-repo converged by the dev checkout's CLI. Part A is the repeatable procedure; Part B is the captured
-evidence. Both legs **PASSED** on the first attempt; the one deviation (the engine's artifact
-location) is a plan-text expectation mismatch, not a defect.
+one fresh-consumer `perk init` / idempotent re-init / clean `perk doctor` transcript in a scratch
+repo converged by the dev checkout's CLI, and one builtin-name coexistence characterization (the
+pi-subagents builtin is also named `scout`) added during PR review. Part A is the repeatable
+procedure; Part B is the captured evidence. All three legs **PASSED** on the first attempt; the one
+deviation (the engine's artifact location) is a plan-text expectation mismatch, not a defect.
 
 ## Context
 
@@ -16,13 +17,14 @@ location) is a plan-text expectation mismatch, not a defect.
 | Date | 2026-09-10 |
 | perk version (`pyproject.toml`) | 3.2.0 |
 | pi-subagents (`.pi/npm/node_modules/pi-subagents/package.json`) | 0.66.0 |
-| Worktree revision the legs ran at | `c81f4ac3` (branch HEAD) + this PR's not-yet-committed implementation diff (the `agents/scout.md` def, the `PERK_AGENTS` entry, the reconverged `.pi/agents/perk/scout.md` mirror) |
+| Tested tree — legs 1 and 2 | The tree of the implementation commit **`e6cd705e`** ("Promote perk-dev.analyst into the delivered perk.scout read-only analysis lane", the hash the CHANGELOG bullet is stamped with) with exactly one path absent: this record (`docs/design/archive/scout-delivery-dogfood.md`, authored after both legs). Every other path in `git show --stat e6cd705e` (20 files) was byte-identical to what the legs ran against — the legs ran after the last source/test/docs edit and before any further edit. Load-bearing blobs, verifiable with `git rev-parse e6cd705e:<path>`: `agents/scout.md` = `.pi/agents/perk/scout.md` = `10d1722d`; `src/perk/convergence/init/agents.py` = `60658eec`; `src/perk/substrate/config.py` = `8cb2c3bf`; the delivered-set directory hash recorded in `.perk/managed-state.toml` = `sha256:ce4b5c2e…940a`. Base: `c81f4ac3` (main). |
+| Tested tree — leg 3 | The PR branch at `3d6d7a6a` (the CHANGELOG follow-up on top of `e6cd705e`) plus the temporary `.pi/settings.json` override described in Part A; the `perk.scout` def blob was unchanged (`10d1722d`). |
 | Dev host | macOS, `uv`-managed CPython 3.13, node v26.3.0 |
 
 ## Part A — the repeatable procedure
 
 Each step names its actor: **(session)** for what the implement session runs itself, **(human)**
-for what a session cannot take. Both legs are session-driven; the human's part is reading the
+for what a session cannot take. All three legs are session-driven; the human's part is reading the
 verdicts.
 
 ### Leg 1 — the dev-session spawn
@@ -69,6 +71,33 @@ Gate criteria: the first init's `Converged:` (or `Converged before failure:`) li
 verbatim as environment noise. A `fail` row, a non-zero `doctor` exit, or a missing/mismatched
 scout file is NOT PASSED. Close with the teardown proof: the scratch dir is gone and
 `git status --porcelain` in the worktree shows only the intended files.
+
+### Leg 3 — builtin-name coexistence (added during PR review)
+
+pi-subagents ships a builtin literally named `scout`; perk converges `subagents.disableBuiltins:
+true`, and the user docs promise that re-enabling that builtin does not change `perk.scout`. Legs 1
+and 2 exercise only the default bulk-disabled state, so this leg characterizes the coexistence live
+(the house rule forbids tests and doctor from reading the installed engine source —
+`docs/developers/pi-subagents-reverify.md`). Run inside a dev session on the worktree:
+
+1. **(session)** Baseline: `subagent({ action: "list" })` — `perk.scout` listed under *Project
+   agents*, no *Builtin agents* section.
+2. **(session)** Add the documented project-level escape hatch to `.pi/settings.json` —
+   `subagents.agentOverrides.scout.disabled = false` beside the converged `disableBuiltins: true`
+   (the engine fingerprints the project settings file into its discovery cache, so the next `list`
+   re-reads it; no session restart).
+3. **(session)** `subagent({ action: "list", capabilities: true })` — record both rows: the builtin
+   `scout` under *Builtin agents* and `perk.scout` under *Project agents*, unchanged.
+4. **(session)** One `perk.scout` spawn under that state (`context: "fresh"`, the acceptance
+   disable) whose task reports the def's `name`/`package` frontmatter and the live
+   `subagents.agentOverrides` object — proving the runtime name still resolves to perk's def while
+   the builtin is enabled.
+5. **(session)** Revert `.pi/settings.json` (`git checkout -- .pi/settings.json`); `list` again —
+   the builtin row is gone, `perk.scout` still listed.
+
+Gate criteria: both rows present in step 3 with distinct descriptions/tools/models; the step-4
+report names `name=scout package=perk`; the step-5 listing has no builtin row and still has
+`perk.scout`; `.pi/settings.json` is byte-identical to the committed file afterwards.
 
 ### Gate outcome policy
 
@@ -228,12 +257,83 @@ $ cd / && rm -rf "$SCRATCH" && ls -d "$SCRATCH"
 ls: /var/folders/90/b55dzd451137c93rcngpgdh00000gp/T/tmp.ZdfONFi0c1: No such file or directory
 ```
 
-`git status --porcelain` in the worktree afterwards listed only this PR's intended files (the
-`agents/scout.md` def, the `.pi/agents/perk/scout.md` mirror, the `.perk/managed-state.toml`
-record, the deleted `.pi/agents/perk-dev/analyst.md`, and the source/test/docs edits) — no scratch
-residue, no `.pi-subagents/` or `.perk/local.toml` staged (both gitignored).
+`git status --porcelain` in the worktree afterwards, verbatim — only this PR's intended files (the
+two staged `A` rows are the def and its mirror; the rest are the not-yet-staged source/test/docs
+edits and the analyst deletion); no scratch residue, no `.pi-subagents/` or `.perk/local.toml`
+(both gitignored), no legacy `.pi/perk.local.toml`:
+
+```
+$ git status --porcelain   # worktree
+ M .perk/managed-state.toml
+ D .pi/agents/perk-dev/analyst.md
+A  .pi/agents/perk/scout.md
+A  agents/scout.md
+ M docs/design/pi-subagents-child-execution-policy.md
+ M docs/design/prose-prompt-map.md
+ M docs/design/prose-prompt-map.yaml
+ M docs/learned/pi/subagents.md
+ M docs/user-docs/how-to/write-a-custom-subagent.md
+ M docs/user-docs/reference/configuration/models-and-compaction.md
+ M extension/substrate/config.test.ts
+ M extension/substrate/config.ts
+ M shared/contracts.md
+ M skills/perk-expert/references/configuration.md
+ M skills/perk-expert/references/customization-recipes.md
+ M src/perk/convergence/init/agents.py
+ M src/perk/convergence/init/templates.py
+ M src/perk/substrate/config.py
+ M tests/test_config.py
+ M tests/test_repo_local_agents.py
+ M tests/test_subagent_agents.py
+```
+
+(The listing predates this record's own file, which was authored next — hence its absence here.)
 
 **Verdict — Leg 2: PASSED.**
+
+### Leg 3 — builtin-name coexistence (attempt 1, 2026-09-10)
+
+**Step 1 — baseline.** The listing under the converged `{"disableBuiltins": true}` showed
+`perk.scout` under *Project agents* and no *Builtin agents* section (the same shape as leg 1 step 1).
+
+**Step 2 — the override.** `.pi/settings.json` `subagents` became
+`{"disableBuiltins": true, "agentOverrides": {"scout": {"disabled": false}}}` (`git diff --stat`:
+`1 file changed, 6 insertions(+), 1 deletion(-)`).
+
+**Step 3 — both rows, verbatim** (the other eleven project rows and the user row were unchanged):
+
+```
+Project agents
+- perk.scout (project): Description: General-purpose read-only analysis lane with no fixed rubric — each spawn's task defines the entire scope (audit a file slice, verify claims against the checkout, census a pattern, summarize a subsystem). It explores read-only and report...; Tools: read, grep, find, ls, bash; Model: openai/gpt-5.6-terra; Thinking: default
+
+Builtin agents
+- scout (builtin): Description: Fast codebase recon that returns compressed context for handoff; Tools: read, grep, find, ls, bash, write, contact_supervisor; Model: inherits current session; Thinking: low
+```
+
+Distinct identities: different description, tool grant (the builtin carries `write` and
+`contact_supervisor`), model (inherits vs pinned terra) and thinking; the `perk.scout` row is
+byte-identical to its leg 1 row.
+
+**Step 4 — the spawn under coexistence.** `subagent({ agent: "perk.scout", context: "fresh",
+acceptance: { level: "none", reason: "report-only scout lane" }, task: <report name/package +
+live overrides> })` → `Async: perk.scout [cff37f99-50f1-4eca-99ab-c7860df54da6]`. From the
+`_meta.json` / `status.json`: `agent = perk.scout`, `model = openai/gpt-5.6-terra`, `context =
+fresh`, `acceptance.level = none (explicit)`, `exitCode = 0`, `durationMs = 6377`, usage 6/89 tokens
+(2 turns, $0.0124). The report, verbatim:
+
+```
+def: name=scout package=perk
+overrides: {"scout":{"disabled":false}}
+```
+
+— the runtime name `perk.scout` resolved to perk's def (`package: perk`) while the engine's own
+`scout` was enabled, and the child observed the override live.
+
+**Step 5 — revert.** `git checkout -- .pi/settings.json` (diff empty; `subagents` back to
+`{"disableBuiltins": true}`); the next `subagent({ action: "list" })` had no *Builtin agents*
+section and still listed `perk.scout` with its full description.
+
+**Verdict — Leg 3: PASSED.**
 
 ### Claim → evidence checklist
 
@@ -246,6 +346,8 @@ residue, no `.pi-subagents/` or `.perk/local.toml` staged (both gitignored).
 | A fresh consumer receives `scout.md` byte-identical to the source | Leg 2 first init `created` line + silent `cmp` |
 | Delivery is idempotent | Leg 2 second init (no `.pi/agents/perk/*` change) |
 | `perk doctor` sees the delivery as converged, with `scout` in its census | Leg 2 doctor rows (`subagent-agents` ok; `subagent-engine` lists `perk.scout`) |
+| Re-enabling the builtin `scout` leaves `perk.scout` discoverable, distinct and executable | Leg 3 step 3 rows + step 4 report (`name=scout package=perk` under the enabled builtin) |
+| The builtin stays disabled under perk's bulk disable | Leg 1 step 1 and leg 3 steps 1/5 listings (no *Builtin agents* section) |
 
 ## Verdicts
 
@@ -253,6 +355,7 @@ residue, no `.pi-subagents/` or `.perk/local.toml` staged (both gitignored).
 | --- | --- | --- |
 | 1 — dev-session spawn (background arm) | **PASSED** | — |
 | 2 — fresh consumer (init / re-init / doctor) | **PASSED** | — |
+| 3 — builtin-name coexistence | **PASSED** | — |
 
 ## Deviations
 
@@ -277,6 +380,8 @@ residue, no `.pi-subagents/` or `.perk/local.toml` staged (both gitignored).
 ## Teardown proof
 
 Scratch dir removed (the `ls -d` above fails with *No such file or directory*); no fixture is kept —
-leg 2 is re-runnable from scratch at any revision. The dev-session spawn left only the engine's own
-per-run bookkeeping under the pi session directory and `$TMPDIR` (outside the checkout), plus
-nothing in the worktree.
+leg 2 is re-runnable from scratch at any revision. The dev-session spawns (legs 1 and 3) left only
+the engine's own per-run bookkeeping under the pi session directory and `$TMPDIR` (outside the
+checkout), plus nothing in the worktree. Leg 3's `.pi/settings.json` override was reverted with
+`git checkout -- .pi/settings.json` before the leg closed (the committed file is unchanged by this
+PR).
