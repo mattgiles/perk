@@ -111,7 +111,8 @@ in a **scratch dir, never the worktree.**
 
 **Nested vs top-level package instances each carry their own module-global registries**
 (`pi-coding-agent` bundles its own nested `@earendil-works/pi-ai`) — see
-`docs/learned/pi/headless-session-drive.md` for the resolution pattern.
+`docs/learned/pi/headless-session-drive.md` § "Driving the real runtime offline with a faux model
+(the e2e worker tier)" (the nested-`pi-ai` bullet) for the resolution pattern.
 
 ## Cross-references
 
@@ -125,4 +126,5 @@ in a **scratch dir, never the worktree.**
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the relocated manual
   rebase-recovery recipes (delete/edit + interrupted rebase)
 - `docs/learned/workflow/distribution.md` — the `pi-ai` bin-path lockfile churn at the release seam
-- `docs/learned/pi/headless-session-drive.md` — the nested-`pi-ai` per-instance-registry resolution
+- `docs/learned/pi/headless-session-drive.md` § "Driving the real runtime offline with a faux model
+  (the e2e worker tier)" — the nested-`pi-ai` per-instance-registry resolution
