@@ -1,38 +1,41 @@
 ---
 title: The prose-review workbench + prose-map governance — launcher security, source adapters, edit workspace
-read_when: Working on perk-dev prose-review, tools/prose-review, or tools/prose-map — launcher security postures, closed adapters, parser traps, wire DTOs, EditWorkspace invariants
+read_when: Working on perk-dev prose-review, tools/prose-review, or tools/prose-map — launcher security, closed adapters, parser traps, wire DTOs, EditWorkspace, assembly/check/git/search/compare surfaces
 cluster: prose-governance
 ---
 
 # The prose-review workbench and prose-map governance
 
 The binding architecture record is `docs/design/prose-review-stack.md`. It owns the system shape
-and settled component boundaries. This learned doc does not duplicate that architecture; it records
-the cross-cutting traps that recur when the prose-map catalog, FastAPI/Vite workbench, source
-adapters, wire protocol, and edit workspace evolve.
+and settled component boundaries. This learned doc does not duplicate that architecture; it
+records the cross-cutting traps that recur when the prose-map catalog, FastAPI/Vite workbench,
+source adapters, wire protocol, edit workspace, and the assembly / check / Git / search / compare
+surfaces beside them evolve.
 
 ## Distillation
 
 - The launcher contains every URL-derived read, passes websockets through only under the current
   no-websocket-route posture, rebuilds from disk, and has one `dist/` writer — "Launcher security
   and the development loop".
-- Catalog failures are fail-closed according to result trustworthiness; policy-definition errors
-  prevent discovery while registration-shape errors become typed findings; `sync` is
-  whole-projection (sweep foreign `unmapped-unit` drift, re-measure count pins from the catalog);
-  a new governed tool bumps three pins under the opt-in suites `run_ci` never runs — "Prose-map
-  catalog governance".
+- Catalog failures are fail-closed by result trustworthiness (policy-definition errors block
+  discovery, registration-shape errors become typed findings); `sync` is whole-projection (sweep
+  foreign `unmapped-unit` drift, re-measure count pins from the catalog); a new governed tool bumps
+  three pins under the opt-in suites `run_ci` never runs — "Prose-map catalog governance".
 - Closed adapter vocabularies are exhaustive at domain/DTO/route boundaries; syntax validation
   precedes selectors and subprocess adapters are bounded — "Source-adapter contract craft".
 - PyYAML merge tags, inherited values, and comment-suffixed document markers require lexical and
   semantic evidence — "PyYAML lexical-resolution traps".
-- Python extraction centralizes normalized-name policy, maps byte/code-point offsets explicitly,
-  and compiles after parsing — "Python AST and tokenize traps".
+- Python name policy is split — shared node-side predicate, resolution-only selector-string
+  admission, a live-catalog test as the only tripwire — "Python AST and tokenize traps".
 - TypeScript selectors keep one identity scheme per collision bucket and isolate the pinned private
   compiler seam — "TypeScript selector and compiler traps".
 - Frontend wire vocabularies mirror Python manually, endpoint parsers stay local, identities are
   occurrence-based, and legal null combinations become unions — "Frontend wire posture".
 - `EditWorkspace` trusts descriptors, validates cache algebra, returns defensive copies, and binds
   edits to revisions — "EditWorkspace invariants".
+- Assembly, CheckRunner, Git observation, search, and compare: server-owned argv/refs, request
+  paths admitted only by catalog membership, closed reason vocabularies mirrored per endpoint —
+  "Shipped surfaces beyond the edit loop".
 - JSX/component-render coverage remains a named browser-dogfood gap, not an implied unit-test pass —
   "Standing proof gap".
 - The workbench constrains extension topology: registration prose stays inline (the TS adapter
@@ -150,10 +153,27 @@ other delimiter variants at the adapter boundary. The YAML adapter is
 
 ## Python AST and tokenize traps
 
-Python applies NFKC normalization to identifiers. A source spelling can normalize into a hard
-keyword even when its raw characters do not look reserved. Apply keyword and name exclusions once
-in the shared name predicate used by both discovery and resolution. Duplicating the rule lets the
-catalog discover a selector that the adapter later refuses.
+Python applies NFKC normalization to identifiers, so a source spelling can normalize into a hard
+keyword even when its raw characters do not look reserved — and `ast.parse` hands back the
+*normalized* name. The name policy is **split across two predicates, not one.** The node-side
+predicate `python_symbol_name` (with `python_symbols`) in
+`packages/perk-dev/src/perk_dev/prose_map/python.py` decides which module-body shapes are symbols
+and excludes keyword names; it IS shared — discovery emits `symbol:<name>` from it and the
+adapter's `_resolve` matches AST nodes with it. The selector-*string* admission is a separate,
+resolution-only rule — `_selector_name` in
+`packages/perk-dev/src/perk_dev/prose_review/source_adapter/python.py` (`symbol:` prefix,
+`str.isidentifier()`, `keyword.iskeyword`) — that discovery never consults because it never parses
+a selector string. So the keyword exclusion lives twice and `isidentifier()` once. The drift
+hazard: widening the discovered language on one side (a new `python_symbols` shape, a dotted
+selector grammar) without the other lets the catalog emit a selector the adapter refuses as
+`unsupported-selector`, or lets the adapter admit a shape no catalog emits and no test exercises.
+Nothing in code holds the two together; the tripwire is
+`tests/test_prose_map.py::test_python_owned_prompt_wrappers_are_ast_selected`, which asserts every
+live-catalog Python-backed selector passes the adapter's admission rule, flanked by the per-side
+pins in `tests/test_prose_map_python.py` and
+`tests/test_prose_review_source.py::test_python_adapter_rejects_every_unemitted_selector_shape`.
+Extend both predicates in one change and keep those pins green; centralizing the admission is an
+open follow-up lead, not a fact to cite.
 
 Token-stream structural detection anchors on logical lines, not visual columns. Marker count or
 pairing mismatch fails closed; guessing the intended block can edit the wrong prose. Keep producer
@@ -163,8 +183,8 @@ AST location columns are UTF-8 byte offsets, while `tokenize` columns are Unicod
 positions. Preserve one line-start table and provide explicit conversions in each direction. After
 an edit, recomposition of untouched prefix, replacement, and untouched suffix is the cheap
 corruption invariant. The owning implementation is
-`packages/perk-dev/src/perk_dev/prose_review/source_adapter/python.py`; the shared name predicate
-both discovery and resolution consume stays in
+`packages/perk-dev/src/perk_dev/prose_review/source_adapter/python.py`; the shared node-side
+symbol language (`python_symbols`, `python_symbol_name`) stays in
 `packages/perk-dev/src/perk_dev/prose_map/python.py`.
 
 Finally, `ast.parse` success does not prove compilability. Run `compile(...)` as a non-executing
@@ -237,6 +257,96 @@ Do not pre-author accessors for imagined consumers. A consumer-less getter expan
 revision contract without proving the shape serves a real flow; add it with the node that owns the
 caller.
 
+## Shipped surfaces beyond the edit loop
+
+`docs/design/prose-review-stack.md` owns each of these five surfaces' shape under the heading
+named below; only the recurring traps live here. Shared posture: argv, refs, and identity are
+server-owned; a request-supplied path is admitted only by catalog membership
+(`snapshot.units_for_path`, one fixed `404` detail); every reason vocabulary is closed in Python
+and hand-mirrored by its own endpoint module in `tools/prose-review/src/`, not `wire.ts`.
+
+### Assembly preview
+
+(Design record: "Assembly preview: `AssemblyRenderer`, the options/render API, and the
+Assembly-mode frontend".) Two failure tiers: a **request-wide** defect (unknown
+assembly/scenario, scenario–assembly mismatch, duplicate or unknown workspace path) raises
+`AssemblyRenderError` with a closed reason that `web.py` maps to `404`/`422` before any source
+read; a **per-layer** defect is a *value* — `FailedAssemblyLayer` carrying the fixed copy in
+`FAILURE_DETAILS` — returned in an HTTP 200. No path, OS error, adapter diagnostic, or raw
+exception text enters a result. A buffered path (even an empty string) is never reread; one
+canonical read or failure is shared per path. Every authored layer is emitted once, in order;
+`optional` yields presence `varies`, never a filter. Code layers are atomic — one `extract_many`
+over every fragment selector, any unresolved fragment fails the layer; prompt-root Markdown is
+`scan_template`-gated (grammar, any include, identifiers outside the scenario's variables)
+*before* `render_text`, and only `jinja2.TemplateError` becomes `template-render-failed`. The
+render route shares `source_transaction_mutex` with saves and refuses `409 catalog stale` while
+writes are frozen; checks do not (below).
+
+### The allowlisted `CheckRunner`
+
+(Design record: "CheckRunner: allowlisted targeted checks with streamed output and
+cancellation".) The closed `CheckId` `Literal` is the whole admission boundary and
+`CHECK_COMMANDS` the whole allowlist — fixed argv tuples plus a timeout; a request carries only
+the id. One active slot (busy → `409`), a bounded record ring (evicted → `404`), idempotent
+cancel. The spawn is list argv, no shell, `cwd=` the once-resolved repo root, one killable
+session — and **inherits the server's environment**: no sandbox, the reviewed argv IS the safety.
+Output is capped in code points and drained past the cap; poll offsets are server-issued
+code-point indexes the client echoes, never JS string lengths. Checks validate the **working
+tree**: they never take `source_transaction_mutex`, never see the browser buffer, and stay allowed
+while writes are frozen. Totality is a cross-file invariant: `CheckRunner.start` and
+`write.py::_suggested_checks` index `CHECK_COMMANDS[...]` directly, so a `CheckId` member without
+a row is a `KeyError`; a complete change aligns `CheckId`, `CHECK_COMMANDS`, each adapter's
+`affected_check_hints`, the frontend `CHECK_IDS` in `checks.ts`, and the exact-table pin in
+`tests/test_prose_review_checks.py`.
+
+### Read-only Git observation
+
+(Design record: "Git observation: read-only working-tree status and diffs".) Read-only is a
+**table property, not a type**: `GitReader` runs only `git status` and `git diff` from three
+fixed argv tables (`STATUS_ARGV`, `DIFF_HEAD_ARGV_PREFIX`, `DIFF_UNTRACKED_ARGV_PREFIX` —
+`core.fsmonitor=false`, `--no-renames`, `--no-ext-diff`, `--no-textconv`) under `GIT_ENV_OVERLAY`,
+the request path being the one appended token after `--`. `_execute` accepts any argv tuple and
+the structural test enumerates exactly those three tables — a fourth table or direct `_execute`
+call is invisible to it, so extend the test with the table. `GitReader` checks no membership
+itself; `web.py::git_diff` is the admission boundary. Bounds are layered: the worktree file is
+stat-refused as `too-large` before any spawn (a stat `OSError` skips the guard), a timeout kills
+the child, and the diff text is capped post-capture. Reasons are coarse on purpose —
+`git-missing` is nominal for *any* spawn `OSError`, `git-error` is the fail-closed bucket, and
+decode failures never escape (undecodable status records are counted anonymously; diff bytes
+decode with replacement). `--no-renames` is load-bearing for the one-path-per-record porcelain
+parser; badges and patches share the HEAD↔worktree baseline (only a solely-untracked path takes
+the `--no-index` diff) — change one without the other and a badge promises what the patch cannot
+show. The frontend diff cache is per status generation, invalidated whole on every completed
+status; nothing polls git.
+
+### Catalog search
+
+(Design record: the search parsers under "The round-trip proof split"; the route under "HTTP
+layer: FastAPI + uvicorn".) The index is built once per catalog generation over a closed metadata
+corpus (capability/shape/fragment/concern labels, unit ids, source paths, tool names) — never file
+contents or browser buffers. Matching is `strip().lower()` substring (not `casefold`); result
+order is index order (capability preorder, then shapes, units, fragments, concerns), unranked and
+undeduped; hits are capped while `total` is not; a blank trimmed query is a browse whose `matched`
+is empty. Filters are **exact owning-unit attributes**: any active filter excludes
+capability/shape/concern entries outright, a fragment inherits its unit, and `"shipped"` does not
+fold in `"both"`. There is no domain refusal (loader loaded|failed; a bad enum is a framework
+`422`), so the client's request-generation counter is the only stale-response guard; React keys
+include the owning unit because fragment ids are owner-local.
+
+### Comparison
+
+(Design record: the options route under "HTTP layer: FastAPI + uvicorn"; the panes under
+"Frontend: Vite + React + TypeScript".) `comparison_options` is a **pure snapshot projection** —
+no server text diff, no source read — over five relation families in fixed order, empty families
+omitted, zero groups a success, `None` the only refusal (`404 unknown comparison subject`). A
+placement is either canonical or an exact shaped one-based layer position (shape and position
+travel together — a union, not two nullables). Per-family dedup is semantic, so equal-looking
+targets may remain: the client keys a choice by `(relation, index)`, never by target value. The
+text compared is the **whole physical-file workspace buffer** on each side (`CenterPane` runs
+`diffLines` from the `diff` package over `EditWorkspace` current text, unsaved edits included);
+the snapshot is authoritative only for the options and no revision token binds the two.
+`@pierre/diffs` renders Git drawer diffs only; Compare's migration onto it is intent, not fact.
+
 ## The workbench is a topology constraint on extension moves
 
 Extension refactors must treat the prose-map/workbench tooling as a structural constraint, not an
@@ -263,7 +373,9 @@ it from controller tests.
 
 ## Cross-references
 
-- `docs/design/prose-review-stack.md` — binding architecture and component ownership
+- `docs/design/prose-review-stack.md` — binding architecture and component ownership; the
+  assembly, CheckRunner, Git-observation, HTTP-layer, frontend and round-trip-proof headings own
+  the five surfaces summarized in "Shipped surfaces beyond the edit loop"
 - `docs/design/prose-prompt-map.md` — generated prompt/prose graph and count tripwires
 - `docs/learned/workflow/broad-catch-narrowing.md` — whole-chain containment and broad-catch policy
 - `docs/learned/workflow/pydantic-boundary-models.md` — strict wire/subprocess boundary models
