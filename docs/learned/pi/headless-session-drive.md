@@ -30,8 +30,8 @@ from the right path instead of rediscovering it.
 - The drive is a SINGLE `session.prompt(...)` — the SDK owns turn iteration and the await spans
   settlement; never frame it as an iterate-until-terminal loop (idle ≠ done, premature idle has
   no in-drive re-engagement) — "Single-prompt drive, NOT a `loop.ts` loop".
-- Never default the model to `getAvailable()[0]` (alphabetical → oldest; a live drive 404'd) —
-  leave it undefined — "Never default the model to `getAvailable()[0]`".
+- Never default the model to `getAvailable()[0]` (catalog order, not a curated default; a live
+  drive 404'd on it) — leave it undefined — "Never default the model to `getAvailable()[0]`".
 - Offline e2e drives the REAL runtime with a faux pi-ai model at the `PERK_BIN` seam — "Driving
   the real runtime offline with a faux model (the e2e worker tier)".
 - `session.prompt("/command")` resolves when the command settles, but dispose only after a
@@ -41,8 +41,8 @@ from the right path instead of rediscovering it.
   `compact()`; `sendUserMessage` persists ONE newline-joined text block, so hash the canonical
   single block, never the sent array — "Replaying a recorded session's compaction headlessly",
   "`sendUserMessage` persists ONE newline-joined text block".
-- "Sources" pins the audited pi versions — re-verify on SDK bumps (a pin bump is a
-  session-construction migration audit).
+- "Sources" names the pin SSOT, the last full re-verification, and the re-verify-at-each-pin-bump
+  rule — a pin bump is a session-construction migration audit, never a "verified non-break".
 
 ## Two construction paths — pick by isolation axis
 
@@ -99,7 +99,9 @@ bump. Rule: treat a pi SDK pin bump as a migration audit of every `createAgentSe
 
 ### Extension-created child sessions must reuse the LIVE `ModelRuntime`
 
-pi 0.84's `createAgentSession` **ignores** `modelRegistry`; an omitted runtime silently builds a
+Since 0.84 `createAgentSession` takes `modelRuntime`, not a registry — `modelRegistry` is no
+declared `CreateAgentSessionOptions` member, so it is silently **ignored**; an omitted runtime
+silently builds a
 default one whose credential state diverges from the live session's — runtime `--api-key`
 overrides and extension-registered providers exist **only** on the live runtime. Extensions
 receive only the compat facade, so btw recovers the live runtime via a feature-detected
@@ -118,11 +120,13 @@ nothing in perk's `session_start` engages until the explicit bind.
 
 ## `session.subscribe()` event facts
 
-Verified against the bundled `agent-session.js` (0.78.x) — see `## Sources`.
+Verified against the bundled `agent-session.js` at the pinned dist — see `## Sources`.
 
-- The subscribe listener receives the **raw agent-core `AgentEvent`**, not the extension
-  `ExtensionEvent` (the session translates agent→extension events separately). Both planes share the
-  same `type` strings, so the names match even though the payload shapes differ.
+- The subscribe listener receives the session-level **`AgentSessionEvent`** union — agent-core
+  `AgentEvent`s passed through (`agent_end` re-emitted with a `willRetry` flag) plus session-only
+  variants (`agent_settled`, `queue_update`, `compaction_start`/`compaction_end`,
+  `entry_appended`, …) — **not** the extension `ExtensionEvent` (translated separately). The
+  planes share `type` strings, so the names match even though the payload shapes differ.
 - `tool_execution_end` carries `result` = the tool's return object; for perk tools `result.details`
   is the `SubmitDetails` / `ResolveDetails` block — so the PR comes straight off the captured event
   (**no** new Python `find-pr-for-branch` command needed).
@@ -140,11 +144,10 @@ that hard-aborts**. Do not frame the drive as an iterate-until-terminal loop.
 
 **No settle race after `prompt()` resolves.** `await session.prompt(...)` spans settlement: it
 resolves only after `_runAgentPrompt`'s full post-agent-run continuation loop (auto-retry,
-compaction retry, `agent_end`-queued follow-ups) AND the `finally`-emitted `agent_settled`
-(verified against the 0.80.4/0.80.5 dist `agent-session.js`) — so `runStage`'s
-post-`prompt()` classification cannot observe an unsettled run. Belt-and-suspenders, the worker
-disables auto-compaction/auto-retry via `applyOverrides`; 0.80.4's `waitForIdle()` is redundant on
-this path.
+compaction retry, `agent_end`-queued follow-ups) AND the `finally`-emitted `agent_settled` — so
+`runStage`'s post-`prompt()` classification cannot observe an unsettled run. Belt-and-suspenders,
+the worker disables auto-compaction/auto-retry via `applyOverrides`; the SDK's `waitForIdle()` is
+redundant on this path.
 
 **Residual gap (tracked in objective #137 prose):** a *premature idle* — the agent stops before the
 success predicate holds — becomes terminal `failed/agent_idle_incomplete` with **no in-drive
@@ -207,21 +210,24 @@ over an external `AbortSignal`:
 
 ## Never default the model to `getAvailable()[0]` — leave it undefined
 
-`ModelRegistry.getAvailable()` sorts **alphabetically**, so `[0]` is the *oldest* model of the
-first provider — not a sensible default. On the first live remote run this picked a since-removed
-dated Haiku and the drive 404'd on turn 1 (defect B7 in `docs/design/archive/remote-runner-e2e-dogfood.md`;
-the workflow-level story is in `docs/learned/workflow/remote-runner.md`).
+`ModelRegistry.getAvailable()` copies the runtime's availability snapshot in **catalog order** —
+provider registration order, then each provider's own model order; no sort at the pinned dist —
+so `[0]` is an arbitrary catalog position, never a curated default. On the first live remote run
+it picked a since-removed dated Haiku and the drive 404'd on turn 1 (defect B7 in
+`docs/design/archive/remote-runner-e2e-dogfood.md`, against an earlier dist that sorted
+alphabetically and so surfaced the *oldest* model — dated history, not the live mechanism; the
+workflow-level story is in `docs/learned/workflow/remote-runner.md`).
 
 The correct shape: pass `model: undefined` to `createAgentSessionFromServices`/`createAgentSession`.
 That engages the SDK's **own initial-model resolution** — settings `defaultModel` → pi's curated
-per-provider defaults → first available — which picks a current-generation model. Mechanism fact
-(re-verified at 0.80.5): #6201 exports the CLI/scope resolvers (`resolveCliModel`,
-`resolveModelScopeWithDiagnostics`) from the root but NOT `findInitialModel` /
-`defaultModelPerProvider`, so deferring via an undefined `model` option remains the only
-sanctioned route to the initial-model chain. The explicit `--model` flag now resolves through
-`resolveCliModel` (fuzzy matching, `provider/pattern`, `:thinking` — parity with interactive
-launch; `resolveWorkerModel` in `extension/worker/sdkAdapter.ts`); keep the zero-available-models
-fail-fast unchanged — only the *default* defers to the SDK.
+per-provider defaults → first available — which picks a current-generation model. Mechanism fact:
+the package root exports the CLI/scope resolvers (`resolveCliModel`,
+`resolveModelScopeWithDiagnostics`) but NOT `findInitialModel` / `defaultModelPerProvider`
+(deep-only in `dist/core/model-resolver.d.ts`), so deferring via an undefined `model` option
+remains the only sanctioned route to the initial-model chain. The explicit `--model` flag now
+resolves through `resolveCliModel` (fuzzy matching, `provider/pattern`, `:thinking` — parity with
+interactive launch; `resolveWorkerModel` in `extension/worker/sdkAdapter.ts`); keep the
+zero-available-models fail-fast unchanged — only the *default* defers to the SDK.
 
 Landed shape: `extension/worker/sdkAdapter.ts` (`resolveAuth` returns `model: undefined` unless
 explicit; `sdkAdapter.test.ts` pins it). Because the SDK may have picked the model, the worker logs
@@ -323,11 +329,11 @@ shape mismatch.
   evidence. Remember: Pi retains the registration graph loaded at session start, so a probe
   launched before a binding change cannot observe that change (a fresh session is required).
 - Pi refuses to compact a small session (`Nothing to compact (session too small)`; the default
-  `keepRecentTokens` is 20,000) — inflate the session past that floor before a real compaction
-  smoke.
-- RPC mode exposes no navigate command — `navigateTree` / `/tree` reach only extension command
-  contexts — so branch/checkpoint evidence must come from tests over the real `branch` /
-  `branchWithSummary` APIs, not from a driven RPC session.
+  `keepRecentTokens` — `DEFAULT_COMPACTION_SETTINGS` in `dist/core/compaction/compaction.js` —
+  was 20,000 at the last audit) — inflate the session past that floor before a compaction smoke.
+- RPC mode exposes no navigate command (a read-only `get_tree` exists; nothing moves the leaf) —
+  `navigateTree` / `/tree` reach only extension command contexts — so branch/checkpoint evidence
+  must come from tests over the real `branch` / `branchWithSummary` APIs, not a driven RPC session.
 - Headless print/RPC output does not expose the post-`context`-filter LLM input; strip/keep
   behavior stays pinned by the consumer suites, not by a driven probe.
 - The Python seam for the env-unset rule: `src/perk/substrate/proc.py`'s `env_remove` deletes
@@ -392,9 +398,20 @@ check the root export list before importing a Pi type by name; mirror/derive dee
 
 ## Sources
 
-- The `session.subscribe()` event facts above were verified by reading the bundled
-  `agent-session.js` (Pi SDK 0.78.x) — the raw-`AgentEvent` translation, `tool_execution_end.result`,
-  and the `message_end` `stopReason === "error"` hook are dist-confirmed, not inferred.
+- `@earendil-works/pi-coding-agent` dist —
+  `dist/core/{agent-session,agent-session-services,sdk}.{js,d.ts}`,
+  `dist/core/{model-registry,model-runtime,settings-manager}.js`, `dist/core/model-resolver.d.ts`,
+  `dist/core/compaction/compaction.js`, `dist/modes/rpc/*`, and the nested `@earendil-works/pi-ai`
+  (`package.json` `exports`, `dist/compat.d.ts`) — at the version `package.json` `devDependencies`
+  pins. The five `@earendil-works/*` pins move in lockstep
+  (`tests/test_packaging.py::test_pi_toolchain_pin_lockstep`), so the pin is the single version
+  truth for every dist-scoped fact here; body version numbers ("pi 0.84 replaced …") are event
+  stamps, never currency claims.
+- **Re-verify at each pin bump — a bump is a session-construction migration audit** (its own
+  section above): re-read every `createAgentSession` / `createAgentSessionServices` call site AND
+  every dist-scoped fact here against the newly *installed* dist (resolved per
+  `toolchain/worktree-node-modules.md`), correct or date what changed. Last full re-verification:
+  the `0.85.1` dist — provenance, not a currency promise; the pin is.
 
 ## Cross-references
 

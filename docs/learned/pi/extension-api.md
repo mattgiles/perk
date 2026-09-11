@@ -6,11 +6,13 @@ cluster: pi-extension
 
 # Pi extension API
 
-Facts verified against the dist source of `@earendil-works/pi-coding-agent` 0.78.x, re-checked at
-0.80.5, and re-audited against the installed 0.84.1 (the notable hops: 0.80's pi-ai `/compat`
-split — the global pi-ai API moved off the root — and 0.84's `ModelRuntime` consolidation of the
-session-creation inputs; both covered in `headless-session-drive.md`). These are the non-obvious
-API contours an agent can't derive from the package's root type exports.
+Facts verified against the dist source of `@earendil-works/pi-coding-agent` at the version
+`package.json` pins — `## Sources` names the pin SSOT, the last full re-verification, and the
+re-verify-at-each-pin-bump rule; body version numbers are event stamps ("since 0.84 …"), never
+currency claims. Two hops reshaped these facts: 0.80's pi-ai `/compat` split (the global pi-ai
+API moved off the root) and 0.84's `ModelRuntime` consolidation of the session-creation inputs —
+both covered in `headless-session-drive.md`. These are the non-obvious API contours an agent
+can't derive from the package's root type exports.
 
 ## Distillation
 
@@ -32,7 +34,8 @@ API contours an agent can't derive from the package's root type exports.
   factory/harness assertion".
 - How pi resolves/loads a `git:`-package extension (clone root, package-manager internals) —
   "How pi loads a `git:`-package extension".
-- "Sources" pins the audited pi versions — re-verify these facts on version bumps.
+- Body version numbers are event stamps, never currency claims — "Sources" names the pin SSOT,
+  the last full re-verification, and the re-verify-at-each-pin-bump rule.
 
 ## `getSystemPromptOptions()` is command-context-only
 
@@ -107,7 +110,7 @@ remove it even on its own injection turn (defeating delivery). Any strip of inje
 
 The `@earendil-works/pi-coding-agent` `ExtensionAPI.on` overloads already declare
 `on("session_compact", …)`, and `SessionCompactEvent` (`{ type, compactionEntry, fromExtension,
-reason, willRetry }` at 0.84.1 — `reason: "manual" | "threshold" | "overflow"` names what
+reason, willRetry }` — `reason: "manual" | "threshold" | "overflow"` names what
 triggered the compaction; `willRetry` is `true` when the aborted turn is retried after this
 compaction, i.e. overflow recovery) is in the `SessionEvent` union — so
 `pi.on("session_compact", …)` typechecks natively in production. Only
@@ -143,10 +146,12 @@ delegate surfaces through the `onError` callback (classified as a compaction fai
 throw in the caller's settle handling — settle-time code around a `ctx.compact` call needs no
 defensive try/catch for the delegate itself.
 
-## `ctx.ui.editor` facts (pi 0.84.1)
+## `ctx.ui.editor` facts
 
 `editor(title, prefill) → Promise<string | undefined>`. Enter submits, Shift+Enter inserts a
-newline, Esc resolves `undefined`, Ctrl+G opens `$EDITOR`. Two non-obvious contours:
+newline, Esc resolves `undefined`, Ctrl+G (`app.editor.external`) opens the external editor —
+`SettingsManager.getExternalEditorCommand()`: the `externalEditor` setting, else `$VISUAL`, else
+`$EDITOR`, else `nano`/`notepad`. Two non-obvious contours:
 
 - **It takes NO AbortSignal** (unlike `select`/`confirm`/`input`) — so a multi-dialog flow must
   check `signal?.aborted` *between* dialogs and let the aborted arm win over an in-flight dialog's
@@ -161,9 +166,12 @@ only by the type contract; first real interactive use should confirm.
 
 ## `registerTool` execute results details requirement
 
-When registering custom tools via `registerTool`, the execute result object returned by the handler MUST
-include a nested `details` object containing at least `ok: boolean` (e.g., `details: { ok: boolean, ... }`).
-This is required to satisfy the TypeScript compiler type constraints for `AgentToolResult`.
+`AgentToolResult<TDetails>` (pi-agent-core) requires `details` but leaves its type
+unconstrained — `ToolDefinition` defaults `TDetails` to `unknown`; nothing in the SDK asks for
+`ok`. The `details: { ok: boolean, … }` shape is **perk's own convention**: the warm-door
+`Result<D, X>` union in `extension/substrate/result.ts` discriminates on `details.ok` (`ok()` /
+`failFor()` build it) and door consumers branch on it. Keep it for every perk tool so those
+consumers stay uniform.
 
 ## A new Pi registration needs a live factory/harness assertion (#1761)
 
@@ -289,11 +297,14 @@ Two adjacent facts:
 
 ## `pi.sendUserMessage` is void fire-and-forget — only the persisted entry is delivery evidence
 
-`pi.sendUserMessage` enqueues over in-memory queues (`steer`/`followUp`); an abort discards them
-(`clearQueue`). Call-return proves **nothing** — the only acceptance evidence that a message was
-delivered is the message appearing as a **persisted user-role `SessionMessageEntry` on the
-branch**. Verified against pi 0.84.1. (The "spy on the session instance" section below remains
-the offline assertion path for pinning that an injection was *attempted*.)
+`pi.sendUserMessage` returns void; while the agent streams it enqueues onto the session's
+in-memory steering / follow-up queues (`deliverAs: "steer" | "followUp"`). `AgentSession.abort()`
+does **not** drain them — `clearQueue()` is separate (the TUI abort handler calls it via
+`restoreQueuedMessagesToEditor`; RPC exposes it as `clear_queue`), so a headless driver that
+aborts must clear explicitly or the queue rides the next run. Call-return proves **nothing** —
+the only acceptance evidence that a message was delivered is the message appearing as a
+**persisted user-role `SessionMessageEntry` on the branch**. (The "spy on the session instance"
+section below remains the offline assertion path for pinning that an injection was *attempted*.)
 
 ## Asserting `pi.sendUserMessage` injection offline: spy on the session instance
 
@@ -333,8 +344,10 @@ two is not yet worth the harness surface.
 
 ## `pi.exec` never throws on spawn failure
 
-The SDK's `execCommand` (`dist/core/exec.js`, verified against the pinned SDK) returns a Promise that
-**resolves on every path** — there is no rejection. A normal exit resolves
+The SDK's `execCommand` (`dist/core/exec.js`) returns a Promise that **resolves on every
+asynchronous path** — the exit arm and the spawn-error arm both resolve; the sole rejection is a
+synchronous `spawn` argument-validation throw in the executor, unreachable from a well-formed
+call. A normal exit resolves
 `{stdout, stderr, code, killed}`; a **spawn error** (ENOENT/EACCES — the binary is absent or not
 executable) lands in `waitForChildProcess`'s `.catch` arm and resolves `{stdout, stderr, code: 1,
 killed: false}`. Consequences:
@@ -385,14 +398,15 @@ for **any** `git:` package — and perk still recognizes `git:` package identiti
 
 pi materializes a `git:` package as a clone at `.pi/git/<host>/<path>/` and loads the extension
 from it via jiti, resolving the extension's imports through a **fixed host-alias set**
-(`getAliases` in `dist/core/extensions/loader.js`; at 0.84.1: the pi-coding-agent /
-pi-agent-core / pi-tui / pi-ai (+ `/compat`, `/oauth`, `/providers/all`) families under both the
-`@earendil-works` and `@mariozechner` scopes, plus typebox (+ `/compile`, `/value`) and the
-`@sinclair/typebox` twins) **plus** native `node_modules` walking. Three distinct gaps in
-`@earendil-works/pi-coding-agent/dist/core/package-manager.js` (re-verified at 0.84.1) can leave
-a consumer loading *no* tools or *months-old* code:
+(`getAliases` in `dist/core/extensions/loader.js` — read it for the live key set; at the
+last audit: the pi-coding-agent / pi-agent-core / pi-tui / pi-ai (+ `/compat`, `/oauth`,
+`/providers/all`) families under both the `@earendil-works` and `@mariozechner` scopes, plus
+typebox (+ `/compile`, `/value`) and the `@sinclair/typebox` twins; both pi-ai root keys resolve
+to the `/compat` entry) **plus** native `node_modules` walking. Three distinct gaps in
+`@earendil-works/pi-coding-agent/dist/core/package-manager.js` can leave a consumer loading *no*
+tools or *months-old* code:
 
-- **(a) No load-time self-heal.** At 0.84.1 the **install/update path self-heals**: `installGit`
+- **(a) No load-time self-heal.** Since 0.84 the **install/update path self-heals**: `installGit`
   on a present clone delegates to `ensureGitRef` (fetch + head-compare; when heads match it
   completes an interrupted update via the `.pi-update-incomplete` marker or runs
   `repairMissingGitDependencies`) — the pre-0.84 "a clone already present at the pinned ref
@@ -413,12 +427,17 @@ a consumer loading *no* tools or *months-old* code:
 
 ## Sources
 
-- `@earendil-works/pi-coding-agent` dist (`agent-session.js`, `dist/index.d.ts`,
-  `dist/core/extensions/loader.js`, `dist/core/package-manager.js`) — verified at 0.78.x,
-  re-verified at 0.80.5, re-audited against the installed 0.84.1. Re-verify against the
-  installed version before relying on a deep-source detail; pin checks matter (see
-  `pi/context-system.md` on the read-only allowlist and `toolchain/worktree-node-modules.md`
-  on resolving the *installed* SDK in a worktree).
+- `@earendil-works/pi-coding-agent` dist — `dist/core/agent-session.js`, `dist/index.d.ts`,
+  `dist/core/extensions/{types.d.ts,runner.js,loader.js}`, `dist/core/package-manager.js`,
+  `dist/core/exec.js`, `dist/modes/interactive/components/extension-editor.js` — at the version
+  `package.json` `devDependencies` pins. The five `@earendil-works/*` pins move in lockstep
+  (`tests/test_packaging.py::test_pi_toolchain_pin_lockstep`), so the pin is the single version
+  truth for every dist-scoped fact here.
+- **Re-verify at each pin bump.** A bump silently re-asserts every dist-scoped fact here: its
+  plan re-reads each against the newly *installed* dist (resolved per
+  `toolchain/worktree-node-modules.md`; deep-source reads need `pi/context-system.md`'s read-only
+  allowlist) and corrects or dates changes. Last full re-verification: the `0.85.1` dist —
+  provenance, not a currency promise; the pin is.
 
 ## Cross-references
 

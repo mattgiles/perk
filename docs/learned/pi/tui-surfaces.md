@@ -23,15 +23,16 @@ pi API facts, and test recipes those turns established.
   single `perk` status slot".
 - The RPC dual-publish LAW: RPC mode drops factory widgets and `setFooter`; every themed surface
   keeps a `setStatus`/string twin — "The RPC dual-publish law".
-- The footer facts (lifecycle, slot filtering, verified pi versions inline) — "`setFooter`
-  adoption facts".
+- The footer facts (lifecycle, slot filtering, `model_select` exists but no usage event —
+  reactivity stays render-driven) — "`setFooter` adoption facts".
 - Test recipes: `invokeCommand` (never `runCommandHandler`) for status/widget effects,
   severity-filtered notify asserts, the full suite via `just test-js` — "Harness recipes".
 - Vendoring a pi-tui-touching extension hits the dual-copy nominal-class clash + friends —
   "Vendoring a TS extension that touches pi-tui".
 - Display renderers sanitize the display projection (strip CSI/OSC/APC + unsafe controls),
   never the persisted payloads — "Transcript rendering is an untrusted-output boundary".
-- Version pins ride inline in section headings ("verified against pi …") — re-verify on bumps.
+- Pi-dist facts carry no inline version stamps — "Sources" names the pin SSOT, the last full
+  re-verification, and the re-verify-at-each-pin-bump rule; body version numbers are event stamps.
 
 ## The surfaces module = `surfaces.ts` + `report.ts`
 
@@ -93,7 +94,7 @@ keep a `setStatus`/string twin as the RPC-visible fallback. The custom footer fi
 key out of `getExtensionStatuses()` to avoid double display (the composed `perk` slot keeps
 publishing via `setStatus` even though the footer renders the composed value directly).
 
-## `setFooter` adoption facts (verified against pi 0.78.1; footer-lifecycle bullets re-verified at pi 0.84.1)
+## `setFooter` adoption facts
 
 - **Factory assignability needs method syntax**: the factory accepts a *narrower structural*
   argument only if the mirror interfaces (theme-like, footer-data-like, `requestRender`) are
@@ -101,9 +102,11 @@ publishing via `setStatus` even though the footer renders the composed value dir
   the assignability.
 - **`sanitizeStatusText` is not exported** from pi — reimplement locally (newline/tab → space,
   collapse spaces, trim).
-- **`ctx.getContextUsage()`** returns `{ tokens, contextWindow, percent }` (tokens/percent
-  nullable). There is **no model-change or context-usage event** for extensions — footer
-  reactivity must be render-driven (read `ctx.model`/usage live in `render()`).
+- **`ctx.getContextUsage()`** returns `ContextUsage | undefined` — `{ tokens, contextWindow,
+  percent }`, `tokens`/`percent` null right after compaction. A **`model_select` extension
+  event** exists (`ModelSelectEvent { model, previousModel, source: "set" | "cycle" | "restore" }`)
+  but **no context-usage event** — footer reactivity stays render-driven (read `ctx.model`/usage
+  live in `render()`; don't subscribe to `model_select` just to repaint).
 - **Replaced-footer dispose is explicit as of pi 0.84.1**: `setExtensionFooter` disposes a
   replaced footer factory, and `resetExtensionUI` restores the built-in footer on `/reload` and
   before session replacement. Installing per headful `session_start` is therefore safe — perk's
@@ -134,7 +137,8 @@ widget consumer remains; the patterns stand for future bounded surfaces.)*
   "~4 lines" ⇒ ≤6 rendered). This is the precedent for any future budgeted surface.
 - **The pure-windower shape generalizes** to any bounded list surface: a `step | elision` item
   union, the anchor clamped to sit second in the window, and no-current ⟹ anchor last.
-- **`truncateToWidth` (pi-tui) emits `...` plus ANSI resets, never `…`** — assert truncation via
+- **`truncateToWidth` (pi-tui) emits its ellipsis — `...` by default, overridable via the third
+  argument — plus ANSI resets, never `…` unless you pass it** — assert truncation via
   `visibleWidth(line) <= width` (also exported from `@earendil-works/pi-tui`), never `.length` or
   `.endsWith("…")`. It is ANSI-aware on input, so pre-themed `theme.fg(...)` strings pass through
   safely.
@@ -190,16 +194,21 @@ Three concerns surfaced vendoring `btw`/`whimsical` from upstream into the perk 
 
 Two physical pi-tui copies (the top-level dep vs the **nested** copy bundled inside
 `@earendil-works/pi-coding-agent`) make tsc treat **value classes with private fields** as **distinct
-nominal types** (`Types have separate declarations of a private property 'previousLines'`). The
-symptom: `ctx.ui.custom`'s factory hands you the *nested-copy* `TUI`, but `new MyOverlay(topLevelTUI)`
-fails. **Functions and interfaces/types do NOT clash** (structural) — only value classes with private
-members. The fix that worked **without a dep bump or deep-path import**: at the single pi boundary,
-type the clash-prone params as **structural slices** of only the methods used (`{ requestRender(): void }`,
-etc.); for a value you must instantiate/extend, import it as a VALUE from top-level pi-tui, but import
-the **keybindings manager from `@earendil-works/pi-coding-agent`** (it re-exports the nested copy, so
-it matches the `ui.custom` factory param); returning an overlay where a structural `Component` is
-expected type-checks structurally. **Version skew is the trap** — "confirmed exported" is true but
-silently assumes a single copy.
+nominal types** (`Types have separate declarations of a private property 'previousLines'`) whenever
+the two copies differ. The port-time symptom: `ctx.ui.custom`'s factory handed the *nested-copy*
+`TUI` class and `new MyOverlay(topLevelTUI)` failed. At the pinned dist `TUI` is an **interface**
+(structural), `TuiMainScreen` owns the private `previousLines`, and both copies are the same
+version — the clash is dormant, not gone: it returns the moment the top-level `pi-tui` and
+pi-coding-agent's bundled copy diverge (the lockstep pin in `## Sources` holds them equal;
+`npm ls @earendil-works/pi-tui` confirms after a bump). **Functions and interfaces/types do NOT
+clash** (structural) — only value classes with private members. The fix that worked **without a
+dep bump or deep-path import**: at the single pi boundary, type the clash-prone params as
+**structural slices** of only the methods used (`{ requestRender(): void }`, etc.); for a value you
+must instantiate/extend, import it as a VALUE from top-level pi-tui, but take the
+**`KeybindingsManager` type from `@earendil-works/pi-coding-agent`** — a type-only root re-export
+matching the `ui.custom` factory param (`import type`, as `extension/vendor/btw/btw.ts` does);
+returning an overlay where a structural `Component` is expected type-checks structurally.
+**Version skew is the trap** — "confirmed exported" is true but silently assumes a single copy.
 
 ### Bringing a new `ctx.ui.*` method under governance (the `setWorkingMessage` seam)
 
@@ -247,6 +256,20 @@ the first production console-swap; prior swaps were all test-local):
 **Scope.** Headful-only — the interceptor installs only after the command's `hasUI` guard (raw
 `console.error` is what clobbers a TUI). No Python, no new tool/command/stage, no
 `shared/contracts.md` change.
+
+## Sources
+
+- `@earendil-works/pi-coding-agent` dist — `dist/core/extensions/types.d.ts`,
+  `dist/modes/interactive/interactive-mode.js`, `dist/modes/interactive/components/footer.js`,
+  `dist/modes/rpc/rpc-mode.js`, `dist/index.d.ts` — and `@earendil-works/pi-tui` dist —
+  `dist/utils.{js,d.ts}`, `dist/tui.d.ts`, `dist/tui-main-screen.d.ts`, `dist/components/loader.js`
+  — at the version `package.json` `devDependencies` pins. The five `@earendil-works/*` pins move in
+  lockstep (`tests/test_packaging.py::test_pi_toolchain_pin_lockstep`), so the pin is the single
+  version truth for every dist-scoped fact here.
+- **Re-verify at each pin bump.** A bump silently re-asserts every dist-scoped fact here: its
+  plan re-reads each against the newly *installed* dist (resolved per
+  `toolchain/worktree-node-modules.md`) and corrects or dates changes. Last full re-verification:
+  the `0.85.1` dist — provenance, not a currency promise; the pin is.
 
 ## Cross-references
 
