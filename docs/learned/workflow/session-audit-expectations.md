@@ -240,7 +240,7 @@ a reusable pattern set:
   `lane-failed`.
 - **Read-then-parse catch sets need `UnicodeDecodeError`** — it escapes `read_text` before
   `json.loads` runs, so `(OSError, JSONDecodeError)` silently misses invalid UTF-8. The fold's
-  bundle reads carry the full set; `learn-evidence-pipeline.md` and `session-data.md` record the
+  bundle reads carry the full set; `learn-docs-scan.md` and `session-data.md` record the
   same fact — cross-reference rather than restate.
 - **The verdict writer has a post-dispatch I/O failure arm.** A `verdicts.json` write failure
   *after* the wave launched returns `io_error` with in-memory lane records and **no guaranteed
