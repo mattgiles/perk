@@ -292,6 +292,6 @@ recipe:
   universe
 - `docs/learned/pi/tui-surfaces.md` — the perk-owned footer the setFooter rule protects
 - `extension/substrate/toolGating.ts` — `admitLate` + the `resources_discover` re-apply; `FFF_SEARCH_TOOLS`
-- `docs/learned/pi/subagents.md` — the 0.67.0 host-builtin intersection anchor
+- `docs/learned/pi/subagents.md` — § "The ≥ 0.67.0 host-builtin intersection"
 - `docs/learned/workflow/cold-door-launch.md` — `FFF_MODE_ENV` at both launch seams
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the native `worktree` refusal
