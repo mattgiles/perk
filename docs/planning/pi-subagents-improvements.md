@@ -356,7 +356,7 @@ See [automated.test.ts](../../extension/pi/v1/codeReview/automated.test.ts) (at 
 
 Perk’s contract still specifies a `tasks` array for the human-triaged review fan-out ([contracts.md](/Users/mattgiles/dev/github/mattgiles/perk/shared/contracts.md:884)), even though pi-subagents removed that public surface in `v0.41.0`.
 
-The learned subagent documentation carries the same stale shape ([subagents.md](/Users/mattgiles/dev/github/mattgiles/perk/docs/learned/pi/subagents.md:318)).
+The learned subagent documentation carries the same stale shape ([subagents.md](../learned/pi/subagents.md) (§ "History (dated)")).
 
 ### 5.5 The dependency seam is weak
 
@@ -809,7 +809,7 @@ At minimum, `perk doctor` should report:
 The same change should remove stale `tasks[]` language from:
 
 - [shared/contracts.md](/Users/mattgiles/dev/github/mattgiles/perk/shared/contracts.md:884)
-- [docs/learned/pi/subagents.md](/Users/mattgiles/dev/github/mattgiles/perk/docs/learned/pi/subagents.md:318)
+- [docs/learned/pi/subagents.md](../learned/pi/subagents.md) (§ "History (dated)")
 - The terminal and browser review guidance.
 - Any bundled Perk-expert reference that describes the affected surface.
 
