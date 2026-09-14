@@ -180,5 +180,5 @@ additional property; it is callable only after the extension is rebuilt/reloaded
 - `pi/subagents.md` — the workflow-level model default.
 - `linear-backend.md` — dual-encoding header markers.
 - `issue-backend.md` — the protocol-growth conformance census.
-- `doc-reconciliation.md` — curation-batch craft.
+- `curation-batch-craft.md` — curation-batch craft.
 - `session-audit-expectations.md` — the perk-dev consumer side.
