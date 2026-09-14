@@ -1,527 +1,245 @@
 ---
-title: The ObjectiveStore seam — splitting an objective tier off IssueBackend
-read_when: You are touching `src/perk/backends/objective_store.py`, its GitHub/Linear stores, an objective-storage consumer, the node↔plan unification protocol, objective replan/supersede, or Protocol growth.
+title: The ObjectiveStore tier — backend-neutral objective storage, its three stores, and the Protocol-growth rules
+read_when: You are touching `perk/backends/objective_store.py`, its GitHub/Linear stores or the resolver, an objective-storage consumer, node↔plan unification, objective replan/supersede, or Protocol growth.
 cluster: objective-system
 ---
 
-# The ObjectiveStore seam
+# The ObjectiveStore tier
 
-Objective #548 carved the **objective-storage tier** out of `IssueBackend` into its own
-backend-neutral Protocol — the parallel split to the issue tier (`issue-backend.md`). The contract
-lives in `src/perk/backends/objective_store.py` (the `Protocol`, frozen result dataclasses, the
-`ObjectiveStoreError` type); the concrete stores live in the backend packages —
-`src/perk/backends/github/objective_store.py`, and on Linear the **live project-backed
-`LinearProjectObjectiveStore`** in `src/perk/backends/linear/project_store.py` (what
-`resolve_objective_store` constructs on the Linear arm) alongside the **dormant issue-backed
-`LinearObjectiveStore`** in `src/perk/backends/linear/objectives.py` (self-labeled dormant, not
-resolver-wired); the resolver is `src/perk/backends/resolve.py` (all originally one
-*perk/backends/objective_stores.py*, since carved apart). This doc preserves the patterns that
-generalize the issue-backend extraction to a second tier off the same monolith, plus the Phase-3
-node↔plan unification protocol. The backend-neutral contract + consumer rules live here; the Linear
-project materialization and manifest-drift *mechanics* live in `linear-backend.md` (the
-Projects-substrate, `add_objective_node` project-store flow, and manifest-drift #609/#626
-sections) — this doc points there and never restates them.
+perk's durable state has two populations: the **issue tier** (plan/learn issues — `IssueBackend`,
+`issue-backend.md`) and the **objective tier** — the `ObjectiveStore` `Protocol` in
+`perk/backends/objective_store.py` with its frozen results and `ObjectiveStoreError`. An objective
+is a GitHub issue **or** a Linear **Project**. `shared/contracts.md` §8.24 is the normative
+statement (the method census, the state disciplines, stores, resolver, unification storage,
+close/reopen, manifest + drift, origin); `linear-backend.md` owns the Linear materialization,
+attachment and manifest-drift *mechanics*. This doc keeps only the rules and traps neither states
+as such — point, never restate.
 
 ## Distillation
 
-- Splitting a tier off `IssueBackend` lands in two nodes: Node A = the dormant contract only
-  (Protocol + frozen results + fresh error type, implementation-free imports), Node B = atomic
-  removal + extraction + resolver + rewire — "The dormant-contract recipe (Node A / Node B
-  split)".
-- Carving a store off a substrate-heavy backend rides the facade-refactor pattern — "The
-  facade-refactor pattern for splitting a tier off a substrate-heavy backend".
-- "Behaviorally equivalent, not byte-identical": the store delegates LATE-BOUND to the same
-  module functions the CLI tests monkeypatch, keeping them green unchanged — "The equivalence
-  lock = late-bound delegation".
-- Nodes and plans unify through the node↔plan protocol (`pr`-field linkage, claim semantics) —
-  "The node↔plan unification protocol".
-- Objective replan is supersede (close-old/create-new, fresh `run_id`, bidirectional lineage) —
-  NOT an in-place upsert; `create_objective` is find-then-return idempotent — "Objective
-  replan: supersede ≠ upsert".
-- Scripted node-linked plan saves must mint a fresh run id per node — the ambient run id
-  triggers the same-run-id upsert that rewrites the previous plan in place — "The same-run-id
-  upsert trap".
-- `find_open_objective_by_origin` is exhaustive-or-raise (§8.24): never silently under-scan; the
-  dormant store raises rather than returning a falsely-authoritative `None`; create-only header
-  fields are allowlist-omission-enforced and auto-carried across replan — "The origin
-  lookup — exhaustive-or-raise".
-- The reviewed dream report persists as marker-keyed companion comments on the objective's
-  `journal_carrier_id`, with the `dream_report` header reference recorded LAST as the completion
-  marker — "The dream-companion flow".
-- `read_node_refinement_targets` is the whole refinement support+read surface (no capability
-  flag; `None` = missing, empty targets = supported) — "`read_node_refinement_targets`".
-- Historical: the node-numbered growth narratives (Phase-4 protocol growth, the manifest/doctor
-  design arcs, adoption growth) chronicle landed work.
+- One tier, three stores, one door: `GitHubObjectiveStore`, the **live** project-backed
+  `LinearProjectObjectiveStore`, the **dormant** issue-backed `LinearObjectiveStore`, resolved
+  off the committed `[issues]` selection — "The tier's shape".
+- Growing the Protocol touches every store **plus the structural conformance fake** in one
+  change, caught only by whole-repo `ty check` — "Growing the Protocol".
+- The GitHub store delegates **late-bound** to the substrate functions the CLI tests monkeypatch:
+  behaviorally equivalent, not byte-identical — "The equivalence lock".
+- `save_node_plan → ObjectiveRef | None` is the whole unification capability; `None` is
+  unambiguous because a unifying store **raises** on a missing node — "Node↔plan unification".
+- Replan is supersede (close-old/create-new, fresh `run_id`, bidirectional lineage), never an
+  upsert; its fail-open close composes from primitives, not public store methods — "Objective
+  replan is supersede".
+- Scripted node-linked saves mint a fresh run id per node — "The same-run-id upsert trap".
+- `find_open_objective_by_origin` never silently under-scans; the dormant store **raises** instead
+  of joining the `→ None` family — "The origin lookup".
+- Manifest authority depends on the operation; split node-creation from edge-creation; re-diagnose
+  after every repair write — "The manifest + drift engine".
 
-## The dormant-contract recipe (Node A / Node B split)
+## The tier's shape
 
-The split lands in two roadmap nodes, directly reusing the proven `issue_backend.py` Node-1.1
-pattern (cross-ref `issue-backend.md`):
+- **Contract:** `perk/backends/objective_store.py` — the `Protocol` (its class body is the method
+  census; this doc restates no count), the frozen results, `ObjectiveStoreError` with its typed
+  subclasses, and `ensure_stacked_tail_append`, the one guard every store's `add_objective_node`
+  runs against its OWN fresh read (§8.66). Imports stay implementation-free: no concrete backend.
+- **Three stores.** `perk/backends/github/objective_store.py::GitHubObjectiveStore`;
+  `perk/backends/linear/project_store.py::LinearProjectObjectiveStore` (the resolver's Linear
+  arm); and `perk/backends/linear/objectives.py::LinearObjectiveStore` — **dormant**: never
+  resolver-wired, directly constructable, unit-tested, still on inline header blocks. The naming
+  hazard is live: issue-backed `LinearObjectiveStore` ≠ project-backed
+  `LinearProjectObjectiveStore`.
+- **One selection.** `perk/backends/resolve.py::resolve_objective_store_id` re-exports
+  `resolve_issue_backend_id` — an objective and its plan/learn issues share ONE tracker; there is
+  **no `[objectives]` table**, and project-vs-issue is not selectable (it is what `linear` means
+  for objectives).
+- **`backend_id` is a class-level literal on every store**, never imported from the resolver:
+  the resolver owns `GITHUB_BACKEND_ID`/`LINEAR_BACKEND_ID` and imports the store modules, so a
+  back-import cycles. Shape: contract ← stores (each imports the contract) ← resolver.
+- **Error translation is a context manager, not a rewrite of every raise** —
+  `github/objective_store.py::_translate` (`GitHubError`) and
+  `linear/_helpers.py::_translate_objective` (`IssueBackendError`, which `LinearGraphQLError`
+  subclasses). **`ObjectiveStoreError` is NOT a subclass of `IssueBackendError`** (both derive
+  from `Exception`): a nested self-call's converted error passes an outer CM untouched (no
+  double-wrap), and `except IssueBackendError` never catches a public store method's raise — the
+  replan trap below.
 
-- **Node A = dormant contract only.** A new module carrying the `Protocol`, its frozen result
-  dataclasses, and a fresh backend-neutral error type — and *nothing else*. No concrete impl, no
-  resolver, no consumer rewire, **no removal from the old protocol**. Imports stay
-  implementation-free: here only `dataclass`/`Protocol`/`perk.objective` — deliberately **no
-  `perk.github`**, because (unlike `IssueBackend.PlanState`) no objective value type carries a PR
-  field. The import-direction guards (read the module text, assert `perk.github` /
-  `perk.backends.issues` substrings are absent) prove the decision.
-- **Node B = atomic removal + extraction + resolver + rewire** in one PR.
+## Growing the Protocol: every store plus the fake, in one change
 
-Shape decisions worth reusing: `ObjectiveState` was **already** backend-neutral (opaque `id`,
-opaque `header` dict), so a Linear Project id/metadata fits with no shape change — the only
-genuinely new value type was `ObjectiveRef` (the old find/create returned the issue-named
-`IssueRef`). The contracts carry a field rename across the twin tiers: `issue_id → objective_id` on
-the node/body update dataclasses. Brief intentional duplication of the objective dataclasses across
-the two contract modules during the dormant phase is accepted.
-
-## The atomic-removal CI-green rule (Node B)
-
-Removing a `Protocol` surface + its dataclasses from a contract that has **≥2 concrete impls and
-many consumers MUST land in ONE PR.** It is CI-green only when the new store surface, the resolver,
-ALL consumer rewires, AND the removal from BOTH concrete backends land **together**.
-
-*Why the removal cannot be its own standalone green PR* — two compounding reasons ty enforces:
-
-1. **Consumers are typed against the protocol.** Every consumer resolves a backend annotated
-   `-> IssueBackend` then calls the objective method; drop the methods and ty reports
-   unresolved-attribute at every call site.
-2. **The new surface returns a NEW type.** The new contract's find/create return `ObjectiveRef`
-   (not the old `IssueRef`), so the concrete backends do **not** already satisfy the new protocol —
-   they must be adapted (the Node B extraction).
-
-So the removal and the rewire are **inseparable**. Consequence: a roadmap node whose prompt says
-"remove the methods" often must have that removal **reassigned to the next node** — pre-declare it
-in the plan body and let `/objective-reconcile` fix the node descriptions post-merge (done here:
-2.1 → dormant-only, 2.2 → gains the removal).
-
-## The facade-refactor pattern for splitting a tier off a substrate-heavy backend
-
-GitHub was the easy case: a thin late-bound delegation adapter — its objective methods moved
-verbatim. **Linear was the hard part:** its objective methods sat on the issue backend atop ~68
-internal `self._…` call sites across shared caches (`_uuid_cache`/`_team_id_cache`/`_label_ids`)
-and ~18 private helpers. The resolution is a **registered collaborator, not inheritance**:
-
-- Extract a module-private ops class owning the whole substrate (client, team_key, caches, every
-  helper). The backend becomes a thin facade that builds its own ops instance and delegates every
-  public method to it.
-- The new store builds its **own** ops instance and carries the objective methods.
-- **The mechanical risk is the ~68 rewrites.** A scoped word-boundary `re.sub` over the
-  public-method region is safe: `\b` does **not** match inside underscore-joined cache names
-  (underscore is a word char), so cache-name prefixes don't get mangled. But keep the moved-helper
-  name set **explicit** and **never blanket-replace `self._*`** — the PR-tier `_get_pr` and public
-  self-calls (`find_comment_id_by_marker`) must NOT be rewritten. A renamed attribute
-  (`self._repo_root` → the ops' public `repo_root`) is handled separately.
-- **Re-expose what tests assert on the facade.** A `_team_key` attr and the readiness probe's
-  private-helper calls were kept reachable via the facade so the existing backend tests stay green.
+- **Static conformance is one protocol-annotated binding per implementer** (the issue tier's
+  recipe, `issue-backend.md` § "Protocol-module shape"):
+  `tests/test_github_objective_store.py::_make_store`,
+  `tests/test_linear_project_store.py::_make_project_store`, `tests/_linear_fakes.py::_make_store`
+  (dormant store), and `tests/test_objective_store.py::_make_store` binding `_FakeObjectiveStore`,
+  the minimal in-memory **structural conformer**. A new member lands in all three stores AND the
+  fake; the per-method delegation tests never catch a missing member — only **whole-repo**
+  `uv run ty check` does (what `just ci` runs), because the fake lives under `tests/` and
+  `ty check perk/` alone stays green on a stale fake.
+- **The `→ None`/`→ False`/empty-result no-op family** (`save_node_plan`, `post_status_update`,
+  the adopt/supersede/gist-source capabilities, the drift pair, `EMPTY_NODE_ENGAGEMENT`): a no-op
+  return lets every call site invoke the method **unconditionally** — no
+  `if backend_id == "linear"` branch. Isolate each fail-open call
+  (`perk/delivery/finalize.py::_post_landed_update`) so a failure cannot discard an
+  already-marked node set. The one deliberate exception is the origin lookup below.
+- **A defaulted-`None` keyword param needs a non-default forwarding case per adapter per arm.**
+  CLI-seam fakes plus `None`-only delegation tests leave a real adapter free to hard-code or drop
+  the value; supersede composes the successor header on its own path, so it is its own arm (the
+  `delivery`/`delivery_lineage` pair is the shipped instance).
+- **An id-normalization fix at an adapter boundary covers every method on that boundary.**
+  Normalizing canonical `#<n>` ids in the GitHub store's `_number` while `journal_carrier_id`
+  re-emitted the caller's spelling broke the production succession fold end to end (today it
+  returns the normalized id). Enumerate every method that accepts or emits the vocabulary, and
+  regress end to end over the production adapters — a store must accept its own writer's form.
+- **Re-render vs materialize.** GitHub and the dormant store re-render the `objective-roadmap`
+  block on `add_objective_node`; the project store materializes a node-issue instead, so its
+  `comment_updated` is always `False` (`linear-backend.md` § "`add_objective_node` project-store
+  flow").
 
 ## The equivalence lock = late-bound delegation
 
-The GitHub store keeps every CLI/integration objective test green **unchanged** because it delegates
-late-bound to the same `perk.github` module functions those tests monkeypatch — only backend-level
-*unit* tests move. This is the precise meaning of **"behaviorally equivalent, not byte-identical"**,
-and the reason the move is low-risk. Mirror it in any future tier extraction over `perk.github`.
+`GitHubObjectiveStore` resolves every delegate by attribute access on the substrate module object
+(`perk.backends.github.objectives` / `.plans`) **at call time**, so CLI/integration tests that
+`monkeypatch.setattr(<module>, ...)` keep intercepting unchanged, even a patch applied after
+construction (`tests/test_github_objective_store.py::TestLateBinding`) — the precise meaning of
+**behaviorally equivalent, not byte-identical**. `close_objective` delegates straight to
+`plans.close_issue` (a GitHub objective IS an issue), so tests patching the issue close pass
+**transparently via delegation**; proving "via the store" needs an injected fake store.
 
-## Translate-CM beats rewriting every raise (Linear store)
+The resolver is the only door: `tests/test_resolve.py::TestConsumerBoundary` scans every
+production module under `perk/` outside `perk/backends/github/` for the substrate imports
+(`SUBSTRATE_MODULES` + `SUBSTRATE_FROM_IMPORT`); the whole GitHub backend package is the allowed
+set, so that direct `close_issue` needs no allowlist entry. A textual backstop with live anchors,
+not a completeness proof (`source-scan-guards.md`).
 
-Rather than rewrite every internal error raise, wrap each store-method body in a module-level
-context manager mapping `IssueBackendError → ObjectiveStoreError` (message-verbatim via
-`str(exc)`). Two facts make it clean:
+## Node↔plan unification is one `ObjectiveRef | None` capability
 
-- `LinearGraphQLError` **subclasses** `IssueBackendError`, so raw GraphQL errors are caught too.
-- Nested self-calls already raise the *converted* `ObjectiveStoreError`, which the outer CM does
-  **not** re-catch (it isn't an `IssueBackendError`) — it propagates with the right type, no
-  double-wrap.
+On the objective-linked `plan-save` path a **unifying** store (the project store) writes the plan
+INTO the node-issue and returns its ref; a **non-unifying** store (GitHub, dormant Linear) returns
+`None` unconditionally. No capability flag — the protocol is sound because:
 
-The GitHub store uses a local translate CM plus a `_number`-style raiser on the non-numeric-id edge
-(the GitHub-numeric-id assumption), mirroring the issue gateway.
+- **`None` is unambiguous only because a unifying store RAISES on not-found**
+  (`project_store.py::save_node_plan`: a `_find_node_issue` miss raises), never `None`.
+- **`dry_run` also returns `None`** (resolving the node-issue is a network read; `--dry-run` is
+  offline), so the caller falls back to the offline compose preview; the guard in
+  `perk/cli/commands/plan/save_cmd.py` unifies only when `not dry_run and objective_id and
+  node_id`, leaving the standalone create branch byte-unchanged.
+- **Derive the land-time backlink self-referentially.** The node's `pr` is the node-issue's OWN
+  identifier (`canonical_pr(identifier)` when a `plan-header` attachment is present), never the
+  header's `pr` field — `pr submit` overwrites that with the PR number and would break the land
+  match. In a unified model never read a field a later stage clobbers.
+- **Visible side effect:** the squash title is the plan issue's title
+  (`perk/delivery/landing.py::squash_commit_message`) — here the node-issue's `"1.1: …"` roadmap
+  title, not the plan H1.
 
-## Resolver single-sourced off `[issues]`
+## Objective replan is supersede, not upsert
 
-`resolve_objective_store_id` re-exports `resolve_issue_backend_id` — an objective and its plan/learn
-issues share ONE `[issues] backend` selection (they live in the same tracker). **There is no
-parallel `[objectives]` table.** The lazy/no-network resolver mirrors the issue resolver (the Linear
-arm needs committed `[issues] team` + `LINEAR_API_KEY`, same hinted errors).
+`perk objective replan` (§8.32) hinges on a store-shape fact: `create_objective` is
+**find-then-return idempotent** on `run_id` (`existed=True`, no rewrite) — there is no in-place
+objective-rewrite primitive, so objective-replan cannot mirror plan-replan's `run_id`-keyed upsert.
+`supersede_objective` is close-old/create-new with a **fresh `run_id`**, **bidirectional lineage**
+(`supersedes` on the new header, `superseded_by` on the old), **create-new-first, close-old-last,
+fail-open on the close**; `finalize_supersession` is the extracted raising, idempotent close side
+(§8.53's deferred-close arm). Carried nodes are MOVE where adopted nodes are STAMP — the same
+`adopt_issue` field read per context (`in-place-adoption.md`). When a store op "isn't an upsert",
+reach for close-old/create-new rather than inventing an in-place rewrite.
 
-## `backend_id` literal discipline survives the split (import-cycle avoidance)
-
-**Every** concrete store's `backend_id` is a class-level literal — `"linear"` on both Linear
-stores; `"github"` on `GitHubObjectiveStore`, exactly as `GitHubIssueBackend.backend_id` —
-**never** imported from the resolver: `src/perk/backends/resolve.py` (which owns
-`GITHUB_BACKEND_ID` / `LINEAR_BACKEND_ID`) imports the store modules to construct them, so
-importing the constant back would cycle. An earlier version of this doc said the GitHub store *can*
-reuse the shared `GITHUB_BACKEND_ID` — superseded history: that held only while the resolver and
-the GitHub store shared the single retired module the intro names. The working import shape,
-cycle-free:
-
-```
-objective_store (contract; imports no concrete backend)
-  ← github/objective_store + linear/project_store + linear/objectives (each imports the contract)
-  ← resolve (imports the concrete stores + the contract; owns the backend-id constants)
-```
-
-## `close_issue` is issue-tier; `close_objective` was added later onto the store
-
-Node 2.1 defined **NO** close on the contract. Mixed consumers (`pr land` reconcile, `objective
-run`) kept an `IssueBackend` for the close while also holding a store for the objective ops (under
-both issue-backed stores objective id == issue id, so it was behaviorally identical). #595 (Node
-3.4) added `ObjectiveStore.close_objective` to remove the issue-tier close leak: `pr land` and
-`objective run` now close via `store.close_objective`.
-
-- The GitHub store impl **deliberately delegates straight to the GitHub issue-close primitive** (a
-  GitHub objective IS an issue), so existing GitHub-path tests that monkeypatch the issue close keep
-  passing **transparently via delegation** — proving "via the store, not the issue backend" requires
-  injecting a fake store.
-- **Guard asymmetry (know which guard owns which set).** Today the direct delegation to the
-  issue-close primitive stays inside `src/perk/backends/github/` (the store delegates to the
-  `plans` substrate), which the consumer-boundary scan in `tests/test_resolve.py` allows
-  wholesale — no allowed-set edit is needed. Dated history: when the guards were per-tier
-  function-set scans, this delegation had to be added to the issue-tier guard's allowed-set —
-  know which guard owns which set. Cross-ref `source-scan-guards.md`.
-
-## The consumer-boundary source scan — the resolver is the only door
-
-The scan lives in `tests/test_resolve.py::TestConsumerBoundary` — folded in from the retired
-`test_objective_stores.py` (per that test module's own docstring) — asserting no production module
-outside `src/perk/backends/github/` imports the substrate modules
-`perk.backends.github.{plans,objectives}` directly; both tiers now express one rule, **"the
-resolver is the only door"**. Dated history: adding the objective-tier guard (then a separate
-function-set scan) required moving the objective gateway functions OUT of the issue-tier guard's
-function set, else the old scan flagged the new module. Static conformance is one ty-checked
-annotated binding per store (a protocol-annotated local bound to the concrete instance).
-
-## The node↔plan unification protocol (#595)
-
-On the objective-linked `plan-save` path a *unifying* store (the project-backed Linear store) writes
-the plan INTO the node-issue and returns its ref; a *non-unifying* store (GitHub, issue-backed
-Linear) returns `None` unconditionally. The whole capability protocol is one method returning
-`ObjectiveRef | None` — no separate capability flag — and it works because:
-
-- **`None` is an unambiguous "doesn't unify" signal *because a unifying store RAISES on
-  not-found*** (it never returns `None` for not-found).
-- **`dry_run` also returns `None`** (resolving the node-issue needs a network read; `--dry-run` is
-  offline) → the caller falls back to the offline compose-preview.
-- The dispatch guard runs the unify path **only when `not dry_run and objective_id and node_id`**,
-  leaving the standalone create branch (ensure_label + create) byte-unchanged in the `else`.
-- The merge into the node-issue uses the **form-preserving inline-code replace** when a
-  `plan-header` is present, else composes the inline-code render and appends — never the bare
-  append path, which appends in lossy HTML form on Linear.
-
-### Derive the land-time backlink self-referentially (the clobbered-field correction)
-
-In the unified "the plan IS the node-issue" model, the node's land-time `pr` backlink is the
-node-issue's **OWN identifier** — NOT the `plan-header`'s `pr` field, because `pr submit` overwrites
-that field with the GitHub PR number; reading it would break the land-match after submit. This
-supersedes the earlier "pr from the plan-header `pr` field" reading. Because the cached plan-ref's
-id already *is* the node-issue identifier, `nodes_for_pr` / `pr submit` / `pr land` needed zero
-changes. **Durable: in a unified model, derive the backlink self-referentially; never read a field a
-later stage clobbers.**
-
-### Unification has a visible side effect
-
-The squash commit title is the **node-issue title** (its roadmap `"{id}: …"` identity), NOT the plan
-H1 — so an objective-linked land's commit reads `"1.1: Node one\n\n…"`, not the plan title. Anyone
-touching title rendering should know **node-issue title ≠ plan title**. (The TS plane needed no
-change — `objective_id` was already an opaque string, and the resolver flip just makes it a Project
-UUID.)
-
-## Phase-4 protocol growth: three implementers, `add_objective_node`, the no-op-return family
-
-### Adding a Protocol method now means THREE implementers
-
-The `ObjectiveStore` Protocol grew **6 → 9 → 10 → 12** methods across Phase 3/4: Phase 3 added
-`save_node_plan` / `close_objective` / `post_status_update`; Phase 4 added
-`add_objective_node` (#614) then `detect_objective_drift` / `repair_objective_drift` (#626). There
-are now **three** concrete implementers — GitHub, the dormant
-issue-backed `LinearObjectiveStore`, and the **live** project-backed `LinearProjectObjectiveStore`
-(`linear-backend.md`). **Durable rule: adding any Protocol method now means writing THREE
-implementers**, all enforced by ty static conformance — the `_make_store` / `_make_project_store`
-typed-annotation bindings plus `_FakeObjectiveStore` in `tests/test_objective_store.py`. A
-Phase-2-era plan authored against a 2-backend world **under-counts** this after a rebase pulls in the
-third store (the #614 plan predated `LinearProjectObjectiveStore` and hit exactly this expansion); the
-Protocol-append rebase conflict is purely additive (both parties append after `update_objective_body`
-→ keep both). The #626 growth carries its own trap: CI's **whole-repo `uv run ty check` caught the
-stale `_FakeObjectiveStore`** when `ty check perk/` alone did **not** — the conformance fake lives
-under `tests/`, so scope the type check to the whole repo, never just `perk/`.
-
-### `read_node_refinement_targets` — one read is the whole support+read surface
-
-`read_node_refinement_targets(*, objective_id) -> RefinementObjectiveSnapshot | None`
-(`src/perk/backends/objective_store.py`) deliberately replaced a singular-read-plus-capability-flag
-design: no capability flag, no dummy-node probe. `None` means a genuinely missing or non-perk
-objective; an **empty target tuple is a supported objective with no nodes**; and there is no
-node-status eligibility restriction on the read (eligibility is derived downstream — refinements
-survive planning/done/skipped as advisory history). Its typed refusal
-`RefinementTargetReadError(ObjectiveStoreError)` carries the codes `unsupported_backend |
-malformed_target | ambiguous_target`; GitHub and the dormant issue-backed Linear store raise
-`unsupported_backend` with **no network call**. Growing the Protocol again meant updating every
-concrete and static conformer *including* `_FakeObjectiveStore` in lockstep — the THREE-implementers
-rule above, now with the fake counted explicitly.
-
-The backend-neutral service (`src/perk/objective/refinement/service.py`) keeps the layering honest:
-read/select/save import backend contracts only, resolve the store and issues through the existing
-resolvers (a backend mismatch is `invalid_input`), and map each typed store/upsert error onto a
-`RefinementError` code through a fixed table without message-matching — never relabel a typed error
-as a generic backend failure. The Linear persistence beneath it is in `workflow/linear-backend.md`
-§ "Objective-node refinement persistence".
-
-### `add_objective_node`: the re-render-vs-materialize split
-
-`ObjectiveNodeAdd` is the **sixth** frozen result dataclass. The implementers split on *where a node
-lives*:
-
-- **GitHub + issue-backed Linear re-render the stored `objective-roadmap` block** — mirror
-  `update_objective_node` verbatim, swapping the mutation to `objective.add_node`.
-- **The project store has no stored roadmap block, so an added node IS a new Linear issue.**
-  `comment_updated` is therefore **always `False`** (no body-comment table to patch). The
-  Linear-side pipeline lives in `linear-backend.md`
-  (`### add_objective_node project-store flow (#614)`).
-
-### The "no-surface, no-op" return-value pattern is a family
-
-`save_node_plan → None`, `post_status_update → False`, and the design-doc'd
-`detect/repair_objective_drift` no-ops on GitHub + issue-backed Linear all share one shape: **a no-op
-return lets every call site invoke the method UNCONDITIONALLY — no `if backend_id == "linear"`
-branch** (mirrors `None`-means-doesn't-unify on the unify path). The fail-open isolation matters: a
-`post_status_update` failure lives in its own helper (`_post_landed_update`) so it can't discard an
-already-marked node set — the same posture as the existing close fail-open.
-
-### An id-normalization fix at an adapter boundary must cover every entry point
-
-Normalizing canonical `#<n>` ids in one method of
-`src/perk/backends/github/objective_store.py` (`_number`) while a sibling method on the same
-adapter (`journal_carrier_id`) accepted and re-emitted the same id vocabulary still broke the
-production succession fold end to end — the fix initially missed the very path the work existed
-to repair. When normalizing an id at a boundary, enumerate **every** method on that boundary
-that accepts or emits the vocabulary, and add an end-to-end regression over the **production
-adapters**, not just the fixed method's unit test.
-
-### Protocol widening with defaulted-`None` keyword params across N stores
-
-Fakes at the CLI seam plus `None`-only delegation tests leave a real adapter free to hard-code
-or drop the new value without failing the suite. When widening the Protocol with a
-defaulted-`None` keyword param, add a **non-default forwarding case per concrete adapter per
-arm** — including **supersede**, which composes the successor header on a separate path from
-create (the delivery/lineage pair, `DeliveryPolicy.STACKED`, is the shipped instance).
-
-### The manifest unifies both backends (the #609 design decision)
-
-GitHub's `objective-roadmap` YAML block **already IS its manifest** (atomically edited → trivially-empty
-drift report), so the `detect/repair_objective_drift` methods carry real behavior **only**
-on the project store (which derives its roadmap live from node-issues — no baseline to diff) and no-op
-everywhere else — the same precedent as the no-op family above. Cross-ref `linear-backend.md` for the
-manifest's storage shape.
-
-## The manifest + drift-detection/repair design (#626)
-
-The #609 design landed: persist an authoritative manifest,
-detect drift = `diff(manifest, observed)`, repair only the safe/unambiguous cases.
-
-### The manifest pattern (structural identity, not live state)
-
-The `objective-manifest` block (primitives in the `src/perk/objective/` package, `manifest.py`)
-pins each node's
-**id/slug/description + explicit `depends_on` (always a list)** plus a `phases` map of pinned
-milestone names. `status`/`pr` are **deliberately excluded** — they are live/observed, not identity.
-Parsing is **three-state**: absent / malformed / valid. Where the manifest physically lives per
-backend is `linear-backend.md`'s territory (the manifest-drift #609/#626 + attachment-native #1355
-sections) — point, don't restate. It is a **no-op
-on GitHub + issue-backed stores** (their roadmap edits are atomic with the body → no divergence
-surface), extending the `save_node_plan→None` / `post_status_update→False` no-op family above.
-
-### Pure engine split
-
-`src/perk/objective/drift.py` is fully **offline** (no network/clock/Click): the **store** builds an
-observed snapshot (the one network step), then the pure `detect_drift` returns a report of conditions
-each carrying a stable **code / severity / target / `repairable` flag**. The test suite is one case
-per code; a **malformed or absent manifest short-circuits** (no baseline to diff).
-
-### Authority precedence — the subtle invariant
-
-Who owns phase names **depends on the operation**:
-
-- **add-node:** the **manifest** is authority for an **existing** phase — attach the node to the
-  manifest-pinned milestone, **never re-derive** from externally-editable overview prose (the
-  overview only *seeds* a brand-new phase).
-- **reconcile:** the **overview** is authority — refresh the pins to match it exactly, **including
-  reverting to the `Phase N` default** when a header is removed.
-
-Consistent framing: manifest authoritative on add-node *reads*, overview authoritative on reconcile
-*writes*. (A first attempt guarded against the default-clobber on reconcile — **wrong**; reconcile
-tracks the overview.)
-
-### Graph reconstruction with intra-batch deps (the deferred-edge sweep)
-
-Detection can only diff a dependency **between two observed nodes** — it can't diff an edge while an
-endpoint is absent. So the recreate path **owns every edge touching a recreated node in BOTH
-directions** (the node's own `depends_on` AND an already-existing dependent's edge to it). The robust
-shape: **create all missing node-issues first**, then **one comprehensive post-loop sweep** restores
-every manifest edge Linear lacks — skipping edges already present and observed↔observed (owned by the
-explicit dependency repair, so no double-create), failing loud on a genuinely unresolvable endpoint.
-**General lesson:** when repairs create nodes other repairs depend on, **split node-creation from
-edge-creation** and drive edges off the **full manifest**, not per-node.
-
-## The objective doctor is an explicit state machine, not a flat report
-
-The doctor flow resolves a superseded requested id to the **one active objective** up front and
-targets *that* for both manifest AND train diagnosis/repair (`redirected_from` preserves the
-requested id; the predecessor is never mutated). It then sequences **manifest repair before train
-repair**, and **re-diagnoses after writes** — a repair invalidates the diagnosis it acted on, so
-the report the human sees is always derived from post-write state, never a stale pre-repair
-snapshot patched by hand.
-
-## Objective-keyed engagement reads + the node-keyed sibling (#687/#696/#705)
-
-The objective-keyed engagement reads (`read_comments` / `read_description_edits` /
-`read_agent_session`) on GitHub **reuse the issue-tier honest reads** — a GitHub objective IS a
-single issue, so the GitHub objective store (`src/perk/backends/github/objective_store.py`) reuses
-the sibling engagement substrate (`src/perk/backends/github/engagement.py`) plus the shared private
-mappers from `src/perk/backends/github/backend.py` — same backend package/tier, no import-guard
-violation.
-
-Linear specifics:
-
-- Linear projects expose **no description-edit-history primitive** → `read_description_edits` stays an
-  honest empty `()` (the edit signal lives on node-issues).
-- `read_comments` is **honest over project comments** — Project Updates are deliberately NOT read
-  (they are perk's own *outbound* feed).
-- The node-keyed `read_node_engagement` is honest **only on the project-backed store** (a roadmap node
-  IS a node-issue); GitHub + the dormant issue-backed store → `EMPTY_NODE_ENGAGEMENT`.
-
-**The deferral-comment-names-its-consumer rule:** when a stub carries a comment naming a future node,
-that node's plan should *consume* it (flip the stub + update the comment), not add a parallel surface.
-(See `human-engagement-reads.md` for the full subsystem.)
-
-## Objective replan: supersede ≠ upsert (#855)
-
-`perk objective replan <N>` re-authors an objective as a **superseding net-new** objective (the
-`supersede_objective` Protocol method), and the design hinges on a store-shape fact:
-
-- **supersede (close-old/create-new) ≠ in-place upsert.** plan-`replan` rewrites in place because
-  `plan_save` is a `run_id`-keyed **upsert**. objective-`replan` CANNOT mirror that:
-  `create_objective` is **find-then-return idempotent** on `run_id` (returns `existed=True`
-  *without* rewriting) — there is **no** in-place objective-rewrite primitive. The resolved shape is
-  close-old/create-new with a **fresh `run_id`**, **bidirectional lineage** (`supersedes` on the new
-  header / `superseded_by` on the old), and **create-new-first, close-old-last, fail-open on the
-  close** (the §8.24 bookkeeping posture). Durable: when a store op "isn't an upsert," reach for
-  close-old/create-new rather than inventing an in-place rewrite.
-- **The no-op-family Protocol growth → census the conformance fakes.** `supersede_objective`
-  (returns `ObjectiveRef | None`; `None` = "store doesn't support it") joins the no-op-family
-  (`adopt_source_as_objective` / `save_node_plan` / `post_status_update`). The non-obvious ripple:
-  `tests/test_objective_store.py::_FakeObjectiveStore` is a **structural conformer**, so whole-repo
-  `ty check` fails (`protocol member … not defined`) until the fake gains the method — the
-  per-method delegation tests do **not** catch a missing Protocol member. Always add a new method to
-  the minimal conformance fake.
-- **Fail-open close must use lower-level primitives, not the public store methods.** The
-  superseded-close (`_close_superseded_objective`) runs **inside** the outer `_translate_objective()`
-  CM and catches `IssueBackendError`. The public methods
-  (`update_objective_header`/`close_objective`/`post_status_update`) each open their OWN
-  `_translate_objective()` and raise `ObjectiveStoreError`, which an `except IssueBackendError`
-  would **NOT** catch — so the close-old work calls the lower-level `_projects`/`_issue_ops`
-  primitives directly (they raise `IssueBackendError`). Watch the error-type boundary when composing
-  fail-open bookkeeping out of would-be-public methods.
-- **Handoff-carrier symmetry.** The cold door stashes `supersedes=<OLD>` in the run handoff exactly
-  as `objective author --from` stashes `adopt_from` (`_supersedes_from_handoff` is a verbatim
-  structural copy of `_adopt_from_handoff`: explicit flag wins, malformed handoff never blocks a
-  save). The carried-node mapping **reuses `objective.parse_adopt_mapping` + the per-node
-  `adopt_issue` field** — interpreted as **MOVE** semantics in supersede context vs in-place **STAMP**
-  in adoption context (no TS schema edit; `adopt_issue` already flows through `ROADMAP_PARAM_SCHEMA`).
-  `create_cmd` dispatch went `if supersedes / elif adopt_from / else create`; `--supersedes` /
-  `--adopt-from` are **mutually exclusive** (incompatible models).
-- **Residual:** a Linear `pending` node-issue (no plan yet) reads back `pr=None`, so the cold-door
-  scratch can cite a node-issue ref only for in-flight nodes; the Linear MOVE path itself is flagged
-  **not-live-proven** (verify at the smoke gate). Cross-ref `in-place-adoption.md` (STAMP vs MOVE)
-  and `linear-backend.md` (the `FakeLinearWorkspace` routing/state additions supersede surfaced).
+- **Fail-open close composes from `IssueBackendError`-raising primitives, never public store
+  methods.** `project_store.py::_close_superseded_objective` wraps the shared private
+  `_finalize_supersession` in `except IssueBackendError`; the public methods
+  (`update_objective_header`/`close_objective`/`post_status_update`/`finalize_supersession`) each
+  open their own `_translate_objective()` and raise `ObjectiveStoreError`, which that `except`
+  would NOT catch — so the close-old work calls `_projects`/`_issue_ops` primitives directly. One
+  implementation, two postures; watch the error-type boundary whenever fail-open bookkeeping is
+  composed out of would-be-public methods.
+- **Create-only header fields are enforced by allowlist omission, and a guarded population must
+  be closed under replan.** `origin` is excluded from `objective.OBJECTIVE_HEADER_FIELDS`, so the
+  header-update LBYL rejects any post-create merge; and because supersede is create-new both live
+  stores auto-carry the validated predecessor `origin` — otherwise the guard's population silently
+  loses members across replans.
 
 ## The same-run-id upsert trap (scripted node-linked saves)
 
-The flip side of `plan_save` being a `run_id`-keyed upsert:
+The flip side of `plan_save` being a `run_id`-keyed upsert: saving several node-linked plans under
+the ambient workflow run id invokes the same-run idempotent upsert — the second save rewrote the
+previous node's plan **in place** (two roadmap nodes pointing at one plan) while the command
+*succeeded*; `issue.existed: true` in the payload is the tell. `plan save` now refuses a
+node-linked same-run-id upsert whose stored header names a *different* node (`error_type:
+node_conflict`, fail-closed before any mutation), but the guard is a backstop — **mint a fresh run
+id per node**.
 
-- **Scripted node-linked plan saves must mint a fresh run ID per node.** Reusing the ambient
-  workflow run ID invokes the documented same-run idempotent upsert: the stacked-publication
-  gate's second save rewrote the previous node's plan **in place** (self-predecessor header, two
-  roadmap nodes pointing at one plan) while the command *succeeded* — `issue.existed: true` in
-  the payload is the tell.
-- `plan save` now refuses a node-linked same-run-id upsert whose stored header names a
-  *different* node (`error_type: node_conflict`, fail closed before any mutation; a null stored
-  node still links). The fresh-run-id rule remains the correct scripting posture — the guard is
-  a backstop, not the workflow.
+## The origin lookup is exhaustive-or-raise
 
-## Adoption Protocol growth + the no-op family (#708/#711)
+`find_open_objective_by_origin(origin, exclude_run_id=None)` never silently under-scans (§8.24):
+infra failure raises; a present-but-malformed header raises; an off-vocabulary origin raises via
+the closed `ObjectiveOrigin` `StrEnum` (`perk/objective/_models.py`) and the fail-closed
+`origin_value` classifier (`perk/objective/parse.py`); only an absent/different origin is a skip.
+The **dormant store RAISES** — a deliberate break from the `→ None` family, because `None` would
+falsely assert authoritatively-none and open a fail-closed guard. `exclude_run_id` makes a
+single-ref API sound for a save-time re-check: the pre-launch guard
+(`perk/cli/commands/learn/dream_cmd.py`) passes `None`; the save-time re-check
+(`perk/cli/commands/objective/create_cmd.py`) excludes its own run, so any returned ref IS a
+conflict.
 
-`read_objective_source` / `adopt_source_as_objective` extend the `→None` no-op family
-(`None` = "no project surface" / "doesn't adopt"); `dry_run → None` falls through to the offline
-compose-preview. (See `in-place-adoption.md` for the full adoption story.)
+## The manifest + drift engine — durable traps
 
-## The origin lookup — exhaustive-or-raise
+The project store persists an `objective-manifest` (structural identity, never `status`/`pr`)
+and diffs it against observed Linear state in the pure offline engine
+`perk/objective/drift.py::detect_drift`; GitHub and the dormant store have no divergence surface
+(no-op family). §8.24 owns the code catalog, repair order and sync points; §8.54 the two-part
+doctor. The traps:
 
-`ObjectiveStore.find_open_objective_by_origin(origin, exclude_run_id=None)` answers "is an open
-objective with this origin already live?" under the **exhaustive-or-raise** posture (§8.24): a
-store never silently under-scans. Infra failure raises; a present-but-malformed header raises; an
-off-vocabulary origin raises via the closed `ObjectiveOrigin` vocabulary
-(`src/perk/objective/_models.py`) and the fail-closed `origin_value` classifier
-(`src/perk/objective/parse.py`); only an absent or *different* origin is a skip. Each store
-enumerates its full open population: GitHub is an all-pages label scan; the Linear project store
-is a team-scoped sentinel sweep; and the **dormant issue-backed store RAISES** — a deliberate
-break from the `→None` no-op family, because `None` here would falsely assert
-authoritatively-none and silently open a fail-closed guard.
+- **Authority depends on the operation.** On add-node the **manifest** owns an existing phase's
+  milestone name (overview prose only seeds a brand-new phase); on reconcile the **overview**
+  owns the pins, *including* reverting to the `Phase N` default when a header is removed — a
+  first attempt guarded that default-clobber, wrongly.
+- **Split node-creation from edge-creation.** Detection only diffs an edge between two observed
+  nodes, so the recreate path owns every edge touching a recreated node in BOTH directions:
+  create all missing node-issues first, then one sweep driven off the full manifest (skipping
+  observed↔observed edges the explicit dependency repair owns; loud on an unresolvable endpoint).
+- **The doctor is a state machine, not a flat report.** It resolves a superseded id to the one
+  active objective once (`redirected_from`; the predecessor is never mutated), repairs manifest
+  before train, and **re-diagnoses after writes** — the report is post-write state, never a
+  patched pre-repair snapshot.
 
-Two consumers, distinguished by `exclude_run_id`:
+## Reads with a stub: engagement, refinement, the dream companion
 
-- **The pre-launch active-origin guard** (`src/perk/cli/commands/learn/dream_cmd.py`) enforces
-  one open learn-dream objective per repo with `exclude_run_id=None`, failing closed on an
-  unanswerable lookup (`origin_lookup_failed` / `origin_conflict`).
-- **The save-time conflict re-check** (`src/perk/cli/commands/objective/create_cmd.py`) passes
-  `exclude_run_id=resolved_run_id` — the caller-exclusion that makes a single-ref API sound for
-  conflict checks: excluding its own run means any returned ref IS a conflict.
+- **Engagement reads:** GitHub reuses the issue-tier honest reads + shared mappers from its own
+  backend package; per-node engagement is honest only on the project store — GitHub and the
+  dormant store return `EMPTY_NODE_ENGAGEMENT`. **A deferral comment names its consumer:** the
+  named node's plan consumes the stub (flip it, update the comment), never adds a parallel
+  surface. Subsystem: `human-engagement-reads.md`.
+- **`read_node_refinement_targets` is the whole support+read surface** (§8.67): no capability
+  flag, no dummy-node probe; `None` = missing/non-perk objective, **empty targets = a supported
+  objective with no nodes**, no node-status eligibility on the read. Only the **dormant** store
+  raises `RefinementTargetReadError("unsupported_backend")`, before any network call — GitHub
+  reads every node off the objective issue's header + roadmap block. The service
+  (`perk/objective/refinement/service.py`) maps typed store errors onto `RefinementError` codes
+  through a fixed table, never by message-matching.
+- **The dream companion** rides marker-keyed comments on `journal_carrier_id` (GitHub = the
+  objective issue; Linear = the metadata sentinel's identifier); core `perk/learn/dream_companion.py`;
+  convergent ordering (`dream_report` header ref recorded LAST) §8.64 +
+  `perk/cli/commands/objective/create_cmd.py::_converge_dream_companion`.
 
-### Create-only header fields + replan closure (#2004)
+## History (dated)
 
-- **Create-only header fields are enforced by allowlist OMISSION**: `OBJECTIVE_HEADER_FIELDS`
-  LBYL-gates only incoming fields — the template for launch-owned provenance fields — and
-  render-only-when-set keeps existing objectives byte-identical.
-- **A guarded population must be closed under replan.** Supersede is close-old/create-new, so
-  any header field feeding an open-population guard needs store-side auto-carry of the validated
-  value into the successor — otherwise the guard's population silently loses members across
-  replans.
-
-## The dream-companion flow
-
-The reviewed dream report persists as marker-keyed companion comments on the objective's report
-carrier — `ObjectiveStore.journal_carrier_id` (GitHub = the objective issue itself; Linear = the
-project metadata sentinel issue). The backend-neutral core is `src/perk/learn/dream_companion.py`
-(contracts §8.64): the marker grammar, the part-invariance + size rule, the run-scoped
-`DREAM_REPORT_TRANSFER_FILENAME` extension→door transfer, and the convergent `persist_parts`.
-
-The save ordering in `src/perk/cli/commands/objective/create_cmd.py::_converge_dream_companion`
-is: strict transfer validation (`_read_dream_transfer`: run-id match, requires the run-scoped
-dream manifest, part-invariance violations refuse) → `persist_parts` →
-`resolve.publish_dream_artifact` (a Linear-only artifact upload; GitHub no-ops — the no-op family
-again) → record the `dream_report` header reference **last** (§8.64's convergent ordering — the
-header ref is the completion marker, so an interrupted save converges on retry). The Linear
-sentinel/attachment mechanics live in `linear-backend.md` — point, don't restate.
-
-## Deferred-doc staleness is intentional, tracked
-
-A code-only extraction node deliberately leaves the contract/module-docstring prose stale for the
-dedicated amendment node — don't "fix" it in the extraction PR (perk's "plan bodies are historical;
-reconcile via outcomes" discipline). The reconcile pass also disambiguated the live naming hazard:
-2.2's **issue-backed** `LinearObjectiveStore` ≠ Phase-3's **project-backed**
-`LinearProjectObjectiveStore`.
+- Carved off `IssueBackend` in two nodes — a dormant contract module (Protocol + frozen results +
+  fresh error type), then one atomic PR for removal + extraction + resolver + consumer rewire
+  (removal and rewire are inseparable under ty), mirroring `issue-backend.md`.
+- The Linear extraction rode the registered-collaborator refactor (`linear-backend.md` § "The
+  substrate-home principle"); its ~68 facade rewrites used a word-boundary `re.sub` over an
+  **explicit** helper name set — never a blanket `self._*` replace.
+- `close_objective` (#595) removed the issue-tier close leak; `supersede_objective` (#855),
+  `finalize_supersession` (§8.53), `read_node_refinement_targets` (§8.67) and the origin lookup
+  (#2004) each grew the Protocol — CI's whole-repo `ty check` caught a stale `_FakeObjectiveStore`
+  that `ty check perk/` missed (#626).
+- Before attachment-native metadata (#1355) the unified plan-header was an inline-code block in
+  the node-issue description; refinement reads once raised `unsupported_backend` on GitHub too.
+- No repo record proves the Linear carried-node MOVE path (`supersede_objective` `carry_map`) live
+  — offline `FakeLinearWorkspace` coverage only (#855; re-verified absent at this recast).
 
 ## Cross-references
 
-- `src/perk/backends/objective_store.py` — the contract module
-- `src/perk/backends/github/objective_store.py`, `src/perk/backends/linear/project_store.py` (the
-  live project-backed store), `src/perk/backends/linear/objectives.py` (dormant) — the concrete
-  stores; `src/perk/backends/resolve.py` — the resolver
-- `docs/learned/workflow/issue-backend.md` — the parallel issue-tier split off the same monolith
-- `docs/learned/workflow/linear-backend.md` — the Linear facade refactor + the project-backed
-  store; owns all Linear project materialization + manifest-drift mechanics (the
-  Projects-substrate, `add_objective_node` project-store flow, and #609/#626 manifest-drift
-  sections)
-- `docs/learned/workflow/objective-lifecycle.md` — objective node status + the supervisor loop
-- `docs/learned/workflow/source-scan-guards.md` — the tier-guard asymmetry (which guard owns which set)
-- `docs/learned/workflow/config-tables.md` — the committed-only `[issues]` table the resolver reads
-- `docs/learned/workflow/doc-reconciliation.md` — the reassigned-removal / past-tense reconcile pattern
-- `docs/learned/workflow/human-engagement-reads.md` — the engagement read contract across both tiers
-- `docs/learned/workflow/in-place-adoption.md` — the adoption Protocol-growth + no-op family
+- `shared/contracts.md` §8.24, §8.32/§8.53, §8.54, §8.64, §8.66, §8.67
+- `docs/learned/workflow/issue-backend.md` — the parallel issue-tier split, the conformance recipe
+- `docs/learned/workflow/linear-backend.md` — Linear materialization, attachments, manifest-drift
+- `docs/learned/workflow/human-engagement-reads.md` — the engagement read contract
+- `docs/learned/workflow/in-place-adoption.md` — adoption Protocol growth, STAMP vs MOVE
+- `docs/learned/workflow/broad-catch-narrowing.md` — the typed-catch posture
