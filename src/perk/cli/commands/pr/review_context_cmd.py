@@ -38,7 +38,6 @@ Exit codes: 0 ok · 1 invalid input / no plan / no PR / op failure · 2 not-a-re
 
 import os
 import re
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -65,8 +64,8 @@ from perk.run import launch
 from perk.state import cache
 from perk.state import run_id as run_id_mod
 from perk.substrate import git
-from perk.substrate.git import GitError
-from perk.substrate.output import log_warn, user_output
+from perk.substrate.git import GitError, StackTopologyError
+from perk.substrate.output import user_output
 
 # A stack member whose head branch is a plan branch gets its plan body enriched via the
 # resolver-fallback arm (the resolver owns the id shape — GitHub numeric, Linear ENG-123).
@@ -347,84 +346,24 @@ def _stack_context(*, repo_root: Path, pr_number: int, local_diff: bool) -> PrRe
 
 
 def _combined_diff(repo_root: Path, stack: ResolvedStack) -> str:
-    """Fetch the member heads + the stack base into a PER-INVOCATION temp-ref namespace and
-    render the combined base→top diff locally, after re-validating the commit topology
-    fail-closed.
-
-    The private namespace matters: concurrent reviewer lanes all run this worker, and
-    worktrees share ONE ref store — a shared temp-ref name would let one lane delete or
-    clobber another's ref mid-read (nondeterministic ``git_error`` lane losses). The base
-    branch is fetched into the same namespace (never ``refs/remotes/origin/…``), so parallel
-    invocations touch no shared ref at all. The topology gate repeats the checkout worker's
-    rule because this worker is independently callable and a layer force-pushed after
-    checkout must not silently vanish from a "combined" diff. The namespace is deleted in a
-    ``finally`` (best-effort, like the checkout discipline)."""
-    namespace = f"refs/perk/review-ctx/{uuid.uuid4().hex[:12]}"
-
-    def ctx_ref(name: str) -> str:
-        return f"{namespace}/{name}"
-
-    refspecs = [
-        f"+refs/pull/{member.pr_number}/head:{ctx_ref(str(member.pr_number))}"
-        for member in stack.members
-    ]
-    refspecs.append(f"+refs/heads/{stack.base_ref}:{ctx_ref('base')}")
+    """The ``UserFacingCliError`` translation boundary over :func:`git.stack_merge_base_diff`,
+    which owns the mechanics and rationale (private temp-ref namespace, fail-closed topology
+    gate, base→top merge-base diff, cleanup)."""
     try:
-        git.fetch_refspecs(repo_root, refspecs)
+        return git.stack_merge_base_diff(
+            repo_root,
+            pr_numbers=[member.pr_number for member in stack.members],
+            base_ref=stack.base_ref,
+        )
+    except StackTopologyError as exc:
+        raise UserFacingCliError(str(exc), error_type="stack_topology_broken") from exc
     except GitError as exc:
+        members = ", ".join(f"#{member.pr_number}" for member in stack.members)
         raise UserFacingCliError(
-            f"git fetch failed for the stack member heads and base branch "
+            f"could not render the combined stack diff for PRs {members} against base branch "
             f"{stack.base_ref!r}\n{exc}",
             error_type="git_error",
         ) from exc
-    try:
-        head_shas: list[str] = []
-        for member in stack.members:
-            sha = git.resolve_commit(repo_root, ctx_ref(str(member.pr_number)))
-            if sha is None:
-                raise UserFacingCliError(
-                    f"fetched PR head ref {ctx_ref(str(member.pr_number))} did not resolve "
-                    "to a commit",
-                    error_type="git_error",
-                )
-            head_shas.append(sha)
-        # The checkout worker's fail-closed topology gate, repeated at THIS read: every
-        # predecessor head must be an ancestor of its successor head, and an indeterminate
-        # probe refuses too — otherwise a broken stack would render a "combined" diff that
-        # silently omits layers.
-        for index in range(1, len(stack.members)):
-            pred, succ = stack.members[index - 1], stack.members[index]
-            verdict = git.is_ancestor(repo_root, head_shas[index - 1], head_shas[index])
-            if verdict is not True:
-                detail = (
-                    "is not an ancestor of" if verdict is False else "ancestry indeterminate for"
-                )
-                raise UserFacingCliError(
-                    f"stack topology broken: PR #{pred.pr_number} head "
-                    f"{head_shas[index - 1][:12]} {detail} PR #{succ.pr_number} head "
-                    f"{head_shas[index][:12]} — the combined diff would not contain every "
-                    "layer (sync the stack first).",
-                    error_type="stack_topology_broken",
-                )
-        base_sha = git.merge_base(repo_root, ctx_ref("base"), head_shas[-1])
-        if base_sha is None:
-            raise UserFacingCliError(
-                f"the stack top (PR #{stack.top.pr_number}) has no common ancestor with base "
-                f"branch {stack.base_ref!r}",
-                error_type="git_error",
-            )
-        try:
-            return git.diff_range(repo_root, base_sha, head_shas[-1])
-        except GitError as exc:
-            raise UserFacingCliError(
-                f"git diff failed for the combined stack diff\n{exc}", error_type="git_error"
-            ) from exc
-    finally:
-        for name in [str(member.pr_number) for member in stack.members] + ["base"]:
-            try:
-                git.delete_ref(repo_root, ctx_ref(name))
-            except GitError as exc:
-                log_warn(f"could not delete temp ref {ctx_ref(name)}: {exc}")
 
 
 def _plan_body_for_branch(repo_root: Path, head_ref: str) -> str | None:

@@ -38,7 +38,7 @@ from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.substrate import git
-from perk.substrate.git import GitError
+from perk.substrate.git import GitError, StackTopologyError
 from perk.substrate.output import log_warn, user_output
 
 # Stale review checkouts (any review-<n> other than the target) older than this are reaped by
@@ -307,21 +307,14 @@ def stack_checkout(
         head_shas.append(sha)
 
     # Post-fetch commit-topology validation, fail closed BEFORE any worktree mutation:
-    # ref-name linkage alone does not prove the base→top diff contains every layer — every
-    # predecessor head must be an ancestor of its successor head, and an indeterminate probe
-    # (None) refuses too.
-    for index in range(1, len(stack.members)):
-        pred, succ = stack.members[index - 1], stack.members[index]
-        verdict = git.is_ancestor(repo_root, head_shas[index - 1], head_shas[index])
-        if verdict is not True:
-            detail = "is not an ancestor of" if verdict is False else "ancestry indeterminate for"
-            raise UserFacingCliError(
-                f"stack topology broken: PR #{pred.pr_number} head "
-                f"{head_shas[index - 1][:12]} {detail} PR #{succ.pr_number} head "
-                f"{head_shas[index][:12]} — the combined diff would not contain every layer "
-                "(sync the stack first).",
-                error_type="stack_topology_broken",
-            )
+    # ref-name linkage alone does not prove the base→top diff contains every layer.
+    try:
+        git.check_stack_topology(
+            repo_root,
+            heads=list(zip((m.pr_number for m in stack.members), head_shas, strict=True)),
+        )
+    except StackTopologyError as exc:
+        raise UserFacingCliError(str(exc), error_type="stack_topology_broken") from exc
 
     base_sha = git.merge_base(repo_root, f"origin/{stack.base_ref}", head_shas[-1])
     if base_sha is None:

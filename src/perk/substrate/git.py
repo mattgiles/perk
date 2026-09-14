@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -101,6 +102,13 @@ class GitError(Exception):
 
 class PushRejectedError(GitError):
     """A push was rejected as non-fast-forward / failed the ``--force-with-lease`` check."""
+
+
+class StackTopologyError(GitError):
+    """A bottom→top chain of PR heads is not provably linear: some predecessor head is not an
+    ancestor of its successor, the probe answered indeterminately, or the probe itself failed
+    to run. Every unanswered case refuses, because a diff over such a chain would silently
+    omit a layer."""
 
 
 _REJECT_MARKERS = ("non-fast-forward", "[rejected]", "stale info", "failed to push some refs")
@@ -657,7 +665,7 @@ def merge_base(repo: Path, a: str, b: str) -> str | None:
 
 def diff_range(repo: Path, base: str, head: str) -> str:
     """The unified two-dot diff ``git diff <base> <head>`` — the hardened, config-pinned review
-    diff read (the combined stack diff and :func:`pr_merge_base_diff`).
+    diff read (:func:`stack_merge_base_diff` and its single-PR arity :func:`pr_merge_base_diff`).
 
     Callers pass an exact already-computed merge-base SHA as ``base``, so the two-dot form
     equals the three-dot merge-base diff they want. The argv pins every rendering knob to
@@ -698,48 +706,77 @@ def diff_range(repo: Path, base: str, head: str) -> str:
     )
 
 
-def pr_merge_base_diff(repo: Path, *, pr_number: int, base_ref: str) -> str:
-    """Render PR ``pr_number``'s merge-base diff locally: fetch ``refs/pull/<n>/head`` and
-    ``refs/heads/<base_ref>`` from ``origin`` into a per-invocation private ref namespace,
-    find their merge-base, and return :func:`diff_range` over it.
+def stack_merge_base_diff(repo: Path, *, pr_numbers: Sequence[int], base_ref: str) -> str:
+    """Render the merge-base diff of a bottom→top chain of PRs locally: fetch every member's
+    ``refs/pull/<n>/head`` plus ``refs/heads/<base_ref>`` from ``origin`` into ONE
+    per-invocation private ref namespace, validate the chain's commit topology fail-closed,
+    find the base→top merge-base, and return :func:`diff_range` over it.
 
-    Pure git mechanics — the forge-side policy (WHEN a locally rendered PR diff replaces the
-    forge's, and how that is disclosed) belongs to the caller (the GitHub gateway). The
-    merge-base is the 3-dot base a PR diff renders against, so the two-dot ``diff_range`` over
-    it equals the forge's merge-base diff, with ``diff_range``'s config pins holding the
-    rendering steady. Objects are fetched into refs, never checked out or executed.
+    Precondition: at least one member (``ResolvedStack`` always has two or more; the
+    single-PR arity :func:`pr_merge_base_diff` passes exactly one). Duplicate PR numbers pass
+    through to git unchanged — the stack resolver already refuses cycles.
+
+    Pure git mechanics — forge-side policy (WHEN a locally rendered diff replaces the
+    forge's, how that is disclosed) belongs to the callers. The merge-base is the 3-dot base a
+    PR diff renders against, so the two-dot ``diff_range`` over it equals the forge's
+    merge-base diff, with ``diff_range``'s config pins holding the rendering steady. Objects
+    are fetched into refs, never checked out or executed.
 
     The namespace ``refs/perk/review-ctx/<uuid>`` is private per invocation: worktrees share
     ONE ref store, so concurrent reviewer lanes must never touch a shared ref name (one lane
-    would clobber or delete another's ref mid-read); the fetch itself writes no ``FETCH_HEAD``
-    (see :func:`fetch_refspecs`). Both temp refs are deleted best-effort in a ``finally``; a
-    failed delete is reported via ``log_warn`` and never masks the read's result or exception.
-    A network op (the fetch timeout). Raises ``GitError`` when the fetch fails, the fetched head
-    does not resolve, or the histories share no ancestor.
+    would clobber or delete another's ref mid-read). The base branch is fetched into the same
+    namespace (never ``refs/remotes/origin/…``), so parallel invocations touch no shared ref
+    at all, and the fetch writes no ``FETCH_HEAD`` (see :func:`fetch_refspecs`). The topology
+    gate (:func:`check_stack_topology`) is repeated at THIS read even though the checkout
+    worker already ran it: this worker is independently callable, and a layer force-pushed
+    after checkout must not silently vanish from a "combined" diff. Every temp ref is deleted
+    best-effort in a ``finally``; a failed delete is reported via ``log_warn`` and never masks
+    the read's result or exception.
+
+    A network op (the fetch timeout). Raises ``StackTopologyError`` when the chain is not
+    provably linear, and ``GitError`` when the fetch fails, a fetched head does not resolve,
+    or the histories share no ancestor.
     """
     namespace = f"refs/perk/review-ctx/{uuid.uuid4().hex[:12]}"
-    head_ref = f"{namespace}/head"
+    head_refs = [f"{namespace}/{pr_number}" for pr_number in pr_numbers]
     base_tmp = f"{namespace}/base"
     try:
         fetch_refspecs(
             repo,
-            [f"+refs/pull/{pr_number}/head:{head_ref}", f"+refs/heads/{base_ref}:{base_tmp}"],
+            [
+                *(
+                    f"+refs/pull/{pr_number}/head:{head_ref}"
+                    for pr_number, head_ref in zip(pr_numbers, head_refs, strict=True)
+                ),
+                f"+refs/heads/{base_ref}:{base_tmp}",
+            ],
         )
-        head_sha = resolve_commit(repo, head_ref)
-        if head_sha is None:
-            raise GitError(f"fetched PR #{pr_number} head ref did not resolve to a commit")
-        merge_base_sha = merge_base(repo, base_tmp, head_sha)
+        heads: list[tuple[int, str]] = []
+        for pr_number, head_ref in zip(pr_numbers, head_refs, strict=True):
+            sha = resolve_commit(repo, head_ref)
+            if sha is None:
+                raise GitError(f"fetched PR #{pr_number} head ref did not resolve to a commit")
+            heads.append((pr_number, sha))
+        check_stack_topology(repo, heads=heads)
+        top_sha = heads[-1][1]
+        merge_base_sha = merge_base(repo, base_tmp, top_sha)
         if merge_base_sha is None:
             raise GitError(
-                f"PR #{pr_number} head has no common ancestor with base branch {base_ref!r}"
+                f"PR #{pr_numbers[-1]} head has no common ancestor with base branch {base_ref!r}"
             )
-        return diff_range(repo, merge_base_sha, head_sha)
+        return diff_range(repo, merge_base_sha, top_sha)
     finally:
-        for ref in (head_ref, base_tmp):
+        for ref in (*head_refs, base_tmp):
             try:
                 delete_ref(repo, ref)
             except GitError as exc:
                 log_warn(f"could not delete temp ref {ref}: {exc}")
+
+
+def pr_merge_base_diff(repo: Path, *, pr_number: int, base_ref: str) -> str:
+    """The single-PR arity of :func:`stack_merge_base_diff`, retained as the GitHub gateway's
+    named seam (``perk.github.reviews._local_pr_diff``); forge policy stays in the gateway."""
+    return stack_merge_base_diff(repo, pr_numbers=(pr_number,), base_ref=base_ref)
 
 
 def is_ancestor(repo: Path, ancestor: str, head: str) -> bool | None:
@@ -755,6 +792,39 @@ def is_ancestor(repo: Path, ancestor: str, head: str) -> bool | None:
     if result.returncode == 1:
         return False
     return None
+
+
+def check_stack_topology(repo: Path, *, heads: Sequence[tuple[int, str]]) -> None:
+    """Refuse (``StackTopologyError``) unless the bottom→top chain ``heads`` of
+    ``(pr_number, head_sha)`` pairs is provably linear: every predecessor head must be an
+    ancestor of its successor head (:func:`is_ancestor`).
+
+    Ref-name linkage alone does not prove a base→top diff contains every layer, so both the
+    checkout worker and the combined-diff read run this gate. Fail-closed on every unanswered
+    probe: ``False`` refuses, an indeterminate ``None`` refuses, and a probe that fails to RUN
+    (its ``GitError``) is folded into the same typed refusal with the probe's text appended and
+    chained — "the probe could not answer" IS the indeterminate case, and a caller that only
+    knows ``GitError`` still fails closed. A single pair runs no probe.
+    """
+    for index in range(1, len(heads)):
+        (pred, pred_sha), (succ, succ_sha) = heads[index - 1], heads[index]
+        probe_error: GitError | None = None
+        try:
+            verdict = is_ancestor(repo, pred_sha, succ_sha)
+        except GitError as exc:
+            verdict = None
+            probe_error = exc
+        if verdict is True:
+            continue
+        detail = "is not an ancestor of" if verdict is False else "ancestry indeterminate for"
+        message = (
+            f"stack topology broken: PR #{pred} head {pred_sha[:12]} {detail} PR #{succ} head "
+            f"{succ_sha[:12]} — the combined diff would not contain every layer "
+            "(sync the stack first)."
+        )
+        if probe_error is not None:
+            raise StackTopologyError(f"{message}\n{probe_error}") from probe_error
+        raise StackTopologyError(message)
 
 
 def update_ref(repo: Path, ref: str, sha: str, *, expected: str | None = None) -> None:
