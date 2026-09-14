@@ -116,7 +116,7 @@ vars into this layering rather than writing `env.setdefault()` loops.
 - **`FFF_MODE_ENV` rides BOTH sites.** The second injected default, `PI_FFF_MODE=tools-and-ui`
   (`launch.FFF_MODE_ENV`), is merged at `launch._build_exec_env` AND `run_worker._spawn_worker`
   (execution-path parity — a worker's reviewer lanes need host `grep`/`find` exactly as an
-  interactive session's do; `pi/subagents.md`'s 0.67.0 anchor). Unlike the npm quiet vars it is
+  interactive session's do; `pi/subagents.md` § "The ≥ 0.67.0 host-builtin intersection"). Unlike the npm quiet vars it is
   a correctness default, not a cosmetic one, which is why it does not share their single-site rule.
 - **The inherited-env trap.** A session launched by the *pre-flip* launcher carries the old value
   (`override`) in its environment, and the operator tier sits above the injected tier — so judging

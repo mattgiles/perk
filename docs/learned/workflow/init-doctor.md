@@ -387,7 +387,7 @@ The craft survives for any future probe over a surface perk *does* own or vendor
 `_subagent_host_tools_check(root, *, environ=None)` (`src/perk/convergence/doctor/checks.py`) is
 the precedent for a report-only check that fires only while an installed, **unpinned** package sits
 in a known-affected version range — here pi-subagents ≥ 0.67.0's host-builtin intersection
-(`pi/subagents.md`'s second version anchor). Four disciplines it settled:
+(`pi/subagents.md` § "The ≥ 0.67.0 host-builtin intersection"). Four disciplines it settled:
 
 - **Gate on a strict `X.Y.Z` against a half-open `[lower, upper)` range**
   (`_SUBAGENTS_HOST_INTERSECTION_AFFECTED = ("0.67.0", None)`; `_parse_strict_semver`). A

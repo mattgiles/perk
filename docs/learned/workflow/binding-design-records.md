@@ -136,4 +136,4 @@ bounded re-verification) added the record disciplines below. The binding record 
   `docs/design/archive/docs-site-bridge-spike.md` — the binding records this craft was distilled from
 - `docs/design/pi-subagents-child-execution-policy.md` (+ the three archive records named above) —
   the characterization/dogfood arc the separation disciplines were distilled from
-- `docs/learned/pi/subagents.md` — the version-anchoring convention the re-verification rule serves
+- `docs/learned/pi/subagents.md` — the `## Sources` provenance convention (re-verify at each pin bump) the re-verification rule serves
