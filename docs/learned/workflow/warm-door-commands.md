@@ -1,422 +1,203 @@
 ---
-title: Warm-door commands — the read-only gating trap, drive-the-session discipline, and rendering every cold-door outcome
+title: Warm-door commands — the four laws (visible commands vs gated write tools, no direct GitHub mutation, render every cold-door outcome, guidance-named tools in every stage scope)
 read_when: You are building or fixing a warm perk slash-command (/plan-save, /address, …), debugging a door that dead-ends or false-succeeds, a drive naming a stage-scoped tool, or a human-facing gesture.
 cluster: doors-and-launch
 ---
 
 # Warm-door commands
 
-perk's warm doors are the TS slash-commands registered via `pi.registerCommand` (and their sibling
-custom tools). They sit in front of cold Python doors (`perk plan save`, `perk objective create`,
-…) that own the durable GitHub mutations. Three cross-cutting disciplines govern how a warm
-command must behave; getting any one wrong produces a **false-success** or **dead-end** that no single file
-reveals.
+perk's warm doors are the TS slash-commands registered through `registerPerkCommand`
+(`extension/substrate/command.ts`) and their sibling tools, in front of the cold Python doors that
+own every durable GitHub mutation. Four laws govern them; breaking any one yields a **false
+success** or a **dead end** no single file reveals. The cold-door client's decode/envelope
+semantics are owned by `docs/learned/workflow/cold-door-client.md` — this doc only points there.
 
 ## Distillation
 
-- Command/tool pairs are gated ASYMMETRICALLY in read-only sessions — a command can render while
-  its sibling tool is filtered off — "The read-only tool-gating trap".
-- The sibling trap: a drive naming a tool the stage's scoping filtered away dead-ends the model;
-  widenings audit what becomes reachable, and zero-argument selector-dependent tools are never
-  exposed in unbound (main-root) sessions — "The stage-scoping sibling trap" (+ "Plan census: a
-  new warm tool must name the toolGating rows").
-- Warm handlers never compose a GitHub mutation themselves: with a validated artifact (or
-  already-committed workflow state) they delegate the durable write directly to the cold door
-  (`runColdDoor` — `/land`, `/plan-save`, `/gist-save`); otherwise they DRIVE the session
-  (`pi.sendUserMessage` guidance + the binding suffix) — "Durable work in a warm handler: direct
-  cold delegation vs session-driving".
-- A warm door must render EVERY cold-door outcome — success / failure / absent; a truthy ternary
-  collapsing "failed" into "" is a silent partial failure — "A warm door must render EVERY
-  cold-door outcome".
-- Anything a human must act on is emitted deterministically by the DOOR (print/notify/clipboard,
-  gate on the action) — never left to model-facing guidance — "Deterministic human-facing
-  gestures belong in the door".
-
-## The read-only tool-gating trap (why command/tool pairs are asymmetric)
-
-In a read-only session, `extension/substrate/toolGating.ts` calls `pi.setActiveTools(READ_ONLY_TOOLS)`
-— the five builtins (`read`/`grep`/`find`/`ls`/`bash`) **plus a curated family of read-only-safe
-carve-outs** (the session-data draft writers, review/wave tools, bounded delegated transitions
-like `objective_node`, the research/delegation families — each with a justification comment in
-`toolGating.ts`; point there for the live set, never enumerate it). The structural guarantees the
-lesson rests on: **write-capable tools never ride the set** (every save tool is invisible while
-gated) and a custom tool is hidden **unless deliberately carved in** — while `pi.registerCommand`
-commands stay **visible regardless of mode**. So a canonical **write** tool gated off is
-invisible while its sibling `/command` is the *only* visible save affordance the agent can see.
-
-This is the structural reason a warm command and its tool are **not symmetric**, and why you cannot
-toggle the gate from inside a model turn (`/plan off` is a user/keyboard action — `planMode.ts`
-registers it as a command + `Ctrl+Alt+P`). The danger: if the visible command cannot carry the
-hidden tool's full payload, it becomes a **trap that produces junk and returns false success**.
-
-**Plan-vs-objective asymmetry — the diagnostic test.** Before treating a command/tool pair as
-symmetric, ask: **can the command carry or recover the tool's full payload?** Recovery includes
-the validated session-data draft artifact — both saves are artifact-first today. A *plan is its
-prose*, so `/plan-save` resolves the validated `plan-draft` artifact → param → transcript scrape
-(`resolvePlanSource`, `planSave.ts`) — the scrape is legitimate because prose can live in one
-assistant message. An *objective's roadmap is structured data* that can never be scraped from a
-message — so `/objective-save` resolves **only** the validated structured `objective_draft`
-artifact (`objectiveApprovalSave`, `authoring/objective/save.ts`); with no draft present the command
-performs no write and drives the structured save instead. If a command can neither carry nor
-recover the payload, it must not half-write.
-
-**Gating on `mode`: match toolGating's *effective* writability.** Warm-minted sessions leave
-`perk:workflow-state.mode` **undefined** — the warm-mint arm of `establishSessionIdentity` writes no
-mode — and `toolGating` treats undefined as writable. A tool that requires an explicit
-`"read-write"` token therefore refuses every ordinary warm session (the `/objective-sync` retained
-resolver did exactly this and was caught only in review). Deny only the explicit
-`mode === "read-only"` floor; never require a positive token the warm path never writes. The
-incident and its sibling re-guard-after-await gap are in
-`workflow/mergeability-and-conflict-resolution.md` § "Two authorization gaps only review caught".
-
-## The stage-scoping sibling trap (a drive naming a tool the stage filtered off)
-
-The read-only gate above has a sibling: **stage scoping** (`STAGE_TOOLS` in
-`extension/substrate/toolGating.ts`) silently removes tool schemas per stage. A warm-door drive
-(the `pi.sendUserMessage` guidance injection) names companion tools by name — so **every tool a
-drive's guidance names must be active in every stage the drive can land in**, or the drive
-dead-ends (observed live: a land-time auto-drive landing in a worktree session whose stage list
-had filtered off the tools the guidance named).
-
-The structural answer is the drive-coverage guard test
-(`extension/substrate/stageTools.test.ts`): a static drive→stages table; each drive's template
-rendered with all optional params set; a word-boundary scan of the rendered guidance against the
-scoped universe (`PERK_TOOLS ∪ BORROWED_TOOLS`); every extracted name must be in
-`STAGE_TOOLS[stage]` for every stage in the table.
-
-Maintenance convention: a new warm-door drive must be added to the guard's static table; a
-new/changed stage list must satisfy every drive that can land in that stage. Gated-landing drives
-are excluded — gate-ON ignores stage lists; `READ_ONLY_TOOLS` + the gated-stage test cover that
-surface.
-
-The guard's per-row scan carries a non-vacuous tripwire — a row extracting **zero** tool names
-fails as "is the scan broken?" — so a drive whose guidance deliberately names no scoped tool (the
-`/commit-and-compact` plain-git commit guidance is the precedent) cannot pass trivially.
-Convention: a tool-free drive **still joins the table**, opting out of only the tripwire via the
-optional `namesNoTools: true` row flag (`extension/substrate/stageTools.test.ts`); the per-stage
-membership check still runs, so a future guidance edit that starts naming tools stays honest.
-
-The widening direction has its own trap: **when a plan widens `STAGE_TOOLS` for stage S with
-tool T, T's execute core must be audited for stage-conditional dispatch** — any arm that assumed
-"T can't run at S" is now live. Instance: adding the review tool to the objective-save stage
-(forced by the drive-coverage guard) made a previously-unreachable plan-arm fallthrough
-reachable — a plan param there could have been reviewed and saved *as a plan* from an objective
-session; the fix routed both objective-authoring stages through the objective arm. Rule: a "no
-routing change" non-goal is settled by checking what the gating change makes **reachable**, not
-by intent — treat the dispatch audit as a mandatory plan step for stage-tools widenings.
-
-Two boundaries on the widening move itself (#2028): **zero-argument, selector-dependent tools
-must never be exposed in unbound (main-root) sessions** — the cached plan selector can point at
-a different plan than the one the session launched for. And when the drive-coverage scanner
-demands a tool, first ask whether the driven prompt should stop naming gesture tokens instead of
-widening the stage list — keep retry guidance on human-facing surfaces (the worker tail, drive
-warnings, launch stderr), not in machine-driven prompts.
-
-## Plan census: a new warm tool must name the toolGating rows
-
-A plan adding **any** warm in-session tool must name the `extension/substrate/toolGating.ts` rows
-(`PERK_TOOLS` + the worktree-stage family) alongside its bindings/skills census. This gap recurred
-in two consecutive flow plans — each meticulously enumerated bindings, skills, manifest,
-contracts, and test pins, and still missed the tool-gating census. The `stageTools.test.ts`
-drive-coverage guard is self-enforcing (it forces the rows the moment guidance names the tool),
-but catching it at plan time avoids the late scramble commit.
-
-The guard's second job: **the tool census doubles as a dormancy enforcer.** `PERK_TOOLS` is
-pinned set-equal to what a session actually registers, so dormant-by-design tools are
-*structurally forced* to ride the same PR as their registration + census additions — atomicity by
-existing test, not convention (see `report-waves.md` for the dormant review-wave pair instance).
-
-## Two correct shapes when the command can't carry the payload
-
-When a command-fallback is *structurally* incapable of the full write, never let it half-write.
-There are two correct shapes, both of which preserve the read-only→read-write "one gesture"
-ergonomics without exposing the tool during read-only (which would break the no-writes invariant):
-
-- **On-ramp (write nothing, redirect):** flip the read-only gate so the real tool becomes visible,
-  and emit just-in-time guidance redirecting to the tool. Kills the false-success signal. (This is
-  what `/objective-save` became in #109/#110 — it had been minting node-less garbage objectives
-  while reporting `"Saved objective #N"`.)
-- **Drive-the-session (inject a driving message):** the strictly better move when a downstream skill
-  owns the step. See next section.
-
-A redirect that merely **prints an instruction to the agent** ("call the `objective_save` tool with
-your prose and roadmap") is itself a bug: a *human* typed the command, so the printed instruction
-reads as "do it manually" and nothing happens (#109's regression, fixed in #112/#113).
-
-Present-tense status: today `/objective-save` is the **artifact-first manual failsafe** — it saves
-a validated `objective_draft` artifact when one exists; the on-ramp + drive-the-session shapes
-above remain its no-draft arm.
-
-## Durable work in a warm handler: direct cold delegation vs session-driving
-
-Warm handlers split durable work along a three-way boundary — the surviving law is narrower than
-"never do durable work":
-
-- **Direct cold delegation (artifact-first).** When a validated artifact — or already-committed
-  workflow state — carries the full payload, the handler performs the durable step itself by
-  invoking the cold door synchronously: `/plan-save` (`approvalSave` → `coldDoorPlanBackend` →
-  `runColdDoor(["plan", "save", …])`, `extension/pi/v1/plan.ts`), `/gist-save`'s valid-draft arm
-  (`gistApprovalSave` + `coldDoorGistBackend` → `runColdDoor(["gist", "create", …])`,
-  `extension/pi/v1/gist.ts`), and `/land` (`landPr` → `runColdDoor(["pr", "land", …])`,
-  `extension/pi/v1/delivery/land.ts` — keyed off the worktree's plan-ref/submitted PR rather than
-  a draft artifact).
-- **Direct GitHub mutation — never.** In every live shape the mutation itself stays owned by the
-  cold Python door; no warm handler composes a `gh`/API mutation in TS.
-- **Genuine session-driving.** When the payload must be produced by the model, the handler injects
-  guidance and the model does the work through the canonical tool (e.g. `/address`). The rest of
-  this section is that discipline.
-
-The pattern shared by every **session-driving** warm workflow command (`/address`, `/objective-plan`,
-`/objective-reconcile`, `/objective-save` (no-draft arm), `/gist-save` (no-draft arm), `/learn-docs`,
-`/learn`): the handler does **not** do the durable work itself. It **drives the session** —
-
-```
-pi.sendUserMessage(<pureGuidance>(...) + bindingSuffix(ctx.cwd, "<trigger>"))
-```
-
-The handler's only job is to set up state (e.g. `gating.exit(ctx)` to make a gated tool reachable)
-and inject guidance; the **model then performs the work by calling the canonical tool**, which
-carries the structure. Structured-write integrity is preserved because the durable write still flows
-through the tool, never a scrape — the command performs no GitHub mutation itself. When you find a
-perk command that *prints an instruction to the agent* instead of injecting a driving message,
-that's the bug — convert it to the driving pattern (or, when a validated artifact already carries
-the payload, to direct cold delegation).
-
-Conventions that generalize:
-
-- **Factor the injected text into a pure, exported `*Guidance(...)` function** (mirror
-  `learnFactoryGuidance` / `factoryGuidance`): terse numbered/bulleted `[...].join("\n")`. Pure +
-  exported so it is unit-testable offline.
-- **Never hardcode a skill pointer in the guidance body** — it rides `bindingSuffix(cwd, trigger)`.
-  Use the `stage:<id>` trigger of the skill that owns the step (e.g. `stage:objective-author`),
-  surfaced warm-from-anywhere like `/objective-plan` uses `stage:objective-plan`.
-- **Headless behavior is a deliberate choice, not boilerplate.** Drive the turn unconditionally
-  (notify on `ctx.hasUI`, else `console.error`, then `sendUserMessage` in **both** branches) —
-  **unless** the command produced a durable artifact a headless run can leave behind. `/learn-docs`
-  is the exception: it early-returns on headless because its durable artifact is the pre-gathered
-  inbox.
-
-**Test-coverage shape for driving commands.** They CANNOT be exercised via `h.invokeCommand(...)` in
-the keyless offline harness, because `pi.sendUserMessage` triggers a real model turn the harness
-can't service. Cover them with (a) a **registration + headless-safe test** (load `headful: false`,
-assert `h.registeredCommands().includes("<cmd>")`), and (b) **pure `*Guidance` unit tests** (the
-rendered text names the tool + required args, renders/omits optional args like `title`, and contains
-no hardcoded skill-pointer string). The canonical tool tests remain the behavioral coverage.
-
-## The `registerPerkCommand` entry-toast wrapper + test discipline for wrappers
-
-**The shared registration chokepoint.** A single `registerPerkCommand(pi, name, options)`
-(`extension/substrate/command.ts`) now wraps every warm perk command: it emits one transient entry
-toast (`perk: <cmd> — running…`) through the `report()` seam (**not** a direct `ctx.ui.notify`, so it
-satisfies the surfaces-discipline guard) synchronously **before** the first `await`, then awaits the
-original handler with no try/catch (errors propagate unchanged). Headless-safe for free via
-`report()`'s stderr fallback. Vendored `/btw` is the sole exclusion (its `ctx.ui.custom` overlay has
-its own UX).
-
-**Test-adaptation corollary.** Any command test asserting an exact notify array/count now gains one
-`info`-severity `perk: <cmd> — running…` entry — relax to substring / severity-filter assertions (the
-established fragile-count pattern; cross-reference the startup-banner note in `pi/tui-surfaces.md`).
-
-**Three reusable wrapper/door test traps:**
-
-1. **Grep ALL sites matching a finder pattern (false-green from an incomplete sweep).** When a change
-   makes a new notify fire on *every* command, a test finder like
-   `.find((m) => m.includes("<cmd>"))` now matches the new entry toast instead of the line it meant to
-   assert, so the downstream assertion passes **vacuously**. Fixing the first such finder does not
-   prove the others are covered — grep ALL sites matching the pattern. The discriminator here: the
-   real status line carries `·`, the entry toast does not, so re-narrowing with `&& m.includes("·")`
-   re-selects the intended line.
-2. **A synchronous spy can't prove a wrapper `await`s.** A sync handler spy records immediately
-   regardless of an omitted `await`. To prove a wrapper awaits to completion: make the inner handler
-   **yield control** and set a `completed` flag after the yield, then assert `completed` after awaiting
-   the wrapped handler. Reusable for any middleware-awaits-to-completion proof.
-3. **Fallback-path tests must assert the observable effect, not the absence of an exception.** The
-   headless (`!hasUI`) path must assert the expected `running…` line actually reached stderr, not
-   merely that the handler ran. When a code path has a distinct observable side effect (stderr line,
-   log, file write), assert that effect.
-
-**Door-restructure ripple.** Changing a warm command's deterministic flow breaks existing
-report-string assertions — when you restructure a door, grep its test for `notifies.some(...)` /
-report-string assertions and re-point them at the new flow's lines (e.g. a degraded-to-fallback path
-asserts the fallback report line).
-
-**The cross-door ordering pin.** `extension/testing/harness.ts`'s fake router argv-capture option
-(the router fake appends each routed subcommand key to an `argvFile`) lets a test pin **invocation
-order across multiple cold-door routes** — the shipped instance is the submit-before-resolve pin.
-Reach for it for any future "A must run before B" cross-door contract instead of inferring order
-from side effects.
-
-## The warm gate-enter recipe (enter is distributed, exit is centralized)
-
-A warm door that seeds a read-only turn enters the gate with the **skip-if-active** recipe, proven
-twice (the `--plan` cold start in `planMode.ts`; `/objective-plan`): if the gate is not already
-active, enter it and announce, placed **after** input resolution (warning paths leave the gate
-untouched) and **before** `sendUserMessage` — so the seeded turn's `before_agent_start` picks up
-the read-only / plan-authoring injections with zero new injection wiring.
-
-Skip-if-active is what lets warm and cold doors coexist: the cold door's registry
-`mode: read-only` handoff already synced the gate at `session_start`, so the warm handler must
-never double-append `mode` or re-announce.
-
-The asymmetry to preserve: **enter is distributed, exit is centralized.** Gate-exit ownership
-stays concentrated in `plan_save` (incl. the approval auto-save) and `/plan` off; a warm door
-entering the gate must add **zero** exit logic, or it forks the mode lifecycle.
-
-## A terminating surface can drive the *next* pass
-
-The section above covers the session-driving shape. This adds the case where the driving
-surface is **terminating** (the `land` tool returns `{ terminate: true }`): `/land` (and the `land`
-tool) auto-drives `/objective-reconcile` instead of printing a copy-pasteable nudge.
-
-- **`terminate` + `followUp` compose.** `terminate: true` only skips the *automatic* follow-up LLM
-  call; an injected `pi.sendUserMessage(msg, { deliverAs: "followUp" })` is a *separate* deliberate
-  new turn delivered once the agent has no more tool calls. So a terminating tool can still hand off
-  into a fresh driven turn — the two are **orthogonal mechanisms**, not in conflict.
-- **Delivery mode branches on `ctx.isIdle()`.** One shared helper serves both surfaces: idle (the
-  `/land` *command* path) → plain `pi.sendUserMessage(msg)` (immediate turn); streaming (the `land`
-  *tool* `execute` path) → `deliverAs: "followUp"`. `isIdle()` lives on the base `ExtensionContext`
-  shared by tool-`execute` ctx and command-handler ctx.
-- **Reuse the guidance, don't re-invoke the slash command.** Inject
-  `reconcileGuidance(String(n)) + bindingSuffix(cwd, "command:objective-reconcile")` — byte-for-byte
-  what `/objective-reconcile` injects — rather than sending literal `"/objective-reconcile #5"` text.
-  Avoids relying on slash-command expansion of an injected message and skips redundant re-resolution
-  (the land result already carries `objective.number`). Required exporting the previously
-  module-private `reconcileGuidance` (now in `authoring/objective/prose.ts` — no circular import:
-  the prose module does not import `land.ts`).
-- **Keep the pure-impl function drive-free.** `landPr` merges / sets-marker / builds text and
-  returns; the drive lives in a *separate* exported helper called by both `execute` and the command
-  handler — preserving the pure function as directly unit-testable. The drive condition mirrors the
-  old nudge condition exactly (`ok === true`, objective present, `number !== null`,
-  `nodes_marked.length > 0`), so non-objective plans / skipped node-marks drive nothing.
-
-**Test-shape consequence.** Once `execute` routes through the drive helper, it can **no longer** be
-harness-routed via `h.invokeTool(...)` (it fires a real model turn the keyless offline harness can't
-service — same limitation as `invokeCommand` on driving commands, already noted above). Replace it
-with (a) a **direct pure-function unit test** for the merge/report path (a stub `pi` whose `exec`
-resolves a fixture + a minimal `ctx` over a `scaffoldRepo()` cwd, asserting on `result.details` +
-success text), and (b) **drive-helper decision/delivery spy tests** (a spy `pi.sendUserMessage`
-recording `{ content, options }`: no objective → not called; failed land → not called; idle → called
-once with `options` undefined; streaming → called once with `options.deliverAs === "followUp"`). The
-non-driving land tests stay on the harness because their fixtures short-circuit the helper.
-
-**`/pr-review` is a different driving shape.** It does **not** drive the same session — the
-`run_pr_review_wave` tool launches a wave of fresh-context, report-only reviewer children and the
-parent posts once. See `docs/learned/pi/subagents.md` for that orchestration (project-vs-builtin
-agents, child-posts-own-mutation vs read-only-child-parent-mutates).
-
-### Gating the drive on a structured sub-result (and bounding it)
-
-`/submit`'s conflict drive (now `decideConflictFollowUp` + `driveConflictFollowUp` across the
-delivery split) reuses the `driveReconcileAfterLand` shape but adds two twists
-that generalize to any **self-healing** drive:
-
-- **Gated on a sub-result, not fired unconditionally.** The drive only fires when the cold door's
-  structured result says there is something to heal — `ok && mergeable === false` — rather than
-  firing whenever the op succeeded. Parsed conflict paths are advisory and may be empty; a clean
-  submit drives nothing.
-- **Bounded by a re-drive cap.** A `WorkflowState` counter (incremented per attempt, **reset on every
-  clean outcome**) caps the self-healing loop so a drive that keeps re-firing can **never loop** —
-  past the cap it reports loudly and stops. Use this whenever a drive's own follow-up turn can
-  re-trigger the same condition.
-
-Keep the probe + full mechanism in `mergeability-and-conflict-resolution.md`; this is just the
-driving-shape generalization.
-
-## A warm door must render EVERY cold-door outcome, not just the success case
-
-When a warm TS surface wraps a cold Python door that returns a **structured non-fatal sub-result**,
-the warm door owns rendering **every** outcome of that sub-result — success / failure / absent — not
-just the happy path. A truthy/falsy ternary that collapses "failed" into `""` is the trap: it makes
-a real failure indistinguishable from "nothing to do", a textbook **silent partial failure** living
-entirely in the warm door.
-
-This was the `/plan-save` objective-node bug (#124/#126). The Python cold door correctly attempted
-the node `planning → in_progress` advance and reported it as `objective_node: { linked, node, status,
-error }`. But the warm door only rendered the success branch
-(`linkSuffix = nodeLink?.linked ? "… → in_progress" : ""`), so a `linked: false` failure rendered as
-empty — the contract's "warn + retriable" signal never reached the user. The fix was a **three-way
-branch** over `nodeLink` (`linked === true` / `linked === false` / `null`).
-
-- **One text field, two doors.** Feed that three-way result into a single `content[0].text` that
-  BOTH surfaces (the `plan_save` tool and the `/plan-save` command) render — so fixing one site
-  fixes both paths at once. Reach for this "one text field, two doors" shape deliberately.
-- **Severity mapping.** A non-fatal sub-step failure on an otherwise-successful op is **`warning`**
-  (not `error` — the primary op succeeded; not `info` — something needs attention). The command
-  computes `!ok → error / linked===false → warning / else info`.
-- **Headless mirror.** Mirror `warning`/`error` to `console.error` in the `!ctx.hasUI` branch so
-  headless runs aren't silent either. Rule: **any user-facing notify in an extension needs a
-  headless `console.error` fallback for non-info severities**, or headless agents lose the signal.
-- **Boundary discipline.** A failed sub-step must **not** alter the primary op's control flow:
-  `details.ok` stays `true`, `terminate` stays `true`, the read-only→read-write `gating.exit` still
-  fires. The save genuinely succeeded; only the link is loud-but-non-fatal. Don't leak a
-  cosmetic/secondary failure into success semantics.
-- **Test-harness note.** When a fix's correctness hinges on a UI attribute the harness drops (the
-  `fakePerk`/`loadPerkSession` harness captured notify *messages* but not *severity*), extend the
-  capture (a parallel `notifyEvents: {message, severity}[]` alongside `notifies: string[]`) rather
-  than asserting only on the surviving substring.
-
-perk's standard for the sub-step failure itself is **loud-but-non-fatal + idempotent manual
-re-run** — the rendered warning enables the retry. Deliberately *not* added: an in-call retry loop
-around the GitHub mutation.
-
-## Deterministic human-facing gestures belong in the door, not in model-facing guidance
-
-**Model-mediated human handoffs fail silently.** Anything a human must *act on* — a command to run,
-a URL to open, a checkout line to paste — must be emitted **deterministically on a human-facing
-surface by the door itself** (a loud print / notify + a clipboard copy where it helps), and the flow
-must **gate on the human's action**, never degrade on a timer. Leaving that gesture inside the
-model-facing injected guidance is a latent failure: the model may paraphrase it, bury it, or skip it,
-and nothing forces it onto the human's screen.
-
-Evidence (the `/review` hunk handoff — retired; the handoff now lives on `/pr-review-terminal`):
-across **both** dogfood runs the hunk launch command lived
-*only* in the injected guidance text. Run 1 silently degraded (the human never saw the command); run
-2's operator had to scavenge it out of the guidance body — recorded as "completely unacceptable". The
-two runs make the rule concrete: a deterministic gesture on a determined surface is a **door**
-responsibility, because only the door output is guaranteed to reach the human.
-
-The bare-minimum requirements for that hunk handoff (door-level loud print +
-clipboard copy with a test seam + wait-for-the-human, degrade only on the human's say-so) rode
-objective #1206 node 4.3 and are live today in `handleHunkLaunch`
-(`extension/pi/v1/codeReview/checkout.ts`, serving `/pr-review-terminal`) — a status pointer; don't
-duplicate the requirement list here.
-
-## Honesty hygiene when converting a command
-
-When converting away from a scrape-based command, **delete the now-dead scrape helper** (e.g.
-`extractObjectiveMarkdown`, referenced only by its own def + test). Leaving a vestigial scrape
-affordance contradicts "the command never scrapes"; tsc/Biome catch the orphaned import. And when a
-command's behavior flips, the surfaces that *describe* it drift together and must be corrected in the
-same turn: `shared/contracts.md`, the in-session context constant (e.g. `OBJECTIVE_AUTHORING_CONTEXT`
-in `authoring/objective/prose.ts`), and the owning `SKILL.md`.
-
-## The warm/cold stack-door parity shape (`/stack-review-browser`)
-
-The stack review door's warm/cold pairing is the parity template (#2033): the warm command drives
-the cold `--stack` checkout via `runColdDoor` and renders its typed refusals (never re-deriving
-them); the seeded stage uses ONE parameterless handoff-bound opener (the binding carries
-everything the opener needs); and shared guidance text must serve BOTH entry paths — write it
-entry-neutral rather than assuming the warm command's context.
-
-## Diagnosis meta-lesson
-
-A swallowed warm-door failure *looks* like an unwired feature. The #126 bug looked like
-"node-advance isn't wired," but the advance *was* automatic and on `main`; the failure was discarded
-downstream in the warm door. When "feature X isn't working," confirm whether X **ran and was
-discarded** before concluding it **never fired** — trace the full handoff → cold-door → warm-door
-chain.
+- **Law 1 — commands stay visible while write tools are gated.** No write-capable tool rides the
+  gate-ON allowlist; a command delegates directly only when a validated artifact / committed state
+  carries the full payload, else it writes nothing and drives the session — "Law 1".
+- **Law 2 — warm handlers never issue a GitHub mutation directly**: `runColdDoor` with a validated
+  payload, or `pi.sendUserMessage` guidance so the model works through the canonical tool — "Law 2".
+- **Law 3 — render EVERY cold-door outcome** — success / failure / absent, nonfatal sub-step failure
+  included — through `report()`, which owns the headless fallback — "Law 3".
+- **Law 4 — every tool a drive's guidance names must be active in every stage the drive can land
+  in**; a stage-list widening audits the dispatch arms it makes reachable — "Law 4".
+- Human-facing gestures are emitted deterministically by the door, never left to model-facing
+  guidance — "Human-facing gestures belong in the door".
+
+## Law 1 — visible commands, gated write tools, the payload test
+
+Gate on, `extension/substrate/toolGating.ts` installs exactly `gatedToolsFor(stage)` —
+`READ_ONLY_TOOLS` (builtins + the carve-outs justified in place; never enumerate them elsewhere) or
+the refinement stage's own selection. **No save/mutation tool ever rides the gate-ON set**; a custom
+tool is hidden unless carved in; a `pi.registerCommand` command stays **visible regardless of
+mode**. A gated `/command` is thus often the only save affordance the agent sees, and only a human
+gesture toggles the gate (`/plan`, `Ctrl+Alt+P`: `installPlanMode`, `extension/pi/v1/plan.ts`).
+
+**The payload test.** Can the command *carry or recover* the tool's full payload? Recovery is
+artifact-first. A plan is its prose, so `/plan-save` resolves the validated `plan-draft` artifact →
+explicit reviewed text → transcript scrape (`resolvePlanSource`, `extension/authoring/plan/source.ts`
+— legitimate because prose can live in one assistant message). An objective's roadmap is
+structured data no message can carry, so `/objective-save` saves **only** a validated
+`objective_draft` artifact (`objectiveApprovalSave`, `extension/authoring/objective/save.ts`); with no
+draft it writes nothing, exits the gate if active (the on-ramp) and drives the structured save
+through the tool. Never half-write — and never merely *print an instruction to the agent*: a human
+typed the command, so it reads as "do it manually" and nothing happens. When a command's behavior
+flips, delete the dead helper and correct the surfaces that describe it in the same turn —
+`shared/contracts.md`, the in-session context constant (`OBJECTIVE_AUTHORING_CONTEXT`,
+`extension/authoring/objective/prose.ts`), the owning `SKILL.md`.
+
+**Gate on the effective mode floor.** Warm-minted sessions leave `perk:workflow-state.mode`
+undefined (the mint arm of `establishSessionIdentity`, `extension/session/lifecycle.ts`, appends
+identity fields only) and `isReadOnlyMode` treats anything but the literal `"read-only"` as
+writable. Deny only that explicit floor; never require a positive `"read-write"` token the warm
+path never writes (`docs/learned/workflow/mergeability-and-conflict-resolution.md` § "Two
+authorization gaps only review caught").
+
+**Enter is distributed, exit rides the save.** A door seeding a read-only turn enters with
+`if (!gating.isActive()) gating.enter(ctx)` — after input resolution, before `sendUserMessage` — so
+the seeded turn picks up the read-only injections and a cold-door `mode: read-only` handoff is never
+double-appended (`/objective-plan`, `/objective-refine`, the `--plan` cold start). Exit is owned by
+the approval→save seam (`saveThroughApprovalGate`, `extension/authoring/review/approvalGate.ts`:
+exit only after a successful save while read-only), the sanctioned no-save exits
+(`/implement-here`), the draftless on-ramp arms and the `/plan` toggle. A seeding door adds **zero**
+exit logic, or it forks the mode lifecycle.
+
+## Law 2 — no direct GitHub mutation: cold door or drive the session
+
+Composing a `gh`/API mutation in TS never happens (`extension/coldDoorGuard.test.ts` pins that
+perk-CLI execs leave only through `extension/substrate/coldDoor.ts`). Two shapes remain:
+
+- **Direct cold delegation (artifact-first).** A validated artifact or committed workflow state
+  carries the payload, so the handler runs the cold door synchronously through `runColdDoor`
+  (`/plan-save` via `approvalSave`, `/gist-save`'s valid-draft arm via `gistApprovalSave`, `/land`
+  via `landPr` — keyed off the worktree's plan-ref).
+- **Session-driving.** The model must produce the payload, so the handler sets up state and injects
+  `pi.sendUserMessage(<x>Guidance(...) + bindingSuffix(ctx.cwd, "<trigger>"))`; the model works
+  through the canonical tool, which carries the structure. The command itself mutates nothing.
+
+Driving-command conventions:
+
+- **Guidance is a pure, exported `*Guidance(...)` function** rendering a `prompts/` template
+  (`factoryGuidance`, `reconcileGuidance`, `extension/authoring/objective/prose.ts`) — unit-testable
+  offline. **No hardcoded skill pointer in the body** — it rides `bindingSuffix(cwd, trigger)`
+  (`extension/substrate/bindingDelivery.ts`) with the owning `stage:<id>` / `command:<name>` trigger.
+- **Headless behavior is a decision.** Report through `report()` and drive in both branches —
+  unless the command leaves a durable artifact a headless run can consume: the learn factory door
+  (`registerLearnFactoryDoor` — `/learn-docs`, `/learn-code`) gathers the inbox and returns headless.
+- **A terminating tool can still drive the next pass.** `terminate: true` only skips the automatic
+  follow-up call; `pi.sendUserMessage(msg, { deliverAs: "followUp" })` is a separate deliberate turn
+  — orthogonal mechanisms. One helper serves both surfaces and branches on `ctx.isIdle()`: idle
+  (the command) → plain `sendUserMessage`; streaming (the tool's `execute`) → `deliverAs: "followUp"`.
+  Keep the pure impl drive-free (`landPr` vs `driveReconcileAfterLand`, `extension/pi/v1/delivery/land.ts`).
+- **Self-healing drives are gated on a structured sub-result and capped.** `/submit`'s conflict
+  drive (`decideConflictFollowUp`, `extension/delivery/submit.ts`) fires only on
+  `ok && mergeable === false`, bounded by `conflict_resolution_attempts` against
+  `CONFLICT_RESOLUTION_ATTEMPT_CAP` and reset on every clean outcome.
+- **Fresh-context waves are still session-driving.** `/pr-review` drives the parent, whose guidance
+  names `run_pr_review_wave`; children report, the parent posts once (`post_pr_review`) —
+  `docs/learned/workflow/report-waves.md`.
+
+**Test shape.** Registration + headless-safe load (`loadPerkSession({ headful: false })`); pure
+`*Guidance` unit tests (tool + required args named, optional args rendered/omitted, no skill-pointer
+string); drive-helper spy tests over the `isIdle()` branches and the not-called arms;
+`spyInjections` / `runCommandHandler` (`extension/testing/harness.ts`) when the handler itself must
+run under `invokeCommand` — the keyless harness cannot service an injected turn.
+
+## Law 3 — render EVERY cold-door outcome
+
+A warm door wrapping a cold door that returns a **structured non-fatal sub-result** owns rendering
+every outcome — success / failure / absent. A truthy ternary collapsing "failed" into `""` makes a
+real failure indistinguishable from "nothing to do": a silent partial failure that *looks like an
+unwired feature*. When "X isn't working", confirm whether X **ran and was discarded** before
+concluding it never fired.
+
+- **One text field, two doors.** Render the three-way branch (`linked === true` / `false` / absent)
+  into one `content[0].text` both the tool and the `/command` consume (`renderSavePlanOutcome`,
+  `extension/pi/v1/plan.ts`) — one site fixes both paths.
+- **Severity ladder.** A nonfatal sub-step failure on a successful op is `warning` (not `error`: the
+  op succeeded; not `info`: something needs attention): `!ok → error / linked === false → warning /
+  else info`.
+- **Headless fallback is the seam's job.** Every user-facing notice goes through `report()`
+  (`extension/surfaces/report.ts`): headful → `ui.notify(headline, severity)`; headless →
+  `console.error` of the full line at every severity. A bare `ctx.ui.notify` loses the headless
+  signal (and fails the surfaces guard).
+- **Boundary discipline.** The sub-step failure never alters the primary op's control flow:
+  `details.ok` stays `true`, `terminate` stays `true`, the gate exit still fires. The standard is
+  **loud-but-non-fatal + idempotent manual re-run**; no in-call retry loop around the mutation.
+- **Typed refusals are rendered, never re-derived** — branch on the client's `errorType` (the
+  `/stack-review-browser` `no_objective` arm, `extension/pi/v1/codeReview/stack.ts`); partial-failure
+  detail follows `cold-door-client.md`'s fail-arm narrowing or is dropped.
+- **Tests capture severity, not just text** (`notifyEvents` beside `notifies`,
+  `extension/testing/harness.ts`); a fallback path asserts the stderr line itself.
+
+## Law 4 — guidance-named tools in every stage scope
+
+Gate-OFF sessions are stage-scoped: `STAGE_TOOLS` (`toolGating.ts`) subtractively filters the scoped
+universe `PERK_TOOLS ∪ BORROWED_TOOLS` per registry stage. A drive names companion tools by name, so
+**every tool a drive's guidance names must be in `STAGE_TOOLS[stage]` for every stage the drive can
+land in**, or it dead-ends (observed live: a post-land auto-drive in a worktree session whose list
+had filtered the reconcile trio off).
+
+- **The drive-coverage guard** (`extension/substrate/stageTools.test.ts`): the static `DRIVE_COVERAGE`
+  table pairs each gate-OFF drive with every stage it can land in; `referencedScopedTools`
+  word-boundary-scans the rendered guidance (all optional params set) against the scoped universe;
+  every name must be in each listed stage. A row extracting **zero** names fails unless it opts out
+  with `namesNoTools: true` — a tool-free drive still joins the table. Gated-landing drives are
+  excluded: gate-ON ignores stage lists (the gated-stage test + the `READ_ONLY_TOOLS` exact-set pin
+  cover that surface).
+- **Maintenance.** A new drive joins the table; a changed stage list must satisfy every drive that
+  can land there. When the scanner demands a tool, first ask whether the prompt should stop naming
+  gesture tokens (retry guidance belongs on human-facing surfaces) before widening.
+- **Widening audits reachability.** When stage S gains tool T, audit T's execute core for
+  stage-conditional dispatch — an arm that assumed "T can't run at S" is now live. A "no routing
+  change" non-goal is settled by what the change makes reachable, never by intent.
+- **Zero-argument, selector-dependent tools never ride unbound (main-root) sessions** — the cached
+  plan selector can point at a different plan than the one the session launched for.
+- **Plan census.** A plan adding any warm tool names its `toolGating.ts` rows (`PERK_TOOLS` + the
+  stage lists) beside its bindings/skills census. `PERK_TOOLS` is pinned set-equal to what a session
+  registers, so the census doubles as a dormancy enforcer: a dormant-by-design tool rides the same
+  PR as its registration (`report-waves.md`).
+
+## Human-facing gestures belong in the door
+
+Anything a human must *act on* — a command to run, a URL, a checkout line — is emitted
+deterministically on a human-facing surface **by the door** (loud `report()` + a clipboard copy),
+never left inside model-facing guidance. The live shape splits: `handleHunkLaunch`
+(`extension/pi/v1/codeReview/checkout.ts`, serving `/pr-review-terminal`) prints the launch line,
+copies it (`extension/substrate/clipboard.ts`) and auto-launches raced against a soft deadline —
+non-blocking — while the *wait for the human, degrade only on their explicit choice* rule lives in
+the injected `pr-review-terminal` guidance.
+
+## The `registerPerkCommand` wrapper
+
+Every warm perk command registers through `registerPerkCommand` (vendored `/btw` is the one direct
+`pi.registerCommand`): one entry toast — `perk: <cmd> — running…`, `info`, via `report()` —
+synchronously before the first `await`, then the handler awaited with no try/catch. Test
+corollaries: notify-count pins gain one `info` entry; a `.find((m) => m.includes("<cmd>"))` finder
+now matches the toast and passes vacuously — grep **all** finder sites (the status line carries `·`,
+the toast does not); a synchronous spy cannot prove an `await` (yield inside the handler, flag after
+the yield); cross-door **ordering** rides the fake-router `argvFile` capture
+(`extension/testing/harness.ts`).
+
+## History (dated by PR)
+
+- `/objective-save` scraped a message and minted node-less objectives while reporting success
+  (#109/#110); its first fix printed an instruction to the agent (#112/#113).
+- `/plan-save` rendered only the `linked === true` branch of the objective-node sub-result, so a
+  failed `planning → in_progress` advance read as "nothing to do" (#124/#126).
+- The `/objective-sync` retained resolver required an explicit `"read-write"` token and refused every
+  warm session. Two dogfood runs of the retired `/review` door, whose hunk launch line lived only in
+  guidance, set the gesture rule.
+- Adding `plan_review` to the objective-save stage (forced by the guard) made a plan-arm fallthrough
+  reachable from an objective session (#2028); `/stack-review-browser` set the warm/cold parity
+  template — cold `--stack` checkout via `runColdDoor`, one parameterless opener, entry-neutral
+  guidance (#2033).
 
 ## Cross-references
 
-- `extension/authoring/plan/save.ts` (`savePlan`) + `extension/pi/v1/plan.ts` (the three-way `nodeLink` render), the "one text field, two
-  doors" shape
-- `extension/pi/v1/objectiveAuthoring.ts` — the on-ramp / drive-the-session conversion (dead `extractObjectiveMarkdown`)
-- `extension/substrate/toolGating.ts` — `READ_ONLY_TOOLS`, the gate that hides non-carved-in custom tools (all write tools) but not commands
-- `extension/pi/v1/plan.ts` — `/plan off` / `Ctrl+Alt+P` (the gate is a user gesture, not a turn action)
-- `docs/learned/workflow/plan-save-surfaces.md` — the two-surface fidelity gap + `handoff_extra` carrier
-- `docs/learned/workflow/objective-lifecycle.md` — the authoring/save loop the driving commands feed
-- `docs/learned/workflow/skill-bindings.md` — `bindingSuffix` (the skill pointer the guidance rides)
-- `docs/learned/pi/context-injection.md` — the conditional inject-and-strip lifecycle
-- `docs/learned/pi/subagents.md` — the spawn-fresh-context driving shape `/pr-review` uses
-- `extension/pi/v1/delivery/land.ts` — `landPr` (drive-free) + the separate drive helper; the terminating-drive case
-- `docs/learned/workflow/mergeability-and-conflict-resolution.md` — `/submit`'s conflict drive (the sub-result-gated + capped reactive drive)
+- `extension/substrate/toolGating.ts` — `READ_ONLY_TOOLS` / `gatedToolsFor`, `STAGE_TOOLS`,
+  `PERK_TOOLS`; `extension/substrate/stageTools.test.ts` — the drive-coverage guard
+- `extension/substrate/coldDoor.ts` + `docs/learned/workflow/cold-door-client.md` — the client;
+  `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the mode floor, the capped drive
