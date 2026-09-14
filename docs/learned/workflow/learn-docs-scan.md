@@ -65,6 +65,6 @@ and the ambient-block budget (`AMBIENT_ROUTING_BLOCK_MAX_BYTES`); advisory hygie
 
 - `perk/learn/docs_scan.py`, `perk/learn/docs_sync.py`, `tests/test_learned_docs_cues.py`.
 - `docs/user-docs/reference/cli/learn-and-gist.md` — `docs-check` exit codes.
-- `cold-door-launch.md` — the stale-pointer cleanup judgment.
+- `doc-reconciliation.md` § "Correction shapes — the instruct-vs-narrate triage and its arms" — the stale-pointer cleanup judgment (fix instructive text, keep narration).
 - `doc-reconciliation.md` § "Deliberate nonzero stale-pointer advisories (`perk learn docs-check`)".
 - `learn-evidence-pipeline.md`, `learn-harvest-dream-core.md` — the siblings.
