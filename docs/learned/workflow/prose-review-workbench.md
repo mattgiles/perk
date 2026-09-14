@@ -367,7 +367,7 @@ afterthought:
 
 JSX glue and rendered-component behavior still rely partly on recorded browser dogfood. The jsdom
 harness in `toolchain/jsdom-react-component-harness.md` narrows that gap for mount, controlled input,
-keyboard, and focus contracts, while `workflow/doc-reconciliation.md` defines the evidence-record
+keyboard, and focus contracts, while `workflow/binding-design-records.md` defines the evidence-record
 bar. Keep any remaining browser-only geometry or integration leg named as a residual; do not infer
 it from controller tests.
 
