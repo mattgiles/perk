@@ -499,6 +499,34 @@ test("loadPerkConfig: out-of-range [compaction] objective_threshold is ignored",
   }
 });
 
+// --- config schema v2: retired spellings fail safe (Python trips loudly; TS reads nothing) ---
+
+// One case per retired spelling the Python tripwire (`ConfigFileModel._reject_legacy_tables` /
+// `ModelsTable._reject_legacy_model_key`) knows. The TS reader selects exact table names, so
+// every retired spelling must load byte-identically to an empty config — never as a partial or
+// coerced read of the value under its old home.
+const RETIRED_SPELLINGS: ReadonlyArray<readonly [label: string, toml: string]> = [
+  ["[trust] ci", '[trust]\nci = "true"\n'],
+  ["[objective] compact_threshold", '[objective]\ncompact_threshold = "0.8"\n'],
+  ["[stages.<stage>] model", '[stages.implement]\nmodel = "a/opus"\n'],
+  ["[subagents] <agent>", '[subagents]\npr-reviewer = "a/sonnet"\n'],
+  ["[[ci]] rows", '[[ci]]\nname = "lint"\ncommand = "just lint"\n'],
+  ["[models] model", '[models]\nmodel = "a/x"\n'],
+];
+
+for (const [label, toml] of RETIRED_SPELLINGS) {
+  test(`loadPerkConfig: retired ${label} spelling loads byte-identically to an empty config`, () => {
+    const baseline = loadPerkConfig(mkdtempSync(join(tmpdir(), "perk-config-empty-")));
+    assert.deepEqual(loadPerkConfig(repoWith({ "perk.toml": toml })), baseline);
+  });
+}
+
+test("subagentModel: the retired [subagents] table is not read by the execute-time reader", () => {
+  // A distinct read path from loadPerkConfig (the three-file overlay) — pinned on its own.
+  const cwd = repoWith({ "perk.toml": '[subagents]\npr-reviewer = "a/sonnet"\n' });
+  assert.equal(subagentModel(cwd, "pr-reviewer"), undefined);
+});
+
 // --- [skills] non-interference (contracts.md §8.39: the namespace is cold-plane-owned) ---
 
 test("loadPerkConfig: [skills] + [skills.stages] content is inert (non-interference pin)", () => {
