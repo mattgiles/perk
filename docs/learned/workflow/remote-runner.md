@@ -6,298 +6,148 @@ cluster: doors-and-launch
 
 # The remote-runner dispatch + CI execution seam
 
-perk can dispatch a stage drive to a remote runner (today: GitHub Actions) instead of running it on
-the local worktree. The seam spans Python (`src/perk/run/runner.py` dispatch +
-`src/perk/run/run_worker.py` CI entrypoint), a managed CI artifact (`.github/workflows/perk-run.yml` + the `perk-remote-setup`
-composite action), and the TS worker the runner ultimately drives (`extension/workerMain.ts` →
-`driveStage`). This doc captures the non-obvious shape and the load-bearing rules.
+perk can dispatch a drivable stage (`implement`/`address`) to a remote runner — today GitHub
+Actions. The seam: `src/perk/run/launch/remote.py` (`_drive_remote_target`) +
+`src/perk/run/runner.py` dispatch; `src/perk/run/workflow_artifacts.py` renders the managed
+`.github/workflows/perk-run.yml` + `perk-remote-setup` composite; `src/perk/run/run_worker.py` is
+the CI entrypoint that spawns `extension/workerMain.ts`. `shared/contracts.md` §8.13–§8.19 hold
+the normative specs; this doc keeps only the rules, traps, and dated residuals.
 
-> **One Code Rule.** Everything below names files and describes behavior; it does not reproduce
-> source. Read the pointers.
+## Two run identities
 
-## Distillation
+perk's **`run_id`** (a ULID, `src/perk/state/run_id.py`) is the canonical correlation key **and**
+the run-discovery token — a `workflow_dispatch` input embedded in the workflow's `run-name`
+(`perk {stage} · plan #{plan} · {run_id}`, workflow file `runner.GITHUB_ACTIONS_WORKFLOW`). The
+GitHub Actions numeric id is a *separate* runner-side handle, `RunHandle.run_ref`; `perk workflow
+run …` takes the former. `github.trigger_workflow` matches the token by *containment* in
+`display_title`/`name`; `runner.parse_run_name` recovers the fields by an *exact* regex + ULID
+check; `tests/test_workflow_artifacts.py::test_run_name_template_and_parser_are_in_lockstep` holds
+them in lockstep. `plan` / `plan_ref.pr_id` is the **plan issue id**, never a PR number — the PR
+is derived via the issue backend's `get_plan(...).pr`.
 
-- The seam is declarative (rendered YAML, unit-testable) + imperative (live execution) — the
-  declarative-correct / execution-untested GAP is a first-class risk (six defects shipped silent
-  in it) — "The seam in two halves — and the gap between them".
-- The dispatch abstraction is the `Runner` Protocol — "The `Runner` contract".
-- Two distinct run ids exist (perk's `run_id` vs the remote workflow-run handle) — NEVER
-  conflate them — "Two distinct run ids — never conflate".
-- Dispatch is establish-before-consume: write → read back → assert round-trip, hard-fail on
-  mismatch; failed records are kept, never deleted — "Establish-before-consume, realized".
-- Discovery is truth-with-a-local-cache, fail-soft everywhere — "Discovery truth with a local
-  cache, fail-soft everywhere".
-- An unbuildable step lands as a LOUD deferral (`::error::` + exit 1), never a silently-broken
-  placeholder — "Honest fiction vs. loud deferral" (its deferral has since been realized).
-- "Consumer dogfood facts" is a point-in-time validation record, not recurring coverage.
+## Dispatch: establish the record before the trigger
 
-## The seam in two halves — and the gap between them
+`_drive_remote_target` positions nothing locally. After resolving the plan (`no_plan_ref` without
+one) and minting the `run_id`, it applies §8.2 establish-before-consume to its own record:
+`cache.write_dispatch` → `cache.read_dispatch` → assert `run_id` + `plan_ref.pr_id` round-tripped,
+else a **hard** `dispatch_state_unverified`. Only then `Runner.dispatch`; a `RunnerError`/
+`GitHubError` rewrites the record `status:"failed"` + `error` and raises `dispatch_failed` — the
+failed record is **kept**, the only durable trace of a run that never started. The finalize
+write-back (`status:"dispatched"` + `run_handle`) is loud-but-non-fatal; the pre-trigger linkage is
+the gate. `--dry-run` writes and triggers nothing but is **not** subprocess-free: it still shells
+`github.default_branch` when the plan has no pinned base (falling back loudly to `"main"`) —
+never equate "dry-run" with "no shell-out".
 
-The seam has a **declarative** half and an **imperative** half, and only the first is
-regression-testable:
+## Discovery is GitHub truth; the record is a cache
 
-- **Declarative (testable):** init/doctor capability registration, contracts `§8.13`/`§8.14`, and
-  the *rendered* YAML of `perk-run.yml` + the composite action. Unit tests assert the rendered input
-  contract, step presence, and repo-kind branching, and locked every fix.
-- **Imperative (proven live on both worker-entry paths):** the live
-  `plan → dispatch → checkout → setup → drive → report` chain completed real remote `implement`
-  and `address` runs end-to-end through perk's own doors on the self-repo (2026-07-04 — the
-  procedure + captured evidence are `docs/design/archive/remote-runner-e2e-dogfood.md`), and on the
-  consumer path (2026-07-06 — the staged `consumer-npm` entry in a scratch consumer repo on the
-  released distributions; `docs/design/archive/remote-runner-consumer-dogfood.md`). Both proofs are
-  point-in-time — there is no recurring CI-gated live E2E.
+The rendered run-name, enumerable via the GHA run listing, **is** the record that a remote run
+exists: any machine reconstructs the run + a `RunHandle` from it with zero local state
+(`Runner.discover` via `src/perk/run/discovery.py`, a sibling module because `cache` imports
+`runner`; never writing back). The local record only *enriches* and keeps failed/never-triggered
+dispatches visible — §8.17's `both`/`local`/`discovered` rows.
 
-**The cross-cutting lesson (from #176):** a managed CI artifact's string-template body is
-unit-testable, but its end-to-end *execution* is not. The six B1–B6 defects in the Node 2.2 path all
-shipped **silent** in exactly this gap — unit tests cannot catch "a fresh `ubuntu-latest` runner has
-no git identity" or "the consumer worker-clone can't exist because `.pi/git` is gitignored." Treat
-the **declarative-correct / execution-untested gap as a first-class risk** when authoring a CI seam.
-The live dogfood confirmed the lesson: it caught **B7** (the worker's `getAvailable()[0]` default
-picked an alphabetically-first — i.e. oldest, since-removed — model and 404'd the drive) plus a
-fresh-plan checkout failure, both invisible to the unit pins; and it surfaced a useful bootstrap —
-worker-*code* fixes ride the plan branch (the `self` entry resolves from the plan-branch checkout)
-while workflow-*template* fixes go live only after merging to main (dispatch pins main's
-`perk-run.yml`). The consumer dogfood re-confirmed the lesson with **B-pre-c** (zero runtime deps
-+ `--legacy-peer-deps` leaves the worker's import set open) and **B8**
-(`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` at spawn) — both invisible to the unit pins.
+- **Reads fail soft.** `perk workflow run list` never `require_github`s; a discovery
+  `RunnerError` degrades to the local-cache view with one stderr note, per-row overlays likewise,
+  exit code unchanged. The deliberate inversion is `discovery.active_writer_plan_ids` (§8.49): an
+  unreadable observation is never "no active writer", so it propagates.
+- **Control climbs a two-rung ladder** (`resolve_target`, §8.18): a record *with* a handle wins;
+  otherwise (no record, or a handle-less record whose finalize never landed)
+  `discovery.find_discovered_run` — exact `run_id` match — so any machine can cancel/retry a run
+  it never dispatched. `run_not_found` vs `run_not_dispatched` name the two misses.
+- **Retry reuses the same run** (`gh run rerun [--failed]` on the existing `run_ref`): no new
+  ULID, no `cache.write_dispatch`, no pre-flight `observe` gate.
 
-## The `Runner` contract
+## Smoke is an input, not a stage
 
-`src/perk/run/runner.py` defines a runner-agnostic `Runner` **Protocol** + value types
-(`RunHandle` — with its `RunHandleModel` boundary — and `RunObservation`) + the concrete
-`GitHubActionsRunner` + `select_runner`. The **persisted dispatch record** is
-`src/perk/state/cache.py`'s `Dispatch` (frozen dataclass) + `DispatchModel` (the LenientParseModel
-boundary), written/read via `cache.write_dispatch` / `cache.read_dispatch` (+
-`cache.list_dispatch_records`) from the `--remote` drive in `src/perk/run/launch/remote.py`.
-`observe`/`cancel` were implemented at the **library level (not stubbed)** so the supervisor
-surfaces that followed consumed settled shapes; the supervisor *command surfaces*, deferred at the
-time, have since landed — `perk workflow run list`/`cancel`/`retry` are registered
-(`src/perk/cli/commands/workflow/run/__init__.py`; their translation pipeline is §"Runner-control
-seam shape" below). The old `remote_not_driven` error was **retired** in favor of three honest
-error types:
-`no_plan_ref` / `dispatch_state_unverified` / `dispatch_failed`. (Scrub *prose* mentions of a retired
-token too — a retired-token guard catches comments, not just code.)
+`perk doctor workflow smoke-test` (`src/perk/run/workflow_smoke.py::dispatch_smoke`, §8.19) proves
+what no static check can — the workflow dispatches, a job starts, secrets are readable in the
+Actions context — by triggering `perk-run.yml` **directly** with `stage=smoke`, `plan=smoke`,
+`smoke="true"`. Only `Validate required secrets` + the `Smoke check` echo run; checkout, composite
+setup, drive and diagnostics upload all carry `if: inputs.smoke != 'true'`. It mints a `run_id`
+but writes **no** dispatch record and creates no GitHub artifact, and `Runner.discover` drops
+`stage == runner.SMOKE_STAGE`, so supervisor surfaces never see it.
 
-## Two distinct run ids — never conflate
+## Remote worker resolution and consumer dependency staging
 
-This is the easy mistake the contract (`§8.13`) calls out explicitly:
+The runner side is a chain a local Pi launch never runs (§8.14): checkout with `PERK_GH_PAT` →
+the `perk-remote-setup` composite → `gh auth setup-git` → `perk run-worker`, which reconstructs
+the plan-ref from the backend, positions the plan branch (`position_branch`, incremental or
+stacked), materializes handoff/plan-ref/plan-body, delivers `.agents/skills/` via the skills-CLI
+sync — **fatal**, pre-spawn (`skills_sync_failed`; see `skill-bindings.md` for the local-mirror
+contrast) — then spawns `node` on the resolved entry with `PERK_RUN_ID` and forwards its exit
+code. The composite sets the `perk[bot]` git identity `--global` (it runs before the plan-branch
+checkout); the worker loads the managed `.pi/settings.json` packages via disk-layered settings
+behind a terminating-tool preflight (`no_extension_tools`) —
+`docs/learned/pi/headless-session-drive.md`.
 
-- perk **`run_id`** (a ULID) is the canonical correlation key **and** the run-discovery token — a
-  `workflow_dispatch` input embedded in the workflow's `run-name`.
-- the GitHub Actions **numeric run id** is a *separate* runner-side handle, stored as
-  `RunHandle.run_ref`.
+- **Worker-entry resolution is a candidate ladder** (`run_worker.resolve_worker_entry`):
+  `PERK_WORKER_ENTRY` (`env`) → self-repo `extension/workerMain.ts` (`self`) → the consumer npm
+  install under `.pi/npm/node_modules/@mgiles/perk` (`consumer-npm`), **staged** by
+  `_stage_consumer_entry` as a fresh full-package copy (`node_modules` excluded) at
+  `.pi/npm/perk-worker/`, because Node refuses to type-strip `.ts` under any `node_modules`
+  (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`); package-root resources ride along, bare imports
+  walk up to `.pi/npm/node_modules`. A miss is loud (`worker_entry_missing`).
+- **Consumer deps are a two-spec install** (`workflow_artifacts._WORKER_DEPS_CONSUMER`):
+  `@mgiles/perk@{__version__}` plus the *unpinned* `@earendil-works/pi-coding-agent` under
+  `--prefix .pi/npm --legacy-peer-deps`. The SDK spec is load-bearing: `@mgiles/perk` ships zero
+  runtime deps (pi is a peer) and `--legacy-peer-deps` skips peers, so the perk spec alone leaves
+  the worker's import set open. Self-repo: `npm ci`.
+- **In a consumer repo no fix rides a plan branch** — worker code is the npm tarball, the CLI is
+  PyPI, the workflow/composite is the consumer's committed tree; committing worker code to a
+  consumer plan branch flips resolution to `self` and voids the proof.
+- **A retired resolver candidate outlives its cleanup migration.** The `consumer-git` rung is
+  gone, but `settings.GIT_PACKAGE` + `consumer_git_clone_root` stay because doctor's
+  `_remove_orphaned_git_clone` (`src/perk/convergence/doctor/fixes.py`) still removes deployed
+  clones — "stop probing X" is not "delete the derivation of X".
 
-Additionally, reconfirm that **`plan_ref.pr_id` is the plan's GitHub issue ID (the plan issue number)**, *not* the pull request number. The actual PR is derived when needed by calling `github.get_plan(...)` with the issue ID.
+## The declarative/imperative gap
 
-## The pinned `workflow_dispatch` contract
+The seam's **declarative** half — rendered YAML, `init`/`doctor` convergence, the contracts — is
+unit-pinned; its **imperative** half — the live dispatch → checkout → setup → drive → report chain
+— only a real run reaches. Every defect the dogfoods logged lived in that gap: treat
+declarative-correct / execution-untested as a first-class risk in any plan touching the seam, and
+live proofs as point-in-time, never recurring coverage. Fixes deploy asymmetrically —
+`GitHubActionsRunner.dispatch` triggers the **default branch's** `perk-run.yml`, so a template fix
+goes live only after merge, while a self-repo worker-*code* fix rides the plan branch (the `self`
+rung). Editing `PERK_RUN_WORKFLOW` means re-converging the committed self-repo copy in the same
+change — and `perk doctor --fix` converges the *whole* repo, so revert drift outside your surface
+(`init-doctor.md`).
 
-The dispatch contract is pinned so the verify-by-discovery poll works:
+## Test traps
 
-- the workflow file MUST be named `perk-run.yml` (`runner.GITHUB_ACTIONS_WORKFLOW`),
-- typed inputs `{run_id, stage, plan, base}`,
-- `run-name` MUST embed `${{ inputs.run_id }}` so the poll (match `display_title`/`name` *contains*
-  the token) succeeds.
+- **Injected `sleep` must reach the poll.** `github.trigger_workflow` takes `sleep`/`max_attempts`
+  but `GitHubActionsRunner.dispatch` does not forward them (`dispatch_smoke` does). Test
+  backoff/exhaustion at the gateway (`tests/test_github.py`, no-op sleep) and the runner's
+  `GitHubError → RunnerError` wrapping by monkeypatching the gateway to raise — never drive
+  exhaustion through the runner (it sleeps for real).
+- **Relocating a shell step into the Python entry** (`position_branch`) turns inert tests into
+  real git runs. `tests/test_run_worker.py` pairs an autouse *recording* stub with one explicit
+  orchestration-order test (branch → worktree → spawn); an autouse stub alone leaves the wiring
+  unobserved. Stub `gh`/git collaborators at their module seams (`run_report.report_started`,
+  `init.sync_skills`, `git.main_worktree_root`) — a global `subprocess.run` fake swallows them.
+- **Reporting is fail-soft for expected failures only.** `run_report.report_started`/
+  `report_terminal` catch `IssueBackendError` (log + swallow, exit code untouched); anything else
+  is a bug and surfaces (`broad-catch-narrowing.md`).
 
-## Establish-before-consume, realized
+## Residual risks and history (dated)
 
-The `§8.2` discipline here is write-then-read-back-then-assert, hard-fail on mismatch (never a silent
-`pass`): `cache.write_dispatch` → `cache.read_dispatch` → assert `run_id` + `plan_ref.pr_id`
-round-tripped → raise `dispatch_state_unverified` on mismatch. The **pre-trigger linkage is the hard
-gate**; the finalize write-back (status→dispatched + handle) is **best-effort / loud-but-non-fatal**.
-Failed-dispatch records are deliberately **kept** (`status:"failed"` + `error`) for later supervisor
-visibility — never deleted.
-
-The dispatch record rides the existing `.perk/workflow/scratch/runs/<run_id>/dispatch.json` path
-(`cache.run_scratch_dir`) — a path `perk init` already creates and `.gitignore` already excludes
-(the single `/.perk/workflow/` entry). **No new
-cache layout / gitignore / init / doctor change was needed**; reuse the run-scoped scratch dir for
-per-run durable artifacts rather than adding a `SUBDIRS` entry. Cross-ref `plan-ref-lifecycle.md` and
-the `§8.2` establish-before-consume discipline.
-
-## "Dry-run" is not "no subprocess"
-
-A side-effect-free `--dry-run` preview can still **shell out**. `_drive_remote_target`'s dry-run is
-write-free (no `dispatch.json`, no trigger) but still calls `github.default_branch(repo_root)` (a
-`gh repo view`) to build the `inputs` preview — wrapped in a `GitHubError` try/except with a loud
-`"main"` fallback (so a CliRunner test on a repo with no real GitHub remote passes: `gh` fails fast →
-fallback). A cold-door dry-run needing a PR number must **skip PR resolution** (which shells `gh`):
-use `pr_number=0` under `--dry-run` (mirroring `create_pr`'s dry-run) and only `require_github` when
-not dry-run. Don't assume "dry-run" means "no subprocess".
-
-## `sleep` injection must reach the actual poll call
-
-`github.trigger_workflow` takes injectable `sleep`/`max_attempts`, but `GitHubActionsRunner.dispatch`
-may call it **without forwarding them** — so it uses the real `time.sleep` + default `max_attempts`.
-A runner-level exhaustion test would therefore sleep for real (~minutes). The discipline that works:
-test poll/backoff + exhaustion at the **github-gateway level** (with an injected no-op `sleep`), and
-test the runner's `GitHubError→RunnerError` wrapping by **monkeypatching the gateway call to raise**.
-Don't try to exercise exhaustion through the runner.
-
-## Smoke-test short-circuit pattern
-
-To enable universal, zero-spend GHA smoke testing of workflows, introduce an additive `smoke` boolean input inside `workflow_dispatch`. When `smoke` is set to true, the workflow should immediately exit successfully (a fast short-circuit) without spinning up heavy runner jobs or committing real resources. This allows verifying GHA dispatch wiring, API credentials, and input contract integrity instantly and safely.
-
-## Runner-control seam shape
-
-The supervisor controls (such as `cancel` and `retry`/`rerun` commands) operate via a strict translation pipeline:
-1. Resolve the `run_id` (ULID) from command arguments.
-2. Resolve it to a `RunHandle` via the two-rung ladder (`resolve_target`, contracts §8.18): the
-   local dispatch record (`scratch/runs/<run_id>/dispatch.json`) is the **cache accelerator**;
-   on a miss (no record, or a handle-less record whose finalize write-back never landed) fall
-   back to the **canonical GHA discovery** (`discovery.find_discovered_run` — exact match on the
-   run-name's parsed `run_id` token), so any machine can control a run it never dispatched.
-3. Dispatch the action to the resolved runner instance via `select_runner(...)` (the record's
-   runner ref when one exists, else the reconstructed handle's).
-
-### Rerun reuse
-
-When retrying/rerunning a remote execution, the supervisor reuses the existing GHA run ID by invoking `gh run rerun [--failed]` against the runner reference. It does not generate a new local ULID or mutate local dispatch records, ensuring history and tracking remain linked to the single canonical dispatch record.
-
-## Fail-soft orchestrators & subprocess test trap
-
-While event-stream reporting components are called unguarded, their internal reporting logic must be fully guarded (`try/except Exception: log + swallow`) to ensure failures in the telemetry/reporting layer never crash the primary execution loop.
-
-**Subprocess Monkeypatching Test Trap:** When writing unit tests for these orchestrators, be extremely careful with subprocess capturing-fakes in parent test suites. Stub the reporting collaborator directly at its module-function seam (e.g., mocking the high-level python function that interfaces with `gh`) rather than letting the code make real or mock-subprocess shell out. Otherwise, internal `gh` calls can bypass or clobber the parent test suite's capture-fakes, resulting in leaky and brittle test runs.
-
-## Discovery truth with a local cache, fail-soft everywhere
-
-The **canonical existence source for remote runs is GitHub's own run enumeration**: the managed
-workflow's run-name embeds `perk {stage} · plan #{plan} · {run_id}`, `runner.parse_run_name`
-recovers those fields, and `Runner.discover` turns the
-listing into `DiscoveredRun`s (smoke runs and foreign titles filtered out); the orchestration
-lives in `src/perk/run/discovery.py`. Local dispatch JSON
-files (under `scratch/runs/<run_id>/dispatch.json`) are a **cache/correlation accelerator** —
-they enrich discovered rows (plan url, objective backlink, precise dispatch time) and are the
-only durable trace of failed/never-triggered dispatches. Supervisor read surfaces (`run list`,
-the `objective run` gate) enumerate GitHub first and degrade **fail-soft** to the local-cache
-view on a discovery error: wrap every external fetch in fail-soft `try` blocks that log one-line
-stderr notes but never raise or alter exit codes when network or API limits are hit.
-
-## CI execution specifics (Node 2.2)
-
-- **Fresh-runner git identity.** The headless `implement` drive commits via `bash` before `submit`
-  pushes; `ubuntu-latest` has no `user.name`/`user.email` and perk's git layer never sets one. The
-  composite setup must `git config --global` a `perk[bot]` identity — **`--global`** because it runs
-  *before* the plan-branch checkout (a repo-local config against an unfinalized tree is fragile).
-- **Auth model (a stated decision, recorded in `§8.14`).** The runner checks out + pushes with
-  `PERK_GH_PAT` (a PAT), **not** `github.token` — only PAT-pushed commits trigger downstream CI;
-  `GITHUB_TOKEN`-pushed commits don't.
-- **Remote drives deliver `.agents/skills/` via the real skills-CLI sync** — the composite
-  installs the `skills` CLI (`go install` from source; darwin-only release binaries) and
-  `position_worktree` runs the canonical `sync_skills` gesture against the checkout's committed
-  manifests. Fatal at both tiers (a failed install fails the job; a failed sync raises
-  `skills_sync_failed` pre-spawn) — no skills, no drive; see `skill-bindings.md` for the full
-  account, including why the local worktree *mirror* cannot work on the runner.
-- **Worker-entry resolution is a three-candidate ladder:** `PERK_WORKER_ENTRY` (env) → self-repo
-  `extension/workerMain.ts` → the consumer npm install. On the third rung the install lands under
-  `.pi/npm/node_modules/@mgiles/perk`, and `_stage_consumer_entry` re-homes it as a staged
-  full-package copy at `.pi/npm/perk-worker/`, spawning the staged `extension/workerMain.ts`
-  (Node hard-refuses type-stripping `.ts` files under any `node_modules`). Verified anchor:
-  `run_worker.py::resolve_worker_entry`'s `WorkerEntry.source` comment reads
-  `"env" | "self" | "consumer-npm"`. **The `consumer-git` candidate** (the
-  `.pi/git/<host>/<path>/extension/workerMain.ts` clone path) **was retired** once the npm install path
-  superseded it — its `_git_clone_worker_entry` helper is gone (the `from perk.convergence import
-  init` import in `run_worker.py` later returned for an unrelated reason: the positioning-time
-  `init.sync_skills` skills delivery).
-
-- **Resolver-candidate vs migration-helper have independent lifecycles.** Dropping the `consumer-git`
-  *candidate* does **not** mean retiring the clone-path SSOT: `consumer_git_clone_root` + `GIT_PACKAGE`
-  (now in `settings.py`) **stay**, because the doctor forward-migration `_remove_orphaned_git_clone`
-  (`src/perk/convergence/doctor/fixes.py`) still `rmtree`s an orphaned `.pi/git/<host>/<path>`. **Rule: a
-  resolver candidate for a retired path can go the moment a superseding path exists; the *cleanup
-  migration* for already-deployed consumers outlives it** — don't conflate "stop probing X" with
-  "delete the derivation of X's location." (See `init-doctor.md` for the migration seam.)
-
-## Honest fiction vs. loud deferral
-
-Consumer remote drive genuinely can't run end-to-end in CI yet (`.pi/npm` is gitignored and nothing in
-the composite runs `pi` to trigger the extension load). The original posture (per "don't author
-fiction") landed the cheap/correct/unit-testable pieces and made the genuinely-unbuildable consumer
-worker-deps step a **loud `::error::` + `exit 1` deferral**, not a silently-broken `npm ci`.
-
-**Update — the deferral has since been realized.** Once perk owned the `.pi/npm` install, the
-`_WORKER_DEPS_CONSUMER` placeholder went from `echo "::error::…"; exit 1` to the real pinned
-**two-spec** install `npm install @mgiles/perk@{__version__} @earendil-works/pi-coding-agent
---prefix .pi/npm --legacy-peer-deps` — the second spec is the B-pre-c fix: the package ships zero
-runtime deps and `--legacy-peer-deps` skips peers, so without the SDK's real deps the worker's
-import set stays open (anchor: `src/perk/run/workflow_artifacts.py::_WORKER_DEPS_CONSUMER`; `_NPM_NAME =
-NPM_PACKAGE.removeprefix("npm:")` derives from the same settings SSOT). Self-repo keeps `npm ci`.
-The path stayed labeled execution-untested until the 2026-07-06 consumer dogfood proved it live
-(`docs/design/archive/remote-runner-consumer-dogfood.md`) — the durable rule stands: a realized-but-
-unverified path must never be presented as proven.
-
-**Grep ALL contracts mentions when reconciling.** Retiring the deferral needed a **third** §8.14 site
-beyond the two obvious ones (the composite worker-deps bullet + the worker-entry ladder step) — the
-`smoke-test` parenthetical ("the consumer worker-deps step is a loud … deferral"). A
-`grep -n "consumer-git\|Node 2.4\|loud.*deferral\|\.pi/git"` across `contracts.md` surfaced it; the
-deferral was even labelled inconsistently ("Node-2.4" vs "Node-2.2") across sites — version labels are
-drift magnets (reinforces `doc-reconciliation.md`).
-
-### Resolved: the remote worker loads `@mgiles/perk` via disk-layered settings
-
-The e2e worker tier originally surfaced this as an open gap: `defaultCreateRuntime`'s in-memory
-settings **ignored disk `.pi/settings.json` packages**, so a remote worker would have registered
-zero extension tools. Resolved by layering disk settings
-(`SettingsManager.create(worktree, throwawayAgentDir)` + `applyOverrides`) so the managed project
-`packages` list resolves — the same package set as a warm session — backstopped by a post-bind
-preflight: the stage's terminating tool must be registered, else a zero-turn
-`failed`/`no_extension_tools` outcome (contracts.md §8.11). The live proofs have since landed on
-both paths (the two dogfood records). Mechanics: `docs/learned/pi/headless-session-drive.md`.
-
-## Consumer dogfood facts (fix delivery, probe outcomes, residual risks)
-
-- **Consumer fix-delivery asymmetry.** In a consumer repo NO fix rides a consumer plan branch:
-  worker code = the published npm tarball, the CLI = PyPI, the workflow/composite = the consumer's
-  committed tree. Pre-release deviation classes, each a labeled hand-edit re-converged at the next
-  release + `perk init`: template fixes → hand-apply to the committed `action.yml`/`perk-run.yml`;
-  worker code → `npm install github:mattgiles/perk#plan-<N>`; Python CLI →
-  `uv tool install git+https://github.com/mattgiles/perk@plan-<N>`. Committing worker code to the
-  consumer's plan branch would flip entry resolution to `self` and destroy the proof.
-- **A live probe confirms premises even when the predicted symptom never fires.** The first live
-  defect can mask later ones: B-pre-c (zero runtime deps + `--legacy-peer-deps` ⇒ SDK never lands)
-  was verified at the install layer (`added 1 package`), but its predicted `ERR_MODULE_NOT_FOUND`
-  never fired because B8 died earlier in the same spawn. A confirm-or-refute plan arm should
-  anticipate the third outcome: *fails-differently*.
-- **Residual risks, documented not fixed:** (1) the fully-canonical published-registry consumer
-  path stays unproven until a release ships both fixes — the scratch fixture
-  `mattgiles/perk-consumer-dogfood` carries labeled deviations; the first post-release dispatch
-  re-proves it; (2) the SDK spec is deliberately unpinned (evergreen posture — version skew
-  unbounded by tests); (3) the staging copy is unit-tested against synthetic package layouts only;
-  (4) the staged entry's non-fatal `MODULE_TYPELESS_PACKAGE_JSON` reparse warning — the
-  `"type": "module"` fix deliberately deferred (it changes the in-session extension-loading
-  surface).
-
-## Relocating a workflow-shell step into the Python worker
-
-Moving a workflow-shell step into the Python worker **breaks every pre-existing test that
-invokes the entry function** — tests calling the worker entry in a non-git tmp cwd that was
-previously inert start running real git. The working pattern: an autouse no-op stub fixture for
-the drive-mechanics tests, **paired with one explicit orchestration-order test using a recording
-stub** (branch positioning → worktree positioning → spawn). The pairing matters: an autouse stub
-alone leaves the new wiring *unobserved* — nothing would notice if the entry stopped calling the
-positioning step entirely. (The deploy-gap residual is already covered by the
-workflow-template-fixes-go-live-only-after-merging rule above — cross-reference it, don't
-restate.)
-
-## `doctor --fix` re-converge pulls in unrelated drift
-
-Regenerating committed self-repo artifacts via `perk doctor --fix` re-converges the **whole repo**,
-so it can pull in **unrelated pre-existing drift** (a stray skill-manifest entry, a `.gitignore`
-reorder). After a `--fix` re-converge, diff *every* touched file and `git checkout` drift outside the
-plan's surface — `--fix` converges the whole repo, not just your target artifact. Cross-ref
-`init-doctor.md`.
+- **2026-07-04 / 2026-07-06** — the self-repo and consumer chains were each proven live once
+  (`docs/design/archive/remote-runner-e2e-dogfood.md`,
+  `docs/design/archive/remote-runner-consumer-dogfood.md`); their defect logs own the chronicle.
+  Durable lessons: the first live defect can mask the next (B8 died before B-pre-c's predicted
+  `ERR_MODULE_NOT_FOUND` could fire — plan for *fails-differently*); the worker's default model
+  must defer to the SDK's own resolution (B7; `headless-session-drive.md`).
+- **Open at this writing:** no recurring CI-gated live E2E; the published-registry consumer path
+  is proven only through labeled hand-edits in the scratch fixture (no post-release canonical
+  re-proof recorded); the SDK spec in `_WORKER_DEPS_CONSUMER` is deliberately unpinned; the staged
+  entry reparses under a `MODULE_TYPELESS_PACKAGE_JSON` warning (`package.json` declares no
+  `"type"`); the stacked `position_branch` arm has never run live (`objective-delivery.md`).
+- **Retired:** the `consumer-git` worker-entry candidate; the `remote_not_driven` error type (now
+  `no_plan_ref` / `dispatch_state_unverified` / `dispatch_failed`); the consumer worker-deps
+  `::error::` deferral.
 
 ## Cross-references
 
-- `src/perk/run/runner.py` — the `Runner` Protocol, value types, `GitHubActionsRunner`, `select_runner`
-- `src/perk/run/run_worker.py` — the CI worker entrypoint + the three-candidate worker-entry ladder
-- `src/perk/convergence/doctor/fixes.py` — `_remove_orphaned_git_clone` (the cleanup migration that
-  outlives the retired `consumer-git` resolver candidate)
-- `extension/workerMain.ts` — the worker entry the runner drives into
-- `shared/contracts.md` §8.13 (Runner contract + dispatch record) / §8.14 (Actions runner artifact +
-  CI worker entrypoint)
-- `docs/learned/pi/headless-session-drive.md` — the drive the runner dispatches into
-- `docs/learned/workflow/plan-ref-lifecycle.md` — the `cache.plan-ref` lifecycle + establish-before-consume
-- `docs/learned/workflow/init-doctor.md` — the `doctor --fix` re-converge discipline; also the
-  retire-an-orphaned-lifecycle recipe + the `_MIGRATIONS` filesystem-rmtree seam
-- `docs/learned/toolchain/worktree-node-modules.md` — worktree SDK resolution gotchas
+- `shared/contracts.md` §8.13 · §8.14 · §8.17/§8.18 · §8.19 — the normative specs
+- `docs/learned/pi/headless-session-drive.md`, `docs/learned/workflow/skill-bindings.md`,
+  `docs/learned/workflow/init-doctor.md`, `docs/learned/toolchain/worktree-node-modules.md`
