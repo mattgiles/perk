@@ -488,9 +488,11 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
 - **Re-verify at each bump.** A new installed version silently re-asserts every engine fact here:
   follow `docs/developers/pi-subagents-reverify.md` (source re-read, `just ci`, a live report wave
   from a read-write session, the constant bump + its test pin, an archive record). Body version
-  numbers are event stamps, never currency claims. Guidance baseline (doctor constant): 0.65.1.
-  Last source re-read of the mechanics in this doc: the installed 0.67.0 — provenance, not a
-  currency promise, and not a bump of the constant.
+  numbers are event stamps, never currency claims. Guidance baseline (doctor constant): 0.68.0
+  (`docs/design/archive/pi-subagents-0.68.0-reverify.md` — stamped on the source re-read + the
+  doctor half of the leg; the browser-door half was not exercised in that pass). Last source
+  re-read of the mechanics in this doc: the installed 0.68.0 (the package ships its `.ts`
+  sources) — provenance, not a currency promise.
 
 ## Cross-references
 

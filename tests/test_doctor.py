@@ -1049,7 +1049,7 @@ def test_subagent_compat_unreadable_package_json_is_warn(scaffolded_perk_repo, m
 
 def test_subagent_compat_verified_version_stamp_is_pinned():
     # Only a full re-verify (docs/developers/pi-subagents-reverify.md) moves the stamp.
-    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.65.1"
+    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.68.0"
 
 
 # --- subagent-host-tools: the pi-subagents >= 0.67.0 host-tool intersection x pi-fff mode ----
