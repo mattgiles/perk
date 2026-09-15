@@ -3,8 +3,6 @@ name: pr-reviewer
 package: perk
 description: The autonomous /pr-review workflow child — reviews the ACTIVE plan's PR along ONE assigned angle (plan-fidelity first-class) in a fresh, isolated session (so the implementation session's history never biases the review) and returns verdict-deriving structured findings — it never posts and never writes files. The parent /pr-review session reconciles the per-angle findings and posts one verdict-driven outcome. (The human-triaged doors — /pr-review-terminal, /pr-review-browser — use perk.adversarial-reviewer instead, for any PR.) Used by /pr-review.
 model: anthropic/claude-sonnet-4-5
-fallbackModels:
-  - anthropic/claude-haiku-4-5
 tools: read, grep, find, ls, bash
 systemPromptMode: replace
 async: true

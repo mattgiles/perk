@@ -3,8 +3,6 @@ name: scout
 package: perk
 description: "General-purpose read-only analysis lane with no fixed rubric — each spawn's task defines the entire scope (audit a file slice, verify claims against the checkout, census a pattern, summarize a subsystem). It explores read-only and reports back — never editing files, never posting anywhere, never spawning subagents. Spawn every lane with an explicit context: 'fresh' (the def sets no defaultContext, so a configured defaultSubagentContext would otherwise decide) and a fully self-contained task; durable report files and typed reports ride the spawn-time output / outputSchema knobs."
 model: openai/gpt-5.6-terra
-fallbackModels:
-  - openai/gpt-5.6-luna
 tools: read, grep, find, ls, bash
 systemPromptMode: replace
 async: true

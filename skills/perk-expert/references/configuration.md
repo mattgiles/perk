@@ -311,7 +311,7 @@ default.
 | `pr-reviewer` | string (model id) | _(frontmatter default)_ |
 | `review-classifier` | string (model id) | _(frontmatter default)_ — consumed by the `classify_review_feedback` tool at execute time |
 | `objective-explorer` | string (model id) | _(frontmatter default)_ — consumed by the `explore_objective_node` tool at execute time |
-| `conflict-resolver` | string (model id) | _(frontmatter default)_ — read from parent session config at invocation for `resolve_submit_conflicts` and awaited retained resolution in `objective_stack_sync`; native `inherit`/fallback semantics, no new key |
+| `conflict-resolver` | string (model id) | _(frontmatter default)_ — read from parent session config at invocation for `resolve_submit_conflicts` and awaited retained resolution in `objective_stack_sync`; native `inherit` semantics, no new key |
 | `learn-analyst` | string (model id) | _(frontmatter default)_ |
 | `adversarial-reviewer` | string (model id) | _(frontmatter default)_ |
 | `draft-reviewer` | string (model id) | _(frontmatter default)_ |
@@ -334,7 +334,7 @@ review-classifier = "anthropic/claude-haiku-4-5"
 ```
 
 Both submit/address and retained stack conflict resolution consume this existing override from
-the parent session configuration through native foreground structured delegation (including `inherit` and native ordered fallbacks), not model-authored
+the parent session configuration through native foreground structured delegation (including `inherit`), not model-authored
 launch text. No new config key is added. pi-subagents' global `worktree` default
 (`<agent dir>/extensions/subagent/config.json`) must be absent or `false`; it is read once at
 extension activation and anything else refuses every launch of that activation, naming the file,

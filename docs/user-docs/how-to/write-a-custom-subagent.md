@@ -53,7 +53,16 @@ managed definitions (and in the repo-local session auditor). Child calls deliber
 `async` so native workflow awaiting still collects their reports. Reports replace the base
 prompt, inherit neither global/project context nor discovered skills, and omit extension lists
 so runner ambient discovery remains available. Explicit source-bound Ponytail assignment skills
-are separate from discovered-skill inheritance. Models and ordered fallbacks are unchanged.
+are separate from discovered-skill inheritance. Each definition carries exactly one `model:`;
+`[models.subagents]` is the spawn-time override.
+
+pi-subagents ≥ 0.68.0 refuses to load **any** agent definition carrying the removed
+`fallbackModels` frontmatter field — its own load error names the file and the field
+(`Agent '<path>' uses removed frontmatter field 'fallbackModels'. Configure one model instead.`),
+and while it fires, every wave that needs that agent reports zero coverage. Perk-delivered
+definitions are fixed by `perk init` (or `perk doctor --fix`), which reconverges
+`.pi/agents/perk/`; a definition you own is yours to edit — delete the key and keep a single
+`model:` line. There is no replacement field: same-launch model switching was removed upstream.
 
 Report profiles also declare `completionGuard: false`. This is **report-only completion**, and it
 is separate from acceptance: the wave already disables pi-subagents' acceptance contract, while

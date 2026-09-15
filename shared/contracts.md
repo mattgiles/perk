@@ -972,7 +972,9 @@ async absent and the guard field absent (the engine default — it IS expected t
 retaining writer tools and project/skill inheritance true. All twelve explicitly set `inheritGlobalContext: false` and omit both
 `extensions` and `subagentOnlyExtensions` (empty is not equivalent). Reports use ambient runner
 discovery; foreground writers have no ambient extensions or transported Perk handoff. Canonical
-models and ordered fallbacks stay intact, as do exact-source Ponytail skillPath exceptions
+models stay intact — ONE `model:` per def, no `fallbackModels` (pi-subagents ≥ 0.68.0 rejects
+any def carrying that removed field wholesale at load; `[models.subagents]` remains the
+spawn-time override) — as do exact-source Ponytail skillPath exceptions
 (pr/adversarial `ponytail-review`, draft `ponytail`). Explicit assignment skills are not discovered
 skill inheritance. The auditor is not added to the delivered set; user/manual agents are outside
 this closed profile policy. `scout` (`agents/scout.md`) is the general-purpose read-only analysis
@@ -1684,8 +1686,8 @@ prompt; the contracts pin the output shape, not the judgment rubric.
   disclosures belong to parent reconciliation on both UI paths, never review comments or
   synthetic annotations. The aggregate envelope and receipt-only details stay unchanged.
 - **Model** configurable via `[models.subagents] adversarial-reviewer` (both planes; default
-  `anthropic/claude-fable-5`, fallback `anthropic/claude-sonnet-4-5` — a deliberately stronger
-  tier than `pr-reviewer` for security-sensitive untrusted-code review). A legacy
+  `anthropic/claude-fable-5` — a deliberately stronger tier than `pr-reviewer` for
+  security-sensitive untrusted-code review). A legacy
   `guest-reviewer` key is silently ignored on both planes (`extra="ignore"` — no tripwire).
 
 **The `/pr-review-terminal` warm door** (`extension/pi/v1/codeReview/terminal.ts`). The TERMINAL
