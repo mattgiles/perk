@@ -25,8 +25,8 @@ surfaces beside them evolve.
   precedes selectors and subprocess adapters are bounded — "Source-adapter contract craft".
 - PyYAML merge tags, inherited values, and comment-suffixed document markers require lexical and
   semantic evidence — "PyYAML lexical-resolution traps".
-- Python name policy is split — shared node-side predicate, resolution-only selector-string
-  admission, a live-catalog test as the only tripwire — "Python AST and tokenize traps".
+- Python name policy is ONE rule — `is_python_symbol_name` (identifier, non-keyword, NFKC-stable) +
+  parser `python_symbol_selector_name`; a live-catalog test ties both sides — "Python AST and tokenize traps".
 - TypeScript selectors keep one identity scheme per collision bucket and isolate the pinned private
   compiler seam — "TypeScript selector and compiler traps".
 - Frontend wire vocabularies mirror Python manually, endpoint parsers stay local, identities are
@@ -155,25 +155,23 @@ other delimiter variants at the adapter boundary. The YAML adapter is
 
 Python applies NFKC normalization to identifiers, so a source spelling can normalize into a hard
 keyword even when its raw characters do not look reserved — and `ast.parse` hands back the
-*normalized* name. The name policy is **split across two predicates, not one.** The node-side
-predicate `python_symbol_name` (with `python_symbols`) in
-`packages/perk-dev/src/perk_dev/prose_map/python.py` decides which module-body shapes are symbols
-and excludes keyword names; it IS shared — discovery emits `symbol:<name>` from it and the
-adapter's `_resolve` matches AST nodes with it. The selector-*string* admission is a separate,
-resolution-only rule — `_selector_name` in
-`packages/perk-dev/src/perk_dev/prose_review/source_adapter/python.py` (`symbol:` prefix,
-`str.isidentifier()`, `keyword.iskeyword`) — that discovery never consults because it never parses
-a selector string. So the keyword exclusion lives twice and `isidentifier()` once. The drift
-hazard: widening the discovered language on one side (a new `python_symbols` shape, a dotted
-selector grammar) without the other lets the catalog emit a selector the adapter refuses as
-`unsupported-selector`, or lets the adapter admit a shape no catalog emits and no test exercises.
-Nothing in code holds the two together; the tripwire is
-`tests/test_prose_map.py::test_python_owned_prompt_wrappers_are_ast_selected`, which asserts every
-live-catalog Python-backed selector passes the adapter's admission rule, flanked by the per-side
-pins in `tests/test_prose_map_python.py` and
+*normalized* name. The name policy is **one shared rule in one seam**: `is_python_symbol_name`
+(identifier, non-keyword, NFKC-stable) in `packages/perk-dev/src/perk_dev/prose_map/python.py`,
+read by the node-side predicate `python_symbol_name` (with `python_symbols`, which decides which
+module-body shapes are symbols) AND by the selector parser `python_symbol_selector_name` beside
+it. Discovery still interpolates `symbol:<name>` from the node side and never parses a selector
+string; the adapter's `_resolve` admits a raw selector only through the parser, so the adapter
+admits exactly the catalog's language. The NFKC-stability clause is why a raw selector spelling
+that would normalize differently (a fullwidth `for`) is *refused*, never canonicalized: the node
+side is always normalized, so such a spelling is one discovery can never emit. The remaining
+drift hazard is widening `python_symbols`' node shapes (or the selector grammar) on one side
+without the other — the catalog would emit a selector the adapter refuses as
+`unsupported-selector`, or the adapter would admit a shape no catalog emits. The tripwire is
+still `tests/test_prose_map.py::test_python_owned_prompt_wrappers_are_ast_selected`, which asserts
+every live-catalog Python-backed selector passes `python_symbol_selector_name`, flanked by the
+per-side pins in `tests/test_prose_map_python.py` and
 `tests/test_prose_review_source.py::test_python_adapter_rejects_every_unemitted_selector_shape`.
-Extend both predicates in one change and keep those pins green; centralizing the admission is an
-open follow-up lead, not a fact to cite.
+Extend the shape enumeration and the parser in one change and keep those pins green.
 
 Token-stream structural detection anchors on logical lines, not visual columns. Marker count or
 pairing mismatch fails closed; guessing the intended block can edit the wrong prose. Keep producer
@@ -184,7 +182,8 @@ positions. Preserve one line-start table and provide explicit conversions in eac
 an edit, recomposition of untouched prefix, replacement, and untouched suffix is the cheap
 corruption invariant. The owning implementation is
 `packages/perk-dev/src/perk_dev/prose_review/source_adapter/python.py`; the shared node-side
-symbol language (`python_symbols`, `python_symbol_name`) stays in
+symbol language (`python_symbols`, `python_symbol_name`, plus the admission rule
+`is_python_symbol_name` and the selector parser `python_symbol_selector_name`) stays in
 `packages/perk-dev/src/perk_dev/prose_map/python.py`.
 
 Finally, `ast.parse` success does not prove compilability. Run `compile(...)` as a non-executing

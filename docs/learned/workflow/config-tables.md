@@ -30,14 +30,14 @@ the two models, not either table in isolation.
 >   `[[ci.checks]]` rows it green-lights) — the "own section" placement rule below was superseded
 >   by "settings that govern a thing live with the thing" once the map→array migration removed
 >   the wholesale-map collision.
-> - **Residual / validation risk: the TS-side fail-safe paths have thin regression coverage.**
->   The design is "Python trips loudly, TS fails safe" — but only the `[ci] trusted` native-bool
->   path has an explicit negative test (quoted `"true"` ⇒ untrusted). Nothing pins that a legacy
->   `[[ci]]` array yields empty `checks`, or that a legacy `[subagents]` table yields no model
->   overrides, under the new reader; and no test asserts that `perk doctor` on a legacy-config
->   repo surfaces the tripwire *actionably* (the config check fails with the field-path message,
->   but the legacy-spelling case specifically is unpinned). Cheap tests to add if the fail-safe
->   claim ever matters in anger.
+> - **Pinned: the TS-side fail-safe posture and the doctor surface.** The design is "Python
+>   trips loudly, TS fails safe", and both halves have regression pins: the retired-spellings
+>   cases in `extension/substrate/config.test.ts` load each spelling the Python tripwire knows
+>   (`[trust]`, `[objective]`, `[stages.<id>]`, `[subagents]`, `[[ci]]`, `[models] model`)
+>   byte-identically to an empty config (whole-object `deepEqual`), with the execute-time
+>   `subagentModel` reader pinned separately; `tests/test_doctor.py`'s legacy-spelling case
+>   asserts `perk doctor`'s config check fails with the tripwire's own message naming both the
+>   legacy table and its new home.
 
 ## Distillation
 
