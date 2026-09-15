@@ -2,14 +2,18 @@
 
 import ast
 import io
-import keyword
 import token
 import tokenize
 from dataclasses import dataclass
 from typing import Literal
 
 from perk_dev.prose_map.models import RoutedUnit
-from perk_dev.prose_map.python import PythonSymbolCandidate, python_symbol_name, python_symbols
+from perk_dev.prose_map.python import (
+    PythonSymbolCandidate,
+    python_symbol_name,
+    python_symbol_selector_name,
+    python_symbols,
+)
 from perk_dev.prose_review.source_adapter.contract import (
     CheckHintId,
     RangeResolution,
@@ -304,19 +308,10 @@ def _source_range(
     return SourceRange(start=start, end=end)
 
 
-def _selector_name(selector: str) -> str | None:
-    if not selector.startswith("symbol:"):
-        return None
-    name = selector.removeprefix("symbol:")
-    if not name or not name.isidentifier() or keyword.iskeyword(name):
-        return None
-    return name
-
-
 def _resolve(document: _PythonDocument, text: str, selector: str) -> SourceRange | _PythonProblem:
     if document.syntax_problem is not None:
         return document.syntax_problem
-    name = _selector_name(selector)
+    name = python_symbol_selector_name(selector)
     if name is None:
         return _PythonProblem(reason="unsupported-selector")
     assert document.module is not None

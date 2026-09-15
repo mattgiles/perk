@@ -884,6 +884,9 @@ def test_python_adapter_ignores_matrix_operator_on_explicitly_continued_decorato
         "symbol:target ",
         "symbol:target/extra",
         "call-argument:target:value",
+        # The NFKC edge: a fullwidth `for` (U+FF46 U+FF4F U+FF52) normalizes to a hard keyword
+        # discovery could never emit, so the adapter refuses rather than canonicalizes it.
+        "symbol:\uff46\uff4f\uff52",
     ],
 )
 def test_python_adapter_rejects_every_unemitted_selector_shape(selector: str) -> None:
