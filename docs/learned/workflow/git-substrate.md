@@ -62,9 +62,12 @@ the read's result — lives in the substrate, which already knows the `refs/pull
 **When** a locally rendered diff replaces the forge's (GitHub's 406 `too_large`, a forced `--local`)
 and **how** that is disclosed (`diff_source`, `LocalDiffReason`) stays in the gateway
 (`src/perk/github/reviews.py`; see `workflow/github-gateway.md`). Objects are fetched into refs, never
-checked out or executed. Residual: `review_context_cmd.py::_combined_diff` (the stack diff) still
-carries its own temp-ref orchestration beside the substrate's — a fold into one primitive is an open
-follow-up.
+checked out or executed. The stack diff rides the same primitive:
+`stack_merge_base_diff(repo, pr_numbers=…, base_ref=…)` fetches every member head + the base into one
+private namespace, runs the ancestry gate (`check_stack_topology` → `StackTopologyError`, which also
+folds a probe that fails to run into the typed refusal; shared with the checkout worker) and diffs
+base→top; `pr_merge_base_diff` is its single-PR arity, and `review_context_cmd.py::_combined_diff`
+is now only the `UserFacingCliError` translation boundary.
 
 ## Two roots
 
@@ -77,7 +80,8 @@ the cold-door consequence — the launcher must compute both, not derive one fro
 
 ## Cross-references
 
-- `src/perk/substrate/git.py` — `diff_range`, `fetch_refspecs`, `pr_merge_base_diff`, `main_worktree_root`
+- `src/perk/substrate/git.py` — `diff_range`, `fetch_refspecs`, `stack_merge_base_diff`,
+  `pr_merge_base_diff`, `check_stack_topology`, `StackTopologyError`, `main_worktree_root`
 - `tests/test_git.py` — the config-pin controls, the two-stage never-execute control, the argv pins
 - `docs/learned/workflow/github-gateway.md` — the 406 `too_large` fallback and `diff_source` disclosure
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the conflict probe + rebase primitive

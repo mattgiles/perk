@@ -291,6 +291,22 @@ def test_config_check_fails_on_illtyped_value(scaffolded_perk_repo):
     assert "see the config check" in providers_check.detail
 
 
+def test_config_check_fails_on_legacy_spelling_naming_the_new_home(scaffolded_perk_repo):
+    # A retired schema-v2 spelling surfaces through the same `ConfigError` arm as an ill-typed
+    # value, so the doctor detail carries the tripwire's own message — the legacy table AND its
+    # new home — rather than a bare "bad value". One representative spelling: `_config_check`
+    # has no spelling-specific branch, and tests/test_config.py enumerates every mapping.
+    (scaffolded_perk_repo / ".perk" / "config.toml").write_text(
+        '[subagents]\npr-reviewer = "a/sonnet"\n', encoding="utf-8"
+    )
+    config = _config_check(scaffolded_perk_repo)
+    assert config.status == "fail"
+    assert config.message == "config invalid (bad value)"
+    assert "legacy table [subagents]" in config.detail
+    assert "[models.subagents]" in config.detail
+    assert config.remediation
+
+
 def _configure_pi_agent_dir(repo, value):
     (repo / ".perk/config.toml").write_text(f'[pi]\nagent_dir = "{value}"\n', encoding="utf-8")
 

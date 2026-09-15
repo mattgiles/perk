@@ -1088,6 +1088,31 @@ def test_pr_merge_base_diff_unrelated_history_raises_and_leaves_no_refs(git_repo
     assert git.list_refs(clone, "refs/perk/") == []
 
 
+# --- check_stack_topology: the one fail-closed ancestry gate both stack workers share -----
+
+
+def test_check_stack_topology_folds_a_probe_that_cannot_run_into_the_typed_refusal(
+    monkeypatch, tmp_path
+):
+    # The one branch the fold introduced: a probe GitError (spawn failure / timeout) refuses as
+    # StackTopologyError with the COMPLETE stable message plus the probe's own text, chained.
+    # The False / None / linear-chain arms are exercised end-to-end by the checkout and
+    # review-context tests that route through this gate.
+    def failing_probe(*_a, **_k):
+        raise git.GitError("probe failed")
+
+    monkeypatch.setattr(git, "is_ancestor", failing_probe)
+    with pytest.raises(git.StackTopologyError) as excinfo:
+        git.check_stack_topology(tmp_path, heads=[(1, "a" * 40), (2, "b" * 40)])
+    assert str(excinfo.value) == (
+        f"stack topology broken: PR #1 head {'a' * 12} ancestry indeterminate for PR #2 head "
+        f"{'b' * 12} — the combined diff would not contain every layer (sync the stack first)."
+        "\nprobe failed"
+    )
+    assert isinstance(excinfo.value.__cause__, git.GitError)
+    assert str(excinfo.value.__cause__) == "probe failed"
+
+
 # --- sync substrate primitives (update_ref / list_refs / detach / rebase / atomic push) --
 
 

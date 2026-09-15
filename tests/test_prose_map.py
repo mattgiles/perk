@@ -1,5 +1,4 @@
 import json
-import keyword
 from dataclasses import replace
 from pathlib import Path
 
@@ -33,6 +32,7 @@ from perk_dev.prose_map.models import (
     SessionShape,
     UnclassifiedToolFieldIssue,
 )
+from perk_dev.prose_map.python import python_symbol_selector_name
 
 ROOT = Path(__file__).parents[1]
 _TEMPLATE_UNIT = "markdown:prompts/top.md"
@@ -402,10 +402,9 @@ def test_python_owned_prompt_wrappers_are_ast_selected(built: BuildResult) -> No
         "managed:skill-scaffold",
     }
     for candidate in python_backed:
-        assert candidate.selector.startswith("symbol:")
-        name = candidate.selector.removeprefix("symbol:")
-        assert name.isidentifier()
-        assert not keyword.iskeyword(name)
+        # The live-catalog proof that discovery emits only what the adapter admits: the
+        # adapter's actual admission rule, not a local re-derivation of it.
+        assert python_symbol_selector_name(candidate.selector) is not None
         assert candidate.fragments
         assert all(fragment.selector == candidate.selector for fragment in candidate.fragments)
 

@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 from perk_dev.prose_map import discovery
-from perk_dev.prose_map.python import python_symbol_name, python_symbols
+from perk_dev.prose_map.python import (
+    python_symbol_name,
+    python_symbol_selector_name,
+    python_symbols,
+)
 
 
 def test_supported_module_body_nodes_are_enumerated_and_named_in_source_order() -> None:
@@ -93,6 +97,27 @@ def test_discovery_preserves_unicode_and_contextual_soft_keyword_symbols(tmp_pat
         "symbol:type",
         "symbol:café",
     ]
+
+
+@pytest.mark.parametrize(
+    ("selector", "name"),
+    [
+        ("symbol:target", "target"),
+        ("symbol:café", "café"),
+        ("symbol:match", "match"),
+        ("symbol:_private", "_private"),
+        # The one NFKC edge the adapter-boundary matrix does not carry: a fullwidth `café`
+        # (U+FF43 U+FF41 U+FF46 U+00E9) normalizes to a DIFFERENT non-keyword identifier — a
+        # spelling discovery can never emit — so it is refused, never canonicalized. Every other
+        # rejected shape is pinned once, at the adapter boundary
+        # (test_python_adapter_rejects_every_unemitted_selector_shape), which calls this parser.
+        ("symbol:\uff43\uff41\uff46\u00e9", None),
+    ],
+)
+def test_selector_name_admits_only_normalized_non_keyword_identifiers(
+    selector: str, name: str | None
+) -> None:
+    assert python_symbol_selector_name(selector) == name
 
 
 def test_invalid_python_is_translated_at_the_discovery_boundary(tmp_path: Path) -> None:
