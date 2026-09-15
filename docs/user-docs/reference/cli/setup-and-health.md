@@ -98,20 +98,24 @@ unpinned, so the check is an early-warning surface, not a gate: a mismatch says 
 (`docs/developers/pi-subagents-reverify.md`), not "broken".
 The `package` group also carries the report-only `subagent-host-tools` check: it reads the
 installed pi-subagents version, the `PI_FFF_MODE` environment variable, and `pi-fff.json` in the
-launch-precedence agent dir (named by its absolute path in the detail). pi-subagents ≥ 0.67.0
-intersects a child agent's declared tools with the tools the **host** session reports as builtin,
-so a pi-fff running in `override` mode — which re-registers `grep`/`find` under its own name —
-makes every `perk.scout`/`perk.*-reviewer` lane fail at launch and silently strips `grep`/`find`
-from the other report agents. perk-launched sessions inject `PI_FFF_MODE=tools-and-ui` to avoid
-this, so the check names only the operator-owned residue and warns (never fails, no `--fix` arm)
-when the installed version is in the affected range and pi-fff resolves to `override`: an
+launch-precedence agent dir (named by its absolute path in the detail). pi-subagents 0.67.x —
+fixed in 0.68.0 — intersected a child agent's declared tools with the tools the **host** session
+reported as builtin-*sourced*, so a pi-fff running in `override` mode — which re-registers
+`grep`/`find` under its own name — made every `perk.scout`/`perk.*-reviewer` lane fail at launch
+and silently stripped `grep`/`find` from the other report agents. perk-launched sessions inject
+`PI_FFF_MODE=tools-and-ui` to avoid this (kept on newer engines as a harmless additive default),
+so the check names only the operator-owned residue and warns (never fails, no `--fix` arm) when
+the installed version is in the affected range `[0.67.0, 0.68.0)` and pi-fff resolves to `override`: an
 exported `PI_FFF_MODE=override` (wins over the injected default — every perk-launched **and**
 warm session is affected; unset it or set it to `tools-and-ui`), or a `"mode": "override"` in
 that `pi-fff.json` with no valid env value (warm/bare `pi` sessions only — where the browser
 review doors and `/pr-review` also spawn waves; remove the key or set it to `tools-and-ui`).
 FFF stays available as `fffind`/`ffgrep` in either remedy. `info` when pi-subagents is not
 installed or its version is unreadable (`subagent-compat` owns that complaint); `ok` on a
-version outside the range or a non-override mode.
+non-override mode or a version outside the range — the two out-of-range messages differ on
+purpose: below 0.67.0 "does not intersect child tools with host builtins", at/above 0.68.0
+"counts wrapped core slots as host builtins — a pi-fff override of grep/find no longer fails
+review/scout lanes" (the intersection still runs; only its builtin census changed).
 The package group also carries a report-only `ponytail-compat` check for the managed internal
 review dependency. A lazy install that is not present yet is `info`. When installed, doctor verifies
 package identity, the `./skills` export, both exact `SKILL.md` files, and their `ponytail` /
@@ -120,14 +124,6 @@ arm because Perk preserves operator source pins. Set the managed entry's source 
 `npm:@dietrichgebert/ponytail@4.9.0`, run `perk init`, and restart the Perk/Pi session. Runtime
 review-wave preflight is the enforcement boundary: an incompatible Ponytail lane remains explicitly
 uncovered rather than resolving a same-named skill elsewhere.
-The `package` group also carries the report-only `subagent-bridge-config` check: it reads
-`subagents.intercomBridge.mode` from both pi settings scopes — the project `.pi/settings.json`
-and the user scope, `settings.json` inside the same launch-precedence agent dir (named by its
-absolute path in the detail; skipped when no agent dir resolves) — and warns (never fails, no
-`--fix` arm — perk neither sets nor manages the key) when either scope sets it to `"off"` or
-`"fork-only"`. Either value silently disables pi-subagents' supervisor channel for perk's
-fresh-context wave children, so perk's live-streaming review flows degrade to completion-only;
-remove the key (or set it to `"always"`) in the named settings file to restore streaming.
 Beyond these doctor checks, a local `perk <stage>` launch also surfaces a **soft, non-fatal warning
 at session start** when the `@mgiles/perk` extension that pi actually loaded differs in version from the
 running `perk` CLI (pi can lazy-load a stale `npm:` package), pointing you at `perk doctor --fix` to

@@ -191,15 +191,27 @@ perk borrows `@ff-labs/pi-fff` (FFF-powered fuzzy file/content search) in every 
 env default: FFF's `fffind`/`ffgrep` (pre-indexed, frecency-ranked) sit beside the untouched
 builtin `find`/`grep` — the mode warm/bare `pi` sessions already use. The injection is a
 *default*, not a pin — your environment wins at both launch paths (local stage launches and the
-remote CI worker), so `export PI_FFF_MODE=override` opts into FFF-as-`find`/`grep`. Caveat:
-pi-subagents ≥ 0.67.0 intersects a child agent's declared tools with the tools the **host**
-reports as builtin, and override mode re-registers `grep`/`find` under pi-fff's own name — so
-every `perk.scout`/`perk.*-reviewer` lane fails at launch and the other report agents silently
-lose `grep`/`find`. `perk doctor`'s `subagent-host-tools` check names that state (an exported
-`override`, or an `override` mode in the agent dir's `pi-fff.json`, while the installed
-pi-subagents is in the affected range). Any other valid pi-fff mode works the same way. To drop
+remote CI worker), so `export PI_FFF_MODE=override` opts into FFF-as-`find`/`grep`. Caveat (a
+0.67.x-only hazard, fixed in pi-subagents 0.68.0): the 0.67.x engine intersected a child agent's
+declared tools with the tools the **host** reported as builtin-*sourced*, and override mode
+re-registers `grep`/`find` under pi-fff's own name — so every `perk.scout`/`perk.*-reviewer` lane
+failed at launch and the other report agents silently lost `grep`/`find`. `perk doctor`'s
+`subagent-host-tools` check names that state (an exported `override`, or an `override` mode in
+the agent dir's `pi-fff.json`, while the installed pi-subagents is in the affected range
+`[0.67.0, 0.68.0)`); on 0.68.0+ it reports `ok` with "counts wrapped core slots as host builtins".
+Any other valid pi-fff mode works the same way. To drop
 the package's resources entirely in one repo, use the `pi config -l` resource-filter lever (see
 [Scope pi resources per-project](#scope-pi-resources-per-project-pi-config--l)).
+
+## Cheaper prompt caching for review children (`PI_SUBAGENT_CACHE_RETENTION`)
+
+pi-subagents ≥ 0.68.0 reads `PI_SUBAGENT_CACHE_RETENTION` for the prompt-cache retention its
+spawned children request, independent of the parent's `PI_CACHE_RETENTION`. perk's review/scout
+children are short-lived fresh-context lanes that never benefit from long cache retention, so when
+the parent runs with `PI_CACHE_RETENTION=long`, set `PI_SUBAGENT_CACHE_RETENTION=short` in the
+environment (your shell profile, or the same place you export `PI_CACHE_RETENTION`) to stop
+paying long-retention cache writes for every lane. Environment-only: perk has no knob for it and
+injects no default — an unmeasured cost policy stays the operator's call.
 
 ## Write a custom subagent (`.pi/agents/<name>.md`)
 
