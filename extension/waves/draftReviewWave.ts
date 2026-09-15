@@ -56,7 +56,7 @@ export function isDraftReviewAngle(value: string): value is DraftReviewAngle {
 /**
  * The per-lane completion-report schema the wave enforces as its `outputSchema` — the engine
  * injects a `structured_output` tool into each lane and fails any lane whose report is missing
- * or schema-invalid. Closed shapes, `{angle, summary, findings, fyi, streamed}` all required, and
+ * or schema-invalid. Closed shapes, `{angle, summary, findings, fyi}` all required, and
  * DELIBERATELY NO VERDICT FIELD — the human adjudicates every finding in the browser, so there
  * is no clean/actionable derivation to make consistent (the `ADVERSARIAL_REVIEW_REPORT_SCHEMA`
  * rationale). The `angle` enum includes `custom` (the custom lane echoes it). Finding rows are
@@ -71,13 +71,12 @@ export function isDraftReviewAngle(value: string): value is DraftReviewAngle {
 export const DRAFT_REVIEW_REPORT_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["angle", "summary", "findings", "fyi", "streamed"],
+  required: ["angle", "summary", "findings", "fyi"],
   properties: {
     angle: {
       type: "string",
       enum: ["grounding", "scope", "decision-completeness", "risk", "custom", "ponytail"],
     },
-    streamed: { type: "boolean" },
     summary: { type: "string" },
     findings: {
       type: "array",

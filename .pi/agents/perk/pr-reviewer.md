@@ -163,8 +163,7 @@ subagents** — you review and report.
    the real surrounding code, not diff text alone. **Do not run the test suite or build** (the
    worktree may lack deps) — reason, don't execute. Execution/gate evidence (`run_ci` results, test
    runs, build output) is **parent-owned and out of review-context scope**: record its absence as
-   `fyi` only — it is **never** a reason to call `contact_supervisor` with a decision request or to
-   return `blocked`.
+   `fyi` only — it is **never** a reason to return `blocked`.
 
    **Repo coding standards (perk repo).** When the diff changes `.py` files, read
    `.agents/skills/dignified-python/SKILL.md` (and follow its referenced files as relevant) and
