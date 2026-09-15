@@ -233,9 +233,9 @@ test("READ_ONLY_TOOLS: the exact recomposed set + order", () => {
     // The scout-wave carve-in (the authoring sessions' launcher; read-only perk.scout lanes over
     // the delegation family, no worktree writes).
     "run_scout_wave",
-    // The child-side carve-in (gated adopt-children keep the engine's injected tools).
+    // The child-side carve-in (gated adopt-children keep the engine's injected completion tool;
+    // `contact_supervisor` is absent on purpose — every perk wave spawns with the bridge off).
     "structured_output",
-    "contact_supervisor",
     // The draft-review-door carve-in (plan-authoring sessions run gated; the
     // /plan-review-browser companions must stay reachable).
     "push_annotations",

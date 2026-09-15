@@ -44,7 +44,7 @@ function markedFake(marker: string): FakeSubagents {
           key,
           ok: true,
           error: null,
-          report: { angle: key, summary: marker, findings: [], fyi: [], streamed: false },
+          report: { angle: key, summary: marker, findings: [], fyi: [] },
         })),
     },
   ]);
@@ -72,7 +72,7 @@ for (const handoff of [false, true]) {
           waveScriptItems(script).map(({ key }) => ({
             key,
             ok: true,
-            report: { angle: key, summary: "ok", findings: [], fyi: [], streamed: false },
+            report: { angle: key, summary: "ok", findings: [], fyi: [] },
           })),
       })),
     );
@@ -596,10 +596,10 @@ interface PushDetails {
   held_batches?: number;
 }
 
-test("two activations share no annotation ledger/held/alternates state (behavioral)", async () => {
+test("two activations share no annotation ledger/held/ready state (behavioral)", async () => {
   // Two per-activation states over their own endpoints — a regression that moved only the
-  // surface into AnnotationState (leaving the dedupe ledger, the held queue, or the retained
-  // alternates module-global) passes the prime/clear probe test above but fails here.
+  // surface into AnnotationState (leaving the dedupe ledger, the held queue, or the readiness
+  // flag module-global) passes the prime/clear probe test above but fails here.
   const s1 = createAnnotationState();
   const s2 = createAnnotationState();
   const e1 = annotationEndpoint();
@@ -630,27 +630,6 @@ test("two activations share no annotation ledger/held/alternates state (behavior
   assert.equal((repeat.details as PushDetails).pushed, 0);
   assert.equal((repeat.details as PushDetails).skipped?.length, 1, "s1's own dedupe still holds");
 
-  // ALTERNATES isolation: both activations retain a cross-source duplicate (perk:tests owns
-  // the anchor in each ledger); s1's release promotes ONLY s1's retained alternate — s2's
-  // stays retained (a shared alternates map would have been drained by s1's release).
-  const dupe = await push(s1, e1, { angle: "quality", findings: [finding], replace: true });
-  assert.equal((dupe.details as PushDetails).skipped?.length, 1, "s1 retains the alternate");
-  const s2Dupe = await push(s2, e2, { angle: "quality", findings: [finding], replace: true });
-  assert.equal((s2Dupe.details as PushDetails).skipped?.length, 1, "s2 retains ITS OWN alternate");
-  const release = await push(s1, e1, { angle: "tests", findings: [], replace: true });
-  assert.equal((release.details as PushDetails).ok, true);
-  assert.equal((release.details as PushDetails).pushed, 1, "s1's release promoted s1's alternate");
-  assert.ok(
-    e1.posts.some((p) => p.source === "perk:quality" && p.count === 1),
-    "the promoted alternate posts under its own angle in s1",
-  );
-  assert.equal(s1.alternates.size, 0, "s1's promotion consumed s1's candidate");
-  assert.equal(
-    s2.alternates.size,
-    1,
-    "s2 retains ITS OWN alternate — s1's release never drains it",
-  );
-
   // HELD-QUEUE isolation: s1's unreachable endpoint holds its batch; the same anchor still
   // posts through s2 (a shared held queue would veto it or flush s1's batch through e2), and
   // s2's successful call drains nothing of s1's queue.
@@ -663,4 +642,9 @@ test("two activations share no annotation ledger/held/alternates state (behavior
   assert.equal((unaffected.details as PushDetails).pushed, 1, "s2 never carries s1's held work");
   assert.equal((unaffected.details as PushDetails).held, 0);
   assert.equal(s1.held.length, 1, "s2's flush drained nothing of s1's queue");
+
+  // READINESS isolation: s1's readiness flag flips independently of s2's (a shared flag would
+  // make s2 retry in-call before its own browser is up).
+  s1.ready = true;
+  assert.equal(s2.ready, false, "s2's readiness is its own");
 });

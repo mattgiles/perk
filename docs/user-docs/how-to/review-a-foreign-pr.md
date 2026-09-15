@@ -9,19 +9,19 @@ sidebarGroup: "Core workflow"
 # How to review a PR human-in-the-loop
 
 Run a human-in-the-loop adversarial review of a PR — a foreign PR perk's own flow did not
-author, or the active worktree's own PR. Adversarial reviewers fan out asynchronously, finding
-batches stream live onto your review surface, you triage them together, and anything that
-reaches GitHub does so only with your explicit approval. **The command is the surface pick** —
+author, or the active worktree's own PR. Adversarial reviewers fan out asynchronously, their
+reconciled findings land on your review surface when the wave completes, you triage them
+together, and anything that reaches GitHub does so only with your explicit approval. **The command is the surface pick** —
 there is no provider selection:
 
 - **`/pr-review-terminal`** — the [hunk](https://github.com/modem-dev/hunk) terminal TUI.
-  Findings are pushed incrementally into your live hunk session (never the same anchor twice);
+  The reconciled findings are pushed into your live hunk session once the wave completes;
   launches carry `--agent-notes`, so pushed findings appear immediately. Posting is perk's gated
   `submit_pr_review` tool — the sole GitHub path on this door.
 - **`/pr-review-browser`** — [plannotator](https://github.com/backnotprop/plannotator)'s browser
-  UI, opened in the background (the session stays free while you review). Findings stream in as
-  badged annotation waves — and **you post to GitHub from the UI** (perk composes nothing by
-  default).
+  UI, opened in the background (the session stays free while you review). Findings land as
+  badged annotations when the wave completes (a marker in the browser says the wave is running)
+  — and **you post to GitHub from the UI** (perk composes nothing by default).
 
 Both doors share the same arg semantics and three modes: a PR number/URL reviews that
 **foreign** PR (detached, read-only checkout — untrusted foreign code, nothing from it is ever
@@ -59,18 +59,17 @@ explicit PR number/URL. It never silently substitutes another branch.
 
 ## While the reviewers work
 
-Keep Pi open. The parent ends its turn after launch, then resumes on native supervisor messages
-and the matching workflow-completion notice — an idle prompt has not lost the wave. Provisional
-batches are relayed before final reconciliation, even when progress and completion arrive together.
-Final reports are collected and reconciled once; no timer-driven wait loop is needed.
-On the browser surface, provisional findings from uncovered lanes are withdrawn. Findings
-sharing an anchor merge into one final annotation, with the highest severity and each valid
-contributor's labels in the text; the source badge names its owning lane, not every contributor.
+Keep Pi open. The parent ends its turn after launch, then resumes on the matching
+workflow-completion notice — an idle prompt has not lost the wave. Reviewers do not stream: no
+finding reaches the session before the wave finishes, so nothing appears on your surface until
+then (in the browser a `perk:wave` marker says the wave is running). Final reports are collected
+and reconciled once; no timer-driven wait loop is needed. Findings sharing an anchor merge into
+one final annotation, with the highest severity and each valid contributor's labels in the text;
+the source badge names its owning lane, not every contributor.
 
-A lane with no findings may report **“no provisional batches (no findings)”** normally. If a lane
-has findings but submitted no provisional batches, perk warns **“completion-only findings; no
-provisional batches”** in-session and retains its `fyi` explanation. Both remain covered reports;
-false streaming status alone does not establish a broken bridge. These disclosures never post.
+**Decide after the findings arrive.** On the browser surface an early approve/request-changes is
+authoritative and forgoes the reviewer findings — the marker and the door-open notice are there
+so the decision is an informed one.
 If collection remains unsettled after the matching completion notice and bounded grace, the agent
 stops for diagnosis rather than retrying a wave.
 
@@ -97,9 +96,9 @@ stops for diagnosis rather than retrying a wave.
    `PERK_TERMINAL_LAUNCH` to a custom launcher (it receives the worktree as `$1` and the command
    as `$2`) or `PERK_CLIPBOARD_CMD` to a custom copier if the defaults don't fit; set either to
    the empty string to turn that side effect off.
-3. **Review in the hunk TUI, write your own notes.** Finding batches stream into your live hunk
-   session as comments while the reviewers still work; their final reports are reconciled as the
-   source of truth. Read the diff, and leave your own notes in hunk — they are read back as
+3. **Review in the hunk TUI, write your own notes.** When the wave completes, the reviewers'
+   reconciled findings are pushed into your live hunk session as comments in one go; their final
+   reports are the source of truth. Read the diff meanwhile, and leave your own notes in hunk — they are read back as
    first-class review comments. If hunk doesn't come up, the flow **checks in and waits for
    you** — it re-shows the launch command and asks whether to keep checking or continue without
    hunk; it never proceeds on its own. Continuing without hunk (sandboxes can block its loopback
@@ -124,9 +123,11 @@ The same review on plannotator's browser UI — with the posting direction **fli
 1. **The browser opens for you, in the background.** No launch command — the door starts the
    local review server and injects the flow immediately (the PR fetch can take a little while;
    an info note lands when the browser is up).
-2. **Findings stream in live.** Finding batches from the selected reviewers and automatic final
-   Ponytail reviewer are pushed into the browser as badged annotations (`perk:<angle>`) while the
-   reviewers still work — you watch them arrive, and you can annotate freely alongside them.
+2. **Findings land when the wave completes.** A `perk:wave` marker in the browser says the
+   reviewer wave is running; when it completes, the selected reviewers' and the automatic final
+   Ponytail reviewer's reconciled findings are pushed into the browser as badged annotations
+   (`perk:<angle>`) and the marker clears. Annotate freely meanwhile — but decide after they
+   arrive (an early decision forgoes them).
 3. **You post directly from the UI — that is the GitHub path.** The browser posts inline
    comments (yours and perk's pushed findings) to GitHub natively, with an APPROVE or COMMENT
    verdict — never REQUEST_CHANGES (that verdict always travels perk's gated path). A platform

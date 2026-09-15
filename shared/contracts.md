@@ -678,7 +678,7 @@ name-sets — `fffind`/`ffgrep`/`fff-multi-grep` + override's `multi_grep`; the 
 `find`/`grep` are already present — local search belongs in read-only exploration, and FFF's
 frecency state lives under `~/.pi/agent/fff/`, outside the worktree), and the pi-subagents delegation family
 (`subagent`/`wait` + `subagent_supervisor` — kept reachable for the gated delegation flows
-and for answering child `contact_supervisor` asks; **accepted no-backstop posture**: spawned
+and for answering ad-hoc children's supervisor asks; **accepted no-backstop posture**: spawned
 children are unscoped by design (§8.40 adopt-never-impersonates) — `subagent` itself can spawn
 ad-hoc read-write children, a deliberate documented leniency like the arg-blind
 `curl`/`agent-browser` entries, with no agent allowlist) + `explore_objective_node` (the gated
@@ -687,11 +687,13 @@ child over the already-carved-in delegation family and writes nothing to the wor
 `run_scout_wave` (the authoring sessions' scout launcher: one read-only `perk.scout` lane per
 brief over the carved-in delegation family; no worktree writes; reachable in every gated stage
 except `objective-refine` on the `explore_objective_node` precedent; §8.70) + the pi-subagents
-**child-side engine tools** (`structured_output`/`contact_supervisor` — delivered through the
-child prompt runtime/native supervisor bridge, inert when absent in parents; native wakes
-require no wait-tool carve-in; kept active so a gated **adopted** child can
-make the engine-required `structured_output` completion call — stripping it fails an
-`outputSchema` run with `structuredOutputFailed`) — a static union of foreign
+**child-side engine tool** (`SUBAGENT_CHILD_TOOLS` = `structured_output` ONLY — delivered
+through the child prompt runtime, inert when absent in parents; native wakes require no
+wait-tool carve-in; kept active so a gated **adopted** child can make the engine-required
+`structured_output` completion call — stripping it fails an `outputSchema` run with
+`structuredOutputFailed`. `contact_supervisor` is deliberately absent: every perk wave spawns
+with the intercom bridge off — `WAVE_INTERCOM_BRIDGE`, below — so no perk child is ever given
+the supervisor door) — a static union of foreign
 tool names, inert when a package is absent — plus `run_audit_wave` (the gated audit-judge
 session's wave call: its one write is structurally bound to the cold door's handoff
 `audit_bundle_dir`, §8.50 — no caller-supplied path exists), `run_harvest_wave` (the gated
@@ -747,8 +749,8 @@ claims, a worktree stage with `/plan` on. The objective/gist/refinement contexts
 their exact stage). NO injected authoring or adapter context reaches a runner child: the fence is
 `installInjectedContext`'s third argument, fed the composition root's `runnerChild` closure (the
 `isRunnerChild` bit of the runner restriction floor below, re-read every `session_start`) —
-suppression only, never a grant; the `[READ-ONLY MODE]` guidance and the engine's child tools
-(`structured_output`/`contact_supervisor`) are untouched.
+suppression only, never a grant; the `[READ-ONLY MODE]` guidance and the engine's child tool
+(`structured_output`) are untouched.
 
 **The audit-wave write binding (`audit_bundle_dir`, §8.50).** The `perk-dev audit judge` cold
 door stashes `handoff_extra={"audit_bundle_dir": <absolute bundle dir>}` in its launch handoff
@@ -972,7 +974,9 @@ async absent and the guard field absent (the engine default — it IS expected t
 retaining writer tools and project/skill inheritance true. All twelve explicitly set `inheritGlobalContext: false` and omit both
 `extensions` and `subagentOnlyExtensions` (empty is not equivalent). Reports use ambient runner
 discovery; foreground writers have no ambient extensions or transported Perk handoff. Canonical
-models and ordered fallbacks stay intact, as do exact-source Ponytail skillPath exceptions
+models stay intact — ONE `model:` per def, no `fallbackModels` (pi-subagents ≥ 0.68.0 rejects
+any def carrying that removed field wholesale at load; `[models.subagents]` remains the
+spawn-time override) — as do exact-source Ponytail skillPath exceptions
 (pr/adversarial `ponytail-review`, draft `ponytail`). Explicit assignment skills are not discovered
 skill inheritance. The auditor is not added to the delivered set; user/manual agents are outside
 this closed profile policy. `scout` (`agents/scout.md`) is the general-purpose read-only analysis
@@ -1548,8 +1552,9 @@ direct `perk pr review-submit` calls are forbidden on every door:
 
 **The `push_annotations` findings-delivery tool** (`extension/pi/v1/providers/annotations.ts`;
 perk-registered — census §8.40). The finding→annotation mechanics are CODE, not prompt
-discipline: the model hands the tool finding batches (one angle per call; provisional findings
-passed straight through, final arrays reconciled as below) and never composes annotation HTTP. FLOW-SCOPED via the door-primed surface
+discipline: the model hands the tool the reconciled final arrays after collection (one angle per
+call — review waves are completion-only, so nothing reaches the surface before the wave
+finishes) and never composes annotation HTTP. FLOW-SCOPED via the door-primed surface
 handle on PER-ACTIVATION state (`createAnnotationState()`, created once per activation and
 threaded to the installer and every priming door — two bound sessions in one process never
 share/clobber a surface or ledger): the browser door primes it on a PR-mode open with the
@@ -1568,30 +1573,44 @@ the `/plan-review-browser` door, §8.23):
   `source` and `author` as `perk:<angle>`: the plan UI displays `author`, while `source` owns
   replacement. The model cannot supply a different author.
 - **Anchor-keyed dedupe, global across sources** with 201-pinned `ids`: a pushed anchor is never
-  re-pushed (skipped, never refused — re-pushing is always safe); a cross-source duplicate
-  skipped from a FINAL (replace) batch is retained and promoted when the owning source releases
-  the anchor.
-- **Hold-and-accumulate:** a network-level failure holds the mapped batch and returns ok — held
-  ≠ degrade (the door's readiness observer owns degrading); `findings: []` is the pure retry;
-  a zero-item pure clear stays a visible pending operation (`held_batches`).
-- **`replace: true` source-scoped atomic reshape:** delete-then-post supersedes the angle's
-  provisional pushes in one unit — no model-composed annotation HTTP or broad clear exists.
+  re-pushed (skipped, never refused — re-pushing is always safe). Plain dedupe only: with nothing
+  pushed before collection the parent's per-angle arrays are already disjoint, so no
+  cross-source promotion exists.
+- **Hold-and-accumulate with the post-readiness bounded retry:** a network-level failure holds
+  the mapped batch and returns ok — held ≠ degrade (the door's readiness observer owns
+  degrading); `findings: []` is the pure retry; a zero-item pure clear stays a visible pending
+  operation (`held_batches`). BEFORE browser readiness the hold is immediate and the door's
+  readiness notice flushes it. AFTER readiness (`AnnotationState.ready`, set by the observer's
+  `resumeAnnotationDelivery`) the same unit is retried in-call over `HELD_RETRY_DELAYS_MS`
+  (1 s, 3 s, 6 s — a landed DELETE is never replayed) and held only on exhaustion; the result
+  text then says the server is unreachable and the findings belong in-session — no later wake is
+  promised (the present-in-session degrade).
+- **`replace: true` source-scoped atomic reshape:** delete-then-post supersedes any earlier
+  pushes under the angle's source in one unit — no model-composed annotation HTTP or broad clear
+  exists. `replace` stays an optional flag so a plain `findings: []` remains the pure flush.
 - **Browser finalization (parent judgment, existing tool operations):** after typed collection,
-  clear every uncovered source (`launch.requested` minus `collected.covered`) with empty
-  findings and `replace: true`, including failed lanes that streamed before failing. Then
-  reconcile ONLY valid final reports: merge distinct concerns at shared existing anchors,
-  retain contributor angle/severity/confidence labels in merged text, and keep the highest
-  severity with its corresponding confidence. The first contributing lane in covered order
-  owns an anchor. Final per-angle arrays are DISJOINT; duplicate-only covered lanes get empty
-  arrays. Replace each covered source once, including empty arrays; the existing final-alternate
-  promotion preserves the union across replace order. Never recover a report from provisional
-  data or re-send every raw lane array as if that were reconciliation. An owning lane label
-  may differ from a contributing custom lens, which remains attributed in merged text. A held
-  clear/replacement (`held_batches`, even with zero held findings) is not finalization; retain
-  native-wake retry and door-owned degrade, never claim the browser is final while work is held.
+  reconcile ONLY valid final reports: merge distinct concerns at shared existing anchors, retain
+  contributor angle/severity/confidence labels in merged text, and keep the highest severity
+  with its corresponding confidence. The first contributing lane in covered order owns an
+  anchor. Final per-angle arrays are DISJOINT; duplicate-only covered lanes get empty arrays.
+  Push each covered source once with `replace: true`, including empty arrays. Never re-send
+  every raw lane array as if that were reconciliation. An owning lane label may differ from a
+  contributing custom lens, which remains attributed in merged text. A held final push
+  (`held_batches`, even with zero held findings) is not finalization: before readiness the
+  readiness notice flushes it; after readiness the findings are presented in-session.
+- **The code-owned `perk:wave` status marker (`WAVE_STATUS_SOURCE`, `replaceWaveStatus`):** the
+  browser doors' mitigation for the completion-only wave. The two launch/collect tool pairs push
+  ONE unprefixed annotation under the reserved source (review mode a general-scope `comment`;
+  plan mode a `GLOBAL_COMMENT`) as a `replace: true` unit through the same hold/retry path —
+  running (the lane census) at launch success, failed at a zero-lane launch soft-fail,
+  incomplete (the uncovered lanes) or cleared (`body: null` = the pure source clear) at
+  collection; `wave_running`/`no_wave` leave it alone. No primed surface ⇒ no effect (the
+  terminal doors prime none); an HTTP rejection is a warning report, never a throw. The `wave`
+  slug is refused by the decode (`bad_input`) so the MODEL cannot write it: the "never create
+  status annotations" rule stands for the model; only code writes `perk:wave`.
 - **Structural delete authority:** the only expressible DELETE is `?source=perk:<angle>`
-  composed from the validated slug — the human's and other sources' annotations are untouchable
-  by construction.
+  composed from the validated slug (or the code-reserved `perk:wave`) — the human's and other
+  sources' annotations are untouchable by construction.
 - **Failure arms:** `no_surface` (unprimed — loud refusal), `bad_input` (the strict per-mode
   decode), `push_rejected` (any non-201 POST / non-2xx DELETE — plannotator version drift;
   the batch is dropped, retrying cannot succeed).
@@ -1639,7 +1658,7 @@ prompt; the contracts pin the output shape, not the judgment rubric.
   the whole session is `review-context` — inspecting the files it materializes
   (`read`/`grep`/`wc`/`sed -n … | tail -c … | head -c`) is inspection, not execution of the head.
 - **Output (the cross-plane contract).** ONE engine-injected **`structured_output`** call
-  carrying `{angle, summary, findings[], fyi[], streamed: boolean, blocked: boolean}` — the
+  carrying `{angle, summary, findings[], fyi[], blocked: boolean}` — the
   wave's `ADVERSARIAL_REVIEW_REPORT_SCHEMA` (`extension/waves/adversarialReviewWave.ts`); all
   fields required (`fyi` may be `[]`) and **verdict-free** (a human triages downstream; an empty
   `findings` array is the "nothing found" statement, earned by hunting, never manufactured).
@@ -1648,8 +1667,7 @@ prompt; the contracts pin the output shape, not the judgment rubric.
   real-but-unanchorable finding (folded into the review body downstream, never lost); `fyi` is
   in-session triage color, never posted. No fenced-JSON completion block — a lane without a
   schema-valid `structured_output` call fails (honest incompleteness at collect).
-  **`blocked` is a required boolean, never defaulted** (the `streamed` discipline —
-  missing/mistyped is engine-invalid): `false` for every completed angle; `true` ONLY when the
+  **`blocked` is a required boolean, never defaulted** (missing/mistyped is engine-invalid): `false` for every completed angle; `true` ONLY when the
   required review could not complete (context fetch failed, a referenced context file
   unreadable, the hunt stopped early), in which case the schema conditional requires
   `findings: []` and a nonblank `fyi` with the blocker first (then partial, unassessed,
@@ -1659,33 +1677,21 @@ prompt; the contracts pin the output shape, not the judgment rubric.
   `extension/waves/blockedReports.ts` — the exact `prReviewWave.ts` detail string
   `"reviewer blocked:\n" + nonblank fyi joined by "\n"`, else `"required review assessment could
   not complete"`) BEFORE `covered`/`complete` are computed, so `collect_review_wave` reports
-  the lane in `failures` with `complete: false`, never as "no findings"; the browser reconcile's
-  uncovered-source clear withdraws its provisional annotations. Zero retries stand.
-- **The streaming protocol (child-side, unconditional whenever `contact_supervisor` exists).**
-  While reviewing, the child sends **non-blocking** progress-update batches —
-  `contact_supervisor({reason: "progress_update", message})`, the message a short line plus a
-  fenced JSON block `{angle, findings[]}` with each finding in **exactly the completion-report
-  finding shape** above. A streamed finding is never re-sent; batches are small and never empty.
-  Batches are **provisional** — the final completion report is the **complete set** (streamed
-  findings included) and stays the reconcile source of truth. **Children never receive
-  the surface handle** (no hunk/plannotator session, launch, or loopback details in any task) —
-  findings travel ONLY via progress updates and the final report. When `contact_supervisor` is
-  absent or a call fails, the child still completes the full report and explains the issue in
-  `fyi`. Required `streamed` starts false and becomes true only after at least one nonempty
-  finding batch is accepted/queued; normal prose, failed calls and empty progress do not count.
-  Earlier success remains true after a later failure (`fyi` records partial delivery). True is
-  child-reported supervisor submission, not proof of human-visible sink delivery. No findings
-  means no empty batch and false normally. Missing/null/mistyped status fails engine schema
-  validation; no default is invented. A valid false report remains covered with no failure or
-  retry. Collect discloses every covered false lane, including custom/Ponytail, in lane order:
-  empty findings → neutral “no provisional batches (no findings)”; nonempty → warning
-  “completion-only findings; no provisional batches”, via `report()` and model-facing text.
-  `fyi` remains the explanation carrier; false alone never diagnoses a broken bridge. These
-  disclosures belong to parent reconciliation on both UI paths, never review comments or
-  synthetic annotations. The aggregate envelope and receipt-only details stay unchanged.
+  the lane in `failures` with `complete: false`, never as "no findings" (a blocked lane
+  contributes no annotations — nothing was pushed before collection). Zero retries stand.
+- **Completion-only (no progress channel).** The wave spawns with the intercom bridge off
+  (`WAVE_INTERCOM_BRIDGE`), so the child has no `contact_supervisor` tool and receives no
+  appended progress-update template: **its findings travel ONLY via the final `structured_output`
+  report** — nothing reaches the parent before the wave finishes. (pi-subagents ≥ 0.68.0 discards
+  parent-side `progress_update` requests silently; the retired provisional-batch protocol would
+  burn child tool calls on batches nobody receives.) **Children never receive the surface
+  handle** (no hunk/plannotator session, launch, or loopback details in any task). The
+  `collect_review_wave` result is `headline + fenced aggregate + the DATA sentence` — no
+  per-lane delivery disclosures exist; `fyi` is in-session triage color, never a finding or a
+  posted comment.
 - **Model** configurable via `[models.subagents] adversarial-reviewer` (both planes; default
-  `anthropic/claude-fable-5`, fallback `anthropic/claude-sonnet-4-5` — a deliberately stronger
-  tier than `pr-reviewer` for security-sensitive untrusted-code review). A legacy
+  `anthropic/claude-fable-5` — a deliberately stronger tier than `pr-reviewer` for
+  security-sensitive untrusted-code review). A legacy
   `guest-reviewer` key is silently ignored on both planes (`extra="ignore"` — no tripwire).
 
 **The `/pr-review-terminal` warm door** (`extension/pi/v1/codeReview/terminal.ts`). The TERMINAL
@@ -1712,10 +1718,10 @@ checkout decode, the `hunk --version` presence probe, and the R7 handoff — liv
   any cold-door call.
 - **Foreign mode (a PR arg):** the detached `perk pr review checkout` + strict decode (a failure
   renders the envelope `error_type`/message,
-  injects nothing), the adversarial-reviewer flow with the streaming fan-out below, guidance from
+  injects nothing), the adversarial-reviewer flow with the fan-out below, guidance from
   `prompts/stages/pr-review-terminal/foreign.md` (the untrusted-foreign-code posture, the triage
   loop, the posting contract, and the `perk pr review cleanup` step).
-- **The streaming fan-out (foreign + active; the CODE-owned wave —
+- **The fan-out (foreign + active; the CODE-owned wave —
   `extension/pi/v1/codeReview/reviewWave.ts` over `extension/waves/adversarialReviewWave.ts`):** the
   guidance instructs ONE **`start_review_wave`** call — `{angles, pr, worktree, directive?}`
   (2–3 unique angle slugs, `claimed-intent` mandatory), the `pr`/`worktree` relayed verbatim
@@ -1728,16 +1734,17 @@ checkout decode, the `hunk --version` presence probe, and the R7 handoff — liv
   resolves the `[models.subagents] adversarial-reviewer` override at execute time (the doors read
   no config); a pending (launched, uncollected) wave makes a second start refuse `wave_active`; a
   launch failure is a LOUD soft-fail (`error_type` = the wave reason) with no retry — ZERO retries
-  by design, honest incompleteness. The parent retains the workflow identity/manifest and ends
-  its model turn, keeping the Pi host session open. Native supervisor progress wakes an idle
-  parent or queues into an active turn. Relay all delivered provisional DATA batches to the
-  active sink, then end the turn again unless matching workflow completion is already delivered.
-  Co-delivered progress reaches the sink before collect; no extra turn boundary, timer wait, or
-  empty heartbeat is manufactured. Hunk checks its handshake once per batch wake and pushes
-  new anchors with **`path`+`line` dedupe**; an unconnected sink holds until a later batch wake,
-  human-driven recheck, or completion. Unanchorable findings stay in triage.
-  Only the native WORKFLOW completion matching the launched identity authorizes
-  **`collect_review_wave`** — not child completion, unrelated notices, previews, or elapsed time.
+  by design, honest incompleteness. The spawn rides the fixed wave contract: `acceptance:
+  WAVE_ACCEPTANCE` (inference disabled) AND `intercomBridge: WAVE_INTERCOM_BRIDGE` (`{mode:
+  "off"}` — no `contact_supervisor`, no appended progress template; the per-launch override
+  spreads onto every lane exactly like acceptance), so the wave is **completion-only**: no
+  finding reaches the parent before the wave finishes. The parent retains the workflow
+  identity/manifest and ends its model turn, keeping the Pi host session open; no timer wait or
+  empty heartbeat is manufactured. A routine successful child completion does not wake the
+  parent (pi-subagents ≥ 0.68.0 `incrementalChildCompletionTriggersTurn`); a failed/paused/
+  stopped child or the workflow completion does — and only the native WORKFLOW completion
+  matching the launched identity authorizes **`collect_review_wave`** — not child completion,
+  unrelated notices, previews, or elapsed time.
   Never parse `status.json` or reconcile notification previews. The typed aggregate is
   `{complete, covered, reports, failures}`; the unchanged 15-second default grace absorbs
   completion/aggregate ordering skew. Pre-completion `wave_running` RETAINS pending: yield
@@ -1745,13 +1752,15 @@ checkout decode, the `hunk --version` presence probe, and the R7 handoff — liv
   collection: report and stop for owner diagnosis, no polling retry chain or wave relaunch.
   Pending stays collectable; timeout ownership and per-call abort non-propagation are unchanged.
   Successful collection reconciles exactly once; remember the pass is collected and ignore
-  duplicate/late notices or provisional batches over finalized findings. `no_wave`/delete-as-claim
-  and sequential tool registration remain the structural backstops. Reconcile typed **reports** (union +
-  dedupe — the source of truth for triage and posting; streamed batches were provisional; an
-  incomplete wave is reported honestly to the human — uncovered angle(s) + failures, never
-  papered over), pushes any not-yet-pushed remainder, and — when the handshake never connected
-  — applies the unchanged check-in posture (ask, wait, degrade only on the human's explicit
-  choice).
+  duplicate/late notices. `no_wave`/delete-as-claim and sequential tool registration remain the
+  structural backstops. Reconcile typed **reports** (union + dedupe — the source of truth for
+  triage and posting; an incomplete wave is reported honestly to the human — uncovered angle(s)
+  + failures, never papered over), then check the hunk handshake ONCE (`hunk session get`):
+  connected → ONE `hunk session comment apply … --stdin` carrying every anchorable final finding
+  (`line: null` findings ride the triage conversation — no incremental push ledger exists); not
+  connected → the unchanged check-in posture (ask, wait, degrade only on the human's explicit
+  choice). The terminal doors prime no annotation surface, so the `perk:wave` marker is a
+  no-op there.
 - **Active mode (no PR arg):** the shared active-PR resolution ladder — `perk pr url --json` →
   `resolveReviewTarget` carrying the PR's required `baseRef`. The PR's current base is authoritative,
   even when it differs from the plan-ref base or repository default: a published stacked layer is
@@ -1916,18 +1925,25 @@ core), imported by this door and `/pr-review-terminal`'s active mode.
   background open on the checkout's PR `url`; guidance from
   `prompts/stages/pr-review-browser/foreign.md` (the untrusted-foreign-code posture, the
   `perk pr review cleanup` step).
-- **The streaming fan-out (foreign + active; the CODE-owned wave):** ONE `start_review_wave`
-  call and the turn-yielding native-wake relay, exactly as on
-  `/pr-review-terminal` (the wave-tool contract in that door's block) — but each arriving
-  fenced-JSON batch is pushed via ONE `push_annotations` call per angle (the tool contract
-  above: code-owned mapping/dedupe/hold; a held result ≠ degrade), and at reconcile each
-  covered angle's disjoint, reconciled final array rides `replace: true`, including empty
-  final arrays, after clearing uncovered sources as specified above (source-scoped tool
-  operations only). Held batches retry on the next native batch/completion wake or the door's
-  readiness continuation, never a timer. Readiness therefore still resumes final delivery when
-  collection already drained and no further wave notice is coming. Children never receive the
-  surface handle — not the URL, not the port (structurally unrepresentable in the wave). Between wakes and after reconciliation the session is free
-  while the human reviews in the browser; the respond arrives later as a message (one shot).
+- **The fan-out (foreign + active; the CODE-owned wave):** ONE `start_review_wave` call, the
+  completion-only yield, and the workflow-completion-gated collect, exactly as on
+  `/pr-review-terminal` (the wave-tool contract in that door's block) — but the sink is the
+  primed annotation surface: `start_review_wave` pushes the code-owned `perk:wave` marker
+  (running / failed) and `collect_review_wave` clears or rewrites it (complete / incomplete),
+  and after collection each covered angle's disjoint, reconciled final array rides ONE
+  `push_annotations` call with `replace: true`, including empty final arrays (the tool contract
+  above: code-owned mapping/dedupe/hold; source-scoped operations only). A final push held
+  before readiness is flushed by the door's readiness continuation — readiness therefore still
+  resumes final delivery when collection already drained and no further wave notice is coming;
+  a push held after readiness exhausted the tool's bounded retries and the findings are
+  presented in-session (no later wake is promised). Children never receive the surface handle
+  — not the URL, not the port (structurally unrepresentable in the wave). **Early-decision
+  policy:** the human may decide in the browser before the wave lands; that decision is
+  authoritative and forgoes the reviewer findings — the marker plus the door-open notice
+  ("reviewer findings land as annotations when the wave completes — decide after they arrive")
+  are the mitigation, never a gate. After the yield and after reconciliation the session is
+  free while the human reviews in the browser; the respond arrives later as a message (one
+  shot).
 - **Active mode (no PR arg):** the shared active-PR ladder — `perk pr url --json` →
   `resolveReviewTarget` requires the PR's base evidence, but the browser payload remains exactly
   `{cwd, prUrl}` — no `defaultBranch` or local `diffType`. A resolved PR → the same flow re-homed
@@ -1994,8 +2010,9 @@ parallel rebuild.
   shared verbatim with `open_stack_review`). The wave runs with `stack: true` — the lane-task
   discriminator (children fetch `perk pr review-context --pr <top> --stack` and report in
   COMBINED-DIFF coordinates; routing is the parent's job; without `stack`, lane tasks are
-  byte-identical to the single-PR wave). Streaming/`push_annotations`/collect/reconcile are the
-  browser door's contract unchanged. Cleanup: `perk pr review cleanup --pr <top>`.
+  byte-identical to the single-PR wave). The completion-only yield, the `perk:wave` marker,
+  `push_annotations`, collect, reconcile, and the early-decision policy are the browser door's
+  contract unchanged. Cleanup: `perk pr review cleanup --pr <top>`.
 - **Respond routing (`stackRespondMessage`):** exit takes precedence over simultaneous
   approval, feedback, and annotations, returning the closed-without-submitting ask. Approval
   with zero decoded annotations retains the complete existing approval/posting message: the
@@ -2386,21 +2403,21 @@ second `--fix` at `fixed == []`).
   `subagent-compat` (installed pi-subagents version vs the guidance-verified version — `warn`
   on mismatch or an unreadable version, `info` when not installed; no source probes),
   `subagent-host-tools` (warns — never fails, no `--fix` — when the installed pi-subagents is
-  in the affected range `[0.67.0, upper)` — the engine intersects a child's declared tools
-  with the host's builtin-sourced tools and fails review/scout lanes closed on a shadowed
-  builtin — and pi-fff resolves to `override`: the `PI_FFF_MODE` environment (every
-  perk-launched AND warm session), else `pi-fff.json` in the launch-precedence agent dir
-  (warm/bare sessions only — the injected env beats the file), mirroring pi-fff's precedence
-  minus the CLI flag; `info` when pi-subagents is not installed or its version is unreadable),
-  `ponytail-compat` (exact
+  in the affected range `[0.67.0, 0.68.0)` — the 0.67.x engine intersected a child's declared
+  tools with the host's builtin-SOURCED tools and failed review/scout lanes closed on a
+  shadowed builtin; 0.68.0's `getHostBuiltinToolNames` counts wrapped core slots regardless of
+  source, so the intersection still runs but a pi-fff override no longer fails lanes — and
+  pi-fff resolves to `override`: the `PI_FFF_MODE` environment (every perk-launched AND warm
+  session), else `pi-fff.json` in the launch-precedence agent dir (warm/bare sessions only —
+  the injected env beats the file), mirroring pi-fff's precedence minus the CLI flag; the two
+  `ok` arms are distinguishable — below the range "does not intersect child tools with host
+  builtins", at/above 0.68.0 "counts wrapped core slots as host builtins"; `info` when
+  pi-subagents is not installed or its version is unreadable), and `ponytail-compat` (exact
   package/`pi.skills`/skill-file/frontmatter;
-  known-good remediation `npm:@dietrichgebert/ponytail@4.9.0` + `perk init` + session restart),
-  and `subagent-bridge-config` (warns when either settings scope — the project
-  `.pi/settings.json` or the user scope, `settings.json` in the launch-precedence agent dir
-  (`launch_pi_agent_dir`, labeled by absolute path; skipped when no dir resolves or the main
-  checkout config is broken) — sets `subagents.intercomBridge.mode` to `"off"`/`"fork-only"`,
-  which silently disables the supervisor channel the live-streaming review flows require) — all
-  report-only probes warn at worst and have no `--fix` arm. `--fix` also migrates a former
+  known-good remediation `npm:@dietrichgebert/ponytail@4.9.0` + `perk init` + session restart)
+  — all report-only probes warn at worst and have no `--fix` arm. (The former
+  `subagent-bridge-config` probe is retired: perk waves spawn with the intercom bridge off, so
+  a settings-scope `subagents.intercomBridge.mode` no longer affects any perk flow.) `--fix` also migrates a former
   git-clone consumer forward by removing the orphaned clone. A managed piece `--fix` cannot
   verify (a malformed `.pi/settings.json` or pi-subagents `config.json`) is reported on
   `fix_errors` (`<check>: <message>`) instead of aborting the run — the file stays untouched and
@@ -2965,10 +2982,11 @@ ignores the keys (the documented fail-safe posture, pinned by test on both plane
 `npm:pi-subagents`, `npm:@ff-labs/pi-fff`, `npm:@juicesharp/rpiv-ask-user-question`, `npm:@juicesharp/rpiv-todo`) layer within the same `_converge_settings` body —
 perk launches inject the env default `PI_FFF_MODE=tools-and-ui` at **both spawn sites** (local
 `_exec_pi`, remote `_spawn_worker`) with operator env winning by merge order, so every session
-keeps pi's builtin `find`/`grep` beside FFF's additive `fffind`/`ffgrep` — pi-subagents ≥ 0.67.0
-intersects a child's declared tools with the **host's** builtin-sourced tools and fails
-review/scout lanes closed when an extension shadows a builtin by name (pi-fff `override` mode
-re-registers `grep`/`find`), so the injected mode stays additive; `export PI_FFF_MODE=override`
+keeps pi's builtin `find`/`grep` beside FFF's additive `fffind`/`ffgrep` — pi-subagents 0.67.x
+failed review/scout lanes closed when an extension shadowed a builtin by name (pi-fff `override`
+mode re-registers `grep`/`find`; ≥ 0.68.0 counts wrapped core slots as host builtins, so the
+injection is a harmless additive default kept for 0.67.x hosts and to keep the builtins beside
+`fffind`/`ffgrep`); `export PI_FFF_MODE=override`
 is the operator opt-in the `subagent-host-tools` doctor check names — `npm:pi-web-access` is **not
 borrowed**: it is the `web` seam's `default: true` provider, converged via the
 provider path, so a default repo still installs it but deselecting `web`
@@ -4614,12 +4632,12 @@ emitted remains unrecoverable — the human re-runs the door.
   reviewed bytes still current, the destination unchanged, no latch).
 
 - **The two draft-review browser doors** (`/plan-review-browser` /
-  `/objective-review-browser`): the summonable streaming draft reviews — a plannotator
+  `/objective-review-browser`): the summonable draft reviews — a plannotator
   plan-review browser on the working draft (plan: the `plan-draft.md` bytes; objective: the
   RENDERED markdown of the validated `objective-draft.json`, never raw JSON), a
   **draft-reviewer wave** (`start_draft_review_wave`/`collect_draft_review_wave` over
-  `extension/waves/draftReviewWave.ts`) streaming phrase-anchored findings into it via
-  `push_annotations` (plan mode), and the browser decision routed through the existing
+  `extension/waves/draftReviewWave.ts`) whose reconciled phrase-anchored findings land in it
+  via `push_annotations` (plan mode) after collection, and the browser decision routed through the existing
   approval seams — the objective APPROVE arm applies the Direct-Edits carve-out above (a
   revise round, nothing saved). Both doors open the current-review slot before launching and
   route the decision through the ladder ("Draft-review guards" above). Door mechanics — the
@@ -4629,18 +4647,24 @@ emitted remains unrecoverable — the human re-runs the door.
   `pi/v1/providers/plannotatorHandoff.ts` + `pi/v1/draftReviewWaveTools.ts`). Bindings:
   `command:plan-review-browser` → `perk-plan-review-browser`;
   `command:objective-review-browser` → `perk-objective-review-browser` (nudge, §8.9).
-  Both use §8.4's native-wake lifecycle and disclosure rules with their separate draft tool
-  pair: launch/yield, relay provisional batches before matching workflow-completion collection,
-  reconcile once from final reports; early grace retains pending and post-completion grace
-  expiry escalates without polling/relaunch. `DRAFT_REVIEW_REPORT_SCHEMA` requires
-  `{angle, summary, findings[], fyi[], streamed: boolean}` with closed verdict-free objects;
-  findings remain `{phrase, severity, confidence, body}`. The same nonempty accepted-batch
-  status, no-empty-batch rule, unavailable/partial-delivery `fyi`, unchanged coverage, and
-  neutral versus completion-only disclosures apply to all lanes, including custom/Ponytail.
-  Browser finalization follows §8.4: clear uncovered sources, reconcile valid reports into
-  disjoint final arrays, then replace each covered lane including empty arrays. Plan-mode
-  `author` displays the owning lane; merged-body attribution retains valid custom contributions.
-  No status annotations or provisional-report recovery.
+  Both use §8.4's completion-only lifecycle with their separate draft tool pair: launch (the
+  spawn rides the fixed wave contract — `acceptance: WAVE_ACCEPTANCE` + `intercomBridge:
+  WAVE_INTERCOM_BRIDGE`, so children have no progress channel) → yield → the matching
+  workflow-completion notice → collect once → reconcile once from final reports; early grace
+  retains pending and post-completion grace expiry escalates without polling/relaunch.
+  `DRAFT_REVIEW_REPORT_SCHEMA` requires `{angle, summary, findings[], fyi[]}` with closed
+  verdict-free objects; findings remain `{phrase, severity, confidence, body}`. Browser
+  finalization follows §8.4: reconcile valid reports into disjoint final arrays, then push each
+  covered lane once with `replace: true`, including empty arrays. Plan-mode `author` displays
+  the owning lane; merged-body attribution retains valid custom contributions. The model
+  creates no status annotations; the code-owned `perk:wave` marker (a plan-mode
+  `GLOBAL_COMMENT` under the reserved source) is pushed by `start_draft_review_wave` (running /
+  failed) and cleared or rewritten by `collect_draft_review_wave` (complete / incomplete).
+  **Early-decision policy:** a human decision in the browser before the wave lands is
+  authoritative and forgoes the reviewer findings (the decision task's `finally` clears both
+  surfaces, so a late push or marker write refuses/no-ops and the still-pending wave stays
+  collectable); the marker plus the door-open notice ("reviewer findings land as annotations
+  when the wave completes — decide after they arrive") are the mitigation, never a gate.
 
 - **Link/`consumed_learn` recovery carriers → §8.3.** Approval-triggered saves carry **no model
   params**; the **cold** `handoff_extra` carrier (→ §8.2) and the **warm**
@@ -5829,7 +5853,11 @@ exactly and throw loudly outside of. It is exactly four categories:
 1. **Variable substitution** — `{{ <ident> }}` where `<ident>` matches `^[A-Za-z_][A-Za-z0-9_]*$`.
    Nothing else inside `{{ }}`: no filters (`|`), no dotted/attribute access, no parentheses, no
    literals, no operators.
-2. **Include** — `{% include "<path>" %}`, double-quoted root-relative path only.
+2. **Include** — `{% include "<path>" %}`, double-quoted root-relative path only. The first
+   real consumer is `prompts/common/review-wave-yield.md` (the completion-only yield/collect
+   discipline shared by the seven review-door prompts, §8.4/§8.23); the partial is listed in
+   `live.yaml` in its own right (rendered with `vars: {}`) so both planes render it
+   identically standalone AND through every including door.
 3. **Conditionals** — `{% if <cond> %}` / `{% elif <cond> %}` / `{% else %}` / `{% endif %}`,
    where `<cond>` is built only from bare identifiers (truthiness), double-quoted string literals,
    the `==` operator, and the keywords `and`, `or`, `not`. `and` is admitted for boolean
@@ -6272,7 +6300,11 @@ v1 extension RPC (`mission: false`, `context: "fresh"`, and the fixed
 `acceptance: {level: "none", reason}` disable — delivered onto every lane child via pi-subagents'
 workflow-defaults spread, suppressing the auto-inferred acceptance contract whose fenced
 `acceptance-report` completion instruction competes with the engine-validated `structured_output`
-report; module-wide, no opt-out), blocks under the module-owned timeout,
+report; module-wide, no opt-out) beside the fixed `intercomBridge: {mode: "off"}`
+(`WAVE_INTERCOM_BRIDGE` — the same per-launch override spread: no `contact_supervisor` tool and
+no appended progress-update template reach any perk child; pi-subagents ≥ 0.68.0 discards
+parent-side progress updates anyway, so the bridge would be pure cost — module-wide, no
+opt-out), blocks under the module-owned timeout,
 and reads the durable `status.json` aggregate — the wave mechanics are CODE, never model-authored
 prompt mechanics. Analyst reports are **engine-validated structured output** against the TS-owned
 `LEARN_ANALYST_REPORT_SCHEMA` (`extension/learning/analystWave.ts` — closed shape, all-required,
@@ -6384,7 +6416,7 @@ reads. Timeout without completion, interrupted sessions and cross-reload recover
 `ReportWaveLaunchManifest = {requested, runnable, preflightFailures}` on both result arms. `requested`
 preserves the declared lane order; `runnable` is the ordered subset eligible for the rendered
 workflow after required-skill preflight; `preflightFailures` contains one ordered keyed
-`skill-unavailable` row per omission. The streaming adversarial/draft start tools expose this
+`skill-unavailable` row per omission. The adversarial/draft start tools expose this
 nested `launch` shape and say only runnable lanes launched; pending collection still keeps the full
 requested denominator. If every lane is skipped, no workflow is spawned: the start is unavailable,
 its receipt has no children, and the same keyed failures appear in the manifest/result without a
@@ -6836,12 +6868,13 @@ the research families (web union + Linear reads + FFF local search) ride EVERY s
 gate-OFF stage lists (delegation additionally rides the read-only gate — §8.3);
 `LINEAR_MUTATING_TOOLS` (incl. `linear_configure_auth`, which writes `~/.pi/agent/auth.json`)
 and `plannotator_submit_plan` appear in NO stage list — in the census, so subtracted from every
-stage session; bare/unscoped sessions keep full access. Child-session tools
-(`structured_output`/`contact_supervisor`) live in **neither census**: children
+stage session; bare/unscoped sessions keep full access. The child-session tool
+(`structured_output` — `SUBAGENT_CHILD_TOOLS`; `contact_supervisor` never reaches a perk child
+because every wave spawns with the intercom bridge off) lives in **neither census**: children
 stay **stage**-unscoped by design (adopt-never-impersonates above), so the stage filter never
 sees a child session — but the read-only **gate** IS inherited by adopted children (§8.3), so
-the child-side engine tools live in `READ_ONLY_TOOLS` (`SUBAGENT_CHILD_TOOLS`), gate membership
-being their only governance surface.
+the child-side engine tool lives in `READ_ONLY_TOOLS`, gate membership being its only
+governance surface.
 
 **Composition with the read-only gate (§8.3).** Gate ON → `setActiveTools(READ_ONLY_TOOLS)`
 **unchanged** — no stage filter, preserving every gated carve-out byte-for-byte (the gate-ON

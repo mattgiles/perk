@@ -226,18 +226,28 @@ test("guidance: the stack posting protocol — perk-side, dry-run-all-first, bot
   assert.match(text, /owning PR's review body/);
   assert.match(text, /sanity-check its quoted context/);
   assert.match(text, /perk pr review cleanup --pr 42/);
-  // The streaming-wave companions are all named (the drive-coverage guard's inputs).
+  // The review-wave companions are all named (the drive-coverage guard's inputs).
   assert.match(text, /start_review_wave/);
   assert.match(text, /collect_review_wave/);
   assert.match(text, /push_annotations/);
   assert.match(text, /submit_pr_review/);
-  assert.match(text, /Native-wake relay/);
-  assert.match(text, /First clear every uncovered source/);
+  // The shared yield partial is included once; the marker + early-decision policy ride step 1.
+  assert.match(text, /4\. \*\*Yield\.\*\*/);
+  assert.match(text, /Children do not stream — no finding reaches you before the wave finishes/);
+  assert.match(text, /'reviewer wave running' marker until the wave lands/);
+  assert.match(text, /an early decision is authoritative and forgoes the findings/);
+  assert.match(text, /combined-diff coordinates/);
   assert.match(text, /disjoint final per-angle arrays/);
   assert.match(text, /visible source names the owning lane/);
+  assert.match(text, /alongside your findings/);
   assert.doesNotMatch(
     text,
     /subagent_wait|bg_wait|hold your turn open|timeout expiry IS the streaming cadence/,
+  );
+  assert.doesNotMatch(
+    text,
+    /Native-wake relay|Subagent progress update|provisional|streamed|uncovered source/,
+    "the retired streaming protocol is gone",
   );
   assert.match(text, /never compose annotation HTTP/);
   assert.match(text, /replace: true/);

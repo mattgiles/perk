@@ -98,10 +98,11 @@ pre-separator tokens are rejected with usage guidance.
 perk-launched sessions run the borrowed [pi-fff](https://github.com/dmtrKovalenko/fff.nvim)
 search extension in its **additive mode** via an injected `PI_FFF_MODE=tools-and-ui` env default:
 FFF's pre-indexed, frecency-ranked `fffind`/`ffgrep` sit beside pi's builtin `find`/`grep`. Your
-environment wins, so `export PI_FFF_MODE=override` makes `find`/`grep` FFF-backed — but
-pi-subagents ≥ 0.67.0 then fails every scout/reviewer lane at launch (the host no longer reports
-`grep`/`find` as builtins; see the `subagent-host-tools` doctor check in
-[Setup and health](cli/setup-and-health.md)).
+environment wins, so `export PI_FFF_MODE=override` makes `find`/`grep` FFF-backed — on a
+pi-subagents 0.67.x host that failed every scout/reviewer lane at launch (the host no longer
+reported `grep`/`find` as builtin-sourced; 0.68.0 fixed the census — see the `subagent-host-tools`
+doctor check in [Setup and health](cli/setup-and-health.md)). The injection stays as a harmless
+additive default.
 
 ### `perk implement [PLAN]` (alias `impl`)
 

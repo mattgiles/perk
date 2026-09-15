@@ -3,8 +3,6 @@ name: dream-analyst
 package: perk
 description: Audits ONE lane of the run-scoped dream manifest — a slice of docs/learned/ — in a fresh, isolated session — verifies each doc against the current checkout and returns exactly one disposition per doc (keep | revise | merge-into | retire) plus cross-cluster overlap signals, harvest follow-ups, and uncertainties — it never edits files, never authors the objective, never posts anywhere. Used by perk learn dream's analyst wave.
 model: openai/gpt-5.6-terra
-fallbackModels:
-  - openai/gpt-5.6-luna
 tools: read, grep, find, ls, bash
 systemPromptMode: replace
 async: true

@@ -129,13 +129,13 @@ _NPM_QUIET_ENV = {
 }
 
 # perk-launched sessions run the borrowed pi-fff extension in its additive default mode so
-# pi's builtin grep/find stay host-builtins: pi-subagents >= 0.67.0 intersects a child's
-# declared tools with the HOST's builtin-sourced tools and fails review/scout lanes closed
-# when an extension shadows a builtin by name (override mode re-registers grep/find under
-# pi-fff's own source). FFF stays reachable as fffind/ffgrep. Injected-default tier: operator
-# env wins by merge order, so `export PI_FFF_MODE=override` opts back into FFF-as-grep/find —
-# at the cost of that launch failure on affected engine versions (the doctor
-# `subagent-host-tools` check names it).
+# pi's builtin grep/find stay host-builtins: pi-subagents 0.67.x failed review/scout lanes
+# closed when an extension shadowed grep/find by name (override mode re-registers them under
+# pi-fff's own source); >= 0.68.0 counts wrapped core slots as host builtins, so the injection
+# is a harmless additive default kept for 0.67.x hosts and to keep the builtins beside
+# fffind/ffgrep. Injected-default tier: operator env wins by merge order, so
+# `export PI_FFF_MODE=override` opts back into FFF-as-grep/find — at the cost of that launch
+# failure on a 0.67.x engine (the doctor `subagent-host-tools` check names it).
 FFF_MODE_ENV = {"PI_FFF_MODE": "tools-and-ui"}
 
 

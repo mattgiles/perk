@@ -702,8 +702,7 @@ def _subagent_engine_check(root: Path) -> Check:
     Enumerates the perk-owned agent defs delivered into `.pi/agents/perk/*.md` for the detail —
     package/dir drift itself is owned by `settings-wiring` (the `npm:pi-subagents` entry) and
     `subagent-agents` (which materializes + drift-repairs `.pi/agents/perk/`). Status `ok` keeps a
-    healthy repo's summary clean; the detail carries the honesty note that the live-spawn smoke is
-    deferred.
+    healthy repo's summary clean; the detail is a pointer, never a probe (no live spawn).
     """
     perk_dir = root / ".pi" / "agents" / "perk"
     names = sorted(p.stem for p in perk_dir.glob("*.md")) if perk_dir.is_dir() else []
@@ -715,9 +714,7 @@ def _subagent_engine_check(root: Path) -> Check:
         "borrowed pi-subagents engine + perk-owned agent defs",
         "presence owned by settings-wiring; defs delivered into .pi/agents/perk/ by init "
         "(subagent-agents convergence); perk agents are namespaced (package: perk) and invoked "
-        f"by explicit perk.* name; delivered defs: {listing}; legacy .agents/skills/*/SKILL.md "
-        "surface as stray agents (benign — never invoked); the live-spawn smoke is deferred to "
-        "Phase 3 `doctor workflow`.",
+        f"by explicit perk.* name; delivered defs: {listing}.",
     )
 
 
@@ -727,7 +724,7 @@ _SUBAGENTS_PACKAGE_DIRNAME = "pi-subagents"
 
 # The pi-subagents version perk's guidance was source-read against; bumped only on a
 # deliberate re-verify of the guidance (never a pin — the package stays unpinned).
-_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.65.1"
+_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.68.0"
 
 
 def _installed_subagents_version(pkg_dir: Path) -> str | None:
@@ -801,15 +798,16 @@ def _subagent_compat_check(root: Path) -> Check:
 
 
 # The half-open pi-subagents range ``[lower, upper)`` whose engine intersects a child's declared
-# tools with the HOST session's builtin-sourced tools (`getHostBuiltinToolNames` /
+# tools with the HOST session's builtin-SOURCED tools (`getHostBuiltinToolNames` /
 # `resolvePiLaunchToolPlan` in `src/runs/shared/child-tool-plan.ts`): an extension that
 # re-registers a builtin by name (pi-fff in `override` mode shadows grep/find) makes the host
 # appear to lack it, so review/scout-named agents fail closed at launch and every other child
 # silently loses the tool. Lower bound inclusive (the release that introduced the intersection);
-# upper bound ``None`` (open) until an upstream release counts a same-name replacement as
-# providing the builtin (or scopes the intersection off background children) — set the upper
-# bound when that release ships (a re-verify item in `docs/developers/pi-subagents-reverify.md`).
-_SUBAGENTS_HOST_INTERSECTION_AFFECTED: tuple[str, str | None] = ("0.67.0", None)
+# upper bound exclusive — the release whose `getHostBuiltinToolNames` counts any core-named
+# slot regardless of source ("wrapped core slots count"), so a same-name replacement provides
+# the builtin. The intersection itself still runs at/above the upper bound; only the
+# classification changed. A closed range never widens silently — `None` would reopen it.
+_SUBAGENTS_HOST_INTERSECTION_AFFECTED: tuple[str, str | None] = ("0.67.0", "0.68.0")
 
 # Mirrors of pi-fff's `CONFIG_FILE_NAME` / `VALID_MODES` (`src/config.ts` in @ff-labs/pi-fff):
 # the per-agent-dir config file and the only mode values its `parseMode` accepts.
@@ -836,7 +834,7 @@ def _fff_file_mode(agent_dir: Path) -> str | None:
 
     ``None`` when the file is absent/unreadable/invalid JSON/non-dict, the key is missing, or
     the value is not one of pi-fff's valid modes — a malformed file is pi-fff's own load-time
-    complaint, never this reader's (the ``_intercom_bridge_mode`` posture).
+    complaint, never this reader's (a malformed file is pi-fff's own load-time complaint).
     """
     try:
         config = json.loads((agent_dir / _FFF_CONFIG_FILENAME).read_text(encoding="utf-8"))
@@ -898,16 +896,27 @@ def _subagent_host_tools_check(root: Path, *, environ: Mapping[str, str] | None 
         and (upper_parsed is None or parsed < upper_parsed)
     )
     if not in_range:
+        if lower_parsed is not None and parsed < lower_parsed:
+            return Check(
+                "subagent-host-tools",
+                "package",
+                "ok",
+                f"pi-subagents {version} does not intersect child tools with host builtins",
+                "report-only — the package stays unpinned",
+            )
+        # At/above the fixed release: the intersection still runs, but a wrapped core slot
+        # counts as the host providing the builtin — the message must not claim it vanished.
         return Check(
             "subagent-host-tools",
             "package",
             "ok",
-            f"pi-subagents {version} does not intersect child tools with host builtins",
+            f"pi-subagents {version} counts wrapped core slots as host builtins — a pi-fff "
+            "override of grep/find no longer fails review/scout lanes",
             "report-only — the package stays unpinned",
         )
 
     consequence = (
-        "pi-subagents >= 0.67.0 reads the host's builtin-sourced tools only: with pi-fff "
+        "pi-subagents 0.67.x reads the host's builtin-sourced tools only: with pi-fff "
         "shadowing the builtin grep/find by name it fails perk.scout / perk.*-reviewer closed "
         "(`tool contract could not be satisfied … [grep, find]`) and silently drops grep/find "
         "from every other perk agent; the same defect follows any extension that re-registers "
@@ -1042,88 +1051,6 @@ def _ponytail_compat_check(root: Path) -> Check:
         "ok",
         "Ponytail review skills compatible",
         "exact package identity, ./skills advertisement, and both source-bound skills verified",
-    )
-
-
-def _intercom_bridge_mode(settings_path: Path) -> str | None:
-    """Best-effort read of ``subagents.intercomBridge.mode`` from a pi settings JSON file.
-
-    ``None`` when the file is absent/unreadable/invalid JSON/non-dict, the key chain is
-    missing, or the value is not a string — invalid project settings stay the
-    ``settings-wiring`` check's complaint, never this reader's.
-    """
-    try:
-        settings = json.loads(settings_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(settings, dict):
-        return None
-    subagents = settings.get("subagents")
-    if not isinstance(subagents, dict):
-        return None
-    bridge = subagents.get("intercomBridge")
-    if not isinstance(bridge, dict):
-        return None
-    mode = bridge.get("mode")
-    return mode if isinstance(mode, str) else None
-
-
-# The intercom-bridge modes that suppress the supervisor channel-dir stamp for perk's wave
-# children ("fork-only" counts because perk's wave children run fresh-context, which
-# deactivates a fork-only bridge). Any other value — unset, "always", junk — leaves the bridge
-# active, mirroring pi-subagents' own `resolveIntercomBridgeMode` fallback.
-_BRIDGE_DISABLING_MODES = ("off", "fork-only")
-
-
-def _subagent_bridge_config_check(root: Path) -> Check:
-    """Report-only probe for the one config knob that silently disables streaming (``package``).
-
-    pi-subagents' supervisor channel — the delivery path for live wave progress (the
-    `/pr-review-terminal` findings streaming, the browser review doors) — is active by
-    default, but an explicit ``subagents.intercomBridge.mode`` of ``"off"`` (or
-    ``"fork-only"``, since perk's wave children run fresh-context) suppresses the channel-dir
-    stamp: children get no ``contact_supervisor`` and streaming silently degrades to
-    completion-only. perk neither sets nor manages the key, so this is **warn-never-fail with
-    no ``--fix`` arm**. Both scopes are read — project ``.pi/settings.json`` + the user scope,
-    ``settings.json`` in the **launch-precedence agent dir** (:func:`launch_pi_agent_dir`: env
-    → `[pi] agent_dir` → ``~/.pi/agent`` — the store a perk session actually launches with,
-    labeled by its absolute path) — and perk does NOT reimplement pi's cross-scope merge
-    semantics: an explicit off/fork-only in EITHER scope warns, with the offending file(s) +
-    value named in the detail (the ``resource-overrides`` heuristic-honesty precedent).
-    Invalid settings stay quiet here — ``settings-wiring`` owns that complaint. The agent dir
-    is resolved at check time; no resolvable dir (no home) or a broken main-checkout config
-    (the ``config`` check's complaint) simply skips the user scope (fail-open, as befits a
-    report-only check).
-    """
-    scopes = [(root / ".pi" / "settings.json", ".pi/settings.json")]
-    try:
-        resolution = launch_pi_agent_dir(root)
-    except (ConfigError, tomllib.TOMLDecodeError):
-        resolution = None
-    if resolution is not None:
-        user_settings = resolution.path / "settings.json"
-        scopes.append((user_settings, str(user_settings)))
-    offenders = [
-        f"{label}: subagents.intercomBridge.mode = {json.dumps(mode)}"
-        for path, label in scopes
-        if (mode := _intercom_bridge_mode(path)) in _BRIDGE_DISABLING_MODES
-    ]
-    if not offenders:
-        return Check(
-            "subagent-bridge-config",
-            "package",
-            "ok",
-            'intercom bridge active (subagents.intercomBridge.mode unset or "always")',
-        )
-    return Check(
-        "subagent-bridge-config",
-        "package",
-        "warn",
-        "subagents.intercomBridge.mode disables the supervisor channel",
-        "; ".join(offenders),
-        'Remove the key (or set it to "always") in the named settings file — perk\'s '
-        "live-streaming review flows (/pr-review-terminal findings streaming, the browser "
-        "review doors) require the supervisor channel.",
     )
 
 

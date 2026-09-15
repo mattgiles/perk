@@ -29,7 +29,8 @@ test("the session-auditor def completes via structured_output with the schema's 
   assert.match(def, /^name: session-auditor$/m);
   assert.match(def, /^package: perk-dev$/m);
   assert.match(def, /^model: openai\/gpt-5\.6-luna$/m);
-  assert.match(def, /^ {2}- openai\/gpt-5\.6-terra$/m);
+  // pi-subagents >= 0.68.0 rejects a def carrying `fallbackModels` at load: one model only.
+  assert.doesNotMatch(def, /^fallbackModels:/m);
   assert.match(def, /^tools: read, grep, find, ls, bash$/m);
   assert.match(def, /^systemPromptMode: replace$/m);
   assert.match(def, /^async: true$/m);

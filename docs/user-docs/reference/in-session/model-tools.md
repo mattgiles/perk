@@ -163,14 +163,15 @@ For package selection, registration timing, and provider fallback behavior, use 
 
 ## Spawned-child tools
 
-These engine tools are not parent-stage tools. They exist only in spawned-child contexts and are
-kept reachable when a child adopts a read-only gate.
+This engine tool is not a parent-stage tool. It exists only in spawned-child contexts and is
+kept reachable when a child adopts a read-only gate. (`contact_supervisor` is absent on purpose:
+perk spawns every wave with the pi-subagents intercom bridge off, so no perk child has a
+supervisor channel — review waves are completion-only.)
 
 <!-- BEGIN child tool census -->
 | Purpose | Tool |
 | --- | --- |
 | Schema-validated completion | `structured_output` |
-| Child-to-parent coordination | `contact_supervisor` |
 <!-- END child tool census -->
 
 ## Gating and stage scoping
@@ -210,7 +211,7 @@ Perk-owned report waves deliver the constant `perk.parent-restrictions/1 = {read
 packet and `worktree: false` to every native runner child. The packet — or a malformed /
 unsupported-version one — establishes a read-only floor before lifecycle work that gate exit, later
 input or tree navigation cannot clear; failed mode persistence is loud and leaves the floor active.
-No packet is never a write grant. `structured_output` and `contact_supervisor` stay allowlisted;
+No packet is never a write grant. `structured_output` stays allowlisted;
 `/btw` mirrors the gate. Manual launches and foreground children are outside this channel.
 
 ### Stage tool diet

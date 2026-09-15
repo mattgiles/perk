@@ -43,10 +43,12 @@ whose commits don't actually stack is `stack_topology_broken` (sync the stack fi
    from it is executed), and opens plannotator on the combined diff in the background.
    Resolution warnings (train blockers, recorded-vs-observed head drift) are notes, not
    refusals.
-2. **Reviewers stream in.** One adversarial wave runs over the **combined diff** (the reviewer
-   children fetch per-member context — each layer's own diff plus the combined diff — with
-   `perk pr review-context --pr <top> --stack`). Findings arrive as badged `perk:<angle>`
-   annotations in the browser while the session stays free.
+2. **Reviewers run; findings land when the wave completes.** One adversarial wave runs over the
+   **combined diff** (the reviewer children fetch per-member context — each layer's own diff
+   plus the combined diff — with `perk pr review-context --pr <top> --stack`). A `perk:wave`
+   marker in the browser says the wave is running; when it completes, the reconciled findings
+   arrive as badged `perk:<angle>` annotations and the marker clears. The session stays free
+   meanwhile — decide after they arrive (an early decision forgoes them).
 3. **Triage in the browser, then close it.** Annotate, edit, or dismiss findings as usual.
    This is a **local-diff session with no attached PR**, so there is no posting from the UI —
    submitting your decision returns it and any annotations to the session. An approval with

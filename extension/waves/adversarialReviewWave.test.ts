@@ -39,7 +39,6 @@ function okEntry(key: string): unknown {
       summary: "solid",
       findings: [],
       fyi: [],
-      streamed: false,
       blocked: false,
     },
   };
@@ -56,7 +55,6 @@ function blockedEntry(key: string, fyi: string[]): unknown {
       summary: "could not review",
       findings: [],
       fyi,
-      streamed: false,
       blocked: true,
     },
   };
@@ -188,7 +186,7 @@ test("ADVERSARIAL_REVIEW_REPORT_SCHEMA pins the verdict-free report shape (close
     allOf: unknown[];
   };
   assert.equal(s.additionalProperties, false);
-  assert.deepEqual(s.required, ["angle", "summary", "findings", "fyi", "streamed", "blocked"]);
+  assert.deepEqual(s.required, ["angle", "summary", "findings", "fyi", "blocked"]);
   assert.deepEqual(s.properties.angle.enum, [
     "claimed-intent",
     "correctness",
@@ -202,19 +200,12 @@ test("ADVERSARIAL_REVIEW_REPORT_SCHEMA pins the verdict-free report shape (close
   assert.equal(s.if, undefined);
   assert.equal(s.properties.blocked.type, "boolean");
   assert.equal(s.allOf.length, 1);
-  assert.deepEqual(Object.keys(s.properties), [
-    "angle",
-    "streamed",
-    "blocked",
-    "summary",
-    "findings",
-    "fyi",
-  ]);
+  assert.deepEqual(Object.keys(s.properties), ["angle", "blocked", "summary", "findings", "fyi"]);
 });
 
 test("ADVERSARIAL_REVIEW_REPORT_SCHEMA blocked arm: empty findings + at least one nonblank fyi (the pr-review conditional shape)", () => {
   const validator = Compile(ADVERSARIAL_REVIEW_REPORT_SCHEMA);
-  const base = { angle: "claimed-intent", summary: "s", findings: [], fyi: [], streamed: false };
+  const base = { angle: "claimed-intent", summary: "s", findings: [], fyi: [] };
   const finding = {
     path: "a.ts",
     line: 1,
@@ -279,10 +270,11 @@ test("the agent def completes via structured_output with the schema's required f
     "the completion step must instruct ONE structured_output call",
   );
   assert.match(def, /\*\*required fields:/);
-  assert.match(def, /send no empty batch and return `streamed: false`/);
-  assert.match(def, /absent or streaming fails/);
-  assert.match(def, /Put a short factual explanation in `fyi`/);
-  assert.doesNotMatch(def, /skip streaming silently/);
+  // Completion-only: the child has no progress channel (every wave spawns with the intercom
+  // bridge off), so the def names no supervisor tool and no streamed-batch shape.
+  assert.doesNotMatch(def, /contact_supervisor/);
+  assert.doesNotMatch(def, /streamed/);
+  assert.match(def, /there is no progress channel/);
   // Def ↔ schema lockstep: every top-level report field the schema requires is named in the def
   // (drift in either direction trips here).
   const schema = ADVERSARIAL_REVIEW_REPORT_SCHEMA as { required: string[] };
@@ -299,12 +291,9 @@ test("the agent def completes via structured_output with the schema's required f
     def,
     /Do NOT emit a fenced-JSON completion block — the `structured_output` call IS the report\./,
   );
-  assert.doesNotMatch(def, /emit a fenced JSON block and stop/i, "the old step-8 form is gone");
-  // …while the STREAMING protocol's fenced-JSON batches (step 7) stay: the one remaining
-  // ```json mention is the progress-update shape, never a completion template.
-  const fencedJsonMentions = def.match(/```json/g) ?? [];
-  assert.equal(fencedJsonMentions.length, 1, "only the streamed-batch shape mentions ```json");
-  assert.match(def, /contact_supervisor\(\{reason: "progress_update", message\}\)/);
+  assert.doesNotMatch(def, /emit a fenced JSON block and stop/i, "the old step-7 form is gone");
+  // …and no fenced-JSON shape of any kind remains now that the streamed-batch protocol is retired.
+  assert.doesNotMatch(def, /```json/);
   // The delivered `.pi/agents/perk/` mirror stays byte-identical (the same-commit convergence).
   const mirror = join(
     import.meta.dirname,
@@ -318,28 +307,22 @@ test("the agent def completes via structured_output with the schema's required f
   assert.equal(readFileSync(mirror, "utf8"), def, "the .pi/agents/perk mirror must not drift");
 });
 
-test("streamed is a required boolean, not a truthy default", () => {
+test("the retired `streamed` field is refused by the closed shape", () => {
   const validator = Compile(ADVERSARIAL_REVIEW_REPORT_SCHEMA);
   const base = { angle: "claimed-intent", summary: "solid", findings: [], fyi: [], blocked: false };
-  for (const streamed of [true, false]) {
-    assert.equal(validator.Check({ ...base, streamed }), true);
-  }
-  assert.equal(validator.Check(base), false);
-  for (const streamed of [null, "false", 0, 1]) {
-    assert.equal(validator.Check({ ...base, streamed }), false);
-  }
+  assert.equal(validator.Check(base), true);
+  assert.equal(validator.Check({ ...base, streamed: false }), false);
 });
 
 test("blocked is a required boolean, not a defaulted false", () => {
-  // The `streamed` discipline: a lane that omits or mistypes `blocked` is engine-invalid, so
-  // "could not review" can never be silently read as "reviewed, nothing found".
+  // Never defaulted: a lane that omits or mistypes `blocked` is engine-invalid, so "could not
+  // review" can never be silently read as "reviewed, nothing found".
   const validator = Compile(ADVERSARIAL_REVIEW_REPORT_SCHEMA);
   const base = {
     angle: "claimed-intent",
     summary: "solid",
     findings: [],
     fyi: [],
-    streamed: false,
   };
   assert.equal(validator.Check({ ...base, blocked: false }), true);
   assert.equal(validator.Check({ ...base, blocked: true, fyi: ["blocker"] }), true);

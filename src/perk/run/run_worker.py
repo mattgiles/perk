@@ -234,8 +234,9 @@ def _spawn_worker(
     """
     argv = ["node", str(entry), stage_id, "--worktree", str(worktree)]
     # FFF_MODE_ENV rides both spawn sites (execution-path parity with `_exec_pi`) because the
-    # FFF mode is behavioral — the additive mode keeps pi's builtin grep/find host-builtins for
-    # pi-subagents' host-tool intersection; `_NPM_QUIET_ENV` stays local-only (cosmetic). Same
+    # FFF mode is behavioral — the additive mode keeps pi's builtin grep/find host-builtins
+    # (protective on a 0.67.x pi-subagents host, harmless on >= 0.68.0); `_NPM_QUIET_ENV`
+    # stays local-only (cosmetic). Same
     # override-respecting merge order: the GHA workflow / operator environ wins.
     env = {**launch.FFF_MODE_ENV, **environ, "PERK_RUN_ID": run_id}
     try:

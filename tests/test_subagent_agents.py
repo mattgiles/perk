@@ -13,19 +13,21 @@ import yaml
 from perk import _resources
 from perk.convergence.init import PERK_AGENTS, _converge_subagent_agents
 
-# Independent closed census: deriving this from PERK_AGENTS would miss a dropped role.
+# Independent closed census: deriving this from PERK_AGENTS would miss a dropped role. One model
+# per agent: pi-subagents >= 0.68.0 rejects any def carrying `fallbackModels` at load, so the
+# frontmatter `model:` is the sole default and `[models.subagents]` the spawn-time override.
 _PROFILES = {
-    "adversarial-reviewer": ("anthropic/claude-fable-5", "anthropic/claude-sonnet-4-5"),
-    "conflict-resolver": ("anthropic/claude-sonnet-4-5", "anthropic/claude-haiku-4-5"),
-    "draft-reviewer": ("openai/gpt-5.6-sol", "openai/gpt-5.6-terra"),
-    "dream-analyst": ("openai/gpt-5.6-terra", "openai/gpt-5.6-luna"),
-    "dream-reducer": ("anthropic/claude-fable-5", "anthropic/claude-sonnet-4-5"),
-    "harvest-analyst": ("openai/gpt-5.6-terra", "openai/gpt-5.6-luna"),
-    "learn-analyst": ("anthropic/claude-sonnet-4-5", "anthropic/claude-haiku-4-5"),
-    "objective-explorer": ("anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4-5"),
-    "pr-reviewer": ("anthropic/claude-sonnet-4-5", "anthropic/claude-haiku-4-5"),
-    "review-classifier": ("anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4-5"),
-    "scout": ("openai/gpt-5.6-terra", "openai/gpt-5.6-luna"),
+    "adversarial-reviewer": "anthropic/claude-fable-5",
+    "conflict-resolver": "anthropic/claude-sonnet-4-5",
+    "draft-reviewer": "openai/gpt-5.6-sol",
+    "dream-analyst": "openai/gpt-5.6-terra",
+    "dream-reducer": "anthropic/claude-fable-5",
+    "harvest-analyst": "openai/gpt-5.6-terra",
+    "learn-analyst": "anthropic/claude-sonnet-4-5",
+    "objective-explorer": "anthropic/claude-haiku-4-5",
+    "pr-reviewer": "anthropic/claude-sonnet-4-5",
+    "review-classifier": "anthropic/claude-haiku-4-5",
+    "scout": "openai/gpt-5.6-terra",
 }
 
 
@@ -57,9 +59,10 @@ def test_native_child_profile(name):
         "bash",
         *(["edit", "write"] if writer else []),
     ]
-    model, fallback = _PROFILES[name]
-    assert fm["model"] == model
-    assert fm["fallbackModels"] == [fallback]
+    assert fm["model"] == _PROFILES[name]
+    # The regression pin for the pi-subagents 0.68.0 break: a def carrying the removed field
+    # is rejected wholesale at load (`uses removed frontmatter field 'fallbackModels'`).
+    assert "fallbackModels" not in fm
     for absent in ("extensions", "subagentOnlyExtensions", "skills", "acceptance", "mission"):
         assert absent not in fm
     if name not in {"pr-reviewer", "adversarial-reviewer", "draft-reviewer"}:
@@ -174,10 +177,11 @@ def test_reviewer_defs_consume_the_review_context_pointer_envelope():
         assert "a long line is never by itself a reason to block" in compact, name
         assert "never dump a whole file into your session" in compact, name
     adversarial = " ".join(_source_bytes("adversarial-reviewer").decode().split())
-    assert (
-        "**required fields: `angle`, `summary`, `findings`, `fyi`, `streamed`, `blocked`**"
-        in adversarial
-    )
+    assert "**required fields: `angle`, `summary`, `findings`, `fyi`, `blocked`**" in adversarial
+    # Completion-only: no progress channel, no supervisor tool, no streamed-batch shape.
+    assert "there is no progress channel" in adversarial
+    assert "contact_supervisor" not in adversarial
+    assert "streamed" not in adversarial
     assert "Blocked is **not a verdict**" in adversarial
     assert "An unfinished hunt is a **blocked lane**" in adversarial
     resolver = " ".join(_source_bytes("conflict-resolver").decode().split())

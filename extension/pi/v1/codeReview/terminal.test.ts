@@ -144,24 +144,22 @@ test("guidance: the directive arm renders/omits on foreign and active — no mod
   }
 });
 
-test("guidance(foreign+active): the tool-owned streaming-loop pins (hunk mechanics retained)", () => {
+test("guidance(foreign+active): the tool-owned completion-only wave pins (hunk mechanics retained)", () => {
   for (const opts of [FOREIGN_OPTS, ACTIVE_OPTS]) {
     const text = prReviewTerminalGuidance(opts);
     assert.match(text, /start_review_wave/, "the fan-out is the launch tool");
     assert.match(text, /collect_review_wave/, "completion rides the collect tool");
-    assert.match(text, /Native-wake relay/, "the door relays native batches to hunk");
-    assert.match(text, /Subagent progress update/, "progress-update batches are processed");
-    // Hunk sink mechanics are unchanged.
-    assert.match(text, /hunk session get --repo/, "the handshake check stays");
-    assert.match(text, /hunk session comment apply --repo/, "the comment-apply push stays");
-    assert.match(text, /never re-push an anchor already pushed/, "incremental path+line dedupe");
+    // The shared yield partial (`prompts/common/review-wave-yield.md`) is included once.
+    assert.match(text, /4\. \*\*Yield\.\*\*/, "the shared yield step is rendered in");
+    assert.match(text, /Children do not stream — no finding reaches you before the wave finishes/);
+    assert.match(text, /ONLY the matching WORKFLOW completion authorizes the collect call/);
+    // Hunk sink mechanics after collection: ONE handshake check, ONE comment-apply push.
+    assert.match(text, /check the hunk handshake once: `hunk session get --repo/);
+    assert.match(text, /ONE `hunk session comment apply --repo/, "the comment-apply push stays");
+    assert.match(text, /`line: null` findings are NOT pushed/);
     assert.match(text, /\{complete, covered, reports, failures\}/, "the typed aggregate");
     assert.match(text, /wave_running/, "the collect grace arm is named");
-    assert.match(
-      text,
-      /completion reports are the \*\*source of truth\*\*/,
-      "completion reports drive triage/posting",
-    );
+    assert.match(text, /the \*\*source of truth\*\* for triage and posting/);
     assert.match(text, /never receive the surface handle/, "children get no hunk session details");
     assert.match(text, /reported honestly/, "incompleteness is surfaced, never papered over");
     assert.match(
@@ -172,12 +170,14 @@ test("guidance(foreign+active): the tool-owned streaming-loop pins (hunk mechani
     assert.match(text, /MUST NOT be selected or duplicated/);
     assert.match(text, /does not spawn or fall back/);
     assert.match(text, /`skill-unavailable`/);
-    // The retired model-authored mechanics are gone.
+    // The retired model-authored mechanics and the streaming protocol are gone (no relay, no
+    // provisional batches, no incremental push ledger, no streamed disclosures).
     for (const gone of [
       /workflowScript/,
       /runs\.all/,
       /subagent_wait|bg_wait|hold your turn open|timeout expiry IS the streaming cadence/,
       /subagent\(\{\s*action/,
+      /Native-wake relay|Subagent progress update|provisional|streamed|Incremental dedupe|ledger/,
     ]) {
       assert.doesNotMatch(text, gone, `retired mechanics must not appear: ${gone}`);
     }

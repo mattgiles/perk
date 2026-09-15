@@ -16,32 +16,64 @@ you are about to build on new engine mechanics.
 1. **Read the installed version** and compare it with `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` in
    `src/perk/convergence/doctor/checks.py`:
    `node -p "require('./.pi/npm/node_modules/pi-subagents/package.json').version"`.
-2. **Re-read the installed source** for each engine mechanic `docs/learned/pi/subagents.md` states
-   (its `## Sources` names the baseline) — supervisor-channel delivery and wakes, the typed child
-   runtime config, the omitted-async semantics, the in-process async workflow host, structured
-   output, the v1 RPC envelope, the partial-settlement projection — and the agent-definition
-   parser's `completionGuard: false` handling: a report-only lane must complete on a valid
-   `structured_output` report and still fail a missing/invalid one (`run_ci` cannot catch this).
-   Also re-read the **host-tool intersection**: `getHostBuiltinToolNames` /
-   `resolvePiLaunchToolPlan` / `isReviewOrScoutLaneAgent` in
-   `src/runs/shared/child-tool-plan.ts` and the `hostAvailableBuiltins` call sites in
-   `src/runs/background/async-execution.ts`. Since 0.67.0 the engine intersects a child's declared
-   tools with the tools the *host* session reports as builtin-sourced, so an extension that
-   re-registers a builtin by name (pi-fff `override` mode shadows `grep`/`find`) fails
-   review/scout-named agents closed at launch — which is why perk's launches inject
-   `PI_FFF_MODE=tools-and-ui` (`FFF_MODE_ENV`). If the installed release counts a same-name
-   replacement as providing the builtin (or no longer intersects background children), set the
-   upper bound of `_SUBAGENTS_HOST_INTERSECTION_AFFECTED` in
-   `src/perk/convergence/doctor/checks.py` (and its exact pin,
-   `tests/test_doctor.py::test_subagent_host_tools_affected_range_is_pinned`) and decide whether
-   to restore `FFF_MODE_ENV` to `override`.
+2. **Re-read the source.** The installed package under `.pi/npm/node_modules/pi-subagents/`
+   ships its TypeScript sources (`pi.extensions: ["./index.ts"]`, `src/**/*.ts`) — re-read them
+   in place; if a future release publishes compiled JS instead, read the matching tag of
+   `nicobailon/pi-subagents` (`gh api` / `gh browse`, or a local clone at the tag). Read the
+   release notes for the version either way. Walk each engine mechanic
+   `docs/learned/pi/subagents.md` states (its `## Sources` names the baseline):
+   - the supervisor channel's `expectsReply` handling in
+     `src/intercom/native-supervisor-channel.ts::poll` — progress updates are **discarded** on
+     the parent side since 0.68.0, which is why every perk wave spawns with
+     `intercomBridge: {mode: "off"}` (`WAVE_INTERCOM_BRIDGE`); confirm the per-launch
+     `SubagentParams.intercomBridge` override still spreads onto workflow children
+     (`src/runs/foreground/subagent-executor.ts` `workflowDefaults`) and still yields
+     `active: false` under `resolveIntercomBridge`;
+   - the wake rules in `src/runs/background/notify.ts` (`incrementalChildCompletionTriggersTurn`
+     — a routine successful child completion does not wake the parent; failed/paused/stopped
+     children and the workflow completion do);
+   - the typed child runtime config, the omitted-async semantics, the in-process async workflow
+     host, structured output (`outputSchema` → the injected `structured_output` call), the v1 RPC
+     envelope, the partial-settlement projection;
+   - the agent-definition parser (`src/agents/agents.ts`, `src/agents/frontmatter.ts`): its
+     **removed-field throws** (`uses removed frontmatter field '<name>'` — 0.68.0 rejects
+     `fallbackModels`; a new removal fails every delivered def at load and shows up as 0/N
+     waves, so grep `agents/*.md` for the named field) and its `completionGuard: false`
+     handling: a report-only lane must complete on a valid `structured_output` report and still
+     fail a missing/invalid one (`run_ci` cannot catch this);
+   - the **host-tool intersection**: `getHostBuiltinToolNames` / `resolvePiLaunchToolPlan` /
+     `isReviewOrScoutLaneAgent` in `src/runs/shared/child-tool-plan.ts` and the
+     `hostAvailableBuiltins` call sites in `src/runs/background/async-execution.ts`. The 0.67.x
+     engine counted only builtin-*sourced* host tools, so pi-fff `override` (re-registering
+     `grep`/`find`) failed review/scout-named agents closed at launch; 0.68.0's
+     `getHostBuiltinToolNames` counts wrapped core slots regardless of source. The affected
+     range is closed: `_SUBAGENTS_HOST_INTERSECTION_AFFECTED = ("0.67.0", "0.68.0")` (exact pin
+     `tests/test_doctor.py::test_subagent_host_tools_affected_range_is_pinned`). perk keeps
+     injecting `PI_FFF_MODE=tools-and-ui` (`FFF_MODE_ENV`) as a harmless additive default; if a
+     later release reintroduces a source-classified census, open a NEW range rather than
+     reopening this one.
 3. **Run `just ci`.**
-4. **Bump the stamp**: `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` and
-   `tests/test_doctor.py::test_subagent_compat_verified_version_stamp_is_pinned`.
-5. **Reconcile the prose**: the `docs/learned/pi/subagents.md` `## Sources` re-read line via `/learn`, and the
-   `subagent-compat` paragraph in `docs/user-docs/reference/cli/setup-and-health.md`.
-6. **Record the evidence**: a dated note in `docs/design/archive/` (the 0.65.1 record,
-   `pi-subagents-native-baseline-dogfood.md`, is the template).
+4. **Run the live leg** from a read-write session whose installed pi-subagents is the new
+   version: `perk doctor` (`subagent-compat` warns until the stamp moves; `subagent-host-tools`
+   `ok`), then one `/plan-review-browser` wave and one `/pr-review-browser` wave to N/N coverage
+   — the `perk:wave` marker appears at launch and clears at collection, and the final
+   annotations land after `collect_*`. **The stamp moves only on a passing leg**: bump
+   `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` and
+   `tests/test_doctor.py::test_subagent_compat_verified_version_stamp_is_pinned` together. A
+   failed leg is diagnosed, fixed, and re-run once; if it still fails, record the FAIL verdict
+   (step 6), leave the stamp where it was (an honest `warn`), and stop for owner diagnosis.
+5. **Reconcile the prose the same turn.** Statements the new release *falsifies* are swept
+   immediately — `shared/contracts.md`, the user docs, and the learned docs alike
+   (`docs/learned/pi/subagents.md` — its `## Sources` re-read line, `## History (dated)`, and any
+   mechanic paragraph; `docs/learned/workflow/report-waves.md`), per
+   `docs/learned/workflow/doc-reconciliation.md`'s same-turn rule; `uv run perk learn docs-check`
+   confirms the navigation is still current. Only genuinely NEW learnings go through `/learn`.
+   Also update the `subagent-compat` paragraph in
+   `docs/user-docs/reference/cli/setup-and-health.md` if its wording moved.
+6. **Record the evidence**: a dated note in `docs/design/archive/` — the source facts with
+   file/function anchors, the decisions, and the live-leg outcome (PASS or FAIL, never omitted).
+   `pi-subagents-native-baseline-dogfood.md` (0.65.1) and `pi-subagents-0.68.0-reverify.md`
+   (0.68.0) are the templates.
 
 ## The standing pin decision
 

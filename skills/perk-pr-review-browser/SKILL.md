@@ -13,7 +13,7 @@ parsed the arg, verified the plannotator extension + an interactive UI, resolved
 foreign PR checkout, the active worktree's own PR, or the pre-PR since-base diff), started the
 browser open **in the background**, and primed the annotation surface for `push_annotations`
 (you never see or relay the server address). Your launch guidance carries the flow — launch the
-wave, stream, reconcile, hand off to the human; this skill is the judgment and detail layer
+wave, collect, reconcile, hand off to the human; this skill is the judgment and detail layer
 behind it.
 
 ## The three modes
@@ -45,24 +45,25 @@ launch statement's rules:
 
 ## Behind the flow (the detail the launch guidance doesn't state)
 
-- **Native delivery.** Launch once, retain workflow identity, and end the turn with Pi open.
-  Relay delivered provisional batches on native supervisor wakes before collecting on matching
-  workflow completion (co-delivered notices need no extra turn). Final reports alone authorize
-  reconciliation, exactly once. Early collection retains pending; expired grace after observed
-  completion requires owner diagnosis, not polling/relaunch. Held annotations retry on native
-  batch/readiness/completion wakes; replace each covered angle at reconcile, even if empty.
-- **Streaming status.** Required `streamed` means the child submitted at least one nonempty batch
-  accepted/queued by the supervisor, not that the human saw it. No findings → false normally;
-  unavailable/failed streaming → complete final report plus factual `fyi` (true remains true after
-  an earlier successful batch). Disclose false lanes in-session without changing coverage:
-  neutral “no provisional batches (no findings)” versus warning “completion-only findings; no
-  provisional batches”. Never post these disclosures or create status annotations; false alone
-  does not diagnose a broken bridge.
+- **Native delivery.** Launch once, retain workflow identity, and end the turn with Pi open;
+  collect only on the matching workflow-completion notice (a routine successful child completion
+  does not wake you; a failed/paused/stopped child does — and never authorizes collection).
+  Children do not stream: nothing reaches you or the browser before the wave finishes. Final
+  reports alone authorize reconciliation, exactly once. Early collection retains pending; expired
+  grace after observed completion requires owner diagnosis, not polling/relaunch. A push held
+  before browser readiness is flushed by the door's readiness notice; a push held after readiness
+  (the tool's bounded retries exhausted) is presented in-session — no later wake is promised.
+- **The `perk:wave` marker and the early-decision policy.** While the wave runs, the browser shows
+  a code-owned status marker under the reserved `perk:wave` source (running at launch, failed on a
+  zero-lane launch, incomplete or cleared at collection) — you never write it (the `wave` slug is
+  refused) and never create status annotations of your own. Tell the human reviewer annotations
+  land when the wave completes and to decide after them: an early decision is authoritative and
+  forgoes the reviewer findings.
 - **The child report shape (verdict-free).** Each child's completion report is
-  `{angle, summary, findings[{path, line, side?, severity, confidence, body}], fyi[], streamed: boolean}` — `line`
+  `{angle, summary, findings[{path, line, side?, severity, confidence, body}], fyi[], blocked}` — `line`
   is an int in the diff or `null` for a real-but-unanchorable finding; `side` omitted means
-  `RIGHT`; an empty `findings` is a legitimate, earned outcome. The streamed fenced-JSON batches
-  carry findings in this same shape.
+  `RIGHT`; an empty `findings` is a legitimate, earned outcome; `blocked: true` marks a lane
+  that could not complete its review (uncovered, never "no findings").
 - **The angle rubric.** `claimed-intent` is the foreign twin of plan-fidelity: PR-text claims
   checked against the diff, plus the hunt for undisclosed scope. `correctness` carries the
   foreign-code supply-chain axes (CI/workflow edits, dependency pins, install/build scripts,
@@ -86,16 +87,16 @@ launch statement's rules:
   info note; never-ready → a loud error plus a degrade notice injected to you (degraded mode
   below).
 - **Reconcile judgment.** A finding worth keeping names a concrete risk the author should act
-  on; drop restatements and style noise. Clear uncovered sources first (`launch.requested`
-  minus `collected.covered`) via empty findings with `replace: true`. Build disjoint final
-  per-angle arrays from valid reports only — never recover a failed report from provisional
-  batches or re-send every lane's raw array. Merge distinct concerns at the same path+line,
+  on; drop restatements and style noise. Build disjoint final per-angle arrays from valid
+  reports only — never re-send every lane's raw array as if that were reconciliation. Merge
+  distinct concerns at the same path+line,
   preserving contributor angle/severity/confidence labels in the merged body and the highest
   severity with its corresponding confidence. The first contributing lane in
   `collected.covered` order owns the anchor; duplicate-only lanes get empty final arrays.
-  Replace each covered lane once, including empty arrays. A held clear/replacement is not
-  finalization: retain native-wake retry and door-owned degrade until nothing is held. The
-  visible source identifies the owner; merged text preserves other valid contributors.
+  Push each covered lane once with `replace: true`, including empty arrays. A held final push is
+  not finalization: before readiness the readiness notice flushes it; after readiness present the
+  findings in-session (the door-owned degrade). The visible source identifies the owner; merged
+  text preserves other valid contributors.
   `fyi` notes are in-session color, never posted.
 - **Respond annotations are context, not a posting queue.** Source-less annotations are
   human-authored; `perk:*`-badged ones are your own findings returning. They become candidate
@@ -108,7 +109,7 @@ launch statement's rules:
 
 ## The annotation mechanics are tool-owned
 
-`push_annotations` owns everything between a finding batch and the browser surface: the
+`push_annotations` owns everything between a reconciled finding array and the browser surface: the
 finding→annotation mapping (a `line: null` finding maps to file/general scope on the surface),
 the `perk:<angle>` source badges, the dedupe ledger, the hold-and-accumulate retry, and the
 source-scoped `replace: true` reshape (other sources' and the human's annotations are

@@ -24,6 +24,7 @@ import {
 import {
   startWaveScript,
   WAVE_ACCEPTANCE,
+  WAVE_INTERCOM_BRIDGE,
   WAVE_TIMEOUT_MS,
   type WaveAdapter,
   type WaveChildReceipt,
@@ -424,6 +425,7 @@ for (const method of ["start", "run"] as const) {
     assert.equal(spawn.context, "fresh");
     assert.equal(spawn.mission, false);
     assert.deepEqual(spawn.acceptance, WAVE_ACCEPTANCE);
+    assert.deepEqual(spawn.intercomBridge, WAVE_INTERCOM_BRIDGE);
     assert.equal(spawn.model, spec.model);
     assert.deepEqual(spawn.outputSchema, spec.outputSchema);
     assert.equal("extensionBindings" in spawn, false);
@@ -689,6 +691,7 @@ test("wave.run: spawn params carry the fixed module contract + spec fields", asy
     mission: false,
     context: "fresh",
     acceptance: WAVE_ACCEPTANCE,
+    intercomBridge: WAVE_INTERCOM_BRIDGE,
     outputSchema: spec.outputSchema,
     model: "anthropic/claude-sonnet-4",
     timeoutMs: 1_234,
@@ -770,7 +773,6 @@ test("wave.run: an ok:false lane carrying a schema-shaped NONEMPTY report stays 
   // report artifact beside a failed lane is diagnostic, never a promotion to coverage.
   const submitted = {
     angle: "grounding",
-    streamed: true,
     summary: "four concerns",
     findings: [{ phrase: "x", severity: "major", confidence: "high", body: "concern" }],
     fyi: [],

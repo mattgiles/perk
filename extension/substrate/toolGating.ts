@@ -89,10 +89,10 @@ export const LINEAR_MUTATING_TOOLS: readonly string[] = [
  * sync (perk is the first `packages` entry) — and is admitted by the `resources_discover`
  * re-apply as a late registrant (see `admitLate`): inside the diet at launch, kept where a stage
  * list carries it. `intercom` is the separate pi-intercom bridge's tool name — a static census
- * entry, inert unless that package is present. Child-side tools (`contact_supervisor`,
- * `structured_output`) are out of scope for the STAGE census — spawned children stay
- * stage-unscoped by design (§8.40 adopt-never-impersonates) — but they DO ride READ_ONLY_TOOLS,
- * because the read-only gate IS inherited by adopted children (see SUBAGENT_CHILD_TOOLS).
+ * entry, inert unless that package is present. The child-side tool (`structured_output`) is out
+ * of scope for the STAGE census — spawned children stay stage-unscoped by design (§8.40
+ * adopt-never-impersonates) — but it DOES ride READ_ONLY_TOOLS, because the read-only gate IS
+ * inherited by adopted children (see SUBAGENT_CHILD_TOOLS).
  */
 export const SUBAGENT_TOOLS: readonly string[] = [
   "subagent",
@@ -102,22 +102,23 @@ export const SUBAGENT_TOOLS: readonly string[] = [
 ];
 
 /**
- * pi-subagents' CHILD-side engine tools. `structured_output` and `contact_supervisor` register
- * inside spawned child sessions through the engine's prompt runtime / native supervisor bridge.
- * Absent tools are inert in gated parents (`setActiveTools` ignores unknown names). A gated
- * ADOPTED child (mode inherited via the `adopt` arm, contracts.md §8.3) must keep them active:
- *  - `structured_output` is the engine-REQUIRED completion call when the launch carries an
- *    `outputSchema` — stripping it makes the child physically unable to finish and fails the
- *    run with `structuredOutputFailed`;
- *  - `contact_supervisor` is the child→parent supervisor door.
- * Native wakes need no wait-tool widening in this census.
- * None mutates the repo (`structured_output` writes only the engine's capture file under
- * `.pi-subagents/` scratch). Census decision, recorded: these names deliberately join NEITHER
- * PERK_TOOLS nor BORROWED_TOOLS — the stage-filter universe never sees them because children
- * are stage-unscoped by design (adopt never impersonates a stage), so gate membership is their
+ * pi-subagents' CHILD-side engine tool. `structured_output` registers inside spawned child
+ * sessions through the engine's prompt runtime. Absent tools are inert in gated parents
+ * (`setActiveTools` ignores unknown names). A gated ADOPTED child (mode inherited via the
+ * `adopt` arm, contracts.md §8.3) must keep it active: `structured_output` is the
+ * engine-REQUIRED completion call when the launch carries an `outputSchema` — stripping it makes
+ * the child physically unable to finish and fails the run with `structuredOutputFailed`.
+ * `contact_supervisor` (the child→parent supervisor door) is deliberately ABSENT: every perk
+ * wave spawns with the intercom bridge off (`WAVE_INTERCOM_BRIDGE`), so no perk child is ever
+ * given that tool; the parent-side `subagent_supervisor` stays in SUBAGENT_TOOLS for ad-hoc
+ * children. Native wakes need no wait-tool widening in this census.
+ * Nothing here mutates the repo (`structured_output` writes only the engine's capture file under
+ * `.pi-subagents/` scratch). Census decision, recorded: this name deliberately joins NEITHER
+ * PERK_TOOLS nor BORROWED_TOOLS — the stage-filter universe never sees it because children
+ * are stage-unscoped by design (adopt never impersonates a stage), so gate membership is its
  * only governance surface.
  */
-export const SUBAGENT_CHILD_TOOLS: readonly string[] = ["structured_output", "contact_supervisor"];
+export const SUBAGENT_CHILD_TOOLS: readonly string[] = ["structured_output"];
 
 /**
  * @ff-labs/pi-fff's search tools. BOTH mode name-sets are enumerated (static names, inert
@@ -221,7 +222,7 @@ export const READ_ONLY_TOOLS = [
   ...FFF_SEARCH_TOOLS,
   // The delegation carve-in: `subagent`/`wait` (+ pi-subagents' late-registered
   // `subagent_supervisor`, kept by every gate-ON re-apply because it is allowlisted here —
-  // letting the parent answer child `contact_supervisor` asks) stay
+  // letting the parent answer ad-hoc children's supervisor asks) stay
   // reachable while gated for the other delegation flows (the gated objective-plan guidance now
   // names the `explore_objective_node` tool below, not a direct spawn). ACCEPTED LENIENCY,
   // deliberately documented: spawned children are unscoped by design (§8.40
@@ -287,7 +288,7 @@ export const REFINE_STAGE_ID = "objective-refine";
  * draft tools (no plan/objective/gist artifact can be authored or routed from here), no save
  * tools, no delegation spawn surface (children are unscoped by design) — and consequently no
  * SUBAGENT_CHILD_TOOLS either: a child that inherited `stage: objective-refine` would lose
- * `structured_output`/`contact_supervisor` under this allowlist. Unreachable today (no perk wave
+ * `structured_output` under this allowlist. Unreachable today (no perk wave
  * spawns from a refinement session; the lifecycle test pins `gatedToolsFor(stage)`) — revisit
  * the moment refinement gains any delegation. Same static-name posture as READ_ONLY_TOOLS;
  * `setActiveTools` ignores absent names.

@@ -69,8 +69,9 @@ def _perk_npm_entry() -> str:
 # `@ff-labs/pi-fff` is the borrowed *FFF-powered fuzzy file/content search* (Rust-native,
 # pre-indexed, frecency-ranked): perk launches inject the env default `PI_FFF_MODE=tools-and-ui`
 # (operator env wins) so stage sessions keep pi's builtin `find`/`grep` beside FFF's additive
-# `fffind`/`ffgrep` — override mode shadows the builtins by name, which pi-subagents >= 0.67.0
-# treats as "host lacks grep/find" and fails review/scout lanes closed. Vetted: no `setFooter`,
+# `fffind`/`ffgrep` — override mode shadows the builtins by name, which pi-subagents 0.67.x
+# treated as "host lacks grep/find" and failed review/scout lanes closed (>= 0.68.0 counts
+# wrapped core slots, so the injection is a harmless additive default). Vetted: no `setFooter`,
 # headless-safe, load-time tool registration.
 # `@juicesharp/rpiv-ask-user-question` is the borrowed *`ask_user_question` questionnaire tool*
 # (the structured 1-to-4-question dialog with options/multiSelect/previews): perk owns no askuser

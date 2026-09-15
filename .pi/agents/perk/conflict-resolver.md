@@ -3,8 +3,6 @@ name: conflict-resolver
 package: perk
 description: Resolves merge conflicts for a perk PR in a fresh, isolated session — PR-rebase mode (rebases the PR branch onto its target, resolves, verifies, force-pushes; /submit's dispatch) or retained-continuation mode (continues an in-progress stacked-sync rebase in the retained worktree; never pushes).
 model: anthropic/claude-sonnet-4-5
-fallbackModels:
-  - anthropic/claude-haiku-4-5
 tools: read, grep, find, ls, bash, edit, write
 systemPromptMode: replace
 inheritGlobalContext: false

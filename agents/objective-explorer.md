@@ -3,8 +3,6 @@ name: objective-explorer
 package: perk
 description: Explores the codebase for an objective node in isolation (read-only) and returns an engine-validated structured report of relevant files/symbols/anchors and open questions, so the parent can author a bounded plan without ingesting the raw exploration transcript. Use optionally, for large nodes, as the exploration half of the /objective-plan factory.
 model: anthropic/claude-haiku-4-5
-fallbackModels:
-  - anthropic/claude-sonnet-4-5
 tools: read, grep, find, ls, bash
 systemPromptMode: replace
 async: true

@@ -3,8 +3,6 @@ name: dream-reducer
 package: perk
 description: Cross-examines the COMPLETE first-level dream analyst outcome from ONE fixed angle (consolidation-preservation | currency-accuracy | knowledge-architecture) in a fresh, isolated session — reads the compact analyst bundle plus the dream manifest, selectively verifies cited evidence, and returns explicit endorse/challenge stances on the analysts' non-keep proposals plus angle findings and uncertainties — it never edits files, never authors anything, never posts anywhere. Used by perk learn dream's reducer wave.
 model: anthropic/claude-fable-5
-fallbackModels:
-  - anthropic/claude-sonnet-4-5
 tools: read, grep, find, ls, bash
 systemPromptMode: replace
 async: true

@@ -1048,7 +1048,8 @@ test("the dream-reducer def agrees with the report schema — fields, stances, c
   assert.match(def, /^name: dream-reducer$/m);
   assert.match(def, /^package: perk$/m);
   assert.match(def, /^model: anthropic\/claude-fable-5$/m);
-  assert.match(def, /^ {2}- anthropic\/claude-sonnet-4-5$/m);
+  // pi-subagents >= 0.68.0 rejects a def carrying `fallbackModels` at load: one model only.
+  assert.doesNotMatch(def, /^fallbackModels:/m);
   assert.match(def, /^tools: read, grep, find, ls, bash$/m);
   assert.match(def, /^systemPromptMode: replace$/m);
   assert.match(def, /^inheritProjectContext: false$/m);

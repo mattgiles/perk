@@ -11,8 +11,8 @@ disable-model-invocation: true
 TUI. The door has already done the deterministic substrate before you read this: it parsed the
 arg, verified the `hunk` binary, resolved the target (a foreign PR checkout, the active
 worktree's own PR, or the pre-PR since-base diff), and launched hunk for the human. Your launch
-guidance carries the flow — launch the wave, stream into hunk, reconcile, run the triage loop
-**with** the human, post; this skill is the judgment and detail layer behind it.
+guidance carries the flow — launch the wave, collect, reconcile, push the findings into hunk, run
+the triage loop **with** the human, post; this skill is the judgment and detail layer behind it.
 
 ## The three modes
 
@@ -48,22 +48,19 @@ lands before (or without) the comments it summarizes.
   terminal app) — denying or missing it just means they run the printed command themselves; the
   auto-launch is a convenience, never load-bearing. The handshake poll discovers when hunk is
   actually up.
-- **Native delivery.** Launch once, retain workflow identity, and end the turn with Pi open.
-  Relay delivered provisional batches on native supervisor wakes before collecting on matching
-  workflow completion (co-delivered notices need no extra turn). Final reports alone authorize
-  reconciliation, exactly once. Early collection retains pending; expired grace after observed
-  completion requires owner diagnosis, not polling/relaunch.
-- **Streaming status.** Required `streamed` means the child submitted at least one nonempty batch
-  accepted/queued by the supervisor, not that the human saw it. No findings → false normally;
-  unavailable/failed streaming → complete final report plus factual `fyi` (true remains true after
-  an earlier successful batch). Disclose false lanes in-session without changing coverage:
-  neutral “no provisional batches (no findings)” versus warning “completion-only findings; no
-  provisional batches”. Never post these disclosures or treat false alone as a broken bridge.
+- **Native delivery.** Launch once, retain workflow identity, and end the turn with Pi open;
+  collect only on the matching workflow-completion notice (a routine successful child completion
+  does not wake you; a failed/paused/stopped child does — and never authorizes collection).
+  Children do not stream: nothing reaches you or hunk before the wave finishes. Final reports
+  alone authorize reconciliation, exactly once. Early collection retains pending; expired grace
+  after observed completion requires owner diagnosis, not polling/relaunch. After collection,
+  check the hunk handshake once and push every anchorable final finding in ONE
+  `hunk session comment apply … --stdin`; not connected → the check-in posture below.
 - **The child report shape (verdict-free).** Each child's completion report is
-  `{angle, summary, findings[{path, line, side?, severity, confidence, body}], fyi[], streamed: boolean}` — `line`
+  `{angle, summary, findings[{path, line, side?, severity, confidence, body}], fyi[], blocked}` — `line`
   is an int in the diff or `null` for a real-but-unanchorable finding; `side` omitted means
-  `RIGHT`; an empty `findings` is a legitimate, earned outcome. The streamed fenced-JSON batches
-  carry findings in this same shape.
+  `RIGHT`; an empty `findings` is a legitimate, earned outcome; `blocked: true` marks a lane
+  that could not complete its review (uncovered, never "no findings").
 - **The angle rubric.** `claimed-intent` is the foreign twin of plan-fidelity: PR-text claims
   checked against the diff, plus the hunt for undisclosed scope. `correctness` carries the
   foreign-code supply-chain axes (CI/workflow edits, dependency pins, install/build scripts,

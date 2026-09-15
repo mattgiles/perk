@@ -1049,7 +1049,7 @@ def test_subagent_compat_unreadable_package_json_is_warn(scaffolded_perk_repo, m
 
 def test_subagent_compat_verified_version_stamp_is_pinned():
     # Only a full re-verify (docs/developers/pi-subagents-reverify.md) moves the stamp.
-    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.65.1"
+    assert _SUBAGENTS_GUIDANCE_VERIFIED_VERSION == "0.68.0"
 
 
 # --- subagent-host-tools: the pi-subagents >= 0.67.0 host-tool intersection x pi-fff mode ----
@@ -1179,28 +1179,39 @@ def test_subagent_host_tools_malformed_fff_config_is_ok(
     assert check.status == "ok"
 
 
-def test_subagent_host_tools_open_upper_bound_covers_later_releases(scaffolded_perk_repo):
-    # Upper bound None: every release at/above the lower bound is in the affected range until
-    # a re-verify closes it.
+def test_subagent_host_tools_fixed_release_is_ok(scaffolded_perk_repo):
+    # At/above the closed upper bound the intersection still runs but wrapped core slots count
+    # as host builtins, so even an operator override is `ok` — and the message says what
+    # changed rather than claiming the intersection vanished.
     _plant_subagents_package(scaffolded_perk_repo, version="0.68.5")
     check = doctor_checks._subagent_host_tools_check(
         scaffolded_perk_repo, environ={"PI_FFF_MODE": "override"}
     )
-    assert check.status == "warn"
+    assert check.status == "ok"
     assert "0.68.5" in check.message
+    assert "counts wrapped core slots as host builtins" in check.message
+    assert "does not intersect" not in check.message
+
+
+def test_subagent_host_tools_below_range_is_ok_without_intersection(scaffolded_perk_repo):
+    # Below the lower bound the engine has no intersection at all — the two `ok` arms must be
+    # distinguishable so an operator reading doctor learns which world they are in.
+    _plant_subagents_package(scaffolded_perk_repo, version="0.66.9")
+    check = doctor_checks._subagent_host_tools_check(
+        scaffolded_perk_repo, environ={"PI_FFF_MODE": "override"}
+    )
+    assert check.status == "ok"
+    assert "does not intersect child tools with host builtins" in check.message
+    assert "wrapped core slots" not in check.message
 
 
 @pytest.mark.parametrize(
     ("version", "expected_status"), [("0.68.0", "ok"), ("0.67.9", "warn"), ("0.66.9", "ok")]
 )
 def test_subagent_host_tools_upper_bound_is_exclusive(
-    scaffolded_perk_repo, monkeypatch, version, expected_status
+    scaffolded_perk_repo, version, expected_status
 ):
-    # The range is half-open `[lower, upper)`: once a re-verify sets the upper bound, the
-    # fixing release itself is outside it.
-    monkeypatch.setattr(
-        doctor_checks, "_SUBAGENTS_HOST_INTERSECTION_AFFECTED", ("0.67.0", "0.68.0")
-    )
+    # The range is half-open `[lower, upper)`: the fixing release itself is outside it.
     _plant_subagents_package(scaffolded_perk_repo, version=version)
     check = doctor_checks._subagent_host_tools_check(
         scaffolded_perk_repo, environ={"PI_FFF_MODE": "override"}
@@ -1220,9 +1231,9 @@ def test_subagent_host_tools_bad_config_skips_file_arm(scaffolded_perk_repo, mon
 
 
 def test_subagent_host_tools_affected_range_is_pinned():
-    # Only a re-verify (docs/developers/pi-subagents-reverify.md) moves the range — the upper
-    # bound stays open until an upstream release counts same-name replacements as builtins.
-    assert doctor_checks._SUBAGENTS_HOST_INTERSECTION_AFFECTED == ("0.67.0", None)
+    # Only a re-verify (docs/developers/pi-subagents-reverify.md) moves the range — closed at
+    # 0.68.0, the release whose host-builtin census counts wrapped core slots.
+    assert doctor_checks._SUBAGENTS_HOST_INTERSECTION_AFFECTED == ("0.67.0", "0.68.0")
 
 
 def test_subagent_host_tools_detail_names_the_launch_injected_default(scaffolded_perk_repo):
@@ -1365,151 +1376,6 @@ def test_ponytail_compat_divergence_warns(scaffolded_perk_repo, mutate, expected
     check = _ponytail_compat_check(scaffolded_perk_repo)
     assert check.status == "warn" and check.status != "fail"
     assert expected in check.detail
-
-
-def _bridge_settings_text(mode: str) -> str:
-    """A pi ``settings.json`` body carrying only ``subagents.intercomBridge.mode``."""
-    return json.dumps({"subagents": {"intercomBridge": {"mode": mode}}})
-
-
-def _plant_user_bridge_mode(agent_dir, bridge_mode):
-    """Plant the user-scope ``settings.json`` (inside the launch-precedence agent dir — the
-    autouse ``isolated_pi_agent_dir`` in these tests) with the given bridge mode."""
-    settings = agent_dir / "settings.json"
-    settings.parent.mkdir(parents=True, exist_ok=True)
-    settings.write_text(_bridge_settings_text(bridge_mode), encoding="utf-8")
-    return settings
-
-
-def _set_project_bridge_mode(repo, mode):
-    """Merge ``subagents.intercomBridge.mode`` into the scaffolded ``.pi/settings.json``
-    (preserving the init-converged keys so settings-wiring stays green)."""
-    settings_path = repo / ".pi" / "settings.json"
-    settings = json.loads(settings_path.read_text(encoding="utf-8"))
-    settings.setdefault("subagents", {})["intercomBridge"] = {"mode": mode}
-    # init's serialization shape (indent=2 + trailing newline) so settings-wiring stays green.
-    settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
-
-
-def test_subagent_bridge_config_engine_story(scaffolded_perk_repo):
-    # The one real-engine story for this check: it pins registration in the report, the
-    # ok/warn severities as the engine composes them, and warn-never-fail through the real
-    # exit mapping. The value/scope matrix lives on the direct seam below.
-    report = run_doctor(scaffolded_perk_repo, verify=False)
-    bridge = next((c for c in report.checks if c.name == "subagent-bridge-config"), None)
-    assert bridge is not None
-    assert bridge.status == "ok" and bridge.group == "package"
-    assert "bridge active" in bridge.message
-    assert report.healthy and report.exit_code == 0
-
-    _set_project_bridge_mode(scaffolded_perk_repo, "off")
-    report = run_doctor(scaffolded_perk_repo, verify=False)
-    bridge = next((c for c in report.checks if c.name == "subagent-bridge-config"), None)
-    assert bridge is not None
-    assert bridge.status == "warn"
-    assert ".pi/settings.json" in bridge.detail and '"off"' in bridge.detail
-    assert bridge.remediation
-    assert report.healthy and report.exit_code == 0
-
-
-@pytest.mark.parametrize(
-    ("settings_text", "expected_status", "expected_offender"),
-    [
-        pytest.param(
-            _bridge_settings_text("off"),
-            "warn",
-            '.pi/settings.json: subagents.intercomBridge.mode = "off"',
-            id="off",
-        ),
-        # "fork-only" counts: perk's wave children run fresh-context, which deactivates a
-        # fork-only bridge — streaming silently degrades to completion-only.
-        pytest.param(
-            _bridge_settings_text("fork-only"),
-            "warn",
-            '.pi/settings.json: subagents.intercomBridge.mode = "fork-only"',
-            id="fork-only",
-        ),
-        pytest.param(_bridge_settings_text("always"), "ok", None, id="always"),
-        # Invalid project settings are the settings-wiring check's complaint, not this one's —
-        # the bridge check stays ok/quiet on that scope.
-        pytest.param("not json{", "ok", None, id="invalid-json"),
-    ],
-)
-def test_subagent_bridge_config_project_scope_matrix(
-    tmp_path, settings_text, expected_status, expected_offender
-):
-    # Direct seam over the project scope. With PI_CODING_AGENT_DIR set (the autouse
-    # isolation), the user scope is a nonexistent directory and no git subprocess runs, so a
-    # bare tmp_path root is a complete input and only the project scope can produce an offender.
-    (tmp_path / ".pi").mkdir()
-    (tmp_path / ".pi" / "settings.json").write_text(settings_text, encoding="utf-8")
-    check = doctor_checks._subagent_bridge_config_check(tmp_path)
-    assert check.name == "subagent-bridge-config"
-    assert check.group == "package"
-    assert check.status == expected_status
-    if expected_offender is not None:
-        assert expected_offender in check.detail
-        assert check.remediation
-    else:
-        assert check.detail == ""
-
-
-def test_subagent_bridge_config_user_scope_off_is_warn(tmp_path, isolated_pi_agent_dir):
-    # The user scope (settings.json in the launch-precedence agent dir) warns too — an explicit
-    # off in EITHER scope disables streaming (perk does not reimplement pi's cross-scope merge
-    # semantics). The detail names the absolute planted path, not a `~/.pi/agent` assumption,
-    # and does not name the clean project scope.
-    settings = _plant_user_bridge_mode(isolated_pi_agent_dir, "off")
-    check = doctor_checks._subagent_bridge_config_check(tmp_path)
-    assert check.status == "warn"
-    assert str(settings) in check.detail
-    assert ".pi/settings.json" not in check.detail
-
-
-def test_subagent_bridge_config_user_scope_follows_configured_agent_dir(
-    scaffolded_perk_repo, monkeypatch
-):
-    # With no operator env, the user scope is the main checkout's `[pi] agent_dir` store —
-    # the same launch-precedence resolver as launch_stage, never a hardcoded ~/.pi/agent.
-    from pathlib import Path
-
-    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
-    home = scaffolded_perk_repo.parent / "fake-home"
-    home.mkdir(exist_ok=True)
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
-    _plant_user_bridge_mode(home / ".pi" / "agent", "off")  # the wrong store: must be ignored
-    _configure_pi_agent_dir(scaffolded_perk_repo, ".pi/agent")
-    settings = _plant_user_bridge_mode(scaffolded_perk_repo / ".pi" / "agent", "off")
-    check = doctor_checks._subagent_bridge_config_check(scaffolded_perk_repo)
-    assert check.status == "warn"
-    assert str(settings) in check.detail and str(home) not in check.detail
-
-
-def test_subagent_bridge_config_unresolvable_agent_dir_skips_user_scope(
-    scaffolded_perk_repo, monkeypatch
-):
-    from pathlib import Path
-
-    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
-
-    def no_home(cls):
-        raise RuntimeError("Could not determine home directory.")
-
-    monkeypatch.setattr(Path, "home", classmethod(no_home))
-    check = doctor_checks._subagent_bridge_config_check(scaffolded_perk_repo)
-    assert check.status == "ok"
-
-
-@pytest.mark.parametrize("text", ["[pi", "[pi]\nagent_dir = 7\n"])
-def test_subagent_bridge_config_bad_config_skips_user_scope(
-    scaffolded_perk_repo, monkeypatch, text
-):
-    # A broken main-checkout config is the `config` check's complaint; the report-only bridge
-    # check skips the user scope rather than crashing.
-    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
-    (scaffolded_perk_repo / ".perk/config.toml").write_text(text, encoding="utf-8")
-    check = doctor_checks._subagent_bridge_config_check(scaffolded_perk_repo)
-    assert check.status == "ok"
 
 
 def test_edited_delivered_def_reports_drift_and_is_fixed(scaffolded_perk_repo):
