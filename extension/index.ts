@@ -609,8 +609,10 @@ export default function perk(
 
   // The flow-scoped review-wave pair (`start_review_wave`/`collect_review_wave`) both human
   // review doors drive: non-blocking adversarial-review launch + the typed collect, flow-scoped
-  // via the session's pending-wave guard.
-  installReviewWaveBindings(pi, reportWave);
+  // via the session's pending-wave guard. The annotation state carries the code-owned
+  // `perk:wave` marker the browser door shows while the wave runs (a no-op for the terminal
+  // door, which primes no surface).
+  installReviewWaveBindings(pi, reportWave, annotations);
   installAuditBindings(pi, reportWave);
   installHarvestBindings(pi, reportWave);
   installDreamBindings(pi, reportWave);
@@ -622,8 +624,9 @@ export default function perk(
 
   // The flow-scoped draft-review-wave pair (`start_draft_review_wave`/
   // `collect_draft_review_wave`) the draft-review door drives: non-blocking draft-review
-  // launch over the door-primed context + the typed collect.
-  registerDraftReviewWaveTools(pi, draftReviewWave, reportWave);
+  // launch over the door-primed context + the typed collect (plus the `perk:wave` marker on the
+  // primed browser surface).
+  registerDraftReviewWaveTools(pi, draftReviewWave, reportWave, annotations);
 
   // The door-primed browser annotation tool (`push_annotations`): the browser door primes the
   // surface handle on open and clears it on settle/degrade — the tool refuses outside a

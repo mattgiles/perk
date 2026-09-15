@@ -66,6 +66,7 @@ import {
   type StartedBrowser,
   startPlannotatorBrowser,
 } from "../providers/plannotatorHandoff.ts";
+import { WAVE_ARRIVAL_NOTICE } from "../providers/waveStatus.ts";
 import { type CheckoutOk, decodeCheckout } from "./checkout.ts";
 import { parseReviewDoorArgs } from "./terminal.ts";
 
@@ -335,9 +336,10 @@ export function installPrReviewBrowserBindings(
           ctx,
           SCOPE,
           "info",
-          parsed.directive
+          (parsed.directive
             ? `PR #${parsed.pr} → adversarial reviewers (focus: ${parsed.directive}) → plannotator browser triage → you post from the browser`
-            : `PR #${parsed.pr} → adversarial reviewers → plannotator browser triage → you post from the browser`,
+            : `PR #${parsed.pr} → adversarial reviewers → plannotator browser triage → you post from the browser`) +
+            WAVE_ARRIVAL_NOTICE,
         );
         await openBrowserAndGuide(pi, ctx, annotations, status, {
           mode: "foreign",
@@ -371,9 +373,10 @@ export function installPrReviewBrowserBindings(
           ctx,
           SCOPE,
           "info",
-          parsed.directive
+          (parsed.directive
             ? `PR #${target.number} (active worktree) → adversarial reviewers (focus: ${parsed.directive}) → plannotator browser triage → you post from the browser`
-            : `PR #${target.number} (active worktree) → adversarial reviewers → plannotator browser triage → you post from the browser`,
+            : `PR #${target.number} (active worktree) → adversarial reviewers → plannotator browser triage → you post from the browser`) +
+            WAVE_ARRIVAL_NOTICE,
         );
         await openBrowserAndGuide(pi, ctx, annotations, status, {
           mode: "active",

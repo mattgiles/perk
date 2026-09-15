@@ -44,7 +44,7 @@ function markedFake(marker: string): FakeSubagents {
           key,
           ok: true,
           error: null,
-          report: { angle: key, summary: marker, findings: [], fyi: [], streamed: false },
+          report: { angle: key, summary: marker, findings: [], fyi: [] },
         })),
     },
   ]);
@@ -72,7 +72,7 @@ for (const handoff of [false, true]) {
           waveScriptItems(script).map(({ key }) => ({
             key,
             ok: true,
-            report: { angle: key, summary: "ok", findings: [], fyi: [], streamed: false },
+            report: { angle: key, summary: "ok", findings: [], fyi: [] },
           })),
       })),
     );

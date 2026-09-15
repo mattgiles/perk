@@ -773,7 +773,6 @@ test("wave.run: an ok:false lane carrying a schema-shaped NONEMPTY report stays 
   // report artifact beside a failed lane is diagnostic, never a promotion to coverage.
   const submitted = {
     angle: "grounding",
-    streamed: true,
     summary: "four concerns",
     findings: [{ phrase: "x", severity: "major", confidence: "high", body: "concern" }],
     fyi: [],

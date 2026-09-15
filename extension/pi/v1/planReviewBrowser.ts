@@ -84,6 +84,7 @@ import {
   type StartedSurface,
   startPlannotatorPlanReview,
 } from "./providers/plannotatorHandoff.ts";
+import { WAVE_ARRIVAL_NOTICE } from "./providers/waveStatus.ts";
 import { type ReviewOutcome, type ToolResult, untrustedReviewFeedback } from "./review.ts";
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
@@ -428,9 +429,10 @@ export async function openPlanReviewSurface(
     ctx,
     SCOPE,
     "info",
-    opts.custom !== undefined
+    (opts.custom !== undefined
       ? `working plan draft → plannotator browser review + draft reviewers (custom lane: ${opts.custom}) → APPROVE auto-saves / DENY returns feedback`
-      : "working plan draft → plannotator browser review + draft reviewers → APPROVE auto-saves / DENY returns feedback",
+      : "working plan draft → plannotator browser review + draft reviewers → APPROVE auto-saves / DENY returns feedback") +
+      WAVE_ARRIVAL_NOTICE,
   );
   return (
     planReviewBrowserGuidance({ ...(opts.custom !== undefined ? { custom: opts.custom } : {}) }) +
