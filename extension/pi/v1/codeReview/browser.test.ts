@@ -111,29 +111,35 @@ test("guidance: the directive arm renders/omits on foreign and active — no mod
   }
 });
 
-test("guidance(both modes): the tool-owned streaming-wave pins", () => {
+test("guidance(both modes): the tool-owned completion-only wave pins", () => {
   for (const opts of [FOREIGN_OPTS, ACTIVE_OPTS]) {
     const text = prReviewBrowserGuidance(opts);
     assert.match(text, /start_review_wave/, "the fan-out is the launch tool");
     assert.match(text, /collect_review_wave/, "completion rides the collect tool");
     assert.match(text, /push_annotations/, "annotation delivery rides the push tool");
-    assert.match(text, /Native-wake relay/, "the door relays native batches to the browser");
-    assert.match(text, /Subagent progress update/, "progress-update batches are processed");
+    // The shared yield partial (`prompts/common/review-wave-yield.md`) is included once.
+    assert.match(text, /4\. \*\*Yield\.\*\*/, "the shared yield step is rendered in");
+    assert.match(text, /Children do not stream — no finding reaches you before the wave finishes/);
+    assert.match(text, /ONLY the matching WORKFLOW completion authorizes the collect call/);
+    assert.match(text, /routine successful child completion does not wake you/);
+    // The code-owned wave marker + the early-decision policy ride step 1.
+    assert.match(text, /'reviewer wave running' marker until the wave lands/);
+    assert.match(text, /an early decision is authoritative and forgoes the findings/);
     assert.match(text, /never compose annotation HTTP/, "the tool owns the mechanics");
-    assert.match(text, /replace: true/, "the reconcile reshape is the tool's replace");
-    assert.match(text, /First clear every uncovered source/);
+    assert.match(text, /replace: true/, "the final push is the tool's replace");
     assert.match(text, /disjoint final per-angle arrays/);
     assert.match(text, /visible source names the owning lane/);
-    assert.match(text, /NOT a degrade/, "a held result ≠ a degrade");
     assert.match(text, /`findings: \[\]` is the pure retry/);
-    assert.match(text, /\{complete, covered, reports, failures\}/, "the typed aggregate");
-    assert.match(text, /wave_running/, "the collect grace arm is named");
     assert.match(
       text,
-      /completion reports are the \*\*source of truth\*\*/,
-      "completion reports drive the reconcile",
+      /no later wake is promised/,
+      "the post-readiness held push degrades in-session",
     );
+    assert.match(text, /\{complete, covered, reports, failures\}/, "the typed aggregate");
+    assert.match(text, /wave_running/, "the collect grace arm is named");
+    assert.match(text, /the \*\*source of truth\*\*/, "final reports drive the reconcile");
     assert.match(text, /never receive the surface handle/);
+    assert.match(text, /alongside your findings/);
     assert.match(text, /reported honestly/, "incompleteness is surfaced, never papered over");
     assert.match(
       text,
@@ -154,6 +160,9 @@ test("guidance(both modes): the tool-owned streaming-wave pins", () => {
       /127\.0\.0\.1/,
       /localhost/,
       /subagent\(\{\s*action/,
+      // The retired streaming protocol: no relay, no provisional batches, no uncovered-source
+      // clear, no streamed disclosures.
+      /Native-wake relay|Subagent progress update|provisional|streamed|uncovered source/,
     ]) {
       assert.doesNotMatch(text, gone, `retired mechanics must not appear: ${gone}`);
     }

@@ -123,7 +123,7 @@ Per-agent model overrides for each perk-owned project agent.
 | `conflict-resolver` | string (model id) | _(agent frontmatter default)_ | Read from the parent session config at invocation for native foreground resolution: `resolve_submit_conflicts` (PR) and awaited `objective_stack_sync` retained resolution. Native `inherit` semantics are preserved; no separate retained key. |
 | `learn-analyst` | string (model id) | _(agent frontmatter default)_ | Model for the learn-analyst agent used by `/learn` to analyze a landed plan's session evidence. |
 | `adversarial-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for the adversarial-reviewer agent spawned by `/pr-review-terminal` and `/pr-review-browser`. |
-| `draft-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for streamed draft review from `/plan-review-browser` and `/objective-review-browser`. |
+| `draft-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for draft review from `/plan-review-browser` and `/objective-review-browser`. |
 | `harvest-analyst` | string (model id) | _(agent frontmatter default)_ | Model for each `docs/learned` mining lane in `perk learn harvest`. |
 | `dream-analyst` | string (model id) | _(agent frontmatter default)_ | Model for each `docs/learned` cluster-audit lane in `perk learn dream`'s analyst wave, consumed by `run_dream_wave` at execute time. |
 | `dream-reducer` | string (model id) | _(agent frontmatter default)_ | Model for the three fixed reducer lanes in `perk learn dream`'s reducer wave, consumed by `run_dream_wave` at execute time. |

@@ -49,7 +49,7 @@ The plan seam must always produce perk's reviewed, canonical plan artifact.
   sends the draft through `plan_review` to the browser. On an eligible call (the Plannotator
   extension actually loaded — the presence probe — plus a validated plan or objective draft
   artifact) `plan_review` first shows an in-TUI launch chooser — browser review
-  with or without the streamed reviewer wave (Esc = without; the review always proceeds); the
+  with or without the reviewer wave (Esc = without; the review always proceeds); the
   wave choice takes an optional custom angle, opens the `/plan-review-browser` /
   `/objective-review-browser` flow, and returns non-blocking `wave_launched` guidance while the
   browser decision routes back automatically. Approval without direct edits uses the ordinary

@@ -5,13 +5,15 @@
 // from terminal.ts — one function ⇒ identical arg semantics by construction):
 //   foreign — `/pr-review-browser <pr|url> [focus]`: the detached `perk pr review checkout`, the
 //             browser opened in the background on the PR URL, the async adversarial-reviewer
-//             fan-out with per-angle annotation waves streamed to the local plannotator server.
+//             fan-out whose reconciled per-angle findings land on the local plannotator server
+//             after collection (completion-only — the code-owned `perk:wave` marker shows the
+//             wave running until then).
 //   active  — `/pr-review-browser [focus]` from a plan worktree whose branch HAS a PR: the same
 //             flow re-homed to the human's own worktree (no checkout, no cleanup).
 //   local   — no PR yet (`perk pr url` → `no_pr`): the absorbed pre-PR since-base browser review
 //             ({cwd, diffType: "since-base", defaultBranch: the plan-ref base}) — NO reviewers,
-//             no guidance injection, no port dance (no waves to stream); the door ends
-//             immediately and the single respond routes back later.
+//             no guidance injection, no port dance (no wave, so no annotation endpoint needed);
+//             the door ends immediately and the single respond routes back later.
 //
 // THE BACKGROUND OPEN: the server URL is deterministic the moment the port is picked
 // (plannotator reads `PLANNOTATOR_PORT` at bind time — see plannotatorHandoff.ts), so in the PR
@@ -21,8 +23,9 @@
 // timeout / an error-or-unavailable bridge settle →
 // a loud error plus a degrade notice injected to the model (findings render in-session; posting
 // unchanged) AND the annotation surface cleared. `push_annotations` owns the
-// hold-and-accumulate discipline: a held batch before any door failure notice means "not up
-// yet", never a degrade.
+// hold-and-accumulate discipline: a batch held before readiness means "not up yet", never a
+// degrade (the readiness notice flushes it); a batch held AFTER readiness exhausted the tool's
+// bounded retries and is presented in-session.
 //
 // THE POSTING FLIP (contracts §8.4): plannotator's native platform-posting is THE GitHub path —
 // the human posts inline comments + APPROVE/COMMENT directly from the UI. Perk composes nothing
@@ -389,7 +392,7 @@ export function installPrReviewBrowserBindings(
       }
 
       // The local / pre-PR mode (the absorbed since-base browser review): no reviewers, no
-      // guidance, no port dance (no waves to stream — no endpoint needed). The bridge runs in
+      // guidance, no port dance (no wave — no endpoint needed). The bridge runs in
       // the background and the single respond routes back via routePrReviewOutcome.
       report(
         ctx,

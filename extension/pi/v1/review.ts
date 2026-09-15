@@ -362,7 +362,7 @@ const CUSTOM_ANGLE_TITLE = "Custom review angle (optional — Enter to skip)";
 
 /**
  * The launch chooser (pure over the injected ui slice — offline-testable): every eligible
- * plannotator round asks the human whether the browser review launches WITH the streamed
+ * plannotator round asks the human whether the browser review launches WITH the
  * reviewer wave; the wave choice then asks for an optional custom review angle. Esc/dismiss
  * anywhere selects a FLAVOR, never cancels the review (Esc at the chooser ⇒ plain; Esc/blank at
  * the angle input ⇒ wave with no custom lane — the input is `.trim()`'d before blank detection,

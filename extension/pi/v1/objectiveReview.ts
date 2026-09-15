@@ -325,7 +325,7 @@ export async function executeObjectiveReview(
   const plannotator = isPlannotatorPlanSelected(ctx.cwd);
   if (plannotator && wave?.present()) {
     // The launch chooser (contracts.md §8.23): every eligible round the human picks with/without
-    // the streamed reviewer wave BEFORE anything launches. Eligibility is drafts-only — the wave
+    // the reviewer wave BEFORE anything launches. Eligibility is drafts-only — the wave
     // door stale-guards the raw artifact bytes, so an absent draft keeps the plain path
     // (silently: there is no forced mode to warn about). A `refused` resume (raw bytes
     // present but refused) also skips the wave arm — the plain review below renders the
