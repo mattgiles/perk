@@ -678,7 +678,7 @@ name-sets — `fffind`/`ffgrep`/`fff-multi-grep` + override's `multi_grep`; the 
 `find`/`grep` are already present — local search belongs in read-only exploration, and FFF's
 frecency state lives under `~/.pi/agent/fff/`, outside the worktree), and the pi-subagents delegation family
 (`subagent`/`wait` + `subagent_supervisor` — kept reachable for the gated delegation flows
-and for answering child `contact_supervisor` asks; **accepted no-backstop posture**: spawned
+and for answering ad-hoc children's supervisor asks; **accepted no-backstop posture**: spawned
 children are unscoped by design (§8.40 adopt-never-impersonates) — `subagent` itself can spawn
 ad-hoc read-write children, a deliberate documented leniency like the arg-blind
 `curl`/`agent-browser` entries, with no agent allowlist) + `explore_objective_node` (the gated
@@ -687,11 +687,13 @@ child over the already-carved-in delegation family and writes nothing to the wor
 `run_scout_wave` (the authoring sessions' scout launcher: one read-only `perk.scout` lane per
 brief over the carved-in delegation family; no worktree writes; reachable in every gated stage
 except `objective-refine` on the `explore_objective_node` precedent; §8.70) + the pi-subagents
-**child-side engine tools** (`structured_output`/`contact_supervisor` — delivered through the
-child prompt runtime/native supervisor bridge, inert when absent in parents; native wakes
-require no wait-tool carve-in; kept active so a gated **adopted** child can
-make the engine-required `structured_output` completion call — stripping it fails an
-`outputSchema` run with `structuredOutputFailed`) — a static union of foreign
+**child-side engine tool** (`SUBAGENT_CHILD_TOOLS` = `structured_output` ONLY — delivered
+through the child prompt runtime, inert when absent in parents; native wakes require no
+wait-tool carve-in; kept active so a gated **adopted** child can make the engine-required
+`structured_output` completion call — stripping it fails an `outputSchema` run with
+`structuredOutputFailed`. `contact_supervisor` is deliberately absent: every perk wave spawns
+with the intercom bridge off — `WAVE_INTERCOM_BRIDGE`, below — so no perk child is ever given
+the supervisor door) — a static union of foreign
 tool names, inert when a package is absent — plus `run_audit_wave` (the gated audit-judge
 session's wave call: its one write is structurally bound to the cold door's handoff
 `audit_bundle_dir`, §8.50 — no caller-supplied path exists), `run_harvest_wave` (the gated
@@ -747,8 +749,8 @@ claims, a worktree stage with `/plan` on. The objective/gist/refinement contexts
 their exact stage). NO injected authoring or adapter context reaches a runner child: the fence is
 `installInjectedContext`'s third argument, fed the composition root's `runnerChild` closure (the
 `isRunnerChild` bit of the runner restriction floor below, re-read every `session_start`) —
-suppression only, never a grant; the `[READ-ONLY MODE]` guidance and the engine's child tools
-(`structured_output`/`contact_supervisor`) are untouched.
+suppression only, never a grant; the `[READ-ONLY MODE]` guidance and the engine's child tool
+(`structured_output`) are untouched.
 
 **The audit-wave write binding (`audit_bundle_dir`, §8.50).** The `perk-dev audit judge` cold
 door stashes `handoff_extra={"audit_bundle_dir": <absolute bundle dir>}` in its launch handoff
@@ -1550,8 +1552,9 @@ direct `perk pr review-submit` calls are forbidden on every door:
 
 **The `push_annotations` findings-delivery tool** (`extension/pi/v1/providers/annotations.ts`;
 perk-registered — census §8.40). The finding→annotation mechanics are CODE, not prompt
-discipline: the model hands the tool finding batches (one angle per call; provisional findings
-passed straight through, final arrays reconciled as below) and never composes annotation HTTP. FLOW-SCOPED via the door-primed surface
+discipline: the model hands the tool the reconciled final arrays after collection (one angle per
+call — review waves are completion-only, so nothing reaches the surface before the wave
+finishes) and never composes annotation HTTP. FLOW-SCOPED via the door-primed surface
 handle on PER-ACTIVATION state (`createAnnotationState()`, created once per activation and
 threaded to the installer and every priming door — two bound sessions in one process never
 share/clobber a surface or ledger): the browser door primes it on a PR-mode open with the
@@ -1570,30 +1573,44 @@ the `/plan-review-browser` door, §8.23):
   `source` and `author` as `perk:<angle>`: the plan UI displays `author`, while `source` owns
   replacement. The model cannot supply a different author.
 - **Anchor-keyed dedupe, global across sources** with 201-pinned `ids`: a pushed anchor is never
-  re-pushed (skipped, never refused — re-pushing is always safe); a cross-source duplicate
-  skipped from a FINAL (replace) batch is retained and promoted when the owning source releases
-  the anchor.
-- **Hold-and-accumulate:** a network-level failure holds the mapped batch and returns ok — held
-  ≠ degrade (the door's readiness observer owns degrading); `findings: []` is the pure retry;
-  a zero-item pure clear stays a visible pending operation (`held_batches`).
-- **`replace: true` source-scoped atomic reshape:** delete-then-post supersedes the angle's
-  provisional pushes in one unit — no model-composed annotation HTTP or broad clear exists.
+  re-pushed (skipped, never refused — re-pushing is always safe). Plain dedupe only: with nothing
+  pushed before collection the parent's per-angle arrays are already disjoint, so no
+  cross-source promotion exists.
+- **Hold-and-accumulate with the post-readiness bounded retry:** a network-level failure holds
+  the mapped batch and returns ok — held ≠ degrade (the door's readiness observer owns
+  degrading); `findings: []` is the pure retry; a zero-item pure clear stays a visible pending
+  operation (`held_batches`). BEFORE browser readiness the hold is immediate and the door's
+  readiness notice flushes it. AFTER readiness (`AnnotationState.ready`, set by the observer's
+  `resumeAnnotationDelivery`) the same unit is retried in-call over `HELD_RETRY_DELAYS_MS`
+  (1 s, 3 s, 6 s — a landed DELETE is never replayed) and held only on exhaustion; the result
+  text then says the server is unreachable and the findings belong in-session — no later wake is
+  promised (the present-in-session degrade).
+- **`replace: true` source-scoped atomic reshape:** delete-then-post supersedes any earlier
+  pushes under the angle's source in one unit — no model-composed annotation HTTP or broad clear
+  exists. `replace` stays an optional flag so a plain `findings: []` remains the pure flush.
 - **Browser finalization (parent judgment, existing tool operations):** after typed collection,
-  clear every uncovered source (`launch.requested` minus `collected.covered`) with empty
-  findings and `replace: true`, including failed lanes that streamed before failing. Then
-  reconcile ONLY valid final reports: merge distinct concerns at shared existing anchors,
-  retain contributor angle/severity/confidence labels in merged text, and keep the highest
-  severity with its corresponding confidence. The first contributing lane in covered order
-  owns an anchor. Final per-angle arrays are DISJOINT; duplicate-only covered lanes get empty
-  arrays. Replace each covered source once, including empty arrays; the existing final-alternate
-  promotion preserves the union across replace order. Never recover a report from provisional
-  data or re-send every raw lane array as if that were reconciliation. An owning lane label
-  may differ from a contributing custom lens, which remains attributed in merged text. A held
-  clear/replacement (`held_batches`, even with zero held findings) is not finalization; retain
-  native-wake retry and door-owned degrade, never claim the browser is final while work is held.
+  reconcile ONLY valid final reports: merge distinct concerns at shared existing anchors, retain
+  contributor angle/severity/confidence labels in merged text, and keep the highest severity
+  with its corresponding confidence. The first contributing lane in covered order owns an
+  anchor. Final per-angle arrays are DISJOINT; duplicate-only covered lanes get empty arrays.
+  Push each covered source once with `replace: true`, including empty arrays. Never re-send
+  every raw lane array as if that were reconciliation. An owning lane label may differ from a
+  contributing custom lens, which remains attributed in merged text. A held final push
+  (`held_batches`, even with zero held findings) is not finalization: before readiness the
+  readiness notice flushes it; after readiness the findings are presented in-session.
+- **The code-owned `perk:wave` status marker (`WAVE_STATUS_SOURCE`, `replaceWaveStatus`):** the
+  browser doors' mitigation for the completion-only wave. The two launch/collect tool pairs push
+  ONE unprefixed annotation under the reserved source (review mode a general-scope `comment`;
+  plan mode a `GLOBAL_COMMENT`) as a `replace: true` unit through the same hold/retry path —
+  running (the lane census) at launch success, failed at a zero-lane launch soft-fail,
+  incomplete (the uncovered lanes) or cleared (`body: null` = the pure source clear) at
+  collection; `wave_running`/`no_wave` leave it alone. No primed surface ⇒ no effect (the
+  terminal doors prime none); an HTTP rejection is a warning report, never a throw. The `wave`
+  slug is refused by the decode (`bad_input`) so the MODEL cannot write it: the "never create
+  status annotations" rule stands for the model; only code writes `perk:wave`.
 - **Structural delete authority:** the only expressible DELETE is `?source=perk:<angle>`
-  composed from the validated slug — the human's and other sources' annotations are untouchable
-  by construction.
+  composed from the validated slug (or the code-reserved `perk:wave`) — the human's and other
+  sources' annotations are untouchable by construction.
 - **Failure arms:** `no_surface` (unprimed — loud refusal), `bad_input` (the strict per-mode
   decode), `push_rejected` (any non-201 POST / non-2xx DELETE — plannotator version drift;
   the batch is dropped, retrying cannot succeed).
