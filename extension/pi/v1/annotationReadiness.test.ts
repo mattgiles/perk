@@ -174,15 +174,16 @@ for (const observer of observers) {
       );
       assert.deepEqual(f.sent[0]?.options, idle ? undefined : { deliverAs: "followUp" });
       assert.match(f.sent[0]?.message ?? "", /findings: \[\].*replace omitted/);
-      assert.match(
-        f.sent[0]?.message ?? "",
-        /held final replacements or source clears after wave collection/,
-      );
+      assert.match(f.sent[0]?.message ?? "", /held final replacements after wave collection/);
+      assert.doesNotMatch(f.sent[0]?.message ?? "", /source clears|provisional/);
       assert.match(f.sent[0]?.message ?? "", /NOT workflow completion/);
       assert.match(
         f.sent[0]?.message ?? "",
-        /Do not repeat reconciliation or resend final\/provisional findings/,
+        /Do not repeat reconciliation or resend final findings/,
       );
+      // The observer's ready arm flips the primed surface's readiness flag (later network
+      // failures retry in-call instead of holding immediately).
+      assert.equal(f.annotations.ready, true);
       assert.doesNotMatch(f.sent[0]?.message ?? "", /127\.0\.0\.1|45001/);
       assert.equal(f.calls.length, 0, "observer does not become a concurrent queue writer");
       const flushed = await executePushAnnotations(
@@ -258,11 +259,19 @@ test("readiness also queues a continuation while a pre-bind request is still in 
   const f = fixture("review", false);
   const observing = observeBrowserReadiness(f.pi, f.ctx, f.started, f.annotations);
   const request = deferred<FetchResponseLike>();
+  // Readiness lands mid-request, so the eventual failure is retried in-call (the bounded
+  // post-readiness schedule — the delays are a no-op here) before the unit is held.
+  const slept: number[] = [];
   const pushing = executePushAnnotations(
     f.annotations,
     f.ctx,
     { angle: "correctness", findings: [f.finding], replace: true },
-    { fetchLike: () => request.promise },
+    {
+      fetchLike: () => request.promise,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    },
   );
   assert.equal(f.annotations.held.length, 0);
   f.makeReady();
@@ -271,6 +280,7 @@ test("readiness also queues a continuation while a pre-bind request is still in 
   assert.deepEqual(f.sent[0]?.options, { deliverAs: "followUp" });
   request.reject(new Error("pre-bind request failed"));
   await pushing;
+  assert.deepEqual(slept, [1_000, 3_000, 6_000], "readiness arrived, so the retries ran");
   assert.equal(f.annotations.held.length, 1);
   const flushed = await executePushAnnotations(
     f.annotations,

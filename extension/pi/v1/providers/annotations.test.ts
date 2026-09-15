@@ -19,15 +19,18 @@ import {
   executePushAnnotations,
   type FetchLike,
   type FetchResponseLike,
+  HELD_RETRY_DELAYS_MS,
   installAnnotationBindings,
   mapFindings,
   type PlanFinding,
   primeAnnotationSurface,
   type ReviewFinding,
+  replaceWaveStatus,
+  WAVE_STATUS_SOURCE,
 } from "./annotations.ts";
 
 // The execute-core tests share ONE state instance — every test primes at its start, and a
-// prime fully resets the ledger/held/alternates (exactly the per-session semantics).
+// prime fully resets the ledger/held/ready (exactly the per-session semantics).
 const state = createAnnotationState();
 
 // --- fixtures ----------------------------------------------------------------------------------
@@ -435,7 +438,11 @@ test("mapFindings plan mode: COMMENT-with-originalText vs GLOBAL_COMMENT", () =>
 
 for (const mode of ["plan", "review"] as const) {
   for (const ownerFirst of [true, false]) {
-    test(`final reconciliation clears failed sources and preserves disjoint merged findings (${mode}, ownerFirst=${ownerFirst})`, async () => {
+    test(`final reconciliation pushes disjoint per-angle arrays in any order, sparing other sources (${mode}, ownerFirst=${ownerFirst})`, async () => {
+      // Completion-only: nothing reaches the surface before collection, so the parent's
+      // reconciled per-angle arrays are the FIRST pushes. Each covered angle is pushed once with
+      // replace: true (empty arrays included); a duplicate-only lane has an empty final array;
+      // the human's and other sources' annotations are structurally untouchable.
       const local = createAnnotationState();
       primeAnnotationSurface(local, { mode, url: URL_BASE });
       const { target } = fakeTarget();
@@ -482,35 +489,23 @@ for (const mode of ["plan", "review"] as const) {
         assert.equal(result.details.ok, true, JSON.stringify(result));
         return result.details;
       }
-      // The failed lane holds a real anchor; another covered lane wins a shared anchor before
-      // the eventual owner. Without cleanup/disjoint finals these provisional bodies can win.
-      await push("failed", [finding("a", "FAILED provisional")]);
-      await push("other", [finding("b", "OTHER provisional", "minor")]);
-      const duplicate = await push("owner", [finding("b", "OWNER provisional")]);
-      assert.equal(duplicate.pushed, 0);
-      assert.equal(duplicate.skipped.length, 1);
-      assert.ok([...local.ledger.values()].some((item) => item.source === "perk:failed"));
 
-      const requested = ["owner", "other", "failed"];
+      // Parent-reconciled input: the first covered contributor owns each anchor; the other's
+      // distinct concern and tags survive in merged text, with maximum severity. Its final array
+      // is empty. A final push held before readiness (server offline) has nonzero held_batches
+      // and is flushed by the readiness retry (findings: [], replace omitted).
       const covered = ["owner", "other"];
-      // A held pure clear has zero held findings but nonzero held_batches: it is not finalized.
-      unavailable = true;
-      for (const angle of requested.filter((key) => !covered.includes(key))) {
-        const held = await push(angle, [], true);
-        assert.equal(held.held, 0);
-        assert.equal(held.held_batches, 1);
-      }
-      unavailable = false;
-      assert.equal((await push("failed", [])).held_batches, 0); // next native wake flush
-      assert.ok(![...stored.values()].some((item) => item.source === "perk:failed"));
-
-      // Parent-reconciled input: first covered contributor owns each anchor; other's distinct
-      // concern and tags survive in merged text, with maximum severity. Its final array is empty.
       const finalA = finding("a", "owner [major/high]: authoritative final A");
       const finalB = finding(
         "b",
         "owner [major/high]: final B\n\nother [minor/high]: distinct final concern",
       );
+      unavailable = true;
+      const held = await push("other", [], true);
+      assert.equal(held.held, 0);
+      assert.equal(held.held_batches, 1, "a held pure clear is not finalized");
+      unavailable = false;
+      assert.equal((await push("other", [])).held_batches, 0);
       for (const angle of ownerFirst ? covered : [...covered].reverse()) {
         await push(angle, angle === "owner" ? [finalA, finalB] : [], true);
       }
@@ -519,7 +514,6 @@ for (const mode of ["plan", "review"] as const) {
       assert.ok(finals.some((item) => item.text === `[major/high] ${finalA.body}`));
       assert.ok(finals.some((item) => item.text === `[major/high] ${finalB.body}`));
       assert.equal(local.held.length, 0);
-      assert.equal(local.alternates.size, 0);
       assert.deepEqual(
         [...new Set([...local.ledger.values()].map((item) => item.source))],
         ["perk:owner"],
@@ -696,7 +690,7 @@ test("execute: a network failure holds the batch (ok, never a degrade); [] flush
   assert.equal(heldOneDetails.held, 1);
   assert.equal(heldOneDetails.held_batches, 1);
   assert.deepEqual(heldOneDetails.ids, []);
-  assert.match(heldOne.content[0]?.text ?? "", /held/);
+  assert.match(heldOne.content[0]?.text ?? "", /held until the browser is ready/);
   assert.match(heldOne.content[0]?.text ?? "", /findings: \[\] is the pure retry/);
   assert.equal(
     notified.some((n) => n.severity === "error"),
@@ -981,16 +975,13 @@ test("execute: plan-mode batches post the COMMENT/GLOBAL_COMMENT shapes", async 
   });
 });
 
-test("execute: reconciling a FAILED streamed lane clears ONLY its provisional source; the successful lanes' final findings are retained (plan mode)", async () => {
-  // The draft-review reconcile over a mixed outcome: grounding and risk both streamed
-  // provisional batches; the supplier then failed the risk lane's completion (uncovered) while
-  // grounding completed. The parent clears the uncovered source with `replace: true, findings: []`
-  // and re-shapes the covered source with its final batch — the risk clear is source-scoped
-  // (one DELETE on `perk:risk`), never a wholesale wipe, and grounding's final batch survives.
+test("execute: a pure source clear (replace + []) touches ONLY that source; another angle's replace is independent (plan mode)", async () => {
+  // Two angles hold annotations; clearing one with `replace: true, findings: []` is ONE
+  // source-scoped DELETE on `perk:risk` (never a wholesale wipe), and grounding's later replace
+  // re-shapes its own source only.
   primeAnnotationSurface(state, { mode: "plan", url: URL_BASE });
   const { target } = fakeTarget();
   const endpoint = fakeEndpoint({ removed: 4 });
-  // Provisional batches while the wave ran.
   await executePushAnnotations(
     state,
     target,
@@ -1011,7 +1002,7 @@ test("execute: reconciling a FAILED streamed lane clears ONLY its provisional so
   );
   endpoint.calls.length = 0;
 
-  // Reconcile: the uncovered risk lane is a pure source clear.
+  // The risk source is a pure source clear.
   const cleared = await executePushAnnotations(
     state,
     target,
@@ -1024,12 +1015,12 @@ test("execute: reconciling a FAILED streamed lane clears ONLY its provisional so
   assert.deepEqual(
     endpoint.calls.map((c) => [c.method, c.url]),
     [["DELETE", `${URL_BASE}/api/external-annotations?source=${encodeURIComponent("perk:risk")}`]],
-    "one source-scoped DELETE on the failed lane; no POST, no other source touched",
+    "one source-scoped DELETE on the cleared source; no POST, no other source touched",
   );
   endpoint.calls.length = 0;
 
-  // Reconcile: the covered grounding lane re-shapes to its final report (same anchor re-pushes
-  // after ITS source-scoped clear; the final body wins).
+  // The grounding angle re-shapes to its final report (same anchor re-pushes after ITS
+  // source-scoped clear; the final body wins).
   const finalized = await executePushAnnotations(
     state,
     target,
@@ -1055,8 +1046,8 @@ test("execute: reconciling a FAILED streamed lane clears ONLY its provisional so
     posted.annotations.map((a) => [a.source, a.text]),
     [["perk:grounding", "[minor/medium] grounding final"]],
   );
-  // The failed lane's anchors are gone from the ledger: a later push of the same risk anchor is
-  // NOT deduped as already present (nothing of the failed lane survived the clear).
+  // The cleared source's anchors are gone from the ledger: a later push of the same risk anchor
+  // is NOT deduped as already present (nothing survived the clear).
   endpoint.calls.length = 0;
   const repushed = await executePushAnnotations(
     state,
@@ -1218,116 +1209,6 @@ test("execute: a new batch never dedupes against a ledger entry a held clear is 
   );
 });
 
-test("execute: hold-time dedupe carves out sources with a pending held clear", async () => {
-  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
-  const { target } = fakeTarget();
-  const endpoint = fakeEndpoint({ removed: 1 });
-  await executePushAnnotations(
-    state,
-    target,
-    { angle: "tests", findings: [reviewFinding()] },
-    { fetchLike: endpoint.fetchLike },
-  );
-  endpoint.setDown(true);
-  await executePushAnnotations(
-    state,
-    target,
-    { angle: "tests", findings: [], replace: true },
-    { fetchLike: endpoint.fetchLike },
-  ); // pending clear for perk:tests
-  // Still down: another angle supplies the same anchor. The stale (unstable) ledger entry must
-  // not veto it at hold time — it is held, then deduped for real at flush time.
-  const heldCross = await executePushAnnotations(
-    state,
-    target,
-    { angle: "quality", findings: [reviewFinding({ body: "quality's take" })] },
-    { fetchLike: endpoint.fetchLike },
-  );
-  const heldDetails = heldCross.details as OkDetails;
-  assert.equal(heldDetails.held, 1);
-  assert.equal(heldDetails.held_batches, 2);
-  assert.deepEqual(heldDetails.skipped, []);
-
-  endpoint.setDown(false);
-  endpoint.calls.length = 0;
-  const flushed = await executePushAnnotations(
-    state,
-    target,
-    { angle: "quality", findings: [] },
-    { fetchLike: endpoint.fetchLike },
-  );
-  assert.equal((flushed.details as OkDetails).pushed, 1);
-  assert.deepEqual(
-    endpoint.calls.map((c) => c.method),
-    ["DELETE", "POST"],
-  );
-  const posted = endpoint.calls[1]?.body as { annotations: { source?: string }[] };
-  assert.equal(posted.annotations[0]?.source, "perk:quality");
-});
-
-test("execute: cross-source duplicates in final batches are retained and promoted, never lost", async () => {
-  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
-  const { target } = fakeTarget();
-  const endpoint = fakeEndpoint();
-  // Streamed: tests owns anchor X.
-  await executePushAnnotations(
-    state,
-    target,
-    { angle: "tests", findings: [reviewFinding()] },
-    { fetchLike: endpoint.fetchLike },
-  );
-  // quality's FINAL batch also carries X: skipped (tests owns it) but RETAINED as a candidate.
-  const qualityFinal = await executePushAnnotations(
-    state,
-    target,
-    {
-      angle: "quality",
-      findings: [
-        reviewFinding({ body: "quality's final take" }),
-        reviewFinding({ path: "src/q.ts", line: 7 }),
-      ],
-      replace: true,
-    },
-    { fetchLike: endpoint.fetchLike },
-  );
-  assert.deepEqual((qualityFinal.details as OkDetails).skipped, ["line:src/a.ts:3"]);
-
-  // tests' FINAL batch omits X: the replace releases the anchor and the retained quality
-  // candidate is promoted in the same POST — the union of final batches survives the order.
-  endpoint.calls.length = 0;
-  const testsFinal = await executePushAnnotations(
-    state,
-    target,
-    { angle: "tests", findings: [reviewFinding({ path: "src/t.ts", line: 9 })], replace: true },
-    { fetchLike: endpoint.fetchLike },
-  );
-  const details = testsFinal.details as OkDetails;
-  assert.equal(details.pushed, 2, "the angle's own finding + the promoted candidate");
-  assert.deepEqual(
-    endpoint.calls.map((c) => c.method),
-    ["DELETE", "POST"],
-  );
-  const posted = endpoint.calls[1]?.body as {
-    annotations: { source?: string; text?: string }[];
-  };
-  assert.deepEqual(
-    posted.annotations.map((a) => a.source),
-    ["perk:tests", "perk:quality"],
-    "the promoted candidate posts under ITS source",
-  );
-  assert.equal(posted.annotations[1]?.text, "[major/high] quality's final take");
-  assert.match(testsFinal.content[0]?.text ?? "", /perk:quality: pushed 1/);
-
-  // Ownership transferred: the anchor now dedupes against quality.
-  const repush = await executePushAnnotations(
-    state,
-    target,
-    { angle: "correctness", findings: [reviewFinding()] },
-    { fetchLike: endpoint.fetchLike },
-  );
-  assert.deepEqual((repush.details as OkDetails).skipped, ["line:src/a.ts:3"]);
-});
-
 test("execute: a DELETE HTTP rejection is push_rejected — the replace unit is dropped", async () => {
   primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target } = fakeTarget();
@@ -1356,7 +1237,7 @@ test("execute: a DELETE HTTP rejection is push_rejected — the replace unit is 
   assert.equal(endpoint.calls.length, 1);
 });
 
-test("execute: a replace supersedes the angle's held work (units and items), sparing other sources", async () => {
+test("execute: a replace supersedes the angle's held work, sparing other sources", async () => {
   primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   const { target } = fakeTarget();
   const endpoint = fakeEndpoint();
@@ -1443,6 +1324,263 @@ test("execute: a POST network failure after a successful DELETE holds only the p
   );
 });
 
+// --- the post-readiness bounded retry -------------------------------------------------------------
+
+test("retry: a network failure BEFORE readiness holds immediately — no sleep, the readiness notice is the retry", async () => {
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint();
+  endpoint.setDown(true);
+  const slept: number[] = [];
+  const result = await executePushAnnotations(
+    state,
+    target,
+    { angle: "tests", findings: [reviewFinding()], replace: true },
+    {
+      fetchLike: endpoint.fetchLike,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    },
+  );
+  assert.equal(result.details.ok, true);
+  assert.deepEqual(slept, [], "not ready ⇒ no in-call retry");
+  assert.equal((result.details as OkDetails).held_batches, 1);
+  assert.equal(endpoint.calls.length, 1, "one attempt (the DELETE) and then the hold");
+  assert.match(result.content[0]?.text ?? "", /held until the browser is ready/);
+  assert.doesNotMatch(result.content[0]?.text ?? "", /no later wake is promised/);
+});
+
+test("retry: a network failure AFTER readiness retries over exactly HELD_RETRY_DELAYS_MS, then holds with the in-session degrade text", async () => {
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
+  state.ready = true;
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint();
+  endpoint.setDown(true);
+  const slept: number[] = [];
+  const result = await executePushAnnotations(
+    state,
+    target,
+    { angle: "tests", findings: [reviewFinding()], replace: true },
+    {
+      fetchLike: endpoint.fetchLike,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    },
+  );
+  assert.equal(result.details.ok, true, "exhaustion is still ok + held, never a soft-fail");
+  assert.deepEqual(slept, [...HELD_RETRY_DELAYS_MS]);
+  assert.deepEqual(slept, [1_000, 3_000, 6_000], "the schedule is pinned");
+  assert.equal(endpoint.calls.length, 4, "the first attempt plus one per delay");
+  assert.equal((result.details as OkDetails).held_batches, 1);
+  const text = result.content[0]?.text ?? "";
+  assert.match(text, /held after 3 retries/);
+  assert.match(text, /present these findings in-session, no later wake is promised/);
+  assert.doesNotMatch(text, /readiness notice/);
+});
+
+test("retry: success on the second attempt after readiness — no hold, the landed DELETE is not replayed", async () => {
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
+  state.ready = true;
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint({ removed: 1 });
+  // The DELETE lands; the POST fails once, then the server answers.
+  endpoint.setDown(true, "POST");
+  const slept: number[] = [];
+  const result = await executePushAnnotations(
+    state,
+    target,
+    { angle: "tests", findings: [reviewFinding()], replace: true },
+    {
+      fetchLike: endpoint.fetchLike,
+      sleep: async (ms) => {
+        slept.push(ms);
+        endpoint.setDown(false);
+      },
+    },
+  );
+  assert.equal(result.details.ok, true);
+  assert.deepEqual(slept, [1_000], "one retry sufficed");
+  const details = result.details as OkDetails;
+  assert.equal(details.held_batches, 0);
+  assert.equal(details.pushed, 1);
+  assert.equal(details.deleted, 1);
+  assert.deepEqual(
+    endpoint.calls.map((c) => c.method),
+    ["DELETE", "POST", "POST"],
+    "the landed delete is not replayed; only the post remainder was retried",
+  );
+  assert.doesNotMatch(result.content[0]?.text ?? "", /held/);
+});
+
+test("retry: a rejection never retries (version drift cannot heal)", async () => {
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
+  state.ready = true;
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint();
+  endpoint.failNext("POST", 400, "drift");
+  const slept: number[] = [];
+  const result = await executePushAnnotations(
+    state,
+    target,
+    { angle: "tests", findings: [reviewFinding()] },
+    {
+      fetchLike: endpoint.fetchLike,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    },
+  );
+  assert.equal(result.details.ok, false);
+  assert.equal((result.details as FailDetails).error_type, "push_rejected");
+  assert.deepEqual(slept, []);
+});
+
+// --- the code-owned perk:wave status marker -------------------------------------------------------
+
+test("decode refuses the code-reserved `wave` slug (bad_input through the tool; no fetch)", async () => {
+  assert.equal(
+    decodePushAnnotationsParams({ angle: "wave", findings: [] }, "review"),
+    null,
+    "the marker's slug is unrepresentable for the model",
+  );
+  assert.equal(decodePushAnnotationsParams({ angle: "wave", findings: [] }, "plan"), null);
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint();
+  const result = await executePushAnnotations(
+    state,
+    target,
+    { angle: "wave", findings: [], replace: true },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.equal((result.details as FailDetails).error_type, "bad_input");
+  assert.match(result.content[0]?.text ?? "", /`wave` slug is reserved to code/);
+  assert.equal(endpoint.calls.length, 0);
+});
+
+test("replaceWaveStatus: no primed surface ⇒ no effect (the terminal doors prime none)", async () => {
+  clearAnnotationSurface(state);
+  const { target, notified } = fakeTarget();
+  const endpoint = fakeEndpoint();
+  await replaceWaveStatus(state, target, "Reviewer wave running", {
+    fetchLike: endpoint.fetchLike,
+  });
+  assert.equal(endpoint.calls.length, 0);
+  assert.equal(notified.length, 0);
+  assert.equal(state.held.length, 0);
+});
+
+test("replaceWaveStatus: review mode posts ONE unprefixed general-scope comment under perk:wave as a replace unit", async () => {
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
+  const { target, notified } = fakeTarget();
+  const endpoint = fakeEndpoint();
+  await replaceWaveStatus(state, target, "Reviewer wave running — 2 lane(s): a, b.", {
+    fetchLike: endpoint.fetchLike,
+  });
+  assert.deepEqual(
+    endpoint.calls.map((c) => [c.method, c.url]),
+    [
+      [
+        "DELETE",
+        `${URL_BASE}/api/external-annotations?source=${encodeURIComponent(WAVE_STATUS_SOURCE)}`,
+      ],
+      ["POST", `${URL_BASE}/api/external-annotations`],
+    ],
+  );
+  assert.deepEqual(endpoint.calls[1]?.body, {
+    annotations: [
+      {
+        source: "perk:wave",
+        type: "comment",
+        scope: "general",
+        text: "Reviewer wave running — 2 lane(s): a, b.",
+      },
+    ],
+  });
+  assert.equal(notified.length, 0);
+  assert.deepEqual(
+    [...state.ledger.entries()].map(([key, entry]) => [key, entry.source]),
+    [["general:Reviewer wave running — 2 lane(s): a, b.", "perk:wave"]],
+  );
+  // A later text REPLACES the marker (delete + post), never accumulates a second one.
+  endpoint.calls.length = 0;
+  await replaceWaveStatus(state, target, "Reviewer wave incomplete — uncovered: b.", {
+    fetchLike: endpoint.fetchLike,
+  });
+  assert.deepEqual(
+    endpoint.calls.map((c) => c.method),
+    ["DELETE", "POST"],
+  );
+  assert.equal(state.ledger.size, 1);
+  assert.ok(state.ledger.has("general:Reviewer wave incomplete — uncovered: b."));
+});
+
+test("replaceWaveStatus: plan mode posts a GLOBAL_COMMENT authored by perk:wave; null clears (replace-empty)", async () => {
+  primeAnnotationSurface(state, { mode: "plan", url: URL_BASE });
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint({ removed: 1 });
+  await replaceWaveStatus(state, target, "Reviewer wave running", {
+    fetchLike: endpoint.fetchLike,
+  });
+  assert.deepEqual(endpoint.calls[1]?.body, {
+    annotations: [
+      {
+        source: "perk:wave",
+        author: "perk:wave",
+        type: "GLOBAL_COMMENT",
+        text: "Reviewer wave running",
+      },
+    ],
+  });
+  assert.ok(state.ledger.has("global:Reviewer wave running"));
+  endpoint.calls.length = 0;
+  await replaceWaveStatus(state, target, null, { fetchLike: endpoint.fetchLike });
+  assert.deepEqual(
+    endpoint.calls.map((c) => [c.method, c.url]),
+    [["DELETE", `${URL_BASE}/api/external-annotations?source=${encodeURIComponent("perk:wave")}`]],
+    "a null body is the pure source-scoped clear — no POST",
+  );
+  assert.equal(state.ledger.size, 0);
+  assert.equal(state.held.length, 0);
+});
+
+test("replaceWaveStatus: held before readiness like any batch and flushed by the pure retry; a rejection is a warning, never a throw", async () => {
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
+  const { target, notified } = fakeTarget();
+  const endpoint = fakeEndpoint();
+  endpoint.setDown(true);
+  await replaceWaveStatus(state, target, "Reviewer wave running", {
+    fetchLike: endpoint.fetchLike,
+  });
+  assert.equal(state.held.length, 1);
+  assert.equal(state.held[0]?.source, "perk:wave");
+  assert.equal(state.inFlight.count, 0);
+  endpoint.setDown(false);
+  endpoint.calls.length = 0;
+  const flushed = await executePushAnnotations(
+    state,
+    target,
+    { angle: "tests", findings: [] },
+    { fetchLike: endpoint.fetchLike },
+  );
+  assert.equal((flushed.details as OkDetails).held_batches, 0);
+  assert.deepEqual(
+    endpoint.calls.map((c) => c.method),
+    ["DELETE", "POST"],
+  );
+  assert.match(flushed.content[0]?.text ?? "", /perk:wave: pushed 1/);
+
+  // An HTTP rejection of the marker is a warning report — the flow continues.
+  endpoint.failNext("DELETE", 500, "boom");
+  await replaceWaveStatus(state, target, null, { fetchLike: endpoint.fetchLike });
+  assert.ok(
+    notified.some((n) => n.severity === "warning" && /perk:wave status marker/.test(n.message)),
+    JSON.stringify(notified),
+  );
+});
+
 // --- registration --------------------------------------------------------------------------------
 
 /** One registered tool def, execute included (the module never touches anything else). */
@@ -1485,21 +1623,33 @@ test("installAnnotationBindings registers exactly the one tool; a fresh state st
   assert.match(guidelines, /untrusted DATA/);
   assert.match(guidelines, /replace: true/);
   for (const pin of [
-    /on a browser surface/,
-    /first clear every uncovered source/,
-    /launch.requested minus collected.covered/,
-    /held clear is not finalization/,
+    /once per covered angle after collection/,
+    /held result before browser readiness is flushed by the readiness notice/,
+    /held result after readiness means the server stayed unreachable/,
+    /present those findings in-session, no later wake is promised/,
     /disjoint per-angle arrays, not each lane's raw array/,
     /contributor angle\/severity\/confidence labels/,
     /highest severity with its corresponding confidence/,
     /first contributing lane in collected.covered order/,
     /duplicate-only covered lanes have empty final arrays/,
     /once with replace: true, including empty arrays/,
-    /no batches\/clears are held/,
+    /perk:wave status marker is code-owned/,
+    /no batches are held/,
   ]) {
     assert.match(guidelines, pin);
   }
   assert.match(guidelines, /never a degrade/);
+  // The retired streaming-era guidance is gone: no per-batch pushes, no uncovered-source clear,
+  // no wake-driven retry.
+  for (const retired of [
+    /each arriving finding batch/,
+    /first clear every uncovered source/,
+    /held clear is not finalization/,
+    /provisional/,
+    /next native batch/,
+  ]) {
+    assert.doesNotMatch(guidelines, retired);
+  }
 
   // A fresh activation is a fresh session: nothing is primed until a door primes it.
   const { target } = fakeTarget();
