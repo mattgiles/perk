@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **231** canonical source units
-- **1242** logical fragments
+- **232** canonical source units
+- **1244** logical fragments
 - **16** session shapes and **12** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -67,6 +67,7 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
 | `markdown:prompts/commit-and-compact-continuation.md` | `context` | `shipped` | [`prompts/commit-and-compact-continuation.md`](../../prompts/commit-and-compact-continuation.md) · `file` | — |
 | `markdown:prompts/commit-and-compact.md` | `context` | `shipped` | [`prompts/commit-and-compact.md`](../../prompts/commit-and-compact.md) · `file` | — |
 | `markdown:prompts/common/resume-advisory.md` | `context` | `shipped` | [`prompts/common/resume-advisory.md`](../../prompts/common/resume-advisory.md) · `file` | — |
+| `markdown:prompts/common/review-wave-yield.md` | `context` | `shipped` | [`prompts/common/review-wave-yield.md`](../../prompts/common/review-wave-yield.md) · `file` | — |
 | `markdown:prompts/contexts/objective-refinement.md` | `context` | `shipped` | [`prompts/contexts/objective-refinement.md`](../../prompts/contexts/objective-refinement.md) · `file` | — |
 | `markdown:prompts/contexts/read-only.md` | `context` | `shipped` | [`prompts/contexts/read-only.md`](../../prompts/contexts/read-only.md) · `file` | — |
 | `markdown:prompts/stages/gist-save.md` | `context` | `shipped` | [`prompts/stages/gist-save.md`](../../prompts/stages/gist-save.md) · `file` | — |
@@ -90,6 +91,8 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
 - `markdown:prompts/commit-and-compact.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/common/resume-advisory.md`
+  - `body` — Document body (`file-body`)
+- `markdown:prompts/common/review-wave-yield.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/contexts/objective-refinement.md`
   - `body` — Document body (`file-body`)
@@ -2150,6 +2153,7 @@ Expert configuration guidance, structural search, and ancillary model utilities.
   - `section:perk-customization-recipes/target-a-non-default-base-branch-workflow-base` — Target a non-default base branch (`[workflow] base`) (`heading:perk-customization-recipes/target-a-non-default-base-branch-workflow-base`)
   - `section:perk-customization-recipes/scope-pi-resources-per-project-pi-config-l` — Scope pi resources per-project (`pi config -l`) (`heading:perk-customization-recipes/scope-pi-resources-per-project-pi-config-l`)
   - `section:perk-customization-recipes/change-pi-fff-s-search-mode-pi-fff-mode` — Change pi-fff's search mode (`PI_FFF_MODE`) (`heading:perk-customization-recipes/change-pi-fff-s-search-mode-pi-fff-mode`)
+  - `section:perk-customization-recipes/cheaper-prompt-caching-for-review-children-pi-subagent-cache-retention` — Cheaper prompt caching for review children (`PI_SUBAGENT_CACHE_RETENTION`) (`heading:perk-customization-recipes/cheaper-prompt-caching-for-review-children-pi-subagent-cache-retention`)
   - `section:perk-customization-recipes/write-a-custom-subagent-pi-agents-name-md` — Write a custom subagent (`.pi/agents/<name>.md`) (`heading:perk-customization-recipes/write-a-custom-subagent-pi-agents-name-md`)
   - `section:perk-customization-recipes/prefer-pi-s-regular-tui-mode-tuimode` — Prefer pi's regular TUI mode (`tuiMode`) (`heading:perk-customization-recipes/prefer-pi-s-regular-tui-mode-tuimode`)
   - `section:perk-customization-recipes/read-the-footer-s-cache-hit-rate-diagnose-misses-showcachemissnotices` — Read the footer's cache-hit rate; diagnose misses (`showCacheMissNotices`) (`heading:perk-customization-recipes/read-the-footer-s-cache-hit-rate-diagnose-misses-showcachemissnotices`)
