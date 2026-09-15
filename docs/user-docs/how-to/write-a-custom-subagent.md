@@ -74,8 +74,8 @@ completes on its validated `structured_output` report and its findings are retai
 do not change: the report contract (a lane that never calls `structured_output`, or calls it with
 a schema-invalid report, still fails), the read-only enforcement (inspection `bash` remains
 available; not editing is Perk's restrictions and the rubric's job, never the guard's), and
-coverage (a failed lane is uncovered — `collect_*` reports it as incomplete, its provisional
-annotations are cleared rather than finalized, and a failed lane is never a clean review). Your
+coverage (a failed lane is uncovered — `collect_*` reports it as incomplete, it contributes no
+annotations, and a failed lane is never a clean review). Your
 own custom agents keep the engine default; an agent override that re-enables the guard on a Perk
 report profile reintroduces the failure and is a documented compatibility limit.
 

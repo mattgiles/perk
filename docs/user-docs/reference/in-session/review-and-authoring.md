@@ -96,49 +96,55 @@ Every report child carries the constant `perk.parent-restrictions/1 = {readOnly:
 the caller's local plan reference). A runner child with the packet is read-only for its activation —
 gate exit and branch navigation cannot clear it; the tool-call allowlist backstop stays — and gets no
 agent scratch. Both halves are perk-owned; a malformed packet fails closed. Manual subagent calls and
-foreground children are outside this channel. Streaming and coverage rules below are unchanged.
+foreground children are outside this channel. The delivery and coverage rules below are unchanged.
 
 ## Human-triaged PR review
 
-### Native delivery and streaming status
+### Native delivery
 
 For terminal/browser PR reviews (including stacks) and both browser draft-review doors, the
 agent launches once, then ends its turn **without closing Pi**. An idle prompt does not mean
-its wave was lost: native supervisor messages wake the parent to relay provisional findings,
-and the matching workflow-completion notice triggers collection. Messages arriving during an
-active turn queue normally; co-delivered batches are relayed before collection, without an
-extra turn boundary. Only final typed reports authorize reconciliation, exactly once.
+its wave was lost. Review waves are **completion-only**: children do not stream, so no finding
+reaches the session before the wave finishes (perk spawns every wave with the pi-subagents
+intercom bridge off — children have no supervisor channel at all). A routine successful child
+completion does not wake the parent; a failed/paused/stopped child or the workflow completion
+does, and only the matching workflow-completion notice triggers collection. Only final typed
+reports authorize reconciliation, exactly once.
 
-Each covered report requires `streamed: boolean`: true means the child successfully submitted
-at least one nonempty finding batch, not proof of human-visible annotation delivery. False with
-no findings is neutral **“no provisional batches (no findings)”**. False with findings produces
-an in-session **“completion-only findings; no provisional batches”** warning naming those lanes.
-`fyi` explains unavailable or partial streaming. Neither false case changes coverage or implies
-by itself that the supervisor bridge is broken; these notices never become posted comments.
+On the browser surfaces a **code-owned marker** — an annotation under the reserved
+`perk:wave` source — says "Reviewer wave running … decide after they arrive" from launch until
+collection clears it (or rewrites it as "incomplete" naming the uncovered lanes). The
+door-open notice says the same thing. **An early decision is authoritative:** if you approve or
+request changes in the browser before the wave lands, that decision proceeds and the reviewer
+findings are forgone — the still-pending wave stays collectable, but nothing is pushed to a
+closed review. The marker and notice are the mitigation, not a gate.
+
+`fyi` in a report is in-session triage color; it never becomes a finding or a posted comment.
 
 Each report also requires `blocked: boolean` (never defaulted — a missing or mistyped value is
 schema-invalid). `false` is every completed angle, findings or not. `true` means the lane could
 not complete its required review — the context fetch failed, a referenced context file was
 unreadable, or the hunt stopped early — with empty `findings` and the blocker first in `fyi`. A
 blocked lane is **uncovered**, never "no findings": collection reports `complete: false`, lists
-the lane in `failures` as `lane-failed` with the `fyi` detail, drops it from `covered`, and the
-browser reconcile clears its provisional annotations with the other uncovered sources. There is
-no retry (the doors' zero-retry posture stands).
+the lane in `failures` as `lane-failed` with the `fyi` detail, and drops it from `covered`; a
+blocked lane contributes no annotations. There is no retry (the doors' zero-retry posture
+stands).
 
-Browser reconciliation withdraws provisional annotations from uncovered lanes before replacing
-final findings. Shared anchors get one merged annotation from valid final reports, owned by the
-first contributing covered lane; its text retains the other contributors and their severity/
-confidence. The highest severity is preserved. Plan views display the owning lane as the author;
-PR views display its source badge. A custom lens that overlaps another lane may appear in the
-merged text rather than as a separate custom card. Held clears/replacements remain pending, not
-finalized; no failed lane's provisional output is treated as an authoritative report.
+Browser reconciliation happens once, after collection: shared anchors get one merged annotation
+from valid final reports, owned by the first contributing covered lane; its text retains the
+other contributors and their severity/confidence. The highest severity is preserved. Each
+covered lane's final array is then pushed once (empty arrays included). Plan views display the
+owning lane as the author; PR views display its source badge. A custom lens that overlaps
+another lane may appear in the merged text rather than as a separate custom card.
 
-If the browser becomes ready after annotation work was held—or while a push is still in
-flight—the door sends one continuation to finish delivery through the normal annotation tool.
-This also works after wave collection, with no further reviewer message or human nudge needed.
-The continuation flushes held final replacements/clears; it does not rerun the wave, collect
-again, or repeat reconciliation. An empty idle queue causes no extra turn, and a closed or
-superseded review does not trigger a delivery continuation.
+If the browser becomes ready after a final push was held, the door sends one continuation to
+finish delivery through the normal annotation tool. This also works after wave collection, with
+no further reviewer message or human nudge needed. The continuation flushes the held final
+pushes; it does not rerun the wave, collect again, or repeat reconciliation. A push that fails
+*after* the browser was ready is retried a few times in-call; if the server stays unreachable
+the findings are presented in-session instead (no later wake is promised). An empty idle queue
+causes no extra turn, and a closed or superseded review does not trigger a delivery
+continuation.
 
 An early collection retains the pending wave and yields until matching completion. If the
 bounded collection grace still expires after matching completion was observed, the flow stops
@@ -157,8 +163,8 @@ Open a human-in-the-loop adversarial review in the
 ```
 
 With a PR target, perk creates a detached read-only checkout for a foreign PR, never executes its
-code, and streams batches from 2–3 selected adversarial reviewers plus one automatic final
-source-bound Ponytail reviewer into hunk while they run. `claimed-intent` is mandatory; Ponytail is
+code, and runs 2–3 selected adversarial reviewers plus one automatic final source-bound
+Ponytail reviewer; their reconciled findings are pushed into hunk when the wave completes. `claimed-intent` is mandatory; Ponytail is
 outside the 2–3 input cap, uses the same model/directive/report family, and is never selected or
 duplicated. A failed exact-source preflight leaves Ponytail explicitly uncovered with
 `skill-unavailable` while other lanes continue. With no target and an active PR, the same flow
@@ -374,7 +380,8 @@ pasted draft text from the model. The shared companion tools are:
 
 Review the working plan draft from plan mode, an objective-node planning session, or a save-stage
 session. The browser opens on the exact draft bytes; 2–3 selected
-grounding/scope/decision-completeness/risk lanes stream phrase annotations. Any argument text adds
+grounding/scope/decision-completeness/risk lanes deliver phrase annotations when the wave
+completes (a marker in the browser says the wave is running until then). Any argument text adds
 one custom review lane, and exactly one automatic final core-Ponytail lane follows outside both
 menus/caps.
 
