@@ -19,7 +19,7 @@ import {
   waveScriptItems,
 } from "../testing/fakeSubagents.ts";
 import { createReportWave, type ReportWaveRequest } from "./reportWave.ts";
-import { WAVE_ACCEPTANCE, type WaveBus } from "./transport.ts";
+import { WAVE_ACCEPTANCE, WAVE_INTERCOM_BRIDGE, type WaveBus } from "./transport.ts";
 
 /** A synchronous in-memory bus (the adapter-contract suite's shape). */
 function createFakeBus(): WaveBus {
@@ -80,6 +80,7 @@ test("rpc round-trip: every child carries the constant packet and caller-checkou
     mission?: boolean;
     context?: string;
     acceptance?: unknown;
+    intercomBridge?: unknown;
     outputSchema?: unknown;
     model?: string;
     timeoutMs?: number;
@@ -88,6 +89,7 @@ test("rpc round-trip: every child carries the constant packet and caller-checkou
   assert.equal(spawn.mission, false);
   assert.equal(spawn.context, "fresh");
   assert.deepEqual(spawn.acceptance, WAVE_ACCEPTANCE);
+  assert.deepEqual(spawn.intercomBridge, WAVE_INTERCOM_BRIDGE);
   assert.deepEqual(spawn.outputSchema, spec.outputSchema);
   assert.equal(spawn.model, "anthropic/claude-sonnet-4");
   assert.equal(spawn.timeoutMs, 5_000);

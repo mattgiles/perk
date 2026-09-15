@@ -293,13 +293,16 @@ test("gated adopt-child: the engine's child-side tools survive the inherited gat
   });
   try {
     const active = h.session.getActiveToolNames();
-    for (const name of ["structured_output", "contact_supervisor"]) {
-      assert.ok(active.includes(name), `child-side engine tool must survive the gate: ${name}`);
-    }
+    assert.ok(
+      active.includes("structured_output"),
+      "child-side engine completion tool must survive the gate",
+    );
     for (const name of ["read", "bash"]) {
       assert.ok(active.includes(name), `read-only tool must stay active: ${name}`);
     }
-    for (const name of ["edit", "write", "subagent_wait", "bg_wait"]) {
+    // `contact_supervisor` is no longer carved in: perk waves spawn with the intercom bridge
+    // off, so a gated adopt-child never needs the supervisor door.
+    for (const name of ["edit", "write", "subagent_wait", "bg_wait", "contact_supervisor"]) {
       assert.ok(!active.includes(name), `the gate itself still holds in the child: ${name}`);
     }
   } finally {

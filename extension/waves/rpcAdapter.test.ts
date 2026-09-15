@@ -18,6 +18,7 @@ import {
 } from "./rpcAdapter.ts";
 import {
   WAVE_ACCEPTANCE,
+  WAVE_INTERCOM_BRIDGE,
   type WaveBus,
   type WaveCompletion,
   type WaveSpawnParams,
@@ -92,6 +93,7 @@ function spawnParams(): WaveSpawnParams {
     mission: false,
     context: "fresh",
     acceptance: WAVE_ACCEPTANCE,
+    intercomBridge: WAVE_INTERCOM_BRIDGE,
     outputSchema: { type: "object" },
     timeoutMs: 60_000,
   };
