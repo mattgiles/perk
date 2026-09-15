@@ -16,12 +16,12 @@ you are about to build on new engine mechanics.
 1. **Read the installed version** and compare it with `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` in
    `src/perk/convergence/doctor/checks.py`:
    `node -p "require('./.pi/npm/node_modules/pi-subagents/package.json').version"`.
-2. **Re-read the source at the upstream tag.** The installed package ships compiled JS + `.d.ts`
-   only (`scripts/build-package.mjs` publishes `src/**/*.js`, no `.ts`), so the source re-read
-   happens against the matching tag of `nicobailon/pi-subagents` — `gh api` / `gh browse` on
-   the tag, or a local clone checked out at it — and the release notes for that version. Walk
-   each engine mechanic `docs/learned/pi/subagents.md` states (its `## Sources` names the
-   baseline):
+2. **Re-read the source.** The installed package under `.pi/npm/node_modules/pi-subagents/`
+   ships its TypeScript sources (`pi.extensions: ["./index.ts"]`, `src/**/*.ts`) — re-read them
+   in place; if a future release publishes compiled JS instead, read the matching tag of
+   `nicobailon/pi-subagents` (`gh api` / `gh browse`, or a local clone at the tag). Read the
+   release notes for the version either way. Walk each engine mechanic
+   `docs/learned/pi/subagents.md` states (its `## Sources` names the baseline):
    - the supervisor channel's `expectsReply` handling in
      `src/intercom/native-supervisor-channel.ts::poll` — progress updates are **discarded** on
      the parent side since 0.68.0, which is why every perk wave spawns with
