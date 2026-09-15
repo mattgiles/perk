@@ -100,39 +100,22 @@ def test_discovery_preserves_unicode_and_contextual_soft_keyword_symbols(tmp_pat
 
 
 @pytest.mark.parametrize(
-    "selector",
-    [
-        # The eight shapes the adapter boundary test rejects as `unsupported-selector`.
-        "",
-        "symbol:",
-        "symbol:target.name",
-        "symbol:for",
-        " symbol:target",
-        "symbol:target ",
-        "symbol:target/extra",
-        "call-argument:target:value",
-        # NFKC edges: a fullwidth `for` normalizes to a hard keyword; a fullwidth-`e` `café`
-        # (U+FF43 U+FF41 U+FF46 U+00E9) normalizes to a DIFFERENT non-keyword identifier. Both
-        # are spellings discovery can never emit, so both are refused, never canonicalized.
-        "symbol:\uff46\uff4f\uff52",
-        "symbol:\uff43\uff41\uff46\u00e9",
-    ],
-)
-def test_selector_name_refuses_every_unemitted_shape(selector: str) -> None:
-    assert python_symbol_selector_name(selector) is None
-
-
-@pytest.mark.parametrize(
     ("selector", "name"),
     [
         ("symbol:target", "target"),
         ("symbol:café", "café"),
         ("symbol:match", "match"),
         ("symbol:_private", "_private"),
+        # The one NFKC edge the adapter-boundary matrix does not carry: a fullwidth `café`
+        # (U+FF43 U+FF41 U+FF46 U+00E9) normalizes to a DIFFERENT non-keyword identifier — a
+        # spelling discovery can never emit — so it is refused, never canonicalized. Every other
+        # rejected shape is pinned once, at the adapter boundary
+        # (test_python_adapter_rejects_every_unemitted_selector_shape), which calls this parser.
+        ("symbol:\uff43\uff41\uff46\u00e9", None),
     ],
 )
 def test_selector_name_admits_only_normalized_non_keyword_identifiers(
-    selector: str, name: str
+    selector: str, name: str | None
 ) -> None:
     assert python_symbol_selector_name(selector) == name
 

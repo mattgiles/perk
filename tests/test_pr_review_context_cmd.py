@@ -3,6 +3,7 @@ import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner, Result
 
 from perk import github, plan
@@ -501,6 +502,28 @@ def test_stack_context_topology_broken_refuses(git_repo_with_remote, monkeypatch
         timeout=30,
     )
     assert listed.stdout.strip() == ""
+
+
+def test_combined_diff_translates_a_substrate_git_error_with_stack_context(monkeypatch, tmp_path):
+    # The non-topology arm of the translation boundary: any other GitError from the substrate
+    # primitive (fetch failure, unresolvable head, no common ancestor, diff failure) surfaces as
+    # `git_error` naming the members + base, with the substrate's own text chained below.
+    import perk.cli.commands.pr.review_context_cmd as review_context_cmd
+    from perk.cli.ensure import UserFacingCliError
+
+    def failing_primitive(repo_root, *, pr_numbers, base_ref):
+        assert (repo_root, list(pr_numbers), base_ref) == (tmp_path, [1, 2], "main")
+        raise git_mod.GitError("git fetch failed: origin unreachable")
+
+    monkeypatch.setattr(git_mod, "stack_merge_base_diff", failing_primitive)
+    with pytest.raises(UserFacingCliError) as excinfo:
+        review_context_cmd._combined_diff(tmp_path, _stack_members())
+    assert excinfo.value.error_type == "git_error"
+    assert str(excinfo.value) == (
+        "could not render the combined stack diff for PRs #1, #2 against base branch 'main'"
+        "\ngit fetch failed: origin unreachable"
+    )
+    assert isinstance(excinfo.value.__cause__, git_mod.GitError)
 
 
 def test_stack_context_two_workers_interleaved_ref_isolation(git_repo_with_remote, monkeypatch):

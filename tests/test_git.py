@@ -1091,51 +1091,26 @@ def test_pr_merge_base_diff_unrelated_history_raises_and_leaves_no_refs(git_repo
 # --- check_stack_topology: the one fail-closed ancestry gate both stack workers share -----
 
 
-def _raise_probe_failure(*_a, **_k):
-    raise git.GitError("probe failed")
-
-
-@pytest.mark.parametrize(
-    "probe",
-    [
-        pytest.param(lambda *a, **k: None, id="indeterminate"),
-        pytest.param(_raise_probe_failure, id="raises"),
-    ],
-)
-def test_check_stack_topology_refuses_every_unanswered_probe(monkeypatch, tmp_path, probe):
-    monkeypatch.setattr(git, "is_ancestor", probe)
-    heads = [(1, "a" * 40), (2, "b" * 40)]
-    with pytest.raises(
-        git.StackTopologyError, match=r"PR #1 head \w{12} ancestry indeterminate for PR #2 head"
-    ) as excinfo:
-        git.check_stack_topology(tmp_path, heads=heads)
-    if probe is _raise_probe_failure:
-        # A probe that could not RUN follows the same typed path, with its own text chained.
-        assert isinstance(excinfo.value.__cause__, git.GitError)
-        assert "probe failed" in str(excinfo.value)
-
-    monkeypatch.setattr(git, "is_ancestor", lambda *a, **k: False)
-    with pytest.raises(git.StackTopologyError, match="is not an ancestor of"):
-        git.check_stack_topology(tmp_path, heads=heads)
-
-
-def test_check_stack_topology_linear_chain_passes_and_a_single_head_probes_nothing(
+def test_check_stack_topology_folds_a_probe_that_cannot_run_into_the_typed_refusal(
     monkeypatch, tmp_path
 ):
-    probes: list[tuple[str, str]] = []
+    # The one branch the fold introduced: a probe GitError (spawn failure / timeout) refuses as
+    # StackTopologyError with the COMPLETE stable message plus the probe's own text, chained.
+    # The False / None / linear-chain arms are exercised end-to-end by the checkout and
+    # review-context tests that route through this gate.
+    def failing_probe(*_a, **_k):
+        raise git.GitError("probe failed")
 
-    def recording(_repo, ancestor, head):
-        probes.append((ancestor, head))
-        return True
-
-    monkeypatch.setattr(git, "is_ancestor", recording)
-    heads = [(1, "a" * 40), (2, "b" * 40), (3, "c" * 40)]
-    assert git.check_stack_topology(tmp_path, heads=heads) is None
-    assert probes == [("a" * 40, "b" * 40), ("b" * 40, "c" * 40)]
-
-    probes.clear()
-    assert git.check_stack_topology(tmp_path, heads=[(7, "d" * 40)]) is None
-    assert probes == []
+    monkeypatch.setattr(git, "is_ancestor", failing_probe)
+    with pytest.raises(git.StackTopologyError) as excinfo:
+        git.check_stack_topology(tmp_path, heads=[(1, "a" * 40), (2, "b" * 40)])
+    assert str(excinfo.value) == (
+        f"stack topology broken: PR #1 head {'a' * 12} ancestry indeterminate for PR #2 head "
+        f"{'b' * 12} — the combined diff would not contain every layer (sync the stack first)."
+        "\nprobe failed"
+    )
+    assert isinstance(excinfo.value.__cause__, git.GitError)
+    assert str(excinfo.value.__cause__) == "probe failed"
 
 
 # --- sync substrate primitives (update_ref / list_refs / detach / rebase / atomic push) --
