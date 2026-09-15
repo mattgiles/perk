@@ -32,15 +32,15 @@ numbers are event stamps, never currency claims.
 - Children are read-only reporters and the PARENT mutates once after reconciling; def-level
   `completionGuard: false` is the report-only escape, `context: "fresh"` per spawn is the only
   isolation guarantee — "Read-only children, parent mutates".
-- pi-subagents ≥ 0.67.0 intersects a child's declared tools with the HOST's builtins: a shadowed
-  `grep`/`find` fails reviewer/scout lanes closed at launch — perk injects
-  `PI_FFF_MODE=tools-and-ui`; doctor `subagent-host-tools` — "The ≥ 0.67.0 host-builtin intersection".
+- pi-subagents 0.67.x failed reviewer/scout lanes closed when pi-fff shadowed `grep`/`find`
+  (host-builtin intersection, fixed in 0.68.0); perk keeps injecting `PI_FFF_MODE=tools-and-ui`;
+  doctor `subagent-host-tools` — "The 0.67.x host-builtin intersection".
 - `outputSchema` injects the engine-required `structured_output` call (covered lane ⟺ schema-valid
   report); every wave spawn disables acceptance auto-inference explicitly; `runs.all` is all-settled
   for config-object items only — "Execution surfaces and structured output".
-- Supervisor progress updates are injected steer messages that wake an idle parent; the completion
-  notice is a preview, never the report — collect via the typed wave tools (`report-waves.md`) —
-  "Supervisor channel".
+- Waves are completion-only: every spawn carries `intercomBridge: {mode: "off"}` (0.68.0 discards
+  parent-side `progress_update`); a successful child completion no longer wakes the parent; the
+  completion notice is a preview — collect via the typed wave tools — "Supervisor channel".
 - perk reaches the engine only through public surfaces (v1 RPC envelope pinned as module constants,
   delegation events, def frontmatter, package `exports`); doctor `subagent-compat` is a version
   tripwire, never a source probe; the accepted coverage gap is named — "Engine-coupling posture".
@@ -76,10 +76,11 @@ named key with `Object.hasOwn` *before* honoring the value — a polluted `Objec
 would otherwise satisfy `keys.length === 1 && value.readOnly === false` and un-floor the child. Every
 decoder reading a named property off parsed JSON should do the same.
 
-**The inherited gate vs the engine's child tools.** The engine injects `structured_output` and
-`contact_supervisor` at extension **load time** — before perk's `session_start` gate sync — so a
-gate sync that omits them deactivates them and an `outputSchema` child fails
-`structuredOutputFailed`. Hence `SUBAGENT_CHILD_TOOLS` sits in `READ_ONLY_TOOLS`
+**The inherited gate vs the engine's child tool.** The engine injects `structured_output` at
+extension **load time** — before perk's `session_start` gate sync — so a gate sync that omits it
+deactivates it and an `outputSchema` child fails `structuredOutputFailed`. Hence
+`SUBAGENT_CHILD_TOOLS` (`structured_output` only — `contact_supervisor` never reaches a perk child,
+the bridge being off at every spawn) sits in `READ_ONLY_TOOLS`
 (`extension/substrate/toolGating.ts`) and in **neither** `PERK_TOOLS` nor `BORROWED_TOOLS` —
 children are stage-unscoped, so gate membership is their only governance surface. A "missing
 `structured_output`" is a **composition** defect: trace (a) the launch tool plan
@@ -194,8 +195,10 @@ a pure prose rewrite stays green **except** for those pinned clauses.
 `.perk/config.toml` (overlaid by `.perk/local.toml`), applied by the wave module as the
 **workflow-level `model` default** on every lane — single-child launches included. It is spawn-time
 and wins over the def's model however set. Placement rule: a `[models.subagents]` key belongs beside
-a **code-owned spawn surface** only; a hand-launched agent rides its frontmatter
-`model:`/`fallbackModels:`. The two readers are the Pydantic `SubagentsTable`
+a **code-owned spawn surface** only; a hand-launched agent rides its frontmatter `model:` (the
+only model field — 0.68.0 **rejects a def carrying `fallbackModels` at load**, `Agent '<path>' uses
+removed frontmatter field 'fallbackModels'`, and every def in the discovery set fails with it; there
+is no replacement, same-launch model switching is gone upstream). The two readers are the Pydantic `SubagentsTable`
 (`src/perk/substrate/config.py`) and `SUBAGENT_KEYS`/`parseSubagentsSelection`
 (`extension/substrate/config.ts`); no key has a Python-plane execution consumer (doctor's
 `_models_check` scans `Config.subagents` generically) — the TS flow tools read at execute time.
@@ -241,21 +244,26 @@ configured `defaultSubagentContext` > def `defaultContext` > `fresh` (an implici
 persisted parent — `canPreferFork`). An isolation-requiring fan-out passes `context: "fresh"` **per
 spawn** — a def-level default cannot guarantee isolation.
 
-## The ≥ 0.67.0 host-builtin intersection (doctor `subagent-host-tools`)
+## The 0.67.x host-builtin intersection (doctor `subagent-host-tools`)
 
 Since 0.67.0 the launch tool plan (`src/runs/shared/child-tool-plan.ts`) intersects a child's
-declared tools with the HOST session's builtins — a host tool counts as builtin when its
-`source === "builtin"` OR (`source === "auto"` and its name is in `PI_BUILTIN_TOOL_NAMES`). Agents
+declared tools with the HOST session's builtins — in 0.67.x a host tool counted as builtin when its
+`source === "builtin"` OR (`source === "auto"` and its name is in `PI_BUILTIN_TOOL_NAMES`); since
+0.68.0 `getHostBuiltinToolNames` counts any core-named slot regardless of source ("wrapped core
+slots count"), so an extension re-registering `grep`/`find` no longer empties the intersection. Agents
 matching `REVIEW_OR_SCOUT_AGENT_PATTERN` (`/\b(?:reviewer|scout)\b/i`) **fail closed at launch**
 when ANY explicitly requested, still-permitted member of `REPOSITORY_INSPECTION_TOOLS` (`read, grep,
 find, ls, bash, powershell`) is host-omitted (excluded or undefined tool lists never fail); every
 other agent silently loses the tool with a `console.warn`-only warning (never in the RPC reply). The trigger is pi-fff's `override` mode re-registering `grep`/`find` as extension tools;
-perk's answer is `PI_FFF_MODE=tools-and-ui` injected at both launch seams
+perk's answer was `PI_FFF_MODE=tools-and-ui` injected at both launch seams
 (`src/perk/run/launch/__init__.py::FFF_MODE_ENV`; `workflow/cold-door-launch.md`,
-`workflow/borrowed-packages.md`), the operator env winning. Doctor's `_subagent_host_tools_check`
-gates on `_SUBAGENTS_HOST_INTERSECTION_AFFECTED = ("0.67.0", None)` — an **open upper bound** only
-the re-verify how-to closes. The borrowed package is unpinned and refreshes at every pi launch, so
-the installed version can move mid-session.
+`workflow/borrowed-packages.md`), the operator env winning — kept after the fix as a harmless
+additive default (protective on any 0.67.x host; keeps the builtins beside `fffind`/`ffgrep`).
+Doctor's `_subagent_host_tools_check` gates on `_SUBAGENTS_HOST_INTERSECTION_AFFECTED = ("0.67.0",
+"0.68.0")` — the range closed by the re-verify how-to once the upstream fix landed; its two `ok`
+arms are distinguishable (below the range: "does not intersect"; at/above 0.68.0: "counts wrapped
+core slots"). The borrowed package is unpinned and refreshes at every pi launch, so the installed
+version can move mid-session.
 
 ## Execution surfaces and structured output
 
@@ -300,29 +308,35 @@ module therefore passes `acceptance: {level: "none", reason}` on EVERY wave spaw
 
 ## Supervisor channel
 
-The intercom bridge appends `contact_supervisor` to a nonempty explicit allowlist when enabled
-(`src/intercom/intercom-bridge.ts::applyIntercomBridgeToAgent`) — a read-only reviewer streams
-without def changes; bridge-off supplies nothing, so never infer delivery from a tool list.
-`reason: "progress_update"` is one-way (`expectsReply` false; never enters `pending`; capped at
-`MAX_MESSAGE_BYTES = 64 KiB`). Delivery is an injected message, nothing else
-(`native-supervisor-channel.ts`): `pi.sendMessage({customType: SUPERVISOR_REQUEST_MESSAGE_TYPE})`
-(`supervisor-ui.ts`) with the host default steer and `triggerTurn: true` — an idle parent wakes.
-Owner match is session-scoped (`requestMatchesOwner` on `orchestratorSessionId`, a typed
-`ChildRuntimeConfig` field), so RPC-spawned and model-called waves stream identically. Transport is
-platform-split (fs watchers + safety scan, or a `CHANNEL_POLL_MS` ≤ 500 ms poller) — upstream
-internals, not a parent prescription. A **decision-type**
-request from a lane is a lane-design smell (unanswerable at parent-turn latency) — reviewer prompts
-classify parent-owned execution evidence as out of scope (`agents/pr-reviewer.md`). The silent
-killer is config: `subagents.intercomBridge.mode` `"off"` or `"fork-only"` (enum `off | fork-only |
-always`; perk children are fresh-context) suppresses the channel — doctor `subagent-bridge-config`
-warns on either scope (project + the launch-precedence agent dir via `launch_pi_agent_dir`), never
-fails. Completion notices (`"subagent-notify"` overall; `"subagent-incremental-child-notify"` per
-settled child) are previews — a 1,000-char return slice plus up to 8 child previews of 4 KiB,
-per-item `triggerTurn` — never the report. `bg_wait` exists upstream for non-notifying background
-work; perk does not adopt it. The parent collection protocol, grace/drain, `streamed` disclosure and
-browser reconciliation are `workflow/report-waves.md` § "Session-scoped guard state" / § "Lane
-semantics". Lesson: the planning session reads subtle dependency source and pre-digests it into the
-plan.
+**Perk waves run with the bridge off.** The intercom bridge appends `contact_supervisor` to a
+nonempty explicit allowlist when active (`src/intercom/intercom-bridge.ts::applyIntercomBridgeToAgent`)
+AND appends `DEFAULT_INTERCOM_BRIDGE_TEMPLATE` to the child's system prompt — a template that itself
+tells the child to send `contact_supervisor({reason: "progress_update"})` on meaningful progress.
+Since 0.68.0 the parent-side channel **discards** every non-reply request
+(`native-supervisor-channel.ts::poll`: `if (!request.expectsReply) { removeRequestFile(…);
+continue; }` — no `sendMessage`, no event, no storage; upstream #2229, deliberate, no opt-in) while
+the child tool still returns "Supervisor progress update queued." — so a streaming child burns tool
+calls on batches nobody receives. Perk therefore passes the per-launch override
+`intercomBridge: {mode: "off"}` on EVERY wave spawn (`extension/waves/transport.ts::WAVE_INTERCOM_BRIDGE`,
+beside `WAVE_ACCEPTANCE`; `SubagentParams.intercomBridge` "replaces the global config for this launch
+only", honored on RPC `spawn` and spread onto every workflow child via `workflowDefaults`):
+`resolveIntercomBridge` yields `active: false` → no tool, no template. The retired provisional
+finding-streaming protocol (fenced-JSON `progress_update` batches, the `streamed` report field, the
+uncovered-source clear, the `subagent-bridge-config` doctor check) is gone end to end; review waves
+are completion-only and the browser doors show a code-owned `perk:wave` marker instead. A settings-
+scope `subagents.intercomBridge.mode` no longer affects any perk flow. A **decision-type** request
+from a lane was always a lane-design smell (unanswerable at parent-turn latency).
+
+**Wakes.** Completion notices (`"subagent-notify"` overall; `"subagent-incremental-child-notify"`
+per settled child) are previews — a 1,000-char return slice plus up to 8 child previews of 4 KiB,
+per-item `triggerTurn` — never the report. Since 0.68.0 `incrementalChildCompletionTriggersTurn`
+(`src/runs/background/notify.ts`) returns `false` for a `completed` child while the workflow is
+still running: a routine successful child completion does NOT wake the parent; failed/paused/stopped
+children and the workflow completion still do — only the matching WORKFLOW completion authorizes
+collection. `bg_wait` exists upstream for non-notifying background work; perk does not adopt it. The
+parent collection protocol, grace/drain and browser reconciliation are `workflow/report-waves.md`
+§ "Session-scoped guard state" / § "Lane semantics". Lesson: the planning session reads subtle
+dependency source and pre-digests it into the plan.
 
 ## The v1 extension RPC seam
 
@@ -435,6 +449,15 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
   (`docs/design/archive/pi-subagents-native-baseline-dogfood.md`); dev host resolved at `52c4fde5`
   (`docs/design/archive/pi-subagents-native-streaming-dogfood.md`).
 - **0.66.0** — artifacts moved from cwd `.pi-subagents/artifacts/` to the session dir.
+- **0.67.0** — the host-builtin intersection (source-classified) failed reviewer/scout lanes under a
+  pi-fff `grep`/`find` override; `PI_FFF_MODE=tools-and-ui` injected at both launch seams.
+- **0.68.0 (2026-09)** — `fallbackModels` rejected at def load (all 12 perk defs failed, every wave
+  0/N); parent-side `progress_update` discarded (provisional finding streaming retired; waves spawn
+  with the bridge off; `subagent-bridge-config` retired; the `perk:wave` marker added); wrapped core
+  slots count as host builtins (the `subagent-host-tools` range closed at 0.68.0; FFF injection
+  kept); routine successful child completions stop waking the parent; the bundled `pi-server` copy
+  dropped (Pi ≥ 0.85.1 required for background children). Record:
+  `docs/design/archive/pi-subagents-0.68.0-reverify.md`.
 - **Two-boolean landing** — deleted: the `<active_agent>` prefix parser + `childIdentity.ts`,
   `nativeSessionKey.ts`, the sampled `parentReadOnly` supplier, `ReportWaveRequest.execution`, the
   six-reason classification, the ten-name report-only census.

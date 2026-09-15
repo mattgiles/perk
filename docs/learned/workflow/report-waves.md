@@ -13,7 +13,7 @@ flow's prompt mechanics onto a code-owned wave tool, the lane-normalization sema
 session-scoped guard-state patterns, and the wave test machinery worth reusing.
 
 **Doc boundary:** the *upstream* pi-subagents mechanics — the v1 RPC envelope, `outputSchema` /
-`structured_output`, the supervisor channel, `mission: false`, the completion-notification wake
+`structured_output`, the supervisor channel (off at every perk spawn), `mission: false`, the completion-notification wake
 (`"subagent-notify"`) and the `bg_wait` background-wait tool (the renamed `subagent_wait`;
 perk does not adopt it) — live in `docs/learned/pi/subagents.md`. Cross-link them; don't
 duplicate them here.
@@ -25,7 +25,8 @@ duplicate them here.
   (`pi/v1/…`) pair catalogued in "Orientation" (upstream pi-subagents mechanics live in
   `pi/subagents.md`, not here).
 - Every wave spawn carries the fixed contract incl. the explicit acceptance disable
-  (`acceptance: {level: "none"}`) — "The fixed spawn contract carries an explicit acceptance
+  (`acceptance: {level: "none"}`) AND the intercom-bridge disable (`intercomBridge: {mode:
+  "off"}`) — waves are completion-only — "The fixed spawn contract carries an explicit acceptance
   disable".
 - Blocking runs are start + await — "The start/settle split"; migrating a flow's prompt mechanics
   onto a code-owned wave tool follows "The flow-migration checklist".
@@ -77,14 +78,14 @@ censuses raw `WAVE_RPC_`/channel tokens (tests included). The flow entrypoints:
   `run_learn_wave` tool (`extension/pi/v1/learning/learn.ts`), best-effort, no retry. (The
   experimental selector-driven `/pr-review-dynamic` flow was retired wholesale — see the
   CHANGELOG.)
-- `adversarialReviewWave.ts` — the human review doors' streaming wave behind the
+- `adversarialReviewWave.ts` — the human review doors' completion-only wave behind the
   `start_review_wave`/`collect_review_wave` tool pair (`extension/pi/v1/codeReview/reviewWave.ts`),
   registered and in the `extension/substrate/toolGating.ts` census. It landed **dormant** first
   (built + tested, unregistered) because registration, the agent-def fenced-JSON →
   `structured_output` flip, and the census additions had to land **atomically** — registering
   early would have broken lane schemas against the fenced-JSON agent def.
 - `draftReviewWave.ts` — the draft doors' (`/plan-review-browser`,
-  `/objective-review-browser`) streaming wave behind the
+  `/objective-review-browser`) completion-only wave behind the
   `start_draft_review_wave`/`collect_draft_review_wave` tool pair
   (`extension/pi/v1/draftReviewWaveTools.ts`, over the door-primed context state in
   `extension/authoring/review/draftContext.ts`), registered and census'd.
@@ -165,8 +166,13 @@ Every wave spawn carries `acceptance: {level: "none", reason}` (`WAVE_ACCEPTANCE
 auto-infers a generic acceptance contract for reviewer/analyst-named or read-only children and
 injects a fenced `acceptance-report` completion instruction into every lane — a competing
 completion contract observed steering a child into invalid `structured_output` attempts.
-Delivery rides pi-subagents' workflow-defaults spread onto each lane child; `renderWaveScript`
-is untouched (scripts stay byte-identical). The hazard details live in
+Beside it rides `intercomBridge: {mode: "off"}` (`WAVE_INTERCOM_BRIDGE`, the same fixed-field
+shape): pi-subagents ≥ 0.68.0 discards parent-side `progress_update` requests yet still appends
+a bridge template telling children to send them — perk children never ask decisions, so the
+bridge is pure cost, and turning it off at spawn is what makes every wave **completion-only**
+(no `contact_supervisor` tool, no template; the def prose needs no tool-named prohibition).
+Delivery of both rides pi-subagents' workflow-defaults spread onto each lane child;
+`renderWaveScript` is untouched (scripts stay byte-identical). The hazard details live in
 `docs/learned/pi/subagents.md`; the doctor `subagent-compat` version `warn` is the drift tripwire
 (doctor never reads the engine's source).
 
@@ -374,7 +380,7 @@ flow-neutral normalization: each flow supplies its typed predicate (pr-review `v
 `covered`, and `complete` — a recovered bounded retry is covered, a persistent block stays
 uncovered; the block's `fyi` diagnostics keep their bytes and order and never become postable
 findings; missing/null/blank plan text **blocks** plan-fidelity (not FYI). In the adversarial
-schema `blocked` is a **required** boolean (the `streamed` discipline — never defaulted) with a
+schema `blocked` is a **required** boolean (never defaulted — missing/mistyped is engine-invalid) with a
 schema conditional (blocked ⇒ empty findings + nonblank `fyi`), and it is not a verdict: it marks
 "could not finish", distinct from "no findings". Relatedly,
 conversation isolation, filesystem placement, and perk's read-only floor are three separate
@@ -513,33 +519,40 @@ The default remains 15 seconds. An early unsettled collect retains pending: end 
 await matching workflow completion. Grace expiry after matching completion was observed is an
 unresolved lifecycle contradiction: report and stop for owner diagnosis, never poll or relaunch.
 The module timeout still owns settlement; pending remains collectable. Parents retain workflow
-identity, yield with Pi open, relay delivered provisional batches before collection (including
-co-delivered progress/completion), and reconcile exactly once from typed reports. Duplicate/late
-notices must not re-collect or replay provisional findings over final reconciliation. The flow-side slot clear is identity-guarded: a supersede landing during an in-flight
+identity, yield with Pi open (a routine successful child completion does not wake them since
+pi-subagents 0.68.0; failed/paused/stopped children and the workflow completion do — only the
+matching WORKFLOW completion authorizes collection), and reconcile exactly once from typed
+reports. Duplicate/late notices must not re-collect. The flow-side slot clear is identity-guarded: a supersede landing during an in-flight
 collect's await never erases the NEW pending wave (the drain/race pins live in
 `extension/waves/reportWave.test.ts`, the flow-slot pins in
 `extension/pi/v1/draftReviewWaveTools.test.ts`; two-session isolation in
 `extension/pi/v1/waveIsolation.test.ts`).
 
-Both streaming report schemas require `streamed: boolean`. It reports successful nonempty
-supervisor submission, not human-visible delivery; no findings sends no empty batch and returns
-false normally. Unavailable/failed delivery keeps the complete final report and explains in
-`fyi`; earlier success remains true after partial failure. Both collect cores disclose all
-covered false lanes in order (custom/Ponytail included): neutral no-findings versus completion-only
-warning with findings, via headless-safe `report()` and model text. Missing/mistyped fields are
-engine-invalid, never defaulted. Coverage/failure/attempt semantics and receipt-only details are
-unchanged; disclosure is in-session only, never synthetic findings or posted comments.
+Both review report schemas are completion-only: `{angle, summary, findings[], fyi[]}` (the
+adversarial schema adds the required `blocked`), no delivery-status field — the wave spawns with
+the bridge off, so nothing reaches the parent before the wave finishes and no per-lane delivery
+disclosure exists (the former `streamed: boolean` + its "no provisional batches" disclosures were
+retired with the streaming protocol; pi-subagents 0.68.0 discards progress updates). The collect
+result is `headline + fenced aggregate + the DATA sentence`. Coverage/failure/attempt semantics
+and receipt-only details are unchanged; `fyi` is in-session color, never synthetic findings or
+posted comments.
 
-Browser reconciliation must clear uncovered sources (requested minus covered), including any
-failed lane that already streamed, before replacing covered final arrays. Otherwise failed
-provisional owners can block valid final findings through global dedupe. Parent-reconciled
-arrays must be disjoint: merge supported concerns and contributor tags, preserve maximum
-severity with its corresponding confidence, and assign each anchor to the first contributing
-covered lane. Replacing duplicate-only lanes with empty arrays lets the existing final-alternate
-mechanism converge independent of order. A held pure clear has zero held findings but a nonzero
-`held_batches` count; it is not finalization. Plan-mode source ownership also needs an `author`
-carrier for visible lane attribution (the installed plan UI displays author rather than source).
-Evidence and the failed original draft leg: `docs/design/archive/pi-subagents-native-streaming-dogfood.md`.
+Browser reconciliation happens once, after collection: parent-reconciled arrays must be
+disjoint — merge supported concerns and contributor tags, preserve maximum severity with its
+corresponding confidence, and assign each anchor to the first contributing covered lane; push
+each covered lane once with `replace: true`, empty arrays included. With nothing pushed before
+collection there is no uncovered-source clear and no cross-source promotion (that machinery was
+deleted from `annotations.ts`). A held final push before browser readiness is flushed by the
+readiness continuation; after readiness the tool retries in-call over `HELD_RETRY_DELAYS_MS`
+and, exhausted, presents the findings in-session — no later wake is promised. The early-decision
+window this opens (the human decides before the wave lands) is closed by policy, not a gate:
+the tool pairs write a code-owned `perk:wave` status marker (running at launch → cleared or
+"incomplete" at collect; the `wave` slug is refused to the model) and the door-open notice says
+to decide after the findings arrive; an early decision is authoritative and forgoes them.
+Plan-mode source ownership also needs an `author` carrier for visible lane attribution (the
+installed plan UI displays author rather than source). Evidence and the failed original draft
+leg of the streaming era: `docs/design/archive/pi-subagents-native-streaming-dogfood.md`; the
+retirement record: `docs/design/archive/pi-subagents-0.68.0-reverify.md`.
 
 ## Deliberate non-behaviors need regression pins
 
@@ -628,15 +641,17 @@ Instances:
   `const TASKS` slice and rendered-script execution were bespoke single-consumer idioms and left
   with the flow).
 - The review-wave pair (and the draft pair) HAVE now run against real pi-subagents — the
-  2026-08-10 live dogfood of the three streaming browser doors
-  (`docs/design/archive/streaming-doors-dogfood.md`: streaming cadence, dedupe, `replace` reshape,
-  typed collect aggregates, all live-confirmed **for the historical held-turn protocol only**).
-  That run does not prove native-wake streaming. The original 0.65.1 host-peer launch failure
-  (`docs/design/archive/pi-subagents-native-baseline-dogfood.md`) is resolved for the repo-local
-  five-package 0.85.1 dev host: aliases and a real background smoke passed at `52c4fde5` on
-  2026-09-05. See `docs/design/archive/pi-subagents-native-streaming-dogfood.md` for that bounded
-  evidence and the separate five-leg streaming acceptance status; no consumer/global repair is
-  claimed. The dynamic-flow half of the residual was
+  2026-08-10 live dogfood of the three browser doors
+  (`docs/design/archive/streaming-doors-dogfood.md`: dedupe, `replace` reshape, typed collect
+  aggregates, all live-confirmed **for the historical held-turn streaming protocol only**). The
+  streaming-acceptance residual that followed was **discharged by retirement**: pi-subagents
+  0.68.0 discards progress updates, so the protocol was removed and the waves are completion-only
+  (the 0.68.0 leg — marker at launch, final annotations after collect — is recorded in
+  `docs/design/archive/pi-subagents-0.68.0-reverify.md`). The original 0.65.1 host-peer launch
+  failure (`docs/design/archive/pi-subagents-native-baseline-dogfood.md`) is resolved for the
+  repo-local five-package 0.85.1 dev host: aliases and a real background smoke passed at
+  `52c4fde5` on 2026-09-05 (`docs/design/archive/pi-subagents-native-streaming-dogfood.md`); no
+  consumer/global repair is claimed. The dynamic-flow half of the residual was
   discharged by retirement — `/pr-review-dynamic` was removed wholesale (see the CHANGELOG)
   without ever running against real pi-subagents. The stale-session gotcha stands: a landing
   session predates its own extension code (see `pi/extension-api.md` on dogfooding just-changed
