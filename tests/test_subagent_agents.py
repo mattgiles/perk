@@ -177,10 +177,11 @@ def test_reviewer_defs_consume_the_review_context_pointer_envelope():
         assert "a long line is never by itself a reason to block" in compact, name
         assert "never dump a whole file into your session" in compact, name
     adversarial = " ".join(_source_bytes("adversarial-reviewer").decode().split())
-    assert (
-        "**required fields: `angle`, `summary`, `findings`, `fyi`, `streamed`, `blocked`**"
-        in adversarial
-    )
+    assert "**required fields: `angle`, `summary`, `findings`, `fyi`, `blocked`**" in adversarial
+    # Completion-only: no progress channel, no supervisor tool, no streamed-batch shape.
+    assert "there is no progress channel" in adversarial
+    assert "contact_supervisor" not in adversarial
+    assert "streamed" not in adversarial
     assert "Blocked is **not a verdict**" in adversarial
     assert "An unfinished hunt is a **blocked lane**" in adversarial
     resolver = " ".join(_source_bytes("conflict-resolver").decode().split())
