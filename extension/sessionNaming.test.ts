@@ -13,6 +13,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { reviseGistDraft } from "./authoring/gist/draft.ts";
+import { reviseObjectiveDraft } from "./authoring/objective/draft.ts";
+import { revisePlanDraft } from "./authoring/plan/draft.ts";
+import { openBranchWorkflowSession } from "./session/branchWorkflowSession.ts";
+import type { WorkflowSession } from "./session/workflowSession.ts";
 import { type PlanRef, writePlanRef } from "./substrate/cache.ts";
 import { recordSessionPointer } from "./substrate/sessionPointers.ts";
 import { WORKFLOW_STATE_TYPE } from "./substrate/workflowState.ts";
@@ -302,10 +307,10 @@ const OBJECTIVE_CREATE_JSON = JSON.stringify({
 
 const DRAFT_PLAN = "# Add retry\n\nSteps.\n";
 
-/** A cold `plan` session whose cold door answers every save with `stdout`. */
-async function planSession(stdout: string) {
+/** A cold `plan` session whose cold door answers every save with `PLAN_SAVE_JSON`. */
+async function planSession() {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
-  const bin = fakePerk(cwd, { stdout });
+  const bin = fakePerk(cwd, { stdout: PLAN_SAVE_JSON });
   return loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
 }
 
@@ -314,7 +319,7 @@ function name(h: Awaited<ReturnType<typeof loadPerkSession>>): string | undefine
 }
 
 test("naming: a planning session becomes plan | <title> after plan_draft and plan | plan #N | <title> after the save", async () => {
-  const h = await planSession(PLAN_SAVE_JSON);
+  const h = await planSession();
   try {
     assert.equal(name(h), "plan");
     const drafted = await h.invokeTool("plan_draft", { plan: DRAFT_PLAN });
@@ -392,6 +397,87 @@ test("naming: an objective-author session gains objective #O after the save", as
   }
 });
 
+/**
+ * The live session's branch-backed `WorkflowSession` — the seam the draft tools write through,
+ * opened here WITHOUT a tool so a planted draft learns no title (a draft that predates the
+ * draft-tool refresh).
+ */
+function seamSession(h: Awaited<ReturnType<typeof loadPerkSession>>, cwd: string): WorkflowSession {
+  const manager = h.session.sessionManager;
+  return openBranchWorkflowSession(
+    { appendEntry: (customType, data) => manager.appendCustomEntry(customType, data) },
+    { cwd, sessionManager: manager, hasUI: false, ui: { notify() {} } },
+  );
+}
+
+function digestOf(revised: { status: string; receipt?: { digest: string } }): string {
+  assert.equal(revised.status, "revised");
+  return revised.receipt?.digest ?? "";
+}
+
+test("naming: a byte-identical draft rewrite (the unchanged arm) still refreshes — every draft tool", async () => {
+  // A persisted draft with no learned title (planted through the seam, not the tool) in an
+  // origin-bearing session: the tool's byte-identical rewrite takes the `unchanged` arm, which
+  // must refresh exactly like `revised` — the draft IS the current artifact either way.
+  const plan = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
+  const hp = await loadPerkSession({ cwd: plan, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    const planted = digestOf(revisePlanDraft({ plan: DRAFT_PLAN }, seamSession(hp, plan)));
+    assert.equal(name(hp), "plan");
+    assert.equal(hp.workflowState().session_naming, undefined, "the seam learns no title");
+    const result = await hp.invokeTool("plan_draft", { plan: DRAFT_PLAN });
+    assert.equal((result.details as { digest?: string }).digest, planted, "byte-identical");
+    assert.equal(name(hp), "plan | Add retry");
+    assert.deepEqual(hp.workflowState().session_naming, { title: "Add retry" });
+    assert.deepEqual(namingWarnings(hp), []);
+  } finally {
+    hp.dispose();
+  }
+
+  const objective = scaffoldRepo({
+    handoff: { runId: "01RID", mode: "read-only", stage: "objective-author" },
+  });
+  const ho = await loadPerkSession({ cwd: objective, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    const input = {
+      prose: "# Objective\n\nThe why.\n",
+      title: "Ship retries",
+      roadmap: [{ id: "1.1", description: "first" }],
+    };
+    const planted = digestOf(
+      reviseObjectiveDraft(input, {
+        session: seamSession(ho, objective),
+        resolveDreamGate: () => ({ kind: "absent" }),
+      }),
+    );
+    assert.equal(name(ho), "objective-author");
+    const result = await ho.invokeTool("objective_draft", input);
+    assert.equal((result.details as { digest?: string }).digest, planted, "byte-identical");
+    assert.equal(name(ho), "objective-author | Ship retries");
+    assert.deepEqual(ho.workflowState().session_naming, { title: "Ship retries" });
+    assert.deepEqual(namingWarnings(ho), []);
+  } finally {
+    ho.dispose();
+  }
+
+  const gist = scaffoldRepo({
+    handoff: { runId: "01RID", mode: "read-only", stage: "gist-author" },
+  });
+  const hg = await loadPerkSession({ cwd: gist, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    const prose = "# Faster reviews\n\nWhy.\n";
+    const planted = digestOf(reviseGistDraft({ prose }, seamSession(hg, gist)));
+    assert.equal(name(hg), "gist-author");
+    const result = await hg.invokeTool("gist_draft", { prose });
+    assert.equal((result.details as { digest?: string }).digest, planted, "byte-identical");
+    assert.equal(name(hg), "gist-author | Faster reviews");
+    assert.deepEqual(hg.workflowState().session_naming, { title: "Faster reviews" });
+    assert.deepEqual(namingWarnings(hg), []);
+  } finally {
+    hg.dispose();
+  }
+});
+
 test("naming: a gist session is <stage> | <title> after gist_draft", async () => {
   const cwd = scaffoldRepo({
     handoff: { runId: "01RID", mode: "read-only", stage: "gist-author" },
@@ -414,7 +500,7 @@ test("naming: a gist session is <stage> | <title> after gist_draft", async () =>
 });
 
 test("naming: a foreign /name before the draft is preserved through every refresh — hints still persist", async () => {
-  const h = await planSession(PLAN_SAVE_JSON);
+  const h = await planSession();
   try {
     h.session.setSessionName("mine");
     await h.invokeTool("plan_draft", { plan: DRAFT_PLAN });
@@ -431,7 +517,7 @@ test("naming: a foreign /name before the draft is preserved through every refres
 });
 
 test("naming: a plan_draft failure never refreshes", async () => {
-  const h = await planSession(PLAN_SAVE_JSON);
+  const h = await planSession();
   try {
     const result = await h.invokeTool("plan_draft", { plan: "   \n" });
     assert.equal((result.details as { error_type?: string }).error_type, "invalid_input");

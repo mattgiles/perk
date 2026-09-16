@@ -107,12 +107,11 @@ function fakeGating(active: boolean): ToolGating & { exits: number } {
  * An ExtensionAPI fake: appendEntry lands on the branch; exec returns the canned payload; the
  * session name is a closure-held slot (the save's §8.71(h) refresh reaches `getSessionName`/
  * `setSessionName` — without them a healthy save would surface a spurious `failed` warning).
- * `sessionName()` reads the slot for the healthy-path assertion.
  */
 function fakeColdDoorPi(
   branch: unknown[],
   opts: { stdout: string; code?: number; argvs?: string[][] },
-): ExtensionAPI & { sessionName(): string | undefined } {
+): ExtensionAPI {
   let sessionName: string | undefined;
   return {
     appendEntry(customType: string, data?: unknown) {
@@ -126,8 +125,7 @@ function fakeColdDoorPi(
     setSessionName(name: string) {
       sessionName = name;
     },
-    sessionName: () => sessionName,
-  } as unknown as ExtensionAPI & { sessionName(): string | undefined };
+  } as unknown as ExtensionAPI;
 }
 
 /**
@@ -571,7 +569,7 @@ test("objective arm: default selection -> first-party VIEW-ONLY; approval auto-s
   assert.doesNotMatch(String(result.content[0]?.text), /nothing is saved yet/);
   // The healthy §8.71(h) refresh: the save linked the objective, so the name gained its
   // `objective #7` segment with the saved (draft) title — through the production composition.
-  assert.equal(pi.sessionName(), "objective-author | objective #7 | Conform planning");
+  assert.equal(pi.getSessionName(), "objective-author | objective #7 | Conform planning");
 });
 
 test("objective arm: approved but the cold door fails -> non-terminating, gate stays on, latched", async () => {

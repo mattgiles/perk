@@ -90,11 +90,13 @@ export interface ObjectiveSaveDeps {
   /** The §8.63 gate, adapter-bound (`resolveDreamReportGate` over the production recovery capability). */
   resolveDreamGate: (input: unknown, generatedAt: string) => DreamReportGateOutcome;
   /**
-   * Best-effort perk-owned session-name refresh (contracts §8.71(h)), run right after the live
-   * session is linked (`link-objective`) so the name gains its `objective #O` segment. `title`
-   * is the saved objective's title (explicit, else derived from the prose's first `# ` heading)
-   * — `null` when neither exists. The production adapter binds it to the Pi naming binding under
-   * `override`; never throws (the binding contains its failures).
+   * Best-effort perk-owned session-name refresh (contracts §8.71(h)), run right after the
+   * `link-objective` ATTEMPT: the name gains its `objective #O` segment when that linkage
+   * succeeded, and recomposes from whatever the branch carries when it did not (the segment
+   * then waits for a later successful link). `title` is the saved objective's title (explicit,
+   * else derived from the prose's first `# ` heading) — `null` when neither exists. The
+   * production adapter binds it to the Pi naming binding under `override`; never throws (the
+   * binding contains its failures), so a naming failure never fails the save.
    */
   refreshSessionName(title: string | null): void;
 }

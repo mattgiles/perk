@@ -88,11 +88,13 @@ export interface PlanSaveDeps {
   /** Best-effort planning-pointer capture (contracts §8.35; no-ops on absent identity). */
   capturePlanningPointer(): void;
   /**
-   * Best-effort perk-owned session-name refresh (contracts §8.71(h)), run right after the live
-   * session is linked so the name gains its `plan #N` segment. `title` is the saved plan's
-   * title (explicit, else derived from its first `# ` heading) — `null` when neither exists.
-   * The production adapter binds it to the Pi naming binding under `override`; never throws
-   * (the binding contains its failures).
+   * Best-effort perk-owned session-name refresh (contracts §8.71(h)), run right after the
+   * `link-plan-ref` ATTEMPT: the name gains its `plan #N` segment when that linkage succeeded,
+   * and recomposes from whatever the branch carries when it did not (the segment then waits for
+   * a later successful link). `title` is the saved plan's title (explicit, else derived from its
+   * first `# ` heading) — `null` when neither exists. The production adapter binds it to the Pi
+   * naming binding under `override`; never throws (the binding contains its failures), so a
+   * naming failure never fails the save.
    */
   refreshSessionName(title: string | null): void;
 }
