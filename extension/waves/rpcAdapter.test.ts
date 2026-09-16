@@ -1,15 +1,22 @@
 // RPC-envelope specifics beyond the shared adapter contract: the exact v1 request envelope
 // shape, bounded reply timeouts (ping → null, spawn → throw), `success: false` narrowing to a
 // typed throw, the advertised-channel subscription (never a pinned channel name), reply-listener
-// disposal after settle, and the capability-check misses that make ping return null.
+// disposal after settle, the capability-check misses that make ping return null, and the
+// CONTEXT-LESS HOLD: a `no_active_session` reply (pi's pre-trust duplicate pi-subagents load) is
+// held until the live responder's reply — a later success wins and fires the fail-open
+// `onDuplicateResponder` once, a different error surfaces immediately, only the reply timeout
+// surfaces the held error (suffixed).
 
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { attachGhostResponder } from "../testing/fakeSubagents.ts";
 import {
   createRpcWaveAdapter,
+  type DuplicateResponderEvent,
+  WAVE_RPC_CONTEXTLESS_ERROR_CODE,
   WAVE_RPC_PING_TIMEOUT_MS,
   WAVE_RPC_PROTOCOL_VERSION,
   WAVE_RPC_REPLY_EVENT_PREFIX,
@@ -341,6 +348,224 @@ test("stop swallows a rejecting responder (best-effort by contract)", async () =
   const stop = captured.at(-1);
   assert.equal(stop?.method, "stop");
   assert.deepEqual(stop?.params, { id: "a1" });
+});
+
+// --- the context-less hold ----------------------------------------------------------------------
+
+const CONTEXTLESS_TEXT = "no_active_session: No active extension context for subagent RPC.";
+const LIVE_SPAWN_DATA = { text: "ok", details: { asyncId: "live-1", asyncDir: "/live-1" } };
+
+/** A responder that replies on a LATER macrotask (the live instance does real work first). */
+function respondLater(
+  bus: WaveBus,
+  script: (request: CapturedRequest) => Record<string, unknown> | null,
+): void {
+  bus.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
+    const request = raw as CapturedRequest;
+    const payload = script(request);
+    if (payload === null) return;
+    setTimeout(() => {
+      bus.emit(`${WAVE_RPC_REPLY_EVENT_PREFIX}${String(request.requestId)}`, {
+        version: WAVE_RPC_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ...payload,
+      });
+    }, 0);
+  });
+}
+
+test("the pinned context-less code is pi-subagents' no_active_session", () => {
+  assert.equal(WAVE_RPC_CONTEXTLESS_ERROR_CODE, "no_active_session");
+});
+
+test("hold: a ghost no_active_session then a later live success resolves the live handle and reports once", async () => {
+  const bus = createFakeBus();
+  attachGhostResponder(bus); // replies synchronously, first
+  const captured: CapturedRequest[] = [];
+  respondLater(bus, (request) => {
+    captured.push(request);
+    return request.method === "ping"
+      ? { success: true, data: pingData() }
+      : { success: true, data: LIVE_SPAWN_DATA };
+  });
+  const events: DuplicateResponderEvent[] = [];
+  const adapter = createRpcWaveAdapter(bus, { onDuplicateResponder: (e) => events.push(e) });
+  assert.notEqual(await adapter.ping(), null);
+  assert.deepEqual(await adapter.spawn(spawnParams()), { asyncId: "live-1", asyncDir: "/live-1" });
+  assert.deepEqual(events, [{ method: "spawn", superseded: CONTEXTLESS_TEXT }]);
+  for (const request of captured) {
+    assert.equal(bus.handlerCount(`${WAVE_RPC_REPLY_EVENT_PREFIX}${String(request.requestId)}`), 0);
+  }
+});
+
+test("hold: a ghost no_active_session then a DIFFERENT live error rejects immediately with the live error", async () => {
+  process.env.PERK_WAVE_RPC_REPLY_MS = "5000";
+  try {
+    const bus = createFakeBus();
+    attachGhostResponder(bus);
+    const captured: CapturedRequest[] = [];
+    respondLater(bus, (request) => {
+      captured.push(request);
+      return request.method === "ping"
+        ? { success: true, data: pingData() }
+        : { success: false, error: { code: "invalid_params", message: "workflowScript required" } };
+    });
+    const events: DuplicateResponderEvent[] = [];
+    const adapter = createRpcWaveAdapter(bus, { onDuplicateResponder: (e) => events.push(e) });
+    await adapter.ping();
+    const started = Date.now();
+    await assert.rejects(adapter.spawn(spawnParams()), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error.message, "invalid_params: workflowScript required");
+      return true;
+    });
+    assert.ok(Date.now() - started < 2000, "the live error settles the request, not the timeout");
+    assert.deepEqual(events, []);
+    for (const request of captured) {
+      assert.equal(
+        bus.handlerCount(`${WAVE_RPC_REPLY_EVENT_PREFIX}${String(request.requestId)}`),
+        0,
+      );
+    }
+  } finally {
+    delete process.env.PERK_WAVE_RPC_REPLY_MS;
+  }
+});
+
+test("hold: a ghost no_active_session then silence rejects at the reply timeout with the held error, suffixed", async () => {
+  process.env.PERK_WAVE_RPC_REPLY_MS = "20";
+  try {
+    const bus = createFakeBus();
+    attachGhostResponder(bus);
+    const captured = respond(bus, (request) =>
+      request.method === "ping" ? { success: true, data: pingData() } : null,
+    );
+    const events: DuplicateResponderEvent[] = [];
+    const adapter = createRpcWaveAdapter(bus, { onDuplicateResponder: (e) => events.push(e) });
+    await adapter.ping();
+    await assert.rejects(adapter.spawn(spawnParams()), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(
+        error.message,
+        `${CONTEXTLESS_TEXT} (held for a later reply that never arrived within 20ms)`,
+      );
+      return true;
+    });
+    assert.deepEqual(events, []);
+    for (const request of captured) {
+      assert.equal(
+        bus.handlerCount(`${WAVE_RPC_REPLY_EVENT_PREFIX}${String(request.requestId)}`),
+        0,
+      );
+    }
+  } finally {
+    delete process.env.PERK_WAVE_RPC_REPLY_MS;
+  }
+});
+
+test("hold negative pin: a single non-context-less error rejects immediately, unsuffixed, without the callback", async () => {
+  const bus = createFakeBus();
+  const captured = respond(bus, (request) =>
+    request.method === "ping"
+      ? { success: true, data: pingData() }
+      : { success: false, error: { code: "invalid_params", message: "workflowScript required" } },
+  );
+  const events: DuplicateResponderEvent[] = [];
+  const adapter = createRpcWaveAdapter(bus, { onDuplicateResponder: (e) => events.push(e) });
+  await adapter.ping();
+  await assert.rejects(adapter.spawn(spawnParams()), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.equal(error.message, "invalid_params: workflowScript required");
+    return true;
+  });
+  assert.deepEqual(events, []);
+  for (const request of captured) {
+    assert.equal(bus.handlerCount(`${WAVE_RPC_REPLY_EVENT_PREFIX}${String(request.requestId)}`), 0);
+  }
+});
+
+test("hold: success first, then a ghost no_active_session — resolved, no callback", async () => {
+  const bus = createFakeBus();
+  // The live responder replies synchronously FIRST (attached before the ghost).
+  respond(bus, (request) =>
+    request.method === "ping"
+      ? { success: true, data: pingData() }
+      : { success: true, data: LIVE_SPAWN_DATA },
+  );
+  attachGhostResponder(bus);
+  const events: DuplicateResponderEvent[] = [];
+  const adapter = createRpcWaveAdapter(bus, { onDuplicateResponder: (e) => events.push(e) });
+  await adapter.ping();
+  assert.deepEqual(await adapter.spawn(spawnParams()), { asyncId: "live-1", asyncDir: "/live-1" });
+  assert.deepEqual(events, []);
+});
+
+test("hold: two ghost replies then a live success fire the callback once", async () => {
+  const bus = createFakeBus();
+  attachGhostResponder(bus);
+  attachGhostResponder(bus);
+  respondLater(bus, (request) =>
+    request.method === "ping"
+      ? { success: true, data: pingData() }
+      : { success: true, data: LIVE_SPAWN_DATA },
+  );
+  const events: DuplicateResponderEvent[] = [];
+  const adapter = createRpcWaveAdapter(bus, { onDuplicateResponder: (e) => events.push(e) });
+  await adapter.ping();
+  await adapter.spawn(spawnParams());
+  assert.equal(events.length, 1);
+});
+
+test("hold: a throwing callback is fail-open, and no callback resolves silently", async () => {
+  const original = console.error;
+  const logged: string[] = [];
+  console.error = (...args: unknown[]) => {
+    logged.push(args.map(String).join(" "));
+  };
+  try {
+    const bus = createFakeBus();
+    attachGhostResponder(bus);
+    respondLater(bus, (request) =>
+      request.method === "ping"
+        ? { success: true, data: pingData() }
+        : { success: true, data: LIVE_SPAWN_DATA },
+    );
+    const throwing = createRpcWaveAdapter(bus, {
+      onDuplicateResponder: () => {
+        throw new Error("observer exploded");
+      },
+    });
+    await throwing.ping();
+    assert.deepEqual(await throwing.spawn(spawnParams()), {
+      asyncId: "live-1",
+      asyncDir: "/live-1",
+    });
+    assert.equal(logged.filter((line) => /observer exploded/.test(line)).length, 1);
+
+    const silent = createRpcWaveAdapter(bus);
+    await silent.ping();
+    assert.deepEqual(await silent.spawn(spawnParams()), { asyncId: "live-1", asyncDir: "/live-1" });
+    assert.equal(logged.filter((line) => /observer exploded/.test(line)).length, 1);
+  } finally {
+    console.error = original;
+  }
+});
+
+test("hold: stop still swallows a held-then-timed-out reply (best-effort by contract)", async () => {
+  process.env.PERK_WAVE_RPC_REPLY_MS = "20";
+  try {
+    const bus = createFakeBus();
+    attachGhostResponder(bus);
+    respond(bus, (request) =>
+      request.method === "ping" ? { success: true, data: pingData() } : null,
+    );
+    const adapter = createRpcWaveAdapter(bus);
+    await adapter.ping();
+    await adapter.stop({ asyncId: "a1", asyncDir: "/d1" });
+  } finally {
+    delete process.env.PERK_WAVE_RPC_REPLY_MS;
+  }
 });
 
 test("readAggregate throws on a missing or corrupt status.json (aggregate-unreadable upstream)", async () => {

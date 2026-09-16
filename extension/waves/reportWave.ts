@@ -690,13 +690,37 @@ function waveOver(supplyAdapter: () => WaveAdapter): ReportWave {
 }
 
 /**
+ * An observability notice the wave surfaces beside (never inside) its typed outcomes:
+ * `duplicate-responders` — a context-less pi-subagents RPC responder answered `method` with the
+ * `superseded` error before the live instance succeeded (a duplicate pi-subagents load; the
+ * request resolved against the success). Reported through `ReportWaveDeps.onNotice`; no tool
+ * result or receipt changes.
+ */
+export interface WaveNotice {
+  kind: "duplicate-responders";
+  method: string;
+  /** The held reply's `code: message`. */
+  superseded: string;
+}
+
+export interface ReportWaveDeps {
+  /** Fail-open observability seam (the adapter never lets a throwing observer affect a launch). */
+  onNotice?: (notice: WaveNotice) => void;
+}
+
+/**
  * The PRODUCTION factory — the wave owns adapter selection: constructs a FRESH rpc adapter per
  * launch over the supplied bus (per-execute adapter freshness; no shared mutable ping state).
  * One per-activation instance is constructed at the composition root (`extension/index.ts`) and
- * threaded to the installers.
+ * threaded to the installers; `deps.onNotice` receives the adapter's duplicate-responder events
+ * as `WaveNotice`s.
  */
-export function createReportWave(bus: WaveBus): ReportWave {
-  return waveOver(() => createRpcWaveAdapter(bus));
+export function createReportWave(bus: WaveBus, deps?: ReportWaveDeps): ReportWave {
+  return waveOver(() =>
+    createRpcWaveAdapter(bus, {
+      onDuplicateResponder: (event) => deps?.onNotice?.({ kind: "duplicate-responders", ...event }),
+    }),
+  );
 }
 
 /** The injection seam (tests; the same internal core over one supplied adapter). */
