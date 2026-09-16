@@ -134,7 +134,8 @@ Changes to these surfaces are user-visible. Signals (paths are illustrative, not
 Generated / managed artifacts perk delivers into consumer repos:
 
 - `.github/workflows/perk-run.yml`, the `perk-remote-setup` action.
-- `.pi/agents/perk/*.md` (delivered agent definitions).
+- `agents/*.md` (the shipped agent definitions — behavior-bearing: they ride the npm package
+  and pi-subagents discovers them as package agents).
 - Managed manifest fragments; the managed `.gitignore` / AGENTS blocks; `.perk/` files.
 
 **Rule:** include when the change alters *delivered behavior*; filter pure formatting or no-op churn

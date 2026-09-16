@@ -2252,7 +2252,7 @@ Canonical carrier: `markdown:skills/perk-learn/SKILL.md`
 ## Generated and materialized lineage
 
 - **delivered-skills:** `markdown:skills/**` materializes-to `.agents/skills/<skill>/`.
-- **delivered-agents:** `markdown:agents/*.md` materializes-to `.pi/agents/perk/<agent>.md`.
+- **delivered-agents:** `markdown:agents/*.md` bundled-as `agents/ in the npm package (pi-subagents package agents)`.
 - **ambient-index:** `ambient:learned-routing` materializes-to `.pi/APPEND_SYSTEM.md`.
 - **downstream-agents:** `managed:downstream-agents` materializes-to `AGENTS.md managed block in initialized repositories`.
 - **repository-skill-scaffold:** `managed:skill-scaffold` materializes-to `.perk/skills/<name>/SKILL.md`.

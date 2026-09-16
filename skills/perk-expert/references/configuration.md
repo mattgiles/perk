@@ -54,7 +54,6 @@ looks. `.pi/` is **not** generally perk-owned — it is Pi's directory with a pe
 | `.perk/managed-state.toml` | perk-generated (`perk init` / `doctor --fix`) | committed | yes |
 | `.pi/settings.json` | Pi (perk-managed slice) | committed | yes |
 | `.pi/npm/`, `.pi/git/` | Pi | gitignored | no |
-| `.pi/agents/perk/*.md` | perk-generated (Pi materialization) | committed | yes |
 | `.pi/APPEND_SYSTEM.md` | perk-generated (committed ambient index) | committed | yes |
 | `.agents/manifest.yaml` | user / skills CLI | committed | yes |
 | `.agents/manifest.d/perk*.yaml` | perk-generated (skills materialization) | committed | yes |
@@ -67,9 +66,13 @@ machine-local store behind the one-line post-upgrade notice (the `perk release-n
 the max perk version this user has run interactively. Self-healing (missing/garbled content is
 silently re-recorded) and safe to delete; no doctor check or init convergence touches it.
 
-**Pi-native materializations.** `.pi/APPEND_SYSTEM.md` (generated ambient routing index) and
-`.pi/agents/perk/` (perk's slice of Pi's project-agent namespace) are perk-generated and committed,
-but they live where Pi discovers them — not evidence that `.pi/` is perk-owned.
+**Pi-native materializations.** `.pi/APPEND_SYSTEM.md` (generated ambient routing index) is
+perk-generated and committed, but it lives where Pi discovers it — not evidence that `.pi/` is
+perk-owned. perk's `perk.*` agent definitions are never written into the repo: they ship inside the
+perk extension package (`.pi/npm/node_modules/@mgiles/perk/agents/`) and pi-subagents discovers
+them as package agents (`/subagents` lists them as `[package]`). A `.pi/agents/perk/` left over from
+an older perk only shadows the shipped definitions; `perk doctor` warns and `perk doctor --fix`
+removes it (commit the deletion).
 
 ## Value types
 

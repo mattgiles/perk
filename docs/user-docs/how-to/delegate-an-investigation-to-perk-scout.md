@@ -14,8 +14,9 @@ asked. It is active in `/plan`, `/objective-plan` and objective-author sessions 
 reachable in perk's other read-only sessions, except `/objective-refine`). You ask the agent; the
 agent writes the briefs and calls the tool.
 
-**Prerequisite:** `perk init` delivered `.pi/agents/perk/scout.md` (the `perk.scout` definition);
-the borrowed `pi-subagents` package installs at launch.
+**Prerequisite:** the perk extension package is installed — it ships the `perk.scout` definition,
+which pi-subagents discovers as a package agent (`perk init` / `perk <stage>` installs the package;
+a bare `pi` launch installs a missing one); the borrowed `pi-subagents` package installs at launch.
 
 ## Steps
 
@@ -65,4 +66,4 @@ complete/incomplete, and the model that ran.
 - **Look up:** [Models and compaction](../reference/configuration/models-and-compaction.md#modelssubagents)
   — the `scout` model key.
 - **Do:** [How to write a custom subagent](write-a-custom-subagent.md) — your own agents beside
-  perk's delivered `perk.scout`.
+  perk's shipped `perk.scout`.

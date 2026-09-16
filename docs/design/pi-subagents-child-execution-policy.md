@@ -72,11 +72,11 @@ nothing — no injection, every owned copy retired — before any caller's selec
 
 Two layers of invariant apply, and they have different owners.
 
-**Definition-level (the def owns it).** Every report agent — the ten delivered `agents/*.md`
+**Definition-level (the def owns it).** Every report agent — the ten shipped `agents/*.md`
 definitions other than the writer, plus the repo-local `perk-dev.session-auditor` at
 `.pi/agents/perk-dev/session-auditor.md` — is `async: true`, `completionGuard: false`,
 `systemPromptMode: replace`, inherits no global/project context or skills, sets no
-`defaultContext`, and has the read-only tool posture `read, grep, find, ls, bash`. The delivered
+`defaultContext`, and has the read-only tool posture `read, grep, find, ls, bash`. The shipped
 ten are pinned by `tests/test_subagent_agents.py::test_native_child_profile`; the auditor by
 `tests/test_repo_local_agents.py::test_auditor_is_a_background_report_outside_delivery`.
 
@@ -134,5 +134,5 @@ writes by design.
 | Runner children provision no scratch | `extension/substrate/agentScratch.test.ts` "a runner child provisions no scratch even without a floor" |
 | Plan-bound readers run in the caller checkout; the packet is constant | `extension/waves/reportWave.test.ts` profile + hostile-fields tests; `reportWaveRpc.test.ts` round-trip |
 | Producer → consumer composition | `extension/pi/v1/waveIsolation.test.ts` "real composition: the rendered packet floors a child…" (fake RPC bus → rendered item → child session → `write` blocked, parent and handoff untouched) |
-| Report agents keep async/fresh/mission/acceptance posture | `tests/test_subagent_agents.py::test_native_child_profile` (the ten delivered defs); `tests/test_repo_local_agents.py::test_auditor_is_a_background_report_outside_delivery` (`perk-dev.session-auditor`); `reportWave.test.ts` spawn pins |
+| Report agents keep async/fresh/mission/acceptance posture | `tests/test_subagent_agents.py::test_native_child_profile` (the ten shipped defs); `tests/test_repo_local_agents.py::test_auditor_is_a_background_report_outside_delivery` (`perk-dev.session-auditor`); `reportWave.test.ts` spawn pins |
 | Reflection failure stays loud | `extension/sessionLifecycle.test.ts` "escaping reflection exception reports safely…" |

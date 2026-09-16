@@ -65,7 +65,8 @@ pinned `@{version}`). perk's own extension is delivered as the pinned `npm:@mgil
 git clone, `perk doctor --fix` **migrates it forward** by removing the now-orphaned
 `.pi/git/<host>/<path>` clone (filesystem-only; idempotent — a no-op once gone).
 The `package` group's `extension-install` check verifies perk's own `@mgiles/perk` npm extension is
-**physically installed** under `.pi/npm/` at the pinned version. Because pi installs a missing
+**physically installed** under `.pi/npm/` at the pinned version (the install also carries perk's
+`perk.*` agent definitions, which pi-subagents discovers as package agents). Because pi installs a missing
 project-scope `npm:` package lazily and unlocked at launch, perk owns the install: `perk init`
 installs the pin (and reinstalls it on version drift), `perk doctor` **fails** when the install is
 absent or its version differs from the pin and `perk doctor --fix` installs/reinstalls
@@ -90,6 +91,18 @@ extension breaks every interactive stage session), or a `-`/`!` disable pattern 
 skill name (a substring heuristic — perk does not reimplement pi's filter semantics). Review the
 overrides via `pi config -l`; see
 [How to scope Pi resources per project](../../how-to/scope-pi-resources-per-project.md).
+The `package` group also carries the report-only `subagent-engine` check (never `fail`). The
+borrowed pi-subagents engine's presence is owned by `settings-wiring`, and perk's `perk.*` agent
+definitions ship inside the perk extension package — pi-subagents discovers them as package agents
+(`/subagents` lists them as `[package]`), so on a healthy repo the check is `ok` and its detail
+enumerates the shipped definitions. It **warns** when a `.pi/agents/perk/` directory is left over
+from an older perk version that wrote the definitions into the repo: pi-subagents ranks project
+definitions above package ones, so those stale copies silently shadow the shipped definitions until
+removed. `perk doctor --fix` removes the directory **filesystem-only** when its tree holds nothing
+but `.md` files and real directories (taking `.pi/agents/.gitkeep` along only when it is the sole
+leftover) — a symlink or any other file makes it refuse the whole removal and name the entries for
+you to handle by hand — and you commit the deletion; the shipped definitions serve from the next
+spawn, no session restart needed.
 The `package` group also carries the report-only `subagent-compat` check: it reads the installed
 pi-subagents version. `info` when the package is not installed (pi lazy-installs it at launch);
 `warn` — never `fail`, no `--fix` — when the version is unreadable or differs from the version

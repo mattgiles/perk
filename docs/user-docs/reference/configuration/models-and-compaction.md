@@ -128,12 +128,12 @@ Per-agent model overrides for each perk-owned project agent.
 | `dream-analyst` | string (model id) | _(agent frontmatter default)_ | Model for each `docs/learned` cluster-audit lane in `perk learn dream`'s analyst wave, consumed by `run_dream_wave` at execute time. |
 | `dream-reducer` | string (model id) | _(agent frontmatter default)_ | Model for the three fixed reducer lanes in `perk learn dream`'s reducer wave, consumed by `run_dream_wave` at execute time. |
 | `scout` | string (model id) | _(agent frontmatter default)_ | Model for `perk.scout`, the general-purpose read-only analysis lane (the task defines its scope), consumed by `run_scout_wave` at execute time; a direct `subagent` spawn uses the frontmatter default. |
-| `session-auditor` | string (model id) | _(agent frontmatter default)_ | **Dev-only** — model for perk's own repository's session-audit judgment wave. The agent definition is repo-local, not delivered by `perk init`, so the key is dormant in consumer repos. |
+| `session-auditor` | string (model id) | _(agent frontmatter default)_ | **Dev-only** — model for perk's own repository's session-audit judgment wave. The agent definition is repo-local, never shipped in the extension package, so the key is dormant in consumer repos. |
 
 An absent key falls back to the agent's frontmatter default. The table is **fixed-key**: it
-configures only perk's own agents, delivered into the perk-managed `.pi/agents/perk/` directory
-by `perk init`, except for the dev-only `session-auditor`. It has no effect on custom subagents,
-which set their model in frontmatter.
+configures only perk's own agents, shipped inside the perk extension package (pi-subagents
+discovers them as package agents), except for the dev-only `session-auditor`. It has no effect on
+custom subagents, which set their model in frontmatter.
 
 A value may carry a **`:thinking` suffix** to set that agent's thinking level, such as
 `pr-reviewer = "anthropic/claude-sonnet-4-5:high"`. The last colon segment counts as a thinking

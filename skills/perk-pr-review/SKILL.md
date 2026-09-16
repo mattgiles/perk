@@ -168,7 +168,7 @@ lines.
 ## Tuning the review
 
 The per-angle review rubric lives in the **`perk.pr-reviewer`** agent's system prompt (source of
-truth `agents/pr-reviewer.md`, materialized to `.pi/agents/perk/pr-reviewer.md`); the `/pr-review`
+truth `agents/pr-reviewer.md`, shipped in the perk extension package); the `/pr-review`
 launch guidance owns the flow, and this skill + the agent prompt own the judgment/rubric detail —
 those are the surfaces to iterate on as the review quality bar evolves. The balance is deliberate:
 rigor is raised (multiple angles, each looking hard) while the bar for what gets *posted* is
