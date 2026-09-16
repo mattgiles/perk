@@ -12722,9 +12722,9 @@ outcome.
   title is normalized (`normalizeTitle`): control characters stripped, whitespace trimmed and
   collapsed, a leading `#` run stripped, capped at 80 **code points** (79 + `…`, never a split
   surrogate pair). Every segment AND the joined name pass `stripControls` (C0/C1 controls, DEL,
-  `U+2028`/`U+2029`, the bidi/format controls, `U+FEFF`) before `setSessionName` — Pi strips only
-  CR/LF and writes the name into the terminal title (an OSC sequence), so no composed name may
-  carry ESC/BEL/OSC bytes or bidi overrides.
+  `U+2028`/`U+2029`, the bidi/format controls including `U+061C`, `U+FEFF`) before
+  `setSessionName` — Pi strips only CR/LF and writes the name into the terminal title (an OSC
+  sequence), so no composed name may carry ESC/BEL/OSC bytes or bidi overrides.
 - **Origin rule (`originStage`).** The purpose segment is durable **cold-launch provenance**: the
   FIRST `perk:workflow-state` entry on the branch carrying BOTH a non-empty `run_id` AND a
   non-empty `stage` — the cold claim's combined entry (§8.2), verbatim registry id (borrowed-stage
@@ -12735,15 +12735,20 @@ outcome.
   entry carries no `stage`) — even after a warm `/objective-refine` pass — are never named.
   Sessions predating the workflow-state `stage` field have no origin and stay unnamed by design.
 - **Identifier sources (decode, then rank).** Every identifier is narrowed from the unvalidated
-  rebuilt state BEFORE precedence, so a malformed high-priority value never suppresses a valid
-  lower tier and a half-valid claim never lends its node to a fallback objective: the objective
-  is an all-or-nothing `objective_node_claim` (both fields non-blank strings, mirroring
-  `workflowSession.ts::readClaim`) → else `active_plan_ref.objective_id` → else
-  `active_objective`; the node is the claim's node, else the hinted `node` (only when an objective
-  resolved); the plan is `active_plan_ref.pr_id`; the title is the merged hints' `title`.
+  rebuilt state to its FINAL form — a string that is still non-blank after control stripping +
+  trim (the same `cleanId` narrowing `composeSessionName` re-applies) — BEFORE precedence, so a
+  malformed, blank or control-only high-priority value never suppresses a valid lower tier and a
+  half-valid claim never lends its node to a fallback objective: the objective is an
+  all-or-nothing `objective_node_claim` (both fields narrow to non-blank, mirroring
+  `workflowSession.ts::readClaim`'s all-or-nothing shape) → else `active_plan_ref.objective_id`
+  → else `active_objective`; the node is the claim's node, else the hinted `node` (only when an
+  objective resolved); the plan is `active_plan_ref.pr_id`; the title is the merged hints'
+  `title`.
 - **Hint policy.** Hints arrive from the handoff's `naming` object (§8.2) and are persisted as
   `session_naming` (§8.3) after a structural decode (non-blank strings only — a blank/`undefined`
-  hint field never clobbers a stored one). `override` (decoded hints win over stored fields) on
+  hint field never clobbers a stored one; the title's whitespace runs collapse to one space before
+  the control strip so a multi-line description keeps its word boundaries, while the node stays
+  strict). `override` (decoded hints win over stored fields) on
   the cold claim and on the later draft/save refreshes; `fill` (hints apply only where nothing is
   stored) on a reload, which replays the SAME retained launch-era handoff — so a later-learned
   title survives reopen. Hints persist regardless of ownership; only the name write is

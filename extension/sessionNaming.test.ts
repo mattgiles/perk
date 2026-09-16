@@ -1,8 +1,8 @@
 // Live composition tests for perk-owned session names (contracts.md §8.71(h)) over a REAL bound
 // AgentSession (offline): the cold claim names from the handoff's `naming` hints + the linked
 // plan-ref; an unnamed pre-feature session gains its name on reopen; a human `/name` is
-// preserved; an adopted env-child and a minted hand-run session (even after a warm refinement
-// append) stay unnamed; a failing `setSessionName` is one warning and startup still completes; a
+// preserved; a fork child inherits its parent's origin through the real fork arm; an adopted
+// env-child and a minted hand-run session (even after a warm refinement append) stay unnamed; a failing `setSessionName` is one warning and startup still completes; a
 // failed ownership append leaves the new name and freezes it as `preserved`; the kept arm's `fill`
 // policy never reverts a later-learned title. The owning behavior matrix lives in
 // `session/sessionName.test.ts`; this suite pins the real Pi wiring around it.
@@ -90,6 +90,41 @@ test("naming: a differing /name is preserved on the next start", async () => {
     await h.emitSessionStart();
     assert.equal(h.session.sessionManager.getSessionName(), "mine");
     assert.equal(h.workflowState().session_name, CLAIMED_NAME); // perk's record is untouched
+    assert.deepEqual(namingWarnings(h), []);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("naming: a fork child inherits its parent's origin through the real forked arm", async () => {
+  // The child's branch begins with the parent's cold-claim entry, recorded under a DIFFERENT
+  // session id than this file's basename — the shape a `/fork` or `pi --fork` child arrives in.
+  const cwd = scaffoldRepo();
+  const file = plantSession(
+    cwd,
+    [
+      {
+        run_id: "01RID",
+        pi_session_id: "parent.jsonl",
+        mode: "read-write",
+        perk_version: "3.4.0",
+        stage: "implement",
+      },
+      { active_plan_ref: planRef("42", { objective_id: "7" }) },
+      { session_naming: { title: "Add retry", node: "1.1" } },
+    ],
+    { fileName: "planted-child.jsonl" },
+  );
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
+  try {
+    const state = h.workflowState();
+    assert.equal(h.sentinel()?.source, "fork");
+    assert.equal(state.run_id, "01RID.1");
+    assert.equal(state.predecessor, "01RID");
+    // The fork entry carries no `stage`; the origin is the parent's claim entry heading the branch.
+    assert.equal(h.session.sessionManager.getSessionName(), CLAIMED_NAME);
+    assert.equal(state.session_name, CLAIMED_NAME);
+    assert.deepEqual(state.session_naming, { title: "Add retry", node: "1.1" });
     assert.deepEqual(namingWarnings(h), []);
   } finally {
     h.dispose();

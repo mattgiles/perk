@@ -254,8 +254,9 @@ implementation worktree. Run ids are not yet accepted as a target.
 `implement | plan #42 | Add retry`), so the picker lists what each conversation *is* rather than
 its first message. The name is refreshed when a session starts; a different name you set with
 `/name` or `pi --name` is never overwritten. Sessions perk did not launch (a hand-run `pi`,
-subagent children) stay unnamed, and an older unnamed perk session gains its name the next time
-you open it.
+subagent children) stay unnamed. An older perk-launched session that has no name yet gains one
+the next time you open it — provided its record carries the stage it was launched for (sessions
+from before perk recorded the launch stage stay unnamed).
 
 **Never creates, restores, or rebinds.** A missing checkout is a typed `worktree_not_found`
 naming the `perk implement` gesture that creates or restores it; an existing one must pass the

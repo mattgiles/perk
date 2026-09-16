@@ -120,6 +120,7 @@ test("stripControls: removes C0/C1/DEL, bidi, format, separator and BOM characte
     ["\u0085", ""],
     ["\u202e", ""],
     ["\u200f", ""],
+    ["\u061c", ""], // ARABIC LETTER MARK — the Bidi_Control character outside U+20xx
     ["\u2066", ""],
     ["\u2028", ""],
     ["\u2060", ""],
@@ -343,11 +344,23 @@ test("decodeNamingHints: keeps non-blank string fields (trimmed, controls stripp
     decodeNamingHints({ title: `  Add${BEL} retry `, node: "1.1", extra: "ignored" }),
     { title: "Add retry", node: "1.1" },
   );
+  assert.deepEqual(decodeNamingHints({ title: `Add${"\u061c"} retry` }), { title: "Add retry" });
   assert.deepEqual(decodeNamingHints({ title: "   ", node: 11 }), {});
   assert.deepEqual(decodeNamingHints({ title: undefined }), {});
   assert.deepEqual(decodeNamingHints(null), {});
   assert.deepEqual(decodeNamingHints("title"), {});
   assert.deepEqual(decodeNamingHints(["title"]), {});
+});
+
+test("decodeNamingHints: a multi-line or tabbed title keeps its word boundaries; the node stays strict", () => {
+  assert.deepEqual(
+    decodeNamingHints({ title: "Add retry\nfor transient\terrors\r\n", node: "1.1\n" }),
+    { title: "Add retry for transient errors", node: "1.1" },
+  );
+  assert.deepEqual(decodeNamingHints({ title: "Add\u2028retry", node: "1.\t1" }), {
+    title: "Add retry",
+    node: "1.1",
+  });
 });
 
 // --- refreshSessionName --------------------------------------------------------------------------
@@ -516,6 +529,50 @@ test("refresh decode-then-rank: malformed values fall through to valid lower tie
     state: { active_objective: 42 },
   });
   assert.deepEqual(refresh(nonStringObjective), { status: "applied", name: "implement" });
+});
+
+test("refresh decode-then-rank: identifiers are narrowed to their FINAL control-stripped form before ranking", () => {
+  // A control-only higher-tier objective must not win precedence and then vanish at compose
+  // time — the valid lower tier ranks instead.
+  const controlOnlyRef = fakePorts({
+    branch: [claimEntry("implement")],
+    state: {
+      active_plan_ref: ref(`${BEL}`, { objective_id: `${ESC}\u202e` }),
+      active_objective: "5",
+    },
+  });
+  assert.deepEqual(refresh(controlOnlyRef), {
+    status: "applied",
+    name: "implement | objective #5",
+  });
+
+  // A claim whose objective is control-only is half-valid: it neither ranks nor lends its node.
+  const controlOnlyClaim = fakePorts({
+    branch: [claimEntry("implement")],
+    state: {
+      objective_node_claim: { objective: `${BEL}`, node: "1.1" },
+      active_plan_ref: ref("42", { objective_id: "7" }),
+    },
+  });
+  assert.deepEqual(refresh(controlOnlyClaim), {
+    status: "applied",
+    name: "implement | plan #42 | objective #7",
+  });
+
+  // A valid claim carrying stray controls ranks with its cleaned values.
+  const dirtyClaim = fakePorts({
+    branch: [claimEntry("implement")],
+    state: { objective_node_claim: { objective: `7${BEL}`, node: ` 1.1${ESC}` } },
+  });
+  assert.deepEqual(refresh(dirtyClaim), {
+    status: "applied",
+    name: "implement | objective #7 / 1.1",
+  });
+});
+
+test("originStage: a control-only run_id or stage is not an origin", () => {
+  assert.equal(originStage([entry({ run_id: `${BEL}`, stage: "implement" })]), null);
+  assert.equal(originStage([entry({ run_id: "01RID", stage: `${ESC}` })]), null);
 });
 
 test("refresh: a valid claim outranks the ref objective and pairs its own node", () => {

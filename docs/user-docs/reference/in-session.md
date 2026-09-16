@@ -100,9 +100,11 @@ door, or model tool; they are human-facing only.
 - **Session names** — every session perk launches carries a perk-owned Pi session name,
   `<stage> | plan #N | objective #O / <node> | <title>` (segments omitted when unknown), so Pi's
   session picker (`pi --resume`, [`perk resume`](./cli/remote-and-utility.md#perk-resume-target))
-  shows what each conversation is. It is refreshed when the session starts (an older unnamed perk
-  session gains its name on reopen); a different name you set with `/name` or `pi --name` is never
-  overwritten; sessions perk did not launch (a hand-run `pi`, subagent children) stay unnamed.
+  shows what each conversation is. It is refreshed when the session starts (an older unnamed
+  perk-launched session gains its name on reopen when its record carries the launch stage;
+  sessions from before perk recorded the stage stay unnamed); a different name you set with
+  `/name` or `pi --name` is never overwritten; sessions perk did not launch (a hand-run `pi`,
+  subagent children) stay unnamed.
   Best-effort: a failure is one warning, never a blocked startup.
 
 ## Related

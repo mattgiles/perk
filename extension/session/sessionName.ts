@@ -49,12 +49,13 @@ const TITLE_CAP = 80;
 /**
  * Every character a terminal or Pi's title sink could interpret: C0 controls (`U+0000–U+001F`),
  * DEL (`U+007F`), C1 controls (`U+0080–U+009F`), the line/paragraph separators
- * (`U+2028`/`U+2029`) and the Unicode bidi/format controls (`U+200B–U+200F`, `U+202A–U+202E`,
- * `U+2060–U+2064`, `U+2066–U+2069`, `U+FEFF`).
+ * (`U+2028`/`U+2029`) and the Unicode bidi/format controls (`U+061C` — the Arabic letter mark,
+ * the one `Bidi_Control` character outside the General Punctuation block — `U+200B–U+200F`,
+ * `U+202A–U+202E`, `U+2060–U+2064`, `U+2066–U+2069`, `U+FEFF`).
  */
 const CONTROL_CHARACTERS =
   // biome-ignore lint/suspicious/noControlCharactersInRegex: the point is to strip them
-  /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
+  /[\u0000-\u001f\u007f-\u009f\u061c\u2028\u2029\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
 
 /** Remove (never replace) every control character `CONTROL_CHARACTERS` names. */
 export function stripControls(text: string): string {
@@ -102,9 +103,15 @@ export function deriveTitle(markdown: string): string | null {
   return null;
 }
 
-/** A control-stripped, trimmed identifier segment, or `null` when blank. */
-function cleanId(value: string | null): string | null {
-  if (value === null) return null;
+/**
+ * The ONE identifier narrowing: a string's control-stripped, trimmed form, or `null` when the
+ * value is not a string or is blank after that. Used both when identifiers are decoded from the
+ * unvalidated rebuilt state (BEFORE ranking — so a control-only or blank higher-tier value can
+ * never win precedence and then vanish at compose time) and again inside `composeSessionName`
+ * (belt-and-braces on its public inputs).
+ */
+function cleanId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
   const cleaned = stripControls(value).trim();
   return cleaned === "" ? null : cleaned;
 }
@@ -138,10 +145,6 @@ export function composeSessionName(parts: {
   return stripControls(segments.join(" | "));
 }
 
-function nonBlankString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() !== "" ? value : null;
-}
-
 /**
  * The origin stage — durable cold-launch provenance: the FIRST `perk:workflow-state` entry whose
  * data carries BOTH a non-empty string `run_id` AND a non-empty string `stage`. Only the cold
@@ -153,8 +156,8 @@ export function originStage(branch: readonly BranchEntry[]): string | null {
   for (const entry of branch) {
     if (entry.type !== "custom" || entry.customType !== WORKFLOW_STATE_TYPE) continue;
     const data = entry.data ?? {};
-    const runId = nonBlankString(data.run_id);
-    const stage = nonBlankString(data.stage);
+    const runId = cleanId(data.run_id);
+    const stage = cleanId(data.stage);
     if (runId !== null && stage !== null) return stage;
   }
   return null;
@@ -165,22 +168,21 @@ export function originStage(branch: readonly BranchEntry[]): string | null {
  * `session_naming`, or the caller's own `hints`: a non-null object's `title`/`node` when non-blank
  * strings (trimmed, controls stripped); anything else → the field is absent. The core normalizes
  * its input, so a present-but-`undefined` or blank hint field can never clobber a stored value.
+ *
+ * The title is prose: its whitespace runs (tabs/newlines included) collapse to one space BEFORE
+ * the control strip, exactly as `normalizeTitle` does, so a multi-line node description keeps
+ * its word boundaries in the persisted hint. The node is an identifier and stays strict.
  */
 export function decodeNamingHints(value: unknown): NamingHints {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
   const record = value as Record<string, unknown>;
   const hints: NamingHints = {};
-  const title = decodeHintField(record.title);
+  const title =
+    typeof record.title === "string" ? cleanId(record.title.replace(/\s+/g, " ")) : null;
   if (title !== null) hints.title = title;
-  const node = decodeHintField(record.node);
+  const node = cleanId(record.node);
   if (node !== null) hints.node = node;
   return hints;
-}
-
-function decodeHintField(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const cleaned = stripControls(value).trim();
-  return cleaned === "" ? null : cleaned;
 }
 
 /**
@@ -211,19 +213,16 @@ function hintsEqual(a: NamingHints, b: NamingHints): boolean {
   return a.title === b.title && a.node === b.node;
 }
 
-/** The all-or-nothing `objective_node_claim` decode (mirrors `workflowSession.ts::readClaim`). */
+/**
+ * The all-or-nothing `objective_node_claim` decode (mirrors `workflowSession.ts::readClaim`, with
+ * both fields narrowed to their final control-stripped, trimmed form).
+ */
 function decodeClaim(value: unknown): { objective: string; node: string } | null {
   if (typeof value !== "object" || value === null) return null;
   const record = value as Record<string, unknown>;
-  if (
-    typeof record.objective === "string" &&
-    record.objective.trim() !== "" &&
-    typeof record.node === "string" &&
-    record.node.trim() !== ""
-  ) {
-    return { objective: record.objective, node: record.node };
-  }
-  return null;
+  const objective = cleanId(record.objective);
+  const node = cleanId(record.node);
+  return objective !== null && node !== null ? { objective, node } : null;
 }
 
 /**
@@ -231,9 +230,10 @@ function decodeClaim(value: unknown): { objective: string; node: string } | null
  * identifiers → compose → ownership-gated write. Everything runs inside ONE try/catch (`failed`
  * with the problem text); nothing is appended when there is no origin.
  *
- * Decode, then rank: every identifier is narrowed from the unvalidated rebuilt state BEFORE
- * precedence, so a malformed high-priority value never suppresses a valid lower-tier one, and a
- * half-valid claim never pairs its node with a fallback objective.
+ * Decode, then rank: every identifier is narrowed from the unvalidated rebuilt state to its
+ * FINAL form (a non-blank string after control stripping + trim, via `cleanId`) BEFORE
+ * precedence, so a malformed, blank or control-only high-priority value never suppresses a
+ * valid lower-tier one, and a half-valid claim never pairs its node with a fallback objective.
  *
  * An append that throws AFTER a successful `setSessionName` is `failed` and leaves the name in
  * place; the next refresh classifies it `preserved` (accepted residual — the ownership record is
@@ -257,9 +257,9 @@ export function refreshSessionName(
     }
 
     const claim = decodeClaim(state.objective_node_claim);
-    const planId = nonBlankString(state.active_plan_ref?.pr_id);
-    const refObjective = nonBlankString(state.active_plan_ref?.objective_id);
-    const activeObjective = nonBlankString(state.active_objective);
+    const planId = cleanId(state.active_plan_ref?.pr_id);
+    const refObjective = cleanId(state.active_plan_ref?.objective_id);
+    const activeObjective = cleanId(state.active_objective);
     const objectiveId = claim?.objective ?? refObjective ?? activeObjective;
     const nodeId = objectiveId === null ? null : (claim?.node ?? merged.node ?? null);
     const title = merged.title ?? null;
