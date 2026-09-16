@@ -120,10 +120,10 @@ Per-agent model overrides for each perk-owned project agent.
 | `pr-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for the PR-reviewer agent. |
 | `review-classifier` | string (model id) | _(agent frontmatter default)_ | Model for the review-classifier agent, consumed by `classify_review_feedback` at execute time. |
 | `objective-explorer` | string (model id) | _(agent frontmatter default)_ | Model for the objective-explorer agent, consumed by `explore_objective_node` at execute time. |
-| `conflict-resolver` | string (model id) | _(agent frontmatter default)_ | Read from the parent session config at invocation for native foreground resolution: `resolve_submit_conflicts` (PR) and awaited `objective_stack_sync` retained resolution. Native `inherit` and fallback semantics are preserved; no separate retained key. |
+| `conflict-resolver` | string (model id) | _(agent frontmatter default)_ | Read from the parent session config at invocation for native foreground resolution: `resolve_submit_conflicts` (PR) and awaited `objective_stack_sync` retained resolution. Native `inherit` semantics are preserved; no separate retained key. |
 | `learn-analyst` | string (model id) | _(agent frontmatter default)_ | Model for the learn-analyst agent used by `/learn` to analyze a landed plan's session evidence. |
 | `adversarial-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for the adversarial-reviewer agent spawned by `/pr-review-terminal` and `/pr-review-browser`. |
-| `draft-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for streamed draft review from `/plan-review-browser` and `/objective-review-browser`. |
+| `draft-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for draft review from `/plan-review-browser` and `/objective-review-browser`. |
 | `harvest-analyst` | string (model id) | _(agent frontmatter default)_ | Model for each `docs/learned` mining lane in `perk learn harvest`. |
 | `dream-analyst` | string (model id) | _(agent frontmatter default)_ | Model for each `docs/learned` cluster-audit lane in `perk learn dream`'s analyst wave, consumed by `run_dream_wave` at execute time. |
 | `dream-reducer` | string (model id) | _(agent frontmatter default)_ | Model for the three fixed reducer lanes in `perk learn dream`'s reducer wave, consumed by `run_dream_wave` at execute time. |
@@ -236,8 +236,8 @@ This is not a models-only overlay: Pi's **whole config directory** moves, includ
 - **pi-subagents' config:** the borrowed engine's `extensions/subagent/config.json` moves with
   the directory. perk's `/submit` conflict resolver reads its `worktree` default there once at
   extension activation and refuses to launch while it is anything but absent or `false` (naming
-  the file); the `subagent-bridge-config` and `subagent-host-tools` checks follow the same
-  redirect (the latter reads pi-fff's `pi-fff.json` from that dir) — operator
+  the file); the `subagent-host-tools` check follows the same redirect (it reads pi-fff's
+  `pi-fff.json` from that dir) — operator
   `PI_CODING_AGENT_DIR` first, then the configured `agent_dir`, then `~/.pi/agent`.
 
 ### Diagnostics and git safety

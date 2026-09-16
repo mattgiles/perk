@@ -167,11 +167,11 @@ into one path-naming `UserFacingCliError` *inside* the convergence, so both call
 continued. The review wave found it — the plan's "malformed JSON" arm was too narrow for a file
 another program writes.
 
-The live read-side instances are doctor's report-only foreign-file readers —
-`_intercom_bridge_mode` and `_fff_file_mode` in `src/perk/convergence/doctor/checks.py` — under a
-different posture (best-effort `None`; the owning check or the foreign program carries the
-complaint), where one `(OSError, ValueError)` net is what covers the `UnicodeDecodeError` and
-`JSONDecodeError` arms the deleted convergence had to enumerate.
+The live read-side instance is doctor's report-only foreign-file reader — `_fff_file_mode` in
+`src/perk/convergence/doctor/checks.py` (its sibling `_intercom_bridge_mode` went with the retired
+`subagent-bridge-config` check) — under a different posture (best-effort `None`; the owning check
+or the foreign program carries the complaint), where one `(OSError, ValueError)` net is what covers
+the `UnicodeDecodeError` and `JSONDecodeError` arms the deleted convergence had to enumerate.
 
 ## Cross-references
 

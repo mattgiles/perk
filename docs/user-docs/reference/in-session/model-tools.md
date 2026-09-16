@@ -164,7 +164,10 @@ For package selection, registration timing, and provider fallback behavior, use 
 ## Spawned-child tools
 
 These engine tools are not parent-stage tools. They exist only in spawned-child contexts and are
-kept reachable when a child adopts a read-only gate.
+kept reachable when a child adopts a read-only gate. perk's own waves spawn with the pi-subagents
+intercom bridge off, so their children never have `contact_supervisor` (review waves are
+completion-only); the allowlist entry keeps the supervisor door for an ad-hoc gated child whose
+bridge is active.
 
 <!-- BEGIN child tool census -->
 | Purpose | Tool |

@@ -44,6 +44,9 @@ def test_scan_is_not_vacuous() -> None:
         "stages/learn.md",
         "stages/objective-plan/seed.md",
         "common/plan-read/github.md",
+        # The first real `{% include %}` consumer's partial (the seven review doors' shared
+        # yield/collect lifecycle) — a partial is a real template the scan must reach.
+        "common/review-wave-yield.md",
         "_fixtures/templates/with_include.md",
     ):
         assert anchor in rels, f"scan missed {anchor} — guard is misaimed"

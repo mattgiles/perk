@@ -470,7 +470,7 @@ const BASELINE_PLAN_REVIEW = {
     "Reviews the validated plan-draft artifact (keep it current with plan_draft); on approval " +
     "the plan is auto-saved and the turn terminates. On deny, revise per the returned " +
     "feedback, rewrite the draft with plan_draft, and call again. On the Plannotator surface " +
-    "the human may first opt into a streamed reviewer wave — the call then returns immediately " +
+    "the human may first opt into a reviewer wave — the call then returns immediately " +
     'with wave guidance (status "wave_launched") to follow in the same turn, and the browser ' +
     "decision routes back automatically. No-op skip when the session is headless or the " +
     "review is dismissed.",
@@ -492,7 +492,7 @@ const BASELINE_PLAN_REVIEW = {
     "Call plan_review only when the plan is decision-complete.",
     "On a DENIED review, revise per the feedback, rewrite the draft with plan_draft, then call plan_review again.",
     "On an APPROVED plan_review, the plan is auto-saved and the turn ends — never re-dump the plan as a final message and never tell the user to run /plan-save; relay the save outcome instead.",
-    "On a wave_launched result (the human opted into the reviewer wave), follow the returned guidance in the same turn — launch the wave and relay its findings; the human's browser decision routes back automatically, so never re-call plan_review while that browser review is open.",
+    "On a wave_launched result (the human opted into the reviewer wave), follow the returned guidance in the same turn — launch the wave, end the turn, and push its findings after collection; the human's browser decision routes back automatically, so never re-call plan_review while that browser review is open.",
     "If plan_review reports it was skipped or unavailable (headless, dismissed), fall back to presenting the complete plan; the human runs /plan-save (the manual failsafe).",
   ],
   executionMode: "sequential",

@@ -2,8 +2,10 @@
 // module — the human-in-the-loop review doors' (/pr-review-browser, /pr-review-terminal)
 // vocabulary as tested code (sibling of `prReviewWave.ts`): the four door angles, the per-lane
 // completion-report schema, and the lane/task composition are module-owned here, launched
-// NON-BLOCKING via `wave.start` so the parent ends its turn after launch and relays batches
-// on native supervisor wakes before collecting on the matching workflow-completion notice.
+// NON-BLOCKING via `wave.start` so the parent ends its turn after launch and collects on the
+// matching workflow-completion notice. COMPLETION-ONLY: the spawn rides the fixed wave contract
+// (`intercomBridge: {mode: "off"}`), so children have no progress channel — findings travel
+// only in the final `structured_output` report, nothing reaches the parent before the wave ends.
 //
 // ZERO retries — deliberate: the doors' contract is honest incompleteness surfaced to the human
 // during triage (an `ok: false` lane is reported, never papered over), so the pr-review
@@ -52,8 +54,9 @@ export function isAdversarialReviewAngle(value: string): value is AdversarialRev
  * The per-lane completion-report schema the wave enforces as its `outputSchema` — the engine
  * injects a `structured_output` tool into each lane and fails any lane whose report is missing
  * or schema-invalid. Transcribes the adversarial-reviewer's completion-report contract
- * (contracts.md §8.4): closed shapes, `{angle, summary, findings, fyi, streamed, blocked}` all
- * required, and DELIBERATELY NO VERDICT FIELD — the human triages every finding, so there is no
+ * (contracts.md §8.4): closed shapes, `{angle, summary, findings, fyi, blocked}` all
+ * required (never defaulted — a missing/mistyped field is engine-invalid), and DELIBERATELY NO
+ * VERDICT FIELD — the human triages every finding, so there is no
  * clean/actionable derivation to make consistent. `blocked: true` is NOT a verdict: it marks a
  * required review that could not complete (context fetch failed, a context file unreadable, the
  * hunt stopped early) — `collectAdversarialReviewWave` normalizes it into an uncovered
@@ -67,13 +70,12 @@ export function isAdversarialReviewAngle(value: string): value is AdversarialRev
 export const ADVERSARIAL_REVIEW_REPORT_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["angle", "summary", "findings", "fyi", "streamed", "blocked"],
+  required: ["angle", "summary", "findings", "fyi", "blocked"],
   properties: {
     angle: {
       type: "string",
       enum: ["claimed-intent", "correctness", "tests", "quality", "ponytail"],
     },
-    streamed: { type: "boolean" },
     blocked: { type: "boolean" },
     summary: { type: "string" },
     findings: {

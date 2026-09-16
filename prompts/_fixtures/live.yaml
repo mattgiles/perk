@@ -15,6 +15,8 @@
     url: "https://linear.app/x/ENG-1"
 - template: "common/resume-advisory.md"
   vars: {}
+- template: "common/review-wave-yield.md"
+  vars: {}
 - template: "common/plan-read/other.md"
   vars:
     pr_id: "42"

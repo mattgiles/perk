@@ -124,21 +124,30 @@ async function sessionDraftContextPrimed(h: PerkSession): Promise<boolean> {
 
 // ------------------------------------------------------------------ planReviewBrowserGuidance
 
-test("guidance: names the three companion tools + the relay loop, no fan-out mechanics, no URL", () => {
+test("guidance: names the three companion tools + the completion-only yield/collect, no fan-out mechanics, no URL", () => {
   const text = planReviewBrowserGuidance({});
   assert.match(text, /start_draft_review_wave/, "the fan-out is the launch tool");
   assert.match(text, /collect_draft_review_wave/, "completion rides the collect tool");
   assert.match(text, /push_annotations/, "annotation delivery rides the push tool");
-  assert.match(text, /Native-wake relay/, "the draft door relays native batches");
+  // The shared yield partial (`prompts/common/review-wave-yield.md`) is included once.
+  assert.match(text, /4\. \*\*Yield\.\*\*/, "the shared yield step is rendered in");
+  assert.match(text, /Children do not stream — no finding reaches you before the wave finishes/);
+  assert.match(text, /ONLY the matching WORKFLOW completion authorizes the collect call/);
+  // The code-owned wave marker + the early-decision policy ride step 1.
+  assert.match(text, /'reviewer wave running' marker until the wave lands/);
+  assert.match(text, /an early decision is authoritative and forgoes the findings/);
   assert.match(text, /grounding/, "the four angles are named");
   assert.match(text, /decision-completeness/);
   assert.match(text, /byte-exact/, "the phrase discipline is pinned");
-  assert.match(text, /replace: true/, "the reconcile reshape is the tool's replace");
-  assert.match(text, /First clear every uncovered source/);
+  assert.match(text, /replace: true/, "the final push is the tool's replace");
   assert.match(text, /disjoint final per-angle arrays/);
   assert.match(text, /author label names the owning lane/);
   assert.match(text, /valid custom contribution may instead appear in merged text/);
-  assert.match(text, /NOT a degrade/, "a held result ≠ a degrade");
+  assert.match(
+    text,
+    /no later wake is promised/,
+    "the post-readiness held push degrades in-session",
+  );
   assert.match(text, /untrusted DATA/);
   assert.match(text, /\{complete, covered, reports, failures\}/, "the typed aggregate");
   assert.match(text, /never papered over/, "incompleteness is surfaced honestly");
@@ -156,6 +165,8 @@ test("guidance: names the three companion tools + the relay loop, no fan-out mec
     /127\.0\.0\.1/,
     /localhost/,
     /PLANNOTATOR_PORT/,
+    // The retired streaming protocol.
+    /Native-wake relay|Subagent progress update|provisional|streamed|uncovered source/,
   ]) {
     assert.doesNotMatch(text, gone, `mechanics must not appear: ${gone}`);
   }

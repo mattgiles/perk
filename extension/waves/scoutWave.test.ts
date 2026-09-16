@@ -24,7 +24,7 @@ import {
   type ScoutBrief,
   scoutLaneTask,
 } from "./scoutWave.ts";
-import { WAVE_ACCEPTANCE } from "./transport.ts";
+import { WAVE_ACCEPTANCE, WAVE_INTERCOM_BRIDGE } from "./transport.ts";
 
 /** A schema-shaped scout report (the engine already validated it — shape only matters here). */
 function scoutReport(scope = "examined the wave module"): unknown {
@@ -170,6 +170,7 @@ test("runScoutWave: one perk.scout lane per brief in order, module contract + ac
   assert.equal(spawn.mission, false);
   assert.equal(spawn.context, "fresh");
   assert.deepEqual(spawn.acceptance, WAVE_ACCEPTANCE);
+  assert.deepEqual(spawn.intercomBridge, WAVE_INTERCOM_BRIDGE);
   assert.equal(spawn.outputSchema, SCOUT_REPORT_SCHEMA);
   assert.equal(spawn.model, "anthropic/claude-haiku-4-5");
   assert.equal(spawn.timeoutMs, 1_234);

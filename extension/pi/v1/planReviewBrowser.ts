@@ -41,9 +41,12 @@
 //    loudly by the ladder, its `finally` leaves the second session's surfaces alone, and its
 //    readiness observer is fenced too (a superseded review's observer neither announces nor
 //    degrades — it can never clear the second session's surfaces or flip its door session).
-//  - an early human decision mid-wave is authoritative — the save proceeds; the cleared surface
-//    makes any late `push_annotations` refuse `no_surface`; a still-pending wave stays
-//    collectable (the wave module's timeout is the orphan insurance).
+//  - an early human decision mid-wave is authoritative and forgoes the reviewer findings — the
+//    save proceeds; the cleared surface makes any late `push_annotations` (and the code-owned
+//    `perk:wave` marker) refuse/no-op; a still-pending wave stays collectable (the wave module's
+//    timeout is the orphan insurance). The mitigation is informational, not a gate: the marker
+//    the browser shows while the wave runs plus the door-open notice tell the human findings
+//    arrive at completion, so the early decision is an informed one.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
@@ -84,6 +87,7 @@ import {
   type StartedSurface,
   startPlannotatorPlanReview,
 } from "./providers/plannotatorHandoff.ts";
+import { WAVE_ARRIVAL_NOTICE } from "./providers/waveStatus.ts";
 import { type ReviewOutcome, type ToolResult, untrustedReviewFeedback } from "./review.ts";
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
@@ -428,9 +432,10 @@ export async function openPlanReviewSurface(
     ctx,
     SCOPE,
     "info",
-    opts.custom !== undefined
+    (opts.custom !== undefined
       ? `working plan draft → plannotator browser review + draft reviewers (custom lane: ${opts.custom}) → APPROVE auto-saves / DENY returns feedback`
-      : "working plan draft → plannotator browser review + draft reviewers → APPROVE auto-saves / DENY returns feedback",
+      : "working plan draft → plannotator browser review + draft reviewers → APPROVE auto-saves / DENY returns feedback") +
+      WAVE_ARRIVAL_NOTICE,
   );
   return (
     planReviewBrowserGuidance({ ...(opts.custom !== undefined ? { custom: opts.custom } : {}) }) +

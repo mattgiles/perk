@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- As of 4cbd2e8 -->
 
+### Changed
+
+- Review-door waves (`/pr-review-terminal`, `/pr-review-browser`, `/stack-review-browser`, `/plan-review-browser`, `/objective-review-browser`) are now completion-only: reviewer findings land on your surface when the wave completes instead of streaming in, a code-owned `perk:wave` marker in the browser says the wave is running until then, and an early decision in the browser is authoritative but forgoes the findings. (cb610d82)
+- Every perk subagent wave now spawns with the pi-subagents intercom bridge off, so children never carry a supervisor channel; `push_annotations` retries a failed post-readiness push a few times before presenting the findings in-session. (cb610d82)
+- The `subagent-host-tools` doctor check now treats pi-subagents 0.68.0 and later as fixed (the affected range is `0.67.x`) and says so in its `ok` message; perk's guidance baseline for pi-subagents moves to 0.68.0. (cb610d82)
+
+### Removed
+
+- Remove provisional finding streaming from the review doors and the `subagent-bridge-config` doctor check; a `subagents.intercomBridge.mode` setting no longer affects any perk flow. (cb610d82)
+
+### Fixed
+
+- perk's agent definitions load again on pi-subagents 0.68.0 and later, which rejects the removed `fallbackModels` frontmatter field. Run `perk init` or `perk doctor --fix` to refresh the delivered `.pi/agents/perk/` definitions; a user-owned definition that still carries the field fails to load with the engine's own error naming the file. (cb610d82)
+
 ## [3.3.0] - 2026-09-10
 
 ### Major Changes

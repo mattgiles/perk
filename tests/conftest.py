@@ -104,7 +104,7 @@ def _reset_launch_banner_guard():
 def isolated_pi_agent_dir(monkeypatch, tmp_path) -> Path:
     """Point pi's agent dir at a throwaway directory for every test.
 
-    doctor's ``subagent-bridge-config`` check reads, and the launch lock sweep deletes, files
+    doctor's ``subagent-host-tools`` check reads, and the launch lock sweep deletes, files
     INSIDE the launch-precedence agent dir (``launch_pi_agent_dir``: env → `[pi] agent_dir` →
     ``~/.pi/agent``), so without this the suite would touch the developer's real store. The env
     arm wins the precedence, so setting it here is the hermetic default; tests that exercise the

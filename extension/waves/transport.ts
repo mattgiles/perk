@@ -119,6 +119,18 @@ export const WAVE_ACCEPTANCE = {
   reason: "perk report-wave lanes complete via the engine-validated structured_output report",
 } as const;
 
+/**
+ * The explicit intercom-bridge disable every wave spawn carries. pi-subagents ≥ 0.68.0 discards
+ * child `progress_update` requests on the parent side (no message, no event, no storage) yet
+ * still appends its bridge template — which instructs children to send exactly those updates —
+ * to every child's system prompt while the bridge is active. perk children never ask decisions
+ * either, so the bridge is pure cost: `{mode: "off"}` resolves to an inactive bridge for this
+ * launch only (the executor's per-launch `intercomBridge` override, spread onto every workflow
+ * child like `acceptance`), so no `contact_supervisor` tool and no progress-update template ever
+ * reach a perk child. This is the completion-only guarantee the review doors rely on.
+ */
+export const WAVE_INTERCOM_BRIDGE = { mode: "off" } as const;
+
 /** The full spawn params the runner fixes: async-only, ephemeral, fresh-context by definition. */
 export interface WaveSpawnParams {
   workflowScript: string;
@@ -130,6 +142,9 @@ export interface WaveSpawnParams {
   /** The fixed acceptance disable (`WAVE_ACCEPTANCE`) — pi-subagents' workflow-defaults spread
    * delivers it onto every child, suppressing the auto-inferred acceptance contract. */
   acceptance: { level: "none"; reason: string };
+  /** The fixed intercom-bridge disable (`WAVE_INTERCOM_BRIDGE`) — rides the same workflow-defaults
+   * spread onto every child, so no child ever sees `contact_supervisor` or the bridge template. */
+  intercomBridge: { mode: "off" };
   outputSchema: object;
   model?: string;
   /** Orphan insurance: the run enforces the same deadline even if the parent session dies. */
@@ -331,6 +346,7 @@ export async function startWaveScript(
       mission: false,
       context: "fresh",
       acceptance: WAVE_ACCEPTANCE,
+      intercomBridge: WAVE_INTERCOM_BRIDGE,
       outputSchema: spec.outputSchema,
       ...(spec.model !== undefined ? { model: spec.model } : {}),
       timeoutMs,

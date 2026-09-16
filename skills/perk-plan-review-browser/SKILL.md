@@ -40,24 +40,24 @@ end your turn; this skill is the judgment and detail layer behind it.
 - **The reviewer model.** The configured `[models.subagents] draft-reviewer` model is resolved
   by `start_draft_review_wave` at execute time — the door reads no config and the guidance
   carries no model plumbing.
-- **Native delivery.** Launch once, retain workflow identity, and end the turn with Pi open.
-  Relay delivered provisional batches on native supervisor wakes before collecting on matching
-  workflow completion (co-delivered notices need no extra turn). Final reports alone authorize
-  reconciliation, exactly once. Early collection retains pending; expired grace after observed
-  completion requires owner diagnosis, not polling/relaunch. Held annotations retry on native
-  batch/readiness/completion wakes; replace each covered lane at reconcile, even if empty.
-- **Streaming status.** Required `streamed` means the child submitted at least one nonempty batch
-  accepted/queued by the supervisor, not that the human saw it. No findings → false normally;
-  unavailable/failed streaming → complete final report plus factual `fyi` (true remains true after
-  an earlier successful batch). Disclose every false lane (custom/Ponytail included) in-session
-  without changing coverage: neutral “no provisional batches (no findings)” versus warning
-  “completion-only findings; no provisional batches”. Never create status annotations; false
-  alone does not diagnose a broken bridge.
+- **Native delivery.** Launch once, retain workflow identity, and end the turn with Pi open;
+  collect only on the matching workflow-completion notice (a routine successful child completion
+  does not wake you; a failed/paused/stopped child does — and never authorizes collection).
+  Children do not stream: nothing reaches you or the browser before the wave finishes. Final
+  reports alone authorize reconciliation, exactly once. Early collection retains pending; expired
+  grace after observed completion requires owner diagnosis, not polling/relaunch. A push held
+  before browser readiness is flushed by the door's readiness notice; a push held after readiness
+  (the tool's bounded retries exhausted) is presented in-session — no later wake is promised.
+- **The `perk:wave` marker and the early-decision policy.** While the wave runs, the browser shows
+  a code-owned status marker under the reserved `perk:wave` source (running at launch, failed on a
+  zero-lane launch, incomplete or cleared at collection) — you never write it (the `wave` slug is
+  refused) and never create status annotations of your own. Tell the human reviewer annotations
+  land when the wave completes and to decide after them: an early decision is authoritative and
+  forgoes the reviewer findings.
 - **The child report shape (verdict-free).** Each child's completion report is
-  `{angle, summary, findings[{phrase, severity, confidence, body}], fyi[], streamed: boolean}` (`phrase` is a
+  `{angle, summary, findings[{phrase, severity, confidence, body}], fyi[]}` (`phrase` is a
   byte-exact span from the draft or `null` for a global finding; an empty `findings` is a
-  legitimate, earned outcome). The streamed fenced-JSON batches carry findings in this same
-  shape; `null` phrases land in the browser's sidebar.
+  legitimate, earned outcome). `null` phrases land in the browser's sidebar.
 - **The annotation mechanics are tool-owned.** Behind the launch statement's
   end-to-end/never-compose-HTTP rules, `push_annotations` owns the finding→annotation mapping,
   the dedupe ledger, the hold-and-accumulate retry, and the source-scoped `replace: true`
@@ -65,16 +65,14 @@ end your turn; this skill is the judgment and detail layer behind it.
 - **The door observes readiness itself.** There is no handshake poll for you to run: ready → an
   info note; never-ready → a loud error, with fallback only after verified invalidation (degraded
   mode below).
-- **Reconcile judgment.** Clear uncovered sources first (`launch.requested` minus
-  `collected.covered`), using `push_annotations` with empty findings and `replace: true`.
-  Build disjoint final per-angle arrays from valid reports only — never recover failed reports
-  from provisional batches or simply re-send every lane's raw array. Merge distinct concerns
+- **Reconcile judgment.** Build disjoint final per-angle arrays from valid reports only — never
+  re-send every lane's raw array as if that were reconciliation. Merge distinct concerns
   at the same phrase; preserve contributor angle/severity/confidence labels in the merged body
   and the highest severity with its corresponding confidence. The first contributing lane in
   `collected.covered` order owns that anchor; duplicate-only lanes get empty final arrays.
-  Replace each covered lane once, including empty arrays. A held clear/replacement is not
-  finalization: keep the wake-driven retry/door-owned degrade posture until nothing is held.
-  `fyi` notes remain in-session color, never pushed.
+  Push each covered lane once with `replace: true`, including empty arrays. A held final push is
+  not finalization: before readiness the readiness notice flushes it; after readiness present the
+  findings in-session (the door-owned degrade). `fyi` notes remain in-session color, never pushed.
 - **Visible attribution.** Plan annotations carry both `source` (replacement ownership) and
   `author` (the owning lane label displayed by the plan UI). A valid custom contribution merged
   under another owner remains labelled in the body; it need not have a separate custom card.

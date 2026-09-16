@@ -581,7 +581,7 @@ export async function runPlanReviewV1(
   //    (perk-plan, tombell, unknown ids) → the first-party in-TUI editor review.
   if (isPlannotatorPlanSelected(ctx.cwd)) {
     // The launch chooser (contracts.md §8.23): every eligible round the human picks with/without
-    // the streamed reviewer wave BEFORE anything launches. Eligibility is drafts-only — the wave
+    // the reviewer wave BEFORE anything launches. Eligibility is drafts-only — the wave
     // door reviews and stale-guards the validated artifact, so a param-tier source keeps the
     // plain path (silently: there is no forced mode to warn about; the `wave === undefined` arm
     // is defensive/test-only and behaves identically).

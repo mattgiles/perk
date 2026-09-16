@@ -86,11 +86,13 @@ property observed through the old path needs a new observer:
   discriminator**: exactly one real-engine story owns registration, composition, and exit mapping —
   it locates the check with `next(…, None)` and asserts `is not None` (a `StopIteration` from a bare
   `next()` is an accident, not a pin). Then fault-inject by deleting the registration line and
-  confirm **only** the engine story fails. Precedent: `tests/test_doctor.py`'s
-  `subagent-bridge-config` suite (`test_subagent_bridge_config_engine_story` plus the direct-seam
-  matrix) went 6 → 2 engine runs while keeping 10 → 10 cases. Shortcut: with `PI_CODING_AGENT_DIR`
-  set, a bare `tmp_path` is a complete input for the env-arm cases — only config-arm cases need a
-  scaffolded repo.
+  confirm **only** the engine story fails. Historical precedent: `tests/test_doctor.py`'s
+  former `subagent-bridge-config` suite (an engine story plus a direct-seam matrix) went 6 → 2
+  engine runs while keeping 10 → 10 cases — the check and its suite were retired with perk's
+  finding-streaming protocol, but the `subagent-host-tools` suite in the same file keeps the
+  shape (one `run_doctor` story, direct `_subagent_host_tools_check(...)` calls for the matrix).
+  Shortcut: with `PI_CODING_AGENT_DIR` set, a bare `tmp_path` is a complete input for the env-arm
+  cases — only config-arm cases need a scaffolded repo.
 
 ## Manufacture collisions for uniqueness and dedup claims
 
