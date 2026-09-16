@@ -527,12 +527,8 @@ test("only non-null non-array objects with exact blocked verdict are reclassifie
   assert.equal(requests.length, 1);
 });
 
-test("reviewer definition and managed mirror pin assessment and exact context acceptance", () => {
+test("reviewer definition pins assessment and exact context acceptance", () => {
   const def = readFileSync(new URL("../../agents/pr-reviewer.md", import.meta.url), "utf8");
-  assert.equal(
-    readFileSync(new URL("../../.pi/agents/perk/pr-reviewer.md", import.meta.url), "utf8"),
-    def,
-  );
   for (const field of PR_REVIEW_REPORT_SCHEMA.required)
     assert.ok(def.includes(`\`${field}\``), field);
   for (const verdict of PR_REVIEW_REPORT_SCHEMA.properties.verdict.enum)

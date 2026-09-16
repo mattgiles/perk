@@ -225,15 +225,4 @@ test("the agent def completes via structured_output with the schema's root field
   // the tool call.
   assert.match(def, /never print a\s+fenced JSON block/);
   assert.doesNotMatch(def, /```json/, "no fenced-JSON completion template in the def");
-  // The delivered `.pi/agents/perk/` mirror stays byte-identical (the same-commit convergence).
-  const mirror = join(
-    import.meta.dirname,
-    "..",
-    "..",
-    ".pi",
-    "agents",
-    "perk",
-    "objective-explorer.md",
-  );
-  assert.equal(readFileSync(mirror, "utf8"), def, "the .pi/agents/perk mirror must not drift");
 });

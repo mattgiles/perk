@@ -37,10 +37,9 @@ from typing import Literal
 
 from pydantic import Field
 
-from perk import __version__, _resources
+from perk import __version__
 from perk.boundary import LenientParseModel, translate_validation_errors
 from perk.convergence.capabilities import Scope
-from perk.convergence.init.agents import PERK_AGENTS
 from perk.convergence.init.blocks import (
     AGENTS_BEGIN,
     AGENTS_END,
@@ -364,19 +363,6 @@ def _observed_block(rel: str, *, begin: str, end: str) -> Callable[[Path], bytes
     return observe
 
 
-def _observed_agents_dir(root: Path) -> bytes | None:
-    """The live `.pi/agents/perk/` directory manifest (``*.md`` only — the convergence's owned
-    scope; stray non-md files are invisible to health exactly as they are to convergence).
-    Missing dir or zero ``.md`` files → not installed."""
-    agents_dir = root / ".pi" / "agents" / "perk"
-    if not agents_dir.is_dir():
-        return None
-    files = {p.name: p.read_bytes() for p in agents_dir.glob("*.md")}
-    if not files:
-        return None
-    return directory_manifest(files)
-
-
 def _settings_payload(root: Path, self_repo: bool) -> bytes:
     return _settings_portion(root, self_repo=self_repo)
 
@@ -387,12 +373,6 @@ def _runner_workflow_payload(root: Path, self_repo: bool) -> bytes:
 
 def _remote_setup_action_payload(root: Path, self_repo: bool) -> bytes:
     return remote_setup_action(self_repo).encode("utf-8")
-
-
-def _subagent_agents_payload(root: Path, self_repo: bool) -> bytes:
-    source_dir = _resources.agents_dir()
-    files = {f"{name}.md": (source_dir / f"{name}.md").read_bytes() for name in PERK_AGENTS}
-    return directory_manifest(files)
 
 
 def _skills_manifest_payload(root: Path, self_repo: bool) -> bytes:
@@ -421,8 +401,7 @@ def managed_artifacts() -> tuple[ArtifactDescriptor, ...]:
     (``perk-repo-skills.yaml`` — network-derived and user-content-derived, not
     offline-computable); ``.perk/config.toml`` (seeded once, user-owned after);
     ``.agents/skills/`` symlinks + the ``.pi/npm`` extension install (gitignored,
-    skills-CLI/npm-managed); the ``.pi/agents/.gitkeep`` (trivial presence marker outside the
-    perk-owned ``perk/`` subdir).
+    skills-CLI/npm-managed).
     """
     return (
         ArtifactDescriptor(
@@ -448,14 +427,6 @@ def managed_artifacts() -> tuple[ArtifactDescriptor, ...]:
             scope="both",
             desired=_remote_setup_action_payload,
             observed=_observed_file(REMOTE_SETUP_ACTION_PATH),
-        ),
-        ArtifactDescriptor(
-            key="subagent-agents",
-            path=".pi/agents/perk/",
-            kind="directory",
-            scope="both",
-            desired=_subagent_agents_payload,
-            observed=_observed_agents_dir,
         ),
         ArtifactDescriptor(
             key="skills-manifest",

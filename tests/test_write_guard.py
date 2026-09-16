@@ -29,7 +29,6 @@ ALLOWED = frozenset(
         "convergence/init/settings.py",
         "convergence/init/templates.py",
         "convergence/init/skills.py",
-        "convergence/init/agents.py",
         "convergence/init/blocks.py",
         "convergence/init/repo_skills.py",
         "convergence/init/version_pin.py",

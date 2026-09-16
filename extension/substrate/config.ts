@@ -54,12 +54,13 @@ export interface PerkConfig {
    * general-purpose read-only analysis lane (task-defined scope), consumed by `run_scout_wave`
    * at execute time — and the
    * dev-only `session-auditor`, whose def is repo-local to perk's own repository
-   * (`.pi/agents/perk-dev/session-auditor.md`, never delivered by `perk init`), so the key is
-   * dormant in consumer repos). Each configured
+   * (`.pi/agents/perk-dev/session-auditor.md`, never shipped), so the key is dormant in
+   * consumer repos). Each configured
    * value is injected as the top-level workflow-level `model` on that agent's one `subagent`
    * workflowScript call — a default flowing onto every lane, single-child runs included (as
-   * /pr-review does); when a key is absent the agent's frontmatter `model` (in
-   * `.pi/agents/perk/<name>.md`; the session-auditor's in its repo-local def) is the default.
+   * /pr-review does); when a key is absent the agent's frontmatter `model` (in the shipped
+   * `agents/<name>.md`, discovered by pi-subagents as a package agent; the session-auditor's in
+   * its repo-local def) is the default.
    * (Since pi-subagents 0.64.0, `subagents.agentOverrides` applies its FULL override set to
    * custom/project agents too — a settings override CAN displace a def's frontmatter-pinned
    * `model:` (the pre-0.64 frontmatter-sensitive fill is gone; verified in the installed
@@ -333,8 +334,11 @@ export function parseCiChecks(rows: Array<Record<string, TomlScalar>>): CiCheck[
 /** One perk-owned project agent name configurable via the `[models.subagents]` table. */
 export type SubagentKey = (typeof SUBAGENT_KEYS)[number];
 
-/** The perk-owned project agents configurable via the `[models.subagents]` table. */
-const SUBAGENT_KEYS = [
+/**
+ * The perk-owned agents configurable via the `[models.subagents]` table — the shipped
+ * `agents/*.md` defs (pinned by `config.test.ts`) plus the dev-only session-auditor.
+ */
+export const SUBAGENT_KEYS = [
   "pr-reviewer",
   "review-classifier",
   "objective-explorer",

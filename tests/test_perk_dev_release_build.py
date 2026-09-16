@@ -136,7 +136,7 @@ def test_verify_missing_expected_names_offenders():
     [
         "extension/testing/helper.ts",
         "extension/pi/v1/delivery/submit.test.ts",
-        "agents/pr-reviewer.md",
+        "docs/index.md",
     ],
 )
 def test_verify_forbidden_present_names_offenders(forbidden):
@@ -145,6 +145,12 @@ def test_verify_forbidden_present_names_offenders(forbidden):
         build.verify_tarball_files(paths)
     assert exc.value.error_type == "tarball_forbidden_files"
     assert forbidden in exc.value.message
+
+
+def test_verify_accepts_shipped_agent_defs():
+    # The perk.* subagent defs are a shipped surface (pi-subagents package agents), never a
+    # forbidden one.
+    build.verify_tarball_files(set(build.NPM_TARBALL_EXPECTED) | {"agents/pr-reviewer.md"})
 
 
 # --- CLI ----------------------------------------------------------------------------

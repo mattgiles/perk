@@ -14,7 +14,10 @@ def test_borrowed_packages_capability_names_ponytail_context():
 
 
 def test_subagent_engine_capability_present():
-    assert "subagent-engine" in {c.name for c in capabilities.CAPABILITIES}
+    engine = next(c for c in capabilities.CAPABILITIES if c.name == "subagent-engine")
+    # The perk.* defs ride the extension npm package (pi-subagents package agents), not a
+    # file-delivery convergence — the summary says so.
+    assert "extension package" in engine.summary
 
 
 def test_skills_manifest_capability_present():

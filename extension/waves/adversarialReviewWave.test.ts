@@ -294,17 +294,6 @@ test("the agent def completes via structured_output with the schema's required f
   assert.doesNotMatch(def, /emit a fenced JSON block and stop/i, "the old step-7 form is gone");
   // …and no fenced-JSON shape of any kind remains now that the streamed-batch protocol is retired.
   assert.doesNotMatch(def, /```json/);
-  // The delivered `.pi/agents/perk/` mirror stays byte-identical (the same-commit convergence).
-  const mirror = join(
-    import.meta.dirname,
-    "..",
-    "..",
-    ".pi",
-    "agents",
-    "perk",
-    "adversarial-reviewer.md",
-  );
-  assert.equal(readFileSync(mirror, "utf8"), def, "the .pi/agents/perk mirror must not drift");
 });
 
 test("the retired `streamed` field is refused by the closed shape", () => {

@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -14,6 +14,7 @@ import {
   resolveIssueBackendId,
   resolveIssueDestination,
   resolveIssueRouting,
+  SUBAGENT_KEYS,
   subagentModel,
 } from "./config.ts";
 
@@ -296,6 +297,20 @@ test("loadPerkConfig: blank/whitespace addendum is treated as absent", () => {
 });
 
 // --- [models.subagents] selection ---
+
+test("SUBAGENT_KEYS census: the shipped agents/*.md defs plus the dev-only session-auditor", () => {
+  // The shipped `agents/*.md` directory IS the perk.* def census (pi-subagents discovers it as a
+  // package agent dir); every shipped def must be configurable here and every configurable key
+  // but the repo-local session-auditor must have a shipped def — a def added or renamed without
+  // joining the key list would ship yet be unconfigurable.
+  const agentsDir = join(import.meta.dirname, "..", "..", "agents");
+  const shipped = readdirSync(agentsDir)
+    .filter((name) => name.endsWith(".md"))
+    .map((name) => name.slice(0, -".md".length))
+    .sort();
+  const configurable = SUBAGENT_KEYS.filter((key) => key !== "session-auditor").sort();
+  assert.deepEqual(configurable, shipped);
+});
 
 test("loadPerkConfig: [models.subagents] absent -> empty object", () => {
   const cwd = repoWith({ "perk.toml": '[workflow]\nplan_authoring = "x"\n' });

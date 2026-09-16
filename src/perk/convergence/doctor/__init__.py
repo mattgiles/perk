@@ -231,7 +231,7 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     # thinking-suffix lens over [models]/[models.subagents]/[models.stages.<id>].
     if (models_check := _models_check(root)) is not None:
         checks.append(models_check)
-    checks.append(_subagent_engine_check(root))
+    checks.append(_subagent_engine_check(root, self_repo))
     # Offline (file reads only) and report-only, so NOT verify-gated — the cli-version /
     # resource-overrides posture; beside subagent-engine for `package`-group adjacency. In
     # scaffolded unit-test repos the gitignored install tree is absent (deterministic `info`).

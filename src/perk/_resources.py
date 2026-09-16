@@ -1,5 +1,5 @@
-"""Locate perk's bundled resources (``shared/``, ``agents/``, ``prompts/``, the changelog)
-from either install mode.
+"""Locate perk's bundled resources (``shared/``, ``prompts/``, the changelog) from either
+install mode.
 
 Each resource is authored once at the repo root and bundled into the wheel as package data
 (hatchling ``force-include``). These resolvers are the Python plane's single "where is bundled
@@ -33,30 +33,6 @@ def shared_dir() -> Path:
     raise FileNotFoundError(
         "perk: could not locate the bundled 'shared/' contracts directory "
         "(checked package data 'perk/_shared' and repo sibling 'shared/')."
-    )
-
-
-def agents_dir() -> Path:
-    """Return the bundled ``agents/`` directory (perk's subagent definition sources).
-
-    Mirrors :func:`shared_dir`:
-
-    - **Installed wheel:** carried as package data at ``perk/_agents`` (hatchling
-      ``force-include``).
-    - **Editable / dev install:** read the repo-root ``agents/`` (two levels above the
-      ``src/perk`` package; the ``force-include`` copy does not exist in an editable checkout).
-    """
-    candidate = Path(str(resources.files("perk"))) / "_agents"
-    if candidate.is_dir():
-        return candidate
-
-    sibling = Path(__file__).resolve().parents[2] / "agents"
-    if sibling.is_dir():
-        return sibling
-
-    raise FileNotFoundError(
-        "perk: could not locate the bundled 'agents/' definitions directory "
-        "(checked package data 'perk/_agents' and repo sibling 'agents/')."
     )
 
 

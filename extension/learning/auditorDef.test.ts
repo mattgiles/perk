@@ -2,8 +2,8 @@
 // sibling): the fake-responder wave tests never exercise the def, so this is the one guard
 // against def/schema drift — the frontmatter contract, the ONE-`structured_output` completion
 // contract, every schema-required report field, the no-fenced-JSON rejection, and the judgment
-// framing the fold relies on. (No `.pi/agents/perk/` mirror pin — the perk-dev def is
-// repo-local, never delivered by `perk init`.)
+// framing the fold relies on. (The perk-dev def is repo-local under `.pi/agents/perk-dev/`,
+// never shipped in the extension package.)
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

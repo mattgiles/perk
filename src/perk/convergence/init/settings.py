@@ -53,8 +53,9 @@ def _perk_npm_entry() -> str:
 # (perk now owns plan mode end-to-end via the tool-gating primitive + `/plan`).
 # `pi-subagents` is the borrowed *spawned delegation engine*: perk takes the
 # engine (the `subagent` tool + spawn/handoff machinery) and owns the workflow-specific
-# agent definitions itself (in `.pi/agents/`, scaffolded by init); the engine is
-# `ctx.hasUI`-clean (children run `--mode json -p`).
+# agent definitions itself (the `perk.*` defs ship inside the perk extension npm package and
+# are discovered by pi-subagents as package agents); the engine is `ctx.hasUI`-clean
+# (children run `--mode json -p`).
 # `pi-web-access` is NO LONGER borrowed: it became the `web` seam's `default: true` provider.
 # It is now converged via the PROVIDER path (`_converge_provider_packages`), not this
 # static borrowed set — the novelty being that this is the first seam whose reference/default
@@ -444,9 +445,9 @@ def _converge_subagents(settings: dict[str, object]) -> list[str]:
 
     The deliberate divergence from the ``_converge_compaction``/``_converge_models``
     write-when-present siblings: perk borrows pi-subagents as the delegation *engine only* and
-    delivers its own ``perk.*`` agent defs, so the builtin agents are model-facing noise in
-    every perk repo — builtins-off is perk's posture everywhere, with no ``.perk/config.toml``
-    involvement. The sanctioned re-enable is a project-settings per-agent
+    ships its own ``perk.*`` agent defs as package agents, so the builtin agents are model-facing
+    noise in every perk repo — builtins-off is perk's posture everywhere, with no
+    ``.perk/config.toml`` involvement. The sanctioned re-enable is a project-settings per-agent
     ``subagents.agentOverrides.<name>.disabled: false`` entry, which pi-subagents consults
     *before* the bulk flag and which this merge never touches (only the ``disableBuiltins`` key
     is perk-owned; sibling keys survive byte-for-byte). Delta-gated because the desired value is

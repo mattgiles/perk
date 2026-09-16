@@ -1,6 +1,7 @@
 """The ``--fix`` repair layer: config re-seed, Linear labels, and the migration seam."""
 
 import filecmp
+import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -271,6 +272,104 @@ def _untrack_subagent_artifacts(root: Path) -> tuple[list[str], list[str]]:
     return changes, errors
 
 
+def _scan_legacy_agent_defs(
+    legacy: Path,
+) -> tuple[list[Path], list[Path], list[str]]:
+    """Walk a leftover `.pi/agents/perk/` without following any link.
+
+    Returns ``(md_files, directories, offenders)`` — the regular ``*.md`` files and regular
+    directories perk may remove, plus the repo-relative names of anything else (a symlink, a
+    non-``.md`` file, a special file). Every classification uses ``follow_symlinks=False`` so a
+    link is an offender, never a traversal target.
+    """
+    md_files: list[Path] = []
+    directories: list[Path] = []
+    offenders: list[str] = []
+    pending = [legacy]
+    while pending:
+        current = pending.pop()
+        with os.scandir(current) as entries:
+            for entry in entries:
+                path = Path(entry.path)
+                if entry.is_symlink():
+                    offenders.append(str(path.relative_to(legacy)))
+                elif entry.is_dir(follow_symlinks=False):
+                    directories.append(path)
+                    pending.append(path)
+                elif entry.is_file(follow_symlinks=False) and entry.name.endswith(".md"):
+                    md_files.append(path)
+                else:
+                    offenders.append(str(path.relative_to(legacy)))
+    return md_files, directories, offenders
+
+
+def _remove_legacy_subagent_agent_defs(root: Path) -> tuple[list[str], list[str]]:
+    """Remove the retired file-delivered `.pi/agents/perk/` (perk agents now ship in the package).
+
+    pi-subagents ranks project defs above package defs, so a leftover directory silently shadows
+    the shipped perk.* defs; removing it lets the package defs serve. All-or-nothing behind a
+    symlink-safe preflight: a symlinked root, any nested symlink, or any non-``.md`` file refuses
+    the whole removal with an error naming the entries — perk never traverses or deletes through
+    a link it did not create. A clean tree is removed deepest-first; the sibling
+    `.pi/agents/.gitkeep` (once ensured by init) goes only when it is the sole leftover, so a
+    user's own agents under `.pi/agents/` are never disturbed. Filesystem-only — git sees plain
+    deletions the human commits. Idempotent (``([], [])`` once the directory is gone); any
+    ``OSError`` is reported on the errors, never swallowed (a partial removal is harmless: the
+    package defs serve the removed names, the survivors keep shadowing theirs).
+    """
+    rel = ".pi/agents/perk"
+    legacy = root / ".pi" / "agents" / "perk"
+    if legacy.is_symlink():
+        return [], [f"{rel}: is a symlink — perk never created one; remove it manually"]
+    if not legacy.exists():
+        return [], []
+    try:
+        md_files, directories, offenders = _scan_legacy_agent_defs(legacy)
+    except OSError as exc:
+        return [], [f"{rel}/: scan failed ({exc}); remove the directory manually"]
+    if offenders:
+        listing = ", ".join(sorted(offenders))
+        return [], [
+            f"{rel}/: not removed — unexpected entries ({listing}); remove the directory manually"
+        ]
+    changes: list[str] = []
+    errors: list[str] = []
+
+    def label(path: Path) -> str:
+        return rel if path == legacy else f"{rel}/{path.relative_to(legacy)}"
+
+    for path in sorted(md_files):
+        try:
+            path.unlink()
+        except OSError as exc:
+            errors.append(f"{label(path)}: remove failed ({exc})")
+            continue
+        changes.append(f"{label(path)}: removed (perk agents now ship in the extension package)")
+    # Deepest-first so every directory is empty by the time its turn comes.
+    deepest_first = sorted(directories, key=lambda p: len(p.parts), reverse=True)
+    for directory in (*deepest_first, legacy):
+        try:
+            directory.rmdir()
+        except OSError as exc:
+            errors.append(f"{label(directory)}/: remove failed ({exc})")
+    if errors:
+        return changes, errors
+    agents = legacy.parent
+    gitkeep = agents / ".gitkeep"
+    try:
+        leftovers = [entry.name for entry in os.scandir(agents)]
+    except OSError as exc:
+        return changes, [f".pi/agents/: scan failed ({exc})"]
+    if leftovers == [".gitkeep"] and gitkeep.is_file() and not gitkeep.is_symlink():
+        try:
+            gitkeep.unlink()
+            agents.rmdir()
+        except OSError as exc:
+            return changes, [f".pi/agents/.gitkeep: remove failed ({exc})"]
+        changes.append(".pi/agents/.gitkeep: removed (no agents remain)")
+    return changes, errors
+
+
 # The legacy/one-off migration seam.
 # Forward-only repairs for oddities `init` does not undo (e.g. a previously-tracked transient
 # cache file). Each must be idempotent: a no-op (`([], [])`) once the repo is converged; each
@@ -282,6 +381,7 @@ _MIGRATIONS: tuple[Callable[[Path], tuple[list[str], list[str]]], ...] = (
     _migrate_legacy_repo_skills,
     _migrate_legacy_config,
     _untrack_subagent_artifacts,
+    _remove_legacy_subagent_agent_defs,
 )
 
 

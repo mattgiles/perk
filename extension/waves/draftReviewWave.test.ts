@@ -247,17 +247,6 @@ test("the agent def completes via structured_output with the schema's required f
     /Do NOT emit a fenced-JSON completion block — the `structured_output` call IS the report\./,
   );
   assert.doesNotMatch(def, /```json/);
-  // The delivered `.pi/agents/perk/` mirror stays byte-identical (the same-commit convergence).
-  const mirror = join(
-    import.meta.dirname,
-    "..",
-    "..",
-    ".pi",
-    "agents",
-    "perk",
-    "draft-reviewer.md",
-  );
-  assert.equal(readFileSync(mirror, "utf8"), def, "the .pi/agents/perk mirror must not drift");
 });
 
 test("the retired `streamed` field is refused by the closed shape", () => {

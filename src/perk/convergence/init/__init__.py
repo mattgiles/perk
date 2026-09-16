@@ -10,7 +10,7 @@ wiring from the first turn (the init-spine principle).
 symbol behind a sorted ``__all__``, preserving the ``init.X`` attribute-access import path.
 The orchestrators reference the moved helpers as
 facade globals, so the existing ``init_mod.sync_skills`` monkeypatch keeps working. Submodules:
-``templates``, ``report``, ``blocks``, ``settings``, ``agents``, ``skills``,
+``templates``, ``report``, ``blocks``, ``settings``, ``skills``,
 ``onboarding`` (the interactive gestures — guided tool installs, gh login, git identity, the
 Linear key prompt).
 """
@@ -28,7 +28,6 @@ from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import client as linear_client
 from perk.convergence import capabilities, env, managed_state
 from perk.convergence.env import EnvCheck
-from perk.convergence.init.agents import PERK_AGENTS, _converge_subagent_agents
 from perk.convergence.init.blocks import (
     AGENTS_BEGIN,
     AGENTS_END,
@@ -148,7 +147,6 @@ __all__ = [
     "LINEAR_PACKAGE",
     "MANAGED_SKILL_NAMES",
     "NPM_PACKAGE",
-    "PERK_AGENTS",
     "PERK_GITHUB_URL",
     "PERK_LOCAL_TOML_TEMPLATE",
     "PERK_SKILLS",
@@ -180,7 +178,6 @@ __all__ = [
     "_converge_provider_packages",
     "_converge_settings",
     "_converge_skills_manifest",
-    "_converge_subagent_agents",
     "_converge_workflow_dir",
     "_desired_packages",
     "_desired_skills_manifest",
@@ -290,20 +287,18 @@ class ManagedConvergence:
 def managed_convergences(root: Path, self_repo: bool) -> list[ManagedConvergence]:
     """The shared structural convergences: ``init`` applies, ``doctor`` verifies/fixes."""
     return [
+        # `subagent-engine` rides here: the engine's presence IS the `npm:pi-subagents` settings
+        # entry (the perk.* defs themselves ship inside the extension npm package and need no
+        # convergence).
         ManagedConvergence(
             "settings-wiring",
-            ("perk-extension", "borrowed-packages", "settings-wiring"),
+            ("perk-extension", "borrowed-packages", "settings-wiring", "subagent-engine"),
             lambda apply: _converge_settings(root, self_repo, apply=apply),
         ),
         ManagedConvergence(
             "workflow-dir",
             ("workflow-dir",),
             lambda apply: _converge_workflow_dir(root, apply=apply),
-        ),
-        ManagedConvergence(
-            "subagent-agents",
-            ("subagent-engine",),
-            lambda apply: _converge_subagent_agents(root, apply=apply),
         ),
         ManagedConvergence(
             "skills-manifest",

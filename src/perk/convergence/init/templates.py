@@ -53,7 +53,7 @@ PERK_TOML_TEMPLATE = """\
 # thinking = "xhigh"
 
 # Per-agent subagent models (optional) — override the model each perk-owned
-# subagent uses (the frontmatter default in .pi/agents/<name>.md is used when
+# subagent uses (the frontmatter default in the shipped agent def is used when
 # unset). Set a per-user override in .perk/local.toml to avoid dirtying this
 # file. A `model:thinking` suffix sets that agent's thinking level (e.g.
 # pr-reviewer = "anthropic/claude-sonnet-4-5:high"); the special value

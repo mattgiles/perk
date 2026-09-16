@@ -43,7 +43,8 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability("agents-block", "managed AGENTS.md conventions", required=True, scope="both"),
     Capability(
         "subagent-engine",
-        "borrowed pi-subagents delegation engine + perk-owned agent defs",
+        "borrowed pi-subagents delegation engine (package entry; perk.* agent defs ship inside "
+        "the perk extension package)",
         required=True,
         scope="both",
     ),

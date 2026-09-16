@@ -8,7 +8,7 @@
 // refusal matrix is exercised through `runDreamReducerWave` over the memory adapter and
 // through `decodeFinalizedDreamBundle`), the strict-completeness runner over the memory
 // adapter (fixed angle lanes, the attempt receipt, model/signal forwarding), and the agent-def
-// ↔ report-schema prose lockstep pin (+ the delivered `.pi/agents/perk/` mirror). Fully offline.
+// ↔ report-schema prose lockstep pin. Fully offline.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -1094,7 +1094,4 @@ test("the dream-reducer def agrees with the report schema — fields, stances, c
   assert.match(flat, /\*\*silence counts as non-endorsement\*\*/);
   assert.match(flat, /stance \*\*every `merge-into`\/`retire` proposal FIRST\*\*/);
   assert.match(flat, /count the overflow in `stances_omitted`/);
-  // The delivered `.pi/agents/perk/` mirror stays byte-identical (the same-commit convergence).
-  const mirror = join(import.meta.dirname, "..", "..", ".pi", "agents", "perk", "dream-reducer.md");
-  assert.equal(readFileSync(mirror, "utf8"), def, "the .pi/agents/perk mirror must not drift");
 });
