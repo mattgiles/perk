@@ -7,25 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- As of 55ceb78 -->
+<!-- As of 012998b -->
+
+## [3.4.0] - 2026-09-16
 
 ### Major Changes
 
-- **Subagents ship with the extension.** Perk's `perk.*` agent definitions now travel with `@mgiles/perk`, keeping them aligned with the installed extension. After upgrading, run `perk init` followed by `perk doctor --fix` to remove legacy `.pi/agents/perk/` copies, then commit those deletions. Project agents using the same `perk.*` names override the packaged definitions. (55ceb78)
+- **Subagents ship with the extension.** Perk's `perk.*` agent definitions now travel with `@mgiles/perk`, keeping them aligned with the installed extension. After upgrading, run `perk init` followed by `perk doctor --fix` to remove legacy `.pi/agents/perk/` copies, then commit those deletions. Project agents using the same `perk.*` names override the packaged definitions.
 
 ### Changed
 
-- Deliver review findings when the whole reviewer wave completes, for terminal PR reviews and browser PR, stack, plan, and objective reviews. A browser marker shows the wave is running; an early decision proceeds without its findings. (18cc375)
-- Limit `subagent-host-tools` warnings about FFF search overrides to pi-subagents 0.67.x; recognize the fix in 0.68.0 and update Perk's verified compatibility baseline to 0.68.0. (18cc375)
+- Deliver review findings when the whole reviewer wave completes, for terminal PR reviews and browser PR, stack, plan, and objective reviews. A browser marker shows the wave is running; an early decision proceeds without its findings.
+- Limit `subagent-host-tools` warnings about FFF search overrides to pi-subagents 0.67.x; recognize the fix in 0.68.0 and update Perk's verified compatibility baseline to 0.68.0.
 
 ### Removed
 
-- Remove the `subagent-bridge-config` doctor check. Perk subagent waves now disable the intercom bridge, so `subagents.intercomBridge.mode` no longer affects them. (18cc375)
+- Remove the `subagent-bridge-config` doctor check. Perk subagent waves now disable the intercom bridge, so `subagents.intercomBridge.mode` no longer affects them.
 
 ### Fixed
 
-- Restore Perk agent loading on pi-subagents 0.68.0 and later by removing the unsupported `fallbackModels` field. Custom agent definitions must also remove that field and configure a single model. (55ceb78)
-- Retry failed browser annotation pushes after the browser is ready, and present the findings in-session if delivery still fails. (18cc375)
+- Restore Perk agent loading on pi-subagents 0.68.0 and later by removing the unsupported `fallbackModels` field. Custom agent definitions must also remove that field and configure a single model.
+- Retry failed browser annotation pushes after the browser is ready, and present the findings in-session if delivery still fails.
 
 ## [3.3.0] - 2026-09-10
 
