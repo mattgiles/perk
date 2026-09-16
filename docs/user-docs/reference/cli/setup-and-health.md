@@ -98,11 +98,16 @@ definitions ship inside the perk extension package — pi-subagents discovers th
 enumerates the shipped definitions. It **warns** when a `.pi/agents/perk/` directory is left over
 from an older perk version that wrote the definitions into the repo: pi-subagents ranks project
 definitions above package ones, so those stale copies silently shadow the shipped definitions until
-removed. `perk doctor --fix` removes the directory **filesystem-only** when its tree holds nothing
-but `.md` files and real directories (taking `.pi/agents/.gitkeep` along only when it is the sole
-leftover) — a symlink or any other file makes it refuse the whole removal and name the entries for
-you to handle by hand — and you commit the deletion; the shipped definitions serve from the next
-spawn, no session restart needed.
+removed; the warning's remediation says exactly what `--fix` will do. `perk doctor --fix` removes
+the directory **filesystem-only** when it is the flat set of `.md` files older perk versions wrote
+and every one of them has a shipped replacement in the installed extension (taking
+`.pi/agents/.gitkeep` along only when it is the sole leftover) — a symlink at `.pi`, `.pi/agents`
+or `.pi/agents/perk`, a subdirectory, any other file, or a definition with no shipped counterpart
+(the extension not installed yet, or a name perk no longer ships) makes it refuse the whole
+removal and name the cause for you to handle by hand, so no `perk.*` agent is ever left without a
+definition. You commit the deletion; the shipped definitions serve from the next spawn, no session
+restart needed. Should an individual file fail to delete after the preflight passed, the error is
+reported and the next `--fix` picks up where it left off.
 The `package` group also carries the report-only `subagent-compat` check: it reads the installed
 pi-subagents version. `info` when the package is not installed (pi lazy-installs it at launch);
 `warn` — never `fail`, no `--fix` — when the version is unreadable or differs from the version

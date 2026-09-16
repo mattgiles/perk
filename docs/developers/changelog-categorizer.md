@@ -131,7 +131,8 @@ Changes to these surfaces are user-visible. Signals (paths are illustrative, not
 
 ## Potentially user-facing (verify before deciding)
 
-Generated / managed artifacts perk delivers into consumer repos:
+Artifacts perk delivers into consumer repos — generated/managed files and the packaged agent
+definitions alike:
 
 - `.github/workflows/perk-run.yml`, the `perk-remote-setup` action.
 - `agents/*.md` (the shipped agent definitions — behavior-bearing: they ride the npm package

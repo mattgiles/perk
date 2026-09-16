@@ -113,7 +113,8 @@ thinking = "xhigh"
 
 ## `[models.subagents]`
 
-Per-agent model overrides for each perk-owned project agent.
+Per-agent model overrides for each perk-owned agent (the definitions shipped inside the perk
+extension package as pi-subagents package agents, plus the repo-local dev-only auditor).
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |

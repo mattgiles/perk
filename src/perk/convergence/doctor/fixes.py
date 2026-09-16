@@ -1,7 +1,6 @@
 """The ``--fix`` repair layer: config re-seed, Linear labels, and the migration seam."""
 
 import filecmp
-import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -11,6 +10,7 @@ from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import client as linear_client
 from perk.cli.ensure import UserFacingCliError
 from perk.convergence import init
+from perk.convergence.doctor import legacy_agent_defs
 from perk.convergence.doctor.data import Check
 from perk.convergence.doctor.linear_checks import _linear_selected
 from perk.state import cache
@@ -272,92 +272,55 @@ def _untrack_subagent_artifacts(root: Path) -> tuple[list[str], list[str]]:
     return changes, errors
 
 
-def _scan_legacy_agent_defs(
-    legacy: Path,
-) -> tuple[list[Path], list[Path], list[str]]:
-    """Walk a leftover `.pi/agents/perk/` without following any link.
-
-    Returns ``(md_files, directories, offenders)`` — the regular ``*.md`` files and regular
-    directories perk may remove, plus the repo-relative names of anything else (a symlink, a
-    non-``.md`` file, a special file). Every classification uses ``follow_symlinks=False`` so a
-    link is an offender, never a traversal target.
-    """
-    md_files: list[Path] = []
-    directories: list[Path] = []
-    offenders: list[str] = []
-    pending = [legacy]
-    while pending:
-        current = pending.pop()
-        with os.scandir(current) as entries:
-            for entry in entries:
-                path = Path(entry.path)
-                if entry.is_symlink():
-                    offenders.append(str(path.relative_to(legacy)))
-                elif entry.is_dir(follow_symlinks=False):
-                    directories.append(path)
-                    pending.append(path)
-                elif entry.is_file(follow_symlinks=False) and entry.name.endswith(".md"):
-                    md_files.append(path)
-                else:
-                    offenders.append(str(path.relative_to(legacy)))
-    return md_files, directories, offenders
-
-
 def _remove_legacy_subagent_agent_defs(root: Path) -> tuple[list[str], list[str]]:
     """Remove the retired file-delivered `.pi/agents/perk/` (perk agents now ship in the package).
 
     pi-subagents ranks project defs above package defs, so a leftover directory silently shadows
-    the shipped perk.* defs; removing it lets the package defs serve. All-or-nothing behind a
-    symlink-safe preflight: a symlinked root, any nested symlink, or any non-``.md`` file refuses
-    the whole removal with an error naming the entries — perk never traverses or deletes through
-    a link it did not create. A clean tree is removed deepest-first; the sibling
+    the shipped perk.* defs; removing it lets the package defs serve. The **preflight is
+    all-or-nothing** and shared with the doctor check (`legacy_agent_defs`): a symlink at `.pi`,
+    `.pi/agents` or `.pi/agents/perk`, any entry outside the flat `*.md` shape the retired
+    convergence wrote (a subdirectory, a link, a foreign file), or a def with no shipped
+    replacement (extension not installed yet / a retired name) refuses the whole removal with one
+    error naming the cause — nothing is deleted, perk never traverses or deletes through a link it
+    did not create, and no perk.* name is ever left without a def. After a passing preflight each
+    `unlink` and the `rmdir` are attempted in turn; an `OSError` is reported on the errors, never
+    swallowed — a partial removal is harmless (the package defs serve the removed names, the
+    survivors keep shadowing theirs) and the next `--fix` resumes. The sibling
     `.pi/agents/.gitkeep` (once ensured by init) goes only when it is the sole leftover, so a
     user's own agents under `.pi/agents/` are never disturbed. Filesystem-only — git sees plain
-    deletions the human commits. Idempotent (``([], [])`` once the directory is gone); any
-    ``OSError`` is reported on the errors, never swallowed (a partial removal is harmless: the
-    package defs serve the removed names, the survivors keep shadowing theirs).
+    deletions the human commits. Idempotent (``([], [])`` once the directory is gone).
     """
-    rel = ".pi/agents/perk"
+    rel = legacy_agent_defs.LEGACY_AGENT_DEFS_REL
     legacy = root / ".pi" / "agents" / "perk"
-    if legacy.is_symlink():
-        return [], [f"{rel}: is a symlink — perk never created one; remove it manually"]
-    if not legacy.exists():
+    info = legacy_agent_defs.inspect_legacy_agent_defs(root)
+    if not info.present:
         return [], []
-    try:
-        md_files, directories, offenders = _scan_legacy_agent_defs(legacy)
-    except OSError as exc:
-        return [], [f"{rel}/: scan failed ({exc}); remove the directory manually"]
-    if offenders:
-        listing = ", ".join(sorted(offenders))
-        return [], [
-            f"{rel}/: not removed — unexpected entries ({listing}); remove the directory manually"
-        ]
+    refusal = legacy_agent_defs.legacy_removal_refusal(
+        root, info, self_repo=init.is_self_repo(root)
+    )
+    if refusal is not None:
+        return [], [refusal]
     changes: list[str] = []
     errors: list[str] = []
-
-    def label(path: Path) -> str:
-        return rel if path == legacy else f"{rel}/{path.relative_to(legacy)}"
-
-    for path in sorted(md_files):
+    for path in info.defs:
         try:
             path.unlink()
         except OSError as exc:
-            errors.append(f"{label(path)}: remove failed ({exc})")
+            errors.append(f"{rel}/{path.name}: remove failed ({exc})")
             continue
-        changes.append(f"{label(path)}: removed (perk agents now ship in the extension package)")
-    # Deepest-first so every directory is empty by the time its turn comes.
-    deepest_first = sorted(directories, key=lambda p: len(p.parts), reverse=True)
-    for directory in (*deepest_first, legacy):
-        try:
-            directory.rmdir()
-        except OSError as exc:
-            errors.append(f"{label(directory)}/: remove failed ({exc})")
+        changes.append(
+            f"{rel}/{path.name}: removed (perk agents now ship in the extension package)"
+        )
+    try:
+        legacy.rmdir()
+    except OSError as exc:
+        errors.append(f"{rel}/: remove failed ({exc})")
     if errors:
         return changes, errors
     agents = legacy.parent
     gitkeep = agents / ".gitkeep"
     try:
-        leftovers = [entry.name for entry in os.scandir(agents)]
+        leftovers = [entry.name for entry in agents.iterdir()]
     except OSError as exc:
         return changes, [f".pi/agents/: scan failed ({exc})"]
     if leftovers == [".gitkeep"] and gitkeep.is_file() and not gitkeep.is_symlink():

@@ -47,15 +47,16 @@ export interface PerkConfig {
   ci: { trusted: boolean; checks: CiCheck[] };
   /**
    * The agent-keyed `[models.subagents]` table: a per-agent model override for each perk-owned
-   * project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`, `conflict-resolver`,
+   * agent — the shipped defs pi-subagents discovers as package agents (`pr-reviewer`,
+   * `review-classifier`, `objective-explorer`, `conflict-resolver`,
    * `learn-analyst`, `adversarial-reviewer`, `draft-reviewer`,
    * `harvest-analyst` — consumed by `run_harvest_wave` at execute time — `dream-analyst` and
    * `dream-reducer` — consumed by `run_dream_wave` at execute time — `scout` — the
    * general-purpose read-only analysis lane (task-defined scope), consumed by `run_scout_wave`
-   * at execute time — and the
+   * at execute time) — and the
    * dev-only `session-auditor`, whose def is repo-local to perk's own repository
-   * (`.pi/agents/perk-dev/session-auditor.md`, never shipped), so the key is dormant in
-   * consumer repos). Each configured
+   * (`.pi/agents/perk-dev/session-auditor.md`, a project agent, never shipped), so the key is
+   * dormant in consumer repos. Each configured
    * value is injected as the top-level workflow-level `model` on that agent's one `subagent`
    * workflowScript call — a default flowing onto every lane, single-child runs included (as
    * /pr-review does); when a key is absent the agent's frontmatter `model` (in the shipped
@@ -331,7 +332,7 @@ export function parseCiChecks(rows: Array<Record<string, TomlScalar>>): CiCheck[
   return checks;
 }
 
-/** One perk-owned project agent name configurable via the `[models.subagents]` table. */
+/** One perk-owned agent name configurable via the `[models.subagents]` table. */
 export type SubagentKey = (typeof SUBAGENT_KEYS)[number];
 
 /**

@@ -972,8 +972,18 @@ layout (`../../../@dietrichgebert/ponytail/…`) then the dev-checkout layout
 (`../.pi/npm/node_modules/@dietrichgebert/ponytail/…`), the engine skipping a missing candidate.
 `.pi/agents/perk/` is **no longer perk-managed**: `perk init` neither creates nor touches
 `.pi/agents/`; a leftover directory (stale shadows) is a doctor `subagent-engine` `warn`, and the
-symlink-safe, all-or-nothing `doctor --fix` migration removes it (`.pi/agents/.gitkeep` only when
-it is the sole leftover). No Python plane consumer of `agents/` remains (no wheel/sdist entry).
+`doctor --fix` migration removes it. Check and fix share ONE classification
+(`doctor/legacy_agent_defs.py`), so the warn's remediation states exactly what `--fix` will do.
+The **preflight is all-or-nothing** and never follows a link: a symlink at `.pi`, `.pi/agents`
+or `.pi/agents/perk`, any entry outside the flat `<name>.md` shape the retired convergence wrote
+(a subdirectory, a link, a foreign file), or a def with no shipped replacement `agents/<name>.md`
+(extension not installed yet, or a retired name — removing it would leave that `perk.*` name
+with no def, whereas a stale shadow is never an outage) refuses the whole removal with one
+error naming the cause and deletes nothing. After a passing preflight each `unlink` and the
+`rmdir` are attempted in turn: an `OSError` lands on `fix_errors` (never swallowed) and the
+survivors keep shadowing theirs until the next `--fix` resumes — so the removal is all-or-nothing
+at the preflight, not transactional across I/O. `.pi/agents/.gitkeep` goes only when it is the
+sole leftover. No Python plane consumer of `agents/` remains (no wheel/sdist entry).
 Ten shipped reports
 (`pr-reviewer`, `review-classifier`, `objective-explorer`, `learn-analyst`, `harvest-analyst`,
 `dream-analyst`, `dream-reducer`, `adversarial-reviewer`, `draft-reviewer`, `scout`) plus the repo-local
@@ -1647,7 +1657,7 @@ the `/plan-review-browser` door, §8.23):
 Forbidden on the door regardless: fetching the raw diff into the parent session (anchors come
 from the children) and any `gh` mutation.
 
-**The adversarial-reviewer angle agent.** A perk-owned project agent
+**The adversarial-reviewer angle agent.** A perk-owned package agent
 `agents/adversarial-reviewer.md` (runtime `perk.adversarial-reviewer`) — fresh-context,
 read-only, **report-only** (it never posts, never stages or writes files, never resolves
 threads, never spawns subagents), shipped in the extension package like its siblings. It reviews **any PR regardless of ownership — the untrusted posture is the default,
@@ -2433,10 +2443,13 @@ second `--fix` at `fixed == []`).
   package agents, the detail enumerating the shipped defs — or `warn` on a leftover
   `.pi/agents/perk/` directory from the retired file delivery, whose stale project-rank defs
   shadow the shipped ones; the sole probe with a repair, the `--fix` migration
-  `_remove_legacy_subagent_agent_defs`: symlink-safe and all-or-nothing — a symlinked root, a
-  nested symlink, or any non-`.md` file refuses the whole removal with an error naming the
-  entries — removing `.pi/agents/.gitkeep` only when it is the sole leftover, filesystem-only,
-  the human commits the deletions),
+  `_remove_legacy_subagent_agent_defs`, whose preflight is all-or-nothing and link-blind — a
+  symlink at `.pi`/`.pi/agents`/`.pi/agents/perk`, any entry outside the flat `*.md` shape, or a
+  def with no shipped replacement refuses the whole removal with one error naming the cause
+  (the warn's remediation carries the same text); after a passing preflight an I/O failure on
+  an individual `unlink`/`rmdir` is reported on `fix_errors` and the next `--fix` resumes —
+  removing `.pi/agents/.gitkeep` only when it is the sole leftover, filesystem-only, the human
+  commits the deletions),
   `subagent-compat` (installed pi-subagents version vs the guidance-verified version — `warn`
   on mismatch or an unreadable version, `info` when not installed; no source probes),
   `subagent-host-tools` (warns — never fails, no `--fix` — when the installed pi-subagents is

@@ -52,6 +52,17 @@ def consumer_perk_package_dir(repo_root: Path) -> Path:
     return package_dir
 
 
+def shipped_agent_defs_dir(repo_root: Path, *, self_repo: bool) -> Path:
+    """Where the shipped ``perk.*`` agent defs live for this checkout (contracts §8.3).
+
+    The defs ride the ``@mgiles/perk`` npm package as pi-subagents package agents: the installed
+    package's ``agents/`` in a consumer, the repo root's ``agents/`` in perk's own checkout (the
+    ``..`` package). The directory may be absent when the extension is not installed yet.
+    """
+    package_root = repo_root if self_repo else consumer_perk_package_dir(repo_root)
+    return package_root / "agents"
+
+
 def installed_perk_version(repo_root: Path) -> str | None:
     """The ``version`` of the installed ``@mgiles/perk``, or ``None``.
 

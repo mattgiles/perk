@@ -47,6 +47,7 @@ from perk.convergence.init.extension_install import (
     extension_install_status,
     installed_perk_version,
     materialize_extension_install,
+    shipped_agent_defs_dir,
 )
 from perk.convergence.init.onboarding import (
     PI_NPM_SPEC,
@@ -223,6 +224,7 @@ __all__ = [
     "render_version_pin",
     "report_to_dict",
     "run_init",
+    "shipped_agent_defs_dir",
     "shutil",
     "skills_conflict_paths",
     "subprocess",

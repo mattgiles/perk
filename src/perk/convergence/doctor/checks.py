@@ -12,6 +12,7 @@ from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
 from perk.convergence import capabilities, env, init, managed_state
+from perk.convergence.doctor import legacy_agent_defs
 from perk.convergence.doctor.data import _MANAGED_GROUP, Check, Status
 from perk.convergence.init.settings import PONYTAIL_NPM_NAME
 from perk.convergence.managed_state import ArtifactHealth, HealthStatus
@@ -696,24 +697,10 @@ def _issues_check(root: Path) -> Check:
     return Check("issues-backend", "issues", "ok", f"issues backend: {backend_id}")
 
 
-# The retired file-delivery location of perk's agent defs. No longer perk-managed: a leftover
-# directory only SHADOWS the shipped defs (pi-subagents ranks project defs above package defs),
-# so doctor warns and the `--fix` migration removes it.
-_LEGACY_AGENT_DEFS_DIR = Path(".pi") / "agents" / "perk"
-
-
-def _legacy_agent_defs_listing(legacy: Path) -> str:
-    """Describe a leftover `.pi/agents/perk/` for the warn detail (never follows a symlink)."""
-    if legacy.is_symlink():
-        return "a symlink"
-    names = sorted(str(p.relative_to(legacy)) for p in legacy.rglob("*.md") if p.is_file())
-    return ", ".join(names) if names else "no .md files"
-
-
 def _shipped_agent_defs_listing(root: Path, self_repo: bool) -> str:
     """Enumerate the shipped `agents/*.md` defs as `perk.<stem>` (repo root when self, else the
     installed `@mgiles/perk` package), or say the package is not installed yet."""
-    agents_dir = (root if self_repo else init.consumer_perk_package_dir(root)) / "agents"
+    agents_dir = init.shipped_agent_defs_dir(root, self_repo=self_repo)
     if not agents_dir.is_dir():
         return "(not installed yet — perk init / perk <stage> installs the extension)"
     names = sorted(p.stem for p in agents_dir.glob("*.md"))
@@ -728,19 +715,28 @@ def _subagent_engine_check(root: Path, self_repo: bool) -> Check:
     package agents, so there is nothing to converge. The one hazard is a leftover
     `.pi/agents/perk/` from the retired file delivery: project defs outrank package defs, so
     stale copies silently shadow the shipped ones — `warn`, repaired by the `--fix` migration
-    (`_remove_legacy_subagent_agent_defs`). The detail is a pointer, never a probe (no live spawn).
+    (`_remove_legacy_subagent_agent_defs`). Check and fix share ONE classification
+    (`legacy_agent_defs`), so the remediation states exactly what `--fix` will do — remove, or
+    refuse and why. The detail is a pointer, never a probe (no live spawn).
     """
-    legacy = root / _LEGACY_AGENT_DEFS_DIR
-    if legacy.exists() or legacy.is_symlink():
+    legacy = legacy_agent_defs.inspect_legacy_agent_defs(root)
+    if legacy.present:
+        refusal = legacy_agent_defs.legacy_removal_refusal(root, legacy, self_repo=self_repo)
+        remediation = (
+            "perk doctor --fix removes the directory (filesystem-only); commit the deletion"
+            if refusal is None
+            else f"perk doctor --fix will refuse — {refusal}"
+        )
         return Check(
             "subagent-engine",
             "package",
             "warn",
             "legacy perk-delivered agent defs shadow the shipped ones",
-            f".pi/agents/perk/ still exists ({_legacy_agent_defs_listing(legacy)}); pi-subagents "
-            "ranks project defs above package defs, so these stale copies replace the perk.* "
-            "defs shipped in the perk extension until removed",
-            "perk doctor --fix removes the directory (filesystem-only); commit the deletion",
+            f"{legacy_agent_defs.LEGACY_AGENT_DEFS_REL}/ still exists "
+            f"({legacy_agent_defs.describe_legacy_agent_defs(legacy)}); pi-subagents ranks "
+            "project defs above package defs, so these stale copies replace the perk.* defs "
+            "shipped in the perk extension until removed",
+            remediation,
         )
     return Check(
         "subagent-engine",
