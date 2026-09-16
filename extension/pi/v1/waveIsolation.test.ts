@@ -555,7 +555,7 @@ test("two sessions share no annotation-push state (prime/clear isolate per activ
   }
 });
 
-// --- the annotation push: per-activation LEDGER/HELD/ALTERNATES isolation (behavioral) ---------
+// --- the annotation push: per-activation LEDGER/HELD/READINESS isolation (behavioral) ----------
 
 /** A minimal scriptable endpoint (the annotations.test.ts fakeEndpoint shape, sized to here). */
 function annotationEndpoint(): {

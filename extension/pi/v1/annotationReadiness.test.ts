@@ -311,6 +311,10 @@ for (const change of ["close", "reprime"] as const) {
       clearAnnotationSurface(f.annotations);
       request.reject(new Error("late failure after close"));
       await pushing;
+      // The in-flight push saw its session close: the late failure is `superseded`, so nothing
+      // of the dead session is re-held onto the cleared state (the leak the send-time identity
+      // fence exists to prevent). The refusal below is therefore on surface identity alone.
+      assert.deepEqual(f.annotations.held, [], "a dead session's unit never leaks into held");
     } else {
       primeAnnotationSurface(f.annotations, f.surface);
       await executePushAnnotations(
@@ -319,12 +323,12 @@ for (const change of ["close", "reprime"] as const) {
         { angle: "correctness", findings: [f.finding] },
         { fetchLike: f.fetchLike },
       );
+      assert.equal(
+        f.annotations.held.length,
+        1,
+        "pending work makes the identity refusal non-vacuous",
+      );
     }
-    assert.equal(
-      f.annotations.held.length,
-      1,
-      "pending work makes the identity refusal non-vacuous",
-    );
     assert.equal(f.annotations.inFlight.count, 0, "old calls cannot decrement the reset counter");
     f.makeReady();
     await observing;

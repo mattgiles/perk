@@ -587,6 +587,164 @@ test("completion/aggregate ordering: a collect before completion stays pending, 
   assert.equal(adapter.calls.spawn.length, 1);
 });
 
+// --- the code-owned perk:wave marker on THIS tool pair (the draft pair has its own caller) -------
+
+/** A recording annotation endpoint that can be switched "down" (network failure). */
+function markerEndpoint(): {
+  fetchLike: NonNullable<Parameters<typeof executePushAnnotations>[3]>["fetchLike"];
+  calls: { method: string; body?: unknown }[];
+  setDown(down: boolean): void;
+} {
+  const calls: { method: string; body?: unknown }[] = [];
+  let down = false;
+  return {
+    calls,
+    setDown: (value) => {
+      down = value;
+    },
+    fetchLike: async (_url, init) => {
+      const body = init.body === undefined ? undefined : JSON.parse(init.body);
+      calls.push({ method: init.method, body });
+      if (down) throw new Error("ECONNREFUSED");
+      if (init.method === "DELETE") {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ removed: 1 }) };
+      }
+      return { ok: true, status: 201, text: async () => JSON.stringify({ ids: ["id"] }) };
+    },
+  };
+}
+
+function markerTexts(calls: { method: string; body?: unknown }[]): string[] {
+  return calls
+    .filter((c) => c.method === "POST")
+    .flatMap((c) => (c.body as { annotations: { text: string; source: string }[] }).annotations)
+    .filter((a) => a.source === "perk:wave")
+    .map((a) => a.text);
+}
+
+test("marker (PR pair): a launch soft-fail pushes the failed marker; nothing primed ⇒ no fetch", async () => {
+  const wave = reportWaveOver(createMemoryWaveAdapter({ ping: null }));
+  const { target } = fakeTarget();
+  const annotations = createAnnotationState();
+  primeAnnotationSurface(annotations, { mode: "review", url: "http://127.0.0.1:7777" });
+  const endpoint = markerEndpoint();
+  const failed = await executeStartReviewWave(freshState(), wave, target, {
+    ...START_OPTS,
+    annotations,
+    annotationDeps: { fetchLike: endpoint.fetchLike },
+  });
+  assert.equal(failed.details.ok, false);
+  assert.deepEqual(
+    endpoint.calls.map((c) => c.method),
+    ["DELETE", "POST"],
+    "the failed marker is a replace unit under perk:wave",
+  );
+  assert.match(
+    markerTexts(endpoint.calls)[0] ?? "",
+    /^Reviewer wave failed to launch \(.+\) — no reviewer findings will arrive\.$/,
+  );
+  // The terminal-door posture: an unprimed state is a no-op, never a fetch.
+  const quiet = markerEndpoint();
+  await executeStartReviewWave(freshState(), wave, target, {
+    ...START_OPTS,
+    annotations: createAnnotationState(),
+    annotationDeps: { fetchLike: quiet.fetchLike },
+  });
+  assert.equal(quiet.calls.length, 0);
+});
+
+test("marker (PR pair): an incomplete collect replaces the running marker with the uncovered angle(s)", async () => {
+  const state = freshState();
+  const { target } = fakeTarget();
+  const wave = reportWaveOver(
+    createMemoryWaveAdapter({
+      aggregate: {
+        state: "complete",
+        value: [
+          okEntry("claimed-intent"),
+          { key: "correctness", ok: false, error: "lane exploded", report: null },
+          okEntry("ponytail"),
+        ],
+      },
+    }),
+  );
+  const annotations = createAnnotationState();
+  primeAnnotationSurface(annotations, { mode: "review", url: "http://127.0.0.1:7777" });
+  const endpoint = markerEndpoint();
+  await executeStartReviewWave(state, wave, target, {
+    ...START_OPTS,
+    annotations,
+    annotationDeps: { fetchLike: endpoint.fetchLike },
+  });
+  assert.match(markerTexts(endpoint.calls)[0] ?? "", /^Reviewer wave running — 3 lane\(s\)/);
+  endpoint.calls.length = 0;
+  const collected = await executeCollectReviewWave(state, wave, target, {
+    annotations,
+    annotationDeps: { fetchLike: endpoint.fetchLike },
+  });
+  assert.equal(collected.details.ok, true);
+  assert.equal((collected.details as { complete?: boolean }).complete, false);
+  assert.deepEqual(
+    endpoint.calls.map((c) => c.method),
+    ["DELETE", "POST"],
+    "incomplete ⇒ replaced, never cleared",
+  );
+  assert.deepEqual(markerTexts(endpoint.calls), [
+    "Reviewer wave incomplete — uncovered: correctness; findings from the covered lanes follow.",
+  ]);
+  assert.doesNotMatch(collected.content[0]?.text ?? "", /perk:wave marker could not be updated/);
+});
+
+test("marker (PR pair): a marker held after readiness through the retries is surfaced — warning + a stale-marker note in the collect result", async () => {
+  const state = freshState();
+  const { target, notified } = fakeTarget();
+  const wave = reportWaveOver(
+    createMemoryWaveAdapter({
+      aggregate: {
+        state: "complete",
+        value: [okEntry("claimed-intent"), okEntry("correctness"), okEntry("ponytail")],
+      },
+    }),
+  );
+  const annotations = createAnnotationState();
+  primeAnnotationSurface(annotations, { mode: "review", url: "http://127.0.0.1:7777" });
+  const endpoint = markerEndpoint();
+  await executeStartReviewWave(state, wave, target, {
+    ...START_OPTS,
+    annotations,
+    annotationDeps: { fetchLike: endpoint.fetchLike },
+  });
+  // The browser came up, then the server went away before collection.
+  annotations.ready = true;
+  endpoint.setDown(true);
+  endpoint.calls.length = 0;
+  const slept: number[] = [];
+  const collected = await executeCollectReviewWave(state, wave, target, {
+    annotations,
+    annotationDeps: {
+      fetchLike: endpoint.fetchLike,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    },
+  });
+  assert.equal(collected.details.ok, true, "the collect itself still succeeds");
+  assert.equal(slept.length, 3, "the bounded retry ran");
+  assert.equal(annotations.held.length, 1);
+  assert.equal(annotations.held[0]?.source, "perk:wave");
+  assert.match(
+    collected.content[0]?.text ?? "",
+    /perk:wave marker could not be updated .* may still show the previous state/,
+    "the model is told the browser may still say 'running'",
+  );
+  assert.ok(
+    notified.some(
+      (n) => n.severity === "warning" && /status marker could not be delivered/.test(n.message),
+    ),
+    JSON.stringify(notified),
+  );
+});
+
 test("executeCollectReviewWave: an incomplete wave is an ok result with the loud warning", async () => {
   const state = freshState();
   const { target, notified } = fakeTarget();

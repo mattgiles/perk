@@ -27,6 +27,7 @@ import {
   type ReviewFinding,
   replaceWaveStatus,
   WAVE_STATUS_SOURCE,
+  waveStatusStaleNote,
 } from "./annotations.ts";
 
 // The execute-core tests share ONE state instance — every test primes at its start, and a
@@ -1414,6 +1415,88 @@ test("retry: success on the second attempt after readiness — no hold, the land
   assert.doesNotMatch(result.content[0]?.text ?? "", /held/);
 });
 
+test("retry: the surface cleared during the backoff ends the retry — no request to the dead URL, no hold, no ledger write", async () => {
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
+  state.ready = true;
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint();
+  endpoint.setDown(true);
+  const slept: number[] = [];
+  const result = await executePushAnnotations(
+    state,
+    target,
+    { angle: "tests", findings: [reviewFinding()], replace: true },
+    {
+      fetchLike: endpoint.fetchLike,
+      sleep: async (ms) => {
+        slept.push(ms);
+        // The human decided in the browser mid-backoff: the door's `finally` clears the surface.
+        clearAnnotationSurface(state);
+        endpoint.setDown(false);
+      },
+    },
+  );
+  assert.equal(result.details.ok, true);
+  assert.deepEqual(
+    slept,
+    [1_000],
+    "the wake after the first delay sees the dead session and stops",
+  );
+  assert.equal(endpoint.calls.length, 1, "only the initial attempt reached the endpoint");
+  assert.equal(state.surface, null);
+  assert.deepEqual(state.held, [], "a dead session's unit is never re-held");
+  assert.equal(state.ledger.size, 0);
+});
+
+test("retry: a superseding door open during the backoff leaves the NEW session's queue and ledger untouched", async () => {
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
+  state.ready = true;
+  const { target } = fakeTarget();
+  const oldEndpoint = fakeEndpoint();
+  oldEndpoint.setDown(true);
+  const result = await executePushAnnotations(
+    state,
+    target,
+    { angle: "tests", findings: [reviewFinding()] },
+    {
+      fetchLike: oldEndpoint.fetchLike,
+      sleep: async () => {
+        // A second review opened while the first push was backing off: re-primed on a new port.
+        primeAnnotationSurface(state, { mode: "plan", url: "http://127.0.0.1:9999" });
+        oldEndpoint.setDown(false);
+      },
+    },
+  );
+  assert.equal(result.details.ok, true);
+  assert.equal(oldEndpoint.calls.length, 1, "the captured unit is never re-sent to the old URL");
+  assert.equal(state.surface?.url, "http://127.0.0.1:9999");
+  assert.deepEqual(state.held, [], "nothing leaked onto the new session's queue");
+  assert.equal(state.ledger.size, 0, "nothing leaked into the new session's ledger");
+  assert.equal(state.ready, false, "the new session's readiness is its own");
+});
+
+test("retry: a session cleared while the HTTP call itself is in flight never writes the dead session's anchors", async () => {
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
+  state.ready = true;
+  const { target } = fakeTarget();
+  const endpoint = fakeEndpoint();
+  const fetchLike: typeof endpoint.fetchLike = async (url, init) => {
+    const response = await endpoint.fetchLike(url, init);
+    // The surface is torn down between the request leaving and its response arriving.
+    if (init.method === "POST") clearAnnotationSurface(state);
+    return response;
+  };
+  const result = await executePushAnnotations(
+    state,
+    target,
+    { angle: "tests", findings: [reviewFinding()], replace: true },
+    { fetchLike },
+  );
+  assert.equal(result.details.ok, true);
+  assert.equal(state.ledger.size, 0, "the 201 landed on a dead session — not recorded");
+  assert.deepEqual(state.held, []);
+});
+
 test("retry: a rejection never retries (version drift cannot heal)", async () => {
   primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
   state.ready = true;
@@ -1544,6 +1627,50 @@ test("replaceWaveStatus: plan mode posts a GLOBAL_COMMENT authored by perk:wave;
   );
   assert.equal(state.ledger.size, 0);
   assert.equal(state.held.length, 0);
+});
+
+test("replaceWaveStatus: the outcome tells a delivered marker from a held one — held after readiness is a warning + `held_unreachable`", async () => {
+  primeAnnotationSurface(state, { mode: "review", url: URL_BASE });
+  const { target, notified } = fakeTarget();
+  const endpoint = fakeEndpoint();
+  const quiet = { fetchLike: endpoint.fetchLike, sleep: async () => {} };
+  assert.equal(await replaceWaveStatus(state, target, "Reviewer wave running", quiet), "delivered");
+  // Before readiness a hold is the normal pre-flush state — no warning, the door flushes it.
+  endpoint.setDown(true);
+  assert.equal(
+    await replaceWaveStatus(state, target, "Reviewer wave incomplete", quiet),
+    "held_until_ready",
+  );
+  assert.equal(notified.length, 0);
+  // After readiness the exhausted hold is the terminal state the caller must surface: with zero
+  // covered lanes no per-angle push follows to flush it, so the browser would keep showing the
+  // previous marker silently.
+  state.held = [];
+  state.ready = true;
+  const slept: number[] = [];
+  const outcome = await replaceWaveStatus(state, target, null, {
+    fetchLike: endpoint.fetchLike,
+    sleep: async (ms) => {
+      slept.push(ms);
+    },
+  });
+  assert.equal(outcome, "held_unreachable");
+  assert.deepEqual(slept, [...HELD_RETRY_DELAYS_MS]);
+  assert.ok(
+    notified.some(
+      (n) =>
+        n.severity === "warning" &&
+        /perk:wave status marker could not be delivered after 3 retries/.test(n.message) &&
+        /may still show the previous marker/.test(n.message),
+    ),
+    JSON.stringify(notified),
+  );
+  assert.match(waveStatusStaleNote("held_unreachable"), /may still show the previous state/);
+  assert.equal(waveStatusStaleNote("delivered"), "");
+  assert.equal(waveStatusStaleNote("held_until_ready"), "");
+  // No surface: no effect, `no_surface`.
+  clearAnnotationSurface(state);
+  assert.equal(await replaceWaveStatus(state, target, null, quiet), "no_surface");
 });
 
 test("replaceWaveStatus: held before readiness like any batch and flushed by the pure retry; a rejection is a warning, never a throw", async () => {

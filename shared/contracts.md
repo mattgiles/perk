@@ -1607,9 +1607,22 @@ the `/plan-review-browser` door, §8.23):
   running (the lane census) at launch success, failed at a zero-lane launch soft-fail,
   incomplete (the uncovered lanes) or cleared (`body: null` = the pure source clear) at
   collection; `wave_running`/`no_wave` leave it alone. No primed surface ⇒ no effect (the
-  terminal doors prime none); an HTTP rejection is a warning report, never a throw. The `wave`
-  slug is refused by the decode (`bad_input`) so the MODEL cannot write it: the "never create
-  status annotations" rule stands for the model; only code writes `perk:wave`.
+  terminal doors prime none); an HTTP rejection is a warning report, never a throw. The
+  replace's outcome is typed (`WaveStatusOutcome`: `no_surface` | `delivered` |
+  `held_until_ready` | `held_unreachable` | `rejected`) — a marker held AFTER readiness through
+  the bounded retries has no later wake to flush it (with zero covered lanes no per-angle push
+  follows), so `held_unreachable` is a warning report AND the tool pair appends a stale-marker
+  note to its result text (`waveStatusStaleNote`): the browser may still show the PREVIOUS
+  marker, so the model tells the human the wave's real state in-session. A held marker before
+  readiness is the normal pre-flush state (no warning). The `wave` slug is refused by the decode
+  (`bad_input`) so the MODEL cannot write it: the "never create status annotations" rule stands
+  for the model; only code writes `perk:wave`.
+- **Session-identity fence on every send:** the surface object captured at push start is
+  compared by identity (`prime` creates a new object, `clear` nulls it) after every HTTP call
+  and after every retry sleep. A session cleared or superseded mid-send makes the unit
+  `superseded`: no further request to the dead URL, no ledger write from a late 201, and
+  nothing re-held onto the new session's queue — a browser decision or a second door open
+  during the ~10 s backoff can never leak a dead session's anchors into the live one.
 - **Structural delete authority:** the only expressible DELETE is `?source=perk:<angle>`
   composed from the validated slug (or the code-reserved `perk:wave`) — the human's and other
   sources' annotations are untouchable by construction.

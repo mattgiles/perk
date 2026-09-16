@@ -484,8 +484,8 @@ const defaultSleep = (ms: number): Promise<void> =>
 
 /**
  * The post-readiness retry schedule: a network failure AFTER the door observed the server up is
- * a transient the same call absorbs (three attempts, ~10 s total) before holding. Before
- * readiness the hold is immediate — the readiness notice is the retry.
+ * a transient the same call absorbs (the initial send plus three retries, ~10 s of backoff)
+ * before holding. Before readiness the hold is immediate — the readiness notice is the retry.
  */
 export const HELD_RETRY_DELAYS_MS: readonly number[] = [1_000, 3_000, 6_000];
 
@@ -640,8 +640,10 @@ function dedupe(
 
 type UnitOutcome =
   | { kind: "sent" }
-  | { kind: "network"; requeue: HeldBatch | null }
-  | { kind: "rejected"; status: number; serverError: string; dropped: HeldBatch };
+  | { kind: "network"; requeue: HeldBatch }
+  | { kind: "rejected"; status: number; serverError: string; dropped: HeldBatch }
+  /** The surface was cleared or re-primed mid-send: the unit belongs to a dead session. */
+  | { kind: "superseded" };
 
 /**
  * Send one unit (the caller has already removed it from the held queue, so the dedupe never
@@ -649,17 +651,22 @@ type UnitOutcome =
  * plain unit dedupes then posts. Dedupe happens HERE, at send time, against the settled
  * ledger/held state — never against a ledger a held replace is about to clear. On a network
  * failure `requeue` names what to hold: the whole unit when the delete never landed (delete +
- * post retried together), or the deduped post remainder once the delete succeeded.
+ * post retried together), or the deduped post remainder once the delete succeeded. Every
+ * state mutation is fenced on `state.surface === surface` (object identity — prime creates a
+ * new object, clear nulls it): a browser decision or a superseding door open while an HTTP
+ * call is in flight must never write a dead session's anchors into the NEW session's ledger.
  */
 async function sendUnit(
   state: AnnotationState,
+  surface: AnnotationSurface,
   fetchLike: FetchLike,
-  url: string,
   unit: HeldBatch,
   tally: Tally,
 ): Promise<UnitOutcome> {
+  const url = surface.url;
   if (unit.replace) {
     const del = await requestDelete(fetchLike, url, unit.source);
+    if (state.surface !== surface) return { kind: "superseded" };
     if (del.kind === "network") return { kind: "network", requeue: unit };
     if (del.kind === "rejected") {
       return { kind: "rejected", status: del.status, serverError: del.serverError, dropped: unit };
@@ -673,6 +680,7 @@ async function sendUnit(
   const items = dedupe(state, unit.items, tally);
   if (items.length === 0) return { kind: "sent" };
   const post = await requestPost(fetchLike, url, items);
+  if (state.surface !== surface) return { kind: "superseded" };
   if (post.kind === "network") {
     return { kind: "network", requeue: { source: unit.source, replace: false, items } };
   }
@@ -702,23 +710,26 @@ async function sendUnit(
  * network failure re-sends the requeue unit (the delete is never replayed once it landed) after
  * each `HELD_RETRY_DELAYS_MS` delay and returns the final outcome — the caller holds on
  * exhaustion. Before readiness the first network failure returns immediately (the readiness
- * notice is the retry). Rejections never retry (version drift cannot heal).
+ * notice is the retry). Rejections never retry (version drift cannot heal). Each wake from the
+ * backoff re-checks the surface identity: a session cleared or superseded during the ~10 s of
+ * sleeping ends the retry as `superseded` — no request to the dead URL, no hold on the new
+ * session's queue.
  */
 async function sendUnitWithRetry(
   state: AnnotationState,
+  surface: AnnotationSurface,
   deps: Required<AnnotationPushDeps>,
-  url: string,
   unit: HeldBatch,
   tally: Tally,
 ): Promise<UnitOutcome> {
   let current = unit;
-  let outcome = await sendUnit(state, deps.fetchLike, url, current, tally);
+  let outcome = await sendUnit(state, surface, deps.fetchLike, current, tally);
   for (const delay of HELD_RETRY_DELAYS_MS) {
     if (outcome.kind !== "network" || !state.ready) return outcome;
-    if (outcome.requeue === null) return { kind: "sent" };
     await deps.sleep(delay);
+    if (state.surface !== surface) return { kind: "superseded" };
     current = outcome.requeue;
-    outcome = await sendUnit(state, deps.fetchLike, url, current, tally);
+    outcome = await sendUnit(state, surface, deps.fetchLike, current, tally);
   }
   return outcome;
 }
@@ -872,7 +883,9 @@ type PushOutcome =
  * a network failure re-holds the broken unit at the front, holds the new unit at the back, and
  * settles; an HTTP rejection drops only the rejected unit and retains the rest. Then the new
  * unit is sent post-flush (send-time dedupe against the settled ledger). A plain empty unit is
- * the pure retry — nothing left to send after the flush.
+ * the pure retry — nothing left to send after the flush. A `superseded` outcome (the surface
+ * was cleared/re-primed mid-send) settles WITHOUT touching `state.held` — the queue now belongs
+ * to the new session (or was reset), and a dead session's unit must not leak into it.
  */
 async function pushUnit(
   state: AnnotationState,
@@ -885,7 +898,6 @@ async function pushUnit(
     fetchLike: deps?.fetchLike ?? defaultFetch,
     sleep: deps?.sleep ?? defaultSleep,
   };
-  const url = surface.url;
   if (unit.replace) {
     state.held = state.held.filter((batch) => batch.source !== unit.source);
   }
@@ -893,9 +905,10 @@ async function pushUnit(
     const batch = state.held[0];
     if (batch === undefined) break;
     state.held = state.held.slice(1);
-    const outcome = await sendUnitWithRetry(state, resolved, url, batch, tally);
+    const outcome = await sendUnitWithRetry(state, surface, resolved, batch, tally);
+    if (outcome.kind === "superseded") return { kind: "settled" };
     if (outcome.kind === "network") {
-      if (outcome.requeue !== null) state.held = [outcome.requeue, ...state.held];
+      state.held = [outcome.requeue, ...state.held];
       holdNewBatch(state, unit, tally);
       return { kind: "settled" };
     }
@@ -905,9 +918,10 @@ async function pushUnit(
     }
   }
   if (unit.items.length > 0 || unit.replace) {
-    const outcome = await sendUnitWithRetry(state, resolved, url, unit, tally);
+    const outcome = await sendUnitWithRetry(state, surface, resolved, unit, tally);
+    if (outcome.kind === "superseded") return { kind: "settled" };
     if (outcome.kind === "network") {
-      if (outcome.requeue !== null) state.held = [...state.held, outcome.requeue];
+      state.held = [...state.held, outcome.requeue];
       return { kind: "settled" };
     }
     if (outcome.kind === "rejected") {
@@ -935,22 +949,43 @@ function holdNewBatch(state: AnnotationState, unit: HeldBatch, tally: Tally): vo
 // ------------------------------------------------------------------------ the wave marker
 
 /**
+ * The marker replace's outcome, so the tool pairs can tell the human when the browser may
+ * still show a stale marker:
+ *  - `no_surface` — nothing primed (the terminal doors), no effect;
+ *  - `delivered` — the replace landed;
+ *  - `held_until_ready` — held before browser readiness; the door's readiness notice flushes it
+ *    (normal — not a degrade);
+ *  - `held_unreachable` — held AFTER readiness through the bounded retries: no later wake will
+ *    deliver it, so the browser may keep showing the PREVIOUS marker (e.g. "running" after the
+ *    wave finished) until a later push flushes the queue — reported as a warning too;
+ *  - `rejected` — an HTTP rejection dropped the marker (reported as a warning).
+ */
+export type WaveStatusOutcome =
+  | "no_surface"
+  | "delivered"
+  | "held_until_ready"
+  | "held_unreachable"
+  | "rejected";
+
+/**
  * Replace the code-owned `perk:wave` status marker on the primed surface (or clear it with
  * `body: null`). The doors' mitigation for the completion-only wave: the human sees a running /
  * failed / incomplete marker where the findings will land, so an early decision is an informed
  * one. No primed surface ⇒ no effect (the terminal doors prime none). The marker is ONE
  * unprefixed annotation — review mode a general-scope `comment`, plan mode a `GLOBAL_COMMENT` —
  * sent as a `replace: true` unit for `WAVE_STATUS_SOURCE` through the same hold/retry path as
- * any batch; an HTTP rejection is a warning report, never a throw (the marker is advisory).
+ * any batch. Neither an HTTP rejection nor an exhausted hold throws (the marker is advisory):
+ * both are warning reports, and the returned outcome lets the caller tell the human the browser
+ * may be showing a stale marker.
  */
 export async function replaceWaveStatus(
   state: AnnotationState,
   target: ReportTarget,
   body: string | null,
   deps?: AnnotationPushDeps,
-): Promise<void> {
+): Promise<WaveStatusOutcome> {
   const surface = state.surface;
-  if (surface === null) return;
+  if (surface === null) return "no_surface";
   const items: MappedAnnotation[] =
     body === null
       ? []
@@ -996,10 +1031,41 @@ export async function replaceWaveStatus(
         `the annotation server rejected the ${outcome.dropped.source} status marker ` +
           `(HTTP ${outcome.status}): ${outcome.serverError} — the marker was dropped`,
       );
+      return "rejected";
     }
+    // The session this marker targeted closed or was superseded mid-send: nothing to tell.
+    if (state.surface !== surface) return "no_surface";
+    // `pushUnit` settles both a delivered and a held unit as ok; the held queue tells them apart.
+    // A marker held after readiness has no later wake to flush it (unless a later push does),
+    // so the browser may keep showing the previous marker — surface that, never let a stale
+    // "running" marker stand silently after the wave has finished.
+    if (!state.held.some((batch) => batch.source === WAVE_STATUS_SOURCE)) return "delivered";
+    if (!state.ready) return "held_until_ready";
+    report(
+      target,
+      "push_annotations",
+      "warning",
+      `the ${WAVE_STATUS_SOURCE} status marker could not be delivered after ` +
+        `${HELD_RETRY_DELAYS_MS.length} retries (annotation server unreachable) — the browser ` +
+        "may still show the previous marker; tell the human the wave's real state in-session",
+    );
+    return "held_unreachable";
   } finally {
     activity.count--;
   }
+}
+
+/**
+ * The model-facing sentence a tool pair appends when the marker replace was held after
+ * readiness — the human must hear the wave's real state from the session, since the browser
+ * marker may be stale. Empty for every other outcome.
+ */
+export function waveStatusStaleNote(outcome: WaveStatusOutcome): string {
+  return outcome === "held_unreachable"
+    ? " NOTE: the browser's perk:wave marker could not be updated (annotation server " +
+        "unreachable) and may still show the previous state — tell the human the wave's real " +
+        "state explicitly."
+    : "";
 }
 
 // ------------------------------------------------------------------------ registration
