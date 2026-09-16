@@ -472,7 +472,11 @@ def test_phase2_gate_github_refinement_doors(
     assert first_claim < first_comment_read  # claim before read
     plan_rid = planned["run_id_override"]
     assert isinstance(plan_rid, str) and plan_rid
-    assert planned["handoff_extra"] == {"objective_id": OBJ_ID, "node_id": "1.2"}
+    assert planned["handoff_extra"] == {
+        "objective_id": OBJ_ID,
+        "node_id": "1.2",
+        "naming": {"title": "Refine me", "node": "1.2"},
+    }
     seed = planned["prompt_override"]
     assert _seed_pointer(seed).resolve() == _refinement_file(root, plan_rid, OBJ_ID).resolve()
     assert NODE_CONTEXT_NOTICE not in seed
