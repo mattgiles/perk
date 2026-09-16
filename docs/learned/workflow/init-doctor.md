@@ -386,14 +386,17 @@ The craft survives for any future probe over a surface perk *does* own or vendor
 
 `_subagent_host_tools_check(root, *, environ=None)` (`src/perk/convergence/doctor/checks.py`) is
 the precedent for a report-only check that fires only while an installed, **unpinned** package sits
-in a known-affected version range — here pi-subagents ≥ 0.67.0's host-builtin intersection
-(`pi/subagents.md` § "The ≥ 0.67.0 host-builtin intersection"). Four disciplines it settled:
+in a known-affected version range — here pi-subagents 0.67.x's host-builtin intersection
+(`pi/subagents.md` § "The 0.67.x host-builtin intersection"). Four disciplines it settled:
 
 - **Gate on a strict `X.Y.Z` against a half-open `[lower, upper)` range**
-  (`_SUBAGENTS_HOST_INTERSECTION_AFFECTED = ("0.67.0", None)`; `_parse_strict_semver`). A
+  (`_SUBAGENTS_HOST_INTERSECTION_AFFECTED = ("0.67.0", "0.68.0")`; `_parse_strict_semver`). A
   non-semver or unreadable version ⇒ `info` "not evaluated", **never** a mismatch — and the
   sibling `subagent-compat` check owns the "unreadable manifest" complaint, so there is no
-  duplicate warn. An open upper bound stays open until a re-verify names the fixing release.
+  duplicate warn. The range opened with an open upper bound and was closed by the 0.68.0
+  re-verify; a closed range's two `ok` arms must stay distinguishable (below the range: no
+  intersection at all; at/above the fix: the intersection runs with a corrected census) so an
+  operator reading doctor learns which world they are in.
 - **Mirror the foreign extension's OWN precedence** (pi-fff: CLI flag → env → config file →
   default, minus the unobservable CLI flag): a valid `PI_FFF_MODE` wins and an invalid value falls
   through to the file exactly as pi-fff's own parser ignores it; the env arm reports "every
@@ -422,8 +425,9 @@ nudge, grep for every fixture that plants the artifact the nudge inspects.
 ## Managed pieces and checks that act on files OUTSIDE the repo (the user's agent dir)
 
 Some pieces read or rewrite files inside the user's Pi agent directory rather than the repo: the
-user scope of `subagent-bridge-config`, and pi-subagents' native `extensions/subagent/config.json`.
-Three rules govern them:
+`subagent-host-tools` check's `pi-fff.json` read, and pi-subagents' native
+`extensions/subagent/config.json` (the retired `subagent-bridge-config` check's user-scope
+`settings.json` read was another). Three rules govern them:
 
 - **Resolve the user scope through the ONE shared resolver `launch_stage` also consumes** —
   `src/perk/substrate/config.py::launch_pi_agent_dir` (env `PI_CODING_AGENT_DIR` → main-checkout

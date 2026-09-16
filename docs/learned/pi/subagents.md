@@ -76,11 +76,13 @@ named key with `Object.hasOwn` *before* honoring the value — a polluted `Objec
 would otherwise satisfy `keys.length === 1 && value.readOnly === false` and un-floor the child. Every
 decoder reading a named property off parsed JSON should do the same.
 
-**The inherited gate vs the engine's child tool.** The engine injects `structured_output` at
-extension **load time** — before perk's `session_start` gate sync — so a gate sync that omits it
-deactivates it and an `outputSchema` child fails `structuredOutputFailed`. Hence
-`SUBAGENT_CHILD_TOOLS` (`structured_output` only — `contact_supervisor` never reaches a perk child,
-the bridge being off at every spawn) sits in `READ_ONLY_TOOLS`
+**The inherited gate vs the engine's child tools.** The engine injects `structured_output` and
+`contact_supervisor` at extension **load time** — before perk's `session_start` gate sync — so a
+gate sync that omits them deactivates them and an `outputSchema` child fails
+`structuredOutputFailed`. Hence `SUBAGENT_CHILD_TOOLS` (both names — perk's own waves spawn
+bridge-off so `contact_supervisor` is absent in their children, but the allowlist governs EVERY
+gated adopted child, and an ad-hoc gated child with an active bridge must keep its supervisor
+door; a review of the first cut caught the over-narrowing) sits in `READ_ONLY_TOOLS`
 (`extension/substrate/toolGating.ts`) and in **neither** `PERK_TOOLS` nor `BORROWED_TOOLS` —
 children are stage-unscoped, so gate membership is their only governance surface. A "missing
 `structured_output`" is a **composition** defect: trace (a) the launch tool plan

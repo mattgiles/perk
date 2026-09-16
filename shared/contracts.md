@@ -687,13 +687,14 @@ child over the already-carved-in delegation family and writes nothing to the wor
 `run_scout_wave` (the authoring sessions' scout launcher: one read-only `perk.scout` lane per
 brief over the carved-in delegation family; no worktree writes; reachable in every gated stage
 except `objective-refine` on the `explore_objective_node` precedent; §8.70) + the pi-subagents
-**child-side engine tool** (`SUBAGENT_CHILD_TOOLS` = `structured_output` ONLY — delivered
-through the child prompt runtime, inert when absent in parents; native wakes require no
-wait-tool carve-in; kept active so a gated **adopted** child can make the engine-required
-`structured_output` completion call — stripping it fails an `outputSchema` run with
-`structuredOutputFailed`. `contact_supervisor` is deliberately absent: every perk wave spawns
-with the intercom bridge off — `WAVE_INTERCOM_BRIDGE`, below — so no perk child is ever given
-the supervisor door) — a static union of foreign
+**child-side engine tools** (`SUBAGENT_CHILD_TOOLS` = `structured_output` +
+`contact_supervisor` — delivered through the child prompt runtime / native supervisor bridge,
+inert when absent in parents; native wakes require no wait-tool carve-in; kept active so a gated
+**adopted** child can make the engine-required `structured_output` completion call — stripping it
+fails an `outputSchema` run with `structuredOutputFailed` — and so an ad-hoc gated child whose
+bridge IS active keeps its supervisor door. Perk's own waves never carry `contact_supervisor`:
+every wave spawns with the intercom bridge off — `WAVE_INTERCOM_BRIDGE`, below — so the tool is
+simply absent there; the allowlist entry is inertness-safe, never a grant) — a static union of foreign
 tool names, inert when a package is absent — plus `run_audit_wave` (the gated audit-judge
 session's wave call: its one write is structurally bound to the cold door's handoff
 `audit_bundle_dir`, §8.50 — no caller-supplied path exists), `run_harvest_wave` (the gated
@@ -749,8 +750,8 @@ claims, a worktree stage with `/plan` on. The objective/gist/refinement contexts
 their exact stage). NO injected authoring or adapter context reaches a runner child: the fence is
 `installInjectedContext`'s third argument, fed the composition root's `runnerChild` closure (the
 `isRunnerChild` bit of the runner restriction floor below, re-read every `session_start`) —
-suppression only, never a grant; the `[READ-ONLY MODE]` guidance and the engine's child tool
-(`structured_output`) are untouched.
+suppression only, never a grant; the `[READ-ONLY MODE]` guidance and the engine's child tools
+(`structured_output`/`contact_supervisor`) are untouched.
 
 **The audit-wave write binding (`audit_bundle_dir`, §8.50).** The `perk-dev audit judge` cold
 door stashes `handoff_extra={"audit_bundle_dir": <absolute bundle dir>}` in its launch handoff
@@ -1517,9 +1518,9 @@ direct `perk pr review-submit` calls are forbidden on every door:
   path (hunk has no GitHub posting; `gh` mutations and direct `perk pr review-submit` calls are
   forbidden); (3) the verdict lands last, atomically with the comments — never before them.
 - **Per-door posting ownership — the browser posting contract (the browser
-  surface's native posting IS the GitHub path):** (1) findings stream only into the local
-  plannotator session (a UI surface on localhost, never GitHub) — nothing **perk-driven**
-  reaches GitHub; (2) **plannotator's native platform-posting is THE GitHub path** — the human
+  surface's native posting IS the GitHub path):** (1) reviewer findings land (after wave
+  collection) only in the local plannotator session (a UI surface on localhost, never GitHub) —
+  nothing **perk-driven** reaches GitHub; (2) **plannotator's native platform-posting is THE GitHub path** — the human
   posts inline comments (their own annotations and perk's pushed findings) plus an
   APPROVE/COMMENT verdict directly from the UI (the UI never posts REQUEST_CHANGES; a platform
   post is a session-ending action — the respond then carries a status string and no
@@ -1577,8 +1578,9 @@ the `/plan-review-browser` door, §8.23):
   pushed before collection the parent's per-angle arrays are already disjoint, so no
   cross-source promotion exists.
 - **Hold-and-accumulate with the post-readiness bounded retry:** a network-level failure holds
-  the mapped batch and returns ok — held ≠ degrade (the door's readiness observer owns
-  degrading); `findings: []` is the pure retry; a zero-item pure clear stays a visible pending
+  the mapped batch and returns ok — a hold BEFORE readiness ≠ degrade (the door's readiness
+  observer owns degrading there; a hold AFTER readiness is the flow's own in-session degrade, see
+  below); `findings: []` is the pure retry; a zero-item pure clear stays a visible pending
   operation (`held_batches`). BEFORE browser readiness the hold is immediate and the door's
   readiness notice flushes it. AFTER readiness (`AnnotationState.ready`, set by the observer's
   `resumeAnnotationDelivery`) the same unit is retried in-call over `HELD_RETRY_DELAYS_MS`
@@ -6868,13 +6870,13 @@ the research families (web union + Linear reads + FFF local search) ride EVERY s
 gate-OFF stage lists (delegation additionally rides the read-only gate — §8.3);
 `LINEAR_MUTATING_TOOLS` (incl. `linear_configure_auth`, which writes `~/.pi/agent/auth.json`)
 and `plannotator_submit_plan` appear in NO stage list — in the census, so subtracted from every
-stage session; bare/unscoped sessions keep full access. The child-session tool
-(`structured_output` — `SUBAGENT_CHILD_TOOLS`; `contact_supervisor` never reaches a perk child
-because every wave spawns with the intercom bridge off) lives in **neither census**: children
-stay **stage**-unscoped by design (adopt-never-impersonates above), so the stage filter never
-sees a child session — but the read-only **gate** IS inherited by adopted children (§8.3), so
-the child-side engine tool lives in `READ_ONLY_TOOLS`, gate membership being its only
-governance surface.
+stage session; bare/unscoped sessions keep full access. Child-session tools
+(`structured_output`/`contact_supervisor` — `SUBAGENT_CHILD_TOOLS`; perk's own waves spawn with
+the intercom bridge off, so `contact_supervisor` is absent in THEIR children, but an ad-hoc gated
+child keeps it) live in **neither census**: children stay **stage**-unscoped by design
+(adopt-never-impersonates above), so the stage filter never sees a child session — but the
+read-only **gate** IS inherited by adopted children (§8.3), so the child-side engine tools live
+in `READ_ONLY_TOOLS`, gate membership being their only governance surface.
 
 **Composition with the read-only gate (§8.3).** Gate ON → `setActiveTools(READ_ONLY_TOOLS)`
 **unchanged** — no stage filter, preserving every gated carve-out byte-for-byte (the gate-ON
@@ -11026,8 +11028,8 @@ misleading guidance), `knowledge-architecture` (document boundaries, clusters, r
 distillation/read cost, harvest-follow-up quality). **The agent:** `perk.dream-reducer`
 (`agents/dream-reducer.md`): report-only (§8.1), read-only tool posture (`read, grep, find, ls, bash`), fresh context,
 engine-injected `structured_output` completion (never fenced JSON), stronger-tier default
-model (`anthropic/claude-fable-5`, fallback `anthropic/claude-sonnet-4-5` — the reducers are
-the judgment-heaviest lanes), delivered via `PERK_AGENTS` into `.pi/agents/perk/`.
+model (`anthropic/claude-fable-5` — the reducers are the judgment-heaviest lanes; no fallback
+model, pi-subagents ≥ 0.68.0 rejects the field), delivered via `PERK_AGENTS` into `.pi/agents/perk/`.
 
 **The closed reducer schema.** `DREAM_REDUCER_REPORT_SCHEMA`: `additionalProperties: false`
 at every level, all fields required, no if/then, no `pattern`; every `maxItems`/`maxLength`

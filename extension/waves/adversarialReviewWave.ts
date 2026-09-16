@@ -2,8 +2,10 @@
 // module — the human-in-the-loop review doors' (/pr-review-browser, /pr-review-terminal)
 // vocabulary as tested code (sibling of `prReviewWave.ts`): the four door angles, the per-lane
 // completion-report schema, and the lane/task composition are module-owned here, launched
-// NON-BLOCKING via `wave.start` so the parent ends its turn after launch and relays batches
-// on native supervisor wakes before collecting on the matching workflow-completion notice.
+// NON-BLOCKING via `wave.start` so the parent ends its turn after launch and collects on the
+// matching workflow-completion notice. COMPLETION-ONLY: the spawn rides the fixed wave contract
+// (`intercomBridge: {mode: "off"}`), so children have no progress channel — findings travel
+// only in the final `structured_output` report, nothing reaches the parent before the wave ends.
 //
 // ZERO retries — deliberate: the doors' contract is honest incompleteness surfaced to the human
 // during triage (an `ok: false` lane is reported, never papered over), so the pr-review

@@ -1638,7 +1638,10 @@ test("installAnnotationBindings registers exactly the one tool; a fresh state st
   ]) {
     assert.match(guidelines, pin);
   }
-  assert.match(guidelines, /never a degrade/);
+  // The two hold arms are distinct: before readiness a hold is never a degrade (the door owns
+  // readiness); after readiness the exhausted hold IS the in-session degrade.
+  assert.match(guidelines, /A held result before readiness is never a degrade/);
+  assert.match(guidelines, /that in-session presentation IS the degrade for this flow/);
   // The retired streaming-era guidance is gone: no per-batch pushes, no uncovered-source clear,
   // no wake-driven retry.
   for (const retired of [

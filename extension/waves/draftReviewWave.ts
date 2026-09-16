@@ -2,8 +2,10 @@
 // the draft-review doors' (/plan-review-browser, /objective-review-browser) vocabulary as tested
 // code (sibling of `adversarialReviewWave.ts`): the four settled angles plus the custom lane,
 // the per-lane completion-report schema, and the lane/task composition are module-owned here,
-// launched NON-BLOCKING via `wave.start` so the parent ends its turn after launch and relays
-// batches on native supervisor wakes before collecting on matching workflow completion.
+// launched NON-BLOCKING via `wave.start` so the parent ends its turn after launch and collects
+// on matching workflow completion. COMPLETION-ONLY: the spawn rides the fixed wave contract
+// (`intercomBridge: {mode: "off"}`), so children have no progress channel — findings travel only
+// in the final `structured_output` report.
 //
 // CONSUMED by the `/plan-review-browser` and `/objective-review-browser` doors via the
 // `start_draft_review_wave` / `collect_draft_review_wave` tool pair

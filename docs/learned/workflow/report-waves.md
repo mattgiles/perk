@@ -645,9 +645,13 @@ Instances:
   (`docs/design/archive/streaming-doors-dogfood.md`: dedupe, `replace` reshape, typed collect
   aggregates, all live-confirmed **for the historical held-turn streaming protocol only**). The
   streaming-acceptance residual that followed was **discharged by retirement**: pi-subagents
-  0.68.0 discards progress updates, so the protocol was removed and the waves are completion-only
-  (the 0.68.0 leg — marker at launch, final annotations after collect — is recorded in
-  `docs/design/archive/pi-subagents-0.68.0-reverify.md`). The original 0.65.1 host-peer launch
+  0.68.0 discards progress updates, so the protocol was removed and the waves are completion-only.
+  The completion-only mechanics (the spawn's `intercomBridge` disable, the `perk:wave` marker at
+  launch/collect, the final push after collect) are pinned **offline only** (memory adapter +
+  fake HTTP); `docs/design/archive/pi-subagents-0.68.0-reverify.md` records the doctor half of
+  the 0.68.0 leg as PASS and the browser-door half as **not exercised** — the first live 0.68.0
+  browser wave (marker visible at launch, cleared at collect, N/N final annotations) is an
+  **outstanding residual**, owed from a read-write session on a 0.68.0 host. The original 0.65.1 host-peer launch
   failure (`docs/design/archive/pi-subagents-native-baseline-dogfood.md`) is resolved for the
   repo-local five-package 0.85.1 dev host: aliases and a real background smoke passed at
   `52c4fde5` on 2026-09-05 (`docs/design/archive/pi-subagents-native-streaming-dogfood.md`); no
