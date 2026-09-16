@@ -4,9 +4,12 @@ The pure-ish resolution layer: the
 :class:`ResolvedWorktree` / :class:`WorktreeRequest` / :class:`Target` value types, the target
 resolver (:func:`resolve_target`), the deterministic worktree-name derivation
 (:func:`resolve_plan_worktree_name`), the origin-aware base resolution (:func:`resolve_base` /
-:func:`_fetch_best_effort`), and the validating worktree selector/positioner
+:func:`_fetch_best_effort`), the validating worktree selector/positioner
 (:func:`resolve_worktree`) — the single interface used whenever a cold door needs a plan
-checkout (contracts.md §8.38).
+checkout (contracts.md §8.38) — and the public fail-closed checkout validators it is built on
+(:func:`require_registered_checkout` for a bare existing checkout,
+:func:`validate_existing_checkout` for one that must be bound to a selected plan), which the
+session-reopen engine reuses so no consumer re-derives the probe order (contracts.md §8.71).
 """
 
 import dataclasses
@@ -239,19 +242,13 @@ def _read_binding(path: Path) -> plan.PlanRef | None:
         return None
 
 
-def _validate_existing_checkout(
-    *,
-    repo_root: Path,
-    path: Path,
-    selection: _Selection,
-) -> plan.PlanRef:
-    """Validate an existing checkout before reuse (read-only git probes only — no mutating or
-    network git operations) and return the settled ref.
+def require_registered_checkout(repo_root: Path, path: Path) -> git.Worktree:
+    """The registration half of checkout validation (read-only git probes only): ``path`` must
+    be a registered git worktree of ``repo_root`` AND a live, usable checkout. Returns the
+    matched ``git worktree list`` entry so a caller can keep probing it (its branch).
 
-    The checkout must be a registered git worktree at the resolved path, be checked out on the
-    selected ``plan-<id>`` branch, carry a readable worktree-local ``plan-ref``, and that
-    binding must equal the selected ref across every ``PlanRef`` field. Disagreements fail
-    before handoff/materialization/exec with typed diagnostics naming each source.
+    No plan binding is required here — this is the whole check for a bare ``--worktree NAME``
+    reopen; :func:`validate_existing_checkout` layers the binding probes on top.
     """
     try:
         entries = git.worktree_list(repo_root)
@@ -279,6 +276,41 @@ def _validate_existing_checkout(
             f"(git worktree remove --force {path}) and re-run.",
             error_type="worktree_unregistered",
         )
+    return entry
+
+
+def validate_existing_checkout(
+    *, repo_root: Path, path: Path, ref: plan.PlanRef, source: str
+) -> plan.PlanRef:
+    """Validate an existing checkout against an already-selected canonical ``ref`` (the public
+    face of :func:`_validate_existing_checkout` for consumers outside the positioner — the
+    session-reopen engine and the ``plan resume`` gate picker). ``source`` is the human name of
+    the selector for the typed diagnostics. Same probes, same order, same refusals."""
+    return _validate_existing_checkout(
+        repo_root=repo_root,
+        path=path,
+        selection=_Selection(ref=ref, plan_id=ref.pr_id, source=source),
+    )
+
+
+def _validate_existing_checkout(
+    *,
+    repo_root: Path,
+    path: Path,
+    selection: _Selection,
+) -> plan.PlanRef:
+    """Validate an existing checkout before reuse (read-only git probes only — no mutating or
+    network git operations) and return the settled ref.
+
+    The checkout must be a registered git worktree at the resolved path, be checked out on the
+    selected ``plan-<id>`` branch, carry a readable worktree-local ``plan-ref``, and that
+    binding must equal the selected ref across every ``PlanRef`` field. Disagreements fail
+    before handoff/materialization/exec with typed diagnostics naming each source. Probe
+    order: registered → live → binding readable → branch → binding equality — so an ordinary
+    checkout of ANOTHER plan (on its own ``plan-<other>`` branch) refuses
+    ``worktree_branch_mismatch`` before the binding comparison is reached.
+    """
+    entry = require_registered_checkout(repo_root, path)
     binding = _read_binding(path)
     if binding is None:
         raise UserFacingCliError(

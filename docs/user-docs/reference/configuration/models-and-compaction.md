@@ -191,7 +191,10 @@ objective_threshold = 0.8
 ## `[pi]`
 
 Pi-process launch settings. Use `agent_dir` to load a project `models.json` with custom providers
-or per-model overrides: perk injects `PI_CODING_AGENT_DIR` into every **cold-local Pi launch**.
+or per-model overrides: perk injects `PI_CODING_AGENT_DIR` into every **cold-local Pi launch** —
+stage launches and session reopens alike: `perk resume` and the `perk plan resume` gate-arm
+picker follow the same `PI_CODING_AGENT_DIR` → `[pi] agent_dir` → default precedence, with the
+same missing-directory warning and `pi_agent_dir_invalid` refusal.
 It is off by default; perk does not create or copy agent files.
 
 | Key | Type | Default | Notes |
@@ -228,7 +231,9 @@ This is not a models-only overlay: Pi's **whole config directory** moves, includ
   `auth.json` from `~/.pi/agent` when needed, or use environment API keys. Protect credentials
   from git **before** copying them.
 - **Trust:** a new `trust.json` starts empty. Worktree stages already launch with `--approve`;
-  main-checkout stages prompt for trust once.
+  main-checkout stages prompt for trust once. Sessions reopened through `perk resume` (or the
+  `plan resume` gate picker) follow Pi's own trust flow — perk passes no `--approve`, because Pi
+  applies trust to whichever session's project the picker selects.
 - **Sessions:** logs land under `<agent-dir>/sessions/`. `/learn` is unaffected because its
   session pointers record absolute paths. `perk-dev` session tools retain their
   `~/.pi/agent/sessions` default; pass `--session-root` for redirected logs.
@@ -277,7 +282,8 @@ address, land, and similar stages) show a `PI_CODING_AGENT_DIR=<path>` line and 
 string in `--json` output when perk would inject it; missing-directory warnings also appear.
 Command-owned previews that return before that seam — seeded doors, skills create/refine, and
 `plan resume` — do not preview it. Their **real launches** still use the same redirect and
-filesystem checks.
+filesystem checks. `perk resume --dry-run` reports the resolved agent directory and its source
+(`env` / `config` / `default`) in its own preview.
 
 **Scope boundaries:** local launches only. `--remote` dispatch is unaffected, the headless worker
 keeps its throwaway agent directory, and a hand-run `pi` is outside perk's control. Use direnv or

@@ -22,6 +22,7 @@ from perk.cli.commands.pr import (
 from perk.cli.commands.pr.ready_cmd import ready_continuation
 from perk.cli.commands.registry import registry_group
 from perk.cli.commands.release_notes_cmd import release_notes_cmd
+from perk.cli.commands.resume_session_cmd import resume_session
 from perk.cli.commands.run_worker_cmd import run_worker_cmd
 from perk.cli.commands.skills import skills_group
 from perk.cli.commands.state import state_group
@@ -87,6 +88,9 @@ register_with_aliases(cli, workflow_group)
 register_with_aliases(cli, skills_group)
 cli.add_command(release_notes_cmd)
 # `release-notes` is an informational command; it renders under the Other help bucket.
+cli.add_command(resume_session)
+# `resume` opens Pi's native session picker in a checkout (contracts.md §8.71) — a session
+# reopen, not a stage launch (no registry stage, no launcher grammar); the Other help bucket.
 cli.add_command(run_worker_cmd)
 # `resume` and `replan` now live under the `plan` group. `replan` is still a dedicated
 # cold door, not a registry stage: it borrows `plan` to re-launch with the target plan's original

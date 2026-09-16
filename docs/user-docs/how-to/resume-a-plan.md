@@ -34,7 +34,9 @@ machine, or any time you want a clean session against an existing plan.
 
    The gate rows are **named, not launched** — when the next step is yours (a review, a land, a
    decision about a closed PR), resume tells you so instead of opening a session at the wrong
-   stage.
+   stage. At those three gates, a real local run from an interactive terminal then opens the plan
+   worktree's **Pi session picker** so you can reopen the conversation that got you there (step 5
+   below); `--json`, `--dry-run`, `--remote`, and piped runs print the gate report only.
 
    When a **local** resume relaunches `implement` into a plan worktree that already exists (for
    example after an earlier session was interrupted), prior work — committed or uncommitted —
@@ -48,6 +50,24 @@ machine, or any time you want a clean session against an existing plan.
    locally: `perk plan resume 42 --remote`. Only the unattended stages (`implement`, `address`) are
    remotely runnable. For the
    fuller recipe, see [How to dispatch a stage to a remote runner](dispatch-a-stage-to-ci.md).
+5. **Reopen the conversation instead (optional).** When you want the *existing* conversation
+   rather than a fresh stage — to re-read what a session decided, or to keep going where it
+   stopped — open Pi's own session picker for a checkout with
+   [`perk resume`](../reference/cli/remote-and-utility.md#perk-resume-target):
+
+   ```bash
+   perk resume                     # this checkout's sessions
+   perk resume 42                  # plan #42's worktree
+   perk resume --worktree plan-42  # any existing checkout by name (root = the main checkout)
+   perk resume 42 --dry-run        # print the resolved checkout + command, launch nothing
+   ```
+
+   The picker is Pi's: browse the Current Folder or All scopes, search, pick, or cancel. perk
+   only positions the checkout and hands you to `pi --resume` — no run id, no handoff, no stage
+   prompt; the reopened session keeps its own identity. Trust for the reopened project is Pi's
+   own prompt (a plan worktree asks once). Checkouts are never created here — a missing worktree
+   points you at `perk implement`. This needs a terminal (Pi's picker is a full-screen TUI);
+   `--dry-run` works anywhere.
 
 Why fresh context rather than a continued conversation? Because the plan is canonical in the issue
 backend and every stage is re-enterable through its cold door. That includes a **merged** plan's
@@ -61,5 +81,5 @@ resolves it correctly from any machine or a fresh clone — see
 ## Related
 
 - **Do:** [How to replan an open plan](replan-an-open-plan.md) — rewrite the plan body instead, when the plan itself is wrong.
-- **Do:** [How to dispatch a stage to a remote runner](dispatch-a-stage-to-ci.md) — the fuller recipe behind `--remote`.
+- **Look up:** [`perk resume`](../reference/cli/remote-and-utility.md#perk-resume-target) — the exact target table and refusals for the session picker.
 - **Understand:** [How perk thinks](../explanation/how-perk-thinks.md) — why every stage re-enters cold with fresh context.

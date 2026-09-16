@@ -1,11 +1,20 @@
-"""`perk resume <plan>` — the cross-stage resume verb.
+"""`perk plan resume <plan>` — the cross-stage resume verb.
 
 Resolve any plan to its next action and act on it. Selects the plan canonically
 (`perk.cli.plan_selection.select_plan` — the one seam, PR selectors included), classifies via
 the shared `resume.resolve_next_action` (contracts.md §8.37), then either launches the
 verdict's stage (reusing `launch_stage` — idempotent worktree + materialize + exec pi) or
-names the human gate without launching. Supervisor surface: `--json` to stdout, stable exit
-codes.
+names the human gate without launching a stage. Supervisor surface: `--json` to stdout, stable
+exit codes.
+
+The three non-launching gate verdicts (`ready_for_review` / `awaiting_review` / `pr_closed`)
+print their gate line and then — in a local interactive terminal only (no `--json` / `--dry-run`
+/ `--remote`, TTY stdin AND stdout) — open the plan worktree's Pi session picker through the
+session-resume engine (contracts.md §8.71): a pure `chdir` + `exec pi --resume` that marks
+nothing ready, reopens nothing, addresses nothing. A missing checkout is explained (exit 0 — the
+gate report stands); an invalid one is a typed refusal (exit 1, after the gate line). Every
+other output shape (`--json`, `--dry-run`, `--remote`, non-TTY) is byte-identical to the
+picker-less report.
 
 Exit codes: 0 resumed / nothing-to-resume · 1 invalid input / unauthed / plan-not-found /
 kind-mismatch (``issue_kind_mismatch`` — an existing issue with no plan-header) / op failure ·
@@ -13,6 +22,9 @@ kind-mismatch (``issue_kind_mismatch`` — an existing issue with no plan-header
 """
 
 import json
+import shlex
+import sys
+from pathlib import Path
 
 import click
 
@@ -26,7 +38,9 @@ from perk.cli.plan_selection import load_main_config, main_repo_root, select_pla
 from perk.github import GitHubError
 from perk.prompts import render
 from perk.run import launch, resume
+from perk.run.launch import session_resume
 from perk.state import cache
+from perk.substrate.config import Config
 from perk.substrate.output import io_step, machine_output, user_output
 from perk.substrate.registry import stage_by_id
 
@@ -64,9 +78,18 @@ def resume_cmd(
     PR: its number or pasted .../pull/N URL, resolved to the plan it records.
 
     \b
+    At a human gate (draft PR awaiting ready, clean PR awaiting review/land, PR closed
+    unmerged) no stage launches: the gate line prints, and in an interactive terminal the
+    plan worktree's Pi session picker (pi --resume) opens so the conversation can be reopened
+    — nothing is marked ready, reopened, or addressed. --json, --dry-run, --remote, and piped
+    invocations print the gate report only.
+
+    \b
     Examples:
       perk plan resume 42            # resolve #42's stage and launch it (fresh context)
       perk plan resume 42 --dry-run  # print the resolved stage + launch plan, launch nothing
+      perk plan resume 42            # at a review gate: prints the gate, then opens the
+                                     # worktree's session picker (terminal only)
       perk plan resume https://github.com/o/r/issues/42   # paste the plan's URL instead of the id
       perk plan resume https://github.com/o/r/pull/55     # …or the plan's PR (number or URL)
     """
@@ -121,6 +144,19 @@ def resume_cmd(
             stacked=ref.delivery_lineage is not None,
             as_json=as_json,
         )
+        # The gate picker (contracts.md §8.71): only a local interactive terminal reopens the
+        # plan worktree's conversation — `--json` / `--dry-run` / `--remote` / a pipe keep the
+        # report byte-identical (the `perk ready` TTY predicate; Pi's picker is a full-screen TUI).
+        if (
+            not as_json
+            and not dry_run
+            and remote is None
+            and sys.stdin.isatty()
+            and sys.stdout.isatty()
+        ):
+            _open_gate_picker(
+                ctx, main_root=main_root, config=config, ref=ref, plan_id=plan_id, pi_args=pi_args
+            )
         return
 
     worktree_name = launch.resolve_plan_worktree_name(ref)
@@ -154,6 +190,56 @@ def resume_cmd(
         plan_state=state,
         invocation_root=invocation_root,
     )
+
+
+def _open_gate_picker(
+    ctx: click.Context,
+    *,
+    main_root: Path,
+    config: Config,
+    ref: plan.PlanRef,
+    plan_id: str,
+    pi_args: tuple[str, ...],
+) -> None:
+    """Open the plan worktree's Pi session picker after a gate report (a pure ``chdir`` +
+    ``exec pi --resume`` through the session-resume engine — no run id, no handoff, no
+    selector write, no stage prompt).
+
+    A missing checkout is explained and returns (exit stays 0 — the gate report stands and no
+    fresh work is started). An existing checkout must validate against the resumed plan (the
+    fail-closed validator's typed refusals) and the launch must compose (the agent-dir refusal)
+    BEFORE anything is announced; typed refusals — the exec step's ``pi_cli_missing`` /
+    ``launch_failed`` included — exit 1 after the gate line. ``pi_args`` are never forwarded to
+    the picker (the reopened session keeps its own settings): one stderr note says so.
+    """
+    path = config.worktree_root / launch.resolve_plan_worktree_name(ref)
+    if not path.exists():
+        user_output(
+            f"no local checkout for plan #{plan_id} at {path} — nothing to reopen "
+            f"(perk implement {plan_id} restores it)"
+        )
+        return
+    try:
+        launch.validate_existing_checkout(
+            repo_root=main_root, path=path, ref=ref, source="the resumed plan"
+        )
+        spec = session_resume.prepare_session_resume(main_root=main_root, checkout=path)
+        if pi_args:
+            user_output(
+                "note: pi args are not forwarded to the session picker (the reopened session "
+                "keeps its own settings)"
+            )
+        user_output(
+            f"opening the plan worktree's session picker: {shlex.join(spec.argv)} in {path}"
+        )
+        session_resume.exec_session_resume(spec)  # the CLI *becomes* pi — nothing after this runs
+    except UserFacingCliError as exc:
+        fail(
+            ctx,
+            as_json=False,
+            error_type=exc.error_type or "invalid_input",
+            message=exc.format_message(),
+        )
 
 
 def _gate_message(
