@@ -7,21 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- As of 4cbd2e8 -->
+<!-- As of 55ceb78 -->
+
+### Major Changes
+
+- **Subagents ship with the extension.** Perk's `perk.*` agent definitions now travel with `@mgiles/perk`, keeping them aligned with the installed extension. After upgrading, run `perk init` followed by `perk doctor --fix` to remove legacy `.pi/agents/perk/` copies, then commit those deletions. Project agents using the same `perk.*` names override the packaged definitions. (55ceb78)
 
 ### Changed
 
-- Review-door waves (`/pr-review-terminal`, `/pr-review-browser`, `/stack-review-browser`, `/plan-review-browser`, `/objective-review-browser`) are now completion-only: reviewer findings land on your surface when the wave completes instead of streaming in, a code-owned `perk:wave` marker in the browser says the wave is running until then, and an early decision in the browser is authoritative but forgoes the findings. (cb610d82)
-- Every perk subagent wave now spawns with the pi-subagents intercom bridge off, so children never carry a supervisor channel; `push_annotations` retries a failed post-readiness push a few times before presenting the findings in-session. (cb610d82)
-- The `subagent-host-tools` doctor check now treats pi-subagents 0.68.0 and later as fixed (the affected range is `0.67.x`) and says so in its `ok` message; perk's guidance baseline for pi-subagents moves to 0.68.0. (cb610d82)
+- Deliver review findings when the whole reviewer wave completes, for terminal PR reviews and browser PR, stack, plan, and objective reviews. A browser marker shows the wave is running; an early decision proceeds without its findings. (18cc375)
+- Limit `subagent-host-tools` warnings about FFF search overrides to pi-subagents 0.67.x; recognize the fix in 0.68.0 and update Perk's verified compatibility baseline to 0.68.0. (18cc375)
 
 ### Removed
 
-- Remove provisional finding streaming from the review doors and the `subagent-bridge-config` doctor check; a `subagents.intercomBridge.mode` setting no longer affects any perk flow. (cb610d82)
+- Remove the `subagent-bridge-config` doctor check. Perk subagent waves now disable the intercom bridge, so `subagents.intercomBridge.mode` no longer affects them. (18cc375)
 
 ### Fixed
 
-- perk's agent definitions load again on pi-subagents 0.68.0 and later, which rejects the removed `fallbackModels` frontmatter field. Run `perk init` or `perk doctor --fix` to refresh the delivered `.pi/agents/perk/` definitions; a user-owned definition that still carries the field fails to load with the engine's own error naming the file. (cb610d82)
+- Restore Perk agent loading on pi-subagents 0.68.0 and later by removing the unsupported `fallbackModels` field. Custom agent definitions must also remove that field and configure a single model. (55ceb78)
+- Retry failed browser annotation pushes after the browser is ready, and present the findings in-session if delivery still fails. (18cc375)
 
 ## [3.3.0] - 2026-09-10
 
