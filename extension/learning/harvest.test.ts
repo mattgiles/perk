@@ -3,8 +3,8 @@
 // the memory adapter — lane/task composition via the recorded spawn (fixed `lane.<ordinal>`
 // keys vs semantic labels), the deterministic pointer post-pass (injected exists), the
 // malformed-report lane degrades, and the wave-level failure arm. Lane planning and the pointer stamp are module-private, so those matrices are exercised
-// through the one entry op. The agent-def ↔ report-schema prose lockstep pin (+ the delivered
-// `.pi/agents/perk/` mirror) rides along. Fully offline.
+// through the one entry op. The agent-def ↔ report-schema prose lockstep pin rides along.
+// Fully offline.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -858,15 +858,4 @@ test("the harvest-analyst def agrees with the report schema — structured_outpu
   // The cap prose agrees with the one named constant.
   assert.ok(def.includes(`top **≤ ${HARVEST_MAX_OPPORTUNITIES}**`));
   assert.equal(schema.properties.opportunities.maxItems, HARVEST_MAX_OPPORTUNITIES);
-  // The delivered `.pi/agents/perk/` mirror stays byte-identical (the same-commit convergence).
-  const mirror = join(
-    import.meta.dirname,
-    "..",
-    "..",
-    ".pi",
-    "agents",
-    "perk",
-    "harvest-analyst.md",
-  );
-  assert.equal(readFileSync(mirror, "utf8"), def, "the .pi/agents/perk mirror must not drift");
 });

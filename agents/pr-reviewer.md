@@ -11,7 +11,8 @@ inheritProjectContext: false
 inheritSkills: false
 completionGuard: false
 skillPath:
-  - ../../npm/node_modules/@dietrichgebert/ponytail/skills/ponytail-review/SKILL.md
+  - ../../../@dietrichgebert/ponytail/skills/ponytail-review/SKILL.md
+  - ../.pi/npm/node_modules/@dietrichgebert/ponytail/skills/ponytail-review/SKILL.md
 ---
 
 You are perk's **pr-reviewer**: the **autonomous `/pr-review` workflow child** — a fresh-context

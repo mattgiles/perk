@@ -7,9 +7,10 @@ These promote the cross-plane packaging assertions formerly carried by the
   `package.json`, and the runtime-derived Python `perk.__version__`,
 - the built **wheel** bundles `perk/_shared/{README,registry,contracts}` and
   `perk/_data/CHANGELOG.md`,
-- the **npm tarball** ships `shared/` and `extension/index.ts` while excluding the dev-only
-  `extension/testing/` + `*.test.ts` (skills are delivered by the external `skills` CLI from the
-  git repo — they are no longer in the `pi` manifest or the npm tarball),
+- the **npm tarball** ships `shared/`, `extension/index.ts` and every `agents/*.md` (perk's
+  subagent defs, declared to pi-subagents via the manifest's `pi-subagents.agents`) while
+  excluding the dev-only `extension/testing/` + `*.test.ts` (skills are delivered by the external
+  `skills` CLI from the git repo — they are no longer in the `pi` manifest or the npm tarball),
 - the skill source quality (each `skills/*/SKILL.md` has frontmatter that parses and
   validates — Pi's loader rejects a skill whose YAML doesn't parse), with the `pi` manifest
   and `files` list asserted to *not* carry skills,
@@ -22,6 +23,7 @@ CI-robust; in CI both toolchains are present so they actually run.
 """
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -31,9 +33,10 @@ import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 from perk import __version__
-from perk.convergence.init.agents import PERK_AGENTS
+from perk.substrate.config import SubagentsTable
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -186,7 +189,7 @@ def test_wheel_bundles_changelog(built_wheel):
 def test_sdist_includes_changelog(built_sdist):
     # Hatchling errors (`Forced include not found`) when building the wheel from an sdist that is
     # missing a force-include source, so the sdist must carry the changelog at its root (the same
-    # lockstep that keeps `shared`/`agents`/`prompts` in the sdist `only-include`).
+    # lockstep that keeps `shared`/`prompts` in the sdist `only-include`).
     with tarfile.open(built_sdist) as tf:
         names = tf.getnames()
     assert f"perk-{_pyproject_version()}/CHANGELOG.md" in names, names
@@ -262,18 +265,94 @@ def test_build_pins_and_all_packages_flag_present():
 
 @pytest.mark.slow
 @pytest.mark.xdist_group("wheel_build")
-def test_wheel_bundles_agents(built_wheel):
-    # perk's subagent defs are bundled into the wheel as `perk/_agents` (force-include) so
-    # `perk init` can materialize them into consumer `.pi/agents/perk/` dirs. The census is
-    # exact in both directions: PERK_AGENTS (the delivery SSOT) must equal the `agents/`
-    # source-def set — a def added without joining the tuple would package fine yet never be
-    # delivered by `perk init` — and every PERK_AGENTS def must ride the wheel.
-    source_defs = {path.stem for path in (REPO_ROOT / "agents").glob("*.md")}
-    assert set(PERK_AGENTS) == source_defs, set(PERK_AGENTS) ^ source_defs
+def test_wheel_and_sdist_exclude_agents(built_wheel, built_sdist):
+    # perk's subagent defs ship in the npm package only (pi-subagents package agents); the
+    # Python plane keeps no consumer of `agents/`, so neither the wheel nor the sdist carries it.
     with zipfile.ZipFile(built_wheel) as zf:
-        names = set(zf.namelist())
-    expected = {f"perk/_agents/{name}.md" for name in PERK_AGENTS}
-    assert expected <= names, expected - names
+        wheel_names = zf.namelist()
+    assert not any(n.startswith("perk/_agents/") for n in wheel_names), wheel_names
+    with tarfile.open(built_sdist) as tf:
+        sdist_names = tf.getnames()
+    prefix = f"perk-{_pyproject_version()}/agents/"
+    assert not any(n.startswith(prefix) for n in sdist_names), sdist_names
+
+
+def test_package_manifest_declares_agent_dir():
+    # pi-subagents discovers an installed package's agent directories from the package.json
+    # `pi-subagents.agents` declaration (`extractSubagentPathsFromPackageRoot`); the top-level
+    # form leaves pi's own `pi` manifest namespace untouched. `files` must ship the directory.
+    pkg = _package_json()
+    assert pkg["pi-subagents"] == {"agents": ["./agents"]}
+    assert "agents/" in pkg["files"]
+
+
+def _frontmatter(path: Path) -> dict:
+    return yaml.safe_load(path.read_text(encoding="utf-8").split("---", 2)[1])
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(shutil.which("npm") is None, reason="npm not on PATH")
+def test_packed_package_declares_discoverable_agent_census(tmp_path):
+    """Black-box over the PACKED artifact, laid out exactly as pi installs it.
+
+    The real tarball is extracted to `<consumer>/.pi/npm/node_modules/@mgiles/perk` and walked the
+    way pi-subagents' package discovery walks an installed package (its documented manifest
+    contract, `docs/agents.md`): read the package's `package.json`, follow every
+    `pi-subagents.agents` entry relative to the package root, parse each `*.md` def's frontmatter,
+    and derive the runtime name `<package>.<name>`. That census must equal the source `agents/`
+    directory AND the `[models.subagents]` key set, and the reviewer defs' installed-layout
+    `skillPath` candidate must land on the exact Ponytail file beside the package. A `files` entry
+    dropped, the manifest key misspelled, a def missing `package: perk`, or a relocated def dir
+    fails here while the dry-run listing above would still pass. The engine's private tree is
+    deliberately not imported (`extension/installedPackageGuard.test.ts`,
+    `docs/developers/pi-subagents-reverify.md`); the live engine leg is the reverify doc's.
+    """
+    result = subprocess.run(
+        ["npm", "pack", "--json", "--pack-destination", str(tmp_path)],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    tarball = tmp_path / json.loads(result.stdout)[0]["filename"]
+    consumer = tmp_path / "consumer"
+    node_modules = consumer / ".pi" / "npm" / "node_modules"
+    package_root = node_modules / "@mgiles" / "perk"
+    with tarfile.open(tarball) as tf:
+        tf.extractall(tmp_path / "unpacked", filter="data")
+    shutil.move(tmp_path / "unpacked" / "package", package_root)
+
+    manifest = json.loads((package_root / "package.json").read_text(encoding="utf-8"))
+    agent_dirs = [
+        Path(os.path.normpath(package_root / entry)) for entry in manifest["pi-subagents"]["agents"]
+    ]
+    assert agent_dirs == [package_root / "agents"]
+    runtime_defs: dict[str, Path] = {}
+    for agent_dir in agent_dirs:
+        assert agent_dir.is_dir(), agent_dir
+        for path in sorted(agent_dir.glob("*.md")):
+            frontmatter = _frontmatter(path)
+            runtime_defs[f"{frontmatter['package']}.{frontmatter['name']}"] = path
+    source_defs = {f"perk.{p.stem}" for p in (REPO_ROOT / "agents").glob("*.md")}
+    assert source_defs, "expected at least one shipped def"
+    assert set(runtime_defs) == source_defs
+    # The Python-side key census (`[models.subagents]`) minus the repo-local dev-only auditor.
+    configurable = {
+        f"perk.{field.alias or name}" for name, field in SubagentsTable.model_fields.items()
+    } - {"perk.session-auditor"}
+    assert set(runtime_defs) == configurable
+    # The installed-layout `skillPath` candidate (first) resolves, from the packed def's own
+    # directory, to the exact Ponytail file the extension's preflight validates.
+    ponytail = node_modules / "@dietrichgebert" / "ponytail" / "skills"
+    for name, skill in (
+        ("pr-reviewer", "ponytail-review"),
+        ("adversarial-reviewer", "ponytail-review"),
+        ("draft-reviewer", "ponytail"),
+    ):
+        path = runtime_defs[f"perk.{name}"]
+        first = Path(os.path.normpath(path.parent / _frontmatter(path)["skillPath"][0]))
+        assert first == ponytail / skill / "SKILL.md", name
 
 
 @pytest.mark.slow
@@ -299,12 +378,14 @@ def test_npm_pack_lists_shipped_and_excludes_dev():
     assert "shared/README.md" in paths
     assert "shared/schemas/contracts/registry.schema.json" in paths
     assert "prompts/README.md" in paths
+    # Every perk.* subagent def rides the tarball (pi-subagents package agents).
+    agent_defs = {f"agents/{p.name}" for p in (REPO_ROOT / "agents").glob("*.md")}
+    assert agent_defs, "expected at least one agent def"
+    assert agent_defs <= paths, agent_defs - paths
 
     # Dev-only surface must be excluded.
     assert not any(p.startswith("extension/testing/") for p in paths), paths
     assert not any(p.endswith(".test.ts") for p in paths), paths
-    # Agent defs are delivered by the Python plane only — never via the npm tarball.
-    assert not any(p.startswith("agents/") for p in paths), paths
     # The docs tree (the Starlight site workspace and canonical docs alike) never ships.
     assert not any(p.startswith("docs/") for p in paths), paths
 

@@ -864,8 +864,8 @@ conflicts; only full finalization can prime. No counter mutation or automatic re
 
 The engine carries the public delegation event literals and emits on Pi's bus — no loader,
 preflight, profile evidence or digest; presence is Pi's tool census (no `subagent` tool →
-`unavailable`, no lock). The resolver definition, git-tracked `.pi/agents/perk/conflict-resolver.md`
-(reconverged by `subagent-agents`), drifts only by reviewed repo change — no dispatch check. Cwd
+`unavailable`, no lock). The resolver definition, the shipped `agents/conflict-resolver.md`
+(package-discovered by pi-subagents), drifts only by reviewed repo change — no dispatch check. Cwd
 NUL/CR/LF refused, other bytes single-quoted in the built `cd`; flagless `perk pr review-context
 --json` owns `base_ref`; rebase/verify/abort/push authority is the resolver's.
 
@@ -959,8 +959,32 @@ followUp injection, binding suffix, terminating submit/finalize success, cap/res
 worker completion are unchanged. A completed child cannot finish a worker: only canonical submit
 with `mergeable !== false` can. §8.35's report-wave invariants remain unchanged.
 
-**Perk-owned child profiles and delivery.** `src/perk/convergence/init/agents.py::PERK_AGENTS`
-delivers canonical `agents/*.md` byte-identically into `.pi/agents/perk/`. Ten delivered reports
+**Perk-owned child profiles and package delivery.** The canonical `agents/*.md` ship inside the
+`@mgiles/perk` npm package (`package.json` `files` carries `agents/`; the manifest's top-level
+`"pi-subagents": {"agents": ["./agents"]}` declares the directory). pi-subagents discovers them as
+**package agents** (`perk.<name>`, `source: "package"`, listed `[package]` in `/subagents`) — from
+the installed `.pi/npm/node_modules/@mgiles/perk/agents/` in consumer repos and from the repo
+root's own `package.json` in perk's checkout — and passes them through the same
+defaults/`agentOverrides` pipeline as project defs. Rank is `builtin < package < user < project`:
+a same-named project/user def **shadows** a package def (never a collision). Each `skillPath`
+entry is def-dir-relative; the reviewer defs carry a two-candidate list covering the installed
+layout (`../../../@dietrichgebert/ponytail/…`) then the dev-checkout layout
+(`../.pi/npm/node_modules/@dietrichgebert/ponytail/…`), the engine skipping a missing candidate.
+`.pi/agents/perk/` is **no longer perk-managed**: `perk init` neither creates nor touches
+`.pi/agents/`; a leftover directory (stale shadows) is a doctor `subagent-engine` `warn`, and the
+`doctor --fix` migration removes it. Check and fix share ONE classification
+(`doctor/legacy_agent_defs.py`), so the warn's remediation states exactly what `--fix` will do.
+The **preflight is all-or-nothing** and never follows a link: a symlink at `.pi`, `.pi/agents`
+or `.pi/agents/perk`, any entry outside the flat `<name>.md` shape the retired convergence wrote
+(a subdirectory, a link, a foreign file), or a def with no shipped replacement `agents/<name>.md`
+(extension not installed yet, or a retired name — removing it would leave that `perk.*` name
+with no def, whereas a stale shadow is never an outage) refuses the whole removal with one
+error naming the cause and deletes nothing. After a passing preflight each `unlink` and the
+`rmdir` are attempted in turn: an `OSError` lands on `fix_errors` (never swallowed) and the
+survivors keep shadowing theirs until the next `--fix` resumes — so the removal is all-or-nothing
+at the preflight, not transactional across I/O. `.pi/agents/.gitkeep` goes only when it is the
+sole leftover. No Python plane consumer of `agents/` remains (no wheel/sdist entry).
+Ten shipped reports
 (`pr-reviewer`, `review-classifier`, `objective-explorer`, `learn-analyst`, `harvest-analyst`,
 `dream-analyst`, `dream-reducer`, `adversarial-reviewer`, `draft-reviewer`, `scout`) plus the repo-local
 `perk-dev.session-auditor` select definition `async: true`. All eleven keep replacement base prompts,
@@ -979,7 +1003,7 @@ models stay intact — ONE `model:` per def, no `fallbackModels` (pi-subagents �
 any def carrying that removed field wholesale at load; `[models.subagents]` remains the
 spawn-time override) — as do exact-source Ponytail skillPath exceptions
 (pr/adversarial `ponytail-review`, draft `ponytail`). Explicit assignment skills are not discovered
-skill inheritance. The auditor is not added to the delivered set; user/manual agents are outside
+skill inheritance. The auditor is not added to the shipped set; user/manual agents are outside
 this closed profile policy. `scout` (`agents/scout.md`) is the general-purpose read-only analysis
 lane — no fixed rubric; each spawn's task defines the scope and the report format, with
 `structured_output` honored when a schema is supplied. `run_scout_wave` (§8.70) is its perk-owned
@@ -1633,11 +1657,10 @@ the `/plan-review-browser` door, §8.23):
 Forbidden on the door regardless: fetching the raw diff into the parent session (anchors come
 from the children) and any `gh` mutation.
 
-**The adversarial-reviewer angle agent.** A perk-owned project agent
+**The adversarial-reviewer angle agent.** A perk-owned package agent
 `agents/adversarial-reviewer.md` (runtime `perk.adversarial-reviewer`) — fresh-context,
 read-only, **report-only** (it never posts, never stages or writes files, never resolves
-threads, never spawns subagents), delivered like its siblings via the managed `.pi/agents/perk/`
-convergence. It reviews **any PR regardless of ownership — the untrusted posture is the default,
+threads, never spawns subagents), shipped in the extension package like its siblings. It reviews **any PR regardless of ownership — the untrusted posture is the default,
 not a foreign-PR special case** — along **one assigned angle**; the two driving
 human-in-the-loop review doors below (`/pr-review-terminal`, `/pr-review-browser`) are its only
 perk-owned spawn sites (via the `start_review_wave` wave),
@@ -2415,6 +2438,18 @@ second `--fix` at `fixed == []`).
 - `package` — the wiring/install/version surfaces: `settings-wiring`, `extension-install`, the
   `required-perk-version` managed check, and the report-only probes `cli-version`
   (CLI-vs-repo-pin warn), `resource-overrides` (pi overrides touching perk's own resources),
+  `subagent-engine` (report-only, never `fail`: `ok` — the engine's presence is owned by
+  `settings-wiring` and the `perk.*` defs ship inside the extension package as pi-subagents
+  package agents, the detail enumerating the shipped defs — or `warn` on a leftover
+  `.pi/agents/perk/` directory from the retired file delivery, whose stale project-rank defs
+  shadow the shipped ones; the sole probe with a repair, the `--fix` migration
+  `_remove_legacy_subagent_agent_defs`, whose preflight is all-or-nothing and link-blind — a
+  symlink at `.pi`/`.pi/agents`/`.pi/agents/perk`, any entry outside the flat `*.md` shape, or a
+  def with no shipped replacement refuses the whole removal with one error naming the cause
+  (the warn's remediation carries the same text); after a passing preflight an I/O failure on
+  an individual `unlink`/`rmdir` is reported on `fix_errors` and the next `--fix` resumes —
+  removing `.pi/agents/.gitkeep` only when it is the sole leftover, filesystem-only, the human
+  commits the deletions),
   `subagent-compat` (installed pi-subagents version vs the guidance-verified version — `warn`
   on mismatch or an unreadable version, `info` when not installed; no source probes),
   `subagent-host-tools` (warns — never fails, no `--fix` — when the installed pi-subagents is
@@ -2430,7 +2465,8 @@ second `--fix` at `fixed == []`).
   pi-subagents is not installed or its version is unreadable), and `ponytail-compat` (exact
   package/`pi.skills`/skill-file/frontmatter;
   known-good remediation `npm:@dietrichgebert/ponytail@4.9.0` + `perk init` + session restart)
-  — all report-only probes warn at worst and have no `--fix` arm. (The former
+  — all report-only probes warn at worst and have no `--fix` arm (`subagent-engine`'s leftover
+  arm being the one migration-repaired exception). (The former
   `subagent-bridge-config` probe is retired: perk waves spawn with the intercom bridge off, so
   a settings-scope `subagents.intercomBridge.mode` no longer affects any perk flow.) `--fix` also migrates a former
   git-clone consumer forward by removing the orphaned clone. A managed piece `--fix` cannot
@@ -3107,8 +3143,9 @@ applies to perk's agents — frontmatter picks per-role economy).
 **`subagents.disableBuiltins` convergence (init-owned):** perk converges the constant
 `"subagents": {"disableBuiltins": true}` into `.pi/settings.json` in **every** perk repo —
 **constant desired with no config read**, the deliberate divergence from `[compaction]`/`[models]`'s
-write-when-present shape: perk borrows pi-subagents as the delegation *engine only* and delivers
-its own `perk.*` agent defs, so the builtin agents are model-facing noise everywhere perk works.
+write-when-present shape: perk borrows pi-subagents as the delegation *engine only* and ships
+its own `perk.*` agent defs as pi-subagents package agents, so the builtin agents are
+model-facing noise everywhere perk works.
 There is **no opt-out knob** (and none can be added under that spelling — the legacy `[subagents]`
 table remains a schema-v2 tripwire in `perk/substrate/config.py` that hard-fails toward
 `[models.subagents]`). It is **Python-plane-only** (pi-subagents consumes `settings.json` itself at
@@ -10931,7 +10968,7 @@ execute time (§8.61) and threaded here.
 **The agent.** `perk.dream-analyst` (`agents/dream-analyst.md`): report-only
 (§8.1), read-only tool posture
 (`read, grep, find, ls, bash`), fresh context, engine-injected `structured_output` completion
-(never fenced JSON), delivered via `PERK_AGENTS` into `.pi/agents/perk/`.
+(never fenced JSON), shipped in the extension package like its siblings.
 
 ## §8.61 · The learn-dream reducer wave + the `run_dream_wave` tool
 
@@ -11042,7 +11079,7 @@ distillation/read cost, harvest-follow-up quality). **The agent:** `perk.dream-r
 (`agents/dream-reducer.md`): report-only (§8.1), read-only tool posture (`read, grep, find, ls, bash`), fresh context,
 engine-injected `structured_output` completion (never fenced JSON), stronger-tier default
 model (`anthropic/claude-fable-5` — the reducers are the judgment-heaviest lanes; no fallback
-model, pi-subagents ≥ 0.68.0 rejects the field), delivered via `PERK_AGENTS` into `.pi/agents/perk/`.
+model, pi-subagents ≥ 0.68.0 rejects the field), shipped in the extension package like its siblings.
 
 **The closed reducer schema.** `DREAM_REDUCER_REPORT_SCHEMA`: `additionalProperties: false`
 at every level, all fields required, no if/then, no `pattern`; every `maxItems`/`maxLength`

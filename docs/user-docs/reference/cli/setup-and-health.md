@@ -65,7 +65,8 @@ pinned `@{version}`). perk's own extension is delivered as the pinned `npm:@mgil
 git clone, `perk doctor --fix` **migrates it forward** by removing the now-orphaned
 `.pi/git/<host>/<path>` clone (filesystem-only; idempotent — a no-op once gone).
 The `package` group's `extension-install` check verifies perk's own `@mgiles/perk` npm extension is
-**physically installed** under `.pi/npm/` at the pinned version. Because pi installs a missing
+**physically installed** under `.pi/npm/` at the pinned version (the install also carries perk's
+`perk.*` agent definitions, which pi-subagents discovers as package agents). Because pi installs a missing
 project-scope `npm:` package lazily and unlocked at launch, perk owns the install: `perk init`
 installs the pin (and reinstalls it on version drift), `perk doctor` **fails** when the install is
 absent or its version differs from the pin and `perk doctor --fix` installs/reinstalls
@@ -90,6 +91,23 @@ extension breaks every interactive stage session), or a `-`/`!` disable pattern 
 skill name (a substring heuristic — perk does not reimplement pi's filter semantics). Review the
 overrides via `pi config -l`; see
 [How to scope Pi resources per project](../../how-to/scope-pi-resources-per-project.md).
+The `package` group also carries the report-only `subagent-engine` check (never `fail`). The
+borrowed pi-subagents engine's presence is owned by `settings-wiring`, and perk's `perk.*` agent
+definitions ship inside the perk extension package — pi-subagents discovers them as package agents
+(`/subagents` lists them as `[package]`), so on a healthy repo the check is `ok` and its detail
+enumerates the shipped definitions. It **warns** when a `.pi/agents/perk/` directory is left over
+from an older perk version that wrote the definitions into the repo: pi-subagents ranks project
+definitions above package ones, so those stale copies silently shadow the shipped definitions until
+removed; the warning's remediation says exactly what `--fix` will do. `perk doctor --fix` removes
+the directory **filesystem-only** when it is the flat set of `.md` files older perk versions wrote
+and every one of them has a shipped replacement in the installed extension (taking
+`.pi/agents/.gitkeep` along only when it is the sole leftover) — a symlink at `.pi`, `.pi/agents`
+or `.pi/agents/perk`, a subdirectory, any other file, or a definition with no shipped counterpart
+(the extension not installed yet, or a name perk no longer ships) makes it refuse the whole
+removal and name the cause for you to handle by hand, so no `perk.*` agent is ever left without a
+definition. You commit the deletion; the shipped definitions serve from the next spawn, no session
+restart needed. Should an individual file fail to delete after the preflight passed, the error is
+reported and the next `--fix` picks up where it left off.
 The `package` group also carries the report-only `subagent-compat` check: it reads the installed
 pi-subagents version. `info` when the package is not installed (pi lazy-installs it at launch);
 `warn` — never `fail`, no `--fix` — when the version is unreadable or differs from the version

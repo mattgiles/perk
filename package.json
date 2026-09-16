@@ -22,11 +22,17 @@
     "!extension/testing/",
     "shared/",
     "prompts/",
+    "agents/",
     "README.md"
   ],
   "pi": {
     "extensions": [
       "./extension/index.ts"
+    ]
+  },
+  "pi-subagents": {
+    "agents": [
+      "./agents"
     ]
   },
   "workspaces": [

@@ -1,8 +1,8 @@
 // The learn-analyst agent-def ↔ report-schema lockstep pins (the adversarialReviewWave.test.ts
 // pattern): the fake-responder wave tests never exercise the def, so this is the one guard
 // against def/schema drift — every angle slug, every report field the schema requires, all six
-// decision tokens, and the nullable `target` shape must appear in `agents/learn-analyst.md`,
-// and the delivered `.pi/agents/perk/` mirror stays byte-identical (same-commit convergence).
+// decision tokens, and the nullable `target` shape must appear in `agents/learn-analyst.md`
+// (the shipped def pi-subagents discovers as a package agent).
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -38,10 +38,4 @@ test("the agent def names every schema-derived vocabulary member", () => {
   assert.match(def, /`target` is\s+a\s+routable pointer[\s\S]*?or\s+`null`/i);
   // The completion contract: the report travels only through the structured_output call.
   assert.match(def, /`structured_output`/);
-});
-
-test("the .pi/agents/perk mirror stays byte-identical to the def", () => {
-  const def = readFileSync(DEF_PATH, "utf8");
-  const mirror = join(import.meta.dirname, "..", "..", ".pi", "agents", "perk", "learn-analyst.md");
-  assert.equal(readFileSync(mirror, "utf8"), def, "the .pi/agents/perk mirror must not drift");
 });

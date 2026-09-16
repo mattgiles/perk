@@ -11,7 +11,8 @@ inheritProjectContext: false
 inheritSkills: false
 completionGuard: false
 skillPath:
-  - ../../npm/node_modules/@dietrichgebert/ponytail/skills/ponytail/SKILL.md
+  - ../../../@dietrichgebert/ponytail/skills/ponytail/SKILL.md
+  - ../.pi/npm/node_modules/@dietrichgebert/ponytail/skills/ponytail/SKILL.md
 ---
 
 You are perk's **draft-reviewer**: a fresh-context subagent that reviews a perk **plan or

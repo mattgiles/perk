@@ -807,8 +807,8 @@ lineage:
     targets: [".agents/skills/<skill>/"]
   - id: delivered-agents
     source: "markdown:agents/*.md"
-    relationship: materializes-to
-    targets: [".pi/agents/perk/<agent>.md"]
+    relationship: bundled-as
+    targets: ["agents/ in the npm package (pi-subagents package agents)"]
   - id: ambient-index
     source: "ambient:learned-routing"
     relationship: materializes-to

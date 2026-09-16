@@ -216,16 +216,18 @@ injects no default — an unmeasured cost policy stays the operator's call.
 ## Write a custom subagent (`.pi/agents/<name>.md`)
 
 Distinct from the fixed `[models.subagents]` model-override table. Author your own agent def anywhere under
-`.pi/agents/` **except** the perk-owned `.pi/agents/perk/` subdir (perk rewrites and prunes that
-subdir on every `perk init`). The runtime name comes from the **frontmatter** `name` (+ optional
-`package` — perk reserves `package: perk`), and `model` is set there (not in `[models.subagents]`). Invoke it
+`.pi/agents/` (perk manages none of that tree — its own `perk.*` defs ship inside the perk extension
+package as pi-subagents package agents). The runtime name comes from the **frontmatter** `name` (+
+optional `package`); pi-subagents ranks project defs above package defs, so a project def named
+`perk.<name>` (`package: perk` + one of perk's names) silently **shadows** perk's shipped def of that
+name — never reuse those names. `model` is set in the frontmatter (not in `[models.subagents]`). Invoke it
 via pi's native `subagent` tool by its runtime name — `subagent({agent: "my-reviewer",
 task: "…"})` (pi-subagents ≥ 0.49 restored native structured single-child execution — a
 direct one-child call runs natively, never converted onto the workflow path);
 use `workflowScript` for multi-child orchestration or a custom result projection;
 `subagent { action: "list" }` still enumerates discovered agents. pi-subagents' **builtin** agents don't appear: perk converges
 the constant `"subagents": {"disableBuiltins": true}` into `.pi/settings.json` in every perk repo (engine-only
-borrow — perk ships its own `perk.*` agents). To re-enable one builtin, add a project-settings
+borrow — perk ships its own `perk.*` agents as package agents). To re-enable one builtin, add a project-settings
 per-agent `"subagents": {"agentOverrides": {"<name>": {"disabled": false}}}` entry; it survives
 init/doctor (perk owns only the `disableBuiltins` key). A user-global re-enable does not work.
 

@@ -31,7 +31,6 @@ perk-owned: it is Pi's directory with a perk-managed slice.
 | `.perk/managed-state.toml` | perk-generated (`perk init` / `doctor --fix`) | committed | yes |
 | `.pi/settings.json` | Pi (perk-managed slice) | committed | yes |
 | `.pi/npm/`, `.pi/git/` | Pi | gitignored | no |
-| `.pi/agents/perk/*.md` | perk-generated (Pi materialization) | committed | yes |
 | `.pi/APPEND_SYSTEM.md` | perk-generated (committed ambient index) | committed | yes |
 | `.agents/manifest.yaml` | user / skills CLI | committed | yes |
 | `.agents/manifest.d/perk*.yaml` | perk-generated (skills materialization) | committed | yes |
@@ -85,11 +84,15 @@ machine-local store behind the one-line post-upgrade notice (see
 interactively. It is self-healing (missing or garbled content is silently re-recorded) and safe
 to delete; no doctor check or init convergence touches it.
 
-**Pi-native materializations.** Two committed perk outputs live in Pi's namespace rather than
-under `.perk/`, because Pi discovers them there: `.pi/APPEND_SYSTEM.md` (the generated ambient
-routing index appended to every session's system prompt) and `.pi/agents/perk/` (perk's owned
-slice of Pi's project-agent namespace). They are perk-generated and committed, but they are
-framed as materializations into a host tool's directory — not evidence that `.pi/` is perk-owned.
+**Pi-native materializations.** One committed perk output lives in Pi's namespace rather than
+under `.perk/`, because Pi discovers it there: `.pi/APPEND_SYSTEM.md` (the generated ambient
+routing index appended to every session's system prompt). It is perk-generated and committed, but
+it is framed as a materialization into a host tool's directory — not evidence that `.pi/` is
+perk-owned. perk's own `perk.*` agent definitions are **not** written into the repo: they ship
+inside the perk extension package (`.pi/npm/node_modules/@mgiles/perk/agents/`) and pi-subagents
+discovers them as package agents (`/subagents` lists them as `[package]`). A `.pi/agents/perk/`
+directory left over from an older perk version only shadows the shipped definitions with stale
+copies; `perk doctor` warns about it and `perk doctor --fix` removes it (you commit the deletion).
 
 ## Related
 

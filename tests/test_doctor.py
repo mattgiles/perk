@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -976,14 +977,31 @@ def test_fix_skips_linear_repair_without_selection(scaffolded_perk_repo, stub_en
 
 
 def test_subagent_engine_signal_and_defs_dir(scaffolded_perk_repo):
-    # The constant informational pointer is `ok`, and the defs-dir convergence is `ok`
-    # on a freshly-converged repo. The informational detail lists the delivered defs.
+    # The report-only pointer is `ok` on a freshly-converged repo and names package discovery;
+    # the perk.* defs ship inside the installed extension package, so the detail enumerates the
+    # installed package's `agents/*.md` (planted here — the scaffold has no npm install) and no
+    # `subagent-agents` convergence exists any more.
+    shipped = scaffolded_perk_repo / ".pi" / "npm" / "node_modules" / "@mgiles" / "perk" / "agents"
+    shipped.mkdir(parents=True)
+    (shipped / "pr-reviewer.md").write_text("---\nname: pr-reviewer\n---\n", encoding="utf-8")
     report = run_doctor(scaffolded_perk_repo, verify=False)
     engine = next(c for c in report.checks if c.name == "subagent-engine")
     assert engine.status == "ok" and engine.group == "package"
-    assert "perk.pr-reviewer" in engine.detail  # delivered defs enumerated from .pi/agents/perk/
-    defs = next(c for c in report.checks if c.name == "subagent-agents")
-    assert defs.status == "ok"
+    assert "package agents" in engine.detail
+    assert "shipped defs: perk.pr-reviewer" in engine.detail
+    assert not (scaffolded_perk_repo / ".pi" / "agents" / "perk").exists()
+    assert "subagent-agents" not in {c.name for c in report.checks}
+
+
+def test_subagent_engine_names_missing_install(scaffolded_perk_repo):
+    # No installed package yet: the detail says so instead of listing nothing (never `fail`).
+    engine = next(
+        c
+        for c in run_doctor(scaffolded_perk_repo, verify=False).checks
+        if c.name == "subagent-engine"
+    )
+    assert engine.status == "ok"
+    assert "not installed yet" in engine.detail
 
 
 def _plant_subagents_package(root, *, version):
@@ -1378,31 +1396,175 @@ def test_ponytail_compat_divergence_warns(scaffolded_perk_repo, mutate, expected
     assert expected in check.detail
 
 
-def test_edited_delivered_def_reports_drift_and_is_fixed(scaffolded_perk_repo):
-    # Hand-editing a delivered `.pi/agents/perk/*.md` makes the `subagent-agents` convergence
-    # report drift; `--fix` rewrites it byte-for-byte from the bundled source.
-    from perk import _resources
-    from perk.convergence.init import PERK_AGENTS
+def _plant_shipped_agent_defs(root, *names):
+    """The installed extension package's `agents/` (the scaffold has no npm install), holding
+    the named shipped defs — the replacements the legacy-dir migration is gated on."""
+    shipped = root / ".pi" / "npm" / "node_modules" / "@mgiles" / "perk" / "agents"
+    shipped.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (shipped / f"{name}.md").write_text(f"---\nname: {name}\npackage: perk\n---\n")
+    return shipped
 
-    name = PERK_AGENTS[0]
-    delivered = scaffolded_perk_repo / ".pi" / "agents" / "perk" / f"{name}.md"
-    delivered.write_text("hand-edited\n", encoding="utf-8")
-    report = run_doctor(scaffolded_perk_repo, verify=False)
-    assert "subagent-agents" in {c.name for c in report.checks if c.status == "fail"}
+
+def _plant_legacy_agent_defs(root, *, gitkeep=True, shipped=True):
+    """A leftover `.pi/agents/perk/` from the retired file delivery (the flat shape it wrote):
+    two stale defs and (by default) the `.gitkeep` init once ensured, with (by default) their
+    shipped replacements installed. Returns the legacy dir."""
+    legacy = root / ".pi" / "agents" / "perk"
+    legacy.mkdir(parents=True)
+    (legacy / "scout.md").write_text("stale scout\n", encoding="utf-8")
+    (legacy / "pr-reviewer.md").write_text("stale pr-reviewer\n", encoding="utf-8")
+    if gitkeep:
+        (root / ".pi" / "agents" / ".gitkeep").write_text("", encoding="utf-8")
+    if shipped:
+        _plant_shipped_agent_defs(root, "scout", "pr-reviewer")
+    return legacy
+
+
+def _engine_check(root):
+    return next(c for c in run_doctor(root, verify=False).checks if c.name == "subagent-engine")
+
+
+def _legacy_fix_lines(report):
+    return [line for line in report.fixed if line.startswith(".pi/agents/")]
+
+
+def test_legacy_agent_defs_warn_and_are_removed_by_fix(scaffolded_perk_repo):
+    # A leftover `.pi/agents/perk/` only SHADOWS the shipped defs (project rank beats package
+    # rank), so it is a `warn`, never `fail`; `--fix` removes the flat tree filesystem-only,
+    # takes the sole-leftover `.gitkeep` with it, and is a no-op on the second run.
+    legacy = _plant_legacy_agent_defs(scaffolded_perk_repo)
+    engine = _engine_check(scaffolded_perk_repo)
+    assert engine.status == "warn" and engine.group == "package"
+    assert "shadow" in engine.message
+    assert "pr-reviewer.md, scout.md" in engine.detail
+    assert engine.remediation.startswith("perk doctor --fix removes the directory")
     fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
-    assert fixed.healthy
-    assert delivered.read_bytes() == (_resources.agents_dir() / f"{name}.md").read_bytes()
+    assert not legacy.exists()
+    assert not (scaffolded_perk_repo / ".pi" / "agents").exists()
+    assert _legacy_fix_lines(fixed) == [
+        ".pi/agents/perk/pr-reviewer.md: removed (perk agents now ship in the extension package)",
+        ".pi/agents/perk/scout.md: removed (perk agents now ship in the extension package)",
+        ".pi/agents/.gitkeep: removed (no agents remain)",
+    ]
+    assert fixed.fix_errors == []
+    assert _engine_check(scaffolded_perk_repo).status == "ok"
+    again = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert again.fixed == [] and again.fix_errors == []
 
 
-def test_missing_agents_dir_is_fail_only_on_owning_check(scaffolded_perk_repo):
-    # Removing `.pi/agents/` fails the owning `subagent-agents` convergence, NOT the
-    # informational `subagent-engine` pointer (no duplicate drift). `--fix` re-creates it.
-    shutil.rmtree(scaffolded_perk_repo / ".pi" / "agents")
-    report = run_doctor(scaffolded_perk_repo, verify=False)
-    assert "subagent-agents" in {c.name for c in report.checks if c.status == "fail"}
-    assert next(c for c in report.checks if c.name == "subagent-engine").status == "ok"
+def test_legacy_agent_defs_fix_keeps_user_agents_and_gitkeep(scaffolded_perk_repo):
+    # A user's own `.pi/agents/mine.md` is never touched, and the `.gitkeep` stays because it is
+    # no longer the sole leftover.
+    _plant_legacy_agent_defs(scaffolded_perk_repo)
+    mine = scaffolded_perk_repo / ".pi" / "agents" / "mine.md"
+    mine.write_text("user agent\n", encoding="utf-8")
     fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
-    assert (scaffolded_perk_repo / ".pi" / "agents" / ".gitkeep").is_file() and fixed.healthy
+    assert fixed.fix_errors == []
+    assert not (scaffolded_perk_repo / ".pi" / "agents" / "perk").exists()
+    assert mine.read_text(encoding="utf-8") == "user agent\n"
+    assert (scaffolded_perk_repo / ".pi" / "agents" / ".gitkeep").is_file()
+    assert not any(".gitkeep" in line for line in fixed.fixed)
+
+
+def _assert_nothing_removed(root, report):
+    legacy = root / ".pi" / "agents" / "perk"
+    assert (legacy / "scout.md").is_file() and (legacy / "pr-reviewer.md").is_file()
+    assert _legacy_fix_lines(report) == []
+
+
+@pytest.mark.parametrize(
+    ("plant", "named"),
+    [
+        (
+            lambda legacy: (legacy / "notes.txt").write_text("keep me\n"),
+            "notes.txt (not a .md file)",
+        ),
+        (lambda legacy: (legacy / "nested").mkdir(), "nested/ (directory)"),
+    ],
+)
+def test_legacy_agent_defs_fix_refuses_unexpected_entries(scaffolded_perk_repo, plant, named):
+    # All-or-nothing preflight: any entry outside the flat `*.md` shape the retired convergence
+    # wrote — a foreign file, a subdirectory — refuses the WHOLE removal (both defs survive) with
+    # one error naming the entry; the warn's remediation already says so.
+    legacy = _plant_legacy_agent_defs(scaffolded_perk_repo)
+    plant(legacy)
+    engine = _engine_check(scaffolded_perk_repo)
+    assert engine.status == "warn" and named in engine.detail
+    assert (
+        engine.remediation.startswith("perk doctor --fix will refuse")
+        and named in engine.remediation
+    )
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    _assert_nothing_removed(scaffolded_perk_repo, fixed)
+    errors = [e for e in fixed.fix_errors if e.startswith(".pi/agents/perk/")]
+    assert len(errors) == 1 and named in errors[0] and "not removed" in errors[0]
+
+
+def test_legacy_agent_defs_fix_refuses_missing_shipped_replacement(scaffolded_perk_repo):
+    # No shipped replacement for a legacy def (extension not installed / a retired name): removing
+    # it would leave that perk.* name with NO def — a stale shadow is never an outage, so refuse
+    # and point at `perk init`; once the replacement is present the same `--fix` proceeds.
+    _plant_legacy_agent_defs(scaffolded_perk_repo, shipped=False)
+    _plant_shipped_agent_defs(scaffolded_perk_repo, "scout")
+    engine = _engine_check(scaffolded_perk_repo)
+    assert (
+        engine.status == "warn"
+        and "no shipped replacement for perk.pr-reviewer" in engine.remediation
+    )
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    _assert_nothing_removed(scaffolded_perk_repo, fixed)
+    errors = [e for e in fixed.fix_errors if e.startswith(".pi/agents/perk/")]
+    assert len(errors) == 1 and "perk.pr-reviewer" in errors[0] and "perk init" in errors[0]
+    assert "perk.scout" not in errors[0]
+    _plant_shipped_agent_defs(scaffolded_perk_repo, "pr-reviewer")
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert fixed.fix_errors == []
+    assert not (scaffolded_perk_repo / ".pi" / "agents" / "perk").exists()
+
+
+@pytest.mark.parametrize("linked", [".pi", ".pi/agents", ".pi/agents/perk"])
+def test_legacy_agent_defs_symlinked_component_is_refused(scaffolded_perk_repo, tmp_path, linked):
+    # A symlink anywhere on the way to the legacy dir — `.pi`, `.pi/agents`, or `.pi/agents/perk`
+    # itself: perk never created one, so doctor warns (naming the link) and `--fix` deletes
+    # nothing — the target's contents survive and the error names the linked component.
+    target = tmp_path / "elsewhere"
+    link = scaffolded_perk_repo / linked
+    if link.exists():
+        # Relocate the real subtree (the scaffold's `.pi/settings.json` must keep resolving).
+        shutil.move(link, target)
+    else:
+        link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(target, target_is_directory=True)
+    inner = target / Path(".pi/agents/perk").relative_to(linked)
+    inner.mkdir(parents=True, exist_ok=True)
+    (inner / "x.md").write_text("outside\n", encoding="utf-8")
+    _plant_shipped_agent_defs(scaffolded_perk_repo, "x")
+    engine = _engine_check(scaffolded_perk_repo)
+    assert engine.status == "warn" and f"{linked} is a symlink" in engine.detail
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert link.is_symlink() and (inner / "x.md").is_file()
+    assert _legacy_fix_lines(fixed) == []
+    assert any(e.startswith(f"{linked}: is a symlink") for e in fixed.fix_errors)
+
+
+def test_legacy_agent_defs_nested_symlink_is_refused(scaffolded_perk_repo, tmp_path):
+    # A link inside the flat tree is an offender: nothing is removed, the link's target is never
+    # traversed, and the error names the link.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "y.md").write_text("outside\n", encoding="utf-8")
+    legacy = _plant_legacy_agent_defs(scaffolded_perk_repo)
+    (legacy / "link").symlink_to(outside, target_is_directory=True)
+    (legacy / "alias.md").symlink_to(outside / "y.md")
+    engine = _engine_check(scaffolded_perk_repo)
+    assert "link (symlink)" in engine.detail and "alias.md (symlink)" in engine.detail
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    _assert_nothing_removed(scaffolded_perk_repo, fixed)
+    assert (legacy / "link").is_symlink() and (legacy / "alias.md").is_symlink()
+    assert (outside / "y.md").is_file()
+    errors = [e for e in fixed.fix_errors if e.startswith(".pi/agents/perk/")]
+    assert len(errors) == 1 and "link (symlink)" in errors[0] and "alias.md (symlink)" in errors[0]
 
 
 def test_drift_detected_and_fixed_idempotently(scaffolded_perk_repo):
@@ -2921,8 +3083,8 @@ def test_artifact_health_ok_on_converged_repo(scaffolded_perk_repo):
     report = run_doctor(scaffolded_perk_repo, verify=False)
     check = _health_check(report)
     assert check.group == "state" and check.status == "ok"
-    assert check.message == "8 managed artifacts up-to-date"
-    assert len(report.artifact_health) == 8
+    assert check.message == "7 managed artifacts up-to-date"
+    assert len(report.artifact_health) == 7
     assert all(r.status == "up-to-date" for r in report.artifact_health)
 
 
@@ -2931,7 +3093,7 @@ def test_artifact_health_info_when_state_not_recorded(scaffolded_perk_repo):
     report = run_doctor(scaffolded_perk_repo, verify=False)
     check = _health_check(report)
     assert check.status == "info"
-    assert check.message == "8 managed artifacts up-to-date; state not yet recorded"
+    assert check.message == "7 managed artifacts up-to-date; state not yet recorded"
     assert ".perk/managed-state.toml" in check.detail
 
 
@@ -2941,7 +3103,7 @@ def test_artifact_health_state_missing_row(scaffolded_perk_repo):
     report = run_doctor(scaffolded_perk_repo, verify=False)
     check = _health_check(report)
     assert check.status == "warn" and check.remediation == "perk doctor --fix"
-    assert "1 state-missing" in check.message and "7 up-to-date" in check.message
+    assert "1 state-missing" in check.message and "6 up-to-date" in check.message
     assert "AGENTS.md (agents-block): state-missing" in check.detail
     assert _health_row(report, "agents-block").status == "state-missing"
 
@@ -3036,7 +3198,7 @@ def test_artifact_health_never_fails_and_serializes(scaffolded_perk_repo):
     assert state_checks and all(c.status != "fail" for c in state_checks)
     payload = report_to_dict(report)
     rows = payload["artifact_health"]
-    assert isinstance(rows, list) and len(rows) == 8
+    assert isinstance(rows, list) and len(rows) == 7
     statuses: dict[object, object] = {}
     for row in rows:
         assert isinstance(row, dict)

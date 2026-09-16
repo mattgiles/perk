@@ -4,7 +4,7 @@
 // re-decode (corpus-membership merge/overlap rules, manifest-order normalization, the
 // code-point measure), the strict-completeness runner over the memory adapter, the
 // verifyDocContainment structural-compatibility pin, and the agent-def ↔ report-schema prose
-// lockstep pin (+ the delivered `.pi/agents/perk/` mirror). Fully offline.
+// lockstep pin. Fully offline.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -1284,7 +1284,4 @@ test("the dream-analyst def agrees with the report schema — fields, dispositio
   assert.match(flat, /Audit ONLY your lane's docs/);
   assert.match(flat, /bounded verification read, never a broad corpus sweep/);
   assert.match(flat, /`empty_clusters` is not yours/);
-  // The delivered `.pi/agents/perk/` mirror stays byte-identical (the same-commit convergence).
-  const mirror = join(import.meta.dirname, "..", "..", ".pi", "agents", "perk", "dream-analyst.md");
-  assert.equal(readFileSync(mirror, "utf8"), def, "the .pi/agents/perk mirror must not drift");
 });

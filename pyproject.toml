@@ -60,7 +60,6 @@ packages = ["src/perk"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "shared" = "perk/_shared"
-"agents" = "perk/_agents"
 "prompts" = "perk/_prompts"
 "CHANGELOG.md" = "perk/_data/CHANGELOG.md"
 # The single bundled Hunk feedback publisher (contracts §8.58) — a one-file mapping so the
@@ -71,7 +70,6 @@ packages = ["src/perk"]
 only-include = [
     "src/perk",
     "shared",
-    "agents",
     "prompts",
     "README.md",
     "CHANGELOG.md",

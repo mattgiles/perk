@@ -37,10 +37,20 @@ you are about to build on new engine mechanics.
      envelope, the partial-settlement projection;
    - the agent-definition parser (`src/agents/agents.ts`, `src/agents/frontmatter.ts`): its
      **removed-field throws** (`uses removed frontmatter field '<name>'` — 0.68.0 rejects
-     `fallbackModels`; a new removal fails every delivered def at load and shows up as 0/N
+     `fallbackModels`; a new removal fails every shipped def at load and shows up as 0/N
      waves, so grep `agents/*.md` for the named field) and its `completionGuard: false`
      handling: a report-only lane must complete on a valid `structured_output` report and still
      fail a missing/invalid one (`run_ci` cannot catch this);
+   - **package agent discovery** — perk's `perk.*` defs reach sessions ONLY this way:
+     `collectPackageSubagentPaths` (`src/agents/agents.ts`) must still gather the project root
+     and every `.pi/npm/node_modules/*` package root, `extractSubagentPathsFromPackageRoot` must
+     still honor the top-level `package.json` `"pi-subagents": {"agents": [...]}` form,
+     `mergeAgentsForScope` (`src/agents/agent-selection.ts`) must keep the
+     `builtin < package < user < project` rank (a same-named project def SHADOWS a package def —
+     the doctor `subagent-engine` leftover arm rests on this), and `resolveSkills`
+     (`src/agents/skills.ts`) must keep resolving `skillPath` against `dirname(agent.filePath)`
+     and skipping a missing entry (`collectFilesystemSkills`: `if (!fs.existsSync(...)) continue`)
+     — the reviewer defs' two-candidate Ponytail `skillPath` depends on both;
    - the **host-tool intersection**: `getHostBuiltinToolNames` / `resolvePiLaunchToolPlan` /
      `isReviewOrScoutLaneAgent` in `src/runs/shared/child-tool-plan.ts` and the
      `hostAvailableBuiltins` call sites in `src/runs/background/async-execution.ts`. The 0.67.x

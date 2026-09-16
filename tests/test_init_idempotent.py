@@ -132,13 +132,9 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert not (tmp_path / ".perk" / "workflow" / ".gitkeep").exists()
     for sub in ("plans", "scratch/runs", "handoff", "markers"):
         assert (tmp_path / ".perk" / "workflow" / sub).is_dir()
-    # perk-owned agent-definitions home (committed `.gitkeep`).
-    assert (tmp_path / ".pi" / "agents" / ".gitkeep").is_file()
-    # perk's agent defs are delivered into the perk-owned `.pi/agents/perk/` subdir.
-    from perk.convergence.init import PERK_AGENTS
-
-    for name in PERK_AGENTS:
-        assert (tmp_path / ".pi" / "agents" / "perk" / f"{name}.md").is_file()
+    # perk's agent defs ship inside the extension npm package (pi-subagents package agents), so
+    # init neither creates nor touches `.pi/agents/` (no `.gitkeep`, no `perk/` subdir).
+    assert not (tmp_path / ".pi" / "agents").exists()
     gitignore = (tmp_path / ".gitignore").read_text()
     assert "/.pi/npm/" in gitignore
     assert "/.pi/agent/*\n!/.pi/agent/models.json" in gitignore

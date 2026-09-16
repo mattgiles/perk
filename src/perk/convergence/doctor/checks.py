@@ -12,6 +12,7 @@ from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
 from perk.convergence import capabilities, env, init, managed_state
+from perk.convergence.doctor import legacy_agent_defs
 from perk.convergence.doctor.data import _MANAGED_GROUP, Check, Status
 from perk.convergence.init.settings import PONYTAIL_NPM_NAME
 from perk.convergence.managed_state import ArtifactHealth, HealthStatus
@@ -696,25 +697,57 @@ def _issues_check(root: Path) -> Check:
     return Check("issues-backend", "issues", "ok", f"issues backend: {backend_id}")
 
 
-def _subagent_engine_check(root: Path) -> Check:
-    """Informational pointer for the borrowed spawned-delegation seam.
+def _shipped_agent_defs_listing(root: Path, self_repo: bool) -> str:
+    """Enumerate the shipped `agents/*.md` defs as `perk.<stem>` (repo root when self, else the
+    installed `@mgiles/perk` package), or say the package is not installed yet."""
+    agents_dir = init.shipped_agent_defs_dir(root, self_repo=self_repo)
+    if not agents_dir.is_dir():
+        return "(not installed yet — perk init / perk <stage> installs the extension)"
+    names = sorted(p.stem for p in agents_dir.glob("*.md"))
+    return ", ".join(f"perk.{n}" for n in names) if names else "(none)"
 
-    Enumerates the perk-owned agent defs delivered into `.pi/agents/perk/*.md` for the detail —
-    package/dir drift itself is owned by `settings-wiring` (the `npm:pi-subagents` entry) and
-    `subagent-agents` (which materializes + drift-repairs `.pi/agents/perk/`). Status `ok` keeps a
-    healthy repo's summary clean; the detail is a pointer, never a probe (no live spawn).
+
+def _subagent_engine_check(root: Path, self_repo: bool) -> Check:
+    """Report-only pointer for the borrowed spawned-delegation seam (never ``fail``).
+
+    The engine's presence is owned by `settings-wiring` (the `npm:pi-subagents` entry); the
+    perk.* defs ship inside the perk extension npm package and are discovered by pi-subagents as
+    package agents, so there is nothing to converge. The one hazard is a leftover
+    `.pi/agents/perk/` from the retired file delivery: project defs outrank package defs, so
+    stale copies silently shadow the shipped ones — `warn`, repaired by the `--fix` migration
+    (`_remove_legacy_subagent_agent_defs`). Check and fix share ONE classification
+    (`legacy_agent_defs`), so the remediation states exactly what `--fix` will do — remove, or
+    refuse and why. The detail is a pointer, never a probe (no live spawn).
     """
-    perk_dir = root / ".pi" / "agents" / "perk"
-    names = sorted(p.stem for p in perk_dir.glob("*.md")) if perk_dir.is_dir() else []
-    listing = ", ".join(f"perk.{n}" for n in names) if names else "(none)"
+    legacy = legacy_agent_defs.inspect_legacy_agent_defs(root)
+    if legacy.present:
+        refusal = legacy_agent_defs.legacy_removal_refusal(root, legacy, self_repo=self_repo)
+        remediation = (
+            "perk doctor --fix removes the directory (filesystem-only); commit the deletion"
+            if refusal is None
+            else f"perk doctor --fix will refuse — {refusal}"
+        )
+        return Check(
+            "subagent-engine",
+            "package",
+            "warn",
+            "legacy perk-delivered agent defs shadow the shipped ones",
+            f"{legacy_agent_defs.LEGACY_AGENT_DEFS_REL}/ still exists "
+            f"({legacy_agent_defs.describe_legacy_agent_defs(legacy)}); pi-subagents ranks "
+            "project defs above package defs, so these stale copies replace the perk.* defs "
+            "shipped in the perk extension until removed",
+            remediation,
+        )
     return Check(
         "subagent-engine",
         "package",
         "ok",
-        "borrowed pi-subagents engine + perk-owned agent defs",
-        "presence owned by settings-wiring; defs delivered into .pi/agents/perk/ by init "
-        "(subagent-agents convergence); perk agents are namespaced (package: perk) and invoked "
-        f"by explicit perk.* name; delivered defs: {listing}.",
+        "borrowed pi-subagents engine + package-shipped perk agents",
+        "presence owned by settings-wiring; perk.* defs ship inside the perk extension npm "
+        "package and are discovered by pi-subagents as package agents (/subagents lists them as "
+        f"[package]); shipped defs: {_shipped_agent_defs_listing(root, self_repo)}; legacy "
+        ".agents/skills/*/SKILL.md surface as stray agents (benign); the live-spawn smoke is "
+        "deferred.",
     )
 
 

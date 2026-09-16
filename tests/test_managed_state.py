@@ -5,9 +5,8 @@ import json
 
 import pytest
 
-from perk import __version__, _resources
+from perk import __version__
 from perk.convergence.init import run_init
-from perk.convergence.init.agents import PERK_AGENTS
 from perk.convergence.init.blocks import GITIGNORE_BODY, _agents_inner, _apply_managed_block
 from perk.convergence.init.settings import BORROWED_PACKAGES, PONYTAIL_PACKAGE
 from perk.convergence.init.skills import _desired_skills_manifest
@@ -20,7 +19,6 @@ from perk.convergence.managed_state import (
     block_inner,
     classify_artifact,
     desired_state,
-    directory_manifest,
     hash_block,
     hash_bytes,
     hash_directory,
@@ -105,7 +103,6 @@ EXPECTED_ARTIFACTS = {
     "settings-wiring": (".pi/settings.json", "block", "both"),
     "runner-workflow": (".github/workflows/perk-run.yml", "file", "both"),
     "remote-setup-action": (".github/actions/perk-remote-setup/action.yml", "file", "both"),
-    "subagent-agents": (".pi/agents/perk/", "directory", "both"),
     "skills-manifest": (".agents/manifest.d/perk.yaml", "file", "both"),
     "gitignore-block": (".gitignore", "block", "both"),
     "agents-block": ("AGENTS.md", "block", "both"),
@@ -157,12 +154,6 @@ class TestDesiredPayloads:
         agents = _descriptor("agents-block").desired_hash(tmp_path, self_repo=False)
         assert gitignore == hash_block(GITIGNORE_BODY)
         assert agents == hash_block(_agents_inner())
-
-    def test_subagent_agents_payload_is_the_directory_manifest(self, tmp_path):
-        source_dir = _resources.agents_dir()
-        files = {f"{name}.md": (source_dir / f"{name}.md").read_bytes() for name in PERK_AGENTS}
-        payload = _descriptor("subagent-agents").desired_payload(tmp_path, self_repo=False)
-        assert payload == directory_manifest(files)
 
     def test_settings_consumer_payload_pins_perk_and_borrowed_set(self, tmp_path):
         payload = _descriptor("settings-wiring").desired_payload(tmp_path, self_repo=False)
@@ -349,29 +340,6 @@ class TestObservedPayloads:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(b"1.2.3\n")
         assert descriptor.observed_payload(tmp_path) == b"1.2.3\n"
-
-    def test_directory_missing_and_empty_are_not_installed(self, tmp_path):
-        descriptor = _descriptor("subagent-agents")
-        assert descriptor.observed_payload(tmp_path) is None
-        agents = tmp_path / ".pi" / "agents" / "perk"
-        agents.mkdir(parents=True)
-        assert descriptor.observed_payload(tmp_path) is None  # zero .md files
-        (agents / "stray.txt").write_bytes(b"not md")
-        assert descriptor.observed_payload(tmp_path) is None  # non-md invisible
-
-    def test_directory_manifest_and_stray_md_sensitivity(self, tmp_path):
-        descriptor = _descriptor("subagent-agents")
-        agents = tmp_path / ".pi" / "agents" / "perk"
-        agents.mkdir(parents=True)
-        (agents / "a.md").write_bytes(b"alpha")
-        base = descriptor.observed_hash(tmp_path)
-        assert base == hash_directory({"a.md": b"alpha"})
-        (agents / "stray.md").write_bytes(b"extra")
-        assert descriptor.observed_hash(tmp_path) != base  # a stray .md changes the hash
-        (agents / "stray.txt").write_bytes(b"noise")  # ...but a non-md file does not
-        assert descriptor.observed_hash(tmp_path) == hash_directory(
-            {"a.md": b"alpha", "stray.md": b"extra"}
-        )
 
     def test_block_round_trips_with_the_real_embedding(self, tmp_path):
         descriptor = _descriptor("agents-block")

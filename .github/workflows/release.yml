@@ -78,7 +78,7 @@ jobs:
 
       # `uv build --package perk` produces perk's wheel + sdist into dist/, pinned to the
       # perk workspace member so the never-published `perk-dev` member is never built. The
-      # hatchling backend force-includes top-level shared/ → perk/_shared and agents/ → perk/_agents.
+      # hatchling backend force-includes top-level shared/ → perk/_shared.
       - name: Build wheel + sdist
         run: uv build --package perk
 

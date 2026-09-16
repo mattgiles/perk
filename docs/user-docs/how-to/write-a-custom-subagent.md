@@ -12,10 +12,13 @@ Add one project agent and run it directly through the `subagent` tool.
 
 ## Steps
 
-1. **Choose a user-owned path.** Project agents are discovered recursively under `.pi/agents/`, so
-   create `.pi/agents/<my-specialist>.md` or place the file in your own nested directory. Do not use
-   `.pi/agents/perk/`: perk owns only that subtree, converges its managed `perk.*` definitions there, and
-   prunes foreign files from it.
+1. **Choose a path under `.pi/agents/`.** Project agents are discovered recursively under
+   `.pi/agents/`, so create `.pi/agents/<my-specialist>.md` or place the file in any nested directory
+   of your own — perk manages none of that tree. What matters is the **name**: perk's own `perk.*`
+   definitions ship inside the perk extension package and pi-subagents ranks project definitions
+   above package ones, so a project definition named `perk.<name>` (frontmatter `package: perk` plus
+   perk's `name`) silently **replaces** perk's shipped definition of that name. Never reuse those
+   names.
 2. **Write a minimal agent definition.** The frontmatter `name` is its runtime name; the body is its
    system prompt.
 
@@ -49,7 +52,7 @@ Add one project agent and run it directly through the `subagent` tool.
 ## Perk-owned profiles
 
 Perk's code-owned report waves use background children selected by `async: true` in their
-managed definitions (and in the repo-local session auditor). Child calls deliberately omit
+shipped definitions (and in the repo-local session auditor). Child calls deliberately omit
 `async` so native workflow awaiting still collects their reports. Reports replace the base
 prompt, inherit neither global/project context nor discovered skills, and omit extension lists
 so runner ambient discovery remains available. Explicit source-bound Ponytail assignment skills
@@ -59,10 +62,12 @@ are separate from discovered-skill inheritance. Each definition carries exactly 
 pi-subagents ≥ 0.68.0 refuses to load **any** agent definition carrying the removed
 `fallbackModels` frontmatter field — its own load error names the file and the field
 (`Agent '<path>' uses removed frontmatter field 'fallbackModels'. Configure one model instead.`),
-and while it fires, every wave that needs that agent reports zero coverage. Perk-delivered
-definitions are fixed by `perk init` (or `perk doctor --fix`), which reconverges
-`.pi/agents/perk/`; a definition you own is yours to edit — delete the key and keep a single
-`model:` line. There is no replacement field: same-launch model switching was removed upstream.
+and while it fires, every wave that needs that agent reports zero coverage. Perk's shipped
+definitions are fixed by upgrading the perk extension package (`perk init` installs the pinned
+version); a stale `.pi/agents/perk/` copy from an older perk would keep shadowing the fixed
+definition until `perk doctor --fix` removes it. A definition you own is yours to edit — delete the
+key and keep a single `model:` line. There is no replacement field: same-launch model switching was
+removed upstream.
 
 Report profiles also declare `completionGuard: false`. This is **report-only completion**, and it
 is separate from acceptance: the wave already disables pi-subagents' acceptance contract, while
@@ -79,8 +84,8 @@ annotations, and a failed lane is never a clean review). Your
 own custom agents keep the engine default; an agent override that re-enables the guard on a Perk
 report profile reintroduces the failure and is a documented compatibility limit.
 
-The conflict resolver (git-tracked `.pi/agents/perk/conflict-resolver.md`, perk-reconverged) keeps
-writer tools and project/skill inheritance. `/submit`/`/address` dispatch it via
+The conflict resolver (the shipped `perk.conflict-resolver`; `/subagents` lists it as `[package]`)
+keeps writer tools and project/skill inheritance. `/submit`/`/address` dispatch it via
 `resolve_submit_conflicts`: one code-owned foreground delegation at the worktree cwd, a strict
 structured record, one per-worktree execution lock and **no restriction packet** (no read-only
 floor). No `subagent` tool → `unavailable`, no lock; an agent-dir `extensions/subagent/config.json`
@@ -103,10 +108,10 @@ there is no name-based eligibility. Foreground mode does not discover ambient Pe
 ## Builtins in a perk repo
 
 pi-subagents currently ships `delegate`, `oracle`, `researcher`, `reviewer`, `scout`, and `worker`.
-The builtin `scout` is unrelated to perk's delivered `perk.scout` (`.pi/agents/perk/scout.md`; its
-runtime name is package-namespaced from the def's `package: perk` frontmatter): the builtin stays
-disabled under perk's bulk disable, `perk.scout` is always discoverable, and re-enabling the builtin
-does not change `perk.scout`. Authoring sessions reach `perk.scout` through the `run_scout_wave`
+The builtin `scout` is unrelated to perk's shipped `perk.scout` (`/subagents` lists it as
+`[package]`; its runtime name is package-namespaced from the def's `package: perk` frontmatter): the
+builtin stays disabled under perk's bulk disable, `perk.scout` is always discoverable, and
+re-enabling the builtin does not change `perk.scout`. Authoring sessions reach `perk.scout` through the `run_scout_wave`
 tool (one fresh read-only lane per self-contained brief).
 perk converges `subagents.disableBuiltins: true`, so those builtins are disabled by default in a
 perk-managed project. To re-enable one, add a project-level
@@ -126,4 +131,4 @@ agent's focused review output.
 - **Look up:** [`[models.subagents]`](../reference/configuration/models-and-compaction.md#modelssubagents) — perk-owned
   agent model configuration and builtin override rules.
 - **Do:** [How to delegate an investigation to perk.scout](delegate-an-investigation-to-perk-scout.md)
-  — fan a read-only investigation out to perk's delivered `perk.scout` from an authoring session.
+  — fan a read-only investigation out to perk's shipped `perk.scout` from an authoring session.

@@ -57,11 +57,14 @@ NPM_TARBALL_EXPECTED: frozenset[str] = frozenset(
         "shared/README.md",
         "shared/schemas/contracts/registry.schema.json",
         "prompts/README.md",
+        # The perk.* subagent defs ride the tarball (pi-subagents package agents); one anchor
+        # proves the directory ships.
+        "agents/scout.md",
     }
 )
 # Dev-only surfaces that must never ship: (prefix, suffix) rules over the packed paths.
 # `docs/` covers the whole docs tree — the Starlight site workspace and canonical docs alike.
-NPM_TARBALL_FORBIDDEN_PREFIXES: tuple[str, ...] = ("extension/testing/", "agents/", "docs/")
+NPM_TARBALL_FORBIDDEN_PREFIXES: tuple[str, ...] = ("extension/testing/", "docs/")
 NPM_TARBALL_FORBIDDEN_SUFFIXES: tuple[str, ...] = (".test.ts",)
 
 
