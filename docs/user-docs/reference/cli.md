@@ -43,6 +43,10 @@ escape a group:
 - **Setup & Health**: `init` and `doctor` (which is itself a group).
 - **The informational `release-notes`** — prints the bundled changelog's release notes (see
   [Remote and utility commands](./cli/remote-and-utility.md#perk-release-notes)).
+- **The session-picker `resume`** — opens Pi's own session picker (`pi --resume`) in a checkout
+  (this one, `--worktree NAME`/`root`, or a plan's worktree) to reopen a conversation; a session
+  reopen, not a stage launch — no run id, handoff, or stage prompt (see
+  [Remote and utility commands](./cli/remote-and-utility.md#perk-resume-target)).
 
 This hub keeps the [stage-launcher spine](#stage-launchers-the-earned-flat-names) and the
 [command map](#command-groups); exact per-command detail lives on six family references:
@@ -50,7 +54,7 @@ This hub keeps the [stage-launcher spine](#stage-launchers-the-earned-flat-names
 [Plan commands](./cli/plan.md), [Objective commands](./cli/objective.md),
 [PR commands](./cli/pr.md), [Learn and gist commands](./cli/learn-and-gist.md), and
 [Remote and utility commands](./cli/remote-and-utility.md) (`worktree`, `state`, `registry`,
-`skills`, `workflow`, `release-notes`).
+`skills`, `workflow`, `resume`, `release-notes`).
 
 **The launcher+worker merge.** Where a stage has *both* a real session-launcher half and a
 deterministic worker half, they merge into **one** command: a session by default, the worker under
@@ -185,6 +189,7 @@ above are the spine; every other command's detail lives on its family reference 
 | `perk registry` (alias `reg`) | Inspect and validate the shared stage registry. | [Remote and utility commands](./cli/remote-and-utility.md#registry) |
 | `perk skills` (alias `sk`) | Manage this repo's skills (sugar over the upstream skills CLI). | [Remote and utility commands](./cli/remote-and-utility.md#skills) |
 | `perk workflow` (alias `wf`) | Supervise dispatched CI runs. | [Remote and utility commands](./cli/remote-and-utility.md#dispatched-runs) |
+| `perk resume` | Open Pi's session picker in a checkout (bare, `--worktree`, or a plan's worktree). | [Remote and utility commands](./cli/remote-and-utility.md#perk-resume-target) |
 | `perk release-notes` | Show perk's bundled release notes. | [Remote and utility commands](./cli/remote-and-utility.md#perk-release-notes) |
 
 <!-- END perk cli command map -->

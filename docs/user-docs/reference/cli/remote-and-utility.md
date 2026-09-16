@@ -1,6 +1,6 @@
 ---
 title: "Remote and utility commands"
-description: "Exact reference for perk worktree, state, registry, skills, workflow run supervision, and release-notes."
+description: "Exact reference for perk worktree, state, registry, skills, workflow run supervision, perk resume (the Pi session picker), and release-notes."
 sidebar:
   order: 3016
 ---
@@ -8,9 +8,9 @@ sidebar:
 # Remote and utility commands
 
 This page holds the exact reference for the utility groups — `perk worktree`, `perk state`,
-`perk registry`, `perk skills`, the `perk workflow` dispatched-run supervisor, and
-`perk release-notes`. For the full command map and shared conventions, start at the
-[CLI commands hub](../cli.md).
+`perk registry`, `perk skills`, the `perk workflow` dispatched-run supervisor, `perk resume`
+(Pi's session picker for a checkout), and `perk release-notes`. For the full command map and
+shared conventions, start at the [CLI commands hub](../cli.md).
 
 ## Worktrees
 
@@ -220,6 +220,62 @@ a run it did not dispatch.
 
 Re-run a completed/failed dispatched run by its perk `run_id`. `--failed` re-runs only the failed
 jobs. Like `cancel`, works without a local dispatch record (any machine).
+
+## Session resumption
+
+### `perk resume [TARGET]`
+
+Browse and reopen Pi conversations for a checkout — perk positions itself in the chosen
+checkout, composes the launch environment, and execs Pi's own session picker (`pi --resume`).
+The picker is Pi's: its Current Folder / All scopes, search, empty lists, and cancellation are
+Pi's own, and project trust for the reopened session follows **Pi's own trust flow** (perk
+passes no `--approve`; a reopened `plan-<id>` worktree prompts for trust once).
+
+```bash
+perk resume                          # this checkout (a plan worktree resolves to itself)
+perk resume --worktree plan-42       # an existing checkout under the worktree root
+perk resume --worktree root          # the main checkout
+perk resume 42                       # plan #42's bound worktree (plan-42)
+perk resume 42 --worktree plan-42-b  # a named checkout that must be bound to plan #42
+perk resume 42 --dry-run             # resolve + print the target, launch nothing
+```
+
+**Where the picker opens.** Precedence is an explicit `TARGET`, then `--worktree`, then the
+checkout you ran the command from — the bare form never reads the main checkout's plan
+selector. `--worktree NAME` names a directory under the configured `[worktree] root` (resolved
+against the main checkout); `root` is a reserved word for the main checkout. `TARGET` is any plan
+selector — an issue id (`42`, `#42`, `ENG-123`), a pasted issue URL, or the plan's PR number/URL —
+and resolves to the plan's `plan-<id>` worktree (or, with `--worktree NAME`, a checkout that must
+be bound to that plan). `TARGET --worktree root` is refused: the main checkout is never a plan's
+implementation worktree. Run ids are not yet accepted as a target.
+
+**Never creates, restores, or rebinds.** A missing checkout is a typed `worktree_not_found`
+naming the `perk implement` gesture that creates or restores it; an existing one must pass the
+same fail-closed validation the stage launchers apply — `worktree_unregistered` (not a live
+registered git worktree), and for the plan forms `worktree_unbound` / `worktree_branch_mismatch`
+/ `worktree_plan_mismatch`. A bare `--worktree NAME` needs no plan binding. Other refusals:
+`invalid_input` (a bad name, or `TARGET --worktree root`), `pi_cli_missing`, `launch_failed`,
+and the plan selection's own errors (`plan_not_found`, `issue_kind_mismatch`).
+
+**What perk does not do.** No run id is minted, no handoff or plan selector is written, no
+stage prompt or `[models.stages]` flags are added, nothing is materialized, no setup hook runs —
+the reopened session keeps its own recorded identity (an inherited `PERK_RUN_ID` is dropped, so
+a session that already carries one keeps it). The agent directory follows the launch precedence:
+`PI_CODING_AGENT_DIR` → the main checkout's `[pi] agent_dir` → Pi's default, with the same
+missing-directory warning and `pi_agent_dir_invalid` refusal as a stage launch.
+
+**Terminal only.** Pi's picker is a full-screen TUI that Pi constructs even on a pipe, so
+`perk resume` without `--dry-run` refuses `not_a_tty` unless both stdin and stdout are terminals
+— decided right after the not-a-repo check and before any config or backend read. There is no
+`--json` and no launch banner. Exit codes: `0` dry-run · `1` typed refusals · `2` not a repo · a
+successful launch never returns (the terminal receives Pi's own exit status).
+
+**`--dry-run`** prints the resolved `checkout`, the `agent dir` and its source (`env` /
+`config` / `default`), and the exact `command` to stderr, then one JSON payload to stdout:
+`{"success": true, "checkout", "agent_dir", "agent_dir_source", "argv", "dry_run": true}`.
+
+`perk plan resume PLAN` at a review gate opens this same picker for the plan worktree — see
+[Plan commands](./plan.md#perk-plan-resume-plan).
 
 ## Release notes
 

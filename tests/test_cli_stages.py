@@ -178,7 +178,6 @@ def test_plan_is_dedicated_hybrid_group(git_repo):
     # The old flat spellings (and their aliases) are gone with no back-compat alias.
     for old in (
         ["save"],
-        ["resume", "42"],
         ["replan", "42"],
         ["plan-save"],
         ["psave"],
@@ -188,6 +187,12 @@ def test_plan_is_dedicated_hybrid_group(git_repo):
         gone = CliRunner().invoke(cli, old)
         assert gone.exit_code == 2, old
         assert "No such command" in gone.output
+    # The flat `resume` name is NOT the retired stage-resume verb: it is the session-picker
+    # door (contracts.md §8.71) — a different command with its own help, not an alias of
+    # `plan resume`.
+    picker = CliRunner().invoke(cli, ["resume", "--help"])
+    assert picker.exit_code == 0
+    assert "pi --resume" in picker.output and "Resume PLAN" not in picker.output
 
 
 def test_implement_remote_dry_run_is_dispatch_preview(git_repo):

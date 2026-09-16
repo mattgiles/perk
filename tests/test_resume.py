@@ -1,3 +1,4 @@
+import importlib
 import json
 import subprocess
 from pathlib import Path
@@ -9,8 +10,15 @@ from perk import github, plan
 from perk.backends import issue_backend, resolve
 from perk.backends.github import plans
 from perk.cli.cli import cli
+from perk.cli.context import PerkContext
 from perk.run import launch, resume
 from perk.state import cache
+from perk.substrate import git as git_mod
+from perk.substrate.config import Config
+
+# The `plan` package re-exports the Command under the module's name (`resume_cmd`), so the
+# MODULE — whose `sys` the TTY gate reads — is reached through the import system directly.
+resume_cmd_mod = importlib.import_module("perk.cli.commands.plan.resume_cmd")
 
 
 def _pr(state: str, *, is_draft: bool = False) -> github.PullRequest:
@@ -641,3 +649,200 @@ def test_not_a_repo_exits_2():
         result = runner.invoke(cli, ["plan", "resume", "7", "--dry-run", "--json"])
     assert result.exit_code == 2
     assert json.loads(result.output)["error_type"] == "not_a_repo"
+
+
+# --- the gate-arm picker (contracts.md §8.71): TTY-only, after the unchanged gate line --------
+
+_INCREMENTAL_READY_GATE = (
+    "plan #7 (PR #55): draft PR — mark it ready (perk pr ready from the plan worktree) "
+    "and /land when satisfied"
+)
+_AWAITING_GATE = "plan #7 (PR #55): no actionable feedback — awaiting the human review/land gate"
+_CLOSED_GATE = "plan #7 (PR #55): PR closed unmerged — needs human attention (reopen it or replan)"
+
+# The three gate verdicts as (pr, feedback, expected gate line).
+_GATE_VERDICTS = [
+    pytest.param(_pr("OPEN", is_draft=True), None, _INCREMENTAL_READY_GATE, id="ready_for_review"),
+    pytest.param(_pr("OPEN"), _feedback(threads=(_thread(True),)), _AWAITING_GATE, id="awaiting"),
+    pytest.param(_pr("CLOSED"), None, _CLOSED_GATE, id="pr_closed"),
+]
+
+
+def _fake_sys(*, stdin_tty: bool, stdout_tty: bool) -> type:
+    """A fake `sys` for resume_cmd's TTY gate — CliRunner swaps the real streams anyway."""
+
+    class _Stream:
+        def __init__(self, tty: bool) -> None:
+            self._tty = tty
+
+        def isatty(self) -> bool:
+            return self._tty
+
+    class _Sys:
+        stdin = _Stream(stdin_tty)
+        stdout = _Stream(stdout_tty)
+
+    return _Sys
+
+
+def _plan7_ref() -> plan.PlanRef:
+    """The ref `select_plan` reconstructs from `_state(...)` — the binding must equal it."""
+    return plan.PlanRef(
+        provider="github", pr_id="7", url="https://gh/o/r/issues/7", labels=("perk:plan",)
+    )
+
+
+def _plan7_worktree(root: Path, *, branch: str = "plan-7", bound: bool = True) -> Path:
+    wt = root / ".worktrees" / "plan-7"
+    git_mod.worktree_add(root, wt, branch=branch, create_branch=True)
+    if bound:
+        cache.write_plan_ref(wt, _plan7_ref())
+    return wt
+
+
+def _gate_run(monkeypatch, root: Path, pr, args, *, feedback=None, tty=None):
+    """A real-local `perk plan resume 7 [args]` against a gate-arm PR at `root`; `tty` is an
+    optional `(stdin, stdout)` pair swapped into the command module's `sys`."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _state(pr=pr))
+    if feedback is not None:
+        monkeypatch.setattr(github, "get_pr_feedback", lambda **k: feedback)
+
+    def boom(**k):
+        raise AssertionError("a gate verdict must never launch a stage")
+
+    monkeypatch.setattr(launch, "launch_stage", boom)
+    if tty is not None:
+        monkeypatch.setattr(resume_cmd_mod, "sys", _fake_sys(stdin_tty=tty[0], stdout_tty=tty[1]))
+    ctx = PerkContext.for_test(
+        cwd=root, repo_root=root, config=Config(worktree_root=root / ".worktrees")
+    )
+    return CliRunner().invoke(cli, ["plan", "resume", "7", *args], obj=ctx)
+
+
+@pytest.mark.parametrize(("pr", "feedback", "gate_line"), _GATE_VERDICTS)
+def test_tty_gate_arm_prints_the_gate_then_opens_the_worktree_picker(
+    monkeypatch, git_repo, launch_exec_recorder, pr, feedback, gate_line
+):
+    monkeypatch.setenv("PERK_RUN_ID", "01OPERATOR")
+    wt = _plan7_worktree(git_repo)
+    result = _gate_run(monkeypatch, git_repo, pr, [], feedback=feedback, tty=(True, True))
+    assert result.exit_code == 0, result.output
+    assert result.stdout == ""
+    lines = result.stderr.rstrip("\n").splitlines()
+    assert lines[-2] == gate_line  # the gate line is unchanged …
+    assert lines[-1] == f"opening the plan worktree's session picker: pi --resume in {wt}"
+    assert launch_exec_recorder.chdirs == [wt]
+    program, argv, env = launch_exec_recorder.calls[0]
+    assert program == launch_exec_recorder.pi_path and argv == ("pi", "--resume")
+    assert "PERK_RUN_ID" not in env  # the operator's run id is dropped, nothing minted
+    assert not cache.plan_ref_path(git_repo).exists()  # no main-root selector write
+    for root in (git_repo, wt):  # no handoff written anywhere
+        assert not any((root / ".perk").rglob("handoff*")) if (root / ".perk").exists() else True
+
+
+def test_tty_gate_arm_missing_worktree_explains_and_exits_0(
+    monkeypatch, git_repo, launch_exec_recorder
+):
+    result = _gate_run(monkeypatch, git_repo, _pr("CLOSED"), [], tty=(True, True))
+    assert result.exit_code == 0, result.output
+    lines = result.stderr.rstrip("\n").splitlines()
+    assert lines[-2] == _CLOSED_GATE
+    assert lines[-1] == (
+        f"no local checkout for plan #7 at {git_repo / '.worktrees' / 'plan-7'} — nothing to "
+        "reopen (perk implement 7 restores it)"
+    )
+    assert launch_exec_recorder.calls == [] and launch_exec_recorder.chdirs == []
+
+
+@pytest.mark.parametrize(
+    ("branch", "bound", "expected"),
+    [
+        ("plan-7", False, "carries no readable plan-ref binding"),
+        ("plan-8", True, "expected 'plan-7'"),
+    ],
+    ids=["unbound", "branch_mismatch"],
+)
+def test_tty_gate_arm_invalid_worktree_refuses_after_the_gate_line(
+    monkeypatch, git_repo, launch_exec_recorder, branch, bound, expected
+):
+    _plan7_worktree(git_repo, branch=branch, bound=bound)
+    result = _gate_run(monkeypatch, git_repo, _pr("OPEN", is_draft=True), [], tty=(True, True))
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    lines = result.stderr.rstrip("\n").splitlines()
+    assert _INCREMENTAL_READY_GATE in lines  # the gate report printed first …
+    assert lines.index(_INCREMENTAL_READY_GATE) < next(
+        i for i, line in enumerate(lines) if line.startswith("Error: ")
+    )
+    assert expected in result.stderr
+    assert launch_exec_recorder.calls == []
+
+
+def test_piped_gate_arm_output_is_byte_identical_and_never_opens_the_picker(
+    monkeypatch, git_repo, launch_exec_recorder
+):
+    """The picker path adds NOTHING to a non-interactive gate report: the default CliRunner
+    (non-TTY) and each half-TTY fake produce byte-equal (stdout, stderr) pairs, the gate line
+    last (the preamble — banner + `io_step` lines — is the pre-existing stream pinned by
+    `test_real_launch_banner_precedes_lookup`)."""
+    import perk.run.launch.materialize as materialize_mod
+
+    _plan7_worktree(git_repo)
+    outputs = []
+    for tty in (None, (True, False), (False, True)):
+        # The banner latches once per process; reset it so each run prints the FULL preamble.
+        materialize_mod._LAUNCH_BANNER_EMITTED = False
+        result = _gate_run(monkeypatch, git_repo, _pr("OPEN", is_draft=True), [], tty=tty)
+        assert result.exit_code == 0, result.output
+        outputs.append((result.stdout, result.stderr))
+    assert outputs[0] == outputs[1] == outputs[2]
+    stdout, stderr = outputs[0]
+    assert stdout == ""
+    assert stderr.rstrip("\n").endswith(_INCREMENTAL_READY_GATE)
+    assert "session picker" not in stderr and "not forwarded" not in stderr
+    assert launch_exec_recorder.calls == [] and launch_exec_recorder.chdirs == []
+
+
+def test_tty_gate_arm_json_wins_over_the_tty(monkeypatch, git_repo, launch_exec_recorder):
+    _plan7_worktree(git_repo)
+    result = _gate_run(monkeypatch, git_repo, _pr("CLOSED"), ["--json"], tty=(True, True))
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["next_action"] == "pr_closed" and data["message"] == _CLOSED_GATE
+    assert "session picker" not in result.stderr
+    assert launch_exec_recorder.calls == []
+
+
+def test_tty_gate_arm_dry_run_never_opens_the_picker(monkeypatch, git_repo, launch_exec_recorder):
+    _plan7_worktree(git_repo)
+    result = _gate_run(monkeypatch, git_repo, _pr("CLOSED"), ["--dry-run"], tty=(True, True))
+    assert result.exit_code == 0, result.output
+    assert result.stderr.rstrip("\n").endswith(_CLOSED_GATE)
+    assert "session picker" not in result.stderr
+    assert launch_exec_recorder.calls == []
+
+
+def test_tty_gate_arm_pi_args_are_noted_and_not_forwarded(
+    monkeypatch, git_repo, launch_exec_recorder
+):
+    wt = _plan7_worktree(git_repo)
+    pi_args = ["--model", "x", "--thinking", "high"]
+    result = _gate_run(monkeypatch, git_repo, _pr("CLOSED"), pi_args, tty=(True, True))
+    assert result.exit_code == 0, result.output
+    lines = result.stderr.rstrip("\n").splitlines()
+    assert lines[-3] == _CLOSED_GATE
+    assert lines[-2] == (
+        "note: pi args are not forwarded to the session picker (the reopened session keeps "
+        "its own settings)"
+    )
+    assert lines[-1] == f"opening the plan worktree's session picker: pi --resume in {wt}"
+    assert launch_exec_recorder.calls[0][1] == ("pi", "--resume")  # exactly, no pass-through
+
+
+def test_done_verdict_never_opens_the_picker(monkeypatch, git_repo, launch_exec_recorder):
+    _plan7_worktree(git_repo)
+    result = _gate_run(monkeypatch, git_repo, _pr("MERGED"), [], tty=(True, True))
+    assert result.exit_code == 0, result.output
+    assert result.stderr.rstrip("\n").endswith("is merged and learned — nothing to resume")
+    assert launch_exec_recorder.calls == []

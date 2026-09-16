@@ -6623,8 +6623,16 @@ change requests).
 ### The two consumers
 
 - **`perk plan resume`** launches a launchable verdict's stage (dry-run previews it) and
-  **reports** a gate/terminal verdict — gate arms never launch, in both real and dry-run modes
-  (benign decisions, exit 0), naming the human gate instead of launching the wrong stage. There
+  **reports** a gate/terminal verdict — gate arms never launch a *stage*, in both real and
+  dry-run modes (benign decisions, exit 0), naming the human gate instead of launching the wrong
+  stage. The three gate arms (`ready_for_review` / `awaiting_review` / `pr_closed`) print the
+  gate report and then, **in a local interactive terminal only** (no `--json` / `--dry-run` /
+  `--remote`, TTY stdin AND stdout), open the plan worktree's Pi session picker through §8.71 —
+  a pure `chdir` + `exec pi --resume` that marks nothing ready, reopens nothing, addresses
+  nothing: a missing checkout is explained on stderr (exit stays 0), an existing-but-invalid one
+  is a typed refusal (exit 1, after the gate line). `--json`, `--dry-run`, `--remote`, and
+  non-TTY gate outputs (stdout AND stderr) are byte-identical to the picker-less report; `done`
+  never opens the picker; `resolve_next_action` is untouched. There
   is **no `submit` resume target**: an open PR resolves to `address`, `awaiting_review`, or
   `ready_for_review`. Both resume payload shapes carry `next_action`; the launchable shape keeps
   `resumed_stage` (always equal to `next_action.stage_id`), gate shapes carry
@@ -12575,3 +12583,109 @@ carries none of the spawn-level facts below.
    with the constant `perk.parent-restrictions/1 {readOnly: true}` packet + `worktree: false`, and
    the spawn carries `context: "fresh"`, `mission: false`, the wave acceptance (`REPORT_ROLES`
    pins `perk.scout` among the spawned report agents).
+
+## §8.71 · Session resumption (`perk resume` and the `perk plan resume` gate-arm picker)
+
+Reopening a Pi conversation is a **session reopen, not a stage launch**: the Python exterior
+positions the cwd, composes the launch *environment*, and execs Pi's native session picker
+(`pi --resume`) in a chosen existing checkout. The engine is `perk.run.launch.session_resume`
+(`prepare_session_resume` → `SessionResumeLaunch{main_root, checkout, argv, agent_dir}`;
+`emit_session_resume_preview`; `exec_session_resume`; `resolve_resume_checkout`); its two
+consumers are the root `perk resume [TARGET] [--worktree NAME] [--dry-run]` command
+(`perk.cli.commands.resume_session_cmd`) and `perk plan resume`'s three gate arms (§8.37). The
+picker itself is Pi's own (Current Folder / All scopes, search, empty lists, cancellation) — perk
+never reimplements or filters it.
+
+### (a) The target table
+
+Precedence reuses §8.38's selection order — an explicit `PLAN` › an explicit `--worktree` › the
+invocation root. `--worktree` names resolve under the **main checkout's** effective
+`[worktree] root`; the bare form **never reads the main-root `cache.plan-ref` selector**.
+
+| form | checkout |
+| --- | --- |
+| `perk resume` | the invocation root (a linked worktree resolves to itself) |
+| `perk resume --worktree NAME` | `worktree_root / NAME` — must exist (`worktree_not_found`) and be a registered live worktree (`worktree_unregistered`); **no plan binding is required** |
+| `perk resume --worktree root` | the main checkout (`root` is a reserved word, compared before `checked_name`) |
+| `perk resume PLAN` | `worktree_root / plan-<id>` — must exist (`worktree_not_found`, naming `perk implement <id>`) and validate against the selected ref |
+| `perk resume PLAN --worktree NAME` | `worktree_root / NAME` — must exist and validate against the selected ref |
+| `perk resume PLAN --worktree root` | `invalid_input` — the main checkout is never a plan's implementation worktree |
+
+`PLAN` is any `select_plan` selector (id, `#id`, a Linear id, an issue URL, a PR number/URL) —
+the one selector seam; auth is backend-conditional (`require_github` only when the committed
+`[issues] backend` resolves to GitHub — the `plan from` precedent).
+
+### (b) The exterior rule
+
+The exterior **mints no run_id, writes no handoff, no `plan-ref` selector, no stage prompt, no
+`[models.stages]` flags, no skills/extension materialization, no setup hook**. It shares ONLY the
+launch environment with a stage launch, through the same seams: `resolve_launch_agent_dir`
+(the `launch_pi_agent_dir` precedence — env → main-checkout `[pi] agent_dir` → default — with
+the same missing-dir warning and `pi_agent_dir_invalid` refusal), `_build_exec_env(run_id=None)`,
+the `LINEAR_API_KEY` seed from the main checkout's `local.toml` (env wins), the pre-chdir
+absolute `pi` resolution (`pi_cli_missing`), the stale agent-lock sweep, and the one shared Pi
+executor `exec_pi` (`_exec_pi(ctx)` is the stage launch's `_LaunchContext` adapter over it, so the
+two paths cannot drift). `run_id=None` **removes an inherited `PERK_RUN_ID`** (never forwards
+it): a reopened session that already carries its workflow-state identity keeps it (the
+extension's `keep` arm); a session with NO persisted identity receives the extension's ordinary
+warm-session mint on load (§8.2 — an in-session branch entry, exactly as a hand-run `pi` in the
+repo; unchanged by this section). Accepted residual: the Linear-key seed rides the child env like
+an operator-exported key — if the human switches the picker to All, opens ANOTHER project's
+session, and approves that project's trust prompt, that project's extensions can read it (the
+same exposure as any exported secret in a hand-run `pi`; with no `--approve` it requires the
+human's explicit trust decision).
+
+### (c) No `--approve`
+
+Pi (0.85.1) resolves project trust — the `--approve` override included — for the **selected
+session's recorded cwd AFTER the picker**, and the All scope may open another project's session.
+A perk-composed `--approve` would therefore auto-trust a project perk never inspected, so the
+engine composes **no trust override** (and needs no linked-worktree probe): the argv is exactly
+`pi --resume`, and Pi's native trust flow (saved decision / default / interactive prompt) governs
+the actually-resumed cwd. A reopened ephemeral `plan-<id>` worktree carrying `.pi/` resources
+prompts for trust once — accepted.
+
+### (d) The terminal-only rule
+
+Pi 0.85.1's `--resume` constructs its TUI selector even on a piped stdin/stdout, so `perk resume`
+without `--dry-run` refuses **`not_a_tty`** unless BOTH stdin and stdout are terminals — decided
+right after `not_a_repo` (which still wins) and **before any config load, backend auth, or
+selection** (a scripted invocation fails fast with no config or backend read). The gate picker
+fires only under `not as_json and not dry_run and remote is None and stdin+stdout TTY` (the
+`perk ready` predicate); every other gate output is byte-identical to today's. `perk resume`
+prints no launch banner (a picker is not a stage launch).
+
+### (e) The dry-run payload
+
+`perk resume … --dry-run` (exit 0, side-effect-free) prints four human lines to stderr (the
+dim header, `checkout:`, `agent dir: <path> (<source>)` or `agent dir: unresolved`, `command:
+<shlex-joined argv>`) and ONE JSON payload to stdout with this key order:
+`{"success": true, "checkout": str, "agent_dir": str | null, "agent_dir_source": "env" |
+"config" | "default" | null, "argv": [...], "dry_run": true}`. `agent_dir_source == "config"` is
+the injection signal (no separate injected-path key). The previewed `argv` IS the exec'd argv
+(build-once parity).
+
+### (f) Never create, restore, or rebind
+
+Checkouts are never created, restored, or rebound by a reopen — a missing one is a typed
+`worktree_not_found` naming the `perk implement` gesture that creates/restores it. An existing
+checkout goes through the fail-closed validators (`require_registered_checkout` for the bare
+`--worktree NAME` form; `validate_existing_checkout` for the plan forms), whose typed refusals
+propagate in the validator's probe order: registered → live → binding readable → **branch →
+binding equality** — so an ordinary checkout of another plan (on its own `plan-<other>` branch)
+refuses `worktree_branch_mismatch`, and `worktree_plan_mismatch` needs a checkout on the right
+branch whose binding names another plan.
+
+### (g) Gate-arm `pi_args`
+
+`perk plan resume PLAN [PI_ARGS…]` at a gate arm never forwards `PI_ARGS` to the picker (the
+reopened session keeps its own settings); a non-empty list yields one stderr note before the
+"opening the plan worktree's session picker" line. The gate picker validates the checkout and
+composes the launch BEFORE announcing anything, so an agent-dir refusal surfaces before any
+"opening" line; the exec step's `pi_cli_missing` / `launch_failed` land after it.
+
+### (h) Deferred
+
+The run-id form (`perk resume RUN_ID` → the recorded session file) and session naming are later
+amendments; a ULID `TARGET` today falls through `select_plan`'s own typed errors
+(`SessionResumeLaunch` carries no `session_file`).

@@ -12,13 +12,16 @@ from perk.cli.ensure import UserFacingCliError
 from perk.delivery import DeliveryError, PrepareResult
 from perk.run import launch
 from perk.run.launch import (
+    LaunchAgentDir,
     _address_prompt,
     _build_exec_env,
     _initial_prompt,
     _stage_model_argv,
     _sweep_stale_pi_agent_locks,
+    exec_pi,
     launch_stage,
     resolve_base,
+    resolve_launch_agent_dir,
     resolve_plan_worktree_name,
     resolve_target,
     resolve_worktree,
@@ -28,7 +31,7 @@ from perk.state import cache
 from perk.substrate import config as config_mod
 from perk.substrate import git as git_mod
 from perk.substrate.bindings import Binding
-from perk.substrate.config import Config, StageModel
+from perk.substrate.config import Config, PiAgentDir, StageModel
 from perk.substrate.git import GitError
 from perk.substrate.skill_exposure import SkillsPolicy
 
@@ -106,10 +109,121 @@ def test_build_exec_env_pi_agent_dir_normalizes_only_blank_values(value):
     assert environ == {"PI_CODING_AGENT_DIR": value}
 
 
+def test_build_exec_env_no_run_id_drops_an_inherited_perk_run_id():
+    """``run_id=None`` (a session reopen) REMOVES an inherited ``PERK_RUN_ID`` — never forwards
+    it — while the CLI version still rides along."""
+    environ = {"PERK_RUN_ID": "inherited", "HOME": "/h"}
+    env = _build_exec_env(
+        run_id=None, environ=environ, fallback_linear_api_key=None, pi_agent_dir=None
+    )
+    assert "PERK_RUN_ID" not in env
+    assert env["PERK_CLI_VERSION"] == __version__
+    assert env["HOME"] == "/h"
+    assert environ == {"PERK_RUN_ID": "inherited", "HOME": "/h"}  # operator env untouched
+
+
+def test_build_exec_env_str_run_id_overrides_an_inherited_value():
+    env = _build_exec_env(
+        run_id="01X",
+        environ={"PERK_RUN_ID": "inherited"},
+        fallback_linear_api_key=None,
+        pi_agent_dir=None,
+    )
+    assert env["PERK_RUN_ID"] == "01X"
+
+
 def _write_pi_config(root, text):
     config_dir = root / ".perk"
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / "config.toml").write_text(text, encoding="utf-8")
+
+
+# --- resolve_launch_agent_dir: the shared agent-dir seam ---------------------------------
+
+
+def test_resolve_launch_agent_dir_env_arm_injects_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", "/operator/agent")
+    agent = resolve_launch_agent_dir(tmp_path)
+    assert agent.resolution == PiAgentDir(Path("/operator/agent"), "env")
+    assert agent.injected is None
+
+
+def test_resolve_launch_agent_dir_config_arm_injects_the_resolved_path(tmp_path, monkeypatch):
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    _write_pi_config(tmp_path, '[pi]\nagent_dir = ".pi/agent"\n')
+    (tmp_path / ".pi/agent").mkdir(parents=True)
+    agent = resolve_launch_agent_dir(tmp_path)
+    assert agent.resolution is not None and agent.resolution.source == "config"
+    assert agent.injected == agent.resolution.path == tmp_path / ".pi/agent"
+
+
+def test_resolve_launch_agent_dir_missing_config_dir_warns(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    _write_pi_config(tmp_path, '[pi]\nagent_dir = "missing"\n')
+    agent = resolve_launch_agent_dir(tmp_path)
+    assert agent.injected == tmp_path / "missing"
+    assert "no auth.json/models.json" in capsys.readouterr().err
+    assert not (tmp_path / "missing").exists()
+
+
+def test_resolve_launch_agent_dir_non_directory_refuses(tmp_path, monkeypatch):
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    _write_pi_config(tmp_path, '[pi]\nagent_dir = "file"\n')
+    (tmp_path / "file").touch()
+    with pytest.raises(UserFacingCliError, match="not a directory") as exc:
+        resolve_launch_agent_dir(tmp_path)
+    assert exc.value.error_type == "pi_agent_dir_invalid"
+
+
+@pytest.mark.parametrize("text", ["[pi", "[pi]\nagent_dir = 7\n"])
+def test_resolve_launch_agent_dir_broken_config_warns_and_falls_back_to_default(
+    tmp_path, monkeypatch, capsys, text
+):
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    _write_pi_config(tmp_path, text)
+    agent = resolve_launch_agent_dir(tmp_path)
+    assert agent.resolution == PiAgentDir(home / ".pi" / "agent", "default")
+    assert agent.injected is None
+    assert "launching without the redirect" in capsys.readouterr().err
+
+
+# --- exec_pi: the one shared Pi exec pipeline ---------------------------------------------
+
+
+def _exec_pi_direct(tmp_path, launch_exec_recorder, *, run_id):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    exec_pi(
+        main_root=tmp_path,
+        checkout=checkout,
+        argv=("pi", "--resume"),
+        run_id=run_id,
+        agent_dir=LaunchAgentDir(
+            resolution=PiAgentDir(launch_exec_recorder.agent_dir, "env"), injected=None
+        ),
+    )
+    return checkout
+
+
+def test_exec_pi_without_run_id_drops_inherited_perk_run_id(
+    tmp_path, monkeypatch, launch_exec_recorder
+):
+    monkeypatch.setenv("PERK_RUN_ID", "01INHERITED")
+    checkout = _exec_pi_direct(tmp_path, launch_exec_recorder, run_id=None)
+    assert launch_exec_recorder.chdirs == [checkout]
+    program, argv, env = launch_exec_recorder.calls[0]
+    assert program == launch_exec_recorder.pi_path and argv == ("pi", "--resume")
+    assert "PERK_RUN_ID" not in env
+    assert env["PERK_CLI_VERSION"] == __version__
+
+
+def test_exec_pi_with_run_id_sets_it(tmp_path, monkeypatch, launch_exec_recorder):
+    monkeypatch.setenv("PERK_RUN_ID", "01INHERITED")
+    _exec_pi_direct(tmp_path, launch_exec_recorder, run_id="01X")
+    assert launch_exec_recorder.calls[0][2]["PERK_RUN_ID"] == "01X"
 
 
 def _launch_agent_dir_plan(root, *, dry_run=False):

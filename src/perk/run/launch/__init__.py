@@ -12,7 +12,7 @@ plan-body snapshot, Linear emission, cwd, dry-run JSON — consumes ``ResolvedWo
 so the launched ``pi`` links ``active_plan_ref`` on ``session_start`` (D5). ``create`` is
 **idempotent** (D4): an existing worktree is validated reuse, not re-created; a missing
 ``reuse`` checkout restores from ``origin/plan-<id>`` (learn excepted). Arbitrary plan-``#N``
-resolution is ``perk resume``/the explicit ``PLAN`` selectors (D2).
+resolution is ``perk plan resume``/the explicit ``PLAN`` selectors (D2).
 
 A ``--remote`` launch of a drivable stage (``implement``/``address``) is a **real drive**
 (contracts.md §8.13): :func:`_drive_remote_target` persists the ``run_id→plan``
@@ -27,10 +27,14 @@ self-gating post-dry-run pipeline :func:`_write_session_handoff` / :func:`_warm_
 / :func:`_exec_pi`), the pure child-environment builder (:func:`_build_exec_env`), the
 ``--dry-run`` preview
 (:func:`_emit_dry_run_preview`), the agent-lock sweep (:func:`_sweep_stale_pi_agent_locks`,
-targeting the shared ``launch_pi_agent_dir`` resolution), and the module constants used here
-(``_PI_AGENT_LOCK_FILES`` / ``_NPM_QUIET_ENV``). The module-level imports the string-path
-monkeypatches resolve against (``os`` / ``subprocess`` / ``github`` / ``git`` / ``cache`` /
-``linear_agent`` / ``init`` / ``runner``) are kept here so ``perk.run.launch.<mod>.attr`` rebinds
+targeting the shared ``launch_pi_agent_dir`` resolution), the shareable launch-environment
+seams every Pi exec — stage launch or session reopen — flows through
+(:func:`resolve_launch_agent_dir` → :class:`LaunchAgentDir`, and the one Pi executor
+:func:`exec_pi`, which :func:`_exec_pi` adapts a :class:`_LaunchContext` onto), and the module
+constants used here (``_PI_AGENT_LOCK_FILES`` / ``_NPM_QUIET_ENV``). The module-level imports
+the string-path monkeypatches resolve against (``os`` / ``subprocess`` / ``github`` / ``git`` /
+``cache`` / ``linear_agent`` / ``init`` / ``runner``) are kept here so
+``perk.run.launch.<mod>.attr`` rebinds
 the shared singleton every submodule that imports the same module sees. The orchestrator and its
 phase functions reference
 the moved helpers (``resolve_target`` / ``resolve_worktree`` / ``_resolve_prompt`` /
@@ -92,10 +96,12 @@ from perk.run.launch.worktree import (
     _fetch_best_effort,
     _sync_main_checkout,
     checked_name,
+    require_registered_checkout,
     resolve_base,
     resolve_plan_worktree_name,
     resolve_target,
     resolve_worktree,
+    validate_existing_checkout,
 )
 from perk.state import cache, run_id
 from perk.substrate import git as git
@@ -164,6 +170,59 @@ class _LaunchContext:
     argv: tuple[str, ...]
     pi_agent_dir: Path | None = None
     agent_dir_resolution: PiAgentDir | None = None
+
+
+@dataclass(frozen=True)
+class LaunchAgentDir:
+    """The agent-dir half of a Pi launch environment, shared by stage launches and session
+    reopens.
+
+    ``resolution`` is the full launch-precedence resolution (env → main-checkout `[pi]
+    agent_dir` → pi's default) the stale-lock sweep targets — ``None`` when no directory is
+    resolvable (the sweep is skipped). ``injected`` is the value handed to the child's
+    ``PI_CODING_AGENT_DIR`` — set only when the ``config`` arm chose the dir (an operator env
+    value is inherited as-is; the default store needs no injection).
+    """
+
+    resolution: PiAgentDir | None
+    injected: Path | None
+
+
+def resolve_launch_agent_dir(repo_root: Path) -> LaunchAgentDir:
+    """Resolve the agent dir a cold-local Pi exec hands pi, through the shared launch-precedence
+    resolver — resolved once for preview/exec parity.
+
+    Inherited redirects count as operator choices, including the value injected by a parent
+    session into a nested cold launch. A broken main-checkout config warns and falls back to
+    pi's default store (no injection) — the same fallback the resolver's ``default`` arm yields.
+    Only the ``config`` arm injects: a missing configured dir warns (pi creates it on demand);
+    an existing non-directory refuses ``pi_agent_dir_invalid`` (pi cannot build its sessions
+    tree there). Reads ``launch_pi_agent_dir`` / ``default_pi_agent_dir`` / ``log_warn`` as bare
+    facade globals (the module-docstring name-binding rule).
+    """
+    try:
+        resolution = launch_pi_agent_dir(repo_root)
+    except (ConfigError, tomllib.TOMLDecodeError) as exc:
+        log_warn(
+            "could not read [pi] agent_dir from the main checkout config — "
+            f"launching without the redirect ({exc})"
+        )
+        resolution = default_pi_agent_dir()
+    injected = None
+    if resolution is not None and resolution.source == "config":
+        injected = resolution.path
+        if not injected.exists():
+            log_warn(
+                f"pi agent dir {injected} is missing — pi creates an empty agent dir "
+                "on demand; sessions launch with no auth.json/models.json"
+            )
+        elif not injected.is_dir():
+            raise UserFacingCliError(
+                f"pi agent dir {injected} is not a directory — pi cannot create its "
+                "sessions tree under a non-directory. Set [pi] agent_dir to a directory.",
+                error_type="pi_agent_dir_invalid",
+            )
+    return LaunchAgentDir(resolution=resolution, injected=injected)
 
 
 def _sweep_stale_pi_agent_locks(agent_dir: Path) -> None:
@@ -326,40 +385,17 @@ def launch_stage(
         plan_state=plan_state,
         plan_id=plan_id,
     )
-    # Resolve once for preview/exec parity through the shared launch-precedence resolver.
-    # Inherited redirects count as operator choices, including the value injected by a parent
-    # session into a nested cold launch. A broken main-checkout config warns and falls back to
-    # pi's default store (no injection) — the same fallback the resolver's `default` arm yields.
-    try:
-        agent_dir_resolution = launch_pi_agent_dir(repo_root)
-    except (ConfigError, tomllib.TOMLDecodeError) as exc:
-        log_warn(
-            "could not read [pi] agent_dir from the main checkout config — "
-            f"launching without the redirect ({exc})"
-        )
-        agent_dir_resolution = default_pi_agent_dir()
-    pi_agent_dir = None
-    if agent_dir_resolution is not None and agent_dir_resolution.source == "config":
-        pi_agent_dir = agent_dir_resolution.path
-        if not pi_agent_dir.exists():
-            log_warn(
-                f"pi agent dir {pi_agent_dir} is missing — pi creates an empty agent dir "
-                "on demand; sessions launch with no auth.json/models.json"
-            )
-        elif not pi_agent_dir.is_dir():
-            raise UserFacingCliError(
-                f"pi agent dir {pi_agent_dir} is not a directory — pi cannot create its "
-                "sessions tree under a non-directory. Set [pi] agent_dir to a directory.",
-                error_type="pi_agent_dir_invalid",
-            )
+    # Resolve once for preview/exec parity through the shared launch-precedence resolver (the
+    # seam every Pi exec shares with the session-reopen engine).
+    agent = resolve_launch_agent_dir(repo_root)
     ctx = _LaunchContext(
         repo_root=repo_root,
         config=config,
         stage=stage,
         resolved=resolved,
         rid=run_id_override or run_id.mint(),
-        pi_agent_dir=pi_agent_dir,
-        agent_dir_resolution=agent_dir_resolution,
+        pi_agent_dir=agent.injected,
+        agent_dir_resolution=agent.resolution,
         argv=_build_argv(
             stage=stage,
             config=config,
@@ -584,7 +620,7 @@ def _run_setup_hook(ctx: _LaunchContext) -> None:
 
 def _build_exec_env(
     *,
-    run_id: str,
+    run_id: str | None,
     environ: Mapping[str, str],
     fallback_linear_api_key: str | None,
     pi_agent_dir: Path | None,
@@ -592,17 +628,23 @@ def _build_exec_env(
     """Build the environment passed to pi without mutating the operator environment.
 
     Operator npm/FFF choices override perk's defaults. The run identity and CLI version are
-    authoritative launch metadata, so they override conflicting inherited values. A non-blank
-    operator ``LINEAR_API_KEY`` wins over the gitignored local-config fallback. Agent-dir
-    precedence is already settled by `launch_stage`; a supplied path is assigned verbatim.
+    authoritative launch metadata, so they override conflicting inherited values. A ``None``
+    ``run_id`` (a session reopen, which mints nothing) REMOVES an inherited ``PERK_RUN_ID``
+    rather than forwarding it — a reopened session that already carries its identity keeps it
+    and never claims or adopts a foreign run. A non-blank operator ``LINEAR_API_KEY`` wins over
+    the gitignored local-config fallback. Agent-dir precedence is already settled by the caller
+    (:func:`resolve_launch_agent_dir`); a supplied path is assigned verbatim.
     """
     env = {
         **_NPM_QUIET_ENV,
         **FFF_MODE_ENV,
         **environ,
-        "PERK_RUN_ID": run_id,
         "PERK_CLI_VERSION": __version__,
     }
+    if run_id is None:
+        env.pop("PERK_RUN_ID", None)
+    else:
+        env["PERK_RUN_ID"] = run_id
     if not env.get("LINEAR_API_KEY", "").strip() and fallback_linear_api_key is not None:
         env["LINEAR_API_KEY"] = fallback_linear_api_key
     if pi_agent_dir is not None:
@@ -632,54 +674,83 @@ def _resolve_pi_executable() -> str:
     return candidate
 
 
-def _exec_pi(ctx: _LaunchContext) -> None:
-    """Build the child env, sweep stale pi agent locks, chdir into the worktree, and ``exec pi``
-    — the CLI *becomes* pi, so nothing after this runs.
+def exec_pi(
+    *,
+    main_root: Path,
+    checkout: Path,
+    argv: tuple[str, ...],
+    run_id: str | None,
+    agent_dir: LaunchAgentDir,
+) -> None:
+    """The ONE Pi exec pipeline: build the child env, sweep stale pi agent locks, chdir into
+    ``checkout``, and ``exec pi`` — the CLI *becomes* pi, so nothing after this runs.
+
+    Shared verbatim by the stage launch (through the :func:`_exec_pi` adapter) and the
+    session-reopen engine (``run_id=None`` — nothing minted, an inherited ``PERK_RUN_ID``
+    dropped), so the two paths cannot drift.
 
     The pi executable is resolved to an ABSOLUTE path pre-chdir via
     :func:`_resolve_pi_executable` (FIRST, before any exec-phase side effect): re-resolving the
     bare name after the chdir would let a relative ``PATH`` entry (e.g. ``.``) pick up a ``pi``
-    inside the very worktree being launched into. Bounded protection: this closes pi-name
-    substitution from the worktree, not the ``#!/usr/bin/env node`` shebang-interpreter lookup
+    inside the very checkout being launched into. Bounded protection: this closes pi-name
+    substitution from the checkout, not the ``#!/usr/bin/env node`` shebang-interpreter lookup
     (pi's bin script's ``env`` still walks the unchanged ``PATH`` post-chdir — a recorded
     residual; sanitizing the operator's ``PATH`` is out of scope).
+
+    ``LINEAR_API_KEY`` is seeded from the MAIN checkout's gitignored ``.perk/local.toml``
+    `[linear] api_key` (read from ``main_root`` BEFORE the chdir) so the borrowed in-session
+    ``linear_*`` tools and any ``perk <stage> --json`` cold-door worker the session spawns (they
+    inherit this env) can authenticate. Env wins: only filled when the environment does not
+    already provide a non-blank key. Best-effort (fail-soft reader). ``PERK_CLI_VERSION``
+    carries the running CLI's version into the session so the extension's ``session_start``
+    handler can surface a soft drift warning when the live loaded ``@mgiles/perk`` extension
+    differs from the CLI that launched it (a stale lazy-installed npm: package) — informational
+    only (not run-control data, unlike ``PERK_RUN_ID``); set at this single local-launch seam.
+
+    Reads ``_resolve_pi_executable`` / ``_build_exec_env`` / ``_sweep_stale_pi_agent_locks`` as
+    bare facade globals (the module-docstring name-binding rule), and ``os.chdir`` /
+    ``os.execvpe`` off the shared ``os`` module object the exec recorders patch.
 
     Annotated ``-> None`` (not ``NoReturn``): tests stub ``os.execvpe`` and control returns.
     """
     pi_path = _resolve_pi_executable()  # pre-chdir: aborts the exec phase before any side effect
-    # PERK_CLI_VERSION carries the running CLI's version into the launched session so the
-    # extension's `session_start` handler can surface a soft drift warning when the live loaded
-    # `@mgiles/perk` extension differs from the CLI that launched it (a stale lazy-installed npm:
-    # package). Informational only (not run-control data, unlike PERK_RUN_ID); set at this single
-    # local-launch seam — the remote worker early-returns before here.
-    # Seed LINEAR_API_KEY from the gitignored `.perk/local.toml` `[linear] api_key` so the
-    # borrowed in-session `linear_*` tools and any `perk <stage> --json` cold-door worker the
-    # session spawns (they inherit this env) can authenticate. Env wins: only fill it when the
-    # environment does not already provide the key. Best-effort (fail-soft reader) — reached only
-    # on the local path (`--dry-run`/`--remote` returned earlier). Reads from the MAIN checkout
-    # (`ctx.repo_root`) and runs before the `os.chdir` below.
     local_linear_key = None
     if not os.environ.get("LINEAR_API_KEY", "").strip():
-        local_linear_key = load_local_linear_api_key(ctx.repo_root)
+        local_linear_key = load_local_linear_api_key(main_root)
     env = _build_exec_env(
-        run_id=ctx.rid,
+        run_id=run_id,
         environ=os.environ,
         fallback_linear_api_key=local_linear_key,
-        pi_agent_dir=ctx.pi_agent_dir,
+        pi_agent_dir=agent_dir.injected,
     )
-    if ctx.agent_dir_resolution is not None:
-        _sweep_stale_pi_agent_locks(ctx.agent_dir_resolution.path)
+    if agent_dir.resolution is not None:
+        _sweep_stale_pi_agent_locks(agent_dir.resolution.path)
     # The presence probe does not eliminate the exec race — a failed chdir/exec is an ordinary
     # OSError arm, not a crash (the watch-seam shape).
     try:
-        os.chdir(ctx.resolved.path)  # pi's ctx.cwd becomes the worktree; the extension claims there
+        os.chdir(checkout)  # pi's ctx.cwd becomes the checkout; the extension claims there
         # absolute pi path: no bare-name PATH re-resolution after the chdir; argv[0] stays "pi"
-        os.execvpe(pi_path, list(ctx.argv), env)  # the CLI *becomes* pi — nothing after this runs
+        os.execvpe(pi_path, list(argv), env)  # the CLI *becomes* pi — nothing after this runs
     except OSError as exc:
         raise UserFacingCliError(
-            f"could not launch pi in {ctx.resolved.path}: {exc}",
+            f"could not launch pi in {checkout}: {exc}",
             error_type="launch_failed",
         ) from exc
+
+
+def _exec_pi(ctx: _LaunchContext) -> None:
+    """The :class:`_LaunchContext` adapter over :func:`exec_pi` — the stage launch's exec phase.
+
+    Reads the context's main root, resolved checkout, argv, minted run id, and agent-dir
+    resolution into the shared pipeline's parameters; nothing else happens here.
+    """
+    exec_pi(
+        main_root=ctx.repo_root,
+        checkout=ctx.resolved.path,
+        argv=ctx.argv,
+        run_id=ctx.rid,
+        agent_dir=LaunchAgentDir(resolution=ctx.agent_dir_resolution, injected=ctx.pi_agent_dir),
+    )
 
 
 def _stage_model_argv(config: Config, stage_id: str) -> list[str]:
@@ -755,6 +826,7 @@ __all__ = [
     "_NPM_QUIET_ENV",
     "_PI_AGENT_LOCK_FILES",
     "_WORKTREE_SETUP_TIMEOUT_S",
+    "LaunchAgentDir",
     "ResolvedWorktree",
     "Target",
     "WorktreeRequest",
@@ -782,17 +854,21 @@ __all__ = [
     "_warm_extension_install",
     "_write_session_handoff",
     "checked_name",
+    "exec_pi",
     "launch_stage",
     "materialize_extensions",
     "materialize_plan_body",
     "materialize_skills",
     "print_launch_banner",
     "print_launch_banner_gated",
+    "require_registered_checkout",
     "resolve_base",
+    "resolve_launch_agent_dir",
     "resolve_plan_worktree_name",
     "resolve_target",
     "resolve_worktree",
     "run_pending_setup",
     "run_worktree_setup",
     "skill_exposure_argv",
+    "validate_existing_checkout",
 ]

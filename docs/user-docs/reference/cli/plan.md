@@ -59,8 +59,17 @@ it with fresh context. perk classifies the plan's canonical state into its **nex
 | PR merged and learned | done — nothing to resume |
 | PR closed unmerged | needs human attention (reopen it or replan) |
 
-Gate outcomes (draft / awaiting review / closed / done) are **reported, never launched** — resume
-names the human gate instead of opening a session at the wrong stage. `--dry-run` resolves and
+Gate outcomes (draft / awaiting review / closed / done) are **reported, never launched as a
+stage** — resume names the human gate instead of opening a session at the wrong stage. At the
+three review gates (draft / awaiting review / closed unmerged), a real local run in an
+interactive terminal then opens the plan worktree's **Pi session picker** (`pi --resume`) so you
+can reopen the conversation — the same picker `perk resume` opens (see
+[Remote and utility commands](./remote-and-utility.md#perk-resume-target)): nothing is marked
+ready, reopened, or addressed, no run id or handoff is written, and any pi args you passed are
+not forwarded (one stderr note says so). A missing plan worktree is explained after the gate line
+(exit 0 — `perk implement PLAN` restores it); an unbound or mismatched one is a typed refusal
+(exit 1). `--json`, `--dry-run`, `--remote`, and piped invocations print exactly the gate report
+and never open the picker; `done` never does. `--dry-run` resolves and
 prints the outcome without launching; `--remote` dispatches to CI only when the resolved stage is
 remotely runnable (`implement`/`address`) — gate and `learn` outcomes stay local; `--json` emits a
 machine-readable report carrying the verdict in a `next_action` field. A merged plan's
