@@ -22,9 +22,13 @@ locally — the workflow positions the worker in CI).
 **Package layout.**
 This ``__init__`` keeps the orchestrator (:func:`launch_stage`), the immutable
 :class:`_LaunchContext` + the named phase functions it flows through (:func:`_build_argv` and the
-self-gating post-dry-run pipeline :func:`_write_session_handoff` / :func:`_warm_extension_install`
-/ :func:`_materialize_into_worktree` / :func:`_emit_linear_run_started` / :func:`_run_setup_hook`
-/ :func:`_exec_pi`), the pure child-environment builder (:func:`_build_exec_env`), the
+self-gating post-dry-run pipeline :func:`_fetch_snapshot_body` / :func:`_write_session_handoff` /
+:func:`_warm_extension_install` / :func:`_materialize_into_worktree` /
+:func:`_emit_linear_run_started` / :func:`_run_setup_hook` / :func:`_exec_pi` — the fetch is the
+tail's one network read and runs BEFORE its first persisted write, the handoff, so the handoff's
+naming hints can carry the plan title; positioning has already materialized the checkout and its
+binding by then, and the tail's persisted-write order handoff → warm → materialize → Linear emit
+→ setup → exec is unchanged), the pure child-environment builder (:func:`_build_exec_env`), the
 ``--dry-run`` preview
 (:func:`_emit_dry_run_preview`), the agent-lock sweep (:func:`_sweep_stale_pi_agent_locks`,
 targeting the shared ``launch_pi_agent_dir`` resolution), the shareable launch-environment
@@ -38,7 +42,8 @@ the string-path monkeypatches resolve against (``os`` / ``subprocess`` / ``githu
 the shared singleton every submodule that imports the same module sees. The orchestrator and its
 phase functions reference
 the moved helpers (``resolve_target`` / ``resolve_worktree`` / ``_resolve_prompt`` /
-``materialize_plan_body`` / ``materialize_skills`` / ``materialize_extensions`` /
+``fetch_plan_body`` / ``write_plan_body_snapshot`` / ``materialize_skills`` /
+``materialize_extensions`` /
 ``print_launch_banner`` / ``run_worktree_setup`` /
 ``_drive_remote_target``) as **bare facade globals**, so ``setattr(launch, "run_worktree_setup",
 …)`` / ``setattr(launch, "launch_stage", …)`` keep rebinding the names the phases read
@@ -73,12 +78,14 @@ from perk.convergence.init.extension_install import consumer_perk_package_dir
 from perk.run import runner as runner
 from perk.run.launch.materialize import (
     _WORKTREE_SETUP_TIMEOUT_S,
+    fetch_plan_body,
     materialize_extensions,
     materialize_plan_body,
     materialize_skills,
     print_launch_banner,
     print_launch_banner_gated,
     run_worktree_setup,
+    write_plan_body_snapshot,
 )
 from perk.run.launch.prompts import (
     _address_prompt,
@@ -281,7 +288,9 @@ def launch_stage(
     the link from the handoff even when the model saved via the ``/plan-save`` *command* (which
     forwards only ``{plan, title}``) rather than the ``plan_save`` *tool*. The ``Handoff`` TS
     interface already carries arbitrary keys (``[key: string]: unknown``), so no TS change is
-    needed to ferry it.
+    needed to ferry it. A door-supplied ``handoff_extra["naming"]`` (the namespaced
+    ``{title, node}`` session-naming hints, contracts.md §8.2) wins WHOLESALE over the hints this
+    launch derives (merge order — no field merge).
 
     ``binding_trigger``: the trigger whose resolved skill bindings (defaults ⊕ the user
     overlay) are appended to the initial prompt **only when there is one to augment** (an idle
@@ -323,7 +332,9 @@ def launch_stage(
     plan id, resolved by the caller through ``perk.cli.plan_selection``). The resolved ref is
     launch authority for BOTH the local positioning path and the ``--remote`` dispatch — the
     launch never re-reads the mutable root selector after selection. ``plan_state`` is the
-    selection's already-fetched canonical state (spares a stacked restore its re-read).
+    selection's already-fetched canonical state (spares a stacked restore its re-read) and also
+    feeds the handoff's ``naming`` hints (its title + ``objective_node_id`` header win over the
+    title derived from the fetched plan body).
 
     ``plan_id``: the bare-id twin of ``plan_ref`` (the ``plan watch`` selection shape),
     forwarded verbatim to ``resolve_worktree(plan_id=…)``: an existing checkout is validated
@@ -427,9 +438,13 @@ def launch_stage(
         )
         return
 
-    _write_session_handoff(ctx, handoff_extra)
+    # The tail's one network read runs BEFORE its first persisted write (the handoff) so the
+    # naming hints can carry the plan title; self-gates: worktree stages only.
+    body = _fetch_snapshot_body(ctx)
+    naming = _naming_hints(plan_state, _snapshot_title(body))
+    _write_session_handoff(ctx, handoff_extra, naming=naming)
     _warm_extension_install(ctx)
-    _materialize_into_worktree(ctx)  # self-gates: worktree stages only
+    _materialize_into_worktree(ctx, body)  # self-gates: worktree stages only
     _emit_linear_run_started(ctx)  # self-gates: implement only
     _run_setup_hook(ctx)  # self-gates: marker-gated (set at create/restore materialization)
     _exec_pi(ctx)  # the CLI *becomes* pi — nothing after this runs
@@ -499,8 +514,65 @@ def _skill_exposure_argv(
     return args
 
 
-def _write_session_handoff(ctx: _LaunchContext, handoff_extra: dict[str, object] | None) -> None:
+def _fetch_snapshot_body(ctx: _LaunchContext) -> str | None:
+    """Fetch the plan body once — the one network read of the post-dry-run tail (self-gates:
+    worktree stages only, exactly like :func:`_materialize_into_worktree`).
+
+    Hoisted ahead of the handoff write (the tail's first persisted write — positioning has already
+    materialized the checkout and its binding by then) so the handoff's ``naming`` hints can carry
+    the plan title. Performs no write itself: the body is handed to
+    :func:`_materialize_into_worktree` for the snapshot, so a later phase failure leaves exactly
+    the residue it left before the fetch moved. Best-effort (``None`` on any failure — the fetch
+    narrates its own warn line).
+    """
+    if ctx.stage.worktree == "none":
+        return None
+    return fetch_plan_body(ctx.repo_root, ctx.resolved.plan_ref)
+
+
+def _snapshot_title(body: str | None) -> str | None:
+    """The plan title derived from a fetched body (``None`` when there is no body or no ATX
+    ``# `` heading outside a code fence — nothing is guessed)."""
+    if body is None:
+        return None
+    return plan.derive_title(body, fallback="") or None
+
+
+def _naming_hints(
+    plan_state: PlanState | None, snapshot_title: str | None
+) -> dict[str, str] | None:
+    """Compose the handoff's ``naming`` hints (contracts.md §8.2): ``title`` from the selected
+    plan state (else the snapshot-derived title), ``node`` from the state's ``objective_node_id``
+    header (the stacked node identity).
+
+    Blank/absent values are omitted; ``None`` when nothing is known. Never emits the top-level
+    planning-link keys (``objective_id``/``node_id``) — those belong to the doors that mark a node
+    ``planning``, and the extension's ``refinementHandoffContamination`` reads them.
+    """
+    hints: dict[str, str] = {}
+    title = plan_state.title.strip() if plan_state is not None else ""
+    if title:
+        hints["title"] = title
+    elif snapshot_title is not None:
+        hints["title"] = snapshot_title
+    if plan_state is not None:
+        node = plan_state.header.get("objective_node_id")
+        if isinstance(node, str) and node.strip():
+            hints["node"] = node.strip()
+    return hints or None
+
+
+def _write_session_handoff(
+    ctx: _LaunchContext,
+    handoff_extra: dict[str, object] | None,
+    naming: dict[str, str] | None = None,
+) -> None:
     """Write the run handoff (+ any ``handoff_extra`` keys) into the worktree cache.
+
+    ``naming`` is the namespaced ``{title, node}`` session-naming hints object (contracts.md
+    §8.2) — the ONLY naming carrier, never the top-level planning-link keys (the extension's
+    ``refinementHandoffContamination`` reads those). Merge order makes a door-supplied
+    ``handoff_extra["naming"]`` win wholesale over the launch-derived hints (no field merge).
 
     The worktree's ``plan-ref`` binding is NOT written here: the positioner
     (:func:`resolve_worktree`) owns binding materialization — a fresh/restored checkout is bound
@@ -509,7 +581,14 @@ def _write_session_handoff(ctx: _LaunchContext, handoff_extra: dict[str, object]
     wt = ctx.resolved.path
     cache.ensure_layout(wt)
     cache.write_handoff(
-        wt, ctx.rid, {"stage": ctx.stage.id, "mode": ctx.stage.mode, **(handoff_extra or {})}
+        wt,
+        ctx.rid,
+        {
+            "stage": ctx.stage.id,
+            "mode": ctx.stage.mode,
+            **({"naming": naming} if naming else {}),
+            **(handoff_extra or {}),
+        },
     )
 
 
@@ -548,22 +627,22 @@ def _warm_extension_install(ctx: _LaunchContext) -> None:
         init.ensure_extension_install_present(ctx.repo_root, self_repo=self_repo)
 
 
-def _materialize_into_worktree(ctx: _LaunchContext) -> None:
-    """Materialize the plan body, skills mirror, and warmed extensions into the worktree
+def _materialize_into_worktree(ctx: _LaunchContext, body: str | None) -> None:
+    """Materialize the plan-body snapshot, skills mirror, and warmed extensions into the worktree
     (self-gates: worktree stages only).
 
-    The plan body is the per-worktree snapshot ``perk pr review-context`` reads first (offline,
-    fetch-once — it reviews the plan as implemented, not whatever the issue says today).
-    Best-effort + loud-but-non-fatal (a worktree without a snapshot falls back to a live fetch at
-    review time). Consumes ``ResolvedWorktree.plan_ref`` — the one resolved ref that is launch
-    authority (no fallback to the mutable root selector). ``materialize_extensions`` clones the
-    warmed repo-root .pi/npm/ into the worktree so pi installs nothing at startup (a silent launch
-    beneath the banner).
+    ``body`` arrives from :func:`_fetch_snapshot_body` (the fetch ran before the handoff write);
+    ``None`` means the fetch failed or found nothing, and no snapshot is written — a worktree
+    without a snapshot falls back to a live fetch at review time (``perk pr review-context``
+    reads the snapshot first: offline, fetch-once, the plan as implemented).
+    ``materialize_extensions`` clones the warmed repo-root .pi/npm/ into the worktree so pi
+    installs nothing at startup (a silent launch beneath the banner).
     """
     if ctx.stage.worktree == "none":
         return
     wt = ctx.resolved.path
-    materialize_plan_body(ctx.repo_root, wt, ctx.resolved.plan_ref)
+    if body is not None:
+        write_plan_body_snapshot(wt, body)
     materialize_skills(ctx.repo_root, wt)
     materialize_extensions(ctx.repo_root, wt)
 
@@ -839,15 +918,18 @@ __all__ = [
     "_emit_linear_run_started",
     "_exec_pi",
     "_fetch_best_effort",
+    "_fetch_snapshot_body",
     "_implement_prompt",
     "_initial_prompt",
     "_learn_prompt",
     "_materialize_into_worktree",
+    "_naming_hints",
     "_plan_read_instruction",
     "_resolve_pi_executable",
     "_resolve_prompt",
     "_run_setup_hook",
     "_skill_exposure_argv",
+    "_snapshot_title",
     "_stage_model_argv",
     "_sweep_stale_pi_agent_locks",
     "_sync_main_checkout",
@@ -855,6 +937,7 @@ __all__ = [
     "_write_session_handoff",
     "checked_name",
     "exec_pi",
+    "fetch_plan_body",
     "launch_stage",
     "materialize_extensions",
     "materialize_plan_body",
@@ -871,4 +954,5 @@ __all__ = [
     "run_worktree_setup",
     "skill_exposure_argv",
     "validate_existing_checkout",
+    "write_plan_body_snapshot",
 ]

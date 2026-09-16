@@ -249,6 +249,14 @@ and resolves to the plan's `plan-<id>` worktree (or, with `--worktree NAME`, a c
 be bound to that plan). `TARGET --worktree root` is refused: the main checkout is never a plan's
 implementation worktree. Run ids are not yet accepted as a target.
 
+**What the picker shows.** perk names the sessions it launches
+`<stage> | plan #N | objective #O / <node> | <title>` (segments omitted when unknown — e.g.
+`implement | plan #42 | Add retry`), so the picker lists what each conversation *is* rather than
+its first message. The name is refreshed when a session starts; a different name you set with
+`/name` or `pi --name` is never overwritten. Sessions perk did not launch (a hand-run `pi`,
+subagent children) stay unnamed, and an older unnamed perk session gains its name the next time
+you open it.
+
 **Never creates, restores, or rebinds.** A missing checkout is a typed `worktree_not_found`
 naming the `perk implement` gesture that creates or restores it; an existing one must pass the
 same fail-closed validation the stage launchers apply — `worktree_unregistered` (not a live

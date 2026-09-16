@@ -199,6 +199,9 @@ def replan(
             },
             # The seeded launch reuses the existing plan's run_id (plan_save upserts on it).
             run_id_override=original_run_id,
+            # The namespaced `naming` hints (contracts.md §8.2) name the session after the plan
+            # being replanned (the `plan` stage has no plan-ref to derive a title from).
+            handoff_extra={"naming": {"title": state.title}},
             # replan borrows `plan`, so its binding trigger is the command (not stage:plan).
             binding_trigger="command:replan",
         )

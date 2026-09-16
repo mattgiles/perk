@@ -216,8 +216,9 @@ def plan_from(
                 "dry_run": True,
             },
             # A fresh run_id is minted (cold_local mints). The `adopt_from` handoff key lets the
-            # later save recover the adoption link from any save surface.
-            handoff_extra={"adopt_from": issue_id},
+            # later save recover the adoption link from any save surface. The namespaced `naming`
+            # hints (contracts.md §8.2) name the session after the adopted issue.
+            handoff_extra={"adopt_from": issue_id, "naming": {"title": src.title}},
         )
 
     run_seeded_door(

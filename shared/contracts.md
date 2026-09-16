@@ -480,6 +480,23 @@ currently active (`pi.getActiveTools()` — the warm gather writes no handoff, s
 can carry the numbers); the cold doors are the factory path there. Headless invocations keep the
 materialize-only behavior.
 
+**Optional handoff naming hints (`naming`).** The same carrier ferries a **namespaced**
+`naming: {title?, node?}` object — the launch-era hints the extension's perk-owned session naming
+(§8.71(h)) consumes. `launch_stage` writes it for worktree stages from the selected plan state's
+title and `objective_node_id` header (the plan-selecting doors: `implement PLAN`, `pr address
+PLAN`, `plan resume PLAN`), else from the title derived (`plan.derive_title`) from the plan body it
+fetches ONCE **before** the handoff write — the fetch (`fetch_plan_body`) is the post-dry-run
+tail's one network read and precedes its first persisted write, while the tail's persisted-write
+order (handoff → warm → materialize (`write_plan_body_snapshot`) → Linear emit → setup → exec)
+is unchanged, so failure residue is unchanged and a dry run still fetches nothing. A door may
+supply its own via `handoff_extra["naming"]`, which wins **wholesale** by merge order (no field
+merge) — `objective plan` (`{title: node.description, node: node.id}`), `plan replan`
+(`{title: <plan title>}`) and `plan from`'s issue mode (`{title: <source issue title>}`). Blank
+values are omitted and the key is absent when nothing is known (nothing is guessed). The hints
+WIN on the cold claim and only FILL fields nothing has learned yet on a reload (§8.71(h)). They
+are never the top-level planning-link keys, so `refinementHandoffContamination` is untouched;
+the TS `Handoff.naming` is `unknown`, decoded structurally by the naming core.
+
 **Fork ≠ branch (easy to get wrong).**
 - A **fork** (`/fork`, `/clone`, `ctx.newSession({ parentSession })`, or a headless
   `pi --fork`) creates a **new session file** that inherits the parent's entries — so the
@@ -543,6 +560,8 @@ end of the section).
 | `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter: incremented on each `perk.conflict-resolver` dispatch from EITHER warm surface — `/submit`'s PR-rebase drive on a definitively-unmergeable PR, or `/objective-sync`'s retained-continuation drive (§8.51) — (cap `CONFLICT_RESOLUTION_ATTEMPT_CAP = 2`, shared, through `delivery/submit.ts`'s ONE `inspectConflictBudget` cap read + each consumer's strict verified `attempts.write`); the increment is persisted-and-verified BEFORE any dispatch on BOTH surfaces (submit/address primes a single-use `resolve_submit_conflicts` authorization; even lock contention consumes the already-counted attempt without refund, reset or retry) — an unverified write (strict read-back `false`) WITHHOLDS the dispatch with a loud report (the surface-uniform withhold posture; a THROWING read/write still propagates on the submit/address path — the pinned load-bearing failure arm — while the stack pipeline's total boundary translates it to `state_error`); reset to 0 on any clean mutating completion (a clean submit; a clean non-declined mutating stack sync/continue/abort/adopt); best-effort tier (cheaply reconstructable) |
 | `dream_bundle_digest` | string | the dream-wave finalized-bundle digest marker (§8.61): `""` = invalidated (cleared unconditionally at wave entry, BEFORE the stale-bundle removal attempt — the invalidation record); `sha256:<hex>` = the digest of the current finalized run-scratch bundle bytes, set only after a successful finalize write; the §8.63 dream-report recovery refuses unless the marker is present, non-empty, and byte-matches the bundle just read; per-field LWW, no rebuild change |
 | `perk_version` | string | the running perk (extension) version, stamped when run identity is established (the claim/fork/adopt/mint arms, §8.2) — the session-audit **exact-vintage** basis (the key literal is the cross-plane coordination point; the read side is `perk-dev`'s audit corpus/vintage layer); omitted when only the `perkVersion()` failure sentinel is available; best-effort tier |
+| `session_name` | string | the last perk-composed session name (§8.71(h)) — the **ownership record**: a naming refresh may overwrite Pi's current session name only when it is absent or equals this, so a differing `/name` or `pi --name` value is preserved; plain append (no strict read-back); best-effort tier |
+| `session_naming` | object \| null | the learned naming hints `{title?, node?}` (§8.71(h)) — decoded non-blank strings only — merged from the handoff's `naming` object (§8.2) and later refresh calls under the hint policy (`override` on the cold claim and the draft/save refreshes, `fill` on a reload); persisted regardless of ownership; best-effort tier |
 
 Automated PR-review postability is PER-ACTIVATION interior state (one holder per installer
 activation — two bound sessions in one process never share/clobber it), not an appended
@@ -12584,7 +12603,7 @@ carries none of the spawn-level facts below.
    the spawn carries `context: "fresh"`, `mission: false`, the wave acceptance (`REPORT_ROLES`
    pins `perk.scout` among the spawned report agents).
 
-## §8.71 · Session resumption (`perk resume` and the `perk plan resume` gate-arm picker)
+## §8.71 · Session resumption (`perk resume`, the `perk plan resume` gate-arm picker) and perk-owned session names
 
 Reopening a Pi conversation is a **session reopen, not a stage launch**: the Python exterior
 positions the cwd, composes the launch *environment*, and execs Pi's native session picker
@@ -12690,8 +12709,66 @@ reopened session keeps its own settings); a non-empty list yields one stderr not
 composes the launch BEFORE announcing anything, so an agent-dir refusal surfaces before any
 "opening" line; the exec step's `pi_cli_missing` / `launch_failed` land after it.
 
-### (h) Deferred
+### (h) Perk-owned session names
 
-The run-id form (`perk resume RUN_ID` → the recorded session file) and session naming are later
-amendments; a ULID `TARGET` today falls through `select_plan`'s own typed errors
-(`SessionResumeLaunch` carries no `session_file`).
+Every *identified* perk session carries a perk-owned Pi session name so the picker (`pi
+--resume`, `perk resume`) lists what each conversation is rather than its first message. The
+Pi-free core is `extension/session/sessionName.ts`; the Pi binding `extension/pi/v1/sessionName.ts`
+(`refreshSessionNameV1`) composes its ports over the live session and reports ONLY a `failed`
+outcome.
+
+- **Grammar.** `<origin stage> | plan #N | objective #O / <node> | <title>` — segments omitted
+  when unknown, **never guessed**; no gist segment; a node renders ONLY beside an objective. The
+  title is normalized (`normalizeTitle`): control characters stripped, whitespace trimmed and
+  collapsed, a leading `#` run stripped, capped at 80 **code points** (79 + `…`, never a split
+  surrogate pair). Every segment AND the joined name pass `stripControls` (C0/C1 controls, DEL,
+  `U+2028`/`U+2029`, the bidi/format controls, `U+FEFF`) before `setSessionName` — Pi strips only
+  CR/LF and writes the name into the terminal title (an OSC sequence), so no composed name may
+  carry ESC/BEL/OSC bytes or bidi overrides.
+- **Origin rule (`originStage`).** The purpose segment is durable **cold-launch provenance**: the
+  FIRST `perk:workflow-state` entry on the branch carrying BOTH a non-empty `run_id` AND a
+  non-empty `stage` — the cold claim's combined entry (§8.2), verbatim registry id (borrowed-stage
+  doors show their borrowed stage). NOT the LWW `stage` (an implement conversation stays
+  `implement` after later stage appends). A fork inherits its parent's origin (the parent's claim
+  entry heads the fork's branch). The warm stage-only `enter-refinement-stage` append is NOT an
+  origin, so unclaimed sessions, adopted env-children (a fresh branch) and hand-run `pi` (a mint
+  entry carries no `stage`) — even after a warm `/objective-refine` pass — are never named.
+  Sessions predating the workflow-state `stage` field have no origin and stay unnamed by design.
+- **Identifier sources (decode, then rank).** Every identifier is narrowed from the unvalidated
+  rebuilt state BEFORE precedence, so a malformed high-priority value never suppresses a valid
+  lower tier and a half-valid claim never lends its node to a fallback objective: the objective
+  is an all-or-nothing `objective_node_claim` (both fields non-blank strings, mirroring
+  `workflowSession.ts::readClaim`) → else `active_plan_ref.objective_id` → else
+  `active_objective`; the node is the claim's node, else the hinted `node` (only when an objective
+  resolved); the plan is `active_plan_ref.pr_id`; the title is the merged hints' `title`.
+- **Hint policy.** Hints arrive from the handoff's `naming` object (§8.2) and are persisted as
+  `session_naming` (§8.3) after a structural decode (non-blank strings only — a blank/`undefined`
+  hint field never clobbers a stored one). `override` (decoded hints win over stored fields) on
+  the cold claim and on the later draft/save refreshes; `fill` (hints apply only where nothing is
+  stored) on a reload, which replays the SAME retained launch-era handoff — so a later-learned
+  title survives reopen. Hints persist regardless of ownership; only the name write is
+  ownership-gated. Equal merged hints append nothing.
+- **Ownership rule.** perk overwrites Pi's current name only when `current === undefined ||
+  current === session_name` (the §8.3 record, appended after each successful write). A differing
+  `/name` or `pi --name` value is **preserved** (`--name` lands before `session_start`, so such a
+  session is preserved from its first start). Accepted residual: a human `/name` that repeats
+  perk's record byte-for-byte is indistinguishable from perk's own write and is treated as owned
+  (perk never inspects `session_info` entry provenance).
+- **Refresh moments.** This amendment: `session_start` for every identified arm (`claimed` reads
+  the handoff hints with `override`; `kept` reads the same retained handoff with `fill`;
+  `forked`/`adopted`/`minted` refresh with no hints under `fill`; `unclaimed` never refreshes), in
+  the cosmetic tail after every load-bearing startup effect (gate → verified linkage → pointer
+  capture → receiver sync) and before the version-parity warning; `session_tree` has no hook. The
+  draft-tool and save-surface refreshes (`override`) are the next amendment.
+- **Best-effort posture.** Outcomes: `applied` / `unchanged` / `preserved` / `skipped` (no origin
+  — nothing appended) / `failed` (one `report()` warning, scope `session name`, `{alsoLog: true}`
+  like its startup neighbors; never a blocked startup). A failed ownership append AFTER a
+  successful `setSessionName` leaves the correct name in place and the next refresh classifies it
+  `preserved` (the record is missing) — an accepted residual. Titles are cosmetic: the TS
+  `deriveTitle` mirrors `plan.derive_title` case-for-case with no cross-plane parity guard.
+
+### (i) Deferred
+
+The run-id form (`perk resume RUN_ID` → the recorded session file) is a later amendment; a ULID
+`TARGET` today falls through `select_plan`'s own typed errors (`SessionResumeLaunch` carries no
+`session_file`).

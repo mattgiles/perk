@@ -63,7 +63,7 @@ The in-session utility surface spans three families:
 
 ## Ancillary in-session features
 
-Five small first-party features ride along inside the perk extension. None is a workflow stage,
+Six small first-party features ride along inside the perk extension. None is a workflow stage,
 door, or model tool; they are human-facing only.
 
 - **The perk footer** — the one-line footer perk owns in the interactive TUI (it supersedes Pi's
@@ -97,6 +97,13 @@ door, or model tool; they are human-facing only.
   objective activation and budget start, node claims, and `/btw` exchanges render as durable
   one-line markers in the interactive transcript. They are display-only, TUI-only, and require
   Pi ≥ 0.80.4; older hosts silently omit them.
+- **Session names** — every session perk launches carries a perk-owned Pi session name,
+  `<stage> | plan #N | objective #O / <node> | <title>` (segments omitted when unknown), so Pi's
+  session picker (`pi --resume`, [`perk resume`](./cli/remote-and-utility.md#perk-resume-target))
+  shows what each conversation is. It is refreshed when the session starts (an older unnamed perk
+  session gains its name on reopen); a different name you set with `/name` or `pi --name` is never
+  overwritten; sessions perk did not launch (a hand-run `pi`, subagent children) stay unnamed.
+  Best-effort: a failure is one warning, never a blocked startup.
 
 ## Related
 

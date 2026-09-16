@@ -101,6 +101,20 @@ export interface WorkflowState {
    * `rebuildWorkflowState` handles it with no rebuild change.
    */
   conflict_resolution_attempts?: number;
+  /**
+   * The last perk-composed session name (§8.71(h)) — the ownership record: a refresh may
+   * overwrite Pi's current name only when it is absent or equals this, so a differing `/name`
+   * or `pi --name` value is preserved. Best-effort tier (plain append, no strict read-back;
+   * per-field LWW needs no rebuild change).
+   */
+  session_name?: string;
+  /**
+   * The learned naming hints `{title?, node?}` (§8.71(h)) — decoded non-blank strings only,
+   * merged from the handoff's `naming` object and later refresh calls under the hint policy
+   * (`override` on claim and the draft/save refreshes, `fill` on reload). Persisted regardless
+   * of ownership. Best-effort tier.
+   */
+  session_naming?: { title?: string; node?: string } | null;
 }
 
 /** The structural slice of a session entry that the rebuild cares about. */

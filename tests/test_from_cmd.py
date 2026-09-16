@@ -121,7 +121,8 @@ def test_real_launch_threads_adopt_from_handoff_and_seed(monkeypatch, unborn_git
         assert err.index("skills \u00b7") < err.index("looking up issue #7")
         assert "\u2713 materialized issue #7 \u2192 adopt-7.md" in err
     assert launched["stage"] == "plan"  # borrows the plan stage
-    assert launched["handoff_extra"] == {"adopt_from": "7"}
+    # `adopt_from` for the save link + the namespaced `naming` hints (the source issue's title).
+    assert launched["handoff_extra"] == {"adopt_from": "7", "naming": {"title": "Human title"}}
     assert launched["run_id_override"] is None  # a FRESH run_id is minted (cold_local)
     # default binding_trigger (None → stage:plan) fires the perk-plan nudge
     assert launched["binding_trigger"] is None
@@ -145,7 +146,7 @@ def test_strips_hash_prefix(monkeypatch, unborn_git_repo_factory):
         _git_init(d, unborn_git_repo_factory)
         result = runner.invoke(cli, ["plan", "from", "#7", "--json"])
         assert result.exit_code == 0, result.output
-    assert launched["handoff_extra"] == {"adopt_from": "7"}
+    assert launched["handoff_extra"] == {"adopt_from": "7", "naming": {"title": "Human title"}}
 
 
 def test_empty_engagement_scratch_and_seed_byte_unchanged(monkeypatch, unborn_git_repo_factory):

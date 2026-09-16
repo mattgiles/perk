@@ -1,8 +1,11 @@
 """Worktree materialization helpers for the cold-door launch.
 
 The canonical materialization paths:
-the ``[worktree] setup`` runner (:func:`run_worktree_setup`), the plan-body snapshot
-(:func:`materialize_plan_body`, also consumed by ``run_worker.position_worktree``), the
+the ``[worktree] setup`` runner (:func:`run_worktree_setup`), the plan-body snapshot — split into
+the one best-effort network read (:func:`fetch_plan_body`) and the silent local write
+(:func:`write_plan_body_snapshot`), composed by :func:`materialize_plan_body` (the shape
+``run_worker.position_worktree`` consumes; the cold-door launch calls the two halves separately so
+the fetched body can also seed the handoff's naming hints) — the
 per-skill symlink mirror (:func:`materialize_skills`), and the extension-install clone-copy
 (:func:`materialize_extensions`). The launch banner (:func:`print_launch_banner`) is the
 idempotent once-per-process emitter that heads a real launch's output. ``_WORKTREE_SETUP_TIMEOUT_S``
@@ -97,39 +100,60 @@ def run_worktree_setup(worktree: Path, commands: list[str]) -> None:
         s.done("worktree setup complete")
 
 
-def materialize_plan_body(repo_root: Path, worktree: Path, plan_ref: plan.PlanRef | None) -> None:
-    """Fetch the plan body from its canonical source and cache it into the worktree.
+def fetch_plan_body(repo_root: Path, plan_ref: plan.PlanRef | None) -> str | None:
+    """The ONE best-effort network read of the plan body from its canonical source.
 
-    The per-worktree plan snapshot for review fidelity: fetched once at positioning time so
-    ``perk pr review-context`` reads the plan as implemented, offline — not whatever the issue
-    says today.
+    Returns the body when the fetch succeeded with content, else ``None`` — a missing/empty id,
+    any backend failure, or an empty body. Best-effort: a failure is reported (the step resolves
+    to a warn) but never blocks the launch (the snapshot is simply absent; ``perk pr
+    review-context`` falls back to a live backend fetch). Honest, not silent. Backend-agnostic:
+    the resolved issue backend owns the id shape (GitHub numeric, Linear ``ENG-123``).
 
-    Public: ``run_worker.position_worktree`` is the second consumer (the one canonical path for
-    plan-body materialization).
-
-    Best-effort: a missing/empty id or any backend failure is reported but never blocks the
-    launch (the snapshot is simply absent; ``perk pr review-context`` falls back to a live
-    backend fetch). Honest, not silent. Backend-agnostic: the resolved issue backend owns the
-    id shape (GitHub numeric, Linear ``ENG-123``).
+    Performs no write — the caller decides where the body lands (:func:`write_plan_body_snapshot`)
+    and may also derive naming hints from it, so the fetch can run before any persisted write.
     """
     if plan_ref is None:
-        return
+        return None
     pr_id = plan_ref.pr_id.strip()
     if not pr_id:
-        return
+        return None
     with io_step(f"fetching plan #{pr_id} body") as s:
         try:
             body = resolve.resolve_issue_backend(repo_root).get_plan_body(issue_id=pr_id)
         except (GitHubError, IssueBackendError) as exc:
             s.warn(f"plan snapshot: could not fetch plan #{pr_id} body — {exc}")
-            return
+            return None
         if body:
-            cache.write_plan_body(worktree, body)
-            s.done(f"cached plan #{pr_id} body")
-        else:
-            # An empty/whitespace body is a successful fetch with nothing to cache (the snapshot
-            # is simply absent; review-context falls back to a live fetch).
-            s.warn(f"plan snapshot: plan #{pr_id} body is empty")
+            s.done(f"fetched plan #{pr_id} body")
+            return body
+        # An empty/whitespace body is a successful fetch with nothing to cache (the snapshot is
+        # simply absent; review-context falls back to a live fetch).
+        s.warn(f"plan snapshot: plan #{pr_id} body is empty")
+        return None
+
+
+def write_plan_body_snapshot(worktree: Path, body: str) -> None:
+    """Cache a fetched plan body into the worktree as the per-worktree plan snapshot.
+
+    The snapshot is what ``perk pr review-context`` reads first — fetched once at positioning
+    time so it reviews the plan as implemented, offline, not whatever the issue says today.
+    Silent: a local write is not a perceptible wait, so it earns no step line (the fetch that
+    preceded it already narrated).
+    """
+    cache.write_plan_body(worktree, body)
+
+
+def materialize_plan_body(repo_root: Path, worktree: Path, plan_ref: plan.PlanRef | None) -> None:
+    """Fetch the plan body from its canonical source and cache it into the worktree — the
+    composition of :func:`fetch_plan_body` + :func:`write_plan_body_snapshot`.
+
+    Public: ``run_worker.position_worktree`` is the consumer of this composed shape (the cold-door
+    launch calls the two halves separately so the fetch can precede the handoff write). A failed
+    or empty fetch leaves no snapshot.
+    """
+    body = fetch_plan_body(repo_root, plan_ref)
+    if body is not None:
+        write_plan_body_snapshot(worktree, body)
 
 
 def materialize_skills(repo_root: Path, worktree: Path) -> None:
