@@ -814,6 +814,18 @@ def test_tty_gate_arm_json_wins_over_the_tty(monkeypatch, git_repo, launch_exec_
     assert launch_exec_recorder.calls == []
 
 
+def test_tty_gate_arm_remote_never_opens_the_picker(monkeypatch, git_repo, launch_exec_recorder):
+    # `--remote` selected a CI runner: a gate verdict prints the gate report only — never a
+    # LOCAL interactive picker (the `remote is None` arm of the TTY predicate), no stage launch.
+    _plan7_worktree(git_repo)
+    result = _gate_run(monkeypatch, git_repo, _pr("CLOSED"), ["--remote"], tty=(True, True))
+    assert result.exit_code == 0, result.output
+    assert result.stdout == ""
+    assert result.stderr.rstrip("\n").endswith(_CLOSED_GATE)
+    assert "session picker" not in result.stderr and "not forwarded" not in result.stderr
+    assert launch_exec_recorder.calls == [] and launch_exec_recorder.chdirs == []
+
+
 def test_tty_gate_arm_dry_run_never_opens_the_picker(monkeypatch, git_repo, launch_exec_recorder):
     _plan7_worktree(git_repo)
     result = _gate_run(monkeypatch, git_repo, _pr("CLOSED"), ["--dry-run"], tty=(True, True))

@@ -22,6 +22,14 @@ would auto-trust a project perk never inspected. The engine composes none; Pi's 
 flow (saved decision / default / interactive prompt) governs the actually-resumed cwd. A
 reopened ephemeral ``plan-<id>`` worktree therefore prompts for trust once — accepted.
 
+**The Linear-key seed crosses projects (accepted residual, contracts.md §8.71(b)).** The shared
+pipeline seeds ``LINEAR_API_KEY`` from the MAIN checkout's ``local.toml`` exactly as a stage launch
+does — a reopened Linear-backed plan session needs it for the ``linear_*`` tools and the cold-door
+workers it spawns. It is process environment, not per-project: a session the human opens from the
+All scope in ANOTHER project inherits it, and a project trusted BEFORE loads its extensions with
+no new prompt. The same exposure as an operator-exported key in a hand-run ``pi``; the engine
+does not narrow the seed for the picker.
+
 **The target table** (:func:`resolve_resume_checkout`; checkouts are never created, restored,
 or rebound — the fail-closed validators' typed refusals propagate in their probe order):
 
@@ -67,6 +75,11 @@ MAIN_CHECKOUT_WORD = "root"
 
 _NEVER_CREATES = "perk resume never creates, restores, or rebinds checkouts"
 
+# Pi's native session picker — the whole argv today. It rides the spec (not the exec call) so
+# preview and exec read ONE tuple, and so a later arm that pins a recorded session file varies
+# it per spec without changing either consumer's call shape.
+_PICKER_ARGV: tuple[str, ...] = ("pi", "--resume")
+
 
 @dataclass(frozen=True)
 class SessionResumeLaunch:
@@ -88,7 +101,7 @@ def prepare_session_resume(*, main_root: Path, checkout: Path) -> SessionResumeL
     return SessionResumeLaunch(
         main_root=main_root,
         checkout=checkout,
-        argv=("pi", "--resume"),
+        argv=_PICKER_ARGV,
         agent_dir=agent_dir,
     )
 

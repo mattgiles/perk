@@ -262,7 +262,13 @@ stage prompt or `[models.stages]` flags are added, nothing is materialized, no s
 the reopened session keeps its own recorded identity (an inherited `PERK_RUN_ID` is dropped, so
 a session that already carries one keeps it). The agent directory follows the launch precedence:
 `PI_CODING_AGENT_DIR` → the main checkout's `[pi] agent_dir` → Pi's default, with the same
-missing-directory warning and `pi_agent_dir_invalid` refusal as a stage launch.
+missing-directory warning and `pi_agent_dir_invalid` refusal as a stage launch. The launch
+environment is otherwise the one a stage launch gets — including a `LINEAR_API_KEY` seeded from the
+main checkout's gitignored `.perk/local.toml` when your shell does not export one. That key is
+process environment, not per-project: a session you open from the picker's **All** scope in
+another project inherits it, and a project you trusted earlier loads its extensions without a
+new prompt — the same exposure as an exported key in a hand-run `pi`. Keep the key out of
+`local.toml` (export it only when needed) if that matters to you.
 
 **Terminal only.** Pi's picker is a full-screen TUI that Pi constructs even on a pipe, so
 `perk resume` without `--dry-run` refuses `not_a_tty` unless both stdin and stdout are terminals

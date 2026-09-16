@@ -422,6 +422,7 @@ def test_help_renders_the_target_table_and_examples():
         "perk resume --worktree NAME",
         "perk resume --worktree root",
         "perk resume PLAN --worktree NAME",
+        "perk resume PLAN --worktree root  refused",
         "perk resume 42 --worktree plan-42-b",
         "perk resume 42 --dry-run",
     ):

@@ -82,6 +82,8 @@ def resume_session(
       perk resume --worktree root       the main checkout
       perk resume PLAN                  the plan's bound worktree (plan-<id>)
       perk resume PLAN --worktree NAME  a named checkout that must be bound to PLAN
+      perk resume PLAN --worktree root  refused: the main checkout is never a plan's
+                                        worktree — drop PLAN or name a plan worktree
 
     \b
     TARGET is a plan issue id (e.g. 42, #42, ENG-123, or the pasted issue URL) — or the

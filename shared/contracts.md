@@ -12629,11 +12629,17 @@ two paths cannot drift). `run_id=None` **removes an inherited `PERK_RUN_ID`** (n
 it): a reopened session that already carries its workflow-state identity keeps it (the
 extension's `keep` arm); a session with NO persisted identity receives the extension's ordinary
 warm-session mint on load (§8.2 — an in-session branch entry, exactly as a hand-run `pi` in the
-repo; unchanged by this section). Accepted residual: the Linear-key seed rides the child env like
-an operator-exported key — if the human switches the picker to All, opens ANOTHER project's
-session, and approves that project's trust prompt, that project's extensions can read it (the
-same exposure as any exported secret in a hand-run `pi`; with no `--approve` it requires the
-human's explicit trust decision).
+repo; unchanged by this section). **Accepted residual — the Linear-key seed crosses projects.**
+The seed is kept on the reopen path (a reopened Linear-backed plan session needs it for the
+borrowed `linear_*` tools and any cold-door worker it spawns — the Current Folder scope is the
+primary use), and it rides the child env exactly like an operator-exported key: it is process
+environment, not per-project. So if the human switches the picker to All and opens ANOTHER
+project's session, that project's extensions start with the key in their environment — and a
+project the human has trusted BEFORE (a saved `trust.json` decision) loads them **without a new
+prompt**; only a never-seen project prompts first. The exposure is the same as any exported
+secret in a hand-run `pi` (Pi's trust model runs a trusted project's extensions with your
+environment); perk neither narrows the seed for the picker nor pretends the prompt gates it. The
+operator's opt-out is not keeping the key in `local.toml` (exporting it only when needed).
 
 ### (c) No `--approve`
 
