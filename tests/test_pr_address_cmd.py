@@ -326,7 +326,8 @@ def test_real_launch_materialized_ref_handoff_and_cwd_agree(git_repo, monkeypatc
     captured: dict = {}
     monkeypatch.setattr(launch, "_exec_pi", lambda ctx: captured.update(ctx=ctx))
     monkeypatch.setattr(launch, "_warm_extension_install", lambda _ctx: None)
-    monkeypatch.setattr(launch, "_materialize_into_worktree", lambda _ctx: None)
+    monkeypatch.setattr(launch, "_fetch_snapshot_body", lambda _ctx: None)
+    monkeypatch.setattr(launch, "_materialize_into_worktree", lambda _ctx, _body: None)
     result = CliRunner().invoke(cli, ["pr", "address", "7"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output
     ctx = captured["ctx"]
@@ -356,7 +357,8 @@ def test_address_explicit_id_inside_linked_worktree_writes_main_selector_only(
     captured: dict = {}
     monkeypatch.setattr(launch, "_exec_pi", lambda ctx: captured.update(ctx=ctx))
     monkeypatch.setattr(launch, "_warm_extension_install", lambda _ctx: None)
-    monkeypatch.setattr(launch, "_materialize_into_worktree", lambda _ctx: None)
+    monkeypatch.setattr(launch, "_fetch_snapshot_body", lambda _ctx: None)
+    monkeypatch.setattr(launch, "_materialize_into_worktree", lambda _ctx, _body: None)
     ctx = PerkContext.for_test(
         cwd=invoking, repo_root=invoking, config=Config(worktree_root=git_repo / ".worktrees")
     )

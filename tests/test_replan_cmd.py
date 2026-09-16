@@ -72,6 +72,7 @@ def _stub_launch(monkeypatch, sink: dict) -> None:
             prompt=k.get("prompt_override"),
             run_id_override=k.get("run_id_override"),
             binding_trigger=k.get("binding_trigger"),
+            handoff_extra=k.get("handoff_extra"),
         ),
     )
 
@@ -120,6 +121,8 @@ def test_real_launch_threads_run_id_override_and_seed(monkeypatch, unborn_git_re
     assert launched["stage"] == "plan"  # borrows the plan stage
     assert launched["run_id_override"] == _RUN_ID  # re-enters the existing plan's run
     assert launched["binding_trigger"] == "command:replan"
+    # The namespaced `naming` hints name the session after the plan being replanned.
+    assert launched["handoff_extra"] == {"naming": {"title": "The plan"}}
     prompt = launched["prompt"] or ""
     assert _SCRATCH_REL in prompt
     # The skill pointer is binding-delivered (command:replan), never hardcoded in the seed.

@@ -70,6 +70,12 @@ export interface Handoff {
   /** The registry stage id the cold launch primed (e.g. `objective-author`). */
   stage?: string;
   pi_session_id?: string;
+  /**
+   * The namespaced session-naming hints `{title?, node?}` (contracts §8.2) — decoded
+   * structurally by `session/sessionName.ts::decodeNamingHints`, never trusted as typed. Never a
+   * planning-link key (`refinementHandoffContamination` reads those).
+   */
+  naming?: unknown;
   [key: string]: unknown;
 }
 

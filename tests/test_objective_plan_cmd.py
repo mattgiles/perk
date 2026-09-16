@@ -206,8 +206,13 @@ def test_selects_next_node_marks_planning_and_launches(monkeypatch, unborn_git_r
     assert launched["run_id_override"] is None  # no refinement → the launch mints
     assert "1.2" in (launched["prompt"] or "") and "objective_id" in (launched["prompt"] or "")
     # The objective link is also ferried through the handoff so plan-save recovers it even
-    # when the model saves via the /plan-save command (which forwards only {plan, title}).
-    assert launched["handoff_extra"] == {"objective_id": "7", "node_id": "1.2"}
+    # when the model saves via the /plan-save command (which forwards only {plan, title}); the
+    # namespaced `naming` hints name the session after the node (title + node segment).
+    assert launched["handoff_extra"] == {
+        "objective_id": "7",
+        "node_id": "1.2",
+        "naming": {"title": "B", "node": "1.2"},
+    }
 
 
 def test_github_call_site_seeds_no_linear_fragments(monkeypatch, unborn_git_repo_factory):
@@ -1291,7 +1296,11 @@ def test_stacked_auto_select_uses_planning_prepare_snapshot(monkeypatch, unborn_
     assert marked["node_id"] == "1.3"
     assert "Ship it from Prepare" in launched["prompt"]
     assert "Snapshot description" in launched["prompt"]
-    assert launched["handoff_extra"] == {"objective_id": "7", "node_id": "1.3"}
+    assert launched["handoff_extra"] == {
+        "objective_id": "7",
+        "node_id": "1.3",
+        "naming": {"title": "Snapshot description", "node": "1.3"},
+    }
 
 
 def test_stacked_build_blocked_is_a_typed_refusal(monkeypatch, unborn_git_repo_factory):

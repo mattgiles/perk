@@ -62,7 +62,9 @@ machine, or any time you want a clean session against an existing plan.
    perk resume 42 --dry-run        # print the resolved checkout + command, launch nothing
    ```
 
-   The picker is Pi's: browse the Current Folder or All scopes, search, pick, or cancel. perk
+   The picker is Pi's: browse the Current Folder or All scopes, search, pick, or cancel.
+   perk-launched sessions carry a perk-owned name in that list (`implement | plan #42 | …`) so
+   you can tell them apart; your own `/name` wins. perk
    only positions the checkout and hands you to `pi --resume` — no run id, no handoff, no stage
    prompt; the reopened session keeps its own identity. Trust for the reopened project is Pi's
    own prompt (a plan worktree asks once). Checkouts are never created here — a missing worktree

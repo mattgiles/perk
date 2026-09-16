@@ -8,8 +8,9 @@ import pytest
 from _launch_helpers import _PLAN_REF, _PLAN_REF_MODEL, _config, _request, _stage
 
 from perk import __version__
-from perk.backends.issue_backend import IssueBackendError
+from perk.backends.issue_backend import IssueBackendError, PlanState
 from perk.cli.ensure import UserFacingCliError
+from perk.github import GitHubError
 from perk.run import launch
 from perk.run.launch import (
     _build_exec_env,
@@ -467,9 +468,10 @@ def _stub_unrelated_launch_phases(monkeypatch, resolved: launch.ResolvedWorktree
     monkeypatch.setattr(launch, "resolve_worktree", lambda **_kwargs: resolved)
     monkeypatch.setattr(launch, "_resolve_prompt", lambda **_kwargs: None)
     monkeypatch.setattr(launch, "_build_argv", lambda **_kwargs: ("pi",))
-    monkeypatch.setattr(launch, "_write_session_handoff", lambda _ctx, _extra: None)
+    monkeypatch.setattr(launch, "_fetch_snapshot_body", lambda _ctx: None)
+    monkeypatch.setattr(launch, "_write_session_handoff", lambda _ctx, _extra, naming=None: None)
     monkeypatch.setattr(launch, "_warm_extension_install", lambda _ctx: None)
-    monkeypatch.setattr(launch, "_materialize_into_worktree", lambda _ctx: None)
+    monkeypatch.setattr(launch, "_materialize_into_worktree", lambda _ctx, _body: None)
     monkeypatch.setattr(launch, "_emit_linear_run_started", lambda _ctx: None)
 
 
@@ -641,12 +643,11 @@ def test_implement_materializes_plan_body_snapshot(tmp_path, monkeypatch, capsys
     assert cache.plan_body_path(worktree).read_text(encoding="utf-8").strip() == markdown.strip()
     err = capsys.readouterr().err
     assert "fetching plan #42 body" in err
-    assert "cached plan #42 body" in err
+    assert "fetched plan #42 body" in err
 
 
 def test_implement_plan_body_fetch_is_best_effort(tmp_path, monkeypatch, capsys):
     """A GitHub failure is swallowed by the materializer and leaves no snapshot."""
-    from perk.github import GitHubError
 
     def boom(**_k):
         raise GitHubError("gh unreachable")
@@ -666,6 +667,303 @@ def test_implement_empty_plan_body_resolves_the_step(tmp_path, monkeypatch, caps
     launch.materialize_plan_body(tmp_path, worktree, _PLAN_REF)
     assert not cache.plan_body_path(worktree).exists()  # nothing cached for an empty body
     assert "plan snapshot: plan #42 body is empty" in capsys.readouterr().err
+
+
+# --- fetch_plan_body / write_plan_body_snapshot (the split halves) ------------------------------
+
+
+def test_fetch_plan_body_returns_body_and_narrates(tmp_path, monkeypatch, capsys):
+    markdown = "# Add retry\n\n## Steps\n"
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: markdown)
+    assert launch.fetch_plan_body(tmp_path, _PLAN_REF) == markdown
+    err = capsys.readouterr().err
+    assert "fetching plan #42 body" in err
+    assert "fetched plan #42 body" in err  # the step resolves without a write inside it
+
+
+def test_fetch_plan_body_failure_is_none_and_warns(tmp_path, monkeypatch, capsys):
+    def boom(**_k):
+        raise GitHubError("gh unreachable")
+
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", boom)
+    assert launch.fetch_plan_body(tmp_path, _PLAN_REF) is None
+    assert "plan snapshot: could not fetch plan #42 body" in capsys.readouterr().err
+
+
+def test_fetch_plan_body_empty_is_none_and_warns(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: "")
+    assert launch.fetch_plan_body(tmp_path, _PLAN_REF) is None
+    assert "plan snapshot: plan #42 body is empty" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "plan_ref", [None, dataclasses.replace(_PLAN_REF, pr_id="  ")], ids=["no-ref", "blank-id"]
+)
+def test_fetch_plan_body_without_an_id_is_none_and_silent(tmp_path, monkeypatch, capsys, plan_ref):
+    calls: list[object] = []
+    monkeypatch.setattr(
+        "perk.backends.github.plans.get_plan_body", lambda **k: calls.append(k) or "# x"
+    )
+    assert launch.fetch_plan_body(tmp_path, plan_ref) is None
+    assert calls == []  # no backend read without an id
+    assert "fetching plan" not in capsys.readouterr().err  # no step line either
+
+
+def test_write_plan_body_snapshot_writes_the_worktree_snapshot(tmp_path):
+    worktree = tmp_path / "worktree"
+    launch.write_plan_body_snapshot(worktree, "# Add retry\n")
+    assert cache.plan_body_path(worktree).read_text(encoding="utf-8").strip() == "# Add retry"
+
+
+# --- naming hints (the handoff's namespaced `naming` object) ------------------------------------
+
+
+def _state(title: str, header: dict[str, object] | None = None) -> PlanState:
+    return PlanState(
+        id="42",
+        url="https://gh/o/r/issues/42",
+        title=title,
+        header=header or {},
+        pr=None,
+        state="OPEN",
+    )
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (None, None),
+        ("no heading here\n\nsome text\n", None),
+        ("# Add retry\n\n## Steps\n", "Add retry"),
+    ],
+    ids=["no-body", "heading-less", "heading"],
+)
+def test_snapshot_title(body, expected):
+    assert launch._snapshot_title(body) == expected
+
+
+@pytest.mark.parametrize(
+    ("plan_state", "snapshot_title", "expected"),
+    [
+        (
+            _state("Add retry", {"objective_node_id": "1.1"}),
+            None,
+            {"title": "Add retry", "node": "1.1"},
+        ),
+        (_state("Add retry"), None, {"title": "Add retry"}),
+        (_state("   "), "Snapshot", {"title": "Snapshot"}),
+        (None, "Snapshot", {"title": "Snapshot"}),
+        (None, None, None),
+        (_state("Add retry", {"objective_node_id": 11}), None, {"title": "Add retry"}),
+    ],
+    ids=[
+        "title+node",
+        "title-only",
+        "blank-title-falls-to-snapshot",
+        "snapshot-only",
+        "nothing",
+        "non-string-node",
+    ],
+)
+def test_naming_hints_matrix(plan_state, snapshot_title, expected):
+    hints = launch._naming_hints(plan_state, snapshot_title)
+    assert hints == expected
+    if hints is not None:  # never the top-level planning-link keys
+        assert "objective_id" not in hints and "node_id" not in hints
+
+
+def _capture_handoff(monkeypatch) -> dict[str, dict[str, object]]:
+    """Capture the handoff blob `launch_stage` writes; stub exec so the CLI never becomes pi."""
+    captured: dict[str, dict[str, object]] = {}
+
+    def _capture(root, run_id, data):
+        captured["data"] = data
+        return cache.handoff_path(root, run_id)
+
+    monkeypatch.setattr("perk.run.launch.cache.write_handoff", _capture)
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch._resolve_pi_executable", lambda: "/stub/bin/pi")
+    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
+    return captured
+
+
+def _launch_implement(git_repo: Path, **kwargs) -> Path:
+    config = Config(worktree_root=git_repo / ".worktrees")
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+        plan_ref=_PLAN_REF,
+        **kwargs,
+    )
+    return config.worktree_root / "plan-42"
+
+
+def test_handoff_naming_from_plan_state(git_repo, monkeypatch):
+    """A state-bearing launch names from the selected plan state: its title + objective node."""
+    captured = _capture_handoff(monkeypatch)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: "# Other\n")
+    _launch_implement(git_repo, plan_state=_state("Add retry", {"objective_node_id": "1.1"}))
+    data = captured["data"]
+    assert data["naming"] == {"title": "Add retry", "node": "1.1"}
+    assert "objective_id" not in data and "node_id" not in data  # never the planning-link keys
+
+
+def test_handoff_naming_from_snapshot_body(git_repo, monkeypatch):
+    """Without a plan state the title comes from the fetched body — which is still snapshotted."""
+    captured = _capture_handoff(monkeypatch)
+    monkeypatch.setattr(
+        "perk.backends.github.plans.get_plan_body", lambda **_k: "# Add retry\n\n## Steps\n"
+    )
+    wt = _launch_implement(git_repo, plan_state=None)
+    assert captured["data"]["naming"] == {"title": "Add retry"}
+    assert cache.plan_body_path(wt).exists()  # the one fetch still feeds the snapshot
+
+
+def test_handoff_naming_door_supplied_wins_wholesale(git_repo, monkeypatch):
+    """A door's `handoff_extra["naming"]` replaces the launch-derived hints (no field merge)."""
+    captured = _capture_handoff(monkeypatch)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: "# Body\n")
+    _launch_implement(
+        git_repo,
+        plan_state=_state("State title", {"objective_node_id": "1.1"}),
+        handoff_extra={"naming": {"title": "Door"}},
+    )
+    assert captured["data"]["naming"] == {"title": "Door"}  # no `node` merged in
+
+
+def test_handoff_has_no_naming_for_worktree_none_stage(git_repo, monkeypatch):
+    captured = _capture_handoff(monkeypatch)
+    monkeypatch.setattr("perk.run.launch.cache.write_plan_ref", lambda *a, **k: None)
+    launch_stage(
+        repo_root=git_repo,
+        config=Config(worktree_root=git_repo / ".worktrees"),
+        stage=_stage("objective-plan"),  # worktree: none → no fetch, no state, no extra
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+        prompt_override="seed",
+    )
+    assert "naming" not in captured["data"]
+
+
+def test_handoff_has_no_naming_when_fetch_fails_and_no_state(git_repo, monkeypatch, capsys):
+    captured = _capture_handoff(monkeypatch)
+
+    def boom(**_k):
+        raise GitHubError("gh unreachable")
+
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", boom)
+    wt = _launch_implement(git_repo, plan_state=None)
+    assert "naming" not in captured["data"]  # nothing guessed
+    assert not cache.plan_body_path(wt).exists()
+    assert "plan snapshot: could not fetch plan #42 body" in capsys.readouterr().err
+
+
+def test_launch_tail_phase_order_fetch_precedes_handoff(tmp_path, monkeypatch):
+    """The post-dry-run tail: the one network read runs first, then the persisted writes in their
+    unchanged order — and the fetched body is what the materializer receives."""
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    resolved = launch.ResolvedWorktree(worktree, _PLAN_REF, disposition="reuse-local")
+    monkeypatch.setattr(launch, "print_launch_banner", lambda _root: None)
+    monkeypatch.setattr(launch, "resolve_worktree", lambda **_kwargs: resolved)
+    monkeypatch.setattr(launch, "_resolve_prompt", lambda **_kwargs: None)
+    monkeypatch.setattr(launch, "_build_argv", lambda **_kwargs: ("pi",))
+    events: list[object] = []
+    monkeypatch.setattr(
+        launch, "_fetch_snapshot_body", lambda _ctx: events.append("fetch") or "# Body\n"
+    )
+    monkeypatch.setattr(
+        launch,
+        "_write_session_handoff",
+        lambda _ctx, _extra, naming=None: events.append("handoff"),
+    )
+    monkeypatch.setattr(launch, "_warm_extension_install", lambda _ctx: events.append("warm"))
+    monkeypatch.setattr(
+        launch,
+        "_materialize_into_worktree",
+        lambda _ctx, body: events.append(("materialize", body)),
+    )
+    monkeypatch.setattr(launch, "_emit_linear_run_started", lambda _ctx: events.append("linear"))
+    monkeypatch.setattr(launch, "_run_setup_hook", lambda _ctx: events.append("setup"))
+    monkeypatch.setattr(launch, "_exec_pi", lambda _ctx: events.append("exec"))
+    launch_stage(
+        repo_root=tmp_path,
+        config=Config(worktree_root=tmp_path / ".worktrees"),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    assert events == [
+        "fetch",
+        "handoff",
+        "warm",
+        ("materialize", "# Body\n"),  # the recorded fetch result reaches the materializer
+        "linear",
+        "setup",
+        "exec",
+    ]
+
+
+def test_launch_handoff_failure_after_fetch_leaves_no_snapshot(git_repo, monkeypatch):
+    """Failure residue is unchanged by the hoisted fetch: a handoff-write failure after a
+    successful fetch propagates, leaves no snapshot (the fetch wrote nothing), and never execs."""
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: "# Body\n")
+    execs: list[str] = []
+    monkeypatch.setattr(launch, "_exec_pi", lambda _ctx: execs.append("pi"))
+
+    def _boom(_ctx, _extra, naming=None):
+        raise UserFacingCliError("handoff write failed", error_type="handoff_failed")
+
+    monkeypatch.setattr(launch, "_write_session_handoff", _boom)
+    config = Config(worktree_root=git_repo / ".worktrees")
+    with pytest.raises(UserFacingCliError) as exc:
+        launch_stage(
+            repo_root=git_repo,
+            config=config,
+            stage=_stage("implement"),
+            worktree=None,
+            dry_run=False,
+            remote=None,
+            pi_args=[],
+            plan_ref=_PLAN_REF,
+        )
+    assert exc.value.error_type == "handoff_failed"
+    assert not cache.plan_body_path(config.worktree_root / "plan-42").exists()
+    assert execs == []
+
+
+def test_dry_run_performs_no_plan_body_fetch(tmp_path, monkeypatch, capsys):
+    """`--dry-run` returns before the tail, so the hoisted fetch never runs."""
+    calls: list[object] = []
+
+    def _never(**k):
+        calls.append(k)
+        raise AssertionError("a dry run must not fetch the plan body")
+
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", _never)
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    data = json.loads(capsys.readouterr().out)
+    assert data["success"] is True and data["stage"] == "implement"
+    assert data["plan_ref"]["pr_id"] == "42"  # the payload is unchanged
+    assert calls == []
 
 
 def _seed_skills(repo_root: Path, *names: str) -> None:

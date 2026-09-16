@@ -169,7 +169,8 @@ def test_implement_explicit_id_inside_linked_worktree_writes_main_selector_only(
     captured: dict = {}
     monkeypatch.setattr(launch, "_exec_pi", lambda c: captured.update(ctx=c))
     monkeypatch.setattr(launch, "_warm_extension_install", lambda _c: None)
-    monkeypatch.setattr(launch, "_materialize_into_worktree", lambda _c: None)
+    monkeypatch.setattr(launch, "_fetch_snapshot_body", lambda _c: None)
+    monkeypatch.setattr(launch, "_materialize_into_worktree", lambda _c, _body: None)
     ctx = PerkContext.for_test(
         cwd=wt42, repo_root=wt42, config=Config(worktree_root=git_repo / ".worktrees")
     )

@@ -690,8 +690,15 @@ def plan_objective(
             dry_run_shows_seed=False,
             # Carry the link through the handoff so `perk plan-save` recovers objective_id/node_id
             # regardless of which save surface the model uses (the /plan-save command forwards
-            # only {plan, title}). The factory already marked node.id `planning` above.
-            handoff_extra={"objective_id": number, "node_id": node.id},
+            # only {plan, title}). The factory already marked node.id `planning` above. The
+            # namespaced `naming` hints (contracts.md §8.2) win wholesale over the launch's own —
+            # `node` rides beside `title` so a later refresh that no longer sees the planning
+            # claim keeps the `/ <node>` segment; the extension caps a long description.
+            handoff_extra={
+                "objective_id": number,
+                "node_id": node.id,
+                "naming": {"title": node.description, "node": node.id},
+            },
             # The stacked child-layer positioning pair (None everywhere else — the launch is
             # byte-identical for bottom layers, incremental objectives, and no-observed-head
             # children).

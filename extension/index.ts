@@ -67,6 +67,7 @@ import { plannotatorPresent } from "./pi/v1/providers/plannotatorHandoff.ts";
 import { installTombellPlanAdapter } from "./pi/v1/providers/tombell.ts";
 import { installScoutWaveBindings } from "./pi/v1/scoutWave.ts";
 import { registerSelfcheck } from "./pi/v1/selfcheck.ts";
+import { refreshSessionNameV1 } from "./pi/v1/sessionName.ts";
 import {
   branchSessionStateStore,
   establishSessionIdentity,
@@ -75,6 +76,7 @@ import {
   sessionStartToolScope,
   sessionTreeFacts,
 } from "./session/lifecycle.ts";
+import { decodeNamingHints } from "./session/sessionName.ts";
 import { createAgentScratchProvisioner, registerAgentScratch } from "./substrate/agentScratch.ts";
 import { registerBindingDelivery } from "./substrate/bindingDelivery.ts";
 import {
@@ -479,6 +481,27 @@ export default function perk(
     // plan-ref match against one fresh cache read) is evaluated inside sync; every ineligible
     // shape closes any open inbox. Never throws (the controller contains its own failures).
     feedbackReceiver.sync(ctx, { ...facts.feedback, mode: ctx.mode ?? null });
+
+    // Perk-owned session name (contracts.md §8.71(h)) — the cosmetic tail, after every
+    // load-bearing startup effect (gate, linkage, capture, receiver). Names are best-effort
+    // metadata: the origin/ownership/hint rules live in the core (`session/sessionName.ts`), the
+    // binding reports only a `failed` outcome, and the return value is ignored. The cold claim
+    // reads the launch-era `naming` hints and lets them WIN (the fresh launch's hints are the
+    // newest facts); a kept start re-reads the SAME retained handoff but only FILLS fields nothing
+    // has learned yet (a later-learned title survives reopen; a missing handoff — e.g. a kept
+    // fork-child id — decodes to `{}`); fork/adopt/mint read no handoff. `identityPorts.readHandoff`
+    // stays the ONE cwd-bound handoff authority. `session_tree` gets no hook.
+    if (identity.arm !== "unclaimed") {
+      const readsHandoff = identity.arm === "claimed" || identity.arm === "kept";
+      const hints =
+        readsHandoff && typeof resolved.run_id === "string"
+          ? decodeNamingHints(identityPorts.readHandoff(resolved.run_id)?.naming)
+          : {};
+      refreshSessionNameV1(pi, ctx, {
+        hints,
+        policy: identity.arm === "claimed" ? "override" : "fill",
+      });
+    }
 
     // Soft version-parity drift signal: pi can lazy-install / load a stale `npm:@mgiles/perk`, so the
     // extension actually running may differ from the `perk` CLI that launched it. The local launch

@@ -272,7 +272,8 @@ def _stub_launch_phases(monkeypatch, execs: list[str]) -> None:
 
     monkeypatch.setattr(launch, "_exec_pi", lambda _ctx: execs.append("pi"))
     monkeypatch.setattr(launch, "_warm_extension_install", lambda _ctx: None)
-    monkeypatch.setattr(launch, "_materialize_into_worktree", lambda _ctx: None)
+    monkeypatch.setattr(launch, "_fetch_snapshot_body", lambda _ctx: None)
+    monkeypatch.setattr(launch, "_materialize_into_worktree", lambda _ctx, _body: None)
 
 
 def _launch(clone: Path, stage_id: str, setup: list[str]) -> None:
