@@ -10,6 +10,7 @@
 // identity-independent (today's behavior, preserved). Backend saves are not abortable
 // mid-flight (today's behavior — stated, not changed).
 
+import { deriveTitle } from "../../session/sessionName.ts";
 import type {
   PlanRef,
   WorkflowChangeResult,
@@ -86,6 +87,14 @@ export interface PlanSaveDeps {
   backend: PlanBackend;
   /** Best-effort planning-pointer capture (contracts §8.35; no-ops on absent identity). */
   capturePlanningPointer(): void;
+  /**
+   * Best-effort perk-owned session-name refresh (contracts §8.71(h)), run right after the live
+   * session is linked so the name gains its `plan #N` segment. `title` is the saved plan's
+   * title (explicit, else derived from its first `# ` heading) — `null` when neither exists.
+   * The production adapter binds it to the Pi naming binding under `override`; never throws
+   * (the binding contains its failures).
+   */
+  refreshSessionName(title: string | null): void;
 }
 
 /**
@@ -94,7 +103,8 @@ export interface PlanSaveDeps {
  * so the cold door derives it) → warm node-claim recovery (BOTH link params absent ⇒ fill both from
  * `session.nodeClaim()`; any explicit value — even one — wins outright, never mixed) →
  * `backend.save` → `capturePlanningPointer()` (best-effort thunk) → link the live session
- * (`apply({kind:"link-plan-ref"})` — append iff the ref differs) → on a node-linked save whose
+ * (`apply({kind:"link-plan-ref"})` — append iff the ref differs) → refresh the session name
+ * (best-effort thunk; the title is explicit-else-derived) → on a node-linked save whose
  * FULL claim identity matches (resolved objective + linked node), clear the claim
  * (`apply({kind:"clear-node-claim"})` — an unrelated claim is never clobbered). Never throws.
  */
@@ -158,6 +168,20 @@ export async function savePlan(
   // read-back — verbatim into the outcome (the adapter's rendering ignores it; the append
   // helper's report() stays the loudness channel).
   const linkage = deps.session.apply({ kind: "link-plan-ref", ref: saved.ref });
+
+  // Refresh the session name (contracts.md §8.71(h)) — unconditional after the link attempt:
+  // the save stood, and the refresh recomposes whatever the branch now carries. It runs HERE,
+  // while the planning claim is still present (an objective-plan session keeps its
+  // `objective #O / <node>` from the claim); the clear below changes nothing visible later,
+  // because the linked ref carries `objective_id` and the door's persisted `node` hint carries
+  // the node. Limitation: a `rejected`/`unverified` linkage leaves `active_plan_ref` without the
+  // saved ref, and the naming core recomposes only what the branch carries (it never reads the
+  // checkout `plan-ref` or retries a linkage), so the name keeps missing `plan #N` (or keeps an
+  // older linked id) until a later SUCCESSFUL linkage — a re-save (`/plan-save`, the deliberate
+  // retry) or, for a consuming stage, the next `session_start` reconciliation from the checkout
+  // `plan-ref`. The linkage seam's own report() already makes that failure loud; the naming
+  // layer adds no second repair path.
+  deps.refreshSessionName(title ?? deriveTitle(plan));
 
   // A successful node-linked save clears the matching claim (best-effort — failure only risks
   // a stale claim silently linking a later, unrelated save; surfaced via the seam's loud

@@ -6,6 +6,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { deriveTitle } from "../../session/sessionName.ts";
 import { openMemoryWorkflowSession } from "../../testing/memoryWorkflowSession.ts";
 import type { ApprovalGate } from "../review/approvalGate.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "./draft.ts";
@@ -92,7 +93,7 @@ test("save: blank prose refuses invalid_input BEFORE the gate and the backend", 
   const gate = scriptedGate();
   const outcome = await saveObjective(
     { prose: "   \n" },
-    { session, backend, resolveDreamGate: gate.resolveDreamGate },
+    { session, backend, resolveDreamGate: gate.resolveDreamGate, refreshSessionName() {} },
   );
   assert.deepEqual(outcome, {
     status: "failed",
@@ -106,6 +107,8 @@ test("save: blank prose refuses invalid_input BEFORE the gate and the backend", 
 test("save: happy path — trimmed prose + full request shape reach the backend; linkage applied", async () => {
   const session = openMemoryWorkflowSession({ runId: "RID" });
   const { backend, requests } = fakeBackend();
+  const titles: (string | null)[] = [];
+  const linkedAtRefresh: (string | null)[] = [];
   const outcome = await saveObjective(
     {
       prose: `\n${PROSE}\n`,
@@ -114,7 +117,15 @@ test("save: happy path — trimmed prose + full request shape reach the backend;
       delivery: "stacked",
       roadmap: ROADMAP,
     },
-    { session, backend, resolveDreamGate: scriptedGate().resolveDreamGate },
+    {
+      session,
+      backend,
+      resolveDreamGate: scriptedGate().resolveDreamGate,
+      refreshSessionName(title) {
+        titles.push(title);
+        linkedAtRefresh.push(session.activeObjective());
+      },
+    },
   );
   assert.deepEqual(requests, [
     {
@@ -134,18 +145,30 @@ test("save: happy path — trimmed prose + full request shape reach the backend;
     linkage: { status: "applied" },
   });
   assert.equal(session.activeObjective(), "7");
+  assert.deepEqual(titles, ["Ship retries"], "the trimmed explicit title reaches the refresh");
+  assert.deepEqual(linkedAtRefresh, ["7"], "the refresh runs AFTER link-objective");
 });
 
 test("save: whitespace-only title/base normalize to absent (trim-or-omit)", async () => {
   const session = openMemoryWorkflowSession({ runId: "RID" });
   const { backend, requests } = fakeBackend();
+  const titles: (string | null)[] = [];
   await saveObjective(
     { prose: PROSE, title: "   ", base: " \t" },
-    { session, backend, resolveDreamGate: scriptedGate().resolveDreamGate },
+    {
+      session,
+      backend,
+      resolveDreamGate: scriptedGate().resolveDreamGate,
+      refreshSessionName(title) {
+        titles.push(title);
+      },
+    },
   );
   assert.equal(requests.length, 1);
   assert.ok(!("title" in (requests[0] ?? {})), "blank title never reaches the backend");
   assert.ok(!("base" in (requests[0] ?? {})), "blank base never reaches the backend");
+  assert.deepEqual(titles, [deriveTitle(PROSE)], "a blank title ⇒ the prose heading");
+  assert.deepEqual(titles, ["Objective"]);
 });
 
 test("save: identity-less session passes runId null; the linkage still runs", async () => {
@@ -153,7 +176,12 @@ test("save: identity-less session passes runId null; the linkage still runs", as
   const { backend, requests } = fakeBackend();
   const outcome = await saveObjective(
     { prose: PROSE },
-    { session, backend, resolveDreamGate: scriptedGate().resolveDreamGate },
+    {
+      session,
+      backend,
+      resolveDreamGate: scriptedGate().resolveDreamGate,
+      refreshSessionName() {},
+    },
   );
   assert.equal(requests[0]?.runId, null);
   assert.equal(outcome.status, "saved");
@@ -168,9 +196,17 @@ test("save: a failed backend passes through verbatim; no linkage attempted", asy
     message: "perk objective create failed",
     errorType: "door_failed",
   });
+  const titles: (string | null)[] = [];
   const outcome = await saveObjective(
     { prose: PROSE },
-    { session, backend, resolveDreamGate: scriptedGate().resolveDreamGate },
+    {
+      session,
+      backend,
+      resolveDreamGate: scriptedGate().resolveDreamGate,
+      refreshSessionName(title) {
+        titles.push(title);
+      },
+    },
   );
   assert.deepEqual(outcome, {
     status: "failed",
@@ -178,11 +214,14 @@ test("save: a failed backend passes through verbatim; no linkage attempted", asy
     errorType: "door_failed",
   });
   assert.equal(session.activeObjective(), null, "a failed save never touches the session");
+  assert.deepEqual(titles, [], "a failed save never refreshes the name");
 });
 
 // --- the linkage matrix (the seam's change result rides verbatim) --------------------------------
 
 test("save: linkage matrix — unchanged / unverified / rejected via the memory knobs", async () => {
+  // One refresh per arm: the refresh is unconditional after the link attempt.
+  const firstTitles: (string | null)[] = [];
   const equal = openMemoryWorkflowSession({ runId: "RID", activeObjective: "7" });
   const first = await saveObjective(
     { prose: PROSE },
@@ -190,10 +229,15 @@ test("save: linkage matrix — unchanged / unverified / rejected via the memory 
       session: equal,
       backend: fakeBackend().backend,
       resolveDreamGate: scriptedGate().resolveDreamGate,
+      refreshSessionName(title) {
+        firstTitles.push(title);
+      },
     },
   );
   assert.equal(first.status === "saved" && first.linkage?.status, "unchanged");
+  assert.deepEqual(firstTitles, ["Objective"]);
 
+  const secondTitles: (string | null)[] = [];
   const unverified = openMemoryWorkflowSession({ runId: "RID" });
   unverified.failNextApplyVerification();
   const second = await quietly(() =>
@@ -203,11 +247,20 @@ test("save: linkage matrix — unchanged / unverified / rejected via the memory 
         session: unverified,
         backend: fakeBackend().backend,
         resolveDreamGate: scriptedGate().resolveDreamGate,
+        refreshSessionName(title) {
+          secondTitles.push(title);
+        },
       },
     ),
   );
   assert.equal(second.status === "saved" && second.linkage?.status, "unverified");
+  assert.deepEqual(secondTitles, ["Objective"]);
 
+  // The rejected arm pins the stated limitation: the refresh runs, but the branch does NOT
+  // carry the objective, so the name it recomposes still lacks `objective #O` until a later
+  // SUCCESSFUL linkage (`/objective-save` re-run, `/objective <id>`) — no naming-side retry.
+  const thirdTitles: (string | null)[] = [];
+  const linkedAtRefresh: (string | null)[] = [];
   const rejected = openMemoryWorkflowSession({ runId: "RID" });
   rejected.failNextApply();
   const third = await quietly(() =>
@@ -217,11 +270,17 @@ test("save: linkage matrix — unchanged / unverified / rejected via the memory 
         session: rejected,
         backend: fakeBackend().backend,
         resolveDreamGate: scriptedGate().resolveDreamGate,
+        refreshSessionName(title) {
+          thirdTitles.push(title);
+          linkedAtRefresh.push(rejected.activeObjective());
+        },
       },
     ),
   );
   assert.equal(third.status === "saved" && third.linkage?.status, "rejected");
   assert.equal(rejected.activeObjective(), null, "a rejected linkage lands nothing");
+  assert.deepEqual(thirdTitles, ["Objective"], "the refresh still ran");
+  assert.deepEqual(linkedAtRefresh, [null], "the rejected link left no objective for the name");
 });
 
 // --- the §8.63 dream arms -------------------------------------------------------------------------
@@ -234,9 +293,17 @@ test("save: a gate refusal fails with the resolver's detail/errorType; backend n
     errorType: "invalid_input",
     detail: "dream_report is only valid inside a perk learn dream session",
   });
+  const titles: (string | null)[] = [];
   const outcome = await saveObjective(
     { prose: PROSE, dream_report: { source: "direct", input: { rows: [] } } },
-    { session, backend, resolveDreamGate: gate.resolveDreamGate },
+    {
+      session,
+      backend,
+      resolveDreamGate: gate.resolveDreamGate,
+      refreshSessionName(title) {
+        titles.push(title);
+      },
+    },
   );
   assert.deepEqual(outcome, {
     status: "failed",
@@ -244,6 +311,7 @@ test("save: a gate refusal fails with the resolver's detail/errorType; backend n
     errorType: "invalid_input",
   });
   assert.equal(requests.length, 0);
+  assert.deepEqual(titles, [], "a gate refusal never refreshes the name");
   // The gate receives the CARRIER's input (never the whole carrier) + the stored/fresh stamp.
   assert.deepEqual(gate.calls[0]?.input, { rows: [] });
 });
@@ -257,7 +325,12 @@ test("save: absent dream_report still consults the gate (fail-closed the other d
   });
   const outcome = await saveObjective(
     { prose: PROSE },
-    { session, backend: fakeBackend().backend, resolveDreamGate: gate.resolveDreamGate },
+    {
+      session,
+      backend: fakeBackend().backend,
+      resolveDreamGate: gate.resolveDreamGate,
+      refreshSessionName() {},
+    },
   );
   assert.equal(
     outcome.status === "failed" && outcome.message,
@@ -282,7 +355,7 @@ test("save: the approval path's stored stamp keeps the comparison deterministic;
         },
       },
     },
-    { session, backend, resolveDreamGate: gate.resolveDreamGate },
+    { session, backend, resolveDreamGate: gate.resolveDreamGate, refreshSessionName() {} },
   );
   assert.equal(outcome.status, "saved");
   assert.equal(gate.calls[0]?.generatedAt, DREAM_BLOCK.generated_at, "the stored stamp rides");
@@ -305,7 +378,7 @@ test("save: stored-parts mismatch refuses bad_state; nothing saved", async () =>
         },
       },
     },
-    { session, backend, resolveDreamGate: gate.resolveDreamGate },
+    { session, backend, resolveDreamGate: gate.resolveDreamGate, refreshSessionName() {} },
   );
   assert.deepEqual(outcome, {
     status: "failed",
@@ -322,7 +395,7 @@ test("save: the direct tool path (no stored parts) skips the byte-compare; parts
   const gate = scriptedGate({ kind: "block", block: DREAM_BLOCK });
   const outcome = await saveObjective(
     { prose: PROSE, dream_report: { source: "direct", input: DREAM_BLOCK.input } },
-    { session, backend, resolveDreamGate: gate.resolveDreamGate },
+    { session, backend, resolveDreamGate: gate.resolveDreamGate, refreshSessionName() {} },
   );
   assert.equal(outcome.status, "saved");
   assert.deepEqual(requests[0]?.dreamParts, DREAM_BLOCK.parts);
@@ -359,6 +432,7 @@ test("approvalSave: no draft ⇒ no-draft — nothing saved, the gate untouched"
     session,
     backend,
     resolveDreamGate: scriptedGate().resolveDreamGate,
+    refreshSessionName() {},
     gate,
   });
   assert.deepEqual(outcome, { status: "no-draft" });
@@ -390,6 +464,7 @@ test("approvalSave: refused draft ⇒ refused-draft BEFORE the gate snapshot; no
       session,
       backend,
       resolveDreamGate: scriptedGate().resolveDreamGate,
+      refreshSessionName() {},
       gate,
     });
     assert.deepEqual(outcome, {
@@ -412,6 +487,7 @@ test("approvalSave: saved while read-only ⇒ gate exits; draft fields feed the 
     session,
     backend,
     resolveDreamGate: scriptedGate().resolveDreamGate,
+    refreshSessionName() {},
     gate,
   });
   assert.equal(outcome.status, "saved");
@@ -431,16 +507,21 @@ test("approvalSave: saved while read-only ⇒ gate exits; draft fields feed the 
 test("approvalSave: an explicit title wins over the draft's", async () => {
   const session = sessionWithDraft();
   const { backend, requests } = fakeBackend();
+  const titles: (string | null)[] = [];
   await objectiveApprovalSave(
     {
       session,
       backend,
       resolveDreamGate: scriptedGate().resolveDreamGate,
+      refreshSessionName(title) {
+        titles.push(title);
+      },
       gate: fakeGate(false),
     },
     { title: "Explicit title" },
   );
   assert.equal(requests[0]?.title, "Explicit title");
+  assert.deepEqual(titles, ["Explicit title"], "the explicit title reached the refresh");
 });
 
 test("approvalSave: a failed save maps to save-failed (result preserved, gateExited false)", async () => {
@@ -449,6 +530,7 @@ test("approvalSave: a failed save maps to save-failed (result preserved, gateExi
     session,
     backend: fakeBackend({ status: "failed", message: "boom", errorType: "door_failed" }).backend,
     resolveDreamGate: scriptedGate().resolveDreamGate,
+    refreshSessionName() {},
     gate: fakeGate(true),
   });
   assert.deepEqual(outcome, {
@@ -472,6 +554,7 @@ test("approvalSave: the artifact's dream block passes through whole (stored stam
     session,
     backend,
     resolveDreamGate: gateCalls.resolveDreamGate,
+    refreshSessionName() {},
     gate: fakeGate(true),
   });
   assert.equal(outcome.status, "saved");

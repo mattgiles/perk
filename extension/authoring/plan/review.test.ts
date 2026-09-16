@@ -101,6 +101,7 @@ function depsFor(
     backend: opts.backend ?? fakeBackend(),
     gate: opts.gate ?? fakeGate(true),
     capturePlanningPointer() {},
+    refreshSessionName() {},
     ...(opts.explicit !== undefined ? { explicit: opts.explicit } : {}),
     allowImplementHere: opts.allowImplementHere ?? true,
   };

@@ -47,6 +47,7 @@ import {
 } from "../../authoring/gist/save.ts";
 import type { ApprovalGate } from "../../authoring/review/approvalGate.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import { deriveTitle } from "../../session/sessionName.ts";
 import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
 import {
@@ -92,6 +93,7 @@ import {
   type ToolResult,
   verdictsFor,
 } from "./review.ts";
+import { refreshSessionNameV1, titleHints } from "./sessionName.ts";
 
 // ------------------------------------------------------------------- the tool-boundary decode
 
@@ -323,6 +325,15 @@ export function installGistBindings(
       switch (revised.status) {
         case "revised":
         case "unchanged":
+          // Both arms mean the draft IS the current artifact — refresh the session name under
+          // `override` with its title (contracts.md §8.71(h)): a non-blank declared title wins,
+          // else the prose heading, else `{}` (a stored title survives). A gist session's name is
+          // `<stage> | <title>` — names carry no gist segment. The outcome is ignored: the
+          // binding reports `failed`, and a naming failure never fails the write.
+          refreshSessionNameV1(pi, ctx, {
+            hints: titleHints(decoded.title?.trim() || deriveTitle(decoded.prose)),
+            policy: "override",
+          });
           // A byte-identical rewrite short-circuits interior-side; the rendered result is
           // computed from identical content either way, so the surface stays byte-stable.
           return ok(`Gist draft written → ${revised.receipt.path} (${revised.receipt.digest})`, {

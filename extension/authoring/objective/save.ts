@@ -14,6 +14,7 @@
 // `dreamParts` carries the gate-proven parts and the adapter stages the run-scoped
 // `dream-report-transfer.json` handoff atomically before the cold door.
 
+import { deriveTitle } from "../../session/sessionName.ts";
 import type { WorkflowChangeResult, WorkflowSession } from "../../session/workflowSession.ts";
 import { type ApprovalGate, saveThroughApprovalGate } from "../review/approvalGate.ts";
 import type { DeliveryChoice } from "./draft.ts";
@@ -88,6 +89,14 @@ export interface ObjectiveSaveDeps {
   backend: ObjectiveBackend;
   /** The §8.63 gate, adapter-bound (`resolveDreamReportGate` over the production recovery capability). */
   resolveDreamGate: (input: unknown, generatedAt: string) => DreamReportGateOutcome;
+  /**
+   * Best-effort perk-owned session-name refresh (contracts §8.71(h)), run right after the live
+   * session is linked (`link-objective`) so the name gains its `objective #O` segment. `title`
+   * is the saved objective's title (explicit, else derived from the prose's first `# ` heading)
+   * — `null` when neither exists. The production adapter binds it to the Pi naming binding under
+   * `override`; never throws (the binding contains its failures).
+   */
+  refreshSessionName(title: string | null): void;
 }
 
 /**
@@ -98,7 +107,8 @@ export interface ObjectiveSaveDeps {
  * stamp keeps the comparison deterministic; drift/tamper between draft-write and save refuses
  * `bad_state`, nothing saved) → `backend.create` with `runId: session.runId` → on success,
  * link the live session (`apply({kind: "link-objective"})` — the seam appends iff the rebuilt
- * `active_objective` differs, strict read-back). Whitespace-only `title`/`base` normalize to
+ * `active_objective` differs, strict read-back) → refresh the session name (best-effort thunk;
+ * the title is explicit-else-derived). Whitespace-only `title`/`base` normalize to
  * absent (trim-or-omit, matching the draft path — a blank `--title` can no longer reach the
  * cold door). Never throws.
  */
@@ -157,6 +167,16 @@ export async function saveObjective(
   // strict read-back — verbatim into the outcome (the seam's report() stays the loudness
   // channel; a linkage failure is loud-but-non-fatal, the save stands).
   const linkage = deps.session.apply({ kind: "link-objective", objective: saved.id });
+
+  // Refresh the session name (contracts.md §8.71(h)) — unconditional after the link attempt:
+  // the save stood, and the refresh recomposes whatever the branch now carries. Limitation: a
+  // `rejected`/`unverified` linkage leaves `active_objective` unset (or on an older id), and
+  // the naming core recomposes only what the branch carries (it never retries a linkage), so
+  // the name keeps missing `objective #O` until a later SUCCESSFUL linkage — an
+  // `/objective-save` re-run or `/objective <id>`. The linkage seam's own report() already
+  // makes that failure loud; the naming layer adds no second repair path.
+  deps.refreshSessionName(title ?? deriveTitle(prose));
+
   return { status: "saved", id: saved.id, url: saved.url, existed: saved.existed, linkage };
 }
 

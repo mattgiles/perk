@@ -12759,12 +12759,31 @@ outcome.
   session is preserved from its first start). Accepted residual: a human `/name` that repeats
   perk's record byte-for-byte is indistinguishable from perk's own write and is treated as owned
   (perk never inspects `session_info` entry provenance).
-- **Refresh moments.** This amendment: `session_start` for every identified arm (`claimed` reads
-  the handoff hints with `override`; `kept` reads the same retained handoff with `fill`;
-  `forked`/`adopted`/`minted` refresh with no hints under `fill`; `unclaimed` never refreshes), in
-  the cosmetic tail after every load-bearing startup effect (gate → verified linkage → pointer
-  capture → receiver sync) and before the version-parity warning; `session_tree` has no hook. The
-  draft-tool and save-surface refreshes (`override`) are the next amendment.
+- **Refresh moments.** Three, all through the one binding. (1) `session_start` for every
+  identified arm (`claimed` reads the handoff hints with `override`; `kept` reads the same
+  retained handoff with `fill`; `forked`/`adopted`/`minted` refresh with no hints under `fill`;
+  `unclaimed` never refreshes), in the cosmetic tail after every load-bearing startup effect
+  (gate → verified linkage → pointer capture → receiver sync) and before the version-parity
+  warning. (2) **The draft tools** — `plan_draft`, `objective_draft`, `gist_draft` refresh on
+  every successful write (`revised` or `unchanged`) with `override` and `hints: { title }`, where
+  the title is the tool's non-blank declared `title` (objective/gist) else `deriveTitle(body)`,
+  or `hints: {}` when neither exists (which leaves a stored title alone); `rejected`/`unverified`
+  writes never refresh. The first-party editor write-back (`revisePlanDraft` through the
+  review's `writeDraft`) is NOT a refresh moment — an approved edit is named by the save that
+  follows. (3) **The linking save surfaces** — `savePlan` refreshes right after its
+  `link-plan-ref` apply (BEFORE the claim clear, so an objective-plan session still composes
+  `objective #O / <node>` from the claim) and `saveObjective` right after its `link-objective`
+  apply, both with `override` and the saved artifact's explicit-else-derived title (`null` →
+  `{}`), through the required `refreshSessionName(title)` thunk on `PlanSaveDeps` /
+  `ObjectiveSaveDeps` bound in `planSaveDepsFor` / `objectiveSaveDepsFor` (every save surface —
+  tool, slash command, approved review, browser door — shares it). The refresh is unconditional
+  after a successful backend save and composes from the rebuilt branch state only (it never reads
+  the checkout `plan-ref` and never retries a linkage), so a `rejected`/`unverified` linkage
+  yields a name still missing `plan #N` / `objective #O` (or keeping an older linked id) until a
+  later SUCCESSFUL linkage — a re-save, `/objective <id>`, or the next consuming-stage
+  `session_start` reconciliation; the linkage seam's own `report()` is the loud channel, and the
+  naming layer adds no repair path. The gist save creates no session linkage and has no hook. A
+  refresh never fails the write/save it follows. `session_tree` has no hook.
 - **Best-effort posture.** Outcomes: `applied` / `unchanged` / `preserved` / `skipped` (no origin
   — nothing appended) / `failed` (one `report()` warning, scope `session name`, `{alsoLog: true}`
   like its startup neighbors; never a blocked startup). A failed ownership append AFTER a

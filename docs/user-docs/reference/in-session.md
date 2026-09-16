@@ -102,7 +102,10 @@ door, or model tool; they are human-facing only.
   session picker (`pi --resume`, [`perk resume`](./cli/remote-and-utility.md#perk-resume-target))
   shows what each conversation is. It is refreshed when the session starts (an older unnamed
   perk-launched session gains its name on reopen when its record carries the launch stage;
-  sessions from before perk recorded the stage stay unnamed); a different name you set with
+  sessions from before perk recorded the stage stay unnamed), when you write a working draft
+  (`plan_draft` / `objective_draft` / `gist_draft` — the draft's title becomes the last
+  segment), and when a plan or objective is saved (the new `plan #N` / `objective #O` segment
+  appears); a different name you set with
   `/name` or `pi --name` is never overwritten; sessions perk did not launch (a hand-run `pi`,
   subagent children) stay unnamed.
   Best-effort: a failure is one warning, never a blocked startup.

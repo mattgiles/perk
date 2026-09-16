@@ -49,6 +49,7 @@ import {
 import type { ApprovalGate } from "../../authoring/review/approvalGate.ts";
 import { DREAM_REPORT_INPUT_SCHEMA } from "../../learning/dreamReport.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import { deriveTitle } from "../../session/sessionName.ts";
 import type { WorkflowSession } from "../../session/workflowSession.ts";
 import { bindingSuffix } from "../../substrate/bindingDelivery.ts";
 import { atomicWriteFileSync, ensureRunScratch } from "../../substrate/cache.ts";
@@ -71,6 +72,7 @@ import { type DraftReviewSlot, recordSaveOutcome } from "./draftReview.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { productionDreamGateRecovery } from "./objectiveDreamGate.ts";
 import { isRefinementSession, refinementStageRefusal } from "./objectiveRefinement.ts";
+import { refreshSessionNameV1, titleHints } from "./sessionName.ts";
 
 // ------------------------------------------------------------------- the tool-boundary decode
 
@@ -302,6 +304,11 @@ export function objectiveSaveDepsFor(
     backend: coldDoorObjectiveBackend(pi, ctx),
     gate: gateFor(gating, ctx),
     resolveDreamGate: dreamGateFor(ctx),
+    refreshSessionName: (title) => {
+      // The §8.71(h) refresh the save feature invokes right after linking: the newest
+      // identifiers win (`override`). The outcome is ignored — the binding renders `failed`.
+      refreshSessionNameV1(pi, ctx, { hints: titleHints(title), policy: "override" });
+    },
   };
 }
 
@@ -514,6 +521,14 @@ export function installObjectiveAuthoringBindings(
       switch (revised.status) {
         case "revised":
         case "unchanged":
+          // Both arms mean the draft IS the current artifact — refresh the session name under
+          // `override` with its title (contracts.md §8.71(h)): a non-blank declared title wins,
+          // else the prose heading, else `{}` (a stored title survives). The outcome is
+          // ignored: the binding reports `failed`, and a naming failure never fails the write.
+          refreshSessionNameV1(pi, ctx, {
+            hints: titleHints(decoded.title?.trim() || deriveTitle(decoded.prose)),
+            policy: "override",
+          });
           // A byte-identical rewrite short-circuits interior-side; the rendered result is
           // computed from identical content either way, so the surface stays byte-stable.
           return ok(
