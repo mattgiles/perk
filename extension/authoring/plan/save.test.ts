@@ -6,6 +6,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { deriveTitle } from "../../session/sessionName.ts";
 import type { PlanRef } from "../../substrate/cache.ts";
 import {
   type MemoryWorkflowSession,
@@ -74,16 +75,27 @@ async function quietly<T>(fn: () => Promise<T> | T): Promise<T> {
   }
 }
 
+/**
+ * The deps bag with recording thunks: `captured` counts pointer captures; `titles` records every
+ * title the session-name refresh received (one per successful save). `onRefresh` observes the
+ * session AT refresh time (the ordering pins: after the link, before the claim clear).
+ */
 function depsFor(
   session: MemoryWorkflowSession,
   backend: PlanBackend,
-): PlanSaveDeps & { captured: number } {
+  onRefresh?: (title: string | null) => void,
+): PlanSaveDeps & { captured: number; titles: (string | null)[] } {
   const deps = {
     session,
     backend,
     captured: 0,
+    titles: [] as (string | null)[],
     capturePlanningPointer() {
       deps.captured += 1;
+    },
+    refreshSessionName(title: string | null) {
+      deps.titles.push(title);
+      onRefresh?.(title);
     },
   };
   return deps;
@@ -108,6 +120,7 @@ test("savePlan: an explicit title is trimmed and forwarded", async () => {
   const deps = depsFor(openMemoryWorkflowSession({ runId: "RID" }), backend);
   await savePlan({ plan: PLAN, title: "  Explicit title  " }, deps);
   assert.equal(backend.requests[0]?.title, "Explicit title");
+  assert.deepEqual(deps.titles, ["Explicit title"], "the explicit title reaches the refresh");
 });
 
 test("savePlan: no explicit title ⇒ title omitted (the cold door derives)", async () => {
@@ -119,6 +132,12 @@ test("savePlan: no explicit title ⇒ title omitted (the cold door derives)", as
     undefined,
     "omitted — the cold door derives from the plan heading",
   );
+  assert.deepEqual(deps.titles, [deriveTitle(PLAN)], "the refresh gets the derived heading");
+  assert.deepEqual(deps.titles, ["A plan"]);
+
+  const headingless = depsFor(openMemoryWorkflowSession({ runId: "RID" }), fakeBackend());
+  await savePlan({ plan: "Just prose, no heading.\n" }, headingless);
+  assert.deepEqual(headingless.titles, [null], "no heading ⇒ null (the refresh passes {})");
 });
 
 test("savePlan: claim recovery fills BOTH link params when both are absent", async () => {
@@ -173,6 +192,7 @@ test("savePlan: a failed backend save passes through — no pointer capture, no 
   });
   assert.equal(deps.captured, 0);
   assert.equal(session.linkedPlanRef(), null);
+  assert.deepEqual(deps.titles, [], "a failed save never refreshes the name");
 });
 
 test("savePlan: a saved outcome captures the pointer and links the session (linkage applied)", async () => {
@@ -192,33 +212,69 @@ test("savePlan: a saved outcome captures the pointer and links the session (link
 
 test("savePlan: linkage arms — unchanged (same ref), rejected and unverified (seam knobs)", async () => {
   const unchanged = openMemoryWorkflowSession({ runId: "RID", activePlanRef: REF });
-  const unchangedOutcome = await savePlan({ plan: PLAN }, depsFor(unchanged, fakeBackend()));
+  const unchangedDeps = depsFor(unchanged, fakeBackend());
+  const unchangedOutcome = await savePlan({ plan: PLAN }, unchangedDeps);
   assert.equal(
     unchangedOutcome.status === "saved" ? unchangedOutcome.linkage?.status : null,
     "unchanged",
   );
+  assert.equal(unchangedDeps.titles.length, 1, "the refresh is unconditional after the link");
 
+  // The rejected arm pins the stated limitation: the refresh runs, but the branch does NOT
+  // carry the saved ref, so the name it recomposes still lacks `plan #N` until a later
+  // SUCCESSFUL linkage (a re-save) — no naming-side retry exists.
   const rejected = openMemoryWorkflowSession({ runId: "RID" });
   rejected.failNextApply();
-  const rejectedOutcome = await quietly(() =>
-    savePlan({ plan: PLAN }, depsFor(rejected, fakeBackend())),
-  );
+  const linkedAtRefresh: (PlanRef | null)[] = [];
+  const rejectedDeps = depsFor(rejected, fakeBackend(), () => {
+    linkedAtRefresh.push(rejected.linkedPlanRef());
+  });
+  const rejectedOutcome = await quietly(() => savePlan({ plan: PLAN }, rejectedDeps));
   assert.equal(
     rejectedOutcome.status === "saved" ? rejectedOutcome.linkage?.status : null,
     "rejected",
   );
+  assert.equal(rejectedDeps.titles.length, 1, "the refresh still ran");
+  assert.deepEqual(linkedAtRefresh, [null], "the rejected link left no ref for the name");
 
   const unverified = openMemoryWorkflowSession({ runId: "RID" });
   unverified.failNextApplyVerification();
-  const unverifiedOutcome = await quietly(() =>
-    savePlan({ plan: PLAN }, depsFor(unverified, fakeBackend())),
-  );
+  const unverifiedDeps = depsFor(unverified, fakeBackend());
+  const unverifiedOutcome = await quietly(() => savePlan({ plan: PLAN }, unverifiedDeps));
   assert.equal(
     unverifiedOutcome.status === "saved" ? unverifiedOutcome.linkage?.status : null,
     "unverified",
   );
+  assert.equal(unverifiedDeps.titles.length, 1);
   // A linkage failure never fails the save — the plan genuinely persisted.
   assert.equal(unverifiedOutcome.status, "saved");
+});
+
+test("savePlan: the refresh runs AFTER link-plan-ref and BEFORE the claim clear", async () => {
+  const linkedRef: PlanRef = { ...REF, objective_id: "7" };
+  const backend = fakeBackend({
+    status: "saved",
+    ref: linkedRef,
+    existed: false,
+    updated: false,
+    cached: true,
+    nodeLink: { linked: true, node: "1.1", status: "in_progress", error: null },
+  });
+  const session = openMemoryWorkflowSession({
+    runId: "RID",
+    nodeClaim: { objective: "7", node: "1.1" },
+  });
+  const snapshots: Array<{ prId: string | undefined; claim: unknown }> = [];
+  const deps = depsFor(session, backend, () => {
+    snapshots.push({ prId: session.linkedPlanRef()?.pr_id, claim: session.nodeClaim() });
+  });
+  const outcome = await savePlan({ plan: PLAN }, deps);
+  assert.equal(outcome.status, "saved");
+  // At refresh time the link is already applied and the claim still stands (so an
+  // objective-plan session keeps `objective #O / <node>` from the claim while it recomposes).
+  assert.deepEqual(snapshots, [{ prId: "42", claim: { objective: "7", node: "1.1" } }]);
+  assert.equal(session.nodeClaim(), null, "the clear ran after the refresh");
+  assert.deepEqual(deps.titles, ["A plan"]);
 });
 
 test("savePlan: claimClear arms — rejected/unverified via the seam knobs (linkage unchanged)", async () => {
@@ -401,9 +457,8 @@ test("planApprovalSave: a failed save maps to save-failed (message preserved, ga
 
 test("planApprovalSave: an explicit title rides through to the backend", async () => {
   const backend = fakeBackend();
-  await planApprovalSave(
-    approvalDeps(openMemoryWorkflowSession({ runId: "RID" }), backend, fakeGate(false)),
-    { reviewedPlan: PLAN, title: "Chosen title" },
-  );
+  const deps = approvalDeps(openMemoryWorkflowSession({ runId: "RID" }), backend, fakeGate(false));
+  await planApprovalSave(deps, { reviewedPlan: PLAN, title: "Chosen title" });
   assert.equal(backend.requests[0]?.title, "Chosen title");
+  assert.deepEqual(deps.titles, ["Chosen title"], "the same title reached the refresh once");
 });

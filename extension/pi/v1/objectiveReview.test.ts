@@ -103,11 +103,16 @@ function fakeGating(active: boolean): ToolGating & { exits: number } {
   return g;
 }
 
-/** An ExtensionAPI fake: appendEntry lands on the branch; exec returns the canned payload. */
+/**
+ * An ExtensionAPI fake: appendEntry lands on the branch; exec returns the canned payload; the
+ * session name is a closure-held slot (the save's §8.71(h) refresh reaches `getSessionName`/
+ * `setSessionName` — without them a healthy save would surface a spurious `failed` warning).
+ */
 function fakeColdDoorPi(
   branch: unknown[],
   opts: { stdout: string; code?: number; argvs?: string[][] },
 ): ExtensionAPI {
+  let sessionName: string | undefined;
   return {
     appendEntry(customType: string, data?: unknown) {
       branch.push({ type: "custom", customType, data });
@@ -115,6 +120,10 @@ function fakeColdDoorPi(
     async exec(_cmd: string, args: string[]) {
       opts.argvs?.push(args);
       return { stdout: opts.stdout, stderr: "", code: opts.code ?? 0, killed: false };
+    },
+    getSessionName: () => sessionName,
+    setSessionName(name: string) {
+      sessionName = name;
     },
   } as unknown as ExtensionAPI;
 }
@@ -558,6 +567,9 @@ test("objective arm: default selection -> first-party VIEW-ONLY; approval auto-s
   assert.match(String(result.content[0]?.text), /objective APPROVED by reviewer/);
   assert.match(String(result.content[0]?.text), /Saved objective #7/);
   assert.doesNotMatch(String(result.content[0]?.text), /nothing is saved yet/);
+  // The healthy §8.71(h) refresh: the save linked the objective, so the name gained its
+  // `objective #7` segment with the saved (draft) title — through the production composition.
+  assert.equal(pi.getSessionName(), "objective-author | objective #7 | Conform planning");
 });
 
 test("objective arm: approved but the cold door fails -> non-terminating, gate stays on, latched", async () => {

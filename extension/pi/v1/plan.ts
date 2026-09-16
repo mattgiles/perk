@@ -53,6 +53,7 @@ import {
 } from "../../authoring/plan/save.ts";
 import { extractPlanMarkdown, resolvePlanSource } from "../../authoring/plan/source.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
+import { deriveTitle } from "../../session/sessionName.ts";
 import type { PlanRef } from "../../substrate/cache.ts";
 import {
   booleanField,
@@ -89,6 +90,7 @@ import {
 import { createPlannotatorBridge } from "./providers/plannotator.ts";
 import { resolvedPlanProviderId } from "./providers/selection.ts";
 import type { WaveLaunch } from "./review.ts";
+import { refreshSessionNameV1, titleHints } from "./sessionName.ts";
 
 // ------------------------------------------------------------------- the tool-boundary decode
 
@@ -361,6 +363,11 @@ export function planSaveDepsFor(
         sessionFile: ctx.sessionManager.getSessionFile?.(),
       });
     },
+    refreshSessionName: (title) => {
+      // The §8.71(h) refresh the save feature invokes right after linking: the newest
+      // identifiers win (`override`). The outcome is ignored — the binding renders `failed`.
+      refreshSessionNameV1(pi, ctx, { hints: titleHints(title), policy: "override" });
+    },
     transcript: () => extractPlanMarkdown(branchOf(ctx)),
     renderSave: (save) => renderSavePlanOutcome(ctx, save),
   };
@@ -458,6 +465,14 @@ export function installPlanBindings(
       switch (revised.status) {
         case "revised":
         case "unchanged":
+          // Both arms mean the draft IS the current artifact, and its derived title is the
+          // newest fact about what this conversation is (contracts.md §8.71(h)) — refresh the
+          // session name under `override`. The outcome is ignored: the binding reports
+          // `failed`, and a naming failure never fails the draft write.
+          refreshSessionNameV1(pi, ctx, {
+            hints: titleHints(deriveTitle(decoded.plan)),
+            policy: "override",
+          });
           // A byte-identical rewrite short-circuits interior-side; the rendered result is
           // computed from identical content either way, so the surface stays byte-stable.
           return ok(`Plan draft written → ${revised.receipt.path} (${revised.receipt.digest})`, {

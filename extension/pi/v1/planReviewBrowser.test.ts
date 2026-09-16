@@ -475,6 +475,8 @@ function decisionScaffold(opts: { saveJson?: string; saveCode?: number; idle?: b
   notified: { message: string; severity?: string }[];
   drafted: string;
   save: { json: string; code: number };
+  /** Pi's current session name (the fake's closure-held slot). */
+  sessionName(): string | undefined;
   open(draft?: string): OpenDraftReview;
   git(...args: string[]): void;
   route(out: ReviewOutcome, review: OpenDraftReview): Promise<void>;
@@ -485,6 +487,11 @@ function decisionScaffold(opts: { saveJson?: string; saveCode?: number; idle?: b
   const injected: { message: string; options?: { deliverAs?: string } }[] = [];
   const notified: { message: string; severity?: string }[] = [];
   const save = { json: opts.saveJson ?? PLAN_JSON, code: opts.saveCode ?? 0 };
+  // The session-name slot is closure-held (never `this`): the `/plan-save` registrar below
+  // copies `...s.pi`, and both copies must observe the same name for the save's §8.71(h)
+  // refresh to classify as owned (a fake without these methods would surface a spurious
+  // `failed` warning on every healthy save in this origin-bearing branch).
+  let sessionName: string | undefined;
   const pi = {
     appendEntry(customType: string, data?: unknown) {
       branch.push({ type: "custom", customType, data });
@@ -495,6 +502,10 @@ function decisionScaffold(opts: { saveJson?: string; saveCode?: number; idle?: b
     },
     sendUserMessage(message: string, options?: { deliverAs?: string }) {
       injected.push(options === undefined ? { message } : { message, options });
+    },
+    getSessionName: () => sessionName,
+    setSessionName(name: string) {
+      sessionName = name;
     },
   } as unknown as ExtensionAPI;
   const ctx = {
@@ -520,6 +531,7 @@ function decisionScaffold(opts: { saveJson?: string; saveCode?: number; idle?: b
     notified,
     drafted: join(sessionDataDir(cwd, "RID"), PLAN_DRAFT_ARTIFACT),
     save,
+    sessionName: () => sessionName,
     open(draft = DE_BASE) {
       const opened = slot.open(ctx, {
         subject: "plan",
@@ -574,6 +586,13 @@ test("decision: APPROVE + Direct Edits → shared apply + approvalSave (edited b
   );
   assert.equal(s.injected[0]?.options, undefined, "idle ⇒ an immediate turn");
   assert.equal(s.slot.unconfirmed(), null, "a confirmed save never latches");
+  // The healthy §8.71(h) refresh through the production composition: origin + the linked id +
+  // the saved plan's derived heading; no `session name` warning was raised.
+  assert.equal(s.sessionName(), "plan | plan #42 | The draft");
+  assert.ok(
+    !s.notified.some((n) => n.message.includes("session name")),
+    `no session-name warning: ${JSON.stringify(s.notified)}`,
+  );
 });
 
 test("decision: APPROVE + unapplyable Direct Edits → verbatim save + the loud warning", async () => {

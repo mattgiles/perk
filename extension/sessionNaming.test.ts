@@ -4,16 +4,24 @@
 // preserved; a fork child inherits its parent's origin through the real fork arm; an adopted
 // env-child and a minted hand-run session (even after a warm refinement append) stay unnamed; a failing `setSessionName` is one warning and startup still completes; a
 // failed ownership append leaves the new name and freezes it as `preserved`; the kept arm's `fill`
-// policy never reverts a later-learned title. The owning behavior matrix lives in
-// `session/sessionName.test.ts`; this suite pins the real Pi wiring around it.
+// policy never reverts a later-learned title. The later refresh moments ride the same wiring:
+// the draft tools (`plan_draft`/`objective_draft`/`gist_draft`) refresh with the draft's title
+// and the linking saves (`/plan-save`, `/objective-save`) add the `plan #N` / `objective #O`
+// segment. The owning behavior matrix lives in `session/sessionName.test.ts`; this suite pins the
+// real Pi wiring around it.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { reviseGistDraft } from "./authoring/gist/draft.ts";
+import { reviseObjectiveDraft } from "./authoring/objective/draft.ts";
+import { revisePlanDraft } from "./authoring/plan/draft.ts";
+import { openBranchWorkflowSession } from "./session/branchWorkflowSession.ts";
+import type { WorkflowSession } from "./session/workflowSession.ts";
 import { type PlanRef, writePlanRef } from "./substrate/cache.ts";
 import { recordSessionPointer } from "./substrate/sessionPointers.ts";
 import { WORKFLOW_STATE_TYPE } from "./substrate/workflowState.ts";
-import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
+import { fakePerk, loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
 
 function planRef(prId: string, extra: Partial<PlanRef> = {}): PlanRef {
   return {
@@ -247,6 +255,274 @@ test("naming: a failed ownership append leaves the new name in place and freezes
     assert.deepEqual(setCalls, []);
     assert.equal(namingWarnings(h).length, 1);
     assert.equal(manager.getSessionName(), renamed);
+  } finally {
+    h.dispose();
+  }
+});
+
+// ------------------------------------------------- the draft-tool and linking-save refreshes
+
+/** The `perk plan save --json` payload shape (`pi/v1/plan.test.ts::PLAN_JSON`). */
+const PLAN_SAVE_JSON = JSON.stringify({
+  success: true,
+  error_type: null,
+  message: null,
+  issue: { id: "42", url: "https://gh/o/r/issues/42", existed: false },
+  plan_ref: {
+    provider: "github",
+    pr_id: "42",
+    url: "https://gh/o/r/issues/42",
+    labels: ["perk:plan"],
+    objective_id: null,
+  },
+  cached: true,
+  dry_run: false,
+});
+
+/** The objective-linked variant: the cold door wrote `objective_id` and committed the node. */
+const OBJECTIVE_PLAN_SAVE_JSON = JSON.stringify({
+  success: true,
+  error_type: null,
+  message: null,
+  issue: { id: "42", url: "https://gh/o/r/issues/42", existed: false },
+  plan_ref: {
+    provider: "github",
+    pr_id: "42",
+    url: "https://gh/o/r/issues/42",
+    labels: ["perk:plan"],
+    objective_id: "7",
+  },
+  objective_node: { linked: true, node: "2.2", status: "in_progress", error: null },
+  cached: true,
+  dry_run: false,
+});
+
+/** The `perk objective create --json` payload shape (`pi/v1/objectiveAuthoring.test.ts`). */
+const OBJECTIVE_CREATE_JSON = JSON.stringify({
+  success: true,
+  error_type: null,
+  objective: { id: "7", url: "https://gh/o/r/issues/7", existed: false },
+  dry_run: false,
+});
+
+const DRAFT_PLAN = "# Add retry\n\nSteps.\n";
+
+/** A cold `plan` session whose cold door answers every save with `PLAN_SAVE_JSON`. */
+async function planSession() {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
+  const bin = fakePerk(cwd, { stdout: PLAN_SAVE_JSON });
+  return loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+}
+
+function name(h: Awaited<ReturnType<typeof loadPerkSession>>): string | undefined {
+  return h.session.sessionManager.getSessionName();
+}
+
+test("naming: a planning session becomes plan | <title> after plan_draft and plan | plan #N | <title> after the save", async () => {
+  const h = await planSession();
+  try {
+    assert.equal(name(h), "plan");
+    const drafted = await h.invokeTool("plan_draft", { plan: DRAFT_PLAN });
+    assert.equal((drafted.details as { ok?: boolean }).ok, true);
+    assert.equal(name(h), "plan | Add retry");
+    assert.deepEqual(h.workflowState().session_naming, { title: "Add retry" });
+    // The approval-path surface (the lower-fidelity one): the thunk sits on the shared
+    // `savePlan` path, so every save surface names alike.
+    await h.invokeCommand("plan-save");
+    assert.equal(name(h), "plan | plan #42 | Add retry");
+    assert.equal(h.workflowState().session_name, "plan | plan #42 | Add retry");
+    assert.deepEqual(namingWarnings(h), []);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("naming: an objective-plan factory session keeps its node through draft, save and reopen", async () => {
+  const cwd = scaffoldRepo({
+    handoff: {
+      runId: "01RID",
+      mode: "read-only",
+      stage: "objective-plan",
+      extra: {
+        objective_id: "7",
+        node_id: "2.2",
+        naming: { title: "Node description", node: "2.2" },
+      },
+    },
+  });
+  const bin = fakePerk(cwd, { stdout: OBJECTIVE_PLAN_SAVE_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    assert.equal(name(h), "objective-plan | objective #7 / 2.2 | Node description");
+    await h.invokeTool("plan_draft", { plan: "# Real title\n\nSteps.\n" });
+    // override: the draft's title replaced the door's node description.
+    assert.equal(name(h), "objective-plan | objective #7 / 2.2 | Real title");
+    await h.invokeCommand("plan-save");
+    assert.equal(name(h), "objective-plan | plan #42 | objective #7 / 2.2 | Real title");
+    assert.equal(h.workflowState().objective_node_claim, null, "the claim was cleared");
+    // The kept arm's `fill` replay of the launch-era hints: the door's `node` hint keeps `/ 2.2`
+    // once the claim is gone, and the replayed `Node description` never reverts `Real title`.
+    await h.emitSessionStart();
+    assert.equal(name(h), "objective-plan | plan #42 | objective #7 / 2.2 | Real title");
+    assert.deepEqual(namingWarnings(h), []);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("naming: an objective-author session gains objective #O after the save", async () => {
+  const cwd = scaffoldRepo({
+    handoff: { runId: "01RID", mode: "read-only", stage: "objective-author" },
+  });
+  const bin = fakePerk(cwd, { stdout: OBJECTIVE_CREATE_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    assert.equal(name(h), "objective-author");
+    const roadmap = [{ id: "1.1", description: "first" }];
+    await h.invokeTool("objective_draft", {
+      prose: "# Objective\n\nThe why.\n",
+      title: "Ship retries",
+      roadmap,
+    });
+    assert.equal(name(h), "objective-author | Ship retries");
+    await h.invokeCommand("objective-save");
+    assert.equal(name(h), "objective-author | objective #7 | Ship retries");
+    assert.deepEqual(namingWarnings(h), []);
+    // Declared-else-derived under override: a title-less redraft names from its heading.
+    await h.invokeTool("objective_draft", { prose: "# Derived\n\nThe why.\n", roadmap });
+    assert.equal(name(h), "objective-author | objective #7 | Derived");
+    assert.deepEqual(namingWarnings(h), []);
+  } finally {
+    h.dispose();
+  }
+});
+
+/**
+ * The live session's branch-backed `WorkflowSession` — the seam the draft tools write through,
+ * opened here WITHOUT a tool so a planted draft learns no title (a draft that predates the
+ * draft-tool refresh).
+ */
+function seamSession(h: Awaited<ReturnType<typeof loadPerkSession>>, cwd: string): WorkflowSession {
+  const manager = h.session.sessionManager;
+  return openBranchWorkflowSession(
+    { appendEntry: (customType, data) => manager.appendCustomEntry(customType, data) },
+    { cwd, sessionManager: manager, hasUI: false, ui: { notify() {} } },
+  );
+}
+
+function digestOf(revised: { status: string; receipt?: { digest: string } }): string {
+  assert.equal(revised.status, "revised");
+  return revised.receipt?.digest ?? "";
+}
+
+test("naming: a byte-identical draft rewrite (the unchanged arm) still refreshes — every draft tool", async () => {
+  // A persisted draft with no learned title (planted through the seam, not the tool) in an
+  // origin-bearing session: the tool's byte-identical rewrite takes the `unchanged` arm, which
+  // must refresh exactly like `revised` — the draft IS the current artifact either way.
+  const plan = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
+  const hp = await loadPerkSession({ cwd: plan, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    const planted = digestOf(revisePlanDraft({ plan: DRAFT_PLAN }, seamSession(hp, plan)));
+    assert.equal(name(hp), "plan");
+    assert.equal(hp.workflowState().session_naming, undefined, "the seam learns no title");
+    const result = await hp.invokeTool("plan_draft", { plan: DRAFT_PLAN });
+    assert.equal((result.details as { digest?: string }).digest, planted, "byte-identical");
+    assert.equal(name(hp), "plan | Add retry");
+    assert.deepEqual(hp.workflowState().session_naming, { title: "Add retry" });
+    assert.deepEqual(namingWarnings(hp), []);
+  } finally {
+    hp.dispose();
+  }
+
+  const objective = scaffoldRepo({
+    handoff: { runId: "01RID", mode: "read-only", stage: "objective-author" },
+  });
+  const ho = await loadPerkSession({ cwd: objective, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    const input = {
+      prose: "# Objective\n\nThe why.\n",
+      title: "Ship retries",
+      roadmap: [{ id: "1.1", description: "first" }],
+    };
+    const planted = digestOf(
+      reviseObjectiveDraft(input, {
+        session: seamSession(ho, objective),
+        resolveDreamGate: () => ({ kind: "absent" }),
+      }),
+    );
+    assert.equal(name(ho), "objective-author");
+    const result = await ho.invokeTool("objective_draft", input);
+    assert.equal((result.details as { digest?: string }).digest, planted, "byte-identical");
+    assert.equal(name(ho), "objective-author | Ship retries");
+    assert.deepEqual(ho.workflowState().session_naming, { title: "Ship retries" });
+    assert.deepEqual(namingWarnings(ho), []);
+  } finally {
+    ho.dispose();
+  }
+
+  const gist = scaffoldRepo({
+    handoff: { runId: "01RID", mode: "read-only", stage: "gist-author" },
+  });
+  const hg = await loadPerkSession({ cwd: gist, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    const prose = "# Faster reviews\n\nWhy.\n";
+    const planted = digestOf(reviseGistDraft({ prose }, seamSession(hg, gist)));
+    assert.equal(name(hg), "gist-author");
+    const result = await hg.invokeTool("gist_draft", { prose });
+    assert.equal((result.details as { digest?: string }).digest, planted, "byte-identical");
+    assert.equal(name(hg), "gist-author | Faster reviews");
+    assert.deepEqual(hg.workflowState().session_naming, { title: "Faster reviews" });
+    assert.deepEqual(namingWarnings(hg), []);
+  } finally {
+    hg.dispose();
+  }
+});
+
+test("naming: a gist session is <stage> | <title> after gist_draft", async () => {
+  const cwd = scaffoldRepo({
+    handoff: { runId: "01RID", mode: "read-only", stage: "gist-author" },
+  });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    assert.equal(name(h), "gist-author");
+    await h.invokeTool("gist_draft", { prose: "# Faster reviews\n\nWhy.\n" });
+    assert.equal(name(h), "gist-author | Faster reviews");
+    await h.invokeTool("gist_draft", { prose: "# Faster reviews\n\nWhy.\n", title: "Declared" });
+    assert.equal(name(h), "gist-author | Declared");
+    // Heading-less + title-less: `{}` under override leaves the stored title alone.
+    await h.invokeTool("gist_draft", { prose: "Just prose, no heading.\n" });
+    assert.equal(name(h), "gist-author | Declared");
+    assert.doesNotMatch(name(h) ?? "", /objective|plan/, "no gist/plan/objective segment");
+    assert.deepEqual(namingWarnings(h), []);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("naming: a foreign /name before the draft is preserved through every refresh — hints still persist", async () => {
+  const h = await planSession();
+  try {
+    h.session.setSessionName("mine");
+    await h.invokeTool("plan_draft", { plan: DRAFT_PLAN });
+    assert.equal(name(h), "mine");
+    await h.invokeCommand("plan-save");
+    assert.equal(name(h), "mine");
+    const state = h.workflowState();
+    assert.equal(state.session_name, "plan", "perk's record is the startup name");
+    assert.deepEqual(state.session_naming, { title: "Add retry" }, "learned facts persist");
+    assert.deepEqual(namingWarnings(h), []);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("naming: a plan_draft failure never refreshes", async () => {
+  const h = await planSession();
+  try {
+    const result = await h.invokeTool("plan_draft", { plan: "   \n" });
+    assert.equal((result.details as { error_type?: string }).error_type, "invalid_input");
+    assert.equal(name(h), "plan");
+    assert.equal(h.workflowState().session_naming, undefined);
   } finally {
     h.dispose();
   }

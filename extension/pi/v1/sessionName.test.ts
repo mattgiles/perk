@@ -6,7 +6,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { WORKFLOW_STATE_TYPE } from "../../substrate/workflowState.ts";
-import { refreshSessionNameV1, type SessionNameCtx, type SessionNamePi } from "./sessionName.ts";
+import {
+  refreshSessionNameV1,
+  type SessionNameCtx,
+  type SessionNamePi,
+  titleHints,
+} from "./sessionName.ts";
 
 interface Fakes {
   pi: SessionNamePi;
@@ -131,6 +136,11 @@ test("binding: unchanged / preserved / skipped are silent", () => {
   );
   assert.deepEqual(skipped.notifies, []);
   assert.deepEqual(skipped.appends, []);
+});
+
+test("titleHints: null → {} (a stored title survives under override); a title → { title }", () => {
+  assert.deepEqual(titleHints(null), {});
+  assert.deepEqual(titleHints("T"), { title: "T" });
 });
 
 test("binding: failed → exactly one warning notify naming the session-name scope", () => {

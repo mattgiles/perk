@@ -480,6 +480,8 @@ function decisionScaffold(opts: { saveJson?: string; saveCode?: number; idle?: b
   injected: { message: string; options?: { deliverAs?: string } }[];
   notified: { message: string; severity?: string }[];
   save: { json: string; code: number };
+  /** Pi's current session name (the fake's closure-held slot). */
+  sessionName(): string | undefined;
   open(): OpenDraftReview;
   rewrite(raw: string): void;
   git(...args: string[]): void;
@@ -493,6 +495,10 @@ function decisionScaffold(opts: { saveJson?: string; saveCode?: number; idle?: b
   const injected: { message: string; options?: { deliverAs?: string } }[] = [];
   const notified: { message: string; severity?: string }[] = [];
   const save = { json: opts.saveJson ?? CREATE_JSON, code: opts.saveCode ?? 0 };
+  // The session-name slot is closure-held (never `this`) so every copy of this fake observes
+  // the same name; the save's §8.71(h) refresh reaches `getSessionName`/`setSessionName` in
+  // this origin-bearing branch (without them a healthy save would surface a spurious `failed`).
+  let sessionName: string | undefined;
   const pi = {
     appendEntry(customType: string, data?: unknown) {
       branch.push({ type: "custom", customType, data });
@@ -503,6 +509,10 @@ function decisionScaffold(opts: { saveJson?: string; saveCode?: number; idle?: b
     },
     sendUserMessage(message: string, options?: { deliverAs?: string }) {
       injected.push(options === undefined ? { message } : { message, options });
+    },
+    getSessionName: () => sessionName,
+    setSessionName(name: string) {
+      sessionName = name;
     },
   } as unknown as ExtensionAPI;
   const ctx = {
@@ -527,6 +537,7 @@ function decisionScaffold(opts: { saveJson?: string; saveCode?: number; idle?: b
     injected,
     notified,
     save,
+    sessionName: () => sessionName,
     open() {
       const opened = slot.open(ctx, {
         subject: "objective",
@@ -585,6 +596,13 @@ test("decision: APPROVE happy path → objectiveApprovalSave (structured artifac
   );
   assert.equal(s.injected[0]?.options, undefined, "idle ⇒ an immediate turn");
   assert.equal(s.slot.unconfirmed(), null, "a confirmed save never latches");
+  // The healthy §8.71(h) refresh through the production composition: origin + the linked
+  // objective + the drafted title; no `session name` warning was raised.
+  assert.equal(s.sessionName(), "objective-author | objective #7 | Ship retries");
+  assert.ok(
+    !s.notified.some((n) => n.message.includes("session name")),
+    `no session-name warning: ${JSON.stringify(s.notified)}`,
+  );
 });
 
 test("decision (the incident): an unrelated git-config change during the review never blocks the approval — one save, gate exited", async () => {

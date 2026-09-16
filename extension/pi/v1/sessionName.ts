@@ -32,6 +32,16 @@ export type SessionNamePi = Pick<ExtensionAPI, "appendEntry" | "getSessionName" 
 export type SessionNameCtx = BranchSource & ReportTarget;
 
 /**
+ * The hint shape the draft/save refreshes pass: `{ title }` when a title is known, `{}` when
+ * none is. Under `override` the core merges decoded hints OVER stored ones, so `{}` leaves the
+ * stored title alone — a heading-less draft never blanks a title learned earlier (e.g. the
+ * `objective plan` door's node description).
+ */
+export function titleHints(title: string | null): NamingHints {
+  return title === null ? {} : { title };
+}
+
+/**
  * Refresh the perk-owned session name over the live Pi session. `failed` is reported as one
  * warning (`{ alsoLog: true }` — headless always logs; the flag adds the RPC-with-UI stderr
  * mirror like the startup neighbors); every other outcome is silent. Returns the outcome for the

@@ -103,11 +103,16 @@ function fakeGating(active: boolean): ToolGating & { exits: number } {
   return g;
 }
 
-/** An ExtensionAPI fake: appendEntry lands on the branch; exec returns the canned payload. */
+/**
+ * An ExtensionAPI fake: appendEntry lands on the branch; exec returns the canned payload; the
+ * session name is a closure-held slot (the save's §8.71(h) refresh reaches `getSessionName`/
+ * `setSessionName` — without them a healthy save would surface a spurious `failed` warning).
+ */
 function fakeColdDoorPi(
   branch: unknown[],
   opts: { stdout: string; code?: number; argvs?: string[][] },
 ): ExtensionAPI {
+  let sessionName: string | undefined;
   return {
     appendEntry(customType: string, data?: unknown) {
       branch.push({ type: "custom", customType, data });
@@ -115,6 +120,10 @@ function fakeColdDoorPi(
     async exec(_cmd: string, args: string[]) {
       opts.argvs?.push(args);
       return { stdout: opts.stdout, stderr: "", code: opts.code ?? 0, killed: false };
+    },
+    getSessionName: () => sessionName,
+    setSessionName(name: string) {
+      sessionName = name;
     },
   } as unknown as ExtensionAPI;
 }
