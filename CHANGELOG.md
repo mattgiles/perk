@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add `perk resume [TARGET]`: open Pi's own session picker (`pi --resume`) in a checkout to reopen a conversation — this checkout by default, an existing checkout via `--worktree NAME` (`root` for the main checkout), or a plan's bound worktree via a plan selector; `--dry-run` prints the resolved checkout, agent dir, and command. A session reopen, not a stage launch: no run id, handoff, plan selector, or stage prompt is written, checkouts are never created or rebound, and it requires an interactive terminal. (e4065ad)
 - `perk plan resume PLAN` at a review gate (draft PR, clean PR awaiting review, PR closed unmerged) now prints its gate line and then, in an interactive terminal, opens the plan worktree's Pi session picker so the conversation can be reopened; `--json`, `--dry-run`, `--remote`, and piped runs print the gate report only. (e4065ad)
+- perk-launched sessions now carry a perk-owned Pi session name, `<stage> | plan #N | objective #O / <node> | <title>` (segments omitted when unknown), so the session picker (`pi --resume`, `perk resume`) shows what each conversation is instead of its first message. A different name set with `/name` or `pi --name` is never overwritten; sessions perk did not launch (a hand-run `pi`, subagent children) stay unnamed; an older unnamed perk session gains its name the next time it is opened. (807a27e)
 
 ## [3.4.0] - 2026-09-16
 
