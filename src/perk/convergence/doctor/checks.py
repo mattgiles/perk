@@ -806,8 +806,9 @@ def _subagent_compat_check(root: Path) -> Check:
 # upper bound exclusive — the release whose `getHostBuiltinToolNames` counts any core-named
 # slot regardless of source ("wrapped core slots count"), so a same-name replacement provides
 # the builtin. The intersection itself still runs at/above the upper bound; only the
-# classification changed. A closed range never widens silently — `None` would reopen it.
-_SUBAGENTS_HOST_INTERSECTION_AFFECTED: tuple[str, str | None] = ("0.67.0", "0.68.0")
+# classification changed. Both bounds are concrete releases — a later regression opens a NEW
+# range rather than reopening this one.
+_SUBAGENTS_HOST_INTERSECTION_AFFECTED: tuple[str, str] = ("0.67.0", "0.68.0")
 
 # Mirrors of pi-fff's `CONFIG_FILE_NAME` / `VALID_MODES` (`src/config.ts` in @ff-labs/pi-fff):
 # the per-agent-dir config file and the only mode values its `parseMode` accepts.
@@ -834,7 +835,7 @@ def _fff_file_mode(agent_dir: Path) -> str | None:
 
     ``None`` when the file is absent/unreadable/invalid JSON/non-dict, the key is missing, or
     the value is not one of pi-fff's valid modes — a malformed file is pi-fff's own load-time
-    complaint, never this reader's (a malformed file is pi-fff's own load-time complaint).
+    complaint, never this reader's.
     """
     try:
         config = json.loads((agent_dir / _FFF_CONFIG_FILENAME).read_text(encoding="utf-8"))
@@ -889,14 +890,11 @@ def _subagent_host_tools_check(root: Path, *, environ: Mapping[str, str] | None 
         )
     lower, upper = _SUBAGENTS_HOST_INTERSECTION_AFFECTED
     lower_parsed = _parse_strict_semver(lower)
-    upper_parsed = _parse_strict_semver(upper) if upper is not None else None
-    in_range = (
-        lower_parsed is not None
-        and parsed >= lower_parsed
-        and (upper_parsed is None or parsed < upper_parsed)
-    )
-    if not in_range:
-        if lower_parsed is not None and parsed < lower_parsed:
+    upper_parsed = _parse_strict_semver(upper)
+    if lower_parsed is None or upper_parsed is None:
+        raise AssertionError("_SUBAGENTS_HOST_INTERSECTION_AFFECTED must hold strict X.Y.Z bounds")
+    if not lower_parsed <= parsed < upper_parsed:
+        if parsed < lower_parsed:
             return Check(
                 "subagent-host-tools",
                 "package",
