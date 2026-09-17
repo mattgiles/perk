@@ -1,6 +1,6 @@
 ---
 name: perk-domain-modeling
-description: Build and sharpen a project's domain model — pin down domain terminology or a ubiquitous language (CONTEXT.md glossary), and route crystallized design decisions to the repo's durable records. Use when the user wants to pin terminology, record a design decision durably, or when another skill needs to maintain the domain model.
+description: "Sharpen domain terminology and maintain the CONTEXT.md glossary. Use when resolving ambiguous terms, testing domain relationships against code, or recording design decisions in the repo’s existing durable records."
 stages: [plan, objective-plan, objective-author, implement, address]
 ---
 
@@ -30,27 +30,17 @@ skill — challenging terms, sharpening language, stress-testing scenarios — a
 
 ## During the session
 
-### Challenge against the glossary
+### Challenge and verify the language
 
-When the user uses a term that conflicts with the existing language in `CONTEXT.md`, call it out immediately. "Your glossary defines 'cancellation' as X, but you seem to mean Y — which is it?"
-
-### Sharpen fuzzy language
-
-When the user uses vague or overloaded terms, propose a precise canonical term. "You're saying 'account' — do you mean the Customer or the User? Those are different things."
-
-### Discuss concrete scenarios
-
-When domain relationships are being discussed, stress-test them with specific scenarios. Invent scenarios that probe edge cases and force the user to be precise about the boundaries between concepts.
-
-### Cross-reference with code
-
-When the user states how something works, check whether the code agrees. If you find a contradiction, surface it: "Your code cancels entire Orders, but you just said partial cancellation is possible — which is right?"
+Challenge terms that conflict with `CONTEXT.md`; resolve vague or overloaded terms into precise
+canonical names. Use concrete scenarios to test relationships and edge cases. Check claims
+against the code and ask the user to resolve contradictions.
 
 ### Update CONTEXT.md inline
 
 When a term is resolved, update `CONTEXT.md` right there. Don't batch these up — capture them as they happen. Use the format in [CONTEXT-FORMAT.md](./CONTEXT-FORMAT.md).
 
-`CONTEXT.md` should be totally devoid of implementation details. Do not treat `CONTEXT.md` as a spec, a scratch pad, or a repository for implementation decisions. It is a glossary and nothing else.
+`CONTEXT.md` is a glossary. Keep specs, scratch notes, and implementation decisions out of it.
 
 ### Escalate decisions sparingly
 

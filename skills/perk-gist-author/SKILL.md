@@ -1,6 +1,6 @@
 ---
 name: perk-gist-author
-description: Authoring a new perk gist — a problem-space statement of intent — in a read-only gist-author session. Use when capturing a statement of intent in a perk repo.
+description: "Author and review a perk gist: a statement of intent upstream of plans and objectives."
 stages: [gist-author]
 disable-model-invocation: true
 ---
@@ -15,18 +15,14 @@ the user, request a human review, and an approval saves it. The save step is mec
 the judgment lives here**. You (the parent) own the problem framing, the user conversation, and
 the durable write; never delegate them.
 
-## What a gist is (and is not)
+## What a gist contains
 
-- **Is**: the problem or desire, why it matters, and the constraints that bound it — honest,
-  code-informed framing of the problem space (the high-level shape, the real surfaces involved) —
-  plus a strategic-altitude read on the 2–3 most consequential solution-domain elements (design,
-  architecture, API surface, risk): identify them and opine, at a higher level than an objective
-  or plan would.
-- **Is not**: a plan. No implementation steps, no detailed solution design, no estimates, no
-  acceptance criteria. Solution-domain *opinions* belong; recorded decisions, tactics, and
-  file-by-file detail do not. If you find yourself enumerating steps or naming the functions
-  you'd edit, you have drifted downstream — a gist gets *adopted* into a plan or objective later,
-  and that flow does the designing.
+State the problem or desire, why it matters, and its constraints. Ground the framing in the
+codebase and offer high-level opinions on the 2–3 most consequential solution choices
+(design, architecture, API surface, or risk).
+
+Leave implementation steps, roadmaps, estimates, acceptance criteria, detailed design, and
+recorded implementation decisions to the later plan or objective.
 
 ## The loop
 

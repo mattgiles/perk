@@ -4,7 +4,8 @@ Use this reference for unit, integration, type-level, boundary, lifecycle, and r
 
 ## Test the contract, not the implementation shape
 
-Tests should explain what callers may rely on:
+Test behavior through stable interfaces. Derive expected results independently of the code under
+test; internal tests are useful when they guard a concrete invariant. Cover what callers rely on:
 
 - accepted inputs and returned values;
 - rejected inputs and error identity;

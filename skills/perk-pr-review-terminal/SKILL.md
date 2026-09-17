@@ -1,6 +1,6 @@
 ---
 name: perk-pr-review-terminal
-description: Human-in-the-loop adversarial PR review in the hunk terminal TUI. Use when reviewing a PR with /pr-review-terminal.
+description: "Review a PR through /pr-review-terminal in the hunk TUI."
 stages: []
 disable-model-invocation: true
 ---

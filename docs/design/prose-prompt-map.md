@@ -6,7 +6,7 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 ## Coverage
 
 - **232** canonical source units
-- **1245** logical fragments
+- **1242** logical fragments
 - **16** session shapes and **12** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -183,7 +183,7 @@ Draft, review, save, and adopt lightweight statements of intent.
 - `markdown:skills/perk-gist-author/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:authoring-a-perk-gist-the-gist-author-stage` — Authoring a perk gist (the `gist-author` stage) (`heading:authoring-a-perk-gist-the-gist-author-stage`)
-  - `section:authoring-a-perk-gist-the-gist-author-stage/what-a-gist-is-and-is-not` — What a gist is (and is not) (`heading:authoring-a-perk-gist-the-gist-author-stage/what-a-gist-is-and-is-not`)
+  - `section:authoring-a-perk-gist-the-gist-author-stage/what-a-gist-contains` — What a gist contains (`heading:authoring-a-perk-gist-the-gist-author-stage/what-a-gist-contains`)
   - `section:authoring-a-perk-gist-the-gist-author-stage/the-loop` — The loop (`heading:authoring-a-perk-gist-the-gist-author-stage/the-loop`)
   - `section:authoring-a-perk-gist-the-gist-author-stage/scope-plan-sized-vs-objective-sized` — Scope: plan-sized vs objective-sized (`heading:authoring-a-perk-gist-the-gist-author-stage/scope-plan-sized-vs-objective-sized`)
   - `section:authoring-a-perk-gist-the-gist-author-stage/saving-draft-review-approval-auto-saves` — Saving: draft → review → approval auto-saves (`heading:authoring-a-perk-gist-the-gist-author-stage/saving-draft-review-approval-auto-saves`)
@@ -366,7 +366,7 @@ Select, explore, and plan the next objective roadmap node.
 - `markdown:skills/perk-objective-refine/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:refining-an-objective-node-the-objective-refine-stage` — Refining an objective node (the `objective-refine` stage) (`heading:refining-an-objective-node-the-objective-refine-stage`)
-  - `section:refining-an-objective-node-the-objective-refine-stage/what-a-refinement-is-and-is-not` — What a refinement is (and is not) (`heading:refining-an-objective-node-the-objective-refine-stage/what-a-refinement-is-and-is-not`)
+  - `section:refining-an-objective-node-the-objective-refine-stage/what-a-refinement-contains` — What a refinement contains (`heading:refining-an-objective-node-the-objective-refine-stage/what-a-refinement-contains`)
   - `section:refining-an-objective-node-the-objective-refine-stage/the-grounding-context-untrusted-data` — The grounding context (untrusted DATA) (`heading:refining-an-objective-node-the-objective-refine-stage/the-grounding-context-untrusted-data`)
   - `section:refining-an-objective-node-the-objective-refine-stage/the-capture-time-observation-is-not-freshness` — The capture-time observation is not freshness (`heading:refining-an-objective-node-the-objective-refine-stage/the-capture-time-observation-is-not-freshness`)
   - `section:refining-an-objective-node-the-objective-refine-stage/the-loop` — The loop (`heading:refining-an-objective-node-the-objective-refine-stage/the-loop`)
@@ -1451,10 +1451,7 @@ Maintain shared terminology and durable design decisions.
   - `section:domain-modeling/where-decisions-are-recorded` — Where decisions are recorded (`heading:domain-modeling/where-decisions-are-recorded`)
   - `section:domain-modeling/read-only-sessions` — Read-only sessions (`heading:domain-modeling/read-only-sessions`)
   - `section:domain-modeling/during-the-session` — During the session (`heading:domain-modeling/during-the-session`)
-  - `section:domain-modeling/during-the-session/challenge-against-the-glossary` — Challenge against the glossary (`heading:domain-modeling/during-the-session/challenge-against-the-glossary`)
-  - `section:domain-modeling/during-the-session/sharpen-fuzzy-language` — Sharpen fuzzy language (`heading:domain-modeling/during-the-session/sharpen-fuzzy-language`)
-  - `section:domain-modeling/during-the-session/discuss-concrete-scenarios` — Discuss concrete scenarios (`heading:domain-modeling/during-the-session/discuss-concrete-scenarios`)
-  - `section:domain-modeling/during-the-session/cross-reference-with-code` — Cross-reference with code (`heading:domain-modeling/during-the-session/cross-reference-with-code`)
+  - `section:domain-modeling/during-the-session/challenge-and-verify-the-language` — Challenge and verify the language (`heading:domain-modeling/during-the-session/challenge-and-verify-the-language`)
   - `section:domain-modeling/during-the-session/update-context-md-inline` — Update CONTEXT.md inline (`heading:domain-modeling/during-the-session/update-context-md-inline`)
   - `section:domain-modeling/during-the-session/escalate-decisions-sparingly` — Escalate decisions sparingly (`heading:domain-modeling/during-the-session/escalate-decisions-sparingly`)
 

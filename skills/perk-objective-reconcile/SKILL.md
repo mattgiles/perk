@@ -1,6 +1,6 @@
 ---
 name: perk-objective-reconcile
-description: Orchestrating the perk objective-reconcile pass — reconcile an objective's stale roadmap prose (and node descriptions) against what was actually built, either post-land (after a node's PR merges) or at ready time (after a stacked layer's handoff stamp, against the pinned accepted diff range). Use when reconciling an objective in a perk repo.
+description: "Reconcile objective prose and node descriptions with landed work or a stacked handoff’s accepted diff."
 stages: []
 disable-model-invocation: true
 ---
@@ -55,12 +55,8 @@ The objective body comment has three section types — only ONE is yours to rewr
 
 ## What to reconcile
 
-Reconcile only genuine divergence between the objective's text and what landed:
-
-- **Decision overrides** — a decision the plan/PR reversed or refined.
-- **Scope changes** — work added, dropped, or moved between nodes.
-- **Naming divergence** — names in the objective prose that the implementation renamed.
-- **Architecture drift** — structural choices the objective described differently.
+Reconcile concrete differences in decisions, scope, names, or architecture between the objective
+and the evidence for this pass.
 
 Route each by section type:
 

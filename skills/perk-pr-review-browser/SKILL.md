@@ -1,6 +1,6 @@
 ---
 name: perk-pr-review-browser
-description: Human-in-the-loop adversarial PR review on the plannotator browser surface. Use when reviewing a PR with /pr-review-browser or a whole PR stack with /stack-review-browser.
+description: "Review a PR through /pr-review-browser or a stack through /stack-review-browser."
 stages: []
 disable-model-invocation: true
 ---

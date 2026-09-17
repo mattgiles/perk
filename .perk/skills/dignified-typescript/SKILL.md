@@ -1,6 +1,6 @@
 ---
 name: dignified-typescript
-description: Opinionated production TypeScript and TSX guidance for writing, reviewing, refactoring, and designing maintainable code. Use for TypeScript code quality, type modeling, runtime validation, assertions and `any`, discriminated unions, async cancellation and cleanup, ESM/package boundaries, Node CLIs, React, Cloudflare Workers/RPC, tests, or requests to make code idiomatic, elegant, strict, or safer. Inspect the repository toolchain and runtime first; preserve explicit project conventions when they differ.
+description: "Write, review, or refactor production TypeScript and TSX. Use for type modeling, runtime validation, assertions and any, discriminated unions, async cancellation and cleanup, ESM/package boundaries, Node CLIs, React, Cloudflare Workers/RPC, or tests. Inspect the toolchain and runtime; preserve explicit project conventions."
 stages: [gist-author, objective-author, objective-plan, plan, implement, stack-review]
 ---
 
@@ -9,8 +9,7 @@ stages: [gist-author, objective-author, objective-plan, plan, implement, stack-r
 Write TypeScript that makes runtime truth visible in the types, keeps authority and ownership explicit,
 and remains ordinary JavaScript where no type machinery is needed.
 
-Treat this as an opinionated production baseline, not a substitute for repository instructions. Prefer a
-small coherent change over a style crusade.
+Prefer a small coherent change. Apply the precedence rules in “Resolve conflicts deliberately.”
 
 ## Follow the workflow
 

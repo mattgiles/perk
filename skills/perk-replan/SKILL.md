@@ -1,6 +1,6 @@
 ---
 name: perk-replan
-description: Re-authoring an open perk plan against the current codebase in a replan session. Use when replanning a perk plan.
+description: "Rewrite an open perk plan against the current codebase, preserving its identity."
 stages: []
 disable-model-invocation: true
 ---
@@ -25,8 +25,6 @@ failsafe and lands on the same upsert.
   new issue.
 - **No link params needed.** The approval path carries none at all; the existing objective link is
   preserved automatically (the re-save header merge is additive — never clobbered).
-- This is perk's analog of erk's `/erk:replan`, but erk creates-new-and-closes-old; perk updates in
-  place so the plan number, the plan→objective link, and the node→plan backlink all survive.
 
 ## The loop
 
@@ -39,7 +37,7 @@ failsafe and lands on the same upsert.
 2. **Re-investigate the current codebase** (explore read-only). Focus on what changed *since the
    plan was written*: recently landed PRs, moved/renamed code the plan's anchors reference,
    assumptions now false, decisions overtaken by events. Gather findings into four categories before
-   rewriting (structure findings *before* authoring — the erk "sparse plan" lesson):
+   rewriting:
    - **Status** — is the plan still needed / still correct in shape?
    - **Discoveries** — what's new in the codebase that bears on this plan.
    - **Corrections** — anchors/claims in the prior plan that are now wrong.
@@ -52,9 +50,7 @@ failsafe and lands on the same upsert.
 
 ## Not yet supported
 
-**Multi-plan consolidation** (erk's `/erk:replan 123 456 789` — merge several plans into one) is
-**deferred**. `replan` re-authors a single plan in place; consolidating multiple plans is out of
-scope for now.
+Replan updates one open plan in place. Multi-plan consolidation is deferred.
 
 See the **perk-plan** skill for plan structure and the decision-completeness bar (read
 `.agents/skills/perk-plan/SKILL.md` — it is prompt-hidden).

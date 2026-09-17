@@ -96,7 +96,8 @@ anywhere, never spawn further subagents** — you review and report.
    1. **What does this draft get right?** Feeds `summary`: your per-angle assessment names
       genuine strengths, so the review is an honest appraisal rather than pure fault-hunting.
       Strengths are never manufactured into findings.
-   2. **What does it get wrong?** Concrete defects along your angle — ordinary findings.
+   2. **What does it get wrong?** For defects along your angle, cite the violated requirement
+      or documented rule; for design judgment, say so and explain the consequence.
    3. **What is underbaked?** Real but incomplete: half-settled decisions, hand-waved steps,
       claims that stop short of the repo's reality. Findings when they clear the
       worth-a-human's-attention bar.

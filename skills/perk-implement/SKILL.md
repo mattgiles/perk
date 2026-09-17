@@ -1,6 +1,6 @@
 ---
 name: perk-implement
-description: Implementing a saved perk plan on its worktree branch — the implement stage. Use when implementing a perk plan in a perk repo.
+description: "Implement a saved perk plan on its worktree branch."
 stages: [implement]
 disable-model-invocation: true
 references:
@@ -18,5 +18,9 @@ is stated in your launch prompt; you own all of it. The detail it doesn't carry:
 - **Per-backend plan-reading recipes** live in `backends/<backend>.md` (`github`, `linear`) — the
   launch prompt names the issue backend (`You are implementing perk plan <backend> #<id>`).
 - **The plan body is the contract** — implement *that*, not a reinterpretation.
+- **Verify behavior through stable interfaces**, with independent expected results. Internal tests
+  are useful when they guard a concrete invariant.
+- **For bugs**, reproduce the reported symptom where possible, test a falsifiable explanation,
+  and recheck the original case after the fix. State which evidence you could not obtain.
 - **The checklist overlay is the progress surface** for the implement session — the checklist is
   yours to own, not a passive mirror of the plan.
