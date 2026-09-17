@@ -276,13 +276,19 @@ test("renderAddressHandoff: three arms keyed on the structured delivery kind", (
     renderAddressHandoff({ ...change, delivery: "incremental" }),
     "Hand-off (incremental plan): once the PR is approved, the human runs /land.",
   );
-  const unreported =
-    "Hand-off: the worker reported no delivery kind (a version-skewed perk CLI?) — do not " +
-    "assume /land; confirm the plan's delivery first (a plan header carrying " +
-    "delivery_lineage is a stacked layer → /ready; otherwise → /land).";
-  assert.equal(renderAddressHandoff(change), unreported);
-  // A junk string the lenient decoder let through is unreported too — never incremental.
-  assert.equal(renderAddressHandoff({ ...change, delivery: "weird" }), unreported);
+  const failSafeTail =
+    " (a version-skewed perk CLI?) — do not assume /land; confirm the plan's delivery first " +
+    "(a plan header carrying delivery_lineage is a stacked layer → /ready; otherwise → /land).";
+  assert.equal(
+    renderAddressHandoff(change),
+    `Hand-off: the worker reported no delivery kind${failSafeTail}`,
+  );
+  // A junk string the lenient decoder let through is unreported too — never incremental — and
+  // is diagnosed as UNRECOGNIZED (the worker did report a value), not as absent.
+  assert.equal(
+    renderAddressHandoff({ ...change, delivery: "weird" }),
+    `Hand-off: the worker reported an unrecognized delivery kind "weird"${failSafeTail}`,
+  );
 });
 
 test("wire baseline: partial resolve with a derivable retry batch", async () => {

@@ -304,6 +304,22 @@ const CLEAN_JSON = JSON.stringify({
   comment_count: 0,
 });
 
+// An OLD worker's clean envelope (version skew): it still names `/land` unconditionally. The
+// non-null value is what makes the "no decode" assertion bite — `null` decodes to `undefined`
+// anyway, so only a string can prove the warm plumbing is gone.
+const LEGACY_CLEAN_JSON = JSON.stringify({
+  success: true,
+  error_type: null,
+  message: null,
+  dry_run: false,
+  pr: 42,
+  mode: "reaction",
+  verdict: "clean",
+  fyi: [],
+  next_command: "/land",
+  comment_count: 0,
+});
+
 /** The staged `review-post-*.json` cold-door batches, oldest first (empty when none staged). */
 function stagedReviewBatches(cwd: string): string[] {
   const dir = runScratchDir(cwd, "01RID");
@@ -994,8 +1010,6 @@ test("tool: post_pr_review delegates a clean batch (👍), records last_pr_revie
       result.content[0]?.text ?? "",
       /Next step: the human's review gate — \/land for an incremental plan, \/ready/,
     );
-    // The `next_command` plumbing is gone from the warm side (no decode, no details row).
-    assert.equal((result.details as { next_command?: unknown }).next_command, undefined);
     const rec = h.workflowState().last_pr_review as {
       verdict?: string;
       angles?: string[];
@@ -1006,6 +1020,35 @@ test("tool: post_pr_review delegates a clean batch (👍), records last_pr_revie
     assert.deepEqual(rec?.angles, ["plan-fidelity"]);
     assert.deepEqual(rec?.covered_angles, ["plan-fidelity"]);
     assert.equal(rec?.comment_count, 0);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: post_pr_review ignores an old worker's unconditional next_command on clean", async () => {
+  // Version skew: an older `perk pr review-post` still says `/land` on clean. The warm side
+  // must neither relay it (wrong on a stacked layer) nor decode it into details.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: LEGACY_CLEAN_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("post_pr_review", {
+      verdict: "clean",
+      summary: "clean",
+      angles: ["plan-fidelity"],
+    });
+    const details = result.details as { ok: boolean; next_command?: unknown };
+    assert.equal(details.ok, true);
+    const text = result.content[0]?.text ?? "";
+    assert.match(
+      text,
+      /Next step: the human's review gate — \/land for an incremental plan, \/ready \(the post-review handoff\) for a stacked layer\./,
+    );
+    assert.doesNotMatch(text, /Next step: \/land/);
+    // The `next_command` plumbing is gone from the warm side (no decode, no details row): a
+    // non-null wire value would have surfaced here if the old decoder were still in place.
+    assert.equal(details.next_command, undefined);
+    assert.equal("next_command" in details, false);
   } finally {
     h.dispose();
   }

@@ -170,8 +170,8 @@ resolve. `--preview` classifies only. Paired tools:
   `retry_threads` batch; unstructured failure requires inspection. Never push manually.
   *Terminating on full success.* Full success ends with a delivery-keyed `Hand-off` line:
   incremental → `/land` once approved; stacked layer → `/ready` records the post-review handoff
-  (never `/land`); if the worker reported no delivery kind, confirm the plan's delivery before
-  choosing.
+  (never `/land`); if the worker reported no recognized delivery kind (absent or unknown), confirm
+  the plan's delivery before choosing.
 
 ### `/land`
 
