@@ -8,9 +8,15 @@ a warm transition keeps the id; a fork derives a child by suffix (``<ulid>.<n>``
 (``extension/substrate/runId.ts``) — the extension otherwise claims, restores, and derives.
 """
 
+import re
 from datetime import datetime
 
 from ulid import ULID
+
+# The STRICT full-match grammar of a run id: a canonical 26-char Crockford base32 ULID with
+# optional `.<n>` fork suffixes (nested included). `re.ASCII` keeps `\d` at `[0-9]` (no Unicode
+# digits); the twin is `CANONICAL_RUN_ID` in extension/substrate/runId.ts.
+_CANONICAL_RUN_ID = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}(\.\d+)*", re.ASCII)
 
 
 def mint() -> str:
@@ -45,6 +51,19 @@ def is_run_id(value: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def is_canonical_run_id(value: str) -> bool:
+    """True when ``value`` matches the STRICT run-id grammar in full.
+
+    The gate for a run id that reaches a CLI selector or becomes a filesystem path (the
+    ``perk resume RUN_ID`` selector): a canonical ULID with optional ``.<n>`` fork suffixes,
+    nested included — nothing else. Contrast :func:`is_run_id`, the permissive parse-based
+    test gc/runner keep, where a suffix like ``.junk`` passes (it never passes here).
+
+    ``fullmatch`` (not ``$``) because Python's ``$`` would admit a trailing newline.
+    """
+    return _CANONICAL_RUN_ID.fullmatch(value) is not None
 
 
 def timestamp(run_id: str) -> datetime:

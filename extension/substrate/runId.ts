@@ -11,6 +11,24 @@ import { randomBytes } from "node:crypto";
 /** Crockford base32 alphabet (no I/L/O/U) — the ULID character set. */
 export const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
+/**
+ * The STRICT full-match grammar of a run id: a canonical 26-char Crockford base32 ULID with
+ * optional `.<n>` fork suffixes (nested included). Twin of `_CANONICAL_RUN_ID` in
+ * perk/state/run_id.py. ECMAScript `$` without the `m` flag is the end-of-input assertion, so
+ * there is no trailing-newline leniency here (pinned by the `<ulid>\n` case in runId.test.ts).
+ */
+export const CANONICAL_RUN_ID = /^[0-9A-HJKMNP-TV-Z]{26}(\.\d+)*$/;
+
+/**
+ * True when `value` matches the STRICT run-id grammar in full — the gate for a run id that
+ * becomes a filesystem path (the `recordRunSession` write). `isSafeRunId` in cache.ts stays the
+ * permissive write-path predicate for the class/site pointer capture; this one admits only a
+ * canonical ULID plus `.<n>` suffixes.
+ */
+export function isCanonicalRunId(value: string): boolean {
+  return CANONICAL_RUN_ID.test(value);
+}
+
 /** Mint a spec-conformant ULID: 10 time chars (48-bit ms) + 16 randomness chars (80 bits). */
 export function mintRunId(): string {
   // Time component: most-significant-first base32 of Date.now() (2^48 ms ≈ year 10889).
