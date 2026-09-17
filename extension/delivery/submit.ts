@@ -28,7 +28,9 @@ export interface PublishedChange {
   mergeable?: boolean | null;
   /** The conflicted paths when `mergeable === false`; `[]` otherwise (advisory). */
   conflicts?: string[];
-  /** `"stacked"` when the submit routed through the delivery publish operation (§8.47). */
+  /** The route the submit took (§8.47): `"stacked"` through the delivery publish operation,
+   * `"incremental"` on the plain push-and-open path. Absent on an old or malformed envelope
+   * (the decoder is lenient) — readers must treat that as unreported, not as incremental. */
   delivery?: string;
   /** The native-stack facts of a stacked submit (absent for the bottom layer). */
   stack?: { number: number; size: number; position: number };

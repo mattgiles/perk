@@ -1022,13 +1022,15 @@ def test_stacked_dry_run_stays_offline_and_byte_identical(monkeypatch):
     assert data["delivery"] is None and data["stack"] is None and data["operation_id"] is None
 
 
-def test_incremental_envelope_serializes_stacked_fields_as_null(monkeypatch):
+def test_incremental_envelope_names_delivery_and_nulls_stack_fields(monkeypatch):
+    # The route is named explicitly so a warm reader can tell "incremental" from an
+    # unreported (version-skewed / malformed) envelope; only the stack fields stay null.
     _authed(monkeypatch)
     _stub_gh(monkeypatch)
     result = _run(monkeypatch, ["pr", "submit", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
-    assert data["delivery"] is None
+    assert data["delivery"] == "incremental"
     assert data["stack"] is None
     assert data["operation_id"] is None
 

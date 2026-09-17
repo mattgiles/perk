@@ -81,7 +81,6 @@ export interface PostOk {
   mode?: string;
   verdict?: string;
   comment_count?: number;
-  next_command?: string;
 }
 
 /**

@@ -52,10 +52,11 @@ checkpoint-claimed lower layer automatically invokes the same transactional sync
 suffix: only that plan's committed head is a local source, every successor starts from its verified
 published head, and submit authorizes the cascade without a second prompt. Typed sync failures and
 recovery guidance pass through unchanged. The `--json` report gains additive `delivery`
-(`"stacked"` or null), `stack` (`{number, size, position}` or null), `operation_id`, and the
-cascade-only `operation {kind, operation_id, abandoned_operation_id, resumed, no_op, affected[],
-notes[]}` block; flat `operation_id` remains the compatibility alias. Incremental plans are
-untouched (the fields are null).
+(`"stacked"` / `"incremental"`; null only on `--dry-run`), `stack` (`{number, size, position}` or
+null), `operation_id`, and the cascade-only `operation {kind, operation_id,
+abandoned_operation_id, resumed, no_op, affected[], notes[]}` block; flat `operation_id` remains
+the compatibility alias. Incremental plans are untouched beyond the named route (the
+stack/operation fields are null on incremental).
 
 ### `perk pr address [PLAN]`
 
@@ -245,7 +246,9 @@ posts an advisory COMMENT review, while a `clean` verdict posts one thumbs-up re
 compared with the freshly resolved active PR before any GitHub mutation, with drift failing
 `review_target_changed`. `--dry-run` validates the full batch including that field but stays
 offline. Invoked by the warm **`post_pr_review`** tool (the parent reconciles the reviewers and
-posts once); reviewer children never call it directly.
+posts once); reviewer children never call it directly. The `--json` envelope's `next_command` is
+`/address` for an actionable verdict and `null` for a clean one (the clean gate is `/land` on an
+incremental plan and `/ready` on a stacked layer — the human's call); the human render names both.
 
 ### `perk pr review-submit`
 

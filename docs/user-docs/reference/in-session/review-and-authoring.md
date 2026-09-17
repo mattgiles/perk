@@ -81,6 +81,8 @@ Companion tools:
   for a reconciled actionable post.
   After a recorded wave, `last_pr_review.angles` is the authoritative attempted manifest
   (including Ponytail), while `covered_angles` contains only completed schema-valid assessments.
+  Its result names the next step — `/address` when actionable; when clean, the human's review gate
+  (`/land` incremental, `/ready` stacked) — never a single command.
   The PR comes from the cold-door result; callers never supply one. A standalone call before any
   valid wave uses caller-supplied angles for both fields. *Non-terminating.*
 

@@ -101,8 +101,41 @@ def test_post_clean_success_json(monkeypatch, unborn_git_repo_factory):
     data = json.loads(result.output)
     assert data["success"] is True and data["pr"] == 42
     assert data["mode"] == "reaction" and data["comment_count"] == 0
-    assert data["verdict"] == "clean" and data["next_command"] == "/land"
+    # Key present, null: the clean gate is the human's and delivery-dependent (`/land`
+    # incremental, `/ready` stacked), so no single command is named.
+    assert data["verdict"] == "clean"
+    assert "next_command" in data and data["next_command"] is None
     assert data["fyi"] == []
+
+
+@pytest.mark.parametrize("dry_run", [False, True], ids=["post", "dry-run"])
+def test_post_clean_human_render_names_both_review_gates(
+    monkeypatch, unborn_git_repo_factory, dry_run: bool
+):
+    # Both clean human-render paths name the delivery-dependent gate; the unconditional
+    # `Next: /land` (wrong on a stacked layer) is gone.
+    if not dry_run:
+        _authed(monkeypatch)
+        monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+        monkeypatch.setattr(
+            github,
+            "add_pr_reaction",
+            lambda **k: github.ReviewPostResult(
+                ok=True, mode="reaction", pr_number=42, comment_count=0
+            ),
+        )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        cache.write_plan_ref(Path(d), _REF)
+        batch = _write_batch(d, {"verdict": "clean", "summary": "clean"})
+        args = ["pr", "review-post", "--batch", batch]
+        if dry_run:
+            args.insert(2, "--dry-run")
+        result = runner.invoke(cli, args)
+    assert result.exit_code == 0
+    assert "/land (incremental) or /ready (stacked handoff)" in result.output
+    assert "Next: /land" not in result.output
 
 
 def test_post_dry_run_offline(unborn_git_repo_factory):

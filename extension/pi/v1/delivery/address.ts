@@ -166,6 +166,36 @@ function createThreadResolver(pi: ExtensionAPI, ctx: ExtensionContext): ResolveT
   };
 }
 
+/**
+ * Render the delivery-keyed hand-off line appended to a fully successful finalization (pure).
+ * The post-approval gesture differs by delivery kind: a stacked layer is stamped with `/ready`
+ * (the human handoff, contracts §8.43/§8.66) and the train lands whole via `/objective-land` —
+ * `/land` refuses it (`stacked_plan`); an incremental plan lands with `/land`. Keyed on the
+ * STRUCTURED `change.delivery` (never the rendered publication suffix, which proves nothing
+ * when absent). Anything but the two known values — `undefined` from an old worker envelope, or
+ * a junk string the lenient `decodeSubmit` let through — is UNREPORTED and never defaults to
+ * `/land`: a version-skewed CLI must degrade to "confirm first", not to a wrong gesture. The
+ * line names human gestures only; the tool never drives `ready`/`land`.
+ */
+export function renderAddressHandoff(change: PublishedChange): string {
+  switch (change.delivery) {
+    case "stacked":
+      return (
+        "Hand-off (stacked layer): once this layer is approved, the human records the handoff " +
+        "with /ready — the stamp also unblocks planning of dependent nodes. Never /land: it " +
+        "refuses a stacked plan (stacked_plan); the train lands whole via /objective-land."
+      );
+    case "incremental":
+      return "Hand-off (incremental plan): once the PR is approved, the human runs /land.";
+    default:
+      return (
+        "Hand-off: the worker reported no delivery kind (a version-skewed perk CLI?) — do not " +
+        "assume /land; confirm the plan's delivery first (a plan header carrying " +
+        "delivery_lineage is a stacked layer → /ready; otherwise → /land)."
+      );
+  }
+}
+
 /** The full-success payload returned by the terminating model-facing finalizer. */
 interface FinalizeAddressOk {
   submit: PublishedChange;
@@ -231,7 +261,7 @@ async function executeFinalizeAddress(
       driveConflictFollowUp(pi, ctx, outcome.conflict, controller);
       return ok(
         `Resolved ${outcome.resolvedThreadIds.length} review thread(s) after ` +
-          renderPublishedMessage(outcome.change),
+          `${renderPublishedMessage(outcome.change)}. ${renderAddressHandoff(outcome.change)}`,
         {
           submit: { ...outcome.change },
           results: outcome.results,

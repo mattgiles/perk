@@ -96,9 +96,12 @@ test("prReviewGuidance renders both verdict outcomes and the next-step surfacing
   // actionable → advisory COMMENT review, next step /address
   assert.match(text, /COMMENT review/);
   assert.match(text, /actionable .*`\/address`/u);
-  // clean → a single 👍 reaction, next step /land
+  // clean → a single 👍 reaction; the next step is the human's delivery-dependent gate (/land
+  // incremental, /ready stacked)
   assert.match(text, /\u{1F44D} reaction/u);
-  assert.match(text, /clean .*`\/land`/u);
+  assert.match(text, /clean ⇒ the human's review gate — `\/land` for an incremental plan/u);
+  assert.match(text, /`\/ready` \(the post-review handoff\) for a stacked layer/u);
+  assert.doesNotMatch(text, /clean ⇒ `\/land`,/u);
   // FYI notes are surfaced in-session only
   assert.match(text, /FYI notes/);
 });
@@ -295,7 +298,9 @@ const CLEAN_JSON = JSON.stringify({
   mode: "reaction",
   verdict: "clean",
   fyi: [],
-  next_command: "/land",
+  // The worker names no single command on clean (the gate is delivery-dependent); the warm
+  // decoder ignores the key either way.
+  next_command: null,
   comment_count: 0,
 });
 
@@ -985,7 +990,12 @@ test("tool: post_pr_review delegates a clean batch (👍), records last_pr_revie
     });
     const details = result.details as { ok: boolean; verdict?: string };
     assert.equal(details.ok, true);
-    assert.match(result.content[0]?.text ?? "", /Next step: \/land/);
+    assert.match(
+      result.content[0]?.text ?? "",
+      /Next step: the human's review gate — \/land for an incremental plan, \/ready/,
+    );
+    // The `next_command` plumbing is gone from the warm side (no decode, no details row).
+    assert.equal((result.details as { next_command?: unknown }).next_command, undefined);
     const rec = h.workflowState().last_pr_review as {
       verdict?: string;
       angles?: string[];

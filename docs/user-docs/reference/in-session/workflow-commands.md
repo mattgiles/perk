@@ -168,7 +168,10 @@ resolve. `--preview` classifies only. Paired tools:
   (including a stacked suffix cascade), then reply to and resolve addressed threads. Full success
   records `last_review_batch` and terminates. A structured partial resolve returns a reduced
   `retry_threads` batch; unstructured failure requires inspection. Never push manually.
-  *Terminating on full success.*
+  *Terminating on full success.* Full success ends with a delivery-keyed `Hand-off` line:
+  incremental → `/land` once approved; stacked layer → `/ready` records the post-review handoff
+  (never `/land`); if the worker reported no delivery kind, confirm the plan's delivery before
+  choosing.
 
 ### `/land`
 

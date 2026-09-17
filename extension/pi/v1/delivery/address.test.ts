@@ -23,7 +23,7 @@ import {
   spyInjections,
 } from "../../../testing/harness.ts";
 import { REVIEW_CLASSIFIER_REPORT_SCHEMA } from "../../../waves/reviewClassifierWave.ts";
-import { addressGuidance, decodeResolveParams } from "./address.ts";
+import { addressGuidance, decodeResolveParams, renderAddressHandoff } from "./address.ts";
 import { conflictResolutionGuidance } from "./submit.ts";
 
 const REF: PlanRef = {
@@ -34,6 +34,8 @@ const REF: PlanRef = {
   objective_id: null,
 };
 
+// Mirrors the worker's envelope: `perk pr submit --json` names the route explicitly
+// ("incremental" here) so the renderer can tell it from an unreported delivery kind.
 const SUBMIT_PAYLOAD = {
   success: true,
   error_type: null,
@@ -45,6 +47,7 @@ const SUBMIT_PAYLOAD = {
   base: "main",
   mergeable: true,
   conflicts: [],
+  delivery: "incremental",
 };
 
 const RESOLVE_PAYLOAD = {
@@ -88,6 +91,7 @@ const SUBMIT_FACTS = {
   base: "main",
   mergeable: true,
   conflicts: [],
+  delivery: "incremental",
 };
 
 /** Invoke the REAL registered finalize_address tool against routed fake cold doors; JSON
@@ -213,7 +217,8 @@ test("wire baseline: completed (submit facts + rows + resolved ids; terminates)"
   });
   assert.equal(
     r.text,
-    "Resolved 2 review thread(s) after Opened draft PR #42 → u/pr/42 (no plan embed)",
+    "Resolved 2 review thread(s) after Opened draft PR #42 → u/pr/42 (no plan embed). " +
+      "Hand-off (incremental plan): once the PR is approved, the human runs /land.",
   );
   assert.deepEqual(r.details, {
     ok: true,
@@ -225,6 +230,59 @@ test("wire baseline: completed (submit facts + rows + resolved ids; terminates)"
     resolved_thread_ids: ["PRRT_1", "PRRT_2"],
   });
   assert.equal(r.terminate, true);
+});
+
+test("wire baseline: completed on a stacked layer names the /ready handoff", async () => {
+  const r = await invokeFinalize({
+    submit: { ...SUBMIT_PAYLOAD, delivery: "stacked" },
+    params: { threads: [{ thread_id: "PRRT_1" }, { thread_id: "PRRT_2" }] },
+  });
+  assert.ok(
+    r.text.endsWith(
+      "Hand-off (stacked layer): once this layer is approved, the human records the handoff " +
+        "with /ready — the stamp also unblocks planning of dependent nodes. Never /land: it " +
+        "refuses a stacked plan (stacked_plan); the train lands whole via /objective-land.",
+    ),
+    r.text,
+  );
+  assert.match(r.text, /\(stacked layer\)/);
+  assert.doesNotMatch(r.text, /the human runs \/land/);
+  assert.equal((r.details.submit as { delivery?: unknown }).delivery, "stacked");
+  assert.equal(r.terminate, true);
+});
+
+test("wire baseline: completed with an unreported delivery kind never defaults to /land", async () => {
+  // The old-worker envelope: no `delivery` key at all.
+  const { delivery: _dropped, ...oldWorkerEnvelope } = SUBMIT_PAYLOAD;
+  const r = await invokeFinalize({
+    submit: oldWorkerEnvelope,
+    params: { threads: [{ thread_id: "PRRT_1" }, { thread_id: "PRRT_2" }] },
+  });
+  assert.match(r.text, /reported no delivery kind/);
+  assert.match(r.text, /do not assume \/land/);
+  assert.doesNotMatch(r.text, /Hand-off \(incremental plan\)/);
+  assert.equal((r.details.submit as { delivery?: unknown }).delivery, undefined);
+  assert.equal(r.terminate, true);
+});
+
+test("renderAddressHandoff: three arms keyed on the structured delivery kind", () => {
+  const change = { pr: { number: 1, url: "u", is_draft: true, existed: false } };
+  const stacked = renderAddressHandoff({ ...change, delivery: "stacked" });
+  assert.match(stacked, /^Hand-off \(stacked layer\): /);
+  assert.match(stacked, /records the handoff with \/ready/);
+  assert.match(stacked, /Never \/land: it refuses a stacked plan \(stacked_plan\)/);
+  assert.match(stacked, /\/objective-land\.$/);
+  assert.equal(
+    renderAddressHandoff({ ...change, delivery: "incremental" }),
+    "Hand-off (incremental plan): once the PR is approved, the human runs /land.",
+  );
+  const unreported =
+    "Hand-off: the worker reported no delivery kind (a version-skewed perk CLI?) — do not " +
+    "assume /land; confirm the plan's delivery first (a plan header carrying " +
+    "delivery_lineage is a stacked layer → /ready; otherwise → /land).";
+  assert.equal(renderAddressHandoff(change), unreported);
+  // A junk string the lenient decoder let through is unreported too — never incremental.
+  assert.equal(renderAddressHandoff({ ...change, delivery: "weird" }), unreported);
 });
 
 test("wire baseline: partial resolve with a derivable retry batch", async () => {

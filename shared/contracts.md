@@ -1360,6 +1360,11 @@ post_pr_review{ pr_number, summary, comments:[{path,line,body,side?}], event? } 
     # A recorded wave adds strict positive `expected_pr` to that batch; the CLI compares it with
     # the freshly resolved active PR before mutation (`review_target_changed` on drift). Dry-run
     # validates the field while remaining offline. Standalone batches omit it.
+    # The `--json` envelope's `next_command` is `/address` on an actionable verdict and `null` on
+    # a clean one (key always present): the clean gate is the human's and delivery-dependent
+    # (`/land` incremental, `/ready` stacked — `/land` refuses a stacked layer), so neither plane
+    # names a single command; the human render names both gestures. The warm `post_pr_review`
+    # renders its next step from the verdict and no longer decodes the field.
 add_pr_reaction{ pr_number }                        -> ReviewPostResult{ ok, mode: "reaction", pr_number, comment_count }
     # the clean-verdict 👍 (issues-reactions endpoint — idempotent on rerun); a hard error on
     # failure (mutations raise; nothing review-shaped is lost).
@@ -8320,8 +8325,12 @@ operation `kind="sync"` around the nested result.
 `[cache.plan-ref, github.plan, github.objective, github.stack]` and writes
 `[github.pr, github.plan, github.objective, github.stack]` (the journal lives on the
 objective's carrier; the stack is its own authority). `PrSubmitOut` gains additive optional
-`delivery` (`"stacked"`), `stack {number, size, position}`, `operation_id`, and the §8.52
-cascade-only `operation` block (all null on incremental); the envelope's `base` carries the PR's
+`delivery`, `stack {number, size, position}`, `operation_id`, and the §8.52 cascade-only
+`operation` block. `delivery` names the route the submit took — `"stacked"` on the stacked path,
+`"incremental"` on the incremental path, `null` only on the offline `--dry-run` (it returns before
+the routing discriminator is read) — so a warm reader can tell an incremental submit from an
+unreported (version-skewed or malformed) envelope; the stack/operation fields stay null on
+incremental. The envelope's `base` carries the PR's
 real merge target — the parent branch — so the warm door's conflict-resolver rebases onto the
 parent. `extension/pi/v1/delivery/submit.ts` decodes the fields leniently (malformed → absent,
 never a sunk decode) and appends a short stack/cascade suffix to the success message. The stacked PR
@@ -9600,8 +9609,15 @@ malformed result payload carries no per-thread claim and instructs inspection be
 Full success means corroborated per-thread success: a nominal-success envelope whose rows fail to
 corroborate every requested thread is treated as a partial failure and records nothing. Full
 success appends `last_review_batch`, returns nested submit + resolve facts, drives the same bounded
-conflict-resolution follow-up as `submit`, and terminates. The headless address-success
-predicate is §8.11/§8.38's. The address stage registry rows include `github.plan`,
+conflict-resolution follow-up as `submit`, and terminates. Full success also appends a
+delivery-keyed **`Hand-off`** line to the result text, keyed on the structured
+`PublishedChange.delivery` (never the rendered publication suffix): `"stacked"` → the human records
+the handoff with `/ready` (never `/land`, which refuses a stacked plan; `/objective-land` lands the
+train), `"incremental"` → the human runs `/land` once approved, absent/unrecognized → an explicit
+unreported arm that tells the model to confirm the plan's delivery first and never defaults to
+`/land`. The line names human gestures only; the tool never drives `ready`/`land`, and the
+`perk-address` skill relays the line verbatim rather than deriving it. The headless
+address-success predicate is §8.11/§8.38's (details, never the text). The address stage registry rows include `github.plan`,
 `github.objective`, and `github.stack` on both reads and writes because finalization is publication.
 
 **Supervisor convergence.** `classify_stacked_veto(selection, objective_id)` runs before branching
