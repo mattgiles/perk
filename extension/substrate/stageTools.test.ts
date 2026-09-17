@@ -36,8 +36,10 @@ import { loadRegistry } from "./registry.ts";
 import {
   BORROWED_TOOLS,
   FFF_SEARCH_TOOLS,
+  LINEAR_MUTATING_TOOLS,
   LINEAR_READ_TOOLS,
   PERK_TOOLS,
+  PLANNOTATOR_PHASE_TOOLS,
   READ_ONLY_TOOLS,
   STAGE_TOOLS,
   WEB_RESEARCH_TOOLS,
@@ -148,6 +150,26 @@ test("STAGE_TOOLS: every listed name is in the scoped universe, and ask_user_que
       );
     }
     assert.ok(tools.includes("ask_user_question"), `${stage} must carry ask_user_question`);
+  }
+});
+
+test("STAGE_TOOLS: the census-only family (Linear mutators + plannotator phase tools) appears in NO stage list", () => {
+  // The §8.40 invariant itself, not only its `implement` instance (the matrix test below): these
+  // names are in the borrowed census so every stage session sheds their schemas, and NO stage
+  // list may carry them — Linear mutations are the Python plane's job, and perk never drives
+  // plannotator's plan phases. A future edit adding either family to `plan`, an `objective-*`
+  // stage, or `stack-review` fails here.
+  const censusOnly = [...LINEAR_MUTATING_TOOLS, ...PLANNOTATOR_PHASE_TOOLS];
+  for (const name of censusOnly) {
+    assert.ok(BORROWED_TOOLS.includes(name), `census-only name must be in BORROWED_TOOLS: ${name}`);
+  }
+  for (const [stage, tools] of Object.entries(STAGE_TOOLS)) {
+    for (const name of censusOnly) {
+      assert.ok(
+        !tools.includes(name),
+        `STAGE_TOOLS.${stage} must not carry the census-only ${name}`,
+      );
+    }
   }
 });
 
@@ -454,10 +476,21 @@ const FAKE_BORROWED_NAMES = [
   "linear_get_issue",
   "linear_create_issue",
   "plannotator_submit_plan",
+  "plannotator_mark_done",
   "some_foreign_tool",
 ];
 
 test("implement claim: borrowed tools follow the matrix (research/delegation/todo stay; mutating/submit drop)", async () => {
+  // The load-time fake IS the regression oracle for the census-only names: a census tool in no
+  // stage list is subtracted by the stage filter, while an un-enumerated name (`some_foreign_tool`
+  // here; a plannotator phase tool the census forgot, in the real world) passes through
+  // fail-open and shows up active. The real-world sequence a forgotten plannotator name rides:
+  // both phase tools register at load → perk's `session_start` sync takes the first-engagement
+  // snapshot WITH them (perk is the first `packages` entry) → plannotator's own `session_start`
+  // idle strip deactivates them → perk's `resources_discover` re-apply re-installs
+  // `snapshot ∪ admitted`, restoring the un-enumerated member into the stage session. The
+  // load-time registration is the load-bearing part of that shape, so no plannotator-faithful
+  // strip fake is needed: the enumerated name drops here; drop it from the census and it stays.
   const runId = "01STAGETOOLBRWI";
   const cwd = scaffoldRepo({ handoff: { runId, mode: "read-write", stage: "implement" } });
   const h = await loadAt(cwd, {
@@ -473,7 +506,11 @@ test("implement claim: borrowed tools follow the matrix (research/delegation/tod
       active.includes("some_foreign_tool"),
       "an un-enumerated foreign name passes through untouched (fail-open)",
     );
-    for (const name of ["linear_create_issue", "plannotator_submit_plan"]) {
+    for (const name of [
+      "linear_create_issue",
+      "plannotator_submit_plan",
+      "plannotator_mark_done",
+    ]) {
       assert.ok(!active.includes(name), `census tool in no stage list must be scoped off: ${name}`);
     }
   } finally {

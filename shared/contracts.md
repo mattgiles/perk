@@ -7036,12 +7036,16 @@ strips/restores its tool per `hasUI` before each turn, so headless sessions carr
 (plannotator's phase machinery, @tombell/pi-plan's plan mode) win between perk's reconciliation
 points (the fail-open direction), and every reconciliation — a rebuild or the startup re-apply —
 re-installs perk's set over a foreign toggle, admitted late tools included; recorded interplay,
-not re-engineered. Stage placement:
+not re-engineered — and plannotator's idle-phase strip of its load-time phase tools runs in its
+OWN `session_start`, after perk's first-engagement snapshot, which is exactly why every
+plannotator phase tool must be enumerated (an un-enumerated one is a snapshot member the
+`resources_discover` re-apply restores). Stage placement:
 the research families (web union + Linear reads + FFF local search) ride EVERY stage list; delegation
 (`subagent`/`wait`/`subagent_supervisor`/`intercom`) and `todo` are worktree-family only among the
 gate-OFF stage lists (delegation additionally rides the read-only gate — §8.3);
 `LINEAR_MUTATING_TOOLS` (incl. `linear_configure_auth`, which writes `~/.pi/agent/auth.json`)
-and `plannotator_submit_plan` appear in NO stage list — in the census, so subtracted from every
+and plannotator's two phase tools (`PLANNOTATOR_PHASE_TOOLS`: `plannotator_submit_plan`,
+`plannotator_mark_done`) appear in NO stage list — in the census, so subtracted from every
 stage session; bare/unscoped sessions keep full access. Child-session tools
 (`structured_output`/`contact_supervisor` — `SUBAGENT_CHILD_TOOLS`; perk's own waves spawn with
 the intercom bridge off, so `contact_supervisor` is absent in THEIR children, but an ad-hoc gated

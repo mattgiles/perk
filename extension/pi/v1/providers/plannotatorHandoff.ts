@@ -33,10 +33,10 @@
 // The requested diffType only sets the INITIAL view (the reviewer can switch from the header menu).
 //
 // SERVER ADDRESSING (why the browser-open core's env preset works): the pi extension runs
-// plannotator's servers IN-PROCESS (`node:http`, not the standalone Bun binary), and their
-// shared port resolution (`server/network.ts getServerPort()`, used by both entry points —
-// `startPlanReviewServer` in `server/serverPlan.ts` and the code-review server in
-// `server/serverReview.ts`) reads `PLANNOTATOR_PORT` at bind time — perk's extension and
+// plannotator's servers IN-PROCESS (`node:http`, not the standalone Bun binary), and both entry
+// points — `startPlanReviewServer` in `server/serverPlan.ts` and the code-review server in
+// `server/serverReview.ts` — bind through the shared `server/network.ts listenOnPort()`, whose
+// `getServerPortConfiguration()` reads `PLANNOTATOR_PORT` at bind time — perk's extension and
 // plannotator's server share one Node process, so an env var set here is read there. The core
 // picks a free ephemeral port, presets the env var, emits the bridge request, polls a
 // server-flavor-unique readiness route (`GET /api/diff` for code review, `GET /api/plan` for
