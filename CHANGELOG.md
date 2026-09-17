@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `perk plan resume PLAN` at a review gate (draft PR, clean PR awaiting review, PR closed unmerged) now prints its gate line and then, in an interactive terminal, opens the plan worktree's Pi session picker so the conversation can be reopened; `--json`, `--dry-run`, `--remote`, and piped runs print the gate report only. (e4065ad)
 - perk-launched sessions now carry a perk-owned Pi session name, `<stage> | plan #N | objective #O / <node> | <title>` (segments omitted when unknown), so the session picker (`pi --resume`, `perk resume`) shows what each conversation is instead of its first message. A different name set with `/name` or `pi --name` is never overwritten; sessions perk did not launch (a hand-run `pi`, subagent children) stay unnamed; an older unnamed perk-launched session whose record carries its launch stage gains its name the next time it is opened. (807a27e)
 - Session names now refresh as the conversation progresses: writing a working draft (`plan_draft`/`objective_draft`/`gist_draft`) sets the title segment from the draft, and saving a plan or objective adds its `plan #N` / `objective #O` segment; a name you set yourself is still never overwritten. (9e3d6b2)
+- Add the `subagent-package-scope` doctor check: a report-only warning when `pi-subagents` is configured in both your user-scope pi settings and the project `.pi/settings.json`, naming both files and the fix (remove the user-scope entry, then restart the session — `/reload` is not enough). A session with that duplicate now also shows one `perk: waves` warning per extension activation the first time a wave launch is answered by the duplicate. (2beca31)
+
+### Fixed
+
+- Wave launches (`start_draft_review_wave`, `start_review_wave`, `run_scout_wave`, …) no longer fail with `no_active_session` while the wave actually spawns when a duplicate pi-subagents extension — a user-scope `npm:pi-subagents` beside the project entry, kept alive by pi's pre-trust load — answers first: perk now holds that context-less reply until the live reply arrives, so the launch succeeds and `collect_*` drains the reports. (ed3c1cf)
 
 ## [3.4.0] - 2026-09-16
 

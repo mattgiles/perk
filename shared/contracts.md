@@ -2481,7 +2481,20 @@ second `--fix` at `fixed == []`).
   the injected env beats the file), mirroring pi-fff's precedence minus the CLI flag; the two
   `ok` arms are distinguishable — below the range "does not intersect child tools with host
   builtins", at/above 0.68.0 "counts wrapped core slots as host builtins"; `info` when
-  pi-subagents is not installed or its version is unreadable), and `ponytail-compat` (exact
+  pi-subagents is not installed or its version is unreadable),
+  `subagent-package-scope` (warns — never fails, no `--fix` — when the pi-subagents npm
+  identity (derived from the borrowed `npm:pi-subagents` entry via the same reduction
+  `settings-wiring` dedups by, string and object-form entries alike) is configured both in the
+  launch-precedence agent dir's user `settings.json` (`launch_pi_agent_dir`) and in the project
+  `.pi/settings.json` — the environment whose pre-trust duplicate load leaves a context-less RPC
+  responder on the bus (§8.35 "RPC reply selection"); a project object-form entry with
+  `autoload` exactly `false` does not count; the detail names both absolute paths and the
+  mechanism, the remediation the user-scope removal (`pi remove npm:pi-subagents` for pi's
+  default store, else edit the file) plus a full session restart (`/reload` is not enough);
+  `info` when the agent dir is unresolvable (a broken `[pi] agent_dir` config is the `config`
+  check's finding); `warn … not evaluated` naming the path on invalid user JSON, and a warn
+  deferring to `settings-wiring` on malformed project settings; `ok` otherwise), and
+  `ponytail-compat` (exact
   package/`pi.skills`/skill-file/frontmatter;
   known-good remediation `npm:@dietrichgebert/ponytail@4.9.0` + `perk init` + session restart)
   — all report-only probes warn at worst and have no `--fix` arm (`subagent-engine`'s leftover
@@ -6482,6 +6495,36 @@ collection channel exists. Generic failures, arbitrary partial strings, nontermi
 states and invalid markers expose no reports; unreadable status remains `aggregate-unreadable`.
 Perk's own timeout/cancellation still stop best-effort without retained reports or post-stop
 reads. Timeout without completion, interrupted sessions and cross-reload recovery are unsupported.
+
+**RPC reply selection (the context-less hold) + the duplicate-load notice.** A pi-subagents
+RPC responder that holds no extension context answers every non-`ping` request with the
+`no_active_session` error **before any work** — the shape pi's two-phase trust load produces
+when a user-scope `npm:pi-subagents` sits beside the project entry (pi 0.85.1 loads the
+user-scope extensions pre-trust, then drops the duplicate from the final set without
+invalidating its `pi.events` subscriptions). The adapter's `request()` therefore does **not**
+settle on that reply: a `no_active_session` reply is **held** (the first one; later identical
+replies are ignored) while the per-request listener stays open and the reply timer keeps
+running; a later `success: true` settles the request with its data and emits exactly one
+`duplicate-responders` event (`{method, superseded}` — the held `code: message`) through the
+adapter's **fail-open** `onDuplicateResponder` callback (a throwing callback is logged and never
+affects settlement); any **different** `success: false` code settles the request immediately
+with that error (the live instance's diagnosis is never masked — the held error is discarded);
+a non-object reply rejects immediately; and only the reply timeout surfaces the held error, as
+its `code: message` suffixed ` (held for a later reply that never arrived within <timeoutMs>ms)`.
+A genuine single-responder `no_active_session` is therefore surfaced only at the reply timeout
+(the accepted cost). `ping` stays first-reply — the context-less responder cannot fail it, and
+the advertised async-complete channel has been one constant across every verified release; two
+loaded versions advertising different channels would time the wave out loudly, never lose it
+silently (the accepted residual). `createReportWave(bus, deps?)` forwards each event to
+`deps.onNotice` as a `WaveNotice {kind: "duplicate-responders", method, superseded}`; the
+composition root's reporter (`pi/v1/waveNoticeReporter.ts`) latches on the kind **once per
+extension activation** and reports one `perk: waves — …` warning over the session ctx retained
+at `session_start`/`session_tree` (stderr when none is retained or the target is headless). No
+flow module participates and no tool result, receipt, or manifest changes. Non-behavior: perk
+neither stops nor adopts an extra spawn a second **live** responder might produce — two
+successes ⇒ first wins; the duplicate load is an environment defect the doctor
+`subagent-package-scope` check reports (§8.6: user-scope and project-scope entries reducing to
+the pi-subagents npm identity, a project `autoload: false` delta excepted).
 
 **Streaming launch manifests.** The report wave's `start` returns one preflight-derived
 `ReportWaveLaunchManifest = {requested, runnable, preflightFailures}` on both result arms. `requested`

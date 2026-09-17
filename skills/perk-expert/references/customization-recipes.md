@@ -203,6 +203,36 @@ Any other valid pi-fff mode works the same way. To drop
 the package's resources entirely in one repo, use the `pi config -l` resource-filter lever (see
 [Scope pi resources per-project](#scope-pi-resources-per-project-pi-config--l)).
 
+## Keep pi-subagents out of user-scope settings (`subagent-package-scope`)
+
+perk converges `npm:pi-subagents` into the **project** `.pi/settings.json` on purpose: the engine
+is a per-repo borrow perk's `perk.*` agent definitions and wave RPC ride on, so it belongs beside
+the other project packages `perk init` manages. A second `npm:pi-subagents` in your **user-scope**
+pi settings (`settings.json` in the launch-precedence agent dir — `PI_CODING_AGENT_DIR` →
+`[pi] agent_dir` → `~/.pi/agent`; typically the result of a global `pi install npm:pi-subagents`)
+is harmless to pi's package loading (it dedupes by identity, project wins) but not to perk's waves.
+pi 0.85.1 loads the user-scope extensions *before* project trust resolves and then drops the user
+copy from the final set **without invalidating it**; pi-subagents' RPC bridge subscribes on
+`pi.events`, so the orphan — which never receives `session_start` — keeps answering perk's wave
+RPC with `no_active_session` a few milliseconds before the project instance succeeds.
+
+Symptom **before** this fix: every wave launch (`start_draft_review_wave`, `start_review_wave`,
+`run_scout_wave`, …) returned `spawn-failed: no_active_session: No active extension context for
+subagent RPC` while the wave actually ran orphaned (`collect_*` answered `no_wave`, the browser's
+`perk:wave` marker never cleared). **After:** perk holds the context-less reply until the live
+reply arrives, the launch succeeds, and the session shows one `perk: waves — A duplicate
+pi-subagents extension is loaded …` warning per extension activation. `perk doctor`'s
+`subagent-package-scope` check warns when both scopes list the identity (pinned or object-form
+entries included) and names both files.
+
+The fix: remove the user-scope entry — `pi remove npm:pi-subagents` when that file is pi's default
+`~/.pi/agent/settings.json` (`pi remove` writes user scope by default), otherwise edit the file —
+then **restart** every running pi session in this repo. `/reload` is not enough: it re-runs the
+same two-phase load and does not clear the orphan. Leave the project entry alone (`perk init`
+keeps it converged). Note the perk repo itself never sees this because `[pi] agent_dir =
+".pi/agent"` keeps the user-global settings out of play — a repo-local agent dir is another way
+to isolate a consumer repo, at the cost of a separate auth/settings store.
+
 ## Cheaper prompt caching for review children (`PI_SUBAGENT_CACHE_RETENTION`)
 
 pi-subagents ≥ 0.68.0 reads `PI_SUBAGENT_CACHE_RETENTION` for the prompt-cache retention its
