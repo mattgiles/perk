@@ -1,6 +1,6 @@
 ---
 name: perk-plan
-description: Authoring a perk implementation plan in a perk plan session. Use when drafting, revising, or reviewing a perk plan before it is saved.
+description: "Author, revise, and review a decision-complete perk implementation plan."
 stages: [plan]
 disable-model-invocation: true
 ---
@@ -8,7 +8,7 @@ disable-model-invocation: true
 # Authoring a perk plan
 
 A perk plan is the **canonical, decision-complete record** of a change. You author it (in plan
-mode, read-only), then save it **verbatim** to GitHub. The save step is purely mechanical — **all
+mode, read-only), then save it **verbatim** to the issue backend. The save step is purely mechanical — **all
 the judgment lives here**. Write the plan so an executor (a future session, or another engineer)
 with **zero prior context** can implement it without guessing.
 
@@ -73,7 +73,8 @@ What changes and why — one short paragraph.
 The concrete edits, each anchored durably (see below). Group by file or component.
 
 ## Test plan
-How the change is verified (commands, new/updated tests, the acceptance gate).
+Verify changed behavior through stable interfaces, with independent expected results. Name commands,
+new/updated tests, and the acceptance gate; use internal tests when they guard a concrete invariant.
 
 ## Assumptions
 Decisions taken and constraints relied on — so the executor inherits the reasoning, not just the steps.
@@ -101,25 +102,13 @@ saved plan must leave **no decisions to the implementer** (no "should I…?" res
 
 ### No time or effort estimates
 
-A perk plan describes **what changes and why**, never **how long it takes**. Do not include time
-estimates, effort sizing, story points, velocity, or any other quantification of duration in a plan —
-not in the title, the steps, or the prose. They add no implementation signal, drift the moment
-anything shifts, and a saved plan is a canonical GitHub artifact where such guesses read as
-commitments. Describe scope through the concrete edits themselves; let the work define its own size.
+Describe scope through concrete changes. Omit time and effort estimates, sizing, story points,
+and velocity throughout the plan.
 
 ## 🔴 Line-number references are DISALLOWED
 
-Line numbers drift as code changes and cause implementation failures. **Never** reference a line
-number in a plan step. Use **durable anchors** instead:
-
-- ✅ **Function / class names** — "Update `savePlan()` in `extension/authoring/plan/save.ts`"
-- ✅ **Behavioral descriptions** — "Add a read-back check before appending the linkage"
-- ✅ **Structural locations** — "In the `save` stage descriptor in `shared/registry.yaml`, add …"
-- ✅ **File + context** — "In the `session_start` handler in `extension/index.ts`, after the run_id claim"
-- 🔴 **Disallowed** — "edit `extension/index.ts:142`"
-
-(Historical line numbers are fine *only* in a "Context / research" note documenting what you found,
-never in an actionable step.)
+Anchor plan steps to files, symbols, behaviors, or structural locations. Use line numbers only
+in research notes; they drift as code changes.
 
 ## Ground the plan in evidence
 

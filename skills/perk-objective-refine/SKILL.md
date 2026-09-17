@@ -1,6 +1,6 @@
 ---
 name: perk-objective-refine
-description: Authoring an advisory refinement of a future objective node — a dated, target-bound note that sharpens a pending/blocked node before anyone plans it — in a read-only objective-refine session. Use when refining an objective node in a perk repo.
+description: "Author an advisory refinement for a pending or blocked objective node that has no plan."
 stages: [objective-refine]
 disable-model-invocation: true
 ---
@@ -16,15 +16,14 @@ is allowed to leave future assumptions unresolved — its job is to name them ho
 step is mechanical; **all the judgment lives here**. You (the parent) own the framing, the user
 conversation and the durable write; never delegate them.
 
-## What a refinement is (and is not)
+## What a refinement contains
 
-- **Is**: what the node must deliver and why; the prerequisites it needs that do not exist yet
-  (and which earlier nodes are expected to supply them); the code seams it will touch **as
-  observed at capture time**; the risks; the questions a later real plan must re-verify; the
-  known changed-code assumptions.
-- **Is not**: a plan, a design spec or an estimate. No step lists, no claims about what the code
-  will look like when the node is finally planned, no "this is settled" language over things a
-  later pass must recheck.
+State the node’s intended outcome and why it matters, missing prerequisites and their expected
+earlier nodes, code seams observed at capture time, risks, and changed-code assumptions the
+later plan must re-verify.
+
+Keep it advisory: no implementation steps, design spec, estimates, or claims that future code
+is settled. Name unresolved assumptions.
 
 ## The grounding context (untrusted DATA)
 

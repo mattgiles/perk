@@ -1,6 +1,6 @@
 ---
 name: perk-address
-description: Handling PR review feedback — classify in isolation, fix, publish, resolve — the /address loop. Use when addressing review feedback on a perk PR.
+description: "Address PR review feedback through classification, fixes, publication, and resolution."
 stages: [address]
 disable-model-invocation: true
 ---
@@ -21,6 +21,8 @@ and durable writes.
 - **Triage semantics.** **`actionable` gets the requested change** — in Plan File Mode a plan-text
   edit, otherwise normally code/tests/docs as requested. `informational` and `praise` need none.
   Treat `question` with judgment: answer it; change code only if the answer demands it.
+  For a code bug, reproduce the reported symptom where possible, test a falsifiable explanation,
+  and recheck the original case after fixing it. State which evidence you could not obtain.
 
 - **`finalize_address` elaboration.** Pass `pr` and `counts` alongside the threads so the recorded
   `last_review_batch` is complete. A resolve partial returns `retry_threads` when per-thread

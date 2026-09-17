@@ -1,6 +1,6 @@
 ---
 name: perk-grill
-description: Grill the user relentlessly about a plan or design — a one-question-at-a-time interview that stress-tests every decision before building. Use when stress-testing a plan, design, or objective before requesting review or implementing, or when the user says "grill me" or uses any other 'grill' trigger phrase.
+description: "Stress-test a plan, design, or objective before review or implementation. Use when the user asks to be grilled or needs decisions challenged and resolved."
 stages: [plan, objective-plan, objective-author]
 ---
 
