@@ -51,7 +51,9 @@ class PrSubmitResult:
     # (conflicts present), None (probe undetermined / skipped — fail-open).
     mergeable: bool | None
     conflicts: tuple[str, ...]
-    # The stacked-delivery additions (contracts.md §8.47) — all None on the incremental path.
+    # The stacked-delivery additions (contracts.md §8.47). `delivery` names the route the submit
+    # took ("stacked" / "incremental"; None only on the offline --dry-run, which returns before
+    # the routing discriminator is read). The stack/operation fields are None on incremental.
     delivery: str | None = None
     stack_number: int | None = None
     stack_size: int | None = None
@@ -294,6 +296,7 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
         base=base,
         mergeable=mergeable,
         conflicts=conflicts,
+        delivery="incremental",
     )
 
 
@@ -561,7 +564,9 @@ class PrSubmitOut(OutputModel):
     # Tri-state: bool when the probe is definitive, null when undetermined.
     mergeable: bool | None
     conflicts: tuple[str, ...]
-    # Additive stacked-delivery fields (contracts.md §8.47) — all null on incremental.
+    # Additive stacked-delivery fields (contracts.md §8.47). `delivery` names the route
+    # ("stacked" / "incremental"; null only on the offline --dry-run); the stack/operation
+    # fields are null on incremental.
     delivery: str | None
     stack: StackRefOut | None
     operation_id: str | None

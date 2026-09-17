@@ -10,7 +10,8 @@ here), resolves the active plan's PR, and branches on the **verdict**:
   submission failure the gateway falls back to a single discussion comment so the review always
   lands. Next step: `/address`.
 - `"clean"` — posts exactly one 👍 reaction to the PR description; nothing review-shaped lands on
-  the PR (`comments` must be absent/empty). Next step: `/land`.
+  the PR (`comments` must be absent/empty). Next step: the human's review gate — `/land`
+  (incremental) or `/ready` (stacked handoff); no single command, so `next_command` is null.
 
 The optional `fyi: string[]` carries borderline notes that are echoed in-session only — they are
 structurally never part of any GitHub payload.
@@ -193,7 +194,9 @@ def _result_to_dict(
         "mode": result.mode,
         "verdict": verdict,
         "fyi": fyi,
-        "next_command": "/land" if verdict == "clean" else "/address",
+        # Key always present: `/address` on actionable; null on clean — the clean gate is the
+        # human's and delivery-dependent (`/land` refuses a stacked layer), so no single command.
+        "next_command": "/address" if verdict == "actionable" else None,
         "comment_count": result.comment_count,
     }
 
@@ -204,7 +207,10 @@ def _render_human(
     if dry_run:
         user_output(click.style("pr review-post --dry-run (no GitHub writes)", dim=True))
         if verdict == "clean":
-            user_output("  would post 👍 to the PR (clean — no comments). Next: /land")
+            user_output(
+                "  would post 👍 to the PR (clean — no comments). "
+                "Next: the human's review gate — /land (incremental) or /ready (stacked handoff)"
+            )
         else:
             user_output(
                 f"  would post a review with {result.comment_count} inline comment(s). "
@@ -215,7 +221,8 @@ def _render_human(
     if verdict == "clean":
         user_output(
             click.style("✓ ", fg="green")
-            + f"Clean review — posted 👍 to PR #{result.pr_number} (no comments). Next: /land"
+            + f"Clean review — posted 👍 to PR #{result.pr_number} (no comments). "
+            + "Next: the human's review gate — /land (incremental) or /ready (stacked handoff)"
         )
     else:
         label = "review" if result.mode == "review" else "comment (fallback)"

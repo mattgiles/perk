@@ -154,9 +154,24 @@ def test_perk_address_sole_carried_detail():
     assert "`retry_threads`" in norm
     assert "retry only that reduced batch" in norm
     assert "omits successful rows and strips replies already reported as posted" in norm
-    # The untrusted-review fence + the hand-off.
+    # The untrusted-review fence + the delivery-keyed hand-off (relayed from the emitter, never
+    # derived; the unconditional `/land` wording is gone).
     assert "<untrusted_review>" in norm
-    assert "go to `/land`" in norm
+    assert "ends with a delivery-keyed **`Hand-off`** line" in norm
+    assert "relay it verbatim" in norm
+    assert "records the handoff with `/ready`" in norm
+    assert "never `/land` — the train lands whole via `/objective-land`" in norm
+    assert "Never run `/ready` or `/land` yourself" in norm
+    assert "go to `/land`" not in norm
+
+
+def test_perk_pr_review_names_the_delivery_dependent_next_step():
+    norm = _norm("perk-pr-review")
+    # A clean verdict names the human's review gate for BOTH delivery kinds; the unconditional
+    # "`/land` is next" wording (wrong on a stacked layer) is gone.
+    assert "`/land` for an incremental plan" in norm
+    assert "`/ready` — the post-review handoff — for a stacked layer" in norm
+    assert '"`/land` is next"' not in norm
 
 
 def test_perk_objective_plan_sole_carried_detail():

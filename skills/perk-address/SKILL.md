@@ -27,7 +27,12 @@ and durable writes.
   outcomes are available: retry only that reduced batch — it omits successful rows and strips
   replies already reported as posted.
 
-- **The hand-off.** Once the PR is approved, go to `/land`.
+- **The hand-off.** `finalize_address`'s success result ends with a delivery-keyed **`Hand-off`**
+  line — relay it verbatim in your closing summary: incremental plan → the human runs `/land` once
+  approved; stacked layer → the human records the handoff with `/ready` (never `/land` — the train
+  lands whole via `/objective-land`); delivery unreported → confirm the plan's delivery before
+  naming either. Never run `/ready` or `/land` yourself, and never derive the hand-off from the
+  publication suffix.
 
 ## Preview
 

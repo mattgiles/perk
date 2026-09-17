@@ -206,7 +206,12 @@ function createRpcChangeReviewer(wave: ReportWave, ctx: ExtensionContext): Chang
   };
 }
 
-/** Narrow the cold door's `review-post --json` payload to the fields the tool reports. */
+/**
+ * Narrow the cold door's `review-post --json` payload to the fields the tool reports. The
+ * envelope's `next_command` is deliberately NOT decoded: the warm tool renders its next step
+ * from the verdict, and the clean gate is the human's delivery-dependent call (`/land`
+ * incremental, `/ready` stacked) that no single command names.
+ */
 function decodePostResult(payload: ColdJson): PostOk | null {
   const pr = numberField(payload, "pr");
   if (pr === undefined || !Number.isInteger(pr) || pr <= 0) return null;
@@ -215,7 +220,6 @@ function decodePostResult(payload: ColdJson): PostOk | null {
     mode: stringField(payload, "mode"),
     verdict: stringField(payload, "verdict"),
     comment_count: numberField(payload, "comment_count"),
-    next_command: stringField(payload, "next_command"),
   };
 }
 
@@ -471,19 +475,21 @@ export function installAutomatedReviewBindings(pi: ExtensionAPI, wave: ReportWav
           return fail(result.message, result.errorType);
         case "posted": {
           const data = result.data;
-          const nextStep = result.record.verdict === "clean" ? "/land" : "/address";
           const count = data.comment_count ?? 0;
+          // Delivery-neutral on clean: the post-review gate is the human's and differs by
+          // delivery kind (`/land` refuses a stacked layer), so both gestures are named.
           const text =
             result.record.verdict === "clean"
-              ? `Clean review — posted 👍 to PR #${result.record.pr}. Next step: ${nextStep}.`
+              ? `Clean review — posted 👍 to PR #${result.record.pr}. Next step: the human's ` +
+                "review gate — /land for an incremental plan, /ready (the post-review handoff) " +
+                "for a stacked layer."
               : `Posted an advisory review with ${count} inline comment(s) to PR #${result.record.pr}. ` +
-                `Next step: ${nextStep}.`;
+                "Next step: /address.";
           return ok(text, {
             pr: data.pr,
             mode: data.mode,
             verdict: data.verdict,
             comment_count: data.comment_count,
-            next_command: data.next_command,
           });
         }
       }

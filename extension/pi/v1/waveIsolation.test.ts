@@ -398,7 +398,7 @@ function cleanPostJson(pr: number): Record<string, unknown> {
     mode: "reaction",
     verdict: "clean",
     fyi: [],
-    next_command: "/land",
+    next_command: null,
     comment_count: 0,
   };
 }

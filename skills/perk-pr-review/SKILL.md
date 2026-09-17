@@ -13,8 +13,9 @@ read-only-child convention (like `/address`): angle-specialized reviewer childre
 report in fresh, isolated contexts, and you (the parent) reconcile and act — `post_pr_review` is
 the mechanical posting step, analogous to the internal resolve half that `/address`'s
 `finalize_address` reaches after publication. The review lands as comments only when actionable; a
-clean PR gets a single 👍 reaction (zero text on the PR) and an unambiguous "`/land` is next"
-confirmation.
+clean PR gets a single 👍 reaction (zero text on the PR) and an unambiguous next-step confirmation
+(the human's review gate: `/land` for an incremental plan, `/ready` — the post-review handoff — for
+a stacked layer).
 
 ## Why fresh contexts
 
