@@ -1,6 +1,6 @@
 ---
 name: perk-objective-replan
-description: Re-authoring an objective as a superseding net-new objective in the objective-replan session. Use when replanning a perk objective.
+description: "Replan unfinished objective work as a successor that supersedes the old objective."
 stages: []
 disable-model-invocation: true
 ---
@@ -17,9 +17,8 @@ never delegate them.
 ## The supersede contract: close-old / create-new
 
 Unlike `plan replan` (which rewrites a plan **in place**), objective-replan **creates a net-new
-objective that supersedes and closes the old one**. perk's `objective_save` is find-then-return
-idempotent on `run_id` (not an upsert), so there is no in-place objective rewrite primitive — the
-close-old/create-new model is the resolved design.
+objective that supersedes and closes the old one**. `objective_save` is find-then-return
+idempotent on `run_id`, not an upsert; objective replan therefore creates a successor.
 
 - **You author a NET-NEW objective.** On save, perk creates the new objective, stamps
   `supersedes=#<OLD>` into its header, then **closes** the old objective (stamping

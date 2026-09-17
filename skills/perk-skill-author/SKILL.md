@@ -1,6 +1,6 @@
 ---
 name: perk-skill-author
-description: Authoring a repo-specific skill via `perk skills create`/`refine`. Use when authoring or refining a repo-authored skill.
+description: "Author or refine a repo-specific skill through perk skills create/refine."
 stages: []
 disable-model-invocation: true
 ---
@@ -30,21 +30,21 @@ the skill, then stop.
 
 ## Write a concrete `description`
 
-The `description` is the *entire* discovery surface — Pi matches a task against it to decide whether
-to surface the skill. A vague topic label ("Python helpers") never fires; a concrete trigger does.
+For an ambient-visible skill, the description is its discovery cue. Name the distinct tasks
+that should activate it, using the words a user or agent would use. Lead with the action and
+include a concrete “Use when …” clause. Collapse synonyms for the same task; retain separate
+branches that require different guidance. Keep it to one or two sentences.
 
-- **Name the tasks and trigger phrases**, not the subject area. Lead with what the skill *does*, end
-  with an explicit "Use when …" clause naming the situations that should activate it.
-- Mirror the words a user or agent would actually use for the task.
-- Keep it one or two sentences — long enough to be concrete, short enough to scan.
+For prompt-hidden bound skills, use the one-line catalog cue described below.
 
 ## Prefer scripts/references over prose
 
-Keep `SKILL.md` **lean** — durable judgment and the loop, not an encyclopedia. Heavy or reference
-material (long tables, API dumps, worked examples, helper scripts) goes in **sibling files** under
-`references/` or `scripts/`. The per-skill delivery symlink carries the whole skill directory, so
-those siblings travel for free — reference them by relative path from `SKILL.md`. A wall of prose is
-harder to apply than a tight body that points at the detail when it's needed.
+Keep `SKILL.md` focused on durable judgment and the loop. Put long tables, API details, worked
+examples, and helpers in sibling `references/` or `scripts/` files. Link them by relative path
+with the condition for reading them; the delivery symlink carries the whole directory.
+
+Keep a rule beside its reason and exceptions. Remove sentences whose deletion loses no
+decision guidance; keep the operative rule and a short reason where it helps.
 
 ## One statement of contract — the skill is the detail tier
 

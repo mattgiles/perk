@@ -1,6 +1,6 @@
 ---
 name: perk-plan-review-browser
-description: Human-in-the-loop review of the working plan draft in the plannotator browser. Use when reviewing a plan draft with /plan-review-browser.
+description: "Review the working plan draft through /plan-review-browser."
 stages: []
 disable-model-invocation: true
 ---

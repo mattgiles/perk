@@ -1,6 +1,6 @@
 ---
 name: perk-learn-dream
-description: Auditing the whole learned corpus and curating ONE bounded curation objective + dream report — the perk learn dream factory. Use when running perk learn dream in a perk repo.
+description: "Audit the learned corpus and propose one bounded curation objective with a dream report."
 stages: []
 disable-model-invocation: true
 ---

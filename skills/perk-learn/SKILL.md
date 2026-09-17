@@ -1,6 +1,6 @@
 ---
 name: perk-learn
-description: Multi-angle knowledge capture after a perk plan lands — the /learn analyst wave. Use when running the learn step in a perk repo.
+description: "Capture evidence-backed learnings after a perk plan lands."
 stages: [learn]
 disable-model-invocation: true
 references:
@@ -49,9 +49,8 @@ one-phrase descriptors). The parent picks **2–4** angles and **always includes
 `session-deviations`**:
 
 - **`session-deviations`** — *always included.* Course-corrections & durable gotchas — with
-  **special emphasis** on **what the agent got wrong or didn't understand about the codebase that
-  sent it off-track**: mental-model gaps, dead ends, and wasted time/effort. This is the
-  highest-value "don't repeat this trap" signal.
+  **special emphasis** on what sent the agent off-track, the session or code evidence that
+  corrected it, and what a future agent should do differently.
 - **`plan-vs-implementation`** — *strongly preferred.* What shipped vs. the plan: deviations, scope
   changes, surprises a future planner should know.
 - **`existing-docs`** — *strongly preferred.* Routing onto the manifest's `existing_docs[]`

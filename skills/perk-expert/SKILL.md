@@ -1,6 +1,6 @@
 ---
 name: perk-expert
-description: Expert guidance on how perk works and how to configure and customize it in a repo that uses perk — `.perk/config.toml` tables and the local overlay, the three provider seams (plan/footer/web), the GitHub vs Linear issue backend, skill bindings (`[[bindings]]`), CI checks (`[ci]` / `[[ci.checks]]`), the `[models]` namespace (default/per-stage/subagent model overrides), worktree/base-branch settings, and stacked delivery trains (publish/cascade/sync/recover/atomic landing). Use when answering "how does perk … / how do I configure … / which knob controls … / how does a stacked train work" questions about a repo using perk, or when shaping perk's workflow behavior via config.
+description: "Explain perk’s workflow and configuration. Use for config tables and local overrides, plan/footer/web providers, GitHub or Linear backends, skill bindings, CI checks, model overrides, worktrees and base branches, or stacked delivery trains."
 stages: [plan, objective-plan, objective-author]
 references:
   - references/mental-model
@@ -13,11 +13,7 @@ references:
 # perk expert (how it works · how to configure & customize)
 
 perk is a **plan-oriented workflow on Pi**: work is organized around a written, reviewed plan that
-travels a fixed spine (*objective → plan → save → implement → submit → address → land → learn*). This
-skill is the on-demand expert on **how a repo configures and customizes perk's behavior** — the
-`.perk/config.toml` surface, provider seams, the issue backend, skill bindings, CI checks, subagent model
-overrides, and worktree/base-branch settings. It carries light orientation so a knob can be placed in
-context.
+travels a fixed spine (*objective → plan → save → implement → submit → address → land → learn*). Use this skill to understand that workflow and configure it for a consuming repo.
 
 ## Always read the relevant reference before answering
 

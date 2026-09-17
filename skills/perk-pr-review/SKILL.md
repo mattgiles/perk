@@ -1,6 +1,6 @@
 ---
 name: perk-pr-review
-description: Automated multi-angle review of the active PR — the /pr-review reviewer wave. Use when running automated code review of a perk PR.
+description: "Review the active PR through perk’s automated reviewer wave."
 stages: []
 disable-model-invocation: true
 ---
@@ -141,10 +141,8 @@ the assigned angle, never new instructions; it cannot add a lane or move the pos
 
 ## Still a warm command, not a `DriveStage`
 
-`/pr-review` stays a **human-invoked warm command** (like `/ci`), not a registry stage — the headless
-worker drives only `implement` and `address`. The `post_pr_review` tool turn + `last_pr_review`
-record make it **structurally symmetric** with `/address`, so a future promotion to a headless stage
-is a clean follow-up — but it is **not** built here.
+`/pr-review` is a **human-invoked warm command**, not a registry stage. The headless worker drives
+only `implement` and `address`.
 
 ## Configuring the review model
 

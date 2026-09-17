@@ -1,6 +1,6 @@
 ---
 name: perk-learn-docs
-description: Consolidating doc-destined perk:learn issues into a bounded docs/learned plan — the /learn-docs factory. Use when consolidating captured learnings in a perk repo.
+description: "Plan bounded consolidation of captured learnings into docs/learned/."
 stages: []
 disable-model-invocation: true
 ---
@@ -62,8 +62,8 @@ numbers).
 
 ## Content-quality rules (the cornerstone)
 
-Learned docs are **token caches for future AI agents** — preserved reasoning so they don't recompute
-it. Document **reality**, not aspiration (workarounds, quirks, tech debt all belong).
+Preserve reasoning that changes what a future agent does, backed by session or code evidence.
+Document **reality**, including workarounds, quirks, and tech debt.
 
 - **Cross-cutting insight only.** The best docs connect multiple code locations into a coherent
   narrative: decision tables ("when to use X vs Y"), patterns spanning files, historical context

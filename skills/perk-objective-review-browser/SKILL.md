@@ -1,6 +1,6 @@
 ---
 name: perk-objective-review-browser
-description: Human-in-the-loop review of the rendered working objective draft in the plannotator browser. Use when reviewing an objective draft with /objective-review-browser.
+description: "Review the working objective draft through /objective-review-browser."
 stages: []
 disable-model-invocation: true
 ---

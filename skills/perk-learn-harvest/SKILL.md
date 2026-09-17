@@ -1,6 +1,6 @@
 ---
 name: perk-learn-harvest
-description: Mining docs/learned as lenses into the code and curating ONE bounded improvement objective — the perk learn harvest factory. Use when running perk learn harvest in a perk repo.
+description: "Use learned docs to find code improvements and propose one bounded objective."
 stages: []
 disable-model-invocation: true
 ---
@@ -35,7 +35,7 @@ Each candidate carries:
   roundaboutness**;
 - a **pointer** — a repo-relative path + an optional symbol (the code site the opportunity lives
   at);
-- **evidence** — the doc that surfaced it + what you actually observed in the code;
+- **evidence** — the doc that surfaced it + observed code behavior or friction, and its consequence;
 - a **confidence** — high | medium | low.
 
 ## The fallback state table
@@ -48,8 +48,7 @@ detail:
 - **Capped-away candidates are structurally invisible.** A lane reports at most 5 leads
   (`HARVEST_MAX_OPPORTUNITIES`); anything beyond crosses only as the lane's `omitted_count` — so
   the pipeline covers what was reported/mined, and the exhaustiveness claim is scoped
-  accordingly. The cap stays 5 deliberately: starvation is made visible by the disclosure row,
-  and widening is a one-constant edit.
+  accordingly. The disclosure row makes omitted leads visible.
 - **The incomplete-harvest report's content.** When the harvest is incomplete (any wave failure
   or zero valid reports — the seed's stop rule), report what was attempted: the failure detail,
   the lanes covered/uncovered, and any omitted counts — alongside the seed's bounded `--from`

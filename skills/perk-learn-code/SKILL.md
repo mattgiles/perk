@@ -1,6 +1,6 @@
 ---
 name: perk-learn-code
-description: Routing pre-stamped SHOULD_BE_CODE perk:learn issues into precise code homes — the /learn-code factory. Use when routing captured learnings into code in a perk repo.
+description: "Plan code changes from pre-stamped SHOULD_BE_CODE learnings."
 stages: []
 disable-model-invocation: true
 ---
@@ -46,11 +46,9 @@ the classification + `target` + the codebase you read directly, with no existing
 
 ## Quality rules
 
-- **Place the insight where an agent will encounter it.** A comment lives at the line it explains; a
-  docstring at the function it documents; a constant beside the others it joins. The point of routing
-  to code is that the knowledge sits exactly where it is needed — not in a doc an agent must know to
-  fetch.
+- **Place the insight where an agent needs it:** the relevant definition, comment, docstring,
+  schema, or user-docs passage.
 - **Explain *why*, not *what*.** A comment/docstring carries the invariant, the gotcha, the reason —
   never a restatement of the code or plan history (the repo's comment-hygiene convention).
-- **Don't widen scope.** If implementing a learning would require a larger change, capture that as
-  the step's intent and let the implement stage scope it — the plan stays bounded to the inbox.
+- **Keep scope bounded to the inbox.** Resolve the extent of each change before saving; if a
+  larger change is necessary, make that scope explicit in the plan.
