@@ -14,11 +14,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
+  attachGhostResponder,
   createFakeSubagents,
   type FakeSettlement,
   waveScriptItems,
 } from "../testing/fakeSubagents.ts";
-import { createReportWave, type ReportWaveRequest } from "./reportWave.ts";
+import { createReportWave, type ReportWaveRequest, type WaveNotice } from "./reportWave.ts";
 import { WAVE_ACCEPTANCE, WAVE_INTERCOM_BRIDGE, type WaveBus } from "./transport.ts";
 
 /** A synchronous in-memory bus (the adapter-contract suite's shape). */
@@ -287,9 +288,62 @@ test("rpc integration: adapter construction is per-launch inside the supplier (s
   );
   assert.match(
     source,
-    /waveOver\(\s*\(\)\s*=>\s*createRpcWaveAdapter\(bus\)/,
+    /waveOver\(\s*\(\)\s*=>\s*createRpcWaveAdapter\(bus\b/,
     "the one construction call must sit inside the per-launch supplier arrow",
   );
+});
+
+// --- the duplicate-responder notice (the context-less hold end to end) -------------------------
+
+test("rpc integration: a ghost context-less responder beside the live one — the run completes and onNotice fires once per launch", async () => {
+  const bus = createFakeBus();
+  attachGhostResponder(bus); // answers first, synchronously, with no_active_session
+  const fake = createFakeSubagents([{ executeScript: DERIVE_REPORTS }]);
+  fake.attach(bus); // the live responder replies after its async preparation
+  const notices: WaveNotice[] = [];
+  const wave = createReportWave(bus, { onNotice: (notice) => notices.push(notice) });
+
+  const first = await wave.run(makeSpec());
+  assert.equal(first.complete, true);
+  assert.deepEqual(
+    first.reports.map((r) => r.key),
+    ["plan-fidelity", "correctness"],
+  );
+  assert.deepEqual(first.failures, []);
+  assert.equal(first.receipt.state, "complete");
+  assert.equal(fake.spawns.length, 1, "exactly one spawn reached the live responder");
+  assert.deepEqual(notices, [
+    {
+      method: "spawn",
+      superseded: "no_active_session: No active extension context for subagent RPC.",
+    },
+  ]);
+
+  const second = await wave.run(makeSpec());
+  assert.equal(second.complete, true);
+  assert.equal(notices.length, 2, "one notice per launch — the reporter, not the wave, latches");
+  assert.equal(fake.stops.length, 0);
+});
+
+test("rpc integration: without a ghost, onNotice is never called; without deps, behavior is unchanged", async () => {
+  const bus = createFakeBus();
+  const fake = createFakeSubagents([{ executeScript: DERIVE_REPORTS }]);
+  fake.attach(bus);
+  const notices: WaveNotice[] = [];
+  const observed = await createReportWave(bus, { onNotice: (n) => notices.push(n) }).run(
+    makeSpec(),
+  );
+  assert.equal(observed.complete, true);
+  assert.deepEqual(notices, []);
+
+  attachGhostResponder(bus);
+  const bare = await createReportWave(bus).run(makeSpec());
+  assert.equal(bare.complete, true);
+  assert.deepEqual(
+    bare.reports.map((r) => r.key),
+    ["plan-fidelity", "correctness"],
+  );
+  assert.equal(fake.spawns.length, 2);
 });
 
 /** A native partial settlement: the durable aggregate failed without a `workflow.value`; the

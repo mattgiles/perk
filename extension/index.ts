@@ -68,6 +68,7 @@ import { installTombellPlanAdapter } from "./pi/v1/providers/tombell.ts";
 import { installScoutWaveBindings } from "./pi/v1/scoutWave.ts";
 import { registerSelfcheck } from "./pi/v1/selfcheck.ts";
 import { refreshSessionNameV1 } from "./pi/v1/sessionName.ts";
+import { createWaveNoticeReporter } from "./pi/v1/waveNoticeReporter.ts";
 import {
   branchSessionStateStore,
   establishSessionIdentity,
@@ -214,8 +215,12 @@ export default function perk(
   // threading pattern): the wave owns adapter selection (a fresh rpc adapter per launch over
   // pi's event bus) and pending execution (instance-owned refs), and is threaded into every
   // wave-consuming installer — no installer touches the transport tier. Plain construction, no
-  // Pi registration, order-safe.
-  const reportWave = createReportWave(pi.events);
+  // Pi registration, order-safe. The wave's fail-open `onNotice` seam feeds the once-per-activation
+  // duplicate-load warning (a context-less pi-subagents responder answering before the live one);
+  // the reporter renders over the retained session ctx (`setContext` below, the conflict
+  // controllers' pattern) — no installer or flow module participates.
+  const waveNotices = createWaveNoticeReporter();
+  const reportWave = createReportWave(pi.events, { onNotice: waveNotices.onNotice });
 
   const conflictResolver = createConflictResolverEngine({
     events: pi.events,
@@ -360,6 +365,7 @@ export default function perk(
 
     submitConflict.setContext(ctx);
     stackConflict.setContext(ctx);
+    waveNotices.setContext(ctx);
     const sessionFile = ctx.sessionManager.getSessionFile();
     const currentSessionId = sessionFile ? basename(sessionFile) : null;
 
@@ -567,6 +573,7 @@ export default function perk(
   // Non-negotiable: rebuild on branch navigation too, or state goes stale after /tree (§8.3).
   pi.on("session_tree", async (_event, ctx) => {
     stackConflict.setContext(ctx);
+    waveNotices.setContext(ctx);
     // ONE fresh full-branch rebuild; the navigation facts derive purely from it (no handoff/
     // checkout read, claim, linkage, or capture on navigation — session/lifecycle.ts owns the
     // asymmetry with startup).

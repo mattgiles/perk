@@ -14,6 +14,22 @@
 // its constants/types cannot be imported — the doctor `subagent-compat` version warning is the
 // drift tripwire, and every pi-subagents bump warrants an adapter re-verify.
 //
+// REPLY SELECTION (the context-less hold): pi's two-phase trust load (pi 0.85.1,
+// `loadProjectTrustExtensions` → `loadFinalExtensionSet`) loads the USER-scope packages'
+// extensions before project trust resolves and then drops a user-scope duplicate of the
+// project's pi-subagents from the final set WITHOUT invalidating it — its factory already
+// subscribed its RPC bridge on the shared `pi.events` bus, and event-bus subscriptions are
+// cleared only on `runtime.invalidate()`. The orphan never receives `session_start`, so its
+// `getContext()` stays null forever: `ping` still succeeds (it needs no ctx), but every other
+// method throws `no_active_session` synchronously BEFORE any work — milliseconds before the live
+// instance's success reply on the same per-request channel. A first-reply policy would settle on
+// the ghost's error while the wave actually launched (orphaned). So `request()` HOLDS a
+// `no_active_session` reply and keeps listening: a later success wins (and the superseded reply
+// is reported through the fail-open `onDuplicateResponder` callback), any DIFFERENT error
+// surfaces immediately (the live instance's real diagnosis is never masked), and only the reply
+// timeout surfaces the held error (suffixed). `ping` stays first-reply: the context-less
+// responder cannot fail it.
+//
 // COMPLETION PAYLOAD (source-read-derived, 0.45.0 `src/runs/background/result-watcher.ts` +
 // `src/runs/foreground/subagent-executor.ts`): the async-complete event spreads the result-file
 // data plus a normalized per-child `results` array. Current engines provide workflow childIds
@@ -44,6 +60,12 @@ export const WAVE_RPC_REQUEST_EVENT = "subagents:rpc:v1:request";
 export const WAVE_RPC_REPLY_EVENT_PREFIX = "subagents:rpc:v1:reply:";
 /** The pinned v1 protocol version. */
 export const WAVE_RPC_PROTOCOL_VERSION = 1;
+/**
+ * The pi-subagents `SubagentRpcErrorCode` a responder throws — before any work — when it holds no
+ * extension context (`src/extension/rpc.ts::handleRequest`, re-verified at 0.68.0; `ping` is
+ * exempt). Held rather than surfaced: see the module header's REPLY SELECTION paragraph.
+ */
+export const WAVE_RPC_CONTEXTLESS_ERROR_CODE = "no_active_session";
 
 /**
  * The ping reply timeout: fast loud-degrade when pi-subagents is absent (ping is a pure
@@ -75,19 +97,57 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * One superseded context-less reply: a `no_active_session` error that a later success on the
+ * same request overrode. `superseded` is the held reply's `code: message`.
+ */
+export interface DuplicateResponderEvent {
+  method: string;
+  superseded: string;
+}
+
+export interface RpcWaveAdapterOptions {
+  /**
+   * Observability only, invoked FAIL-OPEN (a throwing callback is logged and never affects
+   * settlement) exactly once per request that resolved past a held context-less reply.
+   */
+  onDuplicateResponder?: (event: DuplicateResponderEvent) => void;
+}
+
+/** The `code: message` narrowing of a `success: false` reply's error record. */
+function replyError(data: Record<string, unknown>): { code: string; text: string } {
+  const error = isRecord(data.error) ? data.error : {};
+  const code = typeof error.code === "string" ? error.code : "unknown_error";
+  const message = typeof error.message === "string" ? error.message : "no error detail";
+  return { code, text: `${code}: ${message}` };
+}
+
+/**
  * One v1 request/reply round trip: subscribe the per-request reply channel (disposed via the
  * returned unsubscribe once settled), emit the request envelope, await the reply within
- * `timeoutMs`. A `success: false` reply narrows to a thrown `Error` carrying `code: message`.
+ * `timeoutMs`. Reply policy, uniform for every method:
+ *
+ * - `success: true` → resolve `data` (a held context-less reply is first reported fail-open).
+ * - `success: false` with `WAVE_RPC_CONTEXTLESS_ERROR_CODE` → HOLD the first one and keep
+ *   listening (later identical replies are ignored; the timer keeps running).
+ * - `success: false` with any other code → reject with `code: message` immediately, even over a
+ *   held reply (the live instance's diagnosis wins; the held error is discarded).
+ * - a non-object reply → reject immediately.
+ * - timeout → reject with the held `code: message` (suffixed) when one is held, else the plain
+ *   timeout error.
+ *
+ * Every arm settles exactly once: the timer is cleared and the reply subscription disposed.
  */
 async function request(
   bus: WaveBus,
   method: string,
   params: unknown,
   timeoutMs: number,
+  onDuplicateResponder?: (event: DuplicateResponderEvent) => void,
 ): Promise<unknown> {
   const requestId = randomUUID();
   return await new Promise<unknown>((resolve, reject) => {
     let settled = false;
+    let held: string | null = null;
     const settle = (fn: () => void): void => {
       if (settled) return;
       settled = true;
@@ -101,19 +161,31 @@ async function request(
         return;
       }
       if (data.success === true) {
+        if (held !== null && onDuplicateResponder !== undefined) {
+          const superseded = held;
+          try {
+            onDuplicateResponder({ method, superseded });
+          } catch (error) {
+            console.error(`perk: waves — onDuplicateResponder callback threw: ${error}`);
+          }
+        }
         settle(() => resolve(data.data));
         return;
       }
-      const error = isRecord(data.error) ? data.error : {};
-      const code = typeof error.code === "string" ? error.code : "unknown_error";
-      const message = typeof error.message === "string" ? error.message : "no error detail";
-      settle(() => reject(new Error(`${code}: ${message}`)));
+      const error = replyError(data);
+      if (error.code === WAVE_RPC_CONTEXTLESS_ERROR_CODE) {
+        held ??= error.text;
+        return;
+      }
+      settle(() => reject(new Error(error.text)));
     });
-    const timer = setTimeout(
-      () =>
-        settle(() => reject(new Error(`subagent RPC ${method} timed out after ${timeoutMs}ms`))),
-      timeoutMs,
-    );
+    const timer = setTimeout(() => {
+      const detail =
+        held === null
+          ? `subagent RPC ${method} timed out after ${timeoutMs}ms`
+          : `${held} (held for a later reply that never arrived within ${timeoutMs}ms)`;
+      settle(() => reject(new Error(detail)));
+    }, timeoutMs);
     bus.emit(WAVE_RPC_REQUEST_EVENT, {
       version: WAVE_RPC_PROTOCOL_VERSION,
       requestId,
@@ -261,16 +333,24 @@ function narrowPing(data: unknown): WavePing | null {
 /**
  * Create the production wave adapter over pi's event bus. Sequencing contract (enforced): a
  * successful `ping()` must precede `onComplete()` — the completion channel name is taken from
- * ping's advertised `events.asyncComplete`, never pinned.
+ * ping's advertised `events.asyncComplete`, never pinned. `options.onDuplicateResponder` is the
+ * fail-open observability seam for a superseded context-less reply (module header).
  */
-export function createRpcWaveAdapter(bus: WaveBus): WaveAdapter {
+export function createRpcWaveAdapter(bus: WaveBus, options?: RpcWaveAdapterOptions): WaveAdapter {
   let advertised: WavePing | null = null;
+  const call = (method: string, params: unknown, timeoutMs: number): Promise<unknown> =>
+    request(bus, method, params, timeoutMs, options?.onDuplicateResponder);
 
   return {
     async ping(): Promise<WavePing | null> {
       let data: unknown;
       try {
-        data = await request(bus, "ping", undefined, pingTimeoutMs());
+        // Effectively first-reply: pi-subagents' `pingData` needs no context, so the
+        // context-less responder never answers ping with the held code, and the advertised
+        // async-complete channel has been one constant across every verified release (two
+        // loaded versions advertising different channels would time the wave out loudly,
+        // never lose it silently — the accepted residual, §8.35).
+        data = await call("ping", undefined, pingTimeoutMs());
       } catch {
         return null;
       }
@@ -279,7 +359,7 @@ export function createRpcWaveAdapter(bus: WaveBus): WaveAdapter {
     },
 
     async spawn(params: WaveSpawnParams): Promise<WaveRunHandle> {
-      const data = await request(bus, "spawn", params, replyTimeoutMs());
+      const data = await call("spawn", params, replyTimeoutMs());
       const details = isRecord(data) && isRecord(data.details) ? data.details : {};
       const asyncId = details.asyncId;
       const asyncDir = details.asyncDir;
@@ -326,7 +406,7 @@ export function createRpcWaveAdapter(bus: WaveBus): WaveAdapter {
 
     async stop(handle: WaveRunHandle): Promise<void> {
       try {
-        await request(bus, "stop", { id: handle.asyncId }, replyTimeoutMs());
+        await call("stop", { id: handle.asyncId }, replyTimeoutMs());
       } catch {
         // Best-effort by contract: the run may already be terminal, or the responder gone.
       }

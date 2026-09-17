@@ -18,6 +18,10 @@
 // AsyncFunction-over-fake-`runs` evaluator and the returned value becomes the aggregate's
 // `workflow.value` (state `"complete"`).
 //
+// `attachGhostResponder` is the second, CONTEXT-LESS responder (pi's pre-trust duplicate load):
+// ping succeeds, everything else answers `no_active_session` first — the adapter's hold rule
+// under test.
+//
 // Transport vocabulary (`WAVE_RPC_*`, the envelope shape) is deliberately confined here + the
 // `waves/`-internal suites: no suite outside `waves/` and `testing/` names a raw RPC channel or
 // envelope literal (guard-enforced token census).
@@ -229,6 +233,48 @@ export function createFakeSubagents(plans: FakeSpawnPlan[] = []): FakeSubagents 
     complete,
     emit,
   };
+}
+
+/**
+ * The context-less pi-subagents RPC responder pi's pre-trust load leaves on the bus beside the
+ * live instance (a user-scope `npm:pi-subagents` duplicate of the project entry): it answers
+ * `ping` with the standard advertised data (`ping` needs no session context) and every other
+ * method with pi-subagents' `no_active_session` error — synchronously, before the live responder
+ * does any work. It sinks nothing and delivers no completions. Attach it on the same bus as a
+ * `createFakeSubagents` responder to drive the adapter's context-less hold end to end.
+ */
+export function attachGhostResponder(bus: FakeBus): void {
+  bus.on(WAVE_RPC_REQUEST_EVENT, (raw) => {
+    const request = raw as { requestId: string; method: string };
+    const envelope = {
+      version: WAVE_RPC_PROTOCOL_VERSION,
+      requestId: request.requestId,
+      method: request.method,
+    };
+    const channel = `${WAVE_RPC_REPLY_EVENT_PREFIX}${request.requestId}`;
+    if (request.method === "ping") {
+      bus.emit(channel, {
+        ...envelope,
+        success: true,
+        data: {
+          version: WAVE_RPC_PROTOCOL_VERSION,
+          methods: ["ping", "spawn", "stop"],
+          capabilities: { asyncSpawn: true },
+          events: { asyncComplete: ASYNC_COMPLETE_EVENT },
+          session: {},
+        },
+      });
+      return;
+    }
+    bus.emit(channel, {
+      ...envelope,
+      success: false,
+      error: {
+        code: "no_active_session",
+        message: "No active extension context for subagent RPC.",
+      },
+    });
+  });
 }
 
 /**

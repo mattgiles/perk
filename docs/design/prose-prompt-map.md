@@ -6,7 +6,7 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 ## Coverage
 
 - **232** canonical source units
-- **1244** logical fragments
+- **1245** logical fragments
 - **16** session shapes and **12** assemblies
 - **15** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -2153,6 +2153,7 @@ Expert configuration guidance, structural search, and ancillary model utilities.
   - `section:perk-customization-recipes/target-a-non-default-base-branch-workflow-base` — Target a non-default base branch (`[workflow] base`) (`heading:perk-customization-recipes/target-a-non-default-base-branch-workflow-base`)
   - `section:perk-customization-recipes/scope-pi-resources-per-project-pi-config-l` — Scope pi resources per-project (`pi config -l`) (`heading:perk-customization-recipes/scope-pi-resources-per-project-pi-config-l`)
   - `section:perk-customization-recipes/change-pi-fff-s-search-mode-pi-fff-mode` — Change pi-fff's search mode (`PI_FFF_MODE`) (`heading:perk-customization-recipes/change-pi-fff-s-search-mode-pi-fff-mode`)
+  - `section:perk-customization-recipes/keep-pi-subagents-out-of-user-scope-settings-subagent-package-scope` — Keep pi-subagents out of user-scope settings (`subagent-package-scope`) (`heading:perk-customization-recipes/keep-pi-subagents-out-of-user-scope-settings-subagent-package-scope`)
   - `section:perk-customization-recipes/cheaper-prompt-caching-for-review-children-pi-subagent-cache-retention` — Cheaper prompt caching for review children (`PI_SUBAGENT_CACHE_RETENTION`) (`heading:perk-customization-recipes/cheaper-prompt-caching-for-review-children-pi-subagent-cache-retention`)
   - `section:perk-customization-recipes/write-a-custom-subagent-pi-agents-name-md` — Write a custom subagent (`.pi/agents/<name>.md`) (`heading:perk-customization-recipes/write-a-custom-subagent-pi-agents-name-md`)
   - `section:perk-customization-recipes/prefer-pi-s-regular-tui-mode-tuimode` — Prefer pi's regular TUI mode (`tuiMode`) (`heading:perk-customization-recipes/prefer-pi-s-regular-tui-mode-tuimode`)

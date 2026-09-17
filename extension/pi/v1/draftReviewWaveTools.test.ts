@@ -19,6 +19,7 @@ import {
 } from "../../authoring/review/draftContext.ts";
 import { PERK_TOOLS, STAGE_TOOLS } from "../../substrate/toolGating.ts";
 import {
+  attachGhostResponder,
   createFakeSubagents,
   type FakeSubagents,
   waveScriptItems,
@@ -1290,6 +1291,65 @@ test("tools: start_draft_review_wave ignores an already-aborted per-call signal 
     assert.equal(details.ok, true);
     assert.equal(details.complete, true);
     assert.deepEqual(details.covered, ["grounding", "risk", "ponytail"]);
+  } finally {
+    await settleBridges(sink);
+    h.dispose();
+  }
+});
+
+test("tools: a ghost context-less pi-subagents responder on pi.events — the launch still succeeds, collect drains, and ONE `perk: waves` warning is notified per activation", async () => {
+  // The production `index.ts` wiring end to end: the adapter holds the ghost's `no_active_session`
+  // reply until the live fake succeeds, the wave's `onNotice` reaches the composition root's
+  // reporter, and the reporter warns once over the session ctx retained at `session_start`.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
+  gitInit(cwd, { dirty: false });
+  installPonytailCoreSkill(cwd);
+  const fake = draftFake();
+  const sink = newSink();
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    // The ghost binds FIRST so its synchronous error reply always precedes the live reply.
+    extraExtensions: [
+      fakePlannotator(sink),
+      (pi) => attachGhostResponder(pi.events),
+      fake.extension,
+    ],
+  });
+  const waveWarnings = () =>
+    h.notifyEvents.filter(
+      (n) => n.severity === "warning" && n.message.startsWith("perk: waves — "),
+    );
+  try {
+    await primeThroughDoor(h);
+    const started = await h.invokeTool("start_draft_review_wave", {
+      angles: ["grounding", "risk"],
+    });
+    const startDetails = started.details as { ok: boolean; error_type?: string; asyncId?: string };
+    assert.equal(startDetails.ok, true, `expected ok, got ${startDetails.error_type ?? "ok"}`);
+    assert.ok(startDetails.asyncId);
+    assert.match(started.content[0]?.text ?? "", /workflow accepted .*\(asyncId /);
+    assert.equal(fake.spawns.length, 1, "the live responder saw exactly one spawn");
+
+    const collected = await h.invokeTool("collect_draft_review_wave", {});
+    const details = collected.details as { ok: boolean; complete?: boolean; covered?: string[] };
+    assert.equal(details.ok, true);
+    assert.equal(details.complete, true);
+    assert.deepEqual(details.covered, ["grounding", "risk", "ponytail"]);
+
+    const first = waveWarnings();
+    assert.equal(first.length, 1, "exactly one duplicate-load warning");
+    assert.match(first[0]?.message ?? "", /A duplicate pi-subagents extension is loaded/);
+    assert.match(first[0]?.message ?? "", /perk's spawn request/);
+    assert.match(first[0]?.message ?? "", /subagent-package-scope/);
+
+    // A second launch in the same activation adds no warning (the reporter latched).
+    const again = await h.invokeTool("start_draft_review_wave", { angles: ["grounding", "risk"] });
+    assert.equal((again.details as { ok: boolean }).ok, true);
+    const drained = await h.invokeTool("collect_draft_review_wave", {});
+    assert.equal((drained.details as { ok: boolean }).ok, true);
+    assert.equal(fake.spawns.length, 2);
+    assert.equal(waveWarnings().length, 1, "the warning is once per extension activation");
   } finally {
     await settleBridges(sink);
     h.dispose();

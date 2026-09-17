@@ -134,6 +134,34 @@ non-override mode or a version outside the range — the two out-of-range messag
 purpose: below 0.67.0 "does not intersect child tools with host builtins", at/above 0.68.0
 "counts wrapped core slots as host builtins — a pi-fff override of grep/find no longer fails
 review/scout lanes" (the intersection still runs; only its builtin census changed).
+The `package` group also carries the report-only `subagent-package-scope` check: it reads the
+user-scope `settings.json` in the launch-precedence agent dir (`PI_CODING_AGENT_DIR` → `[pi]
+agent_dir` → `~/.pi/agent`) beside the project `.pi/settings.json`, and warns — never fails, no
+`--fix` arm — when both list `pi-subagents` (matched by npm identity, so a pinned
+`npm:pi-subagents@0.67.0` or an object-form `{"source": "npm:pi-subagents"}` entry counts). A
+user entry counts only when it actually loads the package's extensions under pi's resource
+filters: `"extensions": []` disables them all, and `"autoload": false` loads nothing unless an
+`extensions` pattern positively enables one — a non-empty regular pattern list is treated as
+loading (perk does not reimplement pi's glob matching). A project entry with `"autoload":
+false` never counts — pi keeps that delta pair on purpose, so nothing is orphaned. perk
+converges `npm:pi-subagents` into the **project** scope; a second copy in the user scope is
+harmless to pi's package loading (it dedupes by identity, project wins) but not to perk's waves:
+pi 0.85.1 loads the user-scope extensions *before* project trust resolves and then drops the
+user copy from the final set **without invalidating it**, and pi-subagents' RPC bridge
+subscribes on `pi.events`, so the orphan — which never receives `session_start` — keeps
+answering perk's wave RPC with `no_active_session` a few milliseconds before the project instance
+succeeds. perk now holds that reply until the live reply arrives and warns **once per extension
+activation** in the session (`perk: waves — A duplicate pi-subagents extension is loaded …`),
+but the duplicate still costs a listener and the warning, so the check names both files (as
+absolute paths, even for a relative `PI_CODING_AGENT_DIR`) and the remediation: remove the user-scope entry (`pi remove npm:pi-subagents` when that file is
+pi's default `~/.pi/agent/settings.json` — `pi remove` writes user scope by default; otherwise
+edit the file), then **restart** every running pi session in this repo — `/reload` re-runs the
+same two-phase load and does not clear the orphan. `info` when the agent dir cannot be resolved
+(a broken `[pi] agent_dir` is the `config` check's finding); `warn … not evaluated` naming the
+path and the cause (not readable, not valid UTF-8, not valid JSON, or not a JSON object) when the
+user settings cannot be evaluated; a warn deferring to `settings-wiring` when the project settings
+cannot; `ok` otherwise, saying which scope(s) carry the entry ("project scope only", "user scope
+only", or "not configured in either scope" — the last is `settings-wiring`'s finding).
 The package group also carries a report-only `ponytail-compat` check for the managed internal
 review dependency. A lazy install that is not present yet is `info`. When installed, doctor verifies
 package identity, the `./skills` export, both exact `SKILL.md` files, and their `ponytail` /
