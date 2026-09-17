@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CROCKFORD, decodeTime, mintRunId } from "./runId.ts";
+import { CROCKFORD, decodeTime, isCanonicalRunId, mintRunId } from "./runId.ts";
 
 // Exactly the Crockford base32 set — no I/L/O/U — and exactly 26 chars.
 const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -44,4 +44,42 @@ test("two mints in the same millisecond differ (randomness component)", () => {
 
 test("decodeTime rejects non-Crockford characters", () => {
   assert.throws(() => decodeTime("ILOU567890ABCDEFGHJKMNPQRS"));
+});
+
+// --- isCanonicalRunId: the STRICT full-match grammar (the path gate) -----------------------
+
+const ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+
+test("isCanonicalRunId accepts a minted ULID and nested .<n> fork suffixes", () => {
+  assert.ok(isCanonicalRunId(mintRunId()));
+  assert.ok(isCanonicalRunId(`${ULID}.1`));
+  assert.ok(isCanonicalRunId(`${ULID}.1.2`));
+  assert.ok(isCanonicalRunId(`${ULID}.10`));
+});
+
+test("isCanonicalRunId rejects everything off the grammar", () => {
+  const rejected = [
+    "",
+    ULID.toLowerCase(),
+    ULID.slice(0, 25),
+    `${ULID}A`,
+    "01ARZ3NDEKTSV4RRFFQ69G5FAI",
+    "01ARZ3NDEKTSV4RRFFQ69G5FAL",
+    "01ARZ3NDEKTSV4RRFFQ69G5FAO",
+    "01ARZ3NDEKTSV4RRFFQ69G5FAU",
+    `${ULID}.`,
+    `${ULID}.x`,
+    `${ULID}./../x`,
+    `${ULID}/x`,
+    // ECMAScript `$` without `m` is end-of-input: no trailing-newline leniency.
+    `${ULID}\n`,
+    `${ULID}\r\n`,
+    "42",
+    "#42",
+    "ENG-1",
+    "https://github.com/o/r/issues/42",
+  ];
+  for (const value of rejected) {
+    assert.equal(isCanonicalRunId(value), false, `expected ${JSON.stringify(value)} refused`);
+  }
 });

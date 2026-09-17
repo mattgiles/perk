@@ -3,11 +3,14 @@
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from perk.backends import resolve
 from perk.backends.issue_backend import PlanState
 from perk.learn.sessions import resolve_plan_sessions
 from perk.state import session_pointers
 from perk.state.session_pointers import (
+    RunSessionEntry,
     SessionClassPointers,
     SessionPointer,
     SessionPointers,
@@ -32,6 +35,74 @@ _I_WORKER = SessionPointer(
     session_file="/abs/sess-iw.jsonl",
     at="2026-06-02T00:01:00Z",
     parent_pi_session_id=None,
+)
+
+# The cross-plane byte-pin fixtures — the SAME literals live in
+# extension/substrate/sessionPointers.test.ts (ASCII content; the schema/order contract).
+_RID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+_SA = RunSessionEntry(
+    pi_session_id="a.jsonl",
+    session_file="/abs/a.jsonl",
+    cwd="/abs/wt-a",
+    at="2026-06-01T00:00:00.000Z",
+)
+_SB = RunSessionEntry(
+    pi_session_id="b.jsonl",
+    session_file="/abs/b.jsonl",
+    cwd="/abs/wt-b",
+    at="2026-06-02T00:00:00.000Z",
+)
+_EMPTY_RECORD_BYTES = "\n".join(
+    [
+        "{",
+        '  "run_id": "01RID",',
+        '  "planning": {',
+        '    "main": {',
+        '      "pi_session_id": "pm.jsonl",',
+        '      "session_file": "/abs/pm.jsonl",',
+        '      "parent_pi_session_id": null,',
+        '      "at": "2026-06-01T00:00:00Z"',
+        "    },",
+        '    "worker": null',
+        "  },",
+        '  "implementation": {',
+        '    "main": null,',
+        '    "worker": null',
+        "  },",
+        '  "sessions": []',
+        "}",
+        "",
+    ]
+)
+_TWO_SESSIONS_BYTES = "\n".join(
+    [
+        "{",
+        f'  "run_id": "{_RID}",',
+        '  "planning": {',
+        '    "main": null,',
+        '    "worker": null',
+        "  },",
+        '  "implementation": {',
+        '    "main": null,',
+        '    "worker": null',
+        "  },",
+        '  "sessions": [',
+        "    {",
+        '      "pi_session_id": "a.jsonl",',
+        '      "session_file": "/abs/a.jsonl",',
+        '      "cwd": "/abs/wt-a",',
+        '      "at": "2026-06-01T00:00:00.000Z"',
+        "    },",
+        "    {",
+        '      "pi_session_id": "b.jsonl",',
+        '      "session_file": "/abs/b.jsonl",',
+        '      "cwd": "/abs/wt-b",',
+        '      "at": "2026-06-02T00:00:00.000Z"',
+        "    }",
+        "  ]",
+        "}",
+        "",
+    ]
 )
 
 
@@ -74,6 +145,118 @@ def test_write_run_id_is_authoritative(tmp_path: Path):
     write_session_pointers(tmp_path, "01CANON", record)
     again = read_session_pointers(tmp_path, "01CANON")
     assert again is not None and again.run_id == "01CANON"
+
+
+# --- the `sessions` list -------------------------------------------------------------------
+
+
+def test_sessions_round_trip_beside_the_class_slots(tmp_path: Path):
+    record = SessionPointers(
+        run_id=_RID,
+        planning=SessionClassPointers(main=_P_MAIN),
+        implementation=SessionClassPointers(main=_I_MAIN, worker=_I_WORKER),
+        sessions=(_SA, _SB),
+    )
+    write_session_pointers(tmp_path, _RID, record)
+    again = read_session_pointers(tmp_path, _RID)
+    assert again is not None
+    assert again.sessions == (_SA, _SB)
+    assert again.planning.main == _P_MAIN
+    assert again.implementation.main == _I_MAIN
+    assert again.implementation.worker == _I_WORKER
+
+
+def test_legacy_record_without_sessions_reads_as_empty(tmp_path: Path):
+    path = session_pointers.session_pointers_path(tmp_path, _RID)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f'{{"run_id":"{_RID}","planning":{{"main":null,"worker":null}},'
+        '"implementation":{"main":null,"worker":null}}\n',
+        encoding="utf-8",
+    )
+    record = read_session_pointers(tmp_path, _RID)
+    assert record is not None
+    assert record.sessions == ()
+
+
+def test_written_bytes_match_the_ts_pins(tmp_path: Path):
+    # The Python writer and the TS `serialize` emit the SAME bytes for ASCII content: key order,
+    # 2-space indent, trailing newline, `"sessions": []` for an empty list.
+    pm = SessionPointer(
+        pi_session_id="pm.jsonl",
+        session_file="/abs/pm.jsonl",
+        at="2026-06-01T00:00:00Z",
+        parent_pi_session_id=None,
+    )
+    empty = write_session_pointers(
+        tmp_path,
+        "01RID",
+        SessionPointers(run_id="01RID", planning=SessionClassPointers(main=pm)),
+    )
+    assert empty.read_text(encoding="utf-8") == _EMPTY_RECORD_BYTES
+    two = write_session_pointers(tmp_path, _RID, SessionPointers(run_id=_RID, sessions=(_SA, _SB)))
+    assert two.read_text(encoding="utf-8") == _TWO_SESSIONS_BYTES
+
+
+def test_sessions_entry_extra_key_is_dropped_leniently(tmp_path: Path):
+    path = session_pointers.session_pointers_path(tmp_path, _RID)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f'{{"run_id":"{_RID}","sessions":[{{"pi_session_id":"a.jsonl",'
+        '"session_file":"/abs/a.jsonl","cwd":"/abs/wt-a","at":"2026-06-01T00:00:00.000Z",'
+        '"future":true}]}\n',
+        encoding="utf-8",
+    )
+    record = read_session_pointers(tmp_path, _RID)
+    assert record is not None
+    assert record.sessions == (_SA,)
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        # Missing `cwd`.
+        '{"pi_session_id":"a.jsonl","session_file":"/abs/a.jsonl","at":"2026-06-01T00:00:00.000Z"}',
+        # `at` without milliseconds — not the toISOString() form.
+        '{"pi_session_id":"a.jsonl","session_file":"/abs/a.jsonl","cwd":"/w","at":"2026-06-01T00:00:00Z"}',
+        '{"pi_session_id":"a.jsonl","session_file":"/abs/a.jsonl","cwd":"/w","at":"yesterday"}',
+        # The right SHAPE but an impossible instant (month 13, day 40, hour 25, minute/second 61)
+        # — it would sort after every real timestamp; the read edge must refuse it, not pick it.
+        '{"pi_session_id":"a.jsonl","session_file":"/abs/a.jsonl","cwd":"/w","at":"2026-13-40T25:61:61.999Z"}',
+    ],
+)
+def test_malformed_sessions_entry_degrades_the_record_to_none(tmp_path: Path, capsys, entry: str):
+    path = session_pointers.session_pointers_path(tmp_path, _RID)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f'{{"run_id":"{_RID}","sessions":[{entry}]}}\n', encoding="utf-8")
+    assert read_session_pointers(tmp_path, _RID) is None
+    err = capsys.readouterr().err
+    assert "skipping unreadable session-pointers record" in err and str(path) in err
+
+
+def test_unprobeable_record_path_degrades_to_none_without_raising(
+    tmp_path: Path, capsys, monkeypatch
+):
+    # The existence probe is inside the boundary: an OS refusal to stat the record (an
+    # unreadable parent) is an unusable record — warn + None, never a traceback.
+    def _denied(self):
+        raise PermissionError(13, "Permission denied", str(self))
+
+    monkeypatch.setattr(Path, "is_file", _denied)
+    assert read_session_pointers(tmp_path, _RID) is None
+    err = capsys.readouterr().err
+    assert "skipping unreadable session-pointers record" in err and "Permission denied" in err
+
+
+def test_invalid_utf8_record_degrades_to_none_without_raising(tmp_path: Path, capsys):
+    # The DECODE stage: invalid bytes raise UnicodeDecodeError (a ValueError that is NOT a
+    # JSONDecodeError) — the reader's boundary must cover it, or "never raises" is false.
+    path = session_pointers.session_pointers_path(tmp_path, _RID)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b'\xff\xfe{"run_id":')
+    assert read_session_pointers(tmp_path, _RID) is None
+    err = capsys.readouterr().err
+    assert "skipping unreadable session-pointers record" in err and str(path) in err
 
 
 def test_lenient_parse_drops_unknown_keys(tmp_path: Path):

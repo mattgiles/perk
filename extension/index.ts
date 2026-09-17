@@ -91,10 +91,11 @@ import {
   workflowDir,
 } from "./substrate/cache.ts";
 import { decodeReadOnlyFloor, isRunnerChild } from "./substrate/childRestrictions.ts";
+import { mainCheckoutRoot } from "./substrate/git.ts";
 import { loadRegistry, type Registry } from "./substrate/registry.ts";
 import { perkVersion, sharedDir, versionStamp } from "./substrate/resources.ts";
-import { mintRunId } from "./substrate/runId.ts";
-import { captureSessionPointer } from "./substrate/sessionPointers.ts";
+import { isCanonicalRunId, mintRunId } from "./substrate/runId.ts";
+import { captureSessionPointer, recordRunSession } from "./substrate/sessionPointers.ts";
 import { registerToolGating } from "./substrate/toolGating.ts";
 import {
   branchOf,
@@ -478,6 +479,27 @@ export default function perk(
         sessionFile,
         parentSessionId: facts.implementationCapture.parentSessionId,
         preserveForeign: true,
+      });
+    }
+
+    // The run-session record (contracts.md §8.35 `sessions`): every IDENTIFIED arm with a canonical
+    // run id and a file-backed session self-records `{pi_session_id, session_file, cwd, at}` under
+    // the shared main checkout, so `perk resume RUN_ID` can reopen this conversation later. One run
+    // id is one-to-many (a replan reuses it); a reload is an in-place `unchanged`. Best-effort —
+    // the carrier warns and never throws; an in-memory session or a non-canonical id records
+    // nothing. (The class/site capture above keeps its own permissive write path — this gate is
+    // for THIS record.)
+    if (
+      identity.arm !== "unclaimed" &&
+      sessionFile &&
+      typeof resolved.run_id === "string" &&
+      isCanonicalRunId(resolved.run_id)
+    ) {
+      recordRunSession(mainCheckoutRoot(ctx.cwd), resolved.run_id, {
+        pi_session_id: basename(sessionFile),
+        session_file: sessionFile,
+        cwd: ctx.cwd,
+        at: new Date().toISOString(),
       });
     }
 

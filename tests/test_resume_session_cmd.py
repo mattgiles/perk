@@ -20,7 +20,10 @@ from perk.cli.cli import cli
 from perk.cli.commands import resume_session_cmd
 from perk.cli.context import PerkContext
 from perk.cli.ensure import UserFacingCliError
-from perk.state import cache
+from perk.run.launch import session_resume
+from perk.state import cache, session_pointers
+from perk.state.run_id import mint
+from perk.state.session_pointers import RunSessionEntry, SessionPointers
 from perk.substrate import git
 from perk.substrate.config import Config
 
@@ -98,6 +101,42 @@ def _assert_nothing_written(root: Path) -> None:
     assert not workflow.exists() or not any(workflow.rglob("handoff*"))
 
 
+def _run_record(root: Path, rid: str, *names: str) -> list[RunSessionEntry]:
+    """A real `session-pointers.json` for `rid` under `root` whose entries point at REAL tmp
+    paths (a `.jsonl` file + a cwd directory each); `at` ascends in list order."""
+    entries: list[RunSessionEntry] = []
+    for n, name in enumerate(names, start=1):
+        checkout = root / f"recorded-{name}"
+        checkout.mkdir(exist_ok=True)
+        session_file = root / f"{name}.jsonl"
+        session_file.write_text("{}\n", encoding="utf-8")
+        entries.append(
+            RunSessionEntry(
+                pi_session_id=f"{name}.jsonl",
+                session_file=str(session_file),
+                cwd=str(checkout),
+                at=f"2026-06-01T0{n}:00:00.000Z",
+            )
+        )
+    session_pointers.write_session_pointers(
+        root, rid, SessionPointers(run_id=rid, sessions=tuple(entries))
+    )
+    return entries
+
+
+def _no_selector_reads(monkeypatch) -> None:
+    """Raising fakes proving the run arm reads no `[worktree]` config, no backend, no `gh`,
+    and never reaches `select_plan`."""
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("the run arm must not read selector config, a backend, or gh")
+
+    monkeypatch.setattr(resume_session_cmd, "load_main_config", _boom)
+    monkeypatch.setattr(resume_session_cmd, "select_plan", _boom)
+    monkeypatch.setattr(resume_session_cmd, "require_github", _boom)
+    monkeypatch.setattr(resolve, "resolve_issue_backend_id", _boom)
+
+
 # --- _require_terminal: the typed code ------------------------------------------------------
 
 
@@ -135,7 +174,7 @@ def test_non_tty_without_dry_run_fails_fast_before_any_config_or_backend_read(
     result = _invoke(git_repo, ["42"])
     assert result.exit_code == 1
     assert result.stdout == ""
-    assert "Error: perk resume opens Pi's interactive session picker" in result.stderr
+    assert "Error: perk resume opens an interactive Pi session" in result.stderr
     assert "pass --dry-run" in result.stderr
     assert "not_a_tty" not in result.stderr  # the human surface never renders the code
     assert launch_exec_recorder.calls == [] and launch_exec_recorder.chdirs == []
@@ -150,6 +189,7 @@ def test_dry_run_under_non_tty_previews_and_writes_nothing(
     assert payload == {
         "success": True,
         "checkout": str(git_repo),
+        "session_file": None,
         "agent_dir": str(launch_exec_recorder.agent_dir),
         "agent_dir_source": "env",
         "argv": ["pi", "--resume"],
@@ -417,15 +457,186 @@ def test_invalid_worktree_name_is_invalid_input(git_repo, monkeypatch, launch_ex
 def test_help_renders_the_target_table_and_examples():
     result = CliRunner().invoke(cli, ["resume", "--help"])
     assert result.exit_code == 0
-    assert "Browse and reopen Pi conversations for a checkout (pi --resume)." in result.output
+    assert "Browse and reopen Pi conversations for a checkout (pi --resume)" in result.output
     for line in (
         "perk resume --worktree NAME",
         "perk resume --worktree root",
         "perk resume PLAN --worktree NAME",
         "perk resume PLAN --worktree root  refused",
+        "perk resume RUN_ID                the run's newest recorded conversation",
+        "perk resume RUN_ID --worktree NAME  refused: a run id pins its checkout",
         "perk resume 42 --worktree plan-42-b",
         "perk resume 42 --dry-run",
+        "perk resume 01ARZ3NDEKTSV4RRFFQ69G5FAV  # reopen that run's conversation",
     ):
         assert line in result.output, line
     assert "no --approve" in result.output
-    assert "Run ids are not yet accepted" in result.output
+    assert "TARGET may also be a perk run id" in result.output
+    assert "Run ids are not yet accepted" not in result.output
+
+
+# --- the run arm: routing by grammar -----------------------------------------------------------
+
+
+@pytest.mark.parametrize("selector", ["42", "#42", "ENG-1", "https://github.com/o/r/issues/42"])
+def test_plan_selectors_route_to_select_plan_never_the_run_arm(
+    git_repo, monkeypatch, launch_exec_recorder, selector
+):
+    _tty(monkeypatch)
+    monkeypatch.setattr(resume_session_cmd, "require_github", lambda ctx: None)
+    seen: list[str] = []
+
+    def _select(main_root, raw, **kwargs):
+        seen.append(raw)
+        raise UserFacingCliError(f"Plan {raw} not found", error_type="plan_not_found")
+
+    def _no_run_arm(main_root, run_id):
+        raise AssertionError("a plan selector must never reach the run arm")
+
+    monkeypatch.setattr(resume_session_cmd, "select_plan", _select)
+    monkeypatch.setattr(session_resume, "resolve_run_session", _no_run_arm)
+    result = _invoke(git_repo, [selector])
+    assert result.exit_code == 1
+    assert seen == [selector]
+    assert launch_exec_recorder.calls == []
+
+
+def _assert_run_exec(recorder, entry: RunSessionEntry) -> None:
+    assert recorder.chdirs == [Path(entry.cwd)]
+    program, argv, env = recorder.calls[0]
+    assert program == recorder.pi_path
+    assert argv == ("pi", "--session", entry.session_file)
+    assert "--approve" not in argv
+    assert "PERK_RUN_ID" not in env
+
+
+@pytest.mark.parametrize("suffix", ["", ".1.2"])
+def test_run_id_routes_to_the_run_arm_offline(git_repo, monkeypatch, launch_exec_recorder, suffix):
+    # No selector config, no backend, no gh, no select_plan (raising fakes). The agent-dir
+    # resolution is NOT claimed absent here — the engine's config-arm test covers that parity.
+    _tty(monkeypatch)
+    _no_selector_reads(monkeypatch)
+    monkeypatch.setenv("PERK_RUN_ID", "01OPERATOR")
+    rid = f"{mint()}{suffix}"
+    (entry,) = _run_record(git_repo, rid, "only")
+    result = _invoke(git_repo, [rid])
+    assert result.exit_code == 0, result.output
+    _assert_run_exec(launch_exec_recorder, entry)
+    assert result.stderr.splitlines() == [
+        f"reopening run {rid}'s recorded conversation only.jsonl in {entry.cwd}: "
+        f"pi --session {entry.session_file}"
+    ]
+    assert result.stdout == ""
+    _assert_nothing_written(git_repo)
+
+
+def test_malicious_suffix_fails_the_grammar_and_falls_to_select_plan(
+    git_repo, monkeypatch, launch_exec_recorder
+):
+    _tty(monkeypatch)
+    monkeypatch.setattr(resume_session_cmd, "require_github", lambda ctx: None)
+    monkeypatch.setattr(plans, "get_plan", lambda **k: None)
+    monkeypatch.setattr(github, "get_pr", lambda **k: None)
+
+    def _no_run_arm(main_root, run_id):
+        raise AssertionError("an off-grammar id must never reach the run arm")
+
+    monkeypatch.setattr(session_resume, "resolve_run_session", _no_run_arm)
+    result = _invoke(git_repo, [f"{mint()}./../x"])
+    assert result.exit_code == 1
+    assert "Error:" in result.stderr
+    assert launch_exec_recorder.calls == []
+    assert not cache.runs_dir(git_repo).exists()
+
+
+# --- the run arm: refusals through the door ----------------------------------------------------
+
+
+def test_run_id_with_worktree_is_refused_before_any_config_load(
+    git_repo, monkeypatch, launch_exec_recorder
+):
+    _tty(monkeypatch)
+    _no_selector_reads(monkeypatch)
+
+    def _no_record_read(root, run_id):
+        raise AssertionError("--worktree is refused before the record is read")
+
+    monkeypatch.setattr(session_pointers, "read_session_pointers", _no_record_read)
+    result = _invoke(git_repo, [mint(), "--worktree", "plan-42"])
+    assert result.exit_code == 1
+    assert "drop --worktree" in result.stderr
+    assert launch_exec_recorder.calls == []
+
+
+def test_run_not_found_is_a_typed_refusal_through_the_door(
+    git_repo, monkeypatch, launch_exec_recorder
+):
+    _tty(monkeypatch)
+    _no_selector_reads(monkeypatch)
+    rid = mint()
+    result = _invoke(git_repo, [rid])
+    assert result.exit_code == 1
+    assert f"Error: no recorded Pi conversation for run {rid}" in result.stderr
+    assert "perk state prune" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert launch_exec_recorder.calls == []
+    _assert_nothing_written(git_repo)
+
+
+def test_non_tty_without_dry_run_fails_fast_for_a_run_id(
+    git_repo, monkeypatch, launch_exec_recorder
+):
+    def _no_record_read(root, run_id):
+        raise AssertionError("the record must not be read before the TTY check")
+
+    monkeypatch.setattr(session_pointers, "read_session_pointers", _no_record_read)
+    result = _invoke(git_repo, [mint()])  # the default CliRunner is non-TTY
+    assert result.exit_code == 1
+    assert "pass --dry-run" in result.stderr
+    assert launch_exec_recorder.calls == []
+
+
+# --- the run arm: dry-run + collisions ----------------------------------------------------------
+
+
+def test_run_id_dry_run_under_non_tty_previews_the_session_file(
+    git_repo, monkeypatch, launch_exec_recorder
+):
+    _no_selector_reads(monkeypatch)
+    rid = mint()
+    (entry,) = _run_record(git_repo, rid, "only")
+    result = _invoke(git_repo, [rid, "--dry-run"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "success": True,
+        "checkout": entry.cwd,
+        "session_file": entry.session_file,
+        "agent_dir": str(launch_exec_recorder.agent_dir),
+        "agent_dir_source": "env",
+        "argv": ["pi", "--session", entry.session_file],
+        "dry_run": True,
+    }
+    assert "resume --dry-run (recorded session" in result.stderr
+    assert f"  session:  {entry.session_file}" in result.stderr
+    assert launch_exec_recorder.calls == []
+    _assert_nothing_written(git_repo)
+
+
+def test_run_id_with_several_conversations_opens_the_newest_and_lists_the_others(
+    git_repo, monkeypatch, launch_exec_recorder
+):
+    _tty(monkeypatch)
+    _no_selector_reads(monkeypatch)
+    rid = mint()
+    older, newest = _run_record(git_repo, rid, "older", "newest")
+    result = _invoke(git_repo, [rid])
+    assert result.exit_code == 0, result.output
+    _assert_run_exec(launch_exec_recorder, newest)
+    assert result.stderr.splitlines() == [
+        f"run {rid} has 2 recorded conversations — opening the newest (newest.jsonl); "
+        "others: older.jsonl",
+        f"reopening run {rid}'s recorded conversation newest.jsonl in {newest.cwd}: "
+        f"pi --session {newest.session_file}",
+    ]
+    assert older.pi_session_id == "older.jsonl"

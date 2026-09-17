@@ -6214,13 +6214,16 @@ run's scratch dir at `<main-checkout>/.perk/workflow/scratch/runs/<run_id>/` —
 resolver agree on ONE shared location. The path is built only through the
 `run_scratch_dir`/`runScratchDir` seam (`perk/state/cache.py` /
 `extension/substrate/cache.ts`). The plan branch's workflow-state **may mirror** the pointers for
-provenance but is **not primary**. Schema (byte-identical across planes):
+provenance but is **not primary**. Schema (the same SHAPE and key order on both planes;
+byte-identical for ASCII content — `json.dumps` escapes non-ASCII as `\uXXXX` where
+`JSON.stringify` emits it raw, and both readers parse either form):
 
 ```json
 {
   "run_id": "<this run's id>",
   "planning":       { "main": <Pointer|null>, "worker": <Pointer|null> },
-  "implementation": { "main": <Pointer|null>, "worker": <Pointer|null> }
+  "implementation": { "main": <Pointer|null>, "worker": <Pointer|null> },
+  "sessions":       [ <RunSessionEntry>, ... ]
 }
 ```
 
@@ -6234,7 +6237,42 @@ the `/submit` warm door additionally captures `.main` at `impl_run_ids`-stamping
 submitted run resolves `found` regardless of its launched stage). The interior capture is
 **claimer-only and first-write-wins** (a foreign-session overwrite is skipped with a loud stderr
 warning; a same-session re-capture refreshes), and **env-inherited children never capture** (the
-§8.2 adopt arm carries no stage). The submit-door capture is first-write-wins too.
+§8.2 adopt arm carries no stage). The submit-door capture is first-write-wins too. The class/site
+slots' write path is the permissive `isSafeRunId` + `ensureRunScratch` realpath check — unchanged
+by the `sessions` list below.
+
+**The run-session index (`sessions`).** `RunSessionEntry = { "pi_session_id": str,
+"session_file": str, "cwd": str, "at": <toISOString form> }` — one resumable Pi conversation of
+the run: the file basename, its absolute path, the session's cwd at start, and the FIRST-capture
+time in Pi's `Date.prototype.toISOString()` form (`YYYY-MM-DDTHH:mm:ss.sssZ` — fixed width, UTC,
+millisecond precision, so lexical order is chronological). Additive: a record without the key
+reads as `[]` (TS) / `()` (Python); both writers always emit it. Written by the TS
+`recordRunSession` at `session_start` for **every identified arm** (claim / keep / fork / adopt /
+mint — each under its OWN run id; an env-child under its derived `<parent>.<n>`, the parent's
+record untouched) whose `run_id` is canonical and whose session is file-backed (an in-memory
+session records nothing). Keyed by `pi_session_id`: append when absent; update `session_file` /
+`cwd` in place when present and differing; `unchanged` (no write) otherwise. `at` is never
+refreshed by an in-place update, and is validated by the Python read edge as a REAL instant in
+that form (the fixed-width shape AND a calendar-valid `fromisoformat` parse — `2026-13-40T25:61:
+61.999Z` is corrupt, not "newest") — a non-conforming `at` (or a missing field) makes the whole
+record corrupt. One run id is one-to-many by design (a
+`perk plan replan` reuses it; every reload of a kept session is `unchanged`, never a duplicate).
+Best-effort: one stderr warning, never throws. The consumer is `perk resume RUN_ID` (§8.71(i)).
+
+**The strict run-id grammar.** `^[0-9A-HJKMNP-TV-Z]{26}(\.\d+)*$` — a canonical ULID with
+optional `.<n>` fork suffixes, nested included (`is_canonical_run_id` in `perk/state/run_id.py`
+(`re.fullmatch`, `re.ASCII`) / `isCanonicalRunId` in `extension/substrate/runId.ts`). It gates
+the run id at the TWO places a run id from outside becomes a path for THIS record —
+`recordRunSession` (a refused id derives no path and creates nothing) and the resume selector
+(`_run_record_path`, which additionally asserts the derived path stays under `scratch/runs/`,
+both sides resolved) — BEFORE any path is built. The permissive `is_run_id` (gc/runner) and
+`isSafeRunId` (the class/site write path) stay as they are, and the `/learn` resolver's reads are
+unchanged.
+
+**The reader's corrupt-record boundary** (`read_session_pointers`) covers every corruption class
+as one refusal: the DECODE stage (invalid UTF-8 — `UnicodeDecodeError`, a `ValueError` that is
+NOT a `JSONDecodeError`), the parse stage (malformed JSON), the schema stage (`CacheError` —
+e.g. a malformed `sessions[].at`), and the OS — one stderr warning naming the path, then `None`.
 
 **The plan-header linkage.** The planning `run_id` is already on the `plan-header`. The
 implementation run id(s) are stamped onto the header as `impl_run_ids: tuple[str, ...]`, a
@@ -12675,13 +12713,15 @@ carries none of the spawn-level facts below.
 
 Reopening a Pi conversation is a **session reopen, not a stage launch**: the Python exterior
 positions the cwd, composes the launch *environment*, and execs Pi's native session picker
-(`pi --resume`) in a chosen existing checkout. The engine is `perk.run.launch.session_resume`
-(`prepare_session_resume` → `SessionResumeLaunch{main_root, checkout, argv, agent_dir}`;
-`emit_session_resume_preview`; `exec_session_resume`; `resolve_resume_checkout`); its two
-consumers are the root `perk resume [TARGET] [--worktree NAME] [--dry-run]` command
-(`perk.cli.commands.resume_session_cmd`) and `perk plan resume`'s three gate arms (§8.37). The
-picker itself is Pi's own (Current Folder / All scopes, search, empty lists, cancellation) — perk
-never reimplements or filters it.
+(`pi --resume`) in a chosen existing checkout — or, on the run arm, one RECORDED conversation
+(`pi --session <file>`) in its recorded cwd. The engine is `perk.run.launch.session_resume`
+(`prepare_session_resume(session_file=None)` → `SessionResumeLaunch{main_root, checkout, argv,
+agent_dir, session_file}`; `emit_session_resume_preview`; `exec_session_resume`;
+`resolve_resume_checkout` for the picker arms; `resolve_run_session` → `RunSessionTarget{checkout,
+session_file, pi_session_id}` for the run arm); its two consumers are the root `perk resume
+[TARGET] [--worktree NAME] [--dry-run]` command (`perk.cli.commands.resume_session_cmd`) and
+`perk plan resume`'s three gate arms (§8.37). The picker itself is Pi's own (Current Folder / All
+scopes, search, empty lists, cancellation) — perk never reimplements or filters it.
 
 ### (a) The target table
 
@@ -12697,10 +12737,14 @@ invocation root. `--worktree` names resolve under the **main checkout's** effect
 | `perk resume PLAN` | `worktree_root / plan-<id>` — must exist (`worktree_not_found`, naming `perk implement <id>`) and validate against the selected ref |
 | `perk resume PLAN --worktree NAME` | `worktree_root / NAME` — must exist and validate against the selected ref |
 | `perk resume PLAN --worktree root` | `invalid_input` — the main checkout is never a plan's implementation worktree |
+| `perk resume RUN_ID` | the run's newest recorded conversation (`pi --session <file>`) in its recorded cwd — (i) |
+| `perk resume RUN_ID --worktree NAME` | `invalid_input` — a run id already pins its checkout |
 
-`PLAN` is any `select_plan` selector (id, `#id`, a Linear id, an issue URL, a PR number/URL) —
-the one selector seam; auth is backend-conditional (`require_github` only when the committed
-`[issues] backend` resolves to GitHub — the `plan from` precedent).
+`TARGET` routes **by grammar first**: a canonical run id (the strict `is_canonical_run_id`,
+§8.35) takes the run arm; anything else is `PLAN` — any `select_plan` selector (id, `#id`, a
+Linear id, an issue URL, a PR number/URL) — the one selector seam; auth is backend-conditional
+(`require_github` only when the committed `[issues] backend` resolves to GitHub — the `plan from`
+precedent). Shell completion for `TARGET` stays plan-id-only.
 
 ### (b) The exterior rule
 
@@ -12728,6 +12772,12 @@ secret in a hand-run `pi` (Pi's trust model runs a trusted project's extensions 
 environment); perk neither narrows the seed for the picker nor pretends the prompt gates it. The
 operator's opt-out is not keeping the key in `local.toml` (exporting it only when needed).
 
+The run arm composes its launch environment through the SAME seams — the `[pi] agent_dir`
+precedence included (`resolve_launch_agent_dir(main_root)` still reads the main checkout's config
+on its non-env arm). "Offline" on that arm means no `[worktree]`/selector config
+(`load_main_config` is not called), no issue-backend resolution, no `gh`, no `select_plan` — not
+config-free.
+
 ### (c) No `--approve`
 
 Pi (0.85.1) resolves project trust — the `--approve` override included — for the **selected
@@ -12736,27 +12786,32 @@ A perk-composed `--approve` would therefore auto-trust a project perk never insp
 engine composes **no trust override** (and needs no linked-worktree probe): the argv is exactly
 `pi --resume`, and Pi's native trust flow (saved decision / default / interactive prompt) governs
 the actually-resumed cwd. A reopened ephemeral `plan-<id>` worktree carrying `.pi/` resources
-prompts for trust once — accepted.
+prompts for trust once — accepted. The run arm keeps the rule (re-evaluated in (i)).
 
 ### (d) The terminal-only rule
 
-Pi 0.85.1's `--resume` constructs its TUI selector even on a piped stdin/stdout, so `perk resume`
-without `--dry-run` refuses **`not_a_tty`** unless BOTH stdin and stdout are terminals — decided
-right after `not_a_repo` (which still wins) and **before any config load, backend auth, or
-selection** (a scripted invocation fails fast with no config or backend read). The gate picker
+Every arm hands the terminal to an interactive Pi session: Pi 0.85.1's `--resume` constructs
+its TUI selector even on a piped stdin/stdout, and `--session <file>` (the run arm) opens the
+conversation's TUI — so `perk resume` without `--dry-run` refuses **`not_a_tty`** unless BOTH
+stdin and stdout are terminals — decided right after `not_a_repo` (which still wins) and
+**before any routing, config load, backend auth, or selection** (a scripted invocation fails fast
+with no record, config, or backend read). The refusal message names the interactive session
+generally (picker or recorded conversation), not the picker alone. The gate picker
 fires only under `not as_json and not dry_run and remote is None and stdin+stdout TTY` (the
 `perk ready` predicate); every other gate output is byte-identical to today's. `perk resume`
 prints no launch banner (a picker is not a stage launch).
 
 ### (e) The dry-run payload
 
-`perk resume … --dry-run` (exit 0, side-effect-free) prints four human lines to stderr (the
-dim header, `checkout:`, `agent dir: <path> (<source>)` or `agent dir: unresolved`, `command:
-<shlex-joined argv>`) and ONE JSON payload to stdout with this key order:
-`{"success": true, "checkout": str, "agent_dir": str | null, "agent_dir_source": "env" |
-"config" | "default" | null, "argv": [...], "dry_run": true}`. `agent_dir_source == "config"` is
-the injection signal (no separate injected-path key). The previewed `argv` IS the exec'd argv
-(build-once parity).
+`perk resume … --dry-run` (exit 0, side-effect-free) prints four human lines to stderr on the
+picker arms (the dim `session picker` header, `checkout:`, `agent dir: <path> (<source>)` or
+`agent dir: unresolved`, `command: <shlex-joined argv>`) — five on the run arm (the dim
+`recorded session` header, `checkout:`, `session: <file>`, `agent dir:`, `command:`) — and ONE
+JSON payload to stdout with this key order for EVERY arm: `{"success": true, "checkout": str,
+"session_file": str | null, "agent_dir": str | null, "agent_dir_source": "env" | "config" |
+"default" | null, "argv": [...], "dry_run": true}`. `session_file` is `null` on the picker arms.
+`agent_dir_source == "config"` is the injection signal (no separate injected-path key). The
+previewed `argv` IS the exec'd argv (build-once parity).
 
 ### (f) Never create, restore, or rebind
 
@@ -12859,8 +12914,52 @@ outcome.
   `preserved` (the record is missing) — an accepted residual. Titles are cosmetic: the TS
   `deriveTitle` mirrors `plan.derive_title` case-for-case with no cross-plane parity guard.
 
-### (i) Deferred
+### (i) The run-id form
 
-The run-id form (`perk resume RUN_ID` → the recorded session file) is a later amendment; a ULID
-`TARGET` today falls through `select_plan`'s own typed errors (`SessionResumeLaunch` carries no
-`session_file`).
+`perk resume RUN_ID` reopens one of the run's RECORDED conversations — the §8.35 `sessions`
+list of `session-pointers.json` under the MAIN checkout's `scratch/runs/<run_id>/` — through the
+engine's `resolve_run_session(main_root, run_id) -> RunSessionTarget`, then
+`prepare_session_resume(session_file=<file>)`, whose argv is exactly `pi --session <absolute
+file>`: Pi (0.85.1) opens a `/`-bearing argument as a PATH — no picker, no "found in a different
+project → fork?" prompt — and decides the runtime cwd from the session file's header.
+
+- **Grammar before path (scoped to this selector).** The run id becomes a path in ONE place,
+  `_run_record_path`: `is_canonical_run_id` must pass BEFORE any derivation (`invalid_input` —
+  no filesystem probe for a refused id), then the derived record path must stay under
+  `cache.runs_dir(main_root)` (both sides `resolve()`d — `invalid_input` naming "escapes";
+  unreachable through the grammar, kept as defense in depth). The door routes by the same grammar
+  (a) — an off-grammar `TARGET` such as `<ulid>./../x` never reaches the run arm and falls to
+  `select_plan`'s own typed errors.
+- **`--worktree` is refused** with a run id (`invalid_input`, "drop --worktree"), decided BEFORE
+  `load_main_config` — the record pins the checkout.
+- **The refusal ladder** (probe order; every message is human-first, the code is the
+  `error_type`): `run_not_found` — no record, an empty `sessions`, or a CORRUPT record of ANY
+  class (bad JSON, invalid UTF-8, a malformed `at`, a missing field — the reader warned, naming
+  the path, and degraded to `None`; the run arm adds no second classification); the message names
+  the searched record path, `perk state prune`, and bare `perk resume`. `session_missing` — the
+  chosen entry's file is absent; the message names Pi's deferred first flush (a new session's file
+  exists only after its first assistant reply) and bare `perk resume`. `checkout_missing` — the
+  recorded `cwd` is gone; the message names `perk implement` (a reopen never creates, restores, or
+  rebinds — (f)) and the `--worktree NAME` picker that then lists its conversations.
+- **Collision policy.** Several entries → the one with the NEWEST first-captured `at` wins
+  (`at` is the validated fixed-width `toISOString()` form, so lexical order is chronological);
+  ties (equal `at`) go to the LATER list entry; one stderr line lists the others (`run <id> has
+  <n> recorded conversations — opening the newest (<id>); others: <ids>`). An in-place update
+  never refreshes `at` (§8.35), so the order is independent of reloads.
+- **Trust (recorded `cwd`).** The recorded `cwd` is trusted as far as `chdir` + `pi --session`
+  go — no repo-membership or registered-worktree probe (the record is gitignored workflow state
+  in the main checkout, `plan-ref.json`'s trust tier). **No `--approve`, re-evaluated and kept:**
+  the record is data perk reads back (any identified session's cwd, a hand-run `pi` in a
+  subdirectory included) and Pi resolves trust from the session FILE's header cwd AFTER opening —
+  the same two-step shape that made the picker's override unsafe in (c). Pi's trust flow governs
+  the opened cwd.
+- **Announce + preview.** The exec announce is `reopening run <id>'s recorded conversation
+  <pi_session_id> in <cwd>: pi --session <file>`; `--dry-run` follows (e) with `session_file`
+  set. `PERK_RUN_ID` is dropped exactly as on the picker arms (b) — the reopened session keeps
+  its own recorded identity.
+- **Accepted residuals.** Whole-file last-writer-wins on the record; a just-started session is
+  `session_missing` until Pi's first flush; `sessions` entries die with the run dir under `perk
+  state prune` (§8.1 — the dangling header `run_id` then reports `run_not_found`); non-ASCII
+  path characters serialize differently on the two planes (`json.dumps` escapes, `JSON.stringify`
+  emits raw — both readers parse either form); the recorded `cwd` is not re-validated as a perk
+  checkout.

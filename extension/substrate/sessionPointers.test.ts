@@ -4,7 +4,16 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -12,7 +21,9 @@ import { runScratchDir } from "./cache.ts";
 import { mainCheckoutRoot } from "./git.ts";
 import {
   captureSessionPointer,
+  type RunSessionEntry,
   readSessionPointers,
+  recordRunSession,
   recordSessionPointer,
   type SessionPointer,
 } from "./sessionPointers.ts";
@@ -47,6 +58,73 @@ const IM: SessionPointer = {
   parent_pi_session_id: "parent.jsonl",
   at: "2026-06-02T00:00:00Z",
 };
+
+// A canonical run id — `recordRunSession` refuses anything off the strict grammar, so the
+// non-canonical `01RID` fixtures above can never reach its write path.
+const RID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const SA: RunSessionEntry = {
+  pi_session_id: "a.jsonl",
+  session_file: "/abs/a.jsonl",
+  cwd: "/abs/wt-a",
+  at: "2026-06-01T00:00:00.000Z",
+};
+const SB: RunSessionEntry = {
+  pi_session_id: "b.jsonl",
+  session_file: "/abs/b.jsonl",
+  cwd: "/abs/wt-b",
+  at: "2026-06-02T00:00:00.000Z",
+};
+
+// The cross-plane byte pins (ASCII content) — the SAME literals live in
+// tests/test_session_pointers.py; the Python writer must emit them verbatim.
+const EMPTY_RECORD_BYTES = [
+  "{",
+  '  "run_id": "01RID",',
+  '  "planning": {',
+  '    "main": {',
+  '      "pi_session_id": "pm.jsonl",',
+  '      "session_file": "/abs/pm.jsonl",',
+  '      "parent_pi_session_id": null,',
+  '      "at": "2026-06-01T00:00:00Z"',
+  "    },",
+  '    "worker": null',
+  "  },",
+  '  "implementation": {',
+  '    "main": null,',
+  '    "worker": null',
+  "  },",
+  '  "sessions": []',
+  "}",
+  "",
+].join("\n");
+const TWO_SESSIONS_BYTES = [
+  "{",
+  `  "run_id": "${RID}",`,
+  '  "planning": {',
+  '    "main": null,',
+  '    "worker": null',
+  "  },",
+  '  "implementation": {',
+  '    "main": null,',
+  '    "worker": null',
+  "  },",
+  '  "sessions": [',
+  "    {",
+  '      "pi_session_id": "a.jsonl",',
+  '      "session_file": "/abs/a.jsonl",',
+  '      "cwd": "/abs/wt-a",',
+  '      "at": "2026-06-01T00:00:00.000Z"',
+  "    },",
+  "    {",
+  '      "pi_session_id": "b.jsonl",',
+  '      "session_file": "/abs/b.jsonl",',
+  '      "cwd": "/abs/wt-b",',
+  '      "at": "2026-06-02T00:00:00.000Z"',
+  "    }",
+  "  ]",
+  "}",
+  "",
+].join("\n");
 
 // --- read-modify-write merge ------------------------------------------------------------------
 
@@ -87,9 +165,9 @@ test("serialize is byte-stable: explicit key order + 2-space indent + trailing n
     recordSessionPointer(cwd, "01RID", "planning", "main", PM);
     const path = join(runScratchDir(cwd, "01RID"), "session-pointers.json");
     const raw = readFileSync(path, "utf8");
-    assert.ok(raw.endsWith("\n"));
+    assert.equal(raw, EMPTY_RECORD_BYTES);
     const reparsed = JSON.parse(raw);
-    assert.deepEqual(Object.keys(reparsed), ["run_id", "planning", "implementation"]);
+    assert.deepEqual(Object.keys(reparsed), ["run_id", "planning", "implementation", "sessions"]);
     assert.deepEqual(Object.keys(reparsed.planning.main), [
       "pi_session_id",
       "session_file",
@@ -98,6 +176,138 @@ test("serialize is byte-stable: explicit key order + 2-space indent + trailing n
     ]);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("serialize: a two-entry sessions record matches the cross-plane byte pin", () => {
+  const cwd = tempCwd();
+  try {
+    assert.equal(recordRunSession(cwd, RID, SA), "appended");
+    assert.equal(recordRunSession(cwd, RID, SB), "appended");
+    const path = join(runScratchDir(cwd, RID), "session-pointers.json");
+    assert.equal(readFileSync(path, "utf8"), TWO_SESSIONS_BYTES);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// --- recordRunSession: the run's resumable-conversation index -----------------------------------
+
+test("recordRunSession: appended → updated (at kept) → unchanged (no write) → a second id appends", () => {
+  const cwd = tempCwd();
+  try {
+    assert.equal(recordRunSession(cwd, RID, SA), "appended");
+    assert.deepEqual(readSessionPointers(cwd, RID)?.sessions, [SA]);
+
+    // Same pi_session_id, differing cwd: replaced in place, `at` untouched, still ONE entry.
+    const moved = {
+      ...SA,
+      session_file: "/moved/a.jsonl",
+      cwd: "/abs/wt-a2",
+      at: "2099-01-01T00:00:00.000Z",
+    };
+    assert.equal(recordRunSession(cwd, RID, moved), "updated");
+    const afterUpdate = readSessionPointers(cwd, RID)?.sessions;
+    assert.deepEqual(afterUpdate, [{ ...SA, session_file: "/moved/a.jsonl", cwd: "/abs/wt-a2" }]);
+
+    // An identical entry is `unchanged` and the file bytes are untouched.
+    const path = join(runScratchDir(cwd, RID), "session-pointers.json");
+    const before = readFileSync(path, "utf8");
+    assert.equal(recordRunSession(cwd, RID, moved), "unchanged");
+    assert.equal(readFileSync(path, "utf8"), before);
+
+    // A second pi_session_id appends; order is preserved.
+    assert.equal(recordRunSession(cwd, RID, SB), "appended");
+    assert.deepEqual(
+      readSessionPointers(cwd, RID)?.sessions.map((s) => s.pi_session_id),
+      ["a.jsonl", "b.jsonl"],
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("recordRunSession and recordSessionPointer preserve each other's fields (the merge holds)", () => {
+  const cwd = tempCwd();
+  try {
+    recordSessionPointer(cwd, RID, "implementation", "main", IM);
+    assert.equal(recordRunSession(cwd, RID, SA), "appended");
+    let record = readSessionPointers(cwd, RID);
+    assert.deepEqual(record?.implementation.main, IM, "the slot survives a sessions write");
+    assert.deepEqual(record?.sessions, [SA]);
+
+    recordSessionPointer(cwd, RID, "planning", "main", PM);
+    record = readSessionPointers(cwd, RID);
+    assert.deepEqual(record?.sessions, [SA], "sessions survive a slot write");
+    assert.deepEqual(record?.planning.main, PM);
+    assert.deepEqual(record?.implementation.main, IM);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("a legacy record without `sessions` reads as [] and re-serializes with the key", () => {
+  const cwd = tempCwd();
+  try {
+    const dir = runScratchDir(cwd, RID);
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "session-pointers.json");
+    writeFileSync(
+      path,
+      `${JSON.stringify(
+        {
+          run_id: RID,
+          planning: { main: PM, worker: null },
+          implementation: { main: null, worker: null },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    assert.deepEqual(readSessionPointers(cwd, RID)?.sessions, []);
+    assert.equal(recordRunSession(cwd, RID, SA), "appended");
+    const reparsed = JSON.parse(readFileSync(path, "utf8"));
+    assert.deepEqual(Object.keys(reparsed), ["run_id", "planning", "implementation", "sessions"]);
+    assert.deepEqual(reparsed.planning.main, PM);
+    assert.deepEqual(reparsed.sessions, [SA]);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("recordRunSession warns + returns failed on an unwritable root, never throws", () => {
+  const cwd = tempCwd();
+  try {
+    chmodSync(cwd, 0o500);
+    let result = "appended";
+    const warnings = captureStderr(() => {
+      result = recordRunSession(cwd, RID, SA);
+    });
+    assert.equal(result, "failed");
+    assert.equal(warnings.length, 1);
+    assert.ok(warnings[0]?.includes(`could not record run session for ${RID}`));
+  } finally {
+    chmodSync(cwd, 0o700);
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("recordRunSession refuses a non-canonical run id BEFORE any path is derived", () => {
+  for (const bad of [`${RID}./../x`, `${RID}/x`, "../x", "01RID"]) {
+    const root = tempCwd();
+    try {
+      let result = "appended";
+      const warnings = captureStderr(() => {
+        result = recordRunSession(root, bad, SA);
+      });
+      assert.equal(result, "failed", `expected ${JSON.stringify(bad)} refused`);
+      assert.equal(warnings.length, 1);
+      assert.ok(warnings[0]?.includes("non-canonical run id"));
+      assert.equal(existsSync(join(root, ".perk")), false, "nothing is created under root");
+      assert.equal(existsSync(join(root, "x")), false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 

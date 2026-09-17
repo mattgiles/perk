@@ -299,9 +299,14 @@ def scratch_dir(root: Path) -> Path:
     return workflow_dir(root) / "scratch"
 
 
+def runs_dir(root: Path) -> Path:
+    """The ``scratch/runs/`` directory (the run-scratch root every run dir hangs under)."""
+    return scratch_dir(root) / "runs"
+
+
 def run_scratch_dir(root: Path, run_id: str) -> Path:
     """The scratch directory for a run."""
-    return scratch_dir(root) / "runs" / run_id
+    return runs_dir(root) / run_id
 
 
 def list_run_ids(root: Path) -> list[str]:
@@ -310,7 +315,7 @@ def list_run_ids(root: Path) -> list[str]:
     Twin of the TS ``listRunIds`` (extension/substrate/cache.ts). Stray non-directory entries
     are ignored.
     """
-    runs_root = scratch_dir(root) / "runs"
+    runs_root = runs_dir(root)
     if not runs_root.is_dir():
         return []
     return sorted(p.name for p in runs_root.iterdir() if p.is_dir())

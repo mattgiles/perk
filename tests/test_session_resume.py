@@ -15,7 +15,9 @@ from perk import __version__, plan
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch
 from perk.run.launch import session_resume
-from perk.state import cache
+from perk.state import cache, session_pointers
+from perk.state.run_id import mint
+from perk.state.session_pointers import RunSessionEntry, SessionPointers
 from perk.substrate import git
 from perk.substrate.config import Config, PiAgentDir
 
@@ -166,6 +168,207 @@ def test_invalid_worktree_name_refuses_before_any_filesystem_probe(tmp_path, mon
         _resolve(tmp_path, ref=ref, worktree="../x")
 
 
+# --- resolve_run_session: the run arm's selector -------------------------------------------
+
+
+def _entry(
+    pi_session_id: str, *, session_file: Path | str, cwd: Path | str, at: str
+) -> RunSessionEntry:
+    return RunSessionEntry(
+        pi_session_id=pi_session_id, session_file=str(session_file), cwd=str(cwd), at=at
+    )
+
+
+def _live_entry(tmp_path: Path, name: str, at: str) -> RunSessionEntry:
+    """An entry whose session file AND cwd exist under ``tmp_path``."""
+    checkout = tmp_path / f"checkout-{name}"
+    checkout.mkdir(exist_ok=True)
+    session_file = tmp_path / f"{name}.jsonl"
+    session_file.write_text("{}\n", encoding="utf-8")
+    return _entry(f"{name}.jsonl", session_file=session_file, cwd=checkout, at=at)
+
+
+def _write_record(root: Path, run_id: str, *entries: RunSessionEntry) -> Path:
+    return session_pointers.write_session_pointers(
+        root, run_id, SessionPointers(run_id=run_id, sessions=entries)
+    )
+
+
+def test_run_session_refuses_run_not_found_when_no_record(tmp_path, capsys):
+    rid = mint()
+    with pytest.raises(UserFacingCliError) as exc:
+        session_resume.resolve_run_session(tmp_path, rid)
+    assert exc.value.error_type == "run_not_found"
+    message = str(exc.value)
+    assert str(session_pointers.session_pointers_path(tmp_path, rid)) in message
+    assert "perk state prune" in message and "perk resume" in message
+    assert capsys.readouterr().err == ""
+
+
+def test_run_session_refuses_run_not_found_when_sessions_is_empty(tmp_path):
+    rid = mint()
+    _write_record(tmp_path, rid)
+    with pytest.raises(UserFacingCliError) as exc:
+        session_resume.resolve_run_session(tmp_path, rid)
+    assert exc.value.error_type == "run_not_found"
+
+
+def test_run_session_refuses_run_not_found_for_an_invalid_utf8_record(tmp_path, capsys):
+    # Decision 7: a corrupt record of ANY class arrives as the reader's `None` (after its own
+    # path-naming warning) and reports as `run_not_found` — one typed error, no traceback.
+    rid = mint()
+    path = session_pointers.session_pointers_path(tmp_path, rid)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b'\xff\xfe{"run_id":')
+    with pytest.raises(UserFacingCliError) as exc:
+        session_resume.resolve_run_session(tmp_path, rid)
+    assert exc.value.error_type == "run_not_found"
+    err = capsys.readouterr().err
+    assert "skipping unreadable session-pointers record" in err and str(path) in err
+
+
+_ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+
+
+@pytest.mark.parametrize("run_id", [f"{_ULID}./../x", f"{_ULID}/x", "42", ""])
+def test_run_session_refuses_a_non_canonical_id_before_any_filesystem_probe(
+    tmp_path, monkeypatch, run_id
+):
+    def _no_probe(self, *args, **kwargs):
+        raise AssertionError("no filesystem probe for a non-canonical run id")
+
+    monkeypatch.setattr(Path, "is_file", _no_probe)
+    monkeypatch.setattr(Path, "is_dir", _no_probe)
+    monkeypatch.setattr(Path, "resolve", _no_probe)
+    with pytest.raises(UserFacingCliError) as exc:
+        session_resume.resolve_run_session(tmp_path, run_id)
+    assert exc.value.error_type == "invalid_input"
+    assert "not a canonical perk run id" in str(exc.value)
+
+
+def test_run_session_containment_assertion_is_live(tmp_path, monkeypatch):
+    # Unreachable through the grammar — bypass it by rebinding the path derivation so the
+    # derived record escapes the run-scratch root; the assertion must fire on its own.
+    outside = tmp_path / "outside" / "session-pointers.json"
+    monkeypatch.setattr(session_pointers, "session_pointers_path", lambda root, run_id: outside)
+    with pytest.raises(UserFacingCliError) as exc:
+        session_resume.resolve_run_session(tmp_path, mint())
+    assert exc.value.error_type == "invalid_input"
+    assert "escapes" in str(exc.value) and str(outside) in str(exc.value)
+
+
+def test_run_session_newest_first_captured_at_wins_and_lists_the_others(tmp_path, capsys):
+    rid = mint()
+    e3 = _live_entry(tmp_path, "c", "2026-06-01T03:00:00.000Z")
+    e1 = _live_entry(tmp_path, "a", "2026-06-01T01:00:00.000Z")
+    e2 = _live_entry(tmp_path, "b", "2026-06-01T02:00:00.000Z")
+    _write_record(tmp_path, rid, e3, e1, e2)  # written out of order
+    target = session_resume.resolve_run_session(tmp_path, rid)
+    assert target == session_resume.RunSessionTarget(
+        checkout=Path(e3.cwd), session_file=Path(e3.session_file), pi_session_id="c.jsonl"
+    )
+    err_lines = capsys.readouterr().err.splitlines()
+    assert len(err_lines) == 1
+    assert err_lines[0] == (
+        f"run {rid} has 3 recorded conversations — opening the newest (c.jsonl); "
+        "others: a.jsonl, b.jsonl"
+    )
+
+
+def test_run_session_tie_on_at_goes_to_the_later_list_entry(tmp_path):
+    rid = mint()
+    at = "2026-06-01T01:00:00.000Z"
+    first = _live_entry(tmp_path, "first", at)
+    later = _live_entry(tmp_path, "later", at)
+    _write_record(tmp_path, rid, first, later)
+    assert session_resume.resolve_run_session(tmp_path, rid).pi_session_id == "later.jsonl"
+
+
+def test_run_session_refuses_session_missing_naming_the_deferred_first_flush(tmp_path):
+    rid = mint()
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    gone = tmp_path / "gone.jsonl"
+    _write_record(
+        tmp_path,
+        rid,
+        _entry("gone.jsonl", session_file=gone, cwd=checkout, at="2026-06-01T01:00:00.000Z"),
+    )
+    with pytest.raises(UserFacingCliError) as exc:
+        session_resume.resolve_run_session(tmp_path, rid)
+    assert exc.value.error_type == "session_missing"
+    message = str(exc.value)
+    assert "gone.jsonl" in message and str(gone) in message
+    assert "first assistant reply" in message and "perk resume" in message
+
+
+# A path component longer than NAME_MAX: `Path.is_file()` / `is_dir()` raise `ENAMETOOLONG`
+# (not the swallowed `ENOENT`) on Python 3.13, so it exercises the probe boundary deterministically
+# (a permission-denied fixture would not fail under root).
+_UNPROBEABLE = "x" * 300
+
+
+def test_run_session_unprobeable_session_file_is_session_missing_not_a_traceback(tmp_path):
+    rid = mint()
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    unprobeable = tmp_path / _UNPROBEABLE / "s.jsonl"
+    _write_record(
+        tmp_path,
+        rid,
+        _entry("s.jsonl", session_file=unprobeable, cwd=checkout, at="2026-06-01T01:00:00.000Z"),
+    )
+    with pytest.raises(UserFacingCliError) as exc:
+        session_resume.resolve_run_session(tmp_path, rid)
+    assert exc.value.error_type == "session_missing"
+
+
+def test_run_session_unprobeable_checkout_is_checkout_missing_not_a_traceback(tmp_path):
+    rid = mint()
+    session_file = tmp_path / "s.jsonl"
+    session_file.write_text("{}\n", encoding="utf-8")
+    unprobeable = tmp_path / _UNPROBEABLE
+    _write_record(
+        tmp_path,
+        rid,
+        _entry(
+            "s.jsonl", session_file=session_file, cwd=unprobeable, at="2026-06-01T01:00:00.000Z"
+        ),
+    )
+    with pytest.raises(UserFacingCliError) as exc:
+        session_resume.resolve_run_session(tmp_path, rid)
+    assert exc.value.error_type == "checkout_missing"
+
+
+def test_run_session_refuses_checkout_missing_naming_implement(tmp_path):
+    rid = mint()
+    session_file = tmp_path / "s.jsonl"
+    session_file.write_text("{}\n", encoding="utf-8")
+    missing = tmp_path / "removed-checkout"
+    _write_record(
+        tmp_path,
+        rid,
+        _entry("s.jsonl", session_file=session_file, cwd=missing, at="2026-06-01T01:00:00.000Z"),
+    )
+    with pytest.raises(UserFacingCliError) as exc:
+        session_resume.resolve_run_session(tmp_path, rid)
+    assert exc.value.error_type == "checkout_missing"
+    message = str(exc.value)
+    assert str(missing) in message
+    assert "perk implement <PLAN>" in message and "never creates, restores, or rebinds" in message
+
+
+def test_run_session_happy_path_is_silent_for_a_single_entry(tmp_path, capsys):
+    rid = mint()
+    entry = _live_entry(tmp_path, "only", "2026-06-01T01:00:00.000Z")
+    _write_record(tmp_path, rid, entry)
+    target = session_resume.resolve_run_session(tmp_path, rid)
+    assert target == session_resume.RunSessionTarget(
+        checkout=Path(entry.cwd), session_file=Path(entry.session_file), pi_session_id="only.jsonl"
+    )
+    assert capsys.readouterr().err == ""
+
+
 # --- prepare_session_resume: argv built once, no --approve ---------------------------------
 
 
@@ -179,8 +382,43 @@ def test_prepare_argv_is_exactly_pi_resume_with_no_approve(git_repo, linked):
     spec = session_resume.prepare_session_resume(main_root=git_repo, checkout=checkout)
     assert spec.argv == ("pi", "--resume")
     assert "--approve" not in spec.argv
+    assert spec.session_file is None
     assert spec.checkout == checkout and spec.main_root == git_repo
     assert spec.agent_dir.resolution is not None and spec.agent_dir.resolution.source == "env"
+
+
+def test_prepare_with_session_file_pins_pi_session_with_no_approve(tmp_path):
+    session_file = tmp_path / "s.jsonl"
+    spec = session_resume.prepare_session_resume(
+        main_root=tmp_path, checkout=tmp_path, session_file=session_file
+    )
+    assert spec.argv == ("pi", "--session", str(session_file))
+    assert "--approve" not in spec.argv
+    assert spec.session_file == session_file
+
+
+def test_prepare_run_arm_honors_the_pi_agent_dir_config_arm(
+    git_repo, monkeypatch, launch_exec_recorder
+):
+    # Decision 10: "offline" is not config-free — the run arm resolves the agent dir through the
+    # SAME precedence as the picker (the main checkout's committed `[pi] agent_dir`).
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    (git_repo / ".perk").mkdir(exist_ok=True)
+    (git_repo / ".perk/config.toml").write_text(
+        '[pi]\nagent_dir = "committed-agent"\n', encoding="utf-8"
+    )
+    agent_dir = git_repo / "committed-agent"
+    agent_dir.mkdir()
+    session_file = git_repo / "s.jsonl"
+    session_file.touch()
+    spec = session_resume.prepare_session_resume(
+        main_root=git_repo, checkout=git_repo, session_file=session_file
+    )
+    assert spec.agent_dir.resolution is not None
+    assert spec.agent_dir.resolution.source == "config"
+    session_resume.exec_session_resume(spec)
+    env = launch_exec_recorder.calls[0][2]
+    assert env["PI_CODING_AGENT_DIR"] == str(agent_dir)
 
 
 def test_prepare_refuses_a_non_directory_agent_dir_before_anything_else(tmp_path, monkeypatch):
@@ -291,27 +529,33 @@ def test_exec_oserror_is_launch_failed(tmp_path, monkeypatch, launch_exec_record
 # --- emit_session_resume_preview: the dry-run report + preview/exec parity ----------------
 
 
+_PAYLOAD_KEYS = [
+    "success",
+    "checkout",
+    "session_file",
+    "agent_dir",
+    "agent_dir_source",
+    "argv",
+    "dry_run",
+]
+
+
 def test_preview_renders_four_lines_and_the_ordered_payload(tmp_path, capsys, launch_exec_recorder):
     spec = _spec(tmp_path, tmp_path)
     session_resume.emit_session_resume_preview(spec)
     captured = capsys.readouterr()
     err_lines = captured.err.splitlines()
+    assert len(err_lines) == 4
     assert "resume --dry-run (session picker — resolve only, no launch)" in err_lines[0]
     assert err_lines[1] == f"  checkout: {tmp_path}"
     assert err_lines[2] == f"  agent dir: {launch_exec_recorder.agent_dir} (env)"
     assert err_lines[3] == "  command:  pi --resume"
     payload = json.loads(captured.out)
-    assert list(payload) == [
-        "success",
-        "checkout",
-        "agent_dir",
-        "agent_dir_source",
-        "argv",
-        "dry_run",
-    ]
+    assert list(payload) == _PAYLOAD_KEYS
     assert payload == {
         "success": True,
         "checkout": str(tmp_path),
+        "session_file": None,
         "agent_dir": str(launch_exec_recorder.agent_dir),
         "agent_dir_source": "env",
         "argv": ["pi", "--resume"],
@@ -320,6 +564,38 @@ def test_preview_renders_four_lines_and_the_ordered_payload(tmp_path, capsys, la
     # Parity: the previewed argv IS the exec'd argv for the same spec.
     session_resume.exec_session_resume(spec)
     assert payload["argv"] == list(spec.argv) == list(launch_exec_recorder.calls[0][1])
+
+
+def test_preview_run_arm_renders_five_lines_and_the_same_key_order(
+    tmp_path, capsys, launch_exec_recorder
+):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    session_file = tmp_path / "s.jsonl"
+    spec = session_resume.prepare_session_resume(
+        main_root=tmp_path, checkout=checkout, session_file=session_file
+    )
+    session_resume.emit_session_resume_preview(spec)
+    captured = capsys.readouterr()
+    err_lines = captured.err.splitlines()
+    assert len(err_lines) == 5
+    assert "resume --dry-run (recorded session — resolve only, no launch)" in err_lines[0]
+    assert err_lines[1] == f"  checkout: {checkout}"
+    assert err_lines[2] == f"  session:  {session_file}"
+    assert err_lines[3] == f"  agent dir: {launch_exec_recorder.agent_dir} (env)"
+    assert err_lines[4] == f"  command:  pi --session {session_file}"
+    payload = json.loads(captured.out)
+    assert list(payload) == _PAYLOAD_KEYS
+    assert payload["session_file"] == str(session_file)
+    assert payload["checkout"] == str(checkout)
+    assert payload["argv"] == ["pi", "--session", str(session_file)]
+    # Exec parity: the same spec chdirs into the recorded cwd and execs the previewed argv
+    # with the inherited run id dropped.
+    session_resume.exec_session_resume(spec)
+    _program, argv, env = launch_exec_recorder.calls[0]
+    assert payload["argv"] == list(spec.argv) == list(argv)
+    assert launch_exec_recorder.chdirs == [checkout]
+    assert "PERK_RUN_ID" not in env
 
 
 def test_preview_unresolved_agent_dir(tmp_path, capsys):

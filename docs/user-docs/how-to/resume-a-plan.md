@@ -60,13 +60,16 @@ machine, or any time you want a clean session against an existing plan.
    perk resume 42                  # plan #42's worktree
    perk resume --worktree plan-42  # any existing checkout by name (root = the main checkout)
    perk resume 42 --dry-run        # print the resolved checkout + command, launch nothing
+   perk resume <run-id>            # reopen one run's conversation directly (run ids: the plan header, perk state show)
    ```
 
    The picker is Pi's: browse the Current Folder or All scopes, search, pick, or cancel.
    perk-launched sessions carry a perk-owned name in that list (`implement | plan #42 | …`) so
-   you can tell them apart; your own `/name` wins. perk
-   only positions the checkout and hands you to `pi --resume` — no run id, no handoff, no stage
-   prompt; the reopened session keeps its own identity. Trust for the reopened project is Pi's
+   you can tell them apart; your own `/name` wins. A run id (the plan header's `run_id` /
+   `impl_run_ids`) skips the picker: perk reopens that run's newest recorded conversation in the
+   checkout it ran in, listing any others. perk
+   only positions the checkout and hands you to `pi --resume` (or `pi --session <file>`) — no run
+   id, no handoff, no stage prompt; the reopened session keeps its own identity. Trust for the reopened project is Pi's
    own prompt (a plan worktree asks once). Checkouts are never created here — a missing worktree
    points you at `perk implement`. This needs a terminal (Pi's picker is a full-screen TUI);
    `--dry-run` works anywhere.
