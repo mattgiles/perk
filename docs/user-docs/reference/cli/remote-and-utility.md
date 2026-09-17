@@ -226,7 +226,8 @@ jobs. Like `cancel`, works without a local dispatch record (any machine).
 ### `perk resume [TARGET]`
 
 Browse and reopen Pi conversations for a checkout — perk positions itself in the chosen
-checkout, composes the launch environment, and execs Pi's own session picker (`pi --resume`).
+checkout, composes the launch environment, and execs Pi's own session picker (`pi --resume`) —
+or reopen one run's recorded conversation directly by its run id (`pi --session <file>`).
 The picker is Pi's: its Current Folder / All scopes, search, empty lists, and cancellation are
 Pi's own, and project trust for the reopened session follows **Pi's own trust flow** (perk
 passes no `--approve`; a reopened `plan-<id>` worktree prompts for trust once).
@@ -238,6 +239,7 @@ perk resume --worktree root          # the main checkout
 perk resume 42                       # plan #42's bound worktree (plan-42)
 perk resume 42 --worktree plan-42-b  # a named checkout that must be bound to plan #42
 perk resume 42 --dry-run             # resolve + print the target, launch nothing
+perk resume 01ARZ3NDEKTSV4RRFFQ69G5FAV  # reopen that run's recorded conversation
 ```
 
 **Where the picker opens.** Precedence is an explicit `TARGET`, then `--worktree`, then the
@@ -247,7 +249,19 @@ against the main checkout); `root` is a reserved word for the main checkout. `TA
 selector — an issue id (`42`, `#42`, `ENG-123`), a pasted issue URL, or the plan's PR number/URL —
 and resolves to the plan's `plan-<id>` worktree (or, with `--worktree NAME`, a checkout that must
 be bound to that plan). `TARGET --worktree root` is refused: the main checkout is never a plan's
-implementation worktree. Run ids are not yet accepted as a target.
+implementation worktree.
+
+**Reopening a run by id.** `TARGET` may also be a perk **run id** — a 26-character ULID,
+optionally with `.<n>` fork suffixes (`01ARZ3NDEKTSV4RRFFQ69G5FAV`, `…FAV.1`). Run ids come from
+the plan header's `run_id` (the planning run) and `impl_run_ids` (its implementation runs), or
+from `perk state show`. Every perk session records the conversation it starts against its run id,
+so `perk resume RUN_ID` skips the picker and reopens that run's **newest** recorded conversation
+directly (`pi --session <file>`) in the checkout it was recorded in; when a run has several (a
+`perk plan replan` reuses the run id), the others are listed on one stderr line. `--worktree` is
+refused with a run id (the record already pins the checkout). This form reads no plan backend and
+runs no `gh` — only the local run record — but composes the launch environment exactly like every
+other arm (the same agent-directory precedence below). As everywhere, perk passes no `--approve`:
+Pi's own trust flow governs the reopened checkout.
 
 **What the picker shows.** perk names the sessions it launches
 `<stage> | plan #N | objective #O / <node> | <title>` (segments omitted when unknown — e.g.
@@ -266,8 +280,14 @@ naming the `perk implement` gesture that creates or restores it; an existing one
 same fail-closed validation the stage launchers apply — `worktree_unregistered` (not a live
 registered git worktree), and for the plan forms `worktree_unbound` / `worktree_branch_mismatch`
 / `worktree_plan_mismatch`. A bare `--worktree NAME` needs no plan binding. Other refusals:
-`invalid_input` (a bad name, or `TARGET --worktree root`), `pi_cli_missing`, `launch_failed`,
-and the plan selection's own errors (`plan_not_found`, `issue_kind_mismatch`).
+`invalid_input` (a bad name, `TARGET --worktree root`, or `RUN_ID --worktree NAME`),
+`pi_cli_missing`, `launch_failed`, and the plan selection's own errors (`plan_not_found`,
+`issue_kind_mismatch`). The run-id form adds three: `run_not_found` (the run predates session
+recording, its run state was pruned by `perk state prune`, or its record is unreadable — browse
+the picker instead), `session_missing` (the recorded session file is gone — or Pi has not written
+it yet: a new session's file appears only after its first assistant reply), and `checkout_missing`
+(the recorded checkout no longer exists — `perk implement <PLAN>` recreates a plan worktree; it is
+never restored here).
 
 **What perk does not do.** No run id is minted, no handoff or plan selector is written, no
 stage prompt or `[models.stages]` flags are added, nothing is materialized, no setup hook runs —
@@ -288,9 +308,11 @@ new prompt — the same exposure as an exported key in a hand-run `pi`. Keep the
 `--json` and no launch banner. Exit codes: `0` dry-run · `1` typed refusals · `2` not a repo · a
 successful launch never returns (the terminal receives Pi's own exit status).
 
-**`--dry-run`** prints the resolved `checkout`, the `agent dir` and its source (`env` /
-`config` / `default`), and the exact `command` to stderr, then one JSON payload to stdout:
-`{"success": true, "checkout", "agent_dir", "agent_dir_source", "argv", "dry_run": true}`.
+**`--dry-run`** prints the resolved `checkout` (plus the recorded `session` file on the run-id
+form), the `agent dir` and its source (`env` / `config` / `default`), and the exact `command` to
+stderr, then one JSON payload to stdout: `{"success": true, "checkout", "session_file",
+"agent_dir", "agent_dir_source", "argv", "dry_run": true}` — `session_file` is `null` for the
+picker forms.
 
 `perk plan resume PLAN` at a review gate opens this same picker for the plan worktree — see
 [Plan commands](./plan.md#perk-plan-resume-plan).
