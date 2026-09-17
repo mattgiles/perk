@@ -10,7 +10,6 @@ import type { WaveNotice } from "../../waves/reportWave.ts";
 import { createWaveNoticeReporter, renderWaveNotice } from "./waveNoticeReporter.ts";
 
 const NOTICE: WaveNotice = {
-  kind: "duplicate-responders",
   method: "spawn",
   superseded: "no_active_session: No active extension context for subagent RPC.",
 };

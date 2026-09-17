@@ -690,14 +690,12 @@ function waveOver(supplyAdapter: () => WaveAdapter): ReportWave {
 }
 
 /**
- * An observability notice the wave surfaces beside (never inside) its typed outcomes:
- * `duplicate-responders` — a context-less pi-subagents RPC responder answered `method` with the
- * `superseded` error before the live instance succeeded (a duplicate pi-subagents load; the
- * request resolved against the success). Reported through `ReportWaveDeps.onNotice`; no tool
- * result or receipt changes.
+ * The duplicate-responder notice the wave surfaces beside (never inside) its typed outcomes: a
+ * context-less pi-subagents RPC responder answered `method` with the `superseded` error before
+ * the live instance succeeded (a duplicate pi-subagents load; the request resolved against the
+ * success). Reported through `ReportWaveDeps.onNotice`; no tool result or receipt changes.
  */
 export interface WaveNotice {
-  kind: "duplicate-responders";
   method: string;
   /** The held reply's `code: message`. */
   superseded: string;
@@ -717,9 +715,7 @@ export interface ReportWaveDeps {
  */
 export function createReportWave(bus: WaveBus, deps?: ReportWaveDeps): ReportWave {
   return waveOver(() =>
-    createRpcWaveAdapter(bus, {
-      onDuplicateResponder: (event) => deps?.onNotice?.({ kind: "duplicate-responders", ...event }),
-    }),
+    createRpcWaveAdapter(bus, { onDuplicateResponder: (event) => deps?.onNotice?.(event) }),
   );
 }
 

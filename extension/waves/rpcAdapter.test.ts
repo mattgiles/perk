@@ -273,9 +273,17 @@ test("a success:false reply narrows to a typed throw carrying code and message",
       ? { success: true, data: pingData() }
       : { success: false, error: { code: "invalid_params", message: "workflowScript required" } },
   );
-  const adapter = createRpcWaveAdapter(bus);
+  const events: DuplicateResponderEvent[] = [];
+  const adapter = createRpcWaveAdapter(bus, { onDuplicateResponder: (e) => events.push(e) });
   await adapter.ping();
-  await assert.rejects(adapter.spawn(spawnParams()), /invalid_params: workflowScript required/);
+  // Exact message: a non-context-less error is never held, so no `held for` suffix and no
+  // duplicate-responder callback.
+  await assert.rejects(adapter.spawn(spawnParams()), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.equal(error.message, "invalid_params: workflowScript required");
+    return true;
+  });
+  assert.deepEqual(events, []);
 });
 
 test("ping misses null out: asyncSpawn false, spawn absent from methods, empty asyncComplete", async () => {
@@ -461,27 +469,6 @@ test("hold: a ghost no_active_session then silence rejects at the reply timeout 
     }
   } finally {
     delete process.env.PERK_WAVE_RPC_REPLY_MS;
-  }
-});
-
-test("hold negative pin: a single non-context-less error rejects immediately, unsuffixed, without the callback", async () => {
-  const bus = createFakeBus();
-  const captured = respond(bus, (request) =>
-    request.method === "ping"
-      ? { success: true, data: pingData() }
-      : { success: false, error: { code: "invalid_params", message: "workflowScript required" } },
-  );
-  const events: DuplicateResponderEvent[] = [];
-  const adapter = createRpcWaveAdapter(bus, { onDuplicateResponder: (e) => events.push(e) });
-  await adapter.ping();
-  await assert.rejects(adapter.spawn(spawnParams()), (error: unknown) => {
-    assert.ok(error instanceof Error);
-    assert.equal(error.message, "invalid_params: workflowScript required");
-    return true;
-  });
-  assert.deepEqual(events, []);
-  for (const request of captured) {
-    assert.equal(bus.handlerCount(`${WAVE_RPC_REPLY_EVENT_PREFIX}${String(request.requestId)}`), 0);
   }
 });
 

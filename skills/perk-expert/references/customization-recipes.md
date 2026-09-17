@@ -223,7 +223,8 @@ subagent RPC` while the wave actually ran orphaned (`collect_*` answered `no_wav
 reply arrives, the launch succeeds, and the session shows one `perk: waves — A duplicate
 pi-subagents extension is loaded …` warning per extension activation. `perk doctor`'s
 `subagent-package-scope` check warns when both scopes list the identity (pinned or object-form
-entries included) and names both files.
+entries included — but a user entry whose filters load no extension, `"extensions": []` or a
+`"autoload": false` delta with no positive pattern, does not count) and names both files.
 
 The fix: remove the user-scope entry — `pi remove npm:pi-subagents` when that file is pi's default
 `~/.pi/agent/settings.json` (`pi remove` writes user scope by default), otherwise edit the file —

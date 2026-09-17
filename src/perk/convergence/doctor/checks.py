@@ -4,7 +4,8 @@ import json
 import os
 import re
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from perk import __version__, _resources
@@ -1001,55 +1002,78 @@ def _subagent_host_tools_check(root: Path, *, environ: Mapping[str, str] | None 
     )
 
 
-def _subagents_npm_identity() -> str:
-    """The pi-subagents npm identity, derived from the converged borrowed entry.
+@dataclass(frozen=True)
+class _SettingsProblem:
+    """Why a pi ``settings.json`` could not be evaluated (``"<path> is <reason>"``)."""
 
-    Read off ``BORROWED_PACKAGES`` through the same :func:`init._npm_name` reduction
-    ``settings-wiring`` dedups by, so the scope check cannot drift from what init writes (a
-    pinned ``npm:pi-subagents@X`` entry still reduces to the bare identity).
-    """
-    for entry in init.BORROWED_PACKAGES:
-        identity = init._npm_name(entry)
-        if identity == _SUBAGENTS_PACKAGE_DIRNAME:
-            return identity
-    raise AssertionError("BORROWED_PACKAGES must carry the npm:pi-subagents engine entry")
+    reason: str
 
 
-def _settings_packages(path: Path) -> list[object] | None:
+def _settings_packages(path: Path) -> list[object] | _SettingsProblem:
     """The ``packages`` list of a pi ``settings.json``.
 
     ``[]`` when the file is absent or carries no list-valued ``packages`` key (no packages in
-    that scope); ``None`` when the file is present but unreadable, invalid JSON, or not a JSON
-    object (that scope cannot be evaluated — the caller owns the posture).
+    that scope). A present file that cannot be evaluated comes back as a :class:`_SettingsProblem`
+    naming the distinct cause — not readable, not valid UTF-8, not valid JSON, or not a JSON
+    object — so the caller's message never overstates it as "invalid JSON".
     """
     if not path.is_file():
         return []
     try:
-        settings = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return _SettingsProblem("not valid UTF-8")
+    except OSError as exc:
+        return _SettingsProblem(f"not readable ({exc.strerror or exc.__class__.__name__})")
+    try:
+        settings = json.loads(text)
+    except json.JSONDecodeError:
+        return _SettingsProblem("not valid JSON")
     if not isinstance(settings, dict):
-        return None
+        return _SettingsProblem("not a JSON object")
     packages = settings.get("packages")
     return list(packages) if isinstance(packages, list) else []
 
 
-def _lists_package(packages: list[object], identity: str, *, skip_autoload_off: bool) -> bool:
-    """Whether any entry (string or object-form) reduces to ``identity``.
+def _entry_filter(entry: object, key: str) -> object:
+    """An object-form ``packages`` entry's filter field (``None`` for a string entry)."""
+    if not isinstance(entry, dict):
+        return None
+    return next((v for k, v in entry.items() if k == key), None)
 
-    With ``skip_autoload_off``, an object-form entry carrying ``autoload`` exactly ``False`` does
-    not count: pi keeps that pair on purpose (the entry is a delta over another scope's entry and
-    the same path is loaded), so nothing leaks from it.
+
+def _user_entry_loads_extensions(entry: object) -> bool:
+    """Whether a user-scope ``packages`` entry loads the package's extensions at all.
+
+    pi's resource-filter semantics (``collectPackageResources``), minus pattern matching: a
+    string entry loads everything; ``"extensions": []`` disables every extension of the entry;
+    ``"autoload": false`` is delta mode, where nothing loads unless an ``extensions`` pattern
+    positively enables it (``-``/``!`` patterns only disable). A non-empty pattern list is
+    otherwise treated as loading — an honest heuristic: perk does not reimplement pi's glob
+    matching, so a pattern list that filters the one pi-subagents extension out still counts.
     """
-    for entry in packages:
-        if init._package_identity(entry) != identity:
-            continue
-        if skip_autoload_off and isinstance(entry, dict):
-            autoload: object = next((v for key, v in entry.items() if key == "autoload"), None)
-            if autoload is False:
-                continue
-        return True
-    return False
+    patterns = _entry_filter(entry, "extensions")
+    if isinstance(patterns, list) and not patterns:
+        return False
+    if _entry_filter(entry, "autoload") is False:
+        return isinstance(patterns, list) and any(
+            isinstance(pattern, str) and not pattern.startswith(("-", "!")) for pattern in patterns
+        )
+    return True
+
+
+def _project_entry_counts(entry: object) -> bool:
+    """A project entry with ``autoload`` exactly ``false`` is a deliberate delta over the user
+    entry: pi's ``dedupePackages`` keeps BOTH entries in the final set, so the user copy is
+    never orphaned and the pair is not the leak (``findAutoloadDeltaBase``)."""
+    return _entry_filter(entry, "autoload") is not False
+
+
+def _lists_package(
+    packages: list[object], identity: str, *, counts: Callable[[object], bool]
+) -> bool:
+    """Whether any entry (string or object-form) reduces to ``identity`` and ``counts``."""
+    return any(init._package_identity(entry) == identity and counts(entry) for entry in packages)
 
 
 def _subagent_package_scope_check(root: Path) -> Check:
@@ -1063,11 +1087,13 @@ def _subagent_package_scope_check(root: Path) -> Check:
     pi-subagents' RPC bridge subscribes on ``pi.events``, so the orphan keeps answering perk's
     wave RPC with ``no_active_session`` while the project instance spawns. perk holds that reply
     and warns once per activation (contracts §8.35); this check makes the environment visible
-    with the exact remediation. Report-only — ``ok``/``info``/``warn``, never ``fail``, no
-    ``--fix`` arm: the user-scope file is operator-owned (the ``resource-overrides`` posture).
+    with the exact remediation. Both paths are shown absolute (a relative ``PI_CODING_AGENT_DIR``
+    is preserved by the resolver; ``perk doctor`` runs from the repo, so ``absolute()`` is pi's
+    own reading of it). Report-only — ``ok``/``info``/``warn``, never ``fail``, no ``--fix`` arm:
+    the user-scope file is operator-owned (the ``resource-overrides`` posture).
     """
     name = "subagent-package-scope"
-    identity = _subagents_npm_identity()
+    identity = _SUBAGENTS_PACKAGE_DIRNAME
     try:
         resolution = launch_pi_agent_dir(root)
     except (ConfigError, tomllib.TOMLDecodeError):
@@ -1080,30 +1106,30 @@ def _subagent_package_scope_check(root: Path) -> Check:
             f"user-scope {identity} not evaluated — agent dir unresolvable "
             "(see the config / pi-agent-dir checks)",
         )
-    user_path = resolution.path / "settings.json"
+    user_path = (resolution.path / "settings.json").absolute()
     user_packages = _settings_packages(user_path)
-    if user_packages is None:
+    if isinstance(user_packages, _SettingsProblem):
         return Check(
             name,
             "package",
             "warn",
-            f"user-scope {identity} not evaluated — {user_path} is not valid JSON",
-            "pi's user-scope settings must be a JSON object; a malformed file also breaks pi's "
-            "own package loading",
-            f"Fix {user_path} (valid JSON object), then re-run perk doctor.",
+            f"user-scope {identity} not evaluated — {user_path} is {user_packages.reason}",
+            "pi's user-scope settings must be a readable UTF-8 JSON object; a file pi cannot "
+            "parse also breaks pi's own package loading",
+            f"Make {user_path} a readable UTF-8 JSON object, then re-run perk doctor.",
         )
-    project_path = root / ".pi" / "settings.json"
+    project_path = (root / ".pi" / "settings.json").absolute()
     project_packages = _settings_packages(project_path)
-    if project_packages is None:
+    if isinstance(project_packages, _SettingsProblem):
         return Check(
             name,
             "package",
             "warn",
-            f"{identity} scope not evaluated — project settings invalid; "
+            f"{identity} scope not evaluated — project settings {project_packages.reason}; "
             "see the settings-wiring check",
         )
-    in_user = _lists_package(user_packages, identity, skip_autoload_off=False)
-    in_project = _lists_package(project_packages, identity, skip_autoload_off=True)
+    in_user = _lists_package(user_packages, identity, counts=_user_entry_loads_extensions)
+    in_project = _lists_package(project_packages, identity, counts=_project_entry_counts)
     if in_user and in_project:
         return Check(
             name,
@@ -1130,11 +1156,20 @@ def _subagent_package_scope_check(root: Path) -> Check:
             "(settings-wiring converges it)",
             "report-only — the user-scope file is operator-owned",
         )
+    if in_project:
+        return Check(
+            name,
+            "package",
+            "ok",
+            f"{identity} configured in project scope only",
+            "report-only — the user-scope file is operator-owned",
+        )
     return Check(
         name,
         "package",
         "ok",
-        f"{identity} configured in project scope only",
+        f"{identity} not configured in either scope — nothing to overlap "
+        "(the missing project entry is settings-wiring's finding)",
         "report-only — the user-scope file is operator-owned",
     )
 

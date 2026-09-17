@@ -1382,16 +1382,29 @@ def test_subagent_package_scope_user_entry_for_another_package_is_ok(
     assert check.status == "ok"
 
 
-@pytest.mark.parametrize("text", ["not json{", "[]", '"npm:pi-subagents"'])
-def test_subagent_package_scope_invalid_user_settings_is_warn_naming_the_path(
-    scaffolded_perk_repo, isolated_pi_agent_dir, text
+@pytest.mark.parametrize(
+    ("raw", "reason"),
+    [
+        (b"not json{", "not valid JSON"),
+        (b"[]", "not a JSON object"),
+        (b'"npm:pi-subagents"', "not a JSON object"),
+        (b"\xff\xfe{", "not valid UTF-8"),
+    ],
+)
+def test_subagent_package_scope_unevaluable_user_settings_is_warn_naming_path_and_reason(
+    scaffolded_perk_repo, isolated_pi_agent_dir, raw, reason
 ):
-    user_path = _plant_user_settings(isolated_pi_agent_dir, text)
+    # Each distinct cause is named (never overstated as "invalid JSON"); undecodable bytes are
+    # the same report-only warn, never a crash out of run_doctor.
+    isolated_pi_agent_dir.mkdir(parents=True, exist_ok=True)
+    user_path = isolated_pi_agent_dir / "settings.json"
+    user_path.write_bytes(raw)
     check = doctor_checks._subagent_package_scope_check(scaffolded_perk_repo)
     assert check.status == "warn"
     assert "not evaluated" in check.message
-    assert str(user_path) in check.message
+    assert f"{user_path} is {reason}" in check.message
     assert str(user_path) in check.remediation
+    assert "JSON" not in check.message or reason != "not valid UTF-8"
 
 
 def test_subagent_package_scope_malformed_project_settings_defers_to_settings_wiring(
@@ -1416,9 +1429,65 @@ def test_subagent_package_scope_bad_config_is_info(scaffolded_perk_repo, monkeyp
     assert "agent dir unresolvable" in check.message
 
 
-def test_subagent_package_scope_identity_derives_from_the_borrowed_entry():
+def test_subagent_package_scope_identity_is_the_borrowed_entry():
+    # The check matches by `_SUBAGENTS_PACKAGE_DIRNAME`; this pins that constant to the borrowed
+    # entry's npm identity (the same reduction settings-wiring dedups by), so the two cannot drift.
     assert "npm:pi-subagents" in init.BORROWED_PACKAGES
-    assert doctor_checks._subagents_npm_identity() == init._npm_name("npm:pi-subagents")
+    assert init._npm_name("npm:pi-subagents") == doctor_checks._SUBAGENTS_PACKAGE_DIRNAME
+
+
+def test_subagent_package_scope_neither_scope_is_ok_with_an_honest_message(scaffolded_perk_repo):
+    # settings-wiring drift (the project entry missing): no overlap, and the message says so
+    # instead of claiming a project-only state.
+    project = scaffolded_perk_repo / ".pi/settings.json"
+    settings = json.loads(project.read_text(encoding="utf-8"))
+    settings["packages"] = [p for p in settings["packages"] if p != "npm:pi-subagents"]
+    project.write_text(json.dumps(settings), encoding="utf-8")
+    check = doctor_checks._subagent_package_scope_check(scaffolded_perk_repo)
+    assert check.status == "ok"
+    assert "not configured in either scope" in check.message
+    assert "project scope only" not in check.message
+
+
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        # pi: an empty `extensions` array disables every extension of the entry — no factory.
+        ({"source": "npm:pi-subagents", "extensions": []}, "ok"),
+        # Delta mode without a positive extension pattern loads nothing.
+        ({"source": "npm:pi-subagents", "autoload": False}, "ok"),
+        ({"source": "npm:pi-subagents", "autoload": False, "extensions": []}, "ok"),
+        ({"source": "npm:pi-subagents", "autoload": False, "extensions": ["-index.ts"]}, "ok"),
+        # A positive delta pattern enables the extension again.
+        ({"source": "npm:pi-subagents", "autoload": False, "extensions": ["+index.ts"]}, "warn"),
+        # A non-empty regular filter is treated as loading (perk does not reimplement pi's globs).
+        ({"source": "npm:pi-subagents", "extensions": ["index.ts"]}, "warn"),
+        ({"source": "npm:pi-subagents", "skills": []}, "warn"),
+    ],
+)
+def test_subagent_package_scope_user_filters_that_load_no_extension_do_not_count(
+    scaffolded_perk_repo, isolated_pi_agent_dir, entry, expected
+):
+    _plant_user_settings(isolated_pi_agent_dir, json.dumps({"packages": [entry]}))
+    check = doctor_checks._subagent_package_scope_check(scaffolded_perk_repo)
+    assert check.status == expected
+
+
+def test_subagent_package_scope_shows_absolute_paths_for_a_relative_agent_dir(
+    scaffolded_perk_repo, monkeypatch, tmp_path
+):
+    # `launch_pi_agent_dir` preserves a relative PI_CODING_AGENT_DIR; the detail/remediation
+    # still name the absolute file (pi's own reading of it from the doctor cwd).
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", "rel-agent")
+    user_path = _plant_user_settings(
+        tmp_path / "rel-agent", json.dumps({"packages": ["npm:pi-subagents"]})
+    )
+    check = doctor_checks._subagent_package_scope_check(scaffolded_perk_repo)
+    assert check.status == "warn"
+    assert str(user_path.absolute()) in check.detail
+    assert str(user_path.absolute()) in check.remediation
+    assert "user: rel-agent/" not in check.detail
 
 
 def test_subagent_package_scope_engine_story(scaffolded_perk_repo, isolated_pi_agent_dir):

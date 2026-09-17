@@ -2483,17 +2483,26 @@ second `--fix` at `fixed == []`).
   builtins", at/above 0.68.0 "counts wrapped core slots as host builtins"; `info` when
   pi-subagents is not installed or its version is unreadable),
   `subagent-package-scope` (warns — never fails, no `--fix` — when the pi-subagents npm
-  identity (derived from the borrowed `npm:pi-subagents` entry via the same reduction
-  `settings-wiring` dedups by, string and object-form entries alike) is configured both in the
-  launch-precedence agent dir's user `settings.json` (`launch_pi_agent_dir`) and in the project
-  `.pi/settings.json` — the environment whose pre-trust duplicate load leaves a context-less RPC
-  responder on the bus (§8.35 "RPC reply selection"); a project object-form entry with
-  `autoload` exactly `false` does not count; the detail names both absolute paths and the
-  mechanism, the remediation the user-scope removal (`pi remove npm:pi-subagents` for pi's
-  default store, else edit the file) plus a full session restart (`/reload` is not enough);
-  `info` when the agent dir is unresolvable (a broken `[pi] agent_dir` config is the `config`
-  check's finding); `warn … not evaluated` naming the path on invalid user JSON, and a warn
-  deferring to `settings-wiring` on malformed project settings; `ok` otherwise), and
+  identity (matched via the same `_package_identity` reduction `settings-wiring` dedups by,
+  string and object-form entries alike) is configured both in the launch-precedence agent dir's
+  user `settings.json` (`launch_pi_agent_dir`) and in the project `.pi/settings.json` — the
+  environment whose pre-trust duplicate load leaves a context-less RPC responder on the bus
+  (§8.35 "RPC reply selection"). A user entry counts only when it loads the package's
+  extensions under pi's resource-filter semantics: `"extensions": []` disables them all, and
+  `"autoload": false` (delta mode) loads nothing unless an `extensions` pattern positively
+  enables one — a non-empty regular pattern list is treated as loading (perk does not
+  reimplement pi's glob matching; an honest heuristic). A project entry with `autoload` exactly
+  `false` never counts (pi keeps that delta pair, so nothing is orphaned). Both paths are shown
+  absolute (`Path.absolute()` over the resolver's value — a relative `PI_CODING_AGENT_DIR` is
+  pi's own reading from the doctor cwd). The detail names both paths and the mechanism, the
+  remediation the user-scope removal (`pi remove npm:pi-subagents` for pi's default store, else
+  edit the file) plus a full session restart (`/reload` is not enough); `info` when the agent
+  dir is unresolvable (a broken `[pi] agent_dir` config is the `config` check's finding); `warn
+  … not evaluated` naming the path and the distinct cause (`not readable` / `not valid UTF-8` /
+  `not valid JSON` / `not a JSON object`) on an unevaluable user file, and a warn deferring to
+  `settings-wiring` (same cause vocabulary) on unevaluable project settings; `ok` otherwise,
+  with the message naming which scope(s) carry the entry — "project scope only", "user scope
+  only", or "not configured in either scope"), and
   `ponytail-compat` (exact
   package/`pi.skills`/skill-file/frontmatter;
   known-good remediation `npm:@dietrichgebert/ponytail@4.9.0` + `perk init` + session restart)
@@ -6516,9 +6525,9 @@ A genuine single-responder `no_active_session` is therefore surfaced only at the
 the advertised async-complete channel has been one constant across every verified release; two
 loaded versions advertising different channels would time the wave out loudly, never lose it
 silently (the accepted residual). `createReportWave(bus, deps?)` forwards each event to
-`deps.onNotice` as a `WaveNotice {kind: "duplicate-responders", method, superseded}`; the
-composition root's reporter (`pi/v1/waveNoticeReporter.ts`) latches on the kind **once per
-extension activation** and reports one `perk: waves — …` warning over the session ctx retained
+`deps.onNotice` as a `WaveNotice {method, superseded}` (one notice shape; no kind taxonomy until
+a second notice exists); the composition root's reporter (`pi/v1/waveNoticeReporter.ts`) latches
+**once per extension activation** and reports one `perk: waves — …` warning over the session ctx retained
 at `session_start`/`session_tree` (stderr when none is retained or the target is headless). No
 flow module participates and no tool result, receipt, or manifest changes. Non-behavior: perk
 neither stops nor adopts an extra spawn a second **live** responder might produce — two

@@ -314,7 +314,6 @@ test("rpc integration: a ghost context-less responder beside the live one — th
   assert.equal(fake.spawns.length, 1, "exactly one spawn reached the live responder");
   assert.deepEqual(notices, [
     {
-      kind: "duplicate-responders",
       method: "spawn",
       superseded: "no_active_session: No active extension context for subagent RPC.",
     },

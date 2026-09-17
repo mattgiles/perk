@@ -1,4 +1,4 @@
-// The once-per-activation wave-notice reporter: turns the report wave's `duplicate-responders`
+// The once-per-activation wave-notice reporter: turns the report wave's duplicate-responder
 // notice (a context-less pi-subagents RPC responder answered before the live instance — pi's
 // pre-trust load keeps a user-scope duplicate of the project's pi-subagents alive on the bus
 // with no session context) into ONE `perk: waves — …` warning over the retained session ctx.
@@ -18,7 +18,7 @@ import type { WaveNotice } from "../../waves/reportWave.ts";
 export interface WaveNoticeReporter {
   /** Retain the latest session ctx (never resets the latch). */
   setContext(ctx: ReportTarget): void;
-  /** The wave's `onNotice` seam: the first notice per kind warns; later ones are dropped. */
+  /** The wave's `onNotice` seam: the first notice warns; later ones are dropped. */
   onNotice(notice: WaveNotice): void;
 }
 
@@ -38,14 +38,14 @@ export function renderWaveNotice(notice: WaveNotice): string {
 
 export function createWaveNoticeReporter(): WaveNoticeReporter {
   let current: ReportTarget | undefined;
-  const latched = new Set<WaveNotice["kind"]>();
+  let latched = false;
   return {
     setContext(ctx) {
       current = ctx;
     },
     onNotice(notice) {
-      if (latched.has(notice.kind)) return;
-      latched.add(notice.kind);
+      if (latched) return;
+      latched = true;
       const message = renderWaveNotice(notice);
       if (current === undefined) {
         console.error(`perk: ${SCOPE} — ${message}`);
