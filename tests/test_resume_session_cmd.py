@@ -174,7 +174,7 @@ def test_non_tty_without_dry_run_fails_fast_before_any_config_or_backend_read(
     result = _invoke(git_repo, ["42"])
     assert result.exit_code == 1
     assert result.stdout == ""
-    assert "Error: perk resume opens Pi's interactive session picker" in result.stderr
+    assert "Error: perk resume opens an interactive Pi session" in result.stderr
     assert "pass --dry-run" in result.stderr
     assert "not_a_tty" not in result.stderr  # the human surface never renders the code
     assert launch_exec_recorder.calls == [] and launch_exec_recorder.chdirs == []

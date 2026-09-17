@@ -302,6 +302,44 @@ def test_run_session_refuses_session_missing_naming_the_deferred_first_flush(tmp
     assert "first assistant reply" in message and "perk resume" in message
 
 
+# A path component longer than NAME_MAX: `Path.is_file()` / `is_dir()` raise `ENAMETOOLONG`
+# (not the swallowed `ENOENT`) on Python 3.13, so it exercises the probe boundary deterministically
+# (a permission-denied fixture would not fail under root).
+_UNPROBEABLE = "x" * 300
+
+
+def test_run_session_unprobeable_session_file_is_session_missing_not_a_traceback(tmp_path):
+    rid = mint()
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    unprobeable = tmp_path / _UNPROBEABLE / "s.jsonl"
+    _write_record(
+        tmp_path,
+        rid,
+        _entry("s.jsonl", session_file=unprobeable, cwd=checkout, at="2026-06-01T01:00:00.000Z"),
+    )
+    with pytest.raises(UserFacingCliError) as exc:
+        session_resume.resolve_run_session(tmp_path, rid)
+    assert exc.value.error_type == "session_missing"
+
+
+def test_run_session_unprobeable_checkout_is_checkout_missing_not_a_traceback(tmp_path):
+    rid = mint()
+    session_file = tmp_path / "s.jsonl"
+    session_file.write_text("{}\n", encoding="utf-8")
+    unprobeable = tmp_path / _UNPROBEABLE
+    _write_record(
+        tmp_path,
+        rid,
+        _entry(
+            "s.jsonl", session_file=session_file, cwd=unprobeable, at="2026-06-01T01:00:00.000Z"
+        ),
+    )
+    with pytest.raises(UserFacingCliError) as exc:
+        session_resume.resolve_run_session(tmp_path, rid)
+    assert exc.value.error_type == "checkout_missing"
+
+
 def test_run_session_refuses_checkout_missing_naming_implement(tmp_path):
     rid = mint()
     session_file = tmp_path / "s.jsonl"

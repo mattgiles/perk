@@ -21,11 +21,13 @@ The exterior rule: perk mints no run id, writes no handoff or plan selector, add
 prompt or `[models.stages]` flags, materializes nothing, runs no setup hook. An inherited
 ``PERK_RUN_ID`` is dropped so the reopened session keeps its own recorded identity.
 
-Terminal-only: Pi 0.85.1's ``--resume`` constructs its TUI selector even on a pipe, so a
-non-interactive invocation without ``--dry-run`` refuses ``not_a_tty`` — decided right after
-``not_a_repo`` and BEFORE any config load, backend auth, or selection, so a scripted call fails
-fast with no config or backend read. Not a registry stage: no ``MergedCommand``, no launcher
-grammar, no ``--json``, no ``--remote``, no pi pass-through args, no launch banner.
+Terminal-only: every arm hands the terminal to an interactive Pi session — Pi 0.85.1's
+``--resume`` constructs its TUI selector even on a pipe, and ``--session <file>`` opens the
+conversation's TUI — so a non-interactive invocation without ``--dry-run`` refuses ``not_a_tty``
+— decided right after ``not_a_repo`` and BEFORE any routing, config load, backend auth, or
+selection, so a scripted call fails fast with no config or backend read. Not a registry stage: no
+``MergedCommand``, no launcher grammar, no ``--json``, no ``--remote``, no pi pass-through args,
+no launch banner.
 
 Exit codes: 0 dry-run · 1 typed refusals (``not_a_tty``, ``worktree_*``, ``invalid_input``,
 ``run_not_found``, ``session_missing``, ``checkout_missing``, ``pi_cli_missing``,
@@ -52,13 +54,15 @@ from perk.substrate.output import user_output
 
 
 def _require_terminal() -> None:
-    """The terminal-only rule: both stdin and stdout must be TTYs for the picker (typed
-    ``not_a_tty``; the human failure path renders only the message). Reads this module's
-    ``sys`` so tests can swap it (``CliRunner`` replaces ``sys.stdin`` itself)."""
+    """The terminal-only rule: both stdin and stdout must be TTYs for every arm — the picker
+    AND a run id's reopened conversation are interactive Pi sessions (typed ``not_a_tty``; the
+    human failure path renders only the message). Reads this module's ``sys`` so tests can swap
+    it (``CliRunner`` replaces ``sys.stdin`` itself)."""
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         raise UserFacingCliError(
-            "perk resume opens Pi's interactive session picker, which needs a terminal on stdin "
-            "and stdout — run it from a terminal, or pass --dry-run to preview the target",
+            "perk resume opens an interactive Pi session (the session picker, or a run's recorded "
+            "conversation), which needs a terminal on stdin and stdout — run it from a terminal, "
+            "or pass --dry-run to preview the target",
             error_type="not_a_tty",
         )
 
@@ -115,8 +119,9 @@ def resume_session(
     no --approve). perk mints no run id, writes no handoff or plan selector, and adds no
     stage prompt — an inherited PERK_RUN_ID is dropped so the reopened session keeps its own
     identity. The agent directory follows PI_CODING_AGENT_DIR, then the main checkout's
-    [pi] agent_dir, then Pi's default. Terminal-only: stdin and stdout must be a TTY unless
-    --dry-run is passed.
+    [pi] agent_dir, then Pi's default. Terminal-only: every arm opens an interactive Pi
+    session (the picker, or the recorded conversation), so stdin and stdout must be a TTY
+    unless --dry-run is passed.
 
     \b
     Examples:

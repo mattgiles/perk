@@ -7,17 +7,22 @@
 // gate — its behavior matrix lives in `sessionLifecycle.test.ts`.
 //
 // The harness's `scaffoldRepo()` cwd is NOT git-inited, so `mainCheckoutRoot(cwd)` falls back to
-// the cwd and every write lands under it.
+// the cwd and every write lands under it — except the one linked-worktree case at the end, which
+// pins the main-checkout placement the fallback cases cannot distinguish.
 
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, realpathSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { workflowDir } from "./substrate/cache.ts";
 import {
   readSessionPointers,
   recordSessionPointer,
   type SessionPointer,
 } from "./substrate/sessionPointers.ts";
-import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
+import { gitInit, loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
 
 // A canonical run id — the `01RID` fixtures the sibling suites use are deliberately
 // non-canonical and never reach the new write.
@@ -161,6 +166,54 @@ test("in-memory: a session without a file records nothing (and warns nothing)", 
     assert.equal(errors.filter((line) => line.includes("could not record run session")).length, 0);
   } finally {
     h.dispose();
+  }
+});
+
+test("linked worktree: the record lands under the MAIN checkout while the entry keeps the worktree cwd", async () => {
+  // The placement pin: `session_start` must route the write through `mainCheckoutRoot(cwd)`.
+  // Every fallback case above has cwd == carrier root and would pass even if it did not.
+  const main = scaffoldRepo();
+  gitInit(main, { dirty: false });
+  const wt = join(main, "..", `${main.split("/").pop()}-wt`);
+  execFileSync("git", ["worktree", "add", "-q", "-b", "plan-x", wt], {
+    cwd: main,
+    stdio: "ignore",
+  });
+  try {
+    mkdirSync(join(workflowDir(wt), "handoff"), { recursive: true });
+    const file = plantSession(wt, [
+      {
+        run_id: RID,
+        pi_session_id: "planted-parent.jsonl",
+        mode: "read-write",
+        stage: "implement",
+      },
+    ]);
+    const h = await loadPerkSession({ cwd: wt, sessionManager: SessionManager.open(file) });
+    try {
+      assert.equal(h.workflowState().run_id, RID);
+      // Read through the SAME resolution the writer used (realpath both sides: macOS tmp paths
+      // alias /private/var ↔ /var, and git reports the physical location).
+      const record = readSessionPointers(main, RID);
+      assert.ok(record !== null, "the record exists under the main checkout");
+      assert.equal(record.sessions.length, 1);
+      assert.equal(record.sessions[0]?.pi_session_id, "planted-parent.jsonl");
+      assert.equal(record.sessions[0]?.session_file, file);
+      assert.equal(
+        realpathSync(record.sessions[0]?.cwd ?? ""),
+        realpathSync(wt),
+        "the entry records the linked worktree as its cwd",
+      );
+      assert.equal(
+        readSessionPointers(wt, RID),
+        null,
+        "no record was written under the linked worktree's own scratch tree",
+      );
+    } finally {
+      h.dispose();
+    }
+  } finally {
+    execFileSync("git", ["worktree", "remove", "--force", wt], { cwd: main, stdio: "ignore" });
   }
 });
 

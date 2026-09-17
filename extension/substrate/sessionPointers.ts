@@ -13,9 +13,11 @@
 // `recordRunSession` at `session_start` for every identified arm and read by `perk resume RUN_ID`.
 //
 // Seam doctrine — best-effort + loud-but-non-fatal: every write is wrapped so a failure (unwritable
-// root, bad disk) warns to stderr and returns false, NEVER throws. A capture failure must never
-// wedge the save/launch/drive it rides on. Node builtins + cache.ts + git.ts + runId.ts only
-// (loads under `node --test`).
+// root, bad disk, a refused run id) warns to stderr and reports through the return value — `false`
+// from the boolean class/site writer (`recordSessionPointer` / `captureSessionPointer`), `"failed"`
+// from the four-state `recordRunSession` (`RunSessionRecordOutcome`) — and NEVER throws. A capture
+// failure must never wedge the save/launch/drive it rides on. Node builtins + cache.ts + git.ts +
+// runId.ts only (loads under `node --test`).
 
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";

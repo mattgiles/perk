@@ -9,7 +9,8 @@ location.
 Beside the four class/site evidence slots the record carries ``sessions`` — the run's
 resumable-conversation index (one-to-many: a replan reuses the run id), written by the TS
 ``recordRunSession`` at ``session_start`` and read by ``perk resume RUN_ID``; each entry's ``at``
-is Pi's ``toISOString()`` form (``YYYY-MM-DDTHH:mm:ss.sssZ``), validated at this read edge.
+is Pi's ``toISOString()`` form (``YYYY-MM-DDTHH:mm:ss.sssZ``), validated at this read edge as a
+real instant (shape + calendar-valid parse).
 
 Pure cache-tier I/O over an explicit ``root`` — no workflow semantics, no network. The TS twin
 (the capture side) is ``extension/substrate/sessionPointers.ts``; both planes read/write the same
@@ -21,6 +22,7 @@ discipline (§8.34 / :mod:`perk.boundary`): a :class:`LenientParseModel` read ed
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import field_validator
@@ -31,10 +33,25 @@ from perk.substrate.output import user_output
 
 SESSION_POINTERS_FILE = "session-pointers.json"
 
-# The admissible form of a run-session entry's `at`: JavaScript's `Date.prototype.toISOString()`
+# The admissible SHAPE of a run-session entry's `at`: JavaScript's `Date.prototype.toISOString()`
 # output (fixed width, UTC, millisecond precision) — so lexical ordering is chronological by
-# construction. Anything else marks the record corrupt at the read edge.
+# construction. The shape check is paired with a real-instant parse (`_validate_at`): a
+# fixed-width but impossible value (month 13, hour 25) is corrupt too. Anything else marks the
+# record corrupt at the read edge.
 _AT_FORM = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", re.ASCII)
+
+
+def _validate_at(value: str) -> str:
+    """Require ``value`` to be a real UTC instant in the ``toISOString()`` form: the fixed-width
+    shape (:data:`_AT_FORM` — ``fromisoformat`` alone would admit other ISO spellings) AND a
+    calendar-valid parse (``fromisoformat`` — the regex alone would admit ``2026-13-40T25:61…``).
+    A boundary format check, no business logic; ``ValueError`` on either failure."""
+    if _AT_FORM.fullmatch(value) is None:
+        raise ValueError(
+            f"at={value!r} is not the YYYY-MM-DDTHH:mm:ss.sssZ form Pi's toISOString() emits"
+        )
+    datetime.fromisoformat(value)  # raises ValueError on an impossible date/time
+    return value
 
 
 @dataclass(frozen=True)
@@ -125,9 +142,10 @@ class SessionClassPointersModel(LenientParseModel):
 class RunSessionEntryModel(LenientParseModel):
     """The JSON parse boundary for :class:`RunSessionEntry`.
 
-    ``at`` must be the ``toISOString()`` form (:data:`_AT_FORM`) — a format check at the
-    boundary, so the selector's lexical newest-wins ordering is chronological by construction; a
-    non-conforming value fails validation and the whole record degrades as corrupt.
+    ``at`` must be a real instant in the ``toISOString()`` form (:func:`_validate_at`: the
+    fixed-width shape AND a calendar-valid parse) — a format check at the boundary, so the
+    selector's lexical newest-wins ordering is chronological by construction; a non-conforming
+    value fails validation and the whole record degrades as corrupt.
     """
 
     pi_session_id: str
@@ -137,12 +155,8 @@ class RunSessionEntryModel(LenientParseModel):
 
     @field_validator("at", mode="after")
     @classmethod
-    def _at_is_iso_string_form(cls, value: str) -> str:
-        if _AT_FORM.fullmatch(value) is None:
-            raise ValueError(
-                f"at={value!r} is not the YYYY-MM-DDTHH:mm:ss.sssZ form Pi's toISOString() emits"
-            )
-        return value
+    def _at_is_a_to_iso_string_instant(cls, value: str) -> str:
+        return _validate_at(value)
 
     def to_domain(self) -> RunSessionEntry:
         return RunSessionEntry(
@@ -188,9 +202,11 @@ def read_session_pointers(root: Path, run_id: str) -> SessionPointers | None:
     ``CacheError``), and the OS.
     """
     path = session_pointers_path(root, run_id)
-    if not path.is_file():
-        return None
     try:
+        # The existence probe sits inside the boundary too: an `OSError` from `is_file()` (an
+        # unreadable parent) is an unusable record, not a crash.
+        if not path.is_file():
+            return None
         with translate_validation_errors(CacheError, source=str(path)):
             return SessionPointersModel.model_validate(
                 json.loads(path.read_text(encoding="utf-8"))

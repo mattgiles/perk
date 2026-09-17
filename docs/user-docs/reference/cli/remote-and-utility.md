@@ -302,9 +302,11 @@ another project inherits it, and a project you trusted earlier loads its extensi
 new prompt — the same exposure as an exported key in a hand-run `pi`. Keep the key out of
 `local.toml` (export it only when needed) if that matters to you.
 
-**Terminal only.** Pi's picker is a full-screen TUI that Pi constructs even on a pipe, so
-`perk resume` without `--dry-run` refuses `not_a_tty` unless both stdin and stdout are terminals
-— decided right after the not-a-repo check and before any config or backend read. There is no
+**Terminal only.** Every form hands your terminal to an interactive Pi session — the picker is
+a full-screen TUI that Pi constructs even on a pipe, and a run id's reopened conversation is Pi's
+TUI too — so `perk resume` without `--dry-run` refuses `not_a_tty` unless both stdin and stdout
+are terminals — decided right after the not-a-repo check and before any record, config, or
+backend read. There is no
 `--json` and no launch banner. Exit codes: `0` dry-run · `1` typed refusals · `2` not a repo · a
 successful launch never returns (the terminal receives Pi's own exit status).
 

@@ -6214,7 +6214,9 @@ run's scratch dir at `<main-checkout>/.perk/workflow/scratch/runs/<run_id>/` —
 resolver agree on ONE shared location. The path is built only through the
 `run_scratch_dir`/`runScratchDir` seam (`perk/state/cache.py` /
 `extension/substrate/cache.ts`). The plan branch's workflow-state **may mirror** the pointers for
-provenance but is **not primary**. Schema (byte-identical across planes):
+provenance but is **not primary**. Schema (the same SHAPE and key order on both planes;
+byte-identical for ASCII content — `json.dumps` escapes non-ASCII as `\uXXXX` where
+`JSON.stringify` emits it raw, and both readers parse either form):
 
 ```json
 {
@@ -6250,8 +6252,10 @@ mint — each under its OWN run id; an env-child under its derived `<parent>.<n>
 record untouched) whose `run_id` is canonical and whose session is file-backed (an in-memory
 session records nothing). Keyed by `pi_session_id`: append when absent; update `session_file` /
 `cwd` in place when present and differing; `unchanged` (no write) otherwise. `at` is never
-refreshed by an in-place update, and is validated by the Python read edge — a non-conforming
-`at` (or a missing field) makes the whole record corrupt. One run id is one-to-many by design (a
+refreshed by an in-place update, and is validated by the Python read edge as a REAL instant in
+that form (the fixed-width shape AND a calendar-valid `fromisoformat` parse — `2026-13-40T25:61:
+61.999Z` is corrupt, not "newest") — a non-conforming `at` (or a missing field) makes the whole
+record corrupt. One run id is one-to-many by design (a
 `perk plan replan` reuses it; every reload of a kept session is `unchanged`, never a duplicate).
 Best-effort: one stderr warning, never throws. The consumer is `perk resume RUN_ID` (§8.71(i)).
 
@@ -12786,10 +12790,13 @@ prompts for trust once — accepted. The run arm keeps the rule (re-evaluated in
 
 ### (d) The terminal-only rule
 
-Pi 0.85.1's `--resume` constructs its TUI selector even on a piped stdin/stdout, so `perk resume`
-without `--dry-run` refuses **`not_a_tty`** unless BOTH stdin and stdout are terminals — decided
-right after `not_a_repo` (which still wins) and **before any config load, backend auth, or
-selection** (a scripted invocation fails fast with no config or backend read). The gate picker
+Every arm hands the terminal to an interactive Pi session: Pi 0.85.1's `--resume` constructs
+its TUI selector even on a piped stdin/stdout, and `--session <file>` (the run arm) opens the
+conversation's TUI — so `perk resume` without `--dry-run` refuses **`not_a_tty`** unless BOTH
+stdin and stdout are terminals — decided right after `not_a_repo` (which still wins) and
+**before any routing, config load, backend auth, or selection** (a scripted invocation fails fast
+with no record, config, or backend read). The refusal message names the interactive session
+generally (picker or recorded conversation), not the picker alone. The gate picker
 fires only under `not as_json and not dry_run and remote is None and stdin+stdout TTY` (the
 `perk ready` predicate); every other gate output is byte-identical to today's. `perk resume`
 prints no launch banner (a picker is not a stage launch).

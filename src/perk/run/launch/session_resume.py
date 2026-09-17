@@ -42,8 +42,9 @@ of any class — bad JSON, invalid UTF-8, a malformed ``at`` — which the reade
 about and degraded to ``None``), ``session_missing`` (the recorded file is gone, or Pi has not
 flushed a just-started session's file yet), ``checkout_missing`` (the recorded cwd is gone —
 never restored here). Collision policy: the entry with the NEWEST first-captured ``at`` wins —
-``at`` is Pi's ``toISOString()`` form, validated at the read edge, so lexical order is
-chronological; ties go to the later list entry; the others are listed on one stderr line.
+``at`` is Pi's ``toISOString()`` form, validated at the read edge as a real instant (shape +
+calendar-valid parse), so lexical order is chronological; ties go to the later list entry; the
+others are listed on one stderr line.
 "Offline" means no ``[worktree]``/selector config, no issue backend, no ``gh``, no
 ``select_plan`` — the launch ENVIRONMENT is composed exactly as for every arm
 (``resolve_launch_agent_dir(main_root)`` still reads the main checkout's ``[pi] agent_dir`` on
@@ -87,6 +88,7 @@ and the git probes live behind the facade.
 
 import json
 import shlex
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -182,6 +184,19 @@ def _run_record_path(main_root: Path, run_id: str) -> Path:
     return path
 
 
+def _recorded_path_exists(probe: Callable[[], bool]) -> bool:
+    """LBYL over a PERSISTED path string (``sessions[].session_file`` / ``.cwd``): an OS refusal
+    to even stat it — ``EACCES`` on a parent, ``ENAMETOOLONG``, an embedded NUL (``ValueError``)
+    — is the same answer as absence for the selector (the recorded path is unusable either way),
+    so the ladder's typed ``session_missing`` / ``checkout_missing`` fire instead of a traceback
+    escaping the door's ``UserFacingCliError`` boundary. Python 3.13's ``Path.is_file`` /
+    ``is_dir`` swallow only ``ENOENT``-class errors themselves."""
+    try:
+        return probe()
+    except (OSError, ValueError):
+        return False
+
+
 def resolve_run_session(main_root: Path, run_id: str) -> RunSessionTarget:
     """The run arm's selector: the run's newest recorded conversation, or a typed refusal.
 
@@ -196,8 +211,10 @@ def resolve_run_session(main_root: Path, run_id: str) -> RunSessionTarget:
     3. (collision) several entries — the newest first-captured ``at`` wins; ties go to the later
        list entry; one stderr line lists the others.
     4. ``session_missing`` — the chosen entry's file is not there (Pi writes a new session's
-       file only after its first assistant reply, or it was removed).
-    5. ``checkout_missing`` — the recorded cwd is gone (never restored here).
+       file only after its first assistant reply, or it was removed) — or cannot be probed
+       (:func:`_recorded_path_exists`).
+    5. ``checkout_missing`` — the recorded cwd is gone (never restored here) — or cannot be
+       probed.
     """
     path = _run_record_path(main_root, run_id)
     record = session_pointers.read_session_pointers(main_root, run_id)
@@ -216,7 +233,7 @@ def resolve_run_session(main_root: Path, run_id: str) -> RunSessionTarget:
             f"newest ({newest.pi_session_id}); others: {others}"
         )
     session_file = Path(newest.session_file)
-    if not session_file.is_file():
+    if not _recorded_path_exists(session_file.is_file):
         raise UserFacingCliError(
             f"run {run_id}'s recorded conversation {newest.pi_session_id} has no session file "
             f"at {session_file} — Pi writes a new session's file only after its first assistant "
@@ -225,7 +242,7 @@ def resolve_run_session(main_root: Path, run_id: str) -> RunSessionTarget:
             error_type="session_missing",
         )
     checkout = Path(newest.cwd)
-    if not checkout.is_dir():
+    if not _recorded_path_exists(checkout.is_dir):
         raise UserFacingCliError(
             f"run {run_id}'s recorded checkout {checkout} no longer exists — {_NEVER_CREATES}; "
             "perk implement <PLAN> recreates a plan worktree, after which the picker "

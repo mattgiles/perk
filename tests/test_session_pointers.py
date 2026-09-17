@@ -220,6 +220,9 @@ def test_sessions_entry_extra_key_is_dropped_leniently(tmp_path: Path):
         # `at` without milliseconds — not the toISOString() form.
         '{"pi_session_id":"a.jsonl","session_file":"/abs/a.jsonl","cwd":"/w","at":"2026-06-01T00:00:00Z"}',
         '{"pi_session_id":"a.jsonl","session_file":"/abs/a.jsonl","cwd":"/w","at":"yesterday"}',
+        # The right SHAPE but an impossible instant (month 13, day 40, hour 25, minute/second 61)
+        # — it would sort after every real timestamp; the read edge must refuse it, not pick it.
+        '{"pi_session_id":"a.jsonl","session_file":"/abs/a.jsonl","cwd":"/w","at":"2026-13-40T25:61:61.999Z"}',
     ],
 )
 def test_malformed_sessions_entry_degrades_the_record_to_none(tmp_path: Path, capsys, entry: str):
@@ -229,6 +232,20 @@ def test_malformed_sessions_entry_degrades_the_record_to_none(tmp_path: Path, ca
     assert read_session_pointers(tmp_path, _RID) is None
     err = capsys.readouterr().err
     assert "skipping unreadable session-pointers record" in err and str(path) in err
+
+
+def test_unprobeable_record_path_degrades_to_none_without_raising(
+    tmp_path: Path, capsys, monkeypatch
+):
+    # The existence probe is inside the boundary: an OS refusal to stat the record (an
+    # unreadable parent) is an unusable record — warn + None, never a traceback.
+    def _denied(self):
+        raise PermissionError(13, "Permission denied", str(self))
+
+    monkeypatch.setattr(Path, "is_file", _denied)
+    assert read_session_pointers(tmp_path, _RID) is None
+    err = capsys.readouterr().err
+    assert "skipping unreadable session-pointers record" in err and "Permission denied" in err
 
 
 def test_invalid_utf8_record_degrades_to_none_without_raising(tmp_path: Path, capsys):
