@@ -7,20 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- As of 012998b -->
+<!-- As of 92bbeb3 -->
+
+## [3.5.0] - 2026-09-17
 
 ### Added
 
-- Add `perk resume [TARGET]`: open Pi's own session picker (`pi --resume`) in a checkout to reopen a conversation — this checkout by default, an existing checkout via `--worktree NAME` (`root` for the main checkout), or a plan's bound worktree via a plan selector; `--dry-run` prints the resolved checkout, agent dir, and command. A session reopen, not a stage launch: no run id, handoff, plan selector, or stage prompt is written, checkouts are never created or rebound, and it requires an interactive terminal. (e4065ad)
-- `perk plan resume PLAN` at a review gate (draft PR, clean PR awaiting review, PR closed unmerged) now prints its gate line and then, in an interactive terminal, opens the plan worktree's Pi session picker so the conversation can be reopened; `--json`, `--dry-run`, `--remote`, and piped runs print the gate report only. (e4065ad)
-- perk-launched sessions now carry a perk-owned Pi session name, `<stage> | plan #N | objective #O / <node> | <title>` (segments omitted when unknown), so the session picker (`pi --resume`, `perk resume`) shows what each conversation is instead of its first message. A different name set with `/name` or `pi --name` is never overwritten; sessions perk did not launch (a hand-run `pi`, subagent children) stay unnamed; an older unnamed perk-launched session whose record carries its launch stage gains its name the next time it is opened. (807a27e)
-- Session names now refresh as the conversation progresses: writing a working draft (`plan_draft`/`objective_draft`/`gist_draft`) sets the title segment from the draft, and saving a plan or objective adds its `plan #N` / `objective #O` segment; a name you set yourself is still never overwritten. (9e3d6b2)
-- Add the `subagent-package-scope` doctor check: a report-only warning when `pi-subagents` is configured in both your user-scope pi settings and the project `.pi/settings.json`, naming both files and the fix (remove the user-scope entry, then restart the session — `/reload` is not enough). A session with that duplicate now also shows one `perk: waves` warning per extension activation the first time a wave launch is answered by the duplicate. (2beca31)
-- `perk resume` now accepts a perk run id and reopens that run's recorded conversation directly (`pi --session <file>` in its recorded checkout) — perk sessions record every conversation they start against their run id, the newest one opens when a run has several (the others are listed), `--dry-run` reports the `session_file`, and a run that predates recording or was pruned refuses honestly. (fc7c877e)
+- Add `perk resume [TARGET]` to reopen an existing conversation through Pi's session picker for the current checkout, a plan, or a named worktree (`--worktree NAME`). Pass a run id to reopen its newest locally recorded conversation directly; older runs without session records can still be found through the picker. Requires an interactive terminal; `--dry-run` previews the checkout and command.
+- Name perk-launched sessions with their stage, plan, objective, and title so conversations are easier to find in the session picker. Names update as drafts are written and plans or objectives are saved; names you set with `/name` or `pi --name` are preserved.
+- Add the `subagent-package-scope` doctor warning for `pi-subagents` configured in both user and project settings. It identifies both files and explains how to remove the user entry and restart Pi. Affected wave launches also show an in-session warning.
+
+### Changed
+
+- Open the plan worktree's session picker after `perk plan resume PLAN` reports a draft PR, a clean PR awaiting review, or a PR closed unmerged. This applies to interactive local runs; `--json`, `--dry-run`, `--remote`, and piped runs retain the gate report only.
+- Strengthen planning, implementation, and review guidance: verify behavior through stable interfaces with independent test expectations, reproduce and recheck reported bugs, and distinguish documented requirements from design judgments in review findings.
 
 ### Fixed
 
-- Wave launches (`start_draft_review_wave`, `start_review_wave`, `run_scout_wave`, …) no longer fail with `no_active_session` while the wave actually spawns when a duplicate pi-subagents extension — a user-scope `npm:pi-subagents` beside the project entry, kept alive by pi's pre-trust load — answers first: perk now holds that context-less reply until the live reply arrives, so the launch succeeds and `collect_*` drains the reports. (ed3c1cf)
+- Prevent duplicate `pi-subagents` installations from causing a false `no_active_session` failure when a scout or reviewer wave actually launched, allowing its reports to be collected normally.
+- Correct post-review and post-address guidance for stacked PRs: use `/ready` to record an approved layer's handoff, with `/objective-land` landing the whole train. Incremental PRs continue to use `/land` after approval.
+- Keep Plannotator's `plannotator_mark_done` tool out of perk workflow sessions, preventing resource discovery from restoring a tool that does not belong to the active workflow.
 
 ## [3.4.0] - 2026-09-16
 
