@@ -148,15 +148,17 @@ schemas deterministically. A name can be inert when its package or provider is n
 | Checklist/questionnaire | `todo` |
 | Checklist/questionnaire | `ask_user_question` |
 | Plannotator | `plannotator_submit_plan` |
+| Plannotator | `plannotator_mark_done` |
 <!-- END borrowed tool census -->
 
 `ask_user_question` is registered by the questionnaire package only when an interactive UI is
 available; a headless session carries no schema for it. Web research, Linear reads, and FFF search
 stay available across every known stage. Delegation and the checklist join the worktree-stage
-family. Linear mutators and `plannotator_submit_plan` are intentionally absent from every stage
-session even though they remain enumerated here; Linear mutations stay in perk's canonical Python
-plane and perk bridges review without Plannotator's submit tool. Bare unscoped Pi sessions retain
-their package-provided tools.
+family. Linear mutators and Plannotator's two phase tools (`plannotator_submit_plan`,
+`plannotator_mark_done`) are intentionally absent from every stage session even though they
+remain enumerated here; Linear mutations stay in perk's canonical Python plane and perk bridges
+review without Plannotator's phase tools. Bare unscoped Pi sessions retain their package-provided
+tools.
 
 For package selection, registration timing, and provider fallback behavior, use the
 [Providers reference](../providers-and-backends/providers.md).

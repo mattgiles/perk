@@ -143,6 +143,22 @@ export const FFF_SEARCH_TOOLS: readonly string[] = [
 ];
 
 /**
+ * @plannotator/pi-extension's plan-phase tools. Both register at LOAD time; plannotator strips
+ * them in its OWN `session_start` (the idle-phase `stripPlanningOnlyTools`), which runs AFTER
+ * perk's first-engagement snapshot (perk is the first `packages` entry, so its `session_start`
+ * sync fires first). Enumeration is therefore load-bearing, not cosmetic: an un-enumerated name
+ * sits in the snapshot as a non-scoped passthrough, and the `resources_discover` re-apply
+ * re-installs `snapshot ∪ admitted` over plannotator's strip — restoring the tool to every
+ * gate-OFF stage session. Perk never drives plannotator's plan phases (the adapter bridges
+ * `plan_review` to its event API), so both are dead weight there: in the census, in NO stage
+ * list. Bare/unscoped sessions are untouched.
+ */
+export const PLANNOTATOR_PHASE_TOOLS: readonly string[] = [
+  "plannotator_submit_plan",
+  "plannotator_mark_done",
+];
+
+/**
  * The enumerated borrowed-package tool census (contracts.md §8.40): every foreign tool name perk
  * wires — via `BORROWED_PACKAGES`, a provider package, or the linear issue backend — joins the
  * scoped universe beside PERK_TOOLS. Same static-name posture as READ_ONLY_TOOLS: names are
@@ -179,9 +195,9 @@ export const BORROWED_TOOLS: readonly string[] = [
   // @juicesharp/rpiv-ask-user-question (required borrow) — registers at load; strips itself
   // headlessly (!hasUI reconcile).
   "ask_user_question",
-  // @plannotator/pi-extension: perk never drives its plan phases (the adapter bridges
-  // `plan_review` to its event API), so the submit tool is dead weight in stage sessions.
-  "plannotator_submit_plan",
+  // @plannotator/pi-extension's phase tools — see PLANNOTATOR_PHASE_TOOLS for the
+  // registration-timing fact that makes enumerating every one of them load-bearing.
+  ...PLANNOTATOR_PHASE_TOOLS,
 ];
 
 /**
