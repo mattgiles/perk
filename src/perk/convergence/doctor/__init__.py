@@ -59,6 +59,7 @@ from perk.convergence.doctor.checks import (
     _subagent_compat_check,
     _subagent_engine_check,
     _subagent_host_tools_check,
+    _subagent_package_scope_check,
     _watch_feedback_asset_check,
 )
 from perk.convergence.doctor.data import _MANAGED_GROUP, Check, DoctorReport, Status
@@ -144,6 +145,7 @@ __all__ = [
     "_subagent_compat_check",
     "_subagent_engine_check",
     "_subagent_host_tools_check",
+    "_subagent_package_scope_check",
     "_untrack_materialized_plan_cache",
     "_untrack_subagent_artifacts",
     "_watch_feedback_asset_check",
@@ -240,6 +242,10 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     # so NOT verify-gated — right after subagent-compat for `package`-group adjacency: the one
     # known engine + pi-fff interaction that kills every review/scout lane at launch.
     checks.append(_subagent_host_tools_check(root))
+    # The pi-subagents family's third report-only probe (two file reads, warn at worst, no --fix
+    # arm): a user-scope pi-subagents entry beside the project entry — pi's pre-trust load keeps
+    # the user copy alive as a context-less RPC responder (contracts §8.35).
+    checks.append(_subagent_package_scope_check(root))
     # Ponytail is another lazy project install: absent is informational; a present incompatible
     # source warns without repair because settings convergence preserves operator pins.
     checks.append(_ponytail_compat_check(root))

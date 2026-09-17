@@ -1001,6 +1001,144 @@ def _subagent_host_tools_check(root: Path, *, environ: Mapping[str, str] | None 
     )
 
 
+def _subagents_npm_identity() -> str:
+    """The pi-subagents npm identity, derived from the converged borrowed entry.
+
+    Read off ``BORROWED_PACKAGES`` through the same :func:`init._npm_name` reduction
+    ``settings-wiring`` dedups by, so the scope check cannot drift from what init writes (a
+    pinned ``npm:pi-subagents@X`` entry still reduces to the bare identity).
+    """
+    for entry in init.BORROWED_PACKAGES:
+        identity = init._npm_name(entry)
+        if identity == _SUBAGENTS_PACKAGE_DIRNAME:
+            return identity
+    raise AssertionError("BORROWED_PACKAGES must carry the npm:pi-subagents engine entry")
+
+
+def _settings_packages(path: Path) -> list[object] | None:
+    """The ``packages`` list of a pi ``settings.json``.
+
+    ``[]`` when the file is absent or carries no list-valued ``packages`` key (no packages in
+    that scope); ``None`` when the file is present but unreadable, invalid JSON, or not a JSON
+    object (that scope cannot be evaluated — the caller owns the posture).
+    """
+    if not path.is_file():
+        return []
+    try:
+        settings = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(settings, dict):
+        return None
+    packages = settings.get("packages")
+    return list(packages) if isinstance(packages, list) else []
+
+
+def _lists_package(packages: list[object], identity: str, *, skip_autoload_off: bool) -> bool:
+    """Whether any entry (string or object-form) reduces to ``identity``.
+
+    With ``skip_autoload_off``, an object-form entry carrying ``autoload`` exactly ``False`` does
+    not count: pi keeps that pair on purpose (the entry is a delta over another scope's entry and
+    the same path is loaded), so nothing leaks from it.
+    """
+    for entry in packages:
+        if init._package_identity(entry) != identity:
+            continue
+        if skip_autoload_off and isinstance(entry, dict):
+            autoload: object = next((v for key, v in entry.items() if key == "autoload"), None)
+            if autoload is False:
+                continue
+        return True
+    return False
+
+
+def _subagent_package_scope_check(root: Path) -> Check:
+    """Report-only probe for a user-scope pi-subagents entry beside the project entry.
+
+    perk converges ``npm:pi-subagents`` into the **project** ``.pi/settings.json``. When the
+    launch-precedence agent dir's user ``settings.json`` (:func:`launch_pi_agent_dir` — the ONE
+    precedence resolver) lists the same identity, pi dedupes by package identity (project wins)
+    but its two-phase trust load (pi 0.85.1) loads the user-scope extensions before project
+    trust resolves and drops the user copy from the final set **without invalidating it**:
+    pi-subagents' RPC bridge subscribes on ``pi.events``, so the orphan keeps answering perk's
+    wave RPC with ``no_active_session`` while the project instance spawns. perk holds that reply
+    and warns once per activation (contracts §8.35); this check makes the environment visible
+    with the exact remediation. Report-only — ``ok``/``info``/``warn``, never ``fail``, no
+    ``--fix`` arm: the user-scope file is operator-owned (the ``resource-overrides`` posture).
+    """
+    name = "subagent-package-scope"
+    identity = _subagents_npm_identity()
+    try:
+        resolution = launch_pi_agent_dir(root)
+    except (ConfigError, tomllib.TOMLDecodeError):
+        resolution = None
+    if resolution is None:
+        return Check(
+            name,
+            "package",
+            "info",
+            f"user-scope {identity} not evaluated — agent dir unresolvable "
+            "(see the config / pi-agent-dir checks)",
+        )
+    user_path = resolution.path / "settings.json"
+    user_packages = _settings_packages(user_path)
+    if user_packages is None:
+        return Check(
+            name,
+            "package",
+            "warn",
+            f"user-scope {identity} not evaluated — {user_path} is not valid JSON",
+            "pi's user-scope settings must be a JSON object; a malformed file also breaks pi's "
+            "own package loading",
+            f"Fix {user_path} (valid JSON object), then re-run perk doctor.",
+        )
+    project_path = root / ".pi" / "settings.json"
+    project_packages = _settings_packages(project_path)
+    if project_packages is None:
+        return Check(
+            name,
+            "package",
+            "warn",
+            f"{identity} scope not evaluated — project settings invalid; "
+            "see the settings-wiring check",
+        )
+    in_user = _lists_package(user_packages, identity, skip_autoload_off=False)
+    in_project = _lists_package(project_packages, identity, skip_autoload_off=True)
+    if in_user and in_project:
+        return Check(
+            name,
+            "package",
+            "warn",
+            f"{identity} is configured in both user and project scope",
+            f"user: {user_path}; project: {project_path}. pi dedupes packages by identity "
+            "(project wins), but pi 0.85.1 loads user-scope extensions before project trust "
+            "resolves and drops the user copy from the final set without invalidating it; "
+            f"{identity}' RPC bridge subscribes on pi.events, so the orphan keeps answering "
+            "perk's wave RPC with `no_active_session` while the project instance spawns. perk "
+            "now holds that reply and warns once per activation, but the duplicate still costs "
+            "a listener and the warning.",
+            f"Remove the user-scope entry from {user_path} ('pi remove npm:{identity}' when that "
+            "file is pi's default ~/.pi/agent/settings.json; otherwise edit the file), then "
+            "restart every running pi session in this repo — /reload is not enough.",
+        )
+    if in_user:
+        return Check(
+            name,
+            "package",
+            "ok",
+            f"{identity} configured in user scope only — no project entry to overlap "
+            "(settings-wiring converges it)",
+            "report-only — the user-scope file is operator-owned",
+        )
+    return Check(
+        name,
+        "package",
+        "ok",
+        f"{identity} configured in project scope only",
+        "report-only — the user-scope file is operator-owned",
+    )
+
+
 _PONYTAIL_PACKAGE_DIR = Path("@dietrichgebert") / "ponytail"
 _PONYTAIL_SKILLS = (
     ("ponytail", Path("skills") / "ponytail" / "SKILL.md"),

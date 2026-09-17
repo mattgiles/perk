@@ -1288,6 +1288,159 @@ def test_subagent_host_tools_engine_story(scaffolded_perk_repo, monkeypatch):
     assert "subagent-host-tools" not in fixed
 
 
+# --- subagent-package-scope: a user-scope pi-subagents entry beside the project entry --------
+
+
+def _plant_user_settings(agent_dir, text):
+    """Plant the user-scope ``settings.json`` (raw text) in the launch-precedence agent dir."""
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    path = agent_dir / "settings.json"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _project_settings_lists_subagents(root):
+    settings = json.loads((root / ".pi/settings.json").read_text(encoding="utf-8"))
+    return "npm:pi-subagents" in settings["packages"]
+
+
+def test_subagent_package_scope_absent_user_settings_is_ok(scaffolded_perk_repo):
+    # The scaffolded repo converges the project entry; no user file ⇒ project scope only.
+    assert _project_settings_lists_subagents(scaffolded_perk_repo)
+    check = doctor_checks._subagent_package_scope_check(scaffolded_perk_repo)
+    assert check.name == "subagent-package-scope"
+    assert check.status == "ok" and check.group == "package"
+    assert "project scope only" in check.message
+
+
+def test_subagent_package_scope_other_user_packages_is_ok(
+    scaffolded_perk_repo, isolated_pi_agent_dir
+):
+    _plant_user_settings(
+        isolated_pi_agent_dir,
+        json.dumps({"packages": ["npm:@tombell/pi-diff", {"source": "npm:pi-web-access"}]}),
+    )
+    check = doctor_checks._subagent_package_scope_check(scaffolded_perk_repo)
+    assert check.status == "ok"
+    assert "project scope only" in check.message
+
+
+def test_subagent_package_scope_overlap_is_warn_naming_both_paths(
+    scaffolded_perk_repo, isolated_pi_agent_dir
+):
+    # A pinned user entry still reduces to the pi-subagents identity (dedup identity, not spec).
+    user_path = _plant_user_settings(
+        isolated_pi_agent_dir, json.dumps({"packages": ["npm:pi-subagents@0.67.0"]})
+    )
+    check = doctor_checks._subagent_package_scope_check(scaffolded_perk_repo)
+    assert check.status == "warn"
+    assert check.message == "pi-subagents is configured in both user and project scope"
+    assert str(user_path) in check.detail
+    assert str(scaffolded_perk_repo / ".pi" / "settings.json") in check.detail
+    assert "no_active_session" in check.detail
+    assert "pi remove npm:pi-subagents" in check.remediation
+    assert "/reload" in check.remediation
+    assert str(user_path) in check.remediation
+
+
+def test_subagent_package_scope_object_form_user_entry_is_warn(
+    scaffolded_perk_repo, isolated_pi_agent_dir
+):
+    _plant_user_settings(
+        isolated_pi_agent_dir,
+        json.dumps({"packages": [{"source": "npm:pi-subagents", "skills": ["-*"]}]}),
+    )
+    check = doctor_checks._subagent_package_scope_check(scaffolded_perk_repo)
+    assert check.status == "warn"
+
+
+def test_subagent_package_scope_project_autoload_off_is_ok(
+    scaffolded_perk_repo, isolated_pi_agent_dir
+):
+    # pi keeps a project `autoload: false` delta beside the user entry on purpose — the same
+    # path loads once, so nothing leaks and the pair does not count as an overlap.
+    _plant_user_settings(isolated_pi_agent_dir, json.dumps({"packages": ["npm:pi-subagents"]}))
+    project = scaffolded_perk_repo / ".pi/settings.json"
+    settings = json.loads(project.read_text(encoding="utf-8"))
+    settings["packages"] = [
+        {"source": "npm:pi-subagents", "autoload": False} if p == "npm:pi-subagents" else p
+        for p in settings["packages"]
+    ]
+    project.write_text(json.dumps(settings), encoding="utf-8")
+    check = doctor_checks._subagent_package_scope_check(scaffolded_perk_repo)
+    assert check.status == "ok"
+    assert "user scope only" in check.message
+
+
+def test_subagent_package_scope_user_entry_for_another_package_is_ok(
+    scaffolded_perk_repo, isolated_pi_agent_dir
+):
+    _plant_user_settings(
+        isolated_pi_agent_dir, json.dumps({"packages": ["npm:pi-subagents-extras"]})
+    )
+    check = doctor_checks._subagent_package_scope_check(scaffolded_perk_repo)
+    assert check.status == "ok"
+
+
+@pytest.mark.parametrize("text", ["not json{", "[]", '"npm:pi-subagents"'])
+def test_subagent_package_scope_invalid_user_settings_is_warn_naming_the_path(
+    scaffolded_perk_repo, isolated_pi_agent_dir, text
+):
+    user_path = _plant_user_settings(isolated_pi_agent_dir, text)
+    check = doctor_checks._subagent_package_scope_check(scaffolded_perk_repo)
+    assert check.status == "warn"
+    assert "not evaluated" in check.message
+    assert str(user_path) in check.message
+    assert str(user_path) in check.remediation
+
+
+def test_subagent_package_scope_malformed_project_settings_defers_to_settings_wiring(
+    scaffolded_perk_repo, isolated_pi_agent_dir
+):
+    _plant_user_settings(isolated_pi_agent_dir, json.dumps({"packages": ["npm:pi-subagents"]}))
+    (scaffolded_perk_repo / ".pi/settings.json").write_text("{not json", encoding="utf-8")
+    check = doctor_checks._subagent_package_scope_check(scaffolded_perk_repo)
+    assert check.status == "warn"
+    assert "settings-wiring" in check.message
+
+
+@pytest.mark.parametrize("text", ["[pi", "[pi]\nagent_dir = 7\n"])
+def test_subagent_package_scope_bad_config_is_info(scaffolded_perk_repo, monkeypatch, text):
+    # A broken main-checkout config is the `config` check's complaint; the report-only check
+    # reports the unevaluated scope (never crashes, never guesses a store).
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    (scaffolded_perk_repo / ".perk/config.toml").write_text(text, encoding="utf-8")
+    check = doctor_checks._subagent_package_scope_check(scaffolded_perk_repo)
+    assert check.status == "info"
+    assert "not evaluated" in check.message
+    assert "agent dir unresolvable" in check.message
+
+
+def test_subagent_package_scope_identity_derives_from_the_borrowed_entry():
+    assert "npm:pi-subagents" in init.BORROWED_PACKAGES
+    assert doctor_checks._subagents_npm_identity() == init._npm_name("npm:pi-subagents")
+
+
+def test_subagent_package_scope_engine_story(scaffolded_perk_repo, isolated_pi_agent_dir):
+    # Registered right after subagent-host-tools in the package group; warn-never-fail through
+    # the real exit mapping; no --fix arm.
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    names = [c.name for c in report.checks]
+    assert names.index("subagent-package-scope") == names.index("subagent-host-tools") + 1
+    check = next(c for c in report.checks if c.name == "subagent-package-scope")
+    assert check.status == "ok" and check.group == "package"
+
+    _plant_user_settings(isolated_pi_agent_dir, json.dumps({"packages": ["npm:pi-subagents"]}))
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "subagent-package-scope")
+    assert check.status == "warn"
+    assert report.healthy and report.exit_code == 0
+    assert (
+        "subagent-package-scope"
+        not in run_doctor(scaffolded_perk_repo, fix=True, verify=False).fixed
+    )
+
+
 def _plant_ponytail_tree(root):
     package = root / ".pi" / "npm" / "node_modules" / "@dietrichgebert" / "ponytail"
     package.mkdir(parents=True, exist_ok=True)
