@@ -1,6 +1,6 @@
 ---
 name: dignified-pydantic
-description: House style for using Pydantic v2 well — validation/serialization at trust boundaries, strict vs lenient and extra-field policy, request/response/domain model separation, field/model validators, aliases, PATCH (exclude_unset) semantics, settings, and writing constructor calls that type-check under `ty`. Use when adding or reviewing a Pydantic model, designing an API/Celery/config/third-party-API boundary, deciding model_validate vs the constructor, choosing strict/coercion or extra ignore/forbid/allow, untangling "one model for everything", moving business logic out of validators, or making Pydantic code type-checker-friendly.
+description: "Apply the Pydantic v2 house style when writing or reviewing models, API/Celery/config/third-party/LLM boundaries, model_validate versus constructors, coercion and extra-field policies, request/response/domain separation, validators, aliases, PATCH/exclude_unset, settings, or calls that must type-check under ty."
 stages: [plan, objective-plan, implement, address]
 references:
   - references/principles
@@ -10,23 +10,8 @@ references:
 
 # Dignified Pydantic
 
-Opinionated house style for Pydantic v2. The full guide — 48 numbered sections with runnable
-examples — lives in the sibling `references/` files; read them when you need depth on a specific
-mechanism. This page is the durable judgment you apply on every model.
-
-## When to use this skill
-
-Reach for this when you are:
-
-- **adding or reviewing a Pydantic model** — and choosing its base, fields, and config;
-- **designing a boundary** — an HTTP request/response, a Celery task payload, a config/settings
-  loader, a third-party API response, or an LLM structured output;
-- **deciding `Model.model_validate(raw)` vs the constructor `Model(...)`**;
-- **choosing strictness and extra-field policy** — `strict=True` vs coercion, `extra` `forbid` /
-  `ignore` / `allow`;
-- **untangling "one model for everything"** into separate request / domain / response shapes;
-- **moving business logic out of a validator** into a service;
-- **making Pydantic code type-check cleanly under `ty`** (which has no Pydantic plugin).
+Apply these rules to every model. Read the sibling `references/` files for detail and examples
+on the mechanism at hand.
 
 ## The core idea
 

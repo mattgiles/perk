@@ -30,7 +30,7 @@ Toggle perk plan mode — a read-only exploration and plan-authoring session. Pa
   is the sanctioned artifact write while read-only, not a save. *Non-terminating.*
 - **`plan_review`** — present the draft to the configured review surface and wait for the human
   decision. Approval auto-saves and ends the turn. *Terminating on approval.* Before review, the
-  authoring skills direct a one-question-at-a-time pre-review grill.
+  authoring skills direct a pre-review grill in rounds.
 - **`run_scout_wave`** — fan out 1–6 self-contained read-only briefs to fresh `perk.scout` lanes
   and return one engine-validated report per brief (`scope`, `findings[{pointer, claim, basis,
   rationale}]`, `open_questions`, every string length-capped); one attempt, no retry; an

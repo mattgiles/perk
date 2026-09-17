@@ -1,15 +1,13 @@
 ---
 name: copy-docs-to-markdown
-description: Mirror technical documentation from a website URL into a local directory of organized Markdown files (default docs/library/<name>/), preserving the site's section structure, rewriting internal links to local relative links, and generating an index.md entrypoint. Use when asked to copy or mirror docs locally, vendor a library's documentation into the repo, crawl a documentation site into Markdown, or build a local Markdown reference of an external doc set.
+description: "Mirror technical documentation from a website into local Markdown, defaulting to docs/library/<name>/. Use when copying, vendoring, or refreshing a documentation site locally; preserve its section structure, rewrite internal links, and create an index.md entrypoint."
 stages: []
 ---
 
 # Copy docs to Markdown
 
-Create a local Markdown reference copy of technical documentation from a documentation URL, so
-future agents can read it without network access. Keep the result readable: preserve the site
-structure, retain source URLs, and write a practical `index.md` that explains where to look for
-each topic.
+Create an offline Markdown reference. Preserve the site structure and source URLs, and make
+`index.md` route readers to each topic.
 
 **Prerequisites:** `curl` and `html2markdown` must be on `PATH` (e.g.
 `brew install html2markdown`). The bundled script is stdlib-only Python.

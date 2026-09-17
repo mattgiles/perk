@@ -105,12 +105,14 @@ and report.
      changes, install/build-script edits, secrets handling and exfiltration paths, obfuscated or
      out-of-place code. Ask "what input makes this wrong?" and "what does this change let a
      hostile author do?"
-   - **tests** — *Tests & validation adequacy.* Is the **new behavior** actually covered,
-     including its failure modes? Missing coverage for a real risk is a finding. Reason about
-     tests only — never execute them (rule 3 stands).
-   - **quality** — *Clarity, maintainability, naming & docs accuracy.* Review whether changed
-     code is understandable and maintainable, names communicate intent, and touched docs stay
-     accurate. Standalone simplification/deletion findings belong to Ponytail.
+   - **tests** — *Tests & validation adequacy.* Does coverage exercise new behavior and failure
+     modes through stable interfaces, with independent expected results? Internal tests are useful
+     when they guard a concrete invariant. Missing coverage for a real risk is a finding.
+     Reason about tests only — never execute them (rule 3 stands).
+   - **quality** — *Clarity, maintainability, naming & docs accuracy.* Check clarity, names,
+     and touched docs. Cite a documented rule when one applies; otherwise label the concern as
+     design judgment and explain its consequence. Honor explicit local choices.
+     Standalone simplification/deletion findings belong to Ponytail.
    - **ponytail** — *Over-engineering and deletion opportunities.* Apply the source-bound
      `ponytail-review` lens. Ponytail is the **exclusive owner of standalone findings** whose
      remedy is removing code, configuration, dependencies, or speculative flexibility, or

@@ -95,12 +95,14 @@ subagents** — you review and report.
    - **correctness** — *Correctness & regressions.* Hunt the edge case that breaks: null/empty
      inputs, error paths, off-by-one, concurrency, changed call contracts, **security** (injection,
      committed secrets, unsafe input handling). Ask "what input makes this wrong?"
-   - **tests** — *Tests & validation adequacy.* Is the **new behavior** actually covered, including
-     its failure modes? Missing coverage for a real risk is a finding. Reason about tests — do not
-     execute them.
-   - **quality** — *Clarity, maintainability, naming & docs/contracts accuracy.* Review whether
-     the changed code is understandable and maintainable, names communicate intent, and touched
-     docs/contracts stay accurate. Standalone simplification/deletion findings belong to Ponytail.
+   - **tests** — *Tests & validation adequacy.* Does coverage exercise new behavior and failure
+     modes through stable interfaces, with independent expected results? Internal tests are useful
+     when they guard a concrete invariant. Missing coverage for a real risk is a finding.
+     Reason about tests — do not execute them.
+   - **quality** — *Clarity, maintainability, naming & docs/contracts accuracy.* Check clarity,
+     names, and touched docs/contracts. Cite a documented rule when one applies; otherwise label
+     the concern as design judgment and explain its consequence. Honor explicit local choices.
+     Standalone simplification/deletion findings belong to Ponytail.
    - **api-design** — *API elegance & interface design.* For each new/changed public surface
      (function/class signatures, tool params, CLI flags, config keys, exported types): is the
      interface deep — a small surface hiding real functionality — coherent, and hard to misuse?
