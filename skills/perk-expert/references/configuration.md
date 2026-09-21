@@ -383,9 +383,11 @@ thinking = "xhigh"
 
 Pi-process launch knobs. `agent_dir` loads a project `models.json` for custom providers or
 per-model overrides by injecting **`PI_CODING_AGENT_DIR`** into every **cold-local Pi launch** —
-stage launches AND session reopens (`perk resume`, the `perk plan resume` gate-arm picker) share
-the one `PI_CODING_AGENT_DIR` → `[pi] agent_dir` → default precedence, missing-dir warning, and
-`pi_agent_dir_invalid` refusal. Off by default; no auth seeding or session-dir pinning.
+stage launches, session reopens (`perk resume`, the `perk plan resume` gate-arm picker), AND the
+bare `perk` plain session (a plain `pi` in the current checkout: no stage, run id, prompt, or
+`--approve`) share the one `PI_CODING_AGENT_DIR` → `[pi] agent_dir` → default precedence,
+missing-dir warning, and `pi_agent_dir_invalid` refusal. Off by default; no auth seeding or
+session-dir pinning.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
@@ -450,7 +452,8 @@ and omit these; their real launches still apply the same checks and injection. `
 --dry-run` reports the resolved agent dir + its source (`env`/`config`/`default`) in its own preview.
 
 **Non-goals:** `--remote`, the headless worker (throwaway agentDir), and a hand-run `pi` are
-unaffected. Use direnv or your shell for a hand-run Pi redirect.
+unaffected — run bare `perk` for a plain session that carries the redirect. Use direnv or your
+shell for a hand-run Pi redirect.
 
 ### `[compaction]`
 

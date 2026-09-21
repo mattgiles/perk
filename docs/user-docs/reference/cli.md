@@ -28,9 +28,12 @@ command map below.
 The `perk` surface is organized as **noun-groups** — `plan`, `objective`, `pr`, `learn`,
 `worktree`, `state`, `registry`, `skills`, `workflow` — each holding both **warm stage launchers** (a launch
 opens a primed `pi` session for one workflow stage) and **cold deterministic workers** (`--json`
-machine surfaces the warm in-session doors shell out to), separated by help sections. Four things
+machine surfaces the warm in-session doors shell out to), separated by help sections. A few things
 escape a group:
 
+- **Bare `perk`** — no command at all: opens a plain Pi session in the current checkout with
+  perk's configured launch environment (the `[pi] agent_dir` redirect and launch env defaults) —
+  no stage, no run id, no prompt (see [Bare `perk`](#bare-perk--a-plain-pi-session) below).
 - **The one earned flat verb** `implement` (`impl`) — the heavy cold-only working stage, typed
   constantly, reads as a bare imperative.
 - **The hot-path PR flat aliases** `submit` / `address` / `land`, each aliasing its
@@ -72,6 +75,37 @@ Aliases are noted inline next to each command. Common flags: launcher commands a
 `--remote` (dispatch the stage to a CI runner instead of running locally — only the remotely
 runnable stages, `implement` and `address`, dispatch; every other launcher rejects `--remote` as
 local-only); worker commands accept `--json` (emit a machine-readable report).
+
+## Bare `perk` — a plain Pi session
+
+Running `perk` with no arguments from a terminal inside a git checkout **opens a plain `pi`
+session in that checkout** — a plan worktree resolves to itself — carrying perk's configured
+launch environment. It is a session launch, not a stage launch. perk composes exactly what every
+cold-local Pi launch composes and nothing more:
+
+- the **`[pi] agent_dir` redirect** (`PI_CODING_AGENT_DIR` → the **main checkout's**
+  `[pi] agent_dir` → Pi's default; the same missing-directory warning and
+  `pi_agent_dir_invalid` refusal as a stage launch — see
+  [Models and compaction §`[pi]`](configuration/models-and-compaction.md#pi));
+- the `PI_FFF_MODE=tools-and-ui` additive-search default (your environment wins);
+- the `LINEAR_API_KEY` seed from the main checkout's gitignored `.perk/local.toml` (an exported
+  key wins).
+
+It deliberately does **not** add a stage prompt, mint a run id, write a handoff or plan selector,
+pass `--approve` (Pi's own trust flow governs the checkout — a never-seen plan worktree prompts
+once), scope skills, or apply `[models.stages]` model flags: the session is exactly a hand-run
+`pi` in the repo, plus the launch environment above. An inherited `PERK_RUN_ID` is dropped, so
+the session receives the extension's ordinary in-session run id on load.
+
+**Terminal-only.** The plain session is an interactive Pi TUI, so stdin and stdout must both be a
+terminal: on a pipe or in a script, bare `perk` refuses with a `not_a_tty` error that points at
+`perk --help` for the command list (exit 1). **Outside a git repository** it refuses with the
+ordinary not-a-repo error (exit 2) plus a hint: run `pi` directly there, or `perk --help` for the
+commands — perk's configured values need a checkout to read them from.
+
+Bare `perk` is not a command: it adds no row to the command map below, and `perk --help` still
+lists every command (its opening prose now also describes the bare form). To preview the same
+environment composition without launching, use `perk resume --dry-run` in the same checkout.
 
 ## Stage launchers (the earned flat names)
 

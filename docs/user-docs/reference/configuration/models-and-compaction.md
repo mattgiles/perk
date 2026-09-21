@@ -192,9 +192,11 @@ objective_threshold = 0.8
 
 Pi-process launch settings. Use `agent_dir` to load a project `models.json` with custom providers
 or per-model overrides: perk injects `PI_CODING_AGENT_DIR` into every **cold-local Pi launch** —
-stage launches and session reopens alike: `perk resume` and the `perk plan resume` gate-arm
-picker follow the same `PI_CODING_AGENT_DIR` → `[pi] agent_dir` → default precedence, with the
-same missing-directory warning and `pi_agent_dir_invalid` refusal.
+stage launches, session reopens, and the bare `perk` plain session alike: `perk resume`, the
+`perk plan resume` gate-arm picker, and bare `perk` (a plain `pi` in the current checkout — see
+[Bare `perk`](../cli.md#bare-perk--a-plain-pi-session)) follow the same `PI_CODING_AGENT_DIR` →
+`[pi] agent_dir` → default precedence, with the same missing-directory warning and
+`pi_agent_dir_invalid` refusal.
 It is off by default; perk does not create or copy agent files.
 
 | Key | Type | Default | Notes |
