@@ -780,6 +780,19 @@ in node 2.1 (`SectionedAliasGroup`): within a group, the sections render **"Laun
 renders **"Stage Launchers"** / **"Command Groups:"** / **"Setup & Health:"** / **"Other:"**.
 Asserted by `tests/test_cli_help_sections.py`.
 
+**Q6 — Bare `perk` → the plain Pi session (not help).** The bare root invocation is not a
+command and adds no row to the taxonomy (`EXPECTED_SURFACE` is unchanged): it is the
+plain-session door (contracts.md §8.72) — a plain `pi` exec'd in the current checkout with perk's
+configured launch environment (the `[pi] agent_dir` redirect, the launch env defaults) and none
+of a stage launch's composition (no run id, handoff, stage prompt, `--approve`, model flags, or
+skill scoping). It is the root-level analogue of the hybrid bare `perk plan` / `perk learn`
+launches — each has one canonical launch, so the bare form takes it — with `perk --help` remaining
+the taxonomy surface (its leading prose now also describes the bare form; the command sections are
+untouched). Contrast Q4: bare `perk objective` has no single canonical launch and renders group
+help. Mechanism: `invoke_without_command=True` on the root group (the `perk doctor` precedent),
+not a hidden root command with a `parse_args` substitution — no new command name to hide or
+document.
+
 **Correction 1 — `pr ready` is worker-only (W), not L+W.** The objective's target tree marks
 `pr ready` as L+W, but `ready` is **not a registry stage** and has no generated launcher. Today
 `ready` is only the pr-group worker `perk pr ready` (dual-surface `--dry-run`/`--json`) plus the
