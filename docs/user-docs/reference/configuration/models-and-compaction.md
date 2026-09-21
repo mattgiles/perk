@@ -235,7 +235,12 @@ This is not a models-only overlay: Pi's **whole config directory** moves, includ
 - **Trust:** a new `trust.json` starts empty. Worktree stages already launch with `--approve`;
   main-checkout stages prompt for trust once. Sessions reopened through `perk resume` (or the
   `plan resume` gate picker) follow Pi's own trust flow — perk passes no `--approve`, because Pi
-  applies trust to whichever session's project the picker selects.
+  applies trust to whichever session's project the picker selects. The redirect itself is
+  honored **before** Pi resolves project trust: Pi loads global-tier extensions and settings
+  first, so a committed `agent_dir` is a repository-controlled choice of Pi's global directory
+  on every cold-local launch (bare `perk` included). Clone and launch only repositories you
+  trust — the same caution Pi gives for untrusted checkouts; the git-safety rules below protect
+  your credentials from being committed, not you from an untrusted clone.
 - **Sessions:** logs land under `<agent-dir>/sessions/`. `/learn` is unaffected because its
   session pointers record absolute paths. `perk-dev` session tools retain their
   `~/.pi/agent/sessions` default; pass `--session-root` for redirected logs.

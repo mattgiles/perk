@@ -185,6 +185,51 @@ def test_agent_dir_invalid_refuses_before_the_announce(git_repo, monkeypatch, la
     _assert_untouched(launch_exec_recorder)
 
 
+# --- the exec-phase arms: announce first, then the typed error ----------------------------------
+
+
+def _assert_announce_precedes_error(stderr: str, checkout: Path) -> None:
+    """The §8.71(g) shape at the root boundary: the one announce line lands BEFORE the exec-phase
+    error (a real successful exec never returns, so the happy-path recorder cannot pin this)."""
+    announce = stderr.index(f"opening a plain Pi session in {checkout}: pi")
+    error = stderr.index("Error:")
+    assert announce < error
+
+
+def test_missing_pi_refuses_after_the_announce(git_repo, monkeypatch, launch_exec_recorder):
+    _tty(monkeypatch)
+
+    def _no_pi():
+        raise UserFacingCliError("pi CLI not found on PATH", error_type="pi_cli_missing")
+
+    monkeypatch.setattr(launch, "_resolve_pi_executable", _no_pi)
+    result = _invoke(git_repo)
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "pi CLI not found on PATH" in result.stderr
+    assert "pi_cli_missing" not in result.stderr  # the human surface never renders the code
+    _assert_announce_precedes_error(result.stderr, git_repo)
+    _assert_untouched(launch_exec_recorder)  # resolved pre-chdir: no chdir, no exec
+
+
+def test_exec_oserror_is_launch_failed_after_the_announce(
+    git_repo, monkeypatch, launch_exec_recorder
+):
+    _tty(monkeypatch)
+
+    def _exec_fails(program, argv, env):
+        raise OSError("exec refused")
+
+    monkeypatch.setattr(launch.os, "execvpe", _exec_fails)
+    result = _invoke(git_repo)
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert f"could not launch pi in {git_repo}: exec refused" in result.stderr
+    _assert_announce_precedes_error(result.stderr, git_repo)
+    assert launch_exec_recorder.chdirs == [git_repo]  # the chdir happened; the exec did not record
+    assert launch_exec_recorder.calls == []
+
+
 # --- the unchanged root surfaces ---------------------------------------------------------------
 
 

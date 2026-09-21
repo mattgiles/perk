@@ -44,8 +44,8 @@ def cli(ctx: click.Context) -> None:
     """Plan-oriented engineering workflow for Pi.
 
     Bare `perk` opens a plain Pi session in the current checkout with perk's configured
-    launch environment (the [pi] agent_dir redirect and launch env defaults) — no stage, no
-    run id, no prompt. Run `perk --help` for the commands.
+    launch environment (the [pi] agent_dir redirect and launch env defaults) — no stage prompt,
+    no run id, no handoff. Run `perk --help` for the commands.
     """
     # Cheap by design (no I/O) for every SUBCOMMAND invocation: require_* resolves the
     # repo/config lazily, so non-repo commands work outside a git repo. Only the bare

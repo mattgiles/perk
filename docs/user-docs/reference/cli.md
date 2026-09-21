@@ -33,7 +33,8 @@ escape a group:
 
 - **Bare `perk`** — no command at all: opens a plain Pi session in the current checkout with
   perk's configured launch environment (the `[pi] agent_dir` redirect and launch env defaults) —
-  no stage, no run id, no prompt (see [Bare `perk`](#bare-perk--a-plain-pi-session) below).
+  no stage prompt, no run id, no handoff (see [Bare `perk`](#bare-perk--a-plain-pi-session)
+  below).
 - **The one earned flat verb** `implement` (`impl`) — the heavy cold-only working stage, typed
   constantly, reads as a bare imperative.
 - **The hot-path PR flat aliases** `submit` / `address` / `land`, each aliasing its
@@ -95,7 +96,10 @@ It deliberately does **not** add a stage prompt, mint a run id, write a handoff 
 pass `--approve` (Pi's own trust flow governs the checkout — a never-seen plan worktree prompts
 once), scope skills, or apply `[models.stages]` model flags: the session is exactly a hand-run
 `pi` in the repo, plus the launch environment above. An inherited `PERK_RUN_ID` is dropped, so
-the session receives the extension's ordinary in-session run id on load.
+the session receives the extension's ordinary in-session run id on load. As with every perk
+launcher, the `[pi] agent_dir` redirect comes from the checkout's committed config and Pi
+honors it before resolving project trust — launch only in repositories you trust (see the trust
+note under [`[pi]`](configuration/models-and-compaction.md#pi)).
 
 **Terminal-only.** The plain session is an interactive Pi TUI, so stdin and stdout must both be a
 terminal: on a pipe or in a script, bare `perk` refuses with a `not_a_tty` error that points at
@@ -104,8 +108,11 @@ ordinary not-a-repo error (exit 2) plus a hint: run `pi` directly there, or `per
 commands — perk's configured values need a checkout to read them from.
 
 Bare `perk` is not a command: it adds no row to the command map below, and `perk --help` still
-lists every command (its opening prose now also describes the bare form). To preview the same
-environment composition without launching, use `perk resume --dry-run` in the same checkout.
+lists every command (its opening prose now also describes the bare form). The bare form has no
+`--dry-run`; to see the agent-dir resolution a plain session would use (the resolved path and
+whether it came from the environment, the config, or Pi's default), run the `resume` command
+with `--dry-run` in the same checkout — that preview reports the checkout, agent dir and argv
+only, not the rest of the launch environment.
 
 ## Stage launchers (the earned flat names)
 

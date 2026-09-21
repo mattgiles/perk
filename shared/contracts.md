@@ -12997,7 +12997,8 @@ npm-quiet defaults and the `PERK_CLI_VERSION` stamp, the `LINEAR_API_KEY` seed f
 checkout's `local.toml` (env wins), the pre-chdir absolute `pi` resolution (`pi_cli_missing`),
 and the stale agent-lock sweep. The door reads `launch.resolve_launch_agent_dir` / `launch.exec_pi`
 as facade attributes at call time (the §8.71 import-direction rule), so the two paths cannot
-drift and the exec recorder's facade monkeypatches reach it.
+drift and the exec recorder's facade monkeypatches reach it. The committed-redirect trust
+residual this shares with every cold-local launch is recorded in (h).
 
 ### (c) The two-roots rule
 
@@ -13050,3 +13051,21 @@ command), and unknown-command usage errors (`No such command`, exit 2, decided i
 `Group.resolve_command` before the callback runs). The one intended change to `perk --help` is
 its leading prose: the group docstring gains a second paragraph describing the bare form.
 `--help` / `--version` stay eager options and short-circuit before the callback.
+
+### (h) Accepted residual — a committed `[pi] agent_dir` is honored before project trust
+
+`PI_CODING_AGENT_DIR` moves Pi's whole user/global tier, and Pi loads user/global extensions
+and settings BEFORE it resolves project trust (Pi's `docs/security.md`: only project-local
+resources are trust-gated, and a global-tier extension may even own the `project_trust`
+decision). A clone whose committed `.perk/config.toml` points `agent_dir` at a directory the
+repository also commits therefore starts repository-controlled extensions on its first
+cold-local launch with no trust prompt — bare `perk` included, and identically for `perk plan`,
+`perk implement`, `perk resume` and every other door that composes its environment through
+`resolve_launch_agent_dir(main_root)` (the `config` arm reads the MAIN checkout's committed
+config, §8.71(b)). The bare form neither widens nor narrows this: it is the shared seam's
+behaviour, accepted here as it is on every existing cold launch. The operator's mitigation is
+the one Pi's own security model states — clone and launch only repositories you trust, and run
+untrusted ones in a contained environment; perk's `[pi] agent_dir` git-safety guidance protects
+credentials from being committed, not the operator from an untrusted clone. Hardening the seam
+itself — e.g. honoring a COMMITTED redirect only for a project Pi already trusts, or only from
+the gitignored `local.toml` — is a cross-door decision outside this section.
