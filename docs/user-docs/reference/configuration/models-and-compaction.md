@@ -192,9 +192,11 @@ objective_threshold = 0.8
 
 Pi-process launch settings. Use `agent_dir` to load a project `models.json` with custom providers
 or per-model overrides: perk injects `PI_CODING_AGENT_DIR` into every **cold-local Pi launch** —
-stage launches and session reopens alike: `perk resume` and the `perk plan resume` gate-arm
-picker follow the same `PI_CODING_AGENT_DIR` → `[pi] agent_dir` → default precedence, with the
-same missing-directory warning and `pi_agent_dir_invalid` refusal.
+stage launches, session reopens, and the bare `perk` plain session alike: `perk resume`, the
+`perk plan resume` gate-arm picker, and bare `perk` (a plain `pi` in the current checkout — see
+[Bare `perk`](../cli.md#bare-perk--a-plain-pi-session)) follow the same `PI_CODING_AGENT_DIR` →
+`[pi] agent_dir` → default precedence, with the same missing-directory warning and
+`pi_agent_dir_invalid` refusal.
 It is off by default; perk does not create or copy agent files.
 
 | Key | Type | Default | Notes |
@@ -233,7 +235,12 @@ This is not a models-only overlay: Pi's **whole config directory** moves, includ
 - **Trust:** a new `trust.json` starts empty. Worktree stages already launch with `--approve`;
   main-checkout stages prompt for trust once. Sessions reopened through `perk resume` (or the
   `plan resume` gate picker) follow Pi's own trust flow — perk passes no `--approve`, because Pi
-  applies trust to whichever session's project the picker selects.
+  applies trust to whichever session's project the picker selects. The redirect itself is
+  honored **before** Pi resolves project trust: Pi loads global-tier extensions and settings
+  first, so a committed `agent_dir` is a repository-controlled choice of Pi's global directory
+  on every cold-local launch (bare `perk` included). Clone and launch only repositories you
+  trust — the same caution Pi gives for untrusted checkouts; the git-safety rules below protect
+  your credentials from being committed, not you from an untrusted clone.
 - **Sessions:** logs land under `<agent-dir>/sessions/`. `/learn` is unaffected because its
   session pointers record absolute paths. `perk-dev` session tools retain their
   `~/.pi/agent/sessions` default; pass `--session-root` for redirected logs.

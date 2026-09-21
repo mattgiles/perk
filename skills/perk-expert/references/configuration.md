@@ -383,9 +383,11 @@ thinking = "xhigh"
 
 Pi-process launch knobs. `agent_dir` loads a project `models.json` for custom providers or
 per-model overrides by injecting **`PI_CODING_AGENT_DIR`** into every **cold-local Pi launch** —
-stage launches AND session reopens (`perk resume`, the `perk plan resume` gate-arm picker) share
-the one `PI_CODING_AGENT_DIR` → `[pi] agent_dir` → default precedence, missing-dir warning, and
-`pi_agent_dir_invalid` refusal. Off by default; no auth seeding or session-dir pinning.
+stage launches, session reopens (`perk resume`, the `perk plan resume` gate-arm picker), AND the
+bare `perk` plain session (a plain `pi` in the current checkout: no stage prompt, run id,
+handoff, or `--approve`) share the one `PI_CODING_AGENT_DIR` → `[pi] agent_dir` → default
+precedence, missing-dir warning, and `pi_agent_dir_invalid` refusal. Off by default; no auth
+seeding or session-dir pinning.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
@@ -418,7 +420,11 @@ alongside `models.json`.
 - New `trust.json` starts empty: worktree stages already use `--approve`; main-checkout stages
   prompt for trust once. Sessions reopened through `perk resume` / the `plan resume` gate picker
   follow Pi's own trust flow (no `--approve` — Pi applies trust to whichever session's project
-  the picker selects).
+  the picker selects). The redirect is honored BEFORE project trust (Pi loads global-tier
+  extensions/settings first), so a committed `agent_dir` is a repository-controlled choice of
+  Pi's global dir on every cold-local launch, bare `perk` included: clone and launch only
+  repositories you trust (the git-safety rules protect credentials, not against an untrusted
+  clone).
 - Logs go under `<agent-dir>/sessions/`. `/learn` still works (absolute `session_file` pointers).
   `perk-dev` session tools retain `~/.pi/agent/sessions`; use their `--session-root` override.
 - Global settings move; the repo's `.pi/settings.json` remains the overriding project tier.
@@ -450,7 +456,8 @@ and omit these; their real launches still apply the same checks and injection. `
 --dry-run` reports the resolved agent dir + its source (`env`/`config`/`default`) in its own preview.
 
 **Non-goals:** `--remote`, the headless worker (throwaway agentDir), and a hand-run `pi` are
-unaffected. Use direnv or your shell for a hand-run Pi redirect.
+unaffected — run bare `perk` for a plain session that carries the redirect. Use direnv or your
+shell for a hand-run Pi redirect.
 
 ### `[compaction]`
 

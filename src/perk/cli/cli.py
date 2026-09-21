@@ -29,17 +29,28 @@ from perk.cli.commands.state import state_group
 from perk.cli.commands.workflow import workflow_group
 from perk.cli.commands.worktree import worktree_group
 from perk.cli.context import PerkContext
+from perk.cli.plain_session import run_plain_session
 from perk.cli.stages import register_stage_commands
 from perk.cli.version_check import maybe_notice_upgrade, maybe_warn_version_mismatch
 
 
-@click.group(cls=SectionedGroup)
+# `invoke_without_command=True` flips Click's `no_args_is_help` off, so bare `perk` runs this
+# callback (the plain-session arm below) instead of dumping help; `--help` / `--version` stay
+# eager and short-circuit first, and an unknown first token still fails in `resolve_command`.
+@click.group(cls=SectionedGroup, invoke_without_command=True)
 @click.version_option(__version__, prog_name="perk", message="%(prog)s %(version)s")
 @click.pass_context
 def cli(ctx: click.Context) -> None:
-    """Plan-oriented engineering workflow for Pi."""
-    # Cheap by design (no I/O): require_* resolves the repo/config lazily, so non-repo
-    # commands work outside a git repo. Tests inject obj=PerkContext.for_test(...).
+    """Plan-oriented engineering workflow for Pi.
+
+    Bare `perk` opens a plain Pi session in the current checkout with perk's configured
+    launch environment (the [pi] agent_dir redirect and launch env defaults) — no stage prompt,
+    no run id, no handoff. Run `perk --help` for the commands.
+    """
+    # Cheap by design (no I/O) for every SUBCOMMAND invocation: require_* resolves the
+    # repo/config lazily, so non-repo commands work outside a git repo. Only the bare
+    # interactive form pays the launch I/O, in the plain-session arm at the end. Tests inject
+    # obj=PerkContext.for_test(...).
     if ctx.obj is None:
         ctx.obj = PerkContext(cwd=Path.cwd())
     # Report-only version surfaces (warning first, notice second; both may appear). Their
@@ -49,6 +60,8 @@ def cli(ctx: click.Context) -> None:
     # one read + one write of the user-level last-seen-version store for the notice.
     maybe_warn_version_mismatch(ctx.invoked_subcommand, ctx.obj.cwd)
     maybe_notice_upgrade(ctx.invoked_subcommand)
+    if ctx.invoked_subcommand is None:
+        run_plain_session(ctx)  # bare `perk`: a session launch that is not a stage launch
 
 
 cli.add_command(init_perk)

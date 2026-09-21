@@ -12967,3 +12967,105 @@ project → fork?" prompt — and decides the runtime cwd from the session file'
   path characters serialize differently on the two planes (`json.dumps` escapes, `JSON.stringify`
   emits raw — both readers parse either form); the recorded `cwd` is not re-validated as a perk
   checkout.
+
+## §8.72 · The bare `perk` plain session
+
+Bare `perk` (no arguments; a lone `perk --` is the same invocation — Click consumes the separator)
+is a **session launch that is not a stage launch**: the Python exterior positions the cwd,
+composes the launch *environment*, and execs a plain `pi` in the current checkout. The door is
+`perk.cli.plain_session.run_plain_session`, the root callback's arm when
+`ctx.invoked_subcommand is None`; the root group is `invoke_without_command=True` (which turns
+Click's `no_args_is_help` off — the bare form no longer renders help).
+
+### (a) The exterior rule (shared by reference)
+
+§8.71(b)'s exterior rule applies verbatim: perk **mints no run_id, writes no handoff, no
+`plan-ref` selector, no stage prompt, no `[models.stages]` flags, no skill-exposure scoping, no
+skills/extension materialization, no setup hook**, and prints **no launch banner**. There is no
+stage, so every stage-keyed composition is absent by construction — discovery stays pi's full
+default, exactly as for a hand-run `pi` in the repo.
+
+### (b) The launch environment (the same seams)
+
+The bare form shares ONLY the launch environment with a stage launch, through the same seams
+§8.71(b) names: `resolve_launch_agent_dir(main_root)` (the `launch_pi_agent_dir` precedence —
+env → main-checkout `[pi] agent_dir` → default — with the same missing-dir warning and
+`pi_agent_dir_invalid` refusal), the one shared executor `exec_pi(run_id=None, …)` (so
+`_build_exec_env` **removes an inherited `PERK_RUN_ID`**: the session receives the extension's
+ordinary warm-session mint on load, §8.2 — exactly as a hand-run `pi`), the `PI_FFF_MODE` /
+npm-quiet defaults and the `PERK_CLI_VERSION` stamp, the `LINEAR_API_KEY` seed from the main
+checkout's `local.toml` (env wins), the pre-chdir absolute `pi` resolution (`pi_cli_missing`),
+and the stale agent-lock sweep. The door reads `launch.resolve_launch_agent_dir` / `launch.exec_pi`
+as facade attributes at call time (the §8.71 import-direction rule), so the two paths cannot
+drift and the exec recorder's facade monkeypatches reach it. The committed-redirect trust
+residual this shares with every cold-local launch is recorded in (h).
+
+### (c) The two-roots rule
+
+Config anchors to the **main checkout** (`main_repo_root(invocation_root)`); the session opens at
+the **invocation root** (`checkout=invocation_root`) — a linked worktree resolves to itself, and
+the main-root `plan-ref` selector is never read. The same shape as the `perk resume` bare form
+(§8.71(a), first row).
+
+### (d) argv is literally `pi` — no `--approve`
+
+`PLAIN_SESSION_ARGV == ("pi",)`. §8.71(c)'s reasoning carries: perk composes **no trust override**;
+Pi's native trust flow (saved decision / default / interactive prompt) governs the invocation
+root. A never-seen ephemeral `plan-<id>` worktree therefore prompts for trust once — accepted,
+the same as `perk resume`'s bare form in that checkout. No pass-through pi args and no `--dry-run`
+on the bare form: the root option surface stays `--help` / `--version` (a root-level `nargs=-1`
+argument would collide with subcommand resolution); `perk resume --dry-run` in the same checkout
+previews the same environment composition.
+
+### (e) The terminal-only rule
+
+The plain session hands the terminal to an interactive Pi TUI (which constructs even on a pipe),
+so a non-interactive invocation refuses **`not_a_tty`** unless BOTH stdin and stdout are terminals
+— decided right after `not_a_repo` (which still wins) and **before any perk config read or
+agent-dir resolution** (a scripted call fails fast with no config read); the message names
+`perk --help` for the command list. The report-only version surfaces (§8.6a — the mismatch
+warning and the post-upgrade notice) run in the root callback **before** both refusals, exactly as
+for every other command's own refusals: they gate on a stderr TTY and are report-only, so the
+fail-fast promise here is scoped to perk config loads and launch I/O, and an interactive bare
+launch still shows them.
+
+### (f) The typed refusals (the perk-typed arms, not an exhaustive fault list)
+
+In order — `not_a_repo` (exit 2; the message is the ordinary "Not a git repository" text plus one
+appended line naming `pi` directly and `perk --help`) · `not_a_tty` · `pi_agent_dir_invalid` —
+all BEFORE the one announce line `opening a plain Pi session in <invocation root>: pi` (an
+agent-dir refusal never follows an "opening" line — the §8.71(g) shape); then the exec-phase
+`pi_cli_missing` · `launch_failed` after it (exit 1, `EXIT_FOR_TYPE`). A successful exec never
+returns (the terminal receives pi's own exit status). Only `UserFacingCliError` is caught: an
+`OSError` / `UnicodeDecodeError` from the shared config read (`_read_toml`'s `Path.read_text`) or
+the fail-soft `local.toml` key read inside `exec_pi` is untyped and surfaces through Click's
+ordinary unhandled-exception boundary — the same posture as `perk resume` and every stage launch;
+this section does not widen those shared readers.
+
+### (g) What is byte-identical
+
+`perk --version`, every subcommand (behaviour and help), the root help's command sections / rows /
+options (`SectionedGroup.format_commands` is untouched; the structural fingerprint
+`tests/test_cli_parity_smoke.py::EXPECTED_SURFACE` needs no edit — the bare form is not a
+command), and unknown-command usage errors (`No such command`, exit 2, decided in
+`Group.resolve_command` before the callback runs). The one intended change to `perk --help` is
+its leading prose: the group docstring gains a second paragraph describing the bare form.
+`--help` / `--version` stay eager options and short-circuit before the callback.
+
+### (h) Accepted residual — a committed `[pi] agent_dir` is honored before project trust
+
+`PI_CODING_AGENT_DIR` moves Pi's whole user/global tier, and Pi loads user/global extensions
+and settings BEFORE it resolves project trust (Pi's `docs/security.md`: only project-local
+resources are trust-gated, and a global-tier extension may even own the `project_trust`
+decision). A clone whose committed `.perk/config.toml` points `agent_dir` at a directory the
+repository also commits therefore starts repository-controlled extensions on its first
+cold-local launch with no trust prompt — bare `perk` included, and identically for `perk plan`,
+`perk implement`, `perk resume` and every other door that composes its environment through
+`resolve_launch_agent_dir(main_root)` (the `config` arm reads the MAIN checkout's committed
+config, §8.71(b)). The bare form neither widens nor narrows this: it is the shared seam's
+behaviour, accepted here as it is on every existing cold launch. The operator's mitigation is
+the one Pi's own security model states — clone and launch only repositories you trust, and run
+untrusted ones in a contained environment; perk's `[pi] agent_dir` git-safety guidance protects
+credentials from being committed, not the operator from an untrusted clone. Hardening the seam
+itself — e.g. honoring a COMMITTED redirect only for a project Pi already trusts, or only from
+the gitignored `local.toml` — is a cross-door decision outside this section.
