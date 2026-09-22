@@ -310,3 +310,35 @@ def test_subject_refusal_inside_the_run_is_typed(tmp_path, subject_dir, tools_on
 
 def test_profile_startup_is_registered():
     assert "profile-startup" in cli.commands
+
+
+# --- the developer how-to -----------------------------------------------------------------------
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_profiling_how_to_is_indexed_and_states_its_kind():
+    how_to = REPO_ROOT / "docs/developers/profiling-startup.md"
+    text = how_to.read_text(encoding="utf-8")
+    assert text.startswith("# Profiling perk's startup\n\nThis page is a **how-to guide**")
+    index = (REPO_ROOT / "docs/developers/index.md").read_text(encoding="utf-8")
+    assert "(./profiling-startup.md) | How-to |" in index, (
+        "docs/developers/index.md must link the profiling how-to as a How-to row"
+    )
+    # The how-to names the seam variable, the injected env, and every option once.
+    assert "PERK_PROFILE_HANDOFF" in text
+    for name in ("PI_STARTUP_BENCHMARK=1", "PI_TIMING=1", "PI_OFFLINE=1"):
+        assert name in text
+    for option in (
+        "--runs",
+        "--output",
+        "--subject",
+        "--timeout",
+        "--exit-grace",
+        "--pty-size",
+        "--no-profiles",
+        "--json",
+    ):
+        assert f"`{option}" in text, option
+    assert "derived estimate" in text
+    assert "§8.72(i)" in text
