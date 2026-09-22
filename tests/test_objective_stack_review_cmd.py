@@ -76,6 +76,7 @@ def _checkout_result(root: Path, *, notes: tuple[str, ...] = ()) -> ReviewChecko
             ),
         ),
         stack_notes=notes,
+        patch_sha256="f" * 64,
     )
 
 
@@ -200,6 +201,7 @@ def test_dry_run_json_preview_pins_the_nulls_argv_and_handoff(git_repo, monkeypa
     assert data["checkout_path"].endswith("review-2")
     assert data["base_ref"] == "main"
     assert data["base_sha"] is None
+    assert data["patch_sha256"] is None
     assert [row["pr"] for row in data["stack"]] == [1, 2]
     assert all(row["head_sha"] is None for row in data["stack"])
     assert data["stack"][0]["node_id"] == "1.1"
@@ -208,11 +210,22 @@ def test_dry_run_json_preview_pins_the_nulls_argv_and_handoff(git_repo, monkeypa
     # The argv vector is the build-once launch argv: pi + the seeded prompt last.
     assert data["argv"][0] == "pi"
     assert "open_stack_review" in data["argv"][-1]
-    # The handoff blob preview: the real binding's four keys plus the dry_run marker — the
-    # top PR / stack base are derived from the rows in-session, never carried redundantly.
+    # The handoff blob preview: the real binding's keys plus the dry_run marker — the top PR /
+    # stack base REF are derived from the rows in-session, never carried redundantly; the
+    # pinned identity (`base_sha`, `patch_sha256`) is null before any fetch.
     blob = data["handoff"]["stack_review"]
-    assert set(blob) == {"stack", "checkout_path", "notes", "focus", "dry_run"}
+    assert set(blob) == {
+        "stack",
+        "checkout_path",
+        "notes",
+        "focus",
+        "base_sha",
+        "patch_sha256",
+        "dry_run",
+    }
     assert blob["dry_run"] is True
+    assert blob["base_sha"] is None
+    assert blob["patch_sha256"] is None
     assert all(row["head_sha"] is None for row in blob["stack"])
     assert blob["focus"] == "dig in"
     assert blob["checkout_path"] == data["checkout_path"]
@@ -267,9 +280,12 @@ def test_real_run_checks_out_then_launches_with_the_pinned_snapshot(git_repo, mo
     assert "2 member PRs topped by PR #2" in sink["prompt"]
     assert "open_stack_review" in sink["prompt"]
     # The handoff snapshot is the CHECKOUT envelope (hydrated SHAs), not the wire facts —
-    # exactly the four keys the in-session decoder requires (top/base derive from the rows).
+    # exactly the keys the in-session decoder requires (top/base ref derive from the rows;
+    # the pinned identity binds the browser patch, lanes and routing to the same commits).
     blob = sink["handoff_extra"]["stack_review"]
-    assert set(blob) == {"stack", "checkout_path", "notes", "focus"}
+    assert set(blob) == {"stack", "checkout_path", "notes", "focus", "base_sha", "patch_sha256"}
+    assert blob["base_sha"] == "0" * 40
+    assert blob["patch_sha256"] == "f" * 64
     assert blob["checkout_path"].endswith("review-2")
     assert [row["pr"] for row in blob["stack"]] == [1, 2]
     assert [row["head_sha"] for row in blob["stack"]] == ["a" * 40, "b" * 40]
@@ -303,7 +319,7 @@ def test_chain_arm_routes_via_resolve_stack_from_pr(git_repo, monkeypatch):
     assert result.exit_code == 0, result.output
     assert seen["pr"] == 2
     blob = sink["handoff_extra"]["stack_review"]
-    assert set(blob) == {"stack", "checkout_path", "notes", "focus"}
+    assert set(blob) == {"stack", "checkout_path", "notes", "focus", "base_sha", "patch_sha256"}
     assert blob["focus"] is None
     assert "the base-ref chain around PR #2" in sink["prompt"]
 

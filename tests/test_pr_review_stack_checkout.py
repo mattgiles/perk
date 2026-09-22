@@ -1,10 +1,12 @@
 """Tests for `perk pr review checkout --stack` — the stacked-review hydration boundary.
 
 Real-git fixtures (3-layer stacks pushed to ``refs/pull/<n>/head`` on a bare origin): the
-multi-refspec fetch + snapshot envelope, the fail-closed post-fetch topology gate, drift
-notes, the flag-combination refusals, and the non-stack byte-compat pin.
+multi-refspec fetch + snapshot envelope, the pinned combined patch (``<checkout>.patch`` +
+``patch_sha256``), the fail-closed post-fetch topology gate, drift notes, the
+flag-combination refusals, and the non-stack byte-compat pin.
 """
 
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -15,6 +17,7 @@ from click.testing import CliRunner
 import perk.cli.commands.pr.review.checkout_cmd as checkout_cmd
 from perk import github
 from perk.cli.cli import cli
+from perk.cli.commands.pr.review.shared import review_patch_path
 from perk.cli.commands.pr.review.stack_resolve import ResolvedStack, StackMember
 from perk.substrate import git
 
@@ -113,6 +116,101 @@ def test_stack_checkout_success_snapshot_envelope(git_repo_with_remote, monkeypa
     # All member temp refs are gone.
     for n in (1, 2, 3):
         assert git.resolve_commit(clone, f"refs/perk/review/{n}") is None
+    # The pinned combined patch: `<checkout>.patch` beside the checkout (derived — NO path key
+    # anywhere in the envelope), byte-identical to `diff_range(base, top)`, digest carried.
+    assert "patch_path" not in data
+    patch = review_patch_path(wt)
+    assert patch == wt.with_name("review-3.patch") and patch.is_file()
+    patch_bytes = patch.read_bytes()
+    assert patch_bytes == git.diff_range(clone, shas["base"], shas["c"]).encode("utf-8")
+    assert data["patch_sha256"] == hashlib.sha256(patch_bytes).hexdigest()
+    assert len(data["patch_sha256"]) == 64
+    # The patch covers every layer.
+    assert all(f"+++ b/{name}.txt" in patch_bytes.decode() for name in ("a", "b", "c"))
+
+
+def test_stack_checkout_refresh_rewrites_the_patch(git_repo_with_remote, monkeypatch):
+    # A refreshed checkout (the top head moved) rewrites the sibling patch and reports the new
+    # digest — the browser verifies the digest against the file before it opens.
+    clone, _remote, _advance = git_repo_with_remote
+    shas = _seed_linear_stack(clone)
+    members = [
+        _member(1, "feat-a", "main"),
+        _member(2, "feat-b", "feat-a"),
+        _member(3, "feat-c", "feat-b"),
+    ]
+    _wire_stack(monkeypatch, _stack(members))
+    monkeypatch.chdir(clone)
+
+    first = CliRunner().invoke(cli, ["pr", "review", "checkout", "--stack", "--pr", "2", "--json"])
+    assert first.exit_code == 0, first.output
+    first_data = json.loads(first.stdout)
+    wt = Path(first_data["path"])
+    first_bytes = review_patch_path(wt).read_bytes()
+
+    # The top head moves: a new commit on feat-c, force-pushed to refs/pull/3/head.
+    _git(clone, "checkout", "-q", "feat-c")
+    moved = _commit(clone, "c2")
+    _git(clone, "push", "-qf", "origin", "HEAD:refs/pull/3/head")
+    _git(clone, "checkout", "-q", "main")
+
+    second = CliRunner().invoke(cli, ["pr", "review", "checkout", "--stack", "--pr", "2", "--json"])
+    assert second.exit_code == 0, second.output
+    second_data = json.loads(second.stdout)
+    assert second_data["head_sha"] == moved and _sha(wt) == moved
+    second_bytes = review_patch_path(wt).read_bytes()
+    assert second_bytes != first_bytes
+    assert second_data["patch_sha256"] != first_data["patch_sha256"]
+    assert second_data["patch_sha256"] == hashlib.sha256(second_bytes).hexdigest()
+    assert second_bytes == git.diff_range(clone, shas["base"], moved).encode("utf-8")
+
+
+def test_stack_checkout_empty_combined_diff_refuses(git_repo_with_remote, monkeypatch):
+    # base == top (every member head IS the base commit): nothing to review — refuse with the
+    # typed `empty_stack_diff` BEFORE any worktree mutation, and write no patch.
+    clone, _remote, _advance = git_repo_with_remote
+    _git(clone, "push", "-q", "origin", "HEAD:refs/pull/1/head")
+    _git(clone, "push", "-q", "origin", "HEAD:refs/pull/2/head")
+    members = [_member(1, "feat-a", "main"), _member(2, "feat-b", "feat-a")]
+    _wire_stack(monkeypatch, _stack(members))
+    monkeypatch.chdir(clone)
+
+    result = CliRunner().invoke(cli, ["pr", "review", "checkout", "--stack", "--pr", "1", "--json"])
+    assert result.exit_code == 1
+    data = json.loads(result.stdout)
+    assert data["error_type"] == "empty_stack_diff"
+    assert "nothing to review" in data["message"]
+    wt = clone / ".worktrees" / "review-2"
+    assert not wt.exists()
+    assert not review_patch_path(wt).exists()
+
+
+def test_stack_checkout_diff_failure_refuses_before_mutation(git_repo_with_remote, monkeypatch):
+    # A failed combined-diff render is a typed git_error refusal before any worktree mutation
+    # — an existing checkout and its patch survive untouched.
+    clone, _remote, _advance = git_repo_with_remote
+    shas = _seed_linear_stack(clone)
+    members = [
+        _member(1, "feat-a", "main"),
+        _member(2, "feat-b", "feat-a"),
+        _member(3, "feat-c", "feat-b"),
+    ]
+    _wire_stack(monkeypatch, _stack(members))
+    monkeypatch.chdir(clone)
+    first = CliRunner().invoke(cli, ["pr", "review", "checkout", "--stack", "--pr", "2", "--json"])
+    assert first.exit_code == 0, first.output
+    wt = clone / ".worktrees" / "review-3"
+    before = review_patch_path(wt).read_bytes()
+
+    def boom(*a, **k):
+        raise git.GitError("diff exploded")
+
+    monkeypatch.setattr(git, "diff_range", boom)
+    result = CliRunner().invoke(cli, ["pr", "review", "checkout", "--stack", "--pr", "2", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error_type"] == "git_error"
+    assert wt.exists() and _sha(wt) == shas["c"]
+    assert review_patch_path(wt).read_bytes() == before
 
 
 def test_stack_checkout_topology_broken_fails_closed(git_repo_with_remote, monkeypatch):
@@ -135,6 +233,7 @@ def test_stack_checkout_topology_broken_fails_closed(git_repo_with_remote, monke
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error_type"] == "stack_topology_broken"
     assert not (clone / ".worktrees" / "review-2").exists()
+    assert not review_patch_path(clone / ".worktrees" / "review-2").exists()
 
 
 @pytest.mark.parametrize("verdict", [False, None])
@@ -161,12 +260,14 @@ def test_stack_checkout_probe_false_or_indeterminate_preserves_existing_checkout
     wt = clone / ".worktrees" / "review-3"
     assert wt.exists() and _sha(wt) == shas["c"]
 
+    before = review_patch_path(wt).read_bytes()
     monkeypatch.setattr(git, "is_ancestor", lambda *a, **k: verdict)
     result = CliRunner().invoke(cli, ["pr", "review", "checkout", "--stack", "--pr", "2", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error_type"] == "stack_topology_broken"
-    # The prior checkout survives byte-for-byte (same worktree, same pinned head).
+    # The prior checkout AND its patch survive byte-for-byte (same worktree, same pinned head).
     assert wt.exists() and _sha(wt) == shas["c"]
+    assert review_patch_path(wt).read_bytes() == before
 
 
 def test_stack_checkout_drift_note_warns_not_refuses(git_repo_with_remote, monkeypatch):
@@ -286,7 +387,8 @@ def test_non_stack_envelope_byte_compat_pin(git_repo_with_remote, monkeypatch):
 
     result = CliRunner().invoke(cli, ["pr", "review", "checkout", "--pr", "7", "--json"])
     assert result.exit_code == 0, result.output
-    assert list(json.loads(result.stdout).keys()) == [
+    data = json.loads(result.stdout)
+    assert list(data.keys()) == [
         "success",
         "error_type",
         "message",
@@ -297,3 +399,5 @@ def test_non_stack_envelope_byte_compat_pin(git_repo_with_remote, monkeypatch):
         "base_sha",
         "base_ref",
     ]
+    assert "patch_sha256" not in data
+    assert not review_patch_path(Path(data["path"])).exists()

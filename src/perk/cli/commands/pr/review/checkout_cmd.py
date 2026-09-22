@@ -5,6 +5,11 @@ force-refreshed — no reuse arm, no dirty protection: the checkout is disposabl
 material by construction). Any PR state (OPEN/MERGED/CLOSED) is checkout-able — read-only
 investigation is legitimate on all; a non-OPEN state only earns a stderr note.
 
+The ``--stack`` arm additionally writes the pinned **combined patch** — ``git diff`` from the
+stack base to the top head over the exact fetched objects — to ``<checkout>.patch`` beside the
+checkout (``review_patch_path``) and reports its SHA-256 (``patch_sha256``): the browser opens
+that static patch, verified against the digest, so moving refs cannot change the displayed diff.
+
 The head is **untrusted foreign code**: the checkout is read-only investigation material —
 `[worktree] setup` is **never** run and nothing from the head is ever executed (a foreign
 ``package.json``'s install scripts are arbitrary code execution).
@@ -13,6 +18,7 @@ Supervisor surface: `--json` to stdout, human text to stderr, stable exit codes.
 Exit codes: 0 ok · 1 invalid input / op failure · 2 not-a-repo.
 """
 
+import hashlib
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -25,6 +31,7 @@ from perk.boundary import OutputModel
 from perk.cli.commands.objective.stack.shared import resolve_objective_id
 from perk.cli.commands.pr.review.shared import (
     remove_review_worktree,
+    review_patch_path,
     review_temp_ref,
     review_worktree_name,
 )
@@ -38,6 +45,7 @@ from perk.cli.emit import emit, fail
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.substrate import git
+from perk.substrate.fs import atomic_write_text
 from perk.substrate.git import GitError, StackTopologyError
 from perk.substrate.output import log_warn, user_output
 
@@ -78,6 +86,9 @@ class ReviewCheckoutResult:
     # the combined-diff base — no separate stack-base field.
     stack: tuple[StackCheckoutMember, ...] = ()
     stack_notes: tuple[str, ...] = ()
+    # The SHA-256 hex digest of the combined patch written to `review_patch_path(path)` — set
+    # on the stack arm only (the pinned identity the browser verifies before it opens).
+    patch_sha256: str | None = None
 
 
 @click.command("checkout")
@@ -112,9 +123,10 @@ def checkout_review(
     review-<n> siblings. Never runs [worktree] setup, never installs
     anything — the head is untrusted foreign code. With --stack, resolves
     the whole PR stack (from --pr via the base-ref chain walk, or from
-    --objective via the delivery train), fetches every member head, and
+    --objective via the delivery train), fetches every member head,
     checks out the TOP head at review-<top> so the combined base→top diff
-    covers every layer.
+    covers every layer, and writes that pinned diff to review-<top>.patch
+    beside the checkout (its sha256 rides the report).
     """
     try:
         repo_root = require_repo(ctx)
@@ -324,6 +336,26 @@ def stack_checkout(
             error_type="git_error",
         )
 
+    # The pinned combined patch, rendered over the exact fetched objects (no refetch, no moving
+    # ref) BEFORE any worktree mutation — a failed or empty render leaves an existing checkout
+    # untouched. `diff_range`'s config pins keep the bytes identical to what the pinned
+    # `review-context` read renders for the lanes and the routing step.
+    try:
+        combined = git.diff_range(repo_root, base_sha, head_shas[-1])
+    except GitError as exc:
+        raise UserFacingCliError(
+            f"git diff failed for the stack's combined diff {base_sha[:12]}..{head_shas[-1][:12]}"
+            f"\n{exc}",
+            error_type="git_error",
+        ) from exc
+    if not combined.strip():
+        raise UserFacingCliError(
+            f"the stack's combined diff is empty (base {base_sha[:12]} equals the top head) — "
+            "nothing to review",
+            error_type="empty_stack_diff",
+        )
+    patch_sha256 = hashlib.sha256(combined.encode("utf-8")).hexdigest()
+
     # Objective-arm drift corroboration: warn, never refuse — the topology gate above is the
     # safety boundary; a recorded-vs-observed head mismatch is report-only.
     notes = list(stack.notes)
@@ -348,6 +380,17 @@ def stack_checkout(
     except GitError as exc:
         raise UserFacingCliError(
             f"git worktree add failed for {path}\n{exc}", error_type="git_error"
+        ) from exc
+
+    # The patch lands AFTER the worktree exists (the checkout and its sibling are refreshed as
+    # a pair; `remove_review_worktree` above dropped the previous patch). A failed write leaves
+    # the worktree and temp refs for the next run to refresh — a retry repairs the residue.
+    try:
+        atomic_write_text(review_patch_path(path), combined)
+    except OSError as exc:
+        raise UserFacingCliError(
+            f"could not write the stack's combined patch {review_patch_path(path)}\n{exc}",
+            error_type="write_failed",
         ) from exc
 
     for member in stack.members:
@@ -381,6 +424,7 @@ def stack_checkout(
             for member, sha in zip(stack.members, head_shas, strict=True)
         ),
         stack_notes=tuple(notes),
+        patch_sha256=patch_sha256,
     )
 
 
@@ -490,19 +534,24 @@ class StackMemberOut(OutputModel):
 
 class PrReviewStackCheckoutOut(PrReviewCheckoutOut):
     """The ``--stack`` envelope: the single-PR fields (describing the top PR + the combined
-    base) plus the additive pinned snapshot. A separate model so non-stack calls stay
-    byte-compatible (no null stack keys)."""
+    base) plus the additive pinned snapshot and the combined patch's SHA-256 (the patch itself
+    is at the derived ``<path>.patch`` — no path key is carried). A separate model so non-stack
+    calls stay byte-compatible (no null stack keys)."""
 
     stack: tuple[StackMemberOut, ...]
     stack_notes: tuple[str, ...]
+    patch_sha256: str
 
     @classmethod
     def from_stack_domain(cls, result: ReviewCheckoutResult) -> "PrReviewStackCheckoutOut":
+        if result.patch_sha256 is None:
+            raise ValueError("a stack checkout result must carry patch_sha256")
         base = PrReviewCheckoutOut.from_domain(result)
         return cls(
             **base.model_dump(),
             stack=tuple(StackMemberOut.from_domain(m) for m in result.stack),
             stack_notes=result.stack_notes,
+            patch_sha256=result.patch_sha256,
         )
 
 
@@ -525,6 +574,10 @@ def _render_human(result: ReviewCheckoutResult) -> None:
             user_output(
                 f"    #{member.pr_number} {member.branch} ← {member.base_ref} "
                 f"({member.head_sha[:8]})"
+            )
+        if result.patch_sha256 is not None:
+            user_output(
+                f"  patch {review_patch_path(result.path)} (sha256 {result.patch_sha256[:12]})"
             )
     for note in result.stack_notes:
         user_output(f"  note: {note}")

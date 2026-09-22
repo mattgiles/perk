@@ -107,3 +107,43 @@ def test_cleanup_not_a_repo_exits_2():
         result = runner.invoke(cli, ["pr", "review", "cleanup", "--pr", "7", "--json"])
     assert result.exit_code == 2
     assert json.loads(result.stdout)["error_type"] == "not_a_repo"
+
+
+def test_cleanup_removes_the_sibling_stack_patch(git_repo, monkeypatch):
+    # The stack checkout's `<checkout>.patch` sibling goes with the worktree through the ONE
+    # shared removal implementation.
+    from perk.cli.commands.pr.review.shared import review_patch_path
+
+    wt = git_repo / ".worktrees" / "review-7"
+    git.worktree_add_detached(git_repo, wt, _sha(git_repo))
+    patch = review_patch_path(wt)
+    patch.write_text("diff --git a/x b/x\n", encoding="utf-8")
+    monkeypatch.chdir(git_repo)
+
+    result = CliRunner().invoke(cli, ["pr", "review", "cleanup", "--pr", "7", "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["removed"] is True
+    assert not wt.exists()
+    assert not patch.exists()
+
+
+def test_cleanup_removes_an_orphan_patch_alone(git_repo, monkeypatch):
+    # No worktree, only the leftover patch: still `removed: true` (the patch is residue of the
+    # checkout, never left behind), and a second run is the idempotent `removed: false`.
+    from perk.cli.commands.pr.review.shared import review_patch_path
+
+    wt = git_repo / ".worktrees" / "review-7"
+    wt.parent.mkdir(parents=True, exist_ok=True)
+    patch = review_patch_path(wt)
+    patch.write_text("diff --git a/x b/x\n", encoding="utf-8")
+    monkeypatch.chdir(git_repo)
+    runner = CliRunner()
+
+    first = runner.invoke(cli, ["pr", "review", "cleanup", "--pr", "7", "--json"])
+    assert first.exit_code == 0, first.output
+    assert json.loads(first.stdout)["removed"] is True
+    assert not patch.exists()
+
+    second = runner.invoke(cli, ["pr", "review", "cleanup", "--pr", "7", "--json"])
+    assert second.exit_code == 0, second.output
+    assert json.loads(second.stdout)["removed"] is False
