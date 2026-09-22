@@ -33,7 +33,7 @@ from typing import Literal
 from pydantic import Field
 
 from perk.boundary import LenientParseModel, OutputModel, ValidationError
-from perk.run.launch import PROFILE_HANDOFF_ENV
+from perk.run.pi_exec import PROFILE_HANDOFF_ENV
 from perk_dev.profile_startup.pty_session import PtyRun, PtySize, SpawnFn
 from perk_dev.profile_startup.subjects import Subject
 

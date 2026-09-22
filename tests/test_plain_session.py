@@ -19,7 +19,7 @@ from perk.cli import plain_session
 from perk.cli.cli import cli
 from perk.cli.context import PerkContext
 from perk.cli.ensure import UserFacingCliError
-from perk.run import launch
+from perk.run import pi_exec
 from perk.state import cache
 from perk.substrate import git
 from perk.substrate.config import Config
@@ -147,7 +147,7 @@ def test_bare_perk_under_profile_handoff_records_and_execs_nothing(
     # the handoff line follows, with nothing exec'd.
     _tty(monkeypatch)
     target = git_repo / "profiles" / "handoff.json"
-    monkeypatch.setenv(launch.PROFILE_HANDOFF_ENV, str(target))
+    monkeypatch.setenv(pi_exec.PROFILE_HANDOFF_ENV, str(target))
     result = _invoke(git_repo)
     assert result.exit_code == 0, result.output
     _assert_untouched(launch_exec_recorder)
@@ -175,7 +175,7 @@ def test_non_tty_refuses_before_any_config_read_or_agent_dir_resolution(
         raise AssertionError("the agent dir must not resolve before the TTY check")
 
     monkeypatch.setattr(plain_session, "main_repo_root", _no_main_root)
-    monkeypatch.setattr(launch, "resolve_launch_agent_dir", _no_agent_dir)
+    monkeypatch.setattr(pi_exec, "resolve_launch_agent_dir", _no_agent_dir)
     result = _invoke(git_repo)
     assert result.exit_code == 1
     assert result.stdout == ""
@@ -224,7 +224,7 @@ def test_missing_pi_refuses_after_the_announce(git_repo, monkeypatch, launch_exe
     def _no_pi():
         raise UserFacingCliError("pi CLI not found on PATH", error_type="pi_cli_missing")
 
-    monkeypatch.setattr(launch, "_resolve_pi_executable", _no_pi)
+    monkeypatch.setattr(pi_exec, "_resolve_pi_executable", _no_pi)
     result = _invoke(git_repo)
     assert result.exit_code == 1
     assert result.stdout == ""
@@ -242,7 +242,7 @@ def test_exec_oserror_is_launch_failed_after_the_announce(
     def _exec_fails(program, argv, env):
         raise OSError("exec refused")
 
-    monkeypatch.setattr(launch.os, "execvpe", _exec_fails)
+    monkeypatch.setattr(pi_exec.os, "execvpe", _exec_fails)
     result = _invoke(git_repo)
     assert result.exit_code == 1
     assert result.stdout == ""

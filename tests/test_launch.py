@@ -11,24 +11,26 @@ from _launch_helpers import _PLAN_REF, _PLAN_REF_JSON, _PLAN_REF_MODEL, _config,
 from perk import __version__, plan
 from perk.cli.ensure import UserFacingCliError
 from perk.delivery import DeliveryError, PrepareResult
-from perk.run import launch
+from perk.run import launch, pi_exec
 from perk.run.launch import (
-    PROFILE_HANDOFF_ENV,
-    LaunchAgentDir,
     _address_prompt,
-    _build_exec_env,
     _initial_prompt,
     _stage_model_argv,
-    _sweep_stale_pi_agent_locks,
-    exec_pi,
     launch_stage,
     resolve_base,
-    resolve_launch_agent_dir,
     resolve_plan_worktree_name,
     resolve_target,
     resolve_worktree,
 )
 from perk.run.launch import worktree as worktree_mod
+from perk.run.pi_exec import (
+    PROFILE_HANDOFF_ENV,
+    LaunchAgentDir,
+    _build_exec_env,
+    _sweep_stale_pi_agent_locks,
+    exec_pi,
+    resolve_launch_agent_dir,
+)
 from perk.state import cache
 from perk.substrate import config as config_mod
 from perk.substrate import git as git_mod
@@ -433,7 +435,7 @@ def test_launch_unresolvable_home_skips_lock_sweep(tmp_path, monkeypatch, launch
 
     monkeypatch.setattr(Path, "home", classmethod(no_home))
     swept: list[Path] = []
-    monkeypatch.setattr(launch, "_sweep_stale_pi_agent_locks", lambda d: swept.append(d))
+    monkeypatch.setattr(pi_exec, "_sweep_stale_pi_agent_locks", lambda d: swept.append(d))
     _launch_agent_dir_plan(tmp_path)
     assert "PI_CODING_AGENT_DIR" not in launch_exec_recorder.calls[0][2]
     assert swept == []
@@ -1616,9 +1618,9 @@ def _patch_sync_git(
     monkeypatch.setattr(
         launch.init, "ensure_extension_install_present", lambda repo_root, *, self_repo: None
     )
-    monkeypatch.setattr("perk.run.launch._resolve_pi_executable", lambda: "/stub/bin/pi")
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda _f, _a, _e: None)
+    monkeypatch.setattr("perk.run.pi_exec._resolve_pi_executable", lambda: "/stub/bin/pi")
+    monkeypatch.setattr("perk.run.pi_exec.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.pi_exec.os.execvpe", lambda _f, _a, _e: None)
     return calls
 
 

@@ -50,7 +50,7 @@ ALLOWED = frozenset(
         # The maintainer-only stop-before-exec profiling record (contracts.md §8.72(i)): one
         # process writes the operator-named `PERK_PROFILE_HANDOFF` file it alone owns, outside
         # `.perk/workflow/`, immediately before exiting — never raced.
-        "run/launch/__init__.py",
+        "run/pi_exec.py",
     }
 )
 

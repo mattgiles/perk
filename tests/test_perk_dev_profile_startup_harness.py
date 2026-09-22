@@ -18,7 +18,7 @@ from perk_dev.profile_startup.subjects import SdkCopy, Subject, SubjectStamp
 from perk_dev.profile_startup.timings import parse_pi_timings
 
 from perk import __version__
-from perk.run import launch
+from perk.run import pi_exec
 from perk.substrate import git
 
 # --- schedule + env ----------------------------------------------------------------------------
@@ -375,8 +375,8 @@ class _FakeSpawn:
     def __call__(self, argv, *, cwd, env, size, timeout_s, exit_grace_s, startup_marker):
         self._counter += 1
         role = "sample"
-        if launch.PROFILE_HANDOFF_ENV in env:
-            role = "handoff:" + Path(env[launch.PROFILE_HANDOFF_ENV]).stem.removeprefix("handoff-")
+        if pi_exec.PROFILE_HANDOFF_ENV in env:
+            role = "handoff:" + Path(env[pi_exec.PROFILE_HANDOFF_ENV]).stem.removeprefix("handoff-")
         elif "NODE_OPTIONS" in env:
             role = "census"
         self.calls.append(
@@ -438,10 +438,10 @@ class _FakeSpawn:
                 elapsed_ms=1000.0 + self._counter, stderr=stderr, exit_ms=1300.0 + self._counter
             )
         assert startup_marker("--- Startup Timings: main ---") is False
-        target = Path(env[launch.PROFILE_HANDOFF_ENV])
+        target = Path(env[pi_exec.PROFILE_HANDOFF_ENV])
         arm = role.removeprefix("handoff:")
         if arm != "direct" or self.write_direct_record:
-            launch._record_profile_handoff(
+            pi_exec._record_profile_handoff(
                 target, pi_path=str(self.pi_bin), argv=("pi",), checkout=cwd, env=env
             )
         stderr = ""
@@ -535,7 +535,7 @@ def test_run_profile_writes_the_run_directory_in_schedule_order(
         assert call["argv"] == (str(call["cwd"] / ".venv" / "bin" / "perk"),)
         assert "NODE_OPTIONS" not in call["env"]
     targets = {
-        c["env"][launch.PROFILE_HANDOFF_ENV] for c in fake.calls if c["role"].startswith("handoff")
+        c["env"][pi_exec.PROFILE_HANDOFF_ENV] for c in fake.calls if c["role"].startswith("handoff")
     }
     assert len(targets) == 6  # every arm of every subject has its own record file
     census_calls = [c for c in fake.calls if c["role"] == "census"]
@@ -619,7 +619,7 @@ def test_run_profile_stale_direct_record_is_not_trusted(tmp_path, two_subjects):
     a, _b = two_subjects
     options = _options(tmp_path, [a], runs=1)
     stale = options.output / "profiles" / "a" / "handoff-direct.json"
-    launch._record_profile_handoff(
+    pi_exec._record_profile_handoff(
         stale, pi_path="/stale", argv=("pi",), checkout=a.checkout, env={}
     )
     fake = _FakeSpawn(pi_bin=Path(options.pi_path), write_direct_record=False)

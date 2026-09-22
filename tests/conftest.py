@@ -220,17 +220,17 @@ def launch_exec_recorder(tmp_path, monkeypatch, isolated_pi_agent_dir) -> Launch
     the tests that ``delenv`` the redirect to exercise the config/default arms sweep
     ``<tmp>/home/.pi/agent``, never the developer's real ``~/.pi/agent``.
     """
-    from perk.run import launch
+    from perk.run import pi_exec
 
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     isolated_pi_agent_dir.mkdir(exist_ok=True)
     recorder = LaunchExecRecorder(agent_dir=isolated_pi_agent_dir)
-    monkeypatch.setattr(launch, "_resolve_pi_executable", lambda: recorder.pi_path)
-    monkeypatch.setattr(launch.os, "chdir", lambda path: recorder.chdirs.append(Path(path)))
+    monkeypatch.setattr(pi_exec, "_resolve_pi_executable", lambda: recorder.pi_path)
+    monkeypatch.setattr(pi_exec.os, "chdir", lambda path: recorder.chdirs.append(Path(path)))
     monkeypatch.setattr(
-        launch.os,
+        pi_exec.os,
         "execvpe",
         lambda program, argv, env: recorder.calls.append((program, tuple(argv), dict(env))),
     )

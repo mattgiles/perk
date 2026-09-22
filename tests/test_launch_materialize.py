@@ -11,9 +11,8 @@ from perk import __version__
 from perk.backends.issue_backend import IssueBackendError, PlanState
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
-from perk.run import launch
+from perk.run import launch, pi_exec
 from perk.run.launch import (
-    _build_exec_env,
     launch_stage,
     materialize_extensions,
     materialize_skills,
@@ -21,6 +20,7 @@ from perk.run.launch import (
     resolve_worktree,
 )
 from perk.run.launch.materialize import render_launch_banner
+from perk.run.pi_exec import _build_exec_env
 from perk.state import cache
 from perk.substrate import git as git_mod
 from perk.substrate.config import Config
@@ -35,9 +35,9 @@ def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch
     config = Config(worktree_root=git_repo / ".worktrees")
 
     execs: list[tuple[str, list[str]]] = []
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch._resolve_pi_executable", lambda: "/stub/bin/pi")
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append((f, list(a))))
+    monkeypatch.setattr("perk.run.pi_exec.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.pi_exec._resolve_pi_executable", lambda: "/stub/bin/pi")
+    monkeypatch.setattr("perk.run.pi_exec.os.execvpe", lambda f, a, e: execs.append((f, list(a))))
     # Don't shell gh in this real-git integration test (the plan-body fetch is its own test).
     monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
 
@@ -79,15 +79,15 @@ def test_launch_warms_extension_install_before_exec(git_repo, monkeypatch):
     cache.write_plan_ref(git_repo, _PLAN_REF)
     config = Config(worktree_root=git_repo / ".worktrees")
     events: list[object] = []
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.pi_exec.os.chdir", lambda _p: None)
     monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
     monkeypatch.setattr(
         launch.init,
         "ensure_extension_install_present",
         lambda repo_root, *, self_repo: events.append(("warm-install", repo_root, self_repo)),
     )
-    monkeypatch.setattr("perk.run.launch._resolve_pi_executable", lambda: "/stub/bin/pi")
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: events.append("exec"))
+    monkeypatch.setattr("perk.run.pi_exec._resolve_pi_executable", lambda: "/stub/bin/pi")
+    monkeypatch.setattr("perk.run.pi_exec.os.execvpe", lambda f, a, e: events.append("exec"))
     launch_stage(
         repo_root=git_repo,
         config=config,
@@ -126,9 +126,9 @@ def test_install_step_resolves_done_when_install_happens(git_repo, monkeypatch, 
     installing step resolves to a done milestone."""
     cache.write_plan_ref(git_repo, _PLAN_REF)
     config = Config(worktree_root=git_repo / ".worktrees")
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch._resolve_pi_executable", lambda: "/stub/bin/pi")
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
+    monkeypatch.setattr("perk.run.pi_exec.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.pi_exec._resolve_pi_executable", lambda: "/stub/bin/pi")
+    monkeypatch.setattr("perk.run.pi_exec.os.execvpe", lambda f, a, e: None)
     monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
     monkeypatch.setattr(
         launch.init,
@@ -154,9 +154,9 @@ def test_install_step_resolves_warn_when_install_did_not_take(git_repo, monkeypa
     failure), the installing step resolves to a warn rather than dangling."""
     cache.write_plan_ref(git_repo, _PLAN_REF)
     config = Config(worktree_root=git_repo / ".worktrees")
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch._resolve_pi_executable", lambda: "/stub/bin/pi")
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
+    monkeypatch.setattr("perk.run.pi_exec.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.pi_exec._resolve_pi_executable", lambda: "/stub/bin/pi")
+    monkeypatch.setattr("perk.run.pi_exec.os.execvpe", lambda f, a, e: None)
     monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
     monkeypatch.setattr(
         launch.init, "ensure_extension_install_present", lambda repo_root, *, self_repo: None
@@ -238,9 +238,9 @@ def test_exec_pi_resolves_before_chdir_and_execs_the_absolute_path(
     monkeypatch.setattr(
         shutil, "which", lambda binary: events.append(("which", binary)) or "bin/pi"
     )
-    monkeypatch.setattr(launch.os, "chdir", lambda path: events.append("chdir"))
+    monkeypatch.setattr(pi_exec.os, "chdir", lambda path: events.append("chdir"))
     monkeypatch.setattr(
-        launch.os, "execvpe", lambda program, argv, env: events.append(("exec", program, argv))
+        pi_exec.os, "execvpe", lambda program, argv, env: events.append(("exec", program, argv))
     )
     ctx = launch_context_factory(stage=_stage("implement"), plan_ref=_PLAN_REF, agent_dir=agent_dir)
     launch._exec_pi(ctx)
@@ -266,8 +266,8 @@ def test_exec_pi_which_miss_aborts_before_any_exec_phase_side_effect(
     stale_lock = agent_dir / "settings.json.lock"
     stale_lock.write_text("", encoding="utf-8")
     monkeypatch.setattr(shutil, "which", lambda binary: None)
-    monkeypatch.setattr(launch.os, "chdir", lambda path: events.append("chdir"))
-    monkeypatch.setattr(launch.os, "execvpe", lambda program, argv, env: events.append("exec"))
+    monkeypatch.setattr(pi_exec.os, "chdir", lambda path: events.append("chdir"))
+    monkeypatch.setattr(pi_exec.os, "execvpe", lambda program, argv, env: events.append("exec"))
     ctx = launch_context_factory(stage=_stage("implement"), plan_ref=_PLAN_REF, agent_dir=agent_dir)
     with pytest.raises(UserFacingCliError) as excinfo:
         launch._exec_pi(ctx)
@@ -287,7 +287,7 @@ def test_exec_pi_chdir_or_exec_oserror_becomes_launch_failed(
     events: list[str] = []
     agent_dir = tmp_path / "agent"
     agent_dir.mkdir()
-    monkeypatch.setattr(launch, "_resolve_pi_executable", lambda: "/stub/bin/pi")
+    monkeypatch.setattr(pi_exec, "_resolve_pi_executable", lambda: "/stub/bin/pi")
 
     def _chdir(path):
         if failure_point == "chdir":
@@ -299,8 +299,8 @@ def test_exec_pi_chdir_or_exec_oserror_becomes_launch_failed(
             raise OSError("boom")
         events.append("exec")  # unreachable recorder — proves a failed chdir skips the exec
 
-    monkeypatch.setattr(launch.os, "chdir", _chdir)
-    monkeypatch.setattr(launch.os, "execvpe", _execvpe)
+    monkeypatch.setattr(pi_exec.os, "chdir", _chdir)
+    monkeypatch.setattr(pi_exec.os, "execvpe", _execvpe)
     ctx = launch_context_factory(stage=_stage("implement"), plan_ref=_PLAN_REF, agent_dir=agent_dir)
     with pytest.raises(UserFacingCliError) as excinfo:
         launch._exec_pi(ctx)
@@ -781,9 +781,9 @@ def _capture_handoff(monkeypatch) -> dict[str, dict[str, object]]:
         return cache.handoff_path(root, run_id)
 
     monkeypatch.setattr("perk.run.launch.cache.write_handoff", _capture)
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch._resolve_pi_executable", lambda: "/stub/bin/pi")
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
+    monkeypatch.setattr("perk.run.pi_exec.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.pi_exec._resolve_pi_executable", lambda: "/stub/bin/pi")
+    monkeypatch.setattr("perk.run.pi_exec.os.execvpe", lambda f, a, e: None)
     return captured
 
 
@@ -1098,9 +1098,9 @@ def test_handoff_extra_is_merged_into_handoff(git_repo, monkeypatch):
 
     monkeypatch.setattr("perk.run.launch.cache.write_handoff", _capture)
     monkeypatch.setattr("perk.run.launch.cache.write_plan_ref", lambda *a, **k: None)
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch._resolve_pi_executable", lambda: "/stub/bin/pi")
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
+    monkeypatch.setattr("perk.run.pi_exec.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.pi_exec._resolve_pi_executable", lambda: "/stub/bin/pi")
+    monkeypatch.setattr("perk.run.pi_exec.os.execvpe", lambda f, a, e: None)
 
     launch_stage(
         repo_root=git_repo,
