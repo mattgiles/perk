@@ -60,7 +60,7 @@ import type { AnnotationState } from "../providers/annotations.ts";
 import { plannotatorPresent, stackRespondMessage } from "../providers/plannotatorHandoff.ts";
 import { openReviewBrowserCore } from "./browser.ts";
 import { type CheckoutOk, decodeCheckout, PR_URL_RE } from "./checkout.ts";
-import { samePinnedStack, type StackPinState } from "./reviewWave.ts";
+import { type StackPinState, samePinnedStack } from "./reviewWave.ts";
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
 const SCOPE = "stack-review-browser";
