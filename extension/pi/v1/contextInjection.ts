@@ -9,10 +9,11 @@
 //
 // ONE decision drives both hooks: `spec.select` (the flavor to deliver this turn, or null). It
 // reads the FULL branch (`branchOf` — eligibility/state survive compaction), while the dedup
-// reads Pi's OWN live projection (`contextEvidence.ts`: `buildContextEntries()` → native
-// messages) and asks the typed predicate whether the selected flavor's marker is still delivered
-// — as user content (a cold prompt) or as the owned customType's content (a prior hidden copy).
-// A copy Pi has compacted out of context re-injects on the next turn even though the historical
+// reads Pi's OWN live projection (`contextEvidence.ts`: `buildSessionProjection().messages` —
+// compaction selection and `context_edit` omission/replacement already applied) and asks the
+// typed predicate whether the selected flavor's marker is still delivered — as user content (a
+// cold prompt) or as the owned customType's content (a prior hidden copy). A copy Pi has
+// compacted or edited out of context re-injects on the next turn even though the historical
 // entry still sits on the branch; a summary quoting the marker never counts. The submitting
 // `event.prompt` is checked BEFORE the projection read: at `before_agent_start` a cold launch's
 // prompt is not yet persisted, so only that check sees a cold seed on the launch turn.

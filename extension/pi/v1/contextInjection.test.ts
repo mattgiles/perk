@@ -69,10 +69,14 @@ function ctxOver(manager: SessionManager = SessionManager.inMemory("/nowhere")):
   return { cwd: "/nowhere", sessionManager: manager } as unknown as ExtensionContext;
 }
 
-/** A structural ctx whose two reads are independently scripted (recording or throwing). */
+/**
+ * A structural ctx whose two reads are independently scripted (recording or throwing). The
+ * projection read returns MESSAGES (the leaf reads `buildSessionProjection().messages`; Pi's
+ * entry-level selection is pinned only through the real manager in `contextEvidence.test.ts`).
+ */
 function ctxFrom(reads: {
   getBranch: () => unknown[];
-  buildContextEntries: () => unknown[];
+  buildSessionProjection: () => { messages: unknown[] };
 }): ExtensionContext {
   return { cwd: "/nowhere", sessionManager: reads } as unknown as ExtensionContext;
 }
@@ -186,15 +190,27 @@ test("a live retained copy (kept across compaction) still dedups", async () => {
   assert.equal(counts.content, 0);
 });
 
+test("re-injects when a context edit OMITTED the prior hidden copy from Pi's projection", async () => {
+  const { spec, counts } = countingSpec();
+  const { inject } = hooksFor(spec);
+  const manager = SessionManager.inMemory("/nowhere");
+  const copy = priorCopy(manager);
+  assert.equal(await inject(EMPTY_EVENT, ctxOver(manager)), undefined, "live copy suppresses");
+  manager.appendContextEdit(copy, null);
+  const result = (await inject(EMPTY_EVENT, ctxOver(manager))) as { message?: unknown } | undefined;
+  assert.ok(result?.message !== undefined, "an omitted copy is not live — re-inject");
+  assert.equal(counts.content, 1, "the content thunk ran once, on the re-injecting turn");
+});
+
 test("no injection when select returns null (ineligible/defer) — and no projection read", async () => {
   const { spec, counts } = countingSpec({ select: () => null });
   const { inject } = hooksFor(spec);
   const reads: string[] = [];
   const ctx = ctxFrom({
     getBranch: () => [],
-    buildContextEntries: () => {
+    buildSessionProjection: () => {
       reads.push("projection");
-      return [];
+      return { messages: [] };
     },
   });
   assert.equal(await inject(EMPTY_EVENT, ctx), undefined);
@@ -215,9 +231,9 @@ test("the submitting prompt carrying the SELECTED marker suppresses (cold delive
   const reads: string[] = [];
   const ctx = ctxFrom({
     getBranch: () => [],
-    buildContextEntries: () => {
+    buildSessionProjection: () => {
       reads.push("projection");
-      return [];
+      return { messages: [] };
     },
   });
   const result = await inject(
@@ -256,9 +272,9 @@ test("a THROWING branch read: injection short-circuits (no select call, no throw
     getBranch: () => {
       throw new Error("adversarial branch read");
     },
-    buildContextEntries: () => {
+    buildSessionProjection: () => {
       reads.push("projection");
-      return [];
+      return { messages: [] };
     },
   });
 
@@ -306,7 +322,7 @@ test("a THROWING projection read: guarded return — nothing constructed, nothin
   const { inject } = hooksFor(spec);
   const ctx = ctxFrom({
     getBranch: () => [],
-    buildContextEntries: () => {
+    buildSessionProjection: () => {
       throw new Error("adversarial projection read");
     },
   });
@@ -412,9 +428,9 @@ test("retention reads the FULL branch through select (compaction-independent), n
   ];
   const ctx = ctxFrom({
     getBranch: () => branch,
-    buildContextEntries: () => {
+    buildSessionProjection: () => {
       reads.push("projection");
-      return [];
+      return { messages: [] };
     },
   });
   const kept = { customType: CONTEXT_TYPE, content: `${MARKER}\nstill relevant` };

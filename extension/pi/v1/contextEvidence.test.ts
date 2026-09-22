@@ -1,6 +1,7 @@
 // The ONE owner of the projection/evidence matrix behind every live-context dedup (the shared
 // authoring/provider installer, binding delivery, agent scratch): which carriers count, what
-// compaction retains/summarizes, and which branch the projection follows. Drives real
+// compaction retains/summarizes, what a `context_edit` omits/replaces, and which branch the
+// projection follows. Drives real
 // `SessionManager` append/branch/compaction APIs and asserts LITERAL native messages + predicate
 // results — never a second local reconstruction of Pi's selection. Consumer suites own only their
 // distinct policies and wiring; they do not replay this matrix.
@@ -8,9 +9,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  type CustomMessageEntry,
   type SessionEntry,
   SessionManager,
+  type SessionProjection,
 } from "@earendil-works/pi-coding-agent";
 import {
   activeContextMessages,
@@ -361,24 +362,102 @@ test("branch sequence: live/missing siblings, an abandoned-branch summary quote,
   assert.equal(carries(manager), true, "the pre-compaction checkpoint still carries it directly");
 });
 
+// ------------------------------------------------------------------------- context edits
+
+test("context edit OMISSION: an omitted owned copy is no longer live (the entry stays on the branch); a fresh copy restores it", () => {
+  const manager = session();
+  appendMessage(manager, user("start"));
+  const hiddenId = manager.appendCustomMessageEntry(OWNER.customType, `${MARKER}\nv1`, false);
+  assert.equal(carries(manager), true);
+
+  manager.appendContextEdit(hiddenId, null);
+  assert.deepEqual(
+    projected(manager).map((m) => m.role),
+    ["user"],
+    "Pi drops the omitted message from the projection",
+  );
+  assert.equal(carries(manager), false, "an omitted copy is not live delivery");
+  assert.equal(
+    manager.getBranch().some((e) => e.id === hiddenId),
+    true,
+    "the historical entry is still on the branch (history \u2260 live context)",
+  );
+
+  manager.appendCustomMessageEntry(OWNER.customType, `${MARKER}\nv2`, false);
+  assert.equal(carries(manager), true, "a fresh hidden copy restores evidence");
+});
+
+test("context edit REPLACEMENT: the replacement content is what counts", () => {
+  const manager = session();
+  const hiddenId = manager.appendCustomMessageEntry(OWNER.customType, `${MARKER}\nv1`, false);
+  manager.appendContextEdit(hiddenId, { content: "REPLACED" });
+  assert.deepEqual(
+    projected(manager).map((m) => (m.role === "custom" ? m.content : m.role)),
+    ["REPLACED"],
+    "the projected custom carries the replacement bytes",
+  );
+  assert.equal(carries(manager), false, "a replacement without the marker is not evidence");
+
+  const fresh = session();
+  const freshId = fresh.appendCustomMessageEntry(OWNER.customType, "placeholder", false);
+  assert.equal(carries(fresh), false);
+  fresh.appendContextEdit(freshId, { content: `${MARKER}\nreplaced` });
+  assert.equal(carries(fresh), true, "a replacement carrying the marker IS evidence");
+});
+
+test("context edit on a `user` seed: an omitted cold seed no longer counts", () => {
+  const manager = session();
+  const seedId = appendMessage(manager, user(`cold prompt\n\n${MARKER}\nseeded`));
+  appendMessage(manager, assistant("ack"));
+  assert.equal(carries(manager), true);
+  manager.appendContextEdit(seedId, null);
+  assert.deepEqual(
+    projected(manager).map((m) => m.role),
+    ["assistant"],
+  );
+  assert.equal(carries(manager), false);
+});
+
+test("context edits targeting UNRELATED messages never change the owned verdict", () => {
+  const manager = session();
+  const otherId = manager.appendCustomMessageEntry(OTHER_TYPE, `${MARKER}\nanother owner`, false);
+  const assistantId = appendMessage(manager, assistant("a turn"));
+  assert.equal(carries(manager), false);
+
+  // Replacing the OTHER owner's copy / omitting the assistant turn: still no owned evidence.
+  manager.appendContextEdit(otherId, { content: `${MARKER}\nstill the other owner` });
+  manager.appendContextEdit(assistantId, null);
+  assert.equal(carries(manager), false, "edits on other roles/owners do not create evidence");
+
+  // With an owned live copy present, the same unrelated edits do not remove evidence either.
+  manager.appendCustomMessageEntry(OWNER.customType, `${MARKER}\nowned`, false);
+  assert.equal(carries(manager), true);
+  const laterAssistantId = appendMessage(manager, assistant(`${MARKER} quoted`, 11));
+  manager.appendContextEdit(laterAssistantId, null);
+  manager.appendContextEdit(otherId, null);
+  assert.equal(carries(manager), true, "edits on other roles/owners do not remove evidence");
+});
+
 // ------------------------------------------------------------------------- source discipline
 
-test("the leaf reads buildContextEntries() exactly once and never getBranch(); a throw propagates", () => {
+test("the leaf reads buildSessionProjection() exactly once and never getBranch()/buildContextEntries(); a throw propagates", () => {
   const calls: string[] = [];
-  const hidden: CustomMessageEntry = {
-    type: "custom_message",
-    id: "cm1",
-    parentId: null,
-    timestamp: "2025-01-01T00:00:00.000Z",
+  const recorded: ContextMessage = {
+    role: "custom",
     customType: OWNER.customType,
     content: `${MARKER}\nrecorded`,
     display: false,
+    timestamp: Date.parse("2025-01-01T00:00:00.000Z"),
   };
   const recording = {
     sessionManager: {
+      buildSessionProjection(): SessionProjection {
+        calls.push("buildSessionProjection");
+        return { entries: [], messages: [recorded], thinkingLevel: "off", model: null };
+      },
       buildContextEntries(): SessionEntry[] {
         calls.push("buildContextEntries");
-        return [hidden];
+        return [];
       },
       getBranch(): SessionEntry[] {
         calls.push("getBranch");
@@ -387,22 +466,17 @@ test("the leaf reads buildContextEntries() exactly once and never getBranch(); a
     },
   };
   const messages = activeContextMessages(recording);
-  assert.deepEqual(calls, ["buildContextEntries"], "one projection read, no full-branch read");
-  assert.deepEqual(messages, [
-    {
-      role: "custom",
-      customType: OWNER.customType,
-      content: `${MARKER}\nrecorded`,
-      display: false,
-      details: undefined,
-      timestamp: Date.parse("2025-01-01T00:00:00.000Z"),
-    },
-  ]);
+  assert.deepEqual(
+    calls,
+    ["buildSessionProjection"],
+    "one projection read, no entry-level or full-branch read",
+  );
+  assert.deepEqual(messages, [recorded]);
   assert.equal(contextCarriesMarker(messages, OWNER), true);
 
   const throwing: ContextProjectionSource = {
     sessionManager: {
-      buildContextEntries(): SessionEntry[] {
+      buildSessionProjection(): SessionProjection {
         throw new Error("adversarial projection read");
       },
     },

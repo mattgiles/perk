@@ -16,17 +16,24 @@ import {
 } from "./agentScratch.ts";
 import { agentScratchDir, ensureRunScratch } from "./cache.ts";
 
-/** A structural hook ctx: the full branch (run identity) + Pi's projection (dedup). */
+/**
+ * A structural hook ctx: the full branch (run identity) + Pi's projection (dedup). The projection
+ * read yields MESSAGES (`buildSessionProjection().messages`); Pi's entry-level selection is
+ * pinned only through the real manager in `pi/v1/contextEvidence.test.ts`.
+ */
 function fakeCtx(
   cwd: string,
   entries: unknown[],
   projection: () => unknown[] = () => [],
-): AgentScratchContext & { sessionManager: { buildContextEntries(): unknown[] } } {
+): AgentScratchContext & { sessionManager: { buildSessionProjection(): { messages: unknown[] } } } {
   return {
     cwd,
     hasUI: false,
     ui: { notify: () => {} },
-    sessionManager: { getBranch: () => entries, buildContextEntries: projection },
+    sessionManager: {
+      getBranch: () => entries,
+      buildSessionProjection: () => ({ messages: projection() }),
+    },
   };
 }
 
@@ -345,61 +352,38 @@ test("dedup requires the exact owned custom string in Pi's projection — nothin
   const cwd = "/repo";
   const block = renderAgentScratchBlock(cwd, "RID");
   const changed = renderAgentScratchBlock(cwd, "RID.1");
-  const at = "2025-01-01T00:00:00.000Z";
+  // Projected MESSAGES, as Pi's `buildSessionProjection().messages` yields them (plain custom
+  // STATE never projects — that fact is Pi's, pinned in `contextEvidence.test.ts`).
   const customMessage = (content: unknown, customType = AGENT_SCRATCH_CONTEXT_TYPE) => ({
-    type: "custom_message",
-    id: "cm",
-    parentId: null,
-    timestamp: at,
+    role: "custom",
     customType,
     content,
     display: false,
+    timestamp: 1,
   });
-  const userMessage = (content: unknown) => ({
-    type: "message",
-    id: "u",
-    parentId: null,
-    timestamp: at,
-    message: { role: "user", content, timestamp: 1 },
-  });
-  const cases: { name: string; entries: unknown[]; dedups: boolean }[] = [
-    { name: "owned exact string", entries: [customMessage(block.content)], dedups: true },
+  const userMessage = (content: unknown) => ({ role: "user", content, timestamp: 1 });
+  const cases: { name: string; messages: unknown[]; dedups: boolean }[] = [
+    { name: "owned exact string", messages: [customMessage(block.content)], dedups: true },
     {
       name: "same marker, changed bytes",
-      entries: [customMessage(`${block.content} `)],
+      messages: [customMessage(`${block.content} `)],
       dedups: false,
     },
-    { name: "a parent run's block", entries: [customMessage(changed.content)], dedups: false },
-    { name: "marker-only match", entries: [customMessage(block.marker)], dedups: false },
+    { name: "a parent run's block", messages: [customMessage(changed.content)], dedups: false },
+    { name: "marker-only match", messages: [customMessage(block.marker)], dedups: false },
     {
       name: "the exact bytes as a text-part array",
-      entries: [customMessage([{ type: "text", text: block.content }])],
+      messages: [customMessage([{ type: "text", text: block.content }])],
       dedups: false,
     },
-    { name: "an exact USER quote", entries: [userMessage(block.content)], dedups: false },
+    { name: "an exact USER quote", messages: [userMessage(block.content)], dedups: false },
     {
       name: "the exact bytes under another customType",
-      entries: [customMessage(block.content, "perk:other")],
-      dedups: false,
-    },
-    {
-      // Pi's `buildContextEntries()` returns custom STATE entries too; its converter projects
-      // no message for them — `data.content` is state, never model delivery.
-      name: "plain custom state (`data.content`) selected by Pi but never projected",
-      entries: [
-        {
-          type: "custom",
-          id: "st",
-          parentId: null,
-          timestamp: at,
-          customType: AGENT_SCRATCH_CONTEXT_TYPE,
-          data: { content: block.content },
-        },
-      ],
+      messages: [customMessage(block.content, "perk:other")],
       dedups: false,
     },
   ];
-  for (const { name, entries, dedups } of cases) {
+  for (const { name, messages, dedups } of cases) {
     const { hooks } = scratchHooks(() => block);
     const ctx = fakeCtx(
       cwd,
@@ -411,7 +395,7 @@ test("dedup requires the exact owned custom string in Pi's projection — nothin
           data: { content: block.content },
         },
       ],
-      () => entries,
+      () => messages,
     ) as unknown as ExtensionContext;
     const result = await hooks.get("before_agent_start")?.({ prompt: "" }, ctx);
     assert.equal(result?.message === undefined, dedups, name);
