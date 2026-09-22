@@ -756,7 +756,7 @@ _SUBAGENTS_PACKAGE_DIRNAME = "pi-subagents"
 
 # The pi-subagents version perk's guidance was source-read against; bumped only on a
 # deliberate re-verify of the guidance (never a pin — the package stays unpinned).
-_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.68.0"
+_SUBAGENTS_GUIDANCE_VERIFIED_VERSION = "0.70.1"
 
 
 def _installed_subagents_version(pkg_dir: Path) -> str | None:

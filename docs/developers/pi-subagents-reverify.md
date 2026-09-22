@@ -15,10 +15,12 @@ tests or doctor.
    `src/perk/convergence/doctor/checks.py`:
    `node -p "require('./.pi/npm/node_modules/pi-subagents/package.json').version"`.
 2. **Re-read the source.** The installed package under `.pi/npm/node_modules/pi-subagents/`
-   ships its TypeScript sources (`pi.extensions: ["./index.ts"]`, `src/**/*.ts`) — re-read them
-   in place; if a future release publishes compiled JS instead, read the matching tag of
-   `nicobailon/pi-subagents` (`gh api` / `gh browse`, or a local clone at the tag). Read the
-   release notes for the version either way. Walk each engine mechanic
+   ships compiled JavaScript since 0.70.0 (`pi.extensions: ["./index.js"]`, `src/**/*.js` with
+   `.d.ts` files and source maps; ≤ 0.68.x shipped `src/**/*.ts`) — re-read it in place: the
+   module and function anchors below survive compilation, so `grep -n` over `src/**/*.js` finds
+   them. Fall back to the matching tag of `nicobailon/pi-subagents` (`gh api` / `gh browse`, or a
+   local clone at the tag) only for a fact the compiled output obscures. Read the release notes
+   (the package's `CHANGELOG.md`) for the version either way. Walk each engine mechanic
    `docs/learned/pi/subagents.md` states (its `## Sources` names the baseline):
    - the supervisor channel's `expectsReply` handling in
      `src/intercom/native-supervisor-channel.ts::poll` — progress updates are **discarded** on
@@ -82,8 +84,8 @@ tests or doctor.
    `docs/user-docs/reference/cli/setup-and-health.md` if its wording moved.
 6. **Record the evidence**: a dated note in `docs/design/archive/` — the source facts with
    file/function anchors, the decisions, and the live-leg outcome (PASS or FAIL, never omitted).
-   `pi-subagents-native-baseline-dogfood.md` (0.65.1) and `pi-subagents-0.68.0-reverify.md`
-   (0.68.0) are the templates.
+   `pi-subagents-native-baseline-dogfood.md` (0.65.1), `pi-subagents-0.68.0-reverify.md`
+   (0.68.0) and `pi-subagents-0.70.1-reverify.md` (0.70.1) are the templates.
 
 ## The standing pin decision
 
