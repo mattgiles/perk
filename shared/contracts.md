@@ -240,13 +240,16 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   before dedup (repairing deleted directories, and before any projection read), retain one exact
   current-run direct block, remove stale/duplicate direct blocks, and visibly warn/retry on
   provisioning failure. Delivery dedup reads **Pi's own live context projection**
-  (`sessionManager.buildContextEntries()` → `sessionEntryToContextMessages`, via
+  (`sessionManager.buildSessionProjection().messages` — Pi's canonical projection with compaction
+  selection AND `context_edit` omission/replacement applied, via
   `extension/pi/v1/contextEvidence.ts`) and requires **exact identity**: a native `custom`
   message of this customType whose string `content` equals the current run's rendered block
   byte-for-byte. Nothing looser deduplicates — not a text-part array, a user quote, a marker-only
   match, changed bytes, a parent run's block, or plain `custom` state (`data.content` is state,
-  never model delivery). A block Pi has compacted out of context is re-delivered on the next
-  eligible turn even though the historical entry stays on the branch. A projection read failure
+  never model delivery). A block Pi has compacted out of context — or omitted through a
+  `context_edit` — is re-delivered on the next eligible turn even though the historical entry
+  stays on the branch; a replaced copy counts only if the replacement content still equals the
+  block. A projection read failure
   escapes the hook to Pi's hook-error reporting (no guessed copy); the context filter never reads
   the projection. Quoted ordinary messages and compaction summaries remain untouched. Selected
   foreground writers have no Perk activation and no scratch-provisioning promise. Because this is a universal pre-turn side effect
@@ -2879,10 +2882,12 @@ exists (read from the **full branch** — eligibility survives compaction), the 
 non-empty (render-before-dedup: an inert stage reads no projection), the submitting turn's prompt
 (`event.prompt`) does not carry `BINDING_HEADER`, **and** Pi's **live context projection** does
 not already deliver it. Live evidence is Pi-owned and typed (`extension/pi/v1/contextEvidence.ts`):
-`sessionManager.buildContextEntries()` — the current leaf's compaction-aware entry list —
-flattened through Pi's package-root `sessionEntryToContextMessages`, then asked whether the header
-rides **user content** (the persisted cold prompt) or a **`perk:binding-context` custom** (a prior
-warm inject). Perk reconstructs no compaction cutoff and inspects no storage fields; assistant/
+`sessionManager.buildSessionProjection().messages` — Pi's canonical projection of the current
+leaf with compaction selection AND `context_edit` omission/replacement applied — asked whether
+the header rides **user content** (the persisted cold prompt) or a **`perk:binding-context`
+custom** (a prior warm inject); an omitted owned copy re-injects, a replaced copy counts only if
+the replacement still carries the header. Perk reconstructs no compaction cutoff, replays no
+edits, and inspects no storage fields; assistant/
 tool/bash output, other customs, plain `custom` state, and compaction/branch summaries quoting the
 header are never evidence. This distinction is load-bearing because Pi's branch is append-only:
 historical entries remain readable after they leave model context, and a summary quoting the
@@ -5910,14 +5915,16 @@ nothing, the subset being shared).
   plan-authoring context, plannotator's plan flavor, the tombell bridge context, the
   objective-authoring context, and plannotator's objective flavor — rides the shared
   `extension/pi/v1/contextInjection.ts::installInjectedContext` and dedups on **Pi's own live
-  context projection** (`extension/pi/v1/contextEvidence.ts`: `sessionManager.buildContextEntries()`
-  → `sessionEntryToContextMessages`, native messages unchanged — no perk message union, no
-  compaction-cutoff reconstruction). The typed predicate accepts the selected flavor's marker only
+  context projection** (`extension/pi/v1/contextEvidence.ts`:
+  `sessionManager.buildSessionProjection().messages` — compaction selection AND `context_edit`
+  omission/replacement applied by Pi; native messages unchanged — no perk message union, no
+  compaction-cutoff reconstruction, no edit replay). The typed predicate accepts the selected flavor's marker only
   as **user content** or as the **owned customType's custom content** (string, or one whole
   `{type:"text"}` part — parts are never joined; non-text/malformed parts are ignored); assistant/
   tool/bash output, other customs, plain `custom` state, `details`, and compaction/branch
   summaries quoting the marker never count. So the session carries ONE live copy per flavor, a
-  compaction that drops the copy from Pi's projection naturally re-injects, and another flavor's
+  compaction or `context_edit` omission that drops the copy from Pi's projection naturally
+  re-injects (a replacement counts only while it still carries the marker), and another flavor's
   live copy under a shared customType never suppresses the selected flavor. Installer order:
   guarded full-branch read (failure → return, `select` never called) → the runner fence (a runner
   child selects nothing — `select` never called) → `select` (eligibility + flavor from
