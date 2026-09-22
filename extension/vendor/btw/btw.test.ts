@@ -1,11 +1,18 @@
 // btw tests — the extracted pure core (offline): system-prompt footer stripping, text extraction,
 // thread/tool-arg formatting, the gate-mirror `sideSessionTools` invariant, and the §5-conformed
 // themed glyphs (`✗`/`▸`, never `❌`/`⚙`) under the D9 never-exceed-`width` law. Plus a registration
-// smoke that binds the real perk extension and asserts `/btw` registers without throwing.
+// smoke that binds the real perk extension and asserts `/btw` registers without throwing, and the
+// seed-through-the-manager / registry-stream summary construction pins against the real SDK.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type AssistantMessage, fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
+import {
+  type AssistantMessage,
+  type FauxResponseFactory,
+  fauxAssistantMessage,
+  fauxText,
+  type Message,
+} from "@earendil-works/pi-ai";
 import { AgentSession, ModelRegistry, SessionManager } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import {
@@ -14,7 +21,16 @@ import {
 } from "../../substrate/agentScratch.ts";
 import { registerToolGating } from "../../substrate/toolGating.ts";
 import { fauxModelRuntime, loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
-import { buildSeedMessages, createBtwAgentSession, liveModelRuntime, registerBtw } from "./btw.ts";
+import {
+  BTW_SUMMARY_PROMPT,
+  buildSeedMessages,
+  createBtwAgentSession,
+  liveModelRuntime,
+  type ProjectedMessage,
+  registerBtw,
+  seedSessionManager,
+  summarizeBtwThread,
+} from "./btw.ts";
 import {
   extractEventAssistantText,
   extractText,
@@ -176,25 +192,114 @@ test("binding the perk extension registers /btw and does not throw on session_st
 
 // --- run-owned scratch delivery + live-runtime session construction -----------------------------
 
-test("btw seed filtering removes every main-session scratch custom before side-session seeding", () => {
+function seedOf(manager: SessionManager, thread: Parameters<typeof buildSeedMessages>[1] = []) {
+  return buildSeedMessages(
+    { sessionManager: manager } as unknown as Parameters<typeof buildSeedMessages>[0],
+    thread,
+  );
+}
+
+test("btw seed selection over the parent's live projection: keeps user turns + foreign customs; drops scratch customs, `system` messages, and context-edited (omitted) turns", () => {
   const manager = SessionManager.inMemory("/repo");
   const block = renderAgentScratchBlock("/repo", "RID");
   manager.appendCustomMessageEntry(AGENT_SCRATCH_CONTEXT_TYPE, block.content, false);
   manager.appendCustomMessageEntry("test:keep", "keep me", false);
-  const seed = buildSeedMessages(
-    { sessionManager: manager } as unknown as Parameters<typeof buildSeedMessages>[0],
-    [],
+  manager.appendMessage({ role: "user", content: "a main-session question", timestamp: 1 });
+  manager.appendMessage({
+    role: "system",
+    content: "parent prompt",
+    toolsAdded: [{ name: "bash", description: "run", parameters: { type: "object" } }],
+    timestamp: 2,
+  } as never);
+  const omitted = manager.appendMessage({ role: "user", content: "omitted later", timestamp: 3 });
+  manager.appendContextEdit(omitted, null);
+
+  const seed = seedOf(manager);
+  assert.deepEqual(
+    seed.map((m) => (m.role === "custom" ? `custom:${m.customType}` : m.role)),
+    ["custom:test:keep", "user"],
+    "scratch, system and the omitted turn are gone; order is Pi's",
   );
   assert.equal(
-    seed.some(
-      (message) => (message as { customType?: string }).customType === AGENT_SCRATCH_CONTEXT_TYPE,
-    ),
+    (seed[1] as { content?: unknown }).content,
+    "a main-session question",
+    "the surviving user turn is the live one, byte-for-byte",
+  );
+});
+
+test("seedSessionManager persists one of every projected role as canonical entries; the side projection reproduces them in order (system absent)", () => {
+  const seed: ProjectedMessage[] = [
+    { role: "compactionSummary", summary: "earlier history", tokensBefore: 1234, timestamp: 10 },
+    { role: "user", content: "a question", timestamp: 11 },
+    {
+      role: "assistant",
+      content: [{ type: "text", text: "an answer" }],
+      api: "openai-responses",
+      provider: "faux",
+      model: "faux-1",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: 12,
+    },
+    {
+      role: "toolResult",
+      toolCallId: "tc-1",
+      toolName: "read",
+      content: [{ type: "text", text: "file body" }],
+      isError: false,
+      timestamp: 13,
+    },
+    {
+      role: "bashExecution",
+      command: "echo hi",
+      output: "hi",
+      exitCode: 0,
+      cancelled: false,
+      truncated: false,
+      timestamp: 14,
+    },
+    { role: "custom", customType: "test:keep", content: "keep me", display: false, timestamp: 15 },
+    { role: "branchSummary", summary: "an abandoned branch", fromId: null, timestamp: 16 },
+    { role: "system", content: "never side authority", timestamp: 17 } as ProjectedMessage,
+  ];
+  const manager = SessionManager.inMemory("/side");
+  seedSessionManager(manager, seed);
+  const projected = manager.buildSessionProjection().messages;
+  assert.deepEqual(
+    projected.map((m) => m.role),
+    [
+      "compactionSummary",
+      "user",
+      "assistant",
+      "toolResult",
+      "bashExecution",
+      "custom",
+      "branchSummary",
+    ],
+    "every role round-trips through its canonical entry kind; system is skipped",
+  );
+  const summary = projected[0];
+  assert.ok(summary?.role === "compactionSummary");
+  assert.equal(summary.summary, "earlier history");
+  assert.equal(summary.tokensBefore, 1234);
+  const branch = projected[6];
+  assert.ok(branch?.role === "branchSummary");
+  assert.equal(branch.summary, "an abandoned branch");
+  // Message entries keep their bytes and timestamps.
+  assert.deepEqual(projected[1], seed[1]);
+  assert.deepEqual(projected[2], seed[2]);
+  assert.deepEqual(projected[5], seed[5]);
+  // An empty manager's root compaction captures no system message.
+  assert.equal(
+    projected.some((m) => m.role === "system"),
     false,
-  );
-  assert.equal(
-    seed.some((message) => (message as { customType?: string }).customType === "test:keep"),
-    true,
-    "non-scratch seed context survives",
   );
 });
 
@@ -356,23 +461,120 @@ test("createBtwAgentSession (side-chat shape): a reply streams through the LIVE 
   }
 });
 
-test("createBtwAgentSession (summary shape): the summary prompt rides the LIVE runtime too", async () => {
+test("createBtwAgentSession seeds THROUGH the manager: the provider sees the seed before the prompt, no parent system content, and persistence continues normally (the reproduced-defect regression)", async () => {
+  // Pi ≥ 0.87 rebuilds `context.messages` from the session manager on every request, so a seed
+  // assigned onto `agent.state.messages` is silently dropped. Discriminating: the faux factory
+  // captures the exact transcript the provider received.
   const reg = await fauxModelRuntime();
-  reg.setResponses([fauxAssistantMessage([fauxText("the summary")], { stopReason: "stop" })]);
+  let seen: Message[] | null = null;
+  const factory: FauxResponseFactory = (context) => {
+    seen = context.messages;
+    return fauxAssistantMessage([fauxText("reply")], { stopReason: "stop" });
+  };
+  reg.setResponses([factory]);
+  const seed: ProjectedMessage[] = [
+    { role: "user", content: "seeded main-session fact", timestamp: 1 },
+    { role: "custom", customType: "test:keep", content: "keep me", display: false, timestamp: 2 },
+  ];
   const session = await createBtwAgentSession(fakeBtwCtx(reg), {
     thinkingLevel: "off",
-    tools: [],
-    appendSystemPrompt: ["Summarize this side conversation."],
+    tools: ["read"],
+    seed,
   });
   try {
-    await session.prompt(formatThread([{ question: "q", answer: "a" }]), {
-      source: "extension",
-    });
-    const response = lastAssistantMessage(session.state.messages) as AssistantMessage | null;
-    assert.ok(response, "no assistant response captured");
-    assert.equal(response.stopReason, "stop");
-    assert.equal(extractText(response.content), "the summary");
+    await session.prompt("q", { source: "extension" });
+    assert.ok(seen, "the provider was never called");
+    const transcript = seen as Message[];
+    const texts = transcript.map((m) =>
+      typeof m.content === "string"
+        ? m.content
+        : m.content
+            .map((part) => ("text" in part && typeof part.text === "string" ? part.text : ""))
+            .join(""),
+    );
+    const seededAt = texts.findIndex((t) => t.includes("seeded main-session fact"));
+    const keptAt = texts.findIndex((t) => t.includes("keep me"));
+    const promptAt = texts.indexOf("q");
+    assert.ok(seededAt >= 0, "the seeded user turn reached the provider");
+    assert.ok(keptAt > seededAt, "the seeded custom (converted by Pi) followed it");
+    assert.ok(promptAt > keptAt, "the new prompt came AFTER the seed");
+    assert.equal(transcript[keptAt]?.role, "user", "Pi converts a custom to a user turn");
+    for (const m of transcript) {
+      if (m.role !== "system") continue;
+      assert.equal(
+        typeof m.content === "string" && m.content.includes("You are the main session."),
+        false,
+        "no parent system content is seeded",
+      );
+    }
+    // Subsequent persistence is normal: seed + prompt + reply live in the side session's state
+    // (Pi also persists the side session's OWN structured system message on the first turn — it
+    // carries the side prompt, never the parent's).
+    const persisted = session.state.messages;
+    assert.deepEqual(
+      persisted.filter((m) => m.role !== "system").map((m) => m.role),
+      ["user", "custom", "user", "assistant"],
+    );
+    const ownSystem = persisted.find((m) => m.role === "system");
+    assert.ok(ownSystem && typeof ownSystem.content === "string");
+    assert.equal(ownSystem.content.includes("Current date: 2026-01-01"), false);
   } finally {
     session.dispose();
   }
+});
+
+test("summarizeBtwThread: one tool-free request through the registry stream (BTW_SUMMARY_PROMPT alone, the formatted thread, no reasoning)", async () => {
+  const reg = await fauxModelRuntime();
+  const items = [
+    {
+      question: "q",
+      answer: "a",
+      timestamp: 1,
+      provider: "faux",
+      model: "faux-1",
+      thinkingLevel: "off",
+    },
+  ] as const satisfies Parameters<typeof summarizeBtwThread>[1];
+  let captured: { messages: Message[]; reasoning: unknown } | null = null;
+  const factory: FauxResponseFactory = (context, options) => {
+    captured = { messages: context.messages, reasoning: options?.reasoning };
+    return fauxAssistantMessage([fauxText("the summary")], { stopReason: "stop" });
+  };
+  reg.setResponses([factory]);
+  const ctx = fakeBtwCtx(reg);
+  assert.equal(await summarizeBtwThread(ctx, items), "the summary");
+  assert.ok(captured, "the provider was never called");
+  const { messages, reasoning } = captured as { messages: Message[]; reasoning: unknown };
+  const system = messages[0];
+  assert.ok(system?.role === "system", "a leading system message carries the prompt");
+  assert.equal(system.content, BTW_SUMMARY_PROMPT, "the system prompt is BTW_SUMMARY_PROMPT alone");
+  assert.equal(system.toolsAdded, undefined, "no tools declared");
+  assert.deepEqual(
+    messages.slice(1).map((m) => ({ role: m.role, content: m.content })),
+    [{ role: "user", content: formatThread(items) }],
+    "exactly one user message: the formatted thread",
+  );
+  assert.equal(reasoning, undefined, "thinking off = reasoning omitted");
+
+  // An error-stopped response rejects with its message (request-time auth failures ride here).
+  reg.setResponses([
+    fauxAssistantMessage([], { stopReason: "error", errorMessage: "No API key found" }),
+  ]);
+  await assert.rejects(summarizeBtwThread(ctx, items), /No API key found/);
+
+  // An empty `stop` response yields the placeholder.
+  reg.setResponses([fauxAssistantMessage([], { stopReason: "stop" })]);
+  assert.equal(await summarizeBtwThread(ctx, items), "(No summary generated)");
+
+  // An already-aborted signal rejects.
+  const aborted = new AbortController();
+  aborted.abort();
+  reg.setResponses([fauxAssistantMessage([fauxText("late")], { stopReason: "stop" })]);
+  await assert.rejects(summarizeBtwThread(ctx, items, { signal: aborted.signal }));
+
+  // No model selected.
+  await assert.rejects(
+    summarizeBtwThread({ ...ctx, model: undefined } as never, items),
+    /No active model selected/,
+  );
 });

@@ -9,22 +9,23 @@
 //     and the session cache key carries the gate state so a gate flip recreates the session — perk's
 //     structural read-only guarantee is never bypassed by the isolated side session;
 //   - §5 themed-glyph conformance (`❌`→`✗`, running `⚙`→`▸`) via the extracted core;
-//   - the extended `stripDynamicSystemPromptFooter` regex (also strips `Current date:`).
+//   - the extended `stripDynamicSystemPromptFooter` regex (also strips `Current date:`);
+//   - the side session is seeded THROUGH its own `SessionManager` (`seedSessionManager`): Pi
+//     ≥ 0.87 rebuilds `context.messages` from the manager's projection on every request, so
+//     assigning `agent.state.messages` would be silently discarded; parent `system` messages are
+//     never seeded (they would become the side session's provider-visible tool loadout);
+//   - the summary is a tool-free one-shot over `ModelRegistry.streamSimple` (request-time auth,
+//     live `--api-key`/extension providers), not a temporary AgentSession.
 //
 // Charter note: `/btw`'s UI is a `ctx.ui.custom` overlay — the ONE sanctioned exception to the §6 D6
 // decline (docs/design/tui-charter.md). It is human-invoked only (no model tool, not a stage/door),
 // `ctx.hasUI`-gated, and never machine-reachable (cold/headless/RPC), so it cannot threaten the
 // machine-executability the decline protects. `ctx.ui.custom` stays declined for all workflow surfaces.
 
-import type {
-  ThinkingLevel as AiThinkingLevel,
-  AssistantMessage,
-  Message,
-} from "@earendil-works/pi-ai";
+import type { ThinkingLevel as AiThinkingLevel, AssistantMessage } from "@earendil-works/pi-ai";
 import {
   type AgentSession,
   type AgentSessionEvent,
-  buildSessionContext,
   createAgentSession,
   createExtensionRuntime,
   type ExtensionAPI,
@@ -35,6 +36,7 @@ import {
   type ModelRuntime,
   type ResourceLoader,
   SessionManager,
+  type SessionProjection,
 } from "@earendil-works/pi-coding-agent";
 import {
   Container,
@@ -91,12 +93,15 @@ const BTW_SYSTEM_PROMPT = [
   "Be direct and practical.",
 ].join(" ");
 
-const BTW_SUMMARY_PROMPT =
+export const BTW_SUMMARY_PROMPT =
   "Summarize this side conversation for handoff into the main conversation. Keep key decisions, findings, risks, and next actions. Output only the summary.";
+
+/** Pi's projected runtime message union (the seed vocabulary; `AgentMessage` is not a root export). */
+export type ProjectedMessage = SessionProjection["messages"][number];
 
 type SessionThinkingLevel = "off" | AiThinkingLevel;
 
-type BtwDetails = {
+export type BtwDetails = {
   question: string;
   answer: string;
   timestamp: number;
@@ -169,9 +174,51 @@ export function liveModelRuntime(
 }
 
 /**
- * Construct btw's isolated in-memory AgentSession (side chat + summary share this shape) on the
- * live session's model runtime (`liveModelRuntime`). Throws when no model is selected — callers
- * gate on `ctx.model` first.
+ * Persist a projected-message seed into a (fresh) side `SessionManager` as canonical entries, so
+ * the side AgentSession's own projection reproduces it: Pi rebuilds `context.messages` from the
+ * manager on every request, so this is the ONLY seeding path that survives a prompt. Exhaustive
+ * over the projection roles — `appendMessage`'s contract excludes compaction/branch summaries
+ * (they get their own entry kinds, which project back as the same roles; `appendCompaction` at an
+ * empty manager's root projects exactly `[summary]`), and `system` messages are skipped outright:
+ * a parent system message would become the side session's provider-visible tool loadout (defense
+ * in depth behind `buildSeedMessages`'s selection).
+ */
+export function seedSessionManager(
+  manager: SessionManager,
+  seed: readonly ProjectedMessage[],
+): void {
+  for (const message of seed) {
+    switch (message.role) {
+      case "compactionSummary":
+        manager.appendCompaction(message.summary, null, message.tokensBefore);
+        break;
+      case "branchSummary":
+        manager.branchWithSummary(manager.getLeafId(), message.summary);
+        break;
+      case "system":
+        break;
+      case "user":
+      case "assistant":
+      case "toolResult":
+      case "bashExecution":
+      case "custom":
+        manager.appendMessage(message);
+        break;
+      default: {
+        const unreachable: never = message;
+        throw new Error(`unknown projected message role: ${JSON.stringify(unreachable)}`);
+      }
+    }
+  }
+}
+
+/**
+ * Construct btw's isolated in-memory AgentSession (the tool-capable side chat) on the live
+ * session's model runtime (`liveModelRuntime`), seeded through its own `SessionManager`
+ * (`seedSessionManager`) — `createAgentSession` initializes the agent's messages from that
+ * manager and every request re-projects from it, so no `refreshContext()` is needed. btw passes
+ * `model` and `thinkingLevel` explicitly, so the SDK never "restores" them from the seeded
+ * manager. Throws when no model is selected — callers gate on `ctx.model` first.
  */
 export async function createBtwAgentSession(
   ctx: ExtensionContext,
@@ -179,13 +226,16 @@ export async function createBtwAgentSession(
     thinkingLevel: SessionThinkingLevel;
     tools: string[];
     appendSystemPrompt?: string[];
+    seed?: readonly ProjectedMessage[];
   },
 ): Promise<AgentSession> {
   const model = ctx.model;
   if (!model) throw new Error("No active model selected.");
 
+  const sessionManager = SessionManager.inMemory();
+  seedSessionManager(sessionManager, opts.seed ?? []);
   const { session } = await createAgentSession({
-    sessionManager: SessionManager.inMemory(),
+    sessionManager,
     model,
     modelRuntime: liveModelRuntime(ctx),
     thinkingLevel: opts.thinkingLevel,
@@ -195,20 +245,24 @@ export async function createBtwAgentSession(
   return session;
 }
 
-export function buildSeedMessages(ctx: ExtensionContext, thread: BtwDetails[]): Message[] {
-  const seed: Message[] = [];
+/**
+ * The side session's seed: the parent's live projection (`buildSessionProjection().messages` —
+ * compaction selection and context edits applied by Pi) minus the run-owned scratch customs and
+ * EVERY `system` message (Pi ≥ 0.86 persists structured system-prompt sections as `system`
+ * messages carrying `toolsAdded`/`toolsRemoved`; seeded, they would become side authority), then
+ * the btw thread as user/assistant pairs.
+ */
+export function buildSeedMessages(ctx: ExtensionContext, thread: BtwDetails[]): ProjectedMessage[] {
+  const seed: ProjectedMessage[] = [];
 
   try {
-    const contextMessages = buildSessionContext(
-      ctx.sessionManager.getEntries(),
-      ctx.sessionManager.getLeafId(),
-    ).messages;
+    const contextMessages = ctx.sessionManager.buildSessionProjection().messages;
     seed.push(
-      ...(contextMessages.filter(
+      ...contextMessages.filter(
         (message) =>
-          (message as { customType?: string }).customType !== AGENT_SCRATCH_CONTEXT_TYPE &&
-          "role" in message,
-      ) as Message[]),
+          message.role !== "system" &&
+          (message as { customType?: string }).customType !== AGENT_SCRATCH_CONTEXT_TYPE,
+      ),
     );
   } catch {
     // Ignore context seed failures and continue with an empty side thread.
@@ -242,6 +296,41 @@ export function buildSeedMessages(ctx: ExtensionContext, thread: BtwDetails[]): 
   }
 
   return seed;
+}
+
+/**
+ * Summarize a btw thread with ONE tool-free model request through the public registry stream
+ * (`ModelRegistry.streamSimple` → the live `ModelRuntime` with request-time authentication, so a
+ * live `--api-key` override and extension-registered providers are honored). The system prompt
+ * is `BTW_SUMMARY_PROMPT` alone; `reasoning` is omitted (= thinking off). Request-time auth/setup
+ * failures surface as an `error`-stopped message and are thrown with their text.
+ */
+export async function summarizeBtwThread(
+  ctx: Pick<ExtensionContext, "model" | "modelRegistry">,
+  items: readonly BtwDetails[],
+  opts: { signal?: AbortSignal } = {},
+): Promise<string> {
+  const model = ctx.model;
+  if (!model) {
+    throw new Error("No active model selected.");
+  }
+
+  const stream = ctx.modelRegistry.streamSimple(
+    model,
+    {
+      systemPrompt: BTW_SUMMARY_PROMPT,
+      messages: [{ role: "user", content: formatThread(items), timestamp: Date.now() }],
+    },
+    { ...(opts.signal ? { signal: opts.signal } : {}) },
+  );
+  const response = await stream.result();
+  if (response.stopReason === "aborted") {
+    throw new Error("Summary request was aborted.");
+  }
+  if (response.stopReason === "error") {
+    throw new Error(response.errorMessage || "Summary request failed.");
+  }
+  return extractText(response.content) || "(No summary generated)";
 }
 
 class BtwOverlay extends Container implements Focusable {
@@ -629,12 +718,8 @@ export function registerBtw(
       tools: sideSessionTools(gating.isActive()),
       appendSystemPrompt:
         agentScratchContent === null ? undefined : [BTW_SYSTEM_PROMPT, agentScratchContent],
+      seed: buildSeedMessages(ctx, thread),
     });
-
-    const seedMessages = buildSeedMessages(ctx, thread);
-    if (seedMessages.length > 0) {
-      session.agent.state.messages = seedMessages as typeof session.agent.state.messages;
-    }
 
     const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
       if (!sideBusy || !pendingQuestion) {
@@ -818,47 +903,8 @@ export function registerBtw(
       });
   }
 
-  async function summarizeThread(ctx: ExtensionContext, items: BtwDetails[]): Promise<string> {
-    const model = ctx.model;
-    if (!model) {
-      throw new Error("No active model selected.");
-    }
-
-    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-    if (auth.ok === false) {
-      throw new Error(auth.error);
-    }
-
-    // Rides the LIVE runtime like the side session (`createBtwAgentSession`).
-    const session = await createBtwAgentSession(ctx, {
-      thinkingLevel: "off",
-      tools: [],
-      appendSystemPrompt: [BTW_SUMMARY_PROMPT],
-    });
-
-    try {
-      await session.prompt(formatThread(items), { source: "extension" });
-      const response = lastAssistantMessage(session.state.messages) as AssistantMessage | null;
-      if (!response) {
-        throw new Error("Summary finished without a response.");
-      }
-      if (response.stopReason === "aborted") {
-        throw new Error("Summary request was aborted.");
-      }
-      if (response.stopReason === "error") {
-        throw new Error(response.errorMessage || "Summary request failed.");
-      }
-
-      return extractText(response.content) || "(No summary generated)";
-    } finally {
-      try {
-        await session.abort();
-      } catch {
-        // Ignore abort errors during temporary session teardown.
-      }
-      session.dispose();
-    }
-  }
+  // The summary one-shot's abort is owned here: created per call, aborted on session shutdown.
+  let summaryAbort: AbortController | null = null;
 
   async function injectSummaryIntoMain(
     ctx: ExtensionContext | ExtensionCommandContext,
@@ -869,8 +915,9 @@ export function registerBtw(
     }
 
     setOverlayStatus("Summarizing BTW thread for injection...");
+    summaryAbort = new AbortController();
     try {
-      const summary = await summarizeThread(ctx, thread);
+      const summary = await summarizeBtwThread(ctx, thread, { signal: summaryAbort.signal });
       const message = `Summary of my BTW side conversation:\n\n${summary}`;
       if (ctx.isIdle()) {
         pi.sendUserMessage(message);
@@ -882,6 +929,8 @@ export function registerBtw(
       notify(ctx, "Injected BTW summary into main chat.", "info");
     } catch (error) {
       notify(ctx, error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      summaryAbort = null;
     }
   }
 
@@ -1045,6 +1094,7 @@ export function registerBtw(
   });
 
   pi.on("session_shutdown", async () => {
+    summaryAbort?.abort();
     await disposeSideSession();
     dismissOverlay();
   });
