@@ -382,12 +382,15 @@ The craft survives for any future probe over a surface perk *does* own or vendor
 - **The exact-pin test (version + one full row) is what forces bumps to be deliberate,
   reviewed re-verifies.**
 
-## Report-only checks gated on an installed package's version range
+## Report-only checks gated on an installed package's version range (retired precedent)
 
-`_subagent_host_tools_check(root, *, environ=None)` (`src/perk/convergence/doctor/checks.py`) is
-the precedent for a report-only check that fires only while an installed, **unpinned** package sits
-in a known-affected version range — here pi-subagents 0.67.x's host-builtin intersection
-(`pi/subagents.md` § "The 0.67.x host-builtin intersection"). Four disciplines it settled:
+`_subagent_host_tools_check(root, *, environ=None)` (formerly in
+`src/perk/convergence/doctor/checks.py`) was the precedent for a report-only check that fires only
+while an installed, **unpinned** package sits in a known-affected version range — pi-subagents
+0.67.x's host-builtin intersection (`pi/subagents.md` § "The 0.67.x host-builtin intersection
+(historical)"). *Retired 2026-09*: pi-subagents 0.70.0 removed the intersection, so the check, its
+`_SUBAGENTS_HOST_INTERSECTION_AFFECTED` range and the `PI_FFF_MODE` launch injection were deleted
+(like the marker-probe table above, the shape outlives the instance). Four disciplines it settled:
 
 - **Gate on a strict `X.Y.Z` against a half-open `[lower, upper)` range**
   (`_SUBAGENTS_HOST_INTERSECTION_AFFECTED = ("0.67.0", "0.68.0")`; `_parse_strict_semver`). A
@@ -404,11 +407,12 @@ in a known-affected version range — here pi-subagents 0.67.x's host-builtin in
   env beats the file). Reproducing precedence *approximately* would make doctor disagree with the
   tool it is diagnosing.
 - **An `environ: Mapping[str, str] | None` seam defaulting to `os.environ` at call time**, paired
-  with an autouse `monkeypatch.delenv("PI_FFF_MODE")` in `tests/conftest.py` — the check reads the
-  developer's real shell otherwise, and an exported `override` flips unrelated doctor tests.
-- **Parity between the doctor's literal detail and `launch.FFF_MODE_ENV` is pinned by a test, not
-  an import** (`tests/test_doctor.py` asserts the injected value appears in the detail): the
-  `convergence.doctor` package deliberately has no edge into `perk.run.launch`.
+  with an autouse `monkeypatch.delenv("PI_FFF_MODE")` in `tests/conftest.py` (both gone with the
+  check) — a check reading the developer's real shell otherwise lets an exported value flip
+  unrelated doctor tests.
+- **Parity between the doctor's literal detail and a launch-seam constant is pinned by a test,
+  not an import** (`tests/test_doctor.py` asserted the injected `FFF_MODE_ENV` value appeared in
+  the detail): the `convergence.doctor` package deliberately has no edge into `perk.run.launch`.
 
 ## Extending a report-only advisory warn silently flips fixture arms
 
@@ -425,9 +429,10 @@ nudge, grep for every fixture that plants the artifact the nudge inspects.
 ## Managed pieces and checks that act on files OUTSIDE the repo (the user's agent dir)
 
 Some pieces read or rewrite files inside the user's Pi agent directory rather than the repo: the
-`subagent-host-tools` check's `pi-fff.json` read, and pi-subagents' native
+`subagent-package-scope` check's user-scope `settings.json` read, and pi-subagents' native
 `extensions/subagent/config.json` (the retired `subagent-bridge-config` check's user-scope
-`settings.json` read was another). Three rules govern them:
+`settings.json` read and the retired `subagent-host-tools` check's `pi-fff.json` read were
+others). Three rules govern them:
 
 - **Resolve the user scope through the ONE shared resolver `launch_stage` also consumes** —
   `src/perk/substrate/config.py::launch_pi_agent_dir` (env `PI_CODING_AGENT_DIR` → main-checkout
@@ -441,7 +446,7 @@ Some pieces read or rewrite files inside the user's Pi agent directory rather th
   private `config.json` and never converges it (`workflow/borrowed-packages.md` § "Borrowed-engine
   stances"; the refusal surface is in `workflow/mergeability-and-conflict-resolution.md`). The
   read-side disciplines still apply to any check that inspects the user's agent dir — the
-  `subagent-host-tools` check's `pi-fff.json` read is the live instance.
+  `subagent-package-scope` check's user-scope `settings.json` read is the live instance.
 - **Doctor `--fix` catches `UserFacingCliError` from a managed `converge(True)`** and records
   `"<check>: <message>"` on `fix_errors` instead of aborting, so a refusal on one piece never
   blocks the rest of the repair pass.

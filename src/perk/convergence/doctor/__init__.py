@@ -58,7 +58,6 @@ from perk.convergence.doctor.checks import (
     _stage_models_check,
     _subagent_compat_check,
     _subagent_engine_check,
-    _subagent_host_tools_check,
     _subagent_package_scope_check,
     _watch_feedback_asset_check,
 )
@@ -144,7 +143,6 @@ __all__ = [
     "_strip_ungrouped_ignore_line",
     "_subagent_compat_check",
     "_subagent_engine_check",
-    "_subagent_host_tools_check",
     "_subagent_package_scope_check",
     "_untrack_materialized_plan_cache",
     "_untrack_subagent_artifacts",
@@ -238,13 +236,10 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     # resource-overrides posture; beside subagent-engine for `package`-group adjacency. In
     # scaffolded unit-test repos the gitignored install tree is absent (deterministic `info`).
     checks.append(_subagent_compat_check(root))
-    # Same offline/report-only posture (file reads + one env read, warn at worst, no --fix arm),
-    # so NOT verify-gated — right after subagent-compat for `package`-group adjacency: the one
-    # known engine + pi-fff interaction that kills every review/scout lane at launch.
-    checks.append(_subagent_host_tools_check(root))
-    # The pi-subagents family's third report-only probe (two file reads, warn at worst, no --fix
-    # arm): a user-scope pi-subagents entry beside the project entry — pi's pre-trust load keeps
-    # the user copy alive as a context-less RPC responder (contracts §8.35).
+    # The pi-subagents family's second report-only probe (two file reads, warn at worst, no --fix
+    # arm), right after subagent-compat for `package`-group adjacency: a user-scope pi-subagents
+    # entry beside the project entry — pi's pre-trust load keeps the user copy alive as a
+    # context-less RPC responder (contracts §8.35).
     checks.append(_subagent_package_scope_check(root))
     # Ponytail is another lazy project install: absent is informational; a present incompatible
     # source warns without repair because settings convergence preserves operator pins.

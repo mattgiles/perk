@@ -126,14 +126,13 @@ export const SUBAGENT_CHILD_TOOLS: readonly string[] = ["structured_output", "co
 
 /**
  * @ff-labs/pi-fff's search tools. BOTH mode name-sets are enumerated (static names, inert
- * when absent — the code_search version-tolerance precedent): warm sessions run pi-fff's
- * default tools-and-ui mode (fffind/ffgrep [+ fff-multi-grep when enabled upstream]), and
- * perk launches inject PI_FFF_MODE=tools-and-ui (the same additive mode) so pi's builtin
- * find/grep stay host-builtins for pi-subagents' host-tool intersection (an override-mode
- * pi-fff shadows them by name and fails review/scout lanes closed). The override name-set
- * (multi_grep; find/grep already allowlisted/pass-through) stays enumerated for an operator
- * `PI_FFF_MODE=override` opt-in. All register at load time. Frecency/history state lives under ~/.pi/agent/fff/ — outside the worktree
- * (the fetch_content cache-write precedent), so the read-only bar holds.
+ * when absent — the code_search version-tolerance precedent): pi-fff's own default is the
+ * additive tools-and-ui mode (fffind/ffgrep [+ fff-multi-grep when enabled upstream]) beside
+ * pi's builtin find/grep; perk injects no mode (pi-fff's CLI flag → `PI_FFF_MODE` →
+ * `pi-fff.json` precedence decides). The override name-set (multi_grep; find/grep already
+ * allowlisted/pass-through) stays enumerated for an operator `PI_FFF_MODE=override` opt-in.
+ * All register at load time. Frecency/history state lives under ~/.pi/agent/fff/ — outside
+ * the worktree (the fetch_content cache-write precedent), so the read-only bar holds.
  */
 export const FFF_SEARCH_TOOLS: readonly string[] = [
   "fffind",

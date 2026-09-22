@@ -89,9 +89,11 @@ property observed through the old path needs a new observer:
   confirm **only** the engine story fails. Historical precedent: `tests/test_doctor.py`'s
   former `subagent-bridge-config` suite (an engine story plus a direct-seam matrix) went 6 → 2
   engine runs while keeping 10 → 10 cases — the check and its suite were retired with perk's
-  finding-streaming protocol, but the `subagent-host-tools` suite in the same file keeps the
-  shape (one `run_doctor` story, direct `_subagent_host_tools_check(...)` calls for the matrix).
-  Shortcut: with `PI_CODING_AGENT_DIR` set, a bare `tmp_path` is a complete input for the env-arm
+  finding-streaming protocol; the `subagent-host-tools` suite that kept the shape (one
+  `run_doctor` story, direct `_subagent_host_tools_check(...)` calls for the matrix) was retired
+  with its check in 2026-09 — the `subagent-package-scope` suite in the same file is the live
+  instance of the pattern (its engine story pins registration adjacency to `subagent-compat`).
+  Shortcut: with `PI_CODING_AGENT_DIR` set, a bare `tmp_path` is a complete input for env-arm
   cases — only config-arm cases need a scaffolded repo.
 
 ## Manufacture collisions for uniqueness and dedup claims

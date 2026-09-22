@@ -7,9 +7,7 @@ re-verify ritual — never on a version constraint and never on reading the inst
 tests or doctor.
 
 **When to re-verify:** `perk doctor`'s `subagent-compat` check **warns** (installed version ≠
-`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`), its `subagent-host-tools` check **warns** (the installed
-version is in the host-tool-intersection affected range and pi-fff resolves to `override`), or
-you are about to build on new engine mechanics.
+`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`), or you are about to build on new engine mechanics.
 
 ## Steps
 
@@ -51,21 +49,23 @@ you are about to build on new engine mechanics.
      (`src/agents/skills.ts`) must keep resolving `skillPath` against `dirname(agent.filePath)`
      and skipping a missing entry (`collectFilesystemSkills`: `if (!fs.existsSync(...)) continue`)
      — the reviewer defs' two-candidate Ponytail `skillPath` depends on both;
-   - the **host-tool intersection**: `getHostBuiltinToolNames` / `resolvePiLaunchToolPlan` /
-     `isReviewOrScoutLaneAgent` in `src/runs/shared/child-tool-plan.ts` and the
-     `hostAvailableBuiltins` call sites in `src/runs/background/async-execution.ts`. The 0.67.x
-     engine counted only builtin-*sourced* host tools, so pi-fff `override` (re-registering
-     `grep`/`find`) failed review/scout-named agents closed at launch; 0.68.0's
-     `getHostBuiltinToolNames` counts wrapped core slots regardless of source. The affected
-     range is closed: `_SUBAGENTS_HOST_INTERSECTION_AFFECTED = ("0.67.0", "0.68.0")` (exact pin
-     `tests/test_doctor.py::test_subagent_host_tools_affected_range_is_pinned`). perk keeps
-     injecting `PI_FFF_MODE=tools-and-ui` (`FFF_MODE_ENV`) as a harmless additive default; if a
-     later release reintroduces a source-classified census, open a NEW range rather than
-     reopening this one.
+   - the **child tool plan** (`src/runs/shared/child-tool-plan.ts`): since 0.70.0 the engine no
+     longer intersects a child's declared tools with the host session's builtins (the 0.67.x
+     `getHostBuiltinToolNames` census that failed review/scout-named agents closed under a
+     pi-fff `override` is gone), so perk injects no `PI_FFF_MODE` and runs no host-tool doctor
+     check; if a later release reintroduces a host-side intersection, that is a new hazard to
+     name, not a reopened one;
+   - the **completion contract**: 0.70.1 removed the completion mutation guard (a def's
+     `completionGuard` is ignored) and tightened acceptance inference — a report lane must still
+     complete on its validated `structured_output` report under `WAVE_ACCEPTANCE`;
+   - the **fork-context repair** for Pi 0.87 (the checkout-only fix): confirm whether the
+     installed artifact carries it; until it does, perk children stay on `context: "fresh"`
+     (the support boundary recorded in `docs/design/pi-subagents-child-execution-policy.md`).
 3. **Run `just ci`.**
 4. **Run the live leg** from a read-write session whose installed pi-subagents is the new
-   version: `perk doctor` (`subagent-compat` warns until the stamp moves; `subagent-host-tools`
-   `ok`), then one `/plan-review-browser` wave and one `/pr-review-browser` wave to N/N coverage
+   version: `perk doctor` (`subagent-compat` warns until the stamp moves; no
+   `subagent-host-tools` row), then one `/plan-review-browser` wave and one `/pr-review-browser`
+   wave to N/N coverage
    — the `perk:wave` marker appears at launch and clears at collection, and the final
    annotations land after `collect_*`. **The stamp moves only on a passing leg**: bump
    `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` and

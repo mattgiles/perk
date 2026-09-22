@@ -71,18 +71,21 @@ three render sites.
 
 ## Env setdefault via merge order
 
-`_build_exec_env` is `{**_NPM_QUIET_ENV, **FFF_MODE_ENV, **environ, PERK_RUN_ID, PERK_CLI_VERSION}`:
+`_build_exec_env` is `{**_NPM_QUIET_ENV, **environ, PERK_RUN_ID, PERK_CLI_VERSION}`:
 injected defaults < operator env < perk-owned stamps, **no conditionals**. Slot new launch-seam
 vars into this layering, never `env.setdefault()` loops.
 
 - **Cosmetic defaults are local-only; correctness defaults ride both spawn sites.** The advisory
-  npm quiet vars stay off `perk/run/run_worker.py::_spawn_worker` (CI keeps full npm output);
-  `FFF_MODE_ENV` (`PI_FFF_MODE=tools-and-ui`) is merged at BOTH sites — reviewer lanes need host
-  `grep`/`find` on every path (`pi/subagents.md` § "The ≥ 0.67.0 host-builtin intersection").
+  npm quiet vars stay off `perk/run/run_worker.py::_spawn_worker` (CI keeps full npm output).
+  The one correctness default this layering carried — `FFF_MODE_ENV` (`PI_FFF_MODE=tools-and-ui`)
+  merged at BOTH sites so reviewer lanes kept host `grep`/`find` — was retired in 2026-09 once
+  pi-subagents 0.70.0 dropped the host-builtin intersection (`pi/subagents.md` § "The 0.67.x
+  host-builtin intersection (historical)"); a future behavioral default belongs at both sites the
+  same way.
 - **The inherited-env trap.** A session launched by a *pre-flip* launcher carries the old
   injected value in its operator tier: judge a changed default from a relaunch or under `env -u
-  PI_FFF_MODE`, and when a lane fails closed on "host lacks `[grep, find]`" read the launch
-  seam's merge **first** — it was perk's injected tier, not the shell profile.
+  <VAR>`, and when a lane fails on a host-side precondition read the launch seam's merge
+  **first** — with the FFF injection it was perk's injected tier, not the shell profile.
 - **The Linear key seed.** `_exec_pi` fills `LINEAR_API_KEY` from `load_local_linear_api_key`
   (the gitignored `.perk/local.toml`, read from the **main checkout before `os.chdir`**) only
   when the environment lacks a non-blank value (`linear-backend.md`).

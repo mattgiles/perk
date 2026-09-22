@@ -39,7 +39,8 @@ a capability is a borrow at all.
   `resources_discover` re-apply), not leaked — "Borrowed-tool stage scoping".
 - Read a borrowed engine's config once at activation (fix = quit and resume), refuse-don't-converge
   its private config, and expect builtin-shadowing packages to break other packages' host
-  intersections (`PI_FFF_MODE=tools-and-ui`) — "Borrowed-engine stances".
+  intersections (the since-retired `PI_FFF_MODE=tools-and-ui` injection) — "Borrowed-engine
+  stances".
 
 ## The lockstep-surfaces recipe
 
@@ -257,13 +258,15 @@ recipe:
   observed value, and a one-line fix for the operator — the operator owns the file
   (`workflow/mergeability-and-conflict-resolution.md`).
 - **Vetting a package that shadows a builtin by name has a cross-package consequence.** pi-fff's
-  `override` mode re-registers `grep`/`find` as *extension* tools; pi-subagents ≥ 0.67.0 intersects a
-  child's declared tools with the host's `sourceInfo.source === "builtin"` tools and reads that as
-  "host lacks grep/find" — reviewer/scout lanes fail closed at launch (`pi/subagents.md`). perk
-  injects `PI_FFF_MODE=tools-and-ui` at both launch seams (`launch.FFF_MODE_ENV`,
-  `workflow/cold-door-launch.md`): additive — the builtins stay beside `fffind`/`ffgrep`, and
-  `toolGating.ts::FFF_SEARCH_TOOLS` already enumerates both name-sets. Doctor's
-  `subagent-host-tools` row reports the operator-owned remainder (`workflow/init-doctor.md`).
+  `override` mode re-registers `grep`/`find` as *extension* tools; pi-subagents 0.67.x intersected a
+  child's declared tools with the host's `sourceInfo.source === "builtin"` tools and read that as
+  "host lacks grep/find" — reviewer/scout lanes failed closed at launch (`pi/subagents.md`). perk
+  injected `PI_FFF_MODE=tools-and-ui` at both launch seams (`launch.FFF_MODE_ENV`,
+  `workflow/cold-door-launch.md`) and reported the operator-owned remainder through a doctor
+  `subagent-host-tools` row (`workflow/init-doctor.md`). *Update (2026-09):* pi-subagents 0.70.0
+  removed the intersection, so the injection and the doctor row were retired — pi-fff runs under
+  its own precedence; `toolGating.ts::FFF_SEARCH_TOOLS` still enumerates both name-sets. The
+  stance survives: a builtin-shadowing borrow is vetted against every OTHER borrow's host reads.
 
 ## Residuals
 
@@ -292,6 +295,6 @@ recipe:
   universe
 - `docs/learned/pi/tui-surfaces.md` — the perk-owned footer the setFooter rule protects
 - `extension/substrate/toolGating.ts` — `admitLate` + the `resources_discover` re-apply; `FFF_SEARCH_TOOLS`
-- `docs/learned/pi/subagents.md` — § "The ≥ 0.67.0 host-builtin intersection"
-- `docs/learned/workflow/cold-door-launch.md` — `FFF_MODE_ENV` at both launch seams
+- `docs/learned/pi/subagents.md` — § "The 0.67.x host-builtin intersection (historical)"
+- `docs/learned/workflow/cold-door-launch.md` — the env merge order at both launch seams
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the native `worktree` refusal

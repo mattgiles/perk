@@ -2474,18 +2474,7 @@ second `--fix` at `fixed == []`).
   commits the deletions),
   `subagent-compat` (installed pi-subagents version vs the guidance-verified version — `warn`
   on mismatch or an unreadable version, `info` when not installed; no source probes),
-  `subagent-host-tools` (warns — never fails, no `--fix` — when the installed pi-subagents is
-  in the affected range `[0.67.0, 0.68.0)` — the 0.67.x engine intersected a child's declared
-  tools with the host's builtin-SOURCED tools and failed review/scout lanes closed on a
-  shadowed builtin; 0.68.0's `getHostBuiltinToolNames` counts wrapped core slots regardless of
-  source, so the intersection still runs but a pi-fff override no longer fails lanes — and
-  pi-fff resolves to `override`: the `PI_FFF_MODE` environment (every perk-launched AND warm
-  session), else `pi-fff.json` in the launch-precedence agent dir (warm/bare sessions only —
-  the injected env beats the file), mirroring pi-fff's precedence minus the CLI flag; the two
-  `ok` arms are distinguishable — below the range "does not intersect child tools with host
-  builtins", at/above 0.68.0 "counts wrapped core slots as host builtins"; `info` when
-  pi-subagents is not installed or its version is unreadable),
-  `subagent-package-scope` (warns — never fails, no `--fix` — when the pi-subagents npm
+  `subagent-package-scope` (directly after `subagent-compat`; warns — never fails, no `--fix` — when the pi-subagents npm
   identity (matched via the same `_package_identity` reduction `settings-wiring` dedups by,
   string and object-form entries alike) is configured both in the launch-precedence agent dir's
   user `settings.json` (`launch_pi_agent_dir`) and in the project `.pi/settings.json` — the
@@ -3075,14 +3064,13 @@ ignores the keys (the documented fail-safe posture, pinned by test on both plane
 **`perk init` two-directional settings wiring:** provider wiring composes on top of the static
 `_desired_packages` (perk + `BORROWED_PACKAGES`: `npm:@tombell/pi-diff`,
 `npm:pi-subagents`, `npm:@ff-labs/pi-fff`, `npm:@juicesharp/rpiv-ask-user-question`, `npm:@juicesharp/rpiv-todo`) layer within the same `_converge_settings` body —
-perk launches inject the env default `PI_FFF_MODE=tools-and-ui` at **both spawn sites** (local
-`_exec_pi`, remote `_spawn_worker`) with operator env winning by merge order, so every session
-keeps pi's builtin `find`/`grep` beside FFF's additive `fffind`/`ffgrep` — pi-subagents 0.67.x
-failed review/scout lanes closed when an extension shadowed a builtin by name (pi-fff `override`
-mode re-registers `grep`/`find`; ≥ 0.68.0 counts wrapped core slots as host builtins, so the
-injection is a harmless additive default kept for 0.67.x hosts and to keep the builtins beside
-`fffind`/`ffgrep`); `export PI_FFF_MODE=override`
-is the operator opt-in the `subagent-host-tools` doctor check names — `npm:pi-web-access` is **not
+perk injects **no** pi-fff search mode at either spawn site (local `_exec_pi`, remote
+`_spawn_worker`): pi-fff runs under its own precedence (CLI flag → `PI_FFF_MODE` → `pi-fff.json`
+→ its additive `tools-and-ui` default, which keeps pi's builtin `find`/`grep` beside
+`fffind`/`ffgrep`), an operator's `PI_FFF_MODE` passes through verbatim, and pi-subagents
+≥ 0.70.0 no longer intersects a child's tools with the host's builtins, so an `override` mode
+cannot fail a report lane (the 0.67.x hazard the retired `PI_FFF_MODE=tools-and-ui` injection
+and `subagent-host-tools` doctor check guarded is history) — `npm:pi-web-access` is **not
 borrowed**: it is the `web` seam's `default: true` provider, converged via the
 provider path, so a default repo still installs it but deselecting `web`
 removes it like any provider package —
@@ -12990,8 +12978,8 @@ The bare form shares ONLY the launch environment with a stage launch, through th
 env → main-checkout `[pi] agent_dir` → default — with the same missing-dir warning and
 `pi_agent_dir_invalid` refusal), the one shared executor `exec_pi(run_id=None, …)` (so
 `_build_exec_env` **removes an inherited `PERK_RUN_ID`**: the session receives the extension's
-ordinary warm-session mint on load, §8.2 — exactly as a hand-run `pi`), the `PI_FFF_MODE` /
-npm-quiet defaults and the `PERK_CLI_VERSION` stamp, the `LINEAR_API_KEY` seed from the main
+ordinary warm-session mint on load, §8.2 — exactly as a hand-run `pi`), the npm-quiet
+defaults and the `PERK_CLI_VERSION` stamp, the `LINEAR_API_KEY` seed from the main
 checkout's `local.toml` (env wins), the pre-chdir absolute `pi` resolution (`pi_cli_missing`),
 and the stale agent-lock sweep. The door reads `launch.resolve_launch_agent_dir` / `launch.exec_pi`
 as facade attributes at call time (the §8.71 import-direction rule), so the two paths cannot
