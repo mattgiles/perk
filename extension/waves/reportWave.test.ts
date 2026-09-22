@@ -25,6 +25,7 @@ import {
   startWaveScript,
   WAVE_ACCEPTANCE,
   WAVE_INTERCOM_BRIDGE,
+  WAVE_SETTLEMENT_GRACE_MS,
   WAVE_TIMEOUT_MS,
   type WaveAdapter,
   type WaveChildReceipt,
@@ -62,6 +63,15 @@ function makeSpec(overrides: Partial<ReportWaveRequest> = {}): ReportWaveRequest
 /** A schema-valid aggregate entry as the rendered script's projection produces it. */
 function okEntry(key: string, report: unknown): unknown {
   return { key, ok: true, error: null, report };
+}
+
+/**
+ * Drain the runner's ping/spawn microtask chain under mocked `setTimeout` (`setImmediate` is
+ * never mocked) so the expiry timer is armed before a test ticks it. A real wait through the
+ * settlement grace is not acceptable in a unit test.
+ */
+async function drain(): Promise<void> {
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 // Native partial evidence keeps the existing failure vocabulary and completeness denominator.
@@ -272,7 +282,7 @@ for (const outcome of ["timeout", "cancelled"] as const) {
     );
     assert.ok(start.ok);
     if (outcome === "cancelled") controller.abort();
-    else t.mock.timers.tick(30);
+    else t.mock.timers.tick(30 + WAVE_SETTLEMENT_GRACE_MS);
     await stopping;
     memory.emitCompletion({
       ...start.handle,
@@ -955,30 +965,48 @@ test("wave.run: a rejected spawn is a wave-level spawn-failed failure", async ()
   assert.match(result.failures[0]?.detail ?? "", /no session/);
 });
 
-test("wave.run: timeout stops the run best-effort and fails the wave", async () => {
+test("wave.run: timeout stops the run best-effort and fails the wave", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const adapter = createMemoryWaveAdapter({ completion: false });
-  const result = await reportWaveOver(adapter).run(makeSpec({ timeoutMs: 20 }));
+  const pending = reportWaveOver(adapter).run(makeSpec({ timeoutMs: 20 }));
+  await drain();
+  t.mock.timers.tick(20 + WAVE_SETTLEMENT_GRACE_MS);
+  const result = await pending;
   assert.equal(result.complete, false);
   assert.deepEqual(
     result.failures.map((f) => [f.key, f.reason]),
     [[null, "timeout"]],
   );
-  assert.match(result.failures[0]?.detail ?? "", /timed out after 20ms/);
+  assert.match(
+    result.failures[0]?.detail ?? "",
+    /no completion within \d+ms \(engine deadline 20ms \+ 60000ms settlement grace\)/,
+  );
   assert.equal(adapter.calls.stop.length, 1);
   assert.equal(adapter.calls.stop[0]?.asyncId, "wave-async-1");
 });
 
-test("wave.run: PERK_WAVE_TIMEOUT_MS overrides the module default timeout", async () => {
-  assert.equal(WAVE_TIMEOUT_MS, 15 * 60_000);
+test("wave.run: PERK_WAVE_TIMEOUT_MS overrides the module default timeout", async (t) => {
+  // The engine deadline default and the fixed settlement grace perk waits beyond it.
+  assert.equal(WAVE_TIMEOUT_MS, 30 * 60_000);
+  assert.equal(WAVE_SETTLEMENT_GRACE_MS, 60_000);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   process.env.PERK_WAVE_TIMEOUT_MS = "20";
   try {
     const adapter = createMemoryWaveAdapter({ completion: false });
-    const result = await reportWaveOver(adapter).run(makeSpec({ timeoutMs: undefined }));
+    const pending = reportWaveOver(adapter).run(makeSpec({ timeoutMs: undefined }));
+    await drain();
+    // The spawned deadline is the bare engine deadline — the grace never rides the spawn.
+    assert.equal(adapter.calls.spawn[0]?.timeoutMs, 20);
+    t.mock.timers.tick(20 + WAVE_SETTLEMENT_GRACE_MS);
+    const result = await pending;
     assert.deepEqual(
       result.failures.map((f) => [f.key, f.reason]),
       [[null, "timeout"]],
     );
-    assert.equal(adapter.calls.spawn[0]?.timeoutMs, 20);
+    assert.match(
+      result.failures[0]?.detail ?? "",
+      /no completion within \d+ms \(engine deadline 20ms \+ 60000ms settlement grace\)/,
+    );
   } finally {
     delete process.env.PERK_WAVE_TIMEOUT_MS;
   }
@@ -1109,10 +1137,14 @@ test("receipt: spawn-failed — no handle, no children", async () => {
   assert.deepEqual(result.receipt, { state: "spawn-failed", children: [] });
 });
 
-test("receipt: timed-out preserves the spawn handle (no completion, empty children)", async () => {
-  const result = await reportWaveOver(createMemoryWaveAdapter({ completion: false })).run(
+test("receipt: timed-out preserves the spawn handle (no completion, empty children)", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const pending = reportWaveOver(createMemoryWaveAdapter({ completion: false })).run(
     makeSpec({ timeoutMs: 20 }),
   );
+  await drain();
+  t.mock.timers.tick(20 + WAVE_SETTLEMENT_GRACE_MS);
+  const result = await pending;
   assert.deepEqual(result.receipt, {
     runId: "wave-async-1",
     asyncDir: "/memory/wave-async-1",
@@ -1363,19 +1395,134 @@ test("startWaveScript: pre-spawn failures take the ok:false arm with the blockin
   assert.equal(preAborted.calls.spawn.length, 0);
 });
 
-test("startWaveScript: timeout settles result with the best-effort stop recorded", async () => {
+test("startWaveScript: timeout settles result with the best-effort stop recorded", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const adapter = createMemoryWaveAdapter({ completion: false });
   const start = await startWaveScript(adapter, makeScriptSpec({ timeoutMs: 20 }));
   assert.equal(start.ok, true);
   if (!start.ok) return;
+  t.mock.timers.tick(20 + WAVE_SETTLEMENT_GRACE_MS);
   const result = await start.result;
   assert.equal(result.ok, false);
   if (result.ok) return;
   assert.equal(result.failure.reason, "timeout");
-  assert.match(result.failure.detail, /timed out after 20ms/);
+  assert.match(
+    result.failure.detail,
+    /no completion within \d+ms \(engine deadline 20ms \+ 60000ms settlement grace\); run stopped best-effort/,
+  );
   assert.equal(result.receipt.state, "timed-out");
   assert.equal(adapter.calls.stop.length, 1);
   assert.equal(adapter.calls.stop[0]?.asyncId, "wave-async-1");
+});
+
+// The regression pin for the observed bug: every real-world wave "timeout" was the ENGINE's
+// deadline settling `partial/timeout` with most lanes finished, and perk's own timer (armed for
+// the same duration, a few ms earlier) firing first and discarding the retained reports.
+test("settlement grace: a native partial completion arriving after the engine deadline but inside the grace is retained", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const retained = [
+    okEntry("plan-fidelity", { angle: "plan-fidelity" }),
+    okEntry("tests", { angle: "tests" }),
+    {
+      key: "correctness",
+      ok: false,
+      error: "lane still running at native partial settlement",
+      report: null,
+    },
+  ];
+  const deadlinePartial = (handle: { asyncId: string; asyncDir: string }): WaveCompletion => ({
+    ...handle,
+    state: "failed",
+    terminalOutcome: { state: "partial", reason: "timeout" },
+    retainedEntries: retained,
+  });
+  const engineTimedOut = () =>
+    createMemoryWaveAdapter({
+      completion: false,
+      aggregate: {
+        state: "failed",
+        error: "Workflow script timed out after 20ms.",
+        value: undefined,
+      },
+    });
+
+  const adapter = engineTimedOut();
+  const start = await startWaveScript(adapter, makeScriptSpec({ timeoutMs: 20 }));
+  assert.equal(start.ok, true);
+  if (!start.ok) return;
+  // The engine's deadline has passed; perk's timer (deadline + grace) has not fired.
+  t.mock.timers.tick(21);
+  adapter.emitCompletion(deadlinePartial(start.handle));
+  const result = await start.result;
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.failure.reason, "run-failed");
+  assert.match(result.failure.detail, /native partial: timeout.*Workflow script timed out/);
+  assert.deepEqual(result.value, retained);
+  assert.equal(result.receipt.state, "failed");
+  assert.equal(adapter.calls.stop.length, 0);
+
+  // The same carrier through the logical tier: two reports + `lane-failed` for the still-running
+  // lane — never `malformed-report`, never an empty timeout.
+  const logical = engineTimedOut();
+  const pending = reportWaveOver(logical).run(
+    makeSpec({
+      timeoutMs: 20,
+      assignments: [
+        ...ASSIGNMENTS,
+        { key: "tests", agent: "perk.pr-reviewer", task: "angle: tests", phase: "review" },
+      ],
+    }),
+  );
+  await drain();
+  t.mock.timers.tick(21);
+  logical.emitCompletion(
+    deadlinePartial({ asyncId: "wave-async-1", asyncDir: "/memory/wave-async-1" }),
+  );
+  const settled = await pending;
+  assert.equal(settled.complete, false);
+  assert.deepEqual(
+    settled.reports.map((report) => report.key),
+    ["plan-fidelity", "tests"],
+  );
+  assert.deepEqual(
+    settled.failures.map(({ key, reason }) => [key, reason]),
+    [
+      [null, "run-failed"],
+      ["correctness", "lane-failed"],
+    ],
+  );
+  assert.equal(settled.failures[1]?.detail, "lane still running at native partial settlement");
+  assert.equal(logical.calls.stop.length, 0);
+});
+
+test("settlement grace: a completion emitted only after the grace expired is a plain timeout (the grace is a bound, not a wait-forever)", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const adapter = createMemoryWaveAdapter({
+    completion: false,
+    aggregate: {
+      state: "failed",
+      error: "Workflow script timed out after 20ms.",
+      value: undefined,
+    },
+  });
+  const start = await startWaveScript(adapter, makeScriptSpec({ timeoutMs: 20 }));
+  assert.equal(start.ok, true);
+  if (!start.ok) return;
+  t.mock.timers.tick(20 + WAVE_SETTLEMENT_GRACE_MS);
+  adapter.emitCompletion({
+    ...start.handle,
+    state: "failed",
+    terminalOutcome: { state: "partial", reason: "timeout" },
+    retainedEntries: [okEntry("plan-fidelity", { angle: "plan-fidelity" })],
+  });
+  const result = await start.result;
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.failure.reason, "timeout");
+  assert.equal("value" in result, false);
+  assert.equal(result.receipt.state, "timed-out");
+  assert.equal(adapter.calls.stop.length, 1);
 });
 
 test("startWaveScript: an abort after launch settles the cancelled arm with the handle preserved", async () => {
@@ -1456,7 +1603,7 @@ function countingSubscriptions(adapter: MemoryWaveAdapter): {
   return { adapter: wrapped, active: () => active };
 }
 
-test("the runner releases its completion subscription on every settle arm", async () => {
+test("the runner releases its completion subscription on every settle arm", async (t) => {
   // Normal completion.
   const normal = countingSubscriptions(
     createMemoryWaveAdapter({
@@ -1472,9 +1619,15 @@ test("the runner releases its completion subscription on every settle arm", asyn
   await reportWaveOver(normal.adapter).run(makeSpec());
   assert.equal(normal.active(), 0);
 
-  // Timeout.
+  // Timeout (mocked timers only for this arm — the others ride the memory adapter's real
+  // `setTimeout(…, 0)` delivery and a real abort timer).
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const timedOut = countingSubscriptions(createMemoryWaveAdapter({ completion: false }));
-  await reportWaveOver(timedOut.adapter).run(makeSpec({ timeoutMs: 20 }));
+  const pendingTimeout = reportWaveOver(timedOut.adapter).run(makeSpec({ timeoutMs: 20 }));
+  await drain();
+  t.mock.timers.tick(20 + WAVE_SETTLEMENT_GRACE_MS);
+  await pendingTimeout;
+  t.mock.timers.reset();
   assert.equal(timedOut.active(), 0);
 
   // Post-launch cancel.

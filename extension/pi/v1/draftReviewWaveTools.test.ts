@@ -134,12 +134,19 @@ test("strict draft collection exposes only retained successful lanes while parti
       retainedEntries: [
         okEntry("grounding"),
         { key: "risk", ok: false, report: { summary: "not evidence" } },
+        // The deadline partial's still-running lane, as the RPC adapter projects it.
+        {
+          key: "ponytail",
+          ok: false,
+          error: "lane still running at native partial settlement",
+          report: null,
+        },
       ],
     },
   });
   const wave = reportWaveOver(adapter);
   const state = primePlan();
-  const { target } = fakeTarget();
+  const { target, notified } = fakeTarget();
   await executeStartDraftReviewWave(state, wave, target, { angles: TWO_ANGLES });
   const collected = await executeCollectDraftReviewWave(state, wave, target);
   assert.ok(collected.details.ok);
@@ -151,8 +158,23 @@ test("strict draft collection exposes only retained successful lanes while parti
     [
       [null, "run-failed"],
       ["risk", "lane-failed"],
-      ["ponytail", "missing-lane"],
+      ["ponytail", "lane-failed"],
     ],
+  );
+  assert.equal(
+    collected.details.failures[2]?.detail,
+    "lane still running at native partial settlement",
+  );
+  // The incomplete warning names the still-running lane as lane-failed, never malformed-report.
+  assert.ok(
+    notified.some(
+      (n) =>
+        n.severity === "warning" &&
+        n.message.includes("uncovered lane(s): risk, ponytail") &&
+        n.message.includes("ponytail: lane-failed") &&
+        !n.message.includes("malformed-report"),
+    ),
+    JSON.stringify(notified),
   );
   assert.equal(adapter.calls.spawn.length, 1);
   assert.equal(adapter.calls.stop.length, 0);
@@ -940,6 +962,8 @@ test("registerDraftReviewWaveTools registers exactly the two tools over registra
     /reconcile exactly once/,
     /Ignore duplicate\/late notices/,
     /no_wave\/drain-once/,
+    /deadline partial/,
+    /never recover reports from status.json or child artifacts/,
     /fyi is in-session color, never a finding or a posted comment/,
   ])
     assert.match(collectText, pin);

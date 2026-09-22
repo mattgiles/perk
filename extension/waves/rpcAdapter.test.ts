@@ -201,6 +201,9 @@ test("partial projection withholds ambiguous keys/identities and never guesses k
       { workflowKey: "absent" },
       { workflowKey: "false", success: false, error: "failed", structuredOutput: { answer: 2 } },
       { workflowKey: "malformed", success: "true", error: 42, structuredOutput: [] },
+      // The engine's projection of a child still working when the workflow deadline fired: no
+      // `success`, `state: "running"` — an explicit lane failure, never a malformed report.
+      { workflowKey: "late", state: "running", runId: "r" },
     ],
   });
   unsubscribe();
@@ -210,6 +213,12 @@ test("partial projection withholds ambiguous keys/identities and never guesses k
     { key: "absent", ok: null, error: null, report: null },
     { key: "false", ok: false, error: "failed", report: { answer: 2 } },
     { key: "malformed", ok: "true", error: null, report: [] },
+    {
+      key: "late",
+      ok: false,
+      error: "lane still running at native partial settlement",
+      report: null,
+    },
   ]);
   assert.doesNotMatch(JSON.stringify(received[0]?.retainedEntries), /SECRET/);
 });

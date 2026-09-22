@@ -20,7 +20,12 @@ import {
   waveScriptItems,
 } from "../testing/fakeSubagents.ts";
 import { createReportWave, type ReportWaveRequest, type WaveNotice } from "./reportWave.ts";
-import { WAVE_ACCEPTANCE, WAVE_INTERCOM_BRIDGE, type WaveBus } from "./transport.ts";
+import {
+  WAVE_ACCEPTANCE,
+  WAVE_INTERCOM_BRIDGE,
+  WAVE_SETTLEMENT_GRACE_MS,
+  type WaveBus,
+} from "./transport.ts";
 
 /** A synchronous in-memory bus (the adapter-contract suite's shape). */
 function createFakeBus(): WaveBus {
@@ -55,6 +60,15 @@ function makeSpec(overrides: Partial<ReportWaveRequest> = {}): ReportWaveRequest
     timeoutMs: 5_000,
     ...overrides,
   };
+}
+
+/**
+ * Drain the ping/spawn RPC round trips (microtasks + the fake's async preparation) under mocked
+ * `setTimeout` so the runner's expiry timer is armed before a test ticks it (`setImmediate` is
+ * never mocked).
+ */
+async function drain(): Promise<void> {
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 /** One ok report per lane key, derived from the actually-spawned script. */
@@ -251,13 +265,18 @@ test("rpc integration: a FOREIGN completion is ignored; the matching manual deli
   assert.equal(result.receipt.runId, start.runId);
 });
 
-test("rpc integration: timeout stops the real run best-effort (the recorded stop names it)", async () => {
+test("rpc integration: timeout stops the real run best-effort (the recorded stop names it)", async (t) => {
+  // `delivery: "never"` schedules no completion timer; the RPC reply timers are cleared on settle.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const bus = createFakeBus();
   const fake = createFakeSubagents([
     { delivery: "never", executeSettlement: async () => partialFixture() },
   ]);
   fake.attach(bus);
-  const result = await createReportWave(bus).run(makeSpec({ timeoutMs: 30 }));
+  const pending = createReportWave(bus).run(makeSpec({ timeoutMs: 30 }));
+  await drain();
+  t.mock.timers.tick(30 + WAVE_SETTLEMENT_GRACE_MS);
+  const result = await pending;
   assert.deepEqual(
     result.failures.map((f) => [f.key, f.reason]),
     [[null, "timeout"]],
@@ -270,6 +289,36 @@ test("rpc integration: timeout stops the real run best-effort (the recorded stop
   );
   assert.equal(fake.stops.length, 1);
   assert.equal(fake.stops[0]?.id, result.receipt.runId, "the stop request names the spawned run");
+});
+
+test("rpc integration: a native partial delivered inside the settlement grace is retained through the real adapter", async (t) => {
+  // The engine's deadline (the spawned `timeoutMs`) has passed when the completion lands; perk's
+  // own timer (deadline + grace) has not fired, so the real RPC decoder, the transport's durable
+  // read and the normalizer all consume the completion carrier instead of an empty timeout.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const bus = createFakeBus();
+  const fake = createFakeSubagents([
+    { delivery: "manual", executeSettlement: async () => partialFixture() },
+  ]);
+  fake.attach(bus);
+  const pending = createReportWave(bus).run(makeSpec({ timeoutMs: 30 }));
+  await drain();
+  assert.equal(fake.spawns[0]?.timeoutMs, 30, "the spawned engine deadline excludes the grace");
+  t.mock.timers.tick(31);
+  fake.complete(0);
+  const result = await pending;
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.reports, [{ key: "plan-fidelity", report: { verdict: "clean" } }]);
+  assert.deepEqual(
+    result.failures.map(({ key, reason }) => [key, reason]),
+    [
+      [null, "run-failed"],
+      ["correctness", "missing-lane"],
+    ],
+  );
+  assert.match(result.failures[0]?.detail ?? "", /native partial: timeout/);
+  assert.equal(result.receipt.state, "failed");
+  assert.equal(fake.stops.length, 0);
 });
 
 test("rpc integration: adapter construction is per-launch inside the supplier (source pin)", () => {
