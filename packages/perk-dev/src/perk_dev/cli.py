@@ -32,6 +32,7 @@ from perk.substrate.output import io_step, machine_output, user_output
 from perk.substrate.registry import Stage
 from perk_dev import build, bump, changelog, release
 from perk_dev.audit import attribution, bounding, corpus, expectations, fold, runner, vintage
+from perk_dev.profile_startup.cli import profile_startup
 from perk_dev.prose_map.cli import prose_map
 from perk_dev.prose_review.cli import prose_review
 
@@ -48,6 +49,7 @@ def cli(ctx: click.Context) -> None:
 
 cli.add_command(prose_map)
 cli.add_command(prose_review)
+cli.add_command(profile_startup)
 
 
 @cli.command("smoke")
