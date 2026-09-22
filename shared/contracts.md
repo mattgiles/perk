@@ -1007,15 +1007,13 @@ Ten shipped reports
 (`pr-reviewer`, `review-classifier`, `objective-explorer`, `learn-analyst`, `harvest-analyst`,
 `dream-analyst`, `dream-reducer`, `adversarial-reviewer`, `draft-reviewer`, `scout`) plus the repo-local
 `perk-dev.session-auditor` select definition `async: true`. All eleven keep replacement base prompts,
-read-only tools, `inheritProjectContext: false`, `inheritSkills: false` and the report-only
-completion policy `completionGuard: false` (the installed parser reads the literal `"false"` →
-`false`): the engine's completion **mutation** guard never fails a report-only lane for
-completing without edits when its task text reads as implementation intent (a reviewed draft
-saying "… must change …"), while the required `structured_output` report contract is unchanged
-(a missing/invalid report still fails the lane) and non-mutation stays enforced by Perk's
-restrictions + the rubric prohibitions, never by the guard. `conflict-resolver` leaves definition
-async absent and the guard field absent (the engine default — it IS expected to mutate),
-retaining writer tools and project/skill inheritance true. All twelve explicitly set `inheritGlobalContext: false` and omit both
+read-only tools, `inheritProjectContext: false` and `inheritSkills: false`. No def carries a
+`completionGuard` field: pi-subagents 0.70.1 removed the engine's completion **mutation** guard
+(a stray field is ignored, not rejected), so a report-only lane completes on its validated
+`structured_output` report — the required report contract is unchanged (a missing/invalid report
+still fails the lane) and non-mutation is enforced by Perk's restrictions + the rubric
+prohibitions. `conflict-resolver` leaves definition async absent (the engine default — it IS
+expected to mutate), retaining writer tools and project/skill inheritance true. All twelve explicitly set `inheritGlobalContext: false` and omit both
 `extensions` and `subagentOnlyExtensions` (empty is not equivalent). Reports use ambient runner
 discovery; foreground writers have no ambient extensions or transported Perk handoff. Canonical
 models stay intact — ONE `model:` per def, no `fallbackModels` (pi-subagents ≥ 0.68.0 rejects

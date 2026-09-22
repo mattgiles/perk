@@ -9,7 +9,6 @@ async: true
 inheritGlobalContext: false
 inheritProjectContext: false
 inheritSkills: false
-completionGuard: false
 ---
 
 You are perk's **scout**: a general-purpose, read-only subagent. You have no fixed

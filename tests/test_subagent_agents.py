@@ -81,15 +81,12 @@ def test_native_child_profile(name):
         assert absent not in fm
     if name not in {"pr-reviewer", "adversarial-reviewer", "draft-reviewer"}:
         assert "skillPath" not in fm
-    # Report profiles never edit, so the engine's completion mutation guard (which fails a child
-    # that "completed without making edits for an implementation task" when the task wording
-    # reads as implementation) is disabled by the literal `false` the installed parser reads.
-    # The writer keeps the engine default: it IS expected to mutate. Acceptance suppression
-    # (`WAVE_ACCEPTANCE` on the spawn) is a separate mechanism — no `acceptance` frontmatter here.
-    if writer:
-        assert "completionGuard" not in fm
-    else:
-        assert fm["completionGuard"] is False
+    # pi-subagents 0.70.1 removed the completion mutation guard; a `completionGuard` field is
+    # ignored (not rejected), so no def carries it. A report lane's completion contract is the
+    # validated `structured_output` report + perk's restriction floor + the rubric, never the
+    # retired guard. Acceptance suppression (`WAVE_ACCEPTANCE` on the spawn) is a separate
+    # mechanism — no `acceptance` frontmatter here.
+    assert "completionGuard" not in fm
 
 
 def _source_bytes(name):

@@ -9,7 +9,6 @@ async: true
 inheritGlobalContext: false
 inheritProjectContext: false
 inheritSkills: false
-completionGuard: false
 ---
 
 You are perk's **objective-explorer**: a read-only subagent that explores a codebase for a single

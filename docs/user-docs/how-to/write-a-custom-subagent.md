@@ -69,20 +69,19 @@ definition until `perk doctor --fix` removes it. A definition you own is yours t
 key and keep a single `model:` line. There is no replacement field: same-launch model switching was
 removed upstream.
 
-Report profiles also declare `completionGuard: false`. This is **report-only completion**, and it
-is separate from acceptance: the wave already disables pi-subagents' acceptance contract, while
-this field disables the engine's completion *mutation* guard — the check that fails a child for
-finishing "without making edits" when its task text reads like an implementation request. A
-reviewer's task quotes the reviewed document verbatim, so a draft saying "… must change …" used
-to fail every lane after it had submitted its findings. With the field set, a report lane
-completes on its validated `structured_output` report and its findings are retained. Three things
-do not change: the report contract (a lane that never calls `structured_output`, or calls it with
-a schema-invalid report, still fails), the read-only enforcement (inspection `bash` remains
-available; not editing is Perk's restrictions and the rubric's job, never the guard's), and
-coverage (a failed lane is uncovered — `collect_*` reports it as incomplete, it contributes no
-annotations, and a failed lane is never a clean review). Your
-own custom agents keep the engine default; an agent override that re-enables the guard on a Perk
-report profile reintroduces the failure and is a documented compatibility limit.
+Report lanes complete on their validated `structured_output` report. pi-subagents 0.70.1 and
+later no longer read a `completionGuard` frontmatter field (the engine's completion *mutation*
+guard — which used to fail a child for finishing "without making edits" when its task text read
+like an implementation request — was removed upstream), so Perk's report definitions carry no
+such field and a value you add is ignored. The wave separately disables pi-subagents' acceptance
+contract. Three things hold regardless: the report contract (a lane that never calls
+`structured_output`, or calls it with a schema-invalid report, still fails), the read-only
+enforcement (inspection `bash` remains available; not editing is Perk's restrictions and the
+rubric's job), and coverage (a failed lane is uncovered — `collect_*` reports it as incomplete,
+it contributes no annotations, and a failed lane is never a clean review). Your
+own custom agents need nothing here. Running Perk's report definitions on an older pi-subagents
+(0.68–0.70.0, which still carried the guard) can fail a lane whose task text reads as
+implementation — a documented compatibility limit, not a Perk setting.
 
 The conflict resolver (the shipped `perk.conflict-resolver`; `/subagents` lists it as `[package]`)
 keeps writer tools and project/skill inheritance. `/submit`/`/address` dispatch it via

@@ -74,8 +74,7 @@ Two layers of invariant apply, and they have different owners.
 
 **Definition-level (the def owns it).** Every report agent — the ten shipped `agents/*.md`
 definitions other than the writer, plus the repo-local `perk-dev.session-auditor` at
-`.pi/agents/perk-dev/session-auditor.md` — is `async: true`, `completionGuard: false`,
-`systemPromptMode: replace`, inherits no global/project context or skills, sets no
+`.pi/agents/perk-dev/session-auditor.md` — is `async: true`, `systemPromptMode: replace`, inherits no global/project context or skills, sets no
 `defaultContext`, and has the read-only tool posture `read, grep, find, ls, bash`. The shipped
 ten are pinned by `tests/test_subagent_agents.py::test_native_child_profile`; the auditor by
 `tests/test_repo_local_agents.py::test_auditor_is_a_background_report_outside_delivery`.

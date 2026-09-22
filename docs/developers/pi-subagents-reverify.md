@@ -38,9 +38,9 @@ you are about to build on new engine mechanics.
    - the agent-definition parser (`src/agents/agents.ts`, `src/agents/frontmatter.ts`): its
      **removed-field throws** (`uses removed frontmatter field '<name>'` — 0.68.0 rejects
      `fallbackModels`; a new removal fails every shipped def at load and shows up as 0/N
-     waves, so grep `agents/*.md` for the named field) and its `completionGuard: false`
-     handling: a report-only lane must complete on a valid `structured_output` report and still
-     fail a missing/invalid one (`run_ci` cannot catch this);
+     waves, so grep `agents/*.md` for the named field); a report-only lane must complete on a
+     valid `structured_output` report and still fail a missing/invalid one (`run_ci` cannot catch
+     this);
    - **package agent discovery** — perk's `perk.*` defs reach sessions ONLY this way:
      `collectPackageSubagentPaths` (`src/agents/agents.ts`) must still gather the project root
      and every `.pi/npm/node_modules/*` package root, `extractSubagentPathsFromPackageRoot` must
