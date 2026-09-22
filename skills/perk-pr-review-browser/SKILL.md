@@ -153,19 +153,25 @@ is announced, never silent.
 
 ## Stack mode (`/stack-review-browser` + `perk objective stack review`)
 
-The stacked twin of this door: ONE plannotator session over the **combined diff** (stack base →
-top head), one adversarial wave over that combined diff (`start_review_wave` with
-`stack: true` — children fetch `perk pr review-context --pr <top> --stack` and report in
-combined-diff coordinates), then a **judgment-routed posting step** you own. The launch guidance
-carries the full flow; these are the deltas from single-PR mode:
+The stacked twin of this door: ONE plannotator session over the **combined diff** — a static
+patch of the pinned stack base → top head diff, written from the exact fetched commits and
+digest-verified before the browser opens (moving refs cannot change it; the browser has no live
+repository context — exploration happens in the detached checkout) — one adversarial wave over
+the SAME pinned commits (`start_review_wave` with `stack: true` requires this session's open
+stack review and binds the wave to its top PR + checkout; the children run the pinned
+`perk pr review-context --pr <top> --stack --pin-base <sha> --pin-head <pr>=<sha> …` command
+from their task and report in combined-diff coordinates), then a **judgment-routed posting
+step** you own. The launch guidance carries the full flow; these are the deltas from single-PR
+mode:
 
 - **The posting contract does NOT flip here.** The browser session is a local-diff session with
   NO attached PR — plannotator's platform-posting path does not exist. ALL posting is perk-side
   after triage, through `submit_pr_review`: **one real call per member PR**, bottom→top, the
   gate ladder per call (N formal posts = N confirms — accepted).
 - **Routing is your judgment, not a worker.** Inputs: the reconciled findings + returned
-  browser annotations (both combined-diff coordinates), the per-PR diffs materialized by
-  `review-context --stack` (one `diff.patch` per member, paths in its envelope), and the
+  browser annotations (both combined-diff coordinates), the per-PR diffs materialized by the
+  pinned `review-context` command the guidance names (one `diff.patch` per member, paths in its
+  envelope — the same commits the lanes and the browser patch used), and the
   snapshot's layer order. Fold each finding into the OWNING
   PR's review body by default; add an inline anchor only when its location is straightforwardly
   identifiable in that PR's own diff; cross-cutting/unplaceable findings fold into the most
@@ -184,9 +190,11 @@ carries the full flow; these are the deltas from single-PR mode:
   review.
 - **Entry:** warm `/stack-review-browser [objective|pr:<n>|URL] [focus]` (bare numbers are
   objective ids by definition), or the cold `perk objective stack review` launcher whose
-  session makes ONE parameterless `open_stack_review` call. Cleanup:
-  `perk pr review cleanup --pr <top>`. Degraded mode is unchanged — the posting protocol never
-  depended on the browser.
+  session makes ONE parameterless `open_stack_review` call. Both refuse when the checkout's
+  `.patch` is missing or its digest no longer matches (the checkout was refreshed while a review
+  was open — re-run the door). Cleanup:
+  `perk pr review cleanup --pr <top>` (removes the checkout and its patch). Degraded mode is
+  unchanged — the posting protocol never depended on the browser.
 
 ## Untrusted text, untrusted code
 

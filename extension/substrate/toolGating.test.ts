@@ -410,13 +410,22 @@ test("the reviewer defs' oversized-line byte-slice recipe passes the gate; its r
   );
 });
 
+const SHA_A = "a".repeat(40);
+const SHA_B = "b".repeat(40);
+const SHA_0 = "0".repeat(40);
+/** The pinned stack form exactly as `pinnedReviewContextCommand` renders it (+ `--json`). */
+const PINNED_QUERY = `perk pr review-context --pr 42 --stack --pin-base ${SHA_0} --pin-head 41=${SHA_A} --pin-head 42=${SHA_B} --json`;
+
 test("plan-bound review queries allow only the exact argument forms", () => {
   // The plan-bound `--expected-pr` form, the human-triage doors' foreign `--pr` / `--pr --stack`
-  // forms, and the feedback query — each gets the same whitespace/`cd`-prefix/redirect matrix.
+  // forms, the stack flow's PINNED form, and the feedback query — each gets the same
+  // whitespace/`cd`-prefix/redirect matrix.
   const queries = [
     "perk pr review-context --expected-pr 42 --json",
     "perk pr review-context --pr 42 --json",
     "perk pr review-context --pr 42 --stack --json",
+    PINNED_QUERY,
+    `perk pr review-context --pr 43 --stack --pin-base ${SHA_0} --pin-head 41=${SHA_A} --pin-head 42=${SHA_B} --pin-head 43=${SHA_0} --json`,
     "perk pr feedback --json",
   ];
   for (const query of queries) {
@@ -454,6 +463,21 @@ test("plan-bound review queries allow only the exact argument forms", () => {
     "perk pr review-context --pr 42 --expected-pr 42 --json",
     "perk pr review-contextual --expected-pr 42 --json",
     "perk pr review-contexts --pr 42 --json",
+    // The pinned form: only WITH --stack, base + at least two heads, full lowercase 40-hex shas,
+    // `<pr>=<sha>` pairs, --json last — every deviation stays blocked.
+    `perk pr review-context --pr 42 --pin-base ${SHA_0} --pin-head 41=${SHA_A} --pin-head 42=${SHA_B} --json`,
+    `perk pr review-context --pr 42 --stack --pin-base ${SHA_0} --json`,
+    `perk pr review-context --pr 42 --stack --pin-head 41=${SHA_A} --pin-head 42=${SHA_B} --json`,
+    `perk pr review-context --pr 42 --stack --pin-base ${SHA_0} --pin-head 42=${SHA_B} --json`,
+    `perk pr review-context --pr 42 --stack --pin-base ${SHA_0.slice(0, 39)} --pin-head 41=${SHA_A} --pin-head 42=${SHA_B} --json`,
+    `perk pr review-context --pr 42 --stack --pin-base ${SHA_0} --pin-head 41=${SHA_A.toUpperCase()} --pin-head 42=${SHA_B} --json`,
+    `perk pr review-context --pr 42 --stack --pin-base ${SHA_0} --pin-head 41=${SHA_A} --pin-head 42=${SHA_B}x --json`,
+    `perk pr review-context --pr 42 --stack --pin-base ${SHA_0} --pin-head 41${SHA_A} --pin-head 42=${SHA_B} --json`,
+    `perk pr review-context --pr 42 --stack --pin-base ${SHA_0} --pin-head 0=${SHA_A} --pin-head 42=${SHA_B} --json`,
+    `perk pr review-context --pr 42 --stack --pin-head 41=${SHA_A} --pin-head 42=${SHA_B} --pin-base ${SHA_0} --json`,
+    `perk pr review-context --pr 42 --stack --pin-base ${SHA_0} --pin-head 41=${SHA_A} --pin-head 42=${SHA_B} --local --json`,
+    `perk pr review-context --pr 42 --stack --pin-base ${SHA_0} --pin-head 41=${SHA_A} --pin-head 42=${SHA_B}`,
+    `perk pr review-context --expected-pr 42 --stack --pin-base ${SHA_0} --pin-head 41=${SHA_A} --pin-head 42=${SHA_B} --json`,
     "perk pr feedback",
     "perk pr feedback --pr 42 --json",
     "perk pr feedback-extra --json",

@@ -206,10 +206,13 @@ it, because those messages exist to be read, not to enforce.
 The bash gate admits these exact whitespace-separated review-context query forms (optional
 surrounding whitespace, N matching `[1-9][0-9]*`, `--json` last): the plan-bound
 `perk pr review-context --expected-pr N --json`, the human-triage doors' foreign
-`perk pr review-context --pr N --json` and `perk pr review-context --pr N --stack --json`, and
-`perk pr feedback --json`. `cd … && query` works because every segment is checked. This does not
-admit the flagless context form, other argument orders, extra arguments, lookalike verbs,
-`review-post`, `gh api`, real-file redirects, or a mutation chained after a query.
+`perk pr review-context --pr N --json` and `perk pr review-context --pr N --stack --json`, the
+stack review flow's pinned `perk pr review-context --pr N --stack --pin-base <sha> --pin-head
+<pr>=<sha> … --json` (full 40-hex lowercase SHAs, at least two bottom→top `--pin-head` pairs —
+exactly what the stack door renders), and `perk pr feedback --json`. `cd … && query` works because
+every segment is checked. This does not admit the flagless context form, other argument orders,
+extra arguments, lookalike verbs, `review-post`, `gh api`, real-file redirects, or a mutation
+chained after a query.
 
 Perk-owned report waves deliver the constant `perk.parent-restrictions/1 = {readOnly: true}`
 packet and `worktree: false` to every native runner child. The packet — or a malformed /
