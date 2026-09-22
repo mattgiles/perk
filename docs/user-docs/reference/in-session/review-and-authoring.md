@@ -28,7 +28,8 @@ returns an engine-validated report and never posts.
 
 The parent unions and deduplicates findings, derives one verdict, then posts once. Actionable work
 becomes an advisory COMMENT review; a clean result becomes a 👍 reaction. Coverage is strict: the
-wave applies one bounded retry, reports any remaining failure as incomplete, and
+wave applies one bounded retry of the lanes still without a report, reports any remaining
+failure as incomplete, and
 `post_pr_review` refuses a clean verdict with `incomplete_coverage`. Complete coverage is
 necessary but insufficient for clean: the recorded pass also snapshots a minimum verdict from the
 effective post-retry reports (a retry's replacement reports supersede the attempt they replace),

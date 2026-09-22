@@ -1419,7 +1419,9 @@ for §8.3's single-use post state, plus the code-owned **minimum verdict** deriv
 bounded retry from exactly the effective report set (`runPrReviewWave`'s ordered post-merge
 reports — a retried key's replacement report supersedes its earlier attempt; attempt receipts,
 superseded attempts, FYI/summary prose, notification previews, and artifact files are never
-inputs). The snapshot is isolated: only the primitive verdict is stored, so mutating the returned
+inputs). The retry relaunches exactly the effective lanes still without a report
+(skill-unavailable lanes excluded; none on `unavailable`/`cancelled`) — a deadline partial's
+retained reports are kept and only the unreported lane(s) run again. The snapshot is isolated: only the primitive verdict is stored, so mutating the returned
 outcome or its reports after recording cannot lower or raise it, and it is not an ever-actionable
 latch across attempts or passes. Complete coverage is necessary but insufficient for a clean post:
 `post_pr_review` refuses a contradictory clean verdict (`review_verdict_conflict`, ladder in §8.3)
@@ -6519,7 +6521,7 @@ report; module-wide, no opt-out) beside the fixed `intercomBridge: {mode: "off"}
 (`WAVE_INTERCOM_BRIDGE` — the same per-launch override spread: no `contact_supervisor` tool and
 no appended progress-update template reach any perk child; pi-subagents ≥ 0.68.0 discards
 parent-side progress updates anyway, so the bridge would be pure cost — module-wide, no
-opt-out), blocks under the module-owned timeout,
+opt-out), blocks until the engine deadline plus perk's fixed settlement grace,
 and reads the durable `status.json` aggregate — the wave mechanics are CODE, never model-authored
 prompt mechanics. Analyst reports are **engine-validated structured output** against the TS-owned
 `LEARN_ANALYST_REPORT_SCHEMA` (`extension/learning/analystWave.ts` — closed shape, all-required,
@@ -6584,8 +6586,16 @@ outcomes join rows back to the SEMANTIC id through each flow's module-private la
 by parsing keys. The module's exports are exactly `isRoutingToken`, `renderRoutingToken`, and
 `orchestrationKey`.
 
-**Report authority and native partial settlement.** Ordinary durable `state: "complete"`
-uses only `status.json.workflow.value`; completion metadata never supplements or replaces it.
+**Report authority and native partial settlement.** The spawned `timeoutMs` is the **engine
+deadline** (default `WAVE_TIMEOUT_MS` = 30 minutes; `PERK_WAVE_TIMEOUT_MS` overrides it):
+pi-subagents arms it when the script starts, each runner child inherits it as its own deadline,
+it settles the run `partial/timeout` against it, and it is the orphan insurance. Perk's local
+wait timer is armed for the deadline **plus the fixed settlement grace**
+(`WAVE_SETTLEMENT_GRACE_MS` = 60 s; no env override, no spec/request field) so a native partial
+settlement's completion carrier is consumed before perk's own `timeout` can fire; only after the
+grace does the local `timeout` arm run (its detail names both terms). Ordinary durable
+`state: "complete"` uses only `status.json.workflow.value`; completion metadata never
+supplements or replaces it.
 A matched completion with top-level `state: "failed" | "partial"` and an explicit native
 `terminalOutcome: {state: "partial", reason: "timeout" | "budget_exhausted"}`, corroborated by
 one readable durable aggregate in `failed` or `partial` state, may retain successful sibling
@@ -6594,8 +6604,11 @@ rows and missing lanes. Only when it is not an array does the transport use the 
 compact public child-result projection (`workflowKey`, `success`, optional string `error`,
 `structuredOutput` → `{key, ok, error, report}`). The sources are never merged or hole-filled.
 Keys must be nonempty `workflowKey` strings, not agent names, receipt identities, array order or
-artifact paths. Duplicate keys or a child run ID shared across keys withhold those reports as
-keyed malformed entries at the transport. The expected-assignment normalizer
+artifact paths. A `results[]` row the engine projects as `state: "running"` (a child still
+working when the workflow deadline fired — it carries no `success`) projects to
+`{ok: false, error: "lane still running at native partial settlement", report: null}`
+(`lane-failed` at the normalizer), never `ok: null`. Duplicate keys or a child run ID shared
+across keys withhold those reports as keyed malformed entries at the transport. The expected-assignment normalizer
 (`normalizeAssignments`) restates that rule at the logical tier for whatever array it is
 handed — the durable `workflow.value` aggregate and the retained projection alike: more than
 one row for one expected key is ambiguous identity, so that key is `malformed-report` with a
@@ -6610,9 +6623,11 @@ Partial evidence reuses that normalizer, with the wave-level `run-failed` first 
 native reason), then assignment failures in request order, then preflight failures as before.
 Both strict and best-effort remain `complete: false`, even if every report survived. Failed
 children, missing structured output and malformed reports are never promoted. Receipt state
-stays `failed`; native timeout is not Perk's local `timeout` failure. Existing caller retry,
-reconciliation and strict-withholding policies are unchanged: a retryable wave-level failure
-still causes `/pr-review`'s bounded whole-selection retry even with retained reports.
+stays `failed`; native timeout is not Perk's local `timeout` failure. Reconciliation and
+strict-withholding policies are unchanged; `/pr-review`'s one bounded retry relaunches exactly
+the effective lanes without a report (skill-unavailable excluded; none on
+`unavailable`/`cancelled`) — a deadline partial retries only the lane(s) that never reported,
+while a wave-level failure with nothing retained retries the whole runnable selection.
 
 The runner subscribes before spawn and buffers completions **only until the spawn handle is
 known**. It then selects the first matching buffered completion and immediately clears the

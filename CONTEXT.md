@@ -83,6 +83,26 @@ identity (it appears only in attempt receipts' `requestedKeys`, receipt children
 details). Closed slug-enum waves (learn analyst, dream reducer) key by the slug and have none.
 _Avoid_: lane id, label, sanitized key, run key (when the identity is meant)
 
+### Report-wave settlement
+
+**Engine deadline**:
+The spawned `timeoutMs` pi-subagents enforces on a report-wave run (`WAVE_TIMEOUT_MS`, 30 minutes;
+`PERK_WAVE_TIMEOUT_MS` overrides) — inherited by every runner child, settled `partial/timeout`
+against, and the orphan insurance.
+_Avoid_: wave timeout, module timeout (when the engine's bound is meant)
+
+**Settlement grace**:
+Perk's fixed slack beyond the engine deadline (`WAVE_SETTLEMENT_GRACE_MS`, 60 s; not an operator
+knob) before its own `timeout` fires — long enough for the engine's partial settlement and its
+completion carrier to arrive.
+_Avoid_: collect grace (the separate `PERK_WAVE_COLLECT_GRACE_MS` bound on a premature collect)
+
+**Deadline partial**:
+A native partial settlement with reason `timeout` whose completed lanes' reports are retained and
+whose still-running lane(s) surface as `lane-failed` — a normal collected outcome, never a cue to
+recover reports from `status.json` or child artifacts.
+_Avoid_: timeout (perk's own empty expiry), partial timeout
+
 ### Review
 
 **Approval guidance**:
