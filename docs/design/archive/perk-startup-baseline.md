@@ -237,7 +237,7 @@ the seam's `SystemExit(0)`):
 ```
 
 Reading: bare `perk` imports the whole command catalogue before it can open a plain session —
-`perk.cli.cli` costs ~0.7 s of the ~0.8 s handoff, with `doctor` (its render + convergence
+`perk.cli.cli` costs ~0.64 s of the ~0.77 s handoff, with `doctor` (its render + convergence
 modules), the Linear backend and the objective/delivery packages the largest subtrees.
 
 ## Reproduction
