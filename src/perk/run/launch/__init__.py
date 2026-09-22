@@ -34,8 +34,10 @@ binding by then, and the tail's persisted-write order handoff → warm → mater
 targeting the shared ``launch_pi_agent_dir`` resolution), the shareable launch-environment
 seams every Pi exec — stage launch or session reopen — flows through
 (:func:`resolve_launch_agent_dir` → :class:`LaunchAgentDir`, and the one Pi executor
-:func:`exec_pi`, which :func:`_exec_pi` adapts a :class:`_LaunchContext` onto), and the module
-constants used here (``_PI_AGENT_LOCK_FILES`` / ``_NPM_QUIET_ENV``). The module-level imports
+:func:`exec_pi`, which :func:`_exec_pi` adapts a :class:`_LaunchContext` onto, plus its
+maintainer-only stop-before-exec arm :func:`_record_profile_handoff` keyed by
+``PROFILE_HANDOFF_ENV``), and the module constants used here (``_PI_AGENT_LOCK_FILES`` /
+``_NPM_QUIET_ENV``). The module-level imports
 the string-path monkeypatches resolve against (``os`` / ``subprocess`` / ``github`` / ``git`` /
 ``cache`` / ``linear_agent`` / ``init`` / ``runner``) are kept here so
 ``perk.run.launch.<mod>.attr`` rebinds
@@ -63,6 +65,7 @@ import os
 # shared singleton every submodule that imports the same module sees — the explicit-re-export alias
 # form (`import x as x`) marks that intent for the linter (they are not referenced in this file).
 import subprocess as subprocess
+import time
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -140,6 +143,13 @@ _NPM_QUIET_ENV = {
     "npm_config_fund": "false",
     "npm_config_audit": "false",
 }
+
+# The maintainer-only stop-before-exec seam (contracts.md §8.72(i)): when this variable names a
+# file, `exec_pi` records the exact Python→Pi handoff instant there and exits 0 instead of
+# exec'ing pi. The plain path ends in `os.execvpe`, so no in-process profiler (cProfile,
+# `-X importtime`) survives it — this arm is the only exact handoff mark a profiler can wrap.
+# Inert unless set; timing samples never set it. `perk-dev profile-startup` imports the spelling.
+PROFILE_HANDOFF_ENV = "PERK_PROFILE_HANDOFF"
 
 
 @dataclass(frozen=True)
@@ -738,6 +748,37 @@ def _resolve_pi_executable() -> str:
     return candidate
 
 
+def _record_profile_handoff(
+    target: Path,
+    *,
+    pi_path: str,
+    argv: tuple[str, ...],
+    checkout: Path,
+    env: Mapping[str, str],
+) -> None:
+    """Write the stop-before-exec handoff record — the instant that stands for the exec.
+
+    The monotonic stamp is taken FIRST (before any file I/O) so it marks the moment the plain
+    path would have called ``os.execvpe``; ``CLOCK_MONOTONIC`` is system-wide, so a harness that
+    stamped the spawn with the same clock can subtract across processes. ``env_keys`` carries
+    key NAMES only — the child env holds secrets (``LINEAR_API_KEY``), and a profiling record
+    must never leak a value. Exactly these keys, nothing else: the consumer's parser mirrors
+    the set.
+    """
+    handoff_monotonic_ns = time.monotonic_ns()
+    record = {
+        "schema": 1,
+        "handoff_monotonic_ns": handoff_monotonic_ns,
+        "pid": os.getpid(),
+        "pi_path": pi_path,
+        "argv": list(argv),
+        "cwd": str(checkout),
+        "env_keys": sorted(env),
+    }
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+
+
 def exec_pi(
     *,
     main_root: Path,
@@ -748,6 +789,16 @@ def exec_pi(
 ) -> None:
     """The ONE Pi exec pipeline: build the child env, sweep stale pi agent locks, chdir into
     ``checkout``, and ``exec pi`` — the CLI *becomes* pi, so nothing after this runs.
+
+    **The stop-before-exec arm.** When ``PERK_PROFILE_HANDOFF`` (:data:`PROFILE_HANDOFF_ENV`)
+    holds a non-blank file path, the pipeline runs every pre-exec phase as usual (env build,
+    lock sweep), then :func:`_record_profile_handoff` writes the handoff record to that file,
+    ONE stderr line names it, and the process exits ``0`` via ``SystemExit`` — no ``chdir``, no
+    exec, no env mutation. Why: the plain path ends in ``os.execvpe``, so no in-process profiler
+    survives into pi; this arm is the only exact handoff mark, and it lets cProfile / ``-X
+    importtime`` wrap a real launch (cProfile's runner swallows ``SystemExit`` and still dumps
+    its stats). Blank/whitespace values take the ordinary exec path. Every cold-local launch
+    (plain, staged, resumed) routes through here, so the arm applies to all of them.
 
     Shared verbatim by the stage launch (through the :func:`_exec_pi` adapter) and the
     session-reopen engine (``run_id=None`` — nothing minted, an inherited ``PERK_RUN_ID``
@@ -789,6 +840,16 @@ def exec_pi(
     )
     if agent_dir.resolution is not None:
         _sweep_stale_pi_agent_locks(agent_dir.resolution.path)
+    handoff_target = os.environ.get(PROFILE_HANDOFF_ENV, "").strip()
+    if handoff_target:
+        _record_profile_handoff(
+            Path(handoff_target), pi_path=pi_path, argv=argv, checkout=checkout, env=env
+        )
+        user_output(
+            f"{PROFILE_HANDOFF_ENV} set — recorded the Pi handoff to {handoff_target}; "
+            "exiting without launching pi"
+        )
+        raise SystemExit(0)
     # The presence probe does not eliminate the exec race — a failed chdir/exec is an ordinary
     # OSError arm, not a crash (the watch-seam shape).
     try:
@@ -886,6 +947,7 @@ def _emit_dry_run_preview(
 
 
 __all__ = [
+    "PROFILE_HANDOFF_ENV",
     "_NPM_QUIET_ENV",
     "_PI_AGENT_LOCK_FILES",
     "_WORKTREE_SETUP_TIMEOUT_S",
@@ -909,6 +971,7 @@ __all__ = [
     "_materialize_into_worktree",
     "_naming_hints",
     "_plan_read_instruction",
+    "_record_profile_handoff",
     "_resolve_pi_executable",
     "_resolve_prompt",
     "_run_setup_hook",

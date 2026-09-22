@@ -9,6 +9,7 @@ composition (`tests/test_launch.py` pins `PERK_CLI_VERSION` and the inherited-`P
 removal).
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -136,6 +137,27 @@ def test_linked_worktree_opens_itself_with_the_main_checkouts_agent_dir(
     _program, _argv, env = launch_exec_recorder.calls[0]
     assert env["PI_CODING_AGENT_DIR"] == str(git_repo / ".pi" / "agent")
     assert f"opening a plain Pi session in {wt}: pi" in result.stderr
+
+
+def test_bare_perk_under_profile_handoff_records_and_execs_nothing(
+    git_repo, monkeypatch, launch_exec_recorder
+):
+    # The maintainer-only stop-before-exec seam (contracts.md §8.72(i)) reaches the bare form
+    # by construction: it lives in the one shared executor, so the announce line lands first and
+    # the handoff line follows, with nothing exec'd.
+    _tty(monkeypatch)
+    target = git_repo / "profiles" / "handoff.json"
+    monkeypatch.setenv(launch.PROFILE_HANDOFF_ENV, str(target))
+    result = _invoke(git_repo)
+    assert result.exit_code == 0, result.output
+    _assert_untouched(launch_exec_recorder)
+    record = json.loads(target.read_text(encoding="utf-8"))
+    assert record["argv"] == ["pi"] and record["cwd"] == str(git_repo)
+    announce = result.stderr.index(f"opening a plain Pi session in {git_repo}: pi")
+    handoff = result.stderr.index(f"recorded the Pi handoff to {target}")
+    assert announce < handoff
+    assert result.stdout == ""
+    _assert_nothing_written(git_repo)
 
 
 # --- the refusal ladder --------------------------------------------------------------------------
