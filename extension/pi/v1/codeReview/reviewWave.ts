@@ -79,18 +79,35 @@ export interface ReviewWaveState {
 }
 
 /**
- * The per-activation structural binding between the stack door and the wave: the `PinnedStack`
- * the last successful `/stack-review-browser` / `open_stack_review` open verified (patch digest)
- * and bound; `null` until a stack review is open. A later open replaces it (the accepted
- * "second browser door supersedes" posture). Created in `extension/index.ts` and shared by BOTH
- * installers so the model can never aim a stack wave at coordinates it relayed itself.
+ * The per-activation structural binding between the stack door and the wave: `pinned` is the
+ * `PinnedStack` the last successful `/stack-review-browser` / `open_stack_review` open verified
+ * (patch digest) and bound — `null` until a stack review is open; `inFlight` is the pin the
+ * currently pending (launched, uncollected) stack wave was launched against — `null` when no
+ * stack wave is pending. A later open replaces `pinned` (the accepted "second browser door
+ * supersedes" posture) EXCEPT while a stack wave is in flight against a different pin: the lanes
+ * are reviewing those commits and the shared annotation surface would be re-primed for another
+ * stack, so the door refuses until `collect_review_wave` settles the wave (re-opening the SAME
+ * pin — a stale-session reopen — stays allowed). Created in `extension/index.ts` and shared by
+ * BOTH installers so the model can never aim a stack wave at coordinates it relayed itself.
  */
 export interface StackPinState {
   pinned: PinnedStack | null;
+  inFlight: PinnedStack | null;
 }
 
 export function createStackPinState(): StackPinState {
-  return { pinned: null };
+  return { pinned: null, inFlight: null };
+}
+
+/** Structural pin identity: same top PR, checkout, base commit, and member heads in order. */
+export function samePinnedStack(a: PinnedStack, b: PinnedStack): boolean {
+  return (
+    a.topPr === b.topPr &&
+    a.checkout === b.checkout &&
+    a.baseSha === b.baseSha &&
+    a.heads.length === b.heads.length &&
+    a.heads.every((h, i) => h.pr === b.heads[i]?.pr && h.headSha === b.heads[i]?.headSha)
+  );
 }
 
 /** The decoded `start_review_wave` selection (invalid slugs unrepresentable past the boundary). */
@@ -250,6 +267,8 @@ export async function executeStartReviewWave(
     return fail(detail, failure?.reason ?? "spawn-failed", { attempts });
   }
   state.pending = start.ref;
+  // The pin a pending stack wave reviews is locked against supersession until collection.
+  if (pinned !== undefined) stackPin.inFlight = pinned;
   let marker: WaveStatusOutcome = "no_surface";
   if (opts.annotations !== undefined) {
     marker = await replaceWaveStatus(
@@ -306,6 +325,8 @@ export async function executeCollectReviewWave(
     annotations?: AnnotationState;
     /** Test seam for the marker push (default: global fetch / setTimeout). */
     annotationDeps?: Parameters<typeof replaceWaveStatus>[3];
+    /** The shared stack pin: a settled stack wave releases its `inFlight` lock. */
+    stackPin?: StackPinState;
   },
 ): Promise<Result<CollectReviewWaveOk>> {
   const fail = failFor(target, "collect_review_wave");
@@ -330,7 +351,11 @@ export async function executeCollectReviewWave(
   // The identity-guarded slot clear (flow policy): clear only if the slot still holds the
   // collected ref — a supersede landing during this collect's await never erases the NEW ref
   // (the wave's delete-as-claim already makes a stale drain harmless).
-  if (state.pending === ref) state.pending = null;
+  if (state.pending === ref) {
+    state.pending = null;
+    // The settled wave no longer reviews its pin — a later stack open may supersede it.
+    if (opts?.stackPin !== undefined) opts.stackPin.inFlight = null;
+  }
   const { keys: angles, result } = collected;
   // Covered keys in angle-selection order (the reports already normalize in assignment order).
   const reportKeys = new Set(result.reports.map((r) => r.key));
@@ -509,7 +534,7 @@ export function installReviewWaveBindings(
       properties: {},
     },
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      return executeCollectReviewWave(state, wave, ctx, { annotations });
+      return executeCollectReviewWave(state, wave, ctx, { annotations, stackPin });
     },
   });
 }

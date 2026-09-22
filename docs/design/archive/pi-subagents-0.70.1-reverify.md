@@ -138,15 +138,26 @@ spawn shape, the structured result decode, the bounded attempts) passes on the 0
 
 **Browser-door half — OWED (not exercised in this pass).** The `/plan-review-browser` and
 `/pr-review-browser` waves are `hasUI`-gated human-in-the-loop doors (the plannotator decision is
-the human's), so the implementing agent could not drive them. The owner elected (as for 0.68.0)
-to move the stamp on the source re-read + the doctor/scout/offline halves rather than block
-submission; the completion-only wave mechanics — every spawn's `intercomBridge` and `acceptance`
-in the adapter-contract / fake-RPC suites, the `perk:wave` marker at launch and collect, the def ↔
-schema lockstep, the door-prompt pins — are pinned offline and green. **Residual:** the first live
-0.70.1 browser waves — the marker visible at launch, cleared at collect, N/N final annotations
-after `collect_*`, with defs lacking `completionGuard` — are owed from the owner's
-`/pr-review-browser` run on this change's PR; append the outcome here. A FAIL there is a new
-re-verify pass, not a stamp rollback by itself.
+the human's), so the implementing agent could not drive them.
+
+**Verdict: PASS on the automated half, by owner decision.** The plan's J/Step 13 text made the
+stamp move conditional on the full live leg (both browser waves to N/N, the scout with no
+`PI_FFF_MODE`). The owner **waived that live-gate requirement for this pass** — explicitly, twice:
+at Step 13 ("move the stamp on the automated half", the 0.68.0 precedent) and again at `/address`
+when the review wave flagged the gap — and the decision is recorded in the plan's
+`## Assumptions`. So `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` = `0.70.1` certifies the **source
+re-read + doctor + scout-lane + offline conflict-engine** evidence above, and 0.70.1 is described
+everywhere (`docs/user-docs/reference/requirements-and-compatibility.md`,
+`docs/developers/pi-subagents-reverify.md`, `docs/learned/pi/subagents.md`) as the
+*source-verified guidance baseline with the browser-wave half owed*, never as fully
+live-certified. The completion-only wave mechanics — every spawn's `intercomBridge` and
+`acceptance` in the adapter-contract / fake-RPC suites, the `perk:wave` marker at launch and
+collect, the def ↔ schema lockstep, the door-prompt pins — are pinned offline and green.
+**Residual (owed):** the first live 0.70.1 browser waves — the marker visible at launch, cleared
+at collect, N/N final annotations after `collect_*`, with defs lacking `completionGuard` — and a
+scout `grep`/`find` lane from a session launched by the post-change perk (no `PI_FFF_MODE` in its
+environment), from the owner's `/pr-review-browser` run on this change's PR; append the outcome
+here. A FAIL there is a new re-verify pass, not a stamp rollback by itself.
 
 ## Falsified planning-time assumptions
 

@@ -185,6 +185,74 @@ def test_stack_checkout_empty_combined_diff_refuses(git_repo_with_remote, monkey
     assert not review_patch_path(wt).exists()
 
 
+def test_stack_checkout_empty_diff_with_distinct_commits_refuses(git_repo_with_remote, monkeypatch):
+    # Distinct commits, identical trees: the bottom layer adds a file, the top layer reverts it.
+    # The base→top TREE diff is empty, so the refusal is `empty_stack_diff` — and its message
+    # describes the empty diff, never "base equals the top head" (the commits differ).
+    clone, _remote, _advance = git_repo_with_remote
+    base = _sha(clone)
+    _git(clone, "checkout", "-qb", "feat-a")
+    a = _commit(clone, "a")
+    _git(clone, "push", "-q", "origin", "HEAD:refs/pull/1/head")
+    _git(clone, "checkout", "-qb", "feat-b")
+    _git(clone, "rm", "-q", "a.txt")
+    _git(clone, "commit", "-qm", "revert a")
+    b = _sha(clone)
+    _git(clone, "push", "-q", "origin", "HEAD:refs/pull/2/head")
+    _git(clone, "checkout", "-q", "main")
+    assert len({base, a, b}) == 3
+    assert _git(clone, "rev-parse", f"{base}^{{tree}}") == _git(clone, "rev-parse", f"{b}^{{tree}}")
+    members = [_member(1, "feat-a", "main"), _member(2, "feat-b", "feat-a")]
+    _wire_stack(monkeypatch, _stack(members))
+    monkeypatch.chdir(clone)
+
+    result = CliRunner().invoke(cli, ["pr", "review", "checkout", "--stack", "--pr", "1", "--json"])
+    assert result.exit_code == 1
+    data = json.loads(result.stdout)
+    assert data["error_type"] == "empty_stack_diff"
+    assert "identical trees" in data["message"]
+    assert "equals" not in data["message"]
+    assert base[:12] in data["message"] and b[:12] in data["message"]
+    wt = clone / ".worktrees" / "review-2"
+    assert not wt.exists()
+    assert not review_patch_path(wt).exists()
+
+
+def test_stack_checkout_base_not_ancestor_of_bottom_refuses(git_repo_with_remote, monkeypatch):
+    # A linear chain (bottom ⊂ top) whose TOP merged a newer base-branch commit the bottom lacks:
+    # merge-base(origin/main, top) is that newer commit, which is NOT an ancestor of the bottom
+    # head — the pinned reader's base→bottom gate would refuse every lane and the routing
+    # command. Checkout refuses `stack_topology_broken` first, before any diff/worktree mutation.
+    clone, _remote, advance_origin = git_repo_with_remote
+    _git(clone, "checkout", "-qb", "feat-a")
+    a = _commit(clone, "a")
+    _git(clone, "push", "-q", "origin", "HEAD:refs/pull/1/head")
+    _git(clone, "checkout", "-qb", "feat-b")
+    _commit(clone, "b")
+    newer_main = advance_origin()
+    _git(clone, "fetch", "-q", "origin")
+    _git(clone, "merge", "-q", "--no-edit", "origin/main")
+    b = _sha(clone)
+    _git(clone, "push", "-q", "origin", "HEAD:refs/pull/2/head")
+    _git(clone, "checkout", "-q", "main")
+    assert git.merge_base(clone, "origin/main", b) == newer_main
+    assert git.is_ancestor(clone, a, b) is True
+    assert git.is_ancestor(clone, newer_main, a) is False
+    members = [_member(1, "feat-a", "main"), _member(2, "feat-b", "feat-a")]
+    _wire_stack(monkeypatch, _stack(members))
+    monkeypatch.chdir(clone)
+
+    result = CliRunner().invoke(cli, ["pr", "review", "checkout", "--stack", "--pr", "1", "--json"])
+    assert result.exit_code == 1
+    data = json.loads(result.stdout)
+    assert data["error_type"] == "stack_topology_broken"
+    assert "not an ancestor of the bottom head (PR #1)" in data["message"]
+    assert newer_main[:12] in data["message"]
+    wt = clone / ".worktrees" / "review-2"
+    assert not wt.exists()
+    assert not review_patch_path(wt).exists()
+
+
 def test_stack_checkout_diff_failure_refuses_before_mutation(git_repo_with_remote, monkeypatch):
     # A failed combined-diff render is a typed git_error refusal before any worktree mutation
     # — an existing checkout and its patch survive untouched.

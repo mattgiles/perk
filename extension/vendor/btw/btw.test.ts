@@ -578,3 +578,161 @@ test("summarizeBtwThread: one tool-free request through the registry stream (BTW
     /No active model selected/,
   );
 });
+
+test("registration: session_shutdown aborts an IN-FLIGHT summary one-shot — the provider sees the abort and nothing is injected into the main chat", async () => {
+  // The registered flow end to end: `/btw <q>` fills the thread through the overlay-bearing
+  // path, the overlay's dismiss key runs `closeOverlayFlow` → "Inject summary into main chat" →
+  // `injectSummaryIntoMain`, whose summary request hangs in the faux provider until its
+  // `signal` fires; the registered `session_shutdown` handler must be what fires it. A dropped
+  // `summaryAbort?.abort()` or a controller not passed at the call site leaves the request
+  // pending past teardown and this test hanging on `factoryCalled`/`aborted`, never green.
+  const reg = await fauxModelRuntime();
+  let aborted: Promise<void> | null = null;
+  let factoryCalled!: () => void;
+  const factoryReached = new Promise<void>((resolve) => {
+    factoryCalled = resolve;
+  });
+  const summaryFactory: FauxResponseFactory = (_context, options) => {
+    const signal = options?.signal;
+    assert.ok(signal, "the summary request carries an abort signal");
+    factoryCalled();
+    aborted = new Promise<void>((resolve) => {
+      signal.addEventListener("abort", () => resolve(), { once: true });
+    });
+    // Resolve ONLY on abort — an error-stopped message, as a real aborted request surfaces.
+    return aborted.then(() =>
+      fauxAssistantMessage([], { stopReason: "error", errorMessage: "summary aborted" }),
+    );
+  };
+  reg.setResponses([
+    fauxAssistantMessage([fauxText("side answer")], { stopReason: "stop" }),
+    summaryFactory,
+  ]);
+
+  const sent: unknown[] = [];
+  const appended: string[] = [];
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<void> | void>();
+  let command:
+    | ((args: string, ctx: Parameters<typeof createBtwAgentSession>[0]) => Promise<void>)
+    | undefined;
+  const pi = {
+    appendEntry: (type: string) => {
+      appended.push(type);
+    },
+    sendUserMessage: (...args: unknown[]) => {
+      sent.push(args);
+    },
+    getActiveTools: () => ["read", "write"],
+    getAllTools: () => [],
+    setActiveTools: () => {},
+    getThinkingLevel: () => "off",
+    on: (event: string, handler: (event: unknown, ctx: unknown) => Promise<void> | void) => {
+      handlers.set(event, handler);
+    },
+    registerCommand: (
+      _name: string,
+      cmd: {
+        handler: (args: string, ctx: Parameters<typeof createBtwAgentSession>[0]) => Promise<void>;
+      },
+    ) => {
+      command = cmd.handler;
+    },
+  } as unknown as Parameters<typeof registerBtw>[0];
+  registerBtw(
+    pi,
+    registerToolGating(pi, () => false),
+    { resolve: () => null },
+  );
+  assert.ok(command);
+  const shutdown = handlers.get("session_shutdown");
+  assert.ok(shutdown, "the session_shutdown handler is registered");
+
+  // A headful ctx whose `ui.custom` runs the overlay factory with inert TUI collaborators and
+  // keeps the overlay reachable; `ui.select` picks the summary arm of the close flow.
+  let overlay: { handleInput(data: string): void } | null = null;
+  const notifies: { message: string; severity?: string }[] = [];
+  const ctx = {
+    ...fakeBtwCtx(reg),
+    hasUI: true,
+    mode: "interactive",
+    isIdle: () => true,
+    sessionManager: SessionManager.inMemory("/repo"),
+    waitForIdle: async () => {},
+    ui: {
+      notify: (message: string, severity?: string) => {
+        notifies.push({ message, severity });
+      },
+      select: async (_title: string, options: string[]) =>
+        options.find((o) => o.startsWith("Inject summary")) ?? null,
+      theme: passthrough,
+      custom: async (
+        factory: (
+          tui: unknown,
+          theme: unknown,
+          keybindings: unknown,
+          done: () => void,
+        ) => Promise<{ handleInput(data: string): void }>,
+        options: { onHandle?: (handle: unknown) => void },
+      ) => {
+        let finish!: () => void;
+        const pending = new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        overlay = await factory(
+          { requestRender: () => {} },
+          passthrough,
+          { matches: () => true },
+          () => finish(),
+        );
+        options.onHandle?.({
+          focus: () => {},
+          hide: () => finish(),
+          setHidden: () => {},
+          isFocused: () => true,
+        });
+        return pending;
+      },
+    },
+  } as unknown as Parameters<typeof createBtwAgentSession>[0];
+
+  await command("what is up", ctx);
+  assert.equal(
+    appended.filter((t) => t === "btw-thread-entry").length,
+    1,
+    "the thread has one turn",
+  );
+  assert.ok(overlay, "the overlay was created");
+
+  const bounded = <T>(p: Promise<T>, label: string): Promise<T | "timeout"> =>
+    Promise.race([
+      p,
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 5000)).then((t) => {
+        assert.fail(`${label} did not happen within 5s`);
+        return t;
+      }),
+    ]);
+
+  // Dismiss → closeOverlayFlow → "Inject summary into main chat" → the summary request hangs.
+  (overlay as { handleInput(data: string): void }).handleInput("\x1b");
+  await bounded(factoryReached, "the summary request reaching the provider");
+  assert.equal(sent.length, 0, "nothing injected while the summary is pending");
+
+  // Shutdown mid-flight: the registered handler aborts the one-shot; the provider observes it.
+  await shutdown(undefined, ctx);
+  assert.ok(aborted, "the provider registered its abort listener");
+  await bounded(aborted, "the shutdown abort reaching the pending summary request");
+  // Let the rejection propagate through injectSummaryIntoMain's catch arm.
+  for (let i = 0; i < 20 && !notifies.some((n) => n.severity === "error"); i += 1) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  assert.ok(
+    notifies.some((n) => n.severity === "error" && /summary aborted|aborted/i.test(n.message)),
+    `the aborted summary surfaces as an error, never a silent success: ${JSON.stringify(notifies)}`,
+  );
+  assert.equal(sent.length, 0, "no main-chat injection after an aborted summary");
+  assert.equal(
+    appended.filter((t) => t === "btw-thread-reset").length,
+    0,
+    "the thread is not reset — the summary never landed",
+  );
+});

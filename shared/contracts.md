@@ -801,7 +801,8 @@ are the pinned commit identity the in-session tool binds the wave and the routin
 workflow-state `run_id` → the run's handoff (the `audit_bundle_dir` recovery shape); a
 missing/blank binding, a missing checkout dir, or a missing/unreadable/digest-mismatched patch
 is `bad_state` (the refusal names the patch path), headless is a typed refusal, and the tool is
-**single-use** per session. On success it opens the SAME browser-lifecycle core as the warm
+**single-use** per session; a stack wave still pending against a different pin is `bad_state`
+too (the supersession guard). On success it opens the SAME browser-lifecycle core as the warm
 `/stack-review-browser` door (Plannotator's static-patch mode over the verified patch), binds
 the pinned stack into the session's `StackPinState`, and returns the rendered stack guidance as
 its ok text.
@@ -1518,11 +1519,17 @@ perk pr review checkout --pr <n> --json -> { success, error_type, message, path,
     # stack_topology_broken); objective-arm recorded-vs-observed head drift appends a
     # stack_notes row (warn, never refuse). The existing tail reuses verbatim at the TOP head
     # (same review-<top> name → cleanup --pr <top> unchanged); base_sha =
-    # merge-base(origin/<stack base>, top head). THE PINNED COMBINED PATCH: after base_sha is
-    # known (topology validated) and BEFORE any worktree mutation, `diff_range(base_sha, top)`
+    # merge-base(origin/<stack base>, top head), which must ALSO be an ancestor of the BOTTOM
+    # head (the pinned `review-context` reader's base→bottom gate — an upper layer that merged
+    # newer base commits the lower layers lack passes the chain gate but would make every lane
+    # and the routing command refuse; `False`/`None` → stack_topology_broken here, fail-closed,
+    # before any diff or worktree mutation). THE PINNED COMBINED PATCH: after base_sha is
+    # known (both gates passed) and BEFORE any worktree mutation, `diff_range(base_sha, top)`
     # is rendered over the exact fetched objects (a `GitError` → git_error; an empty/
-    # whitespace-only diff → `empty_stack_diff` "the stack's combined diff is empty (base
-    # <sha[:12]> equals the top head) — nothing to review") and hashed
+    # whitespace-only diff → `empty_stack_diff` "the stack's combined diff from base <sha[:12]>
+    # to the top head <sha[:12]> is empty (identical trees) — nothing to review" — an empty
+    # TREE diff, never a claim about commit equality: distinct commits with identical trees,
+    # e.g. a fully reverted stack, refuse the same way) and hashed
     # (`patch_sha256 = sha256(utf-8 bytes)`); after `worktree add` succeeds the bytes are
     # written atomically to `<checkout path>.patch` — the `review-<top>.patch` SIBLING beside
     # the checkout (`review_patch_path` in Python, `patchPathFor` in TS: a pure function of
@@ -2130,9 +2137,15 @@ parallel rebuild.
   strict snapshot decode → the core → ONE guidance injection
   (`prompts/stages/stack-review-browser/stack.md`, rendered with the snapshot table/notes —
   shared verbatim with `open_stack_review`, including the `review_context_command` variable —
-  the pinned command below). A successful open sets the per-activation `StackPinState`
+  the pinned command below). A successful open sets the per-activation `StackPinState.pinned`
   (`{topPr, checkout, baseSha, heads[{pr, headSha}] bottom→top}` from the verified snapshot; a
-  later open replaces it). The model-facing `start_review_wave` keeps `stack: boolean`; with
+  later open replaces it) — EXCEPT while a stack wave is in flight against a different pin: a
+  launched stack wave locks its pin as `StackPinState.inFlight` until `collect_review_wave`
+  settles it, and both entry paths refuse a superseding open in that window (the warm door
+  reports an error naming the pending review's top PR + checkout, the tool fails `bad_state`;
+  re-opening the SAME pin — a stale-session reopen — proceeds), so lanes reviewing one
+  stack's commits can never have their findings pushed/routed against another stack's patch.
+  The model-facing `start_review_wave` keeps `stack: boolean`; with
   `stack: true` the tool requires a bound pin (`bad_state` "open it with /stack-review-browser
   or open_stack_review first") whose `topPr`/`checkout` match the call's `pr`/`worktree`
   (`bad_input` otherwise — the model cannot aim a stack wave at another stack or checkout) and

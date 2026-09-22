@@ -32,6 +32,7 @@ import {
   parseStackReviewArgs,
   patchPathFor,
   pinnedStackOf,
+  pinSupersedeRefusal,
   STACK_DEGRADE_NOTICE,
   type StackSnapshotRow,
   stackReviewGuidance,
@@ -195,6 +196,40 @@ test("verifyStackPatch: missing / unreadable / mismatch / ok over the derived si
   assert.equal(unreadable.ok, false);
   if (unreadable.ok) return;
   assert.equal(unreadable.reason, "unreadable");
+});
+
+test("pinSupersedeRefusal: no pending stack wave or the SAME pin → proceed; a different pin in flight → the refusal names the pending review", () => {
+  const idle = createStackPinState();
+  assert.equal(pinSupersedeRefusal(idle, PINNED), null, "nothing in flight");
+  idle.pinned = PINNED;
+  assert.equal(pinSupersedeRefusal(idle, PINNED), null, "an open review with no wave pending");
+  const busy = { pinned: PINNED, inFlight: PINNED };
+  assert.equal(
+    pinSupersedeRefusal(busy, { ...PINNED }),
+    null,
+    "a stale-session reopen of the same pin",
+  );
+  // A refreshed checkout of the same top PR (one head moved) IS a different pin.
+  const moved = {
+    ...PINNED,
+    heads: [
+      PINNED.heads[0] as { pr: number; headSha: string },
+      { pr: 42, headSha: "c".repeat(40) },
+    ],
+  };
+  const refusal = pinSupersedeRefusal(busy, moved);
+  assert.ok(refusal !== null);
+  assert.match(
+    refusal,
+    /still pending against the open stack review \(top PR #42 at \/wt\/review-42\)/,
+  );
+  assert.match(refusal, /collect_review_wave/);
+  // Another stack entirely.
+  const other = pinnedStackOf(9, "/wt/review-9", "1".repeat(40), [
+    { ...ROW_A, pr: 8 },
+    { ...ROW_B, pr: 9 },
+  ]);
+  assert.ok(pinSupersedeRefusal(busy, other) !== null);
 });
 
 test("decodeStackCheckout: the full envelope decodes; missing stack fields refuse", () => {
@@ -886,6 +921,75 @@ test("open_stack_review: success returns the guidance as ok text; second call is
     await settleBridges(sink);
     h.dispose();
   }
+});
+
+test("executeOpenStackReview: a stack wave pending against a DIFFERENT pin refuses bad_state before any open; the same pin proceeds", async () => {
+  const { cwd, checkoutPath } = scaffoldStackLaunch();
+  const branch = [{ type: "custom", customType: "perk:workflow-state", data: { run_id: RUN_ID } }];
+  const pi = {
+    getCommands: () => [{ name: "plannotator-review" }],
+  } as unknown as ExtensionAPI;
+  const ctx = {
+    cwd,
+    hasUI: true,
+    sessionManager: { getBranch: () => branch },
+    ui: { notify: () => {}, setStatus: () => {} },
+  } as unknown as Parameters<typeof executeOpenStackReview>[1];
+  const bound = pinnedStackOf(42, checkoutPath, "0".repeat(40), [ROW_A, ROW_B]);
+  const otherStack = pinnedStackOf(9, join(cwd, "review-9"), "1".repeat(40), [
+    { ...ROW_A, pr: 8 },
+    { ...ROW_B, pr: 9 },
+  ]);
+  const opens: number[] = [];
+  const open: Parameters<typeof executeOpenStackReview>[6] = (
+    _pi,
+    _ctx,
+    _annotations,
+    _status,
+    pin,
+    opts,
+  ) => {
+    opens.push(opts.pinned.topPr);
+    pin.pinned = opts.pinned;
+    return Promise.resolve(true);
+  };
+
+  // A wave still in flight against another stack: refused, nothing opened, latch untouched.
+  const latch = { opened: false };
+  const busy = { pinned: otherStack, inFlight: otherStack };
+  const refused = await executeOpenStackReview(
+    pi,
+    ctx,
+    latch,
+    createAnnotationState(),
+    createPerkStatus(),
+    busy,
+    open,
+  );
+  const refusedDetails = refused.details as { ok: boolean; error_type?: string };
+  assert.equal(refusedDetails.ok, false);
+  assert.equal(refusedDetails.error_type, "bad_state");
+  assert.match(
+    refused.content[0]?.text ?? "",
+    /still pending against the open stack review \(top PR #9/,
+  );
+  assert.deepEqual(opens, [], "no open attempted");
+  assert.equal(latch.opened, false);
+  assert.deepEqual(busy.pinned, otherStack, "the pending review's pin is untouched");
+
+  // The SAME pin in flight (a stale-session reopen): proceeds.
+  const same = { pinned: bound, inFlight: bound };
+  const ok = await executeOpenStackReview(
+    pi,
+    ctx,
+    latch,
+    createAnnotationState(),
+    createPerkStatus(),
+    same,
+    open,
+  );
+  assert.equal((ok.details as { ok: boolean }).ok, true, ok.content[0]?.text);
+  assert.deepEqual(opens, [42]);
 });
 
 test("executeOpenStackReview: a browser-open failure is browser_failed and keeps the latch closed", async () => {

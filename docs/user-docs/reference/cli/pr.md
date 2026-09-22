@@ -332,7 +332,11 @@ without `--stack` refuses). One fetch pins every member head plus the stack base
 topology is validated **fail-closed before any checkout** (every lower head must be an ancestor
 of the head above it — a violation or indeterminate probe is `stack_topology_broken`); the
 **top** head is checked out at `review-<top>` (so `cleanup --pr <top>` works unchanged) and
-`base_sha` becomes the merge-base of `origin/<stack base>` and the top head. The envelope adds
+`base_sha` becomes the merge-base of `origin/<stack base>` and the top head — which must also be
+an ancestor of the **bottom** head (the coordinate the pinned per-member diffs start from): a
+stack whose upper layer merged newer base-branch commits the lower layers lack is
+`stack_topology_broken` at checkout (sync the stack so every layer builds on the same base),
+rather than a checkout that opens and then fails every reviewer lane. The envelope adds
 the pinned snapshot: `stack[]` (`{pr, url, branch, head_sha, base_ref, node_id, plan_id}`,
 bottom→top) and `stack_notes[]` (resolution warnings + recorded-vs-observed head drift —
 warnings only); the top-level `base_ref` is the stack base.
@@ -346,7 +350,8 @@ path on both sides, never carried) and reports its digest as `patch_sha256` in t
 browser request: a moving member head cannot change the displayed diff, and a refreshed checkout
 of the same top PR (new patch, new digest) invalidates a review still open on the old one. The
 diff is rendered and hashed **before** any worktree mutation: a `git diff` failure is
-`git_error`; a base that equals the top head (nothing to review) is `empty_stack_diff`; a
+`git_error`; an empty base→top diff — identical trees, whether the top head *is* the base or
+every layer's change was reverted (nothing to review) — is `empty_stack_diff`; a
 failure writing the patch after the worktree exists is `write_failed` (a re-run refreshes the
 residue). The single-PR envelope is unchanged (no `patch_sha256` key).
 

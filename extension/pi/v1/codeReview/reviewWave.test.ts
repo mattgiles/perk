@@ -193,7 +193,7 @@ test("start with stack: true against a pin whose topPr/checkout differ refuses b
       state,
       wave,
       target,
-      { pinned: PINNED },
+      { pinned: PINNED, inFlight: null },
       { ...mismatch, stack: true },
     );
     assert.equal(result.details.ok, false);
@@ -206,19 +206,23 @@ test("start with stack: true against a pin whose topPr/checkout differ refuses b
   }
 });
 
-test("start with stack: true against the matching pin launches lanes whose tasks carry EXACTLY the pinned command", async () => {
+test("start with stack: true against the matching pin launches lanes whose tasks carry EXACTLY the pinned command; the pin is locked in flight until collect", async () => {
   const adapter = completeAdapter();
   const wave = reportWaveOver(adapter);
   const state = freshState();
   const { target } = fakeTarget();
-  const result = await executeStartReviewWavePinned(
-    state,
-    wave,
-    target,
-    { pinned: PINNED },
-    { ...START_OPTS, stack: true },
-  );
+  const stackPin: StackPinState = { pinned: PINNED, inFlight: null };
+  const result = await executeStartReviewWavePinned(state, wave, target, stackPin, {
+    ...START_OPTS,
+    stack: true,
+  });
   assert.equal(result.details.ok, true, result.content[0]?.text);
+  assert.deepEqual(stackPin.inFlight, PINNED, "a launched stack wave locks its pin in flight");
+  // Collecting the wave (any settled outcome) releases the lock with the pending slot.
+  const collected = await executeCollectReviewWave(state, wave, target, { stackPin });
+  assert.equal(collected.details.ok, true, collected.content[0]?.text);
+  assert.equal(state.pending, null);
+  assert.equal(stackPin.inFlight, null, "a settled stack wave releases its pin");
   const script = adapter.calls.spawn[0]?.workflowScript ?? "";
   const command = pinnedReviewContextCommand(PINNED);
   assert.ok(script.includes(command), "the lane tasks embed the pinned review-context command");
@@ -229,14 +233,16 @@ test("start with stack: true against the matching pin launches lanes whose tasks
   );
   // Without stack, the same pin is inert: tasks are the single-PR form.
   const plainAdapter = completeAdapter();
+  const plainPin: StackPinState = { pinned: PINNED, inFlight: null };
   const plainResult = await executeStartReviewWavePinned(
     freshState(),
     reportWaveOver(plainAdapter),
     target,
-    { pinned: PINNED },
+    plainPin,
     START_OPTS,
   );
   assert.equal(plainResult.details.ok, true);
+  assert.equal(plainPin.inFlight, null, "a non-stack wave never locks the pin");
   const plainScript = plainAdapter.calls.spawn[0]?.workflowScript ?? "";
   assert.equal(plainScript.includes("--pin-base"), false);
   assert.ok(plainScript.includes("Review PR #42 at /abs/wt."));

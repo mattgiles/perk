@@ -60,7 +60,7 @@ import type { AnnotationState } from "../providers/annotations.ts";
 import { plannotatorPresent, stackRespondMessage } from "../providers/plannotatorHandoff.ts";
 import { openReviewBrowserCore } from "./browser.ts";
 import { type CheckoutOk, decodeCheckout, PR_URL_RE } from "./checkout.ts";
-import type { StackPinState } from "./reviewWave.ts";
+import { samePinnedStack, type StackPinState } from "./reviewWave.ts";
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
 const SCOPE = "stack-review-browser";
@@ -349,11 +349,30 @@ export const STACK_DEGRADE_NOTICE =
 // ------------------------------------------------------------------------ the shared open
 
 /**
+ * The supersession guard both entry paths run BEFORE opening: while a stack wave launched
+ * against a different pin is still pending (uncollected), a new open would re-prime the shared
+ * annotation surface for another stack while the lanes keep reviewing the old commits — their
+ * findings could then be pushed/routed against the wrong patch. Returns the refusal text, or
+ * null when the open may proceed (no pending stack wave, or the SAME pin — a stale-session
+ * reopen of the open review).
+ */
+export function pinSupersedeRefusal(stackPin: StackPinState, next: PinnedStack): string | null {
+  const inFlight = stackPin.inFlight;
+  if (inFlight === null || samePinnedStack(inFlight, next)) return null;
+  return (
+    `a stack review wave is still pending against the open stack review (top PR #${inFlight.topPr} ` +
+    `at ${inFlight.checkout}) — collect it with collect_review_wave (or wait for its native ` +
+    "completion) before opening another stack review"
+  );
+}
+
+/**
  * Open the stack browser session through the extracted lifecycle core (both entry paths):
  * plannotator's static-patch mode over the digest-verified `patchPath` (the caller ran
- * `verifyStackPatch` first), and on success bind the verified `pinned` stack into the
- * per-activation `StackPinState` (a later open replaces it — the accepted "second browser
- * door supersedes" posture).
+ * `verifyStackPatch` and `pinSupersedeRefusal` first), and on success bind the verified
+ * `pinned` stack into the per-activation `StackPinState` (a later open replaces it — the
+ * accepted "second browser door supersedes" posture — unless a stack wave is in flight against
+ * a different pin).
  */
 async function openStackBrowser(
   pi: ExtensionAPI,
@@ -483,6 +502,11 @@ function registerStackReviewBrowser(
         return;
       }
       const pinned = pinnedStackOf(data.pr, data.path, data.base_sha, data.stack);
+      const supersede = pinSupersedeRefusal(stackPin, pinned);
+      if (supersede !== null) {
+        report(ctx, SCOPE, "error", supersede);
+        return;
+      }
       report(
         ctx,
         SCOPE,
@@ -661,6 +685,10 @@ export async function executeOpenStackReview(
     binding.base_sha,
     binding.stack,
   );
+  const supersede = pinSupersedeRefusal(stackPin, pinned);
+  if (supersede !== null) {
+    return fail(supersede, "bad_state");
+  }
   const guidance = stackReviewGuidance({
     topPr: bindingTopPr(binding),
     checkout: binding.checkout_path,

@@ -335,6 +335,21 @@ def stack_checkout(
             f"{stack.base_ref!r}",
             error_type="git_error",
         )
+    # The per-member diff contract the pinned `review-context` reader enforces: the combined
+    # base must be an ancestor of the BOTTOM head (the bottom member diffs base→bottom). The
+    # merge-base with the TOP head can sit above the bottom head when an upper layer merged
+    # newer base-branch commits the lower layers lack — a linear chain the topology gate above
+    # accepts, but one whose snapshot every lane and the routing command would refuse. Refuse
+    # here, fail-closed, before the diff/worktree mutation; an indeterminate probe refuses too.
+    bottom = stack.members[0]
+    if git.is_ancestor(repo_root, base_sha, head_shas[0]) is not True:
+        raise UserFacingCliError(
+            f"the stack base {base_sha[:12]} (merge-base of origin/{stack.base_ref} and the top "
+            f"head) is not an ancestor of the bottom head (PR #{bottom.pr_number}) — an upper "
+            f"layer merged newer {stack.base_ref!r} commits the lower layers lack; sync the stack "
+            "so every layer builds on the same base, then re-run",
+            error_type="stack_topology_broken",
+        )
 
     # The pinned combined patch, rendered over the exact fetched objects (no refetch, no moving
     # ref) BEFORE any worktree mutation — a failed or empty render leaves an existing checkout
@@ -349,9 +364,11 @@ def stack_checkout(
             error_type="git_error",
         ) from exc
     if not combined.strip():
+        # An empty TREE diff — the base and the top head have identical trees (the top head IS
+        # the base, or every layer's change was reverted); the commits may well differ.
         raise UserFacingCliError(
-            f"the stack's combined diff is empty (base {base_sha[:12]} equals the top head) — "
-            "nothing to review",
+            f"the stack's combined diff from base {base_sha[:12]} to the top head "
+            f"{head_shas[-1][:12]} is empty (identical trees) — nothing to review",
             error_type="empty_stack_diff",
         )
     patch_sha256 = hashlib.sha256(combined.encode("utf-8")).hexdigest()

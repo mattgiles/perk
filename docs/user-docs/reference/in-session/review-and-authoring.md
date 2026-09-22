@@ -274,7 +274,10 @@ envelope's `patch_sha256` immediately before the browser request. The browser th
 pinned diff: moving refs cannot change it, there is no live refresh, and the browser has no
 repository context of its own (exploration happens in the detached checkout, which stays the
 reviewers' surface). A checkout of the same top PR refreshed while a review is open invalidates
-that review — the next open refuses on the digest mismatch (re-run the door). One adversarial wave
+that review — the next open refuses on the digest mismatch (re-run the door). While a stack wave is
+still pending (launched, uncollected), opening a *different* stack — or the same stack after a
+refresh — is refused until `collect_review_wave` settles it; re-opening the identical pinned
+review (a stale-session reopen) is allowed. One adversarial wave
 reviews the same pinned commits (`stack: true` requires this door's open review in the session and
 binds the wave to its top PR + checkout; reviewer children run the pinned
 `perk pr review-context --pr <top> --stack --pin-base <sha> --pin-head <pr>=<sha> …` command the

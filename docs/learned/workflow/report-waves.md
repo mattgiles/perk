@@ -352,12 +352,25 @@ perk-side application.)
 - The former named residual (the per-item `outputSchema` override proven offline but never
   against live RPC) was mooted by the dynamic flow's wholesale retirement — no live carrier
   remains.
-- The adversarial wave's `stack: true` option is a **discriminator, not a member array**
+- The adversarial wave's `stack: true` option was a **discriminator, not a member array**
   (`extension/waves/adversarialReviewWave.ts`): with `stack: true` only the subject/context-fetch
-  sentence of the lane task swaps (the combined diff of the stack topped by the PR; the child
-  fetches context via `perk pr review-context --pr <n> --stack`); single-PR lane tasks stay
-  byte-identical when the option is absent, and stack-membership authority stays with the
-  context worker — the wave never enumerates members.
+  sentence of the lane task swapped (the combined diff of the stack topped by the PR; the child
+  fetched context via `perk pr review-context --pr <n> --stack`); single-PR lane tasks stayed
+  byte-identical when the option was absent, and stack-membership authority stayed with the
+  context worker — the wave never enumerated members.
+
+  > **Update (2026-09, the pinned static-patch stack review):** `stack` is now `PinnedStack`
+  > (`{topPr, checkout, baseSha, heads[{pr, headSha}] bottom→top}`) — the checkout snapshot the
+  > stack door digest-verified and bound into the session's `StackPinState`, never model-relayed
+  > coordinates. The lane task embeds `pinnedReviewContextCommand(stack)` =
+  > `perk pr review-context --pr <top> --stack --pin-base <sha> --pin-head <pr>=<sha>…`, so the
+  > wave DOES enumerate every member head, and membership authority moved from the context
+  > worker's live re-resolution to the checkout snapshot (the CLI re-validates the pins'
+  > topology, fetches nothing, and stamps `local-pinned`). The discriminator posture survives in
+  > one form: without `stack`, lane tasks are still byte-identical to the single-PR wave. The
+  > durable lesson is the *shape* of the change — when a lane's input must match what the human
+  > is looking at, pass parent-verified DATA (pins) into the task rather than a flag that lets
+  > the child re-derive a moving answer.
 
 ## Lane semantics — status ≠ validity ≠ coverage
 
