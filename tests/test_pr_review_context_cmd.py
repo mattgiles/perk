@@ -1014,6 +1014,8 @@ def _seed_pinned_stack(clone: Path) -> dict[str, str]:
             ["git", "rev-parse", "HEAD"], cwd=clone, check=True, capture_output=True, text=True
         ).stdout.strip()
 
+    base_branch = git_mod.current_branch(clone)
+    assert base_branch is not None
     shas = {"base": sha()}
     subprocess.run(["git", "checkout", "-qb", "plan-301"], cwd=clone, check=True)
     (clone / "a.txt").write_text("a\n", encoding="utf-8")
@@ -1025,7 +1027,7 @@ def _seed_pinned_stack(clone: Path) -> dict[str, str]:
     subprocess.run(["git", "add", "."], cwd=clone, check=True)
     subprocess.run(["git", "commit", "-qm", "b"], cwd=clone, check=True)
     shas["b"] = sha()
-    subprocess.run(["git", "checkout", "-q", "main"], cwd=clone, check=True)
+    git_mod.checkout_branch(clone, base_branch)
     return shas
 
 
