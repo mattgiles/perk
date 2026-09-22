@@ -9,7 +9,8 @@
       "tools/**/*.css",
       "docs/site/**/*.ts",
       "docs/site/**/*.mjs",
-      "docs/site/**/*.css"
+      "docs/site/**/*.css",
+      "packages/perk-dev/**/*.mjs"
     ]
   },
   "formatter": {

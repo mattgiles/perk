@@ -33,6 +33,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 # SIGTERM → SIGKILL window for a child that outlives its exit grace (the census flush window).
 TERM_GRACE_S = 2.0
@@ -68,6 +69,22 @@ class PtyRun:
     stderr: str
     stdout_bytes: int
     spawn_monotonic_ns: int
+
+
+class SpawnFn(Protocol):
+    """The :func:`spawn_pty` signature — the harness's injectable spawn seam (tests pass a fake)."""
+
+    def __call__(
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: Path,
+        env: Mapping[str, str],
+        size: PtySize,
+        timeout_s: float,
+        exit_grace_s: float,
+        startup_marker: Callable[[str], bool],
+    ) -> PtyRun: ...
 
 
 def _acquire_controlling_tty() -> None:
