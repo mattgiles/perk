@@ -188,7 +188,12 @@ export function verifyStackPatch(
   expectedSha256: string,
 ):
   | { ok: true; patchPath: string }
-  | { ok: false; patchPath: string; reason: "missing" | "unreadable" | "mismatch"; detail: string } {
+  | {
+      ok: false;
+      patchPath: string;
+      reason: "missing" | "unreadable" | "mismatch";
+      detail: string;
+    } {
   const patchPath = patchPathFor(checkoutPath);
   let bytes: Buffer;
   try {

@@ -756,7 +756,11 @@ test("startPlannotatorBrowser: env preset while probing, PR-mode payload, ready 
   try {
     const started = await startPlannotatorBrowser(
       bus,
-      { cwd: "/repo", source: { mode: "pr", prUrl: "https://gh/o/r/pull/77" }, activity: noActivity },
+      {
+        cwd: "/repo",
+        source: { mode: "pr", prUrl: "https://gh/o/r/pull/77" },
+        activity: noActivity,
+      },
       {
         pickFreePort: () => Promise.resolve(45001),
         probe: (url) => {
