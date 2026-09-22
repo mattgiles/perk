@@ -783,17 +783,21 @@ every session that is not a claimed `audit judge` launch — is refused `bad_sta
 
 **The stack-review launch binding (`stack_review`, §8.4).** The `perk objective stack review`
 cold door stashes `handoff_extra={"stack_review": {stack: [{pr, url, branch, head_sha,
-base_ref, node_id, plan_id}…], checkout_path, notes, focus}}` — the checkout worker's
-**pinned snapshot** (§8.4), never re-resolved, carrying EXACTLY the four fields the tool
-consumes (every one required by the strict decode; the top PR and the stack base derive from
-the ordered rows — last row's `pr`, first row's `base_ref`; a blank `focus` normalizes to
-null). The warm
+base_ref, node_id, plan_id}…], checkout_path, notes, focus, base_sha, patch_sha256}}` — the
+checkout worker's **pinned snapshot** (§8.4), never re-resolved, carrying EXACTLY the fields
+the tool consumes (every one required by the strict decode — `base_sha` 40-hex, `patch_sha256`
+64-hex; the top PR and the stack base REF derive from the ordered rows — last row's `pr`,
+first row's `base_ref`; a blank `focus` normalizes to null). `base_sha` + the rows' `head_sha`s
+are the pinned commit identity the in-session tool binds the wave and the routing step to;
+`patch_sha256` is the digest of the derived `<checkout_path>.patch`. The warm
 `open_stack_review` tool takes **no parameters** and recovers the blob through the rebuilt
 workflow-state `run_id` → the run's handoff (the `audit_bundle_dir` recovery shape); a
-missing/blank binding or a missing checkout dir is `bad_state`, headless is a typed refusal,
-and the tool is **single-use** per session. On success it opens the SAME browser-lifecycle core
-as the warm `/stack-review-browser` door and returns the rendered stack guidance as its ok
-text.
+missing/blank binding, a missing checkout dir, or a missing/unreadable/digest-mismatched patch
+is `bad_state` (the refusal names the patch path), headless is a typed refusal, and the tool is
+**single-use** per session. On success it opens the SAME browser-lifecycle core as the warm
+`/stack-review-browser` door (Plannotator's static-patch mode over the verified patch), binds
+the pinned stack into the session's `StackPinState`, and returns the rendered stack guidance as
+its ok text.
 
 **Progress tracking.** perk mints **no** progress state of its own: there is no checkpoint
 substrate — no `perk:checkpoint` entry, `## Steps` seeding machinery, `[WIP:n]`/`[DONE:n]`
@@ -1258,8 +1262,14 @@ the summary (+ rendered findings) as a single discussion comment, so an advisory
 ops below:
 
 ```
+get_pr_text{ pr_number } -> PrText{ title, body, base_ref, head_ref } | None
+    # Read-only; ONE `gh api pulls/{n}` read — the coordinates-free text half of a review
+    # context (`base_ref`/`head_ref` are the payload's names verbatim, "" when absent). Lookup
+    # convention: 404 → None. `get_pr_review_context` composes it with the diff read; the
+    # pinned `review-context --stack` arm reads member text through it directly.
 get_pr_review_context{ pr_number, branch, plan_body, local_diff? } -> PrReviewContext{ pr_number, base_ref, head_ref, title, body, diff, plan_body, diff_source }
-    # Read-only. PR meta via `gh api pulls/{n}`, diff via `gh pr diff {n}`. The gateway reads
+    # Read-only. PR meta via `get_pr_text` (a 404 is a `GitHubError` here — callers wanting
+    # the clean not-found arm pre-check with `get_pr`), diff via `gh pr diff {n}`. The gateway reads
     # no plan/issue state: `plan_body` is resolved backend-neutrally by the consumer
     # (`perk pr review-context`) — the materialized `cache.plan` mirror first, else
     # `IssueBackend.get_plan_body` via the resolver — and passed straight in (best-effort; null
@@ -1304,14 +1314,36 @@ get_pr_review_context{ pr_number, branch, plan_body, local_diff? } -> PrReviewCo
     # namespace (concurrent reviewer lanes share one ref store — no shared temp ref is ever
     # touched; deleted in a finally), the checkout worker's predecessor→successor ancestry gate
     # re-validated fail-closed (stack_topology_broken — indeterminate probes refuse too),
-    # then a local `diff_range(<base_sha>, <top_sha>)`.
+    # then a local `diff_range(<base_sha>, <top_sha>)`. This unpinned arm (re-resolve +
+    # refetch) stays byte-identical for ad-hoc CLI use; the stack review's lanes run the
+    # PINNED arm below.
+    # `--pr <top> --stack --pin-base <sha> --pin-head <pr>=<sha>…` (the PINNED stack arm —
+    # what `pinnedReviewContextCommand` renders for the stack lanes and the routing step from
+    # the snapshot the door verified): the pins ARE the membership — no chain re-resolution,
+    # NO fetch. Grammar (every violation `invalid_input`): the two pin options are valid only
+    # with --stack and only together; every sha is 40 lowercase hex; every <pr> a positive
+    # integer, no duplicates; at least two --pin-head, bottom→top; the last --pin-head's PR
+    # equals --pr; `--local` is inert (every diff is local by construction). Gates in order:
+    # every pinned sha must resolve locally (`pinned_object_missing` naming the sha — the
+    # detached review-<top> checkout keeps every member head alive, so an absent object means
+    # that checkout was removed: "re-run `perk pr review checkout --stack`"); the checkout
+    # worker's predecessor→successor ancestry gate over the pins (`stack_topology_broken`) and
+    # base-is-ancestor-of-bottom (`False`/`None` → `stack_topology_broken`). Then per pinned
+    # PR: member text via `get_pr_text` (a live GitHub read — text, not coordinates; 404 →
+    # `pr_not_found`), `plan_body` for `plan-<N>` heads, `diff = diff_range(prev, head_sha)`
+    # (`prev` = --pin-base for the bottom member, else the previous member's head) stamped
+    # `diff_source: "local-pinned"`; `combined_diff = diff_range(--pin-base, <top head>)`. A
+    # `GitError` is `git_error`. Envelope shape unchanged (stack[] + combined_diff + pointers);
+    # so the browser patch (`stack_checkout` wrote `diff_range(base_sha, top)`), the lanes'
+    # combined/per-member diffs and the routing inputs share ONE commit identity by
+    # construction, and `diff_range`'s config pins keep the bytes identical across the three.
     # PROVENANCE IS PER ARTIFACT: every `diff_source` describes exactly the `diff` beside it —
     # the top-level field the top-level `diff` (the top member's in stack mode), each `stack[]`
-    # member's its own `diff`. `combined_diff` is ALWAYS a local merge-base rendering by
-    # construction and carries no provenance field (documented, never emitted as a constant).
+    # member's its own `diff`. `combined_diff` is ALWAYS a local rendering by construction
+    # and carries no provenance field (documented, never emitted as a constant).
     # `diff_source` is a TRAILING field on `PrReviewContextOut` / `StackContextMemberOut`
-    # (JSON-schema enum {github, local-git}); the reviewer defs disclose a `"local-git"` diff
-    # as one `fyi` line (anchors are unchanged).
+    # (JSON-schema enum {github, local-git, local-pinned}); the reviewer defs disclose a
+    # `"local-git"` diff as one `fyi` line (anchors are unchanged).
     # THE CLI ARMS EMIT A POINTER ENVELOPE, NEVER INLINE TEXT: every free-text section —
     # `body`, `diff`, `plan_body`, each `stack[]` member's sections, `combined_diff` — is
     # written to its own line-oriented file and the `--json` payload carries `context_dir` +
@@ -1479,12 +1511,25 @@ perk pr review checkout --pr <n> --json -> { success, error_type, message, path,
     # stack_topology_broken); objective-arm recorded-vs-observed head drift appends a
     # stack_notes row (warn, never refuse). The existing tail reuses verbatim at the TOP head
     # (same review-<top> name → cleanup --pr <top> unchanged); base_sha =
-    # merge-base(origin/<stack base>, top head). Envelope: the single-PR fields describe the
-    # top PR + combined base (non-stack calls byte-compatible — no null stack keys) plus the
-    # PINNED SNAPSHOT: stack:[{pr, url, branch, head_sha, base_ref, node_id, plan_id}]
-    # bottom→top and stack_notes[] (base_ref/base_sha ARE the combined-diff base — no
-    # duplicate stack-base field) — every downstream consumer (guidance, handoff, posting
-    # narrative) reads THIS envelope; nothing re-resolves moving refs.
+    # merge-base(origin/<stack base>, top head). THE PINNED COMBINED PATCH: after base_sha is
+    # known (topology validated) and BEFORE any worktree mutation, `diff_range(base_sha, top)`
+    # is rendered over the exact fetched objects (a `GitError` → git_error; an empty/
+    # whitespace-only diff → `empty_stack_diff` "the stack's combined diff is empty (base
+    # <sha[:12]> equals the top head) — nothing to review") and hashed
+    # (`patch_sha256 = sha256(utf-8 bytes)`); after `worktree add` succeeds the bytes are
+    # written atomically to `<checkout path>.patch` — the `review-<top>.patch` SIBLING beside
+    # the checkout (`review_patch_path` in Python, `patchPathFor` in TS: a pure function of
+    # the checkout path, so BOTH planes derive it and nothing carries a path; outside the
+    # untrusted checkout, outside `worktree wipe`'s `plan-*` filter). An `OSError` on the
+    # write is `write_failed` — the worktree and temp refs are left for the next run to
+    # refresh (a retry repairs the residue; no rollback). Envelope: the single-PR fields
+    # describe the top PR + combined base (non-stack calls byte-compatible — no null stack
+    # keys, no patch_sha256) plus the PINNED SNAPSHOT: stack:[{pr, url, branch, head_sha,
+    # base_ref, node_id, plan_id}] bottom→top, stack_notes[] and patch_sha256 (64-hex;
+    # base_ref/base_sha ARE the combined-diff base — no duplicate stack-base field) — every
+    # downstream consumer (guidance, handoff, posting narrative, the browser's digest check)
+    # reads THIS envelope; nothing re-resolves moving refs. The human render adds one
+    # `patch <path> (sha256 <12 hex>)` line on the stack arm.
     # Stack refusals (both resolution arms share the gates): not_a_stack (<2 open members —
     # /pr-review-browser territory) · stack_too_deep (> STACK_REVIEW_MAX_MEMBERS = 20) ·
     # fork_unsupported (cross-repo head, fail-closed on a blank identity) · ambiguous_stack
@@ -1494,8 +1539,10 @@ perk pr review checkout --pr <n> --json -> { success, error_type, message, path,
 perk pr review cleanup --pr <n> --json -> { success, error_type, message, pr, path, removed }
     # Single-PR and idempotent: nothing to remove → success, removed:false, exit 0. Fully
     # offline (no GitHub calls). Removes a registered worktree (force) or an unregistered
-    # leftover dir (rmtree), always followed by `git worktree prune`; also deletes a leftover
-    # refs/perk/review/<n> temp ref best-effort.
+    # leftover dir (rmtree), always followed by `git worktree prune`, AND the stack arm's
+    # `<checkout>.patch` sibling (`removed: true` for an orphan patch alone) — the one shared
+    # `remove_review_worktree` the checkout refresh and the stale reaper also run; also
+    # deletes a leftover refs/perk/review/<n> temp ref best-effort.
 perk pr review-submit --pr <n> --event <e> --batch <file> --json -> { success, error_type, message, dry_run, pr, event, mode, comment_count }
     # The comments-first review-submission substrate — consumed by the warm `submit_pr_review`
     # posting tool, not human-CLI-first (a plain cold worker: no launcher half, no registry stage; the
@@ -2048,11 +2095,19 @@ parallel rebuild.
   NO commit SHAs — the checkout worker is the single hydration boundary and its envelope is the
   pinned snapshot (the checkout `--stack` spec above). Cardinality/fork gates are shared by
   both arms (`not_a_stack`, `stack_too_deep`, `fork_unsupported`).
-- **The combined-diff surface:** plannotator renders the diff itself — local mode
-  `{cwd: <top-head checkout>, diffType: "since-base", defaultBranch: "origin/<stack base>"}`.
-  The explicit base MUST be the remote-tracking ref the checkout materializes: plannotator
-  trusts an explicit value verbatim and degrades a failed merge-base to `HEAD` (an empty
-  review), so a bare branch name is a silent-failure trap.
+- **The combined-diff surface:** the browser opens Plannotator's **static-patch mode**
+  `{cwd: <top-head checkout>, patchFile: <checkout>.patch}` (Plannotator ≥ 0.27.16; the
+  `CodeReviewSource` union's `patch` arm — mutually exclusive with `prUrl` by construction)
+  over the patch `stack_checkout` wrote from the pinned `base_sha`→top `head_sha`, verified by
+  SHA-256 against the snapshot's `patch_sha256` immediately BEFORE the request is emitted
+  (`verifyStackPatch`: missing/unreadable/mismatch → the warm door reports an error and emits
+  no request; `open_stack_review` returns `bad_state` naming the path — "the stack checkout was
+  refreshed since this snapshot was taken — re-run the stack review"). Moving refs cannot
+  change the displayed diff; there is no merge-base fallback, no live refresh, no workspace
+  and no platform posting — reviewers and exploration keep the detached checkout. Residual:
+  refreshing the same top PR's checkout while a review is OPEN invalidates that review (the
+  next open refuses on the digest). The former live `since-base` vs `origin/<stack base>`
+  mode (and its merge-base→`HEAD` degrade trap) is gone.
 - **The warm `/stack-review-browser` door** (`extension/pi/v1/codeReview/stack.ts`, SCOPE
   `stack-review-browser`): a thin door over the SAME extracted browser-lifecycle core as
   `/pr-review-browser` (`openReviewBrowserCore`: open → prime → readiness observation → respond
@@ -2067,12 +2122,22 @@ parallel rebuild.
   order: parse → `ctx.hasUI` → plannotator presence. Flow: the checkout `--stack` cold worker →
   strict snapshot decode → the core → ONE guidance injection
   (`prompts/stages/stack-review-browser/stack.md`, rendered with the snapshot table/notes —
-  shared verbatim with `open_stack_review`). The wave runs with `stack: true` — the lane-task
-  discriminator (children fetch `perk pr review-context --pr <top> --stack` and report in
-  COMBINED-DIFF coordinates; routing is the parent's job; without `stack`, lane tasks are
-  byte-identical to the single-PR wave). The completion-only yield, the `perk:wave` marker,
-  `push_annotations`, collect, reconcile, and the early-decision policy are the browser door's
-  contract unchanged. Cleanup: `perk pr review cleanup --pr <top>`.
+  shared verbatim with `open_stack_review`, including the `review_context_command` variable —
+  the pinned command below). A successful open sets the per-activation `StackPinState`
+  (`{topPr, checkout, baseSha, heads[{pr, headSha}] bottom→top}` from the verified snapshot; a
+  later open replaces it). The model-facing `start_review_wave` keeps `stack: boolean`; with
+  `stack: true` the tool requires a bound pin (`bad_state` "open it with /stack-review-browser
+  or open_stack_review first") whose `topPr`/`checkout` match the call's `pr`/`worktree`
+  (`bad_input` otherwise — the model cannot aim a stack wave at another stack or checkout) and
+  passes the pin to the wave: the stack lane tasks and the guidance's routing step read the
+  ONE pinned command `pinnedReviewContextCommand(pin)` = `perk pr review-context --pr <top>
+  --stack --pin-base <base_sha> --pin-head <pr>=<sha>…` (bottom→top), rendered from the same
+  snapshot the browser patch was verified against — parent-captured DATA, never model-relayed
+  prose; children report in COMBINED-DIFF coordinates; routing is the parent's job; without
+  `stack`, lane tasks are byte-identical to the single-PR wave. The completion-only yield, the
+  `perk:wave` marker, `push_annotations`, collect, reconcile, and the early-decision policy are
+  the browser door's contract unchanged. Cleanup: `perk pr review cleanup --pr <top>` (removes
+  the checkout AND its `.patch` sibling).
 - **Respond routing (`stackRespondMessage`):** exit takes precedence over simultaneous
   approval, feedback, and annotations, returning the closed-without-submitting ask. Approval
   with zero decoded annotations retains the complete existing approval/posting message: the
@@ -2103,14 +2168,18 @@ parallel rebuild.
   SIDE-EFFECT-FREE: read-only resolution only — no fetch, no worktree mutation, no handoff
   write, no launch; the preview carries the would-be checkout path, `base_sha: null` +
   per-member `head_sha: null`, the build-once launch argv, and the handoff-blob preview with
-  the same nulls plus `dry_run: true`. Local-only by design: `--remote` is accepted by the
-  seeded-door interface and refused as `remote_blocked` before any resolution.
+  the same nulls (incl. `base_sha: null`, `patch_sha256: null`) plus `dry_run: true`; the real
+  run's blob carries the checkout's `base_sha` + `patch_sha256`. Local-only by design:
+  `--remote` is accepted by the seeded-door interface and refused as `remote_blocked` before
+  any resolution.
   `open_stack_review` (parameterless, single-use; binding/decode in §8.3) recovers the snapshot
   and runs the same core, returning the stack guidance as its ok text.
 - **Routing + per-PR posting (model judgment — no blame-attribution worker):** inputs are the
   reconciled wave findings + returned browser annotations (both combined-diff coordinates), the
-  per-PR diffs materialized by `review-context --stack` (one `diff.patch` file per member, read
-  from the envelope's `stack[].diff.path` references), and the snapshot's layer order. Default
+  per-PR diffs materialized by the PINNED `review-context --stack --pin-base/--pin-head` command
+  the guidance renders (the SAME pinned commits the lanes and the browser patch used; one
+  `diff.patch` file per member, read from the envelope's `stack[].diff.path` references), and
+  the snapshot's layer order. Default
   disposition: fold each finding into the OWNING PR's review body; inline anchors only where
   the location is straightforwardly identifiable in that PR's own diff; cross-cutting/
   unplaceable findings fold into the most relevant PR's body. The posting protocol is the stack

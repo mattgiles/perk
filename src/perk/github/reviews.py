@@ -421,12 +421,28 @@ def resolve_review_threads(
 # Where a review diff was rendered: ``"github"`` is GitHub's diff media type (the default);
 # ``"local-git"`` is the local merge-base diff (``git.pr_merge_base_diff``) the gateway falls
 # back to when GitHub refuses the diff as too large (HTTP 406 ``too_large`` above 20,000 lines /
-# 300 files) or when a caller asks for it (`perk pr review-context --local`).
-type DiffSource = Literal["github", "local-git"]
+# 300 files) or when a caller asks for it (`perk pr review-context --local`); ``"local-pinned"``
+# is a ``git.diff_range`` over caller-pinned commits with no fetch at all (the pinned
+# `perk pr review-context --stack --pin-base/--pin-head` mode the stack review's lanes and
+# routing run, so their diffs share the checkout's commit identity by construction).
+type DiffSource = Literal["github", "local-git", "local-pinned"]
 
 # Why a local diff was rendered — carried into every diagnostic so a forced ``--local`` failure
 # never claims an HTTP 406.
 type LocalDiffReason = Literal["too-large", "forced"]
+
+
+@dataclass(frozen=True)
+class PrText:
+    """A PR's text + ref names (``GET pulls/<n>``): the coordinates-free half of a review
+    context. Read by :func:`get_pr_text`; :func:`get_pr_review_context` composes it with the
+    diff read. ``base_ref``/``head_ref`` are the payload's names verbatim — ``""`` when the
+    payload lacks one (callers choose their own fallback)."""
+
+    title: str
+    body: str
+    base_ref: str
+    head_ref: str
 
 
 @dataclass(frozen=True)
@@ -536,6 +552,34 @@ def _pr_base_ref(*, pr_number: int, repo_root: Path) -> str | None:
     return _exec._opt_str(data.get("base")) if isinstance(data, dict) else None
 
 
+def get_pr_text(*, pr_number: int, repo_root: Path) -> PrText | None:
+    """The PR's title/body/base/head (one ``GET pulls/<n>`` read). Lookup convention: a missing
+    PR (404) returns ``None``; any other failure raises ``GitHubError``."""
+    data = _exec._run_json(
+        [
+            "api",
+            f"repos/{{owner}}/{{repo}}/pulls/{pr_number}",
+            "--jq",
+            "{title: .title, body: .body, base: .base.ref, head: .head.ref}",
+        ],
+        what=f"failed to read PR #{pr_number}",
+        source=f"`gh api pulls/{pr_number}`",
+        cwd=repo_root,
+        default="{}",
+        none_on_not_found=True,
+    )
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise _exec.GitHubError(f"unexpected PR payload: {data!r}")
+    return PrText(
+        title=str(data.get("title") or ""),
+        body=str(data.get("body") or ""),
+        base_ref=_exec._opt_str(data.get("base")) or "",
+        head_ref=_exec._opt_str(data.get("head")) or "",
+    )
+
+
 def get_pr_review_context(
     *,
     pr_number: int,
@@ -554,29 +598,19 @@ def get_pr_review_context(
     ``too_large`` refusal, or when ``local_diff`` is set (the CLI's ``--local``), it is rendered
     locally via ``git.pr_merge_base_diff`` and stamped ``diff_source="local-git"``. Any other
     ``gh pr diff`` failure raises exactly as before. PR title/body/base/head are always GitHub
-    reads."""
-    data = _exec._run_json(
-        [
-            "api",
-            f"repos/{{owner}}/{{repo}}/pulls/{pr_number}",
-            "--jq",
-            "{title: .title, body: .body, base: .base.ref, head: .head.ref}",
-        ],
-        what=f"failed to read PR #{pr_number}",
-        source=f"`gh api pulls/{pr_number}`",
-        cwd=repo_root,
-        default="{}",
-    )
-    if not isinstance(data, dict):
-        raise _exec.GitHubError(f"unexpected PR payload: {data!r}")
+    reads (:func:`get_pr_text`; a 404 here is a ``GitHubError`` — callers wanting the clean
+    not-found arm pre-check with ``get_pr``)."""
+    text = get_pr_text(pr_number=pr_number, repo_root=repo_root)
+    if text is None:
+        raise _exec.GitHubError(f"failed to read PR #{pr_number}: not found")
+    # The local-diff base is the payload's base branch or None (never the head-branch fallback
+    # the envelope's `base_ref` field takes below).
+    base_ref: str | None = text.base_ref or None
 
     diff_source: DiffSource = "github"
     if local_diff:
         diff = _local_pr_diff(
-            pr_number=pr_number,
-            repo_root=repo_root,
-            base_ref=_exec._opt_str(data.get("base")),
-            reason="forced",
+            pr_number=pr_number, repo_root=repo_root, base_ref=base_ref, reason="forced"
         )
         diff_source = "local-git"
     else:
@@ -585,10 +619,7 @@ def get_pr_review_context(
             diff = diff_proc.stdout
         elif _is_diff_too_large(diff_proc):
             diff = _local_pr_diff(
-                pr_number=pr_number,
-                repo_root=repo_root,
-                base_ref=_exec._opt_str(data.get("base")),
-                reason="too-large",
+                pr_number=pr_number, repo_root=repo_root, base_ref=base_ref, reason="too-large"
             )
             diff_source = "local-git"
         else:
@@ -596,10 +627,10 @@ def get_pr_review_context(
 
     return PrReviewContext(
         pr_number=pr_number,
-        base_ref=str(data.get("base") or branch),
-        head_ref=str(data.get("head") or branch),
-        title=str(data.get("title") or ""),
-        body=str(data.get("body") or ""),
+        base_ref=text.base_ref or branch,
+        head_ref=text.head_ref or branch,
+        title=text.title,
+        body=text.body,
         diff=diff,
         plan_body=plan_body,
         diff_source=diff_source,

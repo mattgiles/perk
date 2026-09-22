@@ -27,10 +27,21 @@ Diff provenance: every per-PR `diff` is GitHub's diff media type by default; on 
 `too_large` refusal (above 20,000 lines / 300 files) the gateway renders it locally (a fetch +
 merge-base diff), and `--local` forces that on every arm (the single-PR `diff` and each `--stack`
 member `diff`; PR title/body/base/head stay GitHub reads). Each `diff_source`
-(`"github"` | `"local-git"`) describes exactly the `diff` beside it — the top-level field the
-top-level `diff`, each `stack[]` member's its own `diff`. `combined_diff` is ALWAYS a local
-merge-base rendering (the stack arm fetches and diffs locally by construction) and carries no
+(`"github"` | `"local-git"` | `"local-pinned"`) describes exactly the `diff` beside it — the
+top-level field the top-level `diff`, each `stack[]` member's its own `diff`. `combined_diff` is
+ALWAYS a local rendering (the stack arm fetches and diffs locally by construction) and carries no
 provenance field.
+
+Pinned stack mode (`--pr <top> --stack --pin-base <sha> --pin-head <pr>=<sha> …`): the pins ARE
+the membership — no chain re-resolution, NO fetch. Every diff is `git diff_range` over the exact
+pinned commits (`"local-pinned"`): each member against the previous member's head (the bottom
+against `--pin-base`), and `combined_diff` from `--pin-base` to the top head. The stack review's
+reviewer lanes and routing step run this mode with the commits `perk pr review checkout --stack`
+pinned, so their diffs share the browser patch's commit identity by construction. Refusals: a
+pinned object absent locally is `pinned_object_missing` (the checkout that kept it alive is
+gone); pins that are not a linear stack, or a base that is not an ancestor of the bottom head,
+are `stack_topology_broken`. Member title/body/base/head are still live GitHub reads (text, not
+coordinates). `--local` is inert here (every diff is local by construction).
 
 Supervisor surface: `--json` to stdout, human text to stderr, stable exit codes.
 Exit codes: 0 ok · 1 invalid input / no plan / no PR / op failure · 2 not-a-repo.
@@ -38,6 +49,7 @@ Exit codes: 0 ok · 1 invalid input / no plan / no PR / op failure · 2 not-a-re
 
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -70,6 +82,20 @@ from perk.substrate.output import user_output
 # A stack member whose head branch is a plan branch gets its plan body enriched via the
 # resolver-fallback arm (the resolver owns the id shape — GitHub numeric, Linear ENG-123).
 _PLAN_BRANCH_RE = re.compile(r"^plan-(.+)$")
+
+# The pinned mode's coordinate shapes: a full 40-char lowercase hex commit SHA and the
+# `<pr>=<sha>` head pin (a positive integer PR number bound to one such SHA).
+_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_PIN_HEAD_RE = re.compile(r"^([1-9][0-9]*)=([0-9a-f]{40})$")
+
+
+@dataclass(frozen=True)
+class PinnedStack:
+    """The validated pinned identity of a stack: the combined-diff base commit and the ordered
+    bottom→top ``(pr_number, head_sha)`` pairs (at least two)."""
+
+    base_sha: str
+    heads: tuple[tuple[int, str], ...]
 
 
 @dataclass(frozen=True)
@@ -123,7 +149,21 @@ class PrReviewContextResult:
     "local_diff",
     is_flag=True,
     help="Render the diff locally (git fetch + merge-base diff) instead of GitHub's diff media "
-    "type; automatic on GitHub's 20,000-line/300-file 406.",
+    "type; automatic on GitHub's 20,000-line/300-file 406. Inert in pinned mode.",
+)
+@click.option(
+    "--pin-base",
+    "pin_base",
+    default=None,
+    help="Pinned stack mode (with --stack and --pin-head): the combined-diff base commit "
+    "(full 40-hex SHA) — no chain re-resolution, no fetch.",
+)
+@click.option(
+    "--pin-head",
+    "pin_heads",
+    multiple=True,
+    help="Pinned stack mode: a member head as <pr>=<full sha>, repeated bottom→top (at least "
+    "two; the last must be --pr).",
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
@@ -134,6 +174,8 @@ def review_context_pr(
     expected_pr: int | None,
     stack_mode: bool,
     local_diff: bool,
+    pin_base: str | None,
+    pin_heads: tuple[str, ...],
     as_json: bool,
 ) -> None:
     """Fetch a PR's review context (read-only; a fresh-context reviewer child runs this).
@@ -145,7 +187,11 @@ def review_context_pr(
     --pr N --stack: the whole PR stack containing N — per-member sections
     plus the combined base→top diff, plan-branch members enriched with
     their plan bodies. --local renders every diff locally (composes
-    with every arm).
+    with every arm). With --pr N --stack --pin-base SHA --pin-head PR=SHA…:
+    the pinned mode — the pins ARE the stack (bottom→top, last = N), every
+    diff is rendered from those exact local commits with NO fetch
+    (diff_source "local-pinned"); a pinned commit missing locally refuses
+    (the stack checkout that kept it alive is gone).
     """
     try:
         repo_root = require_repo(ctx)
@@ -155,6 +201,8 @@ def review_context_pr(
             expected_pr=expected_pr,
             stack_mode=stack_mode,
             local_diff=local_diff,
+            pin_base=pin_base,
+            pin_heads=pin_heads,
         )
     except GitHubError as exc:
         fail(
@@ -215,7 +263,12 @@ def _impl(
     expected_pr: int | None,
     stack_mode: bool = False,
     local_diff: bool = False,
+    pin_base: str | None = None,
+    pin_heads: Sequence[str] = (),
 ) -> PrReviewContextResult:
+    pinned = _validate_pins(
+        pr_number=pr_number, stack_mode=stack_mode, pin_base=pin_base, pin_heads=pin_heads
+    )
     if stack_mode and expected_pr is not None:
         raise UserFacingCliError(
             "--stack and --expected-pr are mutually exclusive", error_type="invalid_input"
@@ -233,6 +286,8 @@ def _impl(
         raise UserFacingCliError(
             "--expected-pr must be a positive integer", error_type="invalid_input"
         )
+    if pinned is not None:
+        return _pinned_stack_context(repo_root=repo_root, pinned=pinned)
     if stack_mode and pr_number is not None:
         return _stack_context(repo_root=repo_root, pr_number=pr_number, local_diff=local_diff)
     if pr_number is not None:
@@ -343,6 +398,139 @@ def _stack_context(*, repo_root: Path, pr_number: int, local_diff: bool) -> PrRe
         stack=members,
         combined_diff=combined_diff,
     )
+
+
+def _validate_pins(
+    *,
+    pr_number: int | None,
+    stack_mode: bool,
+    pin_base: str | None,
+    pin_heads: Sequence[str],
+) -> PinnedStack | None:
+    """The pinned mode's option grammar (every violation is ``invalid_input``): ``--pin-base``
+    and ``--pin-head`` are valid only with ``--stack``, only together, every SHA is a full
+    40-hex lowercase commit, every PR a positive integer with no duplicates, at least two heads,
+    and the last head's PR equals ``--pr``. ``None`` when neither pin option is present."""
+    if pin_base is None and not pin_heads:
+        return None
+    if not stack_mode:
+        raise UserFacingCliError(
+            "--pin-base/--pin-head are valid only with --stack", error_type="invalid_input"
+        )
+    if pin_base is None or not pin_heads:
+        raise UserFacingCliError(
+            "--pin-base and --pin-head must be given together (the pinned stack mode)",
+            error_type="invalid_input",
+        )
+    if not _FULL_SHA_RE.match(pin_base):
+        raise UserFacingCliError(
+            f"--pin-base {pin_base!r} is not a full 40-hex lowercase commit SHA",
+            error_type="invalid_input",
+        )
+    heads: list[tuple[int, str]] = []
+    for raw in pin_heads:
+        match = _PIN_HEAD_RE.match(raw)
+        if match is None:
+            raise UserFacingCliError(
+                f"--pin-head {raw!r} is not <pr>=<full 40-hex sha>", error_type="invalid_input"
+            )
+        heads.append((int(match.group(1)), match.group(2)))
+    if len(heads) < 2:
+        raise UserFacingCliError(
+            "the pinned stack mode needs at least two --pin-head members (bottom→top)",
+            error_type="invalid_input",
+        )
+    prs = [pr for pr, _ in heads]
+    if len(set(prs)) != len(prs):
+        raise UserFacingCliError("--pin-head lists a PR more than once", error_type="invalid_input")
+    if prs[-1] != pr_number:
+        raise UserFacingCliError(
+            f"the last --pin-head must be the top PR --pr {pr_number} (got #{prs[-1]})",
+            error_type="invalid_input",
+        )
+    return PinnedStack(base_sha=pin_base, heads=tuple(heads))
+
+
+def _pinned_stack_context(*, repo_root: Path, pinned: PinnedStack) -> PrReviewContextResult:
+    """The pinned ``--stack`` arm: the pins ARE the membership (no chain re-resolution, no
+    fetch). Object check first — every pinned commit must exist locally (the detached
+    ``review-<top>`` checkout keeps every member head reachable, so an absent object means
+    that checkout was removed); then the same fail-closed topology gate as the checkout plus
+    the base-is-ancestor-of-bottom check; then one ``diff_range`` per member over the exact
+    pinned commits and the combined base→top diff, all stamped ``"local-pinned"``. Member
+    text is still a live GitHub read (title/body/base/head — text, not coordinates)."""
+    for sha in (pinned.base_sha, *(sha for _, sha in pinned.heads)):
+        if git.resolve_commit(repo_root, sha) is None:
+            raise UserFacingCliError(
+                f"pinned commit {sha} is not present locally — the stack checkout that pinned "
+                "these commits is gone; re-run `perk pr review checkout --stack`",
+                error_type="pinned_object_missing",
+            )
+    try:
+        git.check_stack_topology(repo_root, heads=list(pinned.heads))
+    except StackTopologyError as exc:
+        raise UserFacingCliError(str(exc), error_type="stack_topology_broken") from exc
+    bottom_pr, bottom_sha = pinned.heads[0]
+    if git.is_ancestor(repo_root, pinned.base_sha, bottom_sha) is not True:
+        raise UserFacingCliError(
+            f"stack topology broken: the pinned base {pinned.base_sha[:12]} is not an ancestor "
+            f"of the bottom head (PR #{bottom_pr} at {bottom_sha[:12]})",
+            error_type="stack_topology_broken",
+        )
+
+    members: list[StackContextMember] = []
+    prev = pinned.base_sha
+    for pr_number, head_sha in pinned.heads:
+        text = github.get_pr_text(pr_number=pr_number, repo_root=repo_root)
+        if text is None:
+            raise UserFacingCliError(
+                f"PR #{pr_number} not found\nCheck the number (gh pr list shows open PRs).",
+                error_type="pr_not_found",
+            )
+        members.append(
+            StackContextMember(
+                pr_number=pr_number,
+                base_ref=text.base_ref,
+                head_ref=text.head_ref,
+                title=text.title,
+                body=text.body,
+                diff=_pinned_diff(repo_root, prev, head_sha, what=f"PR #{pr_number}"),
+                plan_body=_plan_body_for_branch(repo_root, text.head_ref),
+                diff_source="local-pinned",
+            )
+        )
+        prev = head_sha
+    combined_diff = _pinned_diff(
+        repo_root, pinned.base_sha, pinned.heads[-1][1], what="the combined stack diff"
+    )
+    top = members[-1]
+    top_context = github.PrReviewContext(
+        pr_number=top.pr_number,
+        base_ref=top.base_ref,
+        head_ref=top.head_ref,
+        title=top.title,
+        body=top.body,
+        diff=top.diff,
+        plan_body=top.plan_body,
+        diff_source=top.diff_source,
+    )
+    return PrReviewContextResult(
+        context=top_context,
+        branch=top.head_ref,
+        stack=tuple(members),
+        combined_diff=combined_diff,
+    )
+
+
+def _pinned_diff(repo_root: Path, base: str, head: str, *, what: str) -> str:
+    """One ``git.diff_range`` over pinned commits; a ``GitError`` is the typed ``git_error``."""
+    try:
+        return git.diff_range(repo_root, base, head)
+    except GitError as exc:
+        raise UserFacingCliError(
+            f"could not render {what} from pinned commits {base[:12]}..{head[:12]}\n{exc}",
+            error_type="git_error",
+        ) from exc
 
 
 def _combined_diff(repo_root: Path, stack: ResolvedStack) -> str:

@@ -3,7 +3,8 @@
     "DiffSource": {
       "enum": [
         "github",
-        "local-git"
+        "local-git",
+        "local-pinned"
       ],
       "type": "string"
     },
