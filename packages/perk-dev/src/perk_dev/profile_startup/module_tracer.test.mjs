@@ -81,36 +81,62 @@ test("writes nothing when PERK_MODULE_CENSUS_DIR is unset", () => {
   }
 });
 
+// Every wait on the traced child is bounded: a regression that leaves it alive after SIGTERM
+// must FAIL the test, never hang `test-js`.
+const STEP_TIMEOUT_MS = 10_000;
+
+function withDeadline(promise, label) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} did not happen within ${STEP_TIMEOUT_MS} ms`)),
+      STEP_TIMEOUT_MS,
+    );
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
+
+function onceExited(child) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve({ code: child.exitCode, signal: child.signalCode });
+  }
+  return new Promise((resolve) => {
+    child.once("exit", (code, signal) => resolve({ code, signal }));
+  });
+}
+
 test("a SIGTERM'd process still flushes its census through the exit handler", async () => {
   const dir = tempDir();
+  const child = spawn(
+    process.execPath,
+    [
+      "--import",
+      TRACER_URL,
+      "-e",
+      "process.stdout.write('ready\\n'); setInterval(() => {}, 1000);",
+    ],
+    { env: envWith(dir), stdio: ["ignore", "pipe", "pipe"] },
+  );
+  const exited = onceExited(child);
   try {
-    const child = spawn(
-      process.execPath,
-      [
-        "--import",
-        TRACER_URL,
-        "-e",
-        "process.stdout.write('ready\\n'); setInterval(() => {}, 1000);",
-      ],
-      { env: envWith(dir), stdio: ["ignore", "pipe", "pipe"] },
+    await withDeadline(
+      new Promise((resolve, reject) => {
+        let out = "";
+        child.stdout.on("data", (chunk) => {
+          out += chunk.toString();
+          if (out.includes("ready")) {
+            resolve();
+          }
+        });
+        child.once("error", reject);
+        exited.then(({ code, signal }) =>
+          reject(new Error(`exited early (code ${code}, signal ${signal})`)),
+        );
+      }),
+      "the traced child's ready line",
     );
-    await new Promise((resolve, reject) => {
-      let out = "";
-      child.stdout.on("data", (chunk) => {
-        out += chunk.toString();
-        if (out.includes("ready")) {
-          resolve();
-        }
-      });
-      child.on("error", reject);
-      child.on("exit", (code) => reject(new Error(`exited early with ${code}`)));
-    });
-    const exit = new Promise((resolve) => {
-      child.removeAllListeners("exit");
-      child.on("exit", (code, signal) => resolve({ code, signal }));
-    });
     child.kill("SIGTERM");
-    const { code, signal } = await exit;
+    const { code, signal } = await withDeadline(exited, "the traced child's exit after SIGTERM");
     assert.equal(signal, null, "the tracer's handler turns SIGTERM into an orderly exit");
     assert.equal(code, 0);
     const files = censusFiles(dir);
@@ -119,6 +145,11 @@ test("a SIGTERM'd process still flushes its census through the exit handler", as
     assert.equal(header.kind, "process");
     assert.equal(header.hooks, true);
   } finally {
+    // Kill-and-await cleanup: whatever failed above, the child never outlives the test.
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+      await withDeadline(exited, "the traced child's exit after SIGKILL").catch(() => {});
+    }
     rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -77,6 +77,12 @@ def _base_args(tmp_path: Path, subject_dir: Path, *extra: str) -> list[str]:
         (["--pty-size", "500x40"], "--pty-size"),
         (["--pty-size", "120x300"], "--pty-size"),
         (["--pty-size", "wide"], "--pty-size"),
+        # Non-numeric tokens: parsed in-body, so they are the same typed refusal (never Click's
+        # exit-2 usage error, which cannot honor --json).
+        (["--runs", "nope"], "--runs"),
+        (["--runs", "1.5"], "--runs"),
+        (["--timeout", "nope"], "--timeout"),
+        (["--exit-grace", "soon"], "--exit-grace"),
     ],
 )
 def test_option_domain_violations_are_bad_arguments(
@@ -124,6 +130,19 @@ def test_output_that_is_a_file_is_refused(tmp_path, subject_dir, tools_on_path):
         ["--output", str(tmp_path / "file"), "--subject", f"s={subject_dir}", "--json"]
     )
     assert result.exit_code == 1 and _payload(result)["error_type"] == "bad_arguments"
+
+
+def test_output_preparation_os_error_is_io_error(tmp_path, subject_dir, tools_on_path):
+    # A real filesystem refusal: the parent of --output is a regular file, so mkdir(parents=True)
+    # raises NotADirectoryError inside prepare_output_dir — before any run.
+    blocker = tmp_path / "blocker"
+    blocker.write_text("x", encoding="utf-8")
+    result = _invoke(["--output", str(blocker / "out"), "--subject", f"s={subject_dir}", "--json"])
+    assert result.exit_code == 1
+    payload = _payload(result)
+    assert payload["error_type"] == "io_error"
+    assert "could not prepare --output" in payload["message"]
+    assert str(blocker / "out") in payload["message"]
 
 
 def test_non_empty_output_is_output_not_empty(tmp_path, subject_dir, tools_on_path):

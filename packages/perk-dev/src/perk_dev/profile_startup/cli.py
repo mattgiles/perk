@@ -3,13 +3,15 @@ supervisor contract (``--json`` payload → stdout, byte-identical to ``summary.
 stderr; refusals through ``perk.cli.emit.fail``).
 
 Refusals, in order and all BEFORE any sample is spawned: option-domain violations
-(``bad_arguments``, naming the option) → subject specs (``bad_arguments`` / ``subject_missing`` /
+(``bad_arguments``, naming the option — the numeric options are declared as strings and parsed
+HERE, so a non-numeric token is the same typed refusal instead of Click's usage error, which
+cannot honor ``--json``) → subject specs (``bad_arguments`` / ``subject_missing`` /
 ``subject_not_converged``) → the output directory (``bad_arguments`` / ``output_not_empty``) →
 ``pi`` / ``node`` on PATH (``tool_missing``, once) → inside the run, per subject,
-``subject_probe_failed`` / ``subject_untrusted`` (the stamps). Any ``OSError`` writing under
-``--output`` is ``io_error`` (exit 1; the partial run directory is left in place and named). A
-COMPLETED run exits 0 even when samples failed — the summary reports them (the detect-worker
-posture) and a ``warning:`` line names every subject with zero successful samples.
+``subject_probe_failed`` / ``subject_untrusted`` (the stamps). Any ``OSError`` preparing or
+writing under ``--output`` is ``io_error`` (exit 1; a partial run directory is left in place and
+named). A COMPLETED run exits 0 even when samples failed — the summary reports them (the
+detect-worker posture) and a ``warning:`` line names every subject with zero successful samples.
 """
 
 import math
@@ -32,9 +34,9 @@ from perk_dev.profile_startup.summary import (
     summary_json_text,
 )
 
-DEFAULT_RUNS = 5
-DEFAULT_TIMEOUT_S = 180.0
-DEFAULT_EXIT_GRACE_S = 10.0
+DEFAULT_RUNS = "5"
+DEFAULT_TIMEOUT_S = "180"
+DEFAULT_EXIT_GRACE_S = "10"
 DEFAULT_PTY_SIZE = "120x40"
 PTY_COLS_RANGE = (40, 400)
 PTY_ROWS_RANGE = (10, 200)
@@ -63,13 +65,28 @@ def parse_pty_size(value: str) -> PtySize:
     return PtySize(cols=cols, rows=rows)
 
 
-def _validate_scalars(*, runs: int, timeout_s: float, exit_grace_s: float) -> None:
+def parse_runs(raw: str) -> int:
+    """``--runs``: an integer >= 1, else ``bad_arguments``."""
+    try:
+        runs = int(raw.strip())
+    except ValueError:
+        raise _bad(f"--runs must be an integer >= 1, got {raw!r}") from None
     if runs < 1:
         raise _bad(f"--runs must be >= 1, got {runs}")
-    if not math.isfinite(timeout_s) or timeout_s <= 0:
-        raise _bad(f"--timeout must be a finite number of seconds > 0, got {timeout_s}")
-    if not math.isfinite(exit_grace_s) or exit_grace_s < 0:
-        raise _bad(f"--exit-grace must be a finite number of seconds >= 0, got {exit_grace_s}")
+    return runs
+
+
+def parse_seconds(option: str, raw: str, *, minimum: float, inclusive: bool) -> float:
+    """A finite number of seconds for ``option`` (``> minimum``, or ``>= minimum`` when
+    ``inclusive``), else ``bad_arguments`` naming the option."""
+    try:
+        value = float(raw.strip())
+    except ValueError:
+        raise _bad(f"{option} must be a finite number of seconds, got {raw!r}") from None
+    bound = f">= {minimum:g}" if inclusive else f"> {minimum:g}"
+    if not math.isfinite(value) or (value < minimum if inclusive else value <= minimum):
+        raise _bad(f"{option} must be a finite number of seconds {bound}, got {raw!r}")
+    return value
 
 
 def prepare_output_dir(raw: str) -> Path:
@@ -123,7 +140,7 @@ def _warn_empty_subjects(summary: Summary) -> None:
 @click.command("profile-startup")
 @click.option(
     "--runs",
-    type=int,
+    "runs_opt",
     default=DEFAULT_RUNS,
     show_default=True,
     metavar="<n>",
@@ -145,8 +162,7 @@ def _warn_empty_subjects(summary: Summary) -> None:
 )
 @click.option(
     "--timeout",
-    "timeout_s",
-    type=float,
+    "timeout_opt",
     default=DEFAULT_TIMEOUT_S,
     show_default=True,
     metavar="<seconds>",
@@ -154,8 +170,7 @@ def _warn_empty_subjects(summary: Summary) -> None:
 )
 @click.option(
     "--exit-grace",
-    "exit_grace_s",
-    type=float,
+    "exit_grace_opt",
     default=DEFAULT_EXIT_GRACE_S,
     show_default=True,
     metavar="<seconds>",
@@ -181,11 +196,11 @@ def _warn_empty_subjects(summary: Summary) -> None:
 def profile_startup(
     ctx: click.Context,
     *,
-    runs: int,
+    runs_opt: str,
     output_opt: str | None,
     subject_specs: tuple[str, ...],
-    timeout_s: float,
-    exit_grace_s: float,
+    timeout_opt: str,
+    exit_grace_opt: str,
     pty_size_opt: str,
     no_profiles: bool,
     as_json: bool,
@@ -204,7 +219,9 @@ def profile_startup(
       perk-dev profile-startup --output /tmp/ab --subject base=../perk-base --subject cand=. --json
     """
     try:
-        _validate_scalars(runs=runs, timeout_s=timeout_s, exit_grace_s=exit_grace_s)
+        runs = parse_runs(runs_opt)
+        timeout_s = parse_seconds("--timeout", timeout_opt, minimum=0.0, inclusive=False)
+        exit_grace_s = parse_seconds("--exit-grace", exit_grace_opt, minimum=0.0, inclusive=True)
         pty_size = parse_pty_size(pty_size_opt)
         if output_opt is None or not output_opt.strip():
             raise _bad("--output is required (the run directory)")
@@ -215,6 +232,15 @@ def profile_startup(
         pi_path, node_path = resolve_tools()
     except UserFacingCliError as exc:
         fail(ctx, as_json=as_json, error_type=exc.error_type or "bad_arguments", message=str(exc))
+        return
+    except OSError as exc:
+        # `prepare_output_dir`'s resolve/iterdir/mkdir — the same io_error arm as a run-time write.
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="io_error",
+            message=f"could not prepare --output {output_opt}: {exc}",
+        )
         return
     options = ProfileOptions(
         subjects=subjects,

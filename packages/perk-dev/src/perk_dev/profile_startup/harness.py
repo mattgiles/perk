@@ -153,24 +153,23 @@ def _sample_name(entry: ScheduleEntry) -> str:
 
 def _spawn_sample(
     subject: Subject, *, options: ProfileOptions, env: Mapping[str, str], spawn: SpawnFn
-) -> tuple[PtyRun, bool]:
-    scanner = TimingsScanner()
+) -> PtyRun:
+    """One timing spawn of bare ``perk`` (the classification re-parses the captured stderr)."""
     try:
-        run = spawn(
+        return spawn(
             (str(subject.executable),),
             cwd=subject.checkout,
             env=env,
             size=options.pty_size,
             timeout_s=options.timeout_s,
             exit_grace_s=options.exit_grace_s,
-            startup_marker=scanner.feed,
+            startup_marker=TimingsScanner().feed,
         )
     except OSError as exc:
         raise UserFacingCliError(
             f"subject {subject.label}: could not spawn {subject.executable}: {exc}",
             error_type="subject_probe_failed",
         ) from exc
-    return run, scanner.seen
 
 
 def _describe(sample: Sample) -> str:
@@ -259,7 +258,7 @@ def run_profile(
         kind, label = entry
         subject = by_label[label]
         name = _sample_name(entry)
-        run, _seen = _spawn_sample(subject, options=options, env=sample_env.env, spawn=spawn)
+        run = _spawn_sample(subject, options=options, env=sample_env.env, spawn=spawn)
         sample = classify_sample(run, index=0 if kind == WARMUP else int(kind))
         _write_json(
             out / "samples" / label / f"{name}.json",

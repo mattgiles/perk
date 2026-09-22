@@ -128,10 +128,13 @@ def parse_subject_specs(specs: Sequence[str]) -> tuple[Subject, ...]:
     """``LABEL=CHECKOUT`` specs → subjects, in the given order.
 
     Label syntax and uniqueness are ``bad_arguments`` (decided for EVERY spec before any
-    filesystem check); then each subject runs :func:`preflight_subject` in order.
+    filesystem check); then each subject runs :func:`preflight_subject` in order. Uniqueness is
+    case-INsensitive: labels name run-directory paths (``subjects/<label>``, ``samples/<label>``,
+    ``profiles/<label>``), and on a case-insensitive filesystem (the macOS default) ``foo`` and
+    ``Foo`` would silently share — and overwrite — one another's artifacts.
     """
     parsed: list[tuple[str, Path]] = []
-    seen: set[str] = set()
+    seen: dict[str, str] = {}
     for spec in specs:
         label, sep, raw_checkout = spec.partition("=")
         if not sep or not raw_checkout:
@@ -141,9 +144,16 @@ def parse_subject_specs(specs: Sequence[str]) -> tuple[Subject, ...]:
                 "bad_arguments",
                 f"--subject label {label!r} must match {LABEL_RE.pattern}",
             )
-        if label in seen:
-            raise _refuse("bad_arguments", f"--subject label {label!r} is given twice")
-        seen.add(label)
+        folded = label.casefold()
+        if folded in seen:
+            earlier = seen[folded]
+            detail = "is given twice" if earlier == label else f"collides with {earlier!r} by case"
+            raise _refuse(
+                "bad_arguments",
+                f"--subject label {label!r} {detail} — labels name run-directory paths, which "
+                "collide on a case-insensitive filesystem",
+            )
+        seen[folded] = label
         parsed.append((label, Path(raw_checkout).expanduser().resolve()))
     return tuple(preflight_subject(label, checkout) for label, checkout in parsed)
 

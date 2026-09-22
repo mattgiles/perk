@@ -119,9 +119,9 @@ class ProcessCensus:
     urls: tuple[str, ...]
 
 
-def compose_node_options(*, census_dir: Path, cpu_prof_dir: Path) -> str:
-    """The ``NODE_OPTIONS`` value for the census arm, from an empty base (see the module doc)."""
-    del census_dir  # the tracer reads its directory from PERK_MODULE_CENSUS_DIR, not a flag
+def compose_node_options(*, cpu_prof_dir: Path) -> str:
+    """The ``NODE_OPTIONS`` value for the census arm, from an empty base (see the module doc).
+    The tracer learns its census directory from ``PERK_MODULE_CENSUS_DIR``, not from a flag."""
     return f'--import={TRACER_PATH.resolve().as_uri()} --cpu-prof --cpu-prof-dir="{cpu_prof_dir}"'
 
 
@@ -388,7 +388,7 @@ def run_census_arm(
     cpu_prof_dir.mkdir(parents=True, exist_ok=True)
     arm_env = {
         **env,
-        "NODE_OPTIONS": compose_node_options(census_dir=census_dir, cpu_prof_dir=cpu_prof_dir),
+        "NODE_OPTIONS": compose_node_options(cpu_prof_dir=cpu_prof_dir),
         CENSUS_DIR_ENV: str(census_dir),
     }
     report(f"  {subject.label}: census arm (module tracer + --cpu-prof)")

@@ -9,9 +9,12 @@ suite-wide isolated one.
 
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
+import time
+from collections.abc import Collection
 from pathlib import Path
 
 import pytest
@@ -152,6 +155,42 @@ def test_spawn_pty_kills_a_child_that_never_prints_the_marker():
     assert run.elapsed_ms is None and run.exit_ms is None
 
 
+def test_spawn_pty_sweeps_a_grandchild_left_behind_after_a_natural_exit():
+    # The child forks a sleeper into its own process group (no setsid) and exits naturally; the
+    # sleeper ignores the SIGHUP the terminal sends when its session leader exits (so the kernel
+    # does not clean it up for us) and keeps the PTY slave open. The harness must still classify
+    # the natural exit AND sweep the straggler so it cannot skew the next sample.
+    sleeper = (
+        "import signal, sys, time\n"
+        "signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
+        "sys.stdout.write('armed\\n'); sys.stdout.flush()\n"
+        "time.sleep(30)\n"
+    )
+    script = (
+        "import subprocess, sys\n"
+        f"p = subprocess.Popen([sys.executable, '-c', {sleeper!r}], stdout=subprocess.PIPE)\n"
+        "p.stdout.readline()\n"  # the sleeper ignores SIGHUP before the child exits
+        f"sys.stderr.write('{_MARKER_STDERR}')\n"
+        "sys.stderr.write('grandchild=%d\\n' % p.pid)\n"
+        "sys.stderr.flush()\n"
+    )
+    run = _spawn(script, timeout_s=10.0, exit_grace_s=5.0)
+    assert run.exit_code == 0
+    assert run.timed_out is False and run.lingered is False
+    assert run.elapsed_ms is not None and run.exit_ms is not None
+    grandchild = int(run.stderr.split("grandchild=")[1].split()[0])
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        try:
+            os.kill(grandchild, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        os.kill(grandchild, signal.SIGKILL)  # do not leak it into the suite either way
+        pytest.fail("the grandchild survived spawn_pty's process-group sweep")
+
+
 def test_spawn_pty_drains_a_stdout_flood_without_deadlocking():
     script = (
         "import sys\n"
@@ -218,6 +257,16 @@ def test_parse_subject_specs_refuses_duplicate_labels(tmp_path):
         parse_subject_specs([f"same={a}", f"same={a}"])
     assert _error_type(exc) == "bad_arguments"
     assert "twice" in str(exc.value)
+
+
+def test_parse_subject_specs_refuses_labels_that_differ_only_by_case(tmp_path):
+    # `foo` and `Foo` name the same run-directory paths on a case-insensitive filesystem.
+    a = _prepare_checkout(tmp_path / "a")
+    b = _prepare_checkout(tmp_path / "b")
+    with pytest.raises(UserFacingCliError) as exc:
+        parse_subject_specs([f"foo={a}", f"Foo={b}"])
+    assert _error_type(exc) == "bad_arguments"
+    assert "collides with 'foo' by case" in str(exc.value)
 
 
 def test_parse_subject_specs_missing_directory(tmp_path):
@@ -574,9 +623,7 @@ def test_compose_node_options_and_tracer_path(tmp_path):
     from perk_dev.profile_startup import census
 
     assert census.TRACER_PATH.exists() and census.TRACER_PATH.name == "module_tracer.mjs"
-    value = census.compose_node_options(
-        census_dir=tmp_path / "node-census", cpu_prof_dir=tmp_path / "cpu prof"
-    )
+    value = census.compose_node_options(cpu_prof_dir=tmp_path / "cpu prof")
     assert value == (
         f"--import={census.TRACER_PATH.resolve().as_uri()} --cpu-prof "
         f'--cpu-prof-dir="{tmp_path / "cpu prof"}"'
@@ -726,10 +773,19 @@ def test_handoff_record_mirrors_the_seam(tmp_path, launch_exec_recorder):
     assert handoff.read_handoff_record(tmp_path / "bad.json") is None
 
 
-def _fake_handoff_spawn(*, write_records: set[str], write_prof: bool = True, exit_codes=None):
+def _fake_handoff_spawn(
+    *,
+    write_records: set[str],
+    write_prof: bool = True,
+    exit_codes=None,
+    spawn_errors: Collection[str] = (),
+    corrupt_prof: bool = False,
+    importtime_stderr: str = _IMPORTTIME_LOG,
+):
     """A spawn fake for the handoff arms: writes the seam's record for the named arms (keyed by
     the PERK_PROFILE_HANDOFF target's stem suffix), a cProfile dump for the cProfile arm, and an
-    importtime log on the importtime arm's stderr."""
+    importtime log on the importtime arm's stderr. Arms in ``spawn_errors`` raise ``OSError``
+    from the spawn itself (nothing runs)."""
     import cProfile
 
     from perk.run import launch
@@ -740,6 +796,8 @@ def _fake_handoff_spawn(*, write_records: set[str], write_prof: bool = True, exi
         target = Path(env[launch.PROFILE_HANDOFF_ENV])
         arm = target.stem.removeprefix("handoff-")
         calls.append({"argv": tuple(argv), "arm": arm, "target": target, "cwd": cwd})
+        if arm in spawn_errors:
+            raise OSError(2, "No such file or directory", argv[0])
         assert startup_marker("--- Startup Timings: main ---") is False  # never fires
         if arm in write_records:
             launch._record_profile_handoff(
@@ -748,11 +806,14 @@ def _fake_handoff_spawn(*, write_records: set[str], write_prof: bool = True, exi
         stderr = ""
         if arm == "cprofile" and write_prof:
             prof = Path(argv[argv.index("-o") + 1])
-            profiler = cProfile.Profile()
-            profiler.runcall(sum, range(10))
-            profiler.dump_stats(str(prof))
+            if corrupt_prof:
+                prof.write_bytes(b"not a marshal dump")
+            else:
+                profiler = cProfile.Profile()
+                profiler.runcall(sum, range(10))
+                profiler.dump_stats(str(prof))
         if arm == "importtime":
-            stderr = _IMPORTTIME_LOG
+            stderr = importtime_stderr
         code = (exit_codes or {}).get(arm, 0)
         return _pty_run(exit_code=code, elapsed_ms=None, stderr=stderr)
 
@@ -841,3 +902,38 @@ def test_run_handoff_arms_failed_arm_is_recorded_not_raised(tmp_path):
     assert profile.arms["cprofile"].output_present is False
     assert profile.arms["importtime"].status == "failed"  # non-zero exit
     assert profile.arms["importtime"].record_present is True
+
+
+def test_run_handoff_arms_spawn_failure_is_a_failed_arm_and_the_rest_still_run(tmp_path):
+    spawn, calls = _fake_handoff_spawn(
+        write_records={"direct", "cprofile", "importtime"}, spawn_errors={"cprofile"}
+    )
+    profile = _run_arms(tmp_path, spawn)
+    assert [c["arm"] for c in calls] == ["direct", "cprofile", "importtime"]  # no early abort
+    cprofile = profile.arms["cprofile"]
+    assert cprofile.status == "failed"
+    assert cprofile.exit_code is None and cprofile.timed_out is False
+    assert cprofile.record_present is False and cprofile.output_present is False
+    assert profile.arms["direct"].status == "ok" and profile.arms["importtime"].status == "ok"
+    assert profile.handoff_ms is not None
+    assert not (tmp_path / "profiles" / "cprofile.prof").exists()
+
+
+def test_run_handoff_arms_output_present_means_a_usable_artifact(tmp_path):
+    # A cProfile dump pstats cannot load, and an importtime log with no `import time:` rows, are
+    # present on disk but unusable — `output_present` is False and the arms are `failed`.
+    spawn, _calls = _fake_handoff_spawn(
+        write_records={"direct", "cprofile", "importtime"},
+        corrupt_prof=True,
+        importtime_stderr="opening a plain Pi session in /tmp/x: pi\n",
+    )
+    profile = _run_arms(tmp_path, spawn)
+    profiles = tmp_path / "profiles"
+    assert (profiles / "cprofile.prof").is_file()
+    assert not (profiles / "cprofile-top.txt").exists()
+    assert profile.arms["cprofile"].output_present is False
+    assert profile.arms["cprofile"].status == "failed"
+    assert (profiles / "importtime.log").read_text(encoding="utf-8").startswith("opening")
+    assert profile.arms["importtime"].output_present is False
+    assert profile.arms["importtime"].status == "failed"
+    assert profile.arms["direct"].status == "ok"  # the direct arm has no artifact of its own

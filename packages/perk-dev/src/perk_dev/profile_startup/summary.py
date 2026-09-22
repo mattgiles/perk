@@ -1,17 +1,21 @@
 """The run summary: per-sample classification, statistics, the ``--json`` snapshot, and the
 Markdown render.
 
-``pre_pi_remainder_ms = elapsed_ms - pi_main_total_ms`` is a DERIVED ESTIMATE: Pi's
-``resetTimings()`` runs at its ``main()`` entry, so Pi's totals exclude everything before it, and
-the remainder covers Python + Node boot up to ``main()`` plus Pi's fixed 150 ms benchmark settle.
-Every surface that prints it says so. Statistics exclude failed samples and the discarded warm-up
+``elapsed_ms`` is stamped in the HARNESS: from its ``Popen`` call to the moment it observes Pi's
+``main`` ``TOTAL`` line on the stderr pipe — so it includes process creation/exec and the
+harness's own read latency, not only work inside the console script. ``pre_pi_remainder_ms =
+elapsed_ms - pi_main_total_ms`` is therefore a DERIVED ESTIMATE of everything OUTSIDE Pi's own
+``main`` timing (Pi's ``resetTimings()`` runs at its ``main()`` entry, so Pi's totals exclude all
+of it): process spawn/exec, Python (perk) up to the exec handoff, Node boot to Pi's ``main()``,
+Pi's fixed 150 ms benchmark settle, and the marker-observation latency. Every surface that prints
+it says so. Statistics exclude failed samples and the discarded warm-up
 (``first_run`` is reported apart). A two-subject run carries a delta block — reported, never
 judged: there is no verdict vocabulary here.
 """
 
 import json
 import statistics
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from pydantic import Field
@@ -25,8 +29,9 @@ from perk_dev.profile_startup.timings import MAIN_NAMESPACE, TimingGroup, parse_
 
 EXTENSIONS_NAMESPACE = "extensions"
 REMAINDER_CAVEAT = (
-    "derived estimate: elapsed_ms - Pi's `main` TOTAL = Python + Node boot up to Pi's `main()` "
-    "entry plus Pi's fixed 150 ms benchmark settle"
+    "derived estimate: elapsed_ms - Pi's `main` TOTAL = everything outside Pi's own timing: "
+    "process spawn/exec, Python (perk) up to the exec handoff, Node boot to Pi's `main()`, Pi's "
+    "fixed 150 ms benchmark settle, and the harness's marker-observation latency"
 )
 _TOP_EXTENSION_ROWS = 10
 
@@ -619,7 +624,9 @@ def render_summary_md(summary: Summary) -> str:
         lines.append(f"- {s.label} consumer packages: {packages or 'none'}")
     lines.append("")
     lines += _metric_table(
-        summary.subjects, "elapsed_ms", "elapsed_ms (spawn → Pi's `main` TOTAL line)"
+        summary.subjects,
+        "elapsed_ms",
+        "elapsed_ms (the harness's spawn call → Pi's `main` TOTAL line observed on stderr)",
     )
     lines += _metric_table(
         summary.subjects, "pi_main_total_ms", "pi_main_total_ms (Pi's own `main` TOTAL)"
@@ -695,8 +702,3 @@ def render_summary_md(summary: Summary) -> str:
                 lines.append(f"| {name} | {d.delta_ms:+.1f} | {_fmt(d.delta_pct)} |")
         lines.append("")
     return "\n".join(lines)
-
-
-def report_lines(summary: Summary, report: Callable[[str], None]) -> None:
-    for line in render_summary_md(summary).splitlines():
-        report(line)

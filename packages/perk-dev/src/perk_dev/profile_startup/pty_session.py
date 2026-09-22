@@ -12,7 +12,9 @@ Lifecycle: before the startup marker, ``timeout_s`` from spawn → ``SIGKILL`` t
 group, wait :data:`TERM_GRACE_S`, ``SIGKILL``, ``lingered`` (the tracer's exit-on-SIGTERM handler
 uses that window to flush the census and let Node write its CPU profile). Master EOF / ``EIO`` =
 the child closed the terminal. ``exit_ms`` is spawn → natural exit; ``None`` whenever the
-harness terminated the child.
+harness terminated the child. Whatever the outcome, the owned process group is swept with
+``SIGKILL`` on the way out, so a grandchild the leader left behind never survives into the next
+sample.
 
 This module holds the profiler's only ``subprocess.Popen`` literal (sanctioned in
 ``tests/test_tooling.py``); explicit ``cwd=`` and ``start_new_session=`` are the killable
@@ -21,6 +23,7 @@ process-group discipline.
 
 import codecs
 import contextlib
+import errno
 import fcntl
 import os
 import pty
@@ -55,10 +58,12 @@ class PtySize:
 class PtyRun:
     """One completed PTY spawn.
 
-    ``exit_code`` is the process return code (negative for a signal); ``elapsed_ms`` is spawn →
-    the first line the startup marker accepted (``None`` when it never fired); ``exit_ms`` is
-    spawn → natural exit (``None`` when the harness terminated the child); ``stderr`` is the
-    whole decoded stderr text; ``stdout_bytes`` counts the TUI bytes drained from the master.
+    ``exit_code`` is the process return code (negative for a signal). Both durations start at
+    ``spawn_monotonic_ns``, stamped immediately BEFORE the ``Popen`` call, so they include process
+    creation/exec and the parent's read latency: ``elapsed_ms`` ends when the harness observes the
+    first stderr line the startup marker accepts (``None`` when it never fired); ``exit_ms`` ends
+    at the natural exit (``None`` when the harness terminated the child). ``stderr`` is the whole
+    decoded stderr text; ``stdout_bytes`` counts the TUI bytes drained from the master.
     """
 
     exit_code: int | None
@@ -171,7 +176,12 @@ class _Drive:
     def read(self, fd: int) -> None:
         try:
             data = os.read(fd, _READ_CHUNK)
-        except OSError:  # EIO on Linux once the slave side is closed — the PTY's EOF
+        except OSError as exc:
+            # The one expected error: Linux reports a PTY master whose slave side closed as
+            # EIO (macOS returns 0 bytes). Anything else — on either fd — is a harness defect
+            # and must surface, not masquerade as a clean EOF that later reads as a timeout.
+            if fd != self.master or exc.errno != errno.EIO:
+                raise
             data = b""
         if not data:
             self.selector.unregister(fd)
@@ -297,6 +307,12 @@ def spawn_pty(
         if proc.poll() is None:  # never leave a child behind, whatever exited the loop
             _signal_group(proc.pid, signal.SIGKILL)
             proc.wait()
+        # Sweep the owned process group even after a natural exit: a grandchild the leader left
+        # behind in its session would otherwise outlive this run and skew the samples that
+        # follow. The pgid is the (now-reaped) leader's pid and stays reserved while any member
+        # lives, so this reaches exactly the stragglers; an empty group is ESRCH, suppressed.
+        # Timing classification is untouched — `exit_ms` was taken when the leader exited.
+        _signal_group(proc.pid, signal.SIGKILL)
 
     return PtyRun(
         exit_code=proc.returncode,

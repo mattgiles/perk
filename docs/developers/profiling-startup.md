@@ -101,14 +101,18 @@ summary.json / summary.md        the machine snapshot / the human rendering
 
 The metrics, and what each means:
 
-- `elapsed_ms` — spawn → the `TOTAL` line of Pi's `main` timing group on stderr. The startup
-  number: everything from the console script's first instruction to Pi's session being built.
-- `exit_ms` — spawn → the process's natural exit; `null` whenever the harness terminated it.
+- `elapsed_ms` — the harness's spawn call → the moment it observes the `TOTAL` line of Pi's
+  `main` timing group on stderr. The startup number as a user experiences it: process
+  creation/exec, the console script, Node boot, Pi's session being built — plus the harness's own
+  read latency (a few ms; stamped in the parent, not inside the child).
+- `exit_ms` — the same spawn stamp → the process's natural exit; `null` whenever the harness
+  terminated it.
 - `pi_main_total_ms` — Pi's own `main` `TOTAL`. Pi's `resetTimings()` runs at its `main()` entry,
   so this excludes everything before it (Python, Node boot, the bundle's evaluation).
-- `pre_pi_remainder_ms` — `elapsed_ms − pi_main_total_ms`, a **derived estimate** covering Python +
-  Node boot up to Pi's `main()` plus Pi's fixed 150 ms benchmark settle. Every surface that prints
-  it says so.
+- `pre_pi_remainder_ms` — `elapsed_ms − pi_main_total_ms`, a **derived estimate** of everything
+  outside Pi's own timing: process spawn/exec, Python (perk) up to the exec handoff, Node boot to
+  Pi's `main()`, Pi's fixed 150 ms benchmark settle, and the harness's marker-observation latency.
+  Not a measured phase; every surface that prints it says so.
 - `first_run` — the warm-up, reported apart and never in the statistics (it pays the filesystem
   cache and Node's compile cache).
 - `failed` — the sample timed out, exited non-zero without a parsed `main` group, or never printed
@@ -145,8 +149,13 @@ spawn, so a stale record can never stand in for an arm that failed before the se
 | importtime | `python -X importtime -m perk` | `handoff-importtime.json`, `importtime.log`, `importtime-top.txt` (top 30 by cumulative µs) |
 
 `handoff-summary.json` records `handoff_ms` (`null` unless the direct arm is `ok`) and each arm's
-status: `ok` (exit 0, record present, profile/log present), `no_record` (exit 0 but the seam was
-never reached), `failed`. Explore the cProfile dump interactively:
+`ArmStatus`: `record_present` (the seam's record was written and parses), `output_present` (the
+arm's artifact exists **and is usable** — a `cprofile.prof` that pstats can load; an
+`importtime.log` holding at least one `import time:` row, the raw stderr being saved as the log
+either way; always true for the direct arm), and `status`: `ok` (exit 0, record present, output
+present), `no_record` (exit 0 but the seam was never reached), `failed` (a non-zero exit, a
+timeout, an unusable artifact, or a spawn that failed outright — `exit_code` is `null` when
+nothing was spawned; the remaining arms still run). Explore the cProfile dump interactively:
 
 ```bash
 python -m pstats /tmp/perk-startup/profiles/candidate/cprofile.prof
@@ -186,8 +195,9 @@ Open a `.cpuprofile` in Chrome DevTools (Performance → load profile) or any V8
 - Node's compile cache (Pi calls `enableCompileCache()`) makes the first run slower — hence the
   discarded warm-up.
 - `PI_OFFLINE=1` disables Pi's startup network operations; the numbers describe an offline start.
-- Pi's timings start at its `main()` entry; `pre_pi_remainder_ms` is an estimate, never a measured
-  phase.
+- Pi's timings start at its `main()` entry, and the harness's stamps start before `Popen` and end
+  when it reads the marker; `pre_pi_remainder_ms` is an estimate of the gap between the two, never
+  a measured phase.
 - Benchmark sessions leave no Pi session file behind (Pi persists a session only after an
   assistant message), though perk's extension mints an in-memory warm run id as on any launch.
 - Under `--json`, the progress narration still streams on stderr; only `summary.json`'s bytes

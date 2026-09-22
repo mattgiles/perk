@@ -16,7 +16,10 @@ startup marker (the run ends at exit):
 
 Each arm has a DISTINCT record target and the harness unlinks it before spawning, so a stale
 record can never stand in for an arm that failed before the seam. A failed arm is recorded
-(``ArmStatus``), never raised.
+(``ArmStatus``), never raised — including a spawn that fails outright (``OSError`` from the PTY
+spawn: a raced executable or cwd), which becomes a ``failed`` arm with ``exit_code=None`` while
+the remaining arms still run. Only the harness's own artifact writes may raise (an ``io_error``
+for the CLI).
 """
 
 import io
@@ -76,9 +79,16 @@ def read_handoff_record(path: Path) -> HandoffRecord | None:
 
 @dataclass(frozen=True)
 class ArmStatus:
-    """One arm's outcome. ``ok`` = exit 0 AND the record present (AND the profile/log present for
-    the cProfile/importtime arms); ``no_record`` = exit 0 but no record (the seam was never
-    reached); ``failed`` otherwise."""
+    """One arm's outcome.
+
+    ``record_present`` — the seam's record was written and parses. ``output_present`` — the arm's
+    profiling artifact exists AND is usable: a ``cprofile.prof`` pstats can load (the cProfile
+    arm), an ``importtime.log`` holding at least one ``import time:`` row (the importtime arm;
+    the raw stderr is saved as the log regardless), always ``True`` for the direct arm (it has no
+    artifact of its own). ``ok`` = exit 0 AND ``record_present`` AND ``output_present``;
+    ``no_record`` = exit 0 but the seam was never reached; ``failed`` otherwise (a non-zero exit,
+    a timeout, a spawn failure — ``exit_code`` is ``None`` when nothing was spawned).
+    """
 
     status: ArmStatusKind
     exit_code: int | None
@@ -133,10 +143,14 @@ def render_importtime_top(rows: tuple[ImportRow, ...]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_cprofile_top(prof_path: Path, *, top: int = CPROFILE_TOP) -> str:
-    """pstats' ``sort_stats("cumulative")`` top ``top`` rows of a cProfile dump."""
+def render_cprofile_top(prof_path: Path, *, top: int = CPROFILE_TOP) -> str | None:
+    """pstats' ``sort_stats("cumulative")`` top ``top`` rows of a cProfile dump; ``None`` when
+    the dump is absent or not loadable (a truncated/corrupt file — the arm's output is unusable)."""
     stream = io.StringIO()
-    stats = pstats.Stats(str(prof_path), stream=stream)
+    try:
+        stats = pstats.Stats(str(prof_path), stream=stream)
+    except (OSError, EOFError, TypeError, ValueError):
+        return None
     stats.sort_stats("cumulative").print_stats(top)
     return stream.getvalue()
 
@@ -183,27 +197,38 @@ def run_handoff_arms(
         if name == "cprofile":
             prof_path.unlink(missing_ok=True)
         report(f"  {subject.label}: {name} arm")
-        run = spawn(
-            argvs[name],
-            cwd=subject.checkout,
-            env={**env, PROFILE_HANDOFF_ENV: str(target)},
-            size=size,
-            timeout_s=timeout_s,
-            exit_grace_s=exit_grace_s,
-            startup_marker=lambda _line: False,
-        )
+        try:
+            run = spawn(
+                argvs[name],
+                cwd=subject.checkout,
+                env={**env, PROFILE_HANDOFF_ENV: str(target)},
+                size=size,
+                timeout_s=timeout_s,
+                exit_grace_s=exit_grace_s,
+                startup_marker=lambda _line: False,
+            )
+        except OSError as exc:
+            # Nothing was spawned: a failed arm, recorded like any other; the remaining arms run.
+            report(f"  {subject.label}: {name} arm could not spawn ({exc})")
+            arms[name] = ArmStatus(
+                status="failed",
+                exit_code=None,
+                timed_out=False,
+                record_present=False,
+                output_present=False,
+            )
+            continue
         record = read_handoff_record(target)
         output_present = True
         if name == "cprofile":
-            output_present = prof_path.is_file()
-            if output_present:
-                (profiles_dir / "cprofile-top.txt").write_text(
-                    render_cprofile_top(prof_path), encoding="utf-8"
-                )
+            rendered = render_cprofile_top(prof_path)
+            output_present = rendered is not None
+            if rendered is not None:
+                (profiles_dir / "cprofile-top.txt").write_text(rendered, encoding="utf-8")
         elif name == "importtime":
-            log_path.write_text(run.stderr, encoding="utf-8")
+            log_path.write_text(run.stderr, encoding="utf-8")  # the raw log, rows or not
             rows = summarize_importtime(run.stderr)
-            output_present = bool(rows)
+            output_present = bool(rows)  # usable = at least one `import time:` row
             (profiles_dir / "importtime-top.txt").write_text(
                 render_importtime_top(rows), encoding="utf-8"
             )
