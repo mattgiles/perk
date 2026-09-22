@@ -35,7 +35,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from perk import __version__
-from perk.convergence.init.version_pin import read_version_pin
+from perk.convergence.version_pin import read_version_pin
 from perk.substrate import git, paths
 from perk.substrate.output import user_output
 

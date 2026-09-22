@@ -31,7 +31,7 @@ ALLOWED = frozenset(
         "convergence/init/skills.py",
         "convergence/init/blocks.py",
         "convergence/init/repo_skills.py",
-        "convergence/init/version_pin.py",
+        "convergence/version_pin.py",
         "convergence/doctor/fixes.py",
         # Secret writer restore arm: `save_local_linear_api_key`'s read-back-mismatch restore
         # rewrites the gitignored `.perk/local.toml` it just replaced (single-process,

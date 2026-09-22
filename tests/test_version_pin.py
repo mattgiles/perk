@@ -1,7 +1,7 @@
-"""The `.perk/required-perk-version` managed pin (`convergence/init/version_pin.py`)."""
+"""The `.perk/required-perk-version` managed pin (`convergence/version_pin.py`)."""
 
 from perk import __version__
-from perk.convergence.init.version_pin import (
+from perk.convergence.version_pin import (
     converge_version_pin,
     read_version_pin,
     render_version_pin,

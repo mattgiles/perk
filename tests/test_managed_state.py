@@ -10,7 +10,6 @@ from perk.convergence.init import run_init
 from perk.convergence.init.blocks import GITIGNORE_BODY, _agents_inner, _apply_managed_block
 from perk.convergence.init.settings import BORROWED_PACKAGES, PONYTAIL_PACKAGE
 from perk.convergence.init.skills import _desired_skills_manifest
-from perk.convergence.init.version_pin import render_version_pin
 from perk.convergence.managed_state import (
     ArtifactState,
     ManagedState,
@@ -28,6 +27,7 @@ from perk.convergence.managed_state import (
     render_managed_state,
     save_managed_state,
 )
+from perk.convergence.version_pin import render_version_pin
 from perk.run.workflow_artifacts import PERK_RUN_WORKFLOW
 from perk.substrate import paths
 

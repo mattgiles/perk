@@ -121,7 +121,7 @@ from perk.convergence.init.templates import (
     POST_INIT_TEMPLATE,
     converge_config,
 )
-from perk.convergence.init.version_pin import (
+from perk.convergence.version_pin import (
     converge_version_pin,
     read_version_pin,
     render_version_pin,
