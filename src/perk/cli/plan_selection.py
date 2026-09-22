@@ -25,11 +25,12 @@ Two roots:
 - **invocation root** — ``require_repo(ctx)`` at the cwd. Used for worktree-local binding
   *reads* only: the no-argument cache fallback (``address``/``ready`` inside a plan worktree
   select that worktree's own plan).
-- **main root** — ``git.main_worktree_root(invocation_root) or invocation_root``. Used for
-  config loading, ``config.worktree_root`` resolution, backend/canonical reads, and **all
-  selector writes**. An explicit-plan launch invoked from inside a linked worktree updates only
-  the main-checkout selector; the linked worktree's durable binding is never written by
-  selection (the plan-ref two-role clobber hazard).
+- **main root** — ``git.main_worktree_root(invocation_root) or invocation_root``
+  (:func:`perk.cli.context.main_repo_root`, re-exported here so every plan-selecting door keeps
+  one import site). Used for config loading, ``config.worktree_root`` resolution,
+  backend/canonical reads, and **all selector writes**. An explicit-plan launch invoked from
+  inside a linked worktree updates only the main-checkout selector; the linked worktree's
+  durable binding is never written by selection (the plan-ref two-role clobber hazard).
 """
 
 import re
@@ -40,23 +41,13 @@ from urllib.parse import urlsplit
 
 from perk import github, plan
 from perk.backends import issue_backend, resolve
+from perk.cli.context import main_repo_root as main_repo_root
 from perk.cli.ensure import UserFacingCliError
 from perk.run import resume
-from perk.substrate import git
 from perk.substrate.config import Config, ConfigError, load_config
 from perk.substrate.output import io_step
 
 _LINEAR_IDENT = re.compile(r"^[A-Za-z0-9]+-\d+$")
-
-
-def main_repo_root(invocation_root: Path) -> Path:
-    """The **main checkout's** root, even when invoked from inside a linked worktree.
-
-    The anchor for config loading, ``config.worktree_root`` resolution, backend/canonical
-    reads, and selector writes — never for the no-argument cache fallback (which reads the
-    invocation root's own binding).
-    """
-    return git.main_worktree_root(invocation_root) or invocation_root
 
 
 def load_main_config(main_root: Path) -> Config:
