@@ -37,12 +37,20 @@ EXPECTED_ROOT_ALIASES = {
 }
 
 
+def _commands(group: click.Group) -> dict[str, click.Command]:
+    """The group's command map through Click's own lookup API (the root registers its commands
+    lazily on the first ``list_commands``/``get_command`` call — never read ``.commands`` raw)."""
+    ctx = click.Context(group)
+    return {name: cmd for name in group.list_commands(ctx) if (cmd := group.get_command(ctx, name))}
+
+
 def _walk(group: click.Group) -> list[tuple[click.Group, str, click.Command]]:
     """Yield (parent_group, primary_name, cmd) for every primary (non-alias) command."""
     out: list[tuple[click.Group, str, click.Command]] = []
-    alias_names = {a for name in group.commands for a in get_aliases(group.commands[name])}
+    commands = _commands(group)
+    alias_names = {a for cmd in commands.values() for a in get_aliases(cmd)}
     seen: set[str] = set()
-    for name, cmd in group.commands.items():
+    for name, cmd in commands.items():
         if name in alias_names or cmd.name in seen:
             continue
         seen.add(cmd.name or name)
@@ -55,9 +63,10 @@ def _walk(group: click.Group) -> list[tuple[click.Group, str, click.Command]]:
 def test_every_alias_points_back_to_its_primary():
     """Each declared alias must register the same Command object as its primary name."""
     for parent, primary, cmd in _walk(cli):
+        parent_commands = _commands(parent)
         for alias_name in get_aliases(cmd):
-            assert alias_name in parent.commands, f"{alias_name} not registered in {parent.name}"
-            assert parent.commands[alias_name] is cmd, (
+            assert alias_name in parent_commands, f"{alias_name} not registered in {parent.name}"
+            assert parent_commands[alias_name] is cmd, (
                 f"alias {alias_name} does not resolve to primary {primary}"
             )
 
@@ -65,7 +74,7 @@ def test_every_alias_points_back_to_its_primary():
 def test_root_alias_table_matches_expected():
     declared = {
         cmd.name: get_aliases(cmd)[0]
-        for cmd in cli.commands.values()
+        for cmd in _commands(cli).values()
         if get_aliases(cmd) and cmd.name in EXPECTED_ROOT_ALIASES
     }
     assert declared == EXPECTED_ROOT_ALIASES
@@ -116,9 +125,10 @@ def test_subgroup_help_dedups_aliases():
 def test_root_and_subgroups_use_alias_group():
     assert isinstance(cli, AliasGroup)
     assert isinstance(cli, SectionedGroup)
+    root_commands = _commands(cli)
     for name in ("worktree", "objective", "registry", "state"):
-        assert isinstance(cli.commands[name], AliasGroup)
-        assert not isinstance(cli.commands[name], SectionedGroup)
+        assert isinstance(root_commands[name], AliasGroup)
+        assert not isinstance(root_commands[name], SectionedGroup)
 
 
 def _flat_root() -> SectionedGroup:
@@ -140,20 +150,20 @@ def _flat_root() -> SectionedGroup:
 def test_register_flat_alias_resolves_to_same_object():
     # The flat alias registers the *same* Command object at root (SSOT §11.3).
     root = _flat_root()
-    pr_group = root.commands["pr"]
+    pr_group = _commands(root)["pr"]
     assert isinstance(pr_group, click.Group)
-    worker = pr_group.commands["submit"]
+    worker = _commands(pr_group)["submit"]
     register_flat_alias(root, worker, "submit")
-    assert root.commands["submit"] is worker
+    assert _commands(root)["submit"] is worker
     assert get_flat_aliases(root) == {"submit"}
 
 
 def test_register_flat_alias_renders_in_launcher_section():
     # D4: a flat-aliased root command lands in the existing launcher section bucket.
     root = _flat_root()
-    pr_group = root.commands["pr"]
+    pr_group = _commands(root)["pr"]
     assert isinstance(pr_group, click.Group)
-    register_flat_alias(root, pr_group.commands["submit"], "submit")
+    register_flat_alias(root, _commands(pr_group)["submit"], "submit")
     result = CliRunner().invoke(root, ["--help"])
     assert result.exit_code == 0
     launchers_slice = result.output[result.output.index("Stage Launchers") :]
@@ -167,8 +177,10 @@ def test_get_flat_aliases_empty_by_default():
 
 def test_objective_run_and_alias_resolve():
     """`perk objective run` and `perk obj r` resolve to the supervisor command."""
-    objective_group = cli.commands["objective"]
+    root_commands = _commands(cli)
+    objective_group = root_commands["objective"]
     assert isinstance(objective_group, click.Group)
-    assert "run" in objective_group.commands
-    assert objective_group.commands["r"] is objective_group.commands["run"]
-    assert cli.commands["obj"] is objective_group
+    objective_commands = _commands(objective_group)
+    assert "run" in objective_commands
+    assert objective_commands["r"] is objective_commands["run"]
+    assert root_commands["obj"] is objective_group

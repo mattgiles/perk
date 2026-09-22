@@ -105,10 +105,11 @@ def _cli_command_paths() -> set[tuple[str, ...]]:
 
     def walk(group: click.Group, prefix: tuple[str, ...]) -> None:
         ctx = click.Context(group)
-        alias_names = {a for name in group.commands for a in get_aliases(group.commands[name])}
-        for name in group.list_commands(ctx):
-            cmd = group.get_command(ctx, name)
-            if cmd is None or cmd.hidden or name in alias_names:
+        # Through Click's lookup API (the root registers lazily on the first listing).
+        commands = {n: c for n in group.list_commands(ctx) if (c := group.get_command(ctx, n))}
+        alias_names = {a for cmd in commands.values() for a in get_aliases(cmd)}
+        for name, cmd in commands.items():
+            if cmd.hidden or name in alias_names:
                 continue
             path = (*prefix, name)
             paths.add(path)

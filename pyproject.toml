@@ -116,3 +116,6 @@ explicit-preview-rules = true
 [tool.ruff.lint.per-file-ignores]
 # Test-local imports are idiomatic (fixtures, monkeypatch targets).
 "tests/**" = ["PLC0415"]
+# The CLI root defers every command import into its registration hook and callback arms
+# (python-cli-guidelines §8.3, the tiered-import rule).
+"src/perk/cli/cli.py" = ["PLC0415"]

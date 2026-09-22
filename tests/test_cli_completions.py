@@ -230,8 +230,12 @@ _OBJECTIVE_ARG_NAMES = frozenset({"number", "objective", "objective_arg"})
 def _walk_commands(command: click.Command, path: str):
     yield path, command
     if isinstance(command, click.Group):
-        for name, sub in command.commands.items():
-            yield from _walk_commands(sub, f"{path} {name}".strip())
+        # Through Click's lookup API (the root registers lazily on the first listing).
+        ctx = click.Context(command)
+        for name in command.list_commands(ctx):
+            sub = command.get_command(ctx, name)
+            if sub is not None:
+                yield from _walk_commands(sub, f"{path} {name}".strip())
 
 
 class TestWiringCensus:

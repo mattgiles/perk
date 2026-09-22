@@ -37,12 +37,13 @@ def _root_section(name: str) -> str:
 
 def _group_verbs(group: click.Group, ctx: click.Context) -> list[tuple[str, tuple[str, ...]]]:
     """Sorted ``(primary_name, sorted_aliases)`` for a group's visible non-alias commands."""
-    alias_names = {a for n in group.commands for a in get_aliases(group.commands[n])}
+    # Through Click's lookup API (the root registers lazily on the first listing).
+    commands = {n: c for n in group.list_commands(ctx) if (c := group.get_command(ctx, n))}
+    alias_names = {a for cmd in commands.values() for a in get_aliases(cmd)}
     seen: set[str] = set()
     rows: list[tuple[str, tuple[str, ...]]] = []
-    for name in group.list_commands(ctx):
-        cmd = group.get_command(ctx, name)
-        if cmd is None or cmd.hidden or name in alias_names:
+    for name, cmd in commands.items():
+        if cmd.hidden or name in alias_names:
             continue
         primary = cmd.name or name
         if primary in seen:
