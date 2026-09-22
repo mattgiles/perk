@@ -588,16 +588,16 @@ test("/stack-review-browser: a missing or digest-mismatched patch reports the re
   for (const arm of ["missing", "mismatch"] as const) {
     const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
     const planted = plantStackCheckout(cwd);
-    if (arm === "missing") {
-      writeFileSync(patchPathFor(planted.checkoutPath), PATCH_TEXT, "utf8");
+    if (arm === "mismatch") {
       // Refresh residue: the checkout envelope names a digest the file no longer has.
       writeFileSync(patchPathFor(planted.checkoutPath), `${PATCH_TEXT}moved\n`, "utf8");
     }
-    const json =
-      arm === "missing"
-        ? JSON.stringify({ ...STACK_CHECKOUT_PAYLOAD, path: join(cwd, "review-gone") })
-        : planted.json;
-    if (arm === "missing") mkdirSync(join(cwd, "review-gone"));
+    let json = planted.json;
+    if (arm === "missing") {
+      // A checkout dir with NO sibling patch beside it.
+      mkdirSync(join(cwd, "review-gone"));
+      json = JSON.stringify({ ...STACK_CHECKOUT_PAYLOAD, path: join(cwd, "review-gone") });
+    }
     const bin = fakePerk(cwd, { stdout: json });
     const sink: FakeBrowser = { envelopes: [] };
     const h = await loadPerkSession({

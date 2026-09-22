@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxText, getCurrentTools } from "@earendil-works/pi-ai";
 import {
   type ExtensionAPI,
   type ExtensionContext,
@@ -738,8 +738,10 @@ test("foreign deactivation: a late tool its owner deactivated before perk saw it
 });
 
 test("headless prompt turn: the model-visible census after startup", async () => {
-  // One real (faux-runtime) prompt turn: `context.tools` IS the model-visible census, so this
-  // pins what the model actually sees after the startup re-apply — the admitted late tool
+  // One real (faux-runtime) prompt turn: the provider sees a TranscriptContext (pi-ai ≥ 0.87
+  // declares the tool loadout through the system messages' `toolsAdded`/`toolsRemoved`, not a
+  // `context.tools` field), so `getCurrentTools(context.messages)` IS the model-visible census.
+  // This pins what the model actually sees after the startup re-apply — the admitted late tool
   // inside the diet, the scoped-off authoring tool absent, and the questionnaire's own
   // `before_agent_start` strip honored (perk adds no `before_agent_start` re-apply).
   const runId = "01STAGETOOLTURN";
@@ -747,8 +749,8 @@ test("headless prompt turn: the model-visible census after startup", async () =>
   const reg = await fauxModelRuntime();
   const seen: string[][] = [];
   reg.setResponses([
-    (context: { tools?: { name: string }[] }) => {
-      seen.push((context.tools ?? []).map((t) => t.name));
+    (context: { messages: { role: string }[] }) => {
+      seen.push(getCurrentTools(context.messages).map((t) => t.name));
       return fauxAssistantMessage([fauxText("census read")], { stopReason: "stop" });
     },
   ]);
@@ -1015,6 +1017,15 @@ const DRIVE_COVERAGE: readonly {
         ],
         notes: ["drift: PR #41 head moved"],
         directive: "focus",
+        pinned: {
+          topPr: 42,
+          checkout: "/tmp/review-42",
+          baseSha: "0".repeat(40),
+          heads: [
+            { pr: 41, headSha: "a".repeat(40) },
+            { pr: 42, headSha: "b".repeat(40) },
+          ],
+        },
       }),
   },
   {
