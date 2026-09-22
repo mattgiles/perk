@@ -7,7 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- As of 92bbeb3 -->
+<!-- As of c8cb345 -->
+
+## [3.6.0] - 2026-09-21
+
+### Major Changes
+
+- **Upgrade the Pi host before upgrading perk.** perk now requires Pi 0.87.0 or newer for workflow guidance and `/btw`. Use pi-subagents 0.70.1, the source-verified guidance baseline, and Plannotator 0.27.16 or newer for stack browser review. These requirements have no launch-time version gate; older hosts can fail to inject guidance or show the wrong stack diff.
+
+### Changed
+
+- Make bare `perk` open a plain Pi session in the current Git checkout using perk's configured launch environment. Requires an interactive terminal; use `perk --help` for the command list.
+- Honor pi-fff's own mode settings in perk-launched sessions by removing the injected `PI_FFF_MODE=tools-and-ui` default. An `override` setting in `pi-fff.json` can now take effect.
+
+### Removed
+
+- Remove the obsolete `subagent-host-tools` doctor check for pi-fff search overrides; current pi-subagents versions give children the tools declared by their own agent definitions.
+
+### Fixed
+
+- Keep stack browser reviews, reviewer diffs, and per-PR finding routing on the same pinned commits so force-pushes cannot change the diff under review. The browser shows a static patch; refreshing the same stack checkout invalidates the old review and requires reopening it.
+- Restore workflow guidance and scratch context on Pi 0.87, including reinjection when context edits remove an earlier copy.
+- Preserve main-conversation context and earlier side-chat turns in `/btw` on Pi 0.87, and let summary injection use the active API-key override or extension-registered provider.
 
 ## [3.5.0] - 2026-09-17
 
