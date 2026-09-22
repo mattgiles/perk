@@ -132,8 +132,8 @@ Statistics are `median [min–max] (n ok / n failed)` over successful timing sam
 
 ### The Python handoff (`PERK_PROFILE_HANDOFF`)
 
-Perk's one Pi executor `exec_pi` ends in `os.execvpe`, so no in-process profiler survives into
-Pi. The maintainer-only stop-before-exec seam ([contracts.md §8.72(i)](../../shared/contracts.md))
+Perk's one Pi executor `exec_pi` (`perk.run.pi_exec`) ends in `os.execvpe`, so no in-process
+profiler survives into Pi. The maintainer-only stop-before-exec seam ([contracts.md §8.72(i)](../../shared/contracts.md))
 gives the exact handoff instant: when `PERK_PROFILE_HANDOFF=<file>` is set, `exec_pi` runs every
 pre-exec phase, writes `<file>` (`schema`, `handoff_monotonic_ns`, `pid`, `pi_path`, `argv`, `cwd`,
 `env_keys` — key names only, never values), prints one stderr line, and exits `0` without exec'ing
