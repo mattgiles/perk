@@ -3,11 +3,14 @@
 // tested implementation here — reached through the flow-scoped `run_pr_review_wave` tool
 // (`extension/pi/v1/codeReview/automated.ts`), never model-authored prompt mechanics.
 //
-// Retry policy (one bounded retry, ever):
-// - assignment-level failures ⇒ retry ONLY the failed assignments;
-// - retryable wave-level failures (`spawn-failed`/`timeout`/`run-failed`/`aggregate-unreadable`)
-//   ⇒ retry the WHOLE selection;
-// - `unavailable` (deterministic capability absence) and `cancelled` (abort honored) ⇒ NO retry.
+// Retry policy (one bounded retry, ever) — a single rule: relaunch exactly the effective lanes
+// still WITHOUT a report (skill-unavailable lanes excluded), unless the first wave carried a
+// non-retryable wave-level failure (`unavailable` — deterministic capability absence; `cancelled`
+// — abort honored), in which case nothing is retried. That one rule covers every shape: a
+// wave-level failure with nothing retained (`spawn-failed`, an empty `timeout`, …) relaunches the
+// whole selection; assignment-level failures relaunch exactly the failed keys; a deadline
+// partial (native `run-failed` beside retained reports) relaunches only the lane(s) that never
+// reported.
 //
 // Failure posture matches the runner: operational failures never throw — they normalize into the
 // outcome's `failures` (loud degrade upstream); the only throws are programmer errors (empty
@@ -164,7 +167,7 @@ export interface PrReviewWaveOutcome {
   attempts: ReportWaveAttemptReceipt[];
 }
 
-/** The wave-level failure reasons worth one full-selection retry (transient, not deterministic). */
+/** The wave-level failure reasons worth one retry of the uncovered lanes (transient, not deterministic). */
 const RETRYABLE_WAVE_REASONS: ReadonlySet<ReportWaveFailureReason> = new Set([
   "spawn-failed",
   "timeout",
@@ -264,31 +267,26 @@ function buildRequest(
 }
 
 /**
- * Pick retry keys from failures, never report availability. A retryable wave-level failure
- * (`key: null`) retries the whole runnable selection even when partial reports survived;
- * otherwise assignment-level failures retry exactly the failed keys.
+ * Pick the retry keys: every effective lane without a report (in selection order), minus
+ * skill-unavailable lanes — or nothing when a non-retryable wave-level failure (`key: null`,
+ * reason outside `RETRYABLE_WAVE_REASONS`) is present. Report availability, not failure shape,
+ * decides the scope: a deadline partial retries only the lane(s) that never reported, while a
+ * wave-level failure with nothing retained retries the whole runnable selection.
  */
 function retrySelection(
   angles: EffectivePrReviewAngle[],
+  reports: AssignmentReport[],
   failures: ReportWaveFailure[],
 ): EffectivePrReviewAngle[] {
+  const waveLevel = failures.find((failure) => failure.key === null);
+  if (waveLevel !== undefined && !RETRYABLE_WAVE_REASONS.has(waveLevel.reason)) return [];
   const unavailable = new Set(
     failures
       .filter((failure) => failure.reason === "skill-unavailable")
       .map((failure) => failure.key),
   );
-  const waveLevel = failures.find((failure) => failure.key === null);
-  if (waveLevel !== undefined) {
-    return RETRYABLE_WAVE_REASONS.has(waveLevel.reason)
-      ? angles.filter((angle) => !unavailable.has(angle))
-      : [];
-  }
-  const failed = new Set(
-    failures
-      .filter((failure) => failure.reason !== "skill-unavailable")
-      .map((failure) => failure.key),
-  );
-  return angles.filter((angle) => failed.has(angle));
+  const reported = new Set(reports.map((report) => report.key));
+  return angles.filter((angle) => !reported.has(angle) && !unavailable.has(angle));
 }
 
 // Only the typed verdict classifies a pr-review report as blocked (the `verdict: "blocked"`
@@ -322,9 +320,8 @@ function outcomeOf(
 /**
  * Run the pr-review report wave: build the assignments from the angle vocabulary, run the
  * shared wave under the strict completeness policy, and — when incomplete — apply the ONE
- * bounded retry (failed assignments only, or the whole selection on a retryable wave-level failure, or none on
- * `unavailable`/`cancelled`), merging first-wave successes for non-retried keys with the retry
- * wave's results.
+ * bounded retry (exactly the lanes still without a report; none on `unavailable`/`cancelled`),
+ * merging first-wave successes for non-retried keys with the retry wave's results.
  */
 export async function runPrReviewWave(
   wave: ReportWave,
@@ -362,7 +359,7 @@ export async function runPrReviewWave(
     return outcomeOf(angles, first.reports, first.failures, [], attempts);
   }
 
-  const retried = retrySelection(angles, first.failures);
+  const retried = retrySelection(angles, first.reports, first.failures);
   if (retried.length === 0) {
     return outcomeOf(angles, first.reports, first.failures, [], attempts);
   }

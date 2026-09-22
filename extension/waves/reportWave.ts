@@ -3,7 +3,7 @@
 // prompt mechanics (a script skeleton the parent model had to transcribe faithfully — the known
 // prompt-drift risk); this module makes the mechanics CODE. It renders the complete, tested
 // `workflowScript`, launches it through a `WaveAdapter` (async-only, `mission: false`), waits on
-// the run's async-complete event with a module-owned timeout, reads the durable `status.json`
+// the run's async-complete event until the engine deadline plus a fixed settlement grace, reads the durable `status.json`
 // `workflow.value` aggregate, and normalizes `{complete, reports[], failures[]}` under a
 // flow-specific completeness policy. Each launch additionally records an OUTPUT-FREE
 // `WaveScriptReceipt` (run handle + per-child identity/artifact trail from the completion
@@ -115,7 +115,7 @@ export interface ReportWaveRequest {
   completeness: ReportWaveCompleteness;
   /** Workflow-level model default (flows read their configured subagent model). */
   model?: string;
-  /** Module default (`WAVE_TIMEOUT_MS`) when omitted. */
+  /** The engine deadline (the spawned `timeoutMs`); module default (`WAVE_TIMEOUT_MS`) when omitted. */
   timeoutMs?: number;
   /** Test seam; production defaults to the exact Ponytail boundary preflight. */
   requiredSkillPreflight?: (requirement: RequiredPonytailSkill) => Promise<PonytailPreflight>;

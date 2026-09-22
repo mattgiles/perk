@@ -170,15 +170,28 @@ export function assertWaveAdapterContract(
     const handle = await harness.adapter.spawn(minimalSpawnParams());
     harness.completeRunPartial(handle);
     unsubscribe();
+    // Both adapters agree on the still-running lane's projection: an explicit `ok: false` with
+    // the fixed error (the normalizer's `lane-failed`), never `ok: null` (`malformed-report`).
     assert.deepEqual(received, [
       {
         asyncId: handle.asyncId,
         asyncDir: handle.asyncDir,
         state: "failed",
         success: false,
-        children: [{ key: "a", runId: "child", success: true }],
+        children: [
+          { key: "a", runId: "child", success: true },
+          { key: "late", runId: "child-late" },
+        ],
         terminalOutcome: { state: "partial", reason: "budget_exhausted" },
-        retainedEntries: [{ key: "a", ok: true, error: null, report: { answer: 1 } }],
+        retainedEntries: [
+          { key: "a", ok: true, error: null, report: { answer: 1 } },
+          {
+            key: "late",
+            ok: false,
+            error: "lane still running at native partial settlement",
+            report: null,
+          },
+        ],
       },
     ]);
     for (const child of received[0]?.children ?? []) {
@@ -245,9 +258,21 @@ function makeMemoryHarness(): WaveAdapterHarness {
         asyncDir: handle.asyncDir,
         state: "failed",
         success: false,
-        children: [{ key: "a", runId: "child", success: true }],
+        children: [
+          { key: "a", runId: "child", success: true },
+          { key: "late", runId: "child-late" },
+        ],
         terminalOutcome: { state: "partial", reason: "budget_exhausted" },
-        retainedEntries: [{ key: "a", ok: true, error: null, report: { answer: 1 } }],
+        // The memory flavor emits the already-narrowed still-running entry (its input is typed).
+        retainedEntries: [
+          { key: "a", ok: true, error: null, report: { answer: 1 } },
+          {
+            key: "late",
+            ok: false,
+            error: "lane still running at native partial settlement",
+            report: null,
+          },
+        ],
       });
     },
     stageAggregate(_handle, aggregate) {
@@ -410,6 +435,9 @@ function makeRpcHarness(): WaveAdapterHarness {
             output: "SECRET",
             summary: "SECRET",
           },
+          // The engine's projection of a child still working at the workflow deadline: no
+          // `success`, `state: "running"`.
+          { workflowKey: "late", agent: "late", runId: "child-late", state: "running" },
         ],
       });
     },

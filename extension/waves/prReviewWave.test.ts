@@ -98,50 +98,107 @@ function laneItemsOf(script: string): Array<{
 
 // -------------------------------------------------------------------------- lane construction
 
-test("native partial evidence still retries the whole selection and uses the retry's evidence", async () => {
-  // The retained first-attempt report for the retried key is ACTIONABLE: when that key fails
-  // on retry it is not resurrected — its final report is absent and coverage stays incomplete.
+test("native partial evidence retries only the lanes without a report and merges the retry", async () => {
+  // A deadline partial: the engine settled `partial/timeout` with plan-fidelity + ponytail
+  // finished and correctness still running. The retained reports are kept (the actionable one
+  // included), and ONLY the uncovered lane is relaunched.
   const adapter = createMemoryWaveAdapter({
     aggregates: [
-      { state: "failed", value: undefined },
-      {
-        state: "complete",
-        value: [
-          failedEntry("plan-fidelity", "retry failed"),
-          okEntry("correctness"),
-          okEntry("ponytail"),
-        ],
-      },
+      { state: "failed", error: "Workflow script timed out after 5000ms.", value: undefined },
+      { state: "complete", value: [okEntry("correctness")] },
     ],
     completionDetails: [
       {
         state: "failed",
-        terminalOutcome: { state: "partial", reason: "budget_exhausted" },
-        retainedEntries: [actionableEntry("plan-fidelity")],
+        terminalOutcome: { state: "partial", reason: "timeout" },
+        retainedEntries: [
+          actionableEntry("plan-fidelity"),
+          failedEntry("correctness", "lane still running at native partial settlement"),
+          okEntry("ponytail"),
+        ],
       },
       { state: "complete" },
     ],
   });
   const result = await runPrReviewWave(adapter, { angles: TWO_ANGLES, timeoutMs: 5_000 });
-  assert.deepEqual(result.retried, ["plan-fidelity", "correctness", "ponytail"]);
-  assert.deepEqual(result.covered, ["correctness", "ponytail"]);
-  assert.equal(result.complete, false);
-  assert.deepEqual(result.reports, [
-    reportOf(okEntry("correctness")),
-    reportOf(okEntry("ponytail")),
-  ]);
-  assert.deepEqual(result.failures, [
-    { key: "plan-fidelity", reason: "lane-failed", detail: "retry failed" },
-  ]);
   assert.equal(adapter.calls.spawn.length, 2);
   assert.deepEqual(
     laneItemsOf(adapter.calls.spawn[1]?.workflowScript ?? "").map((row) => row.key),
-    ["plan-fidelity", "correctness", "ponytail"],
+    ["correctness"],
   );
+  assert.deepEqual(result.retried, ["correctness"]);
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.covered, ["plan-fidelity", "correctness", "ponytail"]);
+  assert.deepEqual(result.reports, [
+    reportOf(actionableEntry("plan-fidelity")),
+    reportOf(okEntry("correctness")),
+    reportOf(okEntry("ponytail")),
+  ]);
+  assert.deepEqual(result.failures, []);
   assert.equal(result.attempts.length, 2);
   assert.equal(result.attempts[0]?.state, "failed");
   assert.equal(result.attempts[1]?.state, "complete");
   assertOutputFreeReceipts(result.attempts);
+});
+
+test("a deadline partial whose uncovered lane fails again stays incomplete; retained reports survive", async () => {
+  const adapter = createMemoryWaveAdapter({
+    aggregates: [
+      { state: "failed", value: undefined },
+      { state: "complete", value: [failedEntry("correctness", "retry failed")] },
+    ],
+    completionDetails: [
+      {
+        state: "failed",
+        terminalOutcome: { state: "partial", reason: "timeout" },
+        retainedEntries: [
+          okEntry("plan-fidelity"),
+          failedEntry("correctness", "lane still running at native partial settlement"),
+          okEntry("ponytail"),
+        ],
+      },
+      { state: "complete" },
+    ],
+  });
+  const result = await runPrReviewWave(adapter, { angles: TWO_ANGLES, timeoutMs: 5_000 });
+  assert.deepEqual(result.retried, ["correctness"]);
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.covered, ["plan-fidelity", "ponytail"]);
+  assert.deepEqual(result.failures, [
+    { key: "correctness", reason: "lane-failed", detail: "retry failed" },
+  ]);
+});
+
+test("a spawn-failed first wave retries the whole selection (no reports ⇒ every lane uncovered)", async () => {
+  const memory = createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: [okEntry("plan-fidelity"), okEntry("correctness"), okEntry("ponytail")],
+    },
+  });
+  let spawns = 0;
+  const adapter: WaveAdapter = {
+    ...memory,
+    async spawn(params) {
+      spawns += 1;
+      if (spawns === 1) {
+        memory.calls.spawn.push(params);
+        throw new Error("no session");
+      }
+      return await memory.spawn(params);
+    },
+  };
+  const result = await runPrReviewWave(adapter, { angles: TWO_ANGLES, timeoutMs: 5_000 });
+  assert.equal(memory.calls.spawn.length, 2);
+  assert.deepEqual(
+    laneItemsOf(memory.calls.spawn[1]?.workflowScript ?? "").map((row) => row.key),
+    ["plan-fidelity", "correctness", "ponytail"],
+  );
+  assert.deepEqual(result.retried, ["plan-fidelity", "correctness", "ponytail"]);
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.failures, []);
+  assert.equal(result.attempts[0]?.state, "spawn-failed");
+  assert.equal(result.attempts[1]?.state, "complete");
 });
 
 test("runPrReviewWave builds selected lanes plus one final Ponytail lane", async () => {
@@ -444,9 +501,15 @@ const RECEIPT: ReportWaveResult["receipt"] = { state: "complete", runId: "attemp
 
 for (const fyi of [undefined, null, "not an array", [null, 4, "", " \n\t"]]) {
   test(`blocked defensive FYI fallback: ${JSON.stringify(fyi)}`, async () => {
-    const { outcome } = await injectedOutcome({
+    // Every other effective lane reported clean, so the blocked lane is the ONE lane without a
+    // report — the only one the bounded retry relaunches (the injected wave blocks it again).
+    const clean = ["correctness", "tests", "quality", "ponytail"].map((key) => ({
+      key,
+      report: { angle: key, verdict: "clean", findings: [], fyi: [] },
+    }));
+    const { outcome, requests } = await injectedOutcome({
       complete: true,
-      reports: [{ key: "plan-fidelity", report: { verdict: "blocked", fyi } }],
+      reports: [{ key: "plan-fidelity", report: { verdict: "blocked", fyi } }, ...clean],
       failures: [],
       receipt: RECEIPT,
     });
@@ -458,8 +521,12 @@ for (const fyi of [undefined, null, "not an array", [null, 4, "", " \n\t"]]) {
       },
     ]);
     assert.equal(outcome.complete, false);
-    assert.deepEqual(outcome.covered, []);
+    assert.deepEqual(outcome.covered, ["correctness", "tests", "quality", "ponytail"]);
     assert.deepEqual(outcome.retried, ["plan-fidelity"]);
+    assert.deepEqual(
+      requests[1]?.assignments.map((assignment) => assignment.key),
+      ["plan-fidelity"],
+    );
   });
 }
 

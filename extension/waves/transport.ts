@@ -6,9 +6,17 @@
 //
 // `startWaveScript` performs the front half (abort pre-check → capability ping →
 // subscribe-before-spawn → async spawn) and returns the run handle plus a NEVER-REJECTING
-// `result` promise carrying the back half (completion wait under the module-owned timeout,
-// best-effort stop on timeout/cancel, aggregate read, receipt assembly,
-// unsubscribe-on-settle); `runWaveScript` is that start + await.
+// `result` promise carrying the back half (completion wait under the engine deadline plus the
+// module's fixed settlement grace, best-effort stop on timeout/cancel, aggregate read, receipt
+// assembly, unsubscribe-on-settle); `runWaveScript` is that start + await.
+//
+// Deadline posture: the spawned `timeoutMs` is the ENGINE deadline — pi-subagents arms it when
+// the script starts, settles the run `partial/timeout` against it, and ships the finished lanes'
+// reports in the completion payload (the §8.35 completion carrier). Perk's own wait timer is
+// insurance only: it is armed for the engine deadline PLUS `WAVE_SETTLEMENT_GRACE_MS`, so it
+// fires only after the engine has had its chance to settle and notify. Arming it for the bare
+// deadline would race the engine's timer (perk's is armed a few ms earlier, spawn reply →
+// workflow start), win, close acceptance, and discard every retained report as an empty timeout.
 //
 // The failure vocabulary here is the WAVE-LEVEL subset only (`WaveRunFailureReason`): the six
 // reasons a script run itself can produce, always `key: null`. The logical tier widens it with
@@ -31,7 +39,7 @@ export type WaveReceiptState =
   | "spawn-failed" // spawn rejected/threw — no run handle
   | "complete" // completion observed, durable state "complete"
   | "failed" // completion observed, durable/observed failure
-  | "timed-out" // module timeout expired (handle preserved)
+  | "timed-out" // engine deadline + settlement grace expired (handle preserved)
   | "cancelled"; // AbortSignal honored (handle preserved when spawned)
 
 /**
@@ -147,7 +155,12 @@ export interface WaveSpawnParams {
   intercomBridge: { mode: "off" };
   outputSchema: object;
   model?: string;
-  /** Orphan insurance: the run enforces the same deadline even if the parent session dies. */
+  /**
+   * The engine deadline pi-subagents enforces (each runner child inherits it as its own
+   * deadline) — the authority for native partial settlement, and orphan insurance: the run
+   * enforces it even if the parent session dies. Perk's local wait extends it by
+   * `WAVE_SETTLEMENT_GRACE_MS`; the spawned value never includes the grace.
+   */
   timeoutMs: number;
 }
 
@@ -174,7 +187,7 @@ export interface WaveAdapter {
 export type WaveRunFailureReason =
   | "unavailable" // ping failed / capabilities missing
   | "spawn-failed" // RPC spawn rejected or no run handle
-  | "timeout" // module-owned timeout expired (best-effort stop issued)
+  | "timeout" // engine deadline + settlement grace expired with no matched completion (best-effort stop issued)
   | "cancelled" // AbortSignal fired (best-effort stop issued)
   | "run-failed" // terminal status.json state ≠ "complete"
   | "aggregate-unreadable"; // status.json missing/corrupt/no workflow.value array
@@ -194,11 +207,21 @@ export interface WaveRunFailure {
 // ------------------------------------------------------------------------- the script runner
 
 /**
- * The module-owned wave timeout default: a deliberate tightening vs the 30-minute foreground
- * default the prompt-mechanics wave rode. Per-flow `spec.timeoutMs` overrides; the default is
- * overridable for tests via PERK_WAVE_TIMEOUT_MS.
+ * The engine deadline default: the spawned `timeoutMs` pi-subagents enforces on the workflow run
+ * (each runner child inherits it as its own deadline), the authority for native partial
+ * settlement, and the orphan insurance. Matches pi-subagents' own single-agent backstop. Per-flow
+ * `spec.timeoutMs` overrides; the default is overridable for tests via PERK_WAVE_TIMEOUT_MS.
  */
-export const WAVE_TIMEOUT_MS = 15 * 60_000;
+export const WAVE_TIMEOUT_MS = 30 * 60_000;
+
+/**
+ * The fixed settlement grace perk waits BEYOND the engine deadline before its own `timeout`
+ * fires: the engine's partial settlement lands ~1 s after its deadline, and the grace only has to
+ * cover notifier delivery. Deliberately not an operator knob (no env override, no spec/request
+ * field) — tests advance it with mocked timers. A bound, not a wait-forever: once it expires the
+ * run is stopped best-effort and no reports are read.
+ */
+export const WAVE_SETTLEMENT_GRACE_MS = 60_000;
 
 function waveTimeoutMs(): number {
   const raw = Number(process.env.PERK_WAVE_TIMEOUT_MS ?? "");
@@ -215,7 +238,7 @@ export interface WaveScriptSpec {
   outputSchema: object;
   /** Workflow-level model default (per-item `model` fields in the script override it). */
   model?: string;
-  /** Module default (`WAVE_TIMEOUT_MS`) when omitted. */
+  /** The engine deadline; module default (`WAVE_TIMEOUT_MS`) when omitted. */
   timeoutMs?: number;
 }
 
@@ -227,7 +250,7 @@ export type WaveScriptResult =
 /**
  * A launched (or launch-refused) script run. On `ok: true` the run is LIVE: `handle` is the
  * detached async run, and `result` settles when the back half finishes (completion wait under
- * the module-owned timeout, AbortSignal honor, best-effort stop on timeout/cancel, the durable
+ * the engine deadline + settlement grace, AbortSignal honor, best-effort stop on timeout/cancel, the durable
  * aggregate read, receipt assembly, unsubscribe-on-settle). `result` NEVER rejects — every arm
  * normalizes into `WaveScriptResult`, so an uncollected wave can never become an unhandled
  * rejection. Pre-spawn failures (aborted-before-launch, ping fail/null, spawn throw) take the
@@ -245,8 +268,8 @@ function errorDetail(error: unknown): string {
 /**
  * Start one module-rendered workflowScript through the adapter — the non-blocking front half:
  * capability ping → subscribe-before-spawn (the completion-before-reply buffer) → async spawn.
- * On success the back half (block on the async-complete event under the module-owned timeout,
- * abortable → best-effort stop on timeout/cancel → read the durable aggregate → the
+ * On success the back half (block on the async-complete event under the engine deadline +
+ * settlement grace, abortable → best-effort stop on timeout/cancel → read the durable aggregate → the
  * `state !== "complete"` / unreadable arms) runs behind the returned `result` promise, which
  * never rejects. The shared operational core under every runner; per-flow value normalization
  * stays with the caller.
@@ -381,7 +404,11 @@ export async function startWaveScript(
   // `result` never rejects; the subscription is released exactly when it settles.
   const settle = async (): Promise<WaveScriptResult> => {
     try {
-      // 4. Block on completion with the module-owned timeout; honor the caller's AbortSignal.
+      // 4. Block on completion until the engine deadline + settlement grace; honor the caller's
+      //    AbortSignal. The local timer must outlive the engine's (armed for the bare `timeoutMs`
+      //    a few ms AFTER ours) so a native partial settlement's completion carrier is consumed
+      //    here rather than discarded by our own earlier expiry.
+      const waitMs = timeoutMs + WAVE_SETTLEMENT_GRACE_MS;
       const outcome = await new Promise<"complete" | "timeout" | "cancelled">((resolve) => {
         if (matched !== undefined) {
           accepting = false;
@@ -395,7 +422,7 @@ export async function startWaveScript(
           notifyMatch = null;
           resolve(value);
         };
-        const timer = setTimeout(() => settleOutcome("timeout"), timeoutMs);
+        const timer = setTimeout(() => settleOutcome("timeout"), waitMs);
         const onAbort = (): void => settleOutcome("cancelled");
         notifyMatch = () => settleOutcome("complete");
         signal?.addEventListener("abort", onAbort, { once: true });
@@ -413,7 +440,7 @@ export async function startWaveScript(
         return outcome === "timeout"
           ? scriptFailure(
               "timeout",
-              `wave '${spec.flow}' timed out after ${timeoutMs}ms${stopNote}`,
+              `wave '${spec.flow}' received no completion within ${waitMs}ms (engine deadline ${timeoutMs}ms + ${WAVE_SETTLEMENT_GRACE_MS}ms settlement grace); run stopped best-effort${stopNote}`,
               receiptOf("timed-out", spawned),
             )
           : scriptFailure(

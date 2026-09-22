@@ -38,7 +38,10 @@
 // `structuredOutput` never enter a receipt child, unknown fields are ignored, and malformed
 // rows are dropped without failing the wave (receipt absence degrades correlation only).
 // Explicit native partial settlement additionally carries keyed structured results, independently
-// of receipts. The runner retains only its first matched completion, never a report cache.
+// of receipts; a row the engine projects as `state: "running"` (a child still working when the
+// workflow deadline fired — it carries no `success`) projects to an explicit `ok: false` entry so
+// the normalizer reports the lane as failed, never as a malformed report. The runner retains only
+// its first matched completion, never a report cache.
 
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -285,6 +288,12 @@ function narrowPartialOutcome(data: Record<string, unknown>): WaveCompletion["te
   return { state: "partial", reason: outcome.reason };
 }
 
+/**
+ * The retained-entry error for a lane the engine projected as still `running` at native partial
+ * settlement (contracts.md §8.35): explicit `ok: false`, so the logical tier yields `lane-failed`.
+ */
+const LANE_STILL_RUNNING_ERROR = "lane still running at native partial settlement";
+
 /** Project report DATA only by native workflowKey; ambiguous identities withhold evidence. */
 function narrowRetainedEntries(results: unknown): unknown[] {
   if (!Array.isArray(results)) return [];
@@ -306,12 +315,17 @@ function narrowRetainedEntries(results: unknown): unknown[] {
       }
       runKeys.set(row.runId, key);
     }
-    entries.set(key, {
+    entries.set(
       key,
-      ok: row.success ?? null,
-      error: typeof row.error === "string" ? row.error : null,
-      report: row.structuredOutput ?? null,
-    });
+      row.state === "running"
+        ? { key, ok: false, error: LANE_STILL_RUNNING_ERROR, report: null }
+        : {
+            key,
+            ok: row.success ?? null,
+            error: typeof row.error === "string" ? row.error : null,
+            report: row.structuredOutput ?? null,
+          },
+    );
   }
   return [...entries.values()].map((entry) =>
     ambiguous.has(entry.key) ? { key: entry.key, ok: null, error: null, report: null } : entry,

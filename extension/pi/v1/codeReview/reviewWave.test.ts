@@ -27,6 +27,7 @@ import {
 } from "../../../waves/adversarialReviewWave.ts";
 import { PONYTAIL_PACKAGE_ROOT } from "../../../waves/ponytail.ts";
 import { reportWaveOver } from "../../../waves/reportWave.ts";
+import { WAVE_SETTLEMENT_GRACE_MS } from "../../../waves/transport.ts";
 import {
   createAnnotationState,
   executePushAnnotations,
@@ -983,21 +984,31 @@ test("executeCollectReviewWave: a blocked: true lane is uncovered — a lane-fai
   assert.equal(notified.filter((n) => n.severity === "warning").length, 1);
 });
 
-test("the collect grace rides PERK_WAVE_COLLECT_GRACE_MS (the one grace seam — no per-call knob)", async () => {
+test("the collect grace rides PERK_WAVE_COLLECT_GRACE_MS (the one grace seam — no per-call knob)", async (t) => {
+  // Mocked timers: the never-completing wave's expiry (engine deadline + settlement grace) and
+  // the collect grace are both ticked, never waited (the settled-by-timeout result also proves
+  // an uncollected wave never rejects unhandled).
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const drain = async (): Promise<void> => {
+    await new Promise((resolve) => setImmediate(resolve));
+  };
   const state = freshState();
   const { target } = fakeTarget();
   const adapter = createMemoryWaveAdapter({ completion: false });
   const wave = reportWaveOver(adapter);
-  // Bound the never-completing wave's module timeout so its timer never outlives the test
-  // (the settled-by-timeout result also proves an uncollected wave never rejects unhandled).
   process.env.PERK_WAVE_TIMEOUT_MS = "200";
   process.env.PERK_WAVE_COLLECT_GRACE_MS = "20";
   try {
     await executeStartReviewWave(state, wave, target, START_OPTS);
-    // The env override keeps the never-completing wave from stalling 15s.
-    const running = await executeCollectReviewWave(state, wave, target);
+    // The env override bounds the premature collect's grace (the default is 15s).
+    const runningPending = executeCollectReviewWave(state, wave, target);
+    await drain();
+    t.mock.timers.tick(20);
+    const running = await runningPending;
     assert.equal((running.details as { error_type?: string }).error_type, "wave_running");
-    // After the module timeout fires, the retained wave drains into the timeout failure.
+    // After the engine deadline + settlement grace fires, the retained wave drains into the
+    // timeout failure (the wider collect grace never has to elapse).
+    t.mock.timers.tick(200 + WAVE_SETTLEMENT_GRACE_MS);
     process.env.PERK_WAVE_COLLECT_GRACE_MS = "2000";
     const drained = await executeCollectReviewWave(state, wave, target);
     assert.equal(drained.details.ok, true);
@@ -1080,6 +1091,8 @@ test("installReviewWaveBindings registers exactly the two tools over registratio
     /reconcile exactly once/,
     /Ignore duplicate\/late notices/,
     /no_wave\/drain-once/,
+    /deadline partial/,
+    /never recover reports from status.json or child artifacts/,
     /fyi is in-session color, never a finding or a posted comment/,
   ])
     assert.match(collectText, pin);
