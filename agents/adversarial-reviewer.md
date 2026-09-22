@@ -56,14 +56,18 @@ and report.
    unchanged, the note is for the human.
 
    **Stack mode.** When your task says "Review the PR stack topped by PR #‹n› (combined diff)",
-   fetch context with `perk pr review-context --pr <n> --stack --json` instead — it additionally
-   returns the authoritative ordered membership as per-member `stack` sections
+   fetch context with the PINNED command your task names — run it verbatim plus `--json`
+   (`perk pr review-context --pr <n> --stack --pin-base <sha> --pin-head <pr>=<sha> … --json`;
+   the pins are the parent-verified commits the browser shows, so never drop or edit them) —
+   it additionally returns the authoritative ordered membership as per-member `stack` sections
    (`{pr, base_ref, head_ref, title, body, diff, plan_body}`, bottom→top, the text fields the
    same file references) and `combined_diff` (stack base → top head), itself a file reference;
    the top-level `body`/`diff`/`plan_body` point at the top member's files. Review the
    **combined diff** — the worktree is the top head, so the whole stack's changes are present —
-   and use the per-member sections to understand which layer introduced what. `combined_diff`
-   is always rendered locally (the documented default) and needs no `diff_source` disclosure.
+   and use the per-member sections to understand which layer introduced what. Every stack diff
+   is rendered locally from the pinned commits (`diff_source: "local-pinned"`, the documented
+   default) and needs no `diff_source` disclosure; a `pinned_object_missing` or
+   `stack_topology_broken` refusal means the checkout moved under you — report `blocked`.
    Report findings in **combined-diff coordinates** (top-head positions in the combined diff);
    routing findings to individual member PRs is the parent's job, never yours. All other rules
    are unchanged.

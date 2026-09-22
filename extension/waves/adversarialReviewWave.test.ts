@@ -18,6 +18,8 @@ import {
   buildAdversarialReviewAssignments,
   collectAdversarialReviewWave,
   isAdversarialReviewAngle,
+  type PinnedStack,
+  pinnedReviewContextCommand,
   startAdversarialReviewWave,
 } from "./adversarialReviewWave.ts";
 import { PONYTAIL_REVIEW_SKILL } from "./ponytail.ts";
@@ -97,19 +99,37 @@ test("buildAdversarialReviewAssignments: key = label = slug, the fixed agent/pha
   ]);
 });
 
+const PINNED: PinnedStack = {
+  topPr: 42,
+  checkout: "/abs/wt",
+  baseSha: "0".repeat(40),
+  heads: [
+    { pr: 41, headSha: "1".repeat(40) },
+    { pr: 42, headSha: "2".repeat(40) },
+  ],
+};
+
+test("pinnedReviewContextCommand renders --pr <top> --stack --pin-base <sha> then --pin-head <pr>=<sha> bottom→top", () => {
+  assert.equal(
+    pinnedReviewContextCommand(PINNED),
+    `perk pr review-context --pr 42 --stack --pin-base ${"0".repeat(40)} ` +
+      `--pin-head 41=${"1".repeat(40)} --pin-head 42=${"2".repeat(40)}`,
+  );
+});
+
 test("buildAdversarialReviewAssignments stack mode: per-key task pins + the no-stack byte-identity", () => {
-  // The stack discriminator swaps ONLY the subject sentence — the exact per-key pin proves the
-  // task names the stack top, the combined-diff framing, and the --stack context fetch, and
+  // The pinned stack swaps ONLY the subject sentence — the exact per-key pin proves the task
+  // names the stack top, the combined-diff framing, and EXACTLY the pinned context command, and
   // still carries no URL/surface handle.
   const lanes = buildAdversarialReviewAssignments({
     angles: TWO_ANGLES,
     pr: 42,
     worktree: "/abs/wt",
-    stack: true,
+    stack: PINNED,
   });
   const subject =
     "Review the PR stack topped by PR #42 (combined diff) at /abs/wt. " +
-    "Fetch context with `perk pr review-context --pr 42 --stack`.";
+    `Fetch context with \`${pinnedReviewContextCommand(PINNED)}\`.`;
   assert.deepEqual(
     lanes.map((lane) => [lane.key, lane.task]),
     [
@@ -118,19 +138,20 @@ test("buildAdversarialReviewAssignments stack mode: per-key task pins + the no-s
       ["ponytail", `Angle: ponytail. ${subject}`],
     ],
   );
-  // Without stack (absent OR false), tasks are byte-identical to the single-PR form.
+  // Without stack (absent OR explicitly undefined), tasks are byte-identical to the single-PR
+  // form.
   const plain = buildAdversarialReviewAssignments({
     angles: TWO_ANGLES,
     pr: 42,
     worktree: "/abs/wt",
   });
-  const explicitFalse = buildAdversarialReviewAssignments({
+  const explicitUndefined = buildAdversarialReviewAssignments({
     angles: TWO_ANGLES,
     pr: 42,
     worktree: "/abs/wt",
-    stack: false,
+    stack: undefined,
   });
-  assert.deepEqual(explicitFalse, plain);
+  assert.deepEqual(explicitUndefined, plain);
   assert.equal(plain[0]?.task, "Angle: claimed-intent. Review PR #42 at /abs/wt.");
 });
 
@@ -281,9 +302,14 @@ test("the agent def completes via structured_output with the schema's required f
   for (const field of schema.required) {
     assert.match(def, new RegExp(`\`${field}\``), `the def must name the report field ${field}`);
   }
-  // The stack-mode paragraph stays in lockstep with the lane task's --stack pointer: the def
-  // must teach the --stack context fetch and combined-diff-coordinate reporting.
-  assert.match(def, /perk pr review-context --pr <n> --stack --json/);
+  // The stack-mode paragraph stays in lockstep with the lane task's pinned pointer: the def
+  // must teach running the task's pinned --stack command verbatim and combined-diff-coordinate
+  // reporting.
+  assert.match(
+    def,
+    /perk pr review-context --pr <n> --stack --pin-base <sha> --pin-head <pr>=<sha>/,
+  );
+  assert.match(def, /run it verbatim plus `--json`/);
   assert.match(def, /\*\*combined-diff coordinates\*\*/);
   assert.match(def, /routing findings to individual member PRs is the\s+parent's job/i);
   // The retired fenced-JSON completion form is explicitly rejected…

@@ -530,6 +530,7 @@
     member_count: "2"
     stack_table: "1. PR #41 `plan-301` <- `main` - https://x/41"
     notes: "- drift: PR #41 head moved"
+    review_context_command: "perk pr review-context --pr 42 --stack --pin-base 0000000000000000000000000000000000000000 --pin-head 41=1111111111111111111111111111111111111111 --pin-head 42=2222222222222222222222222222222222222222"
     directive: "focus on the CI edits"
 - template: "stages/stack-review-browser/stack.md"
   vars:
@@ -539,6 +540,7 @@
     member_count: "2"
     stack_table: "1. PR #41 `plan-301` <- `main` - https://x/41"
     notes: ""
+    review_context_command: "perk pr review-context --pr 42 --stack --pin-base 0000000000000000000000000000000000000000 --pin-head 41=1111111111111111111111111111111111111111 --pin-head 42=2222222222222222222222222222222222222222"
     directive: ""
 - template: "stages/stack-review/cold.md"
   vars:

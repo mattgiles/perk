@@ -18,7 +18,10 @@
 //
 // Trust posture: `pr`/`worktree` are model-relayed from the door guidance (the `run_learn_wave`
 // `bundle_dir` posture — same trust plane as the task text; the wave's children re-derive
-// everything themselves via `perk pr review-context`). Failure posture: LOUD soft-fail — a
+// everything themselves via `perk pr review-context`). Stack mode is the exception: the lanes
+// are bound to the parent-verified `PinnedStack` the stack door set into the per-activation
+// `StackPinState` (never model-relayed coordinates) — `stack: true` needs an open stack review
+// whose `topPr`/`checkout` match the call's `pr`/`worktree`. Failure posture: LOUD soft-fail — a
 // launch failure surfaces the wave reason as `error_type` with the attempt receipt in the fail
 // extras, never a silent fallback. All rich UI through `report()`; headless-safe by
 // construction.
@@ -38,6 +41,7 @@ import {
   type AdversarialReviewAngle,
   collectAdversarialReviewWave,
   isAdversarialReviewAngle,
+  type PinnedStack,
   startAdversarialReviewWave,
 } from "../../../waves/adversarialReviewWave.ts";
 import { preflightPonytailSkill } from "../../../waves/ponytail.ts";
@@ -72,6 +76,21 @@ const MANDATORY_ANGLE: AdversarialReviewAngle = "claimed-intent";
  */
 export interface ReviewWaveState {
   pending: ReportWaveRef | null;
+}
+
+/**
+ * The per-activation structural binding between the stack door and the wave: the `PinnedStack`
+ * the last successful `/stack-review-browser` / `open_stack_review` open verified (patch digest)
+ * and bound; `null` until a stack review is open. A later open replaces it (the accepted
+ * "second browser door supersedes" posture). Created in `extension/index.ts` and shared by BOTH
+ * installers so the model can never aim a stack wave at coordinates it relayed itself.
+ */
+export interface StackPinState {
+  pinned: PinnedStack | null;
+}
+
+export function createStackPinState(): StackPinState {
+  return { pinned: null };
 }
 
 /** The decoded `start_review_wave` selection (invalid slugs unrepresentable past the boundary). */
@@ -152,6 +171,7 @@ export async function executeStartReviewWave(
   state: ReviewWaveState,
   wave: ReportWave,
   target: ReportTarget,
+  stackPin: StackPinState,
   opts: {
     angles: AdversarialReviewAngle[];
     pr: number;
@@ -174,13 +194,33 @@ export async function executeStartReviewWave(
       "wave_active",
     );
   }
+  let pinned: PinnedStack | undefined;
+  if (opts.stack === true) {
+    // The structural binding: stack lanes read the door-verified pins, never model-relayed
+    // coordinates — and only for the stack the door actually opened.
+    if (stackPin.pinned === null) {
+      return fail(
+        "stack mode needs an open stack review in this session — open it with " +
+          "/stack-review-browser or open_stack_review first",
+        "bad_state",
+      );
+    }
+    if (stackPin.pinned.topPr !== opts.pr || stackPin.pinned.checkout !== opts.worktree) {
+      return fail(
+        `stack mode is bound to the open stack review (top PR #${stackPin.pinned.topPr} at ` +
+          `${stackPin.pinned.checkout}); pr ${opts.pr} / worktree ${opts.worktree} do not match`,
+        "bad_input",
+      );
+    }
+    pinned = stackPin.pinned;
+  }
   const effectiveAngles = [...opts.angles, "ponytail"];
   const start = await startAdversarialReviewWave(wave, {
     angles: opts.angles,
     pr: opts.pr,
     worktree: opts.worktree,
     ...(opts.directive !== undefined ? { directive: opts.directive } : {}),
-    ...(opts.stack !== undefined ? { stack: opts.stack } : {}),
+    ...(pinned !== undefined ? { stack: pinned } : {}),
     ...(opts.model !== undefined ? { model: opts.model } : {}),
     ...(opts.requiredSkillPreflight !== undefined
       ? { requiredSkillPreflight: opts.requiredSkillPreflight }
@@ -364,6 +404,7 @@ export function installReviewWaveBindings(
   pi: ExtensionAPI,
   wave: ReportWave,
   annotations: AnnotationState,
+  stackPin: StackPinState = createStackPinState(),
 ): void {
   const state: ReviewWaveState = { pending: null };
 
@@ -417,9 +458,11 @@ export function installReviewWaveBindings(
         stack: {
           type: "boolean",
           description:
-            "Stack mode (the /stack-review-browser flow): the lanes review the combined diff " +
-            "of the PR stack topped by `pr` at `worktree`, fetching membership via " +
-            "`perk pr review-context --pr <pr> --stack`.",
+            "Stack mode (the /stack-review-browser flow): the lanes review the pinned combined " +
+            "diff of the open stack review topped by `pr` at `worktree`, reading the pinned " +
+            "`perk pr review-context --pr <pr> --stack --pin-base … --pin-head …` command the " +
+            "door bound into the session (no re-resolution; refuses without an open stack " +
+            "review or on a pr/worktree mismatch).",
         },
       },
     },
@@ -440,7 +483,7 @@ export function installReviewWaveBindings(
       // The per-call `signal` is deliberately NOT threaded into the wave: the wave outlives the
       // tool call by design (the parent ends the turn and resumes on native wakes); its bound is the
       // module-owned timeout (the spawned `timeoutMs` is the orphan insurance).
-      return executeStartReviewWave(state, wave, ctx, {
+      return executeStartReviewWave(state, wave, ctx, stackPin, {
         ...decoded,
         ...(model !== undefined ? { model } : {}),
         requiredSkillPreflight: (requirement) => preflightPonytailSkill(requirement, ctx.cwd),

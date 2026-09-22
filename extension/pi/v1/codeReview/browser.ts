@@ -56,8 +56,8 @@ import {
 } from "../providers/annotations.ts";
 import {
   type CodeReviewOutcome,
+  type CodeReviewSource,
   decodePrUrl,
-  LOCAL_REVIEW_DIFF_TYPE,
   type PrUrl,
   plannotatorPresent,
   planRefBaseOf,
@@ -172,7 +172,7 @@ export interface ReviewBrowserCoreOpts {
   /** The invoking door's report scope. */
   scope: string;
   /** The `startPlannotatorBrowser` opts minus `signal`/`activity` (both threaded by the core). */
-  browserOpts: { cwd: string; prUrl?: string; diffType?: string; defaultBranch?: string };
+  browserOpts: { cwd: string; source: CodeReviewSource };
   /** The fully composed guidance to inject (binding suffix included by the caller). */
   guidance: string;
   /** The degrade notice for the browser-never-ready arm (default: the PR-mode notice). */
@@ -269,7 +269,7 @@ async function openBrowserAndGuide(
 ): Promise<void> {
   await openReviewBrowserCore(pi, ctx, annotations, status, {
     scope: SCOPE,
-    browserOpts: { prUrl: opts.prUrl, cwd: ctx.cwd },
+    browserOpts: { cwd: ctx.cwd, source: { mode: "pr", prUrl: opts.prUrl } },
     guidance: prReviewBrowserGuidance(opts) + bindingSuffix(ctx.cwd, `command:${SCOPE}`),
   });
 }
@@ -409,8 +409,7 @@ export function installPrReviewBrowserBindings(
         try {
           const out = await requestPlannotatorCodeReview(pi.events, {
             cwd: ctx.cwd,
-            diffType: LOCAL_REVIEW_DIFF_TYPE,
-            defaultBranch: target.defaultBranch,
+            source: { mode: "local", defaultBranch: target.defaultBranch },
             signal: ctx.signal,
           });
           routePrReviewOutcome(pi, ctx, out, SCOPE);
