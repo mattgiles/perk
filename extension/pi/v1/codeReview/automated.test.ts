@@ -16,6 +16,7 @@ import { test } from "node:test";
 import { runScratchDir } from "../../../substrate/cache.ts";
 import {
   createFakeSubagents,
+  type FakeSpawnPlan,
   type FakeSubagents,
   waveScriptItems,
 } from "../../../testing/fakeSubagents.ts";
@@ -849,50 +850,55 @@ for (const [label, findings] of [
   });
 }
 
-test("tool: a native partial actionable first attempt replaced by an all-clean retry permits a clean post", async () => {
-  // Final-merge-to-posting composition: the recorded minimum is projected from the EFFECTIVE
-  // post-retry reports, never latched from a superseded attempt.
+/** A deadline-partial first attempt: the engine settled `partial/timeout` with exactly one
+ * retained plan-fidelity report (`report`) and the other lanes still running. */
+function deadlinePartialAttempt(report: Record<string, unknown>): FakeSpawnPlan {
+  return {
+    executeSettlement: async () => ({
+      aggregate: { state: "failed", error: "Workflow script timed out.", value: undefined },
+      completion: {
+        state: "failed",
+        success: false,
+        terminalOutcome: { state: "partial", reason: "timeout" },
+        results: [
+          {
+            workflowKey: "plan-fidelity",
+            runId: "child-a",
+            success: true,
+            structuredOutput: { angle: "plan-fidelity", ...report },
+          },
+          { workflowKey: "tests", runId: "child-b", state: "running" },
+          { workflowKey: "ponytail", runId: "child-c", state: "running" },
+        ],
+      },
+    }),
+  };
+}
+
+/** The retry attempt: every relaunched lane answers clean. */
+const ALL_CLEAN_RETRY: FakeSpawnPlan = {
+  executeScript: async (script) =>
+    waveScriptItems(script).map(({ key }) => ({
+      key,
+      ok: true,
+      error: null,
+      report: { angle: key, verdict: "clean", findings: [], fyi: [] },
+    })),
+};
+
+test("tool: a deadline partial's retained actionable report survives the uncovered-lane retry and governs the floor", async () => {
+  // Final-merge-to-posting composition: the retained report is EFFECTIVE evidence (never
+  // relaunched, never superseded), so the recorded minimum is actionable even though every
+  // retried lane answered clean.
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   installPonytailReviewSkill(cwd);
   const bin = fakePerkRouter(cwd, {
     "pr url": { json: PR_URL_JSON },
-    "pr review-post": { json: JSON.parse(CLEAN_JSON) },
+    "pr review-post": { json: JSON.parse(ACTIONABLE_JSON) },
   });
   const fake = createFakeSubagents([
-    {
-      // Attempt 1: the native run ends partial; its retained plan-fidelity report is actionable.
-      executeSettlement: async () => ({
-        aggregate: { state: "failed", error: "native failure", value: undefined },
-        completion: {
-          state: "failed",
-          success: false,
-          terminalOutcome: { state: "partial", reason: "timeout" },
-          results: [
-            {
-              workflowKey: "plan-fidelity",
-              runId: "child-a",
-              success: true,
-              structuredOutput: {
-                angle: "plan-fidelity",
-                verdict: "actionable",
-                findings: [FINDING],
-                fyi: [],
-              },
-            },
-          ],
-        },
-      }),
-    },
-    {
-      // Attempt 2 (the whole-selection retry): every lane answers clean.
-      executeScript: async (script) =>
-        waveScriptItems(script).map(({ key }) => ({
-          key,
-          ok: true,
-          error: null,
-          report: { angle: key, verdict: "clean", findings: [], fyi: [] },
-        })),
-    },
+    deadlinePartialAttempt({ verdict: "actionable", findings: [FINDING], fyi: [] }),
+    ALL_CLEAN_RETRY,
   ]);
   const h = await loadPerkSession({
     cwd,
@@ -912,18 +918,23 @@ test("tool: a native partial actionable first attempt replaced by an all-clean r
     };
     assert.equal(details.ok, true);
     assert.equal(fake.spawns.length, 2, "exactly one bounded retry");
-    assert.deepEqual(details.retried, ["plan-fidelity", "tests", "ponytail"]);
+    assert.deepEqual(
+      waveScriptItems(String(fake.spawns[1]?.workflowScript)).map(({ key }) => key),
+      ["tests", "ponytail"],
+      "the retry relaunches only the lanes without a report",
+    );
+    assert.deepEqual(details.retried, ["tests", "ponytail"]);
     assert.equal(details.complete, true);
     assert.deepEqual(details.covered, ["plan-fidelity", "tests", "ponytail"]);
     assert.deepEqual(details.failures, []);
     assert.deepEqual(
       details.reports?.map(({ key, report }) => [key, report.verdict, report.findings.length]),
       [
-        ["plan-fidelity", "clean", 0],
+        ["plan-fidelity", "actionable", 1],
         ["tests", "clean", 0],
         ["ponytail", "clean", 0],
       ],
-      "the superseded actionable report is absent from the final aggregate",
+      "the retained deadline-partial report is kept beside the retry's reports",
     );
     assert.deepEqual(
       details.attempts?.map((a) => [a.attempt, a.state]),
@@ -932,7 +943,68 @@ test("tool: a native partial actionable first attempt replaced by an all-clean r
         [2, "complete"],
       ],
     );
-    // The effective evidence is all clean → clean is postable, PR-bound, and single-use.
+    // The effective evidence carries an actionable report → clean is refused; actionable lands.
+    const clean = await h.invokeTool("post_pr_review", { verdict: "clean", summary: "clean" });
+    assert.equal((clean.details as { error_type?: string }).error_type, "review_verdict_conflict");
+    const actionable = await h.invokeTool("post_pr_review", {
+      verdict: "actionable",
+      summary: "one issue",
+      comments: [FINDING],
+    });
+    assert.equal((actionable.details as { ok: boolean }).ok, true);
+    assert.deepEqual(latestReviewBatch(cwd), {
+      verdict: "actionable",
+      summary: "one issue",
+      comments: [FINDING],
+      expected_pr: 42,
+    });
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a deadline partial's retained BLOCKED report is superseded by the retry's clean replacement; a clean post is permitted", async () => {
+  // The one shape in which a retry still supersedes a first-attempt report: a blocked report
+  // leaves the effective set (an uncovered `lane-failed`), so its lane is relaunched and the
+  // recorded minimum is projected from the replacement — never latched from the superseded attempt.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  installPonytailReviewSkill(cwd);
+  const bin = fakePerkRouter(cwd, {
+    "pr url": { json: PR_URL_JSON },
+    "pr review-post": { json: JSON.parse(CLEAN_JSON) },
+  });
+  const fake = createFakeSubagents([
+    deadlinePartialAttempt({ verdict: "blocked", findings: [], fyi: ["context fetch failed"] }),
+    ALL_CLEAN_RETRY,
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+    extraExtensions: [fake.extension],
+  });
+  try {
+    const wave = await h.invokeTool("run_pr_review_wave", { angles: ["plan-fidelity", "tests"] });
+    const details = wave.details as {
+      ok: boolean;
+      complete?: boolean;
+      retried?: string[];
+      reports?: { key: string; report: { verdict: string } }[];
+      failures?: unknown[];
+    };
+    assert.equal(details.ok, true);
+    assert.equal(fake.spawns.length, 2);
+    assert.deepEqual(details.retried, ["plan-fidelity", "tests", "ponytail"]);
+    assert.equal(details.complete, true);
+    assert.deepEqual(details.failures, []);
+    assert.deepEqual(
+      details.reports?.map(({ key, report }) => [key, report.verdict]),
+      [
+        ["plan-fidelity", "clean"],
+        ["tests", "clean"],
+        ["ponytail", "clean"],
+      ],
+      "the superseded blocked report is absent from the final aggregate",
+    );
     const clean = await h.invokeTool("post_pr_review", { verdict: "clean", summary: "clean" });
     assert.equal((clean.details as { ok: boolean }).ok, true);
     assert.deepEqual(latestReviewBatch(cwd), {
