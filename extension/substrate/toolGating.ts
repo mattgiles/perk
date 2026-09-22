@@ -126,14 +126,13 @@ export const SUBAGENT_CHILD_TOOLS: readonly string[] = ["structured_output", "co
 
 /**
  * @ff-labs/pi-fff's search tools. BOTH mode name-sets are enumerated (static names, inert
- * when absent — the code_search version-tolerance precedent): warm sessions run pi-fff's
- * default tools-and-ui mode (fffind/ffgrep [+ fff-multi-grep when enabled upstream]), and
- * perk launches inject PI_FFF_MODE=tools-and-ui (the same additive mode) so pi's builtin
- * find/grep stay host-builtins for pi-subagents' host-tool intersection (an override-mode
- * pi-fff shadows them by name and fails review/scout lanes closed). The override name-set
- * (multi_grep; find/grep already allowlisted/pass-through) stays enumerated for an operator
- * `PI_FFF_MODE=override` opt-in. All register at load time. Frecency/history state lives under ~/.pi/agent/fff/ — outside the worktree
- * (the fetch_content cache-write precedent), so the read-only bar holds.
+ * when absent — the code_search version-tolerance precedent): pi-fff's own default is the
+ * additive tools-and-ui mode (fffind/ffgrep [+ fff-multi-grep when enabled upstream]) beside
+ * pi's builtin find/grep; perk injects no mode (pi-fff's CLI flag → `PI_FFF_MODE` →
+ * `pi-fff.json` precedence decides). The override name-set (multi_grep; find/grep already
+ * allowlisted/pass-through) stays enumerated for an operator `PI_FFF_MODE=override` opt-in.
+ * All register at load time. Frecency/history state lives under ~/.pi/agent/fff/ — outside
+ * the worktree (the fetch_content cache-write precedent), so the read-only bar holds.
  */
 export const FFF_SEARCH_TOOLS: readonly string[] = [
   "fffind",
@@ -752,12 +751,15 @@ const SAFE_PATTERNS = [
   /^\s*perk\s+(objective|obj)\s+(show|s|next|n|node-engagement)\b/i,
   // Report children need exactly these query forms, not arbitrary PR operations: plan-bound
   // children (`/pr-review`, `/address`) use the `--expected-pr` form; the human-triage doors'
-  // adversarial children — and the stack-review routing step — use the foreign `--pr` /
-  // `--pr --stack` forms (a read-only parent would otherwise block the doors' children outright).
-  // ONE anchored alternation: `--json` last, nothing else; the flagless form stays out (only the
-  // write-capable foreground conflict-resolver uses it, outside the gate). The destructive veto
-  // still blocks `> file` redirects — the CLI writes its own scratch files.
-  /^\s*perk\s+pr\s+review-context\s+(?:--expected-pr\s+[1-9][0-9]*|--pr\s+[1-9][0-9]*(?:\s+--stack)?)\s+--json\s*$/,
+  // adversarial children use the foreign `--pr` / `--pr --stack` forms (a read-only parent would
+  // otherwise block the doors' children outright); the stack-review flow's lanes AND its routing
+  // step run the PINNED `--pr N --stack --pin-base <sha> --pin-head <pr>=<sha>…` form the door
+  // rendered (`pinnedReviewContextCommand` — full 40-hex lowercase shas, at least two heads; the
+  // CLI re-validates the grammar and topology). ONE anchored alternation: `--json` last, nothing
+  // else; the flagless form stays out (only the write-capable foreground conflict-resolver uses
+  // it, outside the gate). The destructive veto still blocks `> file` redirects — the CLI writes
+  // its own scratch files.
+  /^\s*perk\s+pr\s+review-context\s+(?:--expected-pr\s+[1-9][0-9]*|--pr\s+[1-9][0-9]*(?:\s+--stack(?:\s+--pin-base\s+[0-9a-f]{40}(?:\s+--pin-head\s+[1-9][0-9]*=[0-9a-f]{40}){2,})?)?)\s+--json\s*$/,
   /^\s*perk\s+pr\s+feedback\s+--json\s*$/,
   // Read-only `gh` queries — the guidance in the managed AGENTS block ("GitHub access goes
   // through gh") must be followable in read-only sessions. Query-shaped subcommands only;

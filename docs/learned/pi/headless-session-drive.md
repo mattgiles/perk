@@ -411,7 +411,11 @@ check the root export list before importing a Pi type by name; mirror/derive dee
   section above): re-read every `createAgentSession` / `createAgentSessionServices` call site AND
   every dist-scoped fact here against the newly *installed* dist (resolved per
   `toolchain/worktree-node-modules.md`), correct or date what changed. Last full re-verification:
-  the `0.85.1` dist — provenance, not a currency promise; the pin is.
+  the `0.87.0` dist (the `createAgentSession` initial-state read from `buildSessionContext()`, the
+  request-time `_installAgentRequestProjection` rebuild, `ModelRegistry.streamSimple`, and the
+  provider-facing `TranscriptContext` — tool declarations ride system-message deltas, so a faux
+  provider reads the model-visible census with `getCurrentTools(context.messages)`) — provenance,
+  not a currency promise; the pin is.
 
 ## Cross-references
 

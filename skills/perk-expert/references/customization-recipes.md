@@ -186,19 +186,15 @@ info and incompatible package/skill identity as warn, with a known-good `4.9.0` 
 
 ## Change pi-fff's search mode (`PI_FFF_MODE`)
 
-perk borrows `@ff-labs/pi-fff` (FFF-powered fuzzy file/content search) in every repo, and
-**perk-launched** sessions run it in its additive mode via an injected `PI_FFF_MODE=tools-and-ui`
-env default: FFF's `fffind`/`ffgrep` (pre-indexed, frecency-ranked) sit beside the untouched
-builtin `find`/`grep` — the mode warm/bare `pi` sessions already use. The injection is a
-*default*, not a pin — your environment wins at both launch paths (local stage launches and the
-remote CI worker), so `export PI_FFF_MODE=override` opts into FFF-as-`find`/`grep`. Caveat (a
-0.67.x-only hazard, fixed in pi-subagents 0.68.0): the 0.67.x engine intersected a child agent's
-declared tools with the tools the **host** reported as builtin-*sourced*, and override mode
-re-registers `grep`/`find` under pi-fff's own name — so every `perk.scout`/`perk.*-reviewer` lane
-failed at launch and the other report agents silently lost `grep`/`find`. `perk doctor`'s
-`subagent-host-tools` check names that state (an exported `override`, or an `override` mode in
-the agent dir's `pi-fff.json`, while the installed pi-subagents is in the affected range
-`[0.67.0, 0.68.0)`); on 0.68.0+ it reports `ok` with "counts wrapped core slots as host builtins".
+perk borrows `@ff-labs/pi-fff` (FFF-powered fuzzy file/content search) in every repo and
+injects **no** search mode: perk-launched sessions (local stage launches and the remote CI
+worker alike) run pi-fff under its own precedence — CLI flag → `PI_FFF_MODE` → `mode` in the
+agent dir's `pi-fff.json` → its additive `tools-and-ui` default, where FFF's `fffind`/`ffgrep`
+(pre-indexed, frecency-ranked) sit beside the untouched builtin `find`/`grep`. So
+`export PI_FFF_MODE=override` (or `"mode": "override"` in `pi-fff.json`) opts into
+FFF-as-`find`/`grep` everywhere, and an exported value passes through a perk launch verbatim.
+No doctor check watches the mode: pi-subagents ≥ 0.70.0 no longer intersects a child agent's
+tools with the host's builtins, so the mode cannot fail a `perk.scout`/`perk.*-reviewer` lane.
 Any other valid pi-fff mode works the same way. To drop
 the package's resources entirely in one repo, use the `pi config -l` resource-filter lever (see
 [Scope pi resources per-project](#scope-pi-resources-per-project-pi-config--l)).

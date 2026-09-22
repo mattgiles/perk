@@ -267,9 +267,21 @@ target, the session's active objective, then the worktree plan-ref's linked obje
 tried in order. Single-PR targets refuse with a pointer at `/pr-review-browser`; forks, ambiguous
 chains, and stacks deeper than 20 members refuse typed. perk fetches every member head in one
 round trip, validates the commit topology fail-closed (a broken stack refuses before any
-checkout), checks out the **top** head detached at `review-<top>`, and opens plannotator on the
-combined diff. One adversarial wave reviews the combined diff (`stack: true` — reviewer children
-fetch per-member context with `perk pr review-context --pr <top> --stack`).
+checkout), checks out the **top** head detached at `review-<top>`, writes the combined diff
+(pinned `base_sha` → top head, rendered from the exact fetched commits) to `review-<top>.patch`
+beside it, and opens plannotator on that **static patch** — verified against the checkout
+envelope's `patch_sha256` immediately before the browser request. The browser therefore shows a
+pinned diff: moving refs cannot change it, there is no live refresh, and the browser has no
+repository context of its own (exploration happens in the detached checkout, which stays the
+reviewers' surface). A checkout of the same top PR refreshed while a review is open invalidates
+that review — the next open refuses on the digest mismatch (re-run the door). While a stack wave is
+still pending (launched, uncollected), opening a *different* stack — or the same stack after a
+refresh — is refused until `collect_review_wave` settles it; re-opening the identical pinned
+review (a stale-session reopen) is allowed. One adversarial wave
+reviews the same pinned commits (`stack: true` requires this door's open review in the session and
+binds the wave to its top PR + checkout; reviewer children run the pinned
+`perk pr review-context --pr <top> --stack --pin-base <sha> --pin-head <pr>=<sha> …` command the
+door rendered — no re-resolution, no fetch), and the routing step diffs those same commits.
 
 An approval with no decoded annotations completes the review and may return a nonblank note as
 **nonblocking approval guidance**: the exact note is retained inside an explicitly untrusted DATA

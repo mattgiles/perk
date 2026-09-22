@@ -10,12 +10,18 @@
 // `plannotator:request` with `action: "code-review"` — which opens the EXACT same browser UI.
 // Same in-process bus perk already uses for plan review (createPlannotatorBridge).
 //
-// EVENT ENVELOPE (pinned against `@plannotator/pi-extension@0.22.0`, `plannotator-events.ts` —
-// byte-identical to 0.21.2, the original pin):
+// EVENT ENVELOPE (pinned against `@plannotator/pi-extension@0.27.17`, `plannotator-events.ts` —
+// the `code-review` request/reply shape is byte-identical to the original 0.21.2 pin; 0.27.16
+// added `patchFile`):
 //   request — pi.events.emit("plannotator:request", { requestId, action: "code-review",
 //             payload, respond })                   // respond = in-payload callback
 //   payload — PR mode:    { prUrl, cwd }
 //           — local mode: { cwd, diffType: "since-base", defaultBranch? }
+//           — patch mode: { cwd, patchFile }        // a unified-diff file — static-patch
+//             mode, no repo required. "Mutually exclusive with `prUrl`. Read by the host at
+//             request time, resolved against payload.cwd" (0.27.17). Plannotator's own branch
+//             order makes `prUrl` win over `patchFile`, so perk's `CodeReviewSource` union
+//             makes sending both unrepresentable.
 //   reply   — respond({ status: "handled", result: { approved, feedback?, annotations?,
 //             exit? } })
 //           | respond({ status: "unavailable" | "error", error? })
@@ -81,6 +87,20 @@ export const PLANNOTATOR_REVIEW_COMMAND = "plannotator-review";
  * work, so an `uncommitted` default would open a near-empty review.
  */
 export const LOCAL_REVIEW_DIFF_TYPE = "since-base";
+
+/**
+ * What a code-review open shows — ONE of plannotator's three diff sources, mutually exclusive
+ * by construction (plannotator resolves `prUrl` before `patchFile`, so a payload carrying both
+ * would silently show the PR; this union cannot express it). `pr`: the attached PR's diff (the
+ * `/pr-review-browser` PR mode). `local`: the checkout's own `since-base` diff — the ONE
+ * supported local diff type is set by the payload builder, the arm carries only the optional
+ * explicit base (the pre-PR fallback). `patch`: a static unified-diff file resolved against
+ * `cwd` (the stack door's pinned combined patch — no repository context, no live refresh).
+ */
+export type CodeReviewSource =
+  | { mode: "pr"; prUrl: string }
+  | { mode: "local"; defaultBranch?: string }
+  | { mode: "patch"; patchFile: string };
 
 /**
  * The short, perk-authored triage suffix appended to feedback ONLY when the reviewer left
@@ -193,23 +213,10 @@ interface CodeReviewResponse {
  */
 export async function requestPlannotatorCodeReview(
   bus: PlannotatorBus,
-  opts: {
-    cwd: string;
-    prUrl?: string;
-    diffType?: string;
-    defaultBranch?: string;
-    signal?: AbortSignal;
-  },
+  opts: { cwd: string; source: CodeReviewSource; signal?: AbortSignal },
 ): Promise<CodeReviewOutcome> {
   if (opts.signal?.aborted) return { status: "aborted" };
-
-  // Build the payload conditionally — fields present ONLY when defined, so the PR-mode envelope
-  // stays shape-identical to the original `{ prUrl, cwd }` and an omitted `defaultBranch` lets
-  // plannotator auto-detect the repo default.
-  const payload: Record<string, unknown> = { cwd: opts.cwd };
-  if (opts.prUrl !== undefined) payload.prUrl = opts.prUrl;
-  if (opts.diffType !== undefined) payload.diffType = opts.diffType;
-  if (opts.defaultBranch !== undefined) payload.defaultBranch = opts.defaultBranch;
+  const payload = codeReviewPayload(opts.cwd, opts.source);
 
   return await new Promise<CodeReviewOutcome>((resolve) => {
     let settled = false;
@@ -250,6 +257,31 @@ export async function requestPlannotatorCodeReview(
       },
     });
   });
+}
+
+/**
+ * The wire payload for one `CodeReviewSource` — fields present ONLY when they mean something:
+ * `pr` is byte-identical to the original `{ cwd, prUrl }`; `local` carries the forced
+ * `since-base` diff type and the explicit base only when given (an omitted `defaultBranch` lets
+ * plannotator auto-detect the repo default); `patch` is `{ cwd, patchFile }` and nothing else.
+ */
+function codeReviewPayload(cwd: string, source: CodeReviewSource): Record<string, unknown> {
+  switch (source.mode) {
+    case "pr":
+      return { cwd, prUrl: source.prUrl };
+    case "local":
+      return {
+        cwd,
+        diffType: LOCAL_REVIEW_DIFF_TYPE,
+        ...(source.defaultBranch !== undefined ? { defaultBranch: source.defaultBranch } : {}),
+      };
+    case "patch":
+      return { cwd, patchFile: source.patchFile };
+    default: {
+      const unreachable: never = source;
+      throw new Error(`unknown code-review source: ${JSON.stringify(unreachable)}`);
+    }
+  }
 }
 
 // ------------------------------------------------------------------------ the active-PR ladder
@@ -638,33 +670,23 @@ async function startPlannotatorSurface<T>(
 /**
  * The composable code-review browser open: the engine with launch = the `code-review` bridge
  * request and the `/api/diff` readiness route (`bridgePromise` is the single respond —
- * code-review has no handshake). PR mode passes `{prUrl, cwd}` — the payload stays
- * byte-identical to the original shape because the optional local-mode fields (`diffType`,
- * `defaultBranch`) render ONLY when defined (`requestPlannotatorCodeReview` builds the payload
- * conditionally). The stack door supplies the local-mode trio
- * `{cwd, diffType: "since-base", defaultBranch: "origin/<stack base>"}` instead of a PR URL.
- * Plannotator's defaults are otherwise untouched (deliberately NOT `useLocal: false` — the
- * human chose the full surface).
+ * code-review has no handshake). The `source` selects the payload (`codeReviewPayload`): the
+ * PR door's `{mode: "pr"}` renders the original `{cwd, prUrl}` byte-identically; the pre-PR
+ * fallback's `{mode: "local"}` the forced `since-base` local diff; the stack door's
+ * `{mode: "patch", patchFile: <checkout>.patch}` plannotator's static-patch mode over the
+ * pinned combined patch. Plannotator's defaults are otherwise untouched (deliberately NOT
+ * `useLocal: false` — the human chose the full surface).
  */
 export async function startPlannotatorBrowser(
   bus: PlannotatorBus,
-  opts: {
-    cwd: string;
-    prUrl?: string;
-    diffType?: string;
-    defaultBranch?: string;
-    signal?: AbortSignal;
-    activity: ActivitySink;
-  },
+  opts: { cwd: string; source: CodeReviewSource; signal?: AbortSignal; activity: ActivitySink },
   deps: StartBrowserDeps = {},
 ): Promise<StartedBrowser> {
   return await startPlannotatorSurface(
     (signal) =>
       requestPlannotatorCodeReview(bus, {
         cwd: opts.cwd,
-        ...(opts.prUrl !== undefined ? { prUrl: opts.prUrl } : {}),
-        ...(opts.diffType !== undefined ? { diffType: opts.diffType } : {}),
-        ...(opts.defaultBranch !== undefined ? { defaultBranch: opts.defaultBranch } : {}),
+        source: opts.source,
         ...(signal !== undefined ? { signal } : {}),
       }),
     CODE_REVIEW_READINESS_PROBE_PATH,

@@ -68,12 +68,12 @@ def _perk_npm_entry() -> str:
 # slot, and pi-status's `session_start` footer replaced perk's charter-D2 footer (perk owns
 # the footer wholesale).
 # `@ff-labs/pi-fff` is the borrowed *FFF-powered fuzzy file/content search* (Rust-native,
-# pre-indexed, frecency-ranked): perk launches inject the env default `PI_FFF_MODE=tools-and-ui`
-# (operator env wins) so stage sessions keep pi's builtin `find`/`grep` beside FFF's additive
-# `fffind`/`ffgrep` — override mode shadows the builtins by name, which pi-subagents 0.67.x
-# treated as "host lacks grep/find" and failed review/scout lanes closed (>= 0.68.0 counts
-# wrapped core slots, so the injection is a harmless additive default). Vetted: no `setFooter`,
-# headless-safe, load-time tool registration.
+# pre-indexed, frecency-ranked). perk injects no search mode: pi-fff's own precedence decides
+# (CLI flag → `PI_FFF_MODE` → `pi-fff.json` → its additive `tools-and-ui` default, which keeps
+# pi's builtin `find`/`grep` beside `fffind`/`ffgrep`), and pi-subagents >= 0.70.0 no longer
+# intersects a child's tools with the host's builtins, so an operator's `override` mode no
+# longer affects report lanes. Vetted: no `setFooter`, headless-safe, load-time tool
+# registration.
 # `@juicesharp/rpiv-ask-user-question` is the borrowed *`ask_user_question` questionnaire tool*
 # (the structured 1-to-4-question dialog with options/multiSelect/previews): perk owns no askuser
 # surface anymore — the provider seam is retired and the tool is built-in for every repo.

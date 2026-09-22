@@ -37,10 +37,10 @@ def test_auditor_is_a_background_report_outside_delivery():
     assert fm["model"] == "openai/gpt-5.6-luna"
     # pi-subagents >= 0.68.0 rejects any def carrying the removed `fallbackModels` field at load.
     assert "fallbackModels" not in fm
-    # The report-only completion policy shared with the shipped reports: the engine's
-    # mutation guard is disabled by literal false (the auditor never edits); acceptance stays
-    # suppressed by the wave spawn, not by frontmatter.
-    assert fm["completionGuard"] is False
+    # pi-subagents 0.70.1 removed the completion mutation guard, so (like the shipped reports)
+    # the def carries no `completionGuard`; the auditor completes on its validated report, and
+    # acceptance stays suppressed by the wave spawn, not by frontmatter.
+    assert "completionGuard" not in fm
     for absent in (
         "extensions",
         "subagentOnlyExtensions",

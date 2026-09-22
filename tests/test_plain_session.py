@@ -5,8 +5,8 @@ and the shared `launch_exec_recorder` (stubs `_resolve_pi_executable`, `os.chdir
 the TTY seam swaps the door module's `sys` (CliRunner replaces `sys.stdin`, so patching
 `sys.stdin.isatty` alone would not reach it). These tests prove what the ROOT DISPATCH
 contributes — checkout, argv, `run_id=None`, ordering — not the shared executor's environment
-composition (`tests/test_launch.py` pins `PERK_CLI_VERSION`, `PI_FFF_MODE`, and the
-inherited-`PERK_RUN_ID` removal).
+composition (`tests/test_launch.py` pins `PERK_CLI_VERSION` and the inherited-`PERK_RUN_ID`
+removal).
 """
 
 from pathlib import Path

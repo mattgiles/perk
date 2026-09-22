@@ -639,14 +639,18 @@ notes that proceed.
 
 A real run materializes the combined-diff checkout through the same `--stack` checkout
 implementation as the warm door (one fetch, fail-closed topology validation, the top head at
-`review-<top>`), then launches the dedicated `stack-review` stage session seeded to make ONE
-`open_stack_review` call — the pinned stack snapshot rides the launch handoff, so the session
-never re-resolves the stack. Local-only by design (no `--remote` — the flow is an interactive
+`review-<top>`, the combined patch written to `review-<top>.patch` beside it), then launches the
+dedicated `stack-review` stage session seeded to make ONE `open_stack_review` call — the pinned
+stack snapshot rides the launch handoff (`stack_review`: the member rows with their `head_sha`s,
+the checkout path, the notes, the focus, plus `base_sha` and the patch's `patch_sha256`), so the
+session never re-resolves the stack, and `open_stack_review` verifies the patch against that
+digest before opening plannotator's static-patch view (a mismatch — the checkout was refreshed —
+refuses `bad_state`). Local-only by design (no `--remote` — the flow is an interactive
 browser session). `--dry-run` is **side-effect-free**: it resolves the stack read-only (no
-fetch, no checkout, no handoff write, no launch) and prints the launch plan plus the resolved
-stack table; the `--json` preview carries the would-be `checkout_path`, `base_sha: null` and
-per-member `head_sha: null` (not computable without the fetch), the launch `argv`, and the
-handoff-blob preview with the same nulls plus `dry_run: true`.
+fetch, no checkout, no patch, no handoff write, no launch) and prints the launch plan plus the
+resolved stack table; the `--json` preview carries the would-be `checkout_path`, `base_sha: null`,
+`patch_sha256: null` and per-member `head_sha: null` (not computable without the fetch), the
+launch `argv`, and the handoff-blob preview with the same nulls plus `dry_run: true`.
 
 ## Related
 

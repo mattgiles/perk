@@ -20,7 +20,11 @@ import {
 } from "../../../testing/fakeSubagents.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../../../testing/harness.ts";
 import { createMemoryWaveAdapter } from "../../../testing/memoryAdapter.ts";
-import type { AdversarialReviewAngle } from "../../../waves/adversarialReviewWave.ts";
+import {
+  type AdversarialReviewAngle,
+  type PinnedStack,
+  pinnedReviewContextCommand,
+} from "../../../waves/adversarialReviewWave.ts";
 import { PONYTAIL_PACKAGE_ROOT } from "../../../waves/ponytail.ts";
 import { reportWaveOver } from "../../../waves/reportWave.ts";
 import {
@@ -30,18 +34,38 @@ import {
   type ReviewFinding,
 } from "../providers/annotations.ts";
 import {
+  createStackPinState,
   decodeStartReviewWaveParams,
   executeCollectReviewWave,
   executeStartReviewWave as executeStartReviewWaveBase,
   installReviewWaveBindings,
   type ReviewWaveState,
+  type StackPinState,
 } from "./reviewWave.ts";
 
 const TWO_ANGLES: AdversarialReviewAngle[] = ["claimed-intent", "correctness"];
 const PREFLIGHT_OK = async () => ({ ok: true }) as const;
-const executeStartReviewWave = (...args: Parameters<typeof executeStartReviewWaveBase>) =>
-  executeStartReviewWaveBase(args[0], args[1], args[2], {
-    ...args[3],
+/** The execute core with an EMPTY stack pin (the single-PR doors' posture) and the preflight
+ * seam forced ok; stack-mode tests pass their own pin through `executeStartReviewWavePinned`. */
+const executeStartReviewWave = (
+  state: ReviewWaveState,
+  wave: Parameters<typeof executeStartReviewWaveBase>[1],
+  target: Parameters<typeof executeStartReviewWaveBase>[2],
+  opts: Parameters<typeof executeStartReviewWaveBase>[4],
+) =>
+  executeStartReviewWaveBase(state, wave, target, createStackPinState(), {
+    ...opts,
+    requiredSkillPreflight: PREFLIGHT_OK,
+  });
+const executeStartReviewWavePinned = (
+  state: ReviewWaveState,
+  wave: Parameters<typeof executeStartReviewWaveBase>[1],
+  target: Parameters<typeof executeStartReviewWaveBase>[2],
+  stackPin: StackPinState,
+  opts: Parameters<typeof executeStartReviewWaveBase>[4],
+) =>
+  executeStartReviewWaveBase(state, wave, target, stackPin, {
+    ...opts,
     requiredSkillPreflight: PREFLIGHT_OK,
   });
 
@@ -116,6 +140,113 @@ function fakePi(): {
 }
 
 const START_OPTS = { angles: TWO_ANGLES, pr: 42, worktree: "/abs/wt" };
+
+/** A door-verified pin for the stack at /abs/wt topped by PR #42 (bottom→top heads). */
+const PINNED: PinnedStack = {
+  topPr: 42,
+  checkout: "/abs/wt",
+  baseSha: "0".repeat(40),
+  heads: [
+    { pr: 41, headSha: "1".repeat(40) },
+    { pr: 42, headSha: "2".repeat(40) },
+  ],
+};
+
+function completeAdapter() {
+  return createMemoryWaveAdapter({
+    aggregate: {
+      state: "complete",
+      value: [okEntry("claimed-intent"), okEntry("correctness"), okEntry("ponytail")],
+    },
+  });
+}
+
+test("start with stack: true and NO open stack review refuses bad_state (nothing spawns)", async () => {
+  const adapter = completeAdapter();
+  const wave = reportWaveOver(adapter);
+  const state = freshState();
+  const { target } = fakeTarget();
+  const result = await executeStartReviewWavePinned(state, wave, target, createStackPinState(), {
+    ...START_OPTS,
+    stack: true,
+  });
+  assert.equal(result.details.ok, false);
+  assert.equal((result.details as { error_type?: string }).error_type, "bad_state");
+  assert.match(
+    result.content[0]?.text ?? "",
+    /open it with \/stack-review-browser or open_stack_review first/,
+  );
+  assert.equal(adapter.calls.spawn.length, 0);
+  assert.equal(state.pending, null);
+});
+
+test("start with stack: true against a pin whose topPr/checkout differ refuses bad_input (nothing spawns)", async () => {
+  for (const mismatch of [
+    { ...START_OPTS, pr: 43 },
+    { ...START_OPTS, worktree: "/abs/other" },
+  ]) {
+    const adapter = completeAdapter();
+    const wave = reportWaveOver(adapter);
+    const state = freshState();
+    const { target } = fakeTarget();
+    const result = await executeStartReviewWavePinned(
+      state,
+      wave,
+      target,
+      { pinned: PINNED, inFlight: null },
+      { ...mismatch, stack: true },
+    );
+    assert.equal(result.details.ok, false);
+    assert.equal((result.details as { error_type?: string }).error_type, "bad_input");
+    assert.match(
+      result.content[0]?.text ?? "",
+      /bound to the open stack review \(top PR #42 at \/abs\/wt\)/,
+    );
+    assert.equal(adapter.calls.spawn.length, 0);
+  }
+});
+
+test("start with stack: true against the matching pin launches lanes whose tasks carry EXACTLY the pinned command; the pin is locked in flight until collect", async () => {
+  const adapter = completeAdapter();
+  const wave = reportWaveOver(adapter);
+  const state = freshState();
+  const { target } = fakeTarget();
+  const stackPin: StackPinState = { pinned: PINNED, inFlight: null };
+  const result = await executeStartReviewWavePinned(state, wave, target, stackPin, {
+    ...START_OPTS,
+    stack: true,
+  });
+  assert.equal(result.details.ok, true, result.content[0]?.text);
+  assert.deepEqual(stackPin.inFlight, PINNED, "a launched stack wave locks its pin in flight");
+  // Collecting the wave (any settled outcome) releases the lock with the pending slot.
+  const collected = await executeCollectReviewWave(state, wave, target, { stackPin });
+  assert.equal(collected.details.ok, true, collected.content[0]?.text);
+  assert.equal(state.pending, null);
+  assert.equal(stackPin.inFlight, null, "a settled stack wave releases its pin");
+  const script = adapter.calls.spawn[0]?.workflowScript ?? "";
+  const command = pinnedReviewContextCommand(PINNED);
+  assert.ok(script.includes(command), "the lane tasks embed the pinned review-context command");
+  assert.doesNotMatch(
+    script,
+    /review-context --pr 42 --stack`/,
+    "the unpinned --stack fetch never reaches a lane",
+  );
+  // Without stack, the same pin is inert: tasks are the single-PR form.
+  const plainAdapter = completeAdapter();
+  const plainPin: StackPinState = { pinned: PINNED, inFlight: null };
+  const plainResult = await executeStartReviewWavePinned(
+    freshState(),
+    reportWaveOver(plainAdapter),
+    target,
+    plainPin,
+    START_OPTS,
+  );
+  assert.equal(plainResult.details.ok, true);
+  assert.equal(plainPin.inFlight, null, "a non-stack wave never locks the pin");
+  const plainScript = plainAdapter.calls.spawn[0]?.workflowScript ?? "";
+  assert.equal(plainScript.includes("--pin-base"), false);
+  assert.ok(plainScript.includes("Review PR #42 at /abs/wt."));
+});
 
 test("collect: the result text is the headline + the fenced aggregate + the DATA sentence — no per-lane disclosures", async () => {
   const finding = {

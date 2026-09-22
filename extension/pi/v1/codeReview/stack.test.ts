@@ -6,6 +6,7 @@
 // for the browser).
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -19,7 +20,9 @@ import {
   scaffoldRepo,
   spyInjections,
 } from "../../../testing/harness.ts";
+import { pinnedReviewContextCommand } from "../../../waves/adversarialReviewWave.ts";
 import { createAnnotationState } from "../providers/annotations.ts";
+import { createStackPinState } from "./reviewWave.ts";
 import {
   bindingBaseRef,
   bindingTopPr,
@@ -27,9 +30,13 @@ import {
   decodeStackReviewBinding,
   executeOpenStackReview,
   parseStackReviewArgs,
+  patchPathFor,
+  pinnedStackOf,
+  pinSupersedeRefusal,
   STACK_DEGRADE_NOTICE,
   type StackSnapshotRow,
   stackReviewGuidance,
+  verifyStackPatch,
 } from "./stack.ts";
 
 /** Probe the SESSION's annotation state through the registered tool (the harness flows). */
@@ -124,6 +131,10 @@ const ROW_B: StackSnapshotRow = {
   plan_id: null,
 };
 
+/** The combined patch a stack checkout writes beside the checkout, and its digest. */
+const PATCH_TEXT = "diff --git a/a.txt b/a.txt\n+++ b/a.txt\n@@ -0,0 +1 @@\n+a\n";
+const PATCH_SHA256 = createHash("sha256").update(PATCH_TEXT, "utf8").digest("hex");
+
 const STACK_CHECKOUT_PAYLOAD = {
   success: true,
   error_type: null,
@@ -136,7 +147,90 @@ const STACK_CHECKOUT_PAYLOAD = {
   base_ref: "main",
   stack: [ROW_A, ROW_B],
   stack_notes: ["drift: PR #41 head moved"],
+  patch_sha256: PATCH_SHA256,
 };
+
+/** The verified pin the snapshot above yields. */
+const PINNED = pinnedStackOf(42, "/wt/review-42", "0".repeat(40), [ROW_A, ROW_B]);
+
+test("patchPathFor / pinnedStackOf: the derived `<checkout>.patch` sibling and the bottom→top pins", () => {
+  assert.equal(patchPathFor("/wt/review-42"), "/wt/review-42.patch");
+  assert.deepEqual(PINNED, {
+    topPr: 42,
+    checkout: "/wt/review-42",
+    baseSha: "0".repeat(40),
+    heads: [
+      { pr: 41, headSha: "a".repeat(40) },
+      { pr: 42, headSha: "b".repeat(40) },
+    ],
+  });
+});
+
+test("verifyStackPatch: missing / unreadable / mismatch / ok over the derived sibling", () => {
+  const cwd = scaffoldRepo();
+  const checkout = join(cwd, "review-42");
+  mkdirSync(checkout);
+  const missing = verifyStackPatch(checkout, PATCH_SHA256);
+  assert.equal(missing.ok, false);
+  if (missing.ok) return;
+  assert.equal(missing.reason, "missing");
+  assert.equal(missing.patchPath, `${checkout}.patch`);
+  assert.match(missing.detail, /combined patch is missing at '.*review-42\.patch'/);
+
+  writeFileSync(`${checkout}.patch`, `${PATCH_TEXT}tampered\n`, "utf8");
+  const mismatch = verifyStackPatch(checkout, PATCH_SHA256);
+  assert.equal(mismatch.ok, false);
+  if (mismatch.ok) return;
+  assert.equal(mismatch.reason, "mismatch");
+  assert.match(mismatch.detail, /refreshed since this snapshot was taken/);
+
+  writeFileSync(`${checkout}.patch`, PATCH_TEXT, "utf8");
+  assert.deepEqual(verifyStackPatch(checkout, PATCH_SHA256), {
+    ok: true,
+    patchPath: `${checkout}.patch`,
+  });
+
+  // A directory where the patch should be is unreadable (EISDIR), not missing.
+  mkdirSync(`${checkout}.unreadable.patch`);
+  const unreadable = verifyStackPatch(`${checkout}.unreadable`, PATCH_SHA256);
+  assert.equal(unreadable.ok, false);
+  if (unreadable.ok) return;
+  assert.equal(unreadable.reason, "unreadable");
+});
+
+test("pinSupersedeRefusal: no pending stack wave or the SAME pin → proceed; a different pin in flight → the refusal names the pending review", () => {
+  const idle = createStackPinState();
+  assert.equal(pinSupersedeRefusal(idle, PINNED), null, "nothing in flight");
+  idle.pinned = PINNED;
+  assert.equal(pinSupersedeRefusal(idle, PINNED), null, "an open review with no wave pending");
+  const busy = { pinned: PINNED, inFlight: PINNED };
+  assert.equal(
+    pinSupersedeRefusal(busy, { ...PINNED }),
+    null,
+    "a stale-session reopen of the same pin",
+  );
+  // A refreshed checkout of the same top PR (one head moved) IS a different pin.
+  const moved = {
+    ...PINNED,
+    heads: [
+      PINNED.heads[0] as { pr: number; headSha: string },
+      { pr: 42, headSha: "c".repeat(40) },
+    ],
+  };
+  const refusal = pinSupersedeRefusal(busy, moved);
+  assert.ok(refusal !== null);
+  assert.match(
+    refusal,
+    /still pending against the open stack review \(top PR #42 at \/wt\/review-42\)/,
+  );
+  assert.match(refusal, /collect_review_wave/);
+  // Another stack entirely.
+  const other = pinnedStackOf(9, "/wt/review-9", "1".repeat(40), [
+    { ...ROW_A, pr: 8 },
+    { ...ROW_B, pr: 9 },
+  ]);
+  assert.ok(pinSupersedeRefusal(busy, other) !== null);
+});
 
 test("decodeStackCheckout: the full envelope decodes; missing stack fields refuse", () => {
   const decoded = decodeStackCheckout(STACK_CHECKOUT_PAYLOAD as never);
@@ -147,8 +241,24 @@ test("decodeStackCheckout: the full envelope decodes; missing stack fields refus
   );
   assert.equal(decoded.base_ref, "main", "base_ref IS the stack base on the stack envelope");
   assert.deepEqual(decoded.stack_notes, ["drift: PR #41 head moved"]);
+  assert.equal(decoded.patch_sha256, PATCH_SHA256);
   const { stack: _stack, ...noStack } = STACK_CHECKOUT_PAYLOAD;
   assert.equal(decodeStackCheckout(noStack as never), null);
+  const { patch_sha256: _p, ...noPatch } = STACK_CHECKOUT_PAYLOAD;
+  assert.equal(decodeStackCheckout(noPatch as never), null, "patch_sha256 is REQUIRED");
+  assert.equal(
+    decodeStackCheckout({ ...STACK_CHECKOUT_PAYLOAD, patch_sha256: "abc" } as never),
+    null,
+    "a non-64-hex digest refuses",
+  );
+  assert.equal(
+    decodeStackCheckout({
+      ...STACK_CHECKOUT_PAYLOAD,
+      patch_sha256: PATCH_SHA256.toUpperCase(),
+    } as never),
+    null,
+    "uppercase hex refuses",
+  );
   assert.equal(
     decodeStackCheckout({ ...STACK_CHECKOUT_PAYLOAD, stack: [] } as never),
     null,
@@ -170,10 +280,22 @@ test("decodeStackReviewBinding: every field REQUIRED; endpoints derive; blank fo
     checkout_path: "/wt/review-42",
     notes: [],
     focus: "  ",
+    base_sha: "0".repeat(40),
+    patch_sha256: PATCH_SHA256,
   };
   const decoded = decodeStackReviewBinding(binding);
   assert.ok(decoded !== null);
   assert.equal(decoded.focus, null, "a blank focus normalizes to null (no focus)");
+  assert.equal(decoded.base_sha, "0".repeat(40));
+  assert.equal(decoded.patch_sha256, PATCH_SHA256);
+  // The pinned identity is REQUIRED and shape-checked (40-hex / 64-hex).
+  const { base_sha: _b, ...noBase } = binding;
+  assert.equal(decodeStackReviewBinding(noBase), null, "absent base_sha is drift");
+  const { patch_sha256: _ps, ...noDigest } = binding;
+  assert.equal(decodeStackReviewBinding(noDigest), null, "absent patch_sha256 is drift");
+  assert.equal(decodeStackReviewBinding({ ...binding, base_sha: "0".repeat(12) }), null);
+  assert.equal(decodeStackReviewBinding({ ...binding, patch_sha256: "f".repeat(63) }), null);
+  assert.equal(decodeStackReviewBinding({ ...binding, base_sha: null }), null);
   assert.equal(bindingTopPr(decoded), 42, "top PR derives from the LAST ordered row");
   assert.equal(bindingBaseRef(decoded), "main", "the stack base derives from the FIRST row");
   assert.equal(decodeStackReviewBinding({ ...binding, focus: "dig in" })?.focus, "dig in");
@@ -200,6 +322,7 @@ const GUIDANCE_OPTS = {
   stackBase: "main",
   members: [ROW_A, ROW_B],
   notes: ["drift: PR #41 head moved"],
+  pinned: PINNED,
 };
 
 test("guidance: the member table, the stack framing, and the wave launch pins", () => {
@@ -209,7 +332,13 @@ test("guidance: the member table, the stack framing, and the wave launch pins", 
   assert.match(text, /2\. PR #42 `feat-b` ← `plan-301` — https:\/\/github\.com\/o\/r\/pull\/42/);
   assert.match(text, /drift: PR #41 head moved/);
   assert.ok(text.includes('`{ angles, pr: 42, worktree: "/wt/review-42", stack: true }`'));
-  assert.match(text, /perk pr review-context --pr 42 --stack/);
+  // The routing step names EXACTLY the pinned command (the same one the lanes run); the
+  // unpinned `--stack` fetch is gone from the guidance.
+  assert.ok(text.includes(`\`${pinnedReviewContextCommand(PINNED)} --json\``));
+  assert.doesNotMatch(text, /review-context --pr 42 --stack --json`/);
+  assert.match(text, /static patch of the pinned combined diff/);
+  assert.match(text, /moving refs cannot change it/);
+  assert.doesNotMatch(text, /since-base/);
   assert.match(text, /combined-diff coordinates/);
   assert.match(text, /untrusted foreign code/);
   assert.doesNotMatch(text, /127\.0\.0\.1|localhost/);
@@ -278,8 +407,29 @@ const STACK_CHECKOUT_OK_JSON = JSON.stringify(STACK_CHECKOUT_PAYLOAD);
 interface CodeReviewEnvelope {
   requestId: string;
   action: string;
-  payload: { prUrl?: string; cwd: string; diffType?: string; defaultBranch?: string };
+  payload: {
+    prUrl?: string;
+    cwd: string;
+    diffType?: string;
+    defaultBranch?: string;
+    patchFile?: string;
+  };
   respond: (response: unknown) => void;
+}
+
+/**
+ * Plant a real checkout dir + its `<checkout>.patch` sibling under `cwd` and return the checkout
+ * envelope JSON the fake cold door emits for it (the digest matches the planted bytes unless a
+ * caller tampers afterwards).
+ */
+function plantStackCheckout(cwd: string): { checkoutPath: string; json: string } {
+  const checkoutPath = join(cwd, "review-42");
+  mkdirSync(checkoutPath, { recursive: true });
+  writeFileSync(patchPathFor(checkoutPath), PATCH_TEXT, "utf8");
+  return {
+    checkoutPath,
+    json: JSON.stringify({ ...STACK_CHECKOUT_PAYLOAD, path: checkoutPath }),
+  };
 }
 
 interface FakeBrowser {
@@ -393,10 +543,11 @@ test("/stack-review-browser: a typed checkout refusal is surfaced, nothing injec
   }
 });
 
-test("/stack-review-browser 77: objective argv, ONE guidance injection, the local-mode payload with origin/<base>, prime→clear", async () => {
+test("/stack-review-browser 77: objective argv, ONE guidance injection, the static-patch payload, the pin, prime→clear", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const argvFile = join(cwd, "argv.txt");
-  const bin = fakePerk(cwd, { stdout: STACK_CHECKOUT_OK_JSON, argvFile });
+  const planted = plantStackCheckout(cwd);
+  const bin = fakePerk(cwd, { stdout: planted.json, argvFile });
   const sink: FakeBrowser = { envelopes: [] };
   const h = await loadPerkSession({
     cwd,
@@ -425,14 +576,37 @@ test("/stack-review-browser 77: objective argv, ONE guidance injection, the loca
       text.includes("Follow the `perk-pr-review-browser` skill"),
       "the widened skill rides the command:stack-review-browser binding suffix",
     );
-    // The browser opened on the CHECKOUT in local mode with the remote-tracking base.
+    assert.ok(
+      text.includes(pinnedReviewContextCommand({ ...PINNED, checkout: planted.checkoutPath })),
+      "the guidance carries the pinned review-context command",
+    );
+    // The browser opened plannotator's static-patch mode over the verified `<checkout>.patch`
+    // — no diffType / defaultBranch / prUrl.
     assert.equal(sink.envelopes.length, 1, "the bridge request was emitted");
     assert.deepEqual(sink.envelopes[0]?.payload, {
-      cwd: "/wt/review-42",
-      diffType: "since-base",
-      defaultBranch: "origin/main",
+      cwd: planted.checkoutPath,
+      patchFile: patchPathFor(planted.checkoutPath),
     });
     assert.equal(await sessionSurfacePrimed(h), true, "the surface is primed after the open");
+    // The open bound the pin: a stack wave for THIS stack is no longer refused bad_state /
+    // bad_input (it fails later on the absent subagent runner — a wave failure, not a binding
+    // refusal); a wave aimed elsewhere is bad_input.
+    const bound = await h.invokeTool("start_review_wave", {
+      angles: ["claimed-intent", "tests"],
+      pr: 42,
+      worktree: planted.checkoutPath,
+      stack: true,
+    });
+    const boundType = (bound.details as { error_type?: string }).error_type;
+    assert.notEqual(boundType, "bad_state");
+    assert.notEqual(boundType, "bad_input");
+    const elsewhere = await h.invokeTool("start_review_wave", {
+      angles: ["claimed-intent", "tests"],
+      pr: 43,
+      worktree: planted.checkoutPath,
+      stack: true,
+    });
+    assert.equal((elsewhere.details as { error_type?: string }).error_type, "bad_input");
     await settleBridges(sink);
     const start = Date.now();
     while ((await sessionSurfacePrimed(h)) && Date.now() - start < 5000) {
@@ -445,11 +619,58 @@ test("/stack-review-browser 77: objective argv, ONE guidance injection, the loca
   }
 });
 
+test("/stack-review-browser: a missing or digest-mismatched patch reports the reason and emits NO request", async () => {
+  for (const arm of ["missing", "mismatch"] as const) {
+    const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+    const planted = plantStackCheckout(cwd);
+    if (arm === "mismatch") {
+      // Refresh residue: the checkout envelope names a digest the file no longer has.
+      writeFileSync(patchPathFor(planted.checkoutPath), `${PATCH_TEXT}moved\n`, "utf8");
+    }
+    let json = planted.json;
+    if (arm === "missing") {
+      // A checkout dir with NO sibling patch beside it.
+      mkdirSync(join(cwd, "review-gone"));
+      json = JSON.stringify({ ...STACK_CHECKOUT_PAYLOAD, path: join(cwd, "review-gone") });
+    }
+    const bin = fakePerk(cwd, { stdout: json });
+    const sink: FakeBrowser = { envelopes: [] };
+    const h = await loadPerkSession({
+      cwd,
+      env: { PERK_RUN_ID: "01RID", PERK_BIN: bin },
+      extraExtensions: [fakePlannotator(sink)],
+    });
+    const injected = spyInjections(h);
+    try {
+      await h.runCommandHandler("stack-review-browser", "77");
+      assert.ok(
+        h.notifies.some((n) => n.includes(`${arm}:`) && n.includes(".patch")),
+        `${arm}: the refusal names the reason and the patch path`,
+      );
+      assert.equal(sink.envelopes.length, 0, `${arm}: no bridge emitted`);
+      assert.equal(injected.length, 0, `${arm}: nothing injected`);
+      const wave = await h.invokeTool("start_review_wave", {
+        angles: ["claimed-intent", "tests"],
+        pr: 42,
+        worktree: planted.checkoutPath,
+        stack: true,
+      });
+      assert.equal(
+        (wave.details as { error_type?: string }).error_type,
+        "bad_state",
+        `${arm}: no pin was bound`,
+      );
+    } finally {
+      h.dispose();
+    }
+  }
+});
+
 test("/stack-review-browser (no target): the active_objective ladder feeds --objective", async () => {
   const cwd = scaffoldRepo();
   const file = plantSession(cwd, [{ active_objective: "9" }]);
   const argvFile = join(cwd, "argv.txt");
-  const bin = fakePerk(cwd, { stdout: STACK_CHECKOUT_OK_JSON, argvFile });
+  const bin = fakePerk(cwd, { stdout: plantStackCheckout(cwd).json, argvFile });
   const sink: FakeBrowser = { envelopes: [] };
   const h = await loadPerkSession({
     cwd,
@@ -506,7 +727,9 @@ const RUN_ID = "01STACKRUN";
 
 /** Scaffold a claimed stack-review launch: the handoff carries the `stack_review` binding and
  * the checkout dir exists on disk. */
-function scaffoldStackLaunch(opts: { checkout?: boolean; binding?: boolean } = {}): {
+function scaffoldStackLaunch(
+  opts: { checkout?: boolean; binding?: boolean; patch?: "ok" | "missing" | "mismatch" } = {},
+): {
   cwd: string;
   checkoutPath: string;
 } {
@@ -515,11 +738,16 @@ function scaffoldStackLaunch(opts: { checkout?: boolean; binding?: boolean } = {
   });
   const checkoutPath = join(cwd, "review-42");
   if (opts.checkout !== false) mkdirSync(checkoutPath, { recursive: true });
+  const patch = opts.patch ?? "ok";
+  if (patch === "ok") writeFileSync(patchPathFor(checkoutPath), PATCH_TEXT, "utf8");
+  if (patch === "mismatch") writeFileSync(patchPathFor(checkoutPath), `${PATCH_TEXT}x\n`, "utf8");
   const binding = {
     stack: [ROW_A, ROW_B],
     checkout_path: checkoutPath,
     notes: ["drift: PR #41 head moved"],
     focus: "dig into CI",
+    base_sha: "0".repeat(40),
+    patch_sha256: PATCH_SHA256,
   };
   writeFileSync(
     join(workflowDir(cwd), "handoff", `${RUN_ID}.json`),
@@ -577,6 +805,36 @@ test("open_stack_review: a missing checkout dir is bad_state naming the re-run",
   }
 });
 
+test("open_stack_review: a missing or digest-mismatched patch is bad_state naming the path, nothing opened", async () => {
+  for (const arm of ["missing", "mismatch"] as const) {
+    const { cwd, checkoutPath } = scaffoldStackLaunch({ patch: arm });
+    const sink: FakeBrowser = { envelopes: [] };
+    const h = await loadPerkSession({
+      cwd,
+      env: { PERK_RUN_ID: RUN_ID },
+      extraExtensions: [fakePlannotator(sink)],
+    });
+    try {
+      const result = await h.invokeTool("open_stack_review", {});
+      const details = result.details as { ok: boolean; error_type?: string };
+      assert.equal(details.ok, false, arm);
+      assert.equal(details.error_type, "bad_state", arm);
+      const text = result.content[0]?.text ?? "";
+      assert.ok(text.includes(patchPathFor(checkoutPath)), `${arm}: names the patch path`);
+      if (arm === "mismatch") assert.match(text, /refreshed since this snapshot was taken/);
+      assert.equal(sink.envelopes.length, 0, `${arm}: no bridge emitted`);
+      // The latch stays open: a repaired patch lets a later call succeed.
+      writeFileSync(patchPathFor(checkoutPath), PATCH_TEXT, "utf8");
+      const repaired = await h.invokeTool("open_stack_review", {});
+      assert.equal((repaired.details as { ok: boolean }).ok, true, `${arm}: repairable`);
+      await settleBridges(sink);
+    } finally {
+      await settleBridges(sink);
+      h.dispose();
+    }
+  }
+});
+
 test("open_stack_review: headless → the typed refusal, nothing opened", async () => {
   const { cwd } = scaffoldStackLaunch();
   const sink: FakeBrowser = { envelopes: [] };
@@ -622,12 +880,25 @@ test("open_stack_review: success returns the guidance as ok text; second call is
     assert.match(text, /drift: PR #41 head moved/, "the snapshot notes render");
     assert.doesNotMatch(text, /127\.0\.0\.1|localhost/);
     assert.equal(injected.length, 0, "the tool returns the guidance — it injects nothing");
+    assert.ok(
+      text.includes(pinnedReviewContextCommand({ ...PINNED, checkout: checkoutPath })),
+      "the guidance carries the pinned review-context command",
+    );
     assert.equal(sink.envelopes.length, 1, "the bridge request was emitted");
     assert.deepEqual(sink.envelopes[0]?.payload, {
       cwd: checkoutPath,
-      diffType: "since-base",
-      defaultBranch: "origin/main",
+      patchFile: patchPathFor(checkoutPath),
     });
+    // The open bound the pin for this activation's wave tool.
+    const bound = await h.invokeTool("start_review_wave", {
+      angles: ["claimed-intent", "tests"],
+      pr: 42,
+      worktree: checkoutPath,
+      stack: true,
+    });
+    const boundType = (bound.details as { error_type?: string }).error_type;
+    assert.notEqual(boundType, "bad_state");
+    assert.notEqual(boundType, "bad_input");
     // The cold launch primes THIS activation's threaded annotation state (a fresh/wrong state
     // here would leave push_annotations refusing no_surface while the browser sits open).
     assert.equal(await sessionSurfacePrimed(h), true, "the open primed the annotation surface");
@@ -652,6 +923,75 @@ test("open_stack_review: success returns the guidance as ok text; second call is
   }
 });
 
+test("executeOpenStackReview: a stack wave pending against a DIFFERENT pin refuses bad_state before any open; the same pin proceeds", async () => {
+  const { cwd, checkoutPath } = scaffoldStackLaunch();
+  const branch = [{ type: "custom", customType: "perk:workflow-state", data: { run_id: RUN_ID } }];
+  const pi = {
+    getCommands: () => [{ name: "plannotator-review" }],
+  } as unknown as ExtensionAPI;
+  const ctx = {
+    cwd,
+    hasUI: true,
+    sessionManager: { getBranch: () => branch },
+    ui: { notify: () => {}, setStatus: () => {} },
+  } as unknown as Parameters<typeof executeOpenStackReview>[1];
+  const bound = pinnedStackOf(42, checkoutPath, "0".repeat(40), [ROW_A, ROW_B]);
+  const otherStack = pinnedStackOf(9, join(cwd, "review-9"), "1".repeat(40), [
+    { ...ROW_A, pr: 8 },
+    { ...ROW_B, pr: 9 },
+  ]);
+  const opens: number[] = [];
+  const open: Parameters<typeof executeOpenStackReview>[6] = (
+    _pi,
+    _ctx,
+    _annotations,
+    _status,
+    pin,
+    opts,
+  ) => {
+    opens.push(opts.pinned.topPr);
+    pin.pinned = opts.pinned;
+    return Promise.resolve(true);
+  };
+
+  // A wave still in flight against another stack: refused, nothing opened, latch untouched.
+  const latch = { opened: false };
+  const busy = { pinned: otherStack, inFlight: otherStack };
+  const refused = await executeOpenStackReview(
+    pi,
+    ctx,
+    latch,
+    createAnnotationState(),
+    createPerkStatus(),
+    busy,
+    open,
+  );
+  const refusedDetails = refused.details as { ok: boolean; error_type?: string };
+  assert.equal(refusedDetails.ok, false);
+  assert.equal(refusedDetails.error_type, "bad_state");
+  assert.match(
+    refused.content[0]?.text ?? "",
+    /still pending against the open stack review \(top PR #9/,
+  );
+  assert.deepEqual(opens, [], "no open attempted");
+  assert.equal(latch.opened, false);
+  assert.deepEqual(busy.pinned, otherStack, "the pending review's pin is untouched");
+
+  // The SAME pin in flight (a stale-session reopen): proceeds.
+  const same = { pinned: bound, inFlight: bound };
+  const ok = await executeOpenStackReview(
+    pi,
+    ctx,
+    latch,
+    createAnnotationState(),
+    createPerkStatus(),
+    same,
+    open,
+  );
+  assert.equal((ok.details as { ok: boolean }).ok, true, ok.content[0]?.text);
+  assert.deepEqual(opens, [42]);
+});
+
 test("executeOpenStackReview: a browser-open failure is browser_failed and keeps the latch closed", async () => {
   // The execute core over the injected open seam (the port-pick failure surfaces as a false
   // return from the shared open) — the real registration wires the same core to the tool.
@@ -668,15 +1008,21 @@ test("executeOpenStackReview: a browser-open failure is browser_failed and keeps
   } as unknown as Parameters<typeof executeOpenStackReview>[1];
 
   const latch = { opened: false };
-  const opens: string[] = [];
+  const stackPin = createStackPinState();
+  const opens: { checkoutPath: string; patchPath: string; pinnedTop: number }[] = [];
   const failed = await executeOpenStackReview(
     pi,
     ctx,
     latch,
     createAnnotationState(),
     createPerkStatus(),
-    (_pi, _ctx, _annotations, _status, opts) => {
-      opens.push(opts.checkoutPath);
+    stackPin,
+    (_pi, _ctx, _annotations, _status, _pin, opts) => {
+      opens.push({
+        checkoutPath: opts.checkoutPath,
+        patchPath: opts.patchPath,
+        pinnedTop: opts.pinned.topPr,
+      });
       return Promise.resolve(false);
     },
   );
@@ -684,20 +1030,34 @@ test("executeOpenStackReview: a browser-open failure is browser_failed and keeps
   assert.equal(failedDetails.ok, false);
   assert.equal(failedDetails.error_type, "browser_failed");
   assert.match(failed.content[0]?.text ?? "", /could not start the plannotator review server/);
-  assert.deepEqual(opens, [checkoutPath], "the open was attempted with the bound checkout");
+  assert.deepEqual(
+    opens,
+    [{ checkoutPath, patchPath: patchPathFor(checkoutPath), pinnedTop: 42 }],
+    "the open was attempted with the bound checkout, its verified patch and the pins",
+  );
   assert.equal(latch.opened, false, "a failed open never consumes the single-use latch");
 
-  // The failure is retryable: the SAME latch accepts a later successful open…
+  // The failure is retryable: the SAME latch accepts a later successful open (the seam sets
+  // the pin the way the real open does)…
   const succeeded = await executeOpenStackReview(
     pi,
     ctx,
     latch,
     createAnnotationState(),
     createPerkStatus(),
-    () => Promise.resolve(true),
+    stackPin,
+    (_pi, _ctx, _annotations, _status, pin, opts) => {
+      pin.pinned = opts.pinned;
+      return Promise.resolve(true);
+    },
   );
   assert.equal((succeeded.details as { ok: boolean }).ok, true);
   assert.equal(latch.opened, true);
+  assert.deepEqual(
+    stackPin.pinned,
+    pinnedStackOf(42, checkoutPath, "0".repeat(40), [ROW_A, ROW_B]),
+    "a successful open binds the verified snapshot's pins",
+  );
   // …and only then does single-use bite.
   const third = await executeOpenStackReview(
     pi,
@@ -705,6 +1065,7 @@ test("executeOpenStackReview: a browser-open failure is browser_failed and keeps
     latch,
     createAnnotationState(),
     createPerkStatus(),
+    stackPin,
     () => Promise.resolve(true),
   );
   const thirdDetails = third.details as { ok: boolean; error_type?: string };

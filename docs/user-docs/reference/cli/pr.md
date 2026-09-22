@@ -223,6 +223,25 @@ diff every stack reviewer works in, re-validated against the same fail-closed an
 the checkout and fetched through a per-invocation temp-ref namespace so concurrent reviewer
 lanes never collide).
 
+**The pinned stack mode** (`--pr <top> --stack --pin-base <sha> --pin-head <pr>=<sha> …`) is what
+the stack review flow's reviewer lanes and its routing step actually run: the pins ARE the stack
+membership (no re-resolution, **no fetch**), taken from the snapshot `perk pr review checkout
+--stack` returned — `--pin-base` is that envelope's `base_sha` and each `--pin-head` a
+`stack[]` member's `head_sha`, listed bottom→top. Every diff is rendered locally from exactly
+those commits and stamped `diff_source: "local-pinned"`: each member against the previous
+member's head (the bottom member against `--pin-base`) and `combined_diff` from `--pin-base` to
+the top head — so the browser's patch, the lanes' diffs and the routing inputs share one commit
+identity by construction, and a member head that moves on GitHub after the checkout changes
+nothing. Member title/body/base/head stay live GitHub reads (text, not coordinates). Grammar
+(every violation is `invalid_input`): the two options are valid only with `--stack` and only
+together; every SHA is a full 40-hex lowercase commit; at least two `--pin-head` members; no PR
+listed twice; the last `--pin-head` is the top PR named by `--pr`. A pinned commit that does not
+resolve locally is `pinned_object_missing` — the detached stack checkout is what keeps the pinned
+commits alive, so an absent object means it was removed: re-run `perk pr review checkout --stack`.
+Pins that are not a linear stack (a lower head not an ancestor of the one above it, or the base
+not an ancestor of the bottom head) are `stack_topology_broken`. `--local` is inert in pinned
+mode (every diff is local by construction).
+
 **Large PRs.** Each PR `diff` is GitHub's rendered PR diff by default, which GitHub refuses above
 **20,000 lines or 300 files** (HTTP 406 `too_large`). On that refusal the command automatically
 renders the diff locally instead: it fetches the PR head and base branch into a private
@@ -232,9 +251,9 @@ diff or textconv helpers, GitHub's hunk rendering and `a/`/`b/` prefixes regardl
 config), so the result matches GitHub's diff and its line numbers. `--local` forces that local
 rendering on any arm (flagless, `--expected-pr`, `--pr`, `--pr --stack`) — every per-PR `diff`
 goes local while the PR title/body/base/head still come from GitHub. The envelope discloses the
-provenance as `diff_source` (`"github"` or `"local-git"`) beside the top-level `diff` and on
-each `stack[]` member for its own `diff`; `combined_diff` is always rendered locally and carries
-no provenance field. A local rendering that fails (no `origin` access, a PR payload without a
+provenance as `diff_source` (`"github"`, `"local-git"`, or `"local-pinned"` in the pinned stack
+mode) beside the top-level `diff` and on each `stack[]` member for its own `diff`;
+`combined_diff` is always rendered locally and carries no provenance field. A local rendering that fails (no `origin` access, a PR payload without a
 base branch) is a `github_error` naming the actual trigger.
 
 ### `perk pr review-post`
@@ -313,18 +332,40 @@ without `--stack` refuses). One fetch pins every member head plus the stack base
 topology is validated **fail-closed before any checkout** (every lower head must be an ancestor
 of the head above it — a violation or indeterminate probe is `stack_topology_broken`); the
 **top** head is checked out at `review-<top>` (so `cleanup --pr <top>` works unchanged) and
-`base_sha` becomes the merge-base of `origin/<stack base>` and the top head. The envelope adds
+`base_sha` becomes the merge-base of `origin/<stack base>` and the top head — which must also be
+an ancestor of the **bottom** head (the coordinate the pinned per-member diffs start from): a
+stack whose upper layer merged newer base-branch commits the lower layers lack is
+`stack_topology_broken` at checkout (sync the stack so every layer builds on the same base),
+rather than a checkout that opens and then fails every reviewer lane. The envelope adds
 the pinned snapshot: `stack[]` (`{pr, url, branch, head_sha, base_ref, node_id, plan_id}`,
 bottom→top) and `stack_notes[]` (resolution warnings + recorded-vs-observed head drift —
-warnings only); the top-level `base_ref` is the stack base. Typed refusals: `not_a_stack` (fewer than 2 open members — use the
+warnings only); the top-level `base_ref` is the stack base.
+
+The stack arm also writes the **combined patch** — the hardened, config-pinned `git diff` from
+`base_sha` to the top head over the exact fetched commits — to `<checkout path>.patch` beside the
+checkout (a `review-<top>` checkout ⇒ `review-<top>.patch`; the path is derived from the checkout
+path on both sides, never carried) and reports its digest as `patch_sha256` in the envelope
+(printed as `patch <path> (sha256 <prefix>)` in the human render). This is the static patch
+`/stack-review-browser` opens in Plannotator, verified against that digest immediately before the
+browser request: a moving member head cannot change the displayed diff, and a refreshed checkout
+of the same top PR (new patch, new digest) invalidates a review still open on the old one. The
+diff is rendered and hashed **before** any worktree mutation: a `git diff` failure is
+`git_error`; an empty base→top diff — identical trees, whether the top head *is* the base or
+every layer's change was reverted (nothing to review) — is `empty_stack_diff`; a
+failure writing the patch after the worktree exists is `write_failed` (a re-run refreshes the
+residue). The single-PR envelope is unchanged (no `patch_sha256` key).
+
+Typed refusals: `not_a_stack` (fewer than 2 open members — use the
 single-PR flow), `stack_too_deep` (over 20 members), `fork_unsupported`, `ambiguous_stack`
 (more than one open same-repo child), `stack_cycle` (the base-ref graph loops),
 `not_stacked`/`stack_discontiguous`/`no_objective`
-(objective arm), `stack_topology_broken`.
+(objective arm), `stack_topology_broken`, `empty_stack_diff`, `write_failed`.
 
 ### `perk pr review cleanup`
 
-Remove PR *N*'s review checkout (`--pr <n>` required). Single-PR and **idempotent**: nothing to
+Remove PR *N*'s review checkout (`--pr <n>` required) together with its `review-<n>.patch`
+sibling when one exists (a stack checkout's combined patch — an orphaned patch alone still counts
+as a removal). Single-PR and **idempotent**: nothing to
 remove is success (`removed: false`, exit 0). Fully offline — no GitHub calls. A dirty checkout
 is still removed (it is disposable by construction), and a leftover `refs/perk/review/<n>` temp
 ref is deleted best-effort. The `--json` envelope carries `pr`, `path`, and `removed`.

@@ -32,7 +32,10 @@ on the upward walk is `ambiguous_stack`, deeper than 20 members is `stack_too_de
 whose commits don't actually stack is `stack_topology_broken` (sync the stack first).
 
 **Prerequisites:** the plannotator extension loaded (`[providers] plan = "plannotator-plan"`,
-`perk init`, restart pi) and an interactive session — the browser flow refuses headless.
+`perk init`, restart pi) at **0.27.16 or newer** (the static-patch browser mode this door uses —
+an older Plannotator silently opens a live local review of the checkout instead; see
+[Requirements and compatibility](../reference/requirements-and-compatibility.md)), and an
+interactive session — the browser flow refuses headless.
 
 ## Steps
 
@@ -40,12 +43,20 @@ whose commits don't actually stack is `stack_topology_broken` (sync the stack fi
    objective's train) or `/stack-review-browser pr:148` (a chain from any member PR). perk
    fetches every member head in one round trip, validates the commit topology fail-closed,
    checks out the **top** head detached at `review-<top>` (untrusted foreign code — nothing
-   from it is executed), and opens plannotator on the combined diff in the background.
-   Resolution warnings (train blockers, recorded-vs-observed head drift) are notes, not
-   refusals.
+   from it is executed), writes the **combined patch** — the pinned stack base → top head diff,
+   rendered from the exact fetched commits — to `review-<top>.patch` beside it, and opens
+   plannotator on that static patch in the background (digest-verified against the checkout's
+   `patch_sha256` first). What you see is pinned: a member head force-pushed after the checkout
+   does not move the displayed diff, there is no live refresh, and the browser carries no
+   repository context of its own — the detached checkout is where exploration (yours and the
+   reviewers') happens. Resolution warnings (train blockers, recorded-vs-observed head drift)
+   are notes, not refusals. Refreshing the same top PR's checkout while a review is open
+   invalidates that review: the next open refuses on the digest mismatch — re-run the door.
 2. **Reviewers run; findings land when the wave completes.** One adversarial wave runs over the
-   **combined diff** (the reviewer children fetch per-member context — each layer's own diff
-   plus the combined diff — with `perk pr review-context --pr <top> --stack`). A `perk:wave`
+   **same pinned commits** (the reviewer children fetch per-member context — each layer's own
+   diff plus the combined diff — with the pinned `perk pr review-context --pr <top> --stack
+   --pin-base <sha> --pin-head <pr>=<sha> …` command the door bound into the session; no
+   re-resolution, no fetch, so their diffs match the patch you are looking at). A `perk:wave`
    marker in the browser says the wave is running; when it completes, the reconciled findings
    arrive as badged `perk:<angle>` annotations and the marker clears. The session stays free
    meanwhile — decide after they arrive (an early decision forgoes them).
@@ -60,15 +71,17 @@ whose commits don't actually stack is `stack_topology_broken` (sync the stack fi
    post; the browser posted nothing. You can choose per-PR COMMENT reviews or no post (go
    straight to cleanup). A note is not an annotation or posting queue. If you choose to post,
    perk routes each finding to the member PR that introduced it (judgment over the per-PR
-   diffs): folded into that PR's review body by default, anchored inline only where the
-   location is unambiguous in that PR's own diff.
+   diffs from the same pinned `review-context` command — the commits the patch and the
+   reviewers used): folded into that PR's review body by default, anchored inline only where
+   the location is unambiguous in that PR's own diff.
 5. **Approve any per-PR posting.** perk dry-run-validates **all** per-PR batches first, then —
    with your explicit go-ahead — posts one review per member PR, bottom→top, through the gated
    `submit_pr_review` tool (formal verdicts confirm per PR). Every real post is recorded in the
    `review_posts` ledger; if anything fails mid-sequence the flow stops, shows
    posted-vs-pending, and a resume skips the already-posted PRs (enforced — a repeat post to a
    ledger-confirmed PR is refused) so a review is never posted twice.
-6. **Clean up.** `perk pr review cleanup --pr <top>` removes the stack checkout.
+6. **Clean up.** `perk pr review cleanup --pr <top>` removes the stack checkout and its
+   `review-<top>.patch`.
 
 If the browser never becomes ready, the flow degrades loudly to an in-session findings table —
 triage and the per-PR posting protocol are unchanged (they never depended on the browser).

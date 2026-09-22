@@ -88,7 +88,6 @@ cold-local Pi launch composes and nothing more:
   `[pi] agent_dir` → Pi's default; the same missing-directory warning and
   `pi_agent_dir_invalid` refusal as a stage launch — see
   [Models and compaction §`[pi]`](configuration/models-and-compaction.md#pi));
-- the `PI_FFF_MODE=tools-and-ui` additive-search default (your environment wins);
 - the `LINEAR_API_KEY` seed from the main checkout's gitignored `.perk/local.toml` (an exported
   key wins).
 
@@ -141,13 +140,12 @@ its own options plus at most one positional `PLAN`; everything after the `--` is
 pre-separator tokens are rejected with usage guidance.
 
 perk-launched sessions run the borrowed [pi-fff](https://github.com/dmtrKovalenko/fff.nvim)
-search extension in its **additive mode** via an injected `PI_FFF_MODE=tools-and-ui` env default:
-FFF's pre-indexed, frecency-ranked `fffind`/`ffgrep` sit beside pi's builtin `find`/`grep`. Your
-environment wins, so `export PI_FFF_MODE=override` makes `find`/`grep` FFF-backed — on a
-pi-subagents 0.67.x host that failed every scout/reviewer lane at launch (the host no longer
-reported `grep`/`find` as builtin-sourced; 0.68.0 fixed the census — see the `subagent-host-tools`
-doctor check in [Setup and health](cli/setup-and-health.md)). The injection stays as a harmless
-additive default.
+search extension under pi-fff's **own** settings — perk injects no mode. pi-fff's default is its
+additive `tools-and-ui` mode: FFF's pre-indexed, frecency-ranked `fffind`/`ffgrep` sit beside pi's
+builtin `find`/`grep`. Its knobs are yours: `PI_FFF_MODE` in the environment or `mode` in the
+agent dir's `pi-fff.json` (`export PI_FFF_MODE=override` makes `find`/`grep` FFF-backed). No
+doctor check watches the mode — pi-subagents 0.70.0 and later no longer intersect a child agent's
+tools with the host's builtins, so the mode cannot fail a reviewer or scout lane.
 
 ### `perk implement [PLAN]` (alias `impl`)
 

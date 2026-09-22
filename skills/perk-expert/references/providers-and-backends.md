@@ -97,7 +97,11 @@ degrade loudly in-session and a later browser decision is ignored.
 
 The warm `/pr-review-browser` door also uses plannotator when that package is installed. It can
 review a foreign PR, the active worktree's PR, or a local since-base diff before submission. That
-PR-review choice is command-owned, not a provider seam.
+PR-review choice is command-owned, not a provider seam. The stack review browser
+(`/stack-review-browser`, `perk objective stack review`) additionally needs Plannotator
+0.27.16 or newer: it opens the static-patch mode (`patchFile`) over the pinned combined patch, and
+an older Plannotator ignores that field and shows a live local review of the checkout instead — a
+silently wrong diff, not a refusal.
 
 A plan reference's `provider` field means the **issue backend** (`github` or `linear`), never the
 plan-provider id.

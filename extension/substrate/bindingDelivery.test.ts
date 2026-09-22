@@ -517,7 +517,7 @@ test("Mechanism A: a failed projection read escapes the hook (no guessed copy); 
       getBranch: () => [
         { type: "custom", customType: "perk:workflow-state", data: { run_id: "01RID", stage } },
       ],
-      buildContextEntries: () => {
+      buildSessionProjection: () => {
         reads.push("projection");
         throw new Error("adversarial projection read");
       },

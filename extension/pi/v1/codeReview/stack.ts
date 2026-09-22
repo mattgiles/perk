@@ -12,12 +12,20 @@
 // as the objective id) → else the checkout worker with no id (its `cache.plan-ref` arm) → a
 // `no_objective` failure is a typed usage refusal naming the explicit forms.
 //
-// THE COMBINED DIFF is rendered by plannotator itself: the cold checkout worker materializes a
-// detached checkout of the TOP stack head, and the door opens plannotator in local mode with
-// `{diffType: "since-base", defaultBranch: "origin/<stack base>"}` — the REMOTE-TRACKING ref the
-// checkout actually materializes (plannotator trusts an explicit base verbatim and degrades a
-// failed merge-base to HEAD, which would render an empty review — a bare branch name that only
-// exists on the remote would do exactly that).
+// THE COMBINED DIFF is a PINNED STATIC PATCH: the cold checkout worker materializes a detached
+// checkout of the TOP stack head AND writes `git diff <base_sha> <top head>` over the exact
+// fetched objects to `<checkout>.patch` beside it (`patchPathFor` — the TS half of the
+// two-plane derived-path convention; nothing carries the path), reporting its SHA-256. The door
+// verifies the digest against the file bytes immediately before the request (`verifyStackPatch`
+// — a refreshed checkout is a `mismatch`, a gone checkout a `missing`) and opens plannotator's
+// static-patch mode `{cwd: <checkout>, patchFile: <checkout>.patch}`: no repository context, no
+// merge-base fallback, no live refresh — moving refs cannot change the displayed diff. On a
+// successful open the verified `PinnedStack` (base commit + every member head) is bound into the
+// per-activation `StackPinState`, so the reviewer lanes (`start_review_wave` with `stack: true`)
+// and the guidance's routing step read the ONE pinned `perk pr review-context --stack --pin-base
+// … --pin-head …` command rendered from the same snapshot — browser, lanes and routing share one
+// commit identity by construction. The former live `since-base` vs `origin/<stack base>` mode
+// (and its merge-base→HEAD empty-review trap) is gone; exploration keeps the detached checkout.
 //
 // THE POSTING CONTRACT (the delta from /pr-review-browser): a local-diff session has NO attached
 // PR, so the browser has no platform-posting path — ALL GitHub posting is perk-side after the
@@ -31,7 +39,8 @@
 // can aim the flow anywhere. Single-use per session; it runs the SAME extracted lifecycle core
 // and returns the rendered stack.md guidance as its ok text.
 
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { openBranchWorkflowSession } from "../../../session/branchWorkflowSession.ts";
 import type { WorkflowSession } from "../../../session/workflowSession.ts";
@@ -43,14 +52,15 @@ import { render } from "../../../substrate/prompts.ts";
 import { failFor, ok } from "../../../substrate/result.ts";
 import { report } from "../../../surfaces/report.ts";
 import type { ActivityHandle } from "../../../surfaces/surfaces.ts";
-import type { AnnotationState } from "../providers/annotations.ts";
 import {
-  LOCAL_REVIEW_DIFF_TYPE,
-  plannotatorPresent,
-  stackRespondMessage,
-} from "../providers/plannotatorHandoff.ts";
+  type PinnedStack,
+  pinnedReviewContextCommand,
+} from "../../../waves/adversarialReviewWave.ts";
+import type { AnnotationState } from "../providers/annotations.ts";
+import { plannotatorPresent, stackRespondMessage } from "../providers/plannotatorHandoff.ts";
 import { openReviewBrowserCore } from "./browser.ts";
 import { type CheckoutOk, decodeCheckout, PR_URL_RE } from "./checkout.ts";
+import { type StackPinState, samePinnedStack } from "./reviewWave.ts";
 
 /** The door's report scope — also the `command:<id>` binding trigger id. */
 const SCOPE = "stack-review-browser";
@@ -152,10 +162,87 @@ export interface StackSnapshotRow {
 }
 
 /** The `perk pr review checkout --stack --json` ok-arm: the single-PR fields + the snapshot
- * (`base_ref` IS the combined-diff/stack base on the stack envelope — no separate field). */
+ * (`base_ref` IS the combined-diff/stack base on the stack envelope — no separate field) + the
+ * combined patch's SHA-256 (the patch itself is at the derived `patchPathFor(path)`). */
 export interface StackCheckoutOk extends CheckoutOk {
   stack: StackSnapshotRow[];
   stack_notes: string[];
+  patch_sha256: string;
+}
+
+const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
+const SHA1_HEX_RE = /^[0-9a-f]{40}$/;
+
+/** The stack checkout's combined-patch sibling — the TS half of the `<checkout>.patch`
+ * convention (`review_patch_path` in Python): a pure function of the checkout path, so both
+ * planes derive it and nothing carries a path that could disagree with the checkout. */
+export function patchPathFor(checkoutPath: string): string {
+  return `${checkoutPath}.patch`;
+}
+
+/** The pre-open digest check over the derived patch: the file at `patchPathFor(checkoutPath)`
+ * must exist, be readable, and hash (SHA-256) to the snapshot's `expectedSha256` — a
+ * `mismatch` means the checkout was refreshed since this snapshot was taken. */
+export function verifyStackPatch(
+  checkoutPath: string,
+  expectedSha256: string,
+):
+  | { ok: true; patchPath: string }
+  | {
+      ok: false;
+      patchPath: string;
+      reason: "missing" | "unreadable" | "mismatch";
+      detail: string;
+    } {
+  const patchPath = patchPathFor(checkoutPath);
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(patchPath);
+  } catch (error) {
+    const code = (error as { code?: unknown }).code;
+    if (code === "ENOENT") {
+      return {
+        ok: false,
+        patchPath,
+        reason: "missing",
+        detail: `the stack's combined patch is missing at '${patchPath}' — re-run the stack review`,
+      };
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      patchPath,
+      reason: "unreadable",
+      detail: `the stack's combined patch at '${patchPath}' could not be read: ${message}`,
+    };
+  }
+  const actual = createHash("sha256").update(bytes).digest("hex");
+  if (actual !== expectedSha256) {
+    return {
+      ok: false,
+      patchPath,
+      reason: "mismatch",
+      detail:
+        `the stack's combined patch at '${patchPath}' does not match this snapshot's digest ` +
+        "— the stack checkout was refreshed since this snapshot was taken — re-run the stack review",
+    };
+  }
+  return { ok: true, patchPath };
+}
+
+/** The `PinnedStack` of a snapshot (envelope or binding rows, bottom→top). */
+export function pinnedStackOf(
+  topPr: number,
+  checkoutPath: string,
+  baseSha: string,
+  rows: readonly StackSnapshotRow[],
+): PinnedStack {
+  return {
+    topPr,
+    checkout: checkoutPath,
+    baseSha,
+    heads: rows.map((row) => ({ pr: row.pr, headSha: row.head_sha })),
+  };
 }
 
 function decodeSnapshotRow(item: unknown): StackSnapshotRow | null {
@@ -186,14 +273,17 @@ function decodeStringArray(raw: unknown): string[] | null {
   return raw.every((n) => typeof n === "string") ? (raw as string[]) : null;
 }
 
-/** Strict decode of the `--stack` checkout envelope (the pinned snapshot the door reads). */
+/** Strict decode of the `--stack` checkout envelope (the pinned snapshot the door reads);
+ * `patch_sha256` is REQUIRED (64 lowercase hex) — an older CLI without it fails decode. */
 export function decodeStackCheckout(payload: ColdJson): StackCheckoutOk | null {
   const base = decodeCheckout(payload);
   if (base === null) return null;
   const stack = decodeSnapshotRows(payload.stack);
   const stackNotes = decodeStringArray(payload.stack_notes);
   if (stack === null || stackNotes === null) return null;
-  return { ...base, stack, stack_notes: stackNotes };
+  const patchSha256 = payload.patch_sha256;
+  if (typeof patchSha256 !== "string" || !SHA256_HEX_RE.test(patchSha256)) return null;
+  return { ...base, stack, stack_notes: stackNotes, patch_sha256: patchSha256 };
 }
 
 // ------------------------------------------------------------------------ guidance
@@ -206,6 +296,8 @@ export interface StackReviewGuidanceOpts {
   /** Ordered bottom→top. */
   members: StackSnapshotRow[];
   notes: string[];
+  /** The verified pins — renders the ONE `review_context_command` the routing step reads. */
+  pinned: PinnedStack;
   directive?: string;
 }
 
@@ -233,6 +325,7 @@ export function stackReviewGuidance(opts: StackReviewGuidanceOpts): string {
     member_count: String(opts.members.length),
     stack_table: table,
     notes,
+    review_context_command: pinnedReviewContextCommand(opts.pinned),
     directive: opts.directive ?? "",
   });
 }
@@ -255,33 +348,59 @@ export const STACK_DEGRADE_NOTICE =
 
 // ------------------------------------------------------------------------ the shared open
 
-/** Open the stack browser session through the extracted lifecycle core (both entry paths). */
+/**
+ * The supersession guard both entry paths run BEFORE opening: while a stack wave launched
+ * against a different pin is still pending (uncollected), a new open would re-prime the shared
+ * annotation surface for another stack while the lanes keep reviewing the old commits — their
+ * findings could then be pushed/routed against the wrong patch. Returns the refusal text, or
+ * null when the open may proceed (no pending stack wave, or the SAME pin — a stale-session
+ * reopen of the open review).
+ */
+export function pinSupersedeRefusal(stackPin: StackPinState, next: PinnedStack): string | null {
+  const inFlight = stackPin.inFlight;
+  if (inFlight === null || samePinnedStack(inFlight, next)) return null;
+  return (
+    `a stack review wave is still pending against the open stack review (top PR #${inFlight.topPr} ` +
+    `at ${inFlight.checkout}) — collect it with collect_review_wave (or wait for its native ` +
+    "completion) before opening another stack review"
+  );
+}
+
+/**
+ * Open the stack browser session through the extracted lifecycle core (both entry paths):
+ * plannotator's static-patch mode over the digest-verified `patchPath` (the caller ran
+ * `verifyStackPatch` and `pinSupersedeRefusal` first), and on success bind the verified
+ * `pinned` stack into the per-activation `StackPinState` (a later open replaces it — the
+ * accepted "second browser door supersedes" posture — unless a stack wave is in flight against
+ * a different pin).
+ */
 async function openStackBrowser(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   annotations: AnnotationState,
   status: ActivityHandle,
+  stackPin: StackPinState,
   opts: {
     checkoutPath: string;
-    stackBaseRef: string;
+    patchPath: string;
+    pinned: PinnedStack;
     guidance: string;
     injectGuidance: boolean;
   },
 ): Promise<boolean> {
-  return await openReviewBrowserCore(pi, ctx, annotations, status, {
+  const started = await openReviewBrowserCore(pi, ctx, annotations, status, {
     scope: SCOPE,
     browserOpts: {
       cwd: opts.checkoutPath,
-      diffType: LOCAL_REVIEW_DIFF_TYPE,
-      // The remote-tracking ref the checkout materialized — an explicit base plannotator
-      // trusts verbatim (a bare branch name would degrade to an empty HEAD diff).
-      defaultBranch: `origin/${opts.stackBaseRef}`,
+      source: { mode: "patch", patchFile: opts.patchPath },
     },
     guidance: opts.guidance,
     degradeNotice: STACK_DEGRADE_NOTICE,
     respondMessageFor: stackRespondMessage,
     injectGuidance: opts.injectGuidance,
   });
+  if (started) stackPin.pinned = opts.pinned;
+  return started;
 }
 
 // ------------------------------------------------------------------------ the warm door
@@ -291,6 +410,7 @@ function registerStackReviewBrowser(
   pi: ExtensionAPI,
   annotations: AnnotationState,
   status: ActivityHandle,
+  stackPin: StackPinState,
 ): void {
   registerPerkCommand(pi, SCOPE, {
     description:
@@ -374,6 +494,19 @@ function registerStackReviewBrowser(
       }
 
       const data = checkout.data;
+      // The digest check BEFORE the open: the browser must show exactly the patch the checkout
+      // envelope describes (a refresh between the two is a loud refusal, never a wrong diff).
+      const patch = verifyStackPatch(data.path, data.patch_sha256);
+      if (!patch.ok) {
+        report(ctx, SCOPE, "error", `${patch.reason}: ${patch.detail}`, { alsoLog: true });
+        return;
+      }
+      const pinned = pinnedStackOf(data.pr, data.path, data.base_sha, data.stack);
+      const supersede = pinSupersedeRefusal(stackPin, pinned);
+      if (supersede !== null) {
+        report(ctx, SCOPE, "error", supersede);
+        return;
+      }
       report(
         ctx,
         SCOPE,
@@ -384,9 +517,10 @@ function registerStackReviewBrowser(
             : " → adversarial reviewers") +
           " → plannotator browser triage → judgment-routed per-PR posting",
       );
-      await openStackBrowser(pi, ctx, annotations, status, {
+      await openStackBrowser(pi, ctx, annotations, status, stackPin, {
         checkoutPath: data.path,
-        stackBaseRef: data.base_ref,
+        patchPath: patch.patchPath,
+        pinned,
         guidance:
           stackReviewGuidance({
             topPr: data.pr,
@@ -394,6 +528,7 @@ function registerStackReviewBrowser(
             stackBase: data.base_ref,
             members: data.stack,
             notes: data.stack_notes,
+            pinned,
             ...(parsed.directive ? { directive: parsed.directive } : {}),
           }) + bindingSuffix(ctx.cwd, `command:${SCOPE}`),
         injectGuidance: true,
@@ -405,14 +540,18 @@ function registerStackReviewBrowser(
 // ------------------------------------------------------------------------ the cold-launch tool
 
 /** The decoded `stack_review` launch binding (the launcher's `handoff_extra` blob) — exactly
- * what the tool consumes: the pinned snapshot rows, the checkout path, the notes, and the
- * focus. The top PR and the stack base are DERIVED from the ordered rows (last row's `pr`;
- * first row's `base_ref`), never carried redundantly. */
+ * what the tool consumes: the pinned snapshot rows, the checkout path, the notes, the focus,
+ * and the pinned identity (`base_sha` — the combined-diff base commit; `patch_sha256` — the
+ * digest of the derived `<checkout_path>.patch`). The top PR and the stack base REF are
+ * DERIVED from the ordered rows (last row's `pr`; first row's `base_ref`), never carried
+ * redundantly. */
 export interface StackReviewBinding {
   stack: StackSnapshotRow[];
   checkout_path: string;
   notes: string[];
   focus: string | null;
+  base_sha: string;
+  patch_sha256: string;
 }
 
 /** The derived stack endpoints (the binding's rows are ordered bottom→top, never empty). */
@@ -430,7 +569,7 @@ export function bindingBaseRef(binding: StackReviewBinding): string {
  * field is REQUIRED — `stack` a non-empty row array, `checkout_path` a non-empty string,
  * `notes` a string array, `focus` present as a string or null (the one normalization: a
  * blank/whitespace-only focus string decodes to null — "no focus", matching the launcher's
- * no-flag arm).
+ * no-flag arm), `base_sha` 40 lowercase hex, `patch_sha256` 64 lowercase hex.
  */
 export function decodeStackReviewBinding(raw: unknown): StackReviewBinding | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
@@ -441,11 +580,15 @@ export function decodeStackReviewBinding(raw: unknown): StackReviewBinding | nul
   if (typeof b.checkout_path !== "string" || b.checkout_path === "") return null;
   if (!("focus" in b)) return null;
   if (b.focus !== null && typeof b.focus !== "string") return null;
+  if (typeof b.base_sha !== "string" || !SHA1_HEX_RE.test(b.base_sha)) return null;
+  if (typeof b.patch_sha256 !== "string" || !SHA256_HEX_RE.test(b.patch_sha256)) return null;
   return {
     stack,
     checkout_path: b.checkout_path,
     notes,
     focus: typeof b.focus === "string" && b.focus.trim() !== "" ? b.focus : null,
+    base_sha: b.base_sha,
+    patch_sha256: b.patch_sha256,
   };
 }
 
@@ -466,7 +609,7 @@ export function stackReviewBindingOf(
 const TOOL_GUIDELINES = [
   "Call open_stack_review ONCE, with no arguments, inside the perk objective stack review session — the stack snapshot is bound to the session by the cold door (launch handoff), never passed by you.",
   "Follow the returned guidance exactly: launch the reviewer wave with stack: true, stream findings via push_annotations, and run the judgment-routed per-PR posting protocol through submit_pr_review (dry-run ALL batches first, bottom→top, only what the human approves).",
-  "The tool is single-use per session; a bad_state failure means this session is not a stack-review launch (or the checkout is gone) — re-run perk objective stack review.",
+  "The tool is single-use per session; a bad_state failure means this session is not a stack-review launch, or the checkout / its pinned combined patch is gone or was refreshed since the launch — re-run perk objective stack review.",
 ];
 
 /** The single-use latch (registration-scoped state, injectable for the execute-core tests). */
@@ -487,6 +630,7 @@ export async function executeOpenStackReview(
   latch: OpenLatch,
   annotations: AnnotationState,
   status: ActivityHandle,
+  stackPin: StackPinState,
   open: StackBrowserOpen = openStackBrowser,
 ): Promise<ReturnType<typeof ok> | ReturnType<ReturnType<typeof failFor>>> {
   const fail = failFor(ctx, "open_stack_review");
@@ -522,6 +666,12 @@ export async function executeOpenStackReview(
       "bad_state",
     );
   }
+  // The digest check BEFORE the open (the warm door's twin): the browser shows exactly the
+  // patch the launch snapshot describes, or nothing.
+  const patch = verifyStackPatch(binding.checkout_path, binding.patch_sha256);
+  if (!patch.ok) {
+    return fail(patch.detail, "bad_state");
+  }
   if (!plannotatorPresent(pi)) {
     return fail(
       "the plannotator extension is not loaded (its /plannotator-review command was not " +
@@ -529,17 +679,29 @@ export async function executeOpenStackReview(
       "plannotator_missing",
     );
   }
+  const pinned = pinnedStackOf(
+    bindingTopPr(binding),
+    binding.checkout_path,
+    binding.base_sha,
+    binding.stack,
+  );
+  const supersede = pinSupersedeRefusal(stackPin, pinned);
+  if (supersede !== null) {
+    return fail(supersede, "bad_state");
+  }
   const guidance = stackReviewGuidance({
     topPr: bindingTopPr(binding),
     checkout: binding.checkout_path,
     stackBase: bindingBaseRef(binding),
     members: binding.stack,
     notes: binding.notes,
+    pinned,
     ...(binding.focus !== null ? { directive: binding.focus } : {}),
   });
-  const started = await open(pi, ctx, annotations, status, {
+  const started = await open(pi, ctx, annotations, status, stackPin, {
     checkoutPath: binding.checkout_path,
-    stackBaseRef: bindingBaseRef(binding),
+    patchPath: patch.patchPath,
+    pinned,
     guidance,
     injectGuidance: false,
   });
@@ -566,6 +728,7 @@ function registerOpenStackReview(
   pi: ExtensionAPI,
   annotations: AnnotationState,
   status: ActivityHandle,
+  stackPin: StackPinState,
 ): void {
   const latch: OpenLatch = { opened: false };
 
@@ -574,9 +737,10 @@ function registerOpenStackReview(
     label: "Open stack review",
     description:
       "Open the launch-bound stacked-PR browser review (the perk objective stack review " +
-      "session's ONE opener): starts the plannotator browser over the combined stack diff, " +
-      "primes the annotation surface, and returns the full flow guidance. No parameters: the " +
-      "stack snapshot comes only from the launch handoff. Single-use per session.",
+      "session's ONE opener): verifies the pinned combined patch's digest, starts the " +
+      "plannotator browser over that static patch, primes the annotation surface, binds the " +
+      "pinned stack for start_review_wave, and returns the full flow guidance. No parameters: " +
+      "the stack snapshot comes only from the launch handoff. Single-use per session.",
     promptSnippet: "Open the launch-bound stacked-PR browser review",
     promptGuidelines: TOOL_GUIDELINES,
     executionMode: "sequential",
@@ -586,7 +750,7 @@ function registerOpenStackReview(
       properties: {},
     },
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      return await executeOpenStackReview(pi, ctx, latch, annotations, status);
+      return await executeOpenStackReview(pi, ctx, latch, annotations, status, stackPin);
     },
   });
 }
@@ -594,13 +758,16 @@ function registerOpenStackReview(
 /**
  * Install the Delivery-train review surface: the warm `/stack-review-browser` door + its
  * cold-launch twin (`open_stack_review`). Takes the threaded per-activation annotation state —
- * both openers prime it through `openReviewBrowserCore`.
+ * both openers prime it through `openReviewBrowserCore` — and the per-activation
+ * `StackPinState` shared with `installReviewWaveBindings` (both openers bind the verified pins
+ * on a successful open; `start_review_wave`'s stack mode reads them).
  */
 export function installStackReviewBindings(
   pi: ExtensionAPI,
   annotations: AnnotationState,
   status: ActivityHandle,
+  stackPin: StackPinState,
 ): void {
-  registerStackReviewBrowser(pi, annotations, status);
-  registerOpenStackReview(pi, annotations, status);
+  registerStackReviewBrowser(pi, annotations, status, stackPin);
+  registerOpenStackReview(pi, annotations, status, stackPin);
 }

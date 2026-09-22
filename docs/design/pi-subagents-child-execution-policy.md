@@ -74,8 +74,7 @@ Two layers of invariant apply, and they have different owners.
 
 **Definition-level (the def owns it).** Every report agent — the ten shipped `agents/*.md`
 definitions other than the writer, plus the repo-local `perk-dev.session-auditor` at
-`.pi/agents/perk-dev/session-auditor.md` — is `async: true`, `completionGuard: false`,
-`systemPromptMode: replace`, inherits no global/project context or skills, sets no
+`.pi/agents/perk-dev/session-auditor.md` — is `async: true`, `systemPromptMode: replace`, inherits no global/project context or skills, sets no
 `defaultContext`, and has the read-only tool posture `read, grep, find, ls, bash`. The shipped
 ten are pinned by `tests/test_subagent_agents.py::test_native_child_profile`; the auditor by
 `tests/test_repo_local_agents.py::test_auditor_is_a_background_report_outside_delivery`.
@@ -106,12 +105,16 @@ writes by design.
 - Foreground children have no perk activation; manual `subagent` calls are outside the channel.
 - User-shadowed definitions and installations missing the consumer are not certified.
 - Losing the runner env across a `/reload` is unsupported (the reload re-reads what is there).
-- pi-subagents ≥ 0.67.0's host-side tool intersection is an upstream launch precondition, not
-  perk policy: the engine intersects the child's declared `read, grep, find, ls, bash` with the
-  **host** session's builtin-sourced tools and fails review/scout-named agents closed on a
-  shadowed builtin (pi-fff `override` mode re-registers `grep`/`find` by name). perk launches no
-  longer shadow them (they inject `PI_FFF_MODE=tools-and-ui`), and the doctor `subagent-host-tools`
-  check names the operator-owned residual; the floor described here neither causes nor cures it.
+- pi-subagents ≥ 0.70.0 no longer intersects a child's declared tools with the **host**
+  session's builtin tools (the 0.67.x–0.69.x `child-tool-plan` intersection that failed
+  review/scout-named agents closed on a pi-fff `override`-shadowed `grep`/`find` is gone), so
+  pi-fff's search mode is irrelevant to lane launch: perk injects no `PI_FFF_MODE`, and the
+  retired `subagent-host-tools` doctor check has no successor. The floor described here never
+  depended on it.
+- Pi 0.87's fork / pruned-fork context repair (the checkout-only fix in pi-subagents'
+  development tree) is NOT in the installed 0.70.1 artifact. perk's waves and the conflict
+  resolver spawn with `context: "fresh"`; fork context is unsupported for perk children until a
+  pi-subagents release contains that fix — a support boundary, not a perk defect.
 
 ## Dropped mechanisms
 

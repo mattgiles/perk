@@ -203,13 +203,16 @@ def review_stack(
                 ),
             )
             # The blob mirrors the real launch's binding shape (below) plus the dry_run
-            # marker — top PR and stack base are DERIVED from the ordered rows in-session.
+            # marker — top PR and stack base are DERIVED from the ordered rows in-session;
+            # the pinned identity (`base_sha`, `patch_sha256`) is null before any fetch.
             handoff_preview: dict[str, object] = {
                 "stack_review": {
                     "stack": _preview_rows(stack),
                     "checkout_path": str(would_path),
                     "notes": list(stack.notes),
                     "focus": focus,
+                    "base_sha": None,
+                    "patch_sha256": None,
                     "dry_run": True,
                 }
             }
@@ -237,6 +240,7 @@ def review_stack(
                     "checkout_path": str(would_path),
                     "base_ref": stack.base_ref,
                     "base_sha": None,
+                    "patch_sha256": None,
                     "stack": _preview_rows(stack),
                     "notes": list(stack.notes),
                     "argv": list(argv),
@@ -274,14 +278,19 @@ def review_stack(
             dry_run_payload={},
             # The structural binding: `open_stack_review` recovers this pinned snapshot from
             # the launch handoff — its SOLE stack authority (contracts.md §8.3/§8.4). Exactly
-            # the four fields the tool consumes: the top PR and the stack base are derived
-            # from the ordered rows (last row's pr; first row's base_ref), never duplicated.
+            # the fields the tool consumes: the top PR and the stack base REF are derived from
+            # the ordered rows (last row's pr; first row's base_ref), never duplicated; the
+            # pinned identity — `base_sha` (the combined-diff base commit) and `patch_sha256`
+            # (the digest of `<checkout_path>.patch`) — binds the browser patch, the lanes'
+            # pinned review-context command and the routing step to the same commits.
             handoff_extra={
                 "stack_review": {
                     "stack": snapshot_rows,
                     "checkout_path": str(result.path),
                     "notes": list(result.stack_notes),
                     "focus": focus,
+                    "base_sha": result.base_sha,
+                    "patch_sha256": result.patch_sha256,
                 }
             },
             binding_trigger=_BINDING_TRIGGER,

@@ -6,7 +6,8 @@
 // stale direct scratch custom blocks. A compaction summary may quote old prose/path text; that is
 // not a live guidance delivery or authoritative provenance, and is deliberately left intact.
 //
-// Delivery dedup reads Pi's OWN live context projection (`pi/v1/contextEvidence.ts`) and requires
+// Delivery dedup reads Pi's OWN live context projection (`pi/v1/contextEvidence.ts` over
+// `buildSessionProjection().messages`, compaction and context edits applied) and requires
 // EXACT identity: a `custom` message of this customType whose string content equals the current
 // run's rendered block byte-for-byte. Nothing looser counts — not a text-part array, a user quote,
 // a marker-only match, changed bytes, a parent run's block, or plain `custom` state (`data.content`

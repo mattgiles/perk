@@ -240,13 +240,16 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   before dedup (repairing deleted directories, and before any projection read), retain one exact
   current-run direct block, remove stale/duplicate direct blocks, and visibly warn/retry on
   provisioning failure. Delivery dedup reads **Pi's own live context projection**
-  (`sessionManager.buildContextEntries()` → `sessionEntryToContextMessages`, via
+  (`sessionManager.buildSessionProjection().messages` — Pi's canonical projection with compaction
+  selection AND `context_edit` omission/replacement applied, via
   `extension/pi/v1/contextEvidence.ts`) and requires **exact identity**: a native `custom`
   message of this customType whose string `content` equals the current run's rendered block
   byte-for-byte. Nothing looser deduplicates — not a text-part array, a user quote, a marker-only
   match, changed bytes, a parent run's block, or plain `custom` state (`data.content` is state,
-  never model delivery). A block Pi has compacted out of context is re-delivered on the next
-  eligible turn even though the historical entry stays on the branch. A projection read failure
+  never model delivery). A block Pi has compacted out of context — or omitted through a
+  `context_edit` — is re-delivered on the next eligible turn even though the historical entry
+  stays on the branch; a replaced copy counts only if the replacement content still equals the
+  block. A projection read failure
   escapes the hook to Pi's hook-error reporting (no guessed copy); the context filter never reads
   the projection. Quoted ordinary messages and compaction summaries remain untouched. Selected
   foreground writers have no Perk activation and no scratch-provisioning promise. Because this is a universal pre-turn side effect
@@ -737,8 +740,12 @@ subcommand stay blocked), the read-only `perk objective` queries (`show`/`next` 
 `node-engagement`; the mutating subcommands stay blocked), and exactly the whitespace-separated
 `perk pr review-context --expected-pr N --json` (the plan-bound form), `perk pr review-context
 --pr N --json` and `perk pr review-context --pr N --stack --json` (the human-triage doors'
-adversarial children and the stack-review routing step; N matches `[1-9][0-9]*` on every form,
-`--json` last) and `perk pr feedback --json` forms with optional surrounding whitespace. Anchored
+adversarial children; N matches `[1-9][0-9]*` on every form, `--json` last), the PINNED stack
+form `perk pr review-context --pr N --stack --pin-base <sha> --pin-head <pr>=<sha> … --json`
+(the stack-review flow's lanes and its routing step — exactly `pinnedReviewContextCommand`'s
+rendering: full 40-hex lowercase shas, `--pin-base` then at least two bottom→top `--pin-head`
+pairs; the CLI re-validates grammar and topology) and `perk pr feedback --json` forms with
+optional surrounding whitespace. Anchored
 query exceptions retain segment validation and the destructive veto: `cd … && query` passes, but
 the flagless context form, other argument orders, extra arguments (`--local` included), lookalike
 verbs, `review-post`, `gh api`, real-file redirects, and chained mutations do not. The sub-allowlist also retains command-keyed `ast-grep` /
@@ -783,17 +790,22 @@ every session that is not a claimed `audit judge` launch — is refused `bad_sta
 
 **The stack-review launch binding (`stack_review`, §8.4).** The `perk objective stack review`
 cold door stashes `handoff_extra={"stack_review": {stack: [{pr, url, branch, head_sha,
-base_ref, node_id, plan_id}…], checkout_path, notes, focus}}` — the checkout worker's
-**pinned snapshot** (§8.4), never re-resolved, carrying EXACTLY the four fields the tool
-consumes (every one required by the strict decode; the top PR and the stack base derive from
-the ordered rows — last row's `pr`, first row's `base_ref`; a blank `focus` normalizes to
-null). The warm
+base_ref, node_id, plan_id}…], checkout_path, notes, focus, base_sha, patch_sha256}}` — the
+checkout worker's **pinned snapshot** (§8.4), never re-resolved, carrying EXACTLY the fields
+the tool consumes (every one required by the strict decode — `base_sha` 40-hex, `patch_sha256`
+64-hex; the top PR and the stack base REF derive from the ordered rows — last row's `pr`,
+first row's `base_ref`; a blank `focus` normalizes to null). `base_sha` + the rows' `head_sha`s
+are the pinned commit identity the in-session tool binds the wave and the routing step to;
+`patch_sha256` is the digest of the derived `<checkout_path>.patch`. The warm
 `open_stack_review` tool takes **no parameters** and recovers the blob through the rebuilt
 workflow-state `run_id` → the run's handoff (the `audit_bundle_dir` recovery shape); a
-missing/blank binding or a missing checkout dir is `bad_state`, headless is a typed refusal,
-and the tool is **single-use** per session. On success it opens the SAME browser-lifecycle core
-as the warm `/stack-review-browser` door and returns the rendered stack guidance as its ok
-text.
+missing/blank binding, a missing checkout dir, or a missing/unreadable/digest-mismatched patch
+is `bad_state` (the refusal names the patch path), headless is a typed refusal, and the tool is
+**single-use** per session; a stack wave still pending against a different pin is `bad_state`
+too (the supersession guard). On success it opens the SAME browser-lifecycle core as the warm
+`/stack-review-browser` door (Plannotator's static-patch mode over the verified patch), binds
+the pinned stack into the session's `StackPinState`, and returns the rendered stack guidance as
+its ok text.
 
 **Progress tracking.** perk mints **no** progress state of its own: there is no checkpoint
 substrate — no `perk:checkpoint` entry, `## Steps` seeding machinery, `[WIP:n]`/`[DONE:n]`
@@ -1007,15 +1019,13 @@ Ten shipped reports
 (`pr-reviewer`, `review-classifier`, `objective-explorer`, `learn-analyst`, `harvest-analyst`,
 `dream-analyst`, `dream-reducer`, `adversarial-reviewer`, `draft-reviewer`, `scout`) plus the repo-local
 `perk-dev.session-auditor` select definition `async: true`. All eleven keep replacement base prompts,
-read-only tools, `inheritProjectContext: false`, `inheritSkills: false` and the report-only
-completion policy `completionGuard: false` (the installed parser reads the literal `"false"` →
-`false`): the engine's completion **mutation** guard never fails a report-only lane for
-completing without edits when its task text reads as implementation intent (a reviewed draft
-saying "… must change …"), while the required `structured_output` report contract is unchanged
-(a missing/invalid report still fails the lane) and non-mutation stays enforced by Perk's
-restrictions + the rubric prohibitions, never by the guard. `conflict-resolver` leaves definition
-async absent and the guard field absent (the engine default — it IS expected to mutate),
-retaining writer tools and project/skill inheritance true. All twelve explicitly set `inheritGlobalContext: false` and omit both
+read-only tools, `inheritProjectContext: false` and `inheritSkills: false`. No def carries a
+`completionGuard` field: pi-subagents 0.70.1 removed the engine's completion **mutation** guard
+(a stray field is ignored, not rejected), so a report-only lane completes on its validated
+`structured_output` report — the required report contract is unchanged (a missing/invalid report
+still fails the lane) and non-mutation is enforced by Perk's restrictions + the rubric
+prohibitions. `conflict-resolver` leaves definition async absent (the engine default — it IS
+expected to mutate), retaining writer tools and project/skill inheritance true. All twelve explicitly set `inheritGlobalContext: false` and omit both
 `extensions` and `subagentOnlyExtensions` (empty is not equivalent). Reports use ambient runner
 discovery; foreground writers have no ambient extensions or transported Perk handoff. Canonical
 models stay intact — ONE `model:` per def, no `fallbackModels` (pi-subagents ≥ 0.68.0 rejects
@@ -1260,8 +1270,14 @@ the summary (+ rendered findings) as a single discussion comment, so an advisory
 ops below:
 
 ```
+get_pr_text{ pr_number } -> PrText{ title, body, base_ref, head_ref } | None
+    # Read-only; ONE `gh api pulls/{n}` read — the coordinates-free text half of a review
+    # context (`base_ref`/`head_ref` are the payload's names verbatim, "" when absent). Lookup
+    # convention: 404 → None. `get_pr_review_context` composes it with the diff read; the
+    # pinned `review-context --stack` arm reads member text through it directly.
 get_pr_review_context{ pr_number, branch, plan_body, local_diff? } -> PrReviewContext{ pr_number, base_ref, head_ref, title, body, diff, plan_body, diff_source }
-    # Read-only. PR meta via `gh api pulls/{n}`, diff via `gh pr diff {n}`. The gateway reads
+    # Read-only. PR meta via `get_pr_text` (a 404 is a `GitHubError` here — callers wanting
+    # the clean not-found arm pre-check with `get_pr`), diff via `gh pr diff {n}`. The gateway reads
     # no plan/issue state: `plan_body` is resolved backend-neutrally by the consumer
     # (`perk pr review-context`) — the materialized `cache.plan` mirror first, else
     # `IssueBackend.get_plan_body` via the resolver — and passed straight in (best-effort; null
@@ -1306,14 +1322,36 @@ get_pr_review_context{ pr_number, branch, plan_body, local_diff? } -> PrReviewCo
     # namespace (concurrent reviewer lanes share one ref store — no shared temp ref is ever
     # touched; deleted in a finally), the checkout worker's predecessor→successor ancestry gate
     # re-validated fail-closed (stack_topology_broken — indeterminate probes refuse too),
-    # then a local `diff_range(<base_sha>, <top_sha>)`.
+    # then a local `diff_range(<base_sha>, <top_sha>)`. This unpinned arm (re-resolve +
+    # refetch) stays byte-identical for ad-hoc CLI use; the stack review's lanes run the
+    # PINNED arm below.
+    # `--pr <top> --stack --pin-base <sha> --pin-head <pr>=<sha>…` (the PINNED stack arm —
+    # what `pinnedReviewContextCommand` renders for the stack lanes and the routing step from
+    # the snapshot the door verified): the pins ARE the membership — no chain re-resolution,
+    # NO fetch. Grammar (every violation `invalid_input`): the two pin options are valid only
+    # with --stack and only together; every sha is 40 lowercase hex; every <pr> a positive
+    # integer, no duplicates; at least two --pin-head, bottom→top; the last --pin-head's PR
+    # equals --pr; `--local` is inert (every diff is local by construction). Gates in order:
+    # every pinned sha must resolve locally (`pinned_object_missing` naming the sha — the
+    # detached review-<top> checkout keeps every member head alive, so an absent object means
+    # that checkout was removed: "re-run `perk pr review checkout --stack`"); the checkout
+    # worker's predecessor→successor ancestry gate over the pins (`stack_topology_broken`) and
+    # base-is-ancestor-of-bottom (`False`/`None` → `stack_topology_broken`). Then per pinned
+    # PR: member text via `get_pr_text` (a live GitHub read — text, not coordinates; 404 →
+    # `pr_not_found`), `plan_body` for `plan-<N>` heads, `diff = diff_range(prev, head_sha)`
+    # (`prev` = --pin-base for the bottom member, else the previous member's head) stamped
+    # `diff_source: "local-pinned"`; `combined_diff = diff_range(--pin-base, <top head>)`. A
+    # `GitError` is `git_error`. Envelope shape unchanged (stack[] + combined_diff + pointers);
+    # so the browser patch (`stack_checkout` wrote `diff_range(base_sha, top)`), the lanes'
+    # combined/per-member diffs and the routing inputs share ONE commit identity by
+    # construction, and `diff_range`'s config pins keep the bytes identical across the three.
     # PROVENANCE IS PER ARTIFACT: every `diff_source` describes exactly the `diff` beside it —
     # the top-level field the top-level `diff` (the top member's in stack mode), each `stack[]`
-    # member's its own `diff`. `combined_diff` is ALWAYS a local merge-base rendering by
-    # construction and carries no provenance field (documented, never emitted as a constant).
+    # member's its own `diff`. `combined_diff` is ALWAYS a local rendering by construction
+    # and carries no provenance field (documented, never emitted as a constant).
     # `diff_source` is a TRAILING field on `PrReviewContextOut` / `StackContextMemberOut`
-    # (JSON-schema enum {github, local-git}); the reviewer defs disclose a `"local-git"` diff
-    # as one `fyi` line (anchors are unchanged).
+    # (JSON-schema enum {github, local-git, local-pinned}); the reviewer defs disclose a
+    # `"local-git"` diff as one `fyi` line (anchors are unchanged).
     # THE CLI ARMS EMIT A POINTER ENVELOPE, NEVER INLINE TEXT: every free-text section —
     # `body`, `diff`, `plan_body`, each `stack[]` member's sections, `combined_diff` — is
     # written to its own line-oriented file and the `--json` payload carries `context_dir` +
@@ -1481,12 +1519,31 @@ perk pr review checkout --pr <n> --json -> { success, error_type, message, path,
     # stack_topology_broken); objective-arm recorded-vs-observed head drift appends a
     # stack_notes row (warn, never refuse). The existing tail reuses verbatim at the TOP head
     # (same review-<top> name → cleanup --pr <top> unchanged); base_sha =
-    # merge-base(origin/<stack base>, top head). Envelope: the single-PR fields describe the
-    # top PR + combined base (non-stack calls byte-compatible — no null stack keys) plus the
-    # PINNED SNAPSHOT: stack:[{pr, url, branch, head_sha, base_ref, node_id, plan_id}]
-    # bottom→top and stack_notes[] (base_ref/base_sha ARE the combined-diff base — no
-    # duplicate stack-base field) — every downstream consumer (guidance, handoff, posting
-    # narrative) reads THIS envelope; nothing re-resolves moving refs.
+    # merge-base(origin/<stack base>, top head), which must ALSO be an ancestor of the BOTTOM
+    # head (the pinned `review-context` reader's base→bottom gate — an upper layer that merged
+    # newer base commits the lower layers lack passes the chain gate but would make every lane
+    # and the routing command refuse; `False`/`None` → stack_topology_broken here, fail-closed,
+    # before any diff or worktree mutation). THE PINNED COMBINED PATCH: after base_sha is
+    # known (both gates passed) and BEFORE any worktree mutation, `diff_range(base_sha, top)`
+    # is rendered over the exact fetched objects (a `GitError` → git_error; an empty/
+    # whitespace-only diff → `empty_stack_diff` "the stack's combined diff from base <sha[:12]>
+    # to the top head <sha[:12]> is empty (identical trees) — nothing to review" — an empty
+    # TREE diff, never a claim about commit equality: distinct commits with identical trees,
+    # e.g. a fully reverted stack, refuse the same way) and hashed
+    # (`patch_sha256 = sha256(utf-8 bytes)`); after `worktree add` succeeds the bytes are
+    # written atomically to `<checkout path>.patch` — the `review-<top>.patch` SIBLING beside
+    # the checkout (`review_patch_path` in Python, `patchPathFor` in TS: a pure function of
+    # the checkout path, so BOTH planes derive it and nothing carries a path; outside the
+    # untrusted checkout, outside `worktree wipe`'s `plan-*` filter). An `OSError` on the
+    # write is `write_failed` — the worktree and temp refs are left for the next run to
+    # refresh (a retry repairs the residue; no rollback). Envelope: the single-PR fields
+    # describe the top PR + combined base (non-stack calls byte-compatible — no null stack
+    # keys, no patch_sha256) plus the PINNED SNAPSHOT: stack:[{pr, url, branch, head_sha,
+    # base_ref, node_id, plan_id}] bottom→top, stack_notes[] and patch_sha256 (64-hex;
+    # base_ref/base_sha ARE the combined-diff base — no duplicate stack-base field) — every
+    # downstream consumer (guidance, handoff, posting narrative, the browser's digest check)
+    # reads THIS envelope; nothing re-resolves moving refs. The human render adds one
+    # `patch <path> (sha256 <12 hex>)` line on the stack arm.
     # Stack refusals (both resolution arms share the gates): not_a_stack (<2 open members —
     # /pr-review-browser territory) · stack_too_deep (> STACK_REVIEW_MAX_MEMBERS = 20) ·
     # fork_unsupported (cross-repo head, fail-closed on a blank identity) · ambiguous_stack
@@ -1496,8 +1553,10 @@ perk pr review checkout --pr <n> --json -> { success, error_type, message, path,
 perk pr review cleanup --pr <n> --json -> { success, error_type, message, pr, path, removed }
     # Single-PR and idempotent: nothing to remove → success, removed:false, exit 0. Fully
     # offline (no GitHub calls). Removes a registered worktree (force) or an unregistered
-    # leftover dir (rmtree), always followed by `git worktree prune`; also deletes a leftover
-    # refs/perk/review/<n> temp ref best-effort.
+    # leftover dir (rmtree), always followed by `git worktree prune`, AND the stack arm's
+    # `<checkout>.patch` sibling (`removed: true` for an orphan patch alone) — the one shared
+    # `remove_review_worktree` the checkout refresh and the stale reaper also run; also
+    # deletes a leftover refs/perk/review/<n> temp ref best-effort.
 perk pr review-submit --pr <n> --event <e> --batch <file> --json -> { success, error_type, message, dry_run, pr, event, mode, comment_count }
     # The comments-first review-submission substrate — consumed by the warm `submit_pr_review`
     # posting tool, not human-CLI-first (a plain cold worker: no launcher half, no registry stage; the
@@ -2050,11 +2109,19 @@ parallel rebuild.
   NO commit SHAs — the checkout worker is the single hydration boundary and its envelope is the
   pinned snapshot (the checkout `--stack` spec above). Cardinality/fork gates are shared by
   both arms (`not_a_stack`, `stack_too_deep`, `fork_unsupported`).
-- **The combined-diff surface:** plannotator renders the diff itself — local mode
-  `{cwd: <top-head checkout>, diffType: "since-base", defaultBranch: "origin/<stack base>"}`.
-  The explicit base MUST be the remote-tracking ref the checkout materializes: plannotator
-  trusts an explicit value verbatim and degrades a failed merge-base to `HEAD` (an empty
-  review), so a bare branch name is a silent-failure trap.
+- **The combined-diff surface:** the browser opens Plannotator's **static-patch mode**
+  `{cwd: <top-head checkout>, patchFile: <checkout>.patch}` (Plannotator ≥ 0.27.16; the
+  `CodeReviewSource` union's `patch` arm — mutually exclusive with `prUrl` by construction)
+  over the patch `stack_checkout` wrote from the pinned `base_sha`→top `head_sha`, verified by
+  SHA-256 against the snapshot's `patch_sha256` immediately BEFORE the request is emitted
+  (`verifyStackPatch`: missing/unreadable/mismatch → the warm door reports an error and emits
+  no request; `open_stack_review` returns `bad_state` naming the path — "the stack checkout was
+  refreshed since this snapshot was taken — re-run the stack review"). Moving refs cannot
+  change the displayed diff; there is no merge-base fallback, no live refresh, no workspace
+  and no platform posting — reviewers and exploration keep the detached checkout. Residual:
+  refreshing the same top PR's checkout while a review is OPEN invalidates that review (the
+  next open refuses on the digest). The former live `since-base` vs `origin/<stack base>`
+  mode (and its merge-base→`HEAD` degrade trap) is gone.
 - **The warm `/stack-review-browser` door** (`extension/pi/v1/codeReview/stack.ts`, SCOPE
   `stack-review-browser`): a thin door over the SAME extracted browser-lifecycle core as
   `/pr-review-browser` (`openReviewBrowserCore`: open → prime → readiness observation → respond
@@ -2069,12 +2136,28 @@ parallel rebuild.
   order: parse → `ctx.hasUI` → plannotator presence. Flow: the checkout `--stack` cold worker →
   strict snapshot decode → the core → ONE guidance injection
   (`prompts/stages/stack-review-browser/stack.md`, rendered with the snapshot table/notes —
-  shared verbatim with `open_stack_review`). The wave runs with `stack: true` — the lane-task
-  discriminator (children fetch `perk pr review-context --pr <top> --stack` and report in
-  COMBINED-DIFF coordinates; routing is the parent's job; without `stack`, lane tasks are
-  byte-identical to the single-PR wave). The completion-only yield, the `perk:wave` marker,
-  `push_annotations`, collect, reconcile, and the early-decision policy are the browser door's
-  contract unchanged. Cleanup: `perk pr review cleanup --pr <top>`.
+  shared verbatim with `open_stack_review`, including the `review_context_command` variable —
+  the pinned command below). A successful open sets the per-activation `StackPinState.pinned`
+  (`{topPr, checkout, baseSha, heads[{pr, headSha}] bottom→top}` from the verified snapshot; a
+  later open replaces it) — EXCEPT while a stack wave is in flight against a different pin: a
+  launched stack wave locks its pin as `StackPinState.inFlight` until `collect_review_wave`
+  settles it, and both entry paths refuse a superseding open in that window (the warm door
+  reports an error naming the pending review's top PR + checkout, the tool fails `bad_state`;
+  re-opening the SAME pin — a stale-session reopen — proceeds), so lanes reviewing one
+  stack's commits can never have their findings pushed/routed against another stack's patch.
+  The model-facing `start_review_wave` keeps `stack: boolean`; with
+  `stack: true` the tool requires a bound pin (`bad_state` "open it with /stack-review-browser
+  or open_stack_review first") whose `topPr`/`checkout` match the call's `pr`/`worktree`
+  (`bad_input` otherwise — the model cannot aim a stack wave at another stack or checkout) and
+  passes the pin to the wave: the stack lane tasks and the guidance's routing step read the
+  ONE pinned command `pinnedReviewContextCommand(pin)` = `perk pr review-context --pr <top>
+  --stack --pin-base <base_sha> --pin-head <pr>=<sha>…` (bottom→top), rendered from the same
+  snapshot the browser patch was verified against — parent-captured DATA, never model-relayed
+  prose; children report in COMBINED-DIFF coordinates; routing is the parent's job; without
+  `stack`, lane tasks are byte-identical to the single-PR wave. The completion-only yield, the
+  `perk:wave` marker, `push_annotations`, collect, reconcile, and the early-decision policy are
+  the browser door's contract unchanged. Cleanup: `perk pr review cleanup --pr <top>` (removes
+  the checkout AND its `.patch` sibling).
 - **Respond routing (`stackRespondMessage`):** exit takes precedence over simultaneous
   approval, feedback, and annotations, returning the closed-without-submitting ask. Approval
   with zero decoded annotations retains the complete existing approval/posting message: the
@@ -2105,14 +2188,18 @@ parallel rebuild.
   SIDE-EFFECT-FREE: read-only resolution only — no fetch, no worktree mutation, no handoff
   write, no launch; the preview carries the would-be checkout path, `base_sha: null` +
   per-member `head_sha: null`, the build-once launch argv, and the handoff-blob preview with
-  the same nulls plus `dry_run: true`. Local-only by design: `--remote` is accepted by the
-  seeded-door interface and refused as `remote_blocked` before any resolution.
+  the same nulls (incl. `base_sha: null`, `patch_sha256: null`) plus `dry_run: true`; the real
+  run's blob carries the checkout's `base_sha` + `patch_sha256`. Local-only by design:
+  `--remote` is accepted by the seeded-door interface and refused as `remote_blocked` before
+  any resolution.
   `open_stack_review` (parameterless, single-use; binding/decode in §8.3) recovers the snapshot
   and runs the same core, returning the stack guidance as its ok text.
 - **Routing + per-PR posting (model judgment — no blame-attribution worker):** inputs are the
   reconciled wave findings + returned browser annotations (both combined-diff coordinates), the
-  per-PR diffs materialized by `review-context --stack` (one `diff.patch` file per member, read
-  from the envelope's `stack[].diff.path` references), and the snapshot's layer order. Default
+  per-PR diffs materialized by the PINNED `review-context --stack --pin-base/--pin-head` command
+  the guidance renders (the SAME pinned commits the lanes and the browser patch used; one
+  `diff.patch` file per member, read from the envelope's `stack[].diff.path` references), and
+  the snapshot's layer order. Default
   disposition: fold each finding into the OWNING PR's review body; inline anchors only where
   the location is straightforwardly identifiable in that PR's own diff; cross-cutting/
   unplaceable findings fold into the most relevant PR's body. The posting protocol is the stack
@@ -2476,18 +2563,7 @@ second `--fix` at `fixed == []`).
   commits the deletions),
   `subagent-compat` (installed pi-subagents version vs the guidance-verified version — `warn`
   on mismatch or an unreadable version, `info` when not installed; no source probes),
-  `subagent-host-tools` (warns — never fails, no `--fix` — when the installed pi-subagents is
-  in the affected range `[0.67.0, 0.68.0)` — the 0.67.x engine intersected a child's declared
-  tools with the host's builtin-SOURCED tools and failed review/scout lanes closed on a
-  shadowed builtin; 0.68.0's `getHostBuiltinToolNames` counts wrapped core slots regardless of
-  source, so the intersection still runs but a pi-fff override no longer fails lanes — and
-  pi-fff resolves to `override`: the `PI_FFF_MODE` environment (every perk-launched AND warm
-  session), else `pi-fff.json` in the launch-precedence agent dir (warm/bare sessions only —
-  the injected env beats the file), mirroring pi-fff's precedence minus the CLI flag; the two
-  `ok` arms are distinguishable — below the range "does not intersect child tools with host
-  builtins", at/above 0.68.0 "counts wrapped core slots as host builtins"; `info` when
-  pi-subagents is not installed or its version is unreadable),
-  `subagent-package-scope` (warns — never fails, no `--fix` — when the pi-subagents npm
+  `subagent-package-scope` (directly after `subagent-compat`; warns — never fails, no `--fix` — when the pi-subagents npm
   identity (matched via the same `_package_identity` reduction `settings-wiring` dedups by,
   string and object-form entries alike) is configured both in the launch-precedence agent dir's
   user `settings.json` (`launch_pi_agent_dir`) and in the project `.pi/settings.json` — the
@@ -2819,10 +2895,12 @@ exists (read from the **full branch** — eligibility survives compaction), the 
 non-empty (render-before-dedup: an inert stage reads no projection), the submitting turn's prompt
 (`event.prompt`) does not carry `BINDING_HEADER`, **and** Pi's **live context projection** does
 not already deliver it. Live evidence is Pi-owned and typed (`extension/pi/v1/contextEvidence.ts`):
-`sessionManager.buildContextEntries()` — the current leaf's compaction-aware entry list —
-flattened through Pi's package-root `sessionEntryToContextMessages`, then asked whether the header
-rides **user content** (the persisted cold prompt) or a **`perk:binding-context` custom** (a prior
-warm inject). Perk reconstructs no compaction cutoff and inspects no storage fields; assistant/
+`sessionManager.buildSessionProjection().messages` — Pi's canonical projection of the current
+leaf with compaction selection AND `context_edit` omission/replacement applied — asked whether
+the header rides **user content** (the persisted cold prompt) or a **`perk:binding-context`
+custom** (a prior warm inject); an omitted owned copy re-injects, a replaced copy counts only if
+the replacement still carries the header. Perk reconstructs no compaction cutoff, replays no
+edits, and inspects no storage fields; assistant/
 tool/bash output, other customs, plain `custom` state, and compaction/branch summaries quoting the
 header are never evidence. This distinction is load-bearing because Pi's branch is append-only:
 historical entries remain readable after they leave model context, and a summary quoting the
@@ -3077,14 +3155,13 @@ ignores the keys (the documented fail-safe posture, pinned by test on both plane
 **`perk init` two-directional settings wiring:** provider wiring composes on top of the static
 `_desired_packages` (perk + `BORROWED_PACKAGES`: `npm:@tombell/pi-diff`,
 `npm:pi-subagents`, `npm:@ff-labs/pi-fff`, `npm:@juicesharp/rpiv-ask-user-question`, `npm:@juicesharp/rpiv-todo`) layer within the same `_converge_settings` body —
-perk launches inject the env default `PI_FFF_MODE=tools-and-ui` at **both spawn sites** (local
-`_exec_pi`, remote `_spawn_worker`) with operator env winning by merge order, so every session
-keeps pi's builtin `find`/`grep` beside FFF's additive `fffind`/`ffgrep` — pi-subagents 0.67.x
-failed review/scout lanes closed when an extension shadowed a builtin by name (pi-fff `override`
-mode re-registers `grep`/`find`; ≥ 0.68.0 counts wrapped core slots as host builtins, so the
-injection is a harmless additive default kept for 0.67.x hosts and to keep the builtins beside
-`fffind`/`ffgrep`); `export PI_FFF_MODE=override`
-is the operator opt-in the `subagent-host-tools` doctor check names — `npm:pi-web-access` is **not
+perk injects **no** pi-fff search mode at either spawn site (local `_exec_pi`, remote
+`_spawn_worker`): pi-fff runs under its own precedence (CLI flag → `PI_FFF_MODE` → `pi-fff.json`
+→ its additive `tools-and-ui` default, which keeps pi's builtin `find`/`grep` beside
+`fffind`/`ffgrep`), an operator's `PI_FFF_MODE` passes through verbatim, and pi-subagents
+≥ 0.70.0 no longer intersects a child's tools with the host's builtins, so an `override` mode
+cannot fail a report lane (the 0.67.x hazard the retired `PI_FFF_MODE=tools-and-ui` injection
+and `subagent-host-tools` doctor check guarded is history) — `npm:pi-web-access` is **not
 borrowed**: it is the `web` seam's `default: true` provider, converged via the
 provider path, so a default repo still installs it but deselecting `web`
 removes it like any provider package —
@@ -5851,14 +5928,16 @@ nothing, the subset being shared).
   plan-authoring context, plannotator's plan flavor, the tombell bridge context, the
   objective-authoring context, and plannotator's objective flavor — rides the shared
   `extension/pi/v1/contextInjection.ts::installInjectedContext` and dedups on **Pi's own live
-  context projection** (`extension/pi/v1/contextEvidence.ts`: `sessionManager.buildContextEntries()`
-  → `sessionEntryToContextMessages`, native messages unchanged — no perk message union, no
-  compaction-cutoff reconstruction). The typed predicate accepts the selected flavor's marker only
+  context projection** (`extension/pi/v1/contextEvidence.ts`:
+  `sessionManager.buildSessionProjection().messages` — compaction selection AND `context_edit`
+  omission/replacement applied by Pi; native messages unchanged — no perk message union, no
+  compaction-cutoff reconstruction, no edit replay). The typed predicate accepts the selected flavor's marker only
   as **user content** or as the **owned customType's custom content** (string, or one whole
   `{type:"text"}` part — parts are never joined; non-text/malformed parts are ignored); assistant/
   tool/bash output, other customs, plain `custom` state, `details`, and compaction/branch
   summaries quoting the marker never count. So the session carries ONE live copy per flavor, a
-  compaction that drops the copy from Pi's projection naturally re-injects, and another flavor's
+  compaction or `context_edit` omission that drops the copy from Pi's projection naturally
+  re-injects (a replacement counts only while it still carries the marker), and another flavor's
   live copy under a shared customType never suppresses the selected flavor. Installer order:
   guarded full-branch read (failure → return, `select` never called) → the runner fence (a runner
   child selects nothing — `select` never called) → `select` (eligibility + flavor from
@@ -12992,8 +13071,8 @@ The bare form shares ONLY the launch environment with a stage launch, through th
 env → main-checkout `[pi] agent_dir` → default — with the same missing-dir warning and
 `pi_agent_dir_invalid` refusal), the one shared executor `exec_pi(run_id=None, …)` (so
 `_build_exec_env` **removes an inherited `PERK_RUN_ID`**: the session receives the extension's
-ordinary warm-session mint on load, §8.2 — exactly as a hand-run `pi`), the `PI_FFF_MODE` /
-npm-quiet defaults and the `PERK_CLI_VERSION` stamp, the `LINEAR_API_KEY` seed from the main
+ordinary warm-session mint on load, §8.2 — exactly as a hand-run `pi`), the npm-quiet
+defaults and the `PERK_CLI_VERSION` stamp, the `LINEAR_API_KEY` seed from the main
 checkout's `local.toml` (env wins), the pre-chdir absolute `pi` resolution (`pi_cli_missing`),
 and the stale agent-lock sweep. The door reads `launch.resolve_launch_agent_dir` / `launch.exec_pi`
 as facade attributes at call time (the §8.71 import-direction rule), so the two paths cannot

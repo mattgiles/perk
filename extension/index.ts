@@ -16,7 +16,7 @@ import { createHunkFeedbackReceiver, type HunkFeedbackReceiver } from "./hunkFee
 import { registerBashScanTimeout } from "./pi/v1/bashScanTimeout.ts";
 import { installAutomatedReviewBindings } from "./pi/v1/codeReview/automated.ts";
 import { installPrReviewBrowserBindings } from "./pi/v1/codeReview/browser.ts";
-import { installReviewWaveBindings } from "./pi/v1/codeReview/reviewWave.ts";
+import { createStackPinState, installReviewWaveBindings } from "./pi/v1/codeReview/reviewWave.ts";
 import { installStackReviewBindings } from "./pi/v1/codeReview/stack.ts";
 import { installCuratedSubmissionBindings } from "./pi/v1/codeReview/submit.ts";
 import { installPrReviewTerminalBindings } from "./pi/v1/codeReview/terminal.ts";
@@ -663,8 +663,11 @@ export default function perk(
   // review doors drive: non-blocking adversarial-review launch + the typed collect, flow-scoped
   // via the session's pending-wave guard. The annotation state carries the code-owned
   // `perk:wave` marker the browser door shows while the wave runs (a no-op for the terminal
-  // door, which primes no surface).
-  installReviewWaveBindings(pi, reportWave, annotations);
+  // door, which primes no surface). The per-activation `StackPinState` is the structural
+  // binding between the stack door (which sets the verified pins on open) and the wave's
+  // `stack: true` mode (which reads them — never model-relayed coordinates).
+  const stackPin = createStackPinState();
+  installReviewWaveBindings(pi, reportWave, annotations, stackPin);
   installAuditBindings(pi, reportWave);
   installHarvestBindings(pi, reportWave);
   installDreamBindings(pi, reportWave);
@@ -695,9 +698,10 @@ export default function perk(
   installPrReviewBrowserBindings(pi, annotations, perkStatus);
 
   // The warm `/stack-review-browser` door + its cold-launch twin (`open_stack_review`): the
-  // stacked-PR browser review over the combined base→top diff — one reviewer wave with
-  // `stack: true`, then judgment-routed per-PR posting through `submit_pr_review`.
-  installStackReviewBindings(pi, annotations, perkStatus);
+  // stacked-PR browser review over the pinned combined base→top patch — one reviewer wave with
+  // `stack: true` bound to the same pins, then judgment-routed per-PR posting through
+  // `submit_pr_review`.
+  installStackReviewBindings(pi, annotations, perkStatus, stackPin);
 
   // The warm `/plan-review-browser` door: the summonable streaming draft review — the
   // plannotator plan-review browser on the working plan draft, draft reviewers streaming

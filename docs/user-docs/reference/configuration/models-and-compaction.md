@@ -249,8 +249,8 @@ This is not a models-only overlay: Pi's **whole config directory** moves, includ
 - **pi-subagents' config:** the borrowed engine's `extensions/subagent/config.json` moves with
   the directory. perk's `/submit` conflict resolver reads its `worktree` default there once at
   extension activation and refuses to launch while it is anything but absent or `false` (naming
-  the file); the `subagent-host-tools` and `subagent-package-scope` checks follow the same
-  redirect (they read pi-fff's `pi-fff.json` and the user-scope `settings.json` from that dir) —
+  the file); the `subagent-package-scope` check follows the same redirect (it reads the
+  user-scope `settings.json` from that dir) —
   operator `PI_CODING_AGENT_DIR` first, then the configured `agent_dir`, then `~/.pi/agent`.
   A repo-local `agent_dir` is also why perk's own repository never sees a user-scope
   `npm:pi-subagents` duplicate: the user-global settings are out of play.

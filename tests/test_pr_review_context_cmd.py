@@ -1000,3 +1000,198 @@ def test_stack_envelope_aliases_the_top_member_files_and_writes_no_root_sections
     assert Path(data["combined_diff"]["path"]) == context_dir / "combined.patch"
     assert _text(data["combined_diff"]) == "combined"
     assert sorted(p.name for p in context_dir.iterdir()) == ["combined.patch", "stack"]
+
+
+# --- the pinned --stack mode (--pin-base / --pin-head): the pins ARE the membership ----------
+
+
+def _seed_pinned_stack(clone: Path) -> dict[str, str]:
+    """Two stacked local commits (a on plan-301, b on feat-b); returns name→sha. Nothing is
+    pushed to refs/pull — the pinned mode must not need the remote at all."""
+
+    def sha() -> str:
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=clone, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    shas = {"base": sha()}
+    subprocess.run(["git", "checkout", "-qb", "plan-301"], cwd=clone, check=True)
+    (clone / "a.txt").write_text("a\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=clone, check=True)
+    subprocess.run(["git", "commit", "-qm", "a"], cwd=clone, check=True)
+    shas["a"] = sha()
+    subprocess.run(["git", "checkout", "-qb", "feat-b"], cwd=clone, check=True)
+    (clone / "b.txt").write_text("b\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=clone, check=True)
+    subprocess.run(["git", "commit", "-qm", "b"], cwd=clone, check=True)
+    shas["b"] = sha()
+    subprocess.run(["git", "checkout", "-q", "main"], cwd=clone, check=True)
+    return shas
+
+
+def _wire_pinned_text(monkeypatch) -> list[int]:
+    """Member text is a live GitHub read (title/body/base/head); the pinned mode never touches
+    the chain resolver, the review-context gateway read, or the fetch seam."""
+    from perk.substrate import git as git_mod
+
+    texts = {
+        1: github.PrText(title="title 1", body="body 1", base_ref="main", head_ref="plan-301"),
+        2: github.PrText(title="title 2", body="body 2", base_ref="plan-301", head_ref="feat-b"),
+    }
+    seen: list[int] = []
+
+    def fake_text(*, pr_number, repo_root):
+        seen.append(pr_number)
+        return texts.get(pr_number)
+
+    monkeypatch.setattr(github, "get_pr_text", fake_text)
+
+    def never(*a, **k):
+        raise AssertionError("the pinned mode must not call this")
+
+    monkeypatch.setattr(github, "get_pr_review_context", never)
+    monkeypatch.setattr(git_mod, "fetch_refspecs", never)
+    monkeypatch.setattr(git_mod, "stack_merge_base_diff", never)
+    monkeypatch.setattr("perk.cli.commands.pr.review_context_cmd.resolve_stack_from_pr", never)
+    return seen
+
+
+def _pinned_argv(shas: dict[str, str], *extra: str) -> list[str]:
+    return [
+        "pr",
+        "review-context",
+        "--pr",
+        "2",
+        "--stack",
+        "--pin-base",
+        shas["base"],
+        "--pin-head",
+        f"1={shas['a']}",
+        "--pin-head",
+        f"2={shas['b']}",
+        "--json",
+        *extra,
+    ]
+
+
+def test_pinned_stack_context_diffs_the_exact_pins_with_no_fetch(git_repo, monkeypatch):
+    from perk.substrate import git as git_mod
+
+    clone = Path(git_repo)
+    shas = _seed_pinned_stack(clone)
+    seen = _wire_pinned_text(monkeypatch)
+
+    class _Backend:
+        def get_plan_body(self, *, issue_id: str) -> str:
+            assert issue_id == "301"
+            return "# Plan 301"
+
+    monkeypatch.setattr(
+        "perk.cli.commands.pr.review_context_cmd.resolve.resolve_issue_backend",
+        lambda _root: _Backend(),
+    )
+    monkeypatch.chdir(clone)
+
+    result = CliRunner().invoke(cli, _pinned_argv(shas))
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert seen == [1, 2]
+    # Top-level fields describe the TOP PR; every diff is the pinned local rendering.
+    assert data["pr"] == 2 and data["branch"] == "feat-b" and data["title"] == "title 2"
+    assert data["diff_source"] == "local-pinned"
+    assert [row["pr"] for row in data["stack"]] == [1, 2]
+    assert [row["diff_source"] for row in data["stack"]] == ["local-pinned", "local-pinned"]
+    assert _text(data["stack"][0]["diff"]) == git_mod.diff_range(clone, shas["base"], shas["a"])
+    assert _text(data["stack"][1]["diff"]) == git_mod.diff_range(clone, shas["a"], shas["b"])
+    assert _text(data["combined_diff"]) == git_mod.diff_range(clone, shas["base"], shas["b"])
+    assert _text(data["diff"]) == _text(data["stack"][1]["diff"])
+    # Plan-branch members are still enriched; text is the live GitHub read.
+    assert _text(data["stack"][0]["plan_body"]) == "# Plan 301"
+    assert data["stack"][1]["plan_body"] is None
+    assert _text(data["stack"][0]["body"]) == "body 1"
+    # `--local` is inert in pinned mode (every diff is local by construction).
+    again = CliRunner().invoke(cli, _pinned_argv(shas, "--local"))
+    assert again.exit_code == 0, again.output
+    assert json.loads(again.stdout)["diff_source"] == "local-pinned"
+
+
+def test_pinned_stack_context_missing_object_refuses(git_repo, monkeypatch):
+    clone = Path(git_repo)
+    shas = _seed_pinned_stack(clone)
+    _wire_pinned_text(monkeypatch)
+    monkeypatch.chdir(clone)
+
+    absent = dict(shas, b="c" * 40)
+    result = CliRunner().invoke(cli, _pinned_argv(absent))
+    assert result.exit_code == 1
+    data = json.loads(result.stdout)
+    assert data["error_type"] == "pinned_object_missing"
+    assert "c" * 40 in data["message"]
+    assert "perk pr review checkout --stack" in data["message"]
+
+
+def test_pinned_stack_context_topology_refusals(git_repo, monkeypatch):
+    clone = Path(git_repo)
+    shas = _seed_pinned_stack(clone)
+    _wire_pinned_text(monkeypatch)
+    monkeypatch.chdir(clone)
+    runner = CliRunner()
+
+    # Non-linear pin order: the "bottom" head is the descendant.
+    swapped = [
+        "pr", "review-context", "--pr", "2", "--stack",
+        "--pin-base", shas["base"],
+        "--pin-head", f"1={shas['b']}",
+        "--pin-head", f"2={shas['a']}",
+        "--json",
+    ]  # fmt: skip
+    result = runner.invoke(cli, swapped)
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error_type"] == "stack_topology_broken"
+
+    # A base that is not an ancestor of the bottom head (the top head as "base").
+    result = runner.invoke(cli, _pinned_argv(dict(shas, base=shas["b"])))
+    assert result.exit_code == 1
+    data = json.loads(result.stdout)
+    assert data["error_type"] == "stack_topology_broken"
+    assert "not an ancestor of the bottom head" in data["message"]
+
+
+def test_pinned_stack_context_option_grammar(git_repo, monkeypatch):
+    clone = Path(git_repo)
+    shas = _seed_pinned_stack(clone)
+    _wire_pinned_text(monkeypatch)
+    monkeypatch.chdir(clone)
+    runner = CliRunner()
+    sha_a, sha_b, base = shas["a"], shas["b"], shas["base"]
+
+    def argv(*tail: str, pr: str = "2", stack: bool = True) -> list[str]:
+        return [
+            "pr",
+            "review-context",
+            "--pr",
+            pr,
+            *(["--stack"] if stack else []),
+            *tail,
+            "--json",
+        ]
+
+    heads = ["--pin-head", f"1={sha_a}", "--pin-head", f"2={sha_b}"]
+    cases = {
+        "--pin-* without --stack": argv("--pin-base", base, *heads, stack=False),
+        "a lone --pin-base": argv("--pin-base", base),
+        "a lone --pin-head": argv("--pin-head", f"2={sha_b}"),
+        "one --pin-head": argv("--pin-base", base, "--pin-head", f"2={sha_b}"),
+        "malformed <pr>=<sha>": argv(
+            "--pin-base", base, "--pin-head", f"1={sha_a[:12]}", "--pin-head", f"2={sha_b}"
+        ),
+        "uppercase sha": argv("--pin-base", base.upper(), *heads),
+        "duplicate PR": argv(
+            "--pin-base", base, "--pin-head", f"2={sha_a}", "--pin-head", f"2={sha_b}"
+        ),
+        "last head != --pr": argv("--pin-base", base, *heads, pr="1"),
+    }
+    for name, command in cases.items():
+        result = runner.invoke(cli, command)
+        assert result.exit_code == 1, name
+        assert json.loads(result.stdout)["error_type"] == "invalid_input", name

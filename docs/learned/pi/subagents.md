@@ -29,12 +29,12 @@ numbers are event stamps, never currency claims.
 - Model knob: `[models.subagents] <agent>` applied as the workflow-level `model` at spawn time (wins
   over the def's frontmatter however set); builtins are OFF in every perk repo, re-enable only at
   PROJECT scope; `agentOverrides` is never perk's mechanism — "Models, overrides and builtins".
-- Children are read-only reporters and the PARENT mutates once after reconciling; def-level
-  `completionGuard: false` is the report-only escape, `context: "fresh"` per spawn is the only
-  isolation guarantee — "Read-only children, parent mutates".
-- pi-subagents 0.67.x failed reviewer/scout lanes closed when pi-fff shadowed `grep`/`find`
-  (host-builtin intersection, fixed in 0.68.0); perk keeps injecting `PI_FFF_MODE=tools-and-ui`;
-  doctor `subagent-host-tools` — "The 0.67.x host-builtin intersection".
+- Children are read-only reporters and the PARENT mutates once after reconciling; a report lane
+  completes on its validated report (0.70.1 removed `completionGuard`), `context: "fresh"` per
+  spawn is the only isolation guarantee — "Read-only children, parent mutates".
+- 0.67.x failed reviewer/scout lanes when pi-fff shadowed `grep`/`find` (host-builtin intersection;
+  fixed 0.68.0, removed 0.70.0 — the `PI_FFF_MODE` injection + doctor `subagent-host-tools` retired
+  with it) — "The 0.67.x host-builtin intersection (historical)".
 - `outputSchema` injects the engine-required `structured_output` call (covered lane ⟺ schema-valid
   report); every wave spawn disables acceptance auto-inference explicitly; `runs.all` is all-settled
   for config-object items only — "Execution surfaces and structured output".
@@ -226,19 +226,23 @@ No live perk flow takes the first branch: read-only children report structured f
 `review-submit`); a child never holds a token or composes the mutation; the fallback ladder is
 `workflow/github-gateway.md`'s.
 
-**Def-level `acceptance` vs `completionGuard`** (both frontmatter fields):
+**Def-level `acceptance` vs `completionGuard`** (both were frontmatter fields):
 
 - `acceptance:` becomes the def's `defaultAcceptance`, copied onto a **single-agent** launch that
   omits `acceptance` (`applySingleAgentLaunchDefaults`; explicit call values win); `level: "none"`
   requires a non-empty `reason` (`validateAcceptanceInput`, `src/runs/shared/acceptance.ts`).
-- `completionGuard` is the engine's *mutation* guard (`src/runs/shared/completion-guard.ts`): an
-  implementation-shaped task on a mutation-capable child expects a mutation; a mutation-expecting
-  task on a child with no such tool is refused at launch. `bash` counts as mutation-capable, so a
-  report-only def carrying `bash` rides `completionGuard: false` (a real frontmatter field), not a
-  tools diet. Default: enabled unless the def says `false`; launches carrying an
-  `AgentContract` enable it only when the def says `true` (`src/runs/foreground/execution.ts`).
-  Disabling it removes only the mutation guard — `structured_output`, perk's floor and the rubric
-  still enforce non-mutation.
+- `completionGuard` WAS the engine's *mutation* guard (`src/runs/shared/completion-guard.ts`): an
+  implementation-shaped task on a mutation-capable child expected a mutation; a mutation-expecting
+  task on a child with no such tool was refused at launch. `bash` counted as mutation-capable, so a
+  report-only def carrying `bash` rode `completionGuard: false` (a real frontmatter field), not a
+  tools diet. Disabling it removed only the mutation guard — `structured_output`, perk's floor and
+  the rubric still enforce non-mutation.
+
+  > **Update (2026-09, pi-subagents 0.70.1):** the completion guard was removed upstream and the
+  > `completionGuard` field is now ignored (not rejected — unlike `fallbackModels`). perk's eleven
+  > report defs no longer carry it; the lane completion contract is the validated
+  > `structured_output` report + perk's restriction floor + the rubric. A 0.68–0.70.0 engine may
+  > still fail a guard-less report lane whose task text reads as implementation.
 
 **Isolation knob.** `context: "fresh"` is a clean session; `"fork"` branches parent history.
 Precedence (`src/shared/fork-context.ts::resolveSubagentLaunchContext`): explicit spawn `context` >
@@ -246,9 +250,17 @@ configured `defaultSubagentContext` > def `defaultContext` > `fresh` (an implici
 persisted parent — `canPreferFork`). An isolation-requiring fan-out passes `context: "fresh"` **per
 spawn** — a def-level default cannot guarantee isolation.
 
-## The 0.67.x host-builtin intersection (doctor `subagent-host-tools`)
+## The 0.67.x host-builtin intersection (historical)
 
-Since 0.67.0 the launch tool plan (`src/runs/shared/child-tool-plan.ts`) intersects a child's
+> **Update (2026-09, pi-subagents 0.70.0/0.70.1):** the host-builtin intersection was REMOVED from
+> `child-tool-plan` in 0.70.0 — a child's declared tools are no longer intersected with the host
+> session's builtins, so pi-fff's mode can no longer fail a lane. perk retired the
+> `PI_FFF_MODE=tools-and-ui` injection at both launch seams (`FFF_MODE_ENV` is gone; pi-fff's own
+> precedence — CLI flag → `PI_FFF_MODE` → `pi-fff.json` → `tools-and-ui` — decides) and the doctor
+> `subagent-host-tools` check with it (`subagent-package-scope` now follows `subagent-compat`
+> directly). The paragraph below describes the 0.67.x–0.69.x mechanics as they were.
+
+From 0.67.0 the launch tool plan (`src/runs/shared/child-tool-plan.ts`) intersects a child's
 declared tools with the HOST session's builtins — in 0.67.x a host tool counted as builtin when its
 `source === "builtin"` OR (`source === "auto"` and its name is in `PI_BUILTIN_TOOL_NAMES`); since
 0.68.0 `getHostBuiltinToolNames` counts any core-named slot regardless of source ("wrapped core
@@ -256,16 +268,16 @@ slots count"), so an extension re-registering `grep`/`find` no longer empties th
 matching `REVIEW_OR_SCOUT_AGENT_PATTERN` (`/\b(?:reviewer|scout)\b/i`) **fail closed at launch**
 when ANY explicitly requested, still-permitted member of `REPOSITORY_INSPECTION_TOOLS` (`read, grep,
 find, ls, bash, powershell`) is host-omitted (excluded or undefined tool lists never fail); every
-other agent silently loses the tool with a `console.warn`-only warning (never in the RPC reply). The trigger is pi-fff's `override` mode re-registering `grep`/`find` as extension tools;
-perk's answer was `PI_FFF_MODE=tools-and-ui` injected at both launch seams
-(`src/perk/run/launch/__init__.py::FFF_MODE_ENV`; `workflow/cold-door-launch.md`,
-`workflow/borrowed-packages.md`), the operator env winning — kept after the fix as a harmless
-additive default (protective on any 0.67.x host; keeps the builtins beside `fffind`/`ffgrep`).
-Doctor's `_subagent_host_tools_check` gates on `_SUBAGENTS_HOST_INTERSECTION_AFFECTED = ("0.67.0",
+other agent silently loses the tool with a `console.warn`-only warning (never in the RPC reply). The trigger was pi-fff's `override` mode re-registering `grep`/`find` as extension tools;
+perk's answer was `PI_FFF_MODE=tools-and-ui` injected at both launch seams (the since-retired
+`src/perk/run/launch/__init__.py::FFF_MODE_ENV`; `workflow/cold-door-launch.md`,
+`workflow/borrowed-packages.md`), the operator env winning — kept after the 0.68.0 fix as a
+harmless additive default until 0.70.0 removed the intersection. Doctor's retired
+`_subagent_host_tools_check` gated on `_SUBAGENTS_HOST_INTERSECTION_AFFECTED = ("0.67.0",
 "0.68.0")` — the range closed by the re-verify how-to once the upstream fix landed; its two `ok`
-arms are distinguishable (below the range: "does not intersect"; at/above 0.68.0: "counts wrapped
-core slots"). The borrowed package is unpinned and refreshes at every pi launch, so the installed
-version can move mid-session.
+arms were distinguishable (below the range: "does not intersect"; at/above 0.68.0: "counts
+wrapped core slots"). The borrowed package is unpinned and refreshes at every pi launch, so the
+installed version can move mid-session.
 
 ## Execution surfaces and structured output
 
@@ -382,7 +394,8 @@ path except Ponytail's manifest-declared preflight root, matched as a **whole pa
 equality** (a prefix-strip check would admit `…/ponytail-evil`; the test carries that control).
 
 **The accepted coverage reduction, stated plainly:** no automated engine-level proof exists that
-`completionGuard: false` still completes a report-only lane, that the runner stamps
+a guard-less report-only lane completes on its validated `structured_output` report (the 0.70.1
+engine has no completion guard to disable), that the runner stamps
 `PI_SUBAGENT_CHILD=1`, or that `extensionBindings` reaches the child env — `run_ci` cannot catch an
 upstream change there. Mitigations: the `subagent-compat` `warn`, the fake-RPC composition
 proofs (`report-waves.md` § "Test machinery"), and the live report wave in the re-verify how-to.
@@ -460,6 +473,12 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
   kept); routine successful child completions stop waking the parent; the bundled `pi-server` copy
   dropped (Pi ≥ 0.85.1 required for background children). Record:
   `docs/design/archive/pi-subagents-0.68.0-reverify.md`.
+- **0.70.0 / 0.70.1 (2026-09)** — the host-builtin intersection removed from `child-tool-plan`
+  (perk's `PI_FFF_MODE` injection and the `subagent-host-tools` doctor check retired); 0.70.1
+  removed the completion mutation guard (`completionGuard` ignored; dropped from every perk report
+  def) and tightened acceptance inference; the Pi 0.87 fork-context repair is NOT in the 0.70.1
+  artifact (perk children stay on `context: "fresh"`). Record:
+  `docs/design/archive/pi-subagents-0.70.1-reverify.md`.
 - **Two-boolean landing** — deleted: the `<active_agent>` prefix parser + `childIdentity.ts`,
   `nativeSessionKey.ts`, the sampled `parentReadOnly` supplier, `ReportWaveRequest.execution`, the
   six-reason classification, the ten-name report-only census.
@@ -490,11 +509,13 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
 - **Re-verify at each bump.** A new installed version silently re-asserts every engine fact here:
   follow `docs/developers/pi-subagents-reverify.md` (source re-read, `just ci`, a live report wave
   from a read-write session, the constant bump + its test pin, an archive record). Body version
-  numbers are event stamps, never currency claims. Guidance baseline (doctor constant): 0.68.0
-  (`docs/design/archive/pi-subagents-0.68.0-reverify.md` — stamped on the source re-read + the
-  doctor half of the leg; the browser-door half was not exercised in that pass). Last source
-  re-read of the mechanics in this doc: the installed 0.68.0 (the package ships its `.ts`
-  sources) — provenance, not a currency promise.
+  numbers are event stamps, never currency claims. Guidance baseline (doctor constant): 0.70.1
+  (`docs/design/archive/pi-subagents-0.70.1-reverify.md` — stamped on the source re-read + the
+  doctor, scout-lane and offline conflict-engine halves of the leg; the browser-door half is owed
+  from the owner's post-submit `/pr-review-browser` run, as it was for 0.68.0). Last source
+  re-read of the mechanics in this doc: the installed 0.70.1 (compiled `src/**/*.js` — the
+  package stopped shipping `.ts` sources at 0.70.0; the anchors survive compilation) —
+  provenance, not a currency promise.
 
 ## Cross-references
 

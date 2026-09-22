@@ -17,10 +17,10 @@ runs on **every** provider call over the full message list).
   decision drive both: retention touches only the owned `customType`, fails CLOSED on an unreadable
   branch, and never removes user turns — "Inject-and-conditionally-strip", "Strip-scope
   discipline: don't strip more than you own".
-- Dedup live delivery against Pi's own projection (`buildContextEntries()` →
-  `sessionEntryToContextMessages`, the typed predicates in `contextEvidence.ts`), never a
-  re-derived window; full-branch scans serve only historical latches — "Dedup against Pi's own
-  live projection".
+- Dedup live delivery against Pi's own projection (`buildSessionProjection().messages` — since
+  Pi 0.87.0 the one projection with compaction selection AND `context_edit` omission/replacement
+  applied; the typed predicates in `contextEvidence.ts`), never a re-derived window; full-branch
+  scans serve only historical latches — "Dedup against Pi's own live projection".
 - Check the submitting `event.prompt` BEFORE the projection read — a cold launch's prompt is not
   yet persisted on the launch turn — "Dedup against Pi's own live projection".
 - The census of injections is source-owned: the `installInjectedContext` call sites and the
@@ -66,12 +66,19 @@ post-compaction re-delivery the model now needs.
 
 perk's first answer was a manual window reconstruction — find the latest compaction, validate its
 kept-entry cutoff, scan serialized entries from there. That machinery was **deleted**. Live-delivery
-dedup now flattens `sessionManager.buildContextEntries()` (the current leaf's compaction-aware
+dedup then flattened `sessionManager.buildContextEntries()` (the current leaf's compaction-aware
 `SessionEntry[]`) through Pi's package-root `sessionEntryToContextMessages` converter, and perk keeps
 only typed predicates in the no-state leaf `extension/pi/v1/contextEvidence.ts`
 (`activeContextMessages`, `contextCarriesMarker`). The durable insight: **prefer the platform's
 projection over re-deriving it** — the whole window machinery existed only because perk rebuilt what
 Pi already computes for every provider call.
+
+> **Update (Pi 0.87.0):** the entries→converter pair was itself a partial re-derivation — it
+> ignored `context_edit` entries, so a copy Pi had omitted or replaced still read as delivered.
+> The leaf now reads `sessionManager.buildSessionProjection().messages` (one read, no converter):
+> Pi's canonical projection applies compaction selection AND context edits, an omitted owned copy
+> re-injects, and a replaced copy counts only while the replacement still carries the marker.
+> Same insight, one level further up the platform.
 
 Evidence is **typed, not serialized**: a marker counts only on `user` content (a cold launch prompt)
 or on `custom` content whose `customType` is exactly the owner's. A compaction/branch summary

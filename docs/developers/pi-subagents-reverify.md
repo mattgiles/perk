@@ -7,9 +7,7 @@ re-verify ritual — never on a version constraint and never on reading the inst
 tests or doctor.
 
 **When to re-verify:** `perk doctor`'s `subagent-compat` check **warns** (installed version ≠
-`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`), its `subagent-host-tools` check **warns** (the installed
-version is in the host-tool-intersection affected range and pi-fff resolves to `override`), or
-you are about to build on new engine mechanics.
+`_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`), or you are about to build on new engine mechanics.
 
 ## Steps
 
@@ -17,10 +15,12 @@ you are about to build on new engine mechanics.
    `src/perk/convergence/doctor/checks.py`:
    `node -p "require('./.pi/npm/node_modules/pi-subagents/package.json').version"`.
 2. **Re-read the source.** The installed package under `.pi/npm/node_modules/pi-subagents/`
-   ships its TypeScript sources (`pi.extensions: ["./index.ts"]`, `src/**/*.ts`) — re-read them
-   in place; if a future release publishes compiled JS instead, read the matching tag of
-   `nicobailon/pi-subagents` (`gh api` / `gh browse`, or a local clone at the tag). Read the
-   release notes for the version either way. Walk each engine mechanic
+   ships compiled JavaScript since 0.70.0 (`pi.extensions: ["./index.js"]`, `src/**/*.js` with
+   `.d.ts` files and source maps; ≤ 0.68.x shipped `src/**/*.ts`) — re-read it in place: the
+   module and function anchors below survive compilation, so `grep -n` over `src/**/*.js` finds
+   them. Fall back to the matching tag of `nicobailon/pi-subagents` (`gh api` / `gh browse`, or a
+   local clone at the tag) only for a fact the compiled output obscures. Read the release notes
+   (the package's `CHANGELOG.md`) for the version either way. Walk each engine mechanic
    `docs/learned/pi/subagents.md` states (its `## Sources` names the baseline):
    - the supervisor channel's `expectsReply` handling in
      `src/intercom/native-supervisor-channel.ts::poll` — progress updates are **discarded** on
@@ -38,9 +38,9 @@ you are about to build on new engine mechanics.
    - the agent-definition parser (`src/agents/agents.ts`, `src/agents/frontmatter.ts`): its
      **removed-field throws** (`uses removed frontmatter field '<name>'` — 0.68.0 rejects
      `fallbackModels`; a new removal fails every shipped def at load and shows up as 0/N
-     waves, so grep `agents/*.md` for the named field) and its `completionGuard: false`
-     handling: a report-only lane must complete on a valid `structured_output` report and still
-     fail a missing/invalid one (`run_ci` cannot catch this);
+     waves, so grep `agents/*.md` for the named field); a report-only lane must complete on a
+     valid `structured_output` report and still fail a missing/invalid one (`run_ci` cannot catch
+     this);
    - **package agent discovery** — perk's `perk.*` defs reach sessions ONLY this way:
      `collectPackageSubagentPaths` (`src/agents/agents.ts`) must still gather the project root
      and every `.pi/npm/node_modules/*` package root, `extractSubagentPathsFromPackageRoot` must
@@ -51,27 +51,36 @@ you are about to build on new engine mechanics.
      (`src/agents/skills.ts`) must keep resolving `skillPath` against `dirname(agent.filePath)`
      and skipping a missing entry (`collectFilesystemSkills`: `if (!fs.existsSync(...)) continue`)
      — the reviewer defs' two-candidate Ponytail `skillPath` depends on both;
-   - the **host-tool intersection**: `getHostBuiltinToolNames` / `resolvePiLaunchToolPlan` /
-     `isReviewOrScoutLaneAgent` in `src/runs/shared/child-tool-plan.ts` and the
-     `hostAvailableBuiltins` call sites in `src/runs/background/async-execution.ts`. The 0.67.x
-     engine counted only builtin-*sourced* host tools, so pi-fff `override` (re-registering
-     `grep`/`find`) failed review/scout-named agents closed at launch; 0.68.0's
-     `getHostBuiltinToolNames` counts wrapped core slots regardless of source. The affected
-     range is closed: `_SUBAGENTS_HOST_INTERSECTION_AFFECTED = ("0.67.0", "0.68.0")` (exact pin
-     `tests/test_doctor.py::test_subagent_host_tools_affected_range_is_pinned`). perk keeps
-     injecting `PI_FFF_MODE=tools-and-ui` (`FFF_MODE_ENV`) as a harmless additive default; if a
-     later release reintroduces a source-classified census, open a NEW range rather than
-     reopening this one.
+   - the **child tool plan** (`src/runs/shared/child-tool-plan.ts`): since 0.70.0 the engine no
+     longer intersects a child's declared tools with the host session's builtins (the 0.67.x
+     `getHostBuiltinToolNames` census that failed review/scout-named agents closed under a
+     pi-fff `override` is gone), so perk injects no `PI_FFF_MODE` and runs no host-tool doctor
+     check; if a later release reintroduces a host-side intersection, that is a new hazard to
+     name, not a reopened one;
+   - the **completion contract**: 0.70.1 removed the completion mutation guard (a def's
+     `completionGuard` is ignored) and tightened acceptance inference — a report lane must still
+     complete on its validated `structured_output` report under `WAVE_ACCEPTANCE`;
+   - the **fork-context repair** for Pi 0.87 (the checkout-only fix): confirm whether the
+     installed artifact carries it; until it does, perk children stay on `context: "fresh"`
+     (the support boundary recorded in `docs/design/pi-subagents-child-execution-policy.md`).
 3. **Run `just ci`.**
 4. **Run the live leg** from a read-write session whose installed pi-subagents is the new
-   version: `perk doctor` (`subagent-compat` warns until the stamp moves; `subagent-host-tools`
-   `ok`), then one `/plan-review-browser` wave and one `/pr-review-browser` wave to N/N coverage
+   version: `perk doctor` (`subagent-compat` warns until the stamp moves; no
+   `subagent-host-tools` row), then one `/plan-review-browser` wave and one `/pr-review-browser`
+   wave to N/N coverage
    — the `perk:wave` marker appears at launch and clears at collection, and the final
    annotations land after `collect_*`. **The stamp moves only on a passing leg**: bump
    `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` and
    `tests/test_doctor.py::test_subagent_compat_verified_version_stamp_is_pinned` together. A
    failed leg is diagnosed, fixed, and re-run once; if it still fails, record the FAIL verdict
    (step 6), leave the stamp where it was (an honest `warn`), and stop for owner diagnosis.
+   **The owner-election arm:** the browser doors are human-in-the-loop, so an implementing agent
+   cannot drive them from its own session. The owner may elect to move the stamp on the source
+   re-read + the doctor/scout/offline halves (done for 0.68.0 and 0.70.1) — an explicit,
+   recorded decision (the plan's `## Assumptions` + the archive record's verdict line), never a
+   default. The record then names the browser-door half as **owed** and the requirements page
+   describes the version as the source-verified guidance baseline, not a live-certified one;
+   the owed half is appended to the record from the first live browser wave on that host.
 5. **Reconcile the prose the same turn.** Statements the new release *falsifies* are swept
    immediately — `shared/contracts.md`, the user docs, and the learned docs alike
    (`docs/learned/pi/subagents.md` — its `## Sources` re-read line, `## History (dated)`, and any
@@ -82,8 +91,8 @@ you are about to build on new engine mechanics.
    `docs/user-docs/reference/cli/setup-and-health.md` if its wording moved.
 6. **Record the evidence**: a dated note in `docs/design/archive/` — the source facts with
    file/function anchors, the decisions, and the live-leg outcome (PASS or FAIL, never omitted).
-   `pi-subagents-native-baseline-dogfood.md` (0.65.1) and `pi-subagents-0.68.0-reverify.md`
-   (0.68.0) are the templates.
+   `pi-subagents-native-baseline-dogfood.md` (0.65.1), `pi-subagents-0.68.0-reverify.md`
+   (0.68.0) and `pi-subagents-0.70.1-reverify.md` (0.70.1) are the templates.
 
 ## The standing pin decision
 

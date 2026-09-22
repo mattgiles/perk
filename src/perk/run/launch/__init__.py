@@ -141,16 +141,6 @@ _NPM_QUIET_ENV = {
     "npm_config_audit": "false",
 }
 
-# perk-launched sessions run the borrowed pi-fff extension in its additive default mode so
-# pi's builtin grep/find stay host-builtins: pi-subagents 0.67.x failed review/scout lanes
-# closed when an extension shadowed grep/find by name (override mode re-registers them under
-# pi-fff's own source); >= 0.68.0 counts wrapped core slots as host builtins, so the injection
-# is a harmless additive default kept for 0.67.x hosts and to keep the builtins beside
-# fffind/ffgrep. Injected-default tier: operator env wins by merge order, so
-# `export PI_FFF_MODE=override` opts back into FFF-as-grep/find — at the cost of that launch
-# failure on a 0.67.x engine (the doctor `subagent-host-tools` check names it).
-FFF_MODE_ENV = {"PI_FFF_MODE": "tools-and-ui"}
-
 
 @dataclass(frozen=True)
 class _LaunchContext:
@@ -706,7 +696,7 @@ def _build_exec_env(
 ) -> dict[str, str]:
     """Build the environment passed to pi without mutating the operator environment.
 
-    Operator npm/FFF choices override perk's defaults. The run identity and CLI version are
+    Operator npm choices override perk's defaults. The run identity and CLI version are
     authoritative launch metadata, so they override conflicting inherited values. A ``None``
     ``run_id`` (a session reopen, which mints nothing) REMOVES an inherited ``PERK_RUN_ID``
     rather than forwarding it — a reopened session that already carries its identity keeps it
@@ -714,12 +704,7 @@ def _build_exec_env(
     the gitignored local-config fallback. Agent-dir precedence is already settled by the caller
     (:func:`resolve_launch_agent_dir`); a supplied path is assigned verbatim.
     """
-    env = {
-        **_NPM_QUIET_ENV,
-        **FFF_MODE_ENV,
-        **environ,
-        "PERK_CLI_VERSION": __version__,
-    }
+    env = {**_NPM_QUIET_ENV, **environ, "PERK_CLI_VERSION": __version__}
     if run_id is None:
         env.pop("PERK_RUN_ID", None)
     else:
@@ -901,7 +886,6 @@ def _emit_dry_run_preview(
 
 
 __all__ = [
-    "FFF_MODE_ENV",
     "_NPM_QUIET_ENV",
     "_PI_AGENT_LOCK_FILES",
     "_WORKTREE_SETUP_TIMEOUT_S",

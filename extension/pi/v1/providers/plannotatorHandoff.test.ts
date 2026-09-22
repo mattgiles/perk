@@ -14,6 +14,7 @@ import type { PlannotatorBus } from "./plannotator.ts";
 import {
   CODE_REVIEW_READINESS_PROBE_PATH,
   type CodeReviewOutcome,
+  type CodeReviewSource,
   decodePrUrl,
   LOCAL_REVIEW_DIFF_TYPE,
   PLAN_REVIEW_READINESS_PROBE_PATH,
@@ -32,6 +33,8 @@ import {
 
 /** The inert activity sink for rows that do not observe the browser-wait activity. */
 const noActivity: ActivitySink = () => () => {};
+/** The PR-mode source most bridge tests open with (the payload shape is pinned separately). */
+const PR_U: CodeReviewSource = { mode: "pr", prUrl: "u" };
 
 /** A minimal in-memory event bus (the fake `pi.events` for the pure bridge tests). */
 function fakeBus(): PlannotatorBus & { handlers: Map<string, ((data: unknown) => void)[]> } {
@@ -57,7 +60,13 @@ function fakeBus(): PlannotatorBus & { handlers: Map<string, ((data: unknown) =>
 interface CodeReviewEnvelope {
   requestId: string;
   action: string;
-  payload: { prUrl?: string; cwd: string; diffType?: string; defaultBranch?: string };
+  payload: {
+    prUrl?: string;
+    cwd: string;
+    diffType?: string;
+    defaultBranch?: string;
+    patchFile?: string;
+  };
   respond: (response: unknown) => void;
 }
 
@@ -72,8 +81,8 @@ test("bridge: code-review request carries action + prUrl; a handled reply maps t
     });
   });
   const outcome = await requestPlannotatorCodeReview(bus, {
-    prUrl: "https://gh/o/r/pull/42",
     cwd: "/repo",
+    source: { mode: "pr", prUrl: "https://gh/o/r/pull/42" },
   });
   assert.equal(seen?.action, "code-review");
   assert.equal(seen?.payload.prUrl, "https://gh/o/r/pull/42");
@@ -96,7 +105,7 @@ test("bridge: approved replies with missing, empty, or blank feedback normalize 
         result: { approved: true, ...fields },
       });
     });
-    const outcome = await requestPlannotatorCodeReview(bus, { prUrl: "u", cwd: "/repo" });
+    const outcome = await requestPlannotatorCodeReview(bus, { cwd: "/repo", source: PR_U });
     assert.deepEqual(outcome, {
       status: "handled",
       approved: true,
@@ -140,7 +149,7 @@ test("bridge: content-carrying annotations decode fields, normalize side, skip m
       },
     });
   });
-  const outcome = await requestPlannotatorCodeReview(bus, { prUrl: "u", cwd: "/repo" });
+  const outcome = await requestPlannotatorCodeReview(bus, { cwd: "/repo", source: PR_U });
   assert.equal(outcome.status, "handled");
   if (outcome.status !== "handled") return;
   assert.equal(outcome.annotationCount, 5, "the raw array length — malformed items counted");
@@ -169,7 +178,7 @@ test("bridge: exit === true decodes into the outcome (the closed-without-feedbac
       result: { approved: false, exit: true },
     });
   });
-  const outcome = await requestPlannotatorCodeReview(bus, { prUrl: "u", cwd: "/repo" });
+  const outcome = await requestPlannotatorCodeReview(bus, { cwd: "/repo", source: PR_U });
   assert.equal(outcome.status, "handled");
   if (outcome.status !== "handled") return;
   assert.equal(outcome.exit, true);
@@ -181,7 +190,7 @@ test("bridge: an `unavailable` reply maps to { status: unavailable, warning }", 
   bus.on("plannotator:request", (data) => {
     (data as CodeReviewEnvelope).respond({ status: "unavailable", error: "no browser" });
   });
-  const outcome = await requestPlannotatorCodeReview(bus, { prUrl: "u", cwd: "/repo" });
+  const outcome = await requestPlannotatorCodeReview(bus, { cwd: "/repo", source: PR_U });
   assert.equal(outcome.status, "unavailable");
   assert.match((outcome as { warning: string }).warning, /unavailable: no browser/);
 });
@@ -195,8 +204,8 @@ test("bridge: an already-aborted signal short-circuits before emitting", async (
   const controller = new AbortController();
   controller.abort();
   const outcome: CodeReviewOutcome = await requestPlannotatorCodeReview(bus, {
-    prUrl: "u",
     cwd: "/repo",
+    source: PR_U,
     signal: controller.signal,
   });
   assert.deepEqual(outcome, { status: "aborted" });
@@ -291,7 +300,7 @@ test("resolveReviewTarget: non-no_pr fail arms pass through message + errorType 
   );
 });
 
-test("bridge: local-mode request pins { cwd, diffType, defaultBranch } and omits prUrl", async () => {
+test("bridge: local-mode request pins { cwd, diffType: since-base, defaultBranch } and omits prUrl", async () => {
   const bus = fakeBus();
   let seen: CodeReviewEnvelope | undefined;
   bus.on("plannotator:request", (data) => {
@@ -300,14 +309,16 @@ test("bridge: local-mode request pins { cwd, diffType, defaultBranch } and omits
   });
   await requestPlannotatorCodeReview(bus, {
     cwd: "/repo",
+    source: { mode: "local", defaultBranch: "main" },
+  });
+  assert.equal(seen?.action, "code-review");
+  // The builder sets the ONE supported local diff type; the arm carries only the base.
+  assert.deepEqual(seen?.payload, {
+    cwd: "/repo",
     diffType: LOCAL_REVIEW_DIFF_TYPE,
     defaultBranch: "main",
   });
-  assert.equal(seen?.action, "code-review");
-  assert.equal(seen?.payload.cwd, "/repo");
-  assert.equal(seen?.payload.diffType, LOCAL_REVIEW_DIFF_TYPE);
-  assert.equal(seen?.payload.defaultBranch, "main");
-  assert.equal(seen !== undefined && "prUrl" in seen.payload, false, "prUrl absent in local mode");
+  assert.equal(LOCAL_REVIEW_DIFF_TYPE, "since-base");
 });
 
 test("bridge: an omitted defaultBranch is ABSENT from the payload (not undefined-valued)", async () => {
@@ -317,12 +328,36 @@ test("bridge: an omitted defaultBranch is ABSENT from the payload (not undefined
     seen = data as CodeReviewEnvelope;
     seen.respond({ status: "handled", result: { approved: true } });
   });
-  await requestPlannotatorCodeReview(bus, { cwd: "/repo", diffType: LOCAL_REVIEW_DIFF_TYPE });
-  assert.equal(
-    seen !== undefined && "defaultBranch" in seen.payload,
-    false,
+  await requestPlannotatorCodeReview(bus, { cwd: "/repo", source: { mode: "local" } });
+  assert.deepEqual(
+    seen?.payload,
+    { cwd: "/repo", diffType: LOCAL_REVIEW_DIFF_TYPE },
     "defaultBranch omitted ⇒ plannotator auto-detects the repo default",
   );
+});
+
+test("bridge: patch-mode request is EXACTLY { cwd, patchFile } — no prUrl, no diffType, no defaultBranch", async () => {
+  const bus = fakeBus();
+  let seen: CodeReviewEnvelope | undefined;
+  bus.on("plannotator:request", (data) => {
+    seen = data as CodeReviewEnvelope;
+    seen.respond({ status: "handled", result: { approved: true } });
+  });
+  await requestPlannotatorCodeReview(bus, {
+    cwd: "/wt/review-42",
+    source: { mode: "patch", patchFile: "/wt/review-42.patch" },
+  });
+  assert.equal(seen?.action, "code-review");
+  assert.deepEqual(seen?.payload, { cwd: "/wt/review-42", patchFile: "/wt/review-42.patch" });
+});
+
+test("CodeReviewSource: a PR source cannot also carry a patchFile (plannotator would silently prefer prUrl)", () => {
+  // @ts-expect-error — the union makes the prUrl+patchFile payload unrepresentable.
+  const both: CodeReviewSource = { mode: "pr", prUrl: "u", patchFile: "/x.patch" };
+  assert.equal(both.mode, "pr");
+  // @ts-expect-error — the local arm carries no diff type (the builder owns it).
+  const localWithType: CodeReviewSource = { mode: "local", diffType: "uncommitted" };
+  assert.equal(localWithType.mode, "local");
 });
 
 // --- outcome routing (exit before the no-feedback "approved" arm) --------------------------------
@@ -642,7 +677,7 @@ test("bridge → routeBrowserRespond: approval guidance reaches the PR/stack sin
               result: { approved: true, feedback: RETRY_LIMIT_NOTE, ...fields },
             });
           });
-          const outcome = await requestPlannotatorCodeReview(bus, { cwd: "/repo" });
+          const outcome = await requestPlannotatorCodeReview(bus, { cwd: "/repo", source: PR_U });
           assert.deepEqual(outcome, {
             status: "handled",
             approved: true,
@@ -721,7 +756,11 @@ test("startPlannotatorBrowser: env preset while probing, PR-mode payload, ready 
   try {
     const started = await startPlannotatorBrowser(
       bus,
-      { prUrl: "https://gh/o/r/pull/77", cwd: "/repo", activity: noActivity },
+      {
+        cwd: "/repo",
+        source: { mode: "pr", prUrl: "https://gh/o/r/pull/77" },
+        activity: noActivity,
+      },
       {
         pickFreePort: () => Promise.resolve(45001),
         probe: (url) => {
@@ -755,7 +794,7 @@ test("startPlannotatorBrowser: probe never true → timeout, env RESTORED-BY-DEL
   try {
     const started = await startPlannotatorBrowser(
       bus,
-      { prUrl: "u", cwd: "/repo", activity: noActivity },
+      { cwd: "/repo", source: PR_U, activity: noActivity },
       {
         pickFreePort: () => Promise.resolve(45002),
         probe: () => Promise.resolve(false),
@@ -771,8 +810,8 @@ test("startPlannotatorBrowser: probe never true → timeout, env RESTORED-BY-DEL
   }
 });
 
-test("startPlannotatorBrowser: local-mode fields render ONLY when defined (the stack shape)", async () => {
-  // The stack door's payload: {cwd, diffType, defaultBranch} — no prUrl key at all. The
+test("startPlannotatorBrowser: the patch source renders the static-patch payload (the stack shape)", async () => {
+  // The stack door's payload: {cwd, patchFile} — no prUrl/diffType/defaultBranch key at all. The
   // PR-mode byte-identity pin is the deepEqual above ({ cwd, prUrl } exactly).
   const bus = fakeBus();
   let seen: CodeReviewEnvelope | undefined;
@@ -783,8 +822,7 @@ test("startPlannotatorBrowser: local-mode fields render ONLY when defined (the s
     bus,
     {
       cwd: "/checkout",
-      diffType: "since-base",
-      defaultBranch: "origin/main",
+      source: { mode: "patch", patchFile: "/checkout.patch" },
       activity: noActivity,
     },
     {
@@ -796,11 +834,28 @@ test("startPlannotatorBrowser: local-mode fields render ONLY when defined (the s
     },
   );
   assert.equal(await started.readiness, "ready");
-  assert.deepEqual(seen?.payload, {
-    cwd: "/checkout",
-    diffType: "since-base",
-    defaultBranch: "origin/main",
+  assert.deepEqual(seen?.payload, { cwd: "/checkout", patchFile: "/checkout.patch" });
+});
+
+test("startPlannotatorBrowser: the pre-PR local source renders { cwd, diffType: since-base, defaultBranch? }", async () => {
+  const bus = fakeBus();
+  let seen: CodeReviewEnvelope | undefined;
+  bus.on("plannotator:request", (data) => {
+    seen = data as CodeReviewEnvelope;
   });
+  const started = await startPlannotatorBrowser(
+    bus,
+    { cwd: "/wt", source: { mode: "local", defaultBranch: "main" }, activity: noActivity },
+    {
+      pickFreePort: () => Promise.resolve(45008),
+      probe: () => Promise.resolve(true),
+      intervalMs: 1,
+      budgetMs: 10,
+      sleep: () => Promise.resolve(),
+    },
+  );
+  assert.equal(await started.readiness, "ready");
+  assert.deepEqual(seen?.payload, { cwd: "/wt", diffType: "since-base", defaultBranch: "main" });
 });
 
 test("startPlannotatorBrowser: early bridge settle stops the poll → bridge_settled", async () => {
@@ -811,7 +866,7 @@ test("startPlannotatorBrowser: early bridge settle stops the poll → bridge_set
   let probes = 0;
   const started = await startPlannotatorBrowser(
     bus,
-    { prUrl: "u", cwd: "/repo", activity: noActivity },
+    { cwd: "/repo", source: PR_U, activity: noActivity },
     {
       pickFreePort: () => Promise.resolve(45003),
       probe: () => {
@@ -835,7 +890,7 @@ test("startPlannotatorBrowser: a turn abort stops the poll → aborted", async (
   let probes = 0;
   const started = await startPlannotatorBrowser(
     bus,
-    { prUrl: "u", cwd: "/repo", signal: controller.signal, activity: noActivity },
+    { cwd: "/repo", source: PR_U, signal: controller.signal, activity: noActivity },
     {
       pickFreePort: () => Promise.resolve(45004),
       probe: () => {
@@ -857,7 +912,7 @@ test("startPlannotatorBrowser: a port-pick failure throws (the caller owns the s
   await assert.rejects(
     startPlannotatorBrowser(
       bus,
-      { prUrl: "u", cwd: "/repo", activity: noActivity },
+      { cwd: "/repo", source: PR_U, activity: noActivity },
       { pickFreePort: () => Promise.reject(new Error("no ports")) },
     ),
     /no ports/,
@@ -1062,7 +1117,7 @@ test("startPlannotatorSurface activity: begun on `ready` while the bridge is pen
       });
       const started = await startPlannotatorBrowser(
         bus,
-        { prUrl: "u", cwd: "/repo", activity: recorder(begins, ends) },
+        { cwd: "/repo", source: PR_U, activity: recorder(begins, ends) },
         { ...fast, pickFreePort: () => Promise.resolve(47002), probe: () => Promise.resolve(true) },
       );
       assert.equal(await started.readiness, "ready");
@@ -1080,7 +1135,7 @@ test("startPlannotatorSurface activity: begun on `ready` while the bridge is pen
       const ends: string[] = [];
       const started = await startPlannotatorBrowser(
         bus,
-        { prUrl: "u", cwd: "/repo", activity: recorder(begins, ends) },
+        { cwd: "/repo", source: PR_U, activity: recorder(begins, ends) },
         {
           ...fast,
           budgetMs: 3,
@@ -1157,7 +1212,7 @@ test("startPlannotatorSurface activity: begun on `ready` while the bridge is pen
       });
       const started = await startPlannotatorBrowser(
         bus,
-        { prUrl: "u", cwd: "/repo", activity: recorder(begins, ends) },
+        { cwd: "/repo", source: PR_U, activity: recorder(begins, ends) },
         {
           ...fast,
           budgetMs: 1000,
@@ -1195,7 +1250,7 @@ test("default probe wiring: each wrapper's default probe fetches its own flavor'
     const codeBus = fakeBus(); // no respond — the review stays open; the probe settles readiness
     const code = await startPlannotatorBrowser(
       codeBus,
-      { prUrl: "u", cwd: "/repo", activity: noActivity },
+      { cwd: "/repo", source: PR_U, activity: noActivity },
       {
         pickFreePort: () => Promise.resolve(46005),
         intervalMs: 1,

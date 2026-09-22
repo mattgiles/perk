@@ -104,7 +104,7 @@ def _reset_launch_banner_guard():
 def isolated_pi_agent_dir(monkeypatch, tmp_path) -> Path:
     """Point pi's agent dir at a throwaway directory for every test.
 
-    doctor's ``subagent-host-tools`` check reads, and the launch lock sweep deletes, files
+    doctor's ``subagent-package-scope`` check reads, and the launch lock sweep deletes, files
     INSIDE the launch-precedence agent dir (``launch_pi_agent_dir``: env → `[pi] agent_dir` →
     ``~/.pi/agent``), so without this the suite would touch the developer's real store. The env
     arm wins the precedence, so setting it here is the hermetic default; tests that exercise the
@@ -115,18 +115,6 @@ def isolated_pi_agent_dir(monkeypatch, tmp_path) -> Path:
     agent_dir = tmp_path / "pi-agent"
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(agent_dir))
     return agent_dir
-
-
-@pytest.fixture(autouse=True)
-def _no_operator_fff_mode(monkeypatch):
-    """Strip a developer shell's ``PI_FFF_MODE`` for every test.
-
-    doctor's ``subagent-host-tools`` check reads the variable at check time (its ``environ``
-    seam defaults to ``os.environ``), so an exported ``PI_FFF_MODE=override`` would flip
-    ``run_doctor`` arms on the developer's machine; tests exercising the env arm pass
-    ``environ=`` or ``setenv`` explicitly.
-    """
-    monkeypatch.delenv("PI_FFF_MODE", raising=False)
 
 
 @pytest.fixture(autouse=True)
