@@ -7,9 +7,9 @@ honestly.
 ## The suites and the gates
 
 Regression coverage lives in two framework suites — **pytest** (`tests/`) and **node:test**
-(`extension/**/*.test.ts`, `docs/site/src/**/*.test.mjs`). Four entrypoints run the Python suite,
-and all four run the **full default Python suite** — every case ordinarily collected from
-`tests/`, slow cases included:
+(`extension/**/*.test.ts`, `docs/site/src/**/*.test.mjs`, `packages/perk-dev/**/*.test.mjs`). Four
+entrypoints run the Python suite, and all four run the **full default Python suite** — every case
+ordinarily collected from `tests/`, slow cases included:
 
 - `just test-py` — pytest alone.
 - `just test` — pytest, then node:test, then the docs-site check.

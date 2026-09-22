@@ -118,6 +118,17 @@ def isolated_pi_agent_dir(monkeypatch, tmp_path) -> Path:
 
 
 @pytest.fixture(autouse=True)
+def _scrub_profile_handoff_env(monkeypatch):
+    """Drop an inherited ``PERK_PROFILE_HANDOFF`` before every test.
+
+    ``exec_pi`` reads the maintainer-only stop-before-exec variable from ``os.environ`` at call
+    time; a developer's exported value would flip every launch test onto the recording arm
+    (exit 0, no exec) and cause phantom failures. Tests exercising the arm ``setenv`` it.
+    """
+    monkeypatch.delenv("PERK_PROFILE_HANDOFF", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _no_interactive_prompts(monkeypatch):
     """Fail fast with a clear message when a test reaches a real interactive prompt.
 

@@ -89,17 +89,17 @@ test-py-fast *args:
 test-py-slow *args:
     uv run pytest -m slow {{args}}
 
-# run the node:test suite (extension TS + docs-site plugin .mjs). Mild 2x core
-# oversubscription: session construction is I/O-bound, so more in-flight files overlap
-# their I/O waits.
+# run the node:test suite (extension TS + docs-site plugin .mjs + the perk-dev module tracer's
+# .mjs smoke). Mild 2x core oversubscription: session construction is I/O-bound, so more
+# in-flight files overlap their I/O waits.
 test-js:
-    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "docs/site/src/**/*.test.mjs"
+    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "docs/site/src/**/*.test.mjs" "packages/perk-dev/**/*.test.mjs"
 
-# run the test suite (python: pytest; extension TS + docs-site .mjs: node:test; docs site:
-# static build + post-build checks)
+# run the test suite (python: pytest; extension TS + docs-site .mjs + perk-dev .mjs: node:test;
+# docs site: static build + post-build checks)
 test *args:
     uv run pytest {{args}}
-    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "docs/site/src/**/*.test.mjs"
+    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts" "docs/site/src/**/*.test.mjs" "packages/perk-dev/**/*.test.mjs"
     npm run docs:check
 
 # build the python wheel + sdist (pinned to perk — perk-dev is never published)

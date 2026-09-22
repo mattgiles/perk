@@ -54,11 +54,14 @@ _SANCTIONED_SUBPROCESS_WRAPPERS = {
     ("git", "_run_captured_bytes"),
 }
 
-# The one sanctioned `subprocess.Popen` site: the prose-review CheckRunner's streaming
-# spawn (app-owned; `perk.substrate.proc` stays blocking-and-capture). Every Popen must
-# pass explicit `cwd=` and `start_new_session=` (the killable-process-group discipline).
+# The sanctioned `subprocess.Popen` sites: the prose-review CheckRunner's streaming spawn and
+# the startup profiler's PTY spawn (both app-owned; `perk.substrate.proc` stays
+# blocking-and-capture — a child on a controlling pseudo-terminal with its stderr on a pipe is
+# not expressible as a captured run). Every Popen must pass explicit `cwd=` and
+# `start_new_session=` (the killable-process-group discipline).
 _SANCTIONED_POPEN_SITES = {
     ("checks", "_spawn"),
+    ("pty_session", "spawn_pty"),
 }
 
 
@@ -91,9 +94,10 @@ def test_subprocess_run_only_in_sanctioned_wrappers_with_check_and_timeout():
     offenders: list[str] = []
     scan_roots = (
         REPO_ROOT / "src" / "perk",
-        # The two deliberate perk-dev exceptions are the CheckRunner's Popen `_spawn`
-        # (sanctioned below) and the GitReader's bytes-mode `_run_captured_bytes`
-        # (sanctioned above); no other perk-dev subprocess literal is permitted.
+        # The three deliberate perk-dev exceptions are the CheckRunner's Popen `_spawn` and
+        # the startup profiler's PTY Popen `spawn_pty` (both sanctioned below) and the
+        # GitReader's bytes-mode `_run_captured_bytes` (sanctioned above); no other perk-dev
+        # subprocess literal is permitted.
         REPO_ROOT / "packages" / "perk-dev" / "src" / "perk_dev",
     )
     for path in sorted(p for root in scan_roots for p in root.rglob("*.py")):

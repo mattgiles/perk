@@ -2,6 +2,7 @@ import dataclasses
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from perk.cli.ensure import UserFacingCliError
 from perk.delivery import DeliveryError, PrepareResult
 from perk.run import launch
 from perk.run.launch import (
+    PROFILE_HANDOFF_ENV,
     LaunchAgentDir,
     _address_prompt,
     _build_exec_env,
@@ -224,6 +226,55 @@ def test_exec_pi_with_run_id_sets_it(tmp_path, monkeypatch, launch_exec_recorder
     monkeypatch.setenv("PERK_RUN_ID", "01INHERITED")
     _exec_pi_direct(tmp_path, launch_exec_recorder, run_id="01X")
     assert launch_exec_recorder.calls[0][2]["PERK_RUN_ID"] == "01X"
+
+
+# --- the maintainer-only stop-before-exec seam (contracts.md §8.72(i)) -------------------------
+
+
+def test_exec_pi_profile_handoff_records_and_exits_without_exec(
+    tmp_path, monkeypatch, launch_exec_recorder
+):
+    assert PROFILE_HANDOFF_ENV == "PERK_PROFILE_HANDOFF"
+    target = tmp_path / "profiles" / "h.json"  # the parent does not exist yet
+    monkeypatch.setenv(PROFILE_HANDOFF_ENV, str(target))
+    with pytest.raises(SystemExit) as exc:
+        _exec_pi_direct(tmp_path, launch_exec_recorder, run_id="01X")
+    after_ns = time.monotonic_ns()
+    assert exc.value.code == 0
+    assert launch_exec_recorder.calls == []  # nothing exec'd
+    assert launch_exec_recorder.chdirs == []  # no chdir either
+    record = json.loads(target.read_text(encoding="utf-8"))
+    assert set(record) == {
+        "schema",
+        "handoff_monotonic_ns",
+        "pid",
+        "pi_path",
+        "argv",
+        "cwd",
+        "env_keys",
+    }
+    assert record["schema"] == 1
+    assert isinstance(record["handoff_monotonic_ns"], int)
+    assert record["handoff_monotonic_ns"] <= after_ns
+    assert record["pid"] == os.getpid()
+    assert record["pi_path"] == launch_exec_recorder.pi_path
+    assert record["argv"] == ["pi", "--resume"]
+    assert record["cwd"] == str(tmp_path / "checkout")
+    assert "PERK_CLI_VERSION" in record["env_keys"]
+    assert record["env_keys"] == sorted(record["env_keys"])
+    # Key names only — the child env's values (the CLI version stamp among them) never leak.
+    assert __version__ not in target.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("value", ["", "   ", "\t"])
+def test_exec_pi_blank_profile_handoff_takes_the_ordinary_exec_path(
+    tmp_path, monkeypatch, launch_exec_recorder, value
+):
+    monkeypatch.setenv(PROFILE_HANDOFF_ENV, value)
+    checkout = _exec_pi_direct(tmp_path, launch_exec_recorder, run_id="01X")
+    assert launch_exec_recorder.chdirs == [checkout]
+    assert len(launch_exec_recorder.calls) == 1
+    assert not any(p.suffix == ".json" for p in tmp_path.rglob("*") if p.is_file())
 
 
 def _launch_agent_dir_plan(root, *, dry_run=False):

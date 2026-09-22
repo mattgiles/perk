@@ -13163,3 +13163,28 @@ untrusted ones in a contained environment; perk's `[pi] agent_dir` git-safety gu
 credentials from being committed, not the operator from an untrusted clone. Hardening the seam
 itself — e.g. honoring a COMMITTED redirect only for a project Pi already trusts, or only from
 the gitignored `local.toml` — is a cross-door decision outside this section.
+
+### (i) The maintainer-only stop-before-exec seam (`PERK_PROFILE_HANDOFF`)
+
+The one shared executor `exec_pi` carries a **profiling instrument, not an operator surface**:
+when `PERK_PROFILE_HANDOFF=<file>` is set to a non-blank value, `exec_pi` runs every pre-exec phase
+as usual — the pre-chdir absolute `pi` resolution, the child-env build (`_build_exec_env`), the
+stale agent-lock sweep — and then, immediately before the `chdir` + `exec` that would otherwise
+follow, **records the handoff and exits `0` without exec'ing pi**: it writes `<file>` (parents
+created) as a JSON object with exactly the keys `schema` (`1`), `handoff_monotonic_ns` (a
+`time.monotonic_ns()` stamp taken as the FIRST statement of the recording — the instant that
+stands for the exec; `CLOCK_MONOTONIC` is system-wide, so a harness that stamped its spawn with the
+same clock may subtract across processes), `pid`, `pi_path` (the resolved absolute executable),
+`argv` (the full pi argv as a list), `cwd` (the checkout the exec would have entered), and
+`env_keys` (the child env's key NAMES, sorted — never values; the env carries `LINEAR_API_KEY`);
+prints ONE stderr line (`PERK_PROFILE_HANDOFF set — recorded the Pi handoff to <file>; exiting
+without launching pi`); and raises `SystemExit(0)`. No `chdir`, no exec, no operator-env mutation
+happen on the recording arm; a blank / whitespace-only value takes the ordinary exec path. Because
+every cold-local launch that reaches `exec_pi` routes through this one pipeline, the arm applies
+identically to the plain session, every staged launch (`_exec_pi`), and `perk resume`. Why it
+exists: the plain path ends in `os.execvpe`, so no in-process profiler survives into pi — this arm
+is the only exact Python→Pi handoff mark, and it lets `cProfile` / `python -X importtime` wrap a
+real launch (cProfile's runner swallows `SystemExit` and still dumps its stats). Timing samples
+never set the variable; its only consumer and its documentation are `perk-dev profile-startup`
+(the harness scrubs and re-sets it per profiled arm) and `docs/developers/profiling-startup.md` —
+there is no `docs/user-docs/` or `perk-expert` row for it, the same posture as `PERK_CLI_VERSION`.

@@ -46,8 +46,9 @@ def _recipe_body(name: str) -> str:
 
 def test_root_package_scripts_cover_the_docs_site():
     scripts = json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))["scripts"]
-    # Site lint coverage pre-delivered by node 2.1 — verified here, not re-wired.
-    assert scripts["lint"] == "biome check extension docs/site tools"
+    # Site lint coverage is verified here, not re-wired; `packages/perk-dev` rides along for the
+    # startup profiler's module tracer (.mjs) and its node:test smoke.
+    assert scripts["lint"] == "biome check extension docs/site tools packages/perk-dev"
     assert scripts["docs:typecheck"] == "npm run typecheck --workspace docs/site"
     assert scripts["docs:check"] == "npm run check --workspace docs/site"
 

@@ -1,0 +1,310 @@
+{
+  "schema": 1,
+  "started_at": "2026-01-01T00:00:00+00:00",
+  "finished_at": "2026-01-01T00:05:00+00:00",
+  "tool": {
+    "perk_version": "3.6.0",
+    "perk_dev_head": "ffffffffffffffffffffffffffffffffffffffff"
+  },
+  "host": {
+    "platform": "macOS-15.0-arm64",
+    "machine": "arm64",
+    "cpu_count": 12
+  },
+  "options": {
+    "runs": 4,
+    "timeout_s": 180.0,
+    "exit_grace_s": 10.0,
+    "pty_size": {
+      "cols": 120,
+      "rows": 40
+    },
+    "profiles": true
+  },
+  "env": {
+    "injected": {
+      "PI_STARTUP_BENCHMARK": "1",
+      "PI_TIMING": "1",
+      "PI_OFFLINE": "1"
+    },
+    "removed": [
+      "PERK_RUN_ID",
+      "PERK_PROFILE_HANDOFF",
+      "PERK_MODULE_CENSUS_DIR",
+      "NODE_OPTIONS"
+    ],
+    "operator_node_options": "--max-old-space-size=8192"
+  },
+  "subjects": [
+    {
+      "label": "a",
+      "checkout": "/checkouts/a",
+      "stamp": {
+        "head": "aaaaaaaaaa000000000000000000000000000000",
+        "dirty": false,
+        "perk_version": "perk 3.6.0",
+        "pi_version": "0.87.0",
+        "pi_path": "/opt/node/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
+        "node_version": "v26.3.0",
+        "packages": {
+          "pi-subagents": "0.70.1",
+          "pi-web-access": null
+        },
+        "sdk_copies": [
+          {
+            "name": "@earendil-works/pi-coding-agent",
+            "root": "/checkouts/a/node_modules/@earendil-works/pi-coding-agent",
+            "version": "0.87.0"
+          }
+        ],
+        "agent_dir": "/checkouts/main/.pi/agent",
+        "agent_dir_source": "config",
+        "trusted_by": "trusted_by=/checkouts"
+      },
+      "first_run": {
+        "index": 0,
+        "elapsed_ms": 2000.0,
+        "exit_ms": 2400.0,
+        "exit_code": 0,
+        "timed_out": false,
+        "lingered": false,
+        "failed": false,
+        "failure": null,
+        "pi_main_total_ms": 1500,
+        "pre_pi_remainder_ms": 500.0,
+        "extension_rows": [
+          {
+            "label": "/repo/.pi/npm/node_modules/@mgiles/perk/extension/index.ts module import",
+            "ms": 40
+          },
+          {
+            "label": "/repo/.pi/npm/node_modules/@mgiles/perk/extension/index.ts factory",
+            "ms": 4
+          }
+        ],
+        "groups": {
+          "extensions": {
+            "rows": [
+              {
+                "label": "/repo/.pi/npm/node_modules/@mgiles/perk/extension/index.ts module import",
+                "ms": 40
+              },
+              {
+                "label": "/repo/.pi/npm/node_modules/@mgiles/perk/extension/index.ts factory",
+                "ms": 4
+              }
+            ],
+            "total_ms": 44
+          },
+          "main": {
+            "rows": [
+              {
+                "label": "imports",
+                "ms": 500
+              },
+              {
+                "label": "createAgentSession",
+                "ms": 1000
+              }
+            ],
+            "total_ms": 1500
+          }
+        }
+      },
+      "samples": {
+        "count": 4,
+        "failed": 1,
+        "elapsed_ms": {
+          "median": 1100.0,
+          "min": 1000.0,
+          "max": 1300.0,
+          "count": 3
+        },
+        "pi_main_total_ms": {
+          "median": 750.0,
+          "min": 700.0,
+          "max": 800.0,
+          "count": 3
+        },
+        "pre_pi_remainder_ms": {
+          "median": 350.0,
+          "min": 300.0,
+          "max": 500.0,
+          "count": 3
+        }
+      },
+      "extension_rows": [
+        {
+          "label": "/repo/.pi/npm/node_modules/@mgiles/perk/extension/index.ts module import",
+          "stats": {
+            "median": 44.0,
+            "min": 40.0,
+            "max": 60.0,
+            "count": 3
+          }
+        },
+        {
+          "label": "/repo/.pi/npm/node_modules/@mgiles/perk/extension/index.ts factory",
+          "stats": {
+            "median": 4.0,
+            "min": 4.0,
+            "max": 6.0,
+            "count": 3
+          }
+        }
+      ],
+      "handoff": {
+        "handoff_ms": 123.456,
+        "arms": {
+          "direct": {
+            "status": "ok",
+            "exit_code": 0,
+            "timed_out": false,
+            "record_present": true,
+            "output_present": true
+          },
+          "cprofile": {
+            "status": "ok",
+            "exit_code": 0,
+            "timed_out": false,
+            "record_present": true,
+            "output_present": true
+          },
+          "importtime": {
+            "status": "no_record",
+            "exit_code": 0,
+            "timed_out": false,
+            "record_present": false,
+            "output_present": true
+          }
+        }
+      },
+      "census": {
+        "status": "ok",
+        "exit_code": -15,
+        "timed_out": false,
+        "lingered": true,
+        "marker_seen": true,
+        "hooks_supported": true,
+        "main_pid": 4242,
+        "process_files": 2,
+        "cpu_profiles": [
+          "CPU.20260101.000000.4242.0.001.cpuprofile"
+        ],
+        "summary": {
+          "main_pid": 4242,
+          "distinct_modules": 1500,
+          "builtin_modules": 60,
+          "host_modules": 900,
+          "by_package": {
+            "@earendil-works/pi-coding-agent": 300,
+            "pi-subagents": 240
+          },
+          "sdk_outside_host": {
+            "@earendil-works/pi-coding-agent": 300
+          },
+          "sdk_outside_host_total": 300,
+          "sdk_outside_host_roots": [
+            {
+              "name": "@earendil-works/pi-coding-agent",
+              "root": "/checkouts/a/node_modules/@earendil-works/pi-coding-agent",
+              "version": "0.87.0",
+              "modules": 300
+            }
+          ]
+        },
+        "failure": null
+      }
+    },
+    {
+      "label": "b",
+      "checkout": "/checkouts/b",
+      "stamp": {
+        "head": "bbbbbbbbbb000000000000000000000000000000",
+        "dirty": false,
+        "perk_version": "perk 3.6.0",
+        "pi_version": "0.87.0",
+        "pi_path": "/opt/node/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
+        "node_version": "v26.3.0",
+        "packages": {
+          "pi-subagents": "0.70.1",
+          "pi-web-access": null
+        },
+        "sdk_copies": [
+          {
+            "name": "@earendil-works/pi-coding-agent",
+            "root": "/checkouts/b/node_modules/@earendil-works/pi-coding-agent",
+            "version": "0.87.0"
+          }
+        ],
+        "agent_dir": "/checkouts/main/.pi/agent",
+        "agent_dir_source": "config",
+        "trusted_by": "trusted_by=/checkouts"
+      },
+      "first_run": null,
+      "samples": {
+        "count": 2,
+        "failed": 0,
+        "elapsed_ms": {
+          "median": 925.0,
+          "min": 900.0,
+          "max": 950.0,
+          "count": 2
+        },
+        "pi_main_total_ms": {
+          "median": 625.0,
+          "min": 600.0,
+          "max": 650.0,
+          "count": 2
+        },
+        "pre_pi_remainder_ms": {
+          "median": 300.0,
+          "min": 300.0,
+          "max": 300.0,
+          "count": 2
+        }
+      },
+      "extension_rows": [
+        {
+          "label": "/repo/.pi/npm/node_modules/@mgiles/perk/extension/index.ts module import",
+          "stats": {
+            "median": 40.0,
+            "min": 40.0,
+            "max": 40.0,
+            "count": 2
+          }
+        },
+        {
+          "label": "/repo/.pi/npm/node_modules/@mgiles/perk/extension/index.ts factory",
+          "stats": {
+            "median": 4.0,
+            "min": 4.0,
+            "max": 4.0,
+            "count": 2
+          }
+        }
+      ],
+      "handoff": null,
+      "census": null
+    }
+  ],
+  "deltas": {
+    "first": "a",
+    "second": "b",
+    "metrics": {
+      "elapsed_ms": {
+        "delta_ms": -175.0,
+        "delta_pct": -15.909090909090908
+      },
+      "pi_main_total_ms": {
+        "delta_ms": -125.0,
+        "delta_pct": -16.666666666666664
+      },
+      "pre_pi_remainder_ms": {
+        "delta_ms": -50.0,
+        "delta_pct": -14.285714285714285
+      },
+      "handoff_ms": null
+    }
+  }
+}
