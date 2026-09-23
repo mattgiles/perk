@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { formatSkillsForPrompt, type Skill, type ToolInfo } from "@earendil-works/pi-coding-agent";
 import { BINDING_HEADER } from "../../substrate/bindingDelivery.ts";
+import type { BridgeStatus } from "../../substrate/nativeSdkBridge.ts";
 import { REPORT_DETAIL_TYPE } from "../../surfaces/surfaces.ts";
 import { loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
 import {
@@ -20,6 +21,16 @@ import {
   renderCensus,
   toolsCensus,
 } from "./selfcheck.ts";
+
+/** An inert bridge status for the pure report/census twins (the harness proves the real one). */
+const NO_BRIDGE: BridgeStatus = {
+  state: "unsupported:embedded-host",
+  hostEntry: null,
+  roots: [],
+  specifiers: 0,
+  reused: false,
+  detail: "",
+};
 
 // ---------------------------------------------------------------------------
 // Pure: ambientIndexProbe
@@ -98,12 +109,32 @@ test("buildSelfcheckReport: all wired → ok + info", () => {
       appendSystemPrompt: `head\n\n${index}`,
       contextFiles: [{ path: "AGENTS.md", content: MANAGED_AGENTS_MARKER }],
     },
+    bridge: NO_BRIDGE,
   });
   assert.equal(report.ok, true);
   assert.equal(report.level, "info");
   assert.match(report.summary, /^1\.2\.3: ok/);
   assert.match(report.summary, /ambient=reached/);
   assert.match(report.summary, /agents=reached/);
+  assert.match(report.summary, /; bridge=unsupported:embedded-host$/);
+  assert.equal(report.bridge, NO_BRIDGE);
+});
+
+test("buildSelfcheckReport: the bridge state never affects ok/level", () => {
+  const index = "# routing index";
+  const report = buildSelfcheckReport({
+    version: "1.0.0",
+    sharedOk: true,
+    onDiskIndex: index,
+    options: {
+      appendSystemPrompt: index,
+      contextFiles: [{ path: "AGENTS.md", content: MANAGED_AGENTS_MARKER }],
+    },
+    bridge: { ...NO_BRIDGE, state: "failed:register-hooks", detail: "boom" },
+  });
+  assert.equal(report.ok, true);
+  assert.equal(report.level, "info");
+  assert.match(report.summary, /; bridge=failed:register-hooks$/);
 });
 
 test("buildSelfcheckReport: ambient on disk but absent from prompt → gap + warning", () => {
@@ -115,6 +146,7 @@ test("buildSelfcheckReport: ambient on disk but absent from prompt → gap + war
       appendSystemPrompt: "unrelated",
       contextFiles: [{ path: "AGENTS.md", content: MANAGED_AGENTS_MARKER }],
     },
+    bridge: NO_BRIDGE,
   });
   assert.equal(report.ok, false);
   assert.equal(report.level, "warning");
@@ -128,6 +160,7 @@ test("buildSelfcheckReport: managed AGENTS block missing → gap", () => {
     sharedOk: true,
     onDiskIndex: null,
     options: { appendSystemPrompt: "x", contextFiles: [{ path: "AGENTS.md", content: "plain" }] },
+    bridge: NO_BRIDGE,
   });
   assert.equal(report.ok, false);
   assert.match(report.summary, /agents=MISSING/);
@@ -143,6 +176,7 @@ test("buildSelfcheckReport: shared miss fails ok even when context is wired", ()
       appendSystemPrompt: index,
       contextFiles: [{ path: "AGENTS.md", content: MANAGED_AGENTS_MARKER }],
     },
+    bridge: NO_BRIDGE,
   });
   assert.equal(report.ok, false);
   assert.match(report.summary, /shared=miss/);
@@ -154,6 +188,7 @@ test("buildSelfcheckReport: undefined options (prompt not yet built) → gap, no
     sharedOk: true,
     onDiskIndex: null,
     options: undefined,
+    bridge: NO_BRIDGE,
   });
   assert.equal(report.ok, false);
   assert.equal(report.agents.reachedPrompt, false);
@@ -340,6 +375,14 @@ test("renderCensus: full block pins the line grammar", () => {
       otherCustomMessages: { copies: 0, totalChars: 0 },
       bindingHeaderCopies: 2,
     },
+    {
+      state: "installed",
+      hostEntry: "/pi/dist/index.js",
+      roots: ["/repo/consumers/pi-subagents", "/repo/consumers/pi-web-access"],
+      specifiers: 7,
+      reused: true,
+      detail: "",
+    },
   );
   assert.equal(
     block,
@@ -353,6 +396,9 @@ test("renderCensus: full block pins the line grammar", () => {
       "    per source: builtin=20 (50000c); perk=4 (11234c)",
       "  branch: 142 entries; binding-header-copies=2",
       "    perk contexts: perk:binding-context ×1 (900c); perk:mode-context ×3 (14400c); other custom_message ×0 (0c)",
+      "  native sdk bridge: installed (roots=2, specifiers=7, reused)",
+      "    host: /pi/dist/index.js",
+      "    roots: 2 — /repo/consumers/pi-subagents, /repo/consumers/pi-web-access",
     ].join("\n"),
   );
 });
@@ -374,6 +420,7 @@ test("renderCensus: custom base prompt, empty surfaces → none/omitted segments
       otherCustomMessages: { copies: 1, totalChars: 12 },
       bindingHeaderCopies: 0,
     },
+    { ...NO_BRIDGE, state: "failed:host-entry", detail: "no entry" },
   );
   assert.equal(
     block,
@@ -386,6 +433,9 @@ test("renderCensus: custom base prompt, empty surfaces → none/omitted segments
       "  tools: 0 active / 0 registered; schemas=0c; guidelines=0c; snippets=0c",
       "  branch: 3 entries; binding-header-copies=0",
       "    perk contexts: none; other custom_message ×1 (12c)",
+      "  native sdk bridge: failed:host-entry — no entry",
+      "    host: -",
+      "    roots: 0",
     ].join("\n"),
   );
 });
@@ -453,6 +503,13 @@ test("selfcheck (live): the report-detail entry carries the census block", async
     assert.match(text, /append-system-prompt: \d+c/);
     assert.match(text, /tools: \d+ active \/ \d+ registered/);
     assert.match(text, /branch: \d+ entries; binding-header-copies=\d+/);
+    // The harness binds the factory in the test process (argv[1] is the test runner, not a Pi
+    // CLI), so the bridge is the inert embedded-host state — and registers no hook.
+    assert.match(msg, /; bridge=unsupported:embedded-host/);
+    assert.match(
+      text,
+      /\n {2}native sdk bridge: unsupported:embedded-host\n {4}host: -\n {4}roots: 0/,
+    );
   } finally {
     h.dispose();
   }

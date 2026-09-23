@@ -15,8 +15,8 @@
 //
 // The same report additionally carries a per-surface payload CENSUS — derived counts/chars for
 // `appendSystemPrompt`, `contextFiles`, the skills catalog section, the active tool definitions,
-// and perk-injected `custom_message` branch context. Report-only: the census never affects the
-// ok/level verdict (contracts.md §8.7).
+// and perk-injected `custom_message` branch context, plus the host-SDK bridge state (§8.73).
+// Report-only: the census never affects the ok/level verdict (contracts.md §8.7).
 //
 // Sensitivity: `getSystemPromptOptions()` exposes the full system-prompt construction inputs. This
 // module logs ONLY derived output — identifiers (paths, skill/tool names, source strings,
@@ -32,6 +32,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { BINDING_HEADER } from "../../substrate/bindingDelivery.ts";
 import { registerPerkCommand } from "../../substrate/command.ts";
+import { type BridgeStatus, describeBridge } from "../../substrate/nativeSdkBridge.ts";
 import { branchOf } from "../../substrate/workflowState.ts";
 import { report as reportTo } from "../../surfaces/report.ts";
 
@@ -121,6 +122,8 @@ export interface SelfcheckReport {
   sharedOk: boolean;
   ambient: AmbientIndexProbe;
   agents: ManagedAgentsProbe;
+  /** The host-SDK bridge state of this activation (report-only; never affects ok/level). */
+  bridge: BridgeStatus;
   /** Everything the session needs is wired through to the prompt. */
   ok: boolean;
   /** One-line, content-free summary (safe to surface in UI/logs). */
@@ -134,8 +137,9 @@ export function buildSelfcheckReport(input: {
   sharedOk: boolean;
   onDiskIndex: string | null;
   options: SystemPromptProbeInput | undefined;
+  bridge: BridgeStatus;
 }): SelfcheckReport {
-  const { version, sharedOk, onDiskIndex, options } = input;
+  const { version, sharedOk, onDiskIndex, options, bridge } = input;
   const ambient = ambientIndexProbe(onDiskIndex, options?.appendSystemPrompt);
   const agents = managedAgentsProbe(options?.contextFiles);
   const ok = sharedOk && ambient.wired && agents.reachedPrompt;
@@ -144,8 +148,18 @@ export function buildSelfcheckReport(input: {
     `shared=${sharedOk ? "ok" : "miss"}; ` +
     `ambient=${ambient.onDisk ? (ambient.reachedPrompt ? "reached" : "MISSING") : "none"} ` +
     `(append=${ambient.promptChars}c); ` +
-    `agents=${agents.reachedPrompt ? "reached" : "MISSING"} (files=${agents.contextFileCount})`;
-  return { version, sharedOk, ambient, agents, ok, summary, level: ok ? "info" : "warning" };
+    `agents=${agents.reachedPrompt ? "reached" : "MISSING"} (files=${agents.contextFileCount}); ` +
+    `bridge=${bridge.state}`;
+  return {
+    version,
+    sharedOk,
+    ambient,
+    agents,
+    bridge,
+    ok,
+    summary,
+    level: ok ? "info" : "warning",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -309,12 +323,15 @@ export function branchContextCensus(entries: readonly CensusBranchEntry[]): Bran
 /**
  * Render the census as a fixed multi-line block. The line grammar (the `census:` /
  * `append-system-prompt:` / `context-files:` / `skills:` / `tools:` / `per source:` / `branch:` /
- * `perk contexts:` keys) is stable — the closing audit diffs against these exact keys.
+ * `perk contexts:` / `native sdk bridge:` keys) is stable — the closing audit diffs against these
+ * exact keys. The bridge block carries `describeBridge`, the host entry (or `-`) and the root
+ * paths — identifiers only.
  */
 export function renderCensus(
   prompt: PromptCensus,
   tools: ToolsCensus,
   branch: BranchContextCensus,
+  bridge: BridgeStatus,
 ): string {
   const lines: string[] = ["census:"];
   lines.push(
@@ -353,6 +370,12 @@ export function renderCensus(
     `    perk contexts: ${perkSegment}; other custom_message ` +
       `×${branch.otherCustomMessages.copies} (${branch.otherCustomMessages.totalChars}c)`,
   );
+  lines.push(`  native sdk bridge: ${describeBridge(bridge)}`);
+  lines.push(`    host: ${bridge.hostEntry ?? "-"}`);
+  lines.push(
+    `    roots: ${bridge.roots.length}` +
+      (bridge.roots.length > 0 ? ` — ${bridge.roots.join(", ")}` : ""),
+  );
   return lines.join("\n");
 }
 
@@ -362,7 +385,7 @@ export function renderCensus(
  */
 export function registerSelfcheck(
   pi: ExtensionAPI,
-  opts: { version: string; sharedOk: boolean },
+  opts: { version: string; sharedOk: boolean; bridge: BridgeStatus },
 ): void {
   registerPerkCommand(pi, "perk-selfcheck", {
     description:
@@ -374,6 +397,7 @@ export function registerSelfcheck(
         sharedOk: opts.sharedOk,
         onDiskIndex: readAmbientIndex(ctx.cwd),
         options,
+        bridge: opts.bridge,
       });
       // The census is report-only: it rides the same report but never affects ok/level. A command
       // doesn't fire `before_agent_start`, so the branch reads as of the last completed turn.
@@ -381,6 +405,7 @@ export function registerSelfcheck(
         promptCensus(options),
         toolsCensus(pi.getAllTools(), pi.getActiveTools()),
         branchContextCensus(branchOf(ctx)),
+        opts.bridge,
       );
       // Headless-safe: report() surfaces the derived counts/identifiers (never raw prompt content).
       reportTo(ctx, "selfcheck", report.level, `${report.summary}\n${census}`);
