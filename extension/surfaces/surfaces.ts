@@ -3,7 +3,9 @@
 // status slot key, footer identity marks, the §5 glyph + theming vocabulary, the §4 height
 // bounds, the `createPerkStatus` status handle, and the pure format helpers the standing
 // surfaces render with. The notify seam itself stays in `report.ts` (re-exported here so "the
-// surfaces module" is surfaces.ts + report.ts for the surfaces guard).
+// surfaces module" is surfaces.ts + report.ts for the surfaces guard). The host-SDK bridge
+// captures the host pi-tui namespace through this module (`hostPiTui`), so pi-tui stays confined
+// here.
 //
 // Perk status (charter §6 D2): perk presents ONE footer status under the single
 // `perk` slot — the objective segment composed with the ref-counted activity facet
@@ -15,6 +17,8 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ReportDetailSink } from "./report.ts";
 
+// The whole host pi-tui namespace, for the host-SDK bridge's facade (substrate/hostSdk.ts).
+export * as hostPiTui from "@earendil-works/pi-tui";
 // `Key` is keybinding vocabulary (`pi.registerShortcut(Key.ctrlAlt("p"), …)`), not rich UI —
 // re-exported so pi-tui imports stay structurally confined to the surfaces module (the
 // surfacesGuard pi-tui import rule) without allowlisting the shortcut-registering modules.
