@@ -211,12 +211,13 @@ needs no configuration.
 
 To turn it off: `PERK_DISABLE_NATIVE_SDK_BRIDGE=1 perk <stage>` (or export it before `pi`). The
 value is read **once per process**, at perk's first activation — `/reload` and session replacement
-keep whatever was decided; quit and relaunch to change it. Only the exact value `1` disables;
-`0`, `true` or an empty value leave the bridge on.
+keep whatever was decided; quit and relaunch to change it. Only the value `1` disables (surrounding
+whitespace is ignored); `0`, `true` or an empty value leave the bridge on.
 
 Compatibility: the bridge is inert (never a failure) wherever it cannot apply — Bun or compiled Pi
 builds, embedded SDK hosts and test runners (no Pi package around the entry), a repo with neither
-package installed (`skipped:no-consumers`). Packages Pi loads **before** perk stay unbridged and
+package installed (`skipped:no-consumers`; with one installed, that one is bridged and the other
+is noted in the selfcheck detail). Packages Pi loads **before** perk stay unbridged and
 load their own SDK copies: user-scope `packages` (`~/.pi/agent/settings.json`), agent-dir
 `extensions`, `pi -e` extensions, and a project `.pi/settings.json` that lists perk after one of
 the two (which `perk doctor --fix` repairs — see the `settings-wiring` order rule in
@@ -226,9 +227,11 @@ no launcher preload and never touches `NODE_OPTIONS`.
 Where to look: `/perk-selfcheck` prints `bridge=<state>` in its summary line and a
 `native sdk bridge:` census block (the SDK entry perk found, the bridged package roots) —
 `installed`, `disabled`, `skipped:no-consumers`, or an `unsupported:*` reason. A
-`perk: sdk bridge — …` warning at session start means an install was **declined** (another perk
-copy in the process already bridged a different Pi entry) or **failed** (the message names the
-step); the two packages then load their own SDK copies for that session while perk runs normally.
+`perk: sdk bridge — …` warning at session start means one of two things, and perk runs normally
+either way: **failed** (the message names the step) — this perk copy installed no bridge and the
+two packages load their own SDK copies for that session; **declined** — another perk copy in the
+same process already bridged a different Pi entry (or another bridge version), that earlier bridge
+stays active for the packages it already serves, and this copy installed none.
 
 ## Keep pi-subagents out of user-scope settings (`subagent-package-scope`)
 

@@ -403,8 +403,8 @@ check the root export list before importing a Pi type by name; mirror/derive dee
   `dist/core/{model-registry,model-runtime,settings-manager}.js`, `dist/core/model-resolver.d.ts`,
   `dist/core/compaction/compaction.js`, `dist/modes/rpc/*`, and the nested `@earendil-works/pi-ai`
   (`package.json` `exports`, `dist/compat.d.ts`) — at the version `package.json` `devDependencies`
-  pins. The five `@earendil-works/*` pins move in lockstep
-  (`tests/test_packaging.py::test_pi_toolchain_pin_lockstep`), so the pin is the single version
+  pins. The `@earendil-works/*` devDependency pins move in lockstep (the set
+  `tests/test_packaging.py::test_pi_toolchain_pin_lockstep` enforces), so the pin is the single version
   truth for every dist-scoped fact here; body version numbers ("pi 0.84 replaced …") are event
   stamps, never currency claims.
 - **Re-verify at each pin bump — a bump is a session-construction migration audit** (its own

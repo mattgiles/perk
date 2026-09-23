@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
+import { extractSpecifiers } from "./testing/importGraph.ts";
 
 // The surfaces module: the only files allowed to make rich-UI calls (see the surfaces.ts header —
 // "the surfaces module" is surfaces.ts + report.ts for this node-4.1 guard).
@@ -18,6 +19,12 @@ const SURFACES_MODULE = ["surfaces/report.ts", "surfaces/surfaces.ts"];
 
 // Named so the pattern-matches-the-seam self-check below exercises the SAME regex the rule uses.
 const PI_TUI_IMPORT = /["']@earendil-works\/pi-tui["']/;
+const PI_TUI_SPECIFIER = "@earendil-works/pi-tui";
+
+// Files exempt from the pi-tui LINE regex because they carry the specifier as data (the host-SDK
+// bridge's census + captured-namespace key). Each is held to an import-aware rule instead: the
+// bridge imports node builtins only, and hostSdk.ts reaches pi-tui only through surfaces.ts.
+const DATA_ONLY_PI_TUI_FILES = ["substrate/nativeSdkBridge.ts", "substrate/hostSdk.ts"];
 
 // pattern → allowlist of relative paths. The `.`-prefixed patterns intentionally match
 // call/member sites only — structural-type DECLARATIONS like `setStatus(slot: string, …): void;`
@@ -42,17 +49,16 @@ const RULES: { pattern: RegExp; allowlist: string[] }[] = [
   // confined to the surfaces module, which re-exports the vocabulary other modules need (`Key`,
   // renderer helpers). The two vendor/btw files are the charter's named D6 `ctx.ui.custom`
   // exception (§6): real pi-tui components for the sanctioned human-only overlay. The two
-  // host-SDK bridge files name the pi-tui specifier as DATA — the redirected census entry and
-  // its captured-namespace key — never as an import: the bridge imports node builtins only
-  // (bareImportGuard) and hostSdk.ts takes the pi-tui namespace through the surfaces re-export.
+  // host-SDK bridge files (`DATA_ONLY_PI_TUI_FILES`) name the pi-tui specifier as DATA — the
+  // redirected census entry and its captured-namespace key — never as an import; the line regex
+  // cannot tell the two apart, so the import-aware test below lexes their real specifiers.
   {
     pattern: PI_TUI_IMPORT,
     allowlist: [
       ...SURFACES_MODULE,
       "vendor/btw/btw.ts",
       "vendor/btw/core.ts",
-      "substrate/nativeSdkBridge.ts",
-      "substrate/hostSdk.ts",
+      ...DATA_ONLY_PI_TUI_FILES,
     ],
   },
 ];
@@ -148,5 +154,33 @@ test("setWorkingIndicator is never called (charter D5 rescinded)", () => {
     [],
     `setWorkingIndicator is banned everywhere (D5 rescinded):\n${violations.join("\n")}\n` +
       "perk keeps pi's default working indicator — remove the call.",
+  );
+});
+
+test("the data-only pi-tui allowlist entries carry no pi-tui import (import-aware, lexed specifiers)", () => {
+  const read = (file: string) => readFileSync(path.join(import.meta.dirname, file), "utf8");
+  for (const file of DATA_ONLY_PI_TUI_FILES) {
+    // The regex exemption is only meaningful while the literal is really there as data.
+    assert.ok(PI_TUI_IMPORT.test(stripComments(read(file))), `${file} no longer names pi-tui`);
+    const specifiers = extractSpecifiers(read(file));
+    assert.ok(specifiers.length > 0, `${file}: the lexer saw no imports — the check is vacuous`);
+    assert.ok(!specifiers.includes(PI_TUI_SPECIFIER), `${file} imports pi-tui directly`);
+  }
+  // The bridge is the loader hook: node builtins only (the fixture processes import it SDK-free).
+  const bridge = extractSpecifiers(read("substrate/nativeSdkBridge.ts"));
+  assert.deepEqual(
+    bridge.filter((spec) => !spec.startsWith("node:")),
+    [],
+    "substrate/nativeSdkBridge.ts must import node builtins only",
+  );
+  // hostSdk.ts captures pi-tui through the surfaces module's re-export, never the package.
+  const hostSdk = extractSpecifiers(read("substrate/hostSdk.ts"));
+  assert.ok(
+    hostSdk.includes("../surfaces/surfaces.ts"),
+    "hostSdk.ts must take pi-tui from surfaces.ts",
+  );
+  // Non-vacuity: the lexer reports a direct import when one exists.
+  assert.ok(
+    extractSpecifiers(`import { Key } from "${PI_TUI_SPECIFIER}";`).includes(PI_TUI_SPECIFIER),
   );
 });

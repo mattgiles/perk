@@ -6,7 +6,8 @@
 //   - five end-to-end fixture-process scenarios (a fixture "Pi" host + two fixture consumers +
 //     decoy SDK copies, materialized into a temp tree because `node_modules/`/`dist/` segments are
 //     gitignored) — public Node APIs only, no registry branch re-proven here;
-//   - the census drift guard over the installed consumers' import specifiers.
+//   - the census drift guard over the installed consumers' import specifiers (the live install;
+//     skips where none is installed).
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -110,12 +111,13 @@ test("rootOf: exact root and descendants match; look-alike siblings and nested n
 // Pure: resolvePackageEntry (Node's conditional-exports walk)
 // ---------------------------------------------------------------------------
 
-test("resolvePackageEntry: the exports table", () => {
+test("resolvePackageEntry: the exports table (Node's tri-state selection, then the disk check)", () => {
   const root = scratch("exports");
   for (const file of ["dist/a.js", "dist/b.js", "dist/main.js", "index.js"]) {
     mkdirSync(dirname(join(root, file)), { recursive: true });
     writeFileSync(join(root, file), "export {};\n");
   }
+  mkdirSync(join(root, "dist", "dir.js"), { recursive: true });
   const real = (rel: string) => realpathSync(join(root, rel));
   const cases: [string, unknown, string | null][] = [
     ["string target", { exports: "./dist/a.js" }, real("dist/a.js")],
@@ -132,17 +134,43 @@ test("resolvePackageEntry: the exports table", () => {
       real("dist/b.js"),
     ],
     [
-      "array: first resolvable member",
-      { exports: { ".": ["./missing.js", "./dist/b.js"] } },
+      "an unmatched condition keeps walking to default",
+      { exports: { ".": { require: "./dist/a.js", default: "./dist/b.js" } } },
+      real("dist/b.js"),
+    ],
+    [
+      "an explicit null on a matched condition BLOCKS — default is never reached (Node semantics)",
+      { exports: { ".": { node: null, default: "./dist/a.js" } } },
+      null,
+    ],
+    [
+      "a nested object matching nothing keeps walking (undefined ≠ null)",
+      { exports: { ".": { node: { require: "./dist/a.js" }, default: "./dist/b.js" } } },
       real("dist/b.js"),
     ],
     ["null blocks", { exports: { ".": null } }, null],
-    ["unmatched conditions", { exports: { ".": { require: "./dist/a.js" } } }, null],
+    ["unmatched conditions only", { exports: { ".": { require: "./dist/a.js" } } }, null],
+    [
+      "array: the first SELECTED member wins even when missing (Node checks the disk after selection)",
+      { exports: { ".": ["./missing.js", "./dist/b.js"] } },
+      null,
+    ],
+    [
+      "array: invalid and unmatched members are skipped",
+      { exports: { ".": ["not-relative", { require: "./dist/a.js" }, "./dist/b.js"] } },
+      real("dist/b.js"),
+    ],
+    ["array: a null member blocks when nothing later resolves", { exports: { ".": [null] } }, null],
+    ["array: empty", { exports: { ".": [] } }, null],
     [
       "conditions object without dot keys IS the dot target",
       { exports: { import: "./dist/b.js" } },
       real("dist/b.js"),
     ],
+    ["subpath-keyed exports without a dot entry", { exports: { "./x": "./dist/a.js" } }, null],
+    ["invalid top-level target (not ./-relative)", { exports: "dist/a.js" }, null],
+    ["invalid target shape", { exports: { ".": 42 } }, null],
+    ["a selected directory is not a file", { exports: "./dist/dir.js" }, null],
     ["main fallback", { main: "dist/main.js" }, real("dist/main.js")],
     ["index.js fallback", {}, real("index.js")],
     ["unresolvable main falls to index.js", { main: "./nope.js" }, real("index.js")],
@@ -312,12 +340,20 @@ function scratchInstall(names: readonly string[]): { cwd: string; roots: string[
   return { cwd, roots };
 }
 
-function recordingHooks(): { registerHooks: BridgePorts["registerHooks"]; calls: unknown[] } {
-  const calls: unknown[] = [];
+/**
+ * A recording `registerHooks` fake. Each call snapshots the registry value visible on `global`
+ * AT CALL TIME (the claim-before-register proof: the facades read the registry at evaluation, so
+ * the record must already be published when the hooks go live).
+ */
+function recordingHooks(global?: Record<symbol, unknown>): {
+  registerHooks: BridgePorts["registerHooks"];
+  calls: { options: unknown; registryAtCall: unknown }[];
+} {
+  const calls: { options: unknown; registryAtCall: unknown }[] = [];
   return {
     calls,
     registerHooks: (options) => {
-      calls.push(options);
+      calls.push({ options, registryAtCall: global?.[BRIDGE_REGISTRY_KEY] });
       return { deregister() {} };
     },
   };
@@ -447,8 +483,8 @@ test("install: the host entry follows the symlinked bin and the nested node-firs
 test("install: fresh install claims then registers; the status carries the verified roots", () => {
   const host = scratchHost();
   const install = scratchInstall(NATIVE_SDK_CONSUMERS);
-  const hooks = recordingHooks();
   const global: Record<symbol, unknown> = {};
+  const hooks = recordingHooks(global);
   const status = installNativeSdkBridge(
     fakeNamespaces(),
     portsFor({ cwd: install.cwd, argv1: host.argv1, registerHooks: hooks.registerHooks, global }),
@@ -462,11 +498,14 @@ test("install: fresh install claims then registers; the status carries the verif
     detail: "",
   });
   assert.equal(hooks.calls.length, 1);
-  const registered = hooks.calls[0] as { resolve?: unknown; load?: unknown };
+  const registered = hooks.calls[0]?.options as { resolve?: unknown; load?: unknown };
   assert.equal(typeof registered.resolve, "function");
   assert.equal(typeof registered.load, "function");
   const record = global[BRIDGE_REGISTRY_KEY] as ActiveBridgeRegistry;
   assert.equal(record.kind, "active");
+  // Claim BEFORE register: the very record now on the global was already there when the hooks
+  // were handed to Node (an implementation registering first would snapshot `undefined`).
+  assert.equal(hooks.calls[0]?.registryAtCall, record);
   assert.equal(record.hostEntryPath, host.entryPath);
   assert.deepEqual(
     [...record.roots.entries()],
@@ -677,6 +716,7 @@ test("install: a throwing registerHooks is failed:register-hooks and the claim i
   const host = scratchHost();
   const install = scratchInstall(NATIVE_SDK_CONSUMERS);
   const global: Record<symbol, unknown> = {};
+  let claimedAtCall: unknown = "never called";
   const status = installNativeSdkBridge(
     fakeNamespaces(),
     portsFor({
@@ -684,6 +724,7 @@ test("install: a throwing registerHooks is failed:register-hooks and the claim i
       argv1: host.argv1,
       global,
       registerHooks: () => {
+        claimedAtCall = global[BRIDGE_REGISTRY_KEY];
         throw new Error("hooks refused\nsecond line");
       },
     }),
@@ -696,8 +737,106 @@ test("install: a throwing registerHooks is failed:register-hooks and the claim i
     reused: false,
     detail: "hooks refused",
   });
+  // The claim existed when registration was attempted, and is gone afterwards: both or neither.
+  assert.equal((claimedAtCall as { kind?: unknown } | undefined)?.kind, "active");
   assert.equal(BRIDGE_REGISTRY_KEY in global, false);
+  assert.equal(global[BRIDGE_REGISTRY_KEY], undefined);
   assert.equal(describeBridge(status), "failed:register-hooks — hooks refused");
+  // A later activation on the same global installs afresh (nothing orphaned to reuse or decline).
+  const again = installNativeSdkBridge(
+    fakeNamespaces(),
+    portsFor({
+      cwd: install.cwd,
+      argv1: host.argv1,
+      global,
+      registerHooks: recordingHooks().registerHooks,
+    }),
+  );
+  assert.equal(again.state, "installed");
+  assert.equal(again.reused, false);
+});
+
+/** A global whose registry slot is a non-configurable accessor: `delete` throws (strict mode). */
+function accessorGlobal(opts: { acceptUndefined: boolean }): {
+  global: Record<symbol, unknown>;
+  stored: () => unknown;
+} {
+  let stored: unknown;
+  const global: Record<symbol, unknown> = {};
+  Object.defineProperty(global, BRIDGE_REGISTRY_KEY, {
+    configurable: false,
+    enumerable: true,
+    get: () => stored,
+    set: (value: unknown) => {
+      if (value === undefined && !opts.acceptUndefined) return;
+      stored = value;
+    },
+  });
+  return { global, stored: () => stored };
+}
+
+test("install: rollback on a non-deletable registry slot writes undefined through it", () => {
+  const host = scratchHost();
+  const install = scratchInstall(NATIVE_SDK_CONSUMERS);
+  const { global } = accessorGlobal({ acceptUndefined: true });
+  const status = installNativeSdkBridge(
+    fakeNamespaces(),
+    portsFor({
+      cwd: install.cwd,
+      argv1: host.argv1,
+      global,
+      registerHooks: () => {
+        throw new Error("hooks refused");
+      },
+    }),
+  );
+  assert.equal(status.state, "failed:register-hooks");
+  assert.equal(status.detail, "hooks refused");
+  assert.equal(global[BRIDGE_REGISTRY_KEY], undefined, "the slot reads as absent");
+  const again = installNativeSdkBridge(
+    fakeNamespaces(),
+    portsFor({
+      cwd: install.cwd,
+      argv1: host.argv1,
+      global,
+      registerHooks: recordingHooks().registerHooks,
+    }),
+  );
+  assert.equal(again.state, "installed");
+});
+
+test("install: when the claim cannot be released at all, the record is neutralized — never reused", () => {
+  const host = scratchHost();
+  const install = scratchInstall(NATIVE_SDK_CONSUMERS);
+  const { global, stored } = accessorGlobal({ acceptUndefined: false });
+  const status = installNativeSdkBridge(
+    fakeNamespaces(),
+    portsFor({
+      cwd: install.cwd,
+      argv1: host.argv1,
+      global,
+      registerHooks: () => {
+        throw new Error("hooks refused");
+      },
+    }),
+  );
+  assert.equal(status.state, "failed:register-hooks");
+  assert.equal(
+    status.detail,
+    "hooks refused; the registry claim could not be released (record neutralized)",
+  );
+  const leftover = stored() as { kind?: unknown; roots?: Map<string, unknown> };
+  assert.equal(leftover.kind, "orphaned");
+  assert.equal(leftover.roots?.size, 0);
+  // A later activation cannot mistake the orphan for a live bridge: it declines, naming the kind.
+  const hooks = recordingHooks(global);
+  const again = installNativeSdkBridge(
+    fakeNamespaces(),
+    portsFor({ cwd: install.cwd, argv1: host.argv1, global, registerHooks: hooks.registerHooks }),
+  );
+  assert.equal(again.state, "declined:schema-mismatch");
+  assert.equal(again.detail, "existing registry schema 1 (kind orphaned)");
+  assert.equal(hooks.calls.length, 0);
 });
 
 test("install: a frozen global is failed:registry-claim with zero registrations", () => {
@@ -963,7 +1102,6 @@ test("fixture failure-fallback: a capture failure installs nothing and leaves no
 // Census drift guard: the installed consumers' SDK import specifiers equal NATIVE_SDK_CENSUS
 // ---------------------------------------------------------------------------
 
-const CENSUS_ROOT_ENV = "PERK_NATIVE_CONSUMER_CENSUS_ROOT";
 const SDK_SPECIFIER = /^(@earendil-works\/|@mariozechner\/|typebox|@sinclair\/typebox)/;
 
 /** Every `.js/.mjs/.cjs` under `dir`, skipping nested `node_modules/`. */
@@ -980,38 +1118,28 @@ function consumerSources(dir: string): string[] {
   return out.sort();
 }
 
-/** The scan location: the env-named node_modules (MUST hold both consumers), else the live install, else null. */
-function censusScanRoot(): { root: string; source: string } | null {
-  const fromEnv = process.env[CENSUS_ROOT_ENV];
-  if (fromEnv !== undefined && fromEnv !== "") {
-    for (const name of NATIVE_SDK_CONSUMERS) {
-      assert.ok(
-        existsSync(join(fromEnv, name, "package.json")),
-        `${CENSUS_ROOT_ENV}=${fromEnv} does not hold ${name} — the audited consumer install is incomplete`,
-      );
-    }
-    return { root: fromEnv, source: CENSUS_ROOT_ENV };
-  }
+/** The live project install root when both consumers are installed there, else null (→ skip). */
+function censusScanRoot(): string | null {
   const live = join(import.meta.dirname, "..", "..", NATIVE_CONSUMER_INSTALL_ROOT);
-  if (NATIVE_SDK_CONSUMERS.every((name) => existsSync(join(live, name, "package.json")))) {
-    return { root: live, source: "live project install" };
-  }
-  return null;
+  return NATIVE_SDK_CONSUMERS.every((name) => existsSync(join(live, name, "package.json")))
+    ? live
+    : null;
 }
 
 test("census drift guard: the installed consumers import exactly NATIVE_SDK_CENSUS", (t) => {
-  const scan = censusScanRoot();
-  if (scan === null) {
-    t.skip(
-      `no consumer install to scan — set ${CENSUS_ROOT_ENV} to a node_modules holding both consumers`,
-    );
+  // Runs wherever the consumers are installed (developer checkouts, perk worktrees, the
+  // re-verify ritual); canonical CI has no `.pi/npm` and skips — the committed fixtures cover the
+  // census constant itself there.
+  const scanRoot = censusScanRoot();
+  if (scanRoot === null) {
+    t.skip("no consumer install under the project install root to scan");
     return;
   }
   const observed = new Set<string>();
   const versions: string[] = [];
   let scanned = 0;
   for (const name of NATIVE_SDK_CONSUMERS) {
-    const root = join(scan.root, name);
+    const root = join(scanRoot, name);
     const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
       version?: string;
     };
@@ -1028,7 +1156,7 @@ test("census drift guard: the installed consumers import exactly NATIVE_SDK_CENS
   assert.deepEqual(
     [...observed].sort(),
     expected,
-    `native consumer SDK census drift (${scan.source}: ${versions.join(", ")}) — an extra specifier is a ` +
+    `native consumer SDK census drift (${versions.join(", ")}) — an extra specifier is a ` +
       "silently reloaded SDK copy (extend NATIVE_SDK_CENSUS + bump BRIDGE_SCHEMA); a missing one is a stale entry",
   );
 });

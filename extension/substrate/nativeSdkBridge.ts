@@ -13,7 +13,7 @@
 // so `/reload`, session replacement and a second perk copy converge on one bridge: roots are
 // additive across activations, root states only advance, nothing ever deregisters in production.
 
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import type { LoadHookSync, ModuleHooks, RegisterHooksOptions, ResolveHookSync } from "node:module";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -132,45 +132,72 @@ const EXPORT_CONDITIONS: ReadonlySet<string> = new Set(
   "node import module-sync default".split(" "),
 );
 
+/** Node's `ERR_INVALID_PACKAGE_TARGET`: a target that is not a `./`-relative string (or a nested shape). */
+class InvalidExportTarget extends Error {}
+
 /**
- * Resolve one `exports` target with Node's conditional semantics: a string is the target; an
- * array yields its first resolvable member; a conditions object is walked in DECLARATION order
- * taking the first matching condition (recursing into nested objects/arrays); `null` blocks.
- * Returns the realpath of an existing file, or null.
+ * Select the `"."` target as Node's `resolvePackageTarget` does — a TRI-STATE, with no filesystem
+ * access: a `./`-string is selected as-is (Node checks existence only AFTER selection); `null`
+ * blocks the subpath; a conditions object is walked in declaration order and the first key that
+ * is `default` or in the conditions set decides (`undefined` = that key matched nothing, keep
+ * walking; `null`/string are final); an array takes the first member that resolves to a string,
+ * skipping invalid targets and unmatched members, and remembers a `null` block (Node returns
+ * `null` when a member blocked and nothing later resolved, `undefined` when nothing matched).
+ * Any other shape is an invalid target.
  */
-function resolveExportTarget(target: unknown, rootDir: string): string | null {
+function selectExportTarget(target: unknown): string | null | undefined {
   if (typeof target === "string") {
-    if (!target.startsWith("./")) return null;
-    const candidate = resolve(rootDir, target);
-    if (!existsSync(candidate)) return null;
-    try {
-      return realpathSync(candidate);
-    } catch {
-      return null;
-    }
+    if (!target.startsWith("./")) throw new InvalidExportTarget(`invalid exports target ${target}`);
+    return target;
   }
+  if (target === null) return null;
   if (Array.isArray(target)) {
+    let last: null | undefined;
     for (const member of target) {
-      const resolved = resolveExportTarget(member, rootDir);
-      if (resolved !== null) return resolved;
+      let selected: string | null | undefined;
+      try {
+        selected = selectExportTarget(member);
+      } catch (error) {
+        if (error instanceof InvalidExportTarget) continue;
+        throw error;
+      }
+      if (selected === undefined) continue;
+      if (selected === null) {
+        last = null;
+        continue;
+      }
+      return selected;
     }
-    return null;
+    return last;
   }
   if (isRecord(target)) {
     for (const [condition, nested] of Object.entries(target)) {
       if (!EXPORT_CONDITIONS.has(condition)) continue;
-      const resolved = resolveExportTarget(nested, rootDir);
-      if (resolved !== null) return resolved;
+      const selected = selectExportTarget(nested);
+      if (selected === undefined) continue;
+      return selected;
     }
+    return undefined;
+  }
+  throw new InvalidExportTarget(`invalid exports target ${JSON.stringify(target)}`);
+}
+
+/** The realpath of an existing file under `rootDir`, or null (Node's post-selection existence check). */
+function existingFile(rootDir: string, relative: string): string | null {
+  const candidate = resolve(rootDir, relative);
+  try {
+    return statSync(candidate).isFile() ? realpathSync(candidate) : null;
+  } catch {
     return null;
   }
-  return null;
 }
 
 /**
  * The package's `"."` entry as Node would resolve it for `import`: the `exports` `"."` target (an
- * `exports` without `.`-keys is itself the `"."` target), else `main`, else `index.js`. Null when
- * nothing resolves to an existing file.
+ * `exports` without `.`-keys is itself the `"."` target) selected with Node's tri-state semantics
+ * and THEN checked on disk — a blocked, unmatched, invalid or missing selection is null (Node
+ * would throw `ERR_PACKAGE_PATH_NOT_EXPORTED` / `ERR_INVALID_PACKAGE_TARGET` /
+ * `ERR_MODULE_NOT_FOUND`); no `exports` → `main` → `index.js`.
  */
 export function resolvePackageEntry(manifest: unknown, rootDir: string): string | null {
   if (!isRecord(manifest)) return null;
@@ -182,14 +209,21 @@ export function resolvePackageEntry(manifest: unknown, rootDir: string): string 
       const subpathKeyed = keys.some((key) => key === "." || key.startsWith("./"));
       if (subpathKeyed) target = exportsField["."];
     }
-    return resolveExportTarget(target, rootDir);
+    if (target === undefined) return null;
+    let selected: string | null | undefined;
+    try {
+      selected = selectExportTarget(target);
+    } catch (error) {
+      if (error instanceof InvalidExportTarget) return null;
+      throw error;
+    }
+    return typeof selected === "string" ? existingFile(rootDir, selected) : null;
   }
   if (typeof manifest.main === "string") {
-    const main = manifest.main.startsWith("./") ? manifest.main : `./${manifest.main}`;
-    const resolved = resolveExportTarget(main, rootDir);
-    if (resolved !== null) return resolved;
+    const main = existingFile(rootDir, manifest.main);
+    if (main !== null) return main;
   }
-  return resolveExportTarget("./index.js", rootDir);
+  return existingFile(rootDir, "./index.js");
 }
 
 /**
@@ -423,6 +457,42 @@ function skippedDetail(skipped: readonly string[]): string {
   return skipped.length > 0 ? `unverified consumers: ${skipped.join(", ")}` : "";
 }
 
+/** The decline detail for an unrecognized registry value: its schema, plus an unrecognized kind. */
+function describeForeignRegistry(value: unknown): string {
+  const schema =
+    isRecord(value) && typeof value.schema === "number" ? String(value.schema) : "unrecognized";
+  const kind = isRecord(value) && typeof value.kind === "string" ? value.kind : null;
+  const kindNote =
+    kind !== null && kind !== "active" && kind !== "disabled" ? ` (kind ${kind})` : "";
+  return `existing registry schema ${schema}${kindNote}`;
+}
+
+/**
+ * Roll a claim back so no later activation can observe an `active` record without hooks: delete
+ * the key; if the property cannot be deleted (a non-configurable accessor on the global), write
+ * `undefined` through it; if the record is STILL readable, neutralize it in place (its `kind` is
+ * no longer `active`, so `isBridgeRegistry` rejects it and a later activation declines rather than
+ * reusing it). Returns whether the key reads as absent afterwards.
+ */
+function releaseClaim(global: Record<symbol, unknown>, record: ActiveBridgeRegistry): boolean {
+  try {
+    delete global[BRIDGE_REGISTRY_KEY];
+  } catch {
+    // Non-configurable: fall through to the assignment.
+  }
+  if (global[BRIDGE_REGISTRY_KEY] === undefined) return true;
+  try {
+    global[BRIDGE_REGISTRY_KEY] = undefined;
+  } catch {
+    // Non-writable too: neutralize below.
+  }
+  if (global[BRIDGE_REGISTRY_KEY] === undefined) return true;
+  // Last resort: the record object is ours — make it unrecognizable as an active bridge.
+  (record as { kind: string }).kind = "orphaned";
+  record.roots.clear();
+  return false;
+}
+
 /**
  * Install the bridge for this activation. Synchronous, never throws; each step's outcome is final:
  * registry read → opt-out → capability → host entry → registry decision (reuse/decline) → roots →
@@ -468,13 +538,9 @@ export function installNativeSdkBridge(
 
   // 5. Registry decision (a decline never touches the existing record or its hooks).
   if (foreign) {
-    const schema =
-      isRecord(existingValue) && typeof existingValue.schema === "number"
-        ? String(existingValue.schema)
-        : "unrecognized";
     return makeStatus("declined:schema-mismatch", {
       hostEntry: hostEntryPath,
-      detail: `existing registry schema ${schema}`,
+      detail: describeForeignRegistry(existingValue),
     });
   }
   if (existing !== null) {
@@ -553,14 +619,12 @@ export function installNativeSdkBridge(
   try {
     ports.registerHooks(createBridgeHooks(record));
   } catch (error) {
-    try {
-      delete ports.global[BRIDGE_REGISTRY_KEY];
-    } catch {
-      // The claim could not be rolled back; the status still reports the failure.
-    }
+    const released = releaseClaim(ports.global, record);
     return makeStatus("failed:register-hooks", {
       hostEntry: hostEntryPath,
-      detail: firstLine(error),
+      detail: released
+        ? firstLine(error)
+        : `${firstLine(error)}; the registry claim could not be released (record neutralized)`,
     });
   }
   return makeStatus("installed", {

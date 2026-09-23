@@ -68,11 +68,10 @@ loading a second SDK copy.
      installed artifact carries it; until it does, perk children stay on `context: "fresh"`
      (the support boundary recorded in `docs/design/pi-subagents-child-execution-policy.md`).
 3. **Run `just ci`.** Then run the host-SDK bridge's census drift guard against the live install
-   — `node --test extension/substrate/nativeSdkBridge.test.ts` — and, when it passes on the new
-   version, bump the audited consumer pins in `.github/workflows/ci.yml`'s "Install the audited
-   native consumers" step (`pi-subagents@<new>`; `pi-web-access@<version>` moves the same way when
-   that package is re-verified). A census mismatch is a real finding: a new SDK specifier means a
-   second SDK copy would load unbridged — extend `NATIVE_SDK_CENSUS` and bump `BRIDGE_SCHEMA` in
+   — `node --test extension/substrate/nativeSdkBridge.test.ts` (it scans the consumers under this
+   checkout's `.pi/npm/node_modules/` and skips where none are installed, so this checkout is where
+   it runs for real). A census mismatch is a real finding: a new SDK specifier means a second SDK
+   copy would load unbridged — extend `NATIVE_SDK_CENSUS` and bump `BRIDGE_SCHEMA` in
    `extension/substrate/nativeSdkBridge.ts` (contracts §8.73); a vanished one is a stale entry.
 4. **Run the live leg** from a read-write session whose installed pi-subagents is the new
    version: `perk doctor` (`subagent-compat` warns until the stamp moves; no

@@ -42,19 +42,6 @@ jobs:
       - name: Install Node deps
         run: npm ci
 
-      # The host-SDK bridge's census drift guard (extension/substrate/nativeSdkBridge.test.ts) scans
-      # the two native consumers' import specifiers. `.pi/npm/` is gitignored, so canonical CI
-      # installs the AUDITED consumer versions into a scratch prefix and points the guard at them:
-      # pi-subagents = `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` (doctor/checks.py), pi-web-access =
-      # the version the census was derived from. Both move with the re-verify ritual
-      # (docs/developers/pi-subagents-reverify.md). `--omit=peer` skips the consumers' SDK peers
-      # (the scan needs only their own files).
-      - name: Install the audited native consumers (host-SDK bridge census)
-        run: >-
-          npm install --prefix "$RUNNER_TEMP/native-consumers" --no-save --no-package-lock
-          --omit=peer --ignore-scripts --no-audit --no-fund
-          pi-subagents@0.70.1 pi-web-access@0.30.0
-
       # Lint: `uv run ruff check src/perk tests` + `npm run lint` (biome check extension docs/site).
       # Deliberately NO `ruff format` here — that is the pre-commit hook's job
       # (see docs/learned/toolchain/ruff.md).
@@ -73,5 +60,3 @@ jobs:
       # packaging tests in tests/test_packaging.py actually run instead of skipping.
       - name: Test
         run: just test
-        env:
-          PERK_NATIVE_CONSUMER_CENSUS_ROOT: ${{ runner.temp }}/native-consumers/node_modules

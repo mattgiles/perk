@@ -42,8 +42,22 @@ pytestmark = [
 ]
 
 
+# Inherited variables that would change the asserted outcome: perk run identity / the profiling
+# handoff arm, the bridge opt-out (the assertion is `installed`), and pi-subagents' child-mode
+# flags (a runner child registers no tools). Scrubbed so the smoke answers for THIS launch only.
+_SCRUBBED_ENV = (
+    "PERK_RUN_ID",
+    "PERK_PROFILE_HANDOFF",
+    "PERK_SELFCHECK",
+    "PERK_DISABLE_NATIVE_SDK_BRIDGE",
+    "PI_SUBAGENT_CHILD",
+    "PI_SUBAGENT_CHILD_AGENT",
+    "PI_SUBAGENT_EXTENSION_BINDINGS",
+)
+
+
 def _launch_env() -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if k not in ("PERK_RUN_ID", "PERK_PROFILE_HANDOFF")}
+    env = {k: v for k, v in os.environ.items() if k not in _SCRUBBED_ENV}
     env["PI_OFFLINE"] = "1"
     env["PERK_SKIP_VERSION_CHECK"] = "1"
     env.setdefault("TERM", "xterm-256color")

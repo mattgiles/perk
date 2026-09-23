@@ -78,7 +78,8 @@ The bridge is on by default and is active when:
 
 - Pi runs on Node with `module.registerHooks` (Node 22.15 or newer — every Pi-supported Node), and
 - Pi was launched from its npm package (the `pi` command), so perk can locate the SDK entry, and
-- the two packages are installed under the repo's `.pi/npm/node_modules/`.
+- at least one of the two packages is installed under the repo's `.pi/npm/node_modules/` — each
+  installed package is bridged; a missing one is only noted in the selfcheck detail.
 
 Everything else stays unbridged and loads as before: packages Pi loads **before** perk (user-scope
 `packages` in `~/.pi/agent/settings.json`, agent-dir `extensions`, extensions passed with `pi -e`),
@@ -89,14 +90,20 @@ own `packages` entry ahead of the two packages in `.pi/settings.json` so Pi load
 
 To disable the bridge, set `PERK_DISABLE_NATIVE_SDK_BRIDGE=1` in the environment of the `perk`
 (or `pi`) launch. The value is read once per process: quit and relaunch to change it — `/reload`
-does not re-read it. Only the exact value `1` disables.
+does not re-read it. Only the value `1` disables (surrounding whitespace is ignored; `0`, `true`
+or an empty value leave the bridge on).
 
 Where the state shows: `/perk-selfcheck` reports `bridge=<state>` in its summary line and a
 `native sdk bridge:` block (the SDK entry it found and the bridged package roots) in its census —
 `installed`, `disabled`, `skipped:no-consumers` (neither package installed), or an `unsupported:*`
-reason. A `perk: sdk bridge — …` warning appears at session start only when an install was
-declined or failed (`declined:*` / `failed:*`); the packages then load their own SDK copies for
-that session, and perk otherwise runs normally.
+reason. A `perk: sdk bridge — …` warning appears at session start in two cases only, and perk
+otherwise runs normally:
+
+- **failed** (`failed:*`) — this perk copy could not install the bridge; the packages load their
+  own SDK copies for that session.
+- **declined** (`declined:*`) — another perk copy in the same process already bridged a different
+  Pi entry (or a different bridge version); that earlier bridge stays active for the packages it
+  already serves, and this perk copy installs none.
 
 ## Version compatibility
 

@@ -263,9 +263,9 @@ the first production console-swap; prior swaps were all test-local):
   `dist/modes/interactive/interactive-mode.js`, `dist/modes/interactive/components/footer.js`,
   `dist/modes/rpc/rpc-mode.js`, `dist/index.d.ts` — and `@earendil-works/pi-tui` dist —
   `dist/utils.{js,d.ts}`, `dist/tui.d.ts`, `dist/tui-main-screen.d.ts`, `dist/components/loader.js`
-  — at the version `package.json` `devDependencies` pins. The five `@earendil-works/*` pins move in
-  lockstep (`tests/test_packaging.py::test_pi_toolchain_pin_lockstep`), so the pin is the single
-  version truth for every dist-scoped fact here.
+  — at the version `package.json` `devDependencies` pins. The `@earendil-works/*` devDependency pins
+  move in lockstep (the set `tests/test_packaging.py::test_pi_toolchain_pin_lockstep` enforces), so
+  the pin is the single version truth for every dist-scoped fact here.
 - **Re-verify at each pin bump.** A bump silently re-asserts every dist-scoped fact here: its
   plan re-reads each against the newly *installed* dist (resolved per
   `toolchain/worktree-node-modules.md`) and corrects or dates changes. Last full re-verification:
