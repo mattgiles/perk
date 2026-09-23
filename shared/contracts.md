@@ -13216,7 +13216,8 @@ the terminal check. A subcommand still loads the whole surface on its first look
 Click's own "Did you mean" suggestions are complete because `resolve_command` calls `get_command`
 before it reads the map. Guarded by the fresh-process importtime matrix
 `tests/test_cli_import_tiers.py` (`--version`, bare, `--`, and `--help` as the positive control);
-the rule is `docs/design/first-principles/python-cli-guidelines.md` §8.3.
+the rule is `docs/design/first-principles/python-cli-guidelines.md` §8.3. The measured startup cost
+before and after this rule is `docs/design/archive/perk-startup-closing-evidence.md`.
 
 
 ---
@@ -13388,4 +13389,6 @@ install root is verified), CJS `require()` of a census specifier (not in the obs
 any specifier outside the census (a widening is a `BRIDGE_SCHEMA` bump surfaced by the drift guard).
 The real-host proof is `tests/test_native_sdk_bridge_live.py` (slow; real `pi --approve --mode json
 -p "/perk-selfcheck"` over this checkout: `bridge=installed`, both consumers registered tools, no
-`Failed to load extension`).
+`Failed to load extension`). The two-subject census proof (zero SDK modules outside the host root
+under `bridge=installed`) and the interactive `/reload` → `reused`, child-launch and `pi-web-access`
+lazy-path observations are `docs/design/archive/perk-startup-closing-evidence.md`.

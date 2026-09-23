@@ -3,7 +3,8 @@
 This page is a **how-to guide**: how to measure perk's cold startup repeatably with
 `perk-dev profile-startup`, how to prepare the checkouts it measures, how to read the run
 directory it writes, how the profiled arms work (the Python stop-before-exec seam, cProfile,
-`-X importtime`, the Node module census), and how a committed baseline record is produced.
+`-X importtime`, the Node module census), and how a committed baseline or comparison record is
+produced.
 
 ## What the command measures
 
@@ -26,8 +27,11 @@ enter the statistics.
     the provisioning step, never the measured command);
   - `npm ci` inside it — its own `node_modules`, so Node never resolves a sibling checkout's tree by
     walking up;
-  - `perk doctor --fix` inside it — converges `.pi/npm` (the consumer extension packages) and the
-    skills mirror; a subject without `.pi/npm/node_modules` is refused `subject_not_converged`;
+  - `perk doctor --fix` inside it — converges the skills mirror (and, in a repo that installs perk
+    from npm, `.pi/npm`); the consumer extension packages themselves are Pi's lazy install at its
+    first launch — the Trust step below performs it — and in perk's own checkout nothing else
+    populates `.pi/npm` (the self-repo posture). A subject without `.pi/npm/node_modules` is refused
+    `subject_not_converged`;
   - run `pi` there once from a terminal and choose **Trust** (then `/quit`). Pi keys its trust
     decision by canonical path in `<agent dir>/trust.json`, nearest ancestor wins; a benchmark
     session cannot answer the prompt, so an untrusted checkout is refused `subject_untrusted`.
@@ -51,6 +55,38 @@ git worktree add --detach ../perk-baseline <sha>
 cd ../perk-baseline
 uv sync --all-packages && npm ci && perk doctor --fix
 pi        # choose Trust, then /quit
+```
+
+Placement variant — under the main checkout's own `.worktrees/`:
+
+```bash
+MAIN="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+git worktree add --detach "$MAIN/.worktrees/startup-baseline" <sha>
+(cd "$MAIN/.worktrees/startup-baseline" && uv sync --all-packages && npm ci && uv run perk doctor --fix)
+# no interactive Trust step ran, so nothing has populated .pi/npm yet — stage it the way every
+# plan-worktree launch does (a hard-link clone of the main checkout's converged tree):
+uv run python -c "
+from pathlib import Path
+from perk.run.launch.materialize import materialize_extensions
+materialize_extensions(Path('$MAIN'), Path('$MAIN/.worktrees/startup-baseline'))
+"
+```
+
+A worktree there inherits Pi's nearest-ancestor trust entry (the main checkout's — the stamp
+reads `trusted_by=<main checkout>`, no Trust prompt), and `perk worktree wipe` never sweeps it (it
+touches only `plan-*` names). `uv run perk doctor --fix` inside the worktree runs THAT revision's
+`perk` (its own `.venv`), so the pinned subject is converged with the tooling of its era. Tear it
+down with `git worktree remove --force "$MAIN/.worktrees/startup-baseline"` when the record is
+authored.
+
+Running from **inside** a perk/Pi session (an implement session measuring its own worktree, say)
+is possible when the session's variables are cleared explicitly — the plain-shell environment the
+prerequisites ask for:
+
+```bash
+env -u PI_SESSION_FILE -u PI_SESSION_ID -u PI_MODEL -u PI_PROVIDER -u PI_REASONING_LEVEL \
+    -u PI_CODING_AGENT -u PI_CODING_AGENT_DIR -u PERK_CLI_VERSION -u PERK_RUN_ID \
+  uv run perk-dev profile-startup --runs 5 --output "$OUT" --subject baseline=… --subject candidate="$(pwd)"
 ```
 
 ## Running it
@@ -163,6 +199,16 @@ python -m pstats /tmp/perk-startup/profiles/candidate/cprofile.prof
 % stats 40
 ```
 
+What the bare-`perk` handoff measures is the cost of the **light import tier**: bare `perk`, a
+lone `--` and `--version` import no command group and read no registry (the tiered-import rule,
+[`python-cli-guidelines.md` §8.3](../design/first-principles/python-cli-guidelines.md), contracts
+§8.72(j)), so the importtime and cProfile tops of a current checkout show the config boundary and
+the exec seam rather than the command catalogue. The rule's guard, `tests/test_cli_import_tiers.py`,
+is a fresh-process importtime matrix that reuses this harness's `spawn_pty` + `parse_importtime` —
+the same PTY spawn and the same log parser, so the guard and the handoff arm agree by construction.
+A subcommand still loads the whole surface on its first lookup; that cost is not on the harness's
+path (the closing record's one-off light-verb probe measured it).
+
 ### The Node module census
 
 The census arm spawns bare `perk` once more with `NODE_OPTIONS` composed from an **empty** base:
@@ -193,7 +239,10 @@ host root. Those facade resolutions never reach the tracer — the bridge regist
 than the `--import` tracer, so it runs first and short-circuits them; the tracer sees only the
 bridge's pass-throughs. A non-empty list under an installed bridge names an unbridged SDK path
 (a `preloaded` consumer, a user-scope install, a specifier outside the census) and is the thing to
-diagnose.
+diagnose. The common cause is a consumer listed before perk's own entry in `.pi/settings.json`'s
+`packages` array — Pi loads packages in array order, so that consumer is evaluated before the
+bridge installs and its root goes `preloaded`; `perk doctor` reports the order as `settings-wiring`
+drift and `perk doctor --fix` repairs it (contracts §8.73).
 
 Open a `.cpuprofile` in Chrome DevTools (Performance → load profile) or any V8 profile viewer.
 
@@ -212,20 +261,39 @@ Open a `.cpuprofile` in Chrome DevTools (Performance → load profile) or any V8
 - Under `--json`, the progress narration still streams on stderr; only `summary.json`'s bytes
   reach stdout.
 
-## Producing a baseline record
+## Producing a baseline or comparison record
 
-A committed baseline lives in `docs/design/archive/` (the archive location is the status signal).
-Numbers are measured at commit time — never transcribed from a plan or an objective:
+A committed baseline or comparison record lives in `docs/design/archive/` (the archive location
+is the status signal). Numbers are measured at commit time — never transcribed from a plan or an
+objective:
 
 1. Commit the implementation; confirm `git status --porcelain` is empty and note `git rev-parse
    HEAD`.
 2. Prepare the checkout as a subject (above) and run from a plain shell:
    `perk-dev profile-startup --runs 5 --output <dir outside the repo> --subject baseline=<checkout>`.
-3. Author the record from the verbatim outputs: a context table (revision, date, host, Pi / Node /
+   For a **comparison**, pin the reference revision as a second prepared worktree and pass it
+   **first** — `--subject baseline=<pinned worktree> --subject candidate=<checkout>` — so the delta
+   block reads `candidate - baseline` (subject order on the command line is the label order; the
+   deltas exist only for exactly two subjects).
+3. Apply the validity gate before reading a number: each subject `N ok / 0 failed`; every census
+   `status: ok`; every handoff arm `ok`; every stamp `dirty: false`. A failed gate names its cause,
+   is fixed (never the numbers), and the WHOLE command is re-run into a fresh `--output` — runs are
+   never merged. Data that stays unavailable has one shape in the record: the literal `n/a —
+   <failure named>` (e.g. `n/a — candidate cprofile arm failed (exit 1)`) in place of the number.
+4. Author the record from the verbatim outputs: a context table (revision, date, host, Pi / Node /
    perk / consumer-package versions, `sdk_copies`, agent dir source, PTY size, N, injected env,
    `operator_node_options`), the verbatim `summary.md`, the census (status, distinct modules, top
    packages, `sdk_outside_host_roots`), the Python handoff (`handoff_ms`, arm statuses, the
    importtime and cProfile tops), the exact reproduction command, a "not committed" note for the
-   run directory, and the caveats. Text-only evidence.
-4. Land the record as a trailing docs-only commit. Any later source edit → re-measure and
+   run directory, and the caveats. Text-only evidence. A comparison record adds nothing the
+   summary already carries: the verbatim two-subject `summary.md` (its delta block is the
+   comparison — reported, not judged), the candidate's census and handoff detail, and the
+   reproduction of the pin.
+5. Land the record as a trailing docs-only commit. Any later source edit → re-measure and
    re-author.
+
+The worked examples: `docs/design/archive/perk-startup-baseline.md` (one subject, the
+instrumented revision) and `docs/design/archive/perk-startup-closing-evidence.md` (two subjects —
+that revision pinned as `baseline` against the landed tree — with the validity gate applied, the
+committed baseline cross-checked against the re-measured subject, and a one-off light-verb probe
+that is documented in the record rather than here).

@@ -9,6 +9,10 @@ is the **instrumented** revision: the maintainer-only stop-before-exec arm
 (its variable is unset), so the timed launch path is this branch's — no byte-identity claim
 against pre-instrumentation `main` is made.
 
+> **Update (2026-09):** compared against the landed tree (CLI diet #2494, host-SDK bridge #2496) in
+> `docs/design/archive/perk-startup-closing-evidence.md`; the present-tense readings below describe
+> the measured revision `0e9de381`.
+
 The method and every field's meaning are in [`docs/developers/profiling-startup.md`](../../developers/profiling-startup.md).
 The origin of the work is the planning note `docs/planning/perk-slowness.md` (an untracked
 maintainer memo behind the "Speed up plain perk startup" objective; untouched here).
@@ -275,4 +279,5 @@ host-specific paths and binary profiles; this record carries the text evidence.
 - Pi persists no session file for a benchmark session (it persists only after an assistant
   message); perk's extension mints its in-memory warm run id as on any launch.
 - One subject only — the delta block is absent by design; the closing evidence of the objective
-  will run two subjects (a pinned baseline worktree at this revision vs the candidate).
+  will run two subjects (a pinned baseline worktree at this revision vs the candidate). Resolved:
+  the two-subject run is `docs/design/archive/perk-startup-closing-evidence.md`.
