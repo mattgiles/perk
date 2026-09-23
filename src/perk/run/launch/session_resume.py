@@ -6,7 +6,7 @@ Two doors consume it — the root ``perk resume [TARGET]`` command and ``perk pl
 non-launching gate arms. Both share ONE call shape: :func:`prepare_session_resume` composes the
 launch (argv built once for preview/exec parity), :func:`emit_session_resume_preview` renders
 the ``--dry-run`` report, :func:`exec_session_resume` hands the spec to the one shared Pi exec
-pipeline (:func:`perk.run.launch.exec_pi`). :func:`resolve_resume_checkout` is the selector
+pipeline (:func:`perk.run.pi_exec.exec_pi`). :func:`resolve_resume_checkout` is the selector
 table the root command routes through for the picker arms; :func:`resolve_run_session` is the
 run arm's selector.
 
@@ -79,11 +79,13 @@ RUN_ID       ``None``      the recorded cwd + ``pi --session <file>`` (:func:`re
 RUN_ID       NAME          ``invalid_input`` — a run id already pins its checkout
 ===========  ============  ===================================================================
 
-Import direction: this module imports the facade (``from perk.run import launch``) and reads
-every shared helper as a facade ATTRIBUTE at call time, so facade monkeypatches (the exec
-recorder included) rebind for it too; the facade never imports this module (consumers import
-``perk.run.launch.session_resume`` directly). No ``os``, no ``git`` here — the exec pipeline
-and the git probes live behind the facade.
+Import direction: this module imports the exec seam (``from perk.run import pi_exec``) and the
+facade (``from perk.run import launch``) and reads every shared helper as a module ATTRIBUTE at
+call time — ``pi_exec.resolve_launch_agent_dir`` / ``pi_exec.exec_pi`` for the launch
+environment, ``launch.<validator>`` for the worktree probes — so the ``pi_exec`` monkeypatches
+(the exec recorder included) and the facade patches rebind for it too; the facade never imports
+this module (consumers import ``perk.run.launch.session_resume`` directly). No ``os``, no
+``git`` here — the exec pipeline lives in ``pi_exec`` and the git probes behind the facade.
 """
 
 import json
@@ -96,7 +98,7 @@ import click
 
 from perk import plan
 from perk.cli.ensure import UserFacingCliError
-from perk.run import launch
+from perk.run import launch, pi_exec
 from perk.state import cache, session_pointers
 from perk.state import run_id as run_id_mod
 from perk.substrate.config import Config
@@ -128,7 +130,7 @@ class SessionResumeLaunch:
     main_root: Path
     checkout: Path
     argv: tuple[str, ...]
-    agent_dir: launch.LaunchAgentDir
+    agent_dir: pi_exec.LaunchAgentDir
     session_file: Path | None = None
 
 
@@ -153,7 +155,7 @@ def prepare_session_resume(
     prompt). Nothing else on either arm — no ``--approve`` (see the module docstring), no stage
     flags (the exterior rule). Raises the resolver's ``pi_agent_dir_invalid`` before anything is
     announced."""
-    agent_dir = launch.resolve_launch_agent_dir(main_root)
+    agent_dir = pi_exec.resolve_launch_agent_dir(main_root)
     argv = _PICKER_ARGV if session_file is None else (*_RUN_SESSION_ARGV_PREFIX, str(session_file))
     return SessionResumeLaunch(
         main_root=main_root,
@@ -262,7 +264,7 @@ def exec_session_resume(launch_spec: SessionResumeLaunch) -> None:
 
     Annotated ``-> None`` (not ``NoReturn``): tests stub ``os.execvpe`` and control returns.
     """
-    launch.exec_pi(
+    pi_exec.exec_pi(
         main_root=launch_spec.main_root,
         checkout=launch_spec.checkout,
         argv=launch_spec.argv,

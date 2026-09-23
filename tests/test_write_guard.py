@@ -31,7 +31,7 @@ ALLOWED = frozenset(
         "convergence/init/skills.py",
         "convergence/init/blocks.py",
         "convergence/init/repo_skills.py",
-        "convergence/init/version_pin.py",
+        "convergence/version_pin.py",
         "convergence/doctor/fixes.py",
         # Secret writer restore arm: `save_local_linear_api_key`'s read-back-mismatch restore
         # rewrites the gitignored `.perk/local.toml` it just replaced (single-process,
@@ -50,7 +50,7 @@ ALLOWED = frozenset(
         # The maintainer-only stop-before-exec profiling record (contracts.md §8.72(i)): one
         # process writes the operator-named `PERK_PROFILE_HANDOFF` file it alone owns, outside
         # `.perk/workflow/`, immediately before exiting — never raced.
-        "run/launch/__init__.py",
+        "run/pi_exec.py",
     }
 )
 

@@ -71,10 +71,10 @@ pins a surface, where one exists).
 | consumer npm pin `npm:@mgiles/perk@{…}` | `src/perk/convergence/init/settings.py` | `test_npm_pin_lockstep` |
 | extension-install pin `@mgiles/perk@{…}` | `src/perk/convergence/init/extension_install.py` | `test_npm_pin_lockstep` |
 | remote-runner PyPI pin `uv tool install perk=={…}` | `src/perk/run/workflow_artifacts.py` | — |
-| `PERK_CLI_VERSION` launch env var (informational) | `src/perk/run/launch/__init__.py` | — |
+| `PERK_CLI_VERSION` launch env var (informational) | `src/perk/run/pi_exec.py` | — |
 | materialize splash `perk v{…}` | `src/perk/run/launch/materialize.py` | — |
 | extension self-version via `perkVersion()` | `extension/substrate/resources.ts` (reads the shipped `@mgiles/perk` `package.json`; compared against `PERK_CLI_VERSION` for the soft drift signal) | — |
-| `.perk/required-perk-version` managed pin | `src/perk/convergence/init/version_pin.py` (written by `perk init` / `perk doctor --fix`; consumed by the runtime CLI-vs-repo warning in `src/perk/cli/version_check.py` and the report-only `cli-version` doctor check) | — |
+| `.perk/required-perk-version` managed pin | `src/perk/convergence/version_pin.py` (written by `perk init` / `perk doctor --fix`; consumed by the runtime CLI-vs-repo warning in `src/perk/cli/version_check.py` and the report-only `cli-version` doctor check) | — |
 | `.perk/managed-state.toml` `[managed].version` + per-artifact `version` stamps | written by `perk init` / `perk doctor --fix` (`src/perk/convergence/managed_state.py`) | — |
 
 ### Release-time markers (maintainer, at release)

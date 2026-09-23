@@ -9,6 +9,7 @@ import json
 import subprocess
 from pathlib import Path
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -79,7 +80,7 @@ def test_pr_address_non_preview_seeds_full_loop(git_repo):
 
 def test_flat_address_alias_resolves_to_same_launcher(git_repo):
     # `perk address` (flat alias) is the SAME command object as `perk pr address`.
-    assert cli.commands["address"] is pr_address_command
+    assert cli.get_command(click.Context(cli), "address") is pr_address_command
     _seed(git_repo)
     result = CliRunner().invoke(cli, ["address", "--dry-run"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output

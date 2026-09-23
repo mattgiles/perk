@@ -6,6 +6,7 @@ validators refuse a bare `mkdir` as `worktree_unregistered`. The process boundar
 `exec_pi` pipeline reads), so every "exec'd" assertion is a stubbed argv/env-construction test.
 """
 
+import ast
 import json
 from pathlib import Path
 
@@ -13,7 +14,7 @@ import pytest
 
 from perk import __version__, plan
 from perk.cli.ensure import UserFacingCliError
-from perk.run import launch
+from perk.run import launch, pi_exec
 from perk.run.launch import session_resume
 from perk.state import cache, session_pointers
 from perk.state.run_id import mint
@@ -508,7 +509,7 @@ def test_exec_pi_missing_refuses_typed_before_any_chdir(
     def _missing():
         raise UserFacingCliError("pi CLI not found on PATH", error_type="pi_cli_missing")
 
-    monkeypatch.setattr(launch, "_resolve_pi_executable", _missing)
+    monkeypatch.setattr(pi_exec, "_resolve_pi_executable", _missing)
     with pytest.raises(UserFacingCliError) as exc:
         session_resume.exec_session_resume(_spec(tmp_path, tmp_path))
     assert exc.value.error_type == "pi_cli_missing"
@@ -519,7 +520,7 @@ def test_exec_oserror_is_launch_failed(tmp_path, monkeypatch, launch_exec_record
     def _boom(program, argv, env):
         raise OSError("exec denied")
 
-    monkeypatch.setattr(launch.os, "execvpe", _boom)
+    monkeypatch.setattr(pi_exec.os, "execvpe", _boom)
     with pytest.raises(UserFacingCliError) as exc:
         session_resume.exec_session_resume(_spec(tmp_path, tmp_path))
     assert exc.value.error_type == "launch_failed"
@@ -603,7 +604,7 @@ def test_preview_unresolved_agent_dir(tmp_path, capsys):
         main_root=tmp_path,
         checkout=tmp_path,
         argv=("pi", "--resume"),
-        agent_dir=launch.LaunchAgentDir(resolution=None, injected=None),
+        agent_dir=pi_exec.LaunchAgentDir(resolution=None, injected=None),
     )
     session_resume.emit_session_resume_preview(spec)
     captured = capsys.readouterr()
@@ -617,7 +618,7 @@ def test_preview_config_arm_reports_config_source(tmp_path, capsys):
         main_root=tmp_path,
         checkout=tmp_path,
         argv=("pi", "--resume"),
-        agent_dir=launch.LaunchAgentDir(
+        agent_dir=pi_exec.LaunchAgentDir(
             resolution=PiAgentDir(tmp_path / "agent", "config"), injected=tmp_path / "agent"
         ),
     )
@@ -634,3 +635,40 @@ def test_facade_never_imports_the_engine():
     """The facade `__init__` must not import `session_resume` (which imports the facade and
     reads its helpers as attributes at call time) — the name-binding rule's import direction."""
     assert "session_resume" not in Path(launch.__file__).read_text(encoding="utf-8")
+
+
+def _imported_modules(source: str) -> set[str]:
+    """Every module name an `import`/`from … import …` statement binds, at ANY nesting depth —
+    function-local imports are the documented tiering mechanism, so a textual top-level scan
+    would miss exactly the regression shape that matters."""
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            names.add(node.module)
+            # `from perk.run import launch` binds a submodule: record the dotted spelling too.
+            names.update(f"{node.module}.{alias.name}" for alias in node.names)
+    return names
+
+
+def test_exec_seam_imports_neither_launch_nor_the_cli():
+    """`pi_exec` sits on the bare-`perk` import tier (python-cli-guidelines §8.3): it must never
+    import the launch facade (which would drag the whole orchestrator — github, backends,
+    convergence — under bare `perk`) and its only `perk.cli` import is the typed-error module.
+    AST-based, so an inline (function-local) import is caught the same as a module-level one."""
+    imported = _imported_modules(Path(pi_exec.__file__).read_text(encoding="utf-8"))
+
+    def under(package: str) -> set[str]:
+        return {m for m in imported if m == package or m.startswith(package + ".")}
+
+    assert under("perk.run.launch") == set()
+    assert under("perk.cli") == {"perk.cli.ensure", "perk.cli.ensure.UserFacingCliError"}
+
+
+def test_import_scan_sees_function_local_imports():
+    # The guard's own vacuity check: a nested import is reported exactly like a top-level one.
+    source = "def f():\n    from perk.cli.context import require_repo\n    import perk.run.launch\n"
+    imported = _imported_modules(source)
+    assert "perk.cli.context" in imported
+    assert "perk.run.launch" in imported

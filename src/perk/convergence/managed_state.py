@@ -72,7 +72,7 @@ from perk.convergence.init.skills import (
     PERK_SKILLS_MANIFEST_FILENAME,
     _desired_skills_manifest,
 )
-from perk.convergence.init.version_pin import render_version_pin
+from perk.convergence.version_pin import render_version_pin
 
 # One arm of a latent import cycle: workflow_artifacts imports perk.convergence.init.settings,
 # so importing it before perk.convergence.init fails (see its module docstring).

@@ -87,11 +87,15 @@ def require_github(ctx: click.Context) -> AuthStatus:
   `UserFacingCliError` (with a stable `error_type`, see §5) instead of an `AttributeError`
   deep in a command.
 - **`require_repo` *is* the git binding.** git operations are stateless module functions
-  over the repo root (`perk/git.py`), so there is no `require_git`/`require_cwd`.
+  over the repo root (`perk/git.py`), so there is no `require_git`/`require_cwd`. The
+  two-roots helper `main_repo_root(invocation_root)` lives beside it in `context.py`
+  (re-exported by `perk/cli/plan_selection.py`, whose docstring keeps the two-roots prose).
 - **`require_github` is strict** — it returns an `AuthStatus` and raises when `gh` isn't
   authenticated. `init`/`doctor` instead call `github.check_*` directly to *report*
   (non-fatally). The GitHub gateway itself is module functions in `perk/github.py`, not a
-  context-carried object.
+  context-carried object — and `context.py` imports it **lazily inside `require_github`**
+  (§8.3): the context module sits on the bare-`perk` path, and the gateway's pydantic + `gh`
+  boundary is a subcommand cost.
 - The `_perk()` isinstance-narrowing helper gives **type narrowing** + **clear errors**;
   the house decorator is `@click.pass_context` + `require_*` (not `@click.pass_obj`).
 - `PerkContext.for_test(...)` injects fakes (see §9).
@@ -466,7 +470,10 @@ perk/cli/commands/
 `SectionedGroup`, which renders curated sections — *Stage Launchers / Command Groups /
 Setup & Health / Other* (catch-all) / *Hidden* (env-gated by `PERK_SHOW_HIDDEN`).
 `register_with_aliases` registers the same `Command` object under its primary name and
-every `@alias(...)` name, so resolution is free.
+every `@alias(...)` name, so resolution is free. The root registration itself lives in
+`cli.py::_register_root_commands` — every command import and `add_command` in one function,
+handed to `SectionedGroup(deferred_registration=…)` and run **once, on Click's first
+subcommand lookup or listing** (§8.3); a `SectionedGroup` built without the hook is eager.
 
 **Stage launchers are generated from the stage registry** (`perk/cli/stages.py`): the
 registry is the source of truth for which `perk <stage>` commands exist;
@@ -502,6 +509,35 @@ uses extension tools natively ([cli-vs-pi.md](./cli-vs-pi.md) §3.2). What ships
   transports beyond human/`--json`.)*
 
 *(Source: `cli/json-command-decorator.md`, reconciled with `cli-vs-pi.md`.)*
+
+### 8.3 The tiered-import rule
+
+The CLI root (`perk/cli/cli.py`) and the leaves that bare `perk` and `--version` reach
+(`context.py`, `version_check.py`, `plain_session.py`, `perk/run/pi_exec.py`, the
+`perk.convergence.version_pin` pin reader) keep their **module-level imports cheap**: stdlib,
+`click`, the version SSOT, and the pydantic-free substrate (plus the `perk.substrate.config`
+boundary, which bare `perk` legitimately needs for `[pi] agent_dir` and the `local.toml` key).
+The command surface, the exec seam, `perk.github` and the heavy packages (`backends`,
+`convergence.init`, `run.launch`, `plan`) load **on demand**:
+
+- `cli.py` defers *everything* into `_register_root_commands` (run by `SectionedGroup` on
+  Click's first subcommand lookup/listing) and its callback arms (`PerkContext` in the
+  `ctx.obj is None` branch, `run_plain_session` in the bare arm). It is the one file where
+  in-function imports are the norm, so `PLC0415` is ignored for it in `pyproject.toml`.
+- A **leaf** imports a heavy dependency inside the function that needs it, spelled
+  `from x import y  # noqa: PLC0415 — tiered import` (with the reason in a comment above when
+  it is not obvious): `require_github` → `perk.github`; the plain session →
+  `perk.run.pi_exec` after its terminal check.
+
+Why: bare `perk` and `perk --version` are the most frequent invocations and their startup
+(the objective's 0.71–0.76 s `--version`) was paying for the whole surface — every command
+group, the registry read, the GitHub gateway and the launch orchestrator. Nothing user-visible
+changes: help, aliases, flat aliases, hybrid dispatch and Click's "Did you mean" suggestions
+are byte-identical, because Click's `resolve_command` reaches `get_command` before it reads
+the map. The guard is the fresh-process importtime matrix `tests/test_cli_import_tiers.py`
+(`--version`, bare, `--`; `--help` as the positive control) — a new heavy module-level import
+on the light path fails it. Per-group laziness (a light subcommand still loads the whole
+surface) is a deliberate non-goal until a measured need appears.
 
 ---
 

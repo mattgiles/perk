@@ -6,11 +6,9 @@ import sys
 
 import click
 
-from perk.cli.context import require_repo
+from perk.cli.context import main_repo_root, require_repo
 from perk.cli.emit import fail
 from perk.cli.ensure import UserFacingCliError
-from perk.cli.plan_selection import main_repo_root
-from perk.run import launch
 from perk.substrate.output import user_output
 
 # The whole argv — literally `pi`, never `--approve`: Pi's own trust flow governs the invocation
@@ -48,21 +46,28 @@ def run_plain_session(ctx: click.Context) -> None:
     Pi exec pipeline with ``run_id=None`` (an inherited ``PERK_RUN_ID`` is dropped; the extension
     mints its ordinary warm-session id on load, as for a hand-run ``pi``).
 
-    ``launch.resolve_launch_agent_dir`` / ``launch.exec_pi`` are read as facade attributes at
-    call time so facade monkeypatches (the exec recorder included) rebind for this arm too. Only
-    ``UserFacingCliError`` is caught: an ``OSError`` / ``UnicodeDecodeError`` inside the shared
-    config or ``local.toml`` readers is untyped and propagates through Click's ordinary
-    exception boundary, as on every other cold launch.
+    ``perk.run.pi_exec`` is imported only after the terminal check (the tiered-import rule,
+    python-cli-guidelines §8.3: the exec seam carries the pydantic config boundary, which the
+    refusal ladder must not pay), and ``pi_exec.resolve_launch_agent_dir`` / ``pi_exec.exec_pi``
+    are read as module attributes at call time so the ``pi_exec`` monkeypatches (the exec
+    recorder included) rebind for this arm too. Only ``UserFacingCliError`` is caught: an
+    ``OSError`` / ``UnicodeDecodeError`` inside the shared config or ``local.toml`` readers is
+    untyped and propagates through Click's ordinary exception boundary, as on every other cold
+    launch.
     """
     try:
         invocation_root = require_repo(ctx)  # `not_a_repo` is decided first, as everywhere
         _require_terminal()  # fail fast: before any config load or agent-dir resolution
+        # The exec seam carries the pydantic config boundary, which the refusal ladder above
+        # must not pay (python-cli-guidelines §8.3).
+        from perk.run import pi_exec  # noqa: PLC0415 — tiered import
+
         main_root = main_repo_root(invocation_root)
-        agent_dir = launch.resolve_launch_agent_dir(main_root)
+        agent_dir = pi_exec.resolve_launch_agent_dir(main_root)
         user_output(
             f"opening a plain Pi session in {invocation_root}: {shlex.join(PLAIN_SESSION_ARGV)}"
         )
-        launch.exec_pi(
+        pi_exec.exec_pi(
             main_root=main_root,
             checkout=invocation_root,
             argv=PLAIN_SESSION_ARGV,

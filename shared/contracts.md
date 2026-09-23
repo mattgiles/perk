@@ -12853,8 +12853,9 @@ launch environment with a stage launch, through the same seams: `resolve_launch_
 the same missing-dir warning and `pi_agent_dir_invalid` refusal), `_build_exec_env(run_id=None)`,
 the `LINEAR_API_KEY` seed from the main checkout's `local.toml` (env wins), the pre-chdir
 absolute `pi` resolution (`pi_cli_missing`), the stale agent-lock sweep, and the one shared Pi
-executor `exec_pi` (`_exec_pi(ctx)` is the stage launch's `_LaunchContext` adapter over it, so the
-two paths cannot drift). `run_id=None` **removes an inherited `PERK_RUN_ID`** (never forwards
+executor `exec_pi` (`perk.run.pi_exec`; `perk.run.launch` re-exports `exec_pi`, `LaunchAgentDir`
+and `resolve_launch_agent_dir` for its `_exec_pi` adapter — `_exec_pi(ctx)` is the stage launch's
+`_LaunchContext` adapter over it, so the two paths cannot drift). `run_id=None` **removes an inherited `PERK_RUN_ID`** (never forwards
 it): a reopened session that already carries its workflow-state identity keeps it (the
 extension's `keep` arm); a session with NO persisted identity receives the extension's ordinary
 warm-session mint on load (§8.2 — an in-session branch entry, exactly as a hand-run `pi` in the
@@ -13089,10 +13090,10 @@ env → main-checkout `[pi] agent_dir` → default — with the same missing-dir
 ordinary warm-session mint on load, §8.2 — exactly as a hand-run `pi`), the npm-quiet
 defaults and the `PERK_CLI_VERSION` stamp, the `LINEAR_API_KEY` seed from the main
 checkout's `local.toml` (env wins), the pre-chdir absolute `pi` resolution (`pi_cli_missing`),
-and the stale agent-lock sweep. The door reads `launch.resolve_launch_agent_dir` / `launch.exec_pi`
-as facade attributes at call time (the §8.71 import-direction rule), so the two paths cannot
-drift and the exec recorder's facade monkeypatches reach it. The committed-redirect trust
-residual this shares with every cold-local launch is recorded in (h).
+and the stale agent-lock sweep. The door imports `perk.run.pi_exec` only after the `not_a_tty`
+check and reads `pi_exec.resolve_launch_agent_dir` / `pi_exec.exec_pi` at call time, so the two
+paths cannot drift and the exec recorder's `pi_exec` monkeypatches reach it. The
+committed-redirect trust residual this shares with every cold-local launch is recorded in (h).
 
 ### (c) The two-roots rule
 
@@ -13166,7 +13167,8 @@ the gitignored `local.toml` — is a cross-door decision outside this section.
 
 ### (i) The maintainer-only stop-before-exec seam (`PERK_PROFILE_HANDOFF`)
 
-The one shared executor `exec_pi` carries a **profiling instrument, not an operator surface**:
+The one shared executor `exec_pi` (`perk.run.pi_exec`) carries a **profiling instrument, not an
+operator surface**:
 when `PERK_PROFILE_HANDOFF=<file>` is set to a non-blank value, `exec_pi` runs every pre-exec phase
 as usual — the pre-chdir absolute `pi` resolution, the child-env build (`_build_exec_env`), the
 stale agent-lock sweep — and then, immediately before the `chdir` + `exec` that would otherwise
@@ -13188,3 +13190,16 @@ real launch (cProfile's runner swallows `SystemExit` and still dumps its stats).
 never set the variable; its only consumer and its documentation are `perk-dev profile-startup`
 (the harness scrubs and re-sets it per profiled arm) and `docs/developers/profiling-startup.md` —
 there is no `docs/user-docs/` or `perk-expert` row for it, the same posture as `PERK_CLI_VERSION`.
+
+### (j) Startup cost
+
+Bare `perk`, a lone `--` and the eager `--version` **import no command group and read no
+registry**: the root registration (every command import + `add_command`, `perk/cli/cli.py::
+_register_root_commands`) is deferred as one unit to Click's first subcommand lookup or listing
+(`SectionedGroup.get_command` / `list_commands`), which those three invocations never reach;
+`--version` exits during option parsing, and the bare arm imports `perk.run.pi_exec` only after
+the terminal check. A subcommand still loads the whole surface on its first lookup (unchanged);
+Click's own "Did you mean" suggestions are complete because `resolve_command` calls `get_command`
+before it reads the map. Guarded by the fresh-process importtime matrix
+`tests/test_cli_import_tiers.py` (`--version`, bare, `--`, and `--help` as the positive control);
+the rule is `docs/design/first-principles/python-cli-guidelines.md` §8.3.

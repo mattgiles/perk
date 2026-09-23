@@ -10,15 +10,16 @@ missing. (git ops are stateless module functions over the repo root, so ``requir
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 import click
 
-from perk import github
 from perk.cli.ensure import UserFacingCliError
-from perk.github import AuthStatus
 from perk.substrate import git
 from perk.substrate.config import Config, ConfigError, load_config
+
+if TYPE_CHECKING:
+    from perk.github import AuthStatus
 
 
 @dataclass
@@ -90,16 +91,28 @@ def require_repo(ctx: click.Context) -> Path:
     return _perk(ctx).repo_root()
 
 
+def main_repo_root(invocation_root: Path) -> Path:
+    """The **main checkout's** root, even when invoked from inside a linked worktree.
+
+    The anchor for config loading, ``config.worktree_root`` resolution, backend/canonical
+    reads, and selector writes — never for the no-argument cache fallback (which reads the
+    invocation root's own binding).
+    """
+    return git.main_worktree_root(invocation_root) or invocation_root
+
+
 def require_config(ctx: click.Context) -> Config:
     """The loaded perk config for this invocation."""
     return _perk(ctx).config()
 
 
-def require_github(ctx: click.Context) -> AuthStatus:
+def require_github(ctx: click.Context) -> "AuthStatus":
     """Strict GitHub binding for commands that *need* a working GitHub.
 
     ``init``/``doctor`` instead call ``github.check_*`` directly to *report* (non-fatal).
     """
+    from perk import github  # noqa: PLC0415 — tiered import (python-cli-guidelines §8.3)
+
     _perk(ctx)  # ensure this is a properly-initialized perk command context
     auth = github.check_auth()
     if not auth.ok:

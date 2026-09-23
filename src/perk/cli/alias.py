@@ -20,7 +20,7 @@ perk has no shared CLI package, so the whole (small) mechanism lives here:
 
 import os
 from collections.abc import Callable
-from typing import Literal, TypeVar
+from typing import Any, Literal, TypeVar
 
 import click
 
@@ -195,7 +195,38 @@ class SectionedGroup(AliasGroup):
     Hidden — and any section with no rows is omitted. Alias display and command resolution are
     inherited unchanged from ``AliasGroup``; the ``Hidden`` section is only rendered when
     ``PERK_SHOW_HIDDEN`` is set.
+
+    **Deferred one-unit registration.** ``deferred_registration`` is an optional hook that
+    performs the whole root registration (every command import + ``add_command``) the first time
+    Click asks this group for a subcommand — ``get_command`` / ``list_commands``, which Click
+    reaches only when it resolves, lists, completes or suggests a subcommand. Bare ``perk``, a
+    lone ``--`` and the eager ``--version`` never call either, so they never run the hook: no
+    command group is imported and no registry is read (python-cli-guidelines §8.3). The hook
+    runs at most once; a group built without it is the eager group it always was.
     """
+
+    def __init__(
+        self,
+        *args: Any,
+        deferred_registration: Callable[[click.Group], None] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._deferred_registration = deferred_registration
+
+    def _ensure_registered(self) -> None:
+        # Cleared BEFORE it runs, so the hook's own add_command calls never re-enter it.
+        hook, self._deferred_registration = self._deferred_registration, None
+        if hook is not None:
+            hook(self)
+
+    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+        self._ensure_registered()
+        return super().get_command(ctx, cmd_name)
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        self._ensure_registered()
+        return super().list_commands(ctx)
 
     def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
         alias_names = _collect_alias_names(self, ctx)

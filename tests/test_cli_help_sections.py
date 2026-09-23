@@ -172,6 +172,74 @@ def test_hidden_section_shown_with_env(monkeypatch):
     assert "secret" in hidden_slice
 
 
+def _deferred_group() -> tuple[SectionedGroup, list[click.Group]]:
+    """A synthetic root whose whole registration is the deferred hook (``calls`` records every
+    hook invocation); the group's own callback is a no-op so bare invocation runs it."""
+    calls: list[click.Group] = []
+
+    def register(root: click.Group) -> None:
+        calls.append(root)
+
+        @root.command("hooked")
+        def _hooked() -> None:
+            """Registered by the hook."""
+
+    @click.group(cls=SectionedGroup, invoke_without_command=True, deferred_registration=register)
+    def grp() -> None:
+        pass
+
+    assert isinstance(grp, SectionedGroup)
+    return grp, calls
+
+
+def test_deferred_registration_skipped_by_bare_invocation():
+    # The bare arm runs the group callback without ever resolving or listing a subcommand.
+    grp, calls = _deferred_group()
+    result = CliRunner().invoke(grp, [])
+    assert result.exit_code == 0, result.output
+    assert calls == []
+    result = CliRunner().invoke(grp, ["--"])
+    assert result.exit_code == 0, result.output
+    assert calls == []
+
+
+def test_deferred_registration_runs_exactly_once_across_lookups():
+    grp, calls = _deferred_group()
+    ctx = click.Context(grp)
+    assert grp.get_command(ctx, "hooked") is not None
+    assert calls == [grp]
+    assert "hooked" in grp.list_commands(ctx)
+    result = CliRunner().invoke(grp, ["--help"])
+    assert result.exit_code == 0
+    assert "hooked" in result.output
+    assert calls == [grp]
+
+
+def test_deferred_registration_keeps_an_eager_add_command():
+    # A command added BEFORE the hook fires survives beside the hook's registrations.
+    grp, calls = _deferred_group()
+
+    @click.command("early")
+    def _early() -> None:
+        """Added eagerly."""
+
+    grp.add_command(_early)
+    assert calls == []
+    ctx = click.Context(grp)
+    assert set(grp.list_commands(ctx)) == {"early", "hooked"}
+    assert grp.get_command(ctx, "early") is _early
+    assert calls == [grp]
+
+
+def test_deferred_registration_unknown_command_still_refuses():
+    # `resolve_command` calls `get_command` first, so the hook's map feeds Click's own error.
+    grp, calls = _deferred_group()
+    result = CliRunner().invoke(grp, ["nope"])
+    assert result.exit_code == 2
+    assert "No such command 'nope'" in result.output
+    assert calls == [grp]
+
+
 def _kinded_group() -> SectionedAliasGroup:
     """A synthetic SectionedAliasGroup with a launcher, a worker, and an unmarked command."""
     grp = SectionedAliasGroup("syn")
@@ -247,11 +315,12 @@ def test_objective_group_renders_launchers_and_workers():
 
 def test_section_lists_drift_guard():
     ctx = click.Context(cli)
-    alias_names = {a for name in cli.commands for a in get_aliases(cli.commands[name])}
+    # Through Click's lookup API (the root registers lazily on the first listing).
+    commands = {n: c for n in cli.list_commands(ctx) if (c := cli.get_command(ctx, n))}
+    alias_names = {a for cmd in commands.values() for a in get_aliases(cmd)}
     visible: set[str] = set()
-    for name in cli.list_commands(ctx):
-        cmd = cli.get_command(ctx, name)
-        if cmd is None or cmd.hidden or name in alias_names:
+    for name, cmd in commands.items():
+        if cmd.hidden or name in alias_names:
             continue
         visible.add(name)
 
@@ -260,7 +329,7 @@ def test_section_lists_drift_guard():
     # (a) No stale entries: every curated name resolves to a live root command.
     for bucket in curated:
         for name in bucket:
-            assert name in cli.commands, f"stale curated entry: {name}"
+            assert name in commands, f"stale curated entry: {name}"
 
     # (b) The three curated lists are pairwise disjoint.
     assert curated[0] & curated[1] == set()

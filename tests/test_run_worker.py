@@ -137,9 +137,9 @@ def test_positioning_parity_local_launch_vs_remote_worker(git_repo_with_remote, 
     stage = next(s for s in load_registry().stages if s.id == "implement")
 
     # Path A — the cold-local launch (exec + npm warming no-op'd; everything else real).
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch._resolve_pi_executable", lambda: "/stub/bin/pi")
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda _f, _a, _e: None)
+    monkeypatch.setattr("perk.run.pi_exec.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.pi_exec._resolve_pi_executable", lambda: "/stub/bin/pi")
+    monkeypatch.setattr("perk.run.pi_exec.os.execvpe", lambda _f, _a, _e: None)
     monkeypatch.setattr(
         launch.init, "ensure_extension_install_present", lambda repo_root, *, self_repo: None
     )
@@ -190,9 +190,9 @@ def test_positioning_parity_explicit_ref_launch_vs_remote_worker(git_repo_with_r
     monkeypatch.setattr(plans, "get_plan_body", lambda **_k: "# plan body\n")
     stage = next(s for s in load_registry().stages if s.id == "implement")
 
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch._resolve_pi_executable", lambda: "/stub/bin/pi")
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda _f, _a, _e: None)
+    monkeypatch.setattr("perk.run.pi_exec.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.pi_exec._resolve_pi_executable", lambda: "/stub/bin/pi")
+    monkeypatch.setattr("perk.run.pi_exec.os.execvpe", lambda _f, _a, _e: None)
     monkeypatch.setattr(
         launch.init, "ensure_extension_install_present", lambda repo_root, *, self_repo: None
     )

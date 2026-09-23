@@ -753,10 +753,10 @@ def test_summarize_importtime_sorts_by_cumulative():
 def test_handoff_record_mirrors_the_seam(tmp_path, launch_exec_recorder):
     from perk_dev.profile_startup import handoff
 
-    from perk.run import launch
+    from perk.run import pi_exec
 
     target = tmp_path / "h.json"
-    launch._record_profile_handoff(
+    pi_exec._record_profile_handoff(
         target,
         pi_path="/stub/bin/pi",
         argv=("pi",),
@@ -788,19 +788,19 @@ def _fake_handoff_spawn(
     from the spawn itself (nothing runs)."""
     import cProfile
 
-    from perk.run import launch
+    from perk.run import pi_exec
 
     calls: list[dict] = []
 
     def spawn(argv, *, cwd, env, size, timeout_s, exit_grace_s, startup_marker):
-        target = Path(env[launch.PROFILE_HANDOFF_ENV])
+        target = Path(env[pi_exec.PROFILE_HANDOFF_ENV])
         arm = target.stem.removeprefix("handoff-")
         calls.append({"argv": tuple(argv), "arm": arm, "target": target, "cwd": cwd})
         if arm in spawn_errors:
             raise OSError(2, "No such file or directory", argv[0])
         assert startup_marker("--- Startup Timings: main ---") is False  # never fires
         if arm in write_records:
-            launch._record_profile_handoff(
+            pi_exec._record_profile_handoff(
                 target, pi_path="/stub/bin/pi", argv=("pi",), checkout=cwd, env=env
             )
         stderr = ""
@@ -877,11 +877,11 @@ def test_run_handoff_arms_happy_path_writes_every_artifact(tmp_path):
 
 
 def test_run_handoff_arms_stale_record_is_unlinked_before_the_spawn(tmp_path):
-    from perk.run import launch
+    from perk.run import pi_exec
 
     profiles = tmp_path / "profiles"
     profiles.mkdir()
-    launch._record_profile_handoff(
+    pi_exec._record_profile_handoff(
         profiles / "handoff-direct.json", pi_path="/stale", argv=("pi",), checkout=tmp_path, env={}
     )
     spawn, _calls = _fake_handoff_spawn(write_records={"cprofile", "importtime"})
