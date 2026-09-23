@@ -2222,6 +2222,33 @@ def test_compaction_drift_detected_and_fixed(scaffolded_perk_repo):
     assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
 
 
+def test_native_consumer_ordering_drift_detected_and_fixed(scaffolded_perk_repo):
+    # The host-SDK bridge load-order rule (contracts §8.73) converges inside `settings-wiring`,
+    # so a perk entry planted AFTER `npm:pi-subagents` is drift doctor reports (`fail`, detail
+    # names the move) and `--fix` repairs — the same convergence `perk init` runs.
+    import json
+
+    settings_path = scaffolded_perk_repo / ".pi" / "settings.json"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    packages = settings["packages"]
+    perk_entry = next(p for p in packages if str(p).startswith("npm:@mgiles/perk"))
+    packages.remove(perk_entry)
+    packages.insert(packages.index("npm:pi-subagents") + 1, perk_entry)
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+
+    report = run_doctor(scaffolded_perk_repo, verify=False)
+    wiring = next(c for c in report.checks if c.name == "settings-wiring")
+    assert wiring.status == "fail"
+    assert "moved" in wiring.detail
+    assert wiring.remediation == "perk doctor --fix"
+    fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
+    assert fixed.healthy
+    repaired = json.loads(settings_path.read_text(encoding="utf-8"))["packages"]
+    assert repaired.index(perk_entry) < repaired.index("npm:pi-subagents")
+    again = run_doctor(scaffolded_perk_repo, verify=False)  # converged → no drift
+    assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
+
+
 def test_models_drift_detected_and_fixed(scaffolded_perk_repo):
     # `[models]` converges inside `settings-wiring` too, so doctor dry-runs/fixes it for free.
     # Select a default model that diverges from settings.json → drift → `--fix` repairs.

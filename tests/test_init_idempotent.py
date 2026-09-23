@@ -1119,3 +1119,122 @@ def test_init_verify_installs_perk_extension_and_is_idempotent(git_repo, stub_en
     again = run_init(git_repo, verify=True)
     assert again.ok
     assert not any("@mgiles/perk" in line for line in again.changes)  # present → no change
+
+
+# ---------------------------------------------------------------------------
+# The host-SDK bridge load-order rule (contracts §8.73): perk's `packages` entry precedes the
+# managed native consumers (`npm:pi-subagents`, `npm:pi-web-access`) so Pi loads perk first.
+# ---------------------------------------------------------------------------
+
+
+def _packages(root: Path) -> list[object]:
+    return json.loads((root / ".pi" / "settings.json").read_text(encoding="utf-8"))["packages"]
+
+
+def _identity(entry: object) -> str | None:
+    from perk.convergence.init.settings import _package_identity
+
+    return _package_identity(entry)
+
+
+def test_init_moves_perk_before_the_first_native_consumer(tmp_path):
+    # perk listed after both consumers (string + object form): it moves to just before the FIRST
+    # consumer; user entries before and after keep their relative order; the object-form consumer
+    # entry is untouched.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps(
+            {
+                "packages": [
+                    "npm:@me/first",
+                    "npm:pi-subagents",
+                    "npm:@me/between",
+                    {"source": "npm:pi-web-access"},
+                    f"npm:@mgiles/perk@{__version__}",
+                    "npm:@me/last",
+                ]
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+
+    report = run_init(tmp_path, verify=False)
+
+    assert any(
+        f"moved npm:@mgiles/perk@{__version__} before npm:pi-subagents" in change
+        for change in report.changes
+    ), report.changes
+    packages = _packages(tmp_path)
+    identities = [_identity(p) for p in packages]
+    assert identities.index("@mgiles/perk") < identities.index("pi-subagents")
+    # Relative order of everything else is preserved around the move.
+    assert identities[:5] == [
+        "@me/first",
+        "@mgiles/perk",
+        "pi-subagents",
+        "@me/between",
+        "pi-web-access",
+    ]
+    assert {"source": "npm:pi-web-access"} in packages  # object-form consumer untouched
+    assert identities.index("@me/last") > identities.index("pi-web-access")
+    # Idempotent: the second run reports nothing.
+    assert run_init(tmp_path, verify=False).changes == []
+
+
+def test_init_reconciles_and_moves_a_stale_pinned_perk_entry(tmp_path):
+    # A stale pin AFTER a consumer is both reconciled forward and moved ahead of it.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps({"packages": ["npm:pi-subagents", "npm:@mgiles/perk@0.0.0"]}, indent=2) + "\n"
+    )
+
+    report = run_init(tmp_path, verify=False)
+
+    settings_line = next(c for c in report.changes if c.startswith(".pi/settings.json:"))
+    assert f"updated npm:@mgiles/perk@0.0.0 -> npm:@mgiles/perk@{__version__}" in settings_line
+    assert f"moved npm:@mgiles/perk@{__version__} before npm:pi-subagents" in settings_line
+    identities = [_identity(p) for p in _packages(tmp_path)]
+    assert identities.index("@mgiles/perk") < identities.index("pi-subagents")
+
+
+def test_init_self_repo_moves_local_entry_before_a_consumer(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[tool.perk]\nself = true\n", encoding="utf-8")
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps({"packages": ["npm:pi-web-access", {"source": "..", "themes": []}]}, indent=2)
+        + "\n"
+    )
+
+    report = run_init(tmp_path, verify=False)
+
+    assert any("moved .. before npm:pi-web-access" in c for c in report.changes), report.changes
+    packages = _packages(tmp_path)
+    assert packages[0] == {"source": "..", "themes": []}  # moved intact (filters preserved)
+    assert _identity(packages[1]) == "pi-web-access"
+
+
+def test_init_leaves_a_repo_with_perk_already_first_unchanged(tmp_path):
+    # A converged repo (perk first) is byte-stable: the ordering rule reports nothing.
+    run_init(tmp_path, verify=False)
+    before = (tmp_path / ".pi" / "settings.json").read_text(encoding="utf-8")
+    identities = [_identity(p) for p in _packages(tmp_path)]
+    assert identities.index("@mgiles/perk") < identities.index("pi-subagents")
+    assert identities.index("@mgiles/perk") < identities.index("pi-web-access")
+    report = run_init(tmp_path, verify=False)
+    assert report.changes == []
+    assert (tmp_path / ".pi" / "settings.json").read_text(encoding="utf-8") == before
+
+
+def test_order_perk_before_native_consumers_is_a_no_op_without_both_sides():
+    from perk.convergence.init.settings import _order_perk_before_native_consumers
+
+    only_perk: list[object] = ["npm:@mgiles/perk@1.0.0", "npm:@me/x"]
+    assert _order_perk_before_native_consumers(only_perk, "@mgiles/perk") == []
+    assert only_perk == ["npm:@mgiles/perk@1.0.0", "npm:@me/x"]
+    only_consumer: list[object] = ["npm:pi-subagents"]
+    assert _order_perk_before_native_consumers(only_consumer, "@mgiles/perk") == []
+    assert only_consumer == ["npm:pi-subagents"]
