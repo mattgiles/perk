@@ -186,6 +186,15 @@ duplicate SDK copies a launch actually loaded (the subject stamp's `sdk_copies` 
 installed). Modules jiti evaluates itself (perk's own TypeScript extension files) may not appear in
 the census — a property of the loader, not a defect.
 
+Under perk's host-SDK bridge (contracts §8.73), `sdk_outside_host_roots` is expected to be
+**empty** for a launch whose `/perk-selfcheck` reports `bridge=installed`: the two native consumers'
+SDK imports resolve to facades addressed at the host entry, so no SDK module loads from outside the
+host root. Those facade resolutions never reach the tracer — the bridge registers its hooks later
+than the `--import` tracer, so it runs first and short-circuits them; the tracer sees only the
+bridge's pass-throughs. A non-empty list under an installed bridge names an unbridged SDK path
+(a `preloaded` consumer, a user-scope install, a specifier outside the census) and is the thing to
+diagnose.
+
 Open a `.cpuprofile` in Chrome DevTools (Performance → load profile) or any V8 profile viewer.
 
 ## Caveats

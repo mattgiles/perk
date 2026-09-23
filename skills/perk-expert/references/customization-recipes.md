@@ -199,6 +199,37 @@ Any other valid pi-fff mode works the same way. To drop
 the package's resources entirely in one repo, use the `pi config -l` resource-filter lever (see
 [Scope pi resources per-project](#scope-pi-resources-per-project-pi-config--l)).
 
+## Disable the host-SDK bridge (`PERK_DISABLE_NATIVE_SDK_BRIDGE`)
+
+`pi-subagents` and `pi-web-access` ship compiled JavaScript that Node loads natively, so without
+help each loads its **own** copy of the Pi SDK (`@earendil-works/*`, `typebox`) beside the running
+Pi's. perk's **host-SDK bridge** — installed as the first statement of perk's extension factory,
+via Node's `module.registerHooks` — redirects exactly those SDK imports, from exactly those two
+packages installed under the repo's `.pi/npm/node_modules/`, onto the SDK instances the running Pi
+already holds (shared values and class identity; nothing else changes). It is on by default and
+needs no configuration.
+
+To turn it off: `PERK_DISABLE_NATIVE_SDK_BRIDGE=1 perk <stage>` (or export it before `pi`). The
+value is read **once per process**, at perk's first activation — `/reload` and session replacement
+keep whatever was decided; quit and relaunch to change it. Only the exact value `1` disables;
+`0`, `true` or an empty value leave the bridge on.
+
+Compatibility: the bridge is inert (never a failure) wherever it cannot apply — Bun or compiled Pi
+builds, embedded SDK hosts and test runners (no Pi package around the entry), a repo with neither
+package installed (`skipped:no-consumers`). Packages Pi loads **before** perk stay unbridged and
+load their own SDK copies: user-scope `packages` (`~/.pi/agent/settings.json`), agent-dir
+`extensions`, `pi -e` extensions, and a project `.pi/settings.json` that lists perk after one of
+the two (which `perk doctor --fix` repairs — see the `settings-wiring` order rule in
+[configuration](./configuration.md#repository-layout--the-dot-directory-contract)). perk installs
+no launcher preload and never touches `NODE_OPTIONS`.
+
+Where to look: `/perk-selfcheck` prints `bridge=<state>` in its summary line and a
+`native sdk bridge:` census block (the SDK entry perk found, the bridged package roots) —
+`installed`, `disabled`, `skipped:no-consumers`, or an `unsupported:*` reason. A
+`perk: sdk bridge — …` warning at session start means an install was **declined** (another perk
+copy in the process already bridged a different Pi entry) or **failed** (the message names the
+step); the two packages then load their own SDK copies for that session while perk runs normally.
+
 ## Keep pi-subagents out of user-scope settings (`subagent-package-scope`)
 
 perk converges `npm:pi-subagents` into the **project** `.pi/settings.json` on purpose: the engine
