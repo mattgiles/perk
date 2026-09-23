@@ -41,10 +41,19 @@ const RULES: { pattern: RegExp; allowlist: string[] }[] = [
   // pi-tui imports (static, side-effect, or dynamic — the specifier always sits on one line) are
   // confined to the surfaces module, which re-exports the vocabulary other modules need (`Key`,
   // renderer helpers). The two vendor/btw files are the charter's named D6 `ctx.ui.custom`
-  // exception (§6): real pi-tui components for the sanctioned human-only overlay.
+  // exception (§6): real pi-tui components for the sanctioned human-only overlay. The two
+  // host-SDK bridge files name the pi-tui specifier as DATA — the redirected census entry and
+  // its captured-namespace key — never as an import: the bridge imports node builtins only
+  // (bareImportGuard) and hostSdk.ts takes the pi-tui namespace through the surfaces re-export.
   {
     pattern: PI_TUI_IMPORT,
-    allowlist: [...SURFACES_MODULE, "vendor/btw/btw.ts", "vendor/btw/core.ts"],
+    allowlist: [
+      ...SURFACES_MODULE,
+      "vendor/btw/btw.ts",
+      "vendor/btw/core.ts",
+      "substrate/nativeSdkBridge.ts",
+      "substrate/hostSdk.ts",
+    ],
   },
 ];
 

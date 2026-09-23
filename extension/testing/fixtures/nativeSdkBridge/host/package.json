@@ -1,0 +1,15 @@
+{
+  "name": "@earendil-works/pi-coding-agent",
+  "version": "0.0.0-fixture",
+  "type": "module",
+  "exports": {
+    ".": {
+      "node": {
+        "import": "./dist/index.js"
+      }
+    }
+  },
+  "bin": {
+    "pi": "dist/bundle/cli.js"
+  }
+}
