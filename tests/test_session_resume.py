@@ -6,6 +6,7 @@ validators refuse a bare `mkdir` as `worktree_unregistered`. The process boundar
 `exec_pi` pipeline reads), so every "exec'd" assertion is a stubbed argv/env-construction test.
 """
 
+import ast
 import json
 from pathlib import Path
 
@@ -636,15 +637,38 @@ def test_facade_never_imports_the_engine():
     assert "session_resume" not in Path(launch.__file__).read_text(encoding="utf-8")
 
 
+def _imported_modules(source: str) -> set[str]:
+    """Every module name an `import`/`from … import …` statement binds, at ANY nesting depth —
+    function-local imports are the documented tiering mechanism, so a textual top-level scan
+    would miss exactly the regression shape that matters."""
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            names.add(node.module)
+            # `from perk.run import launch` binds a submodule: record the dotted spelling too.
+            names.update(f"{node.module}.{alias.name}" for alias in node.names)
+    return names
+
+
 def test_exec_seam_imports_neither_launch_nor_the_cli():
     """`pi_exec` sits on the bare-`perk` import tier (python-cli-guidelines §8.3): it must never
     import the launch facade (which would drag the whole orchestrator — github, backends,
-    convergence — under bare `perk`) and its only `perk.cli` import is the typed-error module."""
-    source = Path(pi_exec.__file__).read_text(encoding="utf-8")
-    assert "perk.run.launch" not in source
-    cli_imports = {
-        line.strip()
-        for line in source.splitlines()
-        if line.startswith(("from perk.cli", "import perk.cli"))
-    }
-    assert cli_imports == {"from perk.cli.ensure import UserFacingCliError"}
+    convergence — under bare `perk`) and its only `perk.cli` import is the typed-error module.
+    AST-based, so an inline (function-local) import is caught the same as a module-level one."""
+    imported = _imported_modules(Path(pi_exec.__file__).read_text(encoding="utf-8"))
+
+    def under(package: str) -> set[str]:
+        return {m for m in imported if m == package or m.startswith(package + ".")}
+
+    assert under("perk.run.launch") == set()
+    assert under("perk.cli") == {"perk.cli.ensure", "perk.cli.ensure.UserFacingCliError"}
+
+
+def test_import_scan_sees_function_local_imports():
+    # The guard's own vacuity check: a nested import is reported exactly like a top-level one.
+    source = "def f():\n    from perk.cli.context import require_repo\n    import perk.run.launch\n"
+    imported = _imported_modules(source)
+    assert "perk.cli.context" in imported
+    assert "perk.run.launch" in imported

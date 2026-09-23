@@ -40,6 +40,17 @@ HEAVY = (
     "perk.cli.stages",
 )
 
+# The callback-only tier: what `--version` additionally never pays for. The eager option exits
+# during parsing, before the group callback runs, so the callback arms' lazy imports (the
+# context module and, through it, the pydantic config boundary; the plain-session door and the
+# exec seam it imports) must stay out of the trace — bare `perk` legitimately loads them.
+VERSION_ONLY_HEAVY = (
+    "perk.cli.context",
+    "perk.cli.plain_session",
+    "perk.run.pi_exec",
+    "perk.substrate.config",
+)
+
 # The parse floor: the root module always loads, so an empty module set means the importtime
 # log was not captured (never a vacuous pass).
 _ROOT_MODULE = "perk.cli.cli"
@@ -99,8 +110,8 @@ def _trace(args: list[str], *, cwd: Path, env: dict[str, str]) -> set[str]:
     return modules
 
 
-def _assert_light(modules: set[str], label: str) -> None:
-    offenders = {prefix: sorted(_loaded(modules, prefix)) for prefix in HEAVY}
+def _assert_light(modules: set[str], label: str, *, forbidden: tuple[str, ...] = HEAVY) -> None:
+    offenders = {prefix: sorted(_loaded(modules, prefix)) for prefix in forbidden}
     offenders = {prefix: loaded for prefix, loaded in offenders.items() if loaded}
     assert not offenders, f"{label} imported heavy packages: {json.dumps(offenders, indent=2)}"
 
@@ -114,7 +125,7 @@ def _assert_handoff_recorded(handoff: Path, *, cwd: Path) -> None:
 def test_version_imports_no_heavy_package(tier_env):
     scratch, env = tier_env
     modules = _trace(["--version"], cwd=scratch, env=env)
-    _assert_light(modules, "perk --version")
+    _assert_light(modules, "perk --version", forbidden=(*HEAVY, *VERSION_ONLY_HEAVY))
 
 
 def test_bare_perk_imports_only_the_exec_seam(tier_env, git_repo):
@@ -122,7 +133,9 @@ def test_bare_perk_imports_only_the_exec_seam(tier_env, git_repo):
     handoff = scratch / "handoff.json"
     modules = _trace([], cwd=git_repo, env={**env, _HANDOFF_ENV: str(handoff)})
     _assert_light(modules, "bare perk")
-    assert "perk.run.pi_exec" in modules
+    # The bare arm DOES load the callback tier — the positive control for VERSION_ONLY_HEAVY.
+    for prefix in VERSION_ONLY_HEAVY:
+        assert _loaded(modules, prefix), f"bare perk did not load {prefix}"
     _assert_handoff_recorded(handoff, cwd=git_repo)
 
 
