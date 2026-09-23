@@ -99,6 +99,14 @@ BORROWED_PACKAGES = [
     PONYTAIL_PACKAGE,
 ]
 
+# The managed *native consumers*: the two borrowed/provider packages whose compiled `.js` entries
+# Pi hands to Node's real ESM loader. perk's host-SDK bridge (contracts §8.73) serves only the
+# consumers Pi loads AFTER perk, and Pi loads `packages` extensions in array order — so
+# `_order_perk_before_native_consumers` keeps perk's entry ahead of these. npm identities; the TS
+# twin is `NATIVE_SDK_CONSUMERS` in `extension/substrate/nativeSdkBridge.ts`, pinned by
+# `tests/test_native_sdk_bridge_parity.py`.
+NATIVE_CONSUMER_PACKAGES: tuple[str, ...] = ("pi-subagents", "pi-web-access")
+
 # `pi-mono-linear` is the borrowed *Linear-tools Pi extension*, converged only when the repo
 # selects the linear issue backend (`[issues] backend = "linear"` in committed .perk/config.toml) —
 # two-directional like provider packages: added on select, removed on deselect (hand-adding it
@@ -313,6 +321,35 @@ def _reconcile_perk_entry(packages: list[object], want: str, name: str) -> list[
     return updated
 
 
+def _order_perk_before_native_consumers(packages: list[object], own_identity: str) -> list[str]:
+    """Move perk's own entry ahead of the first managed native consumer; returns the fragments.
+
+    Pi loads `packages` extensions in array order, and the host-SDK bridge perk installs at the
+    top of its extension factory serves only the consumers loaded after perk (contracts §8.73) —
+    so perk's entry must precede `npm:pi-subagents` / `npm:pi-web-access`. When perk's entry
+    (string or object form, whatever the pin reconcile left) sits after the first consumer, it is
+    popped and inserted at the consumer's index; every other entry keeps its relative order. A
+    repo with perk already ahead, or with either side absent, is untouched. Mutates in place.
+    """
+    perk_index = next(
+        (i for i, entry in enumerate(packages) if _package_identity(entry) == own_identity), None
+    )
+    consumer_index = next(
+        (
+            i
+            for i, entry in enumerate(packages)
+            if _package_identity(entry) in NATIVE_CONSUMER_PACKAGES
+        ),
+        None,
+    )
+    if perk_index is None or consumer_index is None or perk_index <= consumer_index:
+        return []
+    displaced = packages[consumer_index]
+    entry = packages.pop(perk_index)
+    packages.insert(consumer_index, entry)
+    return [f"moved {_entry_spec(entry)} before {_entry_spec(displaced)}"]
+
+
 def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> list[str]:
     settings_path = root / ".pi" / "settings.json"
 
@@ -356,6 +393,13 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     # rides the `settings-wiring` ManagedConvergence — doctor dry-runs/fixes it for free.
     packages, linear_changes = _converge_linear_package(root, packages)
     added.extend(linear_changes.added)
+
+    # Load-order rule for the host-SDK bridge (contracts §8.73): perk's entry ahead of the managed
+    # native consumers. Same body, so mis-ordering is `settings-wiring` drift doctor reports and
+    # `--fix` repairs; the managed-state health lens stays order-insensitive (never phantom drift).
+    own_identity = ".." if self_repo else _npm_name(NPM_PACKAGE)
+    if own_identity is not None:
+        updated.extend(_order_perk_before_native_consumers(packages, own_identity))
 
     settings["packages"] = packages
     # Converge pi's interactive auto-compaction from committed `[compaction]` (composes within

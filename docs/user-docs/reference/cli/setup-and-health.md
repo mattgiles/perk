@@ -64,6 +64,12 @@ pinned `@{version}`). perk's own extension is delivered as the pinned `npm:@mgil
 (below); the older `git:`-clone delivery path has been retired. If your repo was previously on the
 git clone, `perk doctor --fix` **migrates it forward** by removing the now-orphaned
 `.pi/git/<host>/<path>` clone (filesystem-only; idempotent — a no-op once gone).
+`settings-wiring` also converges the **load order** of `.pi/settings.json` `packages`: perk's own
+entry is kept ahead of `npm:pi-subagents` and `npm:pi-web-access`, because perk's host SDK bridge
+(see [Requirements and compatibility](../requirements-and-compatibility.md#host-sdk-bridge)) only
+serves packages Pi loads after perk. perk listed after either package is `settings-wiring` drift —
+`fail`, with the detail naming the move — and `perk doctor --fix` (like `perk init`) moves perk's
+entry to just before the first of the two, leaving every other entry's relative order unchanged.
 The `package` group's `extension-install` check verifies perk's own `@mgiles/perk` npm extension is
 **physically installed** under `.pi/npm/` at the pinned version (the install also carries perk's
 `perk.*` agent definitions, which pi-subagents discovers as package agents). Because pi installs a missing

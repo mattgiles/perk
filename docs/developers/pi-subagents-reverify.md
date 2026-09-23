@@ -4,7 +4,11 @@ This page is a **how-to guide**. perk consumes the borrowed `pi-subagents` engin
 public surfaces (the v1 RPC envelope, the delegation events, agent-def frontmatter) and the
 package is deliberately **unpinned**, so compatibility rests on a *recorded baseline* plus this
 re-verify ritual — never on a version constraint and never on reading the installed source from
-tests or doctor.
+tests or doctor. One carve-out: the host-SDK bridge's **census drift guard**
+(`extension/substrate/nativeSdkBridge.test.ts`) lexes the installed consumers' *import specifiers*
+— a structural fact of the shipped artifact (which SDK modules it imports), not engine mechanics —
+so a new release that imports an SDK subpath perk does not bridge fails loudly instead of silently
+loading a second SDK copy.
 
 **When to re-verify:** `perk doctor`'s `subagent-compat` check **warns** (installed version ≠
 `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION`), or you are about to build on new engine mechanics.
@@ -63,7 +67,12 @@ tests or doctor.
    - the **fork-context repair** for Pi 0.87 (the checkout-only fix): confirm whether the
      installed artifact carries it; until it does, perk children stay on `context: "fresh"`
      (the support boundary recorded in `docs/design/pi-subagents-child-execution-policy.md`).
-3. **Run `just ci`.**
+3. **Run `just ci`.** Then run the host-SDK bridge's census drift guard against the live install
+   — `node --test extension/substrate/nativeSdkBridge.test.ts` (it scans the consumers under this
+   checkout's `.pi/npm/node_modules/` and skips where none are installed, so this checkout is where
+   it runs for real). A census mismatch is a real finding: a new SDK specifier means a second SDK
+   copy would load unbridged — extend `NATIVE_SDK_CENSUS` and bump `BRIDGE_SCHEMA` in
+   `extension/substrate/nativeSdkBridge.ts` (contracts §8.73); a vanished one is a stale entry.
 4. **Run the live leg** from a read-write session whose installed pi-subagents is the new
    version: `perk doctor` (`subagent-compat` warns until the stamp moves; no
    `subagent-host-tools` row), then one `/plan-review-browser` wave and one `/pr-review-browser`

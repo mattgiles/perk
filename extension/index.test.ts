@@ -1,11 +1,12 @@
 // Extension-factory wiring tests. The live harness binds extension/index.ts through Pi's real
 // loader and runner, so these assertions cover registration rather than only renderer helpers —
-// and the activation wiring: footer install/vacate, version parity.
+// and the activation wiring: footer install/vacate, version parity, the host-SDK bridge arms.
 
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { BridgeStatus } from "./substrate/nativeSdkBridge.ts";
 import { REPORT_DETAIL_TYPE } from "./surfaces/surfaces.ts";
 import { loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 
@@ -126,6 +127,126 @@ test("version parity: no PERK_CLI_VERSION emits no drift warning", async () => {
     assert.ok(
       !h.notifies.some((m) => /version parity/.test(m)),
       `expected no version-parity warning, got ${JSON.stringify(h.notifies)}`,
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The host-SDK bridge reporting arms (contracts.md §8.73): failed/declined installs warn ONCE per
+// activation; installed/disabled/skipped/unsupported are standing state — selfcheck-only (D7).
+// ---------------------------------------------------------------------------
+
+const BRIDGE_BASE: BridgeStatus = {
+  state: "installed",
+  hostEntry: "/pi/dist/index.js",
+  roots: ["/repo/pi-subagents"],
+  specifiers: 7,
+  reused: false,
+  detail: "",
+};
+
+test("sdk bridge: the default (harness) activation is the inert embedded-host state — selfcheck-only, no warning", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    assert.ok(
+      !h.notifies.some((m) => /sdk bridge/.test(m)),
+      `expected no sdk-bridge warning, got ${JSON.stringify(h.notifies)}`,
+    );
+    await h.invokeCommand("perk-selfcheck");
+    const msg = h.notifies.at(-1) ?? "";
+    assert.match(msg, /^perk: selfcheck — /);
+    assert.match(msg, /bridge=unsupported:embedded-host/);
+    const entries = h.session.sessionManager.getEntries() as unknown as {
+      customType?: string;
+      data?: { text?: string };
+    }[];
+    const detail = entries.find((entry) => entry.customType === REPORT_DETAIL_TYPE);
+    assert.match(detail?.data?.text ?? "", /\n {2}native sdk bridge: unsupported:embedded-host\n/);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("sdk bridge: a failed install warns exactly once per activation, even across two session_starts", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    nativeSdkBridge: () => ({
+      ...BRIDGE_BASE,
+      state: "failed:register-hooks",
+      roots: [],
+      specifiers: 0,
+      detail: "test-injected",
+    }),
+  });
+  try {
+    await h.emitSessionStart();
+    const warnings = h.notifyEvents.filter((e) => /^perk: sdk bridge — /.test(e.message));
+    assert.equal(warnings.length, 1, JSON.stringify(h.notifies));
+    assert.equal(warnings[0]?.severity, "warning");
+    assert.match(
+      warnings[0]?.message ?? "",
+      /^perk: sdk bridge — failed:register-hooks — test-injected — the native SDK consumers load their own SDK copies this session; \/perk-selfcheck shows the state$/,
+    );
+    await h.invokeCommand("perk-selfcheck");
+    assert.match(h.notifies.at(-1) ?? "", /bridge=failed:register-hooks/);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("sdk bridge: a declined install says the earlier bridge stays active", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    nativeSdkBridge: () => ({
+      ...BRIDGE_BASE,
+      state: "declined:host-mismatch",
+      roots: [],
+      specifiers: 0,
+      detail: "active bridge host: /other/dist/index.js",
+    }),
+  });
+  try {
+    const warnings = h.notifies.filter((m) => /^perk: sdk bridge — /.test(m));
+    assert.equal(warnings.length, 1, JSON.stringify(h.notifies));
+    assert.match(
+      warnings[0] ?? "",
+      /declined:host-mismatch — active bridge host: \/other\/dist\/index\.js — an earlier host-SDK bridge in this process stays active for its own roots; this perk copy installed none; \/perk-selfcheck shows the state$/,
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("sdk bridge: an installed bridge emits no warning and reports through selfcheck", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    nativeSdkBridge: () => ({ ...BRIDGE_BASE, reused: true }),
+  });
+  try {
+    await h.emitSessionStart();
+    assert.ok(
+      !h.notifies.some((m) => /sdk bridge/.test(m)),
+      `expected no sdk-bridge warning, got ${JSON.stringify(h.notifies)}`,
+    );
+    await h.invokeCommand("perk-selfcheck");
+    assert.match(h.notifies.at(-1) ?? "", /bridge=installed/);
+    const entries = h.session.sessionManager.getEntries() as unknown as {
+      customType?: string;
+      data?: { text?: string };
+    }[];
+    const detail = entries.find((entry) => entry.customType === REPORT_DETAIL_TYPE);
+    assert.match(
+      detail?.data?.text ?? "",
+      /\n {2}native sdk bridge: installed \(roots=1, specifiers=7, reused\)\n {4}host: \/pi\/dist\/index\.js\n {4}roots: 1 — \/repo\/pi-subagents/,
     );
   } finally {
     h.dispose();

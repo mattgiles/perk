@@ -418,8 +418,11 @@ compaction never dispatches the continuation. Pi's `/compact` remains the escape
 
 Verify that converged context reached the live prompt, then report identifier/count/byte censuses
 for the append prompt, context files, skill catalog, active tool definitions grouped by source, and
-perk branch context. `perk doctor` checks disk; `/perk-selfcheck` checks prompt delivery. It is
-report-only and never reveals prompt or message text. No paired tool.
+perk branch context. `perk doctor` checks disk; `/perk-selfcheck` checks prompt delivery. It also
+reports the host SDK bridge state — `bridge=<state>` in the summary line and a `native sdk bridge:`
+census block naming the SDK entry and the bridged package roots (see
+[Host SDK bridge](../requirements-and-compatibility.md#host-sdk-bridge)). It is report-only and
+never reveals prompt or message text. No paired tool.
 
 ### `/learn-docs`
 

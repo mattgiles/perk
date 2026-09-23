@@ -66,6 +66,18 @@ machine-local store behind the one-line post-upgrade notice (the `perk release-n
 the max perk version this user has run interactively. Self-healing (missing/garbled content is
 silently re-recorded) and safe to delete; no doctor check or init convergence touches it.
 
+**The perk-managed `.pi/settings.json` slice keeps a load order.** Besides converging the
+`packages` set (perk's pinned entry, the borrowed set, the provider-selected packages), `perk init`
+and `perk doctor --fix` keep perk's own entry **ahead of** `npm:pi-subagents` and
+`npm:pi-web-access`: Pi loads `packages` extensions in array order, and perk's host SDK bridge (the
+`registerHooks` redirect that makes those two compiled packages share the running Pi's SDK
+instances; opt-out `PERK_DISABLE_NATIVE_SDK_BRIDGE=1`) serves only packages loaded after perk. perk
+listed after either is `settings-wiring` drift for `perk doctor` (`fail`, detail `moved … before …`);
+the repair moves only perk's entry, to just before the first of the two. The managed-state health
+lens (`.perk/managed-state.toml`, `perk doctor`'s artifact-health view) is deliberately
+**order-insensitive** — a reordered `packages` array never classifies `locally-modified` — so the
+order is doctor's `settings-wiring` finding alone.
+
 **Pi-native materializations.** `.pi/APPEND_SYSTEM.md` (generated ambient routing index) is
 perk-generated and committed, but it lives where Pi discovers it — not evidence that `.pi/` is
 perk-owned. perk's `perk.*` agent definitions are never written into the repo: they ship inside the

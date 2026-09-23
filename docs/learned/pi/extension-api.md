@@ -430,8 +430,8 @@ tools or *months-old* code:
 - `@earendil-works/pi-coding-agent` dist — `dist/core/agent-session.js`, `dist/index.d.ts`,
   `dist/core/extensions/{types.d.ts,runner.js,loader.js}`, `dist/core/package-manager.js`,
   `dist/core/exec.js`, `dist/modes/interactive/components/extension-editor.js` — at the version
-  `package.json` `devDependencies` pins. The five `@earendil-works/*` pins move in lockstep
-  (`tests/test_packaging.py::test_pi_toolchain_pin_lockstep`), so the pin is the single version
+  `package.json` `devDependencies` pins. The `@earendil-works/*` devDependency pins move in lockstep
+  (the set `tests/test_packaging.py::test_pi_toolchain_pin_lockstep` enforces), so the pin is the single version
   truth for every dist-scoped fact here.
 - **Re-verify at each pin bump.** A bump silently re-asserts every dist-scoped fact here: its
   plan re-reads each against the newly *installed* dist (resolved per

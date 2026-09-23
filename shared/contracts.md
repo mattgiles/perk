@@ -2747,7 +2747,10 @@ checks the prompt** (the converged context actually reached the model via Pi's
 booleans/counts — never the raw prompt text (the options expose the full system prompt).
 `/perk-selfcheck` additionally reports a per-surface payload **census** (append prompt, context
 files, skills section, tool definitions, perk-injected `custom_message` branch context) — still
-derived identifiers/counts/chars only, never prompt text; report-only (no gate).
+derived identifiers/counts/chars only, never prompt text; report-only (no gate). The summary line
+ends with the host-SDK bridge state (`; bridge=<state>`, §8.73 — never affecting `ok`/`level`), and
+the census block closes with a `native sdk bridge:` block (`describeBridge`, the host entry path or
+`-`, the verified consumer roots — identifiers only).
 
 The `.perk/workflow/.perk-t3.json` diagnostics sentinel additionally records **`run_mode`** — Pi's
 `ctx.mode` (`tui`/`rpc`/`json`/`print`) — distinct from the workflow **`mode`** (`read-only`/
@@ -3175,7 +3178,18 @@ Unlike the append-only static-package layer, provider wiring is **two-directiona
 existing `packages` entry whose identity is provider-managed but **not** desired (a deselect), and
 **adds** each desired foreign package in **object form** (`{ "source": <spec>, **package_filter }`,
 omitting the filter keys when absent). Entries outside the managed set (perk's own, borrowed, user)
-are never touched. An **unreadable** config (malformed TOML, an ill-typed value, or a retired-key
+are never touched. **Load order** (§8.73): after the static, provider and linear layers, the same
+body (`_order_perk_before_native_consumers`) moves perk's own entry (`..` in the self-repo, the
+`npm:@mgiles/perk` identity otherwise; string or object form) to just before the first managed
+**native consumer** (`NATIVE_CONSUMER_PACKAGES` = `pi-subagents`, `pi-web-access`) when it sits
+after one — every other entry keeps its relative order; a repo with perk already ahead, or with
+either side absent, is untouched. Pi loads `packages` extensions in array order, and the host-SDK
+bridge serves only the consumers loaded after perk. Mis-ordering is therefore `settings-wiring`
+drift (`fail`, detail `moved <perk spec> before <consumer spec>`, remediation `perk doctor --fix`,
+which runs the same convergence as `perk init`); the managed-state health lens
+(`_canonical_package_order`, identity-sorted) is order-insensitive by design, so it never
+classifies the order as `locally-modified` — the two surfaces are intentionally different. An
+**unreadable** config (malformed TOML, an ill-typed value, or a retired-key
 tripwire) makes the provider and linear convergences a **no-op** — never a destructive removal on a
 config perk could not read (perk cannot know the selection it still names); surfacing defers to the
 config check, and the next init after the repair reconciles normally. **perk never filters its own package and never *creates* an object-form entry
@@ -13203,3 +13217,175 @@ Click's own "Did you mean" suggestions are complete because `resolve_command` ca
 before it reads the map. Guarded by the fresh-process importtime matrix
 `tests/test_cli_import_tiers.py` (`--version`, bare, `--`, and `--help` as the positive control);
 the rule is `docs/design/first-principles/python-cli-guidelines.md` §8.3.
+
+
+---
+
+## §8.73 · The host-SDK bridge (native consumers share the host SDK)
+
+Pi loads `packages` extensions through jiti, but a compiled ESM `.js` entry — `pi-subagents`'
+`index.js`, `pi-web-access`'s `dist/index.js` — is handed to Node's **native** ESM loader (jiti's
+no-transpile arm for an async ESM import), so every `@earendil-works/*` / `typebox` import inside
+those two packages would resolve a **second SDK graph** from `node_modules`. The **host-SDK bridge**
+(`extension/substrate/nativeSdkBridge.ts`, node builtins only) redirects exactly the censused
+specifiers, imported from the verified consumer roots, onto generated ESM **facades** that re-export
+the namespaces perk itself captured from the host — values and class identity are the host's own.
+
+**Install point.** The FIRST statement of the extension factory (`extension/index.ts::perk`) is the
+install (`installNativeSdkBridge(hostSdkNamespaces(), ports)`), before any other registration: Pi
+loads packages **sequentially in project `packages` array order**, so the hooks must exist before a
+borrowed native consumer loads — the reason for §8.10's ordering rule. The captured namespaces
+(`extension/substrate/hostSdk.ts::hostSdkNamespaces`) are the instances jiti hands perk for its own
+imports (the bundle's `VIRTUAL_MODULES` under the `pi` bin, the alias files under the unbundled host);
+pi-tui reaches the bridge through the surfaces module's `hostPiTui` re-export. A test injects a
+status through the construction-only `nativeSdkBridge` option; production never passes it.
+
+**The census** — `NATIVE_SDK_CENSUS`, seven specifiers: `@earendil-works/pi-coding-agent`,
+`@earendil-works/pi-tui`, `@earendil-works/pi-ai`, `@earendil-works/pi-ai/compat`,
+`@earendil-works/pi-agent-core`, `typebox`, `typebox/compile` — the SDK imports the two consumers
+actually make (pi-subagents 0.70.1, pi-web-access 0.30.0). The **drift guard**
+(`extension/substrate/nativeSdkBridge.test.ts`) scans every `.js/.mjs/.cjs` under each installed
+consumer root (nested `node_modules/` excluded) with `extension/testing/importGraph.ts::extractSpecifiers`,
+keeps `^(@earendil-works/|@mariozechner/|typebox|@sinclair/typebox)` and asserts set-equality with
+the census: an extra specifier is a silently reloaded SDK copy (extend the census, bump
+`BRIDGE_SCHEMA`), a missing one a stale entry. It scans the **live project install root** when both
+consumers are installed there (developer checkouts, perk worktrees, the re-verify ritual —
+`docs/developers/pi-subagents-reverify.md`) and `t.skip`s otherwise: canonical CI has no `.pi/npm`
+and installs no consumers for it (rescanning pinned, immutable package files each run would add no
+drift signal); the committed fixture consumers cover the census constant itself everywhere.
+
+**Consumer roots** (`verifyConsumerRoots(cwd)`): for each `NATIVE_SDK_CONSUMERS` name (`pi-subagents`,
+`pi-web-access`) the candidate is `<cwd>/.pi/npm/node_modules/<name>` — the **project** install root
+only (user-scope installs are never bridged) — kept iff it exists, realpaths, and its `package.json`
+`name` matches; anything else is `skipped` (reported in `detail` as `unverified consumers: …`, never
+failing the install). Root membership is a whole-token prefix match: `path === root || path starts
+with root + sep` with no `node_modules` segment in the remainder — nested dependencies and
+look-alike siblings (`…-fork`) are outside every root. `NATIVE_CONSUMER_INSTALL_ROOT`
+(`.pi/npm/node_modules/`) is the one sanctioned spelling (`installedPackageGuard`); the cross-plane
+twin `NATIVE_CONSUMER_PACKAGES` (`perk/convergence/init/settings.py`) is pinned equal by
+`tests/test_native_sdk_bridge_parity.py`.
+
+**Host entry** (`deriveHostEntry(argv[1])`): `realpathSync(argv[1])` (the `pi` bin symlink resolves
+to `dist/bundle/cli.js`) and walk parent directories for the `package.json` named
+`@earendil-works/pi-coding-agent`; no such ancestor (a test runner, an embedding SDK host) is
+`unsupported:embedded-host`. The entry is the manifest's `"."` target **selected** with Node's
+`resolvePackageTarget` tri-state (`resolvePackageEntry`, no filesystem access during selection): a
+`./`-string is selected as-is; `null` blocks; a conditions object is walked in **declaration order**
+and the first key that is `default` or in {`node`, `import`, `module-sync`} decides — `undefined`
+(that key matched nothing) keeps walking, `null`/string are final, so `{ node: null, default: … }`
+is blocked exactly as in Node; an array takes the first member that selects a string, skipping
+invalid (non-`./`) and unmatched members and remembering a `null` block; an `exports` without
+`.`-keys is itself the `"."` target. Only THEN the selected file is checked on disk and realpath'd
+(a selected-but-missing file is `failed:host-entry`, as Node would throw `ERR_MODULE_NOT_FOUND` —
+never a fallback to a later member); no `exports` → `main` → `index.js`. Why a resolver of perk's
+own: the flag-less `import.meta.resolve(specifier, parent)` ignores `parent` (resolving from perk's
+own module — perk's devDependency copy, not the host) and `createRequire(argv1).resolve` applies
+the `require` conditions the host's `"."` export does not carry (`ERR_PACKAGE_PATH_NOT_EXPORTED`).
+Today's host resolves to `<pi-coding-agent>/dist/index.js`.
+
+**Facades.** `facadeUrl(hostEntryUrl, specifier)` = `<file: URL of the host entry>?perk-native-sdk-bridge=<encoded specifier>`
+— ONE physical address for all seven (so `fileURLToPath` of any facade URL is the real host entry:
+pi-subagents' `import.meta.resolve("@earendil-works/pi-coding-agent")` → `findPiPackageRootFromEntry`
+walk still finds the host root). `facadeSource(specifier, exportNames)` is import-free ESM: it reads
+`globalThis[Symbol.for("perk.native-sdk-bridge")].namespaces.get(<specifier>)` and re-exports every
+own enumerable key of the captured namespace except `__esModule` as a **string export name**
+(`export { _i as "name" }` — covers `default` and non-identifier names), each read once at facade
+evaluation (identity preserved; `instanceof` holds). The exact host entry — the path or its `file:`
+URL, which pi-subagents' `loadHostPiCodingAgent` imports by absolute entry — maps to the
+`@earendil-works/pi-coding-agent` facade.
+
+**Root state machine** (`createBridgeHooks(record)` — pure over the registry record): every root
+starts `armed`. The **`load` hook** runs only for a module fetched for the first time, so a fresh
+`file:` module under an `armed` root proves the package is being entered now: `armed → bridged`
+(the **entry-observation rule**); its own imports then resolve with a parent inside a bridged root.
+The **`resolve` hook** fires for cached modules too, so it can only prove entry from INSIDE: a resolve
+whose `parentURL` is under an `armed` root means the root was evaluated before the bridge —
+`armed → preloaded`, ordinary loading forever (lazy imports included). From a `bridged` root, a
+census specifier — or the exact host entry — returns `{ url: facadeUrl, format: "module",
+shortCircuit: true }`; everything else, and every resolve from a preloaded root, a nested dependency
+(`node_modules` under the root), an unrelated package or a non-`file:` parent, is `nextResolve`.
+`load` of a facade URL returns `{ format: "module", source, shortCircuit: true }` from the record's
+prepared sources (an unknown marker suffix falls to `nextLoad`). States only advance
+(`armed → bridged | preloaded`); roots are additive across activations. Documented residual: a
+consumer fully evaluated before the bridge whose FIRST post-install activity is a fresh module loaded
+from OUTSIDE its root (a subpath export imported by another package) is treated as entered — neither
+consumer exposes such a path to perk's graph today.
+
+**The registry** — `globalThis[Symbol.for("perk.native-sdk-bridge")]`, `BRIDGE_SCHEMA` = 1 — is
+process-wide (retained across `/reload`, session replacement and extension disposal; never
+deregistered in production; no `ctx`), a discriminated union behind `isBridgeRegistry`:
+`{ schema: 1, kind: "disabled" }` or `{ schema: 1, kind: "active", hostEntryPath, hostEntryUrl,
+roots: Map<root, RootState>, namespaces, facadeSources }` — **no hook handle** (the active record is
+itself the ownership marker; `registerHooks`' return is discarded).
+
+**The install** (`installNativeSdkBridge(namespaces, ports)` — synchronous, never throws; each
+step's outcome is final): (1) **registry read** — absent → continue; `disabled` → `disabled` (the env
+is NOT re-read: once per process); an unrecognized value → remembered, declined at step 5; an
+`active` record → remembered as `existing` (no decision until the current host is established);
+(2) **opt-out**, only when no registry exists: `PERK_DISABLE_NATIVE_SDK_BRIDGE` trimmed === `"1"` →
+claim the disabled record, `disabled` (any other value leaves the bridge on); (3) **capability** —
+no `module.registerHooks` → `unsupported:no-register-hooks`; Bun (`"bun" in process.versions`) →
+`unsupported:bun` — before any registry comparison, so an activation without the API never reuses a
+record; (4) **host entry** as above (`unsupported:embedded-host` / `failed:host-entry` claim nothing);
+(5) **registry decision** — an unrecognized value or `existing.schema !== 1` → `declined:schema-mismatch`;
+`existing.hostEntryPath !== hostEntryPath` → `declined:host-mismatch`; otherwise **reuse**: verify
+this activation's roots, `roots.set(root, "armed")` for each root not already present (never
+remove, never downgrade), return `installed` with `reused: true` and `roots` = every registry root
+after the merge (a decline never touches the existing record or its hooks — the earlier bridge stays
+active for its own roots); (6) **roots** — zero verified roots on a fresh install → `skipped:no-consumers`
+(nothing claimed, no hook; a later activation with roots installs normally); (7) **namespace capture
+check** — every census key present, an object, with ≥ 1 export name, else `failed:namespace-capture`;
+(8) **facade preparation** for all seven (any throw → `failed:facade-prep`); (9) **commit** — the only
+side effects, in order: build the complete `active` record (all roots `armed`); **claim first**
+(`global[key] = record`; a throw — frozen global — → `failed:registry-claim`, nothing registered);
+`registerHooks(createBridgeHooks(record))` — a throw releases the claim (`releaseClaim`: `delete
+global[key]`; if the slot is a non-configurable accessor, write `undefined` through it; if the record
+is STILL readable, neutralize it in place — `kind` becomes `orphaned`, roots cleared — so
+`isBridgeRegistry` rejects it and a later activation **declines** rather than reuses it, with the
+status `detail` naming the unreleased claim) → `failed:register-hooks`. The code between claim and
+register resolves no module, so no observer sees a claim without hooks; afterwards both exist or
+neither (or, in the pathological unreleasable case, an orphan no activation can adopt).
+
+**The bridge status** (`BridgeStatus { state, hostEntry, roots, specifiers, reused, detail }`; `BridgeState` is
+the closed union `installed | disabled | skipped:no-consumers | unsupported:no-register-hooks |
+unsupported:bun | unsupported:embedded-host | declined:schema-mismatch | declined:host-mismatch |
+failed:host-entry | failed:namespace-capture | failed:facade-prep | failed:registry-claim |
+failed:register-hooks`). Per state — `hostEntry` = the host THIS activation derived when step 4 ran,
+else `null`; `specifiers` = 7 only for `installed`, else 0; `roots` = `[]` unless stated:
+
+| state | hostEntry | roots | reused | detail |
+|---|---|---|---|---|
+| `installed` (fresh) | derived | this activation's verified roots | false | `""`, or `unverified consumers: a, b` |
+| `installed` (reuse) | derived | every registry root after the merge | true | as above for this activation's skipped names |
+| `skipped:no-consumers` | derived | `[]` | false | `""` |
+| `disabled` | null | `[]` | false | `""` |
+| `unsupported:*` | null | `[]` | false | `""` |
+| `declined:schema-mismatch` | derived | `[]` | false | `existing registry schema <n or "unrecognized">`, plus ` (kind <k>)` for an unrecognized `kind` (e.g. a neutralized orphan) |
+| `declined:host-mismatch` | derived | `[]` | false | `active bridge host: <existing.hostEntryPath>` |
+| `failed:*` | derived when step 4 succeeded, else null | `[]` | false | first line of the caught error, ≤ 200 chars |
+
+`describeBridge(status)` = `<state>` + (`installed` only) ` (roots=<n>, specifiers=<n>[, reused])` +
+(`detail !== ""`) ` — <detail>`; selfcheck and the warning use only this rendering.
+
+**Reporting.** `session_start` warns **once per activation** (a latch) and only for a transition:
+`failed:*` → `perk: sdk bridge — <describeBridge> — the native SDK consumers load their own SDK
+copies this session; /perk-selfcheck shows the state`; `declined:*` → `perk: sdk bridge —
+<describeBridge> — an earlier host-SDK bridge in this process stays active for its own roots; this
+perk copy installed none; /perk-selfcheck shows the state` (both `alsoLog: true`). `installed` /
+`disabled` / `skipped:*` / `unsupported:*` are standing state — `/perk-selfcheck` only (§8.7: the
+`; bridge=<state>` summary field + the `native sdk bridge:` census block; charter D7).
+
+**Opt-out.** `PERK_DISABLE_NATIVE_SDK_BRIDGE=1` (exactly `1` after trimming surrounding whitespace;
+`0`, `true`, empty leave the bridge on) disables the bridge for the process —
+read once, at the first activation (quit and relaunch to change it; `/reload` never re-reads it).
+No config knob, no launcher preload (`--import`/`NODE_OPTIONS` are never touched at the exec seam).
+
+**Unsupported / unbridged, by design:** Bun and compiled/SEA Pi (`unsupported:bun`, no hooks API),
+embedded SDK hosts and test runners (`unsupported:embedded-host`), consumers Pi loads BEFORE perk —
+user-scope `packages`, agent-dir `extensions`, CLI `-e` extensions, a project mis-ordering doctor
+has not yet repaired (their roots go `preloaded`) — user-scope consumer installs (only the project
+install root is verified), CJS `require()` of a census specifier (not in the observed graph), and
+any specifier outside the census (a widening is a `BRIDGE_SCHEMA` bump surfaced by the drift guard).
+The real-host proof is `tests/test_native_sdk_bridge_live.py` (slow; real `pi --approve --mode json
+-p "/perk-selfcheck"` over this checkout: `bridge=installed`, both consumers registered tools, no
+`Failed to load extension`).

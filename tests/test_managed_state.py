@@ -441,6 +441,42 @@ class TestObservedPayloads:
         settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
         assert descriptor.observed_hash(tmp_path) == base
 
+    def test_settings_perk_after_a_native_consumer_is_up_to_date_here_but_doctor_drift(
+        self, tmp_path
+    ):
+        """The two surfaces are intentionally different (contracts §8.73): the health lens is
+        order-insensitive, so perk listed AFTER a native consumer still classifies ``up-to-date``
+        (never phantom ``locally-modified``); the load-order rule is doctor's `settings-wiring`
+        drift, reported by the derived convergence dry run and repaired by ``--fix``."""
+        from perk.convergence.doctor import run_doctor
+
+        assert run_init(tmp_path, verify=False).ok
+        descriptor = _descriptor("settings-wiring")
+        settings_path = tmp_path / ".pi" / "settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        packages = settings["packages"]
+        perk_entry = next(p for p in packages if str(p).startswith("npm:@mgiles/perk"))
+        packages.remove(perk_entry)
+        packages.insert(packages.index("npm:pi-subagents") + 1, perk_entry)
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+
+        state = load_managed_state(tmp_path)
+        assert state is not None
+        recorded = next(a for a in state.artifacts if a.key == "settings-wiring")
+        assert (
+            classify_artifact(
+                observed=descriptor.observed_hash(tmp_path),
+                desired=descriptor.desired_hash(tmp_path, self_repo=False),
+                recorded=recorded.hash,
+            )
+            == "up-to-date"
+        )
+        wiring = next(
+            c for c in run_doctor(tmp_path, verify=False).checks if c.name == "settings-wiring"
+        )
+        assert wiring.status == "fail"
+        assert "moved" in wiring.detail
+
     def test_settings_source_only_object_form_is_merge_equivalent(self, tmp_path):
         """The canonical-shape proof: a bare ``{"source": …}`` twin of a plain-string entry
         observes identically — the merge convergence dedups by identity and keeps a pre-existing

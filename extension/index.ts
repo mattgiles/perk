@@ -9,6 +9,7 @@
 // facts → implementation pointer capture → feedback receiver sync → presentation/probe tail.
 
 import { existsSync, mkdirSync } from "node:fs";
+import * as nodeModule from "node:module";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createDraftReviewWaveState } from "./authoring/review/draftContext.ts";
@@ -92,6 +93,12 @@ import {
 } from "./substrate/cache.ts";
 import { decodeReadOnlyFloor, isRunnerChild } from "./substrate/childRestrictions.ts";
 import { mainCheckoutRoot } from "./substrate/git.ts";
+import { hostSdkNamespaces } from "./substrate/hostSdk.ts";
+import {
+  type BridgeStatus,
+  describeBridge,
+  installNativeSdkBridge,
+} from "./substrate/nativeSdkBridge.ts";
 import { loadRegistry, type Registry } from "./substrate/registry.ts";
 import { perkVersion, sharedDir, versionStamp } from "./substrate/resources.ts";
 import { isCanonicalRunId, mintRunId } from "./substrate/runId.ts";
@@ -120,6 +127,23 @@ import { createReportWave } from "./waves/reportWave.ts";
 
 // Cross-plane proof marker (TS writes via cache.ts; the Python helper reads it — gate check 3).
 const T3_MARKER = "t3-extension-cache-write";
+
+/**
+ * The production host-SDK bridge install (contracts.md §8.73): the host namespaces perk was handed
+ * + the live process facts. `registerHooks` is feature-detected (Node ≥ 22.15); `"bun" in
+ * process.versions` guards the field `@types/node` does not declare.
+ */
+function installProductionBridge(): BridgeStatus {
+  return installNativeSdkBridge(hostSdkNamespaces(), {
+    cwd: process.cwd(),
+    argv1: process.argv[1],
+    env: process.env,
+    registerHooks:
+      typeof nodeModule.registerHooks === "function" ? nodeModule.registerHooks : undefined,
+    isBun: "bun" in process.versions,
+    global: globalThis as unknown as Record<symbol, unknown>,
+  });
+}
 
 function writeT3Sentinel(
   cwd: string,
@@ -161,8 +185,19 @@ export default function perk(
      * recording receiver to observe the startup/navigation sync order and inputs.
      */
     feedbackReceiverFactory?: (pi: ExtensionAPI) => HunkFeedbackReceiver;
+    /**
+     * Construction-only: the host-SDK bridge install (default `installProductionBridge`). Tests
+     * inject a status to drive the reporting arms; production never passes it.
+     */
+    nativeSdkBridge?: () => BridgeStatus;
   } = {},
 ) {
+  // The host-SDK bridge FIRST (contracts.md §8.73): Pi loads `packages` extensions sequentially in
+  // settings order, so the hooks must exist before any borrowed native consumer loads — the reason
+  // `perk init` keeps perk's entry ahead of `npm:pi-subagents` / `npm:pi-web-access`. Never throws;
+  // every non-installed outcome is standing state (selfcheck) or a one-shot warning (below).
+  const bridge = (options.nativeSdkBridge ?? installProductionBridge)();
+
   const version = perkVersion();
 
   // The read-only tool-gating primitive. Attaches to perk:workflow-state.mode; synced on
@@ -359,6 +394,11 @@ export default function perk(
     perkStatus.clearActivity(ctx);
   });
 
+  // The bridge warning fires once per activation: only a failed or declined install is a
+  // transition worth a toast; installed/disabled/skipped/unsupported are standing state that
+  // `/perk-selfcheck` reports (charter D7).
+  let bridgeReported = false;
+
   pi.on("session_start", async (_event, ctx) => {
     // Read the two native-child booleans and latch the floor before lifecycle work or tool rebuilds.
     runnerChild = isRunnerChild(process.env);
@@ -367,6 +407,29 @@ export default function perk(
     submitConflict.setContext(ctx);
     stackConflict.setContext(ctx);
     waveNotices.setContext(ctx);
+
+    if (!bridgeReported) {
+      bridgeReported = true;
+      if (bridge.state.startsWith("failed:")) {
+        report(
+          ctx,
+          "sdk bridge",
+          "warning",
+          `${describeBridge(bridge)} — the native SDK consumers load their own SDK copies this ` +
+            "session; /perk-selfcheck shows the state",
+          { alsoLog: true },
+        );
+      } else if (bridge.state.startsWith("declined:")) {
+        report(
+          ctx,
+          "sdk bridge",
+          "warning",
+          `${describeBridge(bridge)} — an earlier host-SDK bridge in this process stays active for ` +
+            "its own roots; this perk copy installed none; /perk-selfcheck shows the state",
+          { alsoLog: true },
+        );
+      }
+    }
     const sessionFile = ctx.sessionManager.getSessionFile();
     const currentSessionId = sessionFile ? basename(sessionFile) : null;
 
@@ -759,5 +822,5 @@ export default function perk(
   // `/perk-selfcheck` — the session-wiring verifier (turned from a liveness ping into a real check
   // that the converged ambient index reached `appendSystemPrompt` and the managed `AGENTS.md` block
   // reached `contextFiles`). doctor checks disk; selfcheck checks the prompt.
-  registerSelfcheck(pi, { version, sharedOk });
+  registerSelfcheck(pi, { version, sharedOk, bridge });
 }

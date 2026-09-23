@@ -65,6 +65,46 @@ The remote runner is optional. A configured repository needs:
 See [How to set up and verify the remote runner](../how-to/set-up-the-remote-runner.md) for the
 managed workflow and smoke check.
 
+## Host SDK bridge
+
+Two of the packages `perk init` wires — `pi-subagents` and `pi-web-access` — ship compiled
+JavaScript that Node loads natively, so each would otherwise load its own copy of the Pi SDK
+(`@earendil-works/*`, `typebox`) beside the one the running Pi already holds. perk's **host SDK
+bridge** redirects exactly those SDK imports, from exactly those two installed packages, onto the
+SDK instances the running Pi already loaded. Values and class identity are shared; nothing else
+changes.
+
+The bridge is on by default and is active when:
+
+- Pi runs on Node with `module.registerHooks` (Node 22.15 or newer — every Pi-supported Node), and
+- Pi was launched from its npm package (the `pi` command), so perk can locate the SDK entry, and
+- at least one of the two packages is installed under the repo's `.pi/npm/node_modules/` — each
+  installed package is bridged; a missing one is only noted in the selfcheck detail.
+
+Everything else stays unbridged and loads as before: packages Pi loads **before** perk (user-scope
+`packages` in `~/.pi/agent/settings.json`, agent-dir `extensions`, extensions passed with `pi -e`),
+copies of the two packages installed outside the repo, Bun or compiled Pi builds, and embedded SDK
+hosts. perk installs no launcher preload and adds no `NODE_OPTIONS`; `perk init` only keeps perk's
+own `packages` entry ahead of the two packages in `.pi/settings.json` so Pi loads perk first
+(`perk doctor` reports the order as `settings-wiring` drift; `perk doctor --fix` repairs it).
+
+To disable the bridge, set `PERK_DISABLE_NATIVE_SDK_BRIDGE=1` in the environment of the `perk`
+(or `pi`) launch. The value is read once per process: quit and relaunch to change it — `/reload`
+does not re-read it. Only the value `1` disables (surrounding whitespace is ignored; `0`, `true`
+or an empty value leave the bridge on).
+
+Where the state shows: `/perk-selfcheck` reports `bridge=<state>` in its summary line and a
+`native sdk bridge:` block (the SDK entry it found and the bridged package roots) in its census —
+`installed`, `disabled`, `skipped:no-consumers` (neither package installed), or an `unsupported:*`
+reason. A `perk: sdk bridge — …` warning appears at session start in two cases only, and perk
+otherwise runs normally:
+
+- **failed** (`failed:*`) — this perk copy could not install the bridge; the packages load their
+  own SDK copies for that session.
+- **declined** (`declined:*`) — another perk copy in the same process already bridged a different
+  Pi entry (or a different bridge version); that earlier bridge stays active for the packages it
+  already serves, and this perk copy installs none.
+
 ## Version compatibility
 
 The perk CLI and the `@mgiles/perk` Pi extension are expected to have matching versions. A

@@ -388,10 +388,17 @@ perk reaches pi-subagents only through public surfaces: the v1 RPC envelope, the
 def frontmatter, and the package `exports` subpaths (`./agents`, `./delegation`, `./child-tool-plan`,
 `./preflight`, `./intercom-bridge`, `./control-channel`, `./capability-ceiling`,
 `./workflow-resources`, `./shared-types`, …). The installed-engine test harnesses over the package's
-`src/**` are deleted. Two guards: `extension/bareImportGuard.test.ts` (above) and
-`extension/installedPackageGuard.test.ts` — no extension source spells a `.pi/npm/node_modules/`
-path except Ponytail's manifest-declared preflight root, matched as a **whole path token with
-equality** (a prefix-strip check would admit `…/ponytail-evil`; the test carries that control).
+`src/**` are deleted; the one bounded read of installed consumer sources that remains is the
+host-SDK bridge's census drift guard (`extension/substrate/nativeSdkBridge.test.ts`, contracts
+§8.73), which lexes the import *specifiers* of the installed `pi-subagents`/`pi-web-access` files —
+a structural fact of the shipped artifact, never engine mechanics. Two guards:
+`extension/bareImportGuard.test.ts` (above) and `extension/installedPackageGuard.test.ts` — no
+extension source spells a `.pi/npm/node_modules/` path except two sanctioned roots, Ponytail's
+manifest-declared preflight root and the bridge's consumer install root
+(`NATIVE_CONSUMER_INSTALL_ROOT` in `extension/substrate/nativeSdkBridge.ts`, which verifies
+consumer roots by manifest identity and reads only their `package.json`), each matched as a
+**whole path token with equality** (a prefix-strip check would admit `…/ponytail-evil`; the test
+carries that control).
 
 **The accepted coverage reduction, stated plainly:** no automated engine-level proof exists that
 a guard-less report-only lane completes on its validated `structured_output` report (the 0.70.1

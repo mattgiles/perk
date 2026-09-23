@@ -580,6 +580,8 @@ export async function loadPerkSession(opts: {
   stackResolutionDelivery?: NonNullable<Parameters<typeof perk>[1]>["stackResolutionDelivery"];
   /** Construction-only recording receiver for the startup/navigation sync-order pins. */
   feedbackReceiverFactory?: NonNullable<Parameters<typeof perk>[1]>["feedbackReceiverFactory"];
+  /** Construction-only injected host-SDK bridge status (drives the reporting arms). */
+  nativeSdkBridge?: NonNullable<Parameters<typeof perk>[1]>["nativeSdkBridge"];
 }): Promise<PerkSession> {
   const { cwd, headful = true } = opts;
   const agentDir = mkdtempSync(join(tmpdir(), "perk-agent-"));
@@ -621,6 +623,7 @@ export async function loadPerkSession(opts: {
             resolverEngine: opts.resolverEngine,
             stackResolutionDelivery: opts.stackResolutionDelivery,
             feedbackReceiverFactory: opts.feedbackReceiverFactory,
+            nativeSdkBridge: opts.nativeSdkBridge,
           }),
       },
       ...(opts.extraExtensions ?? []),
