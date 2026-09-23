@@ -530,14 +530,17 @@ The command surface, the exec seam, `perk.github` and the heavy packages (`backe
   `perk.run.pi_exec` after its terminal check.
 
 Why: bare `perk` and `perk --version` are the most frequent invocations and their startup
-(the objective's 0.71–0.76 s `--version`) was paying for the whole surface — every command
+(measured: the bare-`perk` handoff in `docs/design/archive/perk-startup-baseline.md`, the
+light-verb probe in `docs/design/archive/perk-startup-closing-evidence.md`; method:
+`docs/developers/profiling-startup.md`) was paying for the whole surface — every command
 group, the registry read, the GitHub gateway and the launch orchestrator. Nothing user-visible
 changes: help, aliases, flat aliases, hybrid dispatch and Click's "Did you mean" suggestions
 are byte-identical, because Click's `resolve_command` reaches `get_command` before it reads
 the map. The guard is the fresh-process importtime matrix `tests/test_cli_import_tiers.py`
 (`--version`, bare, `--`; `--help` as the positive control) — a new heavy module-level import
 on the light path fails it. Per-group laziness (a light subcommand still loads the whole
-surface) is a deliberate non-goal until a measured need appears.
+surface) is a deliberate non-goal until a measured need appears. Measured in the closing
+record's light-verb probe: `delta_median_ms` = 489.4 ms → pursued as gist #2498.
 
 ---
 
