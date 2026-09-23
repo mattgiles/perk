@@ -89,10 +89,11 @@ def test_pi_toolchain_pin_lockstep():
     # top-level pi-ai pin that diverges from it puts test code and the session runtime in two
     # different pi-ai module instances (separate api registries — see
     # docs/learned/pi/headless-session-drive.md). The background runner also needs the server
-    # and client host peers. All five devDeps must be exact, equal versions; this repairs the
-    # repo-local development host, not consumers' global installs.
+    # and client host peers; the host-SDK bridge captures pi-agent-core for pi-subagents' facade.
+    # All six devDeps must be exact, equal versions; this repairs the repo-local development
+    # host, not consumers' global installs.
     dev_deps = _package_json()["devDependencies"]
-    names = ("pi-coding-agent", "pi-ai", "pi-tui", "pi-server", "pi-client")
+    names = ("pi-coding-agent", "pi-ai", "pi-tui", "pi-server", "pi-client", "pi-agent-core")
     pins = {name: dev_deps[f"@earendil-works/{name}"] for name in names}
     for name, pin in pins.items():
         assert re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?", pin), (

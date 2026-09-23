@@ -52,6 +52,7 @@
     "prose-review:typecheck": "npm run typecheck --workspace tools/prose-review"
   },
   "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
@@ -59,6 +60,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.16",
+    "@earendil-works/pi-agent-core": "0.87.0",
     "@earendil-works/pi-ai": "0.87.0",
     "@earendil-works/pi-client": "0.87.0",
     "@earendil-works/pi-coding-agent": "0.87.0",
