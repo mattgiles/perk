@@ -7,15 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- As of c8cb345 -->
+<!-- As of a4cc75d -->
+
+## [3.7.0] - 2026-09-23
 
 ### Changed
 
-- Allow report waves (review, draft review, pr-review, scout, learn, explorer) 30 minutes before the engine deadline, up from 15. `PERK_WAVE_TIMEOUT_MS` still overrides the default. (fad84a4)
+- Allow report waves (review, draft review, pr-review, scout, learn, explorer) 30 minutes before the engine deadline, up from 15. `PERK_WAVE_TIMEOUT_MS` still overrides the default.
+- Speed up plain `perk` startup and avoid loading duplicate Pi SDK copies for project-installed `pi-subagents` and `pi-web-access`. After upgrading, run `perk init` or `perk doctor --fix` to set the required package load order; `/perk-selfcheck` reports whether the SDK bridge is active.
 
 ### Fixed
 
-- Collect the finished lanes' reports when a report wave's deadline fires with lanes already done, naming the unfinished lane(s) as failed instead of reporting an empty timeout. `/pr-review`'s bounded retry now relaunches only the lanes still without a report. (fad84a4)
+- Collect the finished lanes' reports when a report wave's deadline fires with lanes already done, naming the unfinished lane(s) as failed instead of reporting an empty timeout. `/pr-review`'s bounded retry now relaunches only the lanes still without a report.
 
 ## [3.6.0] - 2026-09-21
 
