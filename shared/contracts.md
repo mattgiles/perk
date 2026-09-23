@@ -13335,7 +13335,7 @@ side effects, in order: build the complete `active` record (all roots `armed`); 
 The code between claim and register resolves no module, so no observer sees a claim without hooks;
 afterwards both exist or neither.
 
-**Status** (`BridgeStatus { state, hostEntry, roots, specifiers, reused, detail }`; `BridgeState` is
+**The bridge status** (`BridgeStatus { state, hostEntry, roots, specifiers, reused, detail }`; `BridgeState` is
 the closed union `installed | disabled | skipped:no-consumers | unsupported:no-register-hooks |
 unsupported:bun | unsupported:embedded-host | declined:schema-mismatch | declined:host-mismatch |
 failed:host-entry | failed:namespace-capture | failed:facade-prep | failed:registry-claim |
