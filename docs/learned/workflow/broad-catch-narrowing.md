@@ -212,8 +212,8 @@ When the reader's cause reaches a human, the classification must name it (#2472)
 `read_text(encoding="utf-8")` raises `UnicodeDecodeError` (a `ValueError`) before `json.loads`, so
 catching `(OSError, json.JSONDecodeError)` lets invalid bytes crash `perk doctor`. Distinguish not
 readable / not valid UTF-8 / not valid JSON / not a JSON object and carry the cause into the
-message, so a "fix the JSON" remediation is never issued for a non-JSON failure — the settings-problem
-classification in `perk/convergence/doctor/checks.py`.
+message, so a "fix the JSON" remediation is never issued for a non-JSON failure — the
+settings-problem classification in `perk/convergence/doctor/checks.py`.
 
 ## Cross-references
 

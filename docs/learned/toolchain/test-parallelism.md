@@ -19,8 +19,9 @@ recipes plus two **tier** recipes layered on top (below). The canonical develope
 `docs/developers/testing.md`; this doc keeps the reasoning and the gotchas.
 
 - **`-n0` on the CLI overrides `addopts`** — the documented serial-debug escape hatch. Extra CLI
-  args (`-k <expr>`) coexist with `addopts`. `-p no:xdist` does NOT strip the `addopts` `-n`/`--dist`
-  flags (`pytest: error: unrecognized arguments: -n --dist`) — `-n0` is the override (#2474).
+  args (`-k <expr>`) coexist with `addopts`. `-p no:xdist` does NOT strip the `addopts`
+  `-n`/`--dist` flags (`pytest: error: unrecognized arguments: -n --dist`) — `-n0` is the
+  override (#2474).
 - **`-n auto` is capped, not all-cores.** `tests/conftest.py` implements pytest-xdist's
   auto-resolution hook seam `pytest_xdist_auto_num_workers`, returning
   `min(os.process_cpu_count() or 1, _XDIST_AUTO_WORKER_CAP)` with the cap at **6** — Git-heavy

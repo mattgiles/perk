@@ -391,7 +391,8 @@ The craft survives for any future probe over a surface perk *does* own or vendor
 `_subagent_host_tools_check(root, *, environ=None)` (formerly in
 `src/perk/convergence/doctor/checks.py`) was the precedent for a report-only check that fires only
 while an installed, **unpinned** package sits in a known-affected version range — pi-subagents
-0.67.x's host-builtin intersection (`pi/subagents.md` § "History (dated)"). *Retired 2026-09*: pi-subagents 0.70.0 removed the intersection, so the check, its
+0.67.x's host-builtin intersection (`pi/subagents.md` § "History (dated)"). *Retired 2026-09*:
+pi-subagents 0.70.0 removed the intersection, so the check, its
 `_SUBAGENTS_HOST_INTERSECTION_AFFECTED` range and the `PI_FFF_MODE` launch injection were deleted
 (like the marker-probe table above, the shape outlives the instance). Four disciplines it settled:
 

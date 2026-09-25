@@ -264,14 +264,14 @@ The coverage predicate: `test_live_manifest_covers_every_real_template` asserts 
 set — every `*.md` under `prompts/` except `README.md` and `_fixtures/` — is a **subset** of the
 manifest (not equality: multi-arm entries repeat a template). Partials and single-plane templates
 are real templates: an `{% include %}` partial needs its **own** entry (a parent's include does not
-cover it — `prompts/common/review-wave-yield.md`, included from seven door prompts, is the first real
-partial and held the rule), and single-plane consumption does not exempt a template. Door-test idiom
-for a shared partial: each door pins the include ONCE via one distinctive partial sentence (the
-`4. **Yield.**` step / "Children do not stream"), and per-door prose pins target the reshaped door
-prose, never the include body. Use `vars: {}` for var-free
-templates. Editing prose alone needs no fixture change; adding a template or changing required
-vars/branches does. Curate conditional-arm coverage in the manifest (provider arms, with-url/no-url,
-empty/populated optional clauses) — representative arms are the only branch evidence Tier B has.
+cover it — `prompts/common/review-wave-yield.md`, included from seven door prompts, is the first
+real partial and held the rule), and single-plane consumption does not exempt a template.
+Door-test idiom for a shared partial: each door pins the include ONCE via one distinctive partial
+sentence (the `4. **Yield.**` step / "Children do not stream"), and per-door prose pins target the
+reshaped door prose, never the include body. Use `vars: {}` for var-free templates. Editing prose
+alone needs no fixture change; adding a template or changing required vars/branches does. Curate
+conditional-arm coverage in the manifest (provider arms, with-url/no-url, empty/populated optional
+clauses) — representative arms are the only branch evidence Tier B has.
 
 Mechanics:
 
