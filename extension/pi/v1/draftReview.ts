@@ -21,10 +21,7 @@
 // state file, no reconciliation procedure.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { GIST_DRAFT_ARTIFACT } from "../../authoring/gist/draft.ts";
-import { OBJECTIVE_DRAFT_ARTIFACT } from "../../authoring/objective/draft.ts";
-import { PLAN_DRAFT_ARTIFACT } from "../../authoring/plan/draft.ts";
-import { REFINEMENT_DRAFT_ARTIFACT } from "../../authoring/refinement/draft.ts";
+import { DRAFT_SUBJECT_ARTIFACTS, type DraftSubject } from "../../authoring/review/subjects.ts";
 import { openBranchWorkflowSession } from "../../session/branchWorkflowSession.ts";
 import {
   captureSaveDestination,
@@ -42,15 +39,10 @@ import { type ToolResult, untrustedReviewFeedback } from "./review.ts";
 // ------------------------------------------------------------------------------ the vocabulary
 
 /** The reviewable draft kinds — the stage-derived subject `WorkflowSession.draftReviewContext` reports. */
-export type DraftReviewSubject = "plan" | "objective" | "gist" | "refinement";
+export type DraftReviewSubject = DraftSubject;
 
 /** Subject → the session artifact whose raw bytes the reviewed-bytes guard compares. */
-export const REVIEW_SUBJECT_ARTIFACTS: Readonly<Record<DraftReviewSubject, string>> = {
-  plan: PLAN_DRAFT_ARTIFACT,
-  objective: OBJECTIVE_DRAFT_ARTIFACT,
-  gist: GIST_DRAFT_ARTIFACT,
-  refinement: REFINEMENT_DRAFT_ARTIFACT,
-};
+export const REVIEW_SUBJECT_ARTIFACTS = DRAFT_SUBJECT_ARTIFACTS;
 
 /** Subject → the manual save command (the deliberate retry once the latch is set). */
 export const MANUAL_SAVE_COMMANDS: Readonly<Record<DraftReviewSubject, string>> = {
