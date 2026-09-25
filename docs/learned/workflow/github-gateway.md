@@ -343,8 +343,6 @@ duplicates past ~30 open issues. The rules (#2003, #2004):
 - **Census boundaries are fail-closed.** An unexpected slurp shape raises, and for an
   authoritative census read empty stdout raises — only a genuinely parsed `[]` reads as empty.
   The bounded browse keeps its tolerant `[]` fold.
-- **Latent same-class residual:** comment-list finders (`find_comment_id_by_marker`) stay
-  unpaginated past ~30 comments — a marker placed late in a long thread is exposed.
 
 ## The stack chain-walk reads (`list_open_prs_for_base` + `head_repo`)
 

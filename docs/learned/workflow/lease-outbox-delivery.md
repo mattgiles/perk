@@ -15,27 +15,35 @@ built on files.
 
 ## Lease protocol traps
 
-- **The check-then-act trap:** stale-lease judgment → quarantine rename is check-then-act — a
-  competing reclaimer can complete a FULL reclaim inside that window, so the "stale" dir you
-  rename can be a **fresh successor lease**. Fix shape: post-rename freshness re-check →
-  restore → go passive.
-- **Directory-identity (inode) fencing:** renew/release on a replaceable lock dir need identity
-  fencing on top of token checks; design residual windows to degrade **fail-closed on both
-  sides** — never two live consumers, never misdelivery.
-- **"We own it" is not a fence.** Ownership is proven per acquisition: mint a per-acquisition
-  ownership token into the lease record, and release token-fenced — quarantine-rename the lock
-  dir, verify the token in the moved state, then delete (or restore on mismatch). A process's
-  memory of having acquired is not evidence at release time.
-- **The post-rename re-check re-judges the FULL non-reclaimability predicate** against the
-  *moved* state — grace window included — and restores any claim that changed since the original
-  judgment; re-checking only the field that triggered the reclaim re-opens the race.
-- **Lease fs catches need three-way classification:** a missing/malformed lease is DATA (it
-  routes to the reclaim rules); expected race codes (ENOENT/EEXIST) are contention; everything
-  else propagates to a typed io_error arm — a blanket catch turns real I/O failures into
-  phantom contention.
+Two machine-local leases implement these rules, and not the same set: the hunk lease
+(`extension/hunkFeedback/store.ts`) and the `/objective-sync` resolver-dispatch lease (PR #2075,
+`extension/substrate/resolverLease.ts`). Each rule names where it holds.
 
-The realized second instance: the `/objective-sync` resolver-dispatch lease (PR #2075) —
-`extension/substrate/resolverLease.ts`.
+- **The check-then-act trap** (both leases): stale-lease judgment → quarantine rename is
+  check-then-act — a competing reclaimer can complete a FULL reclaim inside that window, so the
+  "stale" dir you rename can be a **fresh successor lease**. Fix shape: post-rename freshness
+  re-check → restore → go passive.
+- **Directory-identity (inode) fencing** (hunk lease): renew/release on a replaceable lock dir
+  need identity fencing on top of token checks — `renewHeartbeat`/`releaseLease` capture the
+  lock-dir inode before the read and re-check it after. Design residual windows to degrade
+  **fail-closed on both sides** — never two live consumers, never misdelivery.
+- **"We own it" is not a fence** (both leases; the release shapes differ). Ownership is proven
+  per acquisition: mint a per-acquisition ownership token into the lease record and release
+  token-fenced. The resolver lease (`releaseResolverClaim`) quarantine-renames the lock dir,
+  verifies the token in the moved state, then deletes (or restores on mismatch); the hunk lease
+  (`releaseLease`) verifies the token in place, re-checks the inode, then removes. A process's
+  memory of having acquired is not evidence at release time.
+- **The post-rename re-check re-judges the FULL non-reclaimability predicate** (resolver lease)
+  against the *moved* state — grace window included — and restores any claim that changed since
+  the original judgment; re-checking only the field that triggered the reclaim re-opens the race.
+  The hunk lease re-checks heartbeat freshness only: a moved lease that is missing, corrupt, or
+  carries an unparseable heartbeat is never restored.
+- **Lease fs catches need three-way classification** (resolver lease): a missing/malformed lease
+  is DATA (it routes to the reclaim rules); expected race codes (ENOENT/EEXIST) are contention;
+  everything else propagates to the typed `io_error` arm — a blanket catch turns real I/O failures
+  into phantom contention. The hunk lease has no such arm: `readLease` folds every read failure —
+  missing, malformed, or a genuine I/O error — to `null`, so an unreadable lease is judged like a
+  corrupt one, and its `LeaseAcquisition` carries only `owned`/`token` or a `reason`.
 
 ## Which exclusion primitive — a decision table
 
@@ -43,7 +51,7 @@ perk now carries three machine-local exclusion shapes; pick by what a stale hold
 
 | Primitive | Where | Reclaim on staleness | Same-session reacquire | Use when |
 |---|---|---|---|---|
-| The hunk lease | `extension/hunkFeedback/store.ts` | quarantine-rename reclaim, inode fencing, grace window | via reclaim rules | a long-lived consumer role that must fail over |
+| The hunk lease | `extension/hunkFeedback/store.ts` | quarantine-rename reclaim, inode fencing, grace window | yes (same `run_id` + `pi_session_id`): rewrites a fresh token before any staleness check | a long-lived consumer role that must fail over |
 | The resolver lease (a session **claim**) | `extension/substrate/resolverLease.ts` | dead-PID reclamation via a reclaimability predicate | yes (same PID) | a retry inside the same session must reacquire |
 | The worktree resolver lock | `extension/substrate/worktreeResolverLock.ts` | **none** — no retries, no cleanup on death | no — an existing file is busy even for the same PID | a stale holder must force **manual** recovery |
 

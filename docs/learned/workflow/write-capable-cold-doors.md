@@ -14,21 +14,19 @@ shared posture below are what an agent can't derive from any single file.
 ## Write-capable cold door = borrow the `save` stage (the architectural lever)
 
 A dedicated cold door (a CLI verb, **not** a registry stage) that must WRITE the main checkout
-borrows the **`save` stage descriptor** for launch. `save`'s descriptor pairs `mode: read-write`
-with `worktree: none` — the pairing is not unique to `save` (derive the current roster of stages
-carrying it from `shared/registry.yaml`); `save` is simply **the descriptor borrowed** for
-repo-skill authoring. The positioning rule keys off the `worktree:` field: `worktree: none` is the
-load-bearing property — it resolves to `repo_root` (the main checkout) — while a read-write stage
-with `worktree: create`/`reuse` resolves to a linked worktree, which is wrong here (a repo-owned
-skill lives in the main working tree). This is the
-write-capable sibling of the read-only `plan`-stage borrow the plan factories use (cross-ref
-`plan-factories.md`).
+borrows the **`save` stage descriptor** for launch, for its `mode: read-write` + `worktree: none`
+pairing — `worktree: none` is what positions the session in the main checkout, where a repo-owned
+skill lives (the positioning rule: `cold-door-launch.md` § "`worktree: none` resolves to the main
+checkout"). The pairing is not unique to `save` (derive the current roster from
+`shared/registry.yaml`); `save` is simply **the descriptor borrowed** for repo-skill authoring.
+This is the write-capable sibling of the read-only `plan`-stage borrow the plan factories use
+(cross-ref `plan-factories.md`).
 
 The borrow is otherwise **inert** — borrowing `save` injects no save-stage behavior:
 
-- A `binding_trigger="command:skills-<verb>"` override suppresses `stage:save`'s bindings and
-  delivers the authoring skill (`perk-skill-author`) instead (cross-ref the `binding_trigger`
-  "borrows-a-stage" hazard in `skill-bindings.md` — **any** stage-borrowing command must set this).
+- The explicit `binding_trigger="command:skills-<verb>"` is required: without it `stage:save`'s
+  bindings fire; with it `perk-skill-author` is delivered instead (the mechanism:
+  `skill-bindings.md` § "The `binding_trigger` "borrows-a-stage" hazard").
 - The extension's authoring-context injection is gated on the **read-only** mode (plan mode plus
   the objective-/gist-author mirrors, `extension/index.ts`), so a `mode: read-write` borrow of
   `save` injects no authoring context.
@@ -54,10 +52,11 @@ write-capability:
   an authoring session).
 
 `refine` is a **near-twin of `create`** — borrow `save`, soft-scope seed, deliver `perk-skill-author`
-— minus the create-only steps: no pre-scaffold, no fragment reconverge, no `--from`. The one shape
-difference: `refine` **refuses on the missing `target/"SKILL.md"` file, not the dir** (a directory
-without a `SKILL.md` is not refinable), pointing the user at `perk skills create`; `create` refuses
-on the **existing** dir, pointing at `perk skills refine`.
+— minus the create-only steps: no pre-scaffold, no fragment reconverge. The one shape difference:
+`refine` **refuses on the missing `target/"SKILL.md"` file, not the dir** (a directory without a
+`SKILL.md` is not refinable), pointing the user at `perk skills create`; `create` refuses on the
+**existing** dir, pointing at `perk skills refine`. `create` takes `--from`; `refine` does not
+(semantics: `docs/user-docs/reference/cli/remote-and-utility.md`).
 
 ## Main-checkout resolution for repo-owned content invoked from a worktree
 
@@ -69,14 +68,21 @@ reader, which uses the same idiom). Factor it into **one tiny helper** (`repo_sk
 worktree still targets the main checkout. Tests pin it offline by monkeypatching
 `shared.git.main_worktree_root` → `None` (which falls back to `tmp_path`).
 
-## Non-fatal network reconverge: the FS mutation is the deliverable, errors ride the payload
+## Non-fatal network reconverge: the FS mutation is the deliverable
 
 Each FS-mutating verb does the filesystem write/rmtree **FIRST** (fatal only on a true FS failure),
 **THEN** calls `converge_repo_skills_manifest(root, apply=True)` whose GitHub read
 (`github.repo_identity`) can fail offline / with no remote. Reconverge `errors`/`warnings` are
-**surfaced** (in the `--json` payload + on stderr) but **non-fatal — exit stays 0**. This mirrors
-`perk init`'s `InitReport.warnings` posture: init/doctor will reconverge later regardless, so a
-transient offline reconverge must not fail the local FS verb.
+**surfaced but non-fatal — exit stays 0**. This mirrors `perk init`'s `InitReport.warnings`
+posture: init/doctor will reconverge later regardless, so a transient offline reconverge must not
+fail the local FS verb. Where they surface depends on the verb:
+
+- **`scaffold` / `delete`** return a result: under `--json` the payload carries `warnings`/`errors`
+  (stdout, via `emit`); the human path prints them to stderr.
+- **`create`** never returns: after `perform_scaffold` it prints warnings/errors to stderr via
+  `user_output` on both the human and `--json` paths, then execs its authoring session, so there
+  is no outcome payload. Its only `machine_output` is the `--dry-run --json` preview, which
+  scaffolds nothing.
 
 Test it with a **stubbed convergence** returning a canned `RepoSkillsConvergence` /
 `RepoSkillsManifest` — never hitting the network. Two scope disciplines that held:
@@ -108,14 +114,13 @@ This stitched gate is worth keeping **even when** component tests (`test_repo_sk
 `test_skills_cmd.py`) already assert the sub-clauses, because its value is proving scaffold-output
 **IS** sync-ready as one coherent precondition.
 
-The **manual** network dogfood (against a `gh repo create --private --clone` scratch repo) has one
-gotcha worth recording: the default `gh` token lacks the `delete_repo` scope, so the scratch remote
-**can't be API-deleted** afterward.
-
 ## Cross-references
 
 - `plan-factories.md` — the read-only `plan`-stage borrow sibling (the same lever, read-only flavor).
-- `cold-door-launch.md` — `launch_stage`, the worktree `.agents/skills/` mirror.
+- `cold-door-launch.md` — `launch_stage`; § "`worktree: none` resolves to the main checkout" (the
+  positioning rule the `save` borrow relies on); the worktree `.agents/skills/` mirror.
+- `skill-bindings.md` — § "The `binding_trigger` "borrows-a-stage" hazard" (the trigger-diversion
+  mechanism).
 - `config-tables.md` — the `main_worktree_root(repo_root) or repo_root` precedent (the local-secret reader).
 - `init-external-cli.md` — the repo-authored-skills convergence + the `skills` CLI delivery path.
 - `cli-command-groups.md` — the `perk skills` pass-through group + the parity-smoke fingerprint.
