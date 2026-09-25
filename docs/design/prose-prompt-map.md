@@ -5,10 +5,10 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **232** canonical source units
-- **1242** logical fragments
+- **234** canonical source units
+- **1245** logical fragments
 - **16** session shapes and **12** assemblies
-- **15** explicitly excluded candidates (policy-only; not displayed)
+- **14** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
 
 ### Vocabulary
@@ -70,6 +70,8 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
 | `markdown:prompts/common/review-wave-yield.md` | `context` | `shipped` | [`prompts/common/review-wave-yield.md`](../../prompts/common/review-wave-yield.md) · `file` | — |
 | `markdown:prompts/contexts/objective-refinement.md` | `context` | `shipped` | [`prompts/contexts/objective-refinement.md`](../../prompts/contexts/objective-refinement.md) · `file` | — |
 | `markdown:prompts/contexts/read-only.md` | `context` | `shipped` | [`prompts/contexts/read-only.md`](../../prompts/contexts/read-only.md) · `file` | — |
+| `markdown:prompts/draft-and-compact-continuation.md` | `context` | `shipped` | [`prompts/draft-and-compact-continuation.md`](../../prompts/draft-and-compact-continuation.md) · `file` | — |
+| `markdown:prompts/draft-and-compact.md` | `context` | `shipped` | [`prompts/draft-and-compact.md`](../../prompts/draft-and-compact.md) · `file` | — |
 | `markdown:prompts/stages/gist-save.md` | `context` | `shipped` | [`prompts/stages/gist-save.md`](../../prompts/stages/gist-save.md) · `file` | — |
 | `markdown:prompts/stages/objective-refine/seed.md` | `context` | `shipped` | [`prompts/stages/objective-refine/seed.md`](../../prompts/stages/objective-refine/seed.md) · `file` | — |
 | `python-symbol:src/perk/backends/engagement.py:render_adopted_engagement` | `context` | `shipped` | [`src/perk/backends/engagement.py`](../../src/perk/backends/engagement.py) · `symbol:render_adopted_engagement` | — |
@@ -77,8 +79,8 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
 | `python-symbol:src/perk/backends/engagement.py:render_objective_engagement` | `context` | `shipped` | [`src/perk/backends/engagement.py`](../../src/perk/backends/engagement.py) · `symbol:render_objective_engagement` | — |
 | `python-symbol:src/perk/backends/engagement.py:render_plan_engagement` | `context` | `shipped` | [`src/perk/backends/engagement.py`](../../src/perk/backends/engagement.py) · `symbol:render_plan_engagement` | — |
 | `typescript-model-call:extension/pi/v1/contextInjection.ts:module:before-agent-start:0` | `context` | `shipped` | [`extension/pi/v1/contextInjection.ts`](../../extension/pi/v1/contextInjection.ts) · `symbol:module/event:before_agent_start/0` | — |
-| `typescript-model-call:extension/pi/v1/delivery/commitCompact.ts:module:sendUserMessage:0` | `context` | `shipped` | [`extension/pi/v1/delivery/commitCompact.ts`](../../extension/pi/v1/delivery/commitCompact.ts) · `symbol:module/call:sendUserMessage/0` | — |
-| `typescript-model-call:extension/pi/v1/delivery/commitCompact.ts:module:sendUserMessage:1` | `context` | `shipped` | [`extension/pi/v1/delivery/commitCompact.ts`](../../extension/pi/v1/delivery/commitCompact.ts) · `symbol:module/call:sendUserMessage/1` | — |
+| `typescript-model-call:extension/pi/v1/drivenCompaction.ts:module:sendUserMessage:0` | `context` | `shipped` | [`extension/pi/v1/drivenCompaction.ts`](../../extension/pi/v1/drivenCompaction.ts) · `symbol:module/call:sendUserMessage/0` | — |
+| `typescript-model-call:extension/pi/v1/drivenCompaction.ts:module:sendUserMessage:1` | `context` | `shipped` | [`extension/pi/v1/drivenCompaction.ts`](../../extension/pi/v1/drivenCompaction.ts) · `symbol:module/call:sendUserMessage/1` | — |
 | `typescript-model-call:extension/pi/v1/lifecycleGates.ts:module:sendUserMessage:0` | `context` | `shipped` | [`extension/pi/v1/lifecycleGates.ts`](../../extension/pi/v1/lifecycleGates.ts) · `symbol:module/call:sendUserMessage/0` | — |
 | `typescript-model-call:extension/substrate/bindingDelivery.ts:module:before-agent-start:0` | `context` | `shipped` | [`extension/substrate/bindingDelivery.ts`](../../extension/substrate/bindingDelivery.ts) · `symbol:module/event:before_agent_start/0` | — |
 | `typescript-model-call:extension/substrate/toolGating.ts:module:before-agent-start:0` | `context` | `shipped` | [`extension/substrate/toolGating.ts`](../../extension/substrate/toolGating.ts) · `symbol:module/event:before_agent_start/0` | — |
@@ -98,6 +100,10 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
   - `body` — Document body (`file-body`)
 - `markdown:prompts/contexts/read-only.md`
   - `body` — Document body (`file-body`)
+- `markdown:prompts/draft-and-compact-continuation.md`
+  - `body` — Document body (`file-body`)
+- `markdown:prompts/draft-and-compact.md`
+  - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/gist-save.md`
   - `body` — Document body (`file-body`)
 - `markdown:prompts/stages/objective-refine/seed.md`
@@ -112,9 +118,9 @@ Read-only posture, continuation, compaction, and shared lifecycle guidance.
   - `symbol:render_plan_engagement` — Render plan engagement (`symbol:render_plan_engagement`)
 - `typescript-model-call:extension/pi/v1/contextInjection.ts:module:before-agent-start:0`
   - `handler` — before_agent_start injected context (`symbol:module/event:before_agent_start/0/handler`)
-- `typescript-model-call:extension/pi/v1/delivery/commitCompact.ts:module:sendUserMessage:0`
+- `typescript-model-call:extension/pi/v1/drivenCompaction.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
-- `typescript-model-call:extension/pi/v1/delivery/commitCompact.ts:module:sendUserMessage:1`
+- `typescript-model-call:extension/pi/v1/drivenCompaction.ts:module:sendUserMessage:1`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/1/argument:0`)
 - `typescript-model-call:extension/pi/v1/lifecycleGates.ts:module:sendUserMessage:0`
   - `argument:0` — sendUserMessage model-facing argument (`symbol:module/call:sendUserMessage/0/argument:0`)
@@ -2150,6 +2156,7 @@ Expert configuration guidance, structural search, and ancillary model utilities.
   - `section:perk-customization-recipes/target-a-non-default-base-branch-workflow-base` — Target a non-default base branch (`[workflow] base`) (`heading:perk-customization-recipes/target-a-non-default-base-branch-workflow-base`)
   - `section:perk-customization-recipes/scope-pi-resources-per-project-pi-config-l` — Scope pi resources per-project (`pi config -l`) (`heading:perk-customization-recipes/scope-pi-resources-per-project-pi-config-l`)
   - `section:perk-customization-recipes/change-pi-fff-s-search-mode-pi-fff-mode` — Change pi-fff's search mode (`PI_FFF_MODE`) (`heading:perk-customization-recipes/change-pi-fff-s-search-mode-pi-fff-mode`)
+  - `section:perk-customization-recipes/disable-the-host-sdk-bridge-perk-disable-native-sdk-bridge` — Disable the host-SDK bridge (`PERK_DISABLE_NATIVE_SDK_BRIDGE`) (`heading:perk-customization-recipes/disable-the-host-sdk-bridge-perk-disable-native-sdk-bridge`)
   - `section:perk-customization-recipes/keep-pi-subagents-out-of-user-scope-settings-subagent-package-scope` — Keep pi-subagents out of user-scope settings (`subagent-package-scope`) (`heading:perk-customization-recipes/keep-pi-subagents-out-of-user-scope-settings-subagent-package-scope`)
   - `section:perk-customization-recipes/cheaper-prompt-caching-for-review-children-pi-subagent-cache-retention` — Cheaper prompt caching for review children (`PI_SUBAGENT_CACHE_RETENTION`) (`heading:perk-customization-recipes/cheaper-prompt-caching-for-review-children-pi-subagent-cache-retention`)
   - `section:perk-customization-recipes/write-a-custom-subagent-pi-agents-name-md` — Write a custom subagent (`.pi/agents/<name>.md`) (`heading:perk-customization-recipes/write-a-custom-subagent-pi-agents-name-md`)
