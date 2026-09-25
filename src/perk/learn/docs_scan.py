@@ -40,9 +40,18 @@ _SKILLS_GLOB = (".perk/skills", "*/SKILL.md")
 # The real top-level source dirs a backtick `path::symbol` pointer may name — excludes example /
 # third-party / runtime paths, keeping stale-pointer detection high-precision (validated on the live
 # corpus: an illustrative `perk/foo.py` is rare advisory noise; a `vendor/foo.py` is skipped). `.md`
-# targets are rule 2 (broken doc paths), never a source pointer. `perk/...` pointers stay
-# import-path-shaped and resolve via `_resolve_source_pointer` (src-layout + module→package probes).
+# targets are rule 2 (broken doc paths), never a source pointer. The Python tree is named either
+# import-path-shaped (`perk/...`) or by its src-layout spelling (`src/perk/...`), which
+# `_import_path_form` folds to the former BEFORE this gate; both resolve via
+# `_resolve_source_pointer` (src-layout + module→package probes).
 _SOURCE_ROOTS = ("perk", "extension", "shared", "tests", "agents")
+
+# `src/perk/...` is the corpus's dominant spelling of the Python tree (the uv-workspace src-layout
+# path) and names exactly the file `perk/...` names, so the scan folds it to import-path form.
+# ONLY this prefix is aliased — `_SOURCE_ROOTS` deliberately carries no `src`, because admitting
+# arbitrary `src/...` would turn foreign-tree cites (pi-subagents' `src/runs/...`) into advisory
+# noise.
+_SRC_LAYOUT_ALIAS_PREFIX = "src/perk/"
 
 # A generous pathological guard on each finding family; sorted BEFORE the cap so the cut is
 # deterministic. Never bites a normal corpus.
@@ -477,17 +486,33 @@ def _is_existing_file(path: Path) -> bool:
         return False
 
 
+def _import_path_form(path: str) -> str:
+    """The import-path-shaped form of a pointer path: ``src/perk/...`` → ``perk/...``, every
+    other path unchanged.
+
+    Applied BEFORE the ``_SOURCE_ROOTS`` gate in :func:`_stale_pointers`, so the src-layout alias
+    reaches the same probe order as its canonical spelling — while the *reported* pointer stays
+    the token as written (the analyst must be able to find the span in the doc).
+    """
+    if path.startswith(_SRC_LAYOUT_ALIAS_PREFIX):
+        return path.removeprefix("src/")
+    return path
+
+
 def _resolve_source_pointer(repo_root: Path, path: str) -> Path | None:
     """Resolve a doc's source pointer to the file whose text backs symbol probing.
 
-    Doc pointers stay **import-path-shaped** (``perk/...``), not filesystem-literal: since the
-    uv-workspace src-layout move the Python tree lives at ``src/perk/...``, and the
-    module→package splits preserved import paths (``perk/backends/linear.py`` →
-    ``src/perk/backends/linear/``), so historical split-narrative citations remain valid. Probe
-    order for a ``perk/...`` pointer: the literal path, the src-layout path, then the
-    module→package form (a package dir counts as existing; its ``__init__.py`` backs symbol
-    probing). The other roots (``extension``, ``shared``, ``tests``, ``agents``) never moved
-    under ``src/`` — plain probe only. ``None`` = the pointer is genuinely missing.
+    Takes the **import-path form** (``perk/...``), not a filesystem-literal path; the corpus's
+    dominant ``src/perk/...`` spelling is folded to it upstream by :func:`_import_path_form`
+    (both spellings name one file, and gating on the literal root hid the dominant spelling from
+    the scan entirely). Since the uv-workspace src-layout move the Python tree lives at
+    ``src/perk/...``, and the module→package splits preserved import paths
+    (``perk/backends/linear.py`` → ``src/perk/backends/linear/``), so historical split-narrative
+    citations remain valid. Probe order for a ``perk/...`` pointer: the literal path, the
+    src-layout path, then the module→package form (a package dir counts as existing; its
+    ``__init__.py`` backs symbol probing). The other roots (``extension``, ``shared``, ``tests``,
+    ``agents``) never moved under ``src/`` — plain probe only. ``None`` = the pointer is
+    genuinely missing.
     """
     literal = repo_root / path
     if _is_existing_file(literal):
@@ -513,6 +538,7 @@ def _stale_pointers(repo_root: Path, doc: _ScannedDoc) -> list[StalePointer]:
         if match is None:
             continue
         path = match.group("path")
+        path = _import_path_form(path)  # the `src/perk/...` alias reaches the gate as `perk/...`
         if path.split("/")[0] not in _SOURCE_ROOTS:
             continue
         target = _resolve_source_pointer(repo_root, path)
