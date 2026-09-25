@@ -232,6 +232,10 @@ duplicate SDK copies a launch actually loaded (the subject stamp's `sdk_copies` 
 installed). Modules jiti evaluates itself (perk's own TypeScript extension files) may not appear in
 the census — a property of the loader, not a defect.
 
+`by_package` keeps no importer edge, but every raw `node-census/census-<pid>.jsonl` resolve record
+carries `parent` (the importing module URL) — attribute "who loaded package X" from the raw trace
+rather than the summary.
+
 Under perk's host-SDK bridge (contracts §8.73), `sdk_outside_host_roots` is expected to be
 **empty** for a launch whose `/perk-selfcheck` reports `bridge=installed`: the two native consumers'
 SDK imports resolve to facades addressed at the host entry, so no SDK module loads from outside the
