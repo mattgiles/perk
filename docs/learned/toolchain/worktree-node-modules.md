@@ -75,9 +75,26 @@ naming files/tests absent from your branch means *re-check `git log origin/main`
 SDK).
 
 Two sibling one-line rules live here (their corpus home): **test exit 143 (SIGTERM) with no
-`FAILED` line is a transient kill — rerun before debugging**; and **whole-tree `typecheck-py`
+`FAILED` line is a transient kill — rerun before debugging** (a run-all cancellation fans out as
+MIXED wrapper statuses: aligned termination timestamps + truncated tails + no `FAILED`/`✖` lines
+across several concurrent checks — `signal 15`/`exit 143` on some, a bare `exit 1` on a
+dot-reporter suite — is a runner abort; inspect the scratch `ci-*.md` tails and rerun the gate
+before debugging code, #2471); and **whole-tree `typecheck-py`
 (ty) is change-unscoped** — a sibling's latent `tests/` ty debt lands red on `main` and blocks an
 unrelated PR; prove it pre-existing via the git-stash diagnostic above and clear it separately.
+
+## The `.pi/npm` world in perk's own checkout
+
+Nothing but a Pi launch populates `.pi/npm` here (#2501): `perk doctor --fix` reports
+`extension-install: self-repo — local package, no npm install` and `subagent-compat: pi-subagents
+not installed — compatibility not evaluated` (its detail: pi lazy-installs the package at launch).
+The two populators are Pi's lazy install at an
+INTERACTIVE first launch (the Trust step) and `materialize_extensions`' hard-link clone
+(plan-worktree launches only). A hand-made detached worktree under `.worktrees/` inherits
+nearest-ancestor trust (so it never sees the first) and is not a plan launch (so it never sees the
+second) — stage it explicitly with
+`materialize_extensions(<main>, <worktree>)` (`perk/run/launch/materialize.py`; shared inodes at
+distinct paths — path-keyed tooling copes).
 
 ## Commit hygiene after installing in a worktree
 

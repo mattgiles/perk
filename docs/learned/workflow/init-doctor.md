@@ -30,7 +30,9 @@ cluster: config-and-convergence
   precedent — "Marker-probe table craft".
 - Pieces acting on the user's agent dir resolve it through `launch_pi_agent_dir` (never a parallel
   `Path.home()` copy), rewrite in place without creating, and need autouse `PI_CODING_AGENT_DIR`
-  hermeticity — "Managed pieces and checks that act on files OUTSIDE the repo"; whole-directory
+  hermeticity — "Managed pieces and checks that act on files OUTSIDE the repo"; a legacy-cleanup
+  `--fix` models the retired writer's flat output and shares one classification with its check —
+  "Legacy-cleanup migrations model the retired writer's shape"; whole-directory
   safety checks probe representative artifacts and use `:(literal)` pathspecs — "Whole-directory
   safety checks need representative probes and literal pathspecs".
 
@@ -452,6 +454,16 @@ others). Three rules govern them:
   `"<check>: <message>"` on `fix_errors` instead of aborting, so a refusal on one piece never
   blocks the rest of the repair pass.
 
+**The `subagent-package-scope` shape** (#2472): `package` group, `ok`/`info`/`warn`, never `fail`,
+no `--fix` (an operator-owned user file). User scope resolves via `launch_pi_agent_dir`
+(`ConfigError`/`TOMLDecodeError` ⇒ `info`), project scope via `.pi/settings.json`; identity via the
+init package-identity helper against the constant dirname (the borrowed-entry invariant is pinned
+in a test). Model none/user/project/both explicitly — the first cut's `ok` arm claimed "project
+scope only" when neither scope listed it. `Path.absolute()`-normalize both paths (the resolver
+preserves a relative `PI_CODING_AGENT_DIR`); a project `autoload: false` entry never counts (pi
+keeps both entries of such a delta). Planning lesson: specify a state machine and a cause
+vocabulary for a report-only check up front.
+
 Such pieces force **hermetic isolation in EVERY test that reaches them** — not just the
 user-scope arms — or a developer's real agent dir flips unrelated assertions (and a test can poison
 the real store). The mechanics that make the isolation workable:
@@ -468,6 +480,25 @@ the real store). The mechanics that make the isolation workable:
   preserve the init-converged keys AND init's serialization shape (indent=2 + trailing newline),
   or the unrelated `settings-wiring` check goes red. Doctor tests are coupled across checks
   through the shared scaffold.
+
+## Legacy-cleanup migrations model the retired writer's shape
+
+A `--fix` that removes a retired convergence's output models what the retired WRITER produced (a
+flat `<name>.md` set), not the engine's discovery breadth — the first cut walked recursively, which
+handled a layout perk never produced and symlink-checked only the leaf (#2456). The realized
+instance is the legacy `.pi/agents/perk/` agent-def directory
+(`perk/convergence/doctor/legacy_agent_defs.py`):
+
+- **Classify every entry link-blind** (`is_symlink()` before `is_dir()`/`is_file()`); refuse on a
+  symlink at any owned ancestor, on any non-flat/non-`.md` entry, and on any def lacking its
+  shipped replacement (`shipped_agent_defs_dir`) — deletion never runs before the replacements are
+  proven present.
+- **"All-or-nothing" is a property of the PREFLIGHT.** Post-preflight `OSError`s land on
+  `fix_errors` and the next `--fix` resumes — say so in contracts rather than claim transactional
+  atomicity.
+- **When a report-only check has a `--fix` repair, share ONE classification between them** — a
+  leaf module both `checks.py` and `fixes.py` import — so the remediation states exactly what
+  `--fix` will do and the two can never disagree.
 
 ## Whole-directory safety checks need representative probes and literal pathspecs
 

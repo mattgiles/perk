@@ -19,7 +19,8 @@ recipes plus two **tier** recipes layered on top (below). The canonical develope
 `docs/developers/testing.md`; this doc keeps the reasoning and the gotchas.
 
 - **`-n0` on the CLI overrides `addopts`** — the documented serial-debug escape hatch. Extra CLI
-  args (`-k <expr>`) coexist with `addopts`.
+  args (`-k <expr>`) coexist with `addopts`. `-p no:xdist` does NOT strip the `addopts` `-n`/`--dist`
+  flags (`pytest: error: unrecognized arguments: -n --dist`) — `-n0` is the override (#2474).
 - **`-n auto` is capped, not all-cores.** `tests/conftest.py` implements pytest-xdist's
   auto-resolution hook seam `pytest_xdist_auto_num_workers`, returning
   `min(os.process_cpu_count() or 1, _XDIST_AUTO_WORKER_CAP)` with the cap at **6** — Git-heavy
@@ -86,6 +87,8 @@ the lever is **splitting the largest harness-heavy files** into siblings.
 - `--test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 ))` (portable macOS+Linux) mildly
   oversubscribes cores — session construction is I/O-bound, so in-flight files overlap I/O waits.
   Add it to **both** the `test-js` and `test` justfile recipes.
+- **`node --test` (Node 22+) defaults to the spec reporter** (`✔`/`✖`, `ℹ pass N`), not TAP
+  `ok`/`# pass` — filter output on those glyphs or trust the exit status (#2475).
 
 ### The file-split recipe + gotchas
 

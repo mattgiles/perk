@@ -81,6 +81,12 @@ stay coordinated:
 The empty filters are a loading boundary, not a security boundary. Explicit source-bound loading is
 still possible and is the reason this object exists.
 
+**A pi package identity is not proof its extension is loaded** (#2472): `"extensions": []`
+disables every extension of the package, and `"autoload": false` is delta mode, where nothing
+loads unless positively enabled. Any cross-scope "is this extension active" diagnostic models those
+forms (doctor `subagent-package-scope` — `workflow/init-doctor.md`); perk does not reimplement pi's
+glob matching (a non-empty regular pattern list counts as loading — an honest heuristic).
+
 ## The provider→borrow reclassification equivalence trap
 
 Reclassifying a package (provider-managed → borrowed) changes the *desired* settings-entry shape
@@ -184,7 +190,7 @@ inert-when-absent posture as `READ_ONLY_TOOLS`; un-enumerated foreign names pass
 (fail-open — enumeration is diet-completeness, not correctness).
 
 Placement matrix: research/web tools are universal; delegation + `todo` are worktree-family only;
-Linear-mutating + plannotator-submit tools sit in no stage list.
+Linear-mutating + plannotator **phase** tools (`PLANNOTATOR_PHASE_TOOLS`) sit in no stage list.
 
 Two invariants worth knowing before touching the census:
 
@@ -206,6 +212,17 @@ Two invariants worth knowing before touching the census:
   before perk ever saw it active is never admitted; a tool the census saw inactive is never
   re-activated; gate-ON paths do no admission bookkeeping (the gate-ON set is by name — an
   accepted residual); the snapshot stays the restore authority.
+- **The inverse edge — a load-time tool its owner strips itself** (#2475): a package that
+  registers a tool at LOAD time and strips it in its own `session_start` (plannotator's idle-phase
+  strip of `plannotator_submit_plan`/`plannotator_mark_done`) strips AFTER perk's snapshot, so the
+  tool is a snapshot member and the `resources_discover` re-apply RE-INSTALLS it into every
+  gate-OFF stage session unless enumerated. Every load-time tool a borrowed package registers must
+  be in `BORROWED_TOOLS` even when the owner strips it (static enumeration; prefix rules and
+  presence detection rejected). A census change is a three-surface edit gated by CI: the
+  `toolGating.ts` constant + the marked `<!-- BEGIN borrowed tool census -->` table in
+  `docs/user-docs/reference/in-session/model-tools.md`, asserted set-equal by
+  `docs/site/src/in-session-reference.test.mjs`, + contracts §8.40. Coverage is closed over the
+  enumerated names only (a drift guard is a filed follow-up).
 
 ## The read-only bar is repo non-mutation, not zero side effects
 

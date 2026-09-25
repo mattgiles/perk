@@ -20,6 +20,8 @@ from the right path instead of rediscovering it.
 - One live SDK construction recipe remains — the read-WRITE worker (`sdkAdapter.ts`) with the
   real extension; the fully-isolated read-only child was deleted (PR #2100) and survives only as
   a carrier-less recipe — "Two construction paths — pick by isolation axis".
+- A side session is seeded through its own `SessionManager` appends, never by assigning
+  `agent.state.messages` — "Seeding a side session goes THROUGH its `SessionManager`".
 - Probe scripts AND cold doors launched from inside a perk session inherit `PERK_RUN_ID` — unset
   it or the probe/objective adopts the parent's run — "Probe scripts … inherit the run-id env —
   unset it".
@@ -97,6 +99,12 @@ compat facade. The worker plane, `workerMain`, the e2e harness, and btw **all** 
 bump. Rule: treat a pi SDK pin bump as a migration audit of every `createAgentSession` /
 `createAgentSessionServices` call site, never as a "probably compatible" re-verification.
 
+Run the FULL `node:test` suite immediately after the bump commit, and audit faux/custom providers
+alongside the `createAgentSession` sites: pi-ai 0.87 hands providers a `TranscriptContext` — tool
+declarations ride system-message `toolsAdded`/`toolsRemoved` deltas and `context.tools` is gone, so
+a faux provider reads the model-visible census with `getCurrentTools(context.messages)`
+(`extension/substrate/stageTools.test.ts`).
+
 ### Extension-created child sessions must reuse the LIVE `ModelRuntime`
 
 Since 0.84 `createAgentSession` takes `modelRuntime`, not a registry — `modelRegistry` is no
@@ -109,6 +117,16 @@ structural probe of the facade's compile-time-private `runtime` field (`liveMode
 `extension/vendor/btw/btw.ts`, graceful `undefined` fallback to the default runtime).
 **Version-fragile by design** — the facade pin test breaks loudly if pi renames the field, but
 only against the pinned SDK; re-verify the probe on every pi bump.
+
+## Seeding a side session goes THROUGH its `SessionManager`
+
+Pi ≥ 0.87 rebuilds `context.messages` from the manager on every `prepareRequest`, so assigning
+`agent.state.messages` is silently overwritten (the `/btw` defect). The recipe
+(`extension/vendor/btw/btw.ts::seedSessionManager`): read the parent projection with
+`sessionManager.buildSessionProjection().messages`, drop `system` and perk's scratch customs, and
+persist each role through its canonical append (`appendMessage` / `appendCompaction` /
+`branchWithSummary`) into a fresh `SessionManager.inMemory()` handed to `createAgentSession` — no
+`refreshContext()`.
 
 ## `bindExtensions` is still explicit on the runtime session
 

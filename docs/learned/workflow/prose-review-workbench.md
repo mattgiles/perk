@@ -98,6 +98,11 @@ the same PR (they are not "someone else's"), then **re-measure every count pin f
 catalog after `sync`** — never compute the new pin from your own delta, because the sweep moved
 counts you did not author.
 
+**A `##` added to any canonical model-facing markdown source moves the map** (#2472): a new section
+in a `skills/perk-expert/references/*.md` page changes `docs/design/prose-prompt-map.md`, and the
+map is not `just ci`-gated — run `perk-dev prose-map check`/`sync` whenever a skill reference or
+other canonical prose source gains or renames a section (main can drift silently).
+
 **Adding a governed `promptGuidelines`-bearing tool bumps three pins** at once: the governed-tool
 count in `tests/test_prose_map.py`, the fragment total in `tests/test_prose_review_source.py`, and
 the discovery-candidate count in `tools/prose-map/selector.test.ts`. They live under

@@ -345,6 +345,16 @@ Mechanical reusables that DO transfer from the git lifecycle:
   `npm install --prefix .pi/npm`, then re-run. Environment-class, never attempt-consuming
   (#2006).
 
+**The install-root policy decides the test seam for engine-consumed artifacts** (#2456).
+`extension/installedPackageGuard.test.ts` and the reverify how-to forbid resolving into
+`.pi/npm/node_modules/`, and CI has no lazy install, so an engine-importing discovery test is off
+the table. The substitute is a black-box test over the PACKED artifact in its consumer layout
+(`npm pack` → extract to `<tmp>/.pi/npm/node_modules/@mgiles/perk` → walk pi-subagents' documented
+manifest contract) — `tests/test_packaging.py::test_packed_package_declares_discoverable_agent_census`;
+the live engine leg stays a manual reverify step. Consumer-upgrade residual: pi never refreshes an
+already-installed unranged npm source, so the boundary that matters (a consumer on the old package
++ the new committed defs) is unverified until the next release is consumed.
+
 ## Cross-references
 
 - `docs/learned/workflow/init-external-cli.md` — the skills-manifest `main` ref that survives

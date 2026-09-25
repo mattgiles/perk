@@ -44,6 +44,8 @@ duplicate them here.
   by refusal, never escaped; outcome loops walk the plan, not the aggregate — "Validate
   downstream identifier contracts"; `blocked` reports reclassify to `lane-failed` before coverage
   (`blockedReports.ts`) — "Lane semantics".
+- A `no_active_session` RPC reply is held for a later success (a duplicate responder), never
+  first-reply — "The context-less RPC hold".
 - "Watch items / residuals" is the flagged-edges register — check it before extending the
   module.
 
@@ -401,6 +403,12 @@ controls: the two plan-ref-dependent callers opt into caller-checkout placement 
 plus a strengthened child restriction; every other request keeps native defaults; never repair
 missing plan authority by copying ignored state into allocated worktrees.
 
+**A retry relaunches exactly the effective lanes WITHOUT a report.** A retained actionable report
+is therefore effective evidence a retry can never supersede — only a `blocked` report (reclassified
+`lane-failed`) is retried away. A retry-policy change re-audits downstream end-to-end fixtures for
+REACHABILITY (a stale `extension/codeReview/automated.test.ts` composition kept asserting a path
+the new policy could no longer reach).
+
 Extra defensive arms worth keeping when extending the module: a pre-aborted `AbortSignal` cancels
 before launch (no spawn issued); malformed async-complete payloads are dropped, never surfaced as
 phantom completions; a `status.json` without a `state` field throws (`aggregate-unreadable`)
@@ -427,9 +435,18 @@ preserved while the wave still surfaces failure and `complete: false`. The invar
   pin **tier-of-origin via detail-string divergence** (`assert.match` one detail AND
   `assert.doesNotMatch` the other on the same failure), and give duplicate fixtures **different**
   reports so a first-/last-wins regression is observable.
-- **Native partial ≠ perk's own timeout.** Retention happens only for the explicit native carrier
-  (an object `terminalOutcome` on a `failed`/`partial` completion; never inferred from prose);
-  perk's local timeout/cancel paths still best-effort stop and return no reports.
+- **The engine deadline settles; perk's timer is post-grace insurance.** The spawned `timeoutMs`
+  IS the engine deadline (`WAVE_TIMEOUT_MS`, 30 min; `PERK_WAVE_TIMEOUT_MS` overrides). perk's
+  local timer is orphan insurance armed for deadline + a fixed 60 s `WAVE_SETTLEMENT_GRACE_MS` (no
+  env knob, no spec field), so the engine's `partial/timeout` settlement and its completion
+  carrier are consumed first. Retention happens only for the explicit native carrier (an object
+  `terminalOutcome` on a `failed`/`partial` completion; never inferred from prose). A *deadline
+  partial* retains finished lanes' reports; a `results[]` row with `state: "running"` (no
+  `success`) projects to `lane-failed` ("lane still running at native partial settlement"), never
+  `ok: null`/`malformed-report`. Only the post-grace local `timeout` (and cancel) has no retained
+  reports. Vocabulary: `CONTEXT.md` (engine deadline / settlement grace / deadline partial);
+  normative home §8.35; the engine side is `pi/subagents.md` § "Execution surfaces and structured
+  output".
 - **Completeness is always false on this path** under both completeness policies, even if every
   report survived; the retained `key: null` `run-failed` entry (ordered first, naming the native
   reason) guarantees it; receipts stay output-free and `failed`.
@@ -531,7 +548,8 @@ absorb ordering skew between native workflow-completion delivery and aggregate r
 The default remains 15 seconds. An early unsettled collect retains pending: end the turn and
 await matching workflow completion. Grace expiry after matching completion was observed is an
 unresolved lifecycle contradiction: report and stop for owner diagnosis, never poll or relaunch.
-The module timeout still owns settlement; pending remains collectable. Parents retain workflow
+The engine deadline settles; the local timer is post-grace insurance; pending remains
+collectable. Parents retain workflow
 identity, yield with Pi open (a routine successful child completion does not wake them since
 pi-subagents 0.68.0; failed/paused/stopped children and the workflow completion do — only the
 matching WORKFLOW completion authorizes collection), and reconcile exactly once from typed
@@ -566,6 +584,19 @@ Plan-mode source ownership also needs an `author` carrier for visible lane attri
 installed plan UI displays author rather than source). Evidence and the failed original draft
 leg of the streaming era: `docs/design/archive/pi-subagents-native-streaming-dogfood.md`; the
 retirement record: `docs/design/archive/pi-subagents-0.68.0-reverify.md`.
+
+## The context-less RPC hold
+
+`extension/waves/rpcAdapter.ts::request` is no longer first-reply for errors (#2472): a
+`no_active_session` reply (`WAVE_RPC_CONTEXTLESS_ERROR_CODE`) is HELD while the per-request
+listener stays open. A later `success: true` wins and emits one fail-open `onDuplicateResponder`
+event — forwarded as `WaveNotice {method, superseded}` and latched once per activation by
+`extension/pi/v1/waveNoticeReporter.ts`. Any DIFFERENT error rejects immediately; only the reply
+timeout surfaces the held error, with a "(held for a later reply…)" suffix; `ping` stays
+first-reply. The second responder it absorbs is Pi's pre-trust extension leak
+(`pi/subagents.md` § "The v1 extension RPC seam"). Accepted residuals: a genuine single-responder
+`no_active_session` surfaces only at the ~30 s reply timeout; two loaded versions advertising
+different async-complete channels time out loudly.
 
 ## Deliberate non-behaviors need regression pins
 
@@ -636,6 +667,12 @@ Instances:
 - **The fake engine's ONE settlement mode.** `fakeSubagents.ts` plans take `executeSettlement`
   beside `executeScript` (optional-`never` exclusions refuse a mixed plan at construction) to
   script a native partial settlement — the offline evidence for the retention path.
+- **Changing a shared wave timer needs a repository-wide expiry census** — an indirect collect test
+  relied on the real 200 ms expiry via the env override and silently became a 60 s wait.
+  Mocked-timer idiom: `t.mock.timers.enable({apis: ["setTimeout"]})`, hold the promise, drain
+  microtasks with one `setImmediate`, then tick `timeoutMs + WAVE_SETTLEMENT_GRACE_MS`. Keep the
+  engine deadline, settlement grace and collect grace (`PERK_WAVE_COLLECT_GRACE_MS`) distinct;
+  the inside-grace regression delivers at `deadline + grace − 1`.
 - **The surviving coverage is public-surfaces-only.** The installed-engine suites
   (`partialSettlementCompat`, the child-execution/plan-bound compat tests, the shared
   `installedEngine` fixture) were deleted with the public-surfaces posture (`pi/subagents.md`
@@ -673,6 +710,11 @@ Instances:
   without ever running against real pi-subagents. The stale-session gotcha stands: a landing
   session predates its own extension code (see `pi/extension-api.md` on dogfooding just-changed
   extension code).
+- The 60 s settlement grace is verified only under mocked clocks; blocking flows may occupy ~31 min
+  per attempt (`/pr-review` ~62 min worst case with its retry); no live post-change deadline-partial
+  run has been observed; the live duplicate-load dogfood (user-scope `npm:pi-subagents` beside the
+  project entry) was not executed — its protocol is in
+  `docs/design/archive/pi-pre-trust-extension-leak.md`.
 - `pr`/`worktree`/`bundle_dir` stay model-relayed (an accepted trust posture;
   `decodeStartReviewWaveParams` is the single seam to adjust if door-recorded context is
   adopted).
