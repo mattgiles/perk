@@ -53,10 +53,15 @@ export interface DrivenCompactionSpec<P, C> {
   continuation(ctx: ExtensionContext, completion: C): string;
 }
 
-/** Neutralize a closing tag inside repository-/model-controlled text quoted in a fence:
- * `${tag}>` → `${tag}\>`, so quoted text can never close (or reopen) the fence it sits inside. */
+/** Neutralize every tag spelling of `tag` inside repository-/model-controlled text quoted in a
+ * fence, so quoted text can never close (or reopen) the fence it sits inside: the name directly
+ * followed by `>`, or by whitespace (optionally with attribute-like text) and then `>`, matched
+ * case-insensitively, gets its `>` escaped — `</working-draft >` → `</working-draft \>`. The
+ * canonical spelling keeps its historical bytes (`${tag}>` → `${tag}\>`); a longer name that
+ * merely starts with `tag` (`${tag}s>`) is a different tag and is left alone. */
 export function fenceSafe(text: string, tag: string): string {
-  return text.replaceAll(`${tag}>`, `${tag}\\>`);
+  const name = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.replace(new RegExp(`(${name})((?:\\s[^<>]*)?)>`, "gi"), "$1$2\\>");
 }
 
 /** Register one `*-and-compact` door: the command, its `agent_settled` consumer, and the
@@ -65,7 +70,9 @@ export function installDrivenCompaction<P, C>(
   pi: ExtensionAPI,
   spec: DrivenCompactionSpec<P, C>,
 ): void {
-  let pending: P | null = null;
+  // The armed record rides a wrapper so `null` stays the unarmed marker for EVERY `P` — a spec
+  // whose pending token is itself null (or nullable) can never read as unarmed.
+  let armed: { record: P } | null = null;
   let compactedMeanwhile = false;
   let inFlight = false;
   const say = (ctx: ExtensionContext, severity: Severity, message: string): void => {
@@ -75,7 +82,7 @@ export function installDrivenCompaction<P, C>(
   // Pi emits this for automatic threshold/overflow compaction and for every manual one — our
   // own included (that success-path observation is simply ignored by `onComplete`).
   pi.on("session_compact", async () => {
-    if (pending !== null || inFlight) compactedMeanwhile = true;
+    if (armed !== null || inFlight) compactedMeanwhile = true;
   });
 
   const dispatchContinuation = (continuation: string): void => {
@@ -117,9 +124,9 @@ export function installDrivenCompaction<P, C>(
   };
 
   pi.on("agent_settled", async (_event, ctx) => {
-    if (pending === null) return;
-    const record = pending;
-    pending = null; // consume-then-clear: the record is strictly one-shot
+    if (armed === null) return;
+    const { record } = armed;
+    armed = null; // consume-then-clear: the record is strictly one-shot
     try {
       const outcome = spec.settle(ctx, record);
       switch (outcome.kind) {
@@ -154,7 +161,7 @@ export function installDrivenCompaction<P, C>(
     handler: async (_args, ctx) => {
       // Every invocation supersedes the one-shot slot (the drive arm re-arms it post-send) — a
       // stale record must never survive a non-drive/failed reinvocation into a later settle.
-      pending = null;
+      armed = null;
       const outcome = spec.start(ctx);
       switch (outcome.kind) {
         case "skip":
@@ -171,7 +178,7 @@ export function installDrivenCompaction<P, C>(
           // Arm ONLY after the send: a throwing send leaves the slot unset, so a later
           // `agent_settled` can never consume a phantom record.
           compactedMeanwhile = false;
-          pending = outcome.pending;
+          armed = { record: outcome.pending };
           return;
       }
       const exhaustive: never = outcome; // no default arm: union growth breaks the seam here
