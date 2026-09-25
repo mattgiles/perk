@@ -147,6 +147,13 @@ unregistered construction over a real stage + worker, then the registered routin
   launcher for a merged/flat one leaves the rendered rows unchanged.
 - The registry `command:` field is informational (`_check_shapes` requires non-empty; launchers
   key off `stage.id`) — keep it current, but nothing dispatches on it.
+- **The ROOT-level bare launch is not the hybrid.** Bare `perk` is `invoke_without_command=True` +
+  a `ctx.invoked_subcommand is None` callback arm (`perk/cli/cli.py`): Click 8.4.1 sets
+  `no_args_is_help = not invoke_without_command`; `--help`/`--version` stay eager; an unknown token
+  still fails in `resolve_command`; a lone `perk --` is the bare invocation. Reserve the
+  `parse_args`/`resolve_command` hybrid for a noun that is both a group and a canonical stage. The
+  root form adds no command, so a zero diff on `EXPECTED_SURFACE`, help and user docs IS the proof;
+  deferred one-unit registration lives in `cli-startup-tiers.md`.
 
 ### The warm plane is decoupled from cold spellings
 
@@ -194,6 +201,10 @@ path in `extension/pi/v1/planReview.test.ts` pinned it, not only the save suite)
 - **`CliRunner` replaces `sys.stdin`** with a non-tty stream for the call, so an `isatty()` fork
   cannot be tested by patching `sys.stdin.isatty`; swap the command module's `sys` for
   `SimpleNamespace(stdin=SimpleNamespace(isatty=lambda: …))` (`tests/test_skills_cmd.py`).
+- **`launch_exec_recorder` defeats `CliRunner.isolated_filesystem()`** — the fixture
+  (`tests/conftest.py`) stubs the process-global `os.chdir`, so the isolated cwd is never entered;
+  omit the recorder for isolated-filesystem cases or establish the isolated cwd before installing
+  the stub.
 - **Merged-command worker tests invoke the worker object directly** with an explicit
   `obj=PerkContext(...)` (the root callback's lazy default doesn't run) — through `cli` the
   worker is reachable only under `--json`.
@@ -228,6 +239,11 @@ inherited, a failed `chdir` / `exec` being an ordinary `OSError` arm. Its tests 
 that record the RESOLVED repo argument plus an ops-order log (macOS `/tmp` symlinks skew raw
 comparisons) and apply `monkeypatch.chdir(tmp)` BEFORE stubbing `os.chdir` (LIFO teardown).
 
+**Typed Click options break the `--json` refusal contract.** Click converts typed options BEFORE
+the callback, so `type=int`/`type=float` produce Click's exit-2 usage error, violating "every
+refusal is typed under `--json`" — declare scalars as strings and parse inside the command
+(`startup-profiling.md` § "`--json` verb craft the harness surfaced").
+
 Selector parsing gates digit conversion on `value.isascii() and value.isdigit()`
 (`perk/cli/plan_selection.py::_is_ascii_digits`) — neither `str.isdigit` nor `int()` alone is
 that predicate. Vocabularies whose values reach unquoted argv or injected guidance require an
@@ -245,6 +261,10 @@ hints on cold refusals".
   by eye, run the CI gate. Rebase blockers: `package-lock.json` churn
   (`toolchain/worktree-node-modules.md`), the pre-commit format hook on the first commit
   (`toolchain/ruff.md`).
+- **Reusing a retired/folded root name with a different meaning trips the "old spellings are gone"
+  pins** (`tests/test_cli_stages.py`) — rewrite the pin to assert the new command is not an alias
+  of the old one: its help exits 0, mentions the new behaviour, and lacks the retired stage's help
+  marker (the flat `resume` session picker vs the retired stage-resume verb).
 
 ## Residuals (dated)
 

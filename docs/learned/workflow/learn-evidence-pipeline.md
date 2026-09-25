@@ -46,7 +46,11 @@ precedent; §8.35 owns the linkage).
 fixed by capture site, never by inspecting content. The TS twin `mainCheckoutRoot`
 (`extension/substrate/git.ts`) folds Python's `or cwd` fallback inline. macOS `/private`↔`/var`:
 `path.resolve` is lexical, Python's `.resolve()` realpath-based; different strings, same inode;
-tests realpath both sides.
+tests realpath both sides. A non-git `scaffoldRepo()` harness cannot prove main-checkout placement
+— every case runs on the cwd fallback — so any writer resolving a shared root from a linked
+worktree needs one live `gitInit` + `git worktree add` case asserting the carrier lands under MAIN
+while the entry keeps the worktree `cwd` (realpath both sides) (#2474). The carrier's resume-only
+`sessions[]` index is `session-data.md`'s (§ "Provenance pointers").
 
 ## Capture sites + fork provenance
 

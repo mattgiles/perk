@@ -95,6 +95,10 @@ equality gate). The loader family's canonical fixed shape is
 - **Pin the loader's field-for-field conversion with full domain equality.** One success-path
   assertion against a fully populated expected frozen dataclass (plus the pinned schema version)
   catches swapped/miswired `to_domain()` assignments invisible to every negative test.
+- **A boundary `field_validator` claiming an external timestamp format needs shape AND a
+  calendar-valid parse** — `datetime.fromisoformat` beside the regex; neither alone suffices (a
+  fixed-width regex admits `2026-13-40T25:61:61.999Z`; `fromisoformat` alone admits forms the
+  producer never writes) (#2474).
 
 ## On a read whose absence has semantic weight, a model default is a fail-open bug
 

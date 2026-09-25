@@ -30,6 +30,10 @@ can't derive from the package's root type exports.
   "Asserting `pi.sendUserMessage` injection offline".
 - Abort outranks every resolved result: forward `opts.signal` and re-check `aborted` after EVERY
   await — "`ctx.ui.editor` facts".
+- Pi's own compaction lands BEFORE `agent_settled`; a driven-compaction door observes
+  `session_compact` and arbitrates — "Pi's own compaction runs BEFORE `agent_settled`".
+- Pi sanitizes session names only for newlines; strip terminal controls yourself —
+  "`setSessionName` / `getSessionName` facts".
 - Seam-forwarding + sink tests never prove registration — "A new Pi registration needs a live
   factory/harness assertion".
 - How pi resolves/loads a `git:`-package extension (clone root, package-manager internals) —
@@ -145,6 +149,37 @@ rebuild + render, no re-seed.)
 delegate surfaces through the `onError` callback (classified as a compaction failure), never as a
 throw in the caller's settle handling — settle-time code around a `ctx.compact` call needs no
 defensive try/catch for the delegate itself.
+
+### Pi's own compaction runs BEFORE `agent_settled` — driven-compaction doors arbitrate
+
+Verified at the 0.87.0 dist (event stamp): `AgentSession._runAgentPrompt` awaits
+`_handlePostAgentRun` (`_checkCompaction` → `_runAutoCompaction`) before the `finally` emits
+`agent_settled`, so a door calling `ctx.compact` from `agent_settled` races a compaction that
+already landed, and a second manual `compact()` throws `Already compacted`. The recipe
+(`extension/pi/v1/drivenCompaction.ts`):
+
+- observe `session_compact` while a record is armed — Pi emits it for automatic AND manual
+  compaction;
+- skip your own compaction and dispatch the continuation if one already landed;
+- keep the flag set while yours is in flight, and still resume on a foreign landing when
+  `ctx.compact` fails through `onError`.
+
+`ctx.compact` from an extension aborts an in-flight foreign compaction. A seam's pending record is
+process-local and lost on `/reload`.
+
+## `setSessionName` / `getSessionName` facts
+
+Verified at the 0.85.1 dist:
+
+- Pi sanitizes only `\r\n` → space + trim, and writes the name into an OSC terminal-title sequence,
+  so ESC/BEL/C1/bidi characters in a name break out of it — the extension strips them itself
+  (`extension/session/sessionName.ts`). Enumerate control/format characters by Unicode property
+  (`Bidi_Control` includes `U+061C`, outside General Punctuation), and collapse whitespace before
+  stripping for prose fields, strictly for identifiers.
+- `pi --name` appends its `session_info` entry BEFORE extensions load; `getSessionName()` walks
+  entries newest-first.
+- The runner's `setSessionName`/`appendEntry` resolve at call time, so harness tests override them
+  as instance properties.
 
 ## `ctx.ui.editor` facts
 

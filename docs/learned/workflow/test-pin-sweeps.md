@@ -31,6 +31,19 @@ directions** — a planned file can lack the phrase while an unplanned file carr
 mental model). Sweep by grepping the phrase itself at implementation time; the plan's list is a
 set of hypotheses / a floor, never the inventory.
 
+Four sharpenings of the scan:
+
+- **A frontmatter-field removal sweep greps the FIELD NAME** across both suites and every agent
+  spec in `contracts.md`, not the defs' primary tests (`fallbackModels` was pinned in
+  `auditorDef.test.ts`/`dreamReducer.test.ts`) (#2522).
+- **Structured-data equality pins live in cross-cutting gate suites too** — a door's
+  `handoff_extra` dict pinned by `==` in `test_refinement_cross_backend_gate.py`; grep the kwarg
+  across `tests/` (#2515).
+- **Adding an arm behind a shared refusal sweeps the refusal's wording, help and docs with its
+  pins** — keep the wording arm-neutral (#2474).
+- **A retirement sweep of `docs/learned/` is a grep over the retired NAMES**, not the docs the plan
+  names (#2474).
+
 ## A negative substring pin can shape prose, not just guard it
 
 A negative pin can force a clean structural rule rather than merely blocking a regression: "the

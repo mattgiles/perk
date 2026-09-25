@@ -34,6 +34,7 @@ condition that would make an incorrect implementation fail, then assert the full
 - Negative-space checks prove a live selector and fail under an injected offender; a
   regression pin names the mutation it catches; widen the TEST seed to `unknown`, never the
   production type — "Negative-space checks" / "Structural source pins".
+- Folds and extractions mint branches: pin each arm — "Fold and extraction test craft".
 - Never-execute seams need a live control that first FIRES unhardened (two-stage: git's external
   diff skips textconv) plus an argv pin — "Live controls for never-execute seams".
 - Keep one real default path through the deepest seam; pin composition via the CAPTURED
@@ -64,6 +65,12 @@ test. `workflow/issue-backend.md` records the backend form; delivery routing exa
   choices via observable behavior, not implementation echo (#2018).
 - Citing this doc doesn't apply it: for each invariant asserted, check the fixture would fail
   the trivial/wrong implementation (#2000).
+- **A best-effort/degrade-and-continue layer inherits the fixture gaps of every suite that
+  reaches it** and converts them into passing tests (#2512). Fakes cast `as unknown as
+  ExtensionAPI` are opaque to tsc, so grep the composition-function names in `*.test.ts`, classify
+  each fake by whether its branch is origin-bearing, repair with closure-held stateful methods (a
+  spread-copied fake must observe the same slot), and pin the healthy path ONCE per suite — the
+  composed result AND the absence of the layer's warning text.
 
 ## Seam conversions must re-home every observer
 
@@ -130,6 +137,9 @@ Four sharper payload rules:
   stronger proof than recorder absence (#2018).
 - "Byte-identical" tests compare bytes (raw stdout vs the exact expected serialization), never
   top-level key sets (#2029).
+- A `null` fixture makes a removal assertion vacuous when the decoder maps null → undefined anyway:
+  prove decode/plumbing removal with a non-null legacy wire value and `!("key" in details)`,
+  mutation-checked (#2471).
 
 ## Order pins need one recorder and a discriminating order
 
@@ -163,6 +173,11 @@ route boundaries. `tests/test_prose_review_dto.py`, `tests/test_prose_review_web
   or it pins the wrong refusal (#2182).
 - Per-check corruption matrices: N independent field checks need N fixtures, each corrupting
   exactly one field, none rejectable by an earlier tier (#2176).
+- A fixed-width timestamp regex validates shape, not an instant — the malformed matrix must include
+  a fixed-width-but-impossible value (`2026-13-40T25:61:61.999Z`), or a shape-only validator passes
+  vacuously (#2474).
+- Do not mirror a boundary's rejection matrix inside the unit it calls — pin negatives once at the
+  boundary; unit-test positives plus the shapes only the unit distinguishes (#2516).
 
 ## Parametrize the whole declared surface
 
@@ -278,6 +293,25 @@ reset wipes it); snapshot/stash first and revert only the temporary mutation (#1
   `activePlanRef?: unknown` for `openMemoryWorkflowSession`) while the production field keeps its
   narrow type — loosening the production type to make the test compile would delete the very
   distinction the decoder exists to enforce.
+- **An escape-aware oracle excludes the escape character from anything it lets match before the
+  delimiter** (#2521) — a `[^<>]*` class swallowed the inserted backslash; prove the oracle against
+  the unsafe implementation.
+- **Pin the absence invariant itself, not one instance** (#2475) — an exhaustive
+  `Object.entries(STAGE_TOOLS)` sweep over the census-only family, mutation-checked — and pick the
+  fake that reproduces the load-order MECHANISM, not the foreign owner's toggle.
+
+## Fold and extraction test craft
+
+- **Collapsing N catch arms into one generic arm creates a NEW untested branch at the translation
+  boundary** (#2516) — enumerate the boundary's `except` arms and stub the primitive to raise for
+  each.
+- **An extracted-gate helper test covers only the arm the extraction introduced**, but asserts the
+  whole user-visible message; then re-audit the surviving pin set against the plan's "preserved
+  verbatim" claim (branches exercised ≠ message text pinned). Dedupe the POLICY, not the literal
+  (#2516).
+- **A shared `case A: case B:` block is not shared coverage** — pin each arm; for a byte-identical
+  arm, plant the artifact through the seam, not the tool, then assert the returned digest equals
+  the planted one (#2512).
 
 ## Structural source pins for unobservable invariants
 

@@ -73,6 +73,11 @@ When banning a *string literal* (vs a call site), two additions:
   a `/` operator (`(/\s*["'](scratch|runs)["'])|(["'](scratch|runs)["']\s*/)`) — because the same
   word may be a legitimate dict key elsewhere. The two planes' patterns may deliberately differ —
   match each plane's actual hazard, don't force symmetry.
+- **An allowlist entry for a DATA-only mention of a banned specifier needs a lexed-import
+  assertion** (`extractSpecifiers`) behind it, or the guard silently stops guarding that file
+  (#2525; `pi/native-sdk-bridge.md` § "Guard interplay").
+- **A `\bimport\s*["']` net trips on the export-condition name** — a string literal holding
+  `"import"` matches; build such vocabularies from a split string (#2525).
 
 ## The per-API allowlist variant (the write guards)
 
@@ -231,6 +236,10 @@ most. Expect a broad item-shape extractor to widen after it meets the real corpu
 quadrant or placement guards remain strict. This is discovery, not a reason to weaken the adopted
 contract.
 
+Budget the pins a new tool trips (#2519): a new `write_text` under `src/perk/` needs a justified
+`tests/test_write_guard.py` allowlist entry, and widening Biome to a workspace package re-pins
+`tests/test_docs_gates.py`'s exact-string `lint` script pin.
+
 ## Live-corpus guard craft
 
 From the user-docs metadata guard (`tests/test_user_docs_metadata.py`), craft that generalizes to
@@ -274,6 +283,9 @@ holes (#2168):
 - **Textual import rules rot toward docstrings**, and an exclusion filter can empty the corpus
   silently — both are catalogued with their controls under "Guards that pass while proving
   nothing" (rule rot; everything-found-was-excluded).
+- **Once function-local imports are sanctioned, import-direction guards must be AST-based** —
+  `ast.walk` over `Import`/`ImportFrom`, recording module AND `module.alias`, with a nested-import
+  self-test (#2524; `cli-startup-tiers.md` § "Import-direction source guards must be AST-based").
 
 ## Vendored upstream JS: widen, carve out, prove live
 

@@ -31,6 +31,8 @@ narrative: identity → data dirs → provenance → the read-only writer → GC
   check + ONE destructive command — "GC: the destructive-op triad".
 - Adding a consumer of session data follows the full recipe — "Adding a session-data consumer
   (the full recipe)".
+- Session naming depends on which identity arms' appends carry `run_id`/`stage` — "Session names —
+  the identity arms' append shapes are a consumer contract".
 
 ## Warm run_id minting
 
@@ -138,6 +140,14 @@ distinction and refuse `bad_state` on couldn't-read — "confirmed absent" ≠ "
 - **Verified invalidation** (#1992): when a marker-clear is the mechanism that makes later
   partial failures safe, the clear returns the verified append+read-back result, and an
   unverified clear refuses BEFORE any filesystem work — otherwise the safety story is prose.
+- **The §8.35 carrier's resume-only `sessions[]` index** (#2474): `session-pointers.json` grew
+  `{pi_session_id, session_file, cwd, at}` rows — additive (a legacy record reads as empty), keyed
+  by `pi_session_id`, first-capture `at` never refreshed, newest-`at` wins with ties to the later
+  entry — distinct from the class/site evidence slots and written for EVERY identified arm (adopt
+  included); §8.35's "env-children never capture" stays scoped to the slots. Two run-id predicates
+  coexist by design: the strict `is_canonical_run_id`/`isCanonicalRunId` gates only the two NEW
+  path derivations, while the permissive `is_run_id`/`isSafeRunId` stays for the
+  gc/runner/class-site writers.
 
 ## The atomic-write seam + corruption posture of `.perk/workflow/`
 
@@ -152,7 +162,9 @@ these are the cross-cutting traps:
   mid-multibyte-UTF-8-sequence, so `Path.read_text()` raises `UnicodeDecodeError` before
   `json.loads` ever runs — a "translate malformed JSON" posture catching only
   `json.JSONDecodeError` still leaks tracebacks. Catch both (both are `ValueError` subclasses,
-  so fail-soft `except (OSError, ValueError)` readers stay intact).
+  so fail-soft `except (OSError, ValueError)` readers stay intact). A reader's corrupt-record
+  boundary covers the DECODE stage — `UnicodeDecodeError` is a `ValueError`, not a
+  `JSONDecodeError` (the session-pointers reader degrades invalid UTF-8 like bad JSON).
 - **Content/residue assertions cannot prove atomic replacement.** Byte-content,
   shorter-over-longer, and no-tmp-residue tests all pass for a plain in-place write too. The
   deterministic black-box discriminator: hold the file **open** across the write — atomic replace
@@ -220,6 +232,22 @@ Harness proof pattern: plant a session with `mode: "read-only"`, then `invokeToo
 `READ_ONLY_TOOLS.join(", ")` — allowlist changes track automatically; tests pin one representative
 name.
 
+## Session names — the identity arms' append shapes are a consumer contract
+
+The session-naming origin rule (the first `perk:workflow-state` entry carrying BOTH `run_id` and
+`stage`) works only because the cold claim is the sole identity arm whose append carries both:
+fork/adopt carry `run_id` without `stage`, mint carries neither, and the warm
+`enter-refinement-stage` append is stage-only (#2515). Adding `stage` to a fork/adopt/mint append,
+or `run_id` to the warm refinement append, silently makes hand-run/adopted sessions nameable. No
+guard pins the shapes — only the naming tests pin the consequence (a filed follow-up) — so re-run
+`extension/session/sessionName.test.ts` + `extension/sessionNaming.test.ts` and read §8.71(h) when
+touching an identity arm.
+
+The naming core recomposes solely from rebuilt branch state and never reads the checkout
+`plan-ref` or retries a linkage, so a rejected/unverified link leaves the `plan #N` segment absent
+until a later successful link — state the inheritance as a limitation, and sweep prose for the
+unconditional twin.
+
 ## GC: the destructive-op triad
 
 `src/perk/state/gc.py` + `perk state prune` + the `cache-gc` doctor check established the shape to reuse for
@@ -275,6 +303,10 @@ Key policies:
   authority (whitelisted construction ignores extras); pin both halves. Shared persisted-format
   fixtures are deliberately two-tier: one minimal shared encoding for consumers, richer fixtures
   only in the suite about the format's failure surface.
+- **The kept-arm harness gotcha** (#2515): `resolveSessionStartFacts` re-reads `cache.plan-ref`
+  and strictly re-appends it when the branch LWW ref differs, so a harness test needing
+  startup-derived state to change moves the checkout binding with `writePlanRef`, never a raw
+  branch append.
 
 ## Sources
 

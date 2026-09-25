@@ -116,11 +116,12 @@ export const SUBAGENT_TOOLS: readonly string[] = [
  *    there would leave the child unable to make a `need_decision` ask while the parent keeps
  *    `subagent_supervisor` to answer it. Gate membership is inertness-safe, never a grant.
  * Native wakes need no wait-tool widening in this census.
- * None mutates the repo (`structured_output` writes only the engine's capture file under
- * `.pi-subagents/` scratch). Census decision, recorded: these names deliberately join NEITHER
- * PERK_TOOLS nor BORROWED_TOOLS — the stage-filter universe never sees them because children
- * are stage-unscoped by design (adopt never impersonates a stage), so gate membership is their
- * only governance surface.
+ * None mutates the repo (`structured_output` writes only the engine's capture file among the
+ * child artifacts under the session directory — pi-subagents ≥ 0.66.0; `pi/subagents.md`
+ * § "Child artifacts and wave cleanup"). Census decision, recorded: these names deliberately
+ * join NEITHER PERK_TOOLS nor BORROWED_TOOLS — the stage-filter universe never sees them
+ * because children are stage-unscoped by design (adopt never impersonates a stage), so gate
+ * membership is their only governance surface.
  */
 export const SUBAGENT_CHILD_TOOLS: readonly string[] = ["structured_output", "contact_supervisor"];
 

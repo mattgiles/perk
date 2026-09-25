@@ -61,6 +61,26 @@ and the ambient-block budget (`AMBIENT_ROUTING_BLOCK_MAX_BYTES`); advisory hygie
 `docs-sync` stays permissive. A skipped comparison renders UNCHECKED, never green
 (`DocsCheckReport`'s non-compared defaults); preambles vary with the generating mode.
 
+## Detector blind spots (verified against `docs_scan.py`)
+
+The two pointer detectors (`perk/learn/docs_scan.py` — the stale source pointer and the broken doc
+reference) see less than their names suggest (#2508, #2514):
+
+1. **A backtick span wrapped across lines is invisible** — `_INLINE_CODE_RE` excludes newlines, so a
+   reflow inside a span removes that pointer from BOTH detectors. Wrap tooling must treat spans as
+   atomic tokens and assert whitespace-collapsed equality.
+2. **`src/`-prefixed pointers are skipped** — `_SOURCE_ROOTS` has no `src`; only `perk/...`
+   pointers are probed, and the corpus carries hundreds of unguarded `src/…` spans. The fix is
+   #2505's (`/learn-code`); a code route must NOT admit arbitrary `src/...`, or pi-subagents' own
+   `src/runs/...` cites become noise.
+3. **Bare symbols and bare filenames are unguarded** — cite a load-bearing symbol as
+   `path::symbol` under a source root.
+4. **`prompts/` is outside `_SOURCE_ROOTS`**, so prompt-file references are unguarded.
+5. **An illustrative `.md` path in prose registers as a doc reference** — placeholder it
+   (`<section>/<page>.md`; the token charset exempts `<`).
+
+The judgment side is `doc-reconciliation.md` § "Deliberate nonzero stale-pointer advisories".
+
 ## Cross-references
 
 - `perk/learn/docs_scan.py`, `perk/learn/docs_sync.py`, `tests/test_learned_docs_cues.py`.

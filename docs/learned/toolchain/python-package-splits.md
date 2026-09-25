@@ -106,6 +106,10 @@ sharpenings.
   `__init__`, listing them in `__all__` to silence F401 (re-export-for-tests is legitimate API).
   The explicit `import x as x` / `from perk import github as github` re-export-alias idiom is the
   F401 fix; `PLC0414` (useless-import-alias) is **not** enabled, so it needs no `# noqa`.
+  Corollary (#2524): never re-export the PRIVATE seams tests patch — a patch against the
+  re-export is a silent no-op when the moved function reads its own module's global; drop them
+  from the old `__all__` so stale patches fail loudly, and patch the module that READS the name
+  (`workflow/cli-startup-tiers.md` § "Move-vs-re-export policy on a seam extraction").
 - **A constant used ONLY by a moved helper must travel WITH the helper** — define it in the owning
   submodule and re-export it on the facade. Defining it in `__init__` while the submodule imports it
   creates a facade↔submodule cycle. "Facade keeps X" means **resolvable on the facade**

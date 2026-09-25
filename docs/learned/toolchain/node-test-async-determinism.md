@@ -68,6 +68,19 @@ bridge promise the test settles by hand, a counting `current` spy that returns `
 supersede while the observer is parked on the await, then assert **two** calls and no degrade. Any
 "re-check after the await" claim without this case is unpinned.
 
+**The retry-loop variant** (#2522): a bounded retry over a session-scoped resource needs an
+identity fence after EVERY await (each HTTP call and each sleep), returning a typed `superseded`
+outcome with no request to the dead URL and no ledger write from a late 201. The discriminating
+test mutates state from inside the injected sleep (`extension/pi/v1/providers/annotations.test.ts`).
+Fire-and-forget code-owned status side effects need a typed outcome that distinguishes delivered
+from held (`WaveStatusOutcome`) so the model can tell the human.
+
+## Settle fake bridges in `finally`
+
+In the T1 harness, a test that opens the fake plannotator bridge and exits without settling it
+leaves the readiness poll firing into a disposed session — the "extension ctx is stale" error lands
+on the NEXT test, far from its cause (#2485). Settle every bridge in `finally`, per loop arm.
+
 ## Sequential "race" tests are fiction — use test-only race hooks
 
 A test that performs step A, then step B, then asserts "the race is handled" never ran a race —

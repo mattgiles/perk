@@ -133,6 +133,11 @@ TypeScript `driveStackReconcile` consumer must gate on evidence presence rather 
 transition. The full durability and at-least-once reasoning lives in
 `workflow/objective-delivery.md`.
 
+The narrowing direction has its own rule: don't delete a documented `--json` key because the
+current warm consumer stopped reading it — the envelope is a supervisor surface with external
+script consumers; prefer null-valued retention (`review-post`'s `next_command`, null outside the
+actionable verdict) (#2471).
+
 **`shared/contracts.md` §-numbering is not contiguous.** §8.8 is skipped entirely and §8.10 was
 already taken (provider selection), so the headless worker contract landed as **§8.11**. Always **grep the
 existing `## §8.` headings in `shared/contracts.md` before assigning a section number** — do not trust
@@ -271,8 +276,9 @@ validator strict.
   §8.23; a pointer written from memory of the plan lands on the wrong section silently, and
   `test_contracts_anchors` proves anchors exist, not that your pointer names the right one.
 - **`tests/test_contracts_anchors.py::test_no_provenance_vocabulary` bans provenance words** —
-  roadmap nodes, `Objective #N`, phases, `Q#`, concrete `#NNN` numbers, and the word "dogfood"
-  (any case). Cite an archive gate record by **stem glob** under `docs/design/archive/`
+  roadmap nodes, `Objective #N`, phases, `Q#`, concrete `#NNN` numbers, the word "dogfood" (any
+  case), and `**Status` — a bold concept label like **Status** trips it; rephrase (`**The bridge
+  status**`, #2525). Cite an archive gate record by **stem glob** under `docs/design/archive/`
   (`scout-launcher-*`), never by a literal filename that carries the banned token.
 
 ## A `shared/fixtures/*.json` cross-plane fixture with per-plane expectations

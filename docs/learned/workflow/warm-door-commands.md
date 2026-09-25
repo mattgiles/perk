@@ -149,7 +149,10 @@ had filtered the reconcile trio off).
   cover that surface).
 - **Maintenance.** A new drive joins the table; a changed stage list must satisfy every drive that
   can land there. When the scanner demands a tool, first ask whether the prompt should stop naming
-  gesture tokens (retry guidance belongs on human-facing surfaces) before widening.
+  gesture tokens (retry guidance belongs on human-facing surfaces) before widening. The scan is
+  word-boundary, so natural-language use of a tool-named word ("before the browser is **ready**")
+  reads as the `ready` tool — reword the prose ("browser readiness"), never widen the stage list;
+  other risky bare words: `land`, `learn`, `submit` (#2522).
 - **Widening audits reachability.** When stage S gains tool T, audit T's execute core for
   stage-conditional dispatch — an arm that assumed "T can't run at S" is now live. A "no routing
   change" non-goal is settled by what the change makes reachable, never by intent.
@@ -169,6 +172,13 @@ never left inside model-facing guidance. The live shape splits: `handleHunkLaunc
 copies it (`extension/substrate/clipboard.ts`) and auto-launches raced against a soft deadline —
 non-blocking — while the *wait for the human, degrade only on their explicit choice* rule lives in
 the injected `pr-review-terminal` guidance.
+
+**Key the rendered gesture on the door's STRUCTURED fact**, never a rendered suffix
+(`extension/pi/v1/delivery/address.ts::renderAddressHandoff` keys on `PublishedChange.delivery`,
+contracts §8.47). Make the worker emit an explicit value for the common case
+(`delivery: "incremental"`) so absent ≠ default, and a version-skewed envelope degrades to "confirm
+first", never the destructive gesture; the skill relays the emitter's line verbatim; the unknown
+arm diagnoses truthfully (ABSENT vs UNRECOGNIZED, one fail-safe tail) (#2471).
 
 ## The `registerPerkCommand` wrapper
 
@@ -194,6 +204,9 @@ the yield); cross-door **ordering** rides the fake-router `argvFile` capture
   reachable from an objective session (#2028); `/stack-review-browser` set the warm/cold parity
   template — cold `--stack` checkout via `runColdDoor`, one parameterless opener, entry-neutral
   guidance (#2033).
+- The `/address` hand-off line keyed on a rendered publication suffix, which proves nothing when
+  absent; it was re-keyed on the structured `delivery` field with an explicit incremental value
+  (#2468).
 
 ## Cross-references
 

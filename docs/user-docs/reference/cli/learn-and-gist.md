@@ -340,6 +340,12 @@ deliberately light **project**, so `objective author --from` adopts it in place)
 to the issue tier with the scope stamped in the gist's header. Human output prints the
 consumption command for the saved scope.
 
+The run id resolves `--run-id` → `$PERK_RUN_ID` → a fresh mint, and creation is idempotent per run
+id (a repeat reports `existed: true` — "Found existing"). Inside a perk session, therefore, two bare
+`perk gist create` calls collapse onto ONE issue: pass a distinct `--run-id` (a ULID) per gist —
+in a checkout of perk itself, `uv run python -c 'from perk.state.run_id import mint; print(mint())'`
+mints one.
+
 ### `perk gist list`
 
 List open gists. The default view **hides adopted gists** (the "what's still unconsumed" backlog

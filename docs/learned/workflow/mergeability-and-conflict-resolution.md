@@ -221,9 +221,11 @@ confined source-bound `./preflight` loader, the profile-evidence validator and t
 digest that preceded this are **deleted**; nothing walks the registered tool's `sourceInfo.path`.
 
 The trade-off, stated: writer-profile drift (someone editing `conflict-resolver.md`'s tools or
-inheritance) no longer fails closed at dispatch. Mitigations are the git-tracked
-`.pi/agents/perk/conflict-resolver.md` mirror, `tests/test_subagent_agents.py::test_native_child_profile`
-(the closed per-role profile census), and doctor `subagent-agents`. Protocol drift on the unpinned engine is
+inheritance) no longer fails closed at dispatch. Mitigations are the package-shipped
+`agents/conflict-resolver.md` (discovered by pi-subagents as `source: "package"`),
+`tests/test_subagent_agents.py::test_native_child_profile` (the closed per-role profile census),
+and doctor `subagent-engine` (which also `warn`s on a leftover legacy `.pi/agents/perk/`
+directory). Protocol drift on the unpinned engine is
 **silent** at dispatch: no `started` ack → `cancel` → the grace window → a **retained lock** that
 needs human recovery; the doctor `subagent-compat` version `warn` is the only early signal.
 

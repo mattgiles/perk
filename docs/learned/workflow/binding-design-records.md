@@ -53,7 +53,9 @@ is *effectively* on/off for this record's scope, not whether someone provisioned
 
 Never transcribe planning-time numbers into the committed record — re-measure at commit time, and
 verify the counting selectors themselves (the `git ls-files '<glob>'` root-file drop trap: a glob
-that misses root-level files undercounts silently).
+that misses root-level files undercounts silently). Embedding verbatim tool output couples the
+record to the renderer's WORDING — a text-only renderer change forces a re-measure-and-re-author —
+so commit the docs-only record last, after review settles (#2519).
 
 ## Verification tooling disposed with a scaffold must be rebuilt from prose later
 

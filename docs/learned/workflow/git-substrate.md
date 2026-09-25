@@ -75,6 +75,7 @@ is now only the `UserFacingCliError` translation boundary.
 choice decides where config is loaded from and which selector is written. The authoritative
 statement is the "Two roots" docstring in `src/perk/cli/plan_selection.py` (invocation root for
 worktree-local binding reads only; main root for config, canonical reads, and all selector writes);
+the function itself is `perk/cli/context.py::main_repo_root`, re-exported by `plan_selection.py`;
 the cold-door consequence — the launcher must compute both, not derive one from the other — is in
 `workflow/cold-door-launch.md`.
 

@@ -12,6 +12,30 @@ programming errors propagate) lives in `shared/contracts.md` prose and the propa
 this doc carries the *sweep craft*: what a planner of a similar sweep should expect and how to
 derive each typed set.
 
+## Distillation
+
+- Budget a step for the latent test bugs a narrowing exposes — "Plan for latent-bug exposure".
+- The full CI failure list, not a grep, is the census of exception-behavior sites — "A grep
+  census of exception-behavior sites is incomplete by construction".
+- Derive each typed set from what the try-block does (a pathlib probe over a persisted path is a
+  filesystem operation) — "Derive the typed set from the try-block's operations".
+- Translate every failure mode of a wrapped helper, each arm pinned; fold a probe failure into a
+  typed `GitError` subclass — "Mixed-failure-mode helpers need the full per-arm catch set at
+  translation boundaries".
+- "Never raises" contracts get adversarial fixtures per filesystem call — "Declared fail-open
+  ("never raises") contracts need adversarial-fixture sweeps".
+- Audit a degrade invariant against the boundary's full failure set — "A "degrade, never raise"
+  invariant is only as strong as its enumerated exception set".
+- User input reaching a parser re-derives the catch from the library taxonomy — "Widening a trust
+  boundary reopens exception posture".
+- Broad catches are sanctioned only for cleanup-and-reraise and named degrade boundaries —
+  "Sanctioned broad catches are policy boundaries".
+- A URL-derived path's whole containment chain sits in one refusal boundary — "Whole-chain
+  containment for URL-derived paths".
+- A malformed external payload is a backend error — "Payload-parse failures are backend errors".
+- A foreign-file reader classifies every read outcome, decode included — "A convergence reading a
+  file perk does not own classifies EVERY read outcome".
+
 ## Plan for latent-bug exposure
 
 A narrowing sweep should **EXPECT to surface test bugs the old catches swallowed** — budget an
@@ -50,6 +74,12 @@ Never copy a catch tuple mechanically — enumerate what the try-block actually 
   skips the repair. Error boundaries must report, never silently erase, this distinction. The
   recovery evidence probe in `src/perk/delivery/recover.py` degrades with a loud skip note that
   tells the operator to rerun recover.
+- **A bare pathlib existence probe over a PERSISTED path string is a filesystem operation in this
+  census.** On Python 3.13 `is_file()`/`is_dir()` swallow only `ENOENT`-class errors and raise
+  `PermissionError`, `OSError(ENAMETOOLONG)` and `ValueError` (an embedded NUL); the probe belongs
+  inside the typed refusal boundary with an OS refusal mapping to the absence arm
+  (`perk/run/launch/session_resume.py`). `ENAMETOOLONG` is the deterministic fixture — a
+  permission fixture is vacuous under root (#2474).
 
 ## Mixed-failure-mode helpers need the full per-arm catch set at translation boundaries
 
@@ -73,6 +103,11 @@ reads to `UserFacingCliError` — per-consumer catch sets drift immediately. Ins
 stacked-selection seam (`src/perk/cli/commands/objective/shared.py`) initially caught only the
 reconstruction error while two sibling documented failures escaped as tracebacks through all
 three consumers, each with a different partial catch set.
+
+**Fold "the probe could not run" into the gate's TYPED refusal, not the base error** (#2516): a
+typed subclass of the substrate base error (`StackTopologyError(GitError)`, following the
+`PushRejectedError` precedent in `perk/substrate/git.py`) is caught BEFORE `GitError` at every
+boundary, raised `from exc` with the probe text appended; unknown callers still fail closed.
 
 ## Declared fail-open ("never raises") contracts need adversarial-fixture sweeps
 
@@ -172,6 +207,13 @@ The live read-side instance is doctor's report-only foreign-file reader — `_ff
 `subagent-bridge-config` check) — under a different posture (best-effort `None`; the owning check
 or the foreign program carries the complaint), where one `(OSError, ValueError)` net is what covers
 the `UnicodeDecodeError` and `JSONDecodeError` arms the deleted convergence had to enumerate.
+
+When the reader's cause reaches a human, the classification must name it (#2472):
+`read_text(encoding="utf-8")` raises `UnicodeDecodeError` (a `ValueError`) before `json.loads`, so
+catching `(OSError, json.JSONDecodeError)` lets invalid bytes crash `perk doctor`. Distinguish not
+readable / not valid UTF-8 / not valid JSON / not a JSON object and carry the cause into the
+message, so a "fix the JSON" remediation is never issued for a non-JSON failure — the
+settings-problem classification in `perk/convergence/doctor/checks.py`.
 
 ## Cross-references
 

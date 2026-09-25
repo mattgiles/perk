@@ -31,8 +31,9 @@
 //     syncFromState(handoff.mode=read-only)), and (b) the foreign package's own self-enforcement for
 //     ad-hoc interactive `pi --plan`. The shim is purely a prompting bridge.
 //   - It does NOT restamp `cache.plan-ref.provider` — a tombell-authored prose plan lands with
-//     `provider="github"` exactly like a perk-authored plan (the authoring-provider id lives only in
-//     the `[providers] plan` selection; `provider` is the issue storage backend). All downstream
+//     `provider` = the resolved issue-backend id exactly like a perk-authored plan (`github` only on
+//     the GitHub backend — contracts §8.10/§8.21; the authoring-provider id lives only in the
+//     `[providers] plan` selection; `provider` is the issue storage backend). All downstream
 //     stages bind only to the provider-agnostic plan-ref and are unchanged.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

@@ -264,11 +264,14 @@ The coverage predicate: `test_live_manifest_covers_every_real_template` asserts 
 set — every `*.md` under `prompts/` except `README.md` and `_fixtures/` — is a **subset** of the
 manifest (not equality: multi-arm entries repeat a template). Partials and single-plane templates
 are real templates: an `{% include %}` partial needs its **own** entry (a parent's include does not
-cover it; no production template carries `{% include %}` today, but the Tier-A fixtures still pin
-the feature), and single-plane consumption does not exempt a template. Use `vars: {}` for var-free
-templates. Editing prose alone needs no fixture change; adding a template or changing required
-vars/branches does. Curate conditional-arm coverage in the manifest (provider arms, with-url/no-url,
-empty/populated optional clauses) — representative arms are the only branch evidence Tier B has.
+cover it — `prompts/common/review-wave-yield.md`, included from seven door prompts, is the first
+real partial and held the rule), and single-plane consumption does not exempt a template.
+Door-test idiom for a shared partial: each door pins the include ONCE via one distinctive partial
+sentence (the `4. **Yield.**` step / "Children do not stream"), and per-door prose pins target the
+reshaped door prose, never the include body. Use `vars: {}` for var-free templates. Editing prose
+alone needs no fixture change; adding a template or changing required vars/branches does. Curate
+conditional-arm coverage in the manifest (provider arms, with-url/no-url, empty/populated optional
+clauses) — representative arms are the only branch evidence Tier B has.
 
 Mechanics:
 
@@ -384,7 +387,12 @@ Most arm templates use `{{ var }}` only and keep branching in code. When branchi
   the newline after ANY block tag), merging the line with the next. Author an absorbed extra blank
   line — `{% endif %}\n\n` — so one newline survives. Include fragments' trailing newlines and
   column-zero include placement need byte checks too (the render-config section's include
-  gotchas).
+  gotchas). Treat template text copied from a plan as untrusted for whitespace: render EVERY
+  conditional arm before committing (parity, grammar and budget checks all passed a merged
+  `reasoning.2.` line) and pin the structural newlines in a test.
+- **Two-arm behaviours need arm-named guidelines.** When a behaviour forks on a temporal condition
+  (before vs after browser readiness), every model-facing sentence names its arm — an unqualified
+  sentence true in one arm reads as a contradiction of the other.
 - **Selection stays in code; only string-ASSEMBLY moves into the template.** Distinguish *which
   clause to render* (the arm selection — stays in code) from *how the clause is glued into the
   surrounding prose* (assembly — the intro wrapping / leading space / clause wording moves into

@@ -87,9 +87,11 @@ loading a second SDK copy.
    cannot drive them from its own session. The owner may elect to move the stamp on the source
    re-read + the doctor/scout/offline halves (done for 0.68.0 and 0.70.1) — an explicit,
    recorded decision (the plan's `## Assumptions` + the archive record's verdict line), never a
-   default. The record then names the browser-door half as **owed** and the requirements page
-   describes the version as the source-verified guidance baseline, not a live-certified one;
-   the owed half is appended to the record from the first live browser wave on that host.
+   default; otherwise the bump follows the letter of this step. The record — and the
+   `## Sources` provenance line of `docs/learned/pi/subagents.md` — then names the browser-door
+   half as **owed** and the requirements page describes the version as the source-verified
+   guidance baseline, not a live-certified one; the owed half is appended to the record from the
+   first live browser wave on that host.
 5. **Reconcile the prose the same turn.** Statements the new release *falsifies* are swept
    immediately — `shared/contracts.md`, the user docs, and the learned docs alike
    (`docs/learned/pi/subagents.md` — its `## Sources` re-read line, `## History (dated)`, and any

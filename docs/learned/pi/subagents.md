@@ -1,6 +1,6 @@
 ---
 title: perk's subagent orchestration — the two-boolean child floor, agent-def delivery, and the pi-subagents engine mechanics perk leans on
-read_when: You are spawning a subagent, picking an agent's model, re-enabling a builtin, supervisor streaming, the two-boolean child floor, the ≥ 0.67.0 host-builtin intersection, scout lanes, or agent defs.
+read_when: You are spawning a subagent, picking an agent's model, re-enabling a builtin, supervisor streaming, the two-boolean child floor, agent-def packaging and discovery, wave deadlines, scout lanes.
 cluster: subagent-orchestration
 ---
 
@@ -8,13 +8,16 @@ cluster: subagent-orchestration
 
 perk delegates fresh-context work — PR review, review classification, objective exploration,
 conflict resolution, draft review, harvest/dream/learn analysis — to subagents through the borrowed
-`pi-subagents` engine. perk's defs (the `PERK_AGENTS` tuple, `src/perk/convergence/init/agents.py`)
-reach consumer repos via `perk init`; the flow tools (`run_pr_review_wave`, `run_scout_wave`,
+`pi-subagents` engine. perk's defs (`agents/*.md`) ship in the `@mgiles/perk` npm package and the
+engine discovers them as package agents; the flow tools (`run_pr_review_wave`, `run_scout_wave`,
 `explore_objective_node`, …) spawn them over the report-wave module. `workflow/report-waves.md`
 owns that perk-side module; this doc owns the engine mechanics perk leans on plus perk's child
 policy. Conventions: **One Code Rule** — files + behavior, never reproduced source; **Provenance** —
 engine mechanics reflect the engine source at the version `## Sources` records; body version
-numbers are event stamps, never currency claims.
+numbers are event stamps, never currency claims; **No in-body history** — a superseded rule is
+corrected in place (or its section deleted) and becomes ONE dated `## History (dated)` bullet,
+never an `> **Update**` blockquote, a `(historical)` `##` section, or WAS-tensed primary text
+(`workflow/doc-reconciliation.md` § "Correction shapes").
 
 ## Distillation
 
@@ -23,24 +26,22 @@ numbers are event stamps, never currency claims.
   `PI_SUBAGENT_EXTENSION_BINDINGS` — decoded fail-closed, latched per activation, composed into
   every gate observation; plan guidance rides the gate behind `isPlanGuidanceStage` + the runner
   fence — "Native child execution — the two-boolean policy".
-- Agent defs: the sorted `PERK_AGENTS` tuple is the SSOT (never restate counts); `perk init`
-  delivers each byte-identical into the committed `.pi/agents/perk/` and prunes only there; adding
-  or renaming an agent walks the widening-lockstep census — "Agent-def delivery".
+- Agent defs ship in the npm package (`agents/*.md`, `pi-subagents.agents`), discovered as
+  `source: "package"`; the census is `agents/*.md` ↔ `SUBAGENT_KEYS` ↔ `SubagentsTable`; no
+  reconverge — "Agent-def delivery".
 - Model knob: `[models.subagents] <agent>` applied as the workflow-level `model` at spawn time (wins
   over the def's frontmatter however set); builtins are OFF in every perk repo, re-enable only at
   PROJECT scope; `agentOverrides` is never perk's mechanism — "Models, overrides and builtins".
 - Children are read-only reporters and the PARENT mutates once after reconciling; a report lane
   completes on its validated report (0.70.1 removed `completionGuard`), `context: "fresh"` per
   spawn is the only isolation guarantee — "Read-only children, parent mutates".
-- 0.67.x failed reviewer/scout lanes when pi-fff shadowed `grep`/`find` (host-builtin intersection;
-  fixed 0.68.0, removed 0.70.0 — the `PI_FFF_MODE` injection + doctor `subagent-host-tools` retired
-  with it) — "The 0.67.x host-builtin intersection (historical)".
 - `outputSchema` injects the engine-required `structured_output` call (covered lane ⟺ schema-valid
   report); every wave spawn disables acceptance auto-inference explicitly; `runs.all` is all-settled
   for config-object items only — "Execution surfaces and structured output".
 - Waves are completion-only: every spawn carries `intercomBridge: {mode: "off"}` (0.68.0 discards
   parent-side `progress_update`); a successful child completion no longer wakes the parent; the
-  completion notice is a preview — collect via the typed wave tools — "Supervisor channel".
+  completion notice is a preview — collect via the typed wave tools; engine deadline + 60 s
+  settlement grace; reports ride only the completion `results[]` — "Supervisor channel".
 - perk reaches the engine only through public surfaces (v1 RPC envelope pinned as module constants,
   delegation events, def frontmatter, package `exports`); doctor `subagent-compat` is a version
   tripwire, never a source probe; the accepted coverage gap is named — "Engine-coupling posture".
@@ -110,7 +111,10 @@ All report roles run background (def `async: true`, child calls OMIT `async`,
 structured result schema, no packet ⇒ floor-less, no perk activation),
 mode-discriminated between `pr-rebase` (`/submit`) and the retained stack-sync drive
 (`workflow/mergeability-and-conflict-resolution.md`). Tests assert a **closed census independent of
-`PERK_AGENTS`** (the repo-local `perk-dev.session-auditor` separately).
+the shipped def census** (the repo-local `perk-dev.session-auditor` separately). SDK-identity
+boundary: a blocking `subagent` call shares the host SDK in-process, while the detached runner
+and wave lanes run under pi-subagents' own peer-alias identity (`pi/native-sdk-bridge.md` §
+"Which SDK identity a child runs under").
 
 Bounded posture: not an OS sandbox nor authentication against malicious host extensions; a manual
 `subagent` call is outside the channel; losing the runner env across `/reload` is unsupported. An
@@ -120,73 +124,69 @@ and into the side-session cache key.
 
 ## Agent-def delivery to consumer repos
 
-`PERK_AGENTS` (kept sorted): `adversarial-reviewer`, `conflict-resolver`, `draft-reviewer`,
+The defs are top-level `agents/*.md` shipped IN the `@mgiles/perk` npm package: `package.json`
+declares `"pi-subagents": {"agents": ["./agents"]}`, and pi-subagents discovers them as
+`source: "package"`. There is no second copy and no reconverge — edit `agents/<name>.md` and ship
+a release. The listing (`adversarial-reviewer`, `conflict-resolver`, `draft-reviewer`,
 `dream-analyst`, `dream-reducer`, `harvest-analyst`, `learn-analyst`, `objective-explorer`,
-`pr-reviewer`, `review-classifier`, `scout`. Never restate a count (`workflow/doc-reconciliation.md`).
+`pr-reviewer`, `review-classifier`, `scout`) is the shipped `agents/*.md` census — never restate a
+count (`workflow/doc-reconciliation.md`).
 
 ### How pi-subagents discovers agents
 
 Discovery (`src/agents/agents.ts`) is **recursive** over `<root>/.pi/agents` (+ legacy `.agents`);
 the runtime name comes from **frontmatter** (`name` + `package`, `src/agents/identity.ts::
-buildRuntimeName`), not the path — `.pi/agents/perk/<name>.md` with `package: perk` yields
-`perk.<name>`. Installed npm packages are scanned only for **declared** agent dirs
-(`collectPackageSubagentPaths` reads `pi-subagents.agents` / `pi.subagents.agents` in
-`package.json`); hits load as `source: "package"`, lowest custom rank in `AGENT_SOURCE_PRIORITY`
-(builtin < package < user < project), first-declaration-wins. perk's npm `package.json` declares
-none, so the carrier is the Python wheel + `perk init` (a decision, not an impossibility). Discovery
-runs per execution against the live filesystem with a fingerprint-validated snapshot
+buildRuntimeName`), not the path — a def with `package: perk` yields `perk.<name>`. Installed npm
+packages are scanned only for **declared** agent dirs (`collectPackageSubagentPaths` reads
+`pi-subagents.agents` / `pi.subagents.agents` in `package.json`); hits load as `source: "package"`,
+lowest custom rank in `AGENT_SOURCE_PRIORITY` (builtin < package < user < project),
+first-declaration-wins — so a same-named project def SHADOWS a package def. Discovery runs per
+execution against the live filesystem with a fingerprint-validated snapshot
 (`discoveryFingerprint`, `discoverAgents`): a def written mid-session is usable by the next wave, so
 session-scoped temp defs are viable — their cleanup is yours ("Child artifacts and wave cleanup").
 
-### Delivery design
+**The Ponytail `skillPath` is two def-dir-relative candidates** — the installed layout
+(`../../../@dietrichgebert/ponytail/…`, the def dir sitting inside the consumer's
+`.pi/npm/node_modules/@mgiles/perk/agents/`) first, the dev layout (`../.pi/npm/node_modules/…`,
+perk's own checkout) second; `collectFilesystemSkills` skips a missing candidate.
 
-Sources live **out of the discovered tree** — top-level `agents/<name>.md` (no leading dot), so pi
-never double-loads them in perk's own repo. Bundling mirrors `shared/` → `perk/_shared`: a wheel
-`force-include` maps `agents` → `perk/_agents`; npm `files` is unchanged (`test_packaging.py` asserts
-the tarball lacks `agents/`). The resolver mirrors `shared_dir()`: package data `perk/_agents`, else
-the editable-repo sibling `<repo>/agents`, else a `FileNotFoundError` naming both.
+**The legacy directory.** An older perk wrote the defs into a committed `.pi/agents/perk/` in each
+consumer repo; ranked `project`, a leftover copy shadows the shipped def. Doctor `subagent-engine`
+`warn`s on it and `doctor --fix` removes it (`perk/convergence/doctor/legacy_agent_defs.py`; the
+migration's shape is `workflow/init-doctor.md` § "Legacy-cleanup migrations model the retired
+writer's shape").
 
 ### The widening-lockstep census
 
-Adding an agent touches, in lockstep: `agents/<name>.md` + `PERK_AGENTS` (sorted) + the commented
-`[models.subagents]` sample + `SubagentsTable` (`src/perk/substrate/config.py`) + `SUBAGENT_KEYS`
-(`extension/substrate/config.ts`) + `tests/test_config.py` / `extension/substrate/config.test.ts` /
-`tests/test_packaging.py` + **this doc's listing** (the census is self-referencing — that keeps the
-listing current). A **rename** walks the same census plus
-a `git mv` of the source and a reconverge that prunes the old delivered def.
+The census is `agents/*.md` ↔ `SUBAGENT_KEYS` (`extension/substrate/config.ts`, pinned by
+`extension/substrate/config.test.ts`) ↔ the `SubagentsTable` aliases minus `session-auditor`
+(`perk/substrate/config.py`, pinned by `tests/test_subagent_agents.py` and
+`tests/test_packaging.py::test_packed_package_declares_discoverable_agent_census`). Adding an agent
+touches, in lockstep: `agents/<name>.md` + the commented `[models.subagents]` sample +
+`SubagentsTable` + `SUBAGENT_KEYS` + their pins + **this doc's listing** (the census is
+self-referencing — that keeps the listing current). A **rename** walks the same census plus a
+`git mv` of the source. The test seam for the packed artifact is `workflow/distribution.md`'s
+(§ "init/doctor/launch own the `@mgiles/perk` npm install").
 
 The prose layer the census does not guard: audit every cohort-wide design-doc universal for
 def-level vs spawn-level truth — a def with no launcher breaks any "every spawn adds X" claim, and
 the wave module owns `context: "fresh"` / `mission: false` / the acceptance disable **at spawn
 time**. Coexistence claims (builtin `scout` beside `perk.scout`) are characterized by flipping the
-builtin on and spawning both.
-
-### The committed convergence and doctor
-
-`_converge_subagent_agents` delivers each def **byte-for-byte** into `.pi/agents/perk/` (plus a
-`.gitkeep`) and prunes stray `*.md` **inside that subdir only** — a user-owned `.pi/agents/<mine>.md`
-is out of reach. It computes the identical change-list for `apply=True`/`apply=False` (the
-managed-convergence invariant) and has **no `self_repo` param**. Because `.pi/agents/perk/` is
-**tracked**, linked worktrees inherit the defs via `git checkout` — no worktree mirror (contrast
-skills' `materialize_skills`; `workflow/init-doctor.md`). Doctor: `subagent-engine` enumerates
-`.pi/agents/perk/*.md` (informational); `subagent-agents` owns drift. `[models.subagents]` stays
-**fixed-key** (the `PERK_AGENTS` set) — user agents set `model:` in frontmatter
-(`docs/user-docs/how-to/write-a-custom-subagent.md`).
+builtin on and spawning both. `[models.subagents]` stays **fixed-key** (the shipped census) — user
+agents set `model:` in frontmatter (`docs/user-docs/how-to/write-a-custom-subagent.md`).
 
 ### The repo-local `perk-dev` namespace
 
-`.pi/agents/perk-dev/session-auditor.md` (`package: perk-dev`) lives outside `PERK_AGENTS`:
-repo-local, never delivered, untouched by the prune, yet config-keyed via `[models.subagents]
-session-auditor`. Grow dev-only agents here, not the delivered set.
+`.pi/agents/perk-dev/session-auditor.md` (`package: perk-dev`) lives outside the shipped census:
+repo-local, never shipped, yet config-keyed via `[models.subagents] session-auditor`. Grow dev-only
+agents here, not the shipped set.
 
-### Editing a rubric — the reconverge ritual
+### Editing a rubric
 
 A perk agent's judgment lives **entirely** in its def — SSOT `agents/<name>.md` (e.g. the whole
-reviewer rubric is `agents/pr-reviewer.md`; skill and door defer to it). After editing: re-run `perk init`,
-commit **both** copies byte-identical. Worktree gotchas: `perk init` may fail the skills-sync step
-after printing `Converged before failure:` with the agent copy `updated` — non-fatal for an
-agent-only edit; it also creates the gitignored `.pi/perk.local.toml`, so **stage explicit paths,
-never `git add -A`**. The flat `.pi/agents/<name>.md` spelling is always stale. The wave def↔schema
+reviewer rubric is `agents/pr-reviewer.md`; skill and door defer to it). Edit it and ship; perk's
+own repo discovers the checkout's defs directly through its `..` local package entry
+(`shipped_agent_defs_dir`'s self-repo arm). The wave def↔schema
 lockstep tests (`extension/waves/draftReviewWave.test.ts`,
 `extension/waves/adversarialReviewWave.test.ts`) regex-pin their defs' completion-protocol prose, so
 a pure prose rewrite stays green **except** for those pinned clauses.
@@ -226,58 +226,21 @@ No live perk flow takes the first branch: read-only children report structured f
 `review-submit`); a child never holds a token or composes the mutation; the fallback ladder is
 `workflow/github-gateway.md`'s.
 
-**Def-level `acceptance` vs `completionGuard`** (both were frontmatter fields):
+**Def-level `acceptance` and the ignored `completionGuard`:**
 
 - `acceptance:` becomes the def's `defaultAcceptance`, copied onto a **single-agent** launch that
   omits `acceptance` (`applySingleAgentLaunchDefaults`; explicit call values win); `level: "none"`
   requires a non-empty `reason` (`validateAcceptanceInput`, `src/runs/shared/acceptance.ts`).
-- `completionGuard` WAS the engine's *mutation* guard (`src/runs/shared/completion-guard.ts`): an
-  implementation-shaped task on a mutation-capable child expected a mutation; a mutation-expecting
-  task on a child with no such tool was refused at launch. `bash` counted as mutation-capable, so a
-  report-only def carrying `bash` rode `completionGuard: false` (a real frontmatter field), not a
-  tools diet. Disabling it removed only the mutation guard — `structured_output`, perk's floor and
-  the rubric still enforce non-mutation.
-
-  > **Update (2026-09, pi-subagents 0.70.1):** the completion guard was removed upstream and the
-  > `completionGuard` field is now ignored (not rejected — unlike `fallbackModels`). perk's eleven
-  > report defs no longer carry it; the lane completion contract is the validated
-  > `structured_output` report + perk's restriction floor + the rubric. A 0.68–0.70.0 engine may
-  > still fail a guard-less report lane whose task text reads as implementation.
+- `completionGuard` is ignored (not rejected — unlike `fallbackModels`): the engine's completion
+  mutation guard is gone, so perk's report defs carry no guard field and the lane completion
+  contract is the validated `structured_output` report + perk's restriction floor + the rubric.
+  The guard's arc is under "History (dated)".
 
 **Isolation knob.** `context: "fresh"` is a clean session; `"fork"` branches parent history.
 Precedence (`src/shared/fork-context.ts::resolveSubagentLaunchContext`): explicit spawn `context` >
 configured `defaultSubagentContext` > def `defaultContext` > `fresh` (an implicit fork also needs a
 persisted parent — `canPreferFork`). An isolation-requiring fan-out passes `context: "fresh"` **per
 spawn** — a def-level default cannot guarantee isolation.
-
-## The 0.67.x host-builtin intersection (historical)
-
-> **Update (2026-09, pi-subagents 0.70.0/0.70.1):** the host-builtin intersection was REMOVED from
-> `child-tool-plan` in 0.70.0 — a child's declared tools are no longer intersected with the host
-> session's builtins, so pi-fff's mode can no longer fail a lane. perk retired the
-> `PI_FFF_MODE=tools-and-ui` injection at both launch seams (`FFF_MODE_ENV` is gone; pi-fff's own
-> precedence — CLI flag → `PI_FFF_MODE` → `pi-fff.json` → `tools-and-ui` — decides) and the doctor
-> `subagent-host-tools` check with it (`subagent-package-scope` now follows `subagent-compat`
-> directly). The paragraph below describes the 0.67.x–0.69.x mechanics as they were.
-
-From 0.67.0 the launch tool plan (`src/runs/shared/child-tool-plan.ts`) intersects a child's
-declared tools with the HOST session's builtins — in 0.67.x a host tool counted as builtin when its
-`source === "builtin"` OR (`source === "auto"` and its name is in `PI_BUILTIN_TOOL_NAMES`); since
-0.68.0 `getHostBuiltinToolNames` counts any core-named slot regardless of source ("wrapped core
-slots count"), so an extension re-registering `grep`/`find` no longer empties the intersection. Agents
-matching `REVIEW_OR_SCOUT_AGENT_PATTERN` (`/\b(?:reviewer|scout)\b/i`) **fail closed at launch**
-when ANY explicitly requested, still-permitted member of `REPOSITORY_INSPECTION_TOOLS` (`read, grep,
-find, ls, bash, powershell`) is host-omitted (excluded or undefined tool lists never fail); every
-other agent silently loses the tool with a `console.warn`-only warning (never in the RPC reply). The trigger was pi-fff's `override` mode re-registering `grep`/`find` as extension tools;
-perk's answer was `PI_FFF_MODE=tools-and-ui` injected at both launch seams (the since-retired
-`src/perk/run/launch/__init__.py::FFF_MODE_ENV`; `workflow/cold-door-launch.md`,
-`workflow/borrowed-packages.md`), the operator env winning — kept after the 0.68.0 fix as a
-harmless additive default until 0.70.0 removed the intersection. Doctor's retired
-`_subagent_host_tools_check` gated on `_SUBAGENTS_HOST_INTERSECTION_AFFECTED = ("0.67.0",
-"0.68.0")` — the range closed by the re-verify how-to once the upstream fix landed; its two `ok`
-arms were distinguishable (below the range: "does not intersect"; at/above 0.68.0: "counts
-wrapped core slots"). The borrowed package is unpinned and refreshes at every pi launch, so the
-installed version can move mid-session.
 
 ## Execution surfaces and structured output
 
@@ -297,6 +260,16 @@ workflows run **in-process** in the parent pi (`mode: "workflow"` status carries
 only single/chain runs get the detached runner) ⇒ a wave dies with the parent. Omitted child `async`
 = background under `workflowAwaitAsync: true`; explicit `async: true` = detached. A foreground
 workflow returns the unsliced aggregate inline (30-minute default timeout).
+
+**The workflow deadline and partial settlement** (verified at 0.70.1). The workflow timer arms
+when the script STARTS — a few ms after the spawn reply, which is why a perk timer armed for the
+same duration always won the race. `workflowFailureTerminalOutcome` maps the timeout to
+`{state: "partial", reason: "timeout"}`; `workflowResultChildren` projects an unfinished child as
+`{state: "running"}` with no `success`. The failure-path `status.json` carries NO `workflow.value`
+and no per-step `structuredOutput` — finished lanes' reports travel ONLY in the completion
+payload's `results[]`, so the consumer must still be accepting when it arrives. Runner children
+inherit the workflow deadline. perk's side (the engine deadline, the settlement grace, deadline
+partials) is `workflow/report-waves.md` § "Native partial settlement".
 
 **`outputSchema`.** A top-level `outputSchema` injects a `structured_output` tool into the child
 (`src/runs/shared/structured-output.ts`, `INTERNAL_TOOLS` in `permissions.ts`) regardless of the
@@ -381,6 +354,15 @@ dependency source and pre-digests it into the plan.
   `rpcAdapter.ts` — the versioned envelope exists for exactly this.
 - pi's `EventBus.on` returns an unsubscribe function — per-request reply subscriptions dispose
   cleanly (`extension/pi/v1/providers/plannotator.ts::requestPlannotatorPlanReview` does the same).
+- **Pi 0.85.1's pre-trust extension leak — a second responder.** Without `--approve`, pi's
+  two-phase trust load loads user-scope packages' extensions pre-trust, dedupes by package
+  identity (project wins) and drops the user copy WITHOUT `runtime.invalidate()`, so `pi.events`
+  subscriptions made at load survive as an orphan RPC bridge that never sees `session_start` and
+  answers every non-ping request `no_active_session`; `/reload` does not clear it. perk's own repo
+  never sees it (`[pi] agent_dir` sidelines user-global settings). Record:
+  `docs/design/archive/pi-pre-trust-extension-leak.md`. perk's answer is the wave adapter's
+  context-less hold (`workflow/report-waves.md` § "The context-less RPC hold") + doctor
+  `subagent-package-scope`.
 
 ## Engine-coupling posture — public surfaces only
 
@@ -481,11 +463,20 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
   dropped (Pi ≥ 0.85.1 required for background children). Record:
   `docs/design/archive/pi-subagents-0.68.0-reverify.md`.
 - **0.70.0 / 0.70.1 (2026-09)** — the host-builtin intersection removed from `child-tool-plan`
-  (perk's `PI_FFF_MODE` injection and the `subagent-host-tools` doctor check retired); 0.70.1
-  removed the completion mutation guard (`completionGuard` ignored; dropped from every perk report
-  def) and tightened acceptance inference; the Pi 0.87 fork-context repair is NOT in the 0.70.1
+  (perk's `PI_FFF_MODE` injection and the `subagent-host-tools` doctor check retired; pi-fff's own
+  precedence now decides its mode). Its mechanics while live: reviewer/scout agents failed closed
+  when a requested repository-inspection tool was host-omitted, others silently lost it; 0.68.0's
+  "wrapped core slots count" refinement counted any core-named slot as a host builtin regardless
+  of source, and the retired report-only check gated on the half-open
+  `_SUBAGENTS_HOST_INTERSECTION_AFFECTED = ("0.67.0", "0.68.0")` range (`workflow/init-doctor.md`
+  § "Report-only checks gated on an installed package's version range"). 0.70.1 removed the
+  completion mutation guard (`completionGuard` ignored; dropped from every perk report def — a
+  0.68–0.70.0 engine may still fail a guard-less report lane whose task reads as implementation)
+  and tightened acceptance inference; the Pi 0.87 fork-context repair is NOT in the 0.70.1
   artifact (perk children stay on `context: "fresh"`). Record:
   `docs/design/archive/pi-subagents-0.70.1-reverify.md`.
+- **Agent-def delivery (#2455)** — agent defs moved from the wheel + `perk init` `.pi/agents/perk/`
+  delivery to pi-subagents package discovery; the legacy dir is a doctor migration.
 - **Two-boolean landing** — deleted: the `<active_agent>` prefix parser + `childIdentity.ts`,
   `nativeSessionKey.ts`, the sampled `parentReadOnly` supplier, `ReportWaveRequest.execution`, the
   six-reason classification, the ten-name report-only census.
@@ -509,7 +500,10 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
 - The borrowed `pi-subagents` engine at `.pi/npm/node_modules/pi-subagents/` — `src/agents/`,
   `src/runs/{foreground,background,shared}/`, `src/intercom/`, `src/extension/rpc.ts`,
   `src/workflows/scripted-workflow.ts`, `src/shared/{artifacts,types}.ts`. The package is
-  deliberately **unpinned**; the guidance baseline is the doctor constant
+  deliberately **unpinned** — and an unpinned `npm:` source does NOT refresh at launch: pi's
+  `installedNpmMatchesConfiguredVersion` accepts any installed version for an unranged source
+  (installs a missing package, never refreshes an installed one); the guidance baseline is the
+  doctor constant
   `_SUBAGENTS_GUIDANCE_VERIFIED_VERSION` (`src/perk/convergence/doctor/checks.py`, pinned by
   `tests/test_doctor.py::test_subagent_compat_verified_version_stamp_is_pinned`), and `perk doctor`'s
   `subagent-compat` warns whenever the installed version differs from it.
@@ -532,7 +526,8 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
   `extension/pi/v1/contextInjection.ts` — the two booleans' consumer, the gate, the guidance fence
 - `extension/pi/v1/delivery/conflictResolverEngine.ts`; `extension/waves/scoutWave.ts` /
   `extension/pi/v1/scoutWave.ts`
-- `src/perk/convergence/init/agents.py`, `src/perk/convergence/doctor/checks.py`, `agents/*.md`
+- `perk/convergence/init/extension_install.py::shipped_agent_defs_dir`,
+  `perk/convergence/doctor/legacy_agent_defs.py`, `perk/convergence/doctor/checks.py`, `agents/*.md`
 - `docs/design/pi-subagents-child-execution-policy.md`; `docs/developers/pi-subagents-reverify.md`;
   `docs/learned/workflow/report-waves.md` (the boundary partner)
 - `shared/contracts.md` §8.3 (two-boolean decode), §8.10 (`disableBuiltins` / re-enable), §8.35

@@ -216,9 +216,10 @@ re-creates the dependency on the SSOT symbol.
 The `__version__` SSOT is enforced into the *running session* by three deliberately-chosen mechanisms
 (and one deliberately-rejected one). This builds on the install-pin policy above.
 
-- **`PERK_CLI_VERSION` — a second, *informational* launch env var (the precedent).** `launch_stage`
-  (`src/perk/run/launch/__init__.py`) injects **two** env vars into the `os.execvpe` env dict: the existing
-  run-control `PERK_RUN_ID` **and** the new `PERK_CLI_VERSION = __version__`. The distinction (documented
+- **`PERK_CLI_VERSION` — a second, *informational* launch env var (the precedent).** The one Pi exec
+  pipeline's env builder (`perk/run/pi_exec.py::_build_exec_env`) injects **two** env vars into the
+  `os.execvpe` env dict: the existing run-control `PERK_RUN_ID` **and** the new
+  `PERK_CLI_VERSION = __version__`. The distinction (documented
   in contracts §8.2/§8.6a): `PERK_RUN_ID` is run-control data the extension *acts on*; `PERK_CLI_VERSION`
   is **informational only** — read solely to *compare* versions, never to drive state. This is the
   template for any future "carry a CLI fact into the session for display/comparison" need: add it to the
@@ -344,6 +345,16 @@ Mechanical reusables that DO transfer from the git lifecycle:
   `npm install --prefix .pi/npm`, then re-run. Environment-class, never attempt-consuming
   (#2006).
 
+**The install-root policy decides the test seam for engine-consumed artifacts** (#2456).
+`extension/installedPackageGuard.test.ts` and the reverify how-to forbid resolving into
+`.pi/npm/node_modules/`, and CI has no lazy install, so an engine-importing discovery test is off
+the table. The substitute is a black-box test over the PACKED artifact in its consumer layout
+(`npm pack` → extract to `<tmp>/.pi/npm/node_modules/@mgiles/perk` → walk pi-subagents' documented
+manifest contract) — `tests/test_packaging.py::test_packed_package_declares_discoverable_agent_census`;
+the live engine leg stays a manual reverify step. Consumer-upgrade residual: pi never refreshes an
+already-installed unranged npm source, so the boundary that matters (a consumer on the old package
++ the new committed defs) is unverified until the next release is consumed.
+
 ## Cross-references
 
 - `docs/learned/workflow/init-external-cli.md` — the skills-manifest `main` ref that survives
@@ -356,7 +367,7 @@ Mechanical reusables that DO transfer from the git lifecycle:
   adds a runtime dep)
 - `docs/learned/pi/extension-api.md` — the `session_start` handler the version-drift signal rides;
   also the pi `git:`-package loading substrate (the internals the retired git-clone lifecycle sat on)
-- `src/perk/run/launch/__init__.py`, `extension/index.ts` — the `PERK_CLI_VERSION` inject + the
+- `perk/run/pi_exec.py::_build_exec_env`, `extension/index.ts` — the `PERK_CLI_VERSION` inject + the
   `session_start` drift comparison
 - `docs/learned/toolchain/worktree-node-modules.md` — the `package-lock.json` `pi-ai` bin-path churn
 - `docs/learned/toolchain/uv-workspace-src-layout.md` — the uv-workspace root-package `src`-layout

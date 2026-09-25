@@ -35,7 +35,7 @@ repo-wide archaeology dig.
 `.perk/` is **perk-owned**: committed source (`config.toml`, `skills/`) plus a local cache
 (`workflow/`, `local.toml`). `.pi/` and `.agents/` are **discovery namespaces** owned by Pi and the
 skills CLI respectively — perk writes only a few *generated materializations* into them: the
-perk-managed slice of `.pi/settings.json`, `.pi/agents/perk/*.md`, `.pi/APPEND_SYSTEM.md`, and
+perk-managed slice of `.pi/settings.json`, `.pi/APPEND_SYSTEM.md`, and
 `.agents/manifest.d/perk*.yaml`. **Never imply `.pi/` is generally perk-owned** — perk owns its
 own root and *contributes* materializations into the discovery roots.
 
