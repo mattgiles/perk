@@ -357,10 +357,15 @@ By resolved decision: cumulative `{runs,turns,tokens,elapsed_ms}` summed across 
 filtered by canonicalized `plan_ref.objective_id` (`str(...).lstrip("#")`). No thresholds, no
 enforcement, no `budget_exhausted`.
 
-### Defensive parse of `node.pr`
+### `node.pr` is an opaque backend plan id — never numeric-parse it
 
-Guard `node.pr` with `.isdigit()` before `int(str(node.pr).lstrip("#"))` and fall through to the
-existing `plan_required` fallback on a malformed/non-numeric id.
+The node's `pr` backlink carries the **plan** id as an opaque string — GitHub `"42"`, Linear
+`"ENG-123"` (contracts §8.21, "Opaque string issue ids at every machine boundary").
+`_resolve_in_flight_stage` (`src/perk/cli/commands/objective/run_cmd.py`) strips a leading `#`
+and whitespace and hands any non-empty value to the resolved backend's `get_plan` — the backend
+is the authority on whether that plan exists. Only an empty/missing backlink, or a `get_plan`
+miss (`None`: the issue does not exist), falls through to the `plan_required` fallback. An
+`.isdigit()`/`int(...)` guard would route every Linear id to `plan_required`.
 
 ## Cross-references
 

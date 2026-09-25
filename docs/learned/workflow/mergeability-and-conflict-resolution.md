@@ -245,10 +245,17 @@ dead-PID reclamation; the primitive decision table is in `workflow/lease-outbox-
 
 ## Two authorization gaps only review caught
 
-1. **The mode floor.** Gating on `state.mode !== "read-write"` refused ordinary warm sessions: the
-   warm-mint arm of `establishSessionIdentity` (`extension/session/lifecycle.ts`) leaves `mode`
-   undefined, and `toolGating` treats undefined as writable. Deny only the explicit
-   `state.mode === "read-only"` floor (generalized in `workflow/warm-door-commands.md`).
+1. **The mode floor — it differs per controller.** Gating the retained resolver on
+   `state.mode !== "read-write"` refused ordinary warm sessions: the warm-mint arm of
+   `establishSessionIdentity` (`extension/session/lifecycle.ts`) leaves `mode` undefined, and
+   `toolGating` treats undefined as writable. So the retained controller
+   (`extension/pi/v1/delivery/stackConflictResolver.ts`, its `identity` check) denies only the
+   explicit `state.mode === "read-only"` floor and accepts an omitted warm-session mode
+   (generalized in `workflow/warm-door-commands.md`). The submit controller does **not** share
+   that floor: `extension/pi/v1/delivery/submitConflict.ts`'s `valid` requires the rebuilt
+   `state.mode === "read-write"` (beside `!readOnly()`), so a warm-minted session with no `mode`
+   can neither prime nor consume `resolve_submit_conflicts`. Know which controller you are in
+   before applying either rule.
 2. **Re-guard at the synchronous mutation port.** A currency/cancellation check before an `await`
    is not sound for a claim or counter write after it. The retained resolver's `isCurrent()` check
    runs at the actual claim acquisition and attempt-counter increment, so a revoked invocation
