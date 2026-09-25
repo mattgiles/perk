@@ -194,7 +194,8 @@ never guessed**, and never fails the command. A learn-docs consolidation plan (n
 
 The `--json` bundle also carries `docs_findings` — an advisory, deterministic enrichment of the
 existing-docs inventory: `stale_pointers` (source pointers like `` `perk/x.py::sym` `` that no
-longer resolve), `broken_doc_paths` (doc→doc references — Markdown links and backtick
+longer resolve; the `` `src/perk/x.py::sym` `` spelling is checked as the same pointer),
+`broken_doc_paths` (doc→doc references — Markdown links and backtick
 `.md`/`.mdx` path tokens — that no longer resolve), and
 `duplicate_groups` (the rare exact title/`read_when` collision guard). It surfaces doc drift
 advisorily (the `/learn` existing-docs analyst weighs it candidate-vs-corpus); it never fixes
