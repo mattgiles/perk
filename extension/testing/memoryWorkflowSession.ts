@@ -67,6 +67,8 @@ export function openMemoryWorkflowSession(opts: {
   activePlanRef?: unknown;
   activeObjective?: string | null;
   reviewPosts?: ReviewPostRow[];
+  /** The launched stage (drives the session seam's stage-derived draft-subject routing). */
+  stage?: string;
 }): MemoryWorkflowSession {
   const branch: BranchEntry[] = [];
   const seed = (data: Record<string, unknown>): void => {
@@ -83,6 +85,7 @@ export function openMemoryWorkflowSession(opts: {
     seed({ active_objective: opts.activeObjective });
   }
   if (opts.reviewPosts !== undefined) seed({ review_posts: opts.reviewPosts });
+  if (opts.stage !== undefined) seed({ stage: opts.stage });
 
   let throwNextAppend = false;
   let dropNextAppend = false;
