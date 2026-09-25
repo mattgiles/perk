@@ -266,7 +266,8 @@ Scanner-aware citation craft (#2158, #2157, #2167):
 
 - **Pin the scanner's token shapes at planning time**: `perk/learn/docs_scan.py::_DOC_TOKEN_RE`
   (a backtick doc token is checked only when it contains a `/`) and its source-pointer sibling,
-  which resolves only under `_SOURCE_ROOTS` (a `src/`-prefixed pointer is invisible to it).
+  which resolves only under `_SOURCE_ROOTS` (only the `src/perk/…` spelling is folded to
+  `perk/…`; any other `src/…` pointer is invisible to it).
 - **Three replacement forms keyed to why the pointer died**: renamed/moved → the live path;
   deleted mechanism → a dated-history rewrite naming the deleting event, written locally at each
   hit; hypothetical example → the angle-bracket placeholder (`<name>`), which the charset exempts.

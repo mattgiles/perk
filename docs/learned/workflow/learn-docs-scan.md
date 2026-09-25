@@ -18,8 +18,9 @@ The scan emits only verifiable FACTS: stale `path::symbol` spans; broken doc→d
 slashless tokens skipped); exact normalized title/`read_when` collisions. The de-dup DECISION is the
 analyst's, candidate-vs-corpus; `_duplicate_groups` fires zero times on a curated corpus — a guard,
 never the dedup mechanism. Rule: a deterministic detector emits facts + guards; the LLM decides.
-Source pointers stay import-path-shaped (`perk/...`), probed literal → src-layout → package form
-(`_resolve_source_pointer`) under `_SOURCE_ROOTS` only.
+Source pointers are probed in import-path form (`perk/...`; the corpus's `src/perk/...` spelling
+is folded to it by `_import_path_form`), literal → src-layout → package form
+(`_resolve_source_pointer`), under `_SOURCE_ROOTS` only — never an arbitrary `src/...`.
 
 ## Validate heuristics against the live corpus
 
@@ -69,10 +70,9 @@ reference) see less than their names suggest (#2508, #2514):
 1. **A backtick span wrapped across lines is invisible** — `_INLINE_CODE_RE` excludes newlines, so a
    reflow inside a span removes that pointer from BOTH detectors. Wrap tooling must treat spans as
    atomic tokens and assert whitespace-collapsed equality.
-2. **`src/`-prefixed pointers are skipped** — `_SOURCE_ROOTS` has no `src`; only `perk/...`
-   pointers are probed, and the corpus carries hundreds of unguarded `src/…` spans. The fix is
-   #2505's (`/learn-code`); a code route must NOT admit arbitrary `src/...`, or pi-subagents' own
-   `src/runs/...` cites become noise.
+2. **Only `src/perk/…` is aliased to `perk/…`** (`_SRC_LAYOUT_ALIAS_PREFIX`); every other `src/…`
+   pointer is skipped by design — `_SOURCE_ROOTS` has no `src`, so pi-subagents' own `src/runs/…`
+   cites never become noise.
 3. **Bare symbols and bare filenames are unguarded** — cite a load-bearing symbol as
    `path::symbol` under a source root.
 4. **`prompts/` is outside `_SOURCE_ROOTS`**, so prompt-file references are unguarded.

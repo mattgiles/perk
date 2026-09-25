@@ -136,6 +136,89 @@ def test_non_perk_root_never_probes_src(tmp_path: Path):
     )
 
 
+def test_src_layout_spelling_resolves_and_probes_symbols(tmp_path: Path):
+    # The corpus's `src/perk/...` spelling is an alias of `perk/...`: it reaches the same probes
+    # (clean file + present symbol), and a stale row reports the pointer AS WRITTEN.
+    _write(tmp_path / "src/perk/learn/evidence.py", "def gather_evidence():\n    pass\n")
+    _write(
+        tmp_path / "docs/learned/x.md",
+        "Refs: `src/perk/learn/evidence.py`, `src/perk/learn/evidence.py::gather_evidence`,"
+        " and the stale `src/perk/learn/evidence.py::no_such_fn`.\n",
+    )
+    findings = scan_docs_richly(tmp_path)
+    assert findings.stale_pointers == (
+        StalePointer(
+            doc="docs/learned/x.md",
+            pointer="src/perk/learn/evidence.py::no_such_fn",
+            reason="missing-symbol",
+        ),
+    )
+
+
+def test_src_layout_spelling_missing_file_flags(tmp_path: Path):
+    (tmp_path / "src/perk").mkdir(parents=True)
+    _write(tmp_path / "docs/learned/x.md", "Gone: `src/perk/no_such_module.py::fn`.\n")
+    findings = scan_docs_richly(tmp_path)
+    assert findings.stale_pointers == (
+        StalePointer(
+            doc="docs/learned/x.md",
+            pointer="src/perk/no_such_module.py::fn",
+            reason="missing-file",
+        ),
+    )
+
+
+def test_src_layout_spelling_package_dir_resolves(tmp_path: Path):
+    # The alias reaches the module→package probe too: `src/perk/backends/linear.py` resolves to
+    # the package `__init__.py`, which backs symbol probing.
+    _write(
+        tmp_path / "src/perk/backends/linear/__init__.py",
+        "from perk.backends.linear.client import client_from_env\n",
+    )
+    _write(
+        tmp_path / "docs/learned/x.md",
+        "Refs: `src/perk/backends/linear.py::client_from_env` and the stale"
+        " `src/perk/backends/linear.py::no_such_fn`.\n",
+    )
+    findings = scan_docs_richly(tmp_path)
+    assert findings.stale_pointers == (
+        StalePointer(
+            doc="docs/learned/x.md",
+            pointer="src/perk/backends/linear.py::no_such_fn",
+            reason="missing-symbol",
+        ),
+    )
+
+
+def test_arbitrary_src_root_pointer_still_skipped(tmp_path: Path):
+    # The alias is exactly `src/perk/`, never a `src` root: a foreign-tree cite (pi-subagents'
+    # `src/runs/...`) and a `src/extension/...` path stay skipped even though nothing is on disk.
+    _write(
+        tmp_path / "docs/learned/x.md",
+        "Foreign: `src/runs/foo.ts::x` and `src/extension/index.ts`.\n",
+    )
+    assert scan_docs_richly(tmp_path).stale_pointers == ()
+
+
+def test_both_spellings_are_distinct_rows(tmp_path: Path):
+    # Dedup stays keyed on the token as written: two spellings of one missing pointer yield two
+    # rows, sorted by `(doc, pointer)` (`perk/...` before `src/...`).
+    (tmp_path / "src/perk").mkdir(parents=True)
+    _write(
+        tmp_path / "docs/learned/x.md",
+        "Gone: `perk/gone.py::fn` and `src/perk/gone.py::fn`.\n",
+    )
+    findings = scan_docs_richly(tmp_path)
+    assert findings.stale_pointers == (
+        StalePointer(doc="docs/learned/x.md", pointer="perk/gone.py::fn", reason="missing-file"),
+        StalePointer(
+            doc="docs/learned/x.md",
+            pointer="src/perk/gone.py::fn",
+            reason="missing-file",
+        ),
+    )
+
+
 def test_non_source_root_pointer_skipped(tmp_path: Path):
     # `vendor` is not a real source root → never a stale pointer even though the file is absent.
     _write(tmp_path / "docs/learned/x.md", "A made-up `vendor/foo.py` path.\n")
