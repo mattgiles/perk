@@ -492,8 +492,8 @@ is **runtime-read** (overlay-aware) by the extension instead.
 persisted truncated. Perk implement sessions are typically one long turn, so every compaction is a
 split turn whose turn-prefix summary gets only `0.5 × reserve_tokens` (8192 at the default), shared
 with the summarizer's reasoning at high thinking levels on adaptive-thinking models — if
-`/commit-and-compact` or `/compact` fails with that message, raise `reserve_tokens` (e.g. `65536`)
-and re-run `perk init`. Ceiling: the setting applies to **every** session in the repo (any model,
+`/commit-and-compact`, `/draft-and-compact` or `/compact` fails with that message, raise
+`reserve_tokens` (e.g. `65536`) and re-run `perk init`. Ceiling: the setting applies to **every** session in the repo (any model,
 subagent children included) and pi's trigger has no clamp, so keep it a small fraction of the
 smallest context window any session may run with — a reserve at or above a model's window compacts
 on every turn (`65536` is safe for ≥ 200K windows, wrong for ≤ 64K). Raising it also advances the

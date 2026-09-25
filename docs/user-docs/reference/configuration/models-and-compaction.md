@@ -173,8 +173,8 @@ instead of being persisted truncated. Perk implement sessions are typically one 
 compaction is a *split turn* — a compaction whose cut point lands mid-turn — and the discarded head of
 that turn gets its own *turn-prefix summary* budgeted at only `0.5 × reserve_tokens` (8192 at the
 default), shared with the summarizer's reasoning at high thinking levels on adaptive-thinking models.
-If `/commit-and-compact` or `/compact` fails with that message, raise `reserve_tokens` (e.g. `65536`)
-and re-run `perk init`. *The ceiling:* the setting applies to **every** session in the repo (any
+If `/commit-and-compact`, `/draft-and-compact` or `/compact` fails with that message, raise
+`reserve_tokens` (e.g. `65536`) and re-run `perk init`. *The ceiling:* the setting applies to **every** session in the repo (any
 model, subagent children included) and Pi's trigger has no clamp, so keep it a small fraction of the
 smallest context window any session may run with — a reserve at or above a model's window compacts on
 every turn (`65536` is safe for ≥ 200K windows and wrong for a ≤ 64K one). Raising it also advances

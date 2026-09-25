@@ -412,7 +412,39 @@ generically. This selection reflects persisted session linkage only — the comm
 the plan against its backend issue. Before continuing, the agent reorients from repository evidence (`git status`,
 recent log, and relevant diffs) instead of trusting the compacted summary alone. If worktree state
 cannot be determined or no commit appears, compaction is skipped loudly; a skipped or failed
-compaction never dispatches the continuation. Pi's `/compact` remains the escape hatch. No paired tool.
+compaction never dispatches the continuation. If a compaction already landed during the driven turn
+(Pi's automatic threshold/overflow compaction, or perk's objective threshold compaction), perk skips
+its own compaction and starts the continuation directly. Pi's `/compact` remains the escape hatch.
+No paired tool.
+
+### `/draft-and-compact`
+
+The planning-session twin of `/commit-and-compact`: checkpoint the working draft, compact, then
+automatically resume on the draft only after Pi reports that compaction succeeded. Only read-only
+authoring sessions (the read-only gate is on) qualify; in a read-write session the command refuses
+and points to `/commit-and-compact`. The session's stage picks the subject and its writer tool:
+`plan_draft` for plan sessions (including objective-plan and audit), `objective_draft` for
+objective authoring, `gist_draft` for gist authoring, and `objective_refinement_draft` for
+refinements.
+
+perk drives one model turn that rewrites the **whole** draft through that writer. When a valid draft
+already exists, its current artifact bytes are embedded in the guidance as untrusted DATA so the
+rewrite starts from them; because the writers are whole-value rewrites, the turn carries every
+structured field forward (`roadmap`, `title`, `base`, `delivery` and, in a `perk learn dream`
+session, `dream_report` for objectives; `title` and `scope` for gists). Instead of stopping to ask,
+the turn records every open question in an `## Unresolved` section of the draft prose — a draft
+carrying that section is a checkpoint, never a review candidate.
+
+Compaction runs only once the draft artifact provably changed on the same run (a new digest, or no
+valid draft → a valid draft). No write, a byte-identical rewrite, or a run-identity change skips
+compaction loudly; a skipped or failed compaction never dispatches the continuation. If a compaction
+already landed during the driven turn, perk skips its own and starts the continuation directly, as
+with `/commit-and-compact`. The continuation embeds the just-written draft, re-verifies its anchors
+(file paths, symbols, behaviors) against the checkout, and works each `## Unresolved` item —
+exploring the codebase, or asking with `ask_user_question` where the decision is yours (a refinement
+keeps assumptions about future code named as assumptions rather than inventing certainty). It folds
+each resolution into the draft, removes the section, and only then requests review with
+`plan_review`. Pi's `/compact` remains the escape hatch. No paired tool.
 
 ### `/perk-selfcheck`
 
