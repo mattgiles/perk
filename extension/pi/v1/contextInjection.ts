@@ -87,7 +87,8 @@ export function isPlanGuidanceStage(stage: string | undefined): boolean {
 export interface InjectedContextSpec<K extends string = string> {
   customType: string;
   /**
-   * The flavor table: marker literal → content thunk (plannotator: all three flavor markers).
+   * The flavor table: marker literal → content thunk (plannotator: every flavor marker
+   * `providers/plannotator.ts` exports).
    * A thunk is invoked ONLY after the dedup scan passes, preserving the scan-before-construct
    * ordering (config reads/renders never run on dedup-suppressed turns). Caller contract: the
    * rendered content carries its own key (the marker rides inside the template bytes — pinned by
