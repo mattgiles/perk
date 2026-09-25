@@ -8,8 +8,10 @@
 // through the extension runner), the pending-record disciplines (phantom-record regression,
 // one-shot, overwrite), and the plan-ref authority through registered paths (valid session
 // linkage, LWW, cache-only + conflicting cache, throwing/representative-malformed fallback — the
-// exhaustive validator table is owned by `session/workflowSession.test.ts`). Drives a REAL bound
-// AgentSession via the harness — no LLM / network / Python.
+// exhaustive validator table is owned by `session/workflowSession.test.ts`). This suite is also the
+// regression net for the shared driven-compaction seam (`pi/v1/drivenCompaction.ts`), including
+// its compaction arbitration arms. Drives a REAL bound AgentSession via the harness — no LLM /
+// network / Python.
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -835,6 +837,77 @@ test("/commit-and-compact (dirty) injects only the pre-compaction driving guidan
       h.notifies.some((n) => n.includes("driving a commit of the work completed so far")),
       "the dirty-arm report reaches the UI",
     );
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- compaction arbitration (seam-owned; Pi's native compaction completes before agent_settled) --
+
+test("arbitration: a compaction landing during the driven turn skips ours and resumes directly", async () => {
+  const cwd = scaffoldRepo();
+  gitInit(cwd, { dirty: true });
+  const h = await loadPerkSession({ cwd });
+  const optionsSeen: unknown[] = [];
+  const seen = spyInjections(h, optionsSeen);
+  const deferred = deferCompaction(h);
+  try {
+    await h.invokeCommand("commit-and-compact");
+    assert.equal(seen.length, 1, "the drive guidance");
+    // Pi's threshold/overflow compaction lands inside the driven run, before it settles.
+    await h.emitLifecycle({ type: "session_compact" });
+    commitAll(cwd, "the driven commit");
+    await emitSettled(h);
+    assert.deepEqual(deferred.instructions, [], "no second compaction (Pi would refuse it)");
+    assert.ok(
+      h.notifies.includes(
+        "perk: commit-and-compact — committed — the session was already compacted during the " +
+          "driven turn; resuming on the result…",
+      ),
+    );
+    assert.ok(!h.notifies.some((n) => n.includes("committed — compacting")));
+    await flushCallbacks();
+    assert.equal(seen.length, 2, "the drive guidance, then exactly one continuation");
+    assert.ok(seen[1]?.startsWith("Compaction completed successfully."));
+    assert.ok(
+      seen[1]?.includes("the driven commit"),
+      "the continuation carries the commit evidence",
+    );
+    assert.equal(optionsSeen[1], undefined, "continuation delivery must pass no options");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("arbitration: our compaction failing after a foreign one landed still resumes once", async (t) => {
+  // The window between settle and our own compaction: a foreign compaction (perk's objective
+  // threshold compaction) lands first, so ours rejects — the session WAS compacted, so resume.
+  const cwd = scaffoldRepo();
+  gitInit(cwd, { dirty: true });
+  const h = await loadPerkSession({ cwd });
+  const seen = spyInjections(h);
+  const deferred = deferCompaction(h);
+  const errors: string[] = [];
+  t.mock.method(console, "error", (message: unknown) => errors.push(String(message)));
+  try {
+    await h.invokeCommand("commit-and-compact");
+    commitAll(cwd, "the driven commit");
+    await emitSettled(h);
+    assert.equal(deferred.instructions.length, 1, "our compaction was requested");
+    await h.emitLifecycle({ type: "session_compact" });
+    deferred.reject(new Error("Already compacted"));
+    await flushCallbacks();
+
+    assert.equal(seen.length, 2, "the drive guidance, then exactly one continuation");
+    assert.ok(seen[1]?.startsWith("Compaction completed successfully."));
+    assert.ok(
+      errors.some((line) => line.includes("compaction failed after another compaction landed")),
+    );
+    assert.ok(
+      !errors.some((line) => line.startsWith("perk: commit-and-compact — compaction failed — ")),
+      "never the plain (non-continuing) failure arm",
+    );
+    assert.ok(!errors.some((line) => line.includes("continuation dispatch failed")));
   } finally {
     h.dispose();
   }
