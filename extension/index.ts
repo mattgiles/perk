@@ -40,6 +40,7 @@ import {
 } from "./pi/v1/delivery/stackSync.ts";
 import { installSubmitBindings } from "./pi/v1/delivery/submit.ts";
 import { installSubmitConflictBindings } from "./pi/v1/delivery/submitConflict.ts";
+import { installDraftCompactBindings } from "./pi/v1/draftCompact.ts";
 import { createDraftReviewSlot } from "./pi/v1/draftReview.ts";
 import { registerDraftReviewWaveTools } from "./pi/v1/draftReviewWaveTools.ts";
 import { installGistBindings } from "./pi/v1/gist.ts";
@@ -799,6 +800,13 @@ export default function perk(
   // (clean/read-only trees compact immediately; no commit → no compaction or continuation).
   // Human-only — no tool twin.
   installCommitCompactBindings(pi, gating);
+
+  // The warm `/draft-and-compact` utility door — the read-only authoring twin: drive a whole-draft
+  // checkpoint (open questions recorded under `## Unresolved`), compact once the draft artifact
+  // provably changed on the same run, then completion-gate a continuation that embeds the draft
+  // and works the unresolved items before review. Only gated sessions qualify. Human-only — no
+  // tool twin.
+  installDraftCompactBindings(pi, gating);
 
   // The objective plan factory's warm transition surface: the `objective_node` bounded
   // tool (delegates to the Python cold door; `status:"done"` requires a completion audit) + the

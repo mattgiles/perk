@@ -224,7 +224,7 @@ routes:
     role: launch
     priority: 90
   - id: prompt-session
-    match: { paths: ["prompts/contexts/read-only.md", "prompts/common/resume-advisory.md", "prompts/commit-and-compact.md", "prompts/commit-and-compact-continuation.md"] }
+    match: { paths: ["prompts/contexts/read-only.md", "prompts/common/resume-advisory.md", "prompts/commit-and-compact.md", "prompts/commit-and-compact-continuation.md", "prompts/draft-and-compact.md", "prompts/draft-and-compact-continuation.md"] }
     capability: foundation.session
     audience: shipped
     role: context
@@ -488,7 +488,7 @@ routes:
     role: context
     priority: 100
   - id: ts-session
-    match: { paths: ["extension/pi/v1/delivery/commitCompact.ts", "extension/pi/v1/lifecycleGates.ts", "extension/substrate/bindingDelivery.ts", "extension/substrate/toolGating.ts"] }
+    match: { paths: ["extension/pi/v1/drivenCompaction.ts", "extension/pi/v1/lifecycleGates.ts", "extension/substrate/bindingDelivery.ts", "extension/substrate/toolGating.ts"] }
     capability: foundation.session
     audience: shipped
     role: context

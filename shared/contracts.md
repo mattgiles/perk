@@ -107,7 +107,10 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   (soft results, never throws): mistyped params → `bad_input`; empty/whitespace payload →
   `invalid_input`; no session `run_id` → `no_run_id`; file-or-pointer write failure →
   `write_failed`. Consumers read a draft only via the `WorkflowSession` read seam
-  (`readArtifact` — digest-validated, fail-open). `plan_draft` writes the working plan during
+  (`readArtifact` — digest-validated, fail-open). The warm `/draft-and-compact` door is such a
+  consumer: it embeds the validated bytes in its driven guidance and continuation, and proves a
+  fresh checkpoint by comparing the artifact digest against its invocation-time baseline on the
+  same run (`extension/authoring/draftCompact.ts`). `plan_draft` writes the working plan during
   read-only plan authoring to
   `plan-draft.md` (`PLAN_DRAFT_ARTIFACT`, `extension/authoring/plan/draft.ts`); `objective_draft`'s
   per-artifact differences are below.
