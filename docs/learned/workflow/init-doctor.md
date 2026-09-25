@@ -196,19 +196,21 @@ When a managed convergence delivers content into a subdir, *how* linked worktree
 on whether the delivery is **tracked content** or **symlinks**:
 
 - **Committed (tracked) managed subdir ⇒ no worktree mirror needed.** A convergence that writes
-  byte-stable content into a **committed, tracked** subdir (e.g. agent defs into `.pi/agents/perk/`)
+  byte-stable content into a **committed, tracked** subdir (a directory of byte-stable defs, say)
   is inherited by linked worktrees via plain `git checkout` — so it needs **no** cold-door worktree
   symlink mirror. Contrast skills' `materialize_skills` `.agents/skills/` mirror, required **only**
   because those are *symlinks* the cold door must repoint (see `cold-door-launch.md` /
   `skill-bindings.md`). Choose committed-tracked delivery when worktree inheritance matters and the
   content is byte-stable.
 - **Perk owns the WHOLE subdir: prune inside, never outside.** Such a convergence prunes stray files
-  *within* its owned subdir (e.g. stray `*.md` under `.pi/agents/perk/`) but **never** touches
-  sibling user files outside it (a user's `.pi/agents/<mine>.md`) — and, reaffirming the idempotency
+  *within* its owned subdir (stray files under `<owned>/`) but **never** touches sibling user
+  files outside it (a user's `<parent>/<mine>.md`) — and, reaffirming the idempotency
   rule above, computes the **same change-list for `apply=True`/`apply=False`**.
 
-See `docs/learned/pi/subagents.md` for the realized instance (the `PERK_AGENTS` /
-`_converge_subagent_agents` agent-def delivery).
+No realized committed-tracked instance remains: perk's agent defs, the last one, now ship in the
+npm package — `pi/subagents.md` § "Agent-def delivery". Retiring that delivery left a legacy
+directory in consumer repos, removed by a `doctor --fix` migration — § "Legacy-cleanup migrations
+model the retired writer's shape".
 
 ## "doctor checks disk; selfcheck checks the prompt"
 
@@ -387,8 +389,7 @@ The craft survives for any future probe over a surface perk *does* own or vendor
 `_subagent_host_tools_check(root, *, environ=None)` (formerly in
 `src/perk/convergence/doctor/checks.py`) was the precedent for a report-only check that fires only
 while an installed, **unpinned** package sits in a known-affected version range — pi-subagents
-0.67.x's host-builtin intersection (`pi/subagents.md` § "The 0.67.x host-builtin intersection
-(historical)"). *Retired 2026-09*: pi-subagents 0.70.0 removed the intersection, so the check, its
+0.67.x's host-builtin intersection (`pi/subagents.md` § "History (dated)"). *Retired 2026-09*: pi-subagents 0.70.0 removed the intersection, so the check, its
 `_SUBAGENTS_HOST_INTERSECTION_AFFECTED` range and the `PI_FFF_MODE` launch injection were deleted
 (like the marker-probe table above, the shape outlives the instance). Four disciplines it settled:
 

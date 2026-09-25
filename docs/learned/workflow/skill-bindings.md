@@ -293,7 +293,8 @@ The frozenset in `src/perk/substrate/bindings.py` is the SSOT — each member (e
 `command:pr-review`, `command:objective-replan`, `command:replan`) is a command with a binding-delivery surface (a
 Mechanism-B `bindingSuffix` call site, and for the cold doors a `binding_trigger="command:<id>"`
 override). Don't enumerate the members here — the set keeps growing and a hard-coded list goes
-stale (the same listing-without-a-count discipline `pi/subagents.md` records for `PERK_AGENTS`).
+stale (the same listing-without-a-count discipline `pi/subagents.md` records for the shipped
+`agents/*.md` census).
 Any other `command:<id>` binding **can never fire** and doctor reports it as such. Commands that *are*
 registry stages bind via `stage:<id>` (the kind-selection rule above). If a future command grows a
 delivery surface, this **MANUALLY-curated** frozenset must be extended in lockstep — it is NOT

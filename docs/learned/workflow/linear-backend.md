@@ -478,7 +478,8 @@ the live runs did *not* answer live in the Still-deferred register below.
 ## Linear Projects substrate + `LinearProjectObjectiveStore` (now BUILT)
 
 The project-backed objective store was built on the #567 spike substrate (Objective #548 Phase 3,
-2026-06); the tier contract lives in `objective-store.md` — the Linear-specific mechanics are here.
+2026-06); the tier contract lives in `shared/contracts.md` §8.24 (+ `perk/backends/objective_store.py`)
+— the Linear-specific mechanics are here.
 
 ### The substrate-home principle (the load-bearing #582/#586 lesson)
 
@@ -679,7 +680,7 @@ The load-bearing decisions:
 
 ### Manifest-drift Linear mechanics delivered (#626)
 
-The #609 design landed (drift engine + worker detail live in `objective-store.md` / `cli-command-groups.md`).
+The #609 design landed (drift engine + worker detail live in `perk/objective/drift.py` + contracts §8.54).
 The **Linear-backend-specific** mechanics:
 
 - **`attach_issue_to_milestone` mirrors `attach_issue_to_project`** — the **bare boundary identifier**

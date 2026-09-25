@@ -8,9 +8,14 @@ cluster: doors-and-launch
 
 A perk *local* stage launch ends in `os.execvpe(<absolute pi path>, …)`: the perk CLI process
 **becomes** pi. The seam is the `perk/run/launch/` package (`launch_stage` + its phase functions
-in `perk/run/launch/__init__.py`; `materialize.py`, `prompts.py`, `worktree.py`, `remote.py`).
-This doc owns the launch phase — execution + positioning; what a door *gathers* before calling
-`launch_stage` is `plan-factories.md`'s (§ "Policy stays in the door's `gather` closure").
+in `perk/run/launch/__init__.py`; `materialize.py`, `prompts.py`, `worktree.py`, `remote.py`) plus
+the exec phase in `perk/run/pi_exec.py::exec_pi` — the ONE Pi exec pipeline (env build, absolute
+`pi` resolution, the Linear-key seed, the stale-lock sweep, `chdir` + exec), shared by stage
+launches, the plain bare-`perk` session and `perk resume`; `perk/run/launch/__init__.py::_exec_pi`
+is only the `_LaunchContext` adapter onto it. This doc owns the launch phase — execution +
+positioning; what a door *gathers* before calling `launch_stage` is `plan-factories.md`'s
+(§ "Policy stays in the door's `gather` closure"). This doc carries no history: retire a rule by
+deleting it and pointing at the owner.
 
 ## Distillation
 
@@ -40,7 +45,8 @@ banner — `prompt_suffix`, `preview`, `[models.stages]` flags and the skills mi
 fast-forward (`_sync_main_checkout`, read-only `worktree: none` stages) → `resolve_worktree` →
 agent-dir resolution → the frozen `_LaunchContext` (argv included) → `--dry-run` preview
 **returns here** → handoff → repo-root extension warm-up → worktree materialization → Linear
-run-started emit → setup hook → `_exec_pi`. Nothing after the exec runs: a supervisor **cannot**
+run-started emit → setup hook → `_exec_pi` (the adapter onto `exec_pi`). Nothing after the exec
+runs: a supervisor **cannot**
 compose a local launch, so landing stays the interactive path (`objective-lifecycle.md`). The
 headless worker (`perk run-worker`) bypasses this seam — no pi-CLI arg parsing, no trust
 resolution; only the env parity below reaches it.
@@ -60,6 +66,17 @@ checkout, so perk prepends `--approve` for `stage.worktree != "none"`. Verified 
 (trust the dist when its docs disagree): the override short-circuits before any UI check, so it
 works in **interactive** mode too, and writes no `trust.json` entry (run-scoped; no residue).
 
+**`--approve` is safe only when perk fixes the cwd.** Stage launches `chdir` into a `plan-<id>`
+checkout perk chose; a human-chosen cwd is different. With `--resume` Pi opens the picker first,
+`SessionManager.open()` makes the selected session's recorded cwd the runtime cwd and only then
+applies trust (the override included), and the picker's All scope can select another project —
+so `perk resume`'s picker arms compose **no** `--approve` and Pi's native trust flow governs
+(accepted UX cost: a trust prompt per reopened ephemeral worktree;
+`perk/run/launch/session_resume.py`). `pi --resume` builds its TUI selector even on a pipe, so the
+door owns the terminal-only rule: `not_a_tty`, decided after `not_a_repo` and before any
+config/backend read. Launch prose says "no *stage* prompt", never "no prompt" — every launch
+without `--approve` may still show Pi's trust prompt.
+
 ## Prompt assembly: the augment-only `prompt_suffix` seam
 
 `_resolve_prompt` (`prompts.py`) assembles stage primer (or `prompt_override`) → `prompt_suffix`
@@ -71,24 +88,26 @@ three render sites.
 
 ## Env setdefault via merge order
 
-`_build_exec_env` is `{**_NPM_QUIET_ENV, **environ, PERK_RUN_ID, PERK_CLI_VERSION}`:
-injected defaults < operator env < perk-owned stamps, **no conditionals**. Slot new launch-seam
-vars into this layering, never `env.setdefault()` loops.
+`perk/run/pi_exec.py::_build_exec_env` is `{**_NPM_QUIET_ENV, **environ, PERK_RUN_ID,
+PERK_CLI_VERSION}`: injected defaults < operator env < perk-owned stamps, **no conditionals**.
+Slot new launch-seam vars into this layering, never `env.setdefault()` loops. A `run_id=None`
+call (a session reopen mints nothing) REMOVES an inherited `PERK_RUN_ID` — the extension's `keep`
+arm depends on no foreign id arriving.
 
 - **Cosmetic defaults are local-only; correctness defaults ride both spawn sites.** The advisory
-  npm quiet vars stay off `perk/run/run_worker.py::_spawn_worker` (CI keeps full npm output).
-  The one correctness default this layering carried — `FFF_MODE_ENV` (`PI_FFF_MODE=tools-and-ui`)
-  merged at BOTH sites so reviewer lanes kept host `grep`/`find` — was retired in 2026-09 once
-  pi-subagents 0.70.0 dropped the host-builtin intersection (`pi/subagents.md` § "The 0.67.x
-  host-builtin intersection (historical)"); a future behavioral default belongs at both sites the
-  same way.
+  npm quiet vars stay off `perk/run/run_worker.py::_spawn_worker` (CI keeps full npm output),
+  whereas a *behavioral* default belongs at both spawn sites (the retired `PI_FFF_MODE` injection
+  was the exemplar; its arc is `pi/subagents.md` § "History (dated)").
 - **The inherited-env trap.** A session launched by a *pre-flip* launcher carries the old
   injected value in its operator tier: judge a changed default from a relaunch or under `env -u
   <VAR>`, and when a lane fails on a host-side precondition read the launch seam's merge
-  **first** — with the FFF injection it was perk's injected tier, not the shell profile.
-- **The Linear key seed.** `_exec_pi` fills `LINEAR_API_KEY` from `load_local_linear_api_key`
+  **first** — perk's injected tier, not the shell profile.
+- **The Linear key seed.** `exec_pi` fills `LINEAR_API_KEY` from `load_local_linear_api_key`
   (the gitignored `.perk/local.toml`, read from the **main checkout before `os.chdir`**) only
-  when the environment lacks a non-blank value (`linear-backend.md`).
+  when the environment lacks a non-blank value (`linear-backend.md`). An env seed designed for a
+  perk-controlled cwd becomes CROSS-PROJECT the moment the cwd is human-chosen — re-examine every
+  seeded secret when adding such a door; the seed stays on the reopen path as a documented
+  residual with the operator opt-out (contracts §8.71(b)).
 - **Test hygiene.** Env builders take `environ` explicitly — test them with a dict; a seam
   reading `os.environ` at call time needs an autouse `monkeypatch.delenv` (`tests/conftest.py`),
   or a developer's exported value causes phantom failures.
@@ -111,12 +130,21 @@ resolution and skips on `None`; a broken main-checkout config warns and falls ba
 `default` arm. Every consumer acting on files *inside* the agent dir resolves through this
 function — grep for `launch_pi_agent_dir(` to derive them (`init-doctor.md`).
 
+**A committed redirect is honored before project trust.** On every cold-local launch
+`perk/run/pi_exec.py::resolve_launch_agent_dir`'s `config` arm turns the MAIN checkout's committed
+`[pi] agent_dir` into `PI_CODING_AGENT_DIR`, and Pi loads user/global-tier extensions before it
+resolves project trust — so a clone committing both the redirect and the directory runs
+repository-controlled code on first launch with no prompt (accepted residual, contracts
+§8.72(h)). Hardening is a cross-door decision for the shared seam, never a per-door precedence
+fork.
+
 ## `worktree: none` resolves to the main checkout
 
 `stage.worktree != "none"` is the canonical worktree-stage predicate — never enumerate stage
 ids. The resolver ignores `--worktree` on a `worktree: none` stage, and invoking a two-roots
 plan-selecting door **from** a linked worktree does not position there:
-`perk/cli/plan_selection.py::main_repo_root` anchors the session at the main checkout.
+`perk/cli/context.py::main_repo_root` (re-exported by `perk/cli/plan_selection.py`) anchors the
+session at the main checkout.
 `launch_stage` takes both roots — `repo_root` (positioning anchor) and `invocation_root` (only
 the no-argument cache fallback: *which* plan) — and never derives one from the other
 (`git-substrate.md`). So a planning session launched from a plan worktree runs in `main`, as do
@@ -160,6 +188,11 @@ not one `skills/` dir link (never a symlinked discovery *root*), not a per-launc
 real entry never clobbered. Local-only: the remote `position_worktree` runs in `repo_root` and
 syncs skills via the skills CLI (`skill-bindings.md`).
 
+**Hoisting a network read into its own no-write phase.** `_fetch_snapshot_body` runs before the
+handoff write, so EVERY offline test that stubbed the old phase must also stub the new one — the
+stubbed phase's signature change is the tell. A no-write fetch phase preserves failure residue by
+construction: a later phase raising leaves no snapshot.
+
 ## Launch banner + worktree `.pi/npm` pre-staging
 
 **The exec-wall.** pi's startup npm noise is pi's output *after* exec and cannot be filtered; the
@@ -195,12 +228,23 @@ resolve pre-chdir, exec the **absolute path** (argv[0] stays the bare name), typ
 miss, the chdir/exec race an ordinary `OSError` arm. Both probing seams — the pi launch and
 `hunk_cli_path` — share ONE probe, `perk/substrate/proc.py::which_absolute`: `shutil.which`
 pre-chdir, absolutized via `Path.absolute()` because `which` returns a **relative** candidate
-when the matching `PATH` entry is relative; `None` on a miss. `_exec_pi` resolves `pi` FIRST
+when the matching `PATH` entry is relative; `None` on a miss. `exec_pi` resolves `pi` FIRST
 (`_resolve_pi_executable`; a miss is a typed `pi_cli_missing` refusal, **no bare-name
 fallback**), then `os.execvpe(pi_path, …)` inside the `launch_failed` `OSError` arm. The miss
 aborts the **exec phase only** — earlier phases may have run; a re-run reuses the materialized
 worktree but **mints a fresh `run_id` + handoff** (handoffs are per-run artifacts, never
 resumed).
+
+**Pin announce-before-exec ordering through the FAILURE arms.** A door that announces its launch
+line must prove the announcement precedes the exec phase's refusals: stub the resolver to raise
+`pi_cli_missing` and `execvpe` to raise `OSError`, then assert `stderr.index(announce) <
+stderr.index("Error:")` (`tests/test_plain_session.py`) — a returning `execvpe` stub proves
+nothing.
+
+**Extraction discipline.** The sibling engine `perk/run/launch/session_resume.py` imports the
+facade and reads its helpers as facade attributes at call time; the facade never imports the
+engine (a source-pin test guards the direction). Byte-exact pins with zero test edits were the
+whole preservation proof of the `exec_pi` extraction.
 
 **Bounded protection (recorded residual).** This closes *name substitution* from the worktree.
 It does NOT close the shebang-interpreter lookup: pi's bin is a `#!/usr/bin/env node` script and
@@ -245,12 +289,15 @@ Byte-identity asserts split the same way: compare `result.stdout` against the ba
 assert the loud-but-non-fatal note via `result.stderr`. When refactoring launch/run behind such
 pins, **byte-exact test pins are sufficient proof of behavior preservation** — zero test edits
 is the success signal; don't add helper-level tests (`plan-factories.md` reaffirms this).
+`perk resume --dry-run` previews the checkout, the agent-dir resolution and the argv — NOT the
+launch environment.
 
 ## Cross-references
 
-- `perk/run/launch/__init__.py` (`launch_stage`, `_build_argv`, `_build_exec_env`, `_exec_pi`,
-  `run_pending_setup`), `perk/substrate/config.py` (`launch_pi_agent_dir`),
-  `perk/substrate/proc.py` (`which_absolute`)
+- `perk/run/launch/__init__.py` (`launch_stage`, `_build_argv`, the `_exec_pi` adapter,
+  `run_pending_setup`), `perk/run/pi_exec.py` (`exec_pi`, `_build_exec_env`,
+  `resolve_launch_agent_dir`), `perk/run/launch/session_resume.py`, `perk/substrate/config.py`
+  (`launch_pi_agent_dir`), `perk/substrate/proc.py` (`which_absolute`)
 - `docs/learned/workflow/plan-factories.md` — the seeded-cold-door pipeline whose tail composes
   `launch_stage` (gather policy lives there); `docs/learned/workflow/worktree-lifecycle.md` —
   the setup hook's dry-run preview asymmetry

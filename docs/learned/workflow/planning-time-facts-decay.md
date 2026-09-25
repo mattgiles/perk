@@ -30,6 +30,12 @@ the *authoring and implementing* companion to `workflow/plan-ref-lifecycle.md` (
 - **Named delegates may have been deleted.** A learning or plan that names helper modules as the
   edit site should be checked with `rg` first; the surviving *insight* often has a different home
   than the one the text names.
+- **A build script describes what a checkout WOULD publish** (#2522). Verify packaging and
+  entry-point facts against the installed artifact (`.pi/npm/node_modules/<pkg>/package.json` +
+  `ls`), never upstream build tooling — pi-subagents 0.68.0 shipped `.ts` sources where the build
+  script promised compiled JS (≥ 0.70.0 ships compiled JS).
+- **Installed dependency versions decay too** (#2475) — re-verify the load-bearing facts against the
+  installed package at implement time and cite the version actually verified in the commit.
 
 ## Numeric caps are hard acceptance constraints enforced only by the fidelity lane
 
@@ -39,7 +45,10 @@ criterion that **no tool enforces** — `perk learn docs-check` enforces its own
 neither reads the plan's caps. Only the plan-fidelity review lane will notice, after the fact.
 
 - **Count the replacement passage before committing** (`wc -l`, `wc -c`, or a Python one-liner over
-  the section), not after the review flags it.
+  the section), not after the review flags it. Count the plan's fenced literal with `wc -l` —
+  never trust the number the plan states about it (#2506).
+- **A plan-set ceiling with < 1 % slack is an expiring assertion** — it binds the fidelity lane
+  only; the next PR may exceed it, correctly (#2506).
 - **Prose-budget estimates on contract paragraphs overrun.** A "one paragraph" estimate for a
   `contracts.md` rule reliably becomes three once the precedence order, the failure arms, and the
   test pointer are written. When the honest passage exceeds the cap, surface it under the
@@ -62,6 +71,9 @@ neither reads the plan's caps. Only the plan-fidelity review lane will notice, a
   your delta.** A pin like `len(catalog.governed_tools) == 39` sits over a projection that other
   landed work also moves (`workflow/prose-review-workbench.md`'s `sync` sweep is the sharpest case);
   regenerate, then read the real number.
+- **Pre-decided lever rules over measurements must define the measured population** (#2501) —
+  wrapper frames vs distinct roots in a nested `-X importtime` tree (`startup-profiling.md` §
+  "Measurement discipline").
 
 ## Line count is a poor proxy for duplication
 

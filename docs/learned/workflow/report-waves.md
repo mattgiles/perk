@@ -620,8 +620,8 @@ Instances:
   leaves the suite green while every live lane fails. The pattern: derive the def assertions from
   `schema.required` (drift in either direction trips the same test); reject the retired
   completion form explicitly (`doesNotMatch` on the old wording) while *counting* the legitimate
-  remaining fenced-JSON uses; fold the `.pi/agents/perk/` mirror byte-identity pin into the same
-  test. Reusable example: `extension/waves/adversarialReviewWave.test.ts`.
+  remaining fenced-JSON uses; the def↔schema pins read `agents/<name>.md` only. Reusable example:
+  `extension/waves/adversarialReviewWave.test.ts`.
 - **Identity-bearing generated items need per-key assertions.** Tie every generated lane task to
   *its own* key — assert each task opens with its lane's `Angle:` prefix; exact-pinning a sample
   of two of N leaves a lane launched under a sibling's rubric green.

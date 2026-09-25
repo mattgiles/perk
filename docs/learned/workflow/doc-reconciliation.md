@@ -26,8 +26,8 @@ after all edits and stamped with the measured HEAD SHA) — is
   stamp, never a refreshed number — "De-freeze taxonomy".
 - Mirror drift is an omission: pin the fact ledger first; truthfulness beats scope — "Mirror and
   fact-drift reconciliation".
-- The keep-vs-correct unit is the sentence: instruct → correct, narrate → dated annotation —
-  "Correction shapes".
+- The keep-vs-correct unit is the sentence: instruct → correct, narrate → dated annotation;
+  History-dated docs collapse to one History bullet — "Correction shapes".
 - Keep-and-annotate serves a live audience; a changelog's archive is git history —
   "Keep-and-annotate beats delete".
 - Stale-pointer advisories may end deliberately nonzero: pin the scanner's token shapes,
@@ -61,6 +61,21 @@ Dated instances live inline as `(#NNNN)` issue anchors.
   root, doc parent and scan root (`_doc_reference_resolves`). Every other form — un-backticked,
   slashless, line-wrapped, inside a longer backtick span — is verified by `rg` or `git ls-files`
   per named path (this doc once drifted there, #2019).
+- **An existence grep passes 7 of 8 diet-found defects (#2523).** The decisive checks are
+  **role-read** — for every "X does/owns/gates Y" claim, read X's body or docstring;
+  misattributions cluster where a role was split across two symbols after the doc was written
+  (decide/drive, reader/checker, seam/guard) — and **population enumeration**: treat every
+  every/each/all/only/never as a frozen census, list the population at the checkout, and state it
+  by reference or scope the claim to the mechanism.
+- **A dream lane's "no factual defect" verdict is scoped to its `Evidence checked` list (#2514)** —
+  every claim whose anchor lies outside that list is unverified regardless of the verdict (24
+  corrections across five docs an audit passed as current); the per-fact ledger must cover the
+  unchecked anchors.
+- **Verify comment anchors against the current *call path*, not export existence (#2475)** — an
+  upstream symbol can stay exported while falling off the bind path.
+- **Absolutes and negations ("never", "only", "deleted") are the highest-yield re-verification
+  targets (#2517)** — census each by grep at plan time, rewrite them as census rules, and put a
+  verified-defect → fix table in the plan Summary.
 
 ## A retired-convention sweep needs a symbol grep, not a named-file census
 
@@ -102,6 +117,20 @@ construction (the `fail()`/`EXIT_FOR_TYPE` consolidation missed a third file's r
   first, cite the tracker, or re-verify at cascade/land time.
 - **Path-anchor inventories are a floor** — the executable repo-wide grep, not the plan's list, is
   the acceptance.
+- **A plan-carried byte-exact patch has three span kinds (#2478)** with different post-application
+  counts — replacement (Before → 0, After → 1), deletion (Before → 0), additive (After contains
+  Before verbatim: Before → exactly 1, inside the After) — write the self-check and acceptance
+  wording with all three. An exact-and-unique edit tool IS the per-span "occurs once" pre-check;
+  byte-literal plans state block-deletion blank-line rules and extend mid-line spans to whole
+  lines (verify seams with `cat -e`); a moved baseline is safe when the intervening commits are
+  path-disjoint from the target set.
+- **Dream-report line ranges are analyst-relative (#2509)** — re-derive each to a heading anchor.
+- **A docs-only diff glob-skips every `[[ci.checks]]` row (#2501)** — the green run-all proves
+  nothing about the docs. Ad-hoc citation-existence regexes need a path-token boundary and
+  fenced/illustrative-region pre-filtering (`packages/click/core.py` matched inside
+  `site-packages/…` in verbatim profiler lines). `perk learn docs-check` scans only
+  `docs/learned/**`, routed user-docs pages and `.perk/skills/*/SKILL.md` — never
+  `shared/contracts.md`, `docs/developers/` or `docs/design/`.
 
 ## De-freeze taxonomy — counts, ordinals, censuses, version stamps
 
@@ -125,6 +154,17 @@ construction (the `fail()`/`EXIT_FOR_TYPE` consolidation missed a third file's r
 - **Census method (#2165)**: call-site counts ≠ runtime registration counts; anchor on
   interfaces/methods and re-derive at execution (summary-plus-anchor is the freeze-resistant
   shape); premise confirmations record near-misses, not just pass/fail.
+- **A re-verify obligation placed only in `## Sources` does not fire (#2509)** — it is not on a
+  bump-planner's read path; what fires is a section heading the bump plan routes to by name, or a
+  code tripwire (the 0.87.0 bump re-stamped only the doc whose heading it cited). Keep the
+  provenance line to the version only; the itemized ledger lives in the bump plan/archive record.
+- **A docs-scoped de-freeze leaves sibling freezes alive ONE HOP SIDEWAYS (#2504)** — the
+  pointed-at source comments and the contracts paragraph the doc was distilled from — and the next
+  dream grades the doc against those comments. When the scope fence forbids fixing them, record
+  them as routed leads on a carrier that outlives the plan issue (a learn issue, an objective
+  node, a contracts-amendment plan) before `/submit`.
+- **Universals generalized from N observed cases go false at N+1 (#2523)** — enumerate, don't
+  hedge.
 
 ## Mirror and fact-drift reconciliation
 
@@ -188,6 +228,20 @@ past-tensing (#2007, #2008). The arms:
   the criterion still classifies everything (`docs/design/first-principles/cli-vs-pi.md`'s
   "narrow `--json` list"), an additive status note suffices.
 - **Dry-run the plan's straggler greps against its own quoted target shapes** (#2157).
+- **A doc carrying `## History (dated)` + `## Sources` collapses the triage (#2507)** — every
+  superseded/removed rule is corrected in place (or its section deleted) and becomes ONE dated
+  History bullet, never an `> **Update**` blockquote, a `(historical)` `##` section or WAS-tensed
+  primary text. A heading rename there is a lockstep set of FIVE (H2 + Distillation quote +
+  inbound cross-ref grep + frontmatter `read_when` + `perk learn docs-sync`); a `read_when` naming
+  a heading is re-read whenever that heading goes historical.
+- **Correct a queued-fix defect invariant-first (#2506)** — spine the paragraph on what the fix
+  leaves standing (tripwire test, drift hazard, "change both sides together"), confine the current
+  topology to ONE time-scoped clause the fixing PR can rewrite, phrase the Distillation bullet on
+  the invariant, and name the follow-up so the fixing PR's straggler grep retires the
+  self-expiring "open lead" clause.
+- **Byte targets and "rules-first, no history" shapes are point-in-time exit criteria with no CI
+  guard (#2511)** — a rules-first doc states its editorial convention in its intro, because the
+  next editor is a sibling PR that never read the compression plan.
 
 ## Keep-and-annotate beats delete for never-adopted forward guidance
 
@@ -265,8 +319,17 @@ instance, "ALWAYS" labels included; prose awareness does not enforce itself:
   `/submit` terminates the turn, `_compose_pr_body` (`perk/cli/commands/pr/submit_cmd.py`) is a
   fixed composition, and a todo-tracked post-submit `gh pr edit` once lost to the merge.
   Recorded evidence lands on a carrier written *before* `/submit` — the implementation commit
-  message, a plan-issue comment, or a tracked artifact the plan names — never the PR body, where
-  hand-added content does not survive a republish.
+  message (PR-scoped), a plan-issue comment, or a tracked artifact the plan names — never the PR
+  body, where hand-added content does not survive a republish.
+- **Carrier lifetimes (#2520).** perk's squash land replaces the body with `<title>\n\nCloses #N`
+  (`perk/delivery/landing.py::squash_commit_message`), so branch commit bodies are invisible to
+  `git log main`, `git log -S` and `perk-dev changelog`. PR body = until the next republish;
+  branch commit message = PR-scoped forever; plan-issue comment = durable + backend-visible;
+  tracked artifact = durable + greppable. Verify a carrier claim at BOTH ends of the delivery path
+  (`_compose_pr_body` and `squash_commit_message`); the squash-title composition is
+  `objective-store.md` § "Node↔plan unification is one `ObjectiveRef | None` capability". For a
+  docs-only node the natural evidence homes are the implementation commit message and the node's
+  reconciled description — never "the PR description" (#2504, #2506).
 
 **Forward references and stacked trains:** author only **artifact-anchored** forward references
 (an issue, a successor plan — self-resolving), never **commit-anchored** ones (a promised
@@ -330,6 +393,8 @@ FAIL verdicts, waivers, offline-proven closure) → `docs/learned/workflow/bindi
   `LANDED (PR #n)` narrative in header+roadmap-only objectives (#696/#702/#705). Resolve the real
   merge PR with `gh pr view <n> --json state,mergedAt` before citing "landed via PR #N". A node
   auto-marked `done` may carry no narrative — append it (#711).
+- **"Verify before citing" applies to the merge commit BODY, not just its SHA/state (#2520)** — an
+  `/objective-reconcile` pass minted a false "squash-landed commit message" claim.
 
 ## Cross-references
 

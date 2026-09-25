@@ -42,7 +42,7 @@ directory.
    ```
 
    The script fetches each page with `curl`, converts it with `html2markdown`, writes files that
-   preserve the scoped URL hierarchy (`/concepts/models/` → `concepts/models.md`), rewrites
+   preserve the scoped URL hierarchy (`/concepts/models/` → `<section>/<page>.md`), rewrites
    internal links to local relative `.md` links, and generates `index.md` with grouped local
    links and short per-page notes.
 

@@ -216,9 +216,10 @@ re-creates the dependency on the SSOT symbol.
 The `__version__` SSOT is enforced into the *running session* by three deliberately-chosen mechanisms
 (and one deliberately-rejected one). This builds on the install-pin policy above.
 
-- **`PERK_CLI_VERSION` — a second, *informational* launch env var (the precedent).** `launch_stage`
-  (`src/perk/run/launch/__init__.py`) injects **two** env vars into the `os.execvpe` env dict: the existing
-  run-control `PERK_RUN_ID` **and** the new `PERK_CLI_VERSION = __version__`. The distinction (documented
+- **`PERK_CLI_VERSION` — a second, *informational* launch env var (the precedent).** The one Pi exec
+  pipeline's env builder (`perk/run/pi_exec.py::_build_exec_env`) injects **two** env vars into the
+  `os.execvpe` env dict: the existing run-control `PERK_RUN_ID` **and** the new
+  `PERK_CLI_VERSION = __version__`. The distinction (documented
   in contracts §8.2/§8.6a): `PERK_RUN_ID` is run-control data the extension *acts on*; `PERK_CLI_VERSION`
   is **informational only** — read solely to *compare* versions, never to drive state. This is the
   template for any future "carry a CLI fact into the session for display/comparison" need: add it to the
@@ -356,7 +357,7 @@ Mechanical reusables that DO transfer from the git lifecycle:
   adds a runtime dep)
 - `docs/learned/pi/extension-api.md` — the `session_start` handler the version-drift signal rides;
   also the pi `git:`-package loading substrate (the internals the retired git-clone lifecycle sat on)
-- `src/perk/run/launch/__init__.py`, `extension/index.ts` — the `PERK_CLI_VERSION` inject + the
+- `perk/run/pi_exec.py::_build_exec_env`, `extension/index.ts` — the `PERK_CLI_VERSION` inject + the
   `session_start` drift comparison
 - `docs/learned/toolchain/worktree-node-modules.md` — the `package-lock.json` `pi-ai` bin-path churn
 - `docs/learned/toolchain/uv-workspace-src-layout.md` — the uv-workspace root-package `src`-layout
