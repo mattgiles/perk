@@ -27,7 +27,7 @@
 // Incidental precision, not a goal: a quote-adjacent cluster (`"-r"`, `'grep -r'`) is not a flag
 // position, so quoted flags do not match.
 
-import { splitTopLevelSegments } from "./toolGating.ts";
+import { splitTopLevelSegments } from "./commandPositions.ts";
 
 /**
  * The injected default, in seconds — the ONE source of truth for the number. The managed

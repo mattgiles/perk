@@ -14,6 +14,7 @@ import {
   plantSession,
   scaffoldRepo,
 } from "../testing/harness.ts";
+import { REFUSAL_REASONS } from "./commandPositions.ts";
 import {
   FFF_SEARCH_TOOLS,
   gatedToolsFor,
@@ -23,6 +24,7 @@ import {
   READ_ONLY_TOOLS,
   REFINEMENT_READ_ONLY_CONTEXT,
   REFINEMENT_READ_ONLY_TOOLS,
+  readOnlyBashVerdict,
   registerToolGating,
   SUBAGENT_CHILD_TOOLS,
   WEB_RESEARCH_TOOLS,
@@ -385,6 +387,48 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
     "gh search prs perk",
     "gh search code registerTool --repo x/y", // `code` as a gh-search noun is not an editor invocation
     "gh auth status",
+    // every command position is checked, so loops, assignment prefixes, substitutions, keywords,
+    // wrappers, exec forms and heredocs pass when every command word is allowlisted
+    "for f in a b c; do echo $f; done",
+    'for f in agents/*.md; do wc -l "$f"; done',
+    'EVID=$(cat x); echo "$EVID"',
+    "env | grep PERK",
+    "timeout 30 rg foo src",
+    "find . -exec grep -l foo {} \\;",
+    "find . -exec env X=1 grep -l foo {} \\;",
+    'cd "$(cat .perk/root)" && rg foo', // the structural stand-in for `cd $(git rev-parse …) && …`
+    "cd /repo\ngit ls-files docs | head -5; echo ---; sed -n '1,5p' README.md",
+    'f=$(ls dist/*.js); grep -n "x" "$f"',
+    'f="/a b/c"; sed -n \'1p\' "$f"',
+    "LC_ALL=C sort file",
+    "X=1 Y=2 grep foo f",
+    "cat <<'EOF' | wc -c\nline one\nline two\nEOF",
+    "cat <<EOF\n$(echo hi)\nEOF",
+    'echo "$(pwd)"',
+    "echo `pwd`",
+    "diff <(sort a) <(sort b)",
+    "< README.md wc -l",
+    '<<< "text" wc -c',
+    "2>/dev/null ls",
+    "echo $'a\\'b'; ls",
+    "rg foo \\\n  --glob '*.ts'",
+    "# list files\nls -la",
+    "ls # trailing comment",
+    "while grep -q x f; do cat f; done",
+    "if grep -q x f; then cat f; fi",
+    "! grep -q x f",
+    "{ cat a; cat b; }",
+    "nice -n 5 rg foo",
+    "time rg foo",
+    "nohup rg foo",
+    "command rg foo",
+    "xargs -0 -n1 grep -l foo",
+    "find . -name '*.py' | xargs -I{} wc -l {}",
+    "env -i X=1 grep foo f",
+    "timeout -k 5 30s rg foo",
+    "fd -e py -x wc -l",
+    "cat a |& grep b",
+    "echo ok & ls",
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed: ${cmd}`);
   }
@@ -507,7 +551,6 @@ test("isReadOnlyBashCommand: blocks destructive / non-allowlisted commands", () 
     "chmod +x script.sh",
     "some-unknown-binary --flag", // not in the safe table at all
     "git status && rm file", // destructive wins over a safe prefix
-    "for f in a b c; do echo $f; done", // leading `for` segment non-safe → loops stay blocked
     "git status && some-unknown-binary", // per-segment tightening: second segment non-safe
     "ls | rm -rf x", // pipe whose second segment is destructive
     "perk objective create foo", // mutating objective subcommands stay blocked
@@ -526,13 +569,136 @@ test("isReadOnlyBashCommand: blocks destructive / non-allowlisted commands", () 
     "gh issue view 12 > out.txt", // destructive-wins blocks the redirect
     "npx some-other-pkg", // npx entry is anchored to agent-browser — bare npx stays blocked
     "agent-browser screenshot > shot.png", // >-redirect destructive veto wins over the safe entry
-    "code file.ts", // the `code` editor in command position stays blocked
+    "code file.ts", // the `code` editor at a command position: refused by the allowlist alone
     "ls; code .", // …after a `;` sequencer
     "echo hi && code .", // …after `&&`
     "cat $(code y)", // …inside a command substitution
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
   }
+});
+
+test("isReadOnlyBashCommand: a non-allowlisted command at ANY command position is blocked", () => {
+  for (const cmd of [
+    // positions the leading-word check never saw
+    "echo hi\nnode -e \"require('fs').writeFileSync('x','y')\"",
+    "echo $(python -c \"open('x','w').write('y')\")",
+    "echo ok & python -c \"open('x','w')\"",
+    'echo "a\\"" ; python -c "open(\'x\',\'w\')"',
+    "env X=1 node -e \"require('fs').writeFileSync('x','y')\"",
+    "echo `python -c x`",
+    'echo "$(python -c x)"',
+    "X=$(python -c x)",
+    "diff <(python -c x) f",
+    "<echo python -c pass", // a leading redirection's operand is never the command
+    "<<< echo python -c pass",
+    "< $(python -c x) cat",
+    "echo $'a\\'b'; python -c \"print(42)\" # '", // ANSI-C `\'` does not close the quote
+    "echo $'\\''; python -c pass # '",
+    // exec forms, incl. a wrapper at the exec position
+    "find . -exec rm {} \\;",
+    "find . -exec python -c x {} \\;",
+    "find . -execdir python {} \\;",
+    "find . -ok python {} \\;",
+    "find . -okdir python {} \\;",
+    "find . -exec env python -c pass {} \\;",
+    "find . -maxdepth 0 -exec env python -c pass \\;",
+    "find . -exec timeout 5 python {} \\;",
+    "find . -exec env {} \\;", // `{}` is the command word after `env`: running the found file
+    "fd -x python",
+    "fd --exec python",
+    "fd -X python",
+    "fd --exec-batch python",
+    "fd -x env python",
+    // wrappers reach the wrapped command; a bare non-allowlisted wrapper is its own command
+    "timeout 5 python -c x",
+    "timeout 30",
+    "xargs python -c x",
+    "find . | xargs",
+    "nice python",
+    "time python",
+    "nohup python",
+    "command python",
+    "env -i python",
+    // keywords
+    "if python; then ls; fi",
+    "while python; do ls; done",
+    'for f in x; do python "$f"; done',
+    "for f in $(python -c x); do ls; done",
+    "{ python; }",
+    "! python",
+    // an expanding heredoc body is scanned; lines after the terminator are commands
+    "cat <<EOF\n$(python -c x)\nEOF",
+    "cat <<EOF\nbody\nEOF\npython -c x",
+    "cat <<EOF\nEO\\\nF\npython -c pass\nEOF", // bash joins `EO\⏎F` into the terminator
+    "echo `echo \\`python -c pass\\``", // nested backquote escape: refused
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
+  }
+});
+
+test("isReadOnlyBashCommand: what the walker does not model is refused", () => {
+  for (const cmd of [
+    "$CMD",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
+    "${CMD} x",
+    '"$CMD" x',
+    "ls; $EDITOR x",
+    "$(cat cmd)",
+    "echo 'a",
+    'echo "a',
+    "echo $(ls",
+    "ls )",
+    "cat <",
+    "cat <<EOF\nbody",
+    "env -S 'python -c x' echo",
+    "time -o out rg foo",
+    "timeout rg foo",
+    "xargs -a list grep foo",
+    "(cd x && ls)",
+    "foo() { ls; }; foo",
+    "A=(1 2); ls",
+    "echo $((1+1))",
+    "case x in a) ls;; esac",
+    "[[ -f x ]] && cat x",
+    "ls \\",
+    "A=1", // nothing to run
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
+  }
+});
+
+test("readOnlyBashVerdict: a refusal names its reason", () => {
+  const reason = (cmd: string) => {
+    const verdict = readOnlyBashVerdict(cmd);
+    return verdict.allowed ? "allowed" : verdict.reason;
+  };
+  assert.ok(reason("git status && rm f").startsWith("matches the destructive veto /\\brm\\b/i"));
+  assert.equal(reason("echo 'a"), "unterminated quote");
+  assert.equal(reason("cd x && python -c 1"), "not allowlisted: python -c 1");
+  assert.equal(reason("A=1"), "no command to run (only assignments, comments or whitespace)");
+  assert.equal(reason("$CMD"), REFUSAL_REASONS["dynamic-command-word"]);
+  assert.equal(reason("env -Q ls"), REFUSAL_REASONS["wrapper-usage"]);
+  assert.equal(reason("(ls)"), REFUSAL_REASONS["unmodeled-syntax"]);
+  // only the first line of the offending command, cut to 100 characters
+  assert.equal(
+    reason(`ls; python -c '${"x".repeat(200)}'\nmore`),
+    `not allowlisted: python -c '${"x".repeat(89)}…`,
+  );
+  assert.deepEqual(readOnlyBashVerdict("git status"), { allowed: true });
+});
+
+test("the bash block message keeps its two-line head and appends the reason", async () => {
+  const h = gateFixture(() => true);
+  const result = (await h.call("tool_call", {
+    toolName: "bash",
+    input: { command: "cd x && python -c 1" },
+  })) as { block?: boolean; reason?: string } | undefined;
+  assert.equal(result?.block, true);
+  assert.equal(
+    result?.reason,
+    "perk read-only mode: command blocked (not allowlisted).\nCommand: cd x && python -c 1\nReason: not allowlisted: python -c 1",
+  );
 });
 
 test("live round-trip: gate enforces read-only, then releases on mode=read-write", async () => {
