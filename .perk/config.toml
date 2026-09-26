@@ -8,14 +8,79 @@
 [pi]
 agent_dir = ".pi/agent"
 
+[models.stages.gist-author]
+model = "anthropic/claude-opus-5-5"
+thinking = "medium"
+
+[models.stages.gist-save]
+model = "anthropic/claude-opus-5-5"
+thinking = "medium"
+
+[models.stages.objective-author]
+model = "anthropic/claude-fable-5-1"
+thinking = "xhigh"
+
+[models.stages.objective-save]
+model = "anthropic/claude-opus-5-5"
+thinking = "xhigh"
+
+[models.stages.objective-plan]
+model = "anthropic/claude-fable-5-1"
+thinking = "xhigh"
+
+[models.stages.plan]
+model = "anthropic/claude-fable-5-1"
+thinking = "xhigh"
+
+[models.stages.save]
+model = "anthropic/claude-opus-5-5"
+thinking = "xhigh"
+
+[models.stages.implement]
+model = "anthropic/claude-opus-5-5"
+thinking = "xhigh"
+
+[models.stages.submit]
+model = "anthropic/claude-opus-5-5"
+thinking = "xhigh"
+
+[models.stages.address]
+model = "anthropic/claude-opus-5-5"
+thinking = "xhigh"
+
+[models.stages.land]
+model = "anthropic/claude-opus-5-5"
+thinking = "xhigh"
+
+[models.stages.learn]
+model = "anthropic/claude-opus-5-5"
+thinking = "xhigh"
+
+[models.stages.audit]
+model = "anthropic/claude-opus-5-5"
+thinking = "xhigh"
+
+[models.stages.objective-refine]
+model = "anthropic/claude-opus-5-5"
+thinking = "xhigh"
+
+[models.stages.stack-review]
+model = "anthropic/claude-opus-5-5"
+thinking = "xhigh"
+
 [models.subagents]
-pr-reviewer = "openai/gpt-6-sol"
-review-classifier = "openai/gpt-6-sol"
-objective-explorer = "openai/gpt-6-sol"
-conflict-resolver = "openai/gpt-6-luna"
-learn-analyst = "openai/gpt-6-luna"
 adversarial-reviewer = "openai/gpt-6-sol"
+conflict-resolver = "openai/gpt-6-luna"
+draft-reviewer = "openai/gpt-6-astra"
+dream-analyst = "openai/gpt-6-sol"
+dream-reducer = "openai/gpt-6-sol"
+harvest-analyst = "openai/gpt-6-sol"
+learn-analyst = "openai/gpt-6-luna"
+objective-explorer = "openai/gpt-6-sol"
+pr-reviewer = "openai/gpt-6-astra"
+review-classifier = "openai/gpt-6-sol"
 scout = "openai/gpt-6-sol"
+session-auditor = "openai/gpt-6-sol"
 
 # ═══ How work is verified — and whether it's trusted ═══
 
