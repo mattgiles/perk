@@ -35,9 +35,10 @@ never an `> **Update**` blockquote, a `(historical)` `##` section, or WAS-tensed
 - Children are read-only reporters and the PARENT mutates once after reconciling; a report lane
   completes on its validated report (0.70.1 removed `completionGuard`), `context: "fresh"` per
   spawn is the only isolation guarantee — "Read-only children, parent mutates".
-- `outputSchema` injects the engine-required `structured_output` call (covered lane ⟺ schema-valid
-  report); every wave spawn disables acceptance auto-inference explicitly; `runs.all` is all-settled
-  for config-object items only — "Execution surfaces and structured output".
+- `outputSchema` injects the engine-required `structured_output` call; covered lane ⟺ `ok: true`
+  AND a schema-valid report (a valid report alone is evidence — since 0.71.0 it survives a later
+  provider error/abort); every wave spawn disables acceptance auto-inference explicitly; `runs.all`
+  is all-settled for config-object items only — "Execution surfaces and structured output".
 - Waves are completion-only: every spawn carries `intercomBridge: {mode: "off"}` (0.68.0 discards
   parent-side `progress_update`); a successful child completion no longer wakes the parent; the
   completion notice is a preview — collect via the typed wave tools; engine deadline + 60 s
@@ -252,7 +253,10 @@ mode (`normalizePublicSubagentExecution`; `output: true` by default; synchronous
 fan-out is ONE async workflow: `runs.all` over **config-object** items is all-settled — a failed lane
 resolves `{key, ok: false, output, error}`, siblings never sink; `runs.run(…)` thenables instead run
 permissive, where a failed child THROWS at the boundary (`RUNS_ALL_PERMISSIVE_WARNING`) — perk's
-renderer passes config objects. Duplicate keys throw; run keys match
+renderer passes config objects. A key reused with different launch params throws
+(`Duplicate workflow key '<key>' used with incompatible launch params`); an identical reuse
+returns the first launch's result. perk's `extension/waves/reportWave.ts::validateAssignments`
+rejects a duplicate lane key itself. Run keys match
 `/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/`; top-level `context`/`model`/`outputSchema` default onto every
 child (`prepareWorkflowLaunchParams`, explicit child fields win); a child's `output` is its full
 final message; the script's return persists as `workflow.value` in `<asyncDir>/status.json`. Async
@@ -261,7 +265,7 @@ only single/chain runs get the detached runner) ⇒ a wave dies with the parent.
 = background under `workflowAwaitAsync: true`; explicit `async: true` = detached. A foreground
 workflow returns the unsliced aggregate inline (30-minute default timeout).
 
-**The workflow deadline and partial settlement** (verified at 0.70.1). The workflow timer arms
+**The workflow deadline and partial settlement.** The workflow timer arms
 when the script STARTS — a few ms after the spawn reply, which is why a perk timer armed for the
 same duration always won the race. `workflowFailureTerminalOutcome` maps the timeout to
 `{state: "partial", reason: "timeout"}`; `workflowResultChildren` projects an unfinished child as
@@ -275,23 +279,36 @@ partials) is `workflow/report-waves.md` § "Native partial settlement".
 (`src/runs/shared/structured-output.ts`, `INTERNAL_TOOLS` in `permissions.ts`) regardless of the
 def's `tools:`, plus prompt-runtime instructions making that call the final action ("Do not rely on
 prose-only completion; if you do not call `structured_output`, the parent will fail this step." —
-`subagent-prompt-runtime.ts`). The run fails `structuredOutputFailed` when the tool is never called
-or the payload is schema-invalid; `structuredOutput` is populated ONLY on a schema-valid run, so
-covered lane ⟺ `ok: true` ⟺ a valid report. Spawn-time `output` is the persistence mechanism —
+`subagent-prompt-runtime.ts`). The tool validates each call: a rejected call returns the error to
+the child (which may retry), a valid one is captured and ends the step. An otherwise-successful
+run fails `structuredOutputFailed` when no call validated — `Missing structured_output call; …`
+only if the child never called the tool, else (since 0.71.0) a bounded rejection summary.
+`structuredOutput` is populated only from a validated call, but since 0.71.0 it is **retained**
+when a later provider error or abort fails the run. So engine status (`ok` / `success`), schema
+evidence (`structuredOutput`) and perk coverage are three separate facts: on an `outputSchema` run
+`ok: true` implies a valid report, never the reverse — a valid report is evidence, never proof of
+an OK or covered lane. A covered lane is `ok: true` AND a schema-valid report: perk reads `ok`
+first (`extension/waves/reportWave.ts::normalizeAssignments`; the partial-settlement projection
+`extension/waves/rpcAdapter.ts::narrowRetainedEntries` maps `success` → `ok`), and
+`extension/waves/reportWave.test.ts` pins an `ok: false` lane carrying a valid report as
+`lane-failed` (`workflow/report-waves.md` § "Lane semantics — status ≠ validity ≠ coverage").
+Spawn-time `output` is the persistence mechanism —
 defs never restate it. Schema SSOTs are module constants (`PR_REVIEW_REPORT_SCHEMA`,
 `extension/waves/prReviewWave.ts`; `REVIEW_CLASSIFIER_REPORT_SCHEMA`,
 `extension/waves/reviewClassifierWave.ts`; `OBJECTIVE_EXPLORER_REPORT_SCHEMA`,
 `extension/waves/objectiveExplorerWave.ts`), never prompt-transcribed.
 
-**Acceptance hazard.** With `acceptance` omitted the engine auto-infers a contract: an agent name
-matching `/\b(?:reviewer|oracle|scout|researcher|analyst)\b/` (unless the def declares
-`acceptanceRole`) reads as read-only, `/\bworker\b/` as a writer — and injects a fenced
-`acceptance-report` completion instruction, a COMPETING contract observed steering a child into
+**Acceptance hazard.** With `acceptance` omitted the engine infers a contract from the def's
+declared `acceptanceRole` alone (`inferLevel`, `src/runs/shared/acceptance.ts`): `writer` ⇒
+`checked`, `read-only` ⇒ `none`, anything else ⇒ `attested` — and perk's defs declare no role.
+Any level but `none` injects an `## Acceptance Contract` completion instruction
+(`formatAcceptancePrompt`) demanding an acceptance report — under an `outputSchema`, an
+`acceptanceReport` object inside the final `structured_output` call; otherwise a fenced
+`acceptance-report` block — a COMPETING contract once observed steering a child into
 acceptance-shaped `structured_output` attempts (schema-rejected, run failed). perk's report-wave
 module therefore passes `acceptance: {level: "none", reason}` on EVERY wave spawn
 (`extension/waves/transport.ts::WAVE_ACCEPTANCE`; `explicitAcceptanceCanDisable`) —
-`report-waves.md` § "The fixed spawn contract carries an explicit acceptance disable". An
-`acceptance: auto` "no edits made" wobble never flips a schema-valid lane.
+`report-waves.md` § "The fixed spawn contract carries an explicit acceptance disable".
 
 ## Supervisor channel
 
@@ -332,9 +349,11 @@ dependency source and pre-digests it into the plan.
 
 - **Envelope**: requests on `subagents:rpc:v1:request` as `{version: 1, requestId, method, params?,
   source?}`; one reply on `subagents:rpc:v1:reply:<requestId>` as `{…, success: true, data}` or
-  `{…, success: false, error: {code, message}}`. Methods: `ping`, `status`, `manage`, `spawn`,
-  `steer`, `interrupt`, `stop`, `resume`; a `subagents:rpc:v1:ready` event carries the ping data
-  (`events.ready`). perk's adapter uses `ping` and `spawn` only.
+  `{…, success: false, error: {code, message}}`. Methods: the `SUBAGENT_RPC_METHODS` roster (at the
+  last re-read `ping`, `status`, `manage`, `spawn`, `steer`, `interrupt`, `stop`, `resume`, and
+  since 0.71.0 `cost` — versioned parent-plus-child spend); a `subagents:rpc:v1:ready` event
+  carries the ping data (`events.ready`). perk's adapter uses `ping`, `spawn` and a best-effort
+  `stop` (errors swallowed — the run may already be terminal).
 - **`ping` is the capability check** — works with no session context, returns `{methods[],
   capabilities: {asyncSpawn, …}, events: {…}}`. `events.asyncComplete`
   (`SUBAGENT_ASYNC_COMPLETE_EVENT`, `"subagent:async-complete"`) is taken from ping, never pinned.
@@ -383,8 +402,8 @@ consumer roots by manifest identity and reads only their `package.json`), each m
 carries that control).
 
 **The accepted coverage reduction, stated plainly:** no automated engine-level proof exists that
-a guard-less report-only lane completes on its validated `structured_output` report (the 0.70.1
-engine has no completion guard to disable), that the runner stamps
+a guard-less report-only lane completes on its validated `structured_output` report (the engine
+has had no completion guard to disable since 0.70.1), that the runner stamps
 `PI_SUBAGENT_CHILD=1`, or that `extensionBindings` reaches the child env — `run_ci` cannot catch an
 upstream change there. Mitigations: the `subagent-compat` `warn`, the fake-RPC composition
 proofs (`report-waves.md` § "Test machinery"), and the live report wave in the re-verify how-to.
@@ -472,9 +491,20 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
   § "Report-only checks gated on an installed package's version range"). 0.70.1 removed the
   completion mutation guard (`completionGuard` ignored; dropped from every perk report def — a
   0.68–0.70.0 engine may still fail a guard-less report lane whose task reads as implementation)
-  and tightened acceptance inference; the Pi 0.87 fork-context repair is NOT in the 0.70.1
-  artifact (perk children stay on `context: "fresh"`). Record:
+  and tightened acceptance inference to a declared `acceptanceRole` alone (the agent-name
+  inference — `/\b(?:reviewer|oracle|scout|researcher|analyst)\b/` read-only, `/\bworker\b/`
+  writer — retired); the Pi 0.87 fork-context repair is NOT in the 0.70.1 artifact (perk children
+  stay on `context: "fresh"`). Record:
   `docs/design/archive/pi-subagents-0.70.1-reverify.md`.
+- **0.71.0 (2026-09) — source re-read, baseline stamp unmoved** — a validated `structured_output`
+  now survives a later provider error or abort (upstream #2411), retiring the valid-report ⟺
+  OK-lane biconditional for status ≠ schema evidence ≠ coverage (perk's normalizer already keyed
+  coverage on `ok`); a rejected call reports a validation summary, the missing-call error only
+  when the tool was never called; the RPC gained `cost`; the Pi 0.87 fork-context repair ships
+  (`context_edit` handling in `src/shared/fork-context.ts` / `pruned-fork.ts`) — perk children
+  still spawn `context: "fresh"` for isolation. By owner decision the guidance baseline stays
+  0.70.1, so `subagent-compat` warns by design; the full re-verify, browser-door live leg
+  included, is owed.
 - **Agent-def delivery (#2455)** — agent defs moved from the wheel + `perk init` `.pi/agents/perk/`
   delivery to pi-subagents package discovery; the legacy dir is a doctor migration.
 - **Two-boolean landing** — deleted: the `<active_agent>` prefix parser + `childIdentity.ts`,
@@ -493,13 +523,15 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
   `pr_diff.diff` into the worktree CWD, where `git add -A` swept them into commits; it now writes
   under the run scratch dir (`src/perk/cli/commands/pr/review_context_cmd.py`).
 - **Superseded notes** — `results[].agent` as assignment identity (now `childId`); "`.pi/subagents/`
-  not ignore-covered"; "three Python-parsed keys unused".
+  not ignore-covered"; "three Python-parsed keys unused"; "duplicate workflow keys throw" (only an
+  incompatible reuse does — corrected at the 0.71.0 re-read).
 
 ## Sources
 
 - The borrowed `pi-subagents` engine at `.pi/npm/node_modules/pi-subagents/` — `src/agents/`,
   `src/runs/{foreground,background,shared}/`, `src/intercom/`, `src/extension/rpc.ts`,
-  `src/workflows/scripted-workflow.ts`, `src/shared/{artifacts,types}.ts`. The package is
+  `src/workflows/{scripted-workflow,workflow-child-summary}.ts`,
+  `src/shared/{artifacts,types,fork-context,pruned-fork}.ts`, `CHANGELOG.md`. The package is
   deliberately **unpinned** — and an unpinned `npm:` source does NOT refresh at launch: pi's
   `installedNpmMatchesConfiguredVersion` accepts any installed version for an unranged source
   (installs a missing package, never refreshes an installed one); the guidance baseline is the
@@ -513,10 +545,12 @@ glob-delete. A temp-def wave must delete the def AND check `git status` (`.pi/su
   numbers are event stamps, never currency claims. Guidance baseline (doctor constant): 0.70.1
   (`docs/design/archive/pi-subagents-0.70.1-reverify.md` — stamped on the source re-read + the
   doctor, scout-lane and offline conflict-engine halves of the leg; the browser-door half is owed
-  from the owner's post-submit `/pr-review-browser` run, as it was for 0.68.0). Last source
-  re-read of the mechanics in this doc: the installed 0.70.1 (compiled `src/**/*.js` — the
-  package stopped shipping `.ts` sources at 0.70.0; the anchors survive compilation) —
-  provenance, not a currency promise.
+  from the owner's post-submit `/pr-review-browser` run, as it was for 0.68.0). The baseline was
+  deliberately NOT moved at the 0.71.0 source re-read (owner decision): `perk doctor`'s
+  `subagent-compat` warns by design until the full re-verify runs for 0.71.0, whose browser-door
+  live leg is owed. Last source re-read of the mechanics in this doc: the installed 0.71.0
+  (compiled `src/**/*.js`; body paths name the upstream `.ts` modules, whose anchors survive
+  compilation) — provenance, not a currency promise.
 
 ## Cross-references
 
