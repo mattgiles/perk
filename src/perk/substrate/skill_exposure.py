@@ -298,7 +298,7 @@ def _enumerate_package_skills(repo_root: Path, warnings: list[str]) -> list[_Enu
     ``--skill`` root strings (a root with no one-level ``SKILL.md`` children, or a pattern
     ``pi.skills`` entry → the package dir). Raises :class:`_PackageTierUnavailable` when a listed
     package's install dir is absent (cold ``.pi/npm``) — the honest whole-composition degrade
-    (per-package skips would silently drop pi-subagents/librarian).
+    (per-package skips would silently drop pi-subagents).
     """
     items: list[_EnumeratedSkill | str] = []
     for descriptor in _settings_npm_packages(repo_root):

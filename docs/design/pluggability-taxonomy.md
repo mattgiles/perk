@@ -131,9 +131,8 @@ normalize names** — it allowlists the **union** of all known web tool names in
 the behavior-preserving default (`pi-web-access`, C3) is itself a **foreign package** — the first
 seam where the default carries a non-null `package`. The adapter is **vacate-only with nothing to
 vacate**: perk registers no web tools, so selection simply swaps the installed package (`adapter:
-null`, no shim). C4 holds — the only coupling is the read-only allowlist. The pi-web-access-specific
-`librarian` skill is accepted as lost under a foreign selection. This **extends** the scope fence
-below alongside askuser/footer.
+null`, no shim). C4 holds — the only coupling is the read-only allowlist. This **extends** the
+scope fence below alongside askuser/footer.
 
 **objectives — Not (core, not seam).** A coherent surface (the goal-as-plan-factory:
 `extension/objective.ts`, `objectivePlan.ts`, `objectiveAuthor.ts`, `objectiveSave.ts` over the

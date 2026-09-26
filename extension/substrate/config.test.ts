@@ -563,7 +563,7 @@ test("loadPerkConfig: [skills] + [skills.stages] content is inert (non-interfere
     "[skills.stages]\n" +
     'ast-grep = ["implement", "address"]\n' +
     'dignified-python = "all"\n' +
-    "librarian = []\n";
+    "agent-browser = []\n";
   const baseline = loadPerkConfig(repoWith({ "perk.toml": shared }));
   const withSkills = loadPerkConfig(repoWith({ "perk.toml": shared + skills }));
   assert.deepEqual(withSkills, baseline);

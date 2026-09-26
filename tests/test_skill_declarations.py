@@ -32,9 +32,8 @@ CONFIG_DECLARED_SHIPPED_SKILLS = frozenset({"ast-grep", "dignified-python"})
 
 # Package-bundled skills sanctioned for `[skills.stages]` rows. The known-name universe must be
 # static — CI cannot enumerate the gitignored `.pi/npm` tier — so package-skill rows are
-# sanctioned by this explicit literal (pi-subagents ships `pi-subagents`; pi-web-access ships
-# `librarian`).
-PACKAGE_SKILLS = frozenset({"librarian", "pi-subagents"})
+# sanctioned by this explicit literal (pi-subagents ships `pi-subagents`).
+PACKAGE_SKILLS = frozenset({"pi-subagents"})
 
 
 def _frontmatters(root: Path) -> dict[str, dict]:
