@@ -735,7 +735,11 @@ and unknown/late foreign mutators, even when toolset narrowing failed. This back
 effective read-only sessions, parents too. `edit`/`write` keep their file-modification denial wording;
 other excluded tools receive a read-only not-allowlisted denial. Listed non-bash tools pass this gate
 but retain downstream authority checks. Listed `bash` additionally requires its argument
-check: the whole-string destructive veto (unchanged), then the bash sub-allowlist applied at
+check: the whole-string destructive veto over the walker's **veto view** (`commandPositions.ts`'s
+`vetoText`: every substitution, `${…}` and heredoc body collapsed out of the text that holds it,
+each substitution's own text appended on a line of its own — an argument walk crosses a nested
+operator, a heredoc body is data to the command that reads it, and what bash executes inside a
+substitution is judged exactly like top-level text), then the bash sub-allowlist applied at
 **every command position** (`extension/substrate/commandPositions.ts`) — the start of input and
 the word after an unquoted `;` `|` `|&` `&&` `||`, a lone `&` or an unquoted newline; after
 `$(`/backtick (also inside double quotes) and `<(`/`>(`; after any `NAME=value` prefix and any
@@ -751,15 +755,30 @@ arguments, `env` assignments) must be static. A dynamic command word (`$VAR`, qu
 substituted), an unterminated quote/substitution/heredoc, an unmodeled or non-static wrapper word,
 or unmodeled syntax (bare `(…)`, `$((…))`, arrays, function definitions, `case`/`select`/`[[`,
 nested-backtick escapes, a heredoc delimiter whose quote-removed value is not static) is refused,
-as is a command with nothing to run. Accepted limits (recorded in `commandPositions.ts`, not
-enforced): in-program writers inside allowlisted commands' program text (`awk`/`sed`), a command
-fd supplies at run time (`fd -x env`), exec flags other than the exact pre-expansion words of the
-simple command's own `find`/`fd` (`fd -Hx`, `find . $'-exec' …`), a glob or brace expansion read
-as one word, and `\\` inside backticks. The block message keeps its two-line head (`perk read-only mode: command blocked
+as is a command with nothing to run. Accepted limits (recorded in `commandPositions.ts` and
+`toolGating.ts`, not enforced): in-program writers inside allowlisted commands' program text
+(`awk`/`sed`), a command fd supplies at run time (`fd -x env`), run-time supplied arguments
+(`xargs`, `find -exec`, `fd -x`, and words an expansion supplies), a quote or escape inside a flag
+word and abbreviated long options in the veto rows, exec flags other than the exact pre-expansion
+words of the simple command's own `find`/`fd` (`fd -Hx`, `find . $'-exec' …`), a glob or brace
+expansion read as one word, and `\\` inside backticks. The block message keeps its two-line head (`perk read-only mode: command blocked
 (not allowlisted).` / `Command: <command>`) and appends `Reason: <veto row | walker refusal |
 first non-allowlisted command | no command>`. Tool inventories are unchanged; there is no OS-sandbox claim for allowlisted delegation,
-web/browser or artifact carve-outs. The bash sub-allowlist covers read-only
-inspection commands (read-only `git` queries, `jq`, `curl`, …), read-only `gh` **query**
+web/browser or artifact carve-outs. The bash sub-allowlist (`SAFE_PATTERNS` is the inventory)
+covers read-only inspection commands (`jq`, `curl`, …): the read-only `git` plumbing (`rev-parse`,
+`blame`, `worktree list`, …) including the **list forms** of argument-sensitive subcommands
+(`branch`/`tag`/`config` with only enumerated options plus positionals and a list-implying option
+or getter among them — a negation such as `--no-list`, or a list flag consumed as another option's
+value, never reads as list mode — or `branch`/`tag` bare with display modifiers and no positional;
+`stash list|show`; `remote [-v]|show|get-url`; `config` subcommand getters/a single dotted key;
+`reflog` show forms; `symbolic-ref <ref>`) behind an admitted `-C <dir>`/`--no-pager` prefix
+(never `-c`), everyday text utilities (`nl`, `cut`, `tr`, `shasum`, …), `sed` in every form but
+`-i`, `command -v`, and `perk --version`/`--help`/`learn docs-check`. **Argument-level writers**
+are vetoed — `find -delete`, `sed -i`, the `git` writer forms (`branch -D`, `remote add`,
+`worktree add`, `tag -a`, `stash push`, `config --add`, `hash-object -w`, `--output`, `notes`,
+`update-ref`, `reflog expire|delete|drop`) and exec flags (`grep -O`, `ls-remote
+--upload-pack`), `sort -o`, `tree -o`, `npm audit fix` — reading through a leading quote or
+escape on the flag word; the sub-allowlist further covers read-only `gh` **query**
 subcommands (view/list/diff/status/checks/search + `gh auth status`; `gh api` and every mutating
 subcommand stay blocked), the read-only `perk objective` queries (`show`/`next` + aliases and
 `node-engagement`; the mutating subcommands stay blocked), and exactly the whitespace-separated

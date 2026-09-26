@@ -199,9 +199,19 @@ substitutions, after assignment prefixes and leading redirections, after shell k
 wrappers `env`/`timeout`/`xargs`/`nice`/`time`/`command`/`nohup`, and at `find -exec`/`fd -x`.
 `$VAR` as a command, unterminated quotes and unmodeled shell syntax are refused; `for` loops,
 `VAR=$(…)` assignments and heredocs pass when every command word does, and a refusal names its
-reason beneath the echoed command. It is a structural check with recorded limits, not a sandbox:
-program text inside allowlisted commands (`awk`/`sed`), a command `fd -x` supplies at run time,
-and exec flags in unusual spellings (`fd -Hx`, `find . $'-exec' …`) are accepted leniencies.
+reason beneath the echoed command. The allowlist admits the read-only `git` plumbing (`rev-parse`,
+`blame`, `grep`, `worktree list`, list-form `branch`/`tag`, `stash list|show`,
+`remote -v|show|get-url`, `config --get|--list`, …) and everyday text utilities (`nl`, `cut`, `tr`,
+`shasum`, `sed` without `-i`, …) — `SAFE_PATTERNS` in `extension/substrate/toolGating.ts` is the
+inventory. Argument-level writers are vetoed (`find -delete`, `sed -i`, `git branch -D`/`-m`/`<name>`,
+`git remote add`, `git worktree add`, `git tag -a`/`-d`/`<name>`, `git stash push|pop|…`,
+`git … --output`, `sort -o`, `tree -o`, `npm audit fix`), as are the exec flags `git grep -O` and
+`git ls-remote --upload-pack`; interpreters (`python`, `node`, `uv run`, `sh -c`) stay blocked; and
+heredoc data is data (a `>` or `git add` inside `<<'EOF' … EOF` is not a write) while a `$(…)`
+inside an unquoted heredoc is judged like any other command. It is a structural check with
+recorded limits, not a sandbox: program text inside allowlisted commands (`awk`/`sed`), trailing
+arguments `xargs`/`find -exec`/`fd -x` supply at run time, and exec flags in unusual spellings
+(`fd -Hx`, `find . $'-exec' …`) are accepted leniencies.
 Other listed tools pass this gate
 but still undergo their ordinary authority checks. The sanctioned artifact writers and
 review/exploration companions, research and delegation retain their existing carve-outs; this is
