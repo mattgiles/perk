@@ -15,6 +15,7 @@
 // `session_start`/`session_tree` rebuild points plus one `resources_discover` re-apply.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { commandPositions, REFUSAL_REASONS } from "./commandPositions.ts";
 import { render } from "./prompts.ts";
 import { branchCarries, branchOf, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
@@ -671,16 +672,12 @@ const DESTRUCTIVE_PATTERNS = [
   /\bsystemctl\s+(start|stop|restart|enable|disable)/i,
   /\bservice\s+\S+\s+(start|stop|restart)/i,
   /\b(vim?|nano|emacs|subl)\b/i,
-  // `code` (the editor) is vetoed in command position only — the old bare \bcode\b veto blocked
-  // every command CONTAINING the word (destructive-wins), so the allowlisted `gh search code`
-  // could never run. `code f.ts`, `ls; code .`, `x && code .`, `$(code y)` stay blocked.
-  /(^|[;&|(]|\$\()\s*code\b/i,
 ];
 
 const SAFE_PATTERNS = [
   // `cd` mutates nothing — it is the common prefix for scoping a read-only query
-  // (`cd repo && perk objective show …`). Safe under the per-segment model: every other
-  // segment is still independently validated and the whole-string destructive veto is unchanged.
+  // (`cd repo && perk objective show …`). Safe because every other command position is
+  // independently validated and the whole-string destructive veto is unchanged.
   /^\s*cd\b/,
   /^\s*cat\b/,
   /^\s*head\b/,
@@ -734,11 +731,12 @@ const SAFE_PATTERNS = [
   // Browser-automation skill (.agents/skills/agent-browser): a command-keyed entry mirroring
   // `ast-grep` — it gates the command, not its args. Two invocation forms: the bare global
   // install on PATH, and the `npx` fallback anchored to `agent-browser` so bare `npx <anything>`
-  // stays blocked. Accepted known leniency: the leading-command model cannot inspect args, so
-  // agent-browser's own output flags (screenshot/video `--output`) can write files and its actions
-  // can mutate external sites — outside the gate's granularity. This is accepted and documented,
-  // consistent with the allowlisted `curl` / `fetch_content` GitHub-clone cache-write precedent
-  // (both write outside the gate). The whole-string `>`-redirect destructive veto still applies.
+  // stays blocked. Accepted known leniency: the command-position model checks command words, not
+  // their arguments, so agent-browser's own output flags (screenshot/video `--output`) can write
+  // files and its actions can mutate external sites — outside the gate's granularity. This is
+  // accepted and documented, consistent with the allowlisted `curl` / `fetch_content`
+  // GitHub-clone cache-write precedent (both write outside the gate). The whole-string
+  // `>`-redirect destructive veto still applies.
   /^\s*agent-browser\b/,
   /^\s*npx\s+agent-browser\b/,
   /^\s*bat\b/,
@@ -771,81 +769,54 @@ const SAFE_PATTERNS = [
   /^\s*gh\s+auth\s+status\b/i,
 ];
 
-/**
- * Split a command into top-level shell segments for the per-segment safe check. Walks the string
- * character by character tracking single- and double-quote state, splitting only on UNQUOTED
- * sequencing operators `;`, `&&`, `||`, and `|` (`&&`/`||` are two-char operators; a lone `|` is
- * the pipe). Quoted operators must not split — load-bearing: a `|` inside `grep -iE 'a|b'` stays
- * in one segment. Segments are trimmed and empties dropped.
- *
- * Known limitation: backslash-escaped quote characters are not handled. This is acceptable — the
- * whole-string destructive veto in isReadOnlyBashCommand remains the backstop.
- */
-export function splitTopLevelSegments(command: string): string[] {
-  const segments: string[] = [];
-  let current = "";
-  let quote: '"' | "'" | null = null;
-  for (let i = 0; i < command.length; i++) {
-    const ch = command[i];
-    if (quote) {
-      current += ch;
-      if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      current += ch;
-      continue;
-    }
-    if (ch === ";" || ch === "|" || ch === "&") {
-      const next = command[i + 1];
-      if ((ch === "|" && next === "|") || (ch === "&" && next === "&")) {
-        // two-char operator (`||` / `&&`)
-        segments.push(current);
-        current = "";
-        i++;
-        continue;
-      }
-      if (ch === ";" || ch === "|") {
-        // single-char sequencing operator (`;` / `|`)
-        segments.push(current);
-        current = "";
-        continue;
-      }
-      // a lone `&` (background / part of `&>`): keep it in the segment so `&>` redirect detection
-      // and the destructive veto see it intact.
-      current += ch;
-      continue;
-    }
-    current += ch;
-  }
-  segments.push(current);
-  return segments.map((s) => s.trim()).filter((s) => s.length > 0);
-}
+/** The read-only gate's bash verdict; a refusal carries the one-line reason the block message shows. */
+export type ReadOnlyBashVerdict = { allowed: true } | { allowed: false; reason: string };
 
 /**
- * Whether a bash command is allowed under read-only mode. Two independent checks:
- *  - NOT destructive: a WHOLE-STRING scan against DESTRUCTIVE_PATTERNS (destructive-wins — content
- *    anywhere in the string, incl. command substitutions, still vetoes). Two redirect carve-outs
- *    are neutralized first: FD duplications (`2>&1`, `1>&2`) and redirects to `/dev/null`
- *    (`>/dev/null`, `2>/dev/null`, `&>/dev/null`, `>>/dev/null`) — both discard output and write
- *    nothing to the filesystem. Redirects to a REAL path (`> file`, `&> file`, `>> file`) are NOT
- *    carved out and stay destructive.
- *  - SAFE per segment: split into quote-aware top-level segments (on `;`/`&&`/`||`/`|`) and require
- *    EVERY segment's leading command to match a SAFE_PATTERNS entry. This unblocks `cd`-prefixed
- *    chains and tightens the model — a non-safe command anywhere in a chain is now blocked, not
- *    just when it leads.
+ * Whether a bash command is allowed under read-only mode — first hit wins:
+ *  1. NOT destructive: a WHOLE-STRING scan against DESTRUCTIVE_PATTERNS (destructive-wins — content
+ *     anywhere in the string, incl. command substitutions, still vetoes). Two redirect carve-outs
+ *     are neutralized first: FD duplications (`2>&1`, `1>&2`) and redirects to `/dev/null`
+ *     (`>/dev/null`, `2>/dev/null`, `&>/dev/null`, `>>/dev/null`) — both discard output and write
+ *     nothing to the filesystem. Redirects to a REAL path (`> file`, `&> file`, `>> file`) are NOT
+ *     carved out and stay destructive.
+ *  2. SAFE at every command position (`commandPositions.ts`): the start of input and the word after
+ *     an unquoted `;` `|` `|&` `&&` `||`, a lone `&` or a newline; inside `$(…)`/backticks (also
+ *     within double quotes) and `<(…)`/`>(…)`; after `NAME=value` prefixes, leading redirections,
+ *     the keywords `for…in`/`do`/`done`/`while`/`until`/`if`/`then`/`elif`/`else`/`fi`/`{`/`}`/`!`
+ *     and the wrappers `env`/`timeout N`/`xargs`/`nice`/`time`/`command`/`nohup`; and at
+ *     `find -exec`/`fd -x` — EVERY simple command there must match a SAFE_PATTERNS entry. A dynamic
+ *     command word (`$VAR`, quoted, escaped, substituted), an unterminated quote/substitution/heredoc,
+ *     an unmodeled wrapper flag or unmodeled syntax is refused, as is a command with nothing to
+ *     run. The allowlist matches the simple-command text (command word to the end of that simple
+ *     command), so the anchored `perk pr … --json\s*$` rows still see the full argument tail.
  * Pure → unit-testable offline.
  */
-export function isReadOnlyBashCommand(command: string): boolean {
+export function readOnlyBashVerdict(command: string): ReadOnlyBashVerdict {
   const withoutFdRedirects = command
     .replace(/\d*>&\d+/g, " ")
     .replace(/(?:\d+|&)?>>?\s*\/dev\/null\b/g, " ");
-  const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(withoutFdRedirects));
-  const segments = splitTopLevelSegments(command);
-  const isSafe =
-    segments.length > 0 && segments.every((seg) => SAFE_PATTERNS.some((p) => p.test(seg)));
-  return !isDestructive && isSafe;
+  const veto = DESTRUCTIVE_PATTERNS.find((p) => p.test(withoutFdRedirects));
+  if (veto !== undefined) return { allowed: false, reason: `matches the destructive veto ${veto}` };
+  const positions = commandPositions(command);
+  if (!positions.ok) return { allowed: false, reason: REFUSAL_REASONS[positions.refusal] };
+  if (positions.commands.length === 0)
+    return {
+      allowed: false,
+      reason: "no command to run (only assignments, comments or whitespace)",
+    };
+  const unlisted = positions.commands.find((c) => !SAFE_PATTERNS.some((p) => p.test(c)));
+  if (unlisted === undefined) return { allowed: true };
+  const line = unlisted.split("\n")[0] ?? "";
+  return {
+    allowed: false,
+    reason: `not allowlisted: ${line.length > 100 ? `${line.slice(0, 100)}…` : line}`,
+  };
+}
+
+/** The boolean form of `readOnlyBashVerdict`. */
+export function isReadOnlyBashCommand(command: string): boolean {
+  return readOnlyBashVerdict(command).allowed;
 }
 
 // --- the controller -----------------------------------------------------------------------------
@@ -989,10 +960,11 @@ export function registerToolGating(
       }
       if (event.toolName === "bash") {
         const command = String((event.input as { command?: unknown }).command ?? "");
-        if (!isReadOnlyBashCommand(command)) {
+        const verdict = readOnlyBashVerdict(command);
+        if (!verdict.allowed) {
           return {
             block: true,
-            reason: `perk read-only mode: command blocked (not allowlisted).\nCommand: ${command}`,
+            reason: `perk read-only mode: command blocked (not allowlisted).\nCommand: ${command}\nReason: ${verdict.reason}`,
           };
         }
       }

@@ -11,14 +11,15 @@
 // never rewritten or capped. Expiry is detected only from Pi's own terminal `Command timed out
 // after N seconds` status line, never from a line the command printed.
 //
-// Classifier design: regex-only over each physical line's quote-aware top-level segments (the
-// gate's splitter, reused so both hooks agree on what a segment is and a flag in a LATER pipeline
-// stage — `grep -n foo f | sort -r` — is never attributed to the grep). The command word is
+// Classifier design: regex-only over the command's quote-aware top-level segments (shared with the
+// gate through `commandPositions.ts`, so both hooks agree on what a segment is and a flag in a
+// LATER pipeline stage — `grep -n foo f | sort -r` — is never attributed to the grep). The command word is
 // matched at ANY command boundary inside a segment rather than as the segment's leading word, so
 // wrapper prefixes (`env`/`nice`/`time`/`nohup`/`xargs`), nested shells (`sh -c '…'`) and `$(…)`
 // substitutions are covered without enumerating wrappers. A grep's recursion flag is searched over
 // its full tail (over-matches only); a find's `-maxdepth` exemption is searched only in the find's
-// OWN window — up to the next command word or a quoted-in sequencing operator, quoted spans blanked
+// OWN window — up to the next command word or a quoted-in sequencing operator or newline, quoted
+// spans blanked
 // — so neither a later bounded find nor a quoted argument ever exempts an unbounded one.
 // Over-matching is tolerated by design — a spurious 30s cap on a fast command is harmless, a
 // missed scan is the bug. The accepted over-matches (pinned as such in the tests, so any future
@@ -27,7 +28,7 @@
 // Incidental precision, not a goal: a quote-adjacent cluster (`"-r"`, `'grep -r'`) is not a flag
 // position, so quoted flags do not match.
 
-import { splitTopLevelSegments } from "./toolGating.ts";
+import { splitTopLevelSegments } from "./commandPositions.ts";
 
 /**
  * The injected default, in seconds — the ONE source of truth for the number. The managed
@@ -60,11 +61,11 @@ const RECURSIVE_FLAG =
 const MAXDEPTH_FLAG = /(?:^|\s)-maxdepth(?=\s|$)/;
 
 /**
- * A sequencing operator that survived the top-level split — i.e. one inside a quoted nested shell
- * (`sh -c 'find . -type f; find . -maxdepth 1'`) or a lone `&`. It ends a `find`'s exemption
- * window (see `findWindow`).
+ * A sequencing operator or newline that survived the top-level split — i.e. one inside a quoted
+ * nested shell (`sh -c 'find . -type f; find . -maxdepth 1'`, `sh -c 'find . -type f⏎echo
+ * -maxdepth'`). It ends a `find`'s exemption window (see `findWindow`).
  */
-const INNER_OPERATOR = /[;|&]/;
+const INNER_OPERATOR = /[;|&\n]/;
 
 /**
  * Pi's terminal status line for an expired bash call. No `m` flag — `$` is end-of-string, so the
@@ -75,15 +76,16 @@ const TIMEOUT_STATUS = /(?:^|\n)Command timed out after (\S+) seconds$/;
 
 /**
  * Classify a bash command as a gitignore-blind scan, or `null`. Pure and offline-testable. Per
- * physical line, per quote-aware top-level segment, in order: the first segment that classifies
- * decides. Fast non-scans (`rg`, `fd`, `ast-grep`, `grep -n foo file`) are `null`.
+ * quote-aware top-level segment, in order: the first segment that classifies decides. The walker
+ * owns line boundaries (an unquoted newline splits, a quoted or `\`-continued one does not), every
+ * heredoc body arrives as its own segment (it may be a nested shell's script), and a gate refusal
+ * never shortens the list.
+ * Fast non-scans (`rg`, `fd`, `ast-grep`, `grep -n foo file`) are `null`.
  */
 export function classifyScanCommand(command: string): ScanKind | null {
-  for (const line of command.split("\n")) {
-    for (const segment of splitTopLevelSegments(line)) {
-      const kind = classifySegment(segment);
-      if (kind !== null) return kind;
-    }
+  for (const segment of splitTopLevelSegments(command)) {
+    const kind = classifySegment(segment);
+    if (kind !== null) return kind;
   }
   return null;
 }
@@ -107,13 +109,20 @@ function occurrences(segment: string): Occurrence[] {
 
 /**
  * `text` with every single-/double-quoted span replaced by ONE space (token boundaries kept,
- * quoted content gone). The same quote model as the segment splitter (no backslash-escape
- * handling; an unterminated quote runs to the end).
+ * quoted content gone). Backslash escapes follow the walker: outside single quotes `\` makes the
+ * next character literal — kept outside quotes, blanked with the rest inside double quotes — so
+ * `"a\"b"` is one span. An unterminated quote runs to the end.
  */
 function blankQuoted(text: string): string {
   let out = "";
   let quote: '"' | "'" | null = null;
-  for (const ch of text) {
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i] as string;
+    if (ch === "\\" && quote !== "'") {
+      if (quote === null) out += text.slice(i, i + 2);
+      i++;
+      continue;
+    }
     if (quote !== null) {
       if (ch === quote) quote = null;
       continue;
@@ -130,8 +139,8 @@ function blankQuoted(text: string): string {
 
 /**
  * The text in which THIS `find`'s `-maxdepth` may appear: its tail up to the next command word,
- * with quoted spans blanked, then cut at the first sequencing operator that survived the
- * top-level split (a quoted nested shell's `;`/`|`/`&`). Blanking first means only an UNQUOTED
+ * with quoted spans blanked, then cut at the first sequencing operator or newline that survived
+ * the top-level split (a quoted nested shell's `;`/`|`/`&`/newline). Blanking first means only an UNQUOTED
  * standalone `-maxdepth` option counts (a `-printf 'x -maxdepth y'` format or a `-name
  * "-maxdepth"` operand never exempts) and a quoted `;` inside a `-name` pattern never ends the
  * window. The exemption is the inverse of a match — it REMOVES a cap — so its window must be

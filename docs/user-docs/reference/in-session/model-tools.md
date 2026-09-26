@@ -193,7 +193,16 @@ own narrower refinement allowlist (read/research/question, `plan_review`, and
 `objective_refinement_draft` — no node claim, no other draft or save tool, no delegation) and
 whose hidden guidance is the `[READ-ONLY REFINEMENT MODE]` flavor naming that writer. Every excluded tool is denied, including `edit`, `write`, save/delivery
 tools and unknown or late-registered foreign mutators—even if toolset synchronization failed.
-Allowlisted `bash` also retains its command-segment sub-allowlist. Other listed tools pass this gate
+Allowlisted `bash` also retains its command-position sub-allowlist: every command word must be
+allowlisted — after sequencing operators and newlines, inside `$(…)`/backticks/process
+substitutions, after assignment prefixes and leading redirections, after shell keywords and the
+wrappers `env`/`timeout`/`xargs`/`nice`/`time`/`command`/`nohup`, and at `find -exec`/`fd -x`.
+`$VAR` as a command, unterminated quotes and unmodeled shell syntax are refused; `for` loops,
+`VAR=$(…)` assignments and heredocs pass when every command word does, and a refusal names its
+reason beneath the echoed command. It is a structural check with recorded limits, not a sandbox:
+program text inside allowlisted commands (`awk`/`sed`), a command `fd -x` supplies at run time,
+and exec flags in unusual spellings (`fd -Hx`, `find . $'-exec' …`) are accepted leniencies.
+Other listed tools pass this gate
 but still undergo their ordinary authority checks. The sanctioned artifact writers and
 review/exploration companions, research and delegation retain their existing carve-outs; this is
 not an OS sandbox or an argument-level certificate for delegation, browser automation or web tools.
@@ -214,7 +223,7 @@ surrounding whitespace, N matching `[1-9][0-9]*`, `--json` last): the plan-bound
 stack review flow's pinned `perk pr review-context --pr N --stack --pin-base <sha> --pin-head
 <pr>=<sha> … --json` (full 40-hex lowercase SHAs, at least two bottom→top `--pin-head` pairs —
 exactly what the stack door renders), and `perk pr feedback --json`. `cd … && query` works because
-every segment is checked. This does not admit the flagless context form, other argument orders,
+every command position is checked. This does not admit the flagless context form, other argument orders,
 extra arguments, lookalike verbs, `review-post`, `gh api`, real-file redirects, or a mutation
 chained after a query.
 

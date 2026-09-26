@@ -735,7 +735,29 @@ and unknown/late foreign mutators, even when toolset narrowing failed. This back
 effective read-only sessions, parents too. `edit`/`write` keep their file-modification denial wording;
 other excluded tools receive a read-only not-allowlisted denial. Listed non-bash tools pass this gate
 but retain downstream authority checks. Listed `bash` additionally requires its argument
-check. Tool inventories are unchanged; there is no OS-sandbox claim for allowlisted delegation,
+check: the whole-string destructive veto (unchanged), then the bash sub-allowlist applied at
+**every command position** (`extension/substrate/commandPositions.ts`) — the start of input and
+the word after an unquoted `;` `|` `|&` `&&` `||`, a lone `&` or an unquoted newline; after
+`$(`/backtick (also inside double quotes) and `<(`/`>(`; after any `NAME=value` prefix and any
+leading redirection (its operand is never the command); after the keywords `for…in`/`do`/`done`/
+`while`/`until`/`if`/`then`/`elif`/`else`/`fi`/`{`/`}`/`!`; after the wrappers `env`/`timeout N`/
+`xargs`/`nice`/`time`/`command`/`nohup` (enumerated flags; the same dispatch applies inside exec
+positions); and at `find -exec/-execdir/-ok/-okdir` and `fd -x/--exec/-X/--exec-batch`. Heredoc
+bodies are data (an unquoted-delimiter body is joined at `\`-newline and scanned for
+substitutions; a quoted-delimiter body is literal); `#` comments follow bash's rule; `${…}` is one
+unit. A bare wrapper chain is its own command (`env`, `env -i X=1`), and `xargs`'s own once it is
+in the chain (its input supplies the command); the words a wrapper consumes (flags, their
+arguments, `env` assignments) must be static. A dynamic command word (`$VAR`, quoted, escaped,
+substituted), an unterminated quote/substitution/heredoc, an unmodeled or non-static wrapper word,
+or unmodeled syntax (bare `(…)`, `$((…))`, arrays, function definitions, `case`/`select`/`[[`,
+nested-backtick escapes, a heredoc delimiter whose quote-removed value is not static) is refused,
+as is a command with nothing to run. Accepted limits (recorded in `commandPositions.ts`, not
+enforced): in-program writers inside allowlisted commands' program text (`awk`/`sed`), a command
+fd supplies at run time (`fd -x env`), exec flags other than the exact pre-expansion words of the
+simple command's own `find`/`fd` (`fd -Hx`, `find . $'-exec' …`), a glob or brace expansion read
+as one word, and `\\` inside backticks. The block message keeps its two-line head (`perk read-only mode: command blocked
+(not allowlisted).` / `Command: <command>`) and appends `Reason: <veto row | walker refusal |
+first non-allowlisted command | no command>`. Tool inventories are unchanged; there is no OS-sandbox claim for allowlisted delegation,
 web/browser or artifact carve-outs. The bash sub-allowlist covers read-only
 inspection commands (read-only `git` queries, `jq`, `curl`, …), read-only `gh` **query**
 subcommands (view/list/diff/status/checks/search + `gh auth status`; `gh api` and every mutating
@@ -749,7 +771,8 @@ form `perk pr review-context --pr N --stack --pin-base <sha> --pin-head <pr>=<sh
 rendering: full 40-hex lowercase shas, `--pin-base` then at least two bottom→top `--pin-head`
 pairs; the CLI re-validates grammar and topology) and `perk pr feedback --json` forms with
 optional surrounding whitespace. Anchored
-query exceptions retain segment validation and the destructive veto: `cd … && query` passes, but
+query exceptions keep the command-position check and the destructive veto: `cd … && query` passes
+because every command position is checked, but
 the flagless context form, other argument orders, extra arguments (`--local` included), lookalike
 verbs, `review-post`, `gh api`, real-file redirects, and chained mutations do not. The sub-allowlist also retains command-keyed `ast-grep` /
 `agent-browser` (+ `npx agent-browser`) entries (an accepted arg-blind leniency, like `curl`);
@@ -12687,10 +12710,13 @@ patching through Pi's documented `tool_call` in-place mutation, plus a `tool_res
 
 1. **Injection (`tool_call`).** A `bash` call whose input carries **no** `timeout` and whose
    `command` classifies as a scan gets `timeout = 30` (seconds) patched onto its input. The
-   classifier is regex-only over the command text: per physical line, per quote-aware top-level
-   segment (the read-only gate's segment splitter, reused — so a flag belonging to a LATER
-   pipeline stage, `grep -n foo f | sort -r`, is never attributed to the grep), the first segment
-   that classifies decides. Within a segment the command word is matched at **any command
+   classifier is regex-only over the command text: per quote-aware top-level segment of the
+   shared command-position walker (`commandPositions.ts::splitTopLevelSegments` — so a flag
+   belonging to a LATER pipeline stage, `grep -n foo f | sort -r`, is never attributed to the
+   grep; an unquoted newline or lone `&` is a boundary, a quoted or backslash-continued newline
+   is not, every heredoc body is its own segment — a quoted delimiter stops the outer shell's
+   expansion, not a nested shell reading the body as a script — and a gate refusal never
+   truncates the list), the first segment that classifies decides. Within a segment the command word is matched at **any command
    boundary** (segment start, whitespace, a quote, a backtick, `(` as in `$(`, or a `\` alias
    bypass; an optional `dir/` path prefix), so wrapper prefixes (`env`/`nice`/`time`/`nohup`/
    `xargs`, `LC_ALL=C …`), nested `sh -c '…'`/`bash -lc "…"` forms and `$(…)` substitutions are
@@ -12700,8 +12726,9 @@ patching through Pi's documented `tool_call` in-place mutation, plus a `tool_res
    `-Rl`, `-nr`, `-rnA3`), by `--recursive`/`--dereference-recursive`, or by `-d recurse`/
    `--directories=recurse` — or when the word is `rgrep`; an **unbounded find** when the word is
    `find` and no **unquoted** standalone `-maxdepth` sits in that find's **own window** — its
-   tail up to the next command word, with quoted spans blanked, cut at the first sequencing
-   operator that survived the top-level split (a quoted nested shell's `;`/`|`/`&`). So a later
+   tail up to the next command word, with quoted spans blanked (backslash escapes honored as the
+   walker does), cut at the first sequencing operator or newline that survived the top-level
+   split (a quoted nested shell's `;`/`|`/`&`/newline). So a later
    bounded find never exempts an earlier unbounded one (`sh -c 'find . -type f; find .
    -maxdepth 1'` is capped), a `-maxdepth` inside a quoted argument never exempts (`find .
    -printf 'x -maxdepth y'` and `find . -name "-maxdepth"` are capped), and a quoted `;` in a
