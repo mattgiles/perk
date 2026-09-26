@@ -429,6 +429,9 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
     "fd -e py -x wc -l",
     "cat a |& grep b",
     "echo ok & ls",
+    "env -i FOO=bar", // a wrapper chain with no command word is its own command
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
+    "echo ${x/;/,}; ls", // ${…} is one unit: its `;` is not an operator
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed: ${cmd}`);
   }
@@ -632,6 +635,15 @@ test("isReadOnlyBashCommand: a non-allowlisted command at ANY command position i
     "cat <<EOF\nbody\nEOF\npython -c x",
     "cat <<EOF\nEO\\\nF\npython -c pass\nEOF", // bash joins `EO\⏎F` into the terminator
     "echo `echo \\`python -c pass\\``", // nested backquote escape: refused
+    // a `#` inside ${…} is not a comment, so the later command is still checked
+    `echo \${x:-a #b}; node -e "require('fs').writeFileSync('x','y')"`,
+    // a wrapper operand's expansion could split into the command itself
+    `PAYLOAD='DROP node -e x'; env -u $PAYLOAD ls`,
+    // xargs supplies the bare env's command from its input
+    `printf '%s\\0' node -e x | xargs -0 env`,
+    // a delimiter whose quote-removed value is unknown, and one whose `\`-newline is not quoting
+    "cat <<$'echo'\necho\nnode -e x\n$'echo'",
+    "cat <<E\\\nOF\n$(node -e x)\nEOF",
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
   }

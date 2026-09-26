@@ -97,6 +97,13 @@ const COMMANDS: [string, string[]][] = [
   ["env X=1 timeout 5 rg", ["rg"]],
   ["env - rg", ["rg"]],
   ["env timeout 5 nice -n 1 time -p nohup command rg foo", ["rg foo"]],
+  // a wrapper chain that reaches no command word is its own command, also past assignments…
+  ["env -i FOO=bar", ["env -i FOO=bar"]],
+  ["env X=1 timeout 5", ["timeout 5"]],
+  // …and once xargs is in the chain it is xargs's own: its input supplies the command
+  ["ls | xargs env", ["ls", "xargs env"]],
+  ["ls | xargs env X=1", ["ls", "xargs env X=1"]],
+  ["env xargs env", ["xargs env"]],
   // exec forms: the exec'd text runs to the enclosing command's end
   ["find . -exec grep -l foo {} \\;", ["find . -exec grep -l foo {} \\;", "grep -l foo {} \\;"]],
   [
@@ -154,6 +161,8 @@ const COMMANDS: [string, string[]][] = [
   ["cat <<'EOF'\nEO\\\nF\npython -c pass\nEOF", ["cat <<'EOF'"]],
   ["cat <<EOF\nline \\\ncontinued $(echo hi)\nEOF", ["cat <<EOF", "echo hi"]],
   ["cat <<EOF\n\\$(pwd)\nEOF", ["cat <<EOF"]],
+  // a `\`-newline in the delimiter is removed, not quoting: the body still expands
+  ["cat <<E\\\nOF\n$(pwd)\nEOF", ["cat <<E\\\nOF", "pwd"]],
   ["cat <<EOF\n'$(pwd)'\nEOF", ["cat <<EOF", "pwd"]],
   ["echo $(cat <<EOF\nhi\nEOF\n)", ["echo $(cat <<EOF\nhi\nEOF\n)", "cat <<EOF"]],
   // comments / escapes / continuation
@@ -162,6 +171,13 @@ const COMMANDS: [string, string[]][] = [
   ["echo a#b; ls", ["echo a#b", "ls"]],
   // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
   ["echo ${#x}", ["echo ${#x}"]],
+  // ${…} is one unit: no word splitting, operators or comments inside
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
+  ["echo ${x:-a #b}; python", ["echo ${x:-a #b}", "python"]],
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
+  ["echo ${x/;/,}; ls", ["echo ${x/;/,}", "ls"]],
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
+  ["V=${x:-a $(pwd)} ls", ["pwd", "ls"]],
   ["echo $(#c\nls)", ["echo $(#c\nls)", "ls"]],
   ['echo "a\\"" ; ls', ['echo "a\\""', "ls"]],
   ["echo a\\;b", ["echo a\\;b"]],
@@ -222,6 +238,11 @@ const REFUSALS: [string, CommandRefusal][] = [
   ["xargs -a list grep foo", "wrapper-usage"],
   ["nice -n", "wrapper-usage"],
   ["find . -exec env -S x {} \\;", "wrapper-usage"],
+  // the words a wrapper consumes must be static: an expansion could split into the command
+  ["env -u $PAYLOAD ls", "wrapper-usage"],
+  ["env -u$X ls", "wrapper-usage"],
+  ['nice -n "$N" rg', "wrapper-usage"],
+  ["env FOO=$(cat x) rg", "wrapper-usage"],
   ["(cd x && ls)", "unmodeled-syntax"],
   ["foo() { ls; }", "unmodeled-syntax"],
   ["A=(1 2)", "unmodeled-syntax"],
@@ -239,6 +260,13 @@ const REFUSALS: [string, CommandRefusal][] = [
   ["cat <", "unmodeled-syntax"],
   ["ls > ", "unmodeled-syntax"],
   ["cat <<\nx", "unmodeled-syntax"],
+  // a delimiter whose quote-removed value this lexer cannot compute
+  ["cat <<$'EOF'\nx\nEOF", "unmodeled-syntax"],
+  ["cat <<$X\nx\n$X", "unmodeled-syntax"],
+  // bash reads `'` inside a double-quoted ${…} per operator and POSIX mode
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
+  ["echo \"${x:-'}'}\"", "unmodeled-syntax"],
+  ["echo ${x", "unterminated-substitution"],
   ["echo `echo \\`python -c pass\\``", "unmodeled-syntax"],
   ["echo `echo \\$(ls)`", "unmodeled-syntax"],
 ];
@@ -280,7 +308,9 @@ const SEGMENTS: [string, string[]][] = [
   ["find . -exec grep x {} \\;", ["find . -exec grep x {} \\;"]],
   ["echo $(ls; ls)", ["echo $(ls; ls)"]],
   ["rg foo \\\n --glob x", ["rg foo \\\n --glob x"]],
-  ["cat <<'EOF'\nls\nEOF\nwc", ["cat <<'EOF'", "wc"]],
+  // every heredoc body is its own segment (a quoted one may be a nested shell's script)
+  ["cat <<'EOF'\nls\nEOF\nwc", ["cat <<'EOF'", "ls", "wc"]],
+  ["bash <<'EOF'\nfind . -type f\nEOF", ["bash <<'EOF'", "find . -type f"]],
   ["cat <<EOF\n$(ls)\nEOF\nwc", ["cat <<EOF", "$(ls)", "wc"]],
   ["sh -c 'find . -type f; find . -maxdepth 1'", ["sh -c 'find . -type f; find . -maxdepth 1'"]],
   // lenient continuation: a refusal never truncates the view
@@ -309,15 +339,16 @@ test("segments: a later scan survives an earlier unmodeled construct", () => {
 // The module header's accepted leniencies — shapes a model would not reach by accident — pinned
 // so any tightening is a deliberate change.
 test("accepted leniencies stay as recorded", () => {
-  // a command supplied at run time is invisible: the bare wrapper is the entry
-  assert.deepEqual(commandsOf("ls | xargs env"), ["ls", "env"]);
-  // only the exact exec words of the simple command's own find/fd open a position
+  // a command fd supplies at run time is invisible: `env` runs each found path
+  assert.deepEqual(commandsOf("fd -x env"), ["fd -x env", "env"]);
+  // only the exact exec words of the simple command's own find/fd open a position…
   assert.deepEqual(commandsOf("fd -Hx python"), ["fd -Hx python"]);
   assert.deepEqual(commandsOf("find . -exec fd -x python \\;"), [
     "find . -exec fd -x python \\;",
     "fd -x python \\;",
   ]);
-  // `${…}` is ordinary word text, so a blank-led `#` inside it starts a comment
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
-  assert.deepEqual(commandsOf("echo ${x:-a #b}; python"), ["echo ${x:-a #b}; python"]);
+  // …as they read before expansion (ANSI-C quoting or `$X` hides one)
+  assert.deepEqual(commandsOf("find . $'-exec' python -c pass \\;"), [
+    "find . $'-exec' python -c pass \\;",
+  ]);
 });

@@ -199,7 +199,10 @@ substitutions, after assignment prefixes and leading redirections, after shell k
 wrappers `env`/`timeout`/`xargs`/`nice`/`time`/`command`/`nohup`, and at `find -exec`/`fd -x`.
 `$VAR` as a command, unterminated quotes and unmodeled shell syntax are refused; `for` loops,
 `VAR=$(…)` assignments and heredocs pass when every command word does, and a refusal names its
-reason beneath the echoed command. Other listed tools pass this gate
+reason beneath the echoed command. It is a structural check with recorded limits, not a sandbox:
+program text inside allowlisted commands (`awk`/`sed`), a command `fd -x` supplies at run time,
+and exec flags in unusual spellings (`fd -Hx`, `find . $'-exec' …`) are accepted leniencies.
+Other listed tools pass this gate
 but still undergo their ordinary authority checks. The sanctioned artifact writers and
 review/exploration companions, research and delegation retain their existing carve-outs; this is
 not an OS sandbox or an argument-level certificate for delegation, browser automation or web tools.

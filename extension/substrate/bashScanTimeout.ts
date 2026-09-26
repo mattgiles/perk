@@ -77,8 +77,9 @@ const TIMEOUT_STATUS = /(?:^|\n)Command timed out after (\S+) seconds$/;
 /**
  * Classify a bash command as a gitignore-blind scan, or `null`. Pure and offline-testable. Per
  * quote-aware top-level segment, in order: the first segment that classifies decides. The walker
- * owns line boundaries (an unquoted newline splits, a quoted or `\`-continued one does not), an
- * expanding heredoc body arrives as its own segment, and a gate refusal never shortens the list.
+ * owns line boundaries (an unquoted newline splits, a quoted or `\`-continued one does not), every
+ * heredoc body arrives as its own segment (it may be a nested shell's script), and a gate refusal
+ * never shortens the list.
  * Fast non-scans (`rg`, `fd`, `ast-grep`, `grep -n foo file`) are `null`.
  */
 export function classifyScanCommand(command: string): ScanKind | null {

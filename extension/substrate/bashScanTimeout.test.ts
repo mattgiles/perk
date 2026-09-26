@@ -88,8 +88,10 @@ const UNBOUNDED_FINDS = [
   `sh -c "find . -printf 'x -maxdepth y'"`,
   // a quoted-in newline ends the find's exemption window like a quoted-in `;`
   "sh -c 'find . -type f\necho -maxdepth'",
-  // an expanding heredoc body is its own segment, so its substitution is classified
+  // every heredoc body is its own segment: an expanding body's substitution, and a quoted body
+  // that is a nested shell's script
   "cat <<EOF\n$(find . -type f)\nEOF",
+  "bash <<'EOF'\nfind . -type f\nEOF",
   // a gate refusal never truncates the classifier's view
   `$CMD; find . -type f`,
   `(find . -type f)`,
@@ -119,8 +121,6 @@ const NOT_SCANS = [
   `sh -c "find . -name '*.py' -maxdepth 1"`,
   // escape-aware quote blanking sees the real `-maxdepth`
   `find . -name "a\\"b" -maxdepth 1`,
-  // deliberate: a literal heredoc body cannot execute, so a find inside it is data
-  "cat <<'EOF'\n$(find . -type f)\nEOF",
   `fd foo`,
   `ls -R`,
   `cat docs/find.md`,
@@ -135,6 +135,8 @@ const ACCEPTED_OVER_MATCHES = [
   `git grep -rn foo`,
   `rg -n 'grep -rn foo' src/`,
   `grep -n "x -r y" f`,
+  // a quoted heredoc body is classified whoever reads it (it may be a nested shell's script)
+  "cat <<'EOF'\n$(find . -type f)\nEOF",
 ];
 
 test("classifyScanCommand: recursive greps", () => {

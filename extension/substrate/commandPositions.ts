@@ -8,24 +8,25 @@
 //
 // Two phases. The lexer knows only bash's token rules — quotes (incl. ANSI-C `$'…'`), escapes,
 // line continuations, comments, operators, redirections and their operands, heredocs (incl. the
-// `\`-newline join in an expanding body) and substitutions — and builds a token tree; a backtick
-// body and an expanding heredoc body are lexed as their own inputs, as bash re-parses them. The
-// dispatcher knows only the command-position rules: assignment prefixes, a fixed keyword set, the
-// wrapper flag tables, find/fd exec flags. Lexical refusals ride on tree nodes and never stop the
-// lexer, so `segments` (the scan-timeout classifier's view) always covers the whole input; the
-// first refusal in walk order (a node before its children) wins.
+// `\`-newline join in an expanding body), `${…}` as one unit, and substitutions — and builds a
+// token tree; a backtick body and an expanding heredoc body are lexed as their own inputs, as bash
+// re-parses them. The dispatcher knows only the command-position rules: assignment prefixes, a
+// fixed keyword set, the wrapper flag tables, find/fd exec flags. Lexical refusals ride on tree
+// nodes and never stop the lexer, so `segments` (the scan-timeout classifier's view) always covers
+// the whole input; the first refusal in walk order (a node before its children) wins.
 //
 // Not a shell parser: it refuses what it does not model — fail-closed on the unknown, never on the
 // modeled — and validates no compound-command structure. Accepted leniencies, recorded rather than
 // chased (shapes a model would not reach by accident): in-program writers inside allowlisted
 // commands' program text (`awk '{print > "f"}'`, `awk system()`, `sed 'e …'`/`sed 'w …'`);
-// `find -fprint*`/`-fls` (argument-level writers for the veto list, beside `find -delete`);
-// commands supplied at run time (`… | xargs env`; `fd -x env` runs each found path); exec flags
-// other than the exact words of the simple command's own `find`/`fd` (`fd -Hx`, an exec'd
-// command's own exec flag); `${…}` read as ordinary word text; `\\` inside backticks (bash halves
-// it before the body parses); bash syntax errors that run nothing (empty commands, an unbalanced
-// `if`/`fi`). Recursion follows nesting depth: pathological nesting throws, which both consumers
-// contain (the gate fails closed, the classifier fails open).
+// `find -fprint*`/`-fls` (argument-level writers for the veto list, beside `find -delete`); a
+// command fd supplies at run time (`fd -x env` runs each found path); exec flags other than the
+// exact, pre-expansion words of the simple command's own `find`/`fd` (`fd -Hx`, an exec'd
+// command's own exec flag, `find . $'-exec' …`); words taken lexically, so an unquoted glob or
+// brace expansion counts as one word; `\\` inside backticks (bash halves it before the body
+// parses); bash syntax errors that run nothing (empty commands, an unbalanced `if`/`fi`).
+// Recursion follows nesting depth: pathological nesting throws, which both consumers contain (the
+// gate fails closed, the classifier fails open).
 
 export type CommandRefusal =
   | "unterminated-quote"
@@ -39,7 +40,8 @@ export type CommandRefusal =
 /** One human-readable line per refusal — the gate's `Reason:` text. */
 export const REFUSAL_REASONS: Readonly<Record<CommandRefusal, string>> = {
   "unterminated-quote": "unterminated quote",
-  "unterminated-substitution": "unterminated $(…), <(…), >(…) or backtick substitution",
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
+  "unterminated-substitution": "unterminated $(…), ${…}, <(…), >(…) or backtick substitution",
   "unterminated-heredoc": "heredoc never terminated",
   "unbalanced-close": "unbalanced ) or backtick",
   "dynamic-command-word":
@@ -47,7 +49,7 @@ export const REFUSAL_REASONS: Readonly<Record<CommandRefusal, string>> = {
   "wrapper-usage":
     "unsupported wrapper usage (unknown flag, missing flag argument, or missing/invalid timeout duration)",
   "unmodeled-syntax":
-    "unsupported shell syntax (subshell, function, array, arithmetic, case/select/[[, redirection without operand, nested backtick escape, trailing backslash)",
+    "unsupported shell syntax (subshell, function, array, arithmetic, case/select/[[, redirection without operand, nested backtick escape, trailing backslash, or quoting this gate cannot resolve)",
 };
 
 export type CommandPositions =
@@ -100,6 +102,10 @@ class Word {
     this.plain = false;
     this.value = null;
     if (frame !== undefined) this.frames.push(frame);
+  }
+  /** A `\`-newline inside the word: bash removes it (no quoting), but the word is no longer plain. */
+  continued(): void {
+    this.plain = false;
   }
   refuse(refusal: CommandRefusal): void {
     this.refusal ??= refusal;
@@ -172,12 +178,16 @@ class Lexer {
         } else if (redirect !== null) {
           this.i += redirect.length;
           const operand = this.operand();
-          if (operand !== null && /^\d*<<-?$/.test(redirect))
+          if (operand !== null && /^\d*<<-?$/.test(redirect)) {
+            // Bash ends the body at the quote-removed delimiter; one this lexer cannot compute
+            // (an expansion or ANSI-C quoting in it) is refused rather than guessed.
+            if (operand.value === null) operand.refuse("unmodeled-syntax");
             heredocs.push({
               tag: operand.value ?? operand.text,
               strip: redirect.endsWith("-"),
               expanding: !operand.quoted,
             });
+          }
           tokens.push({ kind: "redirect", operand });
         } else tokens.push({ kind: "word", word: this.word() });
       }
@@ -217,7 +227,8 @@ class Lexer {
       } else if (c === "\\") {
         const next = this.src[this.i + 1];
         if (next === undefined) word.refuse("unmodeled-syntax");
-        word.quote(next === "\n" ? "" : (next ?? ""));
+        if (next === "\n") word.continued();
+        else word.quote(next ?? "");
         this.i += 2;
       } else if (c === "'") this.single(word);
       else if (c === '"') {
@@ -286,6 +297,9 @@ class Lexer {
     } else if (next === "(") {
       this.i += 2;
       word.expand(this.subframe());
+    } else if (next === "{") {
+      this.i += 2;
+      this.brace(word, inDouble);
     } else if (next === "'" && !inDouble) {
       this.i += 2;
       this.ansiC(word);
@@ -297,6 +311,34 @@ class Lexer {
       word.expand();
       this.i++;
       this.i += this.match(VARIABLE)?.length ?? 0;
+    }
+  }
+
+  /** `${` consumed: one unit up to its `}` — no word splitting, operators or comments inside. */
+  private brace(word: Word, inDouble: boolean): void {
+    word.expand();
+    for (;;) {
+      const c = this.src[this.i];
+      if (c === undefined) {
+        word.refuse("unterminated-substitution");
+        return;
+      }
+      if (c === "}") {
+        this.i++;
+        return;
+      }
+      if (c === "\\") this.i += 2;
+      else if (c === "'" && inDouble) {
+        // Bash's reading of `'` inside a double-quoted `${…}` depends on the operator and POSIX mode.
+        word.refuse("unmodeled-syntax");
+        this.i++;
+      } else if (c === "'") this.single(word);
+      else if (c === '"') {
+        this.i++;
+        this.double(word, '"');
+      } else if (c === "$") this.dollar(word, inDouble);
+      else if (c === "`") this.backquote(word);
+      else this.i++;
     }
   }
 
@@ -359,7 +401,10 @@ class Lexer {
   }
 }
 
-/** Top-level slices between sequencing operators; a literal heredoc body is excluded, an expanding one is its own segment. */
+/**
+ * Top-level slices between sequencing operators; every heredoc body is its own segment — a quoted
+ * delimiter stops the outer shell's expansion, not an interpreter reading the body as a script.
+ */
 function segmentsOf(frame: Frame): string[] {
   const segments: string[] = [];
   const push = (text: string) => {
@@ -368,7 +413,7 @@ function segmentsOf(frame: Frame): string[] {
   let start = 0;
   for (const token of frame.tokens) {
     if (token.kind === "op") push(frame.src.slice(start, token.start));
-    else if (token.kind === "body" && token.expanding) push(token.content.text);
+    else if (token.kind === "body") push(token.content.text);
     if (token.kind === "op" || token.kind === "body") start = token.end;
   }
   push(frame.src.slice(start, frame.end));
@@ -388,6 +433,8 @@ type WrapperSpec = {
   numeric?: true;
   /** `env`: a lone `-` ends the flags. */
   dashEnds?: true;
+  /** `xargs`: its input becomes its command's trailing arguments, so a bare chain after it is xargs's own. */
+  appends?: true;
 };
 
 /** A getopt-style spec: `x` (short, no argument), `x:` (short, with argument), `--long` / `--long:` likewise. */
@@ -412,6 +459,7 @@ const WRAPPERS: ReadonlyMap<string, WrapperSpec> = new Map([
     wrapper(
       "0 r t x o n: L: P: I: d: s: E: J: R: S: --null --no-run-if-empty --verbose --exit " +
         "--open-tty --max-args: --max-lines: --max-procs: --replace: --delimiter: --max-chars: --eof:",
+      { appends: true },
     ),
   ],
   ["nice", wrapper("n: --adjustment:", { numeric: true })],
@@ -445,6 +493,12 @@ type SimpleCommand = {
   /** The command word of its first entry — whose exec flags open further positions. */
   word: string | null;
   wrapper: WrapperScan | null;
+  /**
+   * Where a wrapper chain's own text starts while no command word has opened an entry: the
+   * innermost wrapper, or the innermost `xargs` once one is in the chain (its input supplies the
+   * command, so the chain is only as allowed as xargs itself).
+   */
+  fallback: { start: number; xargs: boolean } | null;
 };
 
 class Dispatcher {
@@ -486,7 +540,7 @@ class Dispatcher {
       this.refuse("unmodeled-syntax");
     const scan = cmd.wrapper;
     if (scan !== null && (scan.pendingArgument || scan.needsDuration)) this.refuse("wrapper-usage");
-    else if (scan !== null) this.open(cmd, scan.start, null); // a bare wrapper is its own command
+    else if (cmd.fallback !== null) this.open(cmd, cmd.fallback.start, null); // a bare chain is its own command
     for (const { slot, start } of cmd.entries)
       this.commands[slot] = frame.src.slice(start, end).trim();
   }
@@ -496,6 +550,7 @@ class Dispatcher {
     if (cmd.entries.length === 1) cmd.word = word;
     cmd.state = "args";
     cmd.wrapper = null;
+    cmd.fallback = null;
   }
 
   private word(cmd: SimpleCommand, word: Word): void {
@@ -519,7 +574,12 @@ class Dispatcher {
   /** A word at a command position. */
   private command(cmd: SimpleCommand, word: Word): void {
     const text = word.text;
-    if (ASSIGNMENT.test(word.prefix)) return; // any number of prefixes; the position stays
+    if (ASSIGNMENT.test(word.prefix)) {
+      // Any number of prefixes; the position stays. After a wrapper it is an argv word, which an
+      // expansion could split into the command itself.
+      if (cmd.fallback !== null && word.value === null) this.refuse("wrapper-usage");
+      return;
+    }
     if (!word.plain) this.refuse("dynamic-command-word");
     else if (REFUSED.has(text)) this.refuse("unmodeled-syntax");
     else if (text === "for") cmd.state = "for-name";
@@ -536,17 +596,25 @@ class Dispatcher {
           needsDuration: spec.duration === true,
           flagsDone: false,
         };
+        if (spec.appends === true || cmd.fallback?.xargs !== true)
+          cmd.fallback = { start: word.start, xargs: spec.appends === true };
       }
     }
   }
 
-  /** A word after a wrapper: a flag, a flag's argument, `timeout`'s duration, or the wrapped command. */
+  /**
+   * A word after a wrapper: a flag, a flag's argument, `timeout`'s duration, or the wrapped command.
+   * The words a wrapper consumes must be static — an expansion's word count is unknown here, so
+   * it could supply the wrapped command itself.
+   */
   private wrapped(cmd: SimpleCommand, scan: WrapperScan, word: Word): void {
     const text = word.text;
+    const flag = !scan.flagsDone && text.startsWith("-") && text !== "-" && text !== "--";
+    if ((scan.pendingArgument || flag) && word.value === null) this.refuse("wrapper-usage");
     if (scan.pendingArgument) scan.pendingArgument = false;
     else if (!scan.flagsDone && text === "--") scan.flagsDone = true;
     else if (!scan.flagsDone && text === "-" && scan.spec.dashEnds === true) scan.flagsDone = true;
-    else if (!scan.flagsDone && text.startsWith("-") && text !== "-") this.flag(cmd, scan, text);
+    else if (flag) this.flag(cmd, scan, text);
     else if (scan.needsDuration) {
       if (!DURATION.test(text)) this.refuse("wrapper-usage");
       scan.needsDuration = false;
@@ -589,5 +657,5 @@ class Dispatcher {
 }
 
 function fresh(): SimpleCommand {
-  return { state: "command", entries: [], word: null, wrapper: null };
+  return { state: "command", entries: [], word: null, wrapper: null, fallback: null };
 }
