@@ -680,6 +680,508 @@ test("isReadOnlyBashCommand: what the walker does not model is refused", () => {
   }
 });
 
+test("isReadOnlyBashCommand: the census-driven read-only forms are allowed", () => {
+  for (const cmd of [
+    // git's pure reads, any arguments, behind the admitted global options
+    "git rev-parse HEAD",
+    "git rev-parse --show-toplevel",
+    "cd $(git rev-parse --show-toplevel) && rg foo",
+    "git status --short && git rev-parse HEAD && git log -1 --format='%H %s'",
+    "git worktree list --porcelain",
+    "git blame -L 1,5 f",
+    "git grep -n foo -- src",
+    "git grep -o -e foo", // `-o` (only-matching) is not the pager flag `-O`
+    "git check-ignore -v p",
+    "git merge-base --is-ancestor a HEAD",
+    "git rev-list --count HEAD",
+    "git cat-file -t abc",
+    "git describe --tags",
+    "git name-rev HEAD",
+    "git ls-files docs",
+    "git ls-tree -r HEAD",
+    "git ls-remote origin",
+    "git for-each-ref --format='%(refname)' refs/heads",
+    "git show-ref --heads",
+    "git shortlog -sn",
+    "git count-objects -v",
+    "git range-diff a^..a b^..b",
+    "git show abc --pretty=format: | git patch-id --stable",
+    "git show 4a71:skills/x/SKILL.md | git hash-object --stdin",
+    "git hash-object f",
+    "git diff -Oorder.txt", // diff's `-O<orderfile>` only reads
+    "git --version",
+    "git version",
+    "git -C /other/repo diff --stat v1 v2 -- p",
+    'git -C "$(pwd)" status',
+    "git --no-pager log -1",
+    "git -P log -1",
+    // symbolic-ref: exactly one ref
+    "git symbolic-ref HEAD",
+    "git symbolic-ref --short -q HEAD",
+    "git symbolic-ref HEAD 2>/dev/null",
+    // reflog: the positive list
+    "git reflog",
+    "git reflog show --format='%h %gs' -12 plan-2354",
+    "git reflog -12 --date=iso-strict",
+    "git reflog --all",
+    "git reflog list",
+    "git reflog exists refs/heads/main",
+    // tag: a list-implying flag, or bare with display modifiers
+    "git tag",
+    "git tag --list",
+    "git tag -l 'v*'",
+    "git tag --contains HEAD",
+    "git tag -n5",
+    "git tag --sort=-v:refname",
+    "git tag --points-at HEAD",
+    "git tag --merged main",
+    "git branch --all --contains HEAD && git tag --contains HEAD | head -20",
+    // branch: a list-implying flag, or bare with display modifiers
+    "git branch",
+    "git branch -v",
+    "git branch -vv",
+    "git branch --show-current",
+    "git branch -a",
+    "git branch --all",
+    "git branch -r",
+    "git branch -l",
+    "git branch --list 'plan-*'",
+    "git branch -a --contains abc",
+    "git branch --merged main",
+    "git branch --no-merged",
+    "git branch --points-at HEAD",
+    "git branch --format='%(refname:short)' --sort=-committerdate",
+    "git branch --format '%(refname)' -a",
+    "git branch -v 2>&1",
+    "git branch \\\n  --list 'x*'", // a continued line is one command
+    // remote, stash, config: the read forms
+    "git remote",
+    "git remote -v",
+    "git remote --verbose",
+    "git remote show origin",
+    "git remote get-url origin",
+    "git remote -v show origin",
+    "git stash list",
+    "git stash show -p stash@{0}",
+    "git stash list --format='%gd %s'",
+    "git config --get user.name",
+    "git config --get-regexp '^alias\\.'",
+    "git config --list",
+    "git config -l",
+    "git config --list --show-origin",
+    "git config --local --get core.hooksPath",
+    "git config core.hooksPath",
+    "git config --show-origin diff.renames",
+    "git config get user.name",
+    "git config list",
+    "git config --global --get user.email",
+    // everyday read-only utilities
+    "nl -ba shared/contracts.md | sed -n '736,757p'",
+    "shasum -a 256 f",
+    "sha256sum f",
+    "sha1sum f",
+    "md5 f",
+    "md5sum f",
+    "readlink /usr/local/bin/pi",
+    "realpath .",
+    'basename "$f"',
+    'dirname "$f"',
+    "test -f x && cat x",
+    "[ -f x ] && cat x",
+    "[ -d dir ]",
+    "true",
+    "false",
+    "ls x 2>/dev/null || true",
+    "read -r line < f",
+    'while read -r l; do echo "$l"; done < f',
+    "set -eu\nprintf '%s\\n' '--- pi ---'\ncommand -v pi || true",
+    "set -o pipefail; rg foo | head",
+    "column -t f",
+    "tr ',' '\\n' < f",
+    "cut -c1-200 f",
+    "cut -d: -f1 f",
+    "paste a b",
+    "comm -12 a b",
+    "tac f",
+    "rev f",
+    "od -c f | head",
+    "xxd f | head",
+    "xxd -l 16 -s 0x10 f",
+    "xxd -r -p f",
+    "xxd -p f",
+    "strings f | grep foo",
+    "sleep 1",
+    "fold -w 180 f",
+    "cmp a b",
+    "command -v pi",
+    "command -V pi",
+    "command -pv pi",
+    // sed in every form but -i
+    "sed -n '1,10p' f",
+    "sed 's/a/b/' f",
+    "sed -E 's/(a)/\\1/' f",
+    "sed -e 's/a/b/' -e 's/c/d/' f",
+    "sed '1d;$d' f",
+    "sed -n '/^```markdown$/,/^```$/p' d.md | sed '1d;$d' | wc -c",
+    "sed 's/x/y/' f 2>/dev/null",
+    "sed -n '/-i/p' f", // a quoted `-i` INSIDE a script word is not the flag
+    // perk / pi read verbs
+    "perk --version",
+    "perk --help",
+    "perk -h",
+    "perk plan --help",
+    "perk objective node --help",
+    "perk skills create --help",
+    "perk objective --help 2>&1",
+    "perk init --help", // Click's eager help exits before the command body runs
+    "perk learn docs-check",
+    "perk learn docs-check --json",
+    "pi --version",
+    "pi --version 2>/dev/null | head -1",
+    // already admitted — regression pins
+    "date -u +%Y-%m-%dT%H:%M:%SZ",
+    "stat -f '%Sm %N' f",
+    "npm audit",
+    "npm audit --json",
+    "find . -name '*.ts' -print",
+    "find . -type f -print0 | xargs -0 grep -l foo",
+    "sort -k1,1 f",
+    "sort -r f",
+    "tree -L 2",
+    "tree -a",
+    // a `--sort`/`--tree` flag is not the `sort`/`tree` command
+    "rg --sort path -o 'x' f",
+    "eza --tree -o",
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed: ${cmd}`);
+  }
+});
+
+test("isReadOnlyBashCommand: an argument walk never crosses into the next command", () => {
+  // Each later command's flag would match the earlier command's writer row if the walk crossed
+  // the newline or the operator.
+  for (const cmd of [
+    "git branch\nwc -c README.md",
+    "git config --get user.name\nrg -e needle README.md",
+    "git tag\nsed -n 1p f",
+    "git remote -v; sort -k1 f",
+    "git branch -a; rg -m 1 foo f",
+    "git hash-object f\nrg -w x f",
+    "sed -n 1p f\nrg -i x f",
+    "find . -name x\nrg --fixed-strings -delete f",
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed: ${cmd}`);
+  }
+});
+
+test("isReadOnlyBashCommand: heredoc data is data", () => {
+  for (const cmd of [
+    "wc -c <<'EOF'\na `git add` here and a > here and rm -rf and `npm ci`\nEOF",
+    "cat <<EOF\n-> arrow => fat arrow git push\nEOF",
+    "cat <<-EOF | wc -l\n\t> quoted\n\tEOF",
+    "cat <<'EOF' | wc -c\nsed -i x\nEOF",
+    "echo $(cat <<X\n> inside a substitution's heredoc\nX\n)",
+    "wc -c <<'EOF'\n---\ntitle: x\n---\nEOF",
+    "cat <<A <<'B' | wc -c\nrm a\nA\nmv b\nB",
+    "cat <<EOF\nrm in prose, $(git rev-parse HEAD) -> here\nEOF", // a read-only substitution beside vetoable data
+    "cat <<EOF\n`pwd` > prose\nEOF",
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed: ${cmd}`);
+  }
+});
+
+test("isReadOnlyBashCommand: argument-level writers and non-list forms are blocked", () => {
+  for (const cmd of [
+    // branch: a positional without a list-implying flag, or any writer flag anywhere
+    "git branch foo",
+    "git branch -v foo",
+    "git branch foo main",
+    "git branch -m old new",
+    "git branch -M new",
+    "git branch -c a b",
+    "git branch -C a b",
+    "git branch -u origin/main",
+    "git branch --set-upstream-to=origin/main",
+    "git branch --unset-upstream",
+    "git branch --move a b",
+    "git branch --copy a b",
+    "git branch --edit-description",
+    "git branch -d foo",
+    "git branch -D foo",
+    "git branch '-D' foo",
+    'git branch "-D" foo',
+    "git branch \\-D foo",
+    "git branch --delete foo",
+    "git branch -rd origin/foo",
+    "git branch -a -D foo",
+    "git branch -f foo HEAD",
+    "git branch --force foo",
+    "git branch -t foo origin/foo",
+    "git branch --track foo origin/foo",
+    "git branch --create-reflog foo",
+    "git branch --no-track foo",
+    "git branch --list -D foo",
+    "git branch --format=%(refname) foo",
+    "git branch \\\n  -D foo", // a continued line is one command
+    // remote
+    "git remote add o url",
+    "git remote remove o",
+    "git remote rm o",
+    "git remote rename a b",
+    "git remote set-url o url",
+    "git remote set-head o -a",
+    "git remote set-branches o main",
+    "git remote prune o",
+    "git remote update",
+    "git remote -v add o url",
+    "git remote 'add' o url",
+    // worktree
+    "git worktree add /tmp/x",
+    "git worktree remove x",
+    "git worktree move a b",
+    "git worktree prune",
+    "git worktree lock x",
+    "git worktree unlock x",
+    "git worktree repair",
+    "git worktree",
+    // tag
+    "git tag v1",
+    "git tag v1 HEAD",
+    "git tag -a v1 -m msg",
+    "git tag -am msg v1",
+    "git tag '-a' v1 -m msg",
+    "git tag -s v1",
+    "git tag -u key v1",
+    "git tag -d v1",
+    "git tag --delete v1",
+    "git tag -f v1",
+    "git tag --force v1",
+    "git tag -F msgfile v1",
+    "git tag -e v1",
+    "git tag -l -d v1",
+    "git tag --sort=x v1",
+    // stash: every form but list/show
+    "git stash",
+    "git stash push",
+    "git stash save x",
+    "git stash pop",
+    "git stash apply",
+    "git stash drop",
+    "git stash clear",
+    "git stash branch b",
+    "git stash -u",
+    "git stash -q",
+    "git stash create",
+    "git stash store x",
+    // notes, refs, reflog actions, the remaining whole-subcommand mutators
+    "git notes add -m x",
+    "git notes",
+    "git update-ref refs/heads/x abc",
+    "git update-ref -d refs/heads/x",
+    "git symbolic-ref HEAD refs/heads/x",
+    "git symbolic-ref -d refs/x",
+    "git symbolic-ref --delete refs/x",
+    "git symbolic-ref -m msg HEAD refs/heads/x",
+    "git symbolic-ref",
+    "git reflog expire --all",
+    "git reflog delete HEAD@{1}",
+    "git reflog drop --all",
+    "git reflog drop refs/heads/x",
+    "git reflog plan-2354", // ref-first — over-strict, pinned
+    "git fetch",
+    "git switch main",
+    "git restore f",
+    "git am p",
+    "git apply p",
+    // config: action flags, the subcommand-form writers, the legacy `<key> <value>` set
+    "git config user.name x",
+    "git config --global user.name x",
+    "git config --add x y",
+    "git config --unset x",
+    "git config --unset-all x",
+    "git config --replace-all x y",
+    "git config --rename-section a b",
+    "git config --remove-section a",
+    "git config --edit",
+    "git config -e",
+    "git config set user.name x",
+    "git config unset x",
+    "git config edit",
+    "git config rename-section a b",
+    "git config remove-section a",
+    "git config 'set' k v",
+    // hash-object -w, --output
+    "git hash-object -w f",
+    "git hash-object -wt blob f",
+    "git hash-object '-w' f",
+    "git hash-object -w --stdin",
+    "git diff --output=x.patch",
+    "git log --output x",
+    "git show --output=f HEAD",
+    // global options: `-c`/`--git-dir` never admitted; `-C` keeps every writer veto
+    "git -c alias.x='!python -c 1' x",
+    "git -c core.pager=cat log",
+    "git --git-dir=/x status",
+    "git -C /x branch -D foo",
+    "git -C /x stash pop",
+    "git -C /x tag v1",
+    "git -C /x remote add o u",
+    // find's writers
+    "find . -name '*.log' -delete",
+    "find . -delete",
+    "find . '-delete'",
+    "find . -fprint out.txt",
+    "find . -fprint0 out",
+    "find . -fprintf out '%p\\n'",
+    "find . -fls out",
+    // sed -i, in every spelling the veto reads through
+    "sed -i 's/a/b/' f",
+    "sed -i.bak 's/a/b/' f",
+    "sed '-i.bak' 's/a/b/' f",
+    "sed \"-i\" 's/a/b/' f",
+    "sed \\-i 's/a/b/' f",
+    "sed -i'' 's/a/b/' f",
+    "sed -ni 's/a/b/p' f",
+    "sed -Ei 's/a/b/' f",
+    "sed -e 's/a/b/' -i f",
+    "sed --in-place 's/a/b/' f",
+    "sed --in-place=.bak 's/a/b/' f",
+    "sed -n '1p' f -i",
+    "sed -I 's/a/b/' f",
+    // npm audit fix, sort -o, tree -o, xxd's output operand
+    "npm audit fix",
+    "npm audit fix --force",
+    "sort -o out f",
+    "sort -o./out.txt f",
+    "sort -ro out f",
+    "sort '-o' out f",
+    "sort --output=out f",
+    "sort --output out f",
+    "tree -o out.txt",
+    "tree -ao out",
+    "tree -oout",
+    "xxd in out",
+    "xxd -r in out",
+    "xxd -p f out",
+    "xxd -l 16 f out",
+    // an admitted utility never admits the next command
+    "command -v python && python -c 1",
+    "test -f x && rm x",
+    "true && python -c 1",
+    "set -e; python -c 1",
+    "read -r x < f && python -c 1",
+    "sleep 5; rm x",
+    "tr a b < f > g",
+    "nl f > out",
+    "git rev-parse HEAD > sha",
+    // perk / pi: only the enumerated read verbs
+    "perk init",
+    "perk learn docs-sync",
+    "perk learn docs",
+    "perk plan 12",
+    "perk --version && perk init",
+    "perk objective node-add 2544 --phase 1 --description --help", // an option consumes `--help` as its value
+    "perk plan --force --help",
+    "perk plan 12 --help", // over-strict on non-identifier words — pinned
+    "perk objective node 2.3 --status done --help",
+    "perk plan -- --help",
+    'pi -p "x"',
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
+  }
+});
+
+test("isReadOnlyBashCommand: exec flags of admitted git subcommands and flag words ending at an operator are blocked", () => {
+  for (const cmd of [
+    // `git grep -O<cmd>` runs its pager through the shell; `git ls-remote --upload-pack=<cmd>`
+    // (hidden alias `--exec`) runs a local command — abbreviations included
+    "git grep -Opython x",
+    "git grep -O'python3 -c 1' x",
+    "git grep -nO x",
+    "git grep --open-files-in-pager=python x",
+    "git grep --open x",
+    "git ls-remote --upload-pack=python .",
+    "git ls-remote --upload-pack python .",
+    "git ls-remote --up=python .",
+    "git ls-remote --exec=python .",
+    // a writer flag's word ends at an operator, a newline or a closing `)` as well as a blank
+    "find . -delete; ls",
+    "find . -delete\nls",
+    "find . -delete&& ls",
+    "echo $(find . -delete)",
+    "git branch -a --unset-upstream; ls",
+    "git branch -a --edit-description\nls",
+    "git tag -l -d v1; ls",
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
+  }
+});
+
+test("isReadOnlyBashCommand: heredoc code is still code", () => {
+  for (const cmd of [
+    "cat <<EOF > out\nx\nEOF",
+    "cat <<'EOF' >> out\nx\nEOF",
+    "cat <<EOF\n$(echo x > out)\nEOF",
+    "cat <<EOF\n$(printf x > out)\nEOF",
+    "cat <<EOF\n$(> out echo x)\nEOF", // a leading redirection inside the substitution
+    "cat <<EOF\n$(find . -delete)\nEOF",
+    "cat <<EOF\n$(sort -o out f)\nEOF",
+    "cat <<EOF\n`sed -i s/a/b/ f`\nEOF",
+    "cat <<EOF\n`rm x`\nEOF",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
+    "cat <<EOF\n${x:-$(git branch -D foo)}\nEOF",
+    "cat <<EOF\n$(rm -rf x)\nEOF",
+    "cat <<EOF\n$(python -c 1)\nEOF",
+    "bash <<'EOF'\nrm -rf x\nEOF",
+    "python <<'PY'\nprint(1)\nPY",
+    "sh <<EOF\nls\nEOF",
+    "xargs -0 env <<EOF\nX=1 python\nEOF", // a bare `env` after `xargs` is xargs's own command
+    "awk '{print > \"f\"}' in", // quoted `>` elsewhere stays vetoed on purpose
+    'echo "a > b"',
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
+  }
+});
+
+// The policy comment's accepted leniencies, pinned so a future tightening is a deliberate change.
+test("isReadOnlyBashCommand: recorded leniencies stay as recorded", () => {
+  for (const cmd of [
+    "sed -f script.sed f", // an in-program writer in a program file is invisible
+    "awk -f prog.awk f",
+    "find . -type f -print0 | xargs -0 git branch --list", // run-time appended arguments
+    "sed -f - f <<'EOF'\nw out\nEOF", // a program read from a literal heredoc
+    "sed -'i' 's/a/b/' f", // a quote INSIDE the flag word
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed (recorded leniency): ${cmd}`);
+  }
+});
+
+test("readOnlyBashVerdict: argument-level and heredoc reasons", () => {
+  const reason = (cmd: string) => {
+    const verdict = readOnlyBashVerdict(cmd);
+    return verdict.allowed ? "allowed" : verdict.reason;
+  };
+  const VETO = "matches the destructive veto /";
+  // explicit writer flags and writer subcommands are vetoed…
+  for (const cmd of [
+    "git branch -D foo",
+    "git stash",
+    "find . -delete",
+    "sed -i 's/a/b/' f",
+    "git reflog drop --all",
+  ])
+    assert.ok(reason(cmd).startsWith(VETO), cmd);
+  // …positional-only write forms fail the allowlist shape
+  assert.equal(reason("git branch foo"), "not allowlisted: git branch foo");
+  assert.equal(reason("git tag v1"), "not allowlisted: git tag v1");
+  // heredoc code meets the redirect row; heredoc data meets nothing
+  assert.equal(
+    reason("cat <<EOF\n$(echo x > out)\nEOF"),
+    "matches the destructive veto /(^|[^<])>(?!>)/",
+  );
+  assert.deepEqual(readOnlyBashVerdict("wc -c <<'EOF'\nrm -rf x\nEOF"), { allowed: true });
+});
+
 test("readOnlyBashVerdict: a refusal names its reason", () => {
   const reason = (cmd: string) => {
     const verdict = readOnlyBashVerdict(cmd);

@@ -74,6 +74,18 @@ The raw text from a command word to the end of its simple command (the next same
 operator/newline/closer) — the unit the allowlist regexes match.
 _Avoid_: segment, argv, command line
 
+**Argument-level writer**:
+An allowlisted command whose *argument* turns the read into a write (`find -delete`, `sed -i`,
+`git branch -D`, `git remote add`, `sort -o`); closed by one whole-string veto row each, never by
+removing the command from the allowlist.
+_Avoid_: destructive command, mutating command
+
+**List form**:
+The argument shape under which an argument-sensitive `git` subcommand only reads: an explicit
+list-implying flag present (positionals are patterns), or the bare subcommand with display
+modifiers and no positional.
+_Avoid_: read-only form, safe form
+
 ### Report-wave lane identity
 
 **Semantic lane id**:
