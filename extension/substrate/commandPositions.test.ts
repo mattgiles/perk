@@ -7,6 +7,7 @@ import { test } from "node:test";
 import {
   type CommandRefusal,
   commandPositions,
+  type HeredocBody,
   REFUSAL_REASONS,
   splitTopLevelSegments,
 } from "./commandPositions.ts";
@@ -328,6 +329,80 @@ test("segments: top-level slices, identical through splitTopLevelSegments", () =
     assert.deepEqual(commandPositions(input).segments, expected, input);
     assert.deepEqual(splitTopLevelSegments(input), expected, input);
   }
+});
+
+/** A body span `[start, end)` in the input, with its executable parts. */
+function span(start: number, end: number, executable: string[] = []): HeredocBody {
+  return { start, end, executable };
+}
+
+const BODIES: [string, (input: string) => HeredocBody[]][] = [
+  [
+    "cat <<'EOF' | wc -c\nline one\nline two\nEOF",
+    (x) => [span(x.indexOf("line one"), x.lastIndexOf("EOF"))],
+  ],
+  [
+    "cat <<EOF\n$(echo hi)\nEOF",
+    (x) => [span(x.indexOf("$(echo"), x.lastIndexOf("EOF"), ["$(echo hi)"])],
+  ],
+  [
+    "cat <<EOF\na `pwd` b $(echo x > out)\nEOF",
+    (x) => [span(x.indexOf("a `pwd`"), x.lastIndexOf("EOF"), ["`pwd`", "$(echo x > out)"])],
+  ],
+  // inner before outer
+  [
+    "cat <<EOF\n$(echo $(ls))\nEOF",
+    (x) => [span(x.indexOf("$(echo"), x.lastIndexOf("EOF"), ["$(ls)", "$(echo $(ls))"])],
+  ],
+  [
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
+    "cat <<EOF\n${x:-$(ls)}\nEOF",
+    (x) => [span(x.indexOf("${"), x.lastIndexOf("EOF"), ["$(ls)"])],
+  ],
+  // a literal body executes nothing
+  ["cat <<'EOF'\n$(rm x)\nEOF", (x) => [span(x.indexOf("$(rm"), x.lastIndexOf("EOF"))]],
+  // `<<-` lines keep their leading tabs inside the span
+  ["cat <<-EOF\n\tbody\n\tEOF", (x) => [span(x.indexOf("\tbody"), x.lastIndexOf("\tEOF"))]],
+  [
+    "cat <<A <<'B'\na $(pwd)\nA\nb\nB",
+    (x) => [
+      span(x.indexOf("a $(pwd)"), x.indexOf("\nA\n") + 1, ["$(pwd)"]),
+      span(x.indexOf("\nb\n") + 1, x.lastIndexOf("B")),
+    ],
+  ],
+  // an empty body is a zero-length span at the terminator line's start
+  ["cat <<EOF\nEOF", (x) => [span(x.indexOf("\nEOF") + 1, x.indexOf("\nEOF") + 1)]],
+  // bash joins `EO\⏎F` into the terminator, so the body is empty
+  ["cat <<EOF\nEO\\\nF\npython -c pass\nEOF", (x) => [span(x.indexOf("EO\\"), x.indexOf("EO\\"))]],
+  // a `$(…)` body shares the root source, so its heredoc is reported
+  ["echo $(cat <<X\nx\nX\n)", (x) => [span(x.indexOf("\nx\n") + 1, x.indexOf("\nX\n") + 1)]],
+  // a backtick body is re-lexed as its own input: not reported (recorded limit)
+  ["echo `cat <<X\nx\nX\n`", () => []],
+  ['<<< "text" wc -c', () => []],
+  ["ls", () => []],
+  ["", () => []],
+];
+
+test("heredocBodies: every body the input's own lexer saw, with its executable parts", () => {
+  for (const [input, expected] of BODIES)
+    assert.deepEqual(commandPositions(input).heredocBodies, expected(input), input);
+  // the substitution is still a command position
+  assert.deepEqual(commandsOf("cat <<EOF\n$(echo hi)\nEOF"), ["cat <<EOF", "echo hi"]);
+  const joined = commandsOf("cat <<EOF\nEO\\\nF\npython -c pass\nEOF");
+  assert.ok(Array.isArray(joined) && joined.includes("python -c pass"));
+});
+
+test("heredocBodies: present on the refusal arm", () => {
+  const unterminated = "cat <<EOF\nbody";
+  const result = commandPositions(unterminated);
+  assert.equal(result.ok ? "ok" : result.refusal, "unterminated-heredoc");
+  assert.deepEqual(result.heredocBodies, [span(unterminated.indexOf("body"), unterminated.length)]);
+  const wrapper = "env -Q x <<EOF\nb $(ls)\nEOF";
+  const refused = commandPositions(wrapper);
+  assert.equal(refused.ok ? "ok" : refused.refusal, "wrapper-usage");
+  assert.deepEqual(refused.heredocBodies, [
+    span(wrapper.indexOf("b $(ls)"), wrapper.lastIndexOf("EOF"), ["$(ls)"]),
+  ]);
 });
 
 test("segments: a later scan survives an earlier unmodeled construct", () => {

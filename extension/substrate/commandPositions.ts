@@ -24,7 +24,9 @@
 // exact, pre-expansion words of the simple command's own `find`/`fd` (`fd -Hx`, an exec'd
 // command's own exec flag, `find . $'-exec' …`); words taken lexically, so an unquoted glob or
 // brace expansion counts as one word; `\\` inside backticks (bash halves it before the body
-// parses); bash syntax errors that run nothing (empty commands, an unbalanced `if`/`fi`).
+// parses); bash syntax errors that run nothing (empty commands, an unbalanced `if`/`fi`); a heredoc
+// inside a backtick body or an expanding body's substitution is not reported to the veto (its body
+// stays vetoable).
 // Recursion follows nesting depth: pathological nesting throws, which both consumers contain (the
 // gate fails closed, the classifier fails open).
 
@@ -52,19 +54,40 @@ export const REFUSAL_REASONS: Readonly<Record<CommandRefusal, string>> = {
     "unsupported shell syntax (subshell, function, array, arithmetic, case/select/[[, redirection without operand, nested backtick escape, trailing backslash, or quoting this gate cannot resolve)",
 };
 
-export type CommandPositions =
-  | { ok: true; commands: readonly string[]; segments: readonly string[] }
-  | { ok: false; refusal: CommandRefusal; segments: readonly string[] };
+/** A heredoc body the input's own lexer saw — data to the command that reads it, except its substitutions. */
+export type HeredocBody = {
+  /** The body's span in the input: the first body line's start to the terminator line's start (the input's end when unterminated). */
+  readonly start: number;
+  readonly end: number;
+  /** An expanding body's substitutions as raw source text (`$(…)`, `` `…` ``) — the parts of the body bash executes; empty for a literal body. */
+  readonly executable: readonly string[];
+};
 
-/** One pass over the command text: every simple-command text at every command position + the top-level segments. */
+export type CommandPositions =
+  | {
+      ok: true;
+      commands: readonly string[];
+      segments: readonly string[];
+      heredocBodies: readonly HeredocBody[];
+    }
+  | {
+      ok: false;
+      refusal: CommandRefusal;
+      segments: readonly string[];
+      heredocBodies: readonly HeredocBody[];
+    };
+
+/** One pass over the command text: every simple-command text at every command position, the top-level segments and every heredoc body. */
 export function commandPositions(command: string): CommandPositions {
-  const top = new Lexer(command).frame(null);
+  const lexer = new Lexer(command);
+  const top = lexer.frame(null);
   const segments = segmentsOf(top);
+  const heredocBodies = lexer.bodies;
   const dispatch = new Dispatcher();
   dispatch.frame(top);
   return dispatch.refusal === null
-    ? { ok: true, commands: dispatch.commands, segments }
-    : { ok: false, refusal: dispatch.refusal, segments };
+    ? { ok: true, commands: dispatch.commands, segments, heredocBodies }
+    : { ok: false, refusal: dispatch.refusal, segments, heredocBodies };
 }
 
 /** The top-level segments only (the scan-timeout classifier's view) — lexing alone, always covering the whole input. */
@@ -133,6 +156,10 @@ class Lexer {
   i = 0;
   /** `)` while lexing a `$(`/`<(`/`>(` body. */
   closer: ")" | null = null;
+  /** Every heredoc body lexed from this input — offsets are into `src`, so a re-lexed copy's are its own. */
+  bodies: HeredocBody[] = [];
+  /** Every substitution's raw text, inner before outer. */
+  substitutions: string[] = [];
   constructor(src: string) {
     this.src = src;
   }
@@ -249,8 +276,10 @@ class Lexer {
 
   /** `$(`, `<(` or `>(` consumed: lex to the matching `)`. */
   private subframe(): Frame {
+    const start = this.i - 2;
     const frame = this.frame(")");
     if (this.i < this.src.length) this.i++;
+    this.substitutions.push(this.src.slice(start, this.i));
     return frame;
   }
 
@@ -370,7 +399,9 @@ class Lexer {
     if (/\\[`$]/.test(body)) word.refuse("unmodeled-syntax");
     if (close >= this.src.length) word.refuse("unterminated-substitution");
     word.expand(new Lexer(body).frame(null));
-    this.i = Math.min(close + 1, this.src.length);
+    const end = Math.min(close + 1, this.src.length);
+    this.substitutions.push(this.src.slice(this.i, end));
+    this.i = end;
   }
 
   /**
@@ -379,9 +410,12 @@ class Lexer {
    * as double-quoted text; a literal body is data.
    */
   private body(heredoc: Heredoc): Token {
+    const start = this.i;
+    let end = this.src.length;
     const lines: string[] = [];
     let terminated = false;
     while (this.i < this.src.length && !terminated) {
+      const lineStart = this.i;
       let line = "";
       for (let c = this.src[this.i++]; c !== undefined && c !== "\n"; c = this.src[this.i++]) {
         if (heredoc.expanding && c === "\\" && this.i < this.src.length) {
@@ -390,13 +424,20 @@ class Lexer {
         } else line += c;
       }
       terminated = (heredoc.strip ? line.replace(/^\t+/, "") : line) === heredoc.tag;
-      if (!terminated) lines.push(line);
+      if (terminated) end = lineStart;
+      else lines.push(line);
     }
     this.i = Math.min(this.i, this.src.length);
     const content = new Word();
     content.text = lines.join("\n");
     if (!terminated) content.refuse("unterminated-heredoc");
-    if (heredoc.expanding) new Lexer(content.text).double(content, null);
+    let executable: readonly string[] = [];
+    if (heredoc.expanding) {
+      const inner = new Lexer(content.text);
+      inner.double(content, null);
+      executable = inner.substitutions;
+    }
+    this.bodies.push({ start, end, executable });
     return { kind: "body", end: this.i, expanding: heredoc.expanding, content };
   }
 }
