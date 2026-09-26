@@ -23,8 +23,9 @@ knowledge below is what an agent can't derive from reading any single file.
 - Two delivery doors (cold + warm) share a dedup marker so a skill never lands twice — "The two
   doors and the cold↔warm dedup marker".
 - Linked-worktree delivery works only because the cold door mirrors `.agents/skills/` during
-  launch positioning (gitignored — a dangling-binding warning in a worktree is the symptom) —
-  "Linked-worktree delivery depends on the cold door mirroring `.agents/skills/`".
+  launch positioning (a dangling-binding warning in a worktree is the symptom; the mirror itself
+  is `cold-door-launch.md`'s) — "Linked-worktree delivery depends on the cold door mirroring
+  `.agents/skills/`".
 - A skill may carry NO binding and be discovered purely by frontmatter `description` (which is
   then its primary documentation, and delivered references must be self-contained) —
   "Description-discovered ≠ stage-bound (the perk-expert pattern)".
@@ -160,12 +161,11 @@ Two delivery-surface boundaries that held:
 ## Linked-worktree delivery depends on the cold door mirroring `.agents/skills/`
 
 Both delivery doors read `.agents/skills/<name>/SKILL.md` from the **session cwd** (the worktree),
-but a linked worktree's `.agents/skills/` is empty unless the cold door **mirrors it during launch
-positioning** — `.agents/skills/` is gitignored (so `git worktree add` never carries it) and pi only
-discovers skills up to the worktree's own git root. A dangling-binding warning in a worktree session
-is the **symptom** of a missing mirror, not a config error. The mirror mechanism
-(`materialize_skills` in `launch_stage`, per-skill single-hop symlinks, loud-but-non-fatal +
-idempotent) lives in `workflow/cold-door-launch.md`.
+so a bound skill reaches a linked-worktree session only if the cold door **mirrored
+`.agents/skills/` during launch positioning**. A dangling-binding warning in a worktree session is
+the **symptom** of a missing mirror, not a config error. Why a linked worktree starts with no
+skills, and how the mirror works, is `workflow/cold-door-launch.md` § "Worktree positioning must
+mirror `.agents/skills/`".
 
 **Remote drives get skills via the real skills-CLI sync, not the mirror.** The remote runner
 checkout lacks `.agents/skills/` (gitignored) and the worktree *is* the checkout, so mirroring
@@ -202,12 +202,14 @@ the mechanics.
 
 ### The self-repo skill-layout asymmetry (the biggest trap)
 
-perk's own `perk-*` skills are **NOT** committed under `.agents/skills/` in the self-repo — the
-committed entries there are *borrowed* skills (`dignified-python`, `ruff`, `ty`, `uv`, …). The
-`perk-*` skills (23 at this writing — re-derive against the `skills/` directory, don't trust the
-count) live at `skills/<name>/SKILL.md` and reach Pi via the `..` package's `skills` CLI sync, not
-via `.agents/skills/` symlinks the self-repo materializes. A naive `.agents/skills/<name>/SKILL.md`
-presence check therefore emits **one false warning per bound `perk-*` skill** on perk's own
+perk's own `perk-*` skills are **NOT** committed under `.agents/skills/` in the self-repo — nothing
+is: the directory is gitignored skills-CLI runtime state (see the plan-claim caution below). The
+`perk-*` skills live at `skills/<name>/SKILL.md` — the only roster of the skills hosted there is
+`src/perk/convergence/init/skills.py::PERK_SKILLS`, which
+`tests/test_packaging.py::test_perk_skills_matches_skills_dir` pins to the directory both ways —
+and reach Pi via the `..` package's `skills` CLI sync, not via `.agents/skills/` symlinks the
+self-repo materializes. A naive `.agents/skills/<name>/SKILL.md` presence check therefore emits
+**one false warning per bound `perk-*` skill** on perk's own
 `perk doctor` (8 at the time the trap was hit). The current mechanics (the one-time
 `self_repo=` fallback param is **retired**): `is_skill_installed(root, skill)` is strict on
 `.agents/skills/<name>/SKILL.md` — the delivery read path — in self-repo and consumer trees
@@ -466,5 +468,6 @@ a plane that deliberately doesn't consume.
 - `docs/learned/workflow/init-doctor.md` — why a report-only check ≠ a hand-authored managed check
 - `docs/learned/workflow/init-external-cli.md` — the `skills` CLI as single delivery path
 - `docs/learned/pi/subagents.md` — `/pr-review` (`command:pr-review`), the concrete `command:<id>` binding instance
-- `docs/learned/workflow/cold-door-launch.md` — the worktree `.agents/skills/` mirror (`materialize_skills`);
-  also the launch argv seam the exposure scoping flags compose into
+- `docs/learned/workflow/cold-door-launch.md` — § "Worktree positioning must mirror
+  `.agents/skills/`" (the worktree mirror's single home); also the launch argv seam the exposure
+  scoping flags compose into
