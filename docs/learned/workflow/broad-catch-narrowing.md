@@ -186,10 +186,10 @@ precedent is canonical; `_parse_created_session` was retyped to match it.
 
 ## A convergence reading a file perk does not own classifies EVERY read outcome
 
-*(Historical instance — the `subagent-worktree-default` managed convergence and its module
-`src/perk/convergence/init/subagent_config.py` were deleted with the conflict-resolver dispatch
-reduction (PR #2328); perk now observes-and-refuses pi-subagents' private `config.json` and never
-converges it (`workflow/init-doctor.md`). The classification rule stands.)*
+*(Historical instance — the `subagent-worktree-default` managed convergence and its
+`subagent_config` module under `src/perk/convergence/init/` were deleted with the conflict-resolver
+dispatch reduction (PR #2328); perk now observes-and-refuses pi-subagents' private `config.json`
+and never converges it (`workflow/init-doctor.md`). The classification rule stands.)*
 
 A managed convergence over a foreign file (pi-subagents' native `config.json`) met three
 misclassifications at once: `path.is_file()` misread a *directory* as "absent" while the TS engine
@@ -202,18 +202,23 @@ into one path-naming `UserFacingCliError` *inside* the convergence, so both call
 continued. The review wave found it — the plan's "malformed JSON" arm was too narrow for a file
 another program writes.
 
-The live read-side instance is doctor's report-only foreign-file reader — `_fff_file_mode` in
-`src/perk/convergence/doctor/checks.py` (its sibling `_intercom_bridge_mode` went with the retired
-`subagent-bridge-config` check) — under a different posture (best-effort `None`; the owning check
-or the foreign program carries the complaint), where one `(OSError, ValueError)` net is what covers
-the `UnicodeDecodeError` and `JSONDecodeError` arms the deleted convergence had to enumerate.
-
-When the reader's cause reaches a human, the classification must name it (#2472):
-`read_text(encoding="utf-8")` raises `UnicodeDecodeError` (a `ValueError`) before `json.loads`, so
-catching `(OSError, json.JSONDecodeError)` lets invalid bytes crash `perk doctor`. Distinguish not
-readable / not valid UTF-8 / not valid JSON / not a JSON object and carry the cause into the
-message, so a "fix the JSON" remediation is never issued for a non-JSON failure — the
-settings-problem classification in `perk/convergence/doctor/checks.py`.
+The live instance is doctor's report-only reader of pi's `settings.json` —
+`src/perk/convergence/doctor/checks.py::_settings_packages`, which `_subagent_package_scope_check`
+calls for the operator-owned user-scope file (resolved via `launch_pi_agent_dir`) and for the
+project `.pi/settings.json`. An absent file, or one with no list-valued `packages` key, is `[]`.
+For a present regular file it splits the read from the parse, and each failure comes back as a
+`_SettingsProblem` naming one distinct cause: `UnicodeDecodeError` from
+`read_text(encoding="utf-8")` → not valid UTF-8; any other `OSError` → not readable (with the OS
+`strerror`, else the exception class name); `json.JSONDecodeError` → not valid JSON; a non-`dict`
+top level → not a JSON object. The check renders the cause into its `warn` — the user scope as
+`<path> is <reason>` plus a "readable UTF-8 JSON object" remediation, the project scope naming the
+reason and deferring to the `settings-wiring` check — so a "fix the JSON" remediation is never
+issued for a non-JSON failure. The cause must be named because it reaches a human (#2472):
+`UnicodeDecodeError` is a `ValueError` raised before `json.loads` ever runs, so a
+`(OSError, json.JSONDecodeError)` net lets invalid bytes crash `perk doctor`. One arm stays coarse:
+the `is_file()` gate sends a path that exists but is not a regular file (a directory) to the absent
+`[]` arm, so this probe never reports that shape — a convergence acting on the result needs the
+`exists()`/`is_file()` split above.
 
 ## Cross-references
 

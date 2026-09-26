@@ -32,12 +32,14 @@ perk chose (2) — matching the suite's dominant style. **Lesson:** when a `src`
 ty/pytest resolution roots, audit **every** `from tests.<helper>` dotted call-site import, not just
 the helper module's own internals — the break is at the *importers*, not the moved module.
 
-## The "byte-identical wheel" proof is 261/263, not a literal `IDENTICAL`
+## The "byte-identical wheel" proof enumerates the allowed diff, not a literal `IDENTICAL`
 
 To prove the `src` move is structural-only, build the wheel on base + branch and diff the payloads
-(excluding `*.dist-info/`). The result is **not** a bare `IDENTICAL` — exactly **2 of 263 members
-differ**: the two `__file__`-relative resolvers that had to move one level deeper
-(`parent.parent` → `parents[2]`) in `src/perk/_resources.py` + `src/perk/__init__.py`.
+(excluding `*.dist-info/`). At the conversion (#1057) the result was **not** a bare `IDENTICAL` —
+261 of that wheel's 263 members matched and exactly **2 differed**: the two `__file__`-relative
+resolvers that had to move one level deeper (`parent.parent` → `parents[2]`) in
+`src/perk/_resources.py` + `src/perk/__init__.py`. The member counts are that build's event
+evidence, not a standing expectation — a later proof re-measures its own wheel.
 
 Those changed lines are the **editable/dev-only fallback** — dead code in the *installed* wheel,
 which resolves resources via `importlib.metadata` + the `_shared`/`_agents`/`_prompts` package data,
@@ -64,6 +66,16 @@ move are:
 **Force-includes stay unchanged** because the build root stays the repo-root `pyproject.toml`. This
 is precisely *why root-package layout beats a nested/virtual-root layout*: no `../` external
 force-include paths, no sdist→wheel round-trip breakage. `[tool.perk] self` stays at the root too.
+
+**The current surfaces are member-aware.** Since the dev-only `packages/perk-dev` member landed
+(#1060), the type-check and lint surfaces name it beside the root package:
+`[tool.ty.environment] root` carries `packages/perk-dev/src` (so `import perk_dev` resolves),
+`[tool.ty.src] include` carries `packages/perk-dev/src/perk_dev`, and `[tool.ruff] include`
+carries `packages/perk-dev/src/**/*.py`. The build surfaces do **not**: neither wheel `packages`
+nor sdist `only-include` names anything under `packages/`, because the member is never published
+(`tests/test_packaging.py::test_wheel_excludes_perk_dev` / `test_sdist_excludes_perk_dev`;
+`workflow/distribution.md`). `pyproject.toml` is the authority for the arrays' current contents —
+read it rather than this summary.
 
 ## Two expected non-events
 
