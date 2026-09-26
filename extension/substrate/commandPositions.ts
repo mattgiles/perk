@@ -13,7 +13,11 @@
 // re-parses them. The dispatcher knows only the command-position rules: assignment prefixes, a
 // fixed keyword set, the wrapper flag tables, find/fd exec flags. Lexical refusals ride on tree
 // nodes and never stop the lexer, so `segments` (the scan-timeout classifier's view) always covers
-// the whole input; the first refusal in walk order (a node before its children) wins.
+// the whole input; the first refusal in walk order (a node before its children) wins. The lexer
+// also builds the veto view (`vetoText`): every substitution, `${…}` and heredoc body collapsed out
+// of the text that holds it, each substitution's own text appended on a line of its own — so the
+// destructive veto reads each command's words without a nested operator in the way, reads what
+// bash executes inside a substitution exactly like top-level text, and never reads heredoc data.
 //
 // Not a shell parser: it refuses what it does not model — fail-closed on the unknown, never on the
 // modeled — and validates no compound-command structure. Accepted leniencies, recorded rather than
@@ -24,9 +28,7 @@
 // exact, pre-expansion words of the simple command's own `find`/`fd` (`fd -Hx`, an exec'd
 // command's own exec flag, `find . $'-exec' …`); words taken lexically, so an unquoted glob or
 // brace expansion counts as one word; `\\` inside backticks (bash halves it before the body
-// parses); bash syntax errors that run nothing (empty commands, an unbalanced `if`/`fi`); a heredoc
-// inside a backtick body or an expanding body's substitution is not reported to the veto (its body
-// stays vetoable).
+// parses); bash syntax errors that run nothing (empty commands, an unbalanced `if`/`fi`).
 // Recursion follows nesting depth: pathological nesting throws, which both consumers contain (the
 // gate fails closed, the classifier fails open).
 
@@ -54,40 +56,29 @@ export const REFUSAL_REASONS: Readonly<Record<CommandRefusal, string>> = {
     "unsupported shell syntax (subshell, function, array, arithmetic, case/select/[[, redirection without operand, nested backtick escape, trailing backslash, or quoting this gate cannot resolve)",
 };
 
-/** A heredoc body the input's own lexer saw — data to the command that reads it, except its substitutions. */
-export type HeredocBody = {
-  /** The body's span in the input: the first body line's start to the terminator line's start (the input's end when unterminated). */
-  readonly start: number;
-  readonly end: number;
-  /** An expanding body's substitutions as raw source text (`$(…)`, `` `…` ``) — the parts of the body bash executes; empty for a literal body. */
-  readonly executable: readonly string[];
-};
-
 export type CommandPositions =
-  | {
-      ok: true;
-      commands: readonly string[];
-      segments: readonly string[];
-      heredocBodies: readonly HeredocBody[];
-    }
-  | {
-      ok: false;
-      refusal: CommandRefusal;
-      segments: readonly string[];
-      heredocBodies: readonly HeredocBody[];
-    };
+  | { ok: true; commands: readonly string[]; segments: readonly string[]; vetoText: string }
+  | { ok: false; refusal: CommandRefusal; segments: readonly string[]; vetoText: string };
 
-/** One pass over the command text: every simple-command text at every command position, the top-level segments and every heredoc body. */
+/**
+ * A collapsed span's stand-in: one plain word, so the enclosing command keeps its word count and
+ * an argument walk crosses it; a heredoc body collapses to nothing (its lines are data).
+ */
+const COLLAPSED = "_";
+
+/** One pass over the command text: every simple-command text at every command position, the top-level segments and the veto view. */
 export function commandPositions(command: string): CommandPositions {
   const lexer = new Lexer(command);
   const top = lexer.frame(null);
   const segments = segmentsOf(top);
-  const heredocBodies = lexer.bodies;
+  const vetoText = [collapse(command, 0, command.length, lexer.children), ...lexer.pieces].join(
+    "\n",
+  );
   const dispatch = new Dispatcher();
   dispatch.frame(top);
   return dispatch.refusal === null
-    ? { ok: true, commands: dispatch.commands, segments, heredocBodies }
-    : { ok: false, refusal: dispatch.refusal, segments, heredocBodies };
+    ? { ok: true, commands: dispatch.commands, segments, vetoText }
+    : { ok: false, refusal: dispatch.refusal, segments, vetoText };
 }
 
 /** The top-level segments only (the scan-timeout classifier's view) — lexing alone, always covering the whole input. */
@@ -156,10 +147,10 @@ class Lexer {
   i = 0;
   /** `)` while lexing a `$(`/`<(`/`>(` body. */
   closer: ")" | null = null;
-  /** Every heredoc body lexed from this input — offsets are into `src`, so a re-lexed copy's are its own. */
-  bodies: HeredocBody[] = [];
-  /** Every substitution's raw text, inner before outer. */
-  substitutions: string[] = [];
+  /** The collapsible spans completed at the current nesting level (a substitution swaps its own list in). */
+  children: Span[] = [];
+  /** Every substitution's own text with its children collapsed, inner before outer — the veto view's appended lines. */
+  pieces: string[] = [];
   constructor(src: string) {
     this.src = src;
   }
@@ -277,9 +268,13 @@ class Lexer {
   /** `$(`, `<(` or `>(` consumed: lex to the matching `)`. */
   private subframe(): Frame {
     const start = this.i - 2;
+    const outer = this.children;
+    this.children = [];
     const frame = this.frame(")");
     if (this.i < this.src.length) this.i++;
-    this.substitutions.push(this.src.slice(start, this.i));
+    this.pieces.push(collapse(this.src, start, this.i, this.children));
+    this.children = outer;
+    outer.push({ start, end: this.i, stand: COLLAPSED });
     return frame;
   }
 
@@ -346,14 +341,17 @@ class Lexer {
   /** `${` consumed: one unit up to its `}` — no word splitting, operators or comments inside. */
   private brace(word: Word, inDouble: boolean): void {
     word.expand();
+    const start = this.i - 2;
     for (;;) {
       const c = this.src[this.i];
       if (c === undefined) {
         word.refuse("unterminated-substitution");
+        this.children.push({ start, end: this.src.length, stand: COLLAPSED });
         return;
       }
       if (c === "}") {
         this.i++;
+        this.children.push({ start, end: this.i, stand: COLLAPSED });
         return;
       }
       if (c === "\\") this.i += 2;
@@ -398,9 +396,18 @@ class Lexer {
     const body = this.src.slice(this.i + 1, close);
     if (/\\[`$]/.test(body)) word.refuse("unmodeled-syntax");
     if (close >= this.src.length) word.refuse("unterminated-substitution");
-    word.expand(new Lexer(body).frame(null));
+    const inner = new Lexer(body);
+    word.expand(inner.frame(null));
     const end = Math.min(close + 1, this.src.length);
-    this.substitutions.push(this.src.slice(this.i, end));
+    // The body is a raw slice, so its spans shift by its offset into this input.
+    const offset = this.i + 1;
+    const spans = inner.children.map((s) => ({
+      ...s,
+      start: s.start + offset,
+      end: s.end + offset,
+    }));
+    this.pieces.push(...inner.pieces, collapse(this.src, this.i, end, spans));
+    this.children.push({ start: this.i, end, stand: COLLAPSED });
     this.i = end;
   }
 
@@ -431,15 +438,32 @@ class Lexer {
     const content = new Word();
     content.text = lines.join("\n");
     if (!terminated) content.refuse("unterminated-heredoc");
-    let executable: readonly string[] = [];
     if (heredoc.expanding) {
       const inner = new Lexer(content.text);
       inner.double(content, null);
-      executable = inner.substitutions;
+      this.pieces.push(...inner.pieces);
     }
-    this.bodies.push({ start, end, executable });
+    this.children.push({ start, end, stand: "" });
     return { kind: "body", end: this.i, expanding: heredoc.expanding, content };
   }
+}
+
+/** A span of `src` the veto view collapses to `stand`. */
+type Span = { start: number; end: number; stand: string };
+
+/**
+ * `src[start, end)` with each outermost span inside it replaced by its stand-in. Spans may nest (a
+ * substitution inside `${…}` completes first); a span inside an earlier one is already covered.
+ */
+function collapse(src: string, start: number, end: number, spans: readonly Span[]): string {
+  let text = "";
+  let at = start;
+  for (const span of [...spans].sort((a, b) => a.start - b.start || b.end - a.end)) {
+    if (span.start < at || span.start < start || span.end > end) continue;
+    text += src.slice(at, span.start) + span.stand;
+    at = span.end;
+  }
+  return text + src.slice(at, end);
 }
 
 /**

@@ -15,7 +15,7 @@
 // `session_start`/`session_tree` rebuild points plus one `resources_discover` re-apply.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { commandPositions, type HeredocBody, REFUSAL_REASONS } from "./commandPositions.ts";
+import { commandPositions, REFUSAL_REASONS } from "./commandPositions.ts";
 import { render } from "./prompts.ts";
 import { branchCarries, branchOf, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
@@ -637,17 +637,20 @@ function textCarries(content: unknown, needles: readonly string[]): boolean {
 
 // --- pure policy (perk-owned and self-contained; it began as a copy of plan-mode/utils.ts) -------
 //
-// Two layers. (1) A whole-string destructive veto over the command with every heredoc body's data
-// blanked out and every substitution inside an expanding body appended — a body is data to the
-// command that reads it, but what bash executes inside it is judged exactly like top-level text.
-// (2) An allowlist at every command position (`commandPositions.ts`). Destructive wins.
+// Two layers. (1) A whole-string destructive veto over the walker's veto view (`vetoText`): every
+// substitution, `${…}` and heredoc body collapsed out of the text that holds it, each substitution's
+// own text appended on a line of its own — so an argument walk crosses `$(a; b)`, a heredoc body is
+// data to the command that reads it, and what bash executes inside a substitution is judged
+// exactly like top-level text. (2) An allowlist at every command position (`commandPositions.ts`).
+// Destructive wins.
 //
 // The argument-level rule: an allowlisted command whose argument can turn the read into a write is
-// admitted in its list form only (an explicit list-implying flag, or bare with display modifiers
-// and no positional); each writer flag gets one veto row, reading through a leading quote or
-// escape on the flag word; a positional-only write form (`git branch <name>`, `git tag <name>`,
-// `git config <key> <value>`, `git symbolic-ref <ref> <target>`) is closed by the allowlist shape.
-// Interpreters (`python`, `node`, `uv run`, `sh -c`) are never allowlisted.
+// admitted in its list form only (enumerated options plus positionals with a list-implying option
+// among them, or bare with display modifiers and no positional); each writer flag gets one veto
+// row, reading through a leading quote or escape on the flag word; a positional-only write form
+// (`git branch <name>`, `git tag <name>`, `git config <key> <value>`, `git symbolic-ref <ref>
+// <target>`) is closed by the allowlist shape. Interpreters (`python`, `node`, `uv run`, `sh -c`)
+// are never allowlisted.
 //
 // Accepted leniencies, recorded rather than chased:
 //  1. In-program writers inside allowlisted commands' program text — `awk 'BEGIN{system(…)}'`,
@@ -658,19 +661,16 @@ function textCarries(content: unknown, needles: readonly string[]): boolean {
 //     the class already recorded as `fd -x env`; an expansion (`$X`, `$(…)`) likewise supplies
 //     words the rows read only as their source text.
 //  3. A quote or escape INSIDE a flag word (`-\i`, `-'i'`, `-""i`) — only a LEADING one
-//     (`'-i'`, `\-i`) is read through; a flag lookalike behind a backslash-escaped quote inside a
-//     quoted argument (`--format "x\" -a \""`) likewise; and abbreviated long options (`--del`,
-//     `--in-pl`, `--out=f` — git's option parser and getopt_long accept unambiguous prefixes).
-//  4. A list-flag lookalike consumed as another flag's value (`git tag --format -l v9` — git
-//     itself refuses `--format` outside list mode; recorded, not relied on).
-//  5. The arg-blind admitted commands `curl -o/-O` and `agent-browser --output`.
-//  6. Whole-string vetoes read quoted prose (`echo "git branch -D x"`, `printf '->'`) and flag
+//     (`'-i'`, `\-i`) is read through; and abbreviated long options (`--del`, `--in-pl`,
+//     `--out=f` — git's option parser and getopt_long accept unambiguous prefixes) in the veto rows.
+//  4. The arg-blind admitted commands `curl -o/-O` and `agent-browser --output`.
+//  5. Whole-string vetoes read quoted prose (`echo "git branch -D x"`, `printf '->'`) and flag
 //     clusters (`rg -ln` via `\bln\b`) — over-strict by design; heredoc data is the one carve-out.
-//  7. Over-strict exact-form rows: quoted admitted flags (`git branch '--list'`), `git config` keys
-//     with non-`[\w-]` subsections (`url.https://…`), a quoted single `symbolic-ref` ref, a
-//     ref-first `git reflog <ref>`.
-//  8. A heredoc inside a backtick body or an expanding body's substitution stays visible to the
-//     veto (the walker reports only the bodies it lexes in the input's own coordinates).
+//  6. Over-strict exact-form rows: quoted, clustered, abbreviated or unlisted options in a list
+//     form (`git branch '--list'`, `-av`, `--lis`), a substitution among a list form's words (its
+//     inner words read as the command's own: `git branch -a --contains $(git rev-list …)`; quote a
+//     variable instead), `git config` keys with non-`[\w-]` subsections (`url.https://…`), a quoted
+//     single `symbolic-ref` ref, a ref-first `git reflog <ref>`.
 
 /**
  * Between the words of ONE command: blanks and `\`-newline continuations, never a bare newline — an
@@ -678,10 +678,11 @@ function textCarries(content: unknown, needles: readonly string[]): boolean {
  */
 const SEP = String.raw`(?:[ \t]|\\\n)+`;
 /**
- * One shell word as the argument-level rows read it: whole quoted spans or single unquoted
- * characters (one per iteration, so backtracking stays linear), never an operator.
+ * One shell word as the argument-level rows read it: an escaped character (`\;`), a whole quoted
+ * span (`\"` stays inside a double-quoted one) or a single unquoted character — one per iteration
+ * and the alternatives disjoint, so backtracking stays linear — never an unescaped operator.
  */
-const WORD = String.raw`(?:'[^']*'|"[^"]*"|[^\s'"|;&])+`;
+const WORD = String.raw`(?:\\[^\n]|'[^']*'|"(?:[^"\\]|\\[\s\S])*"|[^\s'"|;&\\])+`;
 /** The argument walk: any number of further words of the same command. */
 const WORDS = `(?:${SEP}${WORD})*`;
 /**
@@ -690,10 +691,11 @@ const WORDS = `(?:${SEP}${WORD})*`;
  */
 const Q = String.raw`(?:\$?['"]|\\)?`;
 /**
- * The end of a flag word in the whole-string scan: a blank or newline, `=`, a closing quote, an
- * operator or the end — `$` alone is the end of the whole scanned text, not of the command.
+ * The end of a flag word in the whole-string scan: a blank or newline, `=`, a closing quote or
+ * backtick, an operator or the end — `$` alone is the end of the whole scanned text, not of the
+ * command.
  */
-const END = String.raw`(?=[\s='"|;&()<>]|$)`;
+const END = String.raw`(?=[\s='"\x60|;&()<>]|$)`;
 /**
  * git's admitted global options. Never `-c key=value` (`-c alias.x='!cmd' x` runs any command),
  * never `--git-dir`/`--work-tree`.
@@ -706,6 +708,33 @@ const GIT = `git${GIT_OPTIONS}${SEP}`;
  * reduced them to fd duplication, `/dev/null` and input.
  */
 const TAIL = String.raw`(?:${SEP}(?:\d*>&\d+|(?:\d+|&)?>>?[ \t]*/dev/null|\d*<{1,3}[ \t]*${WORD}))*[ \t]*$`;
+/** A positional word — never an option, not even a quoted or escaped one (`'--no-list'`). */
+const POSITIONAL = `(?!${Q}-)${WORD}`;
+
+/**
+ * A list-form row: every word an enumerated option (a value-taking one consumes its value, so
+ * `--format --list` is no list flag) or a positional, and at least one list-implying option — so a
+ * negation (`--no-list`), an abbreviation or any other unlisted option never passes as list mode.
+ * Each word parses one way only (a list option's separate commit is just a positional), and the
+ * witness is a lookahead, so a failing match backtracks linearly.
+ */
+function listForm(subcommand: string, options: string, list: string): string {
+  const word = `(?:${options}|${list}|${POSITIONAL})`;
+  return String.raw`${subcommand}(?=(?:${SEP}${word})*?${SEP}(?:${list})(?=\s|$))(?:${SEP}${word})*${TAIL}`;
+}
+
+/** `git branch`'s display modifiers (a value-taking one with its value). */
+const BRANCH_DISPLAY = String.raw`-v|-vv|--verbose|-q|--quiet|-i|--ignore-case|--no-color|--color(?:=\S+)?|--column(?:=\S+)?|--no-column|--abbrev(?:=\d+)?|--no-abbrev|--omit-empty|(?:--sort|--format)(?:=|${SEP})${WORD}`;
+/** Its list-implying options: `-a`/`-r` refuse a branch name; the filters imply list mode. */
+const BRANCH_LIST = `-l|--list|-a|--all|-r|--remotes|--show-current|(?:--contains|--no-contains|--merged|--no-merged|--points-at)(?:=${WORD})?`;
+/** `git tag`'s display modifiers. */
+const TAG_DISPLAY = String.raw`-i|--ignore-case|--no-color|--color(?:=\S+)?|--column(?:=\S+)?|--no-column|--omit-empty|(?:--sort|--format)(?:=|${SEP})${WORD}`;
+/** Its list-implying options: `-n` and the filters imply list mode. */
+const TAG_LIST = String.raw`-l|--list|-n\d*|(?:--contains|--no-contains|--merged|--no-merged|--points-at)(?:=${WORD})?`;
+/** `git config`'s scope, type and display options (a value-taking one with its value). */
+const CONFIG_OPTIONS = String.raw`--local|--global|--system|--worktree|--show-origin|--show-scope|--name-only|-z|--null|--includes|--no-includes|--bool|--int|--bool-or-int|--path|--expiry-date|--type=\S+|(?:--default|--file|-f|--blob)(?:=|${SEP})${WORD}`;
+/** Its getter/list actions — git refuses mixing one with any other action. */
+const CONFIG_GET = "--get(?:-all|-regexp|-urlmatch|-color|-colorbool)?|--list|-l";
 
 /**
  * An allowlist row for one `git` subcommand shape (case-sensitive: git flag case is meaningful).
@@ -840,25 +869,17 @@ const SAFE_PATTERNS = [
   /^\s*htop\b/,
   /^\s*free\b/,
   // git's read-only plumbing. Pure reads take any arguments (their writer flags are vetoed); an
-  // argument-sensitive subcommand is admitted in its list form only — a list-implying flag
-  // present as its own word (positionals are then patterns/commits), or bare with display
-  // modifiers and no positional — so `git branch <name>` / `git tag <name>` / `git config <key>
-  // <value>` / `git symbolic-ref <ref> <target>` fail the shape.
+  // argument-sensitive subcommand is admitted in its list form only — enumerated options plus
+  // positionals with a list-implying option among them (positionals are then patterns/commits),
+  // or bare with display modifiers and no positional — so `git branch <name>` / `git tag <name>` /
+  // `git config <key> <value>` / `git symbolic-ref <ref> <target>` fail the shape.
   git(
     String.raw`(?:status|log|diff|show|blame|grep|check-ignore|merge-base|rev-list|rev-parse|cat-file|describe|name-rev|ls-files|ls-tree|ls-remote|for-each-ref|show-ref|shortlog|count-objects|range-diff|patch-id|hash-object|var|version|--version)\b`,
   ),
-  git(
-    String.raw`branch${WORDS}${SEP}(?:-l|--list|-a|--all|-r|--remotes|--show-current|--contains|--no-contains|--merged|--no-merged|--points-at)(?=[ \t=]|$)`,
-  ),
-  git(
-    String.raw`branch(?:${SEP}(?:-v|-vv|--verbose|-q|--quiet|-i|--ignore-case|--no-color|--color(?:=\S+)?|--column(?:=\S+)?|--no-column|--abbrev(?:=\d+)?|--no-abbrev|--omit-empty|(?:--sort|--format)(?:=|${SEP})${WORD}))*${TAIL}`,
-  ),
-  git(
-    String.raw`tag${WORDS}${SEP}(?:-l|--list|-n\d*|--contains|--no-contains|--merged|--no-merged|--points-at)(?=[ \t=]|$)`,
-  ),
-  git(
-    String.raw`tag(?:${SEP}(?:-i|--ignore-case|--no-color|--color(?:=\S+)?|--column(?:=\S+)?|--no-column|--omit-empty|(?:--sort|--format)(?:=|${SEP})${WORD}))*${TAIL}`,
-  ),
+  git(listForm("branch", BRANCH_DISPLAY, BRANCH_LIST)),
+  git(`branch(?:${SEP}(?:${BRANCH_DISPLAY}))*${TAIL}`),
+  git(listForm("tag", TAG_DISPLAY, TAG_LIST)),
+  git(`tag(?:${SEP}(?:${TAG_DISPLAY}))*${TAIL}`),
   git(String.raw`remote(?:${SEP}(?:-v|--verbose))*(?:${SEP}(?:show|get-url)\b|${TAIL})`),
   git(String.raw`worktree${SEP}list\b`),
   git(String.raw`stash${SEP}(?:list|show)\b`),
@@ -869,15 +890,11 @@ const SAFE_PATTERNS = [
   // A positive list: bare (= show), `show …`, `list`, `exists <ref>`, flag-first; every other
   // action (`expire`/`delete`/`drop`, and any future one) falls outside it.
   git(String.raw`reflog(?:${SEP}(?:show|list|exists)\b|${SEP}-|${TAIL})`),
-  // A getter/list flag present (git refuses mixing it with an action), the git ≥ 2.46
+  // A getter/list action present (`--file --get` gives `--get` to `--file`), the git ≥ 2.46
   // subcommand form, or exactly one dotted key.
-  git(
-    String.raw`config${WORDS}${SEP}(?:--get(?:-all|-regexp|-urlmatch|-color|-colorbool)?|--list|-l)(?=[ \t=]|$)`,
-  ),
+  git(listForm("config", CONFIG_OPTIONS, CONFIG_GET)),
   git(String.raw`config${SEP}(?:get|list)\b`),
-  git(
-    String.raw`config(?:${SEP}(?:--local|--global|--system|--worktree|--show-origin|--show-scope|--name-only|-z|--null|--includes|--no-includes|--bool|--int|--bool-or-int|--path|--expiry-date|--type=\S+|(?:--default|--file|-f|--blob)(?:=|${SEP})${WORD}))*${SEP}[A-Za-z][\w-]*(?:\.[\w-]+)+${TAIL}`,
-  ),
+  git(String.raw`config(?:${SEP}(?:${CONFIG_OPTIONS}))*${SEP}[A-Za-z][\w-]*(?:\.[\w-]+)+${TAIL}`),
   /^\s*npm\s+(list|ls|view|info|search|outdated|audit)/i,
   /^\s*yarn\s+(list|info|why|audit)/i,
   /^\s*node\s+--version/i,
@@ -943,8 +960,9 @@ const SAFE_PATTERNS = [
   /^\s*gh\s+auth\s+status\b/i,
   // `perk --help`, `perk <group> --help`, `perk <group> <verb> --help`: only bare lowercase
   // identifier words precede the help flag, so no option can consume it as a value — Click's
-  // eager help then exits before any command body runs (no perk command disables it).
-  /^\s*perk(?:\s+[a-z][\w-]*){0,3}\s+(?:--help|-h)(?:\s|$)/,
+  // eager help then exits before any command body runs (no perk command disables it). Never `-h`:
+  // perk registers only `--help`, so `-h` reaches a command body as an ordinary argument.
+  /^\s*perk(?:\s+[a-z][\w-]*){0,3}\s+--help(?:\s|$)/,
   // Version stamps + the learned-docs verifier (it writes nothing).
   /^\s*perk\s+--version\b/,
   /^\s*perk\s+learn\s+docs-check\b/,
@@ -957,11 +975,11 @@ export type ReadOnlyBashVerdict = { allowed: true } | { allowed: false; reason: 
 /**
  * Whether a bash command is allowed under read-only mode — first hit wins:
  *  1. NOT destructive: a WHOLE-STRING scan against DESTRUCTIVE_PATTERNS (destructive-wins — content
- *     anywhere in the string, incl. command substitutions, still vetoes) over the command with its
- *     heredoc DATA blanked and its heredoc CODE kept: every body the walker reports is replaced by
- *     one space and every substitution inside an expanding body is appended on its own line, so a
- *     `>` or `git add` in `<<'EOF' … EOF` is not a write while `$(echo x > out)` in an unquoted
- *     body is judged exactly like top-level text. Two redirect carve-outs are neutralized first:
+ *     anywhere in the string, incl. command substitutions, still vetoes) over the walker's veto
+ *     view: every substitution, `${…}` and heredoc body collapsed out of the text that holds it
+ *     and each substitution's own text appended on a line of its own, so an argument walk crosses
+ *     `$(a; b)`, a `>` or `git add` in `<<'EOF' … EOF` is not a write, and `$(echo x > out)` in an
+ *     unquoted body is judged exactly like top-level text. Two redirect carve-outs are neutralized first:
  *     FD duplications (`2>&1`, `1>&2`) and redirects to `/dev/null` (`>/dev/null`, `2>/dev/null`,
  *     `&>/dev/null`, `>>/dev/null`) — both discard output and write nothing to the filesystem.
  *     Redirects to a REAL path (`> file`, `&> file`, `>> file`) are NOT carved out and stay
@@ -981,9 +999,7 @@ export type ReadOnlyBashVerdict = { allowed: true } | { allowed: false; reason: 
  */
 export function readOnlyBashVerdict(command: string): ReadOnlyBashVerdict {
   const positions = commandPositions(command);
-  const bodies = positions.heredocBodies;
-  const scanned = [withoutHeredocBodies(command, bodies), ...bodies.flatMap((b) => b.executable)]
-    .join("\n")
+  const scanned = positions.vetoText
     .replace(/\d*>&\d+/g, " ")
     .replace(/(?:\d+|&)?>>?\s*\/dev\/null\b/g, " ");
   const veto = DESTRUCTIVE_PATTERNS.find((p) => p.test(scanned));
@@ -1001,14 +1017,6 @@ export function readOnlyBashVerdict(command: string): ReadOnlyBashVerdict {
     allowed: false,
     reason: `not allowlisted: ${line.length > 100 ? `${line.slice(0, 100)}…` : line}`,
   };
-}
-
-/** The command with every heredoc body replaced by one space (spans are disjoint; last first keeps earlier offsets valid). */
-function withoutHeredocBodies(command: string, bodies: readonly HeredocBody[]): string {
-  let text = command;
-  for (const { start, end } of [...bodies].sort((a, b) => b.start - a.start))
-    text = `${text.slice(0, start)} ${text.slice(end)}`;
-  return text;
 }
 
 /** The boolean form of `readOnlyBashVerdict`. */

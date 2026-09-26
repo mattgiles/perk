@@ -7,7 +7,6 @@ import { test } from "node:test";
 import {
   type CommandRefusal,
   commandPositions,
-  type HeredocBody,
   REFUSAL_REASONS,
   splitTopLevelSegments,
 } from "./commandPositions.ts";
@@ -331,78 +330,61 @@ test("segments: top-level slices, identical through splitTopLevelSegments", () =
   }
 });
 
-/** A body span `[start, end)` in the input, with its executable parts. */
-function span(start: number, end: number, executable: string[] = []): HeredocBody {
-  return { start, end, executable };
-}
-
-const BODIES: [string, (input: string) => HeredocBody[]][] = [
-  [
-    "cat <<'EOF' | wc -c\nline one\nline two\nEOF",
-    (x) => [span(x.indexOf("line one"), x.lastIndexOf("EOF"))],
-  ],
-  [
-    "cat <<EOF\n$(echo hi)\nEOF",
-    (x) => [span(x.indexOf("$(echo"), x.lastIndexOf("EOF"), ["$(echo hi)"])],
-  ],
-  [
-    "cat <<EOF\na `pwd` b $(echo x > out)\nEOF",
-    (x) => [span(x.indexOf("a `pwd`"), x.lastIndexOf("EOF"), ["`pwd`", "$(echo x > out)"])],
-  ],
-  // inner before outer
-  [
-    "cat <<EOF\n$(echo $(ls))\nEOF",
-    (x) => [span(x.indexOf("$(echo"), x.lastIndexOf("EOF"), ["$(ls)", "$(echo $(ls))"])],
-  ],
-  [
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
-    "cat <<EOF\n${x:-$(ls)}\nEOF",
-    (x) => [span(x.indexOf("${"), x.lastIndexOf("EOF"), ["$(ls)"])],
-  ],
-  // a literal body executes nothing
-  ["cat <<'EOF'\n$(rm x)\nEOF", (x) => [span(x.indexOf("$(rm"), x.lastIndexOf("EOF"))]],
-  // `<<-` lines keep their leading tabs inside the span
-  ["cat <<-EOF\n\tbody\n\tEOF", (x) => [span(x.indexOf("\tbody"), x.lastIndexOf("\tEOF"))]],
-  [
-    "cat <<A <<'B'\na $(pwd)\nA\nb\nB",
-    (x) => [
-      span(x.indexOf("a $(pwd)"), x.indexOf("\nA\n") + 1, ["$(pwd)"]),
-      span(x.indexOf("\nb\n") + 1, x.lastIndexOf("B")),
-    ],
-  ],
-  // an empty body is a zero-length span at the terminator line's start
-  ["cat <<EOF\nEOF", (x) => [span(x.indexOf("\nEOF") + 1, x.indexOf("\nEOF") + 1)]],
+// The veto view: substitutions, `${…}` and heredoc bodies collapse out of their holder (a body to
+// nothing, the others to `_`), and each substitution's own text follows on a line of its own,
+// inner before outer.
+const VETO_TEXT: [string, string][] = [
+  // heredoc data vanishes; the terminator line stays
+  ["cat <<'EOF' | wc -c\nline one\nline two\nEOF", "cat <<'EOF' | wc -c\nEOF"],
+  ["cat <<'EOF'\n$(rm x)\nEOF", "cat <<'EOF'\nEOF"],
+  ["cat <<-EOF\n\tbody\n\tEOF", "cat <<-EOF\n\tEOF"],
+  ["cat <<EOF\nEOF", "cat <<EOF\nEOF"],
   // bash joins `EO\⏎F` into the terminator, so the body is empty
-  ["cat <<EOF\nEO\\\nF\npython -c pass\nEOF", (x) => [span(x.indexOf("EO\\"), x.indexOf("EO\\"))]],
-  // a `$(…)` body shares the root source, so its heredoc is reported
-  ["echo $(cat <<X\nx\nX\n)", (x) => [span(x.indexOf("\nx\n") + 1, x.indexOf("\nX\n") + 1)]],
-  // a backtick body is re-lexed as its own input: not reported (recorded limit)
-  ["echo `cat <<X\nx\nX\n`", () => []],
-  ['<<< "text" wc -c', () => []],
-  ["ls", () => []],
-  ["", () => []],
+  ["cat <<EOF\nEO\\\nF\npython -c pass\nEOF", "cat <<EOF\nEO\\\nF\npython -c pass\nEOF"],
+  // heredoc code: what an expanding body executes is appended
+  ["cat <<EOF\n$(echo hi)\nEOF", "cat <<EOF\nEOF\n$(echo hi)"],
+  ["cat <<EOF\na `pwd` b $(echo x > out)\nEOF", "cat <<EOF\nEOF\n`pwd`\n$(echo x > out)"],
+  ["cat <<EOF\n$(echo $(ls))\nEOF", "cat <<EOF\nEOF\n$(ls)\n$(echo _)"],
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
+  ["cat <<EOF\n${x:-$(ls)}\nEOF", "cat <<EOF\nEOF\n$(ls)"],
+  ["cat <<A <<'B'\na $(pwd)\nA\nb\nB", "cat <<A <<'B'\nA\nB\n$(pwd)"],
+  // a heredoc inside a substitution collapses out of that substitution's text
+  ["echo $(cat <<X\nx\nX\n)", "echo _\n$(cat <<X\nX\n)"],
+  ["echo `cat <<X\nx\nX\n`", "echo _\n`cat <<X\nX\n`"],
+  ["cat <<EOF\n$(cat <<X\nx\nX\n)\nEOF", "cat <<EOF\nEOF\n$(cat <<X\nX\n)"],
+  // a nested operator never stands between a command's words
+  ["git hash-object $(echo input.txt; echo) -w", "git hash-object _ -w\n$(echo input.txt; echo)"],
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
+  ["echo ${x/;/,}; ls", "echo _; ls"],
+  ["diff <(sort a) <(sort b)", "diff _ _\n<(sort a)\n<(sort b)"],
+  ['echo "$(pwd)"', 'echo "_"\n$(pwd)'],
+  ["echo `echo $(ls; pwd) -x`", "echo _\n$(ls; pwd)\n`echo _ -x`"],
+  // nothing to collapse
+  ['<<< "text" wc -c', '<<< "text" wc -c'],
+  ["echo '$(pwd)'", "echo '$(pwd)'"],
+  ["ls", "ls"],
+  ["", ""],
 ];
 
-test("heredocBodies: every body the input's own lexer saw, with its executable parts", () => {
-  for (const [input, expected] of BODIES)
-    assert.deepEqual(commandPositions(input).heredocBodies, expected(input), input);
-  // the substitution is still a command position
+test("vetoText: collapsed holders, then each substitution's own text", () => {
+  for (const [input, expected] of VETO_TEXT)
+    assert.equal(commandPositions(input).vetoText, expected, input);
+  // collapsing leaves the command positions alone
   assert.deepEqual(commandsOf("cat <<EOF\n$(echo hi)\nEOF"), ["cat <<EOF", "echo hi"]);
-  const joined = commandsOf("cat <<EOF\nEO\\\nF\npython -c pass\nEOF");
-  assert.ok(Array.isArray(joined) && joined.includes("python -c pass"));
+  assert.deepEqual(commandsOf("git hash-object $(echo input.txt; echo) -w"), [
+    "git hash-object $(echo input.txt; echo) -w",
+    "echo input.txt",
+    "echo",
+  ]);
 });
 
-test("heredocBodies: present on the refusal arm", () => {
-  const unterminated = "cat <<EOF\nbody";
-  const result = commandPositions(unterminated);
-  assert.equal(result.ok ? "ok" : result.refusal, "unterminated-heredoc");
-  assert.deepEqual(result.heredocBodies, [span(unterminated.indexOf("body"), unterminated.length)]);
-  const wrapper = "env -Q x <<EOF\nb $(ls)\nEOF";
-  const refused = commandPositions(wrapper);
+test("vetoText: present on the refusal arm", () => {
+  const unterminated = commandPositions("cat <<EOF\nbody");
+  assert.equal(unterminated.ok ? "ok" : unterminated.refusal, "unterminated-heredoc");
+  assert.equal(unterminated.vetoText, "cat <<EOF\n");
+  const refused = commandPositions("env -Q x <<EOF\nb $(ls)\nEOF");
   assert.equal(refused.ok ? "ok" : refused.refusal, "wrapper-usage");
-  assert.deepEqual(refused.heredocBodies, [
-    span(wrapper.indexOf("b $(ls)"), wrapper.lastIndexOf("EOF"), ["$(ls)"]),
-  ]);
+  assert.equal(refused.vetoText, "env -Q x <<EOF\nEOF\n$(ls)");
 });
 
 test("segments: a later scan survives an earlier unmodeled construct", () => {

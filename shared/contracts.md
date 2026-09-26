@@ -735,11 +735,11 @@ and unknown/late foreign mutators, even when toolset narrowing failed. This back
 effective read-only sessions, parents too. `edit`/`write` keep their file-modification denial wording;
 other excluded tools receive a read-only not-allowlisted denial. Listed non-bash tools pass this gate
 but retain downstream authority checks. Listed `bash` additionally requires its argument
-check: the whole-string destructive veto over the command with its **heredoc data blanked and its
-heredoc code kept** (`commandPositions.ts` reports every body span the root lexer sees plus the
-raw text of each substitution inside an expanding body; the gate scans the blanked command with
-those substitution texts appended — a body is data to the command that reads it, but what bash
-executes inside it is judged exactly like top-level text), then the bash sub-allowlist applied at
+check: the whole-string destructive veto over the walker's **veto view** (`commandPositions.ts`'s
+`vetoText`: every substitution, `${…}` and heredoc body collapsed out of the text that holds it,
+each substitution's own text appended on a line of its own — an argument walk crosses a nested
+operator, a heredoc body is data to the command that reads it, and what bash executes inside a
+substitution is judged exactly like top-level text), then the bash sub-allowlist applied at
 **every command position** (`extension/substrate/commandPositions.ts`) — the start of input and
 the word after an unquoted `;` `|` `|&` `&&` `||`, a lone `&` or an unquoted newline; after
 `$(`/backtick (also inside double quotes) and `<(`/`>(`; after any `NAME=value` prefix and any
@@ -759,17 +759,18 @@ as is a command with nothing to run. Accepted limits (recorded in `commandPositi
 `toolGating.ts`, not enforced): in-program writers inside allowlisted commands' program text
 (`awk`/`sed`), a command fd supplies at run time (`fd -x env`), run-time supplied arguments
 (`xargs`, `find -exec`, `fd -x`, and words an expansion supplies), a quote or escape inside a flag
-word and abbreviated long options, exec flags other than the exact pre-expansion words of the
-simple command's own `find`/`fd` (`fd -Hx`, `find . $'-exec' …`), a glob or brace expansion read
-as one word, `\\` inside backticks, and heredocs inside a backtick body or a body's substitution
-staying vetoable. The block message keeps its two-line head (`perk read-only mode: command blocked
+word and abbreviated long options in the veto rows, exec flags other than the exact pre-expansion
+words of the simple command's own `find`/`fd` (`fd -Hx`, `find . $'-exec' …`), a glob or brace
+expansion read as one word, and `\\` inside backticks. The block message keeps its two-line head (`perk read-only mode: command blocked
 (not allowlisted).` / `Command: <command>`) and appends `Reason: <veto row | walker refusal |
 first non-allowlisted command | no command>`. Tool inventories are unchanged; there is no OS-sandbox claim for allowlisted delegation,
 web/browser or artifact carve-outs. The bash sub-allowlist (`SAFE_PATTERNS` is the inventory)
 covers read-only inspection commands (`jq`, `curl`, …): the read-only `git` plumbing (`rev-parse`,
 `blame`, `worktree list`, …) including the **list forms** of argument-sensitive subcommands
-(`branch`/`tag` with an explicit list flag or bare with display modifiers and no positional;
-`stash list|show`; `remote [-v]|show|get-url`; `config` getters/`--list`/a single dotted key;
+(`branch`/`tag`/`config` with only enumerated options plus positionals and a list-implying option
+or getter among them — a negation such as `--no-list`, or a list flag consumed as another option's
+value, never reads as list mode — or `branch`/`tag` bare with display modifiers and no positional;
+`stash list|show`; `remote [-v]|show|get-url`; `config` subcommand getters/a single dotted key;
 `reflog` show forms; `symbolic-ref <ref>`) behind an admitted `-C <dir>`/`--no-pager` prefix
 (never `-c`), everyday text utilities (`nl`, `cut`, `tr`, `shasum`, …), `sed` in every form but
 `-i`, `command -v`, and `perk --version`/`--help`/`learn docs-check`. **Argument-level writers**

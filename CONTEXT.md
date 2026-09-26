@@ -81,10 +81,16 @@ removing the command from the allowlist.
 _Avoid_: destructive command, mutating command
 
 **List form**:
-The argument shape under which an argument-sensitive `git` subcommand only reads: an explicit
-list-implying flag present (positionals are patterns), or the bare subcommand with display
-modifiers and no positional.
+The argument shape under which an argument-sensitive `git` subcommand only reads: every word an
+enumerated option or a positional, with a list-implying option among them (positionals are then
+patterns), or the bare subcommand with display modifiers and no positional.
 _Avoid_: read-only form, safe form
+
+**Veto view**:
+The text the whole-string destructive veto reads: the command with every substitution, `${…}` and
+heredoc body collapsed out of the text that holds it, then each substitution's own text (collapsed
+the same way) on a line of its own.
+_Avoid_: scanned text, flattened command
 
 ### Report-wave lane identity
 

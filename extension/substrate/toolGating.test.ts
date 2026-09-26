@@ -828,7 +828,6 @@ test("isReadOnlyBashCommand: the census-driven read-only forms are allowed", () 
     // perk / pi read verbs
     "perk --version",
     "perk --help",
-    "perk -h",
     "perk plan --help",
     "perk objective node --help",
     "perk skills create --help",
@@ -1085,7 +1084,70 @@ test("isReadOnlyBashCommand: argument-level writers and non-list forms are block
     "perk plan 12 --help", // over-strict on non-identifier words — pinned
     "perk objective node 2.3 --status done --help",
     "perk plan -- --help",
+    // perk registers only `--help`: `-h` reaches the command body as an ordinary argument
+    "perk -h",
+    "perk skills create review-probe -h",
     'pi -p "x"',
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
+  }
+});
+
+test("isReadOnlyBashCommand: a list form holds only when git's effective mode is list mode", () => {
+  // each creates the named branch/tag or writes a config file in a real repository
+  for (const cmd of [
+    // a negation cancels the list flag (abbreviated too)
+    "git branch --list --no-list b1",
+    "git branch --show-current --no-show-current b2",
+    "git branch --points-at HEAD --no-points-at b3",
+    "git branch --list --no-lis b9",
+    "git tag --points-at HEAD --no-points-at t2",
+    // a list-flag lookalike consumed as a value-taking option's value
+    "git branch --format --list b4",
+    "git branch --sort --list b5",
+    "git tag --format -l t3",
+    "git config --file --get a.b c",
+    "git config -f --list a.b c",
+    // a quoted or escaped option is still an option, never a positional
+    "git branch --list '--no-list' b6",
+    "git branch --list \\--no-list b7",
+    // an unlisted option in a list form
+    "git branch -a --bogus foo",
+    // a flag lookalike inside a quoted value is no list flag
+    'git branch --format "x\\" -a \\"" b8',
+    // over-strict, pinned: a substitution's inner words read as the command's own
+    "git branch -a --contains $(git rev-list --all -1)",
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
+  }
+  // …while list forms with values, attached filters and display options still pass
+  for (const cmd of [
+    "git branch --contains=HEAD --no-color",
+    "git branch --merged=main -v 'plan-*'",
+    "git tag -l --sort=-v:refname --format '%(refname)' 'v*'",
+    "git config --get-regexp --file x.cfg 'a\\.' ",
+    "git config --show-origin --get-all remote.origin.fetch",
+    'c=$(git rev-list --all -1); git branch -a --contains "$c"',
+  ]) {
+    assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed: ${cmd}`);
+  }
+});
+
+test("isReadOnlyBashCommand: an argument walk crosses escaped operators, substitutions and backticks", () => {
+  for (const cmd of [
+    // the writer flag follows an escaped `;`, a nested operator or a `${…}` holding one
+    "find victim -exec echo {} \\; -delete",
+    "git hash-object $(echo input.txt; echo) -w",
+    "git hash-object `echo input.txt; echo` -w",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell `${…}` text is the point
+    "find . ${x/;/,} -delete",
+    'sed "s/a/b/; s/c/d/" -i f',
+    // a closing backtick ends the flag word, top-level and inside an expanding heredoc
+    "echo `find victim -delete`",
+    "cat <<EOF\n`find victim -delete`\nEOF",
+    "echo `git branch -D foo`",
+    // a nested substitution's own writer flag is judged in its own text
+    "cat <<EOF\n$(git hash-object $(echo a; echo) -w)\nEOF",
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
   }
