@@ -359,7 +359,7 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
     "agent-browser snapshot", // browser-automation skill (command-keyed like ast-grep)
     "agent-browser navigate https://example.com",
     "npx agent-browser skills get core", // npx fallback anchored to agent-browser
-    "cd repo && agent-browser screenshot", // per-segment acceptance with a cd prefix
+    "cd repo && agent-browser screenshot", // every command position allowlisted, cd prefix
     "find . -name '*.ts'",
     "wc -l file",
     "sed -n '1,10p' file",
@@ -368,7 +368,7 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
     "ls -la 1>&2",
     "cat foo 2>/dev/null", // /dev/null redirect is not a file write
     'grep -rn "user-docs" README.md 2>/dev/null',
-    "cd /tmp && grep foo bar", // cd prefix + per-segment safe
+    "cd /tmp && grep foo bar", // cd prefix + every command position safe
     "cd repo && perk objective show 453 2>&1 | head -200", // reported example 1
     `ls tests/ | grep -iE 'doc|user|cli|link'; echo "---"; grep -rl "user-docs" tests/ 2>/dev/null`, // reported example 3 (quoted | does not split; 2>/dev/null allowed)
     `find tests -name '*.py' | grep -iE 'doc|user|cli' ; echo --- ; grep -rl "user-docs" tests 2>/dev/null`, // reported example 4
@@ -551,7 +551,7 @@ test("isReadOnlyBashCommand: blocks destructive / non-allowlisted commands", () 
     "chmod +x script.sh",
     "some-unknown-binary --flag", // not in the safe table at all
     "git status && rm file", // destructive wins over a safe prefix
-    "git status && some-unknown-binary", // per-segment tightening: second segment non-safe
+    "git status && some-unknown-binary", // a non-safe command at a later command position
     "ls | rm -rf x", // pipe whose second segment is destructive
     "perk objective create foo", // mutating objective subcommands stay blocked
     "perk objective node 1.1",

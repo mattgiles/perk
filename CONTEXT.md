@@ -60,6 +60,20 @@ The activation-latched restriction a runner child derives from the packet; it co
 tool gate and cannot be cleared by gate exit, tree navigation or a same-activation restart.
 _Avoid_: child mode, inherited mode
 
+### Read-only bash gate
+
+**Command position**:
+A place in a bash command string where bash reads the next word as a command to run — the start
+of input and after a sequencing operator, newline, substitution opener, assignment prefix, leading
+redirection, shell keyword, known wrapper, or `find -exec`; the read-only gate applies
+`SAFE_PATTERNS` at every one.
+_Avoid_: segment, leading word, first token
+
+**Simple-command text**:
+The raw text from a command word to the end of its simple command (the next same-frame
+operator/newline/closer) — the unit the allowlist regexes match.
+_Avoid_: segment, argv, command line
+
 ### Report-wave lane identity
 
 **Semantic lane id**:
