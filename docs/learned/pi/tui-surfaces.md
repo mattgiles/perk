@@ -43,8 +43,8 @@ these two as the sanctioned rich-UI call sites — `setFooter` calls were delibe
 
 Two structural invariants to preserve:
 
-- **`surfaces.ts` is dependency-free by design**: renderers take *structural* progress params
-  (e.g. a `ProgressState`/`ProgressStep` shape) rather than importing controller state types —
+- **`surfaces.ts` is dependency-free by design**: renderers take *structural* params (e.g.
+  `FooterParts`, `FooterDataLike`, `ThemeLike`) rather than importing controller state types —
   that avoids an import cycle with the surface controllers. Keep it that way when adding renderers.
 - **The glyph + height-budget constants are charter-law data**, pinned only by
   `extension/surfaces/surfaces.test.ts` until consumers bind them — they are not dead code.
@@ -54,8 +54,9 @@ Two structural invariants to preserve:
 The slot is **composed**: `<objective> · <activity>`, either half optional, `undefined` when both
 are absent (`createPerkStatus` in `surfaces.ts`). The objective publisher owns the first half via
 `set`; activity owners hold waits via `beginActivity(target, text)` → `end`. The one activity today
-is `ACTIVITY_BROWSER_REVIEW` ("waiting on browser review"), begun by the two plannotator browser
-paths (`planReviewBrowser.ts`, `objectiveReviewBrowser.ts`, plus the plan door's bridge in `plan.ts`)
+is `ACTIVITY_BROWSER_REVIEW` ("waiting on browser review"), begun by the plannotator browser waits
+(grep `beginActivity(` for the live holders — at the last audit `planReviewBrowser.ts`,
+`objectiveReviewBrowser.ts`, `codeReview/browser.ts`, and the plan door's bridge in `plan.ts`)
 and ended when each wait settles; `session_shutdown` in `extension/index.ts` calls `clearActivity`
 because a browser wait cannot outlive the session. Headless calls are FULL no-ops (record nothing).
 The RPC dual-publish and the footer's own-slot filtering are unchanged by the composition.
@@ -76,7 +77,8 @@ the slot was multi-segment.)
   `ActivityHandle = Pick<PerkStatusHandle, "beginActivity">`, never the full handle; and the sink is
   a **required** parameter at the leaf seam, so a door that forgets to thread it is a compile error,
   not a silently status-less wait. (There is no gist browser door — gist review is a warm
-  `plan_review` arm — so only the two plannotator paths and the plan door carry the sink.)
+  `plan_review` arm — so the sink rides only the plannotator browser doors and the plan door's
+  bridge.)
 - **Shared handle**: created once in `extension/index.ts` and threaded into its publisher and the
   activity owners — the extension's zero-module-level-mutable-state invariant.
 - **Headless `set`/`beginActivity` must be FULL no-ops** — never record state. If a headless call
@@ -86,13 +88,15 @@ the slot was multi-segment.)
 - No width handling is needed in the publication: pi's footer truncates the status line
   itself.
 
-## The RPC dual-publish law (contractual — contracts.md P2.T2c)
+## The RPC dual-publish law
 
 Pi's RPC mode drops component-factory widgets and `setFooter` entirely; only `string[]` widgets
 and `setStatus` forward. Any perk surface moving to a themed factory or the custom footer must
 keep a `setStatus`/string twin as the RPC-visible fallback. The custom footer filters its own slot
 key out of `getExtensionStatuses()` to avoid double display (the composed `perk` slot keeps
-publishing via `setStatus` even though the footer renders the composed value directly).
+publishing via `setStatus` even though the footer renders the composed value directly). The
+composed slot's dual-publish is contractual (`shared/contracts.md` §8.3, progress tracking); the
+charter records why (`docs/design/tui-charter.md` §6: `setFooter` is an RPC no-op).
 
 ## `setFooter` adoption facts
 
@@ -269,7 +273,7 @@ the first production console-swap; prior swaps were all test-local):
 - **Re-verify at each pin bump.** A bump silently re-asserts every dist-scoped fact here: its
   plan re-reads each against the newly *installed* dist (resolved per
   `toolchain/worktree-node-modules.md`) and corrects or dates changes. Last full re-verification:
-  the `0.85.1` dist — provenance, not a currency promise; the pin is.
+  the `0.87.0` dist — provenance, not a currency promise; the pin is.
 
 ## Cross-references
 
@@ -277,7 +281,7 @@ the first production console-swap; prior swaps were all test-local):
   rich-UI call sites)
 - `extension/index.ts` — perk-status handle creation, `session_shutdown` → `clearActivity`, per-`session_start` footer install
 - `extension/testing/harness.ts` — factory-widget/placement capture, `invokeCommand`
-- `shared/contracts.md` P2.T2c — the RPC dual-publish contract
+- `shared/contracts.md` §8.3 (progress tracking) — the composed slot's RPC dual-publish contract
 - `docs/design/tui-charter.md` — the charter the surfaces converge to
 - `docs/learned/pi/extension-seams.md` — `report()` and the consolidation-seam recipe
 - `docs/learned/workflow/borrowed-packages.md` — the setFooter-clobber vetting/retirement recipe

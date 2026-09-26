@@ -52,7 +52,8 @@ precisely for this reason.
 What it exposes:
 
 - **`appendSystemPrompt`** = the loader's `.pi/APPEND_SYSTEM.md` content joined with `\n\n`
-  (verbatim; `undefined` when absent).
+  (verbatim; the empty string `""` when absent — the declared type stays optional, so consumers
+  still coalesce `?? ""`).
 - **`contextFiles`** = the loaded `AGENTS.md` files as `{path, content}`.
 - The base options are populated by the time `bindExtensions` resolves (tool registration →
   `setActiveToolsByName` → `_rebuildSystemPrompt`), so a command handler reads real loaded content.
@@ -90,10 +91,11 @@ what lets a branch-scan dedup work **without extra state** (see `workflow/skill-
 
 ## `before_agent_start` fires BEFORE the submitting prompt is persisted (the first-turn hole)
 
-At `before_agent_start`, pi builds the turn's `messages` array locally (user message first),
-emits the event, appends extension customs to that local array, and only afterwards persists the
-turn — so the just-submitted prompt is **not yet on `ctx.sessionManager.getBranch()`** when the
-event fires (verified in pi `dist/core/agent-session.js`).
+`AgentSession.prompt` emits `before_agent_start` **before** it builds the turn's local `messages`
+array — the user message, any pending next-turn messages, then the extension customs (plus a
+leading system-prompt patch when the prompt/tool loadout changed) — and each message persists only
+on its own `message_end` as the run streams, so the just-submitted prompt is **not yet on
+`ctx.sessionManager.getBranch()`** when the event fires (`dist/core/agent-session.js`).
 
 Consequence: any branch-scan dedup keyed on a marker the submitting prompt carries has a
 **first-turn hole** — it misses a cold seed's marker exactly on the launch turn and
@@ -106,9 +108,12 @@ when a cold twin seeds the same marker into the launch prompt.
 ## The `context` event runs on EVERY provider call
 
 The `context` event (= SDK `transformContext`) runs on **every** provider call over the **full
-message list** — not once per session. So an *unconditional* strip of an injected custom type would
-remove it even on its own injection turn (defeating delivery). Any strip of injected context must be
-**conditional** — see `pi/context-injection.md` for the inject-and-conditionally-strip pattern.
+conversation** — every non-system message, injected customs included — not once per session.
+(Since 0.87 its `messages` omit system messages: Pi restores the prompt and tool state after each
+handler, and the later `context_with_system` event sees the full transcript, its result sent as
+returned.) So an *unconditional* strip of an injected custom type would remove it even on its own
+injection turn (defeating delivery). Any strip of injected context must be **conditional** — see
+`pi/context-injection.md` for the inject-and-conditionally-strip pattern.
 
 ## `session_compact` is a first-class pi SDK event — no harness fiction
 
@@ -122,26 +127,26 @@ the **test** harness needed work: `extension/testing/harness.ts` `emitLifecycle`
 **type-only** (the runtime forwards any event via `emit(event as never)`), so adding
 `session_compact` to it is a pure TS-surface change, not new runtime plumbing.
 
-### The stale-`ctx` compaction race (why a compaction handler's catch arm diverges)
+### A captured `ctx` goes stale on session replacement — compaction is not one
 
-During compaction pi may replace the running session out from under an in-flight handler,
-invalidating the extension runner's `ctx` proxy; the next read off it throws
-`/stale after session replacement/`. That is **benign** — the replacement session's `session_start`
-re-renders — so a `session_compact` handler may **swallow it silently** (an `isStaleCtxError` test on
-`String(e)`), **diverging** from the uniform log-not-throw catch every other lifecycle handler uses.
-Genuine replay bugs still log. Frame this as the general reason a compaction-time handler's error
-handling differs from a normal lifecycle handler. (The handler otherwise mirrors `session_tree`:
-rebuild + render, no re-seed.)
+Pi invalidates an extension runner on session replacement (`newSession` / `fork` /
+`switchSession` dispose the old `AgentSession`) and on `/reload` (the runner is rebuilt); every
+later read off a captured `ctx`, and every `pi.*` action, then throws the
+`…stale after session replacement or reload…` error (`invalidate` / `assertActive` in
+`dist/core/extensions/runner.js` and `loader.js`). Post-replacement work belongs in the
+`withSession` callback's fresh ctx. Compaction is **not** a replacement: manual and automatic
+compaction append a compaction entry inside the same `AgentSession` and runner, so a
+`session_compact` handler's `ctx` stays live and a `ctx.compact` callback may use the captured `pi`
+(`extension/pi/v1/drivenCompaction.ts` relies on this). The retired checkpoints handler's
+swallow-the-stale-error `session_compact` catch arm (survey:
+`docs/design/archive/checkpoints-rpiv-todo-comparison.md`) guarded a mid-compaction replacement the
+pinned dist does not perform — never copy it as a compaction-handler default.
 
 - **Export-wins when a "private" helper has a named unit-test obligation.** A helper specced
-  module-private but separately required to be unit-tested ships **exported** — the test requirement
-  wins (here `isStaleCtxError`; the same resolution as the `plan-review-flow.md` extracted-core
-  recipe).
+  module-private but separately required to be unit-tested ships **exported** — the test
+  requirement wins (the same resolution as the `plan-review-flow.md` extracted-core recipe).
 - **Residual caution:** an error-to-string utility doing `String(e)` throws `TypeError` on a
-  null-prototype object (`String(Object.create(null))`) — not reachable when the arg is always
-  pi-core's proxy error, but a general caution for any such utility.
-- The checkpoints-specific charter survey is **not** duplicated here — it lives in
-  `docs/design/archive/checkpoints-rpiv-todo-comparison.md`.
+  null-prototype object (`String(Object.create(null))`).
 
 ### `ctx.compact` contains a throwing delegate via `onError`
 
@@ -152,11 +157,10 @@ defensive try/catch for the delegate itself.
 
 ### Pi's own compaction runs BEFORE `agent_settled` — driven-compaction doors arbitrate
 
-Verified at the 0.87.0 dist (event stamp): `AgentSession._runAgentPrompt` awaits
-`_handlePostAgentRun` (`_checkCompaction` → `_runAutoCompaction`) before the `finally` emits
-`agent_settled`, so a door calling `ctx.compact` from `agent_settled` races a compaction that
-already landed, and a second manual `compact()` throws `Already compacted`. The recipe
-(`extension/pi/v1/drivenCompaction.ts`):
+`AgentSession._runAgentPrompt` awaits `_handlePostAgentRun` (`_checkCompaction` →
+`_runAutoCompaction`) before the `finally` emits `agent_settled`, so a door calling `ctx.compact`
+from `agent_settled` races a compaction that already landed, and a second manual `compact()`
+throws `Already compacted`. The recipe (`extension/pi/v1/drivenCompaction.ts`):
 
 - observe `session_compact` while a record is armed — Pi emits it for automatic AND manual
   compaction;
@@ -168,8 +172,6 @@ already landed, and a second manual `compact()` throws `Already compacted`. The 
 process-local and lost on `/reload`.
 
 ## `setSessionName` / `getSessionName` facts
-
-Verified at the 0.85.1 dist:
 
 - Pi sanitizes only `\r\n` → space + trim, and writes the name into an OSC terminal-title sequence,
   so ESC/BEL/C1/bidi characters in a name break out of it — the extension strips them itself
@@ -228,22 +230,23 @@ Two contours of `registerTool` partial updates:
 
 ## Read-only gating trap
 
-Custom planning tools must be registered/listed in `READ_ONLY_TOOLS` in order to survive the
-`setActiveTools` filter during planning phases, but they must be strictly **left out** of
-`SDK_READ_ONLY_TOOLS`. Leaving them in the former allows them to remain active when planning, while
-keeping them out of the latter ensures they aren't incorrectly classified as core SDK-restricted
-read-only tools.
+A custom tool that must stay callable inside a read-only gate has to be named in that stage's
+gate-ON allowlist in `extension/substrate/toolGating.ts` — `READ_ONLY_TOOLS`, or
+`REFINEMENT_READ_ONLY_TOOLS` for the refinement stage (`gatedToolsFor` picks) — or the
+`setActiveTools` filter drops it the moment the gate engages. (The second list this section once
+named, the in-process read-only SDK child's `SDK_READ_ONLY_TOOLS`, retired with that child in
+#2100.)
 
 ## Registration-time `process.cwd()` config reads make harness tests host-repo-sensitive
 
 `installPlanMode` (and any seam reading committed config at factory/registration time) resolves
 from `process.cwd()`, **not** the harness `cwd` option. Dogfooding config commits to the perk repo
-itself (e.g. `[providers] plan = "plannotator-plan"` in `.pi/perk.toml`) then silently vacate
+itself (e.g. `[providers] plan = "plannotator-plan"` in `.perk/config.toml`) then silently vacate
 flags/commands inside test runs — the host repo's committed config leaks into the suite.
 
 **Rule:** any harness test exercising registration-time branching must `process.chdir()` into its
 scaffold and restore in `finally`. Hit twice independently. Diagnosis shortcut: a harness test
-failing only locally/on main → check committed `.pi/perk.toml` before suspecting the code.
+failing only locally/on main → check committed `.perk/config.toml` before suspecting the code.
 
 ## Dogfooding just-changed extension code — cwd repo-root loading + `/reload`
 
@@ -281,25 +284,24 @@ extension as the path package `..`. Three consequences:
 
 `session.prompt()` handles `/`-commands **before any provider call**, so
 `env -u PERK_RUN_ID pi --mode json -p "/perk-selfcheck"` is a zero-cost offline probing surface
-(stderr carries `report()` output). It is also the faithful subagent-shape proxy — pi-subagents
-spawns children with baseArgs `--mode json -p`, ± `--no-skills`. (The `env -u` guards the
-`PERK_RUN_ID` leak — see the harness section below.)
+(stderr carries `report()` output). It is **not** a subagent-shape proxy: pi-subagents runs native
+children as in-process `AgentSession`s — in the parent, or in its detached runner process — rather
+than as `pi -p` subprocesses (`pi/native-sdk-bridge.md` § "Which SDK identity a child runs under").
+(The `env -u` guards the inherited `PERK_RUN_ID` leak — see its section below.)
 
-## The harness inherits the agent's own `PERK_RUN_ID`
+## The inherited `PERK_RUN_ID` leak — cleared in the harness, live in probes
 
-node-test runs launched from inside a perk session inherit the session's exported `PERK_RUN_ID`.
-Harness tests that pass no `env` then take the **cold-claim path** and emit linkage-error stderr
-naming a ULID you don't recognize — and the leak *persists across tests* via the harness env
-save/restore (a later test's `applyEnv` snapshots the ambient leaked value and faithfully restores
-it on dispose). This looks exactly like a regression from run-id code and costs a debugging detour
-if you don't know it.
+Anything launched from inside a perk session inherits the session's exported `PERK_RUN_ID`; a bound
+perk extension that sees it takes the **cold-claim path** and emits linkage-error stderr naming a
+ULID you don't recognize — which looks exactly like a regression from run-id code.
 
-- Diagnosis: `echo $PERK_RUN_ID`.
-- CI is unaffected (no perk session env). Run locally with `env -u PERK_RUN_ID node --test …` for
-  representative output.
-- Hardening candidate (not done): default `PERK_RUN_ID: undefined` in `loadPerkSession`'s
-  `applyEnv` baseline (alongside `PERK_SELFCHECK`), with claim tests opting in
-  explicitly.
+- **Resolved in the harness (#2235):** `loadPerkSession`'s `applyEnv` baseline clears
+  `PERK_RUN_ID` (and the `PI_SUBAGENT_*` child variables) beside `PERK_SELFCHECK` and restores the
+  ambient values on dispose, so harness tests are hermetic unless one opts in through `env`.
+- **Still live wherever that baseline is not in force:** `pi --mode json -p` probes, headless probe
+  scripts, and node-tests that never call `loadPerkSession` inherit it — launch them with
+  `env -u PERK_RUN_ID …`.
+- Diagnosis: `echo $PERK_RUN_ID`. CI is unaffected (no perk session env).
 
 ## Strict-mode index access in tests
 
@@ -359,23 +361,26 @@ capture/no-op (the harness export `spyInjections` in `extension/testing/harness.
 such test, and plan authors writing test specs for warm-door
 commands should call for the spy explicitly rather than just waiving the assertion.
 
-## `headfulUIContext` fakes only `notify`/`setStatus`/`setWidget`
+## `headfulUIContext` fakes no dialogs — no `select`/`input`/`editor`/`confirm`
 
-The test harness's headful UI fake has **no `select`/`input`** — **no `editor`**, and **no `confirm`**
-either — so a registered-tool-level UI-interaction test isn't possible offline. The workaround is the
-exported pure decode + pure core pattern — the handler stays a thin wiring layer and the decode +
-core are tested directly with a fake UI (see `pi/tool-param-decode.md`). Editor-dialog flows
-specifically can only be harness-tested for arms that never reach a dialog (headless / bad_input /
-no_plan / bridge); dialog arms test via an extracted core + a scripted UI fake — see
-`workflow/plan-review-flow.md` for the realized recipe.
+The test harness's headful UI fake records only `notify`/`setStatus`/`setWidget` plus
+`setFooter`/`setWorkingIndicator` captures — **no `select`/`input`**, **no `editor`**, and **no
+`confirm`** — so a dialog reached through `invokeCommand` (a real `session.prompt`) isn't testable
+offline. A registered tool's dialogs are testable: `invokeTool`'s `opts.ui` overlays scripted
+answers on the recording UI (`plan_review`'s launch chooser in
+`extension/pi/v1/planReview.test.ts`). The other workaround is the exported pure decode + pure
+core pattern — the handler stays a thin wiring layer and the decode + core are tested directly
+with a fake UI (see `pi/tool-param-decode.md`). The realized editor-dialog recipe
+(`workflow/plan-review-flow.md`) harness-tests the arms that never reach a dialog (headless /
+bad_input / no_plan / bridge) and tests the dialog arms via an extracted core + a scripted UI fake.
 
-The **`confirm` gap** has the same shape: a confirm-gated tool tests its dialog arms through an
-exported **core function** given **structural fakes** — a `fakeCtx` carrying a scripted `confirm` that
-*records* `{title, message}` and returns a canned answer — reserving the real harness for the
-confirm-free arms. In-repo instance: the `submit_pr_review` formal-event gate in
-`extension/pi/v1/codeReview/submit.test.ts` (`formalEventGateFor` scripts a recording confirm; a
-`comment` event never confirms; a headless formal event refuses before any exec). Extend the harness with a scripted confirm recorder only if a **third** consumer appears —
-two is not yet worth the harness surface.
+The **`confirm` gap** closes the same two ways: pass a recording `confirm` through `invokeTool`'s
+`opts.ui` (`run_ci`'s accept/decline/latch tests in `extension/pi/v1/delivery/ci.test.ts`), or test
+an exported **core function** given **structural fakes** — a `fakeCtx` carrying a scripted `confirm`
+that *records* `{title, message}` and returns a canned answer. In-repo core instance: the
+`submit_pr_review` formal-event gate in `extension/pi/v1/codeReview/submit.test.ts`
+(`formalEventGateFor` scripts a recording confirm; a `comment` event never confirms; a headless
+formal event refuses before any exec).
 
 ## `pi.exec` never throws on spawn failure
 
@@ -385,14 +390,17 @@ synchronous `spawn` argument-validation throw in the executor, unreachable from 
 call. A normal exit resolves
 `{stdout, stderr, code, killed}`; a **spawn error** (ENOENT/EACCES — the binary is absent or not
 executable) lands in `waitForChildProcess`'s `.catch` arm and resolves `{stdout, stderr, code: 1,
-killed: false}`. Consequences:
+killed: false}`. One throw sits in front of all that: the extension API's `pi.exec` calls
+`assertActive()` first (`dist/core/extensions/loader.js`), so a captured `pi` used after session
+replacement or `/reload` — or one whose extension failed to load — throws **synchronously**, before
+any spawn. Consequences:
 
-- A `try/catch` around `pi.exec` is **dead-defensive** — fine as defense-in-depth, but the catch arm
-  is unreachable through the real API.
+- A `try/catch` around `pi.exec` never sees a spawn failure — it can catch only that stale-API guard
+  (see "A captured `ctx` goes stale on session replacement") or a malformed-argument throw.
 - A **binary-absence probe** needs only the non-zero-exit arm: `const ok = !probe.killed && probe.code === 0`
   (the `hunk --version` refuse-at-start probe in `extension/pi/v1/codeReview/checkout.ts` is exactly this).
-- **Tests should not try to exercise a throw arm** — it can't happen through the API. Model absence
-  with a *failing fake* (see the next section), not a rejected promise.
+- **Tests should not model binary absence as a throw** — a spawn failure never throws through the
+  API. Model absence with a *failing fake* (see the next section), not a rejected promise.
 
 ## Offline-testing a hardcoded external-binary probe: fake executable + PATH prepend
 
@@ -462,16 +470,19 @@ tools or *months-old* code:
 
 ## Sources
 
-- `@earendil-works/pi-coding-agent` dist — `dist/core/agent-session.js`, `dist/index.d.ts`,
+- `@earendil-works/pi-coding-agent` dist — `dist/index.d.ts`, `dist/main.js`,
+  `dist/core/{agent-session,sdk,session-manager,system-prompt,settings-manager}.js`,
   `dist/core/extensions/{types.d.ts,runner.js,loader.js}`, `dist/core/package-manager.js`,
-  `dist/core/exec.js`, `dist/modes/interactive/components/extension-editor.js` — at the version
+  `dist/core/exec.js`, `dist/modes/interactive/interactive-mode.js`,
+  `dist/modes/interactive/components/extension-editor.js`, `dist/modes/rpc/rpc-mode.js` — plus the
+  nested `pi-agent-core` `dist/agent-loop.js` and `pi-tui` `dist/terminal.js` — at the version
   `package.json` `devDependencies` pins. The `@earendil-works/*` devDependency pins move in lockstep
-  (the set `tests/test_packaging.py::test_pi_toolchain_pin_lockstep` enforces), so the pin is the single version
-  truth for every dist-scoped fact here.
+  (the set `tests/test_packaging.py::test_pi_toolchain_pin_lockstep` enforces), so the pin is the
+  single version truth for every dist-scoped fact here.
 - **Re-verify at each pin bump.** A bump silently re-asserts every dist-scoped fact here: its
   plan re-reads each against the newly *installed* dist (resolved per
   `toolchain/worktree-node-modules.md`; deep-source reads need `pi/context-system.md`'s read-only
-  allowlist) and corrects or dates changes. Last full re-verification: the `0.85.1` dist —
+  allowlist) and corrects or dates changes. Last full re-verification: the `0.87.0` dist —
   provenance, not a currency promise; the pin is.
 
 ## Cross-references
