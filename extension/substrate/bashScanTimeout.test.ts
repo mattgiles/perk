@@ -57,6 +57,13 @@ const RECURSIVE_GREPS = [
   // the recursion flag is searched over the grep's FULL tail: a permuted `-r` after a quoted
   // pattern that itself carries a command word (+ `-maxdepth`) is still a recursive grep
   `grep -n "find . -maxdepth 1" -r .`,
+  // a `\`-continued line is one segment
+  "grep -rn foo \\\n  --include='*.ts' .",
+  // an escaped quote does not hide the `;`
+  `echo "a\\"" ; grep -rn foo .`,
+  // a gate refusal never truncates the classifier's view
+  `env -Q x; grep -rn foo .`,
+  "echo `echo \\`ls\\`` ; grep -rn foo .",
 ];
 
 const UNBOUNDED_FINDS = [
@@ -79,6 +86,13 @@ const UNBOUNDED_FINDS = [
   `find . -name "-maxdepth"`,
   `find . -newermt '-maxdepth 1' -type f`,
   `sh -c "find . -printf 'x -maxdepth y'"`,
+  // a quoted-in newline ends the find's exemption window like a quoted-in `;`
+  "sh -c 'find . -type f\necho -maxdepth'",
+  // an expanding heredoc body is its own segment, so its substitution is classified
+  "cat <<EOF\n$(find . -type f)\nEOF",
+  // a gate refusal never truncates the classifier's view
+  `$CMD; find . -type f`,
+  `(find . -type f)`,
 ];
 
 const NOT_SCANS = [
@@ -103,6 +117,10 @@ const NOT_SCANS = [
   `find . -printf 'x -maxdepth y' -maxdepth 1`,
   `find . -name 'a;b' -maxdepth 1`,
   `sh -c "find . -name '*.py' -maxdepth 1"`,
+  // escape-aware quote blanking sees the real `-maxdepth`
+  `find . -name "a\\"b" -maxdepth 1`,
+  // deliberate: a literal heredoc body cannot execute, so a find inside it is data
+  "cat <<'EOF'\n$(find . -type f)\nEOF",
   `fd foo`,
   `ls -R`,
   `cat docs/find.md`,
