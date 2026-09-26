@@ -81,6 +81,7 @@ pr-reviewer = "openai/gpt-6-astra"
 review-classifier = "openai/gpt-6-sol"
 scout = "openai/gpt-6-sol"
 session-auditor = "openai/gpt-6-sol"
+simplifier = "openai/gpt-6-sol"
 
 # ═══ How work is verified — and whether it's trusted ═══
 

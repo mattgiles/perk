@@ -53,7 +53,8 @@ export interface PerkConfig {
    * `harvest-analyst` — consumed by `run_harvest_wave` at execute time — `dream-analyst` and
    * `dream-reducer` — consumed by `run_dream_wave` at execute time — `scout` — the
    * general-purpose read-only analysis lane (task-defined scope), consumed by `run_scout_wave`
-   * at execute time) — and the
+   * at execute time — `simplifier` — the Ponytail-mandated draft-cut lane, dormant until the
+   * simplify doors land: no shipped door or tool consumes the key yet) — and the
    * dev-only `session-auditor`, whose def is repo-local to perk's own repository
    * (`.pi/agents/perk-dev/session-auditor.md`, a project agent, never shipped), so the key is
    * dormant in consumer repos. Each configured
@@ -72,22 +73,10 @@ export interface PerkConfig {
    * `"inherit"` sentinel (child inherits the parent session's model) — both resolved by
    * pi-subagents on the injected value (the last-colon segment counts as thinking only when it
    * is a pi level, so ollama-style tags stay part of the model id).
-   * Always-present object; absent keys omitted (mirror of `providers`).
+   * Always-present object; absent keys omitted (mirror of `providers`). The key set is
+   * `SUBAGENT_KEYS` — the single TS SSOT, so a key added there type-checks everywhere.
    */
-  subagents: {
-    "pr-reviewer"?: string;
-    "review-classifier"?: string;
-    "objective-explorer"?: string;
-    "conflict-resolver"?: string;
-    "learn-analyst"?: string;
-    "adversarial-reviewer"?: string;
-    "draft-reviewer"?: string;
-    "harvest-analyst"?: string;
-    "dream-analyst"?: string;
-    "dream-reducer"?: string;
-    scout?: string;
-    "session-auditor"?: string;
-  };
+  subagents: Partial<Record<SubagentKey, string>>;
   /**
    * Optional `[compaction] objective_threshold` — the context-usage fraction (0,1] that triggers
    * threshold compaction while an objective is active. A native TOML float (e.g.
@@ -351,6 +340,8 @@ export const SUBAGENT_KEYS = [
   "dream-analyst",
   "dream-reducer",
   "scout",
+  // Dormant until the simplify doors land: no shipped door or tool consumes the key yet.
+  "simplifier",
   // Dev-only: the perk-dev session-audit judgment wave's auditor (dormant in consumer repos).
   "session-auditor",
 ] as const;

@@ -334,6 +334,7 @@ default.
 | `dream-analyst` | string (model id) | _(frontmatter default)_ — consumed by the `run_dream_wave` tool at execute time |
 | `dream-reducer` | string (model id) | _(frontmatter default)_ — consumed by the `run_dream_wave` tool at execute time |
 | `scout` | string (model id) | _(frontmatter default)_ — the general-purpose read-only analysis lane `perk.scout` (task-defined scope) — consumed by the `run_scout_wave` tool at execute time |
+| `simplifier` | string (model id) | _(frontmatter default)_ — `perk.simplifier`, the Ponytail-mandated draft-simplification lane; **dormant** until the simplify doors land (no shipped tool or door consumes the key yet) |
 | `session-auditor` | string (model id) | _(frontmatter default)_ — **dev-only** (perk's own repo's session-audit judgment wave; dormant in consumer repos) |
 
 A value may carry a **`:thinking` suffix** setting that agent's thinking level

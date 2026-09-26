@@ -71,7 +71,7 @@ to perk's subagents (frontmatter/`[models.subagents]` own those).
 Fixed-key table — affects only perk's own agents (`pr-reviewer`, `review-classifier`,
 `objective-explorer`, `conflict-resolver`, `learn-analyst`, `adversarial-reviewer`,
 `draft-reviewer`, `harvest-analyst`, `dream-analyst`,
-`dream-reducer`, `scout`, plus the dev-only
+`dream-reducer`, `scout`, `simplifier` (dormant until the simplify doors land), plus the dev-only
 `session-auditor` — dormant in consumer repos). An absent key uses
 the agent's frontmatter default. The `scout` key is the model the `run_scout_wave` tool spawns in
 `/plan`, `/objective-plan` and objective-author sessions — one fresh read-only `perk.scout` lane per

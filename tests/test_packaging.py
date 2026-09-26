@@ -301,7 +301,7 @@ def test_packed_package_declares_discoverable_agent_census(tmp_path):
     contract, `docs/agents.md`): read the package's `package.json`, follow every
     `pi-subagents.agents` entry relative to the package root, parse each `*.md` def's frontmatter,
     and derive the runtime name `<package>.<name>`. That census must equal the source `agents/`
-    directory AND the `[models.subagents]` key set, and the reviewer defs' installed-layout
+    directory AND the `[models.subagents]` key set, and the Ponytail-bound defs' installed-layout
     `skillPath` candidate must land on the exact Ponytail file beside the package. A `files` entry
     dropped, the manifest key misspelled, a def missing `package: perk`, or a relocated def dir
     fails here while the dry-run listing above would still pass. The engine's private tree is
@@ -350,6 +350,7 @@ def test_packed_package_declares_discoverable_agent_census(tmp_path):
         ("pr-reviewer", "ponytail-review"),
         ("adversarial-reviewer", "ponytail-review"),
         ("draft-reviewer", "ponytail"),
+        ("simplifier", "ponytail"),
     ):
         path = runtime_defs[f"perk.{name}"]
         first = Path(os.path.normpath(path.parent / _frontmatter(path)["skillPath"][0]))
