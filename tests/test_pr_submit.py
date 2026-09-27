@@ -13,6 +13,7 @@ from perk.backends.linear import agent as linear_agent
 from perk.cli.cli import cli
 from perk.cli.commands.pr import submit_cmd
 from perk.delivery import observe as delivery_observe
+from perk.delivery import pr_body
 from perk.delivery import publish as delivery_publish
 from perk.state import cache
 from perk.substrate import git
@@ -286,31 +287,11 @@ def test_real_submit_drops_the_embed_when_the_plan_exceeds_githubs_body_cap(monk
     data = json.loads(result.output)
     assert data["success"] is True and data["plan_embedded"] is False
     body = str(calls["pr_body"])
-    assert len(body) <= submit_cmd._PR_BODY_MAX_CHARS
+    assert len(body) <= pr_body.PR_BODY_MAX_CHARS
     assert "<details>" not in body and "# Big plan" not in body
     assert body.startswith("Closes #7\n\nPlan: #7\n\n")
     assert "too large to embed" in body and "`gh pr checkout 42`" in body
     assert not github.validate_pr_body(body, pr_number=42)
-
-
-def test_plan_embed_fit_is_judged_with_the_footer_reserved():
-    # Exactly at the boundary the create pass (no PR number yet) and the update pass (footer
-    # appended) must agree, so the fit is judged with the footer reserved on both.
-    issue = "7"
-    fixed = len(
-        submit_cmd._join_pr_body(
-            issue=issue, embed=submit_cmd._plan_embed(issue=issue, plan_body="")
-        )
-    )
-    room = submit_cmd._PR_BODY_MAX_CHARS - fixed - submit_cmd._FOOTER_RESERVE
-    fits, too_big = "p" * room, "p" * (room + 1)
-    assert submit_cmd._plan_embed_fits(issue=issue, plan_body=fits)
-    assert not submit_cmd._plan_embed_fits(issue=issue, plan_body=too_big)
-    for plan_body in (fits, too_big):
-        create = submit_cmd._compose_pr_body(issue=issue, plan_body=plan_body)
-        update = submit_cmd._compose_pr_body(issue=issue, plan_body=plan_body, pr_number=42)
-        assert ("<details>" in create) == ("<details>" in update)
-        assert len(update) <= submit_cmd._PR_BODY_MAX_CHARS
 
 
 def test_real_submit_idempotent_existing_pr(monkeypatch):
@@ -1055,9 +1036,11 @@ def test_compose_stacked_pr_body_sections_and_footer():
             ),
         ),
     )
-    body = delivery_publish._compose_stacked_pr_body(
+    composed = delivery_publish._compose_stacked_pr_body(
         issue="7", plan_body="# My Plan", facts=facts, pr_number=42
     )
+    assert composed.plan_embedded is True
+    body = composed.text
     # The disclaimer + position line.
     assert (
         "> Informational — the delivery train on objective #500 is authoritative; "
@@ -1076,6 +1059,6 @@ def test_compose_stacked_pr_body_sections_and_footer():
     # The first (pre-create) pass has no footer yet but still marks the current row.
     first_pass = delivery_publish._compose_stacked_pr_body(
         issue="7", plan_body=None, facts=facts, pr_number=None
-    )
+    ).text
     assert "| 2 | 2.2 | #7 | (this PR) |" in first_pass
     assert "gh pr checkout" not in first_pass

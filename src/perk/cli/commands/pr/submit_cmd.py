@@ -10,6 +10,7 @@ Exit codes: 0 submitted · 1 invalid input / unauthed / no saved plan / op failu
 
 import os
 import tomllib
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from perk.cli.ensure import UserFacingCliError
 # `delivery.SyncResult` there — the resolved deviation recorded in
 # docs/planning/archive/stacked-prs/final-census.md.
 from perk.delivery import SyncResult as DeliverySyncResult
+from perk.delivery import pr_body
 from perk.github import GitHubError
 from perk.run import launch
 from perk.state import cache
@@ -235,7 +237,7 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
         head=branch,
         base=base,
         title=state.title,
-        body=_compose_pr_body(issue=issue, plan_body=plan_body),
+        body=_compose_pr_body(issue=issue, plan_body=plan_body).text,
         repo_root=repo_root,
         draft=True,
     )
@@ -254,7 +256,8 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
     if pr.existed and pr.state == "CLOSED":
         github.reopen_pr(number=pr.number, repo_root=repo_root)
         user_output(click.style(f"↺ reopened closed PR #{pr.number} for this branch", fg="yellow"))
-    full_body = _compose_pr_body(issue=issue, plan_body=plan_body, pr_number=pr.number)
+    composed = _compose_pr_body(issue=issue, plan_body=plan_body, pr_number=pr.number)
+    full_body = composed.text
     github.update_pr_body(number=pr.number, body=full_body, repo_root=repo_root)
     # Post-write self-check: exactly what catches the issue-numbered-footer bug.
     errors = github.validate_pr_body(full_body, pr_number=pr.number)
@@ -290,7 +293,7 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
         branch=branch,
         issue=issue,
         header_update=header_update,
-        plan_embedded=plan_body is not None and _plan_embed_fits(issue=issue, plan_body=plan_body),
+        plan_embedded=composed.plan_embedded,
         pr_checked=True,
         dry_run=False,
         base=base,
@@ -401,44 +404,21 @@ def _safe_plan_body(*, issue: str, repo_root: Path) -> str | None:
         return None
 
 
-# GitHub refuses a PR body above this many characters (`422 body is too long`), on create and
-# on PATCH alike. The plan embed is best-effort, so it yields rather than sinking the submit.
-_PR_BODY_MAX_CHARS = 65_536
-# The footer the update pass appends; reserved on the create pass (PR number still unknown) so
-# both passes judge the same size and never disagree about whether the embed fits.
-_FOOTER_RESERVE = len("\n\n`gh pr checkout 9999999`")
-
-
-def _plan_embed(*, issue: str, plan_body: str) -> str:
-    return f"<details><summary>Plan #{issue}</summary>\n\n{plan_body}\n\n</details>"
-
-
-def _plan_embed_fits(*, issue: str, plan_body: str) -> bool:
-    """Whether the verbatim `<details>` embed keeps the composed body (footer included) under
-    GitHub's cap — the one decision `_compose_pr_body` and the reported `plan_embedded` share."""
-    body = _join_pr_body(issue=issue, embed=_plan_embed(issue=issue, plan_body=plan_body))
-    return len(body) + _FOOTER_RESERVE <= _PR_BODY_MAX_CHARS
-
-
-def _join_pr_body(*, issue: str, embed: str | None, pr_number: int | None = None) -> str:
-    parts = [f"Closes #{issue}", f"Plan: #{issue}"]
-    if embed is not None:
-        parts.append(embed)
-    if pr_number is not None:
-        parts.append(f"`gh pr checkout {pr_number}`")
-    return "\n\n".join(parts) + "\n"
-
-
 def _compose_pr_body(
-    *, issue: str, plan_body: str | None = None, pr_number: int | None = None
-) -> str:
-    """Compose the GitHub PR body: closing keyword + plan link + a best-effort
-    `<details>` embed of the verbatim plan + the checkout footer.
+    *,
+    issue: str,
+    plan_body: str | None = None,
+    pr_number: int | None = None,
+    sections: Sequence[str] = (),
+) -> pr_body.ComposedBody:
+    """Compose the GitHub PR body: closing keyword + plan link + report ``sections`` + a
+    best-effort `<details>` embed of the verbatim plan + the checkout footer.
 
-    Size guard: when the embed would push the body (footer included) over `_PR_BODY_MAX_CHARS`,
-    it is replaced by a one-line pointer at the plan issue — the closing keyword, plan link and
-    footer are untouched, and `plan_embedded` reports `false`. A plan too large to embed must
-    never make the plan unsubmittable.
+    Size guard (the shared kernel, ``perk.delivery.pr_body``): when the embed would push the
+    body (sections and footer included) over GitHub's cap, it is replaced by a one-line pointer
+    at the plan issue — the closing keyword, plan link, sections and footer are untouched, and
+    ``plan_embedded`` reports ``false``. A plan too large to embed must never make the plan
+    unsubmittable.
 
     The two-target split: this HTML-enhanced body goes ONLY into the GitHub PR body (the
     `<details>` embed is fine here). The **footer** (not the embed) must stay a plain-backtick line
@@ -447,24 +427,21 @@ def _compose_pr_body(
     squash commit message is the OTHER target (plain text), set at land.
 
     Closing-keyword invariant: this incremental composition is fixed (exactly one
-    `Closes #<plan>` + plan link + embed + footer), while stacked composition is owned by the
-    Publish engine. Both create-then-update passes **overwrite** any pre-created PR body; the
-    land-side squash footer is equally fixed — there is no seam for extra closing keywords. A PR
-    that must close an additional issue needs a **post-submit** edit on the first turn after
+    `Closes #<plan>` + plan link + sections + embed + footer), while stacked composition is owned
+    by the Publish engine. Both create-then-update passes **overwrite** any pre-created PR body;
+    the land-side squash footer is equally fixed — there is no seam for extra closing keywords. A
+    PR that must close an additional issue needs a **post-submit** edit on the first turn after
     `/submit` (the door terminates its own turn): read the body via `gh pr view`, insert the
     extra `Closes #N` beside the existing one, write back via `gh pr edit --body-file` — and
     track it as an explicit todo before calling `/submit` so it survives the turn boundary.
     """
-    if not plan_body:
-        return _join_pr_body(issue=issue, embed=None, pr_number=pr_number)
-    if _plan_embed_fits(issue=issue, plan_body=plan_body):
-        embed = _plan_embed(issue=issue, plan_body=plan_body)
-    else:
-        embed = (
-            f"_Plan #{issue} is too large to embed here ({len(plan_body):,} characters; GitHub "
-            f"caps a PR body at {_PR_BODY_MAX_CHARS:,}) — read it on the plan issue._"
-        )
-    return _join_pr_body(issue=issue, embed=embed, pr_number=pr_number)
+    return pr_body.compose(
+        issue=issue,
+        lead=[f"Closes #{issue}", f"Plan: #{issue}"],
+        sections=sections,
+        plan_body=plan_body,
+        pr_number=pr_number,
+    )
 
 
 class SubmitPrOut(OutputModel):

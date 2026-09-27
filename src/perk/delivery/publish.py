@@ -23,7 +23,7 @@ the ambiguous arms converge on re-run).
 
 import contextlib
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Never, Protocol, cast
@@ -31,6 +31,7 @@ from typing import Never, Protocol, cast
 from perk import plan
 from perk.backends.issue_backend import IssueBackendError, PlanHeaderUpdate, PlanState
 from perk.backends.objective_store import ObjectiveStoreError
+from perk.delivery import pr_body
 from perk.delivery import sync as sync_mod
 from perk.delivery.facade import (
     DeliveryError,
@@ -212,12 +213,18 @@ class _Publication:
     plan_body: str | None
 
 
-def _compose_body(pub: _Publication, facts: _LayerBodyFacts, pr_number: int | None) -> str:
+def _compose_body(
+    pub: _Publication,
+    facts: _LayerBodyFacts,
+    pr_number: int | None,
+    sections: Sequence[str] = (),
+) -> pr_body.ComposedBody:
     return _compose_stacked_pr_body(
         issue=pub.plan_id,
         plan_body=pub.plan_body,
         facts=facts,
         pr_number=pr_number,
+        sections=sections,
     )
 
 
@@ -1016,7 +1023,7 @@ def _complete_publication(
         head=ctx.branch,
         base=ctx.parent_branch,
         title=pub.plan_state.title,
-        body=_compose_body(pub, facts, None),
+        body=_compose_body(pub, facts, None).text,
         draft=True,
     )
     if expected_pr_number is not None and pr.number != expected_pr_number:
@@ -1039,7 +1046,8 @@ def _complete_publication(
         # target a stale parent. Draft state is never touched on an existing PR — draft-by-
         # default is for creation only; `/ready` stays the separate per-layer gesture.
         pub.context.github.update_pr_base(pr.number, base=ctx.parent_branch)
-    body = _compose_body(pub, facts, pr.number)
+    composed = _compose_body(pub, facts, pr.number)
+    body = composed.text
     pub.context.github.update_pr_body(pr.number, body=body)
     errors = pub.runtime.validate_pr_body(body, pr_number=pr.number)
     if errors:
@@ -1078,7 +1086,7 @@ def _complete_publication(
         pr=pr,
         branch=ctx.branch,
         header_update=header_update,
-        plan_embedded=pub.plan_body is not None,
+        plan_embedded=composed.plan_embedded,
         pr_checked=True,
         parent_branch=ctx.parent_branch,
         operation_id=operation_id,
@@ -1119,8 +1127,10 @@ def _compose_stacked_pr_body(
     plan_body: str | None,
     facts: _LayerBodyFacts,
     pr_number: int | None = None,
-) -> str:
-    """Compose the informational stacked body; the reconstructed train stays authoritative."""
+    sections: Sequence[str] = (),
+) -> pr_body.ComposedBody:
+    """Compose the informational stacked body through the shared kernel (so the GitHub body cap
+    governs the plan embed here too); the reconstructed train stays authoritative."""
     objective = facts.objective_id.removeprefix("#")
     this_layer = (
         "### This layer\n\n"
@@ -1138,12 +1148,13 @@ def _compose_stacked_pr_body(
             pr_cell = f"#{row.pr_number}" if row.pr_number is not None else "—"
         rows.append(f"| {position} | {row.node_id} | {plan_cell} | {pr_cell} |")
     train_context = "### Train context\n\n" + "\n".join(rows)
-    parts = [f"Closes #{issue}", f"Plan: #{issue}", this_layer, train_context]
-    if plan_body:
-        parts.append(f"<details><summary>Plan #{issue}</summary>\n\n{plan_body}\n\n</details>")
-    if pr_number is not None:
-        parts.append(f"`gh pr checkout {pr_number}`")
-    return "\n\n".join(parts) + "\n"
+    return pr_body.compose(
+        issue=issue,
+        lead=[f"Closes #{issue}", f"Plan: #{issue}", this_layer, train_context],
+        sections=sections,
+        plan_body=plan_body,
+        pr_number=pr_number,
+    )
 
 
 # ----------------------------------------------------------------- stack membership convergence
