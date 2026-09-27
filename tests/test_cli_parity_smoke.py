@@ -140,7 +140,14 @@ EXPECTED_SURFACE: dict[str, object] = {
             ("pending", ()),
             ("skip", ()),
         ],
-        "librarian": [("list", ()), ("record", ()), ("remove", ())],
+        "librarian": [
+            ("add", ()),
+            ("check", ()),
+            ("list", ()),
+            ("record", ()),
+            ("refresh", ()),
+            ("remove", ()),
+        ],
         "plan": [("from", ()), ("replan", ()), ("resume", ()), ("save", ()), ("watch", ())],
         "objective": [
             ("author", ()),

@@ -65,7 +65,7 @@ class RefreshOutcome:
 
 
 @contextlib.contextmanager
-def _hooks_dir() -> Iterator[Path]:
+def hooks_dir() -> Iterator[Path]:
     """An empty temporary directory to pin ``core.hooksPath`` at for the op's duration."""
     with tempfile.TemporaryDirectory(prefix="perk-library-hooks-") as name:
         yield Path(name)
@@ -103,7 +103,7 @@ def add_source(
         _eligibility(
             load_catalog(layout), ref=ref, rel=rel, requested=requested, pin=pin, fresh=fresh
         )
-        with _hooks_dir() as hooks:
+        with hooks_dir() as hooks:
             if fresh:
                 _clone_fresh(target, ref, pin, hooks)
             else:
@@ -377,7 +377,7 @@ def refresh_entry(repo_root: Path, *, slug: str, now: Clock | None = None) -> Re
         require_no_tracked_content(layout)
         require_ignored(layout, [])
         entry = _refreshable(load_catalog(layout).get(slug), slug)
-        with _hooks_dir() as hooks, library_lock(repo_root):
+        with hooks_dir() as hooks, library_lock(repo_root):
             catalog = load_catalog(layout)
             current = catalog.get(slug)
             if current is None or current.path != entry.path:

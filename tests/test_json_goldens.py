@@ -727,3 +727,60 @@ def test_golden_librarian_remove() -> None:
     assert_golden(
         "librarian_remove", LibrarianRemoveOut.from_domain(outcome).model_dump(mode="json")
     )
+
+
+def test_golden_librarian_add_source() -> None:
+    from perk.cli.commands.librarian.add.source_cmd import LibrarianAddSourceOut
+    from perk.library import AddSourceOutcome
+
+    _root, views = _librarian_views()
+    outcome = AddSourceOutcome(action="cloned", view=views[0])
+    assert_golden(
+        "librarian_add_source", LibrarianAddSourceOut.from_domain(outcome).model_dump(mode="json")
+    )
+
+
+def test_golden_librarian_check() -> None:
+    from perk.cli.commands.librarian.check_cmd import LibrarianCheckOut
+    from perk.library import CheckOutcome, CheckResult
+
+    _root, views = _librarian_views()
+    outcome = CheckOutcome(
+        results=(
+            CheckResult(
+                action="probed",
+                detail=None,
+                notes=("https://pi.dev/docs/intro: HTTP 503 — not observed",),
+                view=views[1],
+            ),
+            CheckResult(
+                action="pinned", detail="pinned at 8.1.7 — never probed", notes=(), view=views[0]
+            ),
+        ),
+        warnings=("pi: entry changed or was checked meanwhile — rerun",),
+    )
+    assert_golden("librarian_check", LibrarianCheckOut.from_domain(outcome).model_dump(mode="json"))
+
+
+def test_golden_librarian_refresh() -> None:
+    from dataclasses import replace
+
+    from perk.cli.commands.librarian.refresh_cmd import LibrarianRefreshOut
+    from perk.library import RefreshOutcome, SourceUpstream
+
+    _root, views = _librarian_views()
+    source_view = views[0]
+    entry = replace(
+        source_view.entry,
+        ref=None,
+        upstream=SourceUpstream(branch="main", head_sha="4567cdef"),
+        checked_at="2026-09-27T12:00:00Z",
+        evidence="strong",
+    )
+    view = replace(source_view, entry=entry, status="fresh", checked_age_seconds=0)
+    outcome = RefreshOutcome(
+        action="fast_forwarded", detail=None, previous_head="0123abcd", view=view
+    )
+    assert_golden(
+        "librarian_refresh", LibrarianRefreshOut.from_domain(outcome).model_dump(mode="json")
+    )

@@ -1,0 +1,52 @@
+{
+  "success": true,
+  "error_type": null,
+  "message": null,
+  "results": [
+    {
+      "action": "probed",
+      "detail": null,
+      "notes": [
+        "https://pi.dev/docs/intro: HTTP 503 \u2014 not observed"
+      ],
+      "entry": {
+        "kind": "docs",
+        "slug": "pi",
+        "source": "https://pi.dev/docs",
+        "path": "/repo/docs/library/documentation/pi",
+        "present": false,
+        "ref": null,
+        "added_at": "2026-09-01T00:00:00Z",
+        "checked_at": "2026-09-20T00:00:00Z",
+        "checked_age_seconds": 604800,
+        "stale_after": 1209600,
+        "evidence": "strong",
+        "drifted": false,
+        "status": "fresh"
+      }
+    },
+    {
+      "action": "pinned",
+      "detail": "pinned at 8.1.7 \u2014 never probed",
+      "notes": [],
+      "entry": {
+        "kind": "source",
+        "slug": "click",
+        "source": "https://github.com/pallets/click",
+        "path": "/repo/docs/library/source-code/github.com/pallets/click",
+        "present": true,
+        "ref": "8.1.7",
+        "added_at": "2026-09-02T00:00:00Z",
+        "checked_at": null,
+        "checked_age_seconds": null,
+        "stale_after": 86400,
+        "evidence": "none",
+        "drifted": false,
+        "status": "pinned"
+      }
+    }
+  ],
+  "warnings": [
+    "pi: entry changed or was checked meanwhile \u2014 rerun"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "success": true,
+  "error_type": null,
+  "message": null,
+  "action": "cloned",
+  "entry": {
+    "kind": "source",
+    "slug": "click",
+    "source": "https://github.com/pallets/click",
+    "path": "/repo/docs/library/source-code/github.com/pallets/click",
+    "present": true,
+    "ref": "8.1.7",
+    "added_at": "2026-09-02T00:00:00Z",
+    "checked_at": null,
+    "checked_age_seconds": null,
+    "stale_after": 86400,
+    "evidence": "none",
+    "drifted": false,
+    "status": "pinned"
+  }
+}

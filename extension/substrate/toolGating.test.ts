@@ -549,6 +549,12 @@ test("perk librarian workers are admitted only in their --json-last forms", () =
     "perk librarian record --adopt docs/library/pi --kind docs --source https://pi.dev/docs --json",
     "perk librarian record --publish docs/library/.staging/pi-01ARZ --slug pi --source https://pi.dev/docs --replace --accept-failures --json",
     "perk librarian remove pi --json",
+    "perk librarian add source foo/bar --json",
+    "perk librarian add source https://github.com/pallets/click --ref 8.1.7 --slug click --json",
+    "perk librarian check --json",
+    "perk librarian check pi click --force --json",
+    "cd repo && perk librarian check --json",
+    "perk librarian refresh pi --json",
   ])
     assert.equal(isReadOnlyBashCommand(command), true, command);
   for (const command of [
@@ -556,9 +562,13 @@ test("perk librarian workers are admitted only in their --json-last forms", () =
     "perk librarian list --json --verbose",
     "perk librarian record --adopt docs/library/pi --kind docs --source https://x --json > out.txt",
     "perk librarian remove pi --json && git add .",
-    "perk librarian add source foo/bar --json",
-    "perk librarian check --json",
-    "perk librarian refresh pi --json",
+    "perk librarian add docs https://pi.dev/docs --json",
+    "perk librarian add --json",
+    "perk librarian check",
+    "perk librarian refresh pi --json > out.txt",
+    "perk librarian check --json && git add .",
+    "perk librarian addsource foo/bar --json",
+    "perk librarian checkx --json",
     "perk librarianx list --json",
   ])
     assert.equal(isReadOnlyBashCommand(command), false, command);
