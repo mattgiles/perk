@@ -2323,7 +2323,46 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
   keyword / plan link / footer are unchanged, the submit succeeds, and `plan_embedded` reports
   `false`. The fit is judged with the footer reserved on both passes, so create and update
   never disagree. The squash **commit message** is the OTHER
-  target: plain text, set at land, so HTML never leaks into `git log`.
+  target: plain text, set at land, so HTML never leaks into `git log`. Both routes compose
+  through ONE shared body kernel (`perk.delivery.pr_body.compose(issue, lead, sections,
+  plan_body, pr_number) -> ComposedBody{text, plan_embedded}`): `lead` (incremental `Closes` +
+  `Plan`; stacked `Closes` + `Plan` + `This layer` + `Train context`), then `sections` (bounded
+  report blocks — the one hook for reports on PR bodies, never dropped), then the embed or the
+  pointer, then the footer. The fit is judged with every section and the footer reserve in
+  place, and the stacked route honors the cap exactly like the incremental one.
+- **Change stats section.** Every published PR body carries `### Change stats` as its one
+  section (after `Plan: #N` on incremental, after `Train context` on stacked, before the embed):
+  lines **added / removed / modified** over the PR's exact range, split into the five fixed rows
+  **Code / Tests / Comments / Learned docs / Other** (zero rows hidden in rendering; data always
+  carries all five in order) with a `<sub>` footnote naming `<base7>..<head7>`.
+  `perk.delivery.change_stats` owns the vocabulary: an ordered partition tuple (`learned` = `docs/learned/`,
+  `tests` = the test-path regex, `rest` residual; first match wins) × a prose/source language
+  class (by cloc language name) × a six-arm routing table (learned → Learned docs; tests code →
+  Tests, tests comment → Comments; rest prose → Other; rest source code → Code, rest source
+  comment → Comments). **perk owns the pairs; cloc only counts:** `git diff --name-status -z
+  --find-renames` lists the range, both sides are materialized from `git archive` (regular files
+  only), every file is partitioned in Python, and cloc receives one explicit
+  `--diff-list-file` per non-empty partition under a pinned argv (`--config <devnull>`,
+  `--show-errors`, `--diff-timeout 0`, `--ignore-whitespace`) — a rename is one compared pair
+  owned by its **new** path, an empty range or partition never invokes cloc, and cloc-reported
+  per-file errors fail the count rather than under-report it. **Base authority** (incremental):
+  an existing PR's non-blank `base_ref` is the `base` for create, the stats, the probe, and the
+  envelope (perk never retargets an incremental PR); otherwise the pinned plan base, else the
+  GitHub default. The incremental range is `merge-base(origin/<base>, HEAD)..HEAD` with
+  `origin/<base>` fetched first (a failed fetch is unavailable, no stale fallback), counted once
+  before the push. **Stacked per-arm policy:** a fresh publish / republish / resume counts
+  `parent_sha..candidate_sha` once and writes the section into both body passes; a cascade that
+  moved the trigger's head refreshes the trigger PR's body fail-soft over its fresh checkpoint
+  pair (a GitHub or validation failure becomes the note — the publication is already journaled;
+  successor bodies are not rewritten, each footnote names its range); a cascade no-op and the
+  pure no-op convergence report stats on the envelope with no write. The count runs through the
+  `_PublishRuntime.change_stats` seam (no default). **Degrade-and-note:** cloc missing, a cloc
+  failure, an unresolvable range or a git failure never fails submit — the section reads
+  `_Unavailable: <note>._` (one line, ≤ 200 chars). The `--json` envelope gains two additive
+  trailing fields, `change_stats` (`{base, head, rows: [{id, label, added, removed, modified}]}`
+  or null) and `change_stats_note` (string or null); `--dry-run` leaves both null. The warm
+  `/submit` success message appends one `change stats: …` / `change stats unavailable: …` line
+  (absent when an older CLI reports neither).
 - **Mergeability probe.** **After** the PR is created + the body validated, `perk pr submit` runs
   a deterministic **local** `git merge-tree --write-tree origin/<base> <head-ref>` probe (no GitHub
   round-trip, no reliance on GitHub's eventually-consistent `mergeable` field). Incremental submit
@@ -2358,6 +2397,13 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
   a new reader paired with an old CLI (missing `base_ref`) or malformed success refuses with the
   existing `bad_output` version-skew diagnostic, never a legacy fallback. Only `no_pr` selects
   the local plan-ref/default-base arm; all other failures pass through unchanged.
+- **`pr stats` (the change-stats worker).** A read-only, `gh`-free `perk pr stats [--base REF]
+  [--fetch] --json` worker counts the same five rows over `merge-base(<base>, HEAD)..HEAD`. Base:
+  `--base`, else the local plan-ref base, else the trunk. Offline by default (`origin/<base>` when
+  it resolves locally, else the local `<base>`); `--fetch` reproduces publication's fresh-remote
+  semantics. Success envelope `{success, error_type, message, base_ref, stats}`; unlike submit it
+  fails loudly — `error_type` is the unavailable kind (`cloc_missing` / `cloc_failed` /
+  `range_unresolved` / `git_failed`), exit 1; not-a-repo exit 2.
 - **Draft → ready is a deliberate gesture.** Submit keeps the PR **draft**; perk does **not**
   auto-publish. `perk pr ready` (warm `/ready`) is the explicit review gate — `mark_pr_ready` if
   draft, idempotent. On a **stacked** layer the same gesture is the deliberate post-review human
@@ -2436,7 +2482,9 @@ above-every-marker placement).
 the `plan-header.base` and the `cache.plan-ref.base`. Three consumers read it: `create_pr` (the
 PR merge target), the worktree start-point (`origin/<base>` instead of the detected trunk), and
 the `/submit` merge-conflict probe (chain: `cache.plan-ref.base` → `plan-header.base` →
-`default_branch()`). An explicit `implement` `--base` flag (a one-off git start-point
+`default_branch()`). Once an incremental PR exists, its actual non-blank `base_ref` outranks the
+whole chain for create, the change stats, the probe, and the envelope `base` (perk never
+retargets an incremental PR — the PR-body craft ops' change-stats bullet). An explicit `implement` `--base` flag (a one-off git start-point
 override) still wins the start-point verbatim for **incremental** plans only — on a stacked
 layer an explicit `--base` is a typed `invalid_input` refusal (the parent is derived from the
 delivery train, never chosen; §8.46). `reconstruct_plan_ref`

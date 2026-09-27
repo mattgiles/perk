@@ -103,6 +103,14 @@ finish the work. Withholding/failure means stop and report, not local conflict e
 launch. Mechanical publication remains successful even if resolution fails. If the probe cannot
 run, submission succeeds with mergeability undetermined.
 
+The success line (the `submit` tool result and the `/submit` report alike) ends with one change
+stats line — `change stats: code +120 −30 ~12 · tests +80 −5 ~3 · …` over the non-zero rows of
+the PR body's **Change stats** table (`change stats: no counted lines` when every row is zero).
+When the stats could not be computed (cloc missing, the base could not be fetched) the line reads
+`change stats unavailable: <reason>` and the submit still succeeds; an older perk CLI that
+reports neither prints no line. See [`perk pr submit`](../cli/pr.md#perk-pr-submit) for the rows
+and the counting rules.
+
 Authorization is bound to this session, run, worktree and unchanged attempt counter; direct,
 repeated, stale or read-only calls refuse. Full address finalization uses the same tool and cap,
 only after publication and thread resolution succeed. Without pi-subagents' `subagent` tool loaded
@@ -171,7 +179,8 @@ resolve. `--preview` classifies only. Paired tools:
   *Terminating on full success.* Full success ends with a delivery-keyed `Hand-off` line:
   incremental → `/land` once approved; stacked layer → `/ready` records the post-review handoff
   (never `/land`); if the worker reported no recognized delivery kind (absent or unknown), confirm
-  the plan's delivery before choosing.
+  the plan's delivery before choosing. The same change-stats line `/submit` prints follows the
+  hand-off.
 
 ### `/land`
 

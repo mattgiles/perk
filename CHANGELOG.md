@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Add /simplify-plan and /simplify-objective: run a Ponytail-mandated cut pass over the working plan or objective draft in a fresh perk.simplifier lane (intensity lite|full|ultra, default ultra, optional focus hint) and fold its proposal back through plan_draft / objective_draft — nothing is saved. The lane model is [models.subagents] simplifier. (d1ab3f8)
+- Report change stats on every submitted PR: the body gains a **Change stats** table of lines added / removed / modified, split into Code, Tests, Comments, Learned docs (`docs/learned/`), and Other, counted by cloc over the PR's exact range and refreshed whenever perk rewrites the PR. `perk pr submit --json` adds `change_stats` and `change_stats_note`, and the `/submit` success line ends with a `change stats: …` line. A cloc or range failure never fails the submit — the table reads "Unavailable" with the reason. (5e06cde)
+- Add `perk pr stats [--base REF] [--fetch] [--json]`: count the current branch's change stats without publishing (read-only, no GitHub access). (2ce0098)
+
+### Changed
+
+- Require `cloc`: `perk init` / `perk doctor` report it missing like any required tool, interactive `perk init` offers to install it (brew, else `npm install -g cloc`), and the remote-runner setup action installs it. Install it with `brew install cloc`, `npm install -g cloc`, or your distro package. (0b704d6)
+- Target an existing incremental PR's actual base branch: when the plan's PR already exists, its target branch — not the plan's pinned base or the repository default — governs submit's base, mergeability probe, change stats, and reported `base`. perk never retargets it. (5e06cde)
+- Keep stacked PR bodies under GitHub's 65,536-character cap: a stacked layer's plan embed now yields to a one-line pointer when it would not fit, as the incremental route already did. (573e25c)
 
 ## [3.7.0] - 2026-09-23
 
