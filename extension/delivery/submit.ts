@@ -42,6 +42,27 @@ export interface PublishedChange {
     affected_count: number;
     notes: string[];
   };
+  /** The PR's cloc change stats (every row, in order; renderers hide zero rows). Absent on an
+   * old or malformed envelope, or when the stats were unavailable (see `change_stats_note`). */
+  change_stats?: ChangeStats;
+  /** The one-line reason the change stats could not be computed. */
+  change_stats_note?: string;
+}
+
+/** One change-stats row: lines added / removed / modified under a fixed row id. */
+export interface ChangeStatsRow {
+  id: string;
+  label: string;
+  added: number;
+  removed: number;
+  modified: number;
+}
+
+/** The change stats over the PR's `base..head` range. */
+export interface ChangeStats {
+  base: string;
+  head: string;
+  rows: ChangeStatsRow[];
 }
 
 /** One external publish attempt: the verified facts, or the adapter's soft failure. */

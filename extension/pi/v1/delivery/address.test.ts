@@ -251,6 +251,23 @@ test("wire baseline: completed on a stacked layer names the /ready handoff", asy
   assert.equal(r.terminate, true);
 });
 
+test("wire baseline: completed carries the change-stats line after the hand-off", async () => {
+  const r = await invokeFinalize({
+    submit: { ...SUBMIT_PAYLOAD, change_stats: null, change_stats_note: "cloc is not installed." },
+    params: { threads: [{ thread_id: "PRRT_1" }, { thread_id: "PRRT_2" }] },
+  });
+  assert.equal(
+    r.text,
+    "Resolved 2 review thread(s) after Opened draft PR #42 → u/pr/42 (no plan embed). " +
+      "Hand-off (incremental plan): once the PR is approved, the human runs /land.\n" +
+      "change stats unavailable: cloc is not installed.",
+  );
+  assert.equal(
+    (r.details.submit as { change_stats_note?: unknown }).change_stats_note,
+    "cloc is not installed.",
+  );
+});
+
 test("wire baseline: completed with an unreported delivery kind never defaults to /land", async () => {
   // The old-worker envelope: no `delivery` key at all.
   const { delivery: _dropped, ...oldWorkerEnvelope } = SUBMIT_PAYLOAD;

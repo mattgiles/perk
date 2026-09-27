@@ -287,6 +287,56 @@ test("wire baseline: a malformed operation block drops without sinking submit", 
   assert.deepEqual(r.details, { ...BASE_DETAILS, delivery: "stacked" });
 });
 
+const CHANGE_STATS = {
+  base: "a".repeat(40),
+  head: "b".repeat(40),
+  rows: [
+    { id: "code", label: "Code", added: 120, removed: 30, modified: 12 },
+    { id: "tests", label: "Tests", added: 80, removed: 5, modified: 3 },
+    { id: "comments", label: "Comments", added: 0, removed: 0, modified: 0 },
+    { id: "learned_docs", label: "Learned docs", added: 2, removed: 0, modified: 0 },
+    { id: "other", label: "Other", added: 0, removed: 0, modified: 0 },
+  ],
+};
+
+test("wire baseline: change stats decode and ride one appended line", async () => {
+  const r = await invokeSubmit({
+    stdout: submitJson({ change_stats: CHANGE_STATS, change_stats_note: null }),
+  });
+  assert.equal(
+    r.text,
+    "Opened draft PR #42 → u/pr/42 (no plan embed)\n" +
+      "change stats: code +120 \u221230 ~12 · tests +80 \u22125 ~3 · learned docs +2 \u22120 ~0",
+  );
+  assert.deepEqual(r.details, { ...BASE_DETAILS, change_stats: CHANGE_STATS });
+});
+
+test("wire baseline: an unavailable-stats note rides the appended line", async () => {
+  const r = await invokeSubmit({
+    stdout: submitJson({ change_stats: null, change_stats_note: "cloc is not installed." }),
+  });
+  assert.equal(
+    r.text,
+    "Opened draft PR #42 → u/pr/42 (no plan embed)\n" +
+      "change stats unavailable: cloc is not installed.",
+  );
+  assert.deepEqual(r.details, { ...BASE_DETAILS, change_stats_note: "cloc is not installed." });
+});
+
+test("decode: a malformed change-stats block drops without sinking submit", async () => {
+  for (const change_stats of [
+    { base: "a", head: "b", rows: [{ id: "code", label: "Code", added: "many" }] },
+    { base: "a", rows: [] },
+    { base: "a", head: "b", rows: "none" },
+    { base: "a", head: "b", rows: [7] },
+  ]) {
+    const r = await invokeSubmit({ stdout: submitJson({ change_stats }) });
+    assert.equal(r.details.ok, true);
+    assert.equal(r.details.change_stats, undefined);
+    assert.equal(r.text, "Opened draft PR #42 → u/pr/42 (no plan embed)");
+  }
+});
+
 test("wire baseline: the failure arm", async () => {
   const r = await invokeSubmit({ stdout: pushRejectedJson(), code: 1 });
   assert.equal(r.text, `submit failed: ${PUSH_REJECTED_MESSAGE}`);
@@ -625,6 +675,39 @@ test("renderPublishedMessage: the existing-PR verb", () => {
     plan_embedded: true,
   });
   assert.equal(text, "Found existing PR #42 → u/pr/42 (plan embedded)");
+});
+
+test("renderPublishedMessage: the change-stats line variants", () => {
+  const pr = { number: 42, url: "u/pr/42", is_draft: true, existed: false };
+  const zero = CHANGE_STATS.rows.map((row) => ({ ...row, added: 0, removed: 0, modified: 0 }));
+  assert.equal(
+    renderPublishedMessage({ pr, plan_embedded: true, change_stats: CHANGE_STATS }),
+    "Opened draft PR #42 → u/pr/42 (plan embedded)\n" +
+      "change stats: code +120 \u221230 ~12 · tests +80 \u22125 ~3 · learned docs +2 \u22120 ~0",
+  );
+  assert.equal(
+    renderPublishedMessage({
+      pr,
+      plan_embedded: true,
+      change_stats: { ...CHANGE_STATS, rows: zero },
+    }),
+    "Opened draft PR #42 → u/pr/42 (plan embedded)\nchange stats: no counted lines",
+  );
+  assert.equal(
+    renderPublishedMessage({ pr, plan_embedded: true, change_stats_note: "range unresolved" }),
+    "Opened draft PR #42 → u/pr/42 (plan embedded)\nchange stats unavailable: range unresolved",
+  );
+  // An older CLI reports neither field: the message is the bare headline.
+  assert.equal(
+    renderPublishedMessage({ pr, plan_embedded: true }),
+    "Opened draft PR #42 → u/pr/42 (plan embedded)",
+  );
+  // The line rides the conflicted headline too.
+  assert.equal(
+    renderPublishedMessage({ pr, mergeable: false, change_stats_note: "x" }),
+    "Opened draft PR #42 → u/pr/42 — merge conflicts detected; resolving\n" +
+      "change stats unavailable: x",
+  );
 });
 
 // --- driveConflictFollowUp: translation + delivery mode -------------------------------------------
