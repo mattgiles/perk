@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- As of a4cc75d -->
 
+### Added
+
+- Add /simplify-plan and /simplify-objective: run a Ponytail-mandated cut pass over the working plan or objective draft in a fresh perk.simplifier lane (intensity lite|full|ultra, default ultra, optional focus hint) and fold its proposal back through plan_draft / objective_draft — nothing is saved. The lane model is [models.subagents] simplifier. (d1ab3f8)
+
 ## [3.7.0] - 2026-09-23
 
 ### Changed
