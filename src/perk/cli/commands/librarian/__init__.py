@@ -2,21 +2,28 @@
 
 The perk library is the catalogued, gitignored offline reference of external documentation
 mirrors and source checkouts under the MAIN checkout's ``docs/library/``. The group's workers are
-deterministic supervisor surfaces: ``list`` (offline, lock-free), ``record`` (the sole catalog
-writer — ``--publish`` a staged mirror, ``--adopt`` an uncatalogued directory) and ``remove``.
-Every mutating worker runs the cache-only preflight (representative ignore probes, a
-tracked-content sweep, real-directory roots) and refuses anything that would reach outside the
-gitignored cache — which is what admits the ``--json`` forms to read-only perk sessions.
+deterministic supervisor surfaces: ``list`` (offline, lock-free), ``record`` (the docs catalog
+writer — ``--publish`` a staged mirror, ``--adopt`` an uncatalogued directory), ``remove``,
+``add source`` (clone or re-pin a source checkout), ``check`` (the ONLY freshness probe) and
+``refresh`` (fast-forward a source checkout). ``add source`` and ``refresh`` reach the network
+only for their own checkout, with every executing git operation config-pinned (hooks disabled,
+no global/system config). Every mutating worker runs the cache-only preflight (representative
+ignore probes, a tracked-content sweep, real-directory roots) and refuses anything that would
+reach outside the gitignored cache — which is what admits the ``--json`` forms to read-only perk
+sessions.
 
 ``--json`` → stdout, human text → stderr; exit codes ``0`` ok · ``1`` typed refusal / op failure
-· ``2`` not-a-repo. No verb aliases: the read-only gate grammar names exactly the three verbs.
+· ``2`` not-a-repo. No verb aliases: the read-only gate grammar names exactly the six verbs.
 """
 
 import click
 
 from perk.cli.alias import AliasGroup
+from perk.cli.commands.librarian.add import add_group
+from perk.cli.commands.librarian.check_cmd import check_library_cmd
 from perk.cli.commands.librarian.list_cmd import list_library_cmd
 from perk.cli.commands.librarian.record_cmd import record_library_cmd
+from perk.cli.commands.librarian.refresh_cmd import refresh_library_cmd
 from perk.cli.commands.librarian.remove_cmd import remove_library_cmd
 
 
@@ -26,6 +33,9 @@ def librarian_group() -> None:
     source code."""
 
 
+librarian_group.add_command(add_group)
+librarian_group.add_command(check_library_cmd)
 librarian_group.add_command(list_library_cmd)
 librarian_group.add_command(record_library_cmd)
+librarian_group.add_command(refresh_library_cmd)
 librarian_group.add_command(remove_library_cmd)

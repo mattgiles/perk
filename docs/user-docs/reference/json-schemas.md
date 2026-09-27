@@ -79,6 +79,9 @@ category directory.
 | `librarian-list.schema.json` | `LibrarianListOut` | `serialization` | Library report: catalogued entries with derived status, uncatalogued and staging directories. |
 | `librarian-record.schema.json` | `LibrarianRecordOut` | `serialization` | Published or adopted library entry plus best-effort warnings. |
 | `librarian-remove.schema.json` | `LibrarianRemoveOut` | `serialization` | Removed library entry and whether its content was deleted. |
+| `librarian-add-source.schema.json` | `LibrarianAddSourceOut` | `serialization` | Cloned, reused, or re-pinned source checkout entry. |
+| `librarian-check.schema.json` | `LibrarianCheckOut` | `serialization` | Per-entry freshness probe results with notes, plus warnings. |
+| `librarian-refresh.schema.json` | `LibrarianRefreshOut` | `serialization` | Source checkout fast-forward (or skip) outcome and the recorded entry. |
 <!-- perk:reference-facts:schemas-outputs:end -->
 
 The `validation` mode records what a parser accepts. The `serialization` mode records what a JSON

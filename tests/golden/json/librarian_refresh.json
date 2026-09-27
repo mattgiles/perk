@@ -1,0 +1,23 @@
+{
+  "success": true,
+  "error_type": null,
+  "message": null,
+  "action": "fast_forwarded",
+  "detail": null,
+  "previous_head": "0123abcd",
+  "entry": {
+    "kind": "source",
+    "slug": "click",
+    "source": "https://github.com/pallets/click",
+    "path": "/repo/docs/library/source-code/github.com/pallets/click",
+    "present": true,
+    "ref": null,
+    "added_at": "2026-09-02T00:00:00Z",
+    "checked_at": "2026-09-27T12:00:00Z",
+    "checked_age_seconds": 0,
+    "stale_after": 86400,
+    "evidence": "strong",
+    "drifted": false,
+    "status": "fresh"
+  }
+}

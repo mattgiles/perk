@@ -30,8 +30,11 @@ from pydantic import BaseModel
 
 from perk.cli.commands.learn.capture_cmd import LearnCaptureOut
 from perk.cli.commands.learn.skip_cmd import LearnSkipOut
+from perk.cli.commands.librarian.add.source_cmd import LibrarianAddSourceOut
+from perk.cli.commands.librarian.check_cmd import LibrarianCheckOut
 from perk.cli.commands.librarian.list_cmd import LibrarianListOut
 from perk.cli.commands.librarian.record_cmd import LibrarianRecordOut
+from perk.cli.commands.librarian.refresh_cmd import LibrarianRefreshOut
 from perk.cli.commands.librarian.remove_cmd import LibrarianRemoveOut
 from perk.cli.commands.objective.doctor_cmd import ObjectiveDoctorOut
 from perk.cli.commands.objective.node_engagement_cmd import ObjectiveNodeEngagementOut
@@ -123,6 +126,9 @@ SCHEMAS: tuple[SchemaEntry, ...] = (
     SchemaEntry("outputs/librarian-list.schema.json", LibrarianListOut, "serialization"),
     SchemaEntry("outputs/librarian-record.schema.json", LibrarianRecordOut, "serialization"),
     SchemaEntry("outputs/librarian-remove.schema.json", LibrarianRemoveOut, "serialization"),
+    SchemaEntry("outputs/librarian-add-source.schema.json", LibrarianAddSourceOut, "serialization"),
+    SchemaEntry("outputs/librarian-check.schema.json", LibrarianCheckOut, "serialization"),
+    SchemaEntry("outputs/librarian-refresh.schema.json", LibrarianRefreshOut, "serialization"),
 )
 
 

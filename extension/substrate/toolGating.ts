@@ -1099,10 +1099,14 @@ const SAFE_PATTERNS = [
   // only the gitignored `docs/library/` cache and refuses unless its representative ignore probes
   // pass and nothing under the library is tracked (the probes run before its lock, except
   // `remove`'s entry probe): the `perk pr review-context` leniency, made operational by the CLI's
-  // cache-only preflight. `--json` last, any whitespace-separated arguments before it; the
-  // destructive veto still blocks real-file redirects and chained mutations. Later verbs
-  // (`add source`/`check`/`refresh`) are admitted when they land.
-  /^\s*perk\s+librarian\s+(?:list|record|remove)\b(?:\s+\S+)*\s+--json\s*$/,
+  // cache-only preflight. The three network verbs — `check` (the only freshness probe),
+  // `refresh` and `add source` — mutate only that same cache behind the same preflight, and
+  // their git operations run config-pinned (no global/system config, hooks disabled), so nothing
+  // a cloned tree or the user's global config selects can execute (env config and a checkout's
+  // repo-local config stay trusted, §8.75(i)). `add docs` is not admitted.
+  // `--json` last, any whitespace-separated arguments before it; the destructive veto still
+  // blocks real-file redirects and chained mutations.
+  /^\s*perk\s+librarian\s+(?:list|record|remove|check|refresh|add\s+source)\b(?:\s+\S+)*\s+--json\s*$/,
   // Read-only `gh` queries — the guidance in the managed AGENTS block ("GitHub access goes
   // through gh") must be followable in read-only sessions. Query-shaped subcommands only;
   // `gh api` stays blocked (it can POST/PATCH), as do all mutating subcommands (create/edit/

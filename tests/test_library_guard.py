@@ -1,8 +1,10 @@
 """The cache-only preflight (``perk/library/guard.py``, contracts.md §8.75(d)).
 
 Each guard over a real scaffolded consumer repo (it carries the managed gitignore block), plus
-the end-to-end promise that a refused publish sees zero filesystem effects — the tree is
-byte-identical before/after and no lock file was created (the preflight runs before the lock).
+the end-to-end promise that a refused publish — and a refused network worker (``add source``,
+``check``, ``refresh``, §8.75(i)) — sees zero filesystem effects: the tree is byte-identical
+before/after, no lock file was created (the preflight runs before the lock), and no network
+call was made.
 """
 
 import hashlib
@@ -10,11 +12,14 @@ import os
 import subprocess
 from pathlib import Path
 
+import httpx
 import pytest
 
-from perk.library import guard, lock, ops
+from perk.library import catalog as cat
+from perk.library import check, guard, lock, ops, source
 from perk.library.errors import LibraryError
 from perk.library.layout import LibraryLayout
+from perk.substrate import git
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -226,3 +231,93 @@ def test_refused_publish_symlinked_root_leaves_no_trace(scaffolded_perk_repo, tm
         tmp_path_factory.mktemp("redirect"), target_is_directory=True
     )
     _assert_refused_without_effects(repo, "library_root_invalid")
+
+
+# --- the network workers run the same preflight, before any network or write ----------------
+
+
+def _seed_catalog(repo: Path) -> None:
+    layout = LibraryLayout.for_repo(repo)
+    mirror = layout.docs_entry_dir("pi")
+    mirror.mkdir(parents=True)
+    (mirror / "index.md").write_text("# pi\n", encoding="utf-8")
+    checkout = layout.root / "source-code" / "github.com" / "acme" / "widget"
+    checkout.mkdir(parents=True)
+    added_at = "2026-09-01T00:00:00Z"
+    cat.write_catalog(
+        layout,
+        cat.Catalog(
+            entries=(
+                cat.Entry(
+                    kind="docs",
+                    slug="pi",
+                    source="https://pi.dev/docs",
+                    path="documentation/pi",
+                    stale_after=1_209_600,
+                    upstream=cat.DocsUpstream(),
+                    added_at=added_at,
+                ),
+                cat.Entry(
+                    kind="source",
+                    slug="widget",
+                    source="https://github.com/acme/widget.git",
+                    path="source-code/github.com/acme/widget",
+                    stale_after=86_400,
+                    upstream=cat.SourceUpstream(branch="main", head_sha="0" * 40),
+                    added_at=added_at,
+                ),
+            )
+        ),
+    )
+
+
+def _unignore(repo: Path, _tmp: Path) -> str:
+    (repo / ".gitignore").write_text("", encoding="utf-8")
+    return "library_not_ignored"
+
+
+def _track(repo: Path, _tmp: Path) -> str:
+    tracked = repo / "docs" / "library" / "hunk" / "index.md"
+    tracked.parent.mkdir(parents=True)
+    tracked.write_text("# hunk\n", encoding="utf-8")
+    _git(repo, "add", "-f", "docs/library/hunk/index.md")
+    return "library_tracked_content"
+
+
+def _redirect(repo: Path, tmp: Path) -> str:
+    (repo / "docs" / "library" / ".staging").symlink_to(tmp, target_is_directory=True)
+    return "library_root_invalid"
+
+
+def _no_network(*_args, **_kwargs):
+    raise AssertionError("a refused worker reached the network")
+
+
+@pytest.mark.parametrize("breakage", [_unignore, _track, _redirect], ids=lambda f: f.__name__)
+@pytest.mark.parametrize("worker", ["add source", "check", "refresh"])
+def test_network_workers_refuse_before_any_network_or_write(
+    scaffolded_perk_repo, tmp_path_factory, monkeypatch, worker, breakage
+):
+    repo = scaffolded_perk_repo
+    monkeypatch.chdir(repo)
+    _seed_catalog(repo)
+    error_type = breakage(repo, tmp_path_factory.mktemp("redirect"))
+    for name in ("clone_partial", "fetch", "remote_branch_head"):
+        monkeypatch.setattr(git, name, _no_network)
+    transport = httpx.MockTransport(_no_network)
+    run = {
+        "add source": lambda: source.add_source(
+            repo, repo_ref="acme/gadget", pin=None, slug=None, stale_after=None
+        ),
+        "check": lambda: check.check_entries(repo, slugs=(), force=True, transport=transport),
+        "refresh": lambda: source.refresh_entry(repo, slug="widget"),
+    }[worker]
+    lock.lock_path(repo).unlink(missing_ok=True)
+    before_status = _git(repo, "status", "--porcelain", "--ignored")
+    before = _snapshot(repo)
+    with pytest.raises(LibraryError) as excinfo:
+        run()
+    assert excinfo.value.error_type == error_type
+    assert _snapshot(repo) == before
+    assert _git(repo, "status", "--porcelain", "--ignored") == before_status
+    assert not lock.lock_path(repo).exists()

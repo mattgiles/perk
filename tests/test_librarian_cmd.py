@@ -7,14 +7,34 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
+from _library_upstream import CLONE_URL, ENTRY_PATH, REPO_REF, upstream
 from click.testing import CliRunner
 
 from perk.cli.cli import cli
+from perk.cli.commands.librarian import check_cmd
 from perk.library import catalog as cat
 from perk.library.layout import LibraryLayout
 
+__all__ = ["upstream"]  # the fixture, re-exported so pytest collects it here
+
 SOURCE = "https://pi.dev/docs"
+ENTRY_KEYS = [
+    "kind",
+    "slug",
+    "source",
+    "path",
+    "present",
+    "ref",
+    "added_at",
+    "checked_at",
+    "checked_age_seconds",
+    "stale_after",
+    "evidence",
+    "drifted",
+    "status",
+]
 
 
 def _run(args: list[str]):
@@ -39,10 +59,10 @@ def repo(scaffolded_perk_repo, monkeypatch):
     return scaffolded_perk_repo
 
 
-def test_group_help_lists_the_three_verbs():
+def test_group_help_lists_the_six_verbs():
     result = _run(["--help"])
     assert result.exit_code == 0
-    for verb in ("list", "record", "remove"):
+    for verb in ("add", "check", "list", "record", "refresh", "remove"):
         assert verb in result.output
 
 
@@ -76,21 +96,7 @@ def test_list_json_on_a_populated_library(repo):
     payload = _json(result)
     assert payload["catalog_present"] is True
     [entry] = payload["entries"]
-    assert list(entry) == [
-        "kind",
-        "slug",
-        "source",
-        "path",
-        "present",
-        "ref",
-        "added_at",
-        "checked_at",
-        "checked_age_seconds",
-        "stale_after",
-        "evidence",
-        "drifted",
-        "status",
-    ]
+    assert list(entry) == ENTRY_KEYS
     assert entry["path"] == str(layout.docs_entry_dir("pi"))
     assert entry["status"] == "unknown"
     [orphan] = payload["uncatalogued"]
@@ -276,3 +282,156 @@ def test_injected_lock_mkdir_failure_is_an_envelope(repo, monkeypatch):
     assert "library lock" in _json(result)["message"]
     assert (staging / "index.md").is_file()
     assert cat.load_catalog(LibraryLayout.for_repo(repo)) == cat.Catalog()
+
+
+# --- add source / check / refresh -------------------------------------------------------------
+
+
+def _publish_pi(repo: Path) -> None:
+    staging = _stage(repo)
+    result = _run(["record", "--publish", str(staging), "--slug", "pi", "--source", SOURCE])
+    assert result.exit_code == 0, result.stderr
+
+
+def test_add_source_json_envelope_and_rerun(repo, upstream):
+    result = _run(["add", "source", REPO_REF, "--json"])
+    assert result.exit_code == 0, result.stderr
+    payload = _json(result)
+    assert list(payload) == ["success", "error_type", "message", "action", "entry"]
+    assert payload["action"] == "cloned"
+    assert list(payload["entry"]) == ENTRY_KEYS
+    assert payload["entry"]["source"] == CLONE_URL
+    assert payload["entry"]["path"] == str(LibraryLayout.for_repo(repo).root / ENTRY_PATH)
+    assert payload["entry"]["status"] == "unknown"
+    assert _json(_run(["add", "source", REPO_REF, "--json"]))["action"] == "reused"
+
+
+def test_add_source_human_render(repo, upstream):
+    upstream.tag("v1", "HEAD~1")
+    result = _run(["add", "source", REPO_REF, "--ref", "v1"])
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout == ""
+    checkout = LibraryLayout.for_repo(repo).root / ENTRY_PATH
+    assert f"cloned widget at v1 → {checkout}" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("args", "error_type"),
+    [
+        (["click"], "invalid_repo_ref"),
+        ([REPO_REF, "--stale-after", "7w"], "invalid_stale_after"),
+        ([REPO_REF, "--slug", "Widget"], "invalid_slug"),
+        ([REPO_REF, "--ref", "v 1"], "invalid_input"),
+    ],
+)
+def test_add_source_input_refusals(repo, args, error_type):
+    result = _run(["add", "source", *args, "--json"])
+    assert result.exit_code == 1
+    assert _json(result)["error_type"] == error_type
+    assert not (LibraryLayout.for_repo(repo).root / ENTRY_PATH).exists()
+
+
+@pytest.mark.parametrize("args", [["add", "source", REPO_REF], ["check"], ["refresh", "widget"]])
+def test_network_verbs_outside_a_repo_exit_2(tmp_path, monkeypatch, args):
+    monkeypatch.chdir(tmp_path)
+    result = _run([*args, "--json"])
+    assert result.exit_code == 2
+    assert _json(result)["error_type"] == "not_a_repo"
+
+
+def _failing_transport() -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused (injected)", request=request)
+
+    return httpx.MockTransport(handler)
+
+
+def test_check_json_envelope_exits_0_with_a_failed_result(repo, monkeypatch):
+    _publish_pi(repo)
+    monkeypatch.setattr(check_cmd, "http_transport", _failing_transport)
+    result = _run(["check", "--json"])
+    assert result.exit_code == 0, result.stderr
+    payload = _json(result)
+    assert list(payload) == ["success", "error_type", "message", "results", "warnings"]
+    [entry_result] = payload["results"]
+    assert list(entry_result) == ["action", "detail", "notes", "entry"]
+    assert entry_result["action"] == "failed"
+    assert "ConnectError" in entry_result["detail"]
+    assert list(entry_result["entry"]) == ENTRY_KEYS
+    assert payload["warnings"] == []
+
+
+def test_check_probes_over_the_transport_seam(repo, monkeypatch):
+    _publish_pi(repo)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == SOURCE:
+            return httpx.Response(200, headers={"ETag": '"v1"'})
+        return httpx.Response(404)
+
+    monkeypatch.setattr(check_cmd, "http_transport", lambda: httpx.MockTransport(handler))
+    result = _run(["check"])
+    assert result.exit_code == 0, result.stderr
+    [line] = result.stderr.splitlines()
+    assert line.split() == ["probed", "fresh", "docs", "pi"]
+    entry = cat.load_catalog(LibraryLayout.for_repo(repo)).get("pi")
+    assert entry is not None and entry.evidence == "strong"
+
+
+def test_check_human_render_lists_notes_and_details(repo, monkeypatch):
+    _publish_pi(repo)
+    monkeypatch.setattr(check_cmd, "http_transport", _failing_transport)
+    result = _run(["check"])
+    assert result.exit_code == 0
+    lines = result.stderr.splitlines()
+    assert lines[0].startswith("failed   unknown      docs   pi")
+    assert any(line.startswith("  note: ") for line in lines[1:])
+
+
+def test_check_unknown_slug_exits_1(repo):
+    _publish_pi(repo)
+    result = _run(["check", "pi", "nope", "--json"])
+    assert result.exit_code == 1
+    assert _json(result)["error_type"] == "entry_not_found"
+
+
+def test_refresh_json_envelope(repo, upstream):
+    assert _run(["add", "source", REPO_REF]).exit_code == 0
+    result = _run(["refresh", "widget", "--json"])
+    assert result.exit_code == 0, result.stderr
+    payload = _json(result)
+    assert list(payload) == [
+        "success",
+        "error_type",
+        "message",
+        "action",
+        "detail",
+        "previous_head",
+        "entry",
+    ]
+    assert payload["action"] == "up_to_date"
+    assert payload["entry"]["status"] == "fresh"
+    new = upstream.advance_origin()
+    human = _run(["refresh", "widget"])
+    assert human.exit_code == 0
+    assert f"fast-forwarded widget {payload['previous_head'][:7]}..{new[:7]}" in human.stderr
+
+
+def test_refresh_docs_entry_needs_a_session(repo):
+    _publish_pi(repo)
+    result = _run(["refresh", "pi", "--json"])
+    assert result.exit_code == 1
+    assert _json(result)["error_type"] == "needs_session"
+    human = _run(["refresh", "pi"])
+    assert human.exit_code == 1
+    assert "judgment work" in human.stderr
+
+
+def test_refresh_pinned_entry_is_refused(repo, upstream):
+    upstream.tag("v1", "HEAD~1")
+    assert _run(["add", "source", REPO_REF, "--ref", "v1"]).exit_code == 0
+    result = _run(["refresh", "widget", "--json"])
+    assert result.exit_code == 1
+    payload = _json(result)
+    assert payload["error_type"] == "entry_pinned"
+    assert "--ref <new>" in payload["message"]

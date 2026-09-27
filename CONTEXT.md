@@ -359,3 +359,39 @@ _Avoid_: output, render site, surface (when the sanitization boundary is meant)
 The render-time copy of persisted or in-memory text after the display sanitizer; the stored bytes
 are never altered.
 _Avoid_: sanitized payload, rendered text, cleaned entry
+
+### The perk library
+
+**Repo-ref**:
+The user-facing spelling of a source repository (`owner/repo`, `host/org/repo`, `https://…`,
+`ssh://…`, `git@host:org/repo`), normalised by `parse_repo_ref` to a `RepoRef` (host/org/repo plus
+the clone URL the catalog records).
+_Avoid_: repo URL (when any accepted spelling is meant), slug
+
+**Pin / re-pin**:
+`--ref` detaches a source checkout at a tag/branch/commit and records it as the entry's `ref`; a
+pinned entry is drift-exempt (`pinned`), refused by `refresh`, restored only with an explicit
+`--ref`, and moved only by another `add source … --ref`. Unpinning is `remove` + `add source`.
+_Avoid_: lock, freeze
+
+**Baseline** (of a marker):
+The first observation of a marker the catalog did not yet hold (a page's ETag, the inventory
+fingerprint, a source `head_sha`), recorded as the mirror's revision; later probes compare
+against it and never overwrite it.
+_Avoid_: snapshot, refresh
+
+**Inventory fingerprint**:
+The `weak` evidence tier: a hash of a docs site's sitemap `(loc, lastmod)` set and/or its
+`llms.txt` body — never an HTML body.
+_Avoid_: content hash, page hash
+
+**Throttle**:
+`check` skipping an entry whose `checked_at` is inside its `stale_after` window (`recent`) unless
+`--force`.
+_Avoid_: cache, rate limit
+
+**Config-pinned git**:
+The library's executing git operations, run without global/system config and with hooks
+disabled, so nothing a cloned tree or the user's global/system config selects can execute; env
+config and a checkout's own repo-local config remain trusted (unaudited).
+_Avoid_: sandboxed git, safe clone

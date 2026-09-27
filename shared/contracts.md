@@ -799,10 +799,12 @@ refusals. `SAFE_PATTERNS` remains the command inventory: read-only Git plumbing/
 everyday text utilities, read-only `gh`/`perk` queries, the exact review-context/feedback forms and
 the existing command-keyed browser/search entries; this change adds no command. The perk library
 workers are admitted in their deterministic `--json` forms only — `perk librarian
-list|record|remove … --json` with `--json` last and any whitespace-separated arguments before it
-(`add source`/`check`/`refresh` are not yet admitted). They mutate only the gitignored
-`docs/library/` cache: the same accepted leniency as `perk pr review-context`'s scratch write,
-made operational by the CLI's cache-only preflight (§8.75(d)), which refuses unless its
+list|record|remove|check|refresh|add source … --json` with `--json` last and any
+whitespace-separated arguments before it (`add docs` is not admitted). They mutate only the
+gitignored `docs/library/` cache — the network verbs (`check`, `refresh`, `add source`) behind the
+same preflight, their git operations config-pinned with hooks disabled (§8.75(i)): the same
+accepted leniency as `perk pr review-context`'s scratch write, made operational by the CLI's
+cache-only preflight (§8.75(d)), which refuses unless its
 representative ignore probes pass (one path per class the operation writes, before the lock —
 except `remove`'s entry-directory probe, which needs the catalog and runs under it) and nothing
 under the library is tracked. The destructive veto still blocks real-file redirects and chained
@@ -13669,7 +13671,7 @@ exit, no `plan_review`.
    (§8.57).
 7. **Boundaries.** No browser/plannotator dependency; no persistence, retry, supersede, or
    cancel; dream drafts refused; refinement sessions excluded by the stage gate.
-## §8.75 · The perk library (layout, catalog, lock, staging/publish, the read-only carve-out)
+## §8.75 · The perk library (layout, catalog, lock, staging/publish, the read-only carve-out, the network verbs)
 
 The **perk library** is a catalogued, gitignored offline reference of external documentation
 mirrors and source checkouts. Python owns it end to end (`perk/library/` + the `perk librarian`
@@ -13744,7 +13746,8 @@ accepted window. `remove` probes its entry directory under the lock (the path co
 catalog), after the pre-lock base probe — so a `library_not_ignored` refusal there can leave the
 lock file (itself covered by the pre-lock probe) behind.
 
-**(e) The workers.** `list` (offline, lock-free): every entry with its derived status and
+**(e) The workers.** (The network verbs `add source`, `check` and `refresh` are (i).) `list`
+(offline, lock-free): every entry with its derived status and
 absolute path (`present` = the directory exists), every uncatalogued directory — top-level names
 outside `documentation`/`source-code`/`.staging`, plus every `documentation/` child no entry owns
 (a displaced prior revision, a half-rolled-back swap) — with a copyable adopt hint, and every
@@ -13789,7 +13792,9 @@ the catalog; content left at …", an adoptable orphan, never a dangling entry.
 
 **(f) The read-only-invariant carve-out.** The library is a gitignored cache, not repository
 content. The workers are admitted to read-only perk sessions (§8.3: `perk librarian
-list|record|remove … --json`, `--json` last) because the preflight refuses operations whose
+list|record|remove|check|refresh|add source … --json`, `--json` last; `add docs` is not
+admitted) because the preflight — which the network verbs run too, their executing git
+operations config-pinned with hooks disabled (§8.75(i)) — refuses operations whose
 representative probes reach a non-ignored or tracked path (coverage by path class, not a proof —
 §8.75(d)), the lock never follows a symlink out of the cache, and the committed README is
 init/doctor-only (converged only through non-symlinked `docs/`, `docs/library/` and `README.md`
@@ -13801,12 +13806,19 @@ paths).
 `invalid_input` (option combination), `staging_not_found`, `staging_outside_library`,
 `staging_invalid`, `staging_failed_pages`, `slug_exists`, `entry_removed_meanwhile`,
 `kind_mismatch`, `adopt_not_found`, `adopt_invalid`, `directory_catalogued`, `entry_not_found`,
-`entry_path_invalid`, `io_error`, `not_a_repo`. Every expected filesystem/git failure is
+`entry_path_invalid`, `io_error`, `not_a_repo`, and for the network verbs (§8.75(i))
+`invalid_repo_ref`, `clone_failed`, `ref_not_found`, `checkout_invalid`, `checkout_dirty`,
+`fetch_failed`, `entry_pinned`, `entry_missing`, `needs_session`. Every expected filesystem/git failure is
 translated at the library boundary (`translating_io`: the `OSError` family and `GitError` →
 `io_error`), so a worker never emits a traceback where an envelope is promised. Options are plain
 strings parsed inside the command (a bad value is a typed refusal, never a Click usage error).
-Envelopes: `LibrarianListOut` / `LibrarianRecordOut` / `LibrarianRemoveOut` (shapes are the
-`shared/schemas/outputs/librarian-*.schema.json` snapshots); failures are the shared
+Envelopes: `LibrarianListOut` / `LibrarianRecordOut` / `LibrarianRemoveOut` /
+`LibrarianAddSourceOut` (`action` ∈ `cloned`/`reused`/`repinned`, `entry`) / `LibrarianCheckOut`
+(`results[]` of `{action, detail, notes, entry}` with `action` ∈
+`probed`/`pinned`/`recent`/`missing`/`failed`, `warnings`) / `LibrarianRefreshOut` (`action` ∈
+`fast_forwarded`/`up_to_date`/`skipped_dirty`/`skipped_non_ff`, `detail`, `previous_head`,
+`entry`) — shapes are the `shared/schemas/outputs/librarian-*.schema.json` snapshots
+(`librarian-add-source`, `librarian-check` and `librarian-refresh` included); failures are the shared
 `{success: false, error_type, message}`. Exits `0` ok · `1` typed refusal / op failure · `2`
 `not_a_repo`.
 
@@ -13817,3 +13829,131 @@ or clean (`library catalogued (N entries)`); `warn` for an unreadable catalog, a
 README, or tracked content under `docs/library/`; `info` for uncatalogued and leftover staging
 directories; never `fail`, no `--fix`, no network. The README is not in the artifact-health
 registry (the lens has no "not applicable" state — a deferred descriptor).
+
+**(i) The network verbs** (`perk/library/repo_ref.py`, `source.py`, `probe.py`, `check.py`).
+`check` is the **only freshness probe**; `add source` and `refresh` reach the network only for
+their own checkout; nothing under `init`/`doctor` does. The posture is simple and legible — no
+rollback ladders: every rare failure (a race, a killed run, a catalog write failing after a git
+mutation) is a typed refusal whose message names the library's state and the rerun that
+completes the operation.
+
+- *Config-pinned git.* Every executing git operation over a library checkout (clone, fetch,
+  detach, fast-forward, the dirty check — `git status` can run an fsmonitor hook or a clean
+  filter — and the `ls-remote` probe) runs with `GIT_CONFIG_GLOBAL=/dev/null` +
+  `GIT_CONFIG_NOSYSTEM=1` (`git.LIBRARY_GIT_ENV`) and `-c core.hooksPath=<an empty temporary
+  directory>` — the `pinned=` keyword of `clone_partial` / `fetch` / `merge_ff_only` /
+  `checkout_detached` / `remote_branch_head` / `is_dirty` (`None` keeps every other caller
+  unchanged). No hook, filter driver, fsmonitor, credential helper, `insteadOf` rewrite or
+  config-file proxy configured in global/system config applies, and no hook runs, so nothing a
+  cloned tree or the user's global/system config selects can execute. Documented costs: private
+  repositories use the `git@`/`ssh://` form (ssh-agent auth is outside git config); LFS content
+  arrives as pointer files. **Trust boundary** (documented, not audited): env config
+  (`GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`, `GIT_CONFIG_PARAMETERS`) and env proxies still apply, and
+  a checkout's repo-local `.git/config` is honoured — for a perk clone it is what git wrote at
+  clone time; for an adopted pre-existing checkout it is whatever its creator configured.
+- *Repo-refs.* `parse_repo_ref` (pure) accepts, in order: scp-like `git@<host>:<org>/<repo>[.git]`
+  (clone URL `git@<host>:<org>/<repo>.git`); an `https`/`http`/`ssh` URL whose path is exactly
+  `/<org>/<repo>[.git][/]` — no query/fragment, no port, no userinfo except an `ssh://` login
+  user (`<scheme>://[user@]<host>/<org>/<repo>.git`); bare `<org>/<repo>` (GitHub,
+  `https://github.com/<org>/<repo>.git`); bare `<host>/<org>/<repo>` with a `.` in the host. The
+  host is lowercased, org/repo case-preserved, each a source path segment without `..`; anything
+  else (deeper paths, subgroups) is `invalid_repo_ref`. The default slug is the lowercased repo
+  name (`invalid_slug` asks for `--slug`). A source entry's `source` is the clone URL.
+- *`head_sha` is the checkout's HEAD* — the revision the local mirror holds; `upstream.branch` is
+  the default branch (`refs/remotes/origin/HEAD`). Only a clone, a re-pin or a fast-forward
+  changes it.
+- *`add source <repo-ref> [--ref <pin>] [--slug <slug>] [--stale-after <window>]`.* Validation
+  (a pin is non-empty with no whitespace and no leading `-` — `invalid_input`), the preflight
+  (the target probed as a mutated directory), then a lock-free eligibility read: the entry
+  owning `source-code/<host>/<org>/<repo>`, if any, must agree with `--slug` and with the clone
+  URL (`invalid_input` — `remove` first to switch URLs); a new slug must be free (`slug_exists`);
+  a pinned entry whose checkout is missing needs an explicit `--ref` (`entry_pinned`: restore
+  with the recorded pin, re-pin, or `remove` + `add source`). A missing target is claimed by a
+  `mkdir` **without** `exist_ok` — the atomic ownership claim (`checkout_invalid` "appeared
+  meanwhile", nothing deleted) — then partial-cloned lock-free (`--filter=blob:none`; the lock is
+  never held across a clone; `clone_failed`, with the `git@`/`ssh://` hint for an `https` URL)
+  and optionally detached at the pin (a tag, then an `origin/` branch, then any revision —
+  `ref_not_found`). An existing target must be a checkout of the clone URL — its own real
+  `.git` directory (a gitfile such as a linked worktree, or a symlink, is refused), git's
+  toplevel equal to the target, the **stored** `remote.origin.url` equal to the clone URL
+  (comparable under `insteadOf` rewrites) and a resolvable HEAD — else `checkout_invalid`
+  ("rerun later, or delete it and rerun"); a valid uncatalogued checkout (a killed run's) is
+  catalogued. Under the lock: a fresh clone (made outside the lock) is recorded only while the
+  catalog's owner of the path still equals the pre-clone read — otherwise another run adopted or
+  re-pinned the checkout meanwhile and recording this run's pin would pair a `ref` with another
+  revision's HEAD (`checkout_invalid`, the checkout kept as that run recorded it); eligibility
+  again; a **re-pin** (an existing checkout, a `--ref`
+  differing from the recorded `ref`) refuses a dirty tree (`checkout_dirty`), fetches
+  (`fetch_failed`) and detaches; the entry is new (`stale_after` default 24 h), a revision change
+  (a fresh clone or a re-pin: `ref` = the pin, markers from the checkout, `checked_at` /
+  `evidence` / `drifted` reset) or unchanged (only a given `stale_after` applies — no marker
+  refresh), and is written only when it changed. Actions `cloned` / `reused` / `repinned`.
+  **Nothing is deleted that this run did not create**: a fresh clone is removed on any later
+  failure (nothing catalogued, nothing left behind) — unless the catalog's owner of the path
+  changed since the pre-clone read (another run adopted the checkout meanwhile), or the catalog
+  cannot be read, in which case the directory is kept; a catalog write failing after a re-pin is
+  `io_error` saying the checkout is already at the new pin and that rerunning the same command
+  completes the re-pin. There is no unpin verb: `remove` + `add source` tracks the default
+  branch again.
+- *`refresh <slug>`.* Lock-free classification: `entry_not_found`; a docs entry is
+  `needs_session` (re-crawl into `.staging/`, curate, `record --publish … --replace` from a
+  session); a pinned entry is `entry_pinned` (re-pin with `add source <source> --ref <new>`, or
+  `remove` + `add source`). Under the lock: the entry must still be the same unpinned source
+  entry (`entry_removed_meanwhile`); the symlink walk and ignore probe of the checkout; a
+  missing checkout is `entry_missing` (`add source <source>` re-clones it); the checkout
+  validator above. A dirty tree is `skipped_dirty`, a HEAD detached or on another branch
+  `skipped_non_ff` — both before any fetch, nothing written. Then the fetch — pruned, so a
+  branch deleted upstream leaves no stale tracking ref (`fetch_failed`, nothing written) — and a
+  classification by **ancestry, never by the merge's exit code**
+  (`merge --ff-only` also exits 0 for "Already up to date"): `origin/<branch>` gone →
+  `skipped_non_ff` with evidence `none` and `drifted` kept; the tip equal to HEAD →
+  `up_to_date`; HEAD an ancestor of the tip → fast-forward to that exact classified SHA (a name such as
+  `origin/main` could resolve to a same-named tag) → `fast_forwarded`; otherwise
+  `skipped_non_ff` ("local commits ahead of …" / "diverged from …") with `drifted = true`; an
+  unanswerable ancestry probe is `io_error`. Every post-fetch arm records `checked_at`, evidence
+  `strong` (unless the tip is gone), `drifted` as above (`false` for `up_to_date` /
+  `fast_forwarded`) and `head_sha` = HEAD. A catalog write failing after a fast-forward is
+  `io_error` saying the checkout is already fast-forwarded and rerunning `refresh` records it.
+- *`check [<slug>…] [--force]`.* An absent library is an empty outcome; every named slug must
+  exist (`entry_not_found`, listing all unknown ones, before any probe); the selection is every
+  entry by slug or the named ones in order (deduplicated). The preflight runs before any
+  network (the catalog is the only write). Lock-free classification: `pinned` (never probed),
+  `missing` (no entry directory — the re-clone / re-publish hint), `recent` (`checked_at` inside
+  `stale_after`, unless `--force`; a never-checked entry is never throttled), else probed.
+  **Source**: `ls-remote` of the catalogued clone URL's `refs/heads/<branch>` (config-pinned);
+  a failure is `failed` (entry untouched); an absent branch is evidence `none` with a note; a
+  SHA is evidence `strong` with `drifted = sha != head_sha` (a missing `head_sha` is baselined).
+  **Docs**: the recorded pages (the seed prepended when absent) — at most
+  `DOCS_PAGE_PROBE_LIMIT` = 20 conditional `GET`s that read no body (`If-None-Match` /
+  `If-Modified-Since` from the recorded marker) — plus the inventory at the site root:
+  `sitemap.xml` (on 404 `sitemap-index.xml`; an index followed into at most 5 children) and
+  `llms.txt`, bodies capped at 2 MiB, a sitemap that is DOCTYPE-bearing or unparseable (incl.
+  an unknown / multi-byte declared encoding) ignored. Bounds: 10 s per HTTP operation (httpx's
+  per-operation timeout — connect, each read — not a per-request deadline), 5 redirects, 3
+  consecutive page transport errors abandon the remaining pages, and a 60 s wall-clock budget per
+  entry checked **between** requests (skips are noted) — both soft: a trickling response can
+  overrun them; accepted leniency — httpx reads intermediate redirect bodies. Per page: `304` → unchanged, strong;
+  `200` → each of ETag / Last-Modified / the sitemap's per-URL `lastmod` is **baselined** when
+  recorded `None`, **moved** when both differ, any observed one strong — and a recorded marker
+  the response omits leaves that page not re-observed; `404`/`410` → moved, strong; any other
+  status or a transport error → not observed (noted) — a page's existence is itself a recorded
+  comparison, so any probed page not observed this run counts as not re-observed, validators or
+  not. Validators travel as latin-1 text (a 1:1 map of the raw header bytes), so an obs-text
+  ETag round-trips byte-exactly; a recorded value outside latin-1 is a noted probe error. The
+  **inventory fingerprint**
+  (`sitemap=<sha256 of the sorted loc⇥lastmod lines>` and/or `llms=<sha256 of the body>`,
+  `;`-joined — never an HTML body) is compared only when every inventory request answered
+  definitively (a readable 200 whose sitemap parsed, or 404/410), baselined / moved alike. Evidence: `strong` if any page gave
+  strong evidence, else `weak` if a fingerprint was observed, else `none`. **Markers are the
+  mirror's revision**: baselined once and never overwritten by a probe (only `record --publish
+  --replace` replaces them); `drifted` is recomputed when evidence exists — any moved comparison,
+  or the prior drift when some recorded comparison was not re-observed this run (noted "drift
+  retained") — and kept when evidence is `none`. Every request failing is `failed` (entry
+  untouched). The observations are applied under the lock in one catalog write, each only when
+  the catalogued entry still **equals its pre-probe snapshot exactly** (a newer observation is
+  never overwritten by an older one); otherwise that result becomes `failed` ("entry changed or
+  was checked meanwhile — rerun") carrying the snapshot's view, plus a top-level warning. No
+  observation, no lock. `derive_status` is unchanged: `weak` unchanged evidence reads `fresh`,
+  `none` reads `unverifiable`. A completed check exits 0 even with `failed` results; exit 1 is
+  reserved for whole-command refusals (`entry_not_found`, `catalog_malformed`, a preflight
+  refusal, `library_busy`, `io_error`).
