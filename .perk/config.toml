@@ -94,17 +94,22 @@ trusted = true
 # glob; a check with a `glob` is SKIPPED on the run-all path when no changed file (vs trunk)
 # matches it, so a docs-only change reports success fast. Checks run CONCURRENTLY and report in
 # declared order — each row must be independently runnable (put an ordered sequence inside one
-# `command`, e.g. "build && test"). Project-supplied CI is untrusted by
-# default: an interactive session prompts to confirm (per-session latch), and headless runs need
-# `--allow-project-ci` — unless `trusted = true` above opts the whole repo in. These rows mirror
-# `just ci`'s verification targets (lint/typecheck/test/changelog-check) plus the scope-aware
-# `docs-check` docs gate (every surface it runs is also reached through lint/typecheck/test, so
-# a docs-only change still verifies when the code-suffix globs all skip); `setup` is environment
-# prep, not a verification check — it is owned by the [worktree] setup hook below. The Python
-# test target is carried as the two complementary tier rows (`test-py-fast` + `test-py-slow`,
-# same glob) so the concurrent run overlaps the slow build/integration cohort with the rest:
-# their union is exactly what `just test-py` collects (`tests/test_pytest_tiers.py` guards both
-# the selection and this wiring), so the gate's scope is unchanged — no case is skipped.
+# `command`, e.g. "build && test"). Project-supplied CI is untrusted by default: an interactive
+# session prompts to confirm (per-session latch), and headless runs need `--allow-project-ci` —
+# unless `trusted = true` above opts the whole repo in. These rows mirror `just ci`'s verification
+# targets (lint/typecheck/test/changelog-check) plus the scope-aware `docs-check` docs gate;
+# `setup` is environment prep, not a verification check — it is owned by the [worktree] setup hook
+# below. The docs row carries only its unique work — the docs-scoped pytest guards — plus EVERY
+# Astro invocation (site sync + typecheck, then build + post-build checks) in one serial chain: it
+# is the single Astro owner, because two rows running Astro content sync at once race on the same
+# generated files. The site's lint and unit tests reach `docs/site` through the `lint-js`/`test-js`
+# rows' `docs/site/**` globs instead. The TypeScript typecheck is carried as independently globbed
+# rows over the root package scripts (the root tsconfig, then the separately configured
+# prose-review workspace); `just typecheck-js` stays the full union GitHub CI runs. The Python test
+# target is carried as the two complementary tier rows (`test-py-fast` + `test-py-slow`, same glob)
+# so the concurrent run overlaps the slow build/integration cohort with the rest: their union is
+# exactly what `just test-py` collects (`tests/test_pytest_tiers.py` guards both the selection and
+# this wiring), so the gate's scope is unchanged — no case is skipped.
 [[ci.checks]]
 name = "lint-py"
 command = "just lint-py"
@@ -113,7 +118,7 @@ glob = "*.py"
 [[ci.checks]]
 name = "lint-js"
 command = "just lint-js"
-glob = "*.ts,*.tsx,*.js,*.jsx,*.mjs"
+glob = "*.ts,*.tsx,*.js,*.jsx,*.mjs,docs/site/**,biome.json"
 
 [[ci.checks]]
 name = "typecheck-py"
@@ -122,8 +127,13 @@ glob = "*.py"
 
 [[ci.checks]]
 name = "typecheck-js"
-command = "just typecheck-js"
-glob = "*.ts,*.tsx,*.js,*.jsx"
+command = "npm run typecheck"
+glob = "extension/**,tools/**,tsconfig.json,package.json,package-lock.json"
+
+[[ci.checks]]
+name = "typecheck-prose-review"
+command = "npm run prose-review:typecheck"
+glob = "tools/prose-review/**,package.json,package-lock.json"
 
 [[ci.checks]]
 name = "test-py-fast"
@@ -138,7 +148,7 @@ glob = "*.py"
 [[ci.checks]]
 name = "test-js"
 command = "just test-js"
-glob = "*.ts,*.tsx,*.js,*.jsx,*.mjs"
+glob = "*.ts,*.tsx,*.js,*.jsx,*.mjs,docs/site/**,package.json,package-lock.json"
 
 [[ci.checks]]
 name = "docs-check"
