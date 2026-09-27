@@ -538,7 +538,7 @@ test("install: a partially installed project reports the unverified consumer in 
   assert.equal(status.detail, "unverified consumers: pi-web-access");
   assert.equal(
     describeBridge(status),
-    "installed (roots=1, specifiers=7) — unverified consumers: pi-web-access",
+    `installed (roots=1, specifiers=${NATIVE_SDK_CENSUS.length}) — unverified consumers: pi-web-access`,
   );
   assert.deepEqual(verifyConsumerRoots(install.cwd), {
     roots: install.roots,
@@ -835,7 +835,7 @@ test("install: when the claim cannot be released at all, the record is neutraliz
     portsFor({ cwd: install.cwd, argv1: host.argv1, global, registerHooks: hooks.registerHooks }),
   );
   assert.equal(again.state, "declined:schema-mismatch");
-  assert.equal(again.detail, "existing registry schema 1 (kind orphaned)");
+  assert.equal(again.detail, `existing registry schema ${BRIDGE_SCHEMA} (kind orphaned)`);
   assert.equal(hooks.calls.length, 0);
 });
 
@@ -881,11 +881,11 @@ test("describeBridge: the per-state renderings", () => {
       ...base,
       state: "installed",
       roots: ["/a"],
-      specifiers: 7,
+      specifiers: NATIVE_SDK_CENSUS.length,
       reused: true,
       detail: "x",
     }),
-    "installed (roots=1, specifiers=7, reused) — x",
+    `installed (roots=1, specifiers=${NATIVE_SDK_CENSUS.length}, reused) — x`,
   );
 });
 

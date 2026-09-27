@@ -13388,10 +13388,13 @@ imports (the bundle's `VIRTUAL_MODULES` under the `pi` bin, the alias files unde
 pi-tui reaches the bridge through the surfaces module's `hostPiTui` re-export. A test injects a
 status through the construction-only `nativeSdkBridge` option; production never passes it.
 
-**The census** — `NATIVE_SDK_CENSUS`, seven specifiers: `@earendil-works/pi-coding-agent`,
+**The census** — `NATIVE_SDK_CENSUS`, eight specifiers: `@earendil-works/pi-coding-agent`,
 `@earendil-works/pi-tui`, `@earendil-works/pi-ai`, `@earendil-works/pi-ai/compat`,
-`@earendil-works/pi-agent-core`, `typebox`, `typebox/compile` — the SDK imports the two consumers
-actually make (pi-subagents 0.70.1, pi-web-access 0.30.0). The **drift guard**
+`@earendil-works/pi-agent-core`, `typebox`, `typebox/compile`, `typebox/value` — the SDK imports the
+two consumers actually make (pi-subagents 0.72.1, pi-web-access 0.31.0). `typebox/value` is imported
+only by pi-subagents' binary-runner bootstrap (the compiled-host child path, not perk's normal Node
+loading) — the census is package-wide by design, so every consumer module that evaluates under the
+bridge shares the host's copy. The **drift guard**
 (`extension/substrate/nativeSdkBridge.test.ts`) scans every `.js/.mjs/.cjs` under each installed
 consumer root (nested `node_modules/` excluded) with `extension/testing/importGraph.ts::extractSpecifiers`,
 keeps `^(@earendil-works/|@mariozechner/|typebox|@sinclair/typebox)` and asserts set-equality with
@@ -13432,7 +13435,7 @@ the `require` conditions the host's `"."` export does not carry (`ERR_PACKAGE_PA
 Today's host resolves to `<pi-coding-agent>/dist/index.js`.
 
 **Facades.** `facadeUrl(hostEntryUrl, specifier)` = `<file: URL of the host entry>?perk-native-sdk-bridge=<encoded specifier>`
-— ONE physical address for all seven (so `fileURLToPath` of any facade URL is the real host entry:
+— ONE physical address for all eight (so `fileURLToPath` of any facade URL is the real host entry:
 pi-subagents' `import.meta.resolve("@earendil-works/pi-coding-agent")` → `findPiPackageRootFromEntry`
 walk still finds the host root). `facadeSource(specifier, exportNames)` is import-free ESM: it reads
 `globalThis[Symbol.for("perk.native-sdk-bridge")].namespaces.get(<specifier>)` and re-exports every
@@ -13459,10 +13462,10 @@ consumer fully evaluated before the bridge whose FIRST post-install activity is 
 from OUTSIDE its root (a subpath export imported by another package) is treated as entered — neither
 consumer exposes such a path to perk's graph today.
 
-**The registry** — `globalThis[Symbol.for("perk.native-sdk-bridge")]`, `BRIDGE_SCHEMA` = 1 — is
+**The registry** — `globalThis[Symbol.for("perk.native-sdk-bridge")]`, `BRIDGE_SCHEMA` = 2 — is
 process-wide (retained across `/reload`, session replacement and extension disposal; never
 deregistered in production; no `ctx`), a discriminated union behind `isBridgeRegistry`:
-`{ schema: 1, kind: "disabled" }` or `{ schema: 1, kind: "active", hostEntryPath, hostEntryUrl,
+`{ schema: 2, kind: "disabled" }` or `{ schema: 2, kind: "active", hostEntryPath, hostEntryUrl,
 roots: Map<root, RootState>, namespaces, facadeSources }` — **no hook handle** (the active record is
 itself the ownership marker; `registerHooks`' return is discarded).
 
@@ -13475,7 +13478,7 @@ claim the disabled record, `disabled` (any other value leaves the bridge on); (3
 no `module.registerHooks` → `unsupported:no-register-hooks`; Bun (`"bun" in process.versions`) →
 `unsupported:bun` — before any registry comparison, so an activation without the API never reuses a
 record; (4) **host entry** as above (`unsupported:embedded-host` / `failed:host-entry` claim nothing);
-(5) **registry decision** — an unrecognized value or `existing.schema !== 1` → `declined:schema-mismatch`;
+(5) **registry decision** — an unrecognized value or `existing.schema !== 2` → `declined:schema-mismatch`;
 `existing.hostEntryPath !== hostEntryPath` → `declined:host-mismatch`; otherwise **reuse**: verify
 this activation's roots, `roots.set(root, "armed")` for each root not already present (never
 remove, never downgrade), return `installed` with `reused: true` and `roots` = every registry root
@@ -13483,7 +13486,7 @@ after the merge (a decline never touches the existing record or its hooks — th
 active for its own roots); (6) **roots** — zero verified roots on a fresh install → `skipped:no-consumers`
 (nothing claimed, no hook; a later activation with roots installs normally); (7) **namespace capture
 check** — every census key present, an object, with ≥ 1 export name, else `failed:namespace-capture`;
-(8) **facade preparation** for all seven (any throw → `failed:facade-prep`); (9) **commit** — the only
+(8) **facade preparation** for all eight (any throw → `failed:facade-prep`); (9) **commit** — the only
 side effects, in order: build the complete `active` record (all roots `armed`); **claim first**
 (`global[key] = record`; a throw — frozen global — → `failed:registry-claim`, nothing registered);
 `registerHooks(createBridgeHooks(record))` — a throw releases the claim (`releaseClaim`: `delete
@@ -13499,7 +13502,7 @@ the closed union `installed | disabled | skipped:no-consumers | unsupported:no-r
 unsupported:bun | unsupported:embedded-host | declined:schema-mismatch | declined:host-mismatch |
 failed:host-entry | failed:namespace-capture | failed:facade-prep | failed:registry-claim |
 failed:register-hooks`). Per state — `hostEntry` = the host THIS activation derived when step 4 ran,
-else `null`; `specifiers` = 7 only for `installed`, else 0; `roots` = `[]` unless stated:
+else `null`; `specifiers` = 8 only for `installed`, else 0; `roots` = `[]` unless stated:
 
 | state | hostEntry | roots | reused | detail |
 |---|---|---|---|---|

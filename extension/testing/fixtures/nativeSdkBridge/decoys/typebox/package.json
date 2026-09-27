@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./index.js",
-    "./compile": "./compile.js"
+    "./compile": "./compile.js",
+    "./value": "./value.js"
   }
 }

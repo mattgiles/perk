@@ -10,6 +10,7 @@ import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import * as typebox from "typebox";
 import * as typeboxCompile from "typebox/compile";
+import * as typeboxValue from "typebox/value";
 import { nestedOrigin } from "../nested/index.js";
 
 export const statics = {
@@ -20,6 +21,7 @@ export const statics = {
   "@earendil-works/pi-agent-core": piAgentCore,
   typebox,
   "typebox/compile": typeboxCompile,
+  "typebox/value": typeboxValue,
 };
 export { nestedOrigin };
 export const resolvedHost = import.meta.resolve("@earendil-works/pi-coding-agent");
