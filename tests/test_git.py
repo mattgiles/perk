@@ -119,6 +119,32 @@ def test_tracked_paths(git_repo):
         git.tracked_paths(git_repo.parent, pathspecs)
 
 
+def test_ignored_subset(git_repo, tmp_path_factory):
+    (git_repo / ".gitignore").write_text("/cache/**\n!/cache/README.md\n*.log\n", encoding="utf-8")
+    tracked = git_repo / "kept.log"
+    tracked.write_text("x\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "-f", "kept.log"], cwd=git_repo, check=True, capture_output=True, text=True
+    )
+    probes = [
+        "cache/catalog.json",  # ignored, nonexistent
+        "cache/deep/nested/index.md",  # ignored, nonexistent nested
+        "cache/README.md",  # negated
+        "src/app.py",  # never ignored
+        "kept.log",  # tracked but pattern-ignored: --no-index reports it
+    ]
+    assert git.ignored_subset(git_repo, probes) == frozenset(
+        {"cache/catalog.json", "cache/deep/nested/index.md", "kept.log"}
+    )
+    # None ignored (exit 1) is an ordinary empty answer; an empty probe list short-circuits.
+    assert git.ignored_subset(git_repo, ["src/app.py"]) == frozenset()
+    assert git.ignored_subset(git_repo, []) == frozenset()
+    # A broken probe (not a repo) fails closed.
+    outside = tmp_path_factory.mktemp("not-a-repo")
+    with pytest.raises(git.GitError):
+        git.ignored_subset(outside, ["cache/catalog.json"])
+
+
 def test_delete_branch(git_repo):
     import pytest
 

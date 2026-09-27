@@ -1,0 +1,25 @@
+{
+  "success": true,
+  "error_type": null,
+  "message": null,
+  "action": "publish",
+  "entry": {
+    "kind": "docs",
+    "slug": "pi",
+    "source": "https://pi.dev/docs",
+    "path": "/repo/docs/library/documentation/pi",
+    "present": false,
+    "ref": null,
+    "added_at": "2026-09-01T00:00:00Z",
+    "checked_at": "2026-09-20T00:00:00Z",
+    "checked_age_seconds": 604800,
+    "stale_after": 1209600,
+    "evidence": "strong",
+    "drifted": false,
+    "status": "fresh"
+  },
+  "replaced_previous": true,
+  "warnings": [
+    "prior revision left at /repo/docs/library/documentation/.pi.previous-1a2b3c4d5e6f"
+  ]
+}

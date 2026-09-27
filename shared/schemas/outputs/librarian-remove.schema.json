@@ -1,0 +1,67 @@
+{
+  "$defs": {
+    "Kind": {
+      "enum": [
+        "docs",
+        "source"
+      ],
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The ``--json`` envelope of ``perk librarian remove`` (order load-bearing).",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "slug": {
+      "title": "Slug",
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/$defs/Kind"
+    },
+    "path": {
+      "title": "Path",
+      "type": "string"
+    },
+    "content_removed": {
+      "title": "Content Removed",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "message",
+    "slug",
+    "kind",
+    "path",
+    "content_removed"
+  ],
+  "title": "LibrarianRemoveOut",
+  "type": "object"
+}

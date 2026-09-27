@@ -3,8 +3,9 @@
 This is the **sole** construction site for the perk-owned dot-path families —
 the config files (`config.toml`/`local.toml`), the required-perk-version pin, the
 committed managed-state file (`managed-state.toml`), the
-repo-authored skills dir, and the user-level `~/.perk` family (the last-seen-version
-store — the one perk-owned path outside the repo). The config family
+repo-authored skills dir, the perk library root (`docs/library/`, the gitignored offline reference
+cache — not a dot-path, but perk-owned and constructed only here), and the user-level `~/.perk`
+family (the last-seen-version store — the one perk-owned path outside the repo). The config family
 now lives at `.perk/`; the legacy `.pi/perk.toml` / `.pi/perk.local.toml` paths are exposed only as
 `legacy_*` helpers for the doctor migration (never read). The workflow family lives in the
 established cache seam (``perk/state/cache.py::workflow_dir``); together these two modules own every
@@ -32,6 +33,9 @@ LEGACY_LOCAL_CONFIG_FILENAME = "perk.local.toml"
 # Forward-slash relative string for display f-strings (kept byte-consistent with
 # ``repo_skills_dir`` below — same `.perk/skills` literal text).
 REPO_SKILLS_REL = ".perk/skills"
+# Forward-slash relative string for display and git pathspecs (kept byte-consistent with
+# ``library_dir`` below).
+LIBRARY_REL = "docs/library"
 
 
 def config_dir(root: Path) -> Path:
@@ -76,6 +80,15 @@ def legacy_local_config_file(root: Path) -> Path:
 def repo_skills_dir(root: Path) -> Path:
     """The repo-authored skill source root."""
     return root / ".perk" / "skills"
+
+
+def library_dir(root: Path) -> Path:
+    """The perk library root under ``root`` — the single construction site for it.
+
+    Pure construction: the library lives in the **main checkout**, so callers resolve the main
+    worktree first (``perk.library.layout.library_root``) and pass that root here.
+    """
+    return root / "docs" / "library"
 
 
 def user_perk_dir() -> Path:

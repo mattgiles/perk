@@ -1,0 +1,237 @@
+{
+  "$defs": {
+    "EntryOut": {
+      "additionalProperties": false,
+      "description": "One catalogued entry in a ``--json`` envelope (order load-bearing; ``path`` absolute).",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/Kind"
+        },
+        "slug": {
+          "title": "Slug",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "present": {
+          "title": "Present",
+          "type": "boolean"
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ref"
+        },
+        "added_at": {
+          "title": "Added At",
+          "type": "string"
+        },
+        "checked_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Checked At"
+        },
+        "checked_age_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Checked Age Seconds"
+        },
+        "stale_after": {
+          "title": "Stale After",
+          "type": "integer"
+        },
+        "evidence": {
+          "$ref": "#/$defs/Evidence"
+        },
+        "drifted": {
+          "title": "Drifted",
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/Status"
+        }
+      },
+      "required": [
+        "kind",
+        "slug",
+        "source",
+        "path",
+        "present",
+        "ref",
+        "added_at",
+        "checked_at",
+        "checked_age_seconds",
+        "stale_after",
+        "evidence",
+        "drifted",
+        "status"
+      ],
+      "title": "EntryOut",
+      "type": "object"
+    },
+    "Evidence": {
+      "enum": [
+        "strong",
+        "weak",
+        "none"
+      ],
+      "type": "string"
+    },
+    "Kind": {
+      "enum": [
+        "docs",
+        "source"
+      ],
+      "type": "string"
+    },
+    "StagingOut": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ],
+      "title": "StagingOut",
+      "type": "object"
+    },
+    "Status": {
+      "enum": [
+        "fresh",
+        "stale",
+        "drifted",
+        "unverifiable",
+        "pinned",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "UncataloguedOut": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "hint": {
+          "title": "Hint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "hint"
+      ],
+      "title": "UncataloguedOut",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The ``--json`` envelope of ``perk librarian list`` (order load-bearing).",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "library_root": {
+      "title": "Library Root",
+      "type": "string"
+    },
+    "catalog_present": {
+      "title": "Catalog Present",
+      "type": "boolean"
+    },
+    "entries": {
+      "items": {
+        "$ref": "#/$defs/EntryOut"
+      },
+      "title": "Entries",
+      "type": "array"
+    },
+    "uncatalogued": {
+      "items": {
+        "$ref": "#/$defs/UncataloguedOut"
+      },
+      "title": "Uncatalogued",
+      "type": "array"
+    },
+    "staging": {
+      "items": {
+        "$ref": "#/$defs/StagingOut"
+      },
+      "title": "Staging",
+      "type": "array"
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "message",
+    "library_root",
+    "catalog_present",
+    "entries",
+    "uncatalogued",
+    "staging"
+  ],
+  "title": "LibrarianListOut",
+  "type": "object"
+}

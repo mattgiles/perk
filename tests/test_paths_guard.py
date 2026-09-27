@@ -19,6 +19,9 @@ segment adjacent to a ``/`` operator in either of two shapes:
   ``"config.toml"`` / ``"local.toml"`` / ``"required-perk-version"`` / ``"last-seen-version"``
   or the filename constants).
 
+A third arm guards the perk library root: ``"docs" / "library"`` construction (or a
+``Path("docs/library...`` literal) belongs only in ``paths.library_dir``.
+
 **Pi-native** ``.pi/...`` paths (``".pi" / "npm"``, ``".pi" / "agents"``, ``".pi" /
 "settings.json"``) and prose mentioning ``.pi/workflow`` therefore never false-positive. The TS
 twin is ``extension/pathsGuard.test.ts``.
@@ -53,9 +56,15 @@ PI_PATTERN = re.compile(r"""["']\.pi["']\s*/\s*""" + _PI_FOLLOW)
 # perk-owned follow-segment.
 PERK_PATTERN = re.compile(r"""["']\.perk["']\s*/\s*""" + _PERK_FOLLOW)
 
+# The perk library root (`docs/library/`): a quoted `"docs" / "library"` construction or a
+# `Path("docs/library...` literal. Gitignore-pattern strings and prose mentions never match.
+LIBRARY_PATTERN = re.compile(r'["\']docs["\']\s*/\s*["\']library["\']|Path\(\s*["\']docs/library')
+
 
 def _matches(line: str) -> bool:
-    return bool(PI_PATTERN.search(line) or PERK_PATTERN.search(line))
+    return bool(
+        PI_PATTERN.search(line) or PERK_PATTERN.search(line) or LIBRARY_PATTERN.search(line)
+    )
 
 
 ALLOWED = frozenset({"substrate/paths.py", "state/cache.py"})
@@ -107,6 +116,9 @@ class TestPerkOwnedPathGuard:
         assert any(_matches(line) for line in paths_src.splitlines()), (
             "paths.py no longer matches the banned pattern — guard is vacuous"
         )
+        assert any(LIBRARY_PATTERN.search(line) for line in paths_src.splitlines()), (
+            "paths.py no longer matches the library arm — guard is vacuous"
+        )
 
     def test_positive_each_family_arm_matches(self) -> None:
         """Per-arm positive asserts on synthetic strings — keeps the config/local arms honest even
@@ -129,6 +141,16 @@ class TestPerkOwnedPathGuard:
         assert PERK_PATTERN.search('root / ".perk" / LAST_SEEN_VERSION_FILENAME')
         assert PERK_PATTERN.search('root / ".perk" / "managed-state.toml"')
         assert PERK_PATTERN.search('root / ".perk" / MANAGED_STATE_FILENAME')
+        # The library arm.
+        assert LIBRARY_PATTERN.search('root / "docs" / "library"')
+        assert LIBRARY_PATTERN.search('Path("docs/library/catalog.json")')
+
+    def test_library_arm_negative_shapes(self) -> None:
+        """The managed gitignore literal and prose mentions of the library never match."""
+        assert not _matches('    "/docs/library/**",')
+        assert not _matches('    "!/docs/library/README.md",')
+        assert not _matches("the perk library lives at `docs/library/` in the main checkout")
+        assert not _matches('LIBRARY_REL = "docs/library"')
 
     def test_negative_pi_native_paths_do_not_match(self) -> None:
         """Pi-native `.pi/...` construction is out of scope and must not false-positive; and a

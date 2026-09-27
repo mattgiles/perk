@@ -1,0 +1,52 @@
+{
+  "success": true,
+  "error_type": null,
+  "message": null,
+  "library_root": "/repo/docs/library",
+  "catalog_present": true,
+  "entries": [
+    {
+      "kind": "source",
+      "slug": "click",
+      "source": "https://github.com/pallets/click",
+      "path": "/repo/docs/library/source-code/github.com/pallets/click",
+      "present": true,
+      "ref": "8.1.7",
+      "added_at": "2026-09-02T00:00:00Z",
+      "checked_at": null,
+      "checked_age_seconds": null,
+      "stale_after": 86400,
+      "evidence": "none",
+      "drifted": false,
+      "status": "pinned"
+    },
+    {
+      "kind": "docs",
+      "slug": "pi",
+      "source": "https://pi.dev/docs",
+      "path": "/repo/docs/library/documentation/pi",
+      "present": false,
+      "ref": null,
+      "added_at": "2026-09-01T00:00:00Z",
+      "checked_at": "2026-09-20T00:00:00Z",
+      "checked_age_seconds": 604800,
+      "stale_after": 1209600,
+      "evidence": "strong",
+      "drifted": false,
+      "status": "fresh"
+    }
+  ],
+  "uncatalogued": [
+    {
+      "name": "hunk",
+      "path": "/repo/docs/library/hunk",
+      "hint": "perk librarian record --adopt /repo/docs/library/hunk --kind docs --source <url>"
+    }
+  ],
+  "staging": [
+    {
+      "name": "pi-01ARZ",
+      "path": "/repo/docs/library/.staging/pi-01ARZ"
+    }
+  ]
+}

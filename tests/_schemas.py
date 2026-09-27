@@ -30,6 +30,9 @@ from pydantic import BaseModel
 
 from perk.cli.commands.learn.capture_cmd import LearnCaptureOut
 from perk.cli.commands.learn.skip_cmd import LearnSkipOut
+from perk.cli.commands.librarian.list_cmd import LibrarianListOut
+from perk.cli.commands.librarian.record_cmd import LibrarianRecordOut
+from perk.cli.commands.librarian.remove_cmd import LibrarianRemoveOut
 from perk.cli.commands.objective.doctor_cmd import ObjectiveDoctorOut
 from perk.cli.commands.objective.node_engagement_cmd import ObjectiveNodeEngagementOut
 from perk.cli.commands.objective.stack.land_cmd import ObjectiveStackLandOut
@@ -115,6 +118,9 @@ SCHEMAS: tuple[SchemaEntry, ...] = (
         ObjectiveNodeEngagementOut,
         "serialization",
     ),
+    SchemaEntry("outputs/librarian-list.schema.json", LibrarianListOut, "serialization"),
+    SchemaEntry("outputs/librarian-record.schema.json", LibrarianRecordOut, "serialization"),
+    SchemaEntry("outputs/librarian-remove.schema.json", LibrarianRemoveOut, "serialization"),
 )
 
 
