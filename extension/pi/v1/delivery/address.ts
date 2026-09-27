@@ -57,7 +57,12 @@ import {
   REVIEW_CLASSIFIER_FLOW,
   runReviewClassifierWave,
 } from "../../../waves/reviewClassifierWave.ts";
-import { driveConflictFollowUp, publishDepsFor, renderPublishedMessage } from "./submit.ts";
+import {
+  driveConflictFollowUp,
+  publishDepsFor,
+  renderChangeStatsLine,
+  renderPublishedHeadline,
+} from "./submit.ts";
 import type { SubmitConflictController } from "./submitConflict.ts";
 
 /** The four known `counts` keys (recorded into workflow-state — strict-decoded). */
@@ -267,7 +272,8 @@ async function executeFinalizeAddress(
       driveConflictFollowUp(pi, ctx, outcome.conflict, controller);
       return ok(
         `Resolved ${outcome.resolvedThreadIds.length} review thread(s) after ` +
-          `${renderPublishedMessage(outcome.change)}. ${renderAddressHandoff(outcome.change)}`,
+          `${renderPublishedHeadline(outcome.change)}. ${renderAddressHandoff(outcome.change)}` +
+          renderChangeStatsLine(outcome.change),
         {
           submit: { ...outcome.change },
           results: outcome.results,

@@ -1,6 +1,7 @@
 """The doc-scanning pure leaf for the learn evidence bundle (`contracts.md` §8.35).
 
-Two concerns, one dependency-light leaf (imports only stdlib + ``yaml`` + ``perk.boundary``):
+Two concerns, one dependency-light leaf (imports only stdlib + ``yaml`` + ``perk.boundary`` + the
+``perk.substrate.paths`` constants leaf):
 
 - **The basic inventory** (``scan_existing_docs`` → ``DocEntry`` tuples) — the read of the three
   conventional docs roots (frontmatter / first-heading metadata), surfaced on the bundle's
@@ -25,6 +26,7 @@ from pathlib import Path
 import yaml
 
 from perk.boundary import LenientParseModel
+from perk.substrate.paths import LEARNED_DOCS_REL
 
 _SNIPPET_LEN = 240
 
@@ -32,7 +34,7 @@ _SNIPPET_LEN = 240
 # perk's own codebase, not the workflow-managed skill surface; `.perk/skills/` is the repo-authored
 # skill surface. The user-docs root has no single glob: its admission rule mirrors the docs-site
 # collection loader (see `_iter_user_docs`).
-_LEARNED_GLOB = ("docs/learned", "**/*.md")
+_LEARNED_GLOB = (LEARNED_DOCS_REL, "**/*.md")
 _USER_DOCS_ROOT = "docs/user-docs"
 _USER_DOC_SUFFIXES = (".md", ".mdx")
 _SKILLS_GLOB = (".perk/skills", "*/SKILL.md")

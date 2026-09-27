@@ -8,10 +8,11 @@ Sections its ``--help`` (via :class:`SectionedAliasGroup`) into **Launchers** / 
   launcher-only (L) —
   it has a launcher half + the warm review flow but no deterministic worker.
 - **Workers** — ``check`` / ``feedback`` / ``ready`` / ``resolve-threads`` / ``review-context`` /
-  ``review-post`` / ``review-submit`` / ``url`` + the ``review`` subgroup (``checkout``/``cleanup``,
-  the ephemeral PR-head review worktrees): deterministic cold doors the warm TS doors delegate
-  to. Each is a supervisor surface: ``--json`` → stdout, human text → stderr, stable exit codes
-  (``0`` ok · ``1`` invalid/op-failure · ``2`` not-a-repo).
+  ``review-post`` / ``review-submit`` / ``stats`` / ``url`` + the ``review`` subgroup
+  (``checkout``/``cleanup``, the ephemeral PR-head review worktrees): deterministic cold doors the
+  warm TS doors delegate to (``stats`` is a standalone read). Each is a supervisor surface:
+  ``--json`` → stdout, human text → stderr, stable exit codes (``0`` ok · ``1``
+  invalid/op-failure · ``2`` not-a-repo).
 
 ``submit`` / ``land`` / ``address`` are also exported as the module-level command objects
 ``pr_submit_command`` / ``pr_land_command`` / ``pr_address_command`` so ``cli.py`` can register the
@@ -32,6 +33,7 @@ from perk.cli.commands.pr.review import review_group
 from perk.cli.commands.pr.review_context_cmd import review_context_pr
 from perk.cli.commands.pr.review_post_cmd import review_post_pr
 from perk.cli.commands.pr.review_submit_cmd import review_submit_pr
+from perk.cli.commands.pr.stats_cmd import stats_pr
 from perk.cli.commands.pr.submit_cmd import submit_pr
 from perk.cli.commands.pr.url_cmd import url_pr
 from perk.cli.stages import make_merged_command
@@ -78,6 +80,7 @@ mark_kind(resolve_threads_pr, "worker")
 mark_kind(review_context_pr, "worker")
 mark_kind(review_post_pr, "worker")
 mark_kind(review_submit_pr, "worker")
+mark_kind(stats_pr, "worker")
 mark_kind(url_pr, "worker")
 mark_kind(review_group, "worker")
 
@@ -91,5 +94,6 @@ pr_group.add_command(resolve_threads_pr)
 pr_group.add_command(review_context_pr)
 pr_group.add_command(review_post_pr)
 pr_group.add_command(review_submit_pr)
+pr_group.add_command(stats_pr)
 pr_group.add_command(url_pr)
 pr_group.add_command(review_group)

@@ -27,6 +27,7 @@ from perk.backends.issue_backend import IssueBackendError, PlanHeaderUpdate, Pla
 from perk.backends.objective_store import ObjectiveRef, ObjectiveState, ObjectiveStoreError
 from perk.delivery import capability, land, train
 from perk.delivery import layer as layer_mod
+from perk.delivery.change_stats import ChangeStats
 from perk.delivery.journal import (
     JournalCorruptionError,
     JournalFold,
@@ -521,6 +522,11 @@ class PublishResult:
         resumed: bool
         converged_noop: bool
         cascade: "SyncResult | None" = None
+        # The layer's change stats over its parent-checkpoint..published-head range, or a
+        # one-line `change_stats_note` when they could not be computed (or the body refresh
+        # after a cascade failed).
+        change_stats: ChangeStats | None = None
+        change_stats_note: str | None = None
 
     @dataclass(frozen=True)
     class Ready:

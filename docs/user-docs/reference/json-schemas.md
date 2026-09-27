@@ -57,6 +57,7 @@ category directory.
 | --- | --- | --- | --- |
 | `plan-save.schema.json` | `PlanSaveOut` | `serialization` | Saved plan reference, issue, and linkage result. |
 | `pr-submit.schema.json` | `PrSubmitOut` | `serialization` | Pull-request publication result. |
+| `pr-stats.schema.json` | `PrStatsOut` | `serialization` | Read-only change stats for the current branch. |
 | `pr-ready.schema.json` | `PrReadyOut` | `serialization` | Draft-to-ready transition result. |
 | `pr-land.schema.json` | `PrLandOut` | `serialization` | Pull-request landing and plan-finalization result. |
 | `pr-feedback.schema.json` | `PrFeedbackOut` | `serialization` | Classified PR feedback and thread inventory. |

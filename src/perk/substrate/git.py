@@ -6,6 +6,7 @@ One implementation per plane (cli-vs-pi §3); shells ``git`` via subprocess, nev
 returning ``None`` on failure (the operation is the authoritative test).
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import Literal
 
 from perk.substrate.output import log_warn
-from perk.substrate.proc import ProcFailure, run_captured, run_checked
+from perk.substrate.proc import ProcFailure, run_captured, run_captured_bytes, run_checked
 
 # GIT_TERMINAL_PROMPT=0: credential prompts fail fast instead of hanging to the timeout.
 _GIT_ENV = {"GIT_TERMINAL_PROMPT": "0"}
@@ -77,6 +78,25 @@ type RebaseOutcome = RebaseCompleted | RebaseConflict
 
 
 @dataclass(frozen=True)
+class DiffEntry:
+    """One changed path from :func:`diff_entries` (repo-relative, POSIX).
+
+    ``status`` is git's status letter with a type change (``T``) folded to ``M`` — both sides
+    still exist at the same path. ``old_path`` is set only for a rename (``R``): the source path,
+    while ``path`` is the destination. ``old_blob`` / ``new_blob`` are the side's blob id when that
+    side is a **regular file** (mode ``100644`` / ``100755``) and ``None`` otherwise — an absent
+    side, a symlink, or a submodule gitlink. A path git emits in bytes that are not valid UTF-8
+    decodes with ``surrogateescape`` (lossless; ``os.fsencode`` restores the bytes).
+    """
+
+    status: Literal["A", "D", "M", "R"]
+    path: str
+    old_path: str | None = None
+    old_blob: str | None = None
+    new_blob: str | None = None
+
+
+@dataclass(frozen=True)
 class MergeProbe:
     """The result of a best-effort local merge-conflict probe (`detect_merge_conflicts`).
 
@@ -130,6 +150,23 @@ def _run(args: list[str], *, cwd: Path | None = None, timeout: int = 30) -> str:
         return run_checked(["git", *args], cwd=cwd, timeout=timeout, env_overlay=_GIT_ENV)
     except ProcFailure as exc:
         raise GitError(str(exc)) from exc
+
+
+def _run_bytes(
+    args: list[str], *, cwd: Path | None = None, timeout: int = 30, stdin: bytes | None = None
+) -> bytes:
+    """``_run`` in bytes mode: stdout comes back undecoded (raw blob contents, ``-z`` paths
+    that need not be UTF-8); a non-zero exit raises ``GitError`` with the decoded stderr."""
+    try:
+        proc = run_captured_bytes(
+            ["git", *args], cwd=cwd, timeout=timeout, stdin=stdin, env_overlay=_GIT_ENV
+        )
+    except ProcFailure as exc:
+        raise GitError(str(exc)) from exc
+    if proc.returncode != 0:
+        detail = proc.stderr.decode("utf-8", errors="replace").strip()
+        raise GitError(detail or f"git {args[0]} exited {proc.returncode}")
+    return proc.stdout
 
 
 def _run_capture(
@@ -727,6 +764,115 @@ def diff_range(repo: Path, base: str, head: str) -> str:
         cwd=repo,
         timeout=60,
     )
+
+
+def diff_entries(repo: Path, base: str, head: str) -> tuple[DiffEntry, ...]:
+    """The changed files between ``base`` and ``head`` (``git diff --raw -z --no-abbrev``).
+
+    The argv pins the knobs that would otherwise leak user config into the listing:
+    ``--find-renames`` regardless of ``diff.renames``, ``--no-ext-diff`` / ``--no-textconv``
+    (the never-execute posture of :func:`diff_range`), ``--no-color``. ``--diff-filter=ADMRT``
+    admits the statuses a line count can use (copies, unmerged and unknown entries are out).
+    ``-z`` keeps every path raw (no C-quoting) with NUL separators, read in bytes mode so a
+    non-UTF-8 filename survives. Raises ``GitError`` on failure.
+    """
+    out = _run_bytes(
+        [
+            "diff",
+            "--raw",
+            "-z",
+            "--no-abbrev",
+            "--find-renames",
+            "--diff-filter=ADMRT",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+            base,
+            head,
+        ],
+        cwd=repo,
+        timeout=60,
+    )
+    return _parse_diff_raw_z(out)
+
+
+def _parse_diff_raw_z(out: bytes) -> tuple[DiffEntry, ...]:
+    """Parse ``:<old mode> <new mode> <old oid> <new oid> <status>\\0<path>\\0[<path>\\0]``
+    records (a rename carries the source path, then the destination)."""
+    if not out:
+        return ()
+    fields = out.removesuffix(b"\0").split(b"\0")
+    entries: list[DiffEntry] = []
+    index = 0
+    while index < len(fields):
+        meta = fields[index].decode("ascii", errors="replace")
+        index += 1
+        parts = meta.removeprefix(":").split(" ")
+        if not meta.startswith(":") or len(parts) != 5:
+            raise GitError(f"unexpected git diff --raw record: {meta!r}")
+        old_mode, new_mode, old_oid, new_oid, status = parts
+        letter = status[:1]
+        width = 2 if letter == "R" else 1
+        if index + width > len(fields):
+            raise GitError(f"truncated git diff --raw record: {meta!r}")
+        paths = [os.fsdecode(raw) for raw in fields[index : index + width]]
+        index += width
+        old_blob = old_oid if old_mode.startswith("100") else None
+        new_blob = new_oid if new_mode.startswith("100") else None
+        if letter == "R":
+            entries.append(DiffEntry("R", paths[1], paths[0], old_blob, new_blob))
+        elif letter == "A":
+            entries.append(DiffEntry("A", paths[0], None, None, new_blob))
+        elif letter == "D":
+            entries.append(DiffEntry("D", paths[0], None, old_blob, None))
+        elif letter in ("M", "T"):
+            entries.append(DiffEntry("M", paths[0], None, old_blob, new_blob))
+        else:
+            raise GitError(f"unexpected git diff status {status!r} for {paths[0]!r}")
+    return tuple(entries)
+
+
+def read_blobs(repo: Path, oids: Sequence[str]) -> dict[str, bytes]:
+    """The raw contents of each blob in ``oids`` (``git cat-file --batch``), byte-exact.
+
+    Unlike a checkout or ``git archive``, no attribute, filter, or end-of-line conversion is
+    applied — the bytes are exactly what the commit stores. One process for the whole batch;
+    duplicate ids are read once. Raises ``GitError`` on failure, a missing object, or a
+    non-blob object.
+    """
+    unique = list(dict.fromkeys(oids))
+    if not unique:
+        return {}
+    out = _run_bytes(
+        ["cat-file", "--batch"],
+        cwd=repo,
+        timeout=120,
+        stdin="".join(f"{oid}\n" for oid in unique).encode("ascii"),
+    )
+    return _parse_cat_file_batch(out)
+
+
+def _parse_cat_file_batch(out: bytes) -> dict[str, bytes]:
+    """Parse ``<oid> <type> <size>\\n<contents>\\n`` records (``<name> missing\\n`` for an
+    absent object)."""
+    blobs: dict[str, bytes] = {}
+    pos = 0
+    while pos < len(out):
+        newline = out.find(b"\n", pos)
+        if newline == -1:
+            raise GitError("truncated git cat-file --batch header")
+        header = out[pos:newline].decode("ascii", errors="replace").split(" ")
+        if len(header) == 2 and header[1] == "missing":
+            raise GitError(f"git object {header[0]} is missing")
+        if len(header) != 3 or header[1] != "blob" or not header[2].isdigit():
+            raise GitError(f"unexpected git cat-file --batch header: {' '.join(header)!r}")
+        start = newline + 1
+        end = start + int(header[2])
+        if end > len(out):
+            raise GitError(f"truncated git cat-file --batch contents for {header[0]}")
+        blobs[header[0]] = out[start:end]
+        pos = end + 1
+    return blobs
 
 
 def stack_merge_base_diff(repo: Path, *, pr_numbers: Sequence[int], base_ref: str) -> str:

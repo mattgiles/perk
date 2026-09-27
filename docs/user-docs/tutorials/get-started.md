@@ -32,6 +32,9 @@ same environment `perk init` checks for:
   with the official installer, `curl -fsSL
   https://raw.githubusercontent.com/mattgiles/skills/main/scripts/install.sh | sh` (macOS), or
   `go install github.com/mattgiles/skills/cmd/skills@latest`.
+- **`cloc`** — `cloc --version`; perk counts each PR's change stats (lines of code, tests,
+  comments, learned docs) with it. Install it with `brew install cloc` (macOS),
+  `npm install -g cloc`, or your distro package.
 - **`uv`** — `uv --version`; used to install perk in Step 1.
 - **`ast-grep`** *(optional)* — `ast-grep --version`. perk sessions prefer it for structural
   (AST) code search; `init`/`doctor` only **warn** when it is absent, never block. Install it
@@ -96,7 +99,7 @@ perk init
 writes managed blocks into `.gitignore` and `AGENTS.md`, and drops a `.perk/config.toml` config
 (with the `[[ci.checks]]` checks block **commented out** by default). It is idempotent — re-running it
 on an already-wired repo is a no-op. Run interactively, it is also a guided onboarding: it
-offers to install the missing supported tools (`gh`, `pi`, `skills`), to run `gh auth login`
+offers to install the missing supported tools (`gh`, `pi`, `skills`, `cloc`), to run `gh auth login`
 when the GitHub CLI is unauthenticated, and to set your git `user.name`/`user.email` when they
 are unset — so if the prerequisites above came up short, interactive `perk init` walks you
 through most of them.

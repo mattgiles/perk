@@ -36,6 +36,9 @@ REPO_SKILLS_REL = ".perk/skills"
 # Forward-slash relative string for display and git pathspecs (kept byte-consistent with
 # ``library_dir`` below).
 LIBRARY_REL = "docs/library"
+# The learned-docs root, repo-relative and forward-slash: the learn docs scan roots its glob here
+# and the change-stats partitioning matches PR paths against it.
+LEARNED_DOCS_REL = "docs/learned"
 
 
 def config_dir(root: Path) -> Path:

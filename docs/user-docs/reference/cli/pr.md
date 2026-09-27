@@ -1,6 +1,6 @@
 ---
 title: "PR commands"
-description: "Exact reference for the perk pr group — submit, address, land, ready, the review workers, and the review checkouts."
+description: "Exact reference for the perk pr group — submit, address, land, ready, the change-stats worker, the review workers, and the review checkouts."
 sidebar:
   order: 3014
 ---
@@ -8,8 +8,8 @@ sidebar:
 # PR commands
 
 This page holds the exact reference for the `perk pr` group — the canonical submit/address/land/
-ready entries behind the flat spine aliases, the review workers, and the ephemeral review
-checkouts. For the full command map and shared conventions, start at the
+ready entries behind the flat spine aliases, the change-stats worker, the review workers, and the
+ephemeral review checkouts. For the full command map and shared conventions, start at the
 [CLI commands hub](../cli.md).
 
 ### `perk pr`
@@ -38,7 +38,32 @@ stays fully offline (`base: ""`, `mergeable: null`).
 When the branch already has a PR (a replan reuses the `plan-<n>` branch), submit reuses it: an
 **open** PR is decorated as before, a **closed** PR is reopened first (a loud `reopened closed PR
 #n` note), and an **already-merged** PR is refused with `error_type: pr_already_merged` (there is
-nothing to submit — start a fresh plan/branch).
+nothing to submit — start a fresh plan/branch). An existing PR's **actual target branch** is
+authoritative for an incremental submit: perk never retargets it, so that branch — not the plan's
+pinned base or the repository default — is the `base` for the PR, the change stats, the
+mergeability probe, and the `--json` `base` field.
+
+Every submitted PR body carries a **Change stats** section (after `Plan: #N`, or after the
+stacked `Train context`, and before the plan embed): the lines **added / removed / modified**
+over the PR's exact range, counted by [cloc](https://github.com/AlDanial/cloc) over the committed
+file contents (whitespace-insensitive; blank lines, symlinks, submodules, and files cloc does not
+recognize are excluded; `.gitattributes` archive and end-of-line settings do not apply) and split
+into five rows — **Code** (source outside tests), **Tests** (paths under `test/`, `tests/`,
+`__tests__/`, `fixtures/`, `testing/`, … plus `*.test.ts`, `test_*.py`, `*_test.go`,
+`conftest.py`, …), **Comments** (comment lines in source and test files), **Learned docs**
+(anything under `docs/learned/`), and **Other** (prose/data such as Markdown, YAML, JSON, TOML).
+Zero rows are hidden; a rename counts once, under its new path. The incremental range is
+`merge-base(origin/<base>, HEAD)..HEAD` with `origin/<base>` fetched fresh first; a stacked layer
+counts its parent checkpoint → published head. The table and the plan embed share GitHub's
+65,536-character body cap on both routes: the section always stays, the embed yields to a
+pointer when it would not fit. The `--json` report gains `change_stats` (`{base, head, rows:
+[{id, label, added, removed, modified}]}`, all five rows in order) and `change_stats_note`, and
+the human output adds a `change stats: …` line. When cloc is missing or the range cannot be
+resolved, submit still succeeds: the section reads `_Unavailable: <reason>._`, `change_stats` is
+null, `change_stats_note` carries the one-line reason, and the human output warns
+`⚠ change stats unavailable: … — run perk doctor`. A note can also ride beside populated stats
+(a stacked cascade whose PR-body refresh failed): the human output then adds
+`⚠ change stats warning: …`. `--dry-run` computes nothing (both null).
 
 A plan that is a **stacked delivery layer** (its plan-ref or plan header carries a
 `delivery_lineage`) routes through the delivery module's publish operation instead of the plain
@@ -56,7 +81,12 @@ recovery guidance pass through unchanged. The `--json` report gains additive `de
 null), `operation_id`, and the cascade-only `operation {kind, operation_id,
 abandoned_operation_id, resumed, no_op, affected[], notes[]}` block; flat `operation_id` remains
 the compatibility alias. Incremental plans are untouched beyond the named route (the
-stack/operation fields are null on incremental).
+stack/operation fields are null on incremental). Every stacked arm reports change stats: a fresh
+publish, a republish, and a resumed publication write the section into both body passes; a
+lower-layer cascade that moved the trigger's head refreshes the trigger PR's body with fresh stats
+(a refresh failure becomes the `change_stats_note`, never a submit failure — successor bodies are
+not rewritten, and each footnote names the SHA range it describes); a pure no-op convergence
+returns the stats on the envelope without writing anything.
 
 ### `perk pr address [PLAN]`
 
@@ -369,6 +399,19 @@ as a removal). Single-PR and **idempotent**: nothing to
 remove is success (`removed: false`, exit 0). Fully offline — no GitHub calls. A dirty checkout
 is still removed (it is disposable by construction), and a leftover `refs/perk/review/<n>` temp
 ref is deleted best-effort. The `--json` envelope carries `pr`, `path`, and `removed`.
+
+### `perk pr stats`
+
+Count the current branch's change stats — the same five rows `perk pr submit` writes into the PR
+body — without publishing anything. Read-only and GitHub-free (no `gh` call). The base is
+`--base <ref>` when given, else the local `cache.plan-ref` base, else the repository trunk; the
+range is `merge-base(<base>, HEAD)..HEAD`. Offline by default: `origin/<base>` when it resolves
+locally, else the local `<base>`; `--fetch` fetches `origin/<base>` first (publication's
+fresh-remote view). Human output prints `change stats vs <base-ref> (<base7>..<head7>)` then one
+line per non-zero row. `--json` emits `{success, error_type, message, base_ref, stats: {base,
+head, rows: [{id, label, added, removed, modified}]}}` (schema `pr-stats.schema.json`). Unlike
+submit, this worker fails loudly: `cloc_missing`, `cloc_failed`, `range_unresolved`, and
+`git_failed` exit `1`. Exit `0` ok · `1` stats unavailable · `2` not-a-repo.
 
 ### `perk pr url`
 

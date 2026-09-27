@@ -284,6 +284,7 @@ def stub_env(monkeypatch):
             env_mod.EnvCheck("gh", True, "ok", ""),
             env_mod.EnvCheck("node", True, "v22.19.0", ""),
             env_mod.EnvCheck("pi", True, "ok", ""),
+            env_mod.EnvCheck("cloc", True, "ok", ""),
         ],
     )
     monkeypatch.setattr(

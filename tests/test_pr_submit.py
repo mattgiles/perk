@@ -12,6 +12,7 @@ from perk.backends.issue_backend import IssueBackendError, PlanHeaderUpdate
 from perk.backends.linear import agent as linear_agent
 from perk.cli.cli import cli
 from perk.cli.commands.pr import submit_cmd
+from perk.delivery import change_stats, pr_body
 from perk.delivery import observe as delivery_observe
 from perk.delivery import publish as delivery_publish
 from perk.state import cache
@@ -37,6 +38,17 @@ def _authed(monkeypatch) -> None:
 
 
 _CLEAN_PROBE = git.MergeProbe(determined=True, mergeable=True, conflicts=())
+_STATS = change_stats.ChangeStats(
+    base="1" * 40,
+    head="2" * 40,
+    rows=(
+        change_stats.RowStats("code", "Code", 120, 30, 12),
+        change_stats.RowStats("tests", "Tests", 80, 5, 3),
+        change_stats.RowStats("comments", "Comments", 0, 0, 0),
+        change_stats.RowStats("learned_docs", "Learned docs", 0, 0, 0),
+        change_stats.RowStats("other", "Other", 4, 0, 0),
+    ),
+)
 
 
 def _stub_gh(
@@ -47,6 +59,8 @@ def _stub_gh(
     probe: git.MergeProbe | None = _CLEAN_PROBE,
     state: str = "OPEN",
     reopen_fails: bool = False,
+    existing_base: str | None = None,
+    stats: tuple[change_stats.ChangeStats | None, str | None] | None = None,
 ) -> dict[str, object]:
     """Stub the whole submit gateway path; record what the worker did.
 
@@ -54,6 +68,9 @@ def _stub_gh(
     ``None`` makes the probe raise ``GitError`` (the fail-open path). The probe call is recorded.
     ``state`` sets the reused PR's normalized state (OPEN | CLOSED | MERGED — the non-OPEN reuse
     guard); ``reopen_fails`` makes the ``reopen_pr`` stub raise ``GitHubError`` (the loud-fail arm).
+    ``existing_base`` makes the pre-push ``find_pr_for_branch`` lookup return an existing PR with
+    that base (``None`` → no PR yet). ``stats`` is what the change-stats seam returns (default: a
+    small populated count); the base it was asked for is recorded.
     """
     calls: dict[str, object] = {
         "pushed": False,
@@ -62,7 +79,10 @@ def _stub_gh(
         "pr_body": None,
         "probed": False,
         "reopened": None,
+        "create_body": None,
+        "stats_base": None,
     }
+    stats_result = stats if stats is not None else (_STATS, None)
     monkeypatch.setattr(
         plans,
         "get_plan",
@@ -70,13 +90,38 @@ def _stub_gh(
     )
     monkeypatch.setattr(plans, "get_plan_body", lambda **k: plan_body)
     monkeypatch.setattr(github, "default_branch", lambda root: "main")
-    monkeypatch.setattr(
-        github,
-        "create_pr",
-        lambda **k: github.PullRequest(
-            number=42, url="u/pr/42", is_draft=True, state=state, existed=existed
-        ),
-    )
+
+    def _create(**k):
+        calls["create_body"] = k["body"]
+        calls["create_base"] = k["base"]
+        return github.PullRequest(
+            number=42,
+            url="u/pr/42",
+            is_draft=True,
+            state=state,
+            existed=existed or existing_base is not None,
+            base_ref=existing_base or k["base"],
+        )
+
+    def _find(**k):
+        if existing_base is None:
+            return None
+        return github.PullRequest(
+            number=42,
+            url="u/pr/42",
+            is_draft=True,
+            state=state,
+            existed=True,
+            base_ref=existing_base,
+        )
+
+    def _stats(_root, *, base):
+        calls["stats_base"] = base
+        return stats_result
+
+    monkeypatch.setattr(github, "create_pr", _create)
+    monkeypatch.setattr(github, "find_pr_for_branch", _find)
+    monkeypatch.setattr(submit_cmd, "_change_stats_for", _stats)
 
     def _reopen(**k):
         calls["reopened"] = k["number"]
@@ -97,8 +142,9 @@ def _stub_gh(
         calls["pushed"] = True
         calls["push_kwargs"] = k
 
-    def _probe(*_a, **_k):
+    def _probe(*_a, **k):
         calls["probed"] = True
+        calls["probe_base"] = k.get("base")
         if probe is None:
             raise git.GitError("probe boom")
         return probe
@@ -131,6 +177,8 @@ def test_dry_run_is_offline_and_well_formed(monkeypatch):
     assert data["plan_header"]["fields_updated"] == ["branch", "pr", "lifecycle_stage"]
     # Dry run stays fully offline: no probe, mergeability unknown.
     assert data["base"] == "" and data["mergeable"] is None and data["conflicts"] == []
+    # ...and no change stats either (null/null — the offline dry run computes nothing).
+    assert data["change_stats"] is None and data["change_stats_note"] is None
 
 
 def test_no_plan_ref_exits_1(monkeypatch):
@@ -286,31 +334,113 @@ def test_real_submit_drops_the_embed_when_the_plan_exceeds_githubs_body_cap(monk
     data = json.loads(result.output)
     assert data["success"] is True and data["plan_embedded"] is False
     body = str(calls["pr_body"])
-    assert len(body) <= submit_cmd._PR_BODY_MAX_CHARS
+    assert len(body) <= pr_body.PR_BODY_MAX_CHARS
     assert "<details>" not in body and "# Big plan" not in body
     assert body.startswith("Closes #7\n\nPlan: #7\n\n")
     assert "too large to embed" in body and "`gh pr checkout 42`" in body
     assert not github.validate_pr_body(body, pr_number=42)
 
 
-def test_plan_embed_fit_is_judged_with_the_footer_reserved():
-    # Exactly at the boundary the create pass (no PR number yet) and the update pass (footer
-    # appended) must agree, so the fit is judged with the footer reserved on both.
-    issue = "7"
-    fixed = len(
-        submit_cmd._join_pr_body(
-            issue=issue, embed=submit_cmd._plan_embed(issue=issue, plan_body="")
+def test_reused_pr_base_governs_create_stats_probe_and_envelope(monkeypatch):
+    # An existing PR targeting `release` wins over the plan's pinned `develop`: perk never
+    # retargets an incremental PR, so the PR's actual target drives every base consumer.
+    _authed(monkeypatch)
+    calls = _stub_gh(monkeypatch, existing_base="release")
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(
+            Path(d), plan.PlanRefModel.model_validate({**_REF, "base": "develop"}).to_domain()
         )
+        result = runner.invoke(cli, ["pr", "submit", "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["base"] == "release"
+    assert calls["create_base"] == "release"
+    assert calls["stats_base"] == "release"
+    assert calls["probe_base"] == "release"
+
+
+def test_change_stats_section_lands_in_both_bodies_and_the_envelope(monkeypatch):
+    _authed(monkeypatch)
+    calls = _stub_gh(monkeypatch, plan_body="# My Plan")
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 0, result.output
+    section = change_stats.render_pr_section(_STATS, note=None)
+    for body in (str(calls["create_body"]), str(calls["pr_body"])):
+        assert body.startswith(f"Closes #7\n\nPlan: #7\n\n{section}\n\n<details>")
+    assert calls["stats_base"] == "main"
+    data = json.loads(result.stdout)
+    assert data["change_stats_note"] is None
+    assert data["change_stats"] == change_stats.ChangeStatsOut.from_domain(_STATS).model_dump(
+        mode="json"
     )
-    room = submit_cmd._PR_BODY_MAX_CHARS - fixed - submit_cmd._FOOTER_RESERVE
-    fits, too_big = "p" * room, "p" * (room + 1)
-    assert submit_cmd._plan_embed_fits(issue=issue, plan_body=fits)
-    assert not submit_cmd._plan_embed_fits(issue=issue, plan_body=too_big)
-    for plan_body in (fits, too_big):
-        create = submit_cmd._compose_pr_body(issue=issue, plan_body=plan_body)
-        update = submit_cmd._compose_pr_body(issue=issue, plan_body=plan_body, pr_number=42)
-        assert ("<details>" in create) == ("<details>" in update)
-        assert len(update) <= submit_cmd._PR_BODY_MAX_CHARS
+    assert data["plan_embedded"] is True
+
+
+def test_unavailable_change_stats_degrade_to_a_note(monkeypatch):
+    _authed(monkeypatch)
+    calls = _stub_gh(monkeypatch, stats=(None, "cloc is not installed."))
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["success"] is True
+    assert data["change_stats"] is None
+    assert data["change_stats_note"] == "cloc is not installed."
+    assert "### Change stats\n\n_Unavailable: cloc is not installed._" in str(calls["pr_body"])
+
+
+def test_change_stats_human_render(capsys):
+    result = submit_cmd.PrSubmitResult(
+        pr=github.PullRequest(number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=False),
+        branch="plan-7",
+        issue="7",
+        header_update=PlanHeaderUpdate(fields_updated=(), dry_run=False),
+        plan_embedded=True,
+        pr_checked=True,
+        dry_run=False,
+        base="main",
+        mergeable=True,
+        conflicts=(),
+        delivery="incremental",
+        change_stats=_STATS,
+    )
+    submit_cmd._render_human(result)
+    rendered = capsys.readouterr().err
+    compact = "code +120 \u221230 ~12 · tests +80 \u22125 ~3 · other +4 \u22120 ~0"
+    assert f"  change stats: {compact}" in rendered
+    assert "unavailable" not in rendered and "warning" not in rendered
+
+    note = "could not fetch origin/main: offline"
+    submit_cmd._render_human(replace(result, change_stats=None, change_stats_note=note))
+    rendered = capsys.readouterr().err
+    assert f"⚠ change stats unavailable: {note} — run perk doctor" in rendered
+
+    # A note beside populated stats (a failed body refresh after a cascade) is still surfaced.
+    refresh = "PR body refresh failed after cascade: HTTP 502"
+    submit_cmd._render_human(replace(result, change_stats_note=refresh))
+    rendered = capsys.readouterr().err
+    assert f"  change stats: {compact}" in rendered
+    assert f"⚠ change stats warning: {refresh}" in rendered
+    assert "unavailable" not in rendered
+
+
+def test_change_stats_seam_never_raises(monkeypatch, tmp_path):
+    def _unavailable(*_args, **_kwargs):
+        raise change_stats.ChangeStatsUnavailable("range_unresolved", "could not\n  fetch")
+
+    monkeypatch.setattr(submit_cmd.change_stats, "resolve_range", _unavailable)
+    assert submit_cmd._change_stats_for(tmp_path, base="main") == (None, "could not fetch")
+
+    rng = change_stats.DiffRange(base="1" * 40, head="2" * 40, base_ref="origin/main")
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(
+        submit_cmd.change_stats,
+        "resolve_range",
+        lambda root, *, base, fetch: seen.update(base=base, fetch=fetch) or rng,
+    )
+    monkeypatch.setattr(submit_cmd.change_stats, "summarize", lambda root, b, h: _STATS)
+    assert submit_cmd._change_stats_for(tmp_path, base="main") == (_STATS, None)
+    assert seen == {"base": "main", "fetch": True}
 
 
 def test_real_submit_idempotent_existing_pr(monkeypatch):
@@ -629,6 +759,7 @@ def _publication_result(
     cascade: delivery.SyncResult | None = None,
     fields_updated: tuple[str, ...] = ("branch", "pr", "lifecycle_stage"),
     converged_noop: bool = False,
+    change_stats_note: str | None = None,
 ) -> delivery.PublishResult:
     layer = delivery.PublishResult.Layer(
         pr=github.PullRequest(number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=False),
@@ -648,6 +779,8 @@ def _publication_result(
         resumed=cascade.resumed if cascade is not None else False,
         converged_noop=cascade.no_op if cascade is not None else converged_noop,
         cascade=cascade,
+        change_stats=None if change_stats_note is not None else _STATS,
+        change_stats_note=change_stats_note,
     )
     return delivery.PublishResult(kind="layer", plan_id="7", dry_run=False, layer=layer)
 
@@ -730,6 +863,26 @@ def test_stacked_submit_delegates_to_delivery_publish(monkeypatch):
     ]
     assert data["plan_header"]["fields_updated"] == ["branch", "pr", "lifecycle_stage"]
     assert calls["pushed"] is False and calls["header"] is None
+    # The layer's change stats ride the envelope; the incremental seam is never consulted.
+    assert data["change_stats"] == change_stats.ChangeStatsOut.from_domain(_STATS).model_dump(
+        mode="json"
+    )
+    assert data["change_stats_note"] is None
+    assert calls["stats_base"] is None
+
+
+def test_stacked_submit_copies_an_unavailable_stats_note(monkeypatch):
+    _authed(monkeypatch)
+    _stub_gh(monkeypatch)
+    _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
+    _stub_delivery_publish(
+        monkeypatch, result=_publication_result(change_stats_note="cloc is not installed.")
+    )
+    result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["change_stats"] is None
+    assert data["change_stats_note"] == "cloc is not installed."
 
 
 def test_stacked_cascade_envelope_bookkeeping_and_human_render(monkeypatch):
@@ -1055,9 +1208,11 @@ def test_compose_stacked_pr_body_sections_and_footer():
             ),
         ),
     )
-    body = delivery_publish._compose_stacked_pr_body(
+    composed = delivery_publish._compose_stacked_pr_body(
         issue="7", plan_body="# My Plan", facts=facts, pr_number=42
     )
+    assert composed.plan_embedded is True
+    body = composed.text
     # The disclaimer + position line.
     assert (
         "> Informational — the delivery train on objective #500 is authoritative; "
@@ -1076,6 +1231,6 @@ def test_compose_stacked_pr_body_sections_and_footer():
     # The first (pre-create) pass has no footer yet but still marks the current row.
     first_pass = delivery_publish._compose_stacked_pr_body(
         issue="7", plan_body=None, facts=facts, pr_number=None
-    )
+    ).text
     assert "| 2 | 2.2 | #7 | (this PR) |" in first_pass
     assert "gh pr checkout" not in first_pass

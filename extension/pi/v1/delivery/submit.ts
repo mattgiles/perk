@@ -16,6 +16,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
+  type ChangeStatsRow,
   type ConflictAttempts,
   type ConflictFollowUp,
   type PublishChange,
@@ -111,6 +112,40 @@ function operationField(payload: ColdJson): PublishedChange["operation"] {
 }
 
 /**
+ * Lenient all-or-nothing decode of the advisory change-stats block: a malformed block (or any
+ * malformed row) drops the whole block without sinking the submit decode.
+ */
+function changeStatsField(payload: ColdJson): PublishedChange["change_stats"] {
+  const value = objectField(payload, "change_stats");
+  if (value === undefined) return undefined;
+  const base = stringField(value, "base");
+  const head = stringField(value, "head");
+  const rawRows = value.rows;
+  if (base === undefined || head === undefined || !Array.isArray(rawRows)) return undefined;
+  const rows: ChangeStatsRow[] = [];
+  for (const raw of rawRows) {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+    const row = raw as ColdJson;
+    const id = stringField(row, "id");
+    const label = stringField(row, "label");
+    const added = numberField(row, "added");
+    const removed = numberField(row, "removed");
+    const modified = numberField(row, "modified");
+    if (
+      id === undefined ||
+      label === undefined ||
+      added === undefined ||
+      removed === undefined ||
+      modified === undefined
+    ) {
+      return undefined;
+    }
+    rows.push({ id, label, added, removed, modified });
+  }
+  return { base, head, rows };
+}
+
+/**
  * Narrow the `perk pr submit --json` success payload; strict on `pr`, lenient on the rest. The
  * `base`/`mergeable`/`conflicts` mergeability fields are advisory (mirror land.ts's lenient
  * sub-fields): a malformed value must NOT make a successful submit decode to `null`. `issue` is
@@ -137,6 +172,8 @@ function decodeSubmit(payload: ColdJson): PublishedChange | null {
     delivery: stringField(payload, "delivery"),
     stack: stackField(payload),
     operation: operationField(payload),
+    change_stats: changeStatsField(payload),
+    change_stats_note: stringField(payload, "change_stats_note"),
   };
 }
 
@@ -215,11 +252,41 @@ export function publishDepsFor(pi: ExtensionAPI, ctx: ExtensionContext): Publish
 }
 
 /**
- * Render the published-change success message (pure): verb + conflicted/clean + the delivery
- * suffix. Automatic-cascade facts supersede the generic stacked suffix; a malformed operation
- * block was dropped by the lenient decoder, so it falls back to the pre-existing stack wording.
+ * The change-stats lines (pure) — `\nchange stats: code +A −R ~M · …` over the non-zero rows
+ * (`\nchange stats: no counted lines` when every row is zero), followed by `\nchange stats
+ * warning: <note>` when a note rides alongside the counts (a failed PR-body refresh after a
+ * cascade); `\nchange stats unavailable: <note>` when only the note came back; `""` when neither
+ * did (an older CLI).
+ */
+export function renderChangeStatsLine(change: PublishedChange): string {
+  const stats = change.change_stats;
+  const note = change.change_stats_note;
+  if (stats === undefined) return note === undefined ? "" : `\nchange stats unavailable: ${note}`;
+  const rows = stats.rows.filter((r) => r.added !== 0 || r.removed !== 0 || r.modified !== 0);
+  const counts =
+    rows.length === 0
+      ? "no counted lines"
+      : rows
+          .map((r) => `${r.label.toLowerCase()} +${r.added} \u2212${r.removed} ~${r.modified}`)
+          .join(" · ");
+  const warning = note === undefined ? "" : `\nchange stats warning: ${note}`;
+  return `\nchange stats: ${counts}${warning}`;
+}
+
+/**
+ * Render the published-change success message (pure): the headline plus the change-stats line —
+ * the one render path for the `submit` tool result and the `/submit` report.
  */
 export function renderPublishedMessage(change: PublishedChange): string {
+  return renderPublishedHeadline(change) + renderChangeStatsLine(change);
+}
+
+/**
+ * The one-line published-change headline (pure): verb + conflicted/clean + the delivery suffix.
+ * Automatic-cascade facts supersede the generic stacked suffix; a malformed operation block was
+ * dropped by the lenient decoder, so it falls back to the pre-existing stack wording.
+ */
+export function renderPublishedHeadline(change: PublishedChange): string {
   const verb = change.pr.existed ? "Found existing" : "Opened draft";
   const deliverySuffix =
     change.operation?.kind === "sync"

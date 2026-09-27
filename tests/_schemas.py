@@ -49,6 +49,7 @@ from perk.cli.commands.pr.review.cleanup_cmd import PrReviewCleanupOut
 from perk.cli.commands.pr.review_context_cmd import PrReviewContextOut, PrReviewStackContextOut
 from perk.cli.commands.pr.review_post_cmd import ReviewBatchInput
 from perk.cli.commands.pr.review_submit_cmd import PrReviewSubmitOut, ReviewSubmitBatchInput
+from perk.cli.commands.pr.stats_cmd import PrStatsOut
 from perk.cli.commands.pr.submit_cmd import PrSubmitOut
 from perk.cli.commands.state.new_run_cmd import HandoffArgInput
 from perk.convergence.doctor import DoctorReportOut
@@ -90,6 +91,7 @@ SCHEMAS: tuple[SchemaEntry, ...] = (
     # ``--json`` output envelopes.
     SchemaEntry("outputs/plan-save.schema.json", PlanSaveOut, "serialization"),
     SchemaEntry("outputs/pr-submit.schema.json", PrSubmitOut, "serialization"),
+    SchemaEntry("outputs/pr-stats.schema.json", PrStatsOut, "serialization"),
     SchemaEntry("outputs/pr-ready.schema.json", PrReadyOut, "serialization"),
     SchemaEntry("outputs/pr-land.schema.json", PrLandOut, "serialization"),
     SchemaEntry("outputs/pr-feedback.schema.json", PrFeedbackOut, "serialization"),

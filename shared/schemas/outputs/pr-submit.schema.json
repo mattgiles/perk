@@ -1,5 +1,67 @@
 {
   "$defs": {
+    "ChangeStatsOut": {
+      "additionalProperties": false,
+      "description": "The ``--json`` projection; ``rows`` is ordered so a future row appends compatibly.",
+      "properties": {
+        "base": {
+          "title": "Base",
+          "type": "string"
+        },
+        "head": {
+          "title": "Head",
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/ChangeStatsRowOut"
+          },
+          "title": "Rows",
+          "type": "array"
+        }
+      },
+      "required": [
+        "base",
+        "head",
+        "rows"
+      ],
+      "title": "ChangeStatsOut",
+      "type": "object"
+    },
+    "ChangeStatsRowOut": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "added": {
+          "title": "Added",
+          "type": "integer"
+        },
+        "removed": {
+          "title": "Removed",
+          "type": "integer"
+        },
+        "modified": {
+          "title": "Modified",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "added",
+        "removed",
+        "modified"
+      ],
+      "title": "ChangeStatsRowOut",
+      "type": "object"
+    },
     "DeliveryOperationOut": {
       "additionalProperties": false,
       "description": "The typed delivery operation nested in a stacked cascade result.",
@@ -297,6 +359,27 @@
           "type": "null"
         }
       ]
+    },
+    "change_stats": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChangeStatsOut"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "change_stats_note": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Change Stats Note"
     }
   },
   "required": [
@@ -316,7 +399,9 @@
     "delivery",
     "stack",
     "operation_id",
-    "operation"
+    "operation",
+    "change_stats",
+    "change_stats_note"
   ],
   "title": "PrSubmitOut",
   "type": "object"

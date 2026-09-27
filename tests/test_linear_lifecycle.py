@@ -35,6 +35,7 @@ from perk.backends.linear import attachments as linear_attachments
 from perk.backends.linear import client as linear_client
 from perk.backends.resolve import resolve_objective_store
 from perk.cli.cli import cli
+from perk.cli.commands.pr import submit_cmd
 from perk.github import prs
 from perk.objective.drift import DriftCode
 from perk.run import run_report
@@ -77,7 +78,10 @@ def _patch_pr_tier_for_submit(monkeypatch: pytest.MonkeyPatch) -> dict[str, obje
 
     monkeypatch.setattr("perk.substrate.git.push", _push)
     monkeypatch.setattr(github, "default_branch", lambda root: "main")
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: None)
     monkeypatch.setattr(github, "create_pr", lambda **k: _pr(draft=True))
+    # The change-stats seam fetches + shells cloc; keep the lifecycle hermetic.
+    monkeypatch.setattr(submit_cmd, "_change_stats_for", lambda root, *, base: (None, "stub"))
 
     def _update_body(*, number, body, repo_root):
         calls["pr_body"] = body

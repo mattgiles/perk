@@ -18,7 +18,7 @@ hash = "sha256:b794695bee28c07cee56bfd2c21fd6126f6cd35fdad64d150c72818a6634820b"
 path = ".github/actions/perk-remote-setup/action.yml"
 kind = "file"
 version = "3.7.0"
-hash = "sha256:1cd0d6050e14a7e29e1a5c666366a29ba22f234a070f35b17835c7337fb9137d"
+hash = "sha256:4d9c52de4122748105beda97c22abe625d9d7832ea61a6414bd658282fb34668"
 
 [managed.artifacts.required-perk-version]
 path = ".perk/required-perk-version"

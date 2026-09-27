@@ -40,9 +40,10 @@ The managed `.gitignore` block also carries the perk library rules `/docs/librar
 
 Run **interactively**, `perk init` is also a guided onboarding flow. It offers to install the
 missing *supported* required tools — `gh` via `brew install gh` (when brew is on PATH), `pi` via
-`npm install -g @earendil-works/pi-coding-agent` (when node ≥ 22 is present), and `skills` via
-its official installer script on macOS / `go install` elsewhere (`git` and `node` stay
-guide-only — the failure report carries their install commands). It offers to run `gh auth
+`npm install -g @earendil-works/pi-coding-agent` (when node ≥ 22 is present), `skills` via
+its official installer script on macOS / `go install` elsewhere, and `cloc` via `brew install
+cloc` (when brew is on PATH) or `npm install -g cloc` (when node ≥ 22 is present) (`git` and
+`node` stay guide-only — the failure report carries their install commands). It offers to run `gh auth
 login` when the GitHub CLI is unauthenticated, checks your git commit identity
 (`user.name`/`user.email`) and prompts to set it (globally by default, or repo-local), and —
 when the committed `[issues] backend` is `"linear"` with a `team` and no API key resolves —

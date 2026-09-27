@@ -9,8 +9,10 @@ keyword-only params: ``env_overlay`` merges over ``os.environ`` (overlay wins) a
 ``env_remove`` DELETES inherited names first (removal is not expressible as an overlay — an
 empty-string value is still a set variable); both ``None`` inherits untouched (``env=None``).
 ``tests/test_tooling.py``'s AST
-guard pins this: ``run_captured`` holds the only sanctioned captured ``subprocess.run``
-literal (the inherited-stdio streaming sites are a different idiom and keep their own).
+guard pins this: ``run_captured`` holds the only sanctioned captured text-mode
+``subprocess.run`` literal, and ``run_captured_bytes`` its bytes-mode twin for output text
+decoding would corrupt (raw blob contents, ``-z`` pathnames that need not be UTF-8); the
+inherited-stdio streaming sites are a different idiom and keep their own.
 ``run_interactive`` is the one sanctioned **inherited-stdio interactive** primitive (the child
 owns the terminal; nothing is captured) for gestures like init's offered ``gh auth login``.
 
@@ -137,6 +139,35 @@ def run_captured(
             check=False,
             capture_output=True,
             text=True,
+            timeout=timeout,
+            env=env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ProcFailure("timeout", tuple(argv)) from exc
+    except OSError as exc:
+        raise ProcFailure("spawn", tuple(argv), cause_text=str(exc)) from exc
+
+
+def run_captured_bytes(
+    argv: Sequence[str],
+    *,
+    cwd: Path | None = None,
+    timeout: int,
+    stdin: bytes | None = None,
+    env_overlay: Mapping[str, str] | None = None,
+    env_remove: Sequence[str] | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    """The bytes-mode twin of ``run_captured``: ``stdin`` is fed to the child, stdout/stderr come
+    back undecoded. Same contract otherwise — returned regardless of exit code, spawn/timeout
+    failures raise ``ProcFailure``, the same env composition."""
+    env = _child_env(env_overlay, env_remove)
+    try:
+        return subprocess.run(
+            list(argv),
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+            input=stdin,
             timeout=timeout,
             env=env,
         )

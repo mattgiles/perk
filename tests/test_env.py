@@ -5,7 +5,7 @@ from perk.convergence.env import EnvCheck, check_environment, required_tools_ok
 def test_check_environment_covers_required_tools():
     checks = check_environment()
     required = {c.name for c in checks if not c.optional}
-    assert required == {"git", "gh", "node", "pi", "skills"}
+    assert required == {"git", "gh", "node", "pi", "skills", "cloc"}
     ast_grep = next(c for c in checks if c.name == "ast-grep")
     assert ast_grep.optional is True
 
@@ -35,6 +35,10 @@ def test_required_remediations_carry_the_exact_install_command(monkeypatch):
         "Install the skills CLI: curl -fsSL "
         "https://raw.githubusercontent.com/mattgiles/skills/main/scripts/install.sh | sh "
         "(macOS), or: go install github.com/mattgiles/skills/cmd/skills@latest"
+    )
+    assert remediations["cloc"] == (
+        "Install cloc: brew install cloc (macOS), npm install -g cloc, or your distro package "
+        "(https://github.com/AlDanial/cloc)."
     )
 
 

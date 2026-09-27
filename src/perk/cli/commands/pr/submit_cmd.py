@@ -10,6 +10,7 @@ Exit codes: 0 submitted · 1 invalid input / unauthed / no saved plan / op failu
 
 import os
 import tomllib
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +30,8 @@ from perk.cli.ensure import UserFacingCliError
 # `delivery.SyncResult` there — the resolved deviation recorded in
 # docs/planning/archive/stacked-prs/final-census.md.
 from perk.delivery import SyncResult as DeliverySyncResult
+from perk.delivery import change_stats, pr_body
+from perk.delivery.change_stats import ChangeStats, ChangeStatsOut
 from perk.github import GitHubError
 from perk.run import launch
 from perk.state import cache
@@ -60,6 +63,11 @@ class PrSubmitResult:
     stack_position: int | None = None
     operation_id: str | None = None
     operation: DeliverySyncResult | None = None
+    # The PR's change stats (both None on --dry-run). `change_stats_note` is a one-line note:
+    # alone, why the stats could not be computed; beside populated stats, what went wrong around
+    # them (a failed PR-body refresh after a stacked cascade).
+    change_stats: ChangeStats | None = None
+    change_stats_note: str | None = None
 
 
 @click.command("submit")
@@ -212,17 +220,24 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
             issue=issue,
             run_id=run_id,
         )
-    # Resolve the PR merge target / conflict-probe base: the plan's pinned base wins
-    # (cache.plan-ref → plan-header), else the GitHub default branch (byte-identical to before).
-    # Mirror the `isinstance(...).strip()` guard the start-point resolver uses (launch.py) so all
-    # three base readers treat a malformed/non-string cached value identically (ignore it), rather
-    # than stringifying it into a bogus branch name.
+    # Resolve the PR merge target / conflict-probe base. An existing PR's actual target is
+    # authoritative (perk never retargets an incremental PR, and `create_pr` returns an existing
+    # PR base-blind), so it governs create, the change stats, the probe and the envelope alike.
+    # Otherwise the plan's pinned base wins (cache.plan-ref → plan-header), else the GitHub
+    # default branch. Mirror the `isinstance(...).strip()` guard the start-point resolver uses
+    # (launch.py) so all three base readers treat a malformed/non-string cached value identically
+    # (ignore it), rather than stringifying it into a bogus branch name.
+    existing = github.find_pr_for_branch(branch=branch, repo_root=repo_root)
     pinned = plan_ref.base or state.header.get("base")
-    base = (
-        pinned.strip()
-        if isinstance(pinned, str) and pinned.strip()
-        else github.default_branch(repo_root)
-    )
+    if existing is not None and existing.base_ref.strip():
+        base = existing.base_ref.strip()
+    elif isinstance(pinned, str) and pinned.strip():
+        base = pinned.strip()
+    else:
+        base = github.default_branch(repo_root)
+    # Computed once, before the push: HEAD is local, and both body passes carry the section.
+    stats, stats_note = _change_stats_for(repo_root, base=base)
+    sections = (change_stats.render_pr_section(stats, note=stats_note),)
     # Auto-force (--force-with-lease): perk plan branches are single-author and expected to
     # diverge after amend/squash/rebase; a no-op on the first push.
     git.push(repo_root, branch, force=True)
@@ -235,7 +250,7 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
         head=branch,
         base=base,
         title=state.title,
-        body=_compose_pr_body(issue=issue, plan_body=plan_body),
+        body=_compose_pr_body(issue=issue, plan_body=plan_body, sections=sections).text,
         repo_root=repo_root,
         draft=True,
     )
@@ -254,7 +269,10 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
     if pr.existed and pr.state == "CLOSED":
         github.reopen_pr(number=pr.number, repo_root=repo_root)
         user_output(click.style(f"↺ reopened closed PR #{pr.number} for this branch", fg="yellow"))
-    full_body = _compose_pr_body(issue=issue, plan_body=plan_body, pr_number=pr.number)
+    composed = _compose_pr_body(
+        issue=issue, plan_body=plan_body, pr_number=pr.number, sections=sections
+    )
+    full_body = composed.text
     github.update_pr_body(number=pr.number, body=full_body, repo_root=repo_root)
     # Post-write self-check: exactly what catches the issue-numbered-footer bug.
     errors = github.validate_pr_body(full_body, pr_number=pr.number)
@@ -290,13 +308,15 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
         branch=branch,
         issue=issue,
         header_update=header_update,
-        plan_embedded=plan_body is not None and _plan_embed_fits(issue=issue, plan_body=plan_body),
+        plan_embedded=composed.plan_embedded,
         pr_checked=True,
         dry_run=False,
         base=base,
         mergeable=mergeable,
         conflicts=conflicts,
         delivery="incremental",
+        change_stats=stats,
+        change_stats_note=stats_note,
     )
 
 
@@ -367,6 +387,8 @@ def _stacked_submit_impl(
         stack_position=result.stack_position,
         operation_id=result.operation_id,
         operation=result.cascade,
+        change_stats=result.change_stats,
+        change_stats_note=result.change_stats_note,
     )
 
 
@@ -391,6 +413,17 @@ def _probe_mergeability(
     return probe.mergeable, probe.conflicts
 
 
+def _change_stats_for(repo_root: Path, *, base: str) -> tuple[ChangeStats | None, str | None]:
+    """The PR's change stats over ``merge-base(origin/<base>, HEAD)..HEAD`` — fetched fresh, the
+    remote being the authority. Never raises: an unavailable count degrades to ``(None, note)``
+    (a one-line reason) so a cloc or range failure can never sink the submit."""
+    try:
+        rng = change_stats.resolve_range(repo_root, base=base, fetch=True)
+        return change_stats.summarize(repo_root, rng.base, rng.head), None
+    except change_stats.ChangeStatsUnavailable as exc:
+        return None, change_stats.normalize_note(exc.message)
+
+
 def _safe_plan_body(*, issue: str, repo_root: Path) -> str | None:
     """Fetch the verbatim plan markdown for the `<details>` embed. Best-effort: any GitHub
     failure degrades to `None` (no embed) rather than sinking the submit."""
@@ -401,44 +434,21 @@ def _safe_plan_body(*, issue: str, repo_root: Path) -> str | None:
         return None
 
 
-# GitHub refuses a PR body above this many characters (`422 body is too long`), on create and
-# on PATCH alike. The plan embed is best-effort, so it yields rather than sinking the submit.
-_PR_BODY_MAX_CHARS = 65_536
-# The footer the update pass appends; reserved on the create pass (PR number still unknown) so
-# both passes judge the same size and never disagree about whether the embed fits.
-_FOOTER_RESERVE = len("\n\n`gh pr checkout 9999999`")
-
-
-def _plan_embed(*, issue: str, plan_body: str) -> str:
-    return f"<details><summary>Plan #{issue}</summary>\n\n{plan_body}\n\n</details>"
-
-
-def _plan_embed_fits(*, issue: str, plan_body: str) -> bool:
-    """Whether the verbatim `<details>` embed keeps the composed body (footer included) under
-    GitHub's cap — the one decision `_compose_pr_body` and the reported `plan_embedded` share."""
-    body = _join_pr_body(issue=issue, embed=_plan_embed(issue=issue, plan_body=plan_body))
-    return len(body) + _FOOTER_RESERVE <= _PR_BODY_MAX_CHARS
-
-
-def _join_pr_body(*, issue: str, embed: str | None, pr_number: int | None = None) -> str:
-    parts = [f"Closes #{issue}", f"Plan: #{issue}"]
-    if embed is not None:
-        parts.append(embed)
-    if pr_number is not None:
-        parts.append(f"`gh pr checkout {pr_number}`")
-    return "\n\n".join(parts) + "\n"
-
-
 def _compose_pr_body(
-    *, issue: str, plan_body: str | None = None, pr_number: int | None = None
-) -> str:
-    """Compose the GitHub PR body: closing keyword + plan link + a best-effort
-    `<details>` embed of the verbatim plan + the checkout footer.
+    *,
+    issue: str,
+    plan_body: str | None = None,
+    pr_number: int | None = None,
+    sections: Sequence[str] = (),
+) -> pr_body.ComposedBody:
+    """Compose the GitHub PR body: closing keyword + plan link + report ``sections`` + a
+    best-effort `<details>` embed of the verbatim plan + the checkout footer.
 
-    Size guard: when the embed would push the body (footer included) over `_PR_BODY_MAX_CHARS`,
-    it is replaced by a one-line pointer at the plan issue — the closing keyword, plan link and
-    footer are untouched, and `plan_embedded` reports `false`. A plan too large to embed must
-    never make the plan unsubmittable.
+    Size guard (the shared kernel, ``perk.delivery.pr_body``): when the embed would push the
+    body (sections and footer included) over GitHub's cap, it is replaced by a one-line pointer
+    at the plan issue — the closing keyword, plan link, sections and footer are untouched, and
+    ``plan_embedded`` reports ``false``. A plan too large to embed must never make the plan
+    unsubmittable.
 
     The two-target split: this HTML-enhanced body goes ONLY into the GitHub PR body (the
     `<details>` embed is fine here). The **footer** (not the embed) must stay a plain-backtick line
@@ -447,24 +457,21 @@ def _compose_pr_body(
     squash commit message is the OTHER target (plain text), set at land.
 
     Closing-keyword invariant: this incremental composition is fixed (exactly one
-    `Closes #<plan>` + plan link + embed + footer), while stacked composition is owned by the
-    Publish engine. Both create-then-update passes **overwrite** any pre-created PR body; the
-    land-side squash footer is equally fixed — there is no seam for extra closing keywords. A PR
-    that must close an additional issue needs a **post-submit** edit on the first turn after
+    `Closes #<plan>` + plan link + sections + embed + footer), while stacked composition is owned
+    by the Publish engine. Both create-then-update passes **overwrite** any pre-created PR body;
+    the land-side squash footer is equally fixed — there is no seam for extra closing keywords. A
+    PR that must close an additional issue needs a **post-submit** edit on the first turn after
     `/submit` (the door terminates its own turn): read the body via `gh pr view`, insert the
     extra `Closes #N` beside the existing one, write back via `gh pr edit --body-file` — and
     track it as an explicit todo before calling `/submit` so it survives the turn boundary.
     """
-    if not plan_body:
-        return _join_pr_body(issue=issue, embed=None, pr_number=pr_number)
-    if _plan_embed_fits(issue=issue, plan_body=plan_body):
-        embed = _plan_embed(issue=issue, plan_body=plan_body)
-    else:
-        embed = (
-            f"_Plan #{issue} is too large to embed here ({len(plan_body):,} characters; GitHub "
-            f"caps a PR body at {_PR_BODY_MAX_CHARS:,}) — read it on the plan issue._"
-        )
-    return _join_pr_body(issue=issue, embed=embed, pr_number=pr_number)
+    return pr_body.compose(
+        issue=issue,
+        lead=[f"Closes #{issue}", f"Plan: #{issue}"],
+        sections=sections,
+        plan_body=plan_body,
+        pr_number=pr_number,
+    )
 
 
 class SubmitPrOut(OutputModel):
@@ -571,6 +578,11 @@ class PrSubmitOut(OutputModel):
     stack: StackRefOut | None
     operation_id: str | None
     operation: DeliveryOperationOut | None
+    # Additive change-stats fields: the rows over the PR's range (null when they could not be
+    # computed) and a one-line `change_stats_note` (the reason, or a warning beside populated
+    # stats); both null on --dry-run.
+    change_stats: ChangeStatsOut | None
+    change_stats_note: str | None
 
     @classmethod
     def from_domain(cls, result: PrSubmitResult) -> "PrSubmitOut":
@@ -607,6 +619,12 @@ class PrSubmitOut(OutputModel):
                 if result.operation is not None
                 else None
             ),
+            change_stats=(
+                ChangeStatsOut.from_domain(result.change_stats)
+                if result.change_stats is not None
+                else None
+            ),
+            change_stats_note=result.change_stats_note,
         )
 
 
@@ -628,6 +646,20 @@ def _render_human(result: PrSubmitResult) -> None:
         + click.style(f"#{result.pr.number}", fg="cyan")
         + f" → {result.pr.url} ({embed}; footer checked)"
     )
+    if result.change_stats is not None:
+        compact = change_stats.render_compact(result.change_stats)
+        user_output(click.style(f"  change stats: {compact}", dim=True))
+        if result.change_stats_note is not None:
+            user_output(
+                click.style(f"⚠ change stats warning: {result.change_stats_note}", fg="yellow")
+            )
+    elif result.change_stats_note is not None:
+        user_output(
+            click.style(
+                f"⚠ change stats unavailable: {result.change_stats_note} — run perk doctor",
+                fg="yellow",
+            )
+        )
     if result.delivery == "stacked":
         if result.stack_number is not None:
             user_output(

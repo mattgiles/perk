@@ -1502,3 +1502,135 @@ def test_is_ignored_unexpected_exit_raises(git_repo, monkeypatch):
     monkeypatch.setattr(subprocess, "run", _record)
     with pytest.raises(git.GitError, match="check-ignore"):
         git.is_ignored(git_repo, ".perk/local.toml")
+
+
+def _change_matrix_repo(git_repo) -> tuple[str, str]:
+    """Commit a base, then a head that adds, deletes, modifies, renames and type-changes."""
+    (git_repo / "keep.py").write_text("a = 1\n", encoding="utf-8")
+    (git_repo / "gone.py").write_text("x = 1\n", encoding="utf-8")
+    (git_repo / "helper.py").write_text("".join(f"line_{n} = {n}\n" for n in range(20)))
+    (git_repo / "flip.txt").write_text("text\n", encoding="utf-8")
+    _git(git_repo, "add", ".")
+    _git(git_repo, "commit", "-qm", "base")
+    base = _sha(git_repo)
+    (git_repo / "keep.py").write_text("a = 2\n", encoding="utf-8")
+    (git_repo / "gone.py").unlink()
+    (git_repo / "tests").mkdir()
+    _git(git_repo, "mv", "helper.py", "tests/helper.py")
+    with (git_repo / "tests" / "helper.py").open("a", encoding="utf-8") as fh:
+        fh.write("extra = 1\n")
+    (git_repo / "[id].tsx").write_text("export {}\n", encoding="utf-8")
+    (git_repo / "flip.txt").unlink()
+    (git_repo / "flip.txt").symlink_to("keep.py")
+    _git(git_repo, "add", "-A")
+    _git(git_repo, "commit", "-qm", "head")
+    return base, _sha(git_repo)
+
+
+def _blob(repo, spec: str) -> str:
+    return _git(repo, "rev-parse", spec).strip()
+
+
+def test_diff_entries_parses_every_status_with_regular_file_blobs(git_repo):
+    base, head = _change_matrix_repo(git_repo)
+    entries = git.diff_entries(git_repo, base, head)
+    assert sorted(entries, key=lambda e: e.path) == [
+        git.DiffEntry("A", "[id].tsx", None, None, _blob(git_repo, f"{head}:[id].tsx")),
+        # The file→symlink type change folds to M; the symlink side carries no blob.
+        git.DiffEntry("M", "flip.txt", None, _blob(git_repo, f"{base}:flip.txt"), None),
+        git.DiffEntry("D", "gone.py", None, _blob(git_repo, f"{base}:gone.py"), None),
+        git.DiffEntry(
+            "M",
+            "keep.py",
+            None,
+            _blob(git_repo, f"{base}:keep.py"),
+            _blob(git_repo, f"{head}:keep.py"),
+        ),
+        git.DiffEntry(
+            "R",
+            "tests/helper.py",
+            "helper.py",
+            _blob(git_repo, f"{base}:helper.py"),
+            _blob(git_repo, f"{head}:tests/helper.py"),
+        ),
+    ]
+    assert git.diff_entries(git_repo, head, head) == ()
+
+
+def test_diff_entries_keeps_a_non_utf8_filename_losslessly(git_repo):
+    import os
+
+    base = _sha(git_repo)
+    raw = b"caf\xe9.py"  # latin-1 bytes: not valid UTF-8 (some filesystems refuse the name)
+    oid = (
+        subprocess.run(
+            ["git", "hash-object", "-w", "--stdin"],
+            cwd=git_repo,
+            input=b"x = 1\n",
+            check=True,
+            capture_output=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
+    # Index-only: the tree carries the raw bytes without touching the working tree.
+    _git(git_repo, "update-index", "--add", "--cacheinfo", f"100644,{oid},{os.fsdecode(raw)}")
+    _git(git_repo, "commit", "-qm", "latin-1 name")
+    [entry] = git.diff_entries(git_repo, base, _sha(git_repo))
+    assert entry.status == "A"
+    assert os.fsencode(entry.path) == raw
+
+
+def test_diff_entries_unknown_ref_raises(git_repo):
+    with pytest.raises(git.GitError):
+        git.diff_entries(git_repo, "HEAD", "no-such-ref")
+
+
+def test_parse_diff_raw_rejects_truncated_and_unknown_records():
+    oid = "a" * 40
+    with pytest.raises(git.GitError, match="truncated"):
+        git._parse_diff_raw_z(f":100644 100644 {oid} {oid} R100\0only-old\0".encode())
+    with pytest.raises(git.GitError, match="unexpected git diff status"):
+        git._parse_diff_raw_z(f":100644 100644 {oid} {oid} C75\0a\0b\0".encode())
+    with pytest.raises(git.GitError, match="unexpected git diff --raw record"):
+        git._parse_diff_raw_z(b"M\0a\0")
+
+
+def test_read_blobs_returns_the_committed_bytes_without_attributes(git_repo):
+    # `export-subst` / `export-ignore` / eol attributes are archive/checkout policies; the raw
+    # blob read must ignore them all.
+    (git_repo / ".gitattributes").write_text(
+        "v.py export-subst\nignored.py export-ignore\ncrlf.txt text eol=crlf\n",
+        encoding="utf-8",
+    )
+    (git_repo / "v.py").write_text('x = "$Format:%H$"\n', encoding="utf-8")
+    (git_repo / "ignored.py").write_text("y = 1\n", encoding="utf-8")
+    (git_repo / "crlf.txt").write_text("a\nb\n", encoding="utf-8")
+    (git_repo / "bin.dat").write_bytes(b"\x00\xff\n\n")
+    _git(git_repo, "add", "-A")
+    _git(git_repo, "commit", "-qm", "attributes")
+    oids = {
+        name: _blob(git_repo, f"HEAD:{name}")
+        for name in ("v.py", "ignored.py", "crlf.txt", "bin.dat")
+    }
+    blobs = git.read_blobs(git_repo, [*oids.values(), oids["v.py"]])  # a duplicate reads once
+    assert blobs == {
+        oids["v.py"]: b'x = "$Format:%H$"\n',
+        oids["ignored.py"]: b"y = 1\n",
+        oids["crlf.txt"]: b"a\nb\n",
+        oids["bin.dat"]: b"\x00\xff\n\n",
+    }
+    assert git.read_blobs(git_repo, []) == {}
+
+
+def test_read_blobs_missing_object_raises(git_repo):
+    with pytest.raises(git.GitError, match="missing"):
+        git.read_blobs(git_repo, ["0123456789abcdef0123456789abcdef01234567"])
+
+
+def test_parse_cat_file_batch_rejects_non_blobs_and_truncation():
+    oid = "a" * 40
+    with pytest.raises(git.GitError, match="unexpected"):
+        git._parse_cat_file_batch(f"{oid} commit 3\nabc\n".encode())
+    with pytest.raises(git.GitError, match="truncated"):
+        git._parse_cat_file_batch(f"{oid} blob 10\nabc\n".encode())

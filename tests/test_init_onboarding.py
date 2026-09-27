@@ -36,6 +36,7 @@ _ALL_OK = [
     EnvCheck("node", True, "v22.19.0", ""),
     EnvCheck("pi", True, "ok", ""),
     EnvCheck("skills", True, "ok", ""),
+    EnvCheck("cloc", True, "ok", ""),
 ]
 
 
@@ -89,6 +90,34 @@ def test_resolve_installer_skills_darwin_vs_linux(monkeypatch):
     )
     installer = onboarding._resolve_installer("skills", node_ok=True)
     assert installer is not None and installer.label == f"go install {onboarding.SKILLS_GO_SPEC}"
+
+
+def test_resolve_installer_cloc_prefers_brew_then_npm(monkeypatch):
+    monkeypatch.setattr(
+        onboarding.shutil,
+        "which",
+        lambda name: "/opt/homebrew/bin/brew" if name == "brew" else None,
+    )
+    installer = onboarding._resolve_installer("cloc", node_ok=False)
+    assert installer is not None and installer.label == "brew install cloc"
+
+    monkeypatch.setattr(onboarding.shutil, "which", lambda name: None)
+    installer = onboarding._resolve_installer("cloc", node_ok=True)
+    assert installer is not None and installer.label == "npm install -g cloc"
+    assert onboarding._resolve_installer("cloc", node_ok=False) is None  # guide-only
+
+
+def test_guide_installs_cloc_via_npm_without_brew(monkeypatch):
+    monkeypatch.setattr(onboarding, "user_confirm", lambda prompt, *, default: True)
+    installed: list[str] = []
+    monkeypatch.setattr(npm_mod, "install_global", lambda spec, *, timeout: installed.append(spec))
+    monkeypatch.setattr(
+        onboarding.shutil, "which", lambda name: "/usr/local/bin/cloc" if name == "cloc" else None
+    )
+    changes, warnings = onboarding.guide_missing_tools(_env("cloc"))
+    assert installed == ["cloc"]
+    assert changes == ["tool cloc: installed (npm -g cloc)"]
+    assert warnings == []
 
 
 # --- guide_missing_tools ----------------------------------------------------------------------

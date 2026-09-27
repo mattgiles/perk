@@ -132,6 +132,17 @@ def test_composite_action_installs_the_skills_cli():
         assert "continue-on-error" not in body
 
 
+def test_composite_action_installs_cloc_after_pi():
+    # Submit counts the PR's change stats with cloc; both repo kinds install the npm package
+    # (it wraps cloc's Perl script) right after pi.
+    for self_repo in (True, False):
+        doc = yaml.safe_load(wa.remote_setup_action(self_repo=self_repo))
+        names = [step["name"] for step in doc["runs"]["steps"]]
+        assert names.index("Install cloc") == names.index("Install pi") + 1
+        step = next(s for s in doc["runs"]["steps"] if s["name"] == "Install cloc")
+        assert step["run"] == "npm install -g cloc"
+
+
 def test_drive_step_configures_git_auth_before_run_worker():
     # The skills CLI clones skill sources over https during positioning; `gh auth setup-git`
     # installs gh as the credential helper (GH_TOKEN = PERK_GH_PAT) so private sources resolve.

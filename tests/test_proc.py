@@ -144,6 +144,37 @@ def test_run_captured_spawn_arm(monkeypatch):
     assert failure.__cause__ is original  # facades discriminate FileNotFoundError via __cause__
 
 
+def test_run_captured_bytes_feeds_stdin_and_keeps_output_undecoded(monkeypatch):
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(args, 0, stdout=b"\xff\x00raw", stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    result = proc.run_captured_bytes(["tool"], timeout=7, stdin=b"in\n")
+    assert result.stdout == b"\xff\x00raw"
+    assert captured["input"] == b"in\n"
+    assert captured["check"] is False and captured["capture_output"] is True
+    assert "text" not in captured  # bytes mode: nothing decodes the output
+    assert captured["timeout"] == 7 and captured["env"] is None
+
+
+@pytest.mark.parametrize(
+    ("raised", "kind"),
+    [(subprocess.TimeoutExpired(["tool"], 1), "timeout"), (FileNotFoundError("nope"), "spawn")],
+)
+def test_run_captured_bytes_failure_arms(monkeypatch, raised, kind):
+    def fake_run(args, **kwargs):
+        raise raised
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(proc.ProcFailure) as info:
+        proc.run_captured_bytes(["tool"], timeout=1)
+    assert info.value.kind == kind
+
+
 def test_run_interactive_inherits_stdio_and_returns_exit_code(monkeypatch):
     """No capture kwargs: the child inherits the terminal; the exit code passes through."""
     captured = {}

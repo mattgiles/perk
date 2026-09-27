@@ -37,6 +37,7 @@ SKILLS_INSTALL_SCRIPT = (
     "curl -fsSL https://raw.githubusercontent.com/mattgiles/skills/main/scripts/install.sh | sh"
 )
 SKILLS_GO_SPEC = "github.com/mattgiles/skills/cmd/skills@latest"
+CLOC_NPM_SPEC = "cloc"
 
 # Generous: brew / the skills installer / go install download over the network.
 _INSTALL_TIMEOUT = 600
@@ -73,7 +74,8 @@ def _resolve_installer(name: str, *, node_ok: bool) -> _Installer | None:
 
     ``git``/``node`` are always guide-only (OS-owned — their remediation strings are the
     guidance); ``pi`` needs a working node (npm); ``gh`` needs brew; ``skills`` uses the
-    official installer script on macOS and ``go install`` elsewhere (when go is present).
+    official installer script on macOS and ``go install`` elsewhere (when go is present);
+    ``cloc`` prefers brew and falls back to the npm package when node works.
     """
     if name == "gh" and shutil.which("brew") is not None:
         return _Installer(
@@ -87,6 +89,19 @@ def _resolve_installer(name: str, *, node_ok: bool) -> _Installer | None:
             detail=f"npm -g {PI_NPM_SPEC}",
             run=lambda: npm.install_global(PI_NPM_SPEC, timeout=_INSTALL_TIMEOUT),
         )
+    if name == "cloc":
+        if shutil.which("brew") is not None:
+            return _Installer(
+                label="brew install cloc",
+                detail="brew install cloc",
+                run=lambda: _run_install(["brew", "install", "cloc"]),
+            )
+        if node_ok:
+            return _Installer(
+                label=f"npm install -g {CLOC_NPM_SPEC}",
+                detail=f"npm -g {CLOC_NPM_SPEC}",
+                run=lambda: npm.install_global(CLOC_NPM_SPEC, timeout=_INSTALL_TIMEOUT),
+            )
     if name == "skills":
         if sys.platform == "darwin":
             return _Installer(
