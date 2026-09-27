@@ -33,7 +33,9 @@ import {
   reportDetailEntryRenderer,
   STATUS_SLOT_PERK,
   type StandingTarget,
+  sanitizeOneLine,
   setWorkingMessage,
+  stripTerminalControls,
   type ThemeLike,
   TRANSCRIPT_MARKER_MAX_LINES,
   type TranscriptRenderer,
@@ -311,6 +313,33 @@ test("composeFooterLine: guest statuses are sanitized (newlines/tabs/space runs 
   assert.ok(line.endsWith("a b c"), JSON.stringify(line));
 });
 
+test("composeFooterLine: objective + guests render as control-free single-line segments", () => {
+  const line = composeFooterLine(
+    {
+      identity: "perk",
+      objective: "🎯 25\u001b[31m1\u001b[0m\n· 1k tok",
+      guests: ["g\u009b31muest\u0007", "\u001b]0;x\u0007"],
+    },
+    plainTheme,
+    80,
+  );
+  assert.ok(line.includes("🎯 251 · 1k tok"), JSON.stringify(line));
+  for (const control of ["\u001b", "\u009b", "\u0007", "\n"]) {
+    assert.ok(!line.includes(control), JSON.stringify(line));
+  }
+  // The all-control guest is omitted, not joined as an empty trailing segment.
+  assert.ok(line.endsWith("guest"), JSON.stringify(line));
+});
+
+test("composeFooterLine: an objective that folds to empty is omitted", () => {
+  const line = composeFooterLine(
+    { identity: "perk", objective: "\u001b]0;x\u0007", guests: [] },
+    plainTheme,
+    80,
+  );
+  assert.equal(line, "perk");
+});
+
 test("composeFooterLine: context formats like pi's footer and colors by threshold", () => {
   const tag: ThemeLike = { fg: (color, text) => `<${color}>${text}</>` };
   const ctx = (percent: number | null) =>
@@ -442,6 +471,29 @@ test("perkFooter: renders exactly one line with the live objective, branch, mode
   // a null rate omits the cache segment on the next render (pi's display gate)
   rate = null;
   assert.ok(!(component.render(120)[0] as string).includes("CH"));
+  component.dispose();
+});
+
+test("perkFooter: a control-bearing status value renders as one control-free segment", () => {
+  const { target } = fakeTarget(true);
+  const status = createPerkStatus();
+  status.set(target, "🎯 2544\u001b[2J · 1k tok · 5m");
+  const factory = perkFooter({
+    identity: "perk v0.0.1",
+    status,
+    getModelId: () => null,
+    getThinkingLevel: () => null,
+    getCacheHitRate: () => null,
+    getContext: () => null,
+  });
+  const component = factory({ requestRender: () => {} }, plainTheme, fakeFooterData());
+  const lines = component.render(80);
+  assert.equal(lines.length, 1);
+  const line = lines[0] as string;
+  assert.ok(!line.includes("\u001b"), JSON.stringify(line));
+  assert.ok(line.includes("🎯 2544 · 1k tok · 5m"), JSON.stringify(line));
+  // The published status value itself stays byte-exact.
+  assert.equal(status.get(), "🎯 2544\u001b[2J · 1k tok · 5m");
   component.dispose();
 });
 
@@ -778,13 +830,14 @@ test("reportDetailEntryRenderer strips terminal controls only from rendered rows
   ]);
 });
 
-// The display-sanitizer branch matrix. Policy pinned here (current behavior, no production
-// change): a TERMINATED control sequence/string is removed with the surrounding text preserved
-// byte-exact; an UNTERMINATED control string drops opener-through-end-of-input while preserving
-// all preceding text (dropping printable tail bytes is the safe arm — preserving them could
-// expose control payload); no control byte ever survives to the display projection. Any future
-// behavior change re-pins this matrix deliberately.
-test("reportDetailEntryRenderer sanitizer matrix: every opener/terminator family", () => {
+// The display-sanitizer branch matrix, pinned on `stripTerminalControls` itself (THE perk display
+// sanitizer). Policy: a TERMINATED control sequence/string is removed with the surrounding text
+// preserved byte-exact; an UNTERMINATED control string drops opener-through-end-of-input while
+// preserving all preceding text (dropping printable tail bytes is the safe arm — preserving them
+// could expose control payload); no control byte other than the line-structure pair (LF, tab)
+// ever survives to the display projection. Any future behavior change re-pins this matrix
+// deliberately.
+test("stripTerminalControls sanitizer matrix: every opener/terminator family", () => {
   const ESC = "\u001b";
   const ST = `${ESC}\\`;
   const stringFamilies = [
@@ -849,13 +902,23 @@ test("reportDetailEntryRenderer sanitizer matrix: every opener/terminator family
     ]),
   ];
   for (const { name, input, expected } of cases) {
-    const lines = renderMarker(
-      reportDetailEntryRenderer,
-      { text: input, severity: "info" },
-      { theme: plainTheme },
-    );
-    assert.deepEqual(lines, [expected], name);
+    assert.equal(stripTerminalControls(input), expected, name);
   }
+});
+
+test("stripTerminalControls keeps line structure (LF, tab) and strips every other control", () => {
+  assert.equal(stripTerminalControls("a\r\nb\tc\u0007\n\nd\u007f"), "a\nb\tc\n\nd");
+  // A bare ESC before a newline consumes nothing beyond itself — the newline survives.
+  assert.equal(stripTerminalControls("x\u001b\ny"), "x\ny");
+  // A bare (non-opener) C1 byte, and a C1-introduced CSI.
+  assert.equal(stripTerminalControls("p\u0085q"), "pq");
+  assert.equal(stripTerminalControls("p\u009b31mq"), "pq");
+});
+
+test("sanitizeOneLine: the sanitizer, then Pi's one-line whitespace fold", () => {
+  assert.equal(sanitizeOneLine(" a\u001b[31m\n\tb  c\u0007 "), "a b c");
+  assert.equal(sanitizeOneLine("\u001b]0;x\u0007"), "");
+  assert.equal(sanitizeOneLine("🎯 251"), "🎯 251");
 });
 
 test("reportDetailEntryRenderer rejects malformed data", () => {
@@ -988,6 +1051,78 @@ test("btwThreadEntryRenderer: first question line collapsed; accent question + d
   }
 });
 
+test("markerLine: a collapsed marker renders its message as one control-free row", () => {
+  const collapsed = (data: unknown) => renderMarker(workflowStateEntryRenderer, data);
+  assert.deepEqual(collapsed({ active_objective: "251\u001b]0;evil\u0007" }), [
+    "<dim>perk: workflow — objective 251 activated</>",
+  ]);
+  const folded = collapsed({ active_objective: "25\n1" });
+  assert.deepEqual(folded, ["<dim>perk: workflow — objective 25 1 activated</>"]);
+  assert.ok(!folded?.[0]?.includes("\n"));
+});
+
+test("workflowStateEntryRenderer (expanded): the JSON row strips raw C1 bytes JSON.stringify passes", () => {
+  const lines = renderMarker(
+    workflowStateEntryRenderer,
+    { mode: "read-only", note: "x\u0085y" },
+    { expanded: true },
+  );
+  assert.deepEqual(lines, [
+    "<dim>perk: workflow — read-only mode</>",
+    '<dim>{"mode":"read-only","note":"xy"}</>',
+  ]);
+});
+
+test("objectiveBudgetEntryRenderer: control-bearing id + timestamp render as control-free rows", () => {
+  const data = {
+    objective_id: "2544\u001b[31m",
+    activated_at: "2026-07-10T00:00:00Z\u001b_apc\u001b\\\nnext",
+  };
+  assert.deepEqual(renderMarker(objectiveBudgetEntryRenderer, data), [
+    "<dim>perk: objective — 2544 budget tracking started</>",
+  ]);
+  const expanded = renderMarker(objectiveBudgetEntryRenderer, data, { expanded: true });
+  assert.deepEqual(expanded, [
+    "<dim>perk: objective — 2544 budget tracking started</>",
+    "<dim>activated at 2026-07-10T00:00:00Z next</>",
+  ]);
+  for (const line of expanded ?? []) {
+    assert.ok(!line.includes("\u001b") && !line.includes("\n"), JSON.stringify(line));
+  }
+  // The persisted payload is never touched by rendering.
+  assert.equal(data.objective_id, "2544\u001b[31m");
+});
+
+test("btwThreadEntryRenderer: controls are stripped from the whole strings before rows derive", () => {
+  const data = {
+    question: "what\u001b[31m is\u001b[1m a seam?\n(second)",
+    answer: "line one\u001b]0;t\u0007\r\nline\u001b_p\u001b\\ two",
+  };
+  assert.deepEqual(renderMarker(btwThreadEntryRenderer, data), [
+    "<dim>perk: btw — what is a seam?</>",
+  ]);
+  assert.deepEqual(renderMarker(btwThreadEntryRenderer, data, { expanded: true }), [
+    "<accent>perk: btw — what is a seam?</>",
+    "<dim>line one</>",
+    "<dim>line two</>",
+  ]);
+});
+
+test("btwThreadEntryRenderer (expanded): one row per source line, in order, tabs preserved", () => {
+  const data = { question: "q", answer: "para one\n\n- a\n- b\n\n```\n\tcode\n```" };
+  assert.deepEqual(renderMarker(btwThreadEntryRenderer, data, { expanded: true }), [
+    "<accent>perk: btw — q</>",
+    "<dim>para one</>",
+    "<dim></>",
+    "<dim>- a</>",
+    "<dim>- b</>",
+    "<dim></>",
+    "<dim>```</>",
+    "<dim>\tcode</>",
+    "<dim>```</>",
+  ]);
+});
+
 test("btwThreadResetEntryRenderer: thread-reset marker + expanded ISO timestamp; malformed → undefined", () => {
   const data = { timestamp: Date.UTC(2026, 6, 10, 12, 0, 0) };
   assert.deepEqual(renderMarker(btwThreadResetEntryRenderer, data), [
@@ -1009,6 +1144,13 @@ test("transcript markers: every emitted line is width-truncated (D9)", () => {
     [workflowStateEntryRenderer, { run_id: long, stage: long, mode: long }],
     [objectiveBudgetEntryRenderer, { objective_id: long, activated_at: long }],
     [btwThreadEntryRenderer, { question: long, answer: `${long}\n${long}` }],
+    [
+      btwThreadEntryRenderer,
+      {
+        question: `${long}\u001b[31m\u001b]0;title\u0007${long}`,
+        answer: `${long}\u001b[2J\r\n\u009b31m${long}\u0007`,
+      },
+    ],
     [btwThreadResetEntryRenderer, { timestamp: 0 }],
   ];
   for (const [renderer, data] of cases) {

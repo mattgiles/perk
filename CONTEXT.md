@@ -333,3 +333,16 @@ pi-subagents' global `worktree` setting in `<agent dir>/extensions/subagent/conf
 to every delegation that omits the field and read by both engines once at activation; perk
 observes and refuses, never converges it.
 _Avoid_: worktree allocation default, perk-managed worktree setting
+
+### TUI surfaces
+
+**Display sink**:
+A place where perk itself renders text into the terminal (a transcript marker row, a footer
+segment, a `/btw` overlay row); every one passes untrusted text through the surfaces module's
+display sanitizer, folded when its renderer emits a single row.
+_Avoid_: output, render site, surface (when the sanitization boundary is meant)
+
+**Display projection**:
+The render-time copy of persisted or in-memory text after the display sanitizer; the stored bytes
+are never altered.
+_Avoid_: sanitized payload, rendered text, cleaned entry

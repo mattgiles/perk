@@ -11,9 +11,15 @@ import {
   type FauxResponseFactory,
   fauxAssistantMessage,
   fauxText,
+  fauxToolCall,
   type Message,
 } from "@earendil-works/pi-ai";
-import { AgentSession, ModelRegistry, SessionManager } from "@earendil-works/pi-coding-agent";
+import {
+  AgentSession,
+  initTheme,
+  ModelRegistry,
+  SessionManager,
+} from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import {
   AGENT_SCRATCH_CONTEXT_TYPE,
@@ -735,4 +741,341 @@ test("registration: session_shutdown aborts an IN-FLIGHT summary one-shot — th
     0,
     "the thread is not reset — the summary never landed",
   );
+});
+
+// --- the overlay's display sinks (the display-sanitizer law, charter §6) ---------------------------
+
+type BtwCtx = Parameters<typeof createBtwAgentSession>[0];
+type BtwHandler = (args: string, ctx: BtwCtx) => Promise<void>;
+interface OverlayComponent {
+  render(width: number): string[];
+  handleInput(data: string): void;
+  getDraft(): string;
+}
+
+const ESC = "\u001b";
+const SGR = new RegExp(`${ESC}\\[[0-9;]*m`, "g");
+/** A row with its SGR styling removed (the positive-check view). */
+const unstyled = (row: string): string => row.replace(SGR, "");
+const hasCodeIn = (text: string, lo: number, hi: number): boolean =>
+  [...text].some((ch) => {
+    const code = ch.charCodeAt(0);
+    return code >= lo && code <= hi;
+  });
+
+/**
+ * The all-rows law: no row carries a LF; no raw row carries a C1 byte; once SGR styling is
+ * removed, no ESC or other C0 byte remains anywhere.
+ */
+function assertCleanRows(rows: readonly string[]): void {
+  for (const row of rows) {
+    assert.ok(!row.includes("\n"), `row carries a LF: ${JSON.stringify(row)}`);
+    assert.ok(!hasCodeIn(row, 0x80, 0x9f), `row carries a C1 byte: ${JSON.stringify(row)}`);
+    const plain = unstyled(row);
+    assert.ok(!hasCodeIn(plain, 0x00, 0x1f), `non-SGR control survives: ${JSON.stringify(row)}`);
+  }
+}
+
+/** Row regions: the transcript window sits between the two `├…┤` separators; status, then input. */
+function overlayRegions(rows: readonly string[]): {
+  transcript: string[];
+  status: string;
+  input: string;
+} {
+  const separators = rows.flatMap((row, index) => (row.includes("├") ? [index] : []));
+  assert.equal(separators.length, 2, "two separator rows frame the transcript window");
+  const [first, second] = separators as [number, number];
+  return {
+    transcript: rows.slice(first + 1, second),
+    status: rows[second + 1] ?? "",
+    input: rows[second + 2] ?? "",
+  };
+}
+
+/** Assert `needles` appear on distinct rows, in this order. */
+function assertRowsInOrder(rows: readonly string[], needles: readonly string[]): void {
+  let from = 0;
+  for (const needle of needles) {
+    const at = rows.findIndex((row, index) => index >= from && row.includes(needle));
+    assert.ok(at >= 0, `missing ${JSON.stringify(needle)} after row ${from}: ${rows.join("\n")}`);
+    from = at + 1;
+  }
+}
+
+const settle = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+/**
+ * Register `/btw` against a fake `pi` and a headful ctx whose `ui.custom` builds the real
+ * `BtwOverlay` with an identity theme, so every overlay row can be rendered and inspected.
+ */
+async function mountBtwOverlay(
+  reg: Awaited<ReturnType<typeof fauxModelRuntime>>,
+  overrides: Record<string, unknown> = {},
+): Promise<{
+  handler: BtwHandler;
+  ctx: BtwCtx;
+  appended: { type: string; data: unknown }[];
+  overlay(): OverlayComponent;
+}> {
+  // The real Markdown theme needs pi's global theme instance.
+  initTheme("dark");
+  const appended: { type: string; data: unknown }[] = [];
+  let handler: BtwHandler | undefined;
+  const pi = {
+    appendEntry: (type: string, data: unknown) => {
+      appended.push({ type, data });
+    },
+    getActiveTools: () => ["read", "write"],
+    getAllTools: () => [],
+    setActiveTools: () => {},
+    getThinkingLevel: () => "off",
+    on: () => {},
+    registerCommand: (_name: string, command: { handler: BtwHandler }) => {
+      handler = command.handler;
+    },
+  } as unknown as Parameters<typeof registerBtw>[0];
+  registerBtw(
+    pi,
+    registerToolGating(pi, () => false),
+    { resolve: () => null },
+  );
+  assert.ok(handler);
+  let component: OverlayComponent | null = null;
+  const identityTheme = {
+    fg: (_color: string, text: string) => text,
+    bold: (text: string) => text,
+  };
+  const ctx = {
+    ...fakeBtwCtx(reg),
+    hasUI: true,
+    isIdle: () => true,
+    waitForIdle: async () => {},
+    sessionManager: SessionManager.inMemory("/repo"),
+    ui: {
+      notify() {},
+      custom: async (
+        factory: (
+          tui: unknown,
+          theme: unknown,
+          keybindings: unknown,
+          done: () => void,
+        ) => Promise<OverlayComponent>,
+        options: { onHandle?: (handle: unknown) => void },
+      ) => {
+        component = await factory(
+          { requestRender() {} },
+          identityTheme,
+          { matches: () => false },
+          () => {},
+        );
+        options.onHandle?.({
+          setHidden() {},
+          hide() {},
+          focus() {},
+          isFocused: () => true,
+        });
+      },
+    },
+    ...overrides,
+  } as unknown as BtwCtx;
+  return {
+    handler,
+    ctx,
+    appended,
+    overlay: () => {
+      assert.ok(component, "the overlay was created");
+      return component;
+    },
+  };
+}
+
+const QUESTION = `Question ${ESC}]0;Q-PAYLOAD\u0007here`;
+
+test("overlay: the Markdown answer + stored question render control-free with line structure intact; persisted bytes stay exact", async () => {
+  const answer =
+    `Intro ${ESC}]0;OSC-PAYLOAD\u0007paragraph.\n\n- item one${ESC}[31m\n- item two\n\n` +
+    `\`\`\`ts\nconst x = 1;${ESC}_APC-PAYLOAD${ESC}\\\nconst y = 2;\n\`\`\`\n\nLast ${ESC}[2Jparagraph.`;
+  const reg = await fauxModelRuntime();
+  reg.setResponses([fauxAssistantMessage([fauxText(answer)], { stopReason: "stop" })]);
+  const { handler, ctx, appended, overlay } = await mountBtwOverlay(reg);
+  await handler(QUESTION, ctx);
+  await settle();
+  const rows = overlay().render(100);
+  assertCleanRows(rows);
+  for (const leak of ["Q-PAYLOAD", "OSC-PAYLOAD", "APC-PAYLOAD", "[2J"]) {
+    assert.ok(!rows.some((row) => row.includes(leak)), `${leak} leaked: ${rows.join("\n")}`);
+  }
+  const transcript = overlayRegions(rows).transcript.map(unstyled);
+  assertRowsInOrder(transcript, [
+    "You: Question here",
+    "Intro paragraph.",
+    "item one",
+    "item two",
+    "const x = 1;",
+    "const y = 2;",
+    "Last paragraph.",
+  ]);
+  const entry = appended.find((e) => e.type === "btw-thread-entry");
+  assert.ok(entry, "the thread entry was persisted");
+  const data = entry.data as { question: string; answer: string };
+  assert.equal(data.question, QUESTION, "the persisted question is byte-exact");
+  assert.equal(data.answer, answer, "the persisted answer is byte-exact");
+});
+
+test("overlay: the pending question + a multi-line provider error fold into single control-free rows", async () => {
+  const reg = await fauxModelRuntime();
+  reg.setResponses([
+    fauxAssistantMessage([fauxText("")], {
+      stopReason: "error",
+      errorMessage: `boom ${ESC}]0;ERR-PAYLOAD\u0007failed\nsecond`,
+    }),
+  ]);
+  const { handler, ctx, overlay } = await mountBtwOverlay(reg);
+  await handler(QUESTION, ctx);
+  await settle();
+  const rows = overlay().render(100);
+  assertCleanRows(rows);
+  assert.ok(!rows.some((row) => row.includes("ERR-PAYLOAD")), rows.join("\n"));
+  const transcript = overlayRegions(rows).transcript.map(unstyled);
+  assert.ok(
+    transcript.some((row) => row.includes("You: Question here")),
+    transcript.join("\n"),
+  );
+  assert.ok(
+    transcript.some((row) => row.replace(/│/g, "").trim() === "✗ boom failed second"),
+    transcript.join("\n"),
+  );
+});
+
+test("overlay: tool rows fold a model-authored tool name and a newline-bearing path; the raw name still correlates tool_execution_end", async (t) => {
+  const rawName = `loo${ESC}]0;NAME-PAYLOAD\u0007kup`;
+  const reg = await fauxModelRuntime();
+  let mounted: Awaited<ReturnType<typeof mountBtwOverlay>> | null = null;
+  // Render the overlay immediately BEFORE btw's listener sees each end event: a renderer that
+  // folded the stored tool names in place would break the raw-name match that event performs.
+  const beforeEnd: { toolName: string; rows: string[] }[] = [];
+  const subscribe = AgentSession.prototype.subscribe;
+  t.mock.method(
+    AgentSession.prototype,
+    "subscribe",
+    function (this: AgentSession, listener: Parameters<AgentSession["subscribe"]>[0]) {
+      return subscribe.call(this, (event) => {
+        if (event.type === "tool_execution_end" && mounted !== null) {
+          beforeEnd.push({ toolName: event.toolName, rows: mounted.overlay().render(100) });
+        }
+        return listener(event);
+      });
+    },
+  );
+  let snapshot: string[] | null = null;
+  const factory: FauxResponseFactory = () => {
+    snapshot = mounted?.overlay().render(100) ?? null;
+    return fauxAssistantMessage([fauxText("done")], { stopReason: "stop" });
+  };
+  reg.setResponses([
+    fauxAssistantMessage(
+      [
+        fauxToolCall(rawName, {}),
+        fauxToolCall("read", { path: `/tmp/a\nb${ESC}]0;TOOL-PAYLOAD\u0007.txt` }),
+      ],
+      { stopReason: "toolUse" },
+    ),
+    factory,
+  ]);
+  mounted = await mountBtwOverlay(reg);
+  await mounted.handler("look it up", mounted.ctx);
+
+  const rowFor = (rows: readonly string[], needle: (row: string) => boolean) =>
+    overlayRegions(rows).transcript.map(unstyled).find(needle);
+  const isLookup = (row: string) => row.includes("lookup");
+  const isRead = (row: string) => row.includes("read") && row.includes("/tmp/a b.txt");
+
+  // Mid-flight: each call rendered folded and still running before its end event arrived.
+  assert.deepEqual(
+    beforeEnd.map((e) => e.toolName).sort(),
+    [rawName, "read"].sort(),
+    "the end events carry the raw tool names",
+  );
+  for (const { toolName, rows } of beforeEnd) {
+    assertCleanRows(rows);
+    const row = rowFor(rows, toolName === "read" ? isRead : isLookup);
+    assert.ok(row?.includes("▸"), `running before its end event: ${JSON.stringify(row)}`);
+  }
+
+  // Afterwards: both calls finished, so the render did not disturb the raw-name match.
+  assert.ok(snapshot, "the follow-up request snapshotted the overlay");
+  const rows = snapshot as string[];
+  assertCleanRows(rows);
+  for (const leak of ["NAME-PAYLOAD", "TOOL-PAYLOAD"]) {
+    const all = [...rows, ...beforeEnd.flatMap((e) => e.rows)];
+    assert.ok(!all.some((row) => row.includes(leak)), `${leak} leaked: ${rows.join("\n")}`);
+  }
+  for (const row of [rowFor(rows, isLookup), rowFor(rows, isRead)]) {
+    assert.ok(row && /[✗✓]/.test(row) && !row.includes("▸"), JSON.stringify(row));
+  }
+});
+
+test("overlay: the status row folds provider auth-error text into one control-free line", async () => {
+  const reg = await fauxModelRuntime();
+  const { handler, ctx, overlay } = await mountBtwOverlay(reg, {
+    modelRegistry: {
+      getApiKeyAndHeaders: async () => ({
+        ok: false,
+        error: `no key ${ESC}]0;AUTH-PAYLOAD\u0007for x\nline2`,
+      }),
+    },
+  });
+  await handler("q", ctx);
+  await settle();
+  const rows = overlay().render(100);
+  assertCleanRows(rows);
+  assert.ok(!rows.some((row) => row.includes("AUTH-PAYLOAD")), rows.join("\n"));
+  const { status } = overlayRegions(rows);
+  assert.ok(unstyled(status).includes("no key for x line2"), JSON.stringify(status));
+});
+
+test("overlay: a pasted draft is scrubbed of control bytes on entry; typed keys are untouched", async () => {
+  const reg = await fauxModelRuntime();
+  const { handler, ctx, overlay } = await mountBtwOverlay(reg);
+  await handler("", ctx);
+  await settle();
+  const component = overlay();
+  component.handleInput(`${ESC}[200~ab${ESC}]0;PASTE-PAYLOAD\u0007c${ESC}[201~`);
+  assert.equal(component.getDraft(), "abc");
+  let rows = component.render(100);
+  assertCleanRows(rows);
+  const { input } = overlayRegions(rows);
+  assert.ok(unstyled(input).includes("abc"), JSON.stringify(input));
+  assert.ok(!rows.some((row) => row.includes("PASTE-PAYLOAD")), rows.join("\n"));
+  component.handleInput("x");
+  assert.equal(component.getDraft(), "abcx", "the scrub is inert without controls");
+  // A paste split across chunks is cleaned by the backstop once the Input completes it.
+  component.handleInput(`${ESC}[200~d${ESC}]0;SPLIT-PAYLOAD`);
+  component.handleInput(`\u0007e${ESC}[201~`);
+  assert.equal(component.getDraft(), "abcxde");
+  rows = component.render(100);
+  assertCleanRows(rows);
+  assert.ok(!rows.some((row) => row.includes("SPLIT-PAYLOAD")), rows.join("\n"));
+});
+
+test("overlay: a control-bearing paste into the middle of a draft leaves the cursor after the pasted text", async () => {
+  const reg = await fauxModelRuntime();
+  const { handler, ctx, overlay } = await mountBtwOverlay(reg);
+  await handler("", ctx);
+  await settle();
+  const component = overlay();
+  const LEFT = `${ESC}[D`;
+  // `ab|cd`: type the draft, then move the cursor two characters left.
+  for (const key of ["a", "b", "c", "d", LEFT, LEFT]) component.handleInput(key);
+  component.handleInput(`${ESC}[200~${ESC}[31mX${ESC}]0;PASTE-PAYLOAD\u0007${ESC}[0m${ESC}[201~`);
+  assert.equal(component.getDraft(), "abXcd");
+  // The next keystroke lands right after the paste, not at the displaced raw offset.
+  component.handleInput("Y");
+  assert.equal(component.getDraft(), "abXYcd");
+  // A lone control byte in a paste (BEL) is dropped without moving later edits either.
+  component.handleInput(LEFT);
+  component.handleInput(`${ESC}[200~Z\u0007${ESC}[201~`);
+  component.handleInput("W");
+  assert.equal(component.getDraft(), "abXZWYcd");
+  assertCleanRows(component.render(100));
 });
