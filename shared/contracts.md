@@ -2564,8 +2564,8 @@ env gate runs before the repo probe — in both modes).
 
 **Interactive onboarding gestures.** Interactive `perk init` is a guided onboarding flow: a
 confirm-then-install pass over the missing *supported* required tools (`gh` via brew, `pi` via
-`npm -g`, `skills` via its official installer script on macOS / `go install` elsewhere —
-`git`/`node` stay guide-only), an offered interactive `gh auth login` (re-probed afterward; the
+`npm -g`, `skills` via its official installer script on macOS / `go install` elsewhere, `cloc`
+via brew else `npm -g` when node works — `git`/`node` stay guide-only), an offered interactive `gh auth login` (re-probed afterward; the
 re-probe is the authority), a git `user.name`/`user.email` check with a prompted setup (scope
 confirm, global default), and — when the committed backend is `linear` with a `team` and no key
 resolves — a prompted, charset-guarded, auth-validated Linear API key persisted atomically
