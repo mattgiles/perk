@@ -1028,6 +1028,27 @@ def test_prompt_override_overrides_initial_prompt(tmp_path, capsys):
     assert _pointer("perk-objective-plan") in data["argv"][-1]
 
 
+@pytest.mark.parametrize("trigger", ["command:librarian-add", "command:librarian-refresh"])
+def test_librarian_door_delivers_the_skill_once(tmp_path, capsys, trigger):
+    # The docs doors borrow `save` and override the trigger: the `librarian` nudge rides the
+    # binding exactly once (the seeds carry no pointer line), and `stage:save` does not fire.
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("save"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+        prompt_override="SEED",
+        binding_trigger=trigger,
+    )
+    prompt = json.loads(capsys.readouterr().out)["argv"][-1]
+    assert prompt.startswith("SEED")
+    assert prompt.count(_pointer("librarian")) == 1
+    assert prompt.count("Follow the") == 1
+
+
 def test_initial_prompt_primes_implement_and_address():
     """Implement and address are primed; other stages launch unprimed."""
     impl = _initial_prompt(_stage("implement"), _PLAN_REF_MODEL)
