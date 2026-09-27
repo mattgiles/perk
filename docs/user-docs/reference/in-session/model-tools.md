@@ -113,6 +113,8 @@ schemas deterministically. A name can be inert when its package or provider is n
 | Web research | `code_search` |
 | Web research | `fetch_content` |
 | Web research | `get_search_content` |
+| Web research | `source_check` |
+| Web research | `web_enable` |
 | Web research | `ollama_web_search` |
 | Web research | `ollama_web_fetch` |
 | Web research | `web_fetch` |
@@ -142,6 +144,7 @@ schemas deterministically. A name can be inert when its package or provider is n
 | Linear mutators | `linear_upload_file_to_issue_comment` |
 | Linear mutators | `linear_configure_auth` |
 | Delegation | `subagent` |
+| Delegation | `subagents_enable` |
 | Delegation | `wait` |
 | Delegation | `subagent_supervisor` |
 | Delegation | `intercom` |
@@ -163,6 +166,17 @@ family. Linear mutators and Plannotator's two phase tools (`plannotator_submit_p
 remain enumerated here; Linear mutations stay in perk's canonical Python plane and perk bridges
 review without Plannotator's phase tools. Bare unscoped Pi sessions retain their package-provided
 tools.
+
+**Lazy loaders.** pi-subagents and pi-web-access hide their heavy tools until the model asks for
+them: `subagent` appears only after the model calls `subagents_enable`, and `web_search`,
+`source_check`, `fetch_content` and `get_search_content` only after it calls `web_enable`. The
+packages also restore that selection when you navigate the session tree. Perk honors the
+package's selection in every mode — it never re-enables a tool the package hid, and never drops
+one the model enabled where the stage allows it. A loader is available exactly where its tools
+are. Calling a loader where its tools are excluded is refused with a reason naming the stage, for
+example `perk stage scoping: subagents_enable is blocked (its tools — subagent — are not available
+in the gist-save stage).` The package may still advertise the loader there; the refusal is what
+keeps the excluded tools out.
 
 For package selection, registration timing, and provider fallback behavior, use the
 [Providers reference](../providers-and-backends/providers.md).
@@ -188,7 +202,8 @@ bridge is active.
 
 Effective read-only gating is the existing workflow mode **or** a captured runner restriction
 floor. Perk installs `READ_ONLY_TOOLS` as the active set and independently checks the same full
-allowlist at tool-call time — except in an `objective-refine` session, whose gate-ON set is its
+allowlist at tool-call time — minus any lazy-loaded tool its package currently hides (the loaders
+themselves are allowlisted, so the model can still enable them) — except in an `objective-refine` session, whose gate-ON set is its
 own narrower refinement allowlist (read/research/question, `plan_review`, and
 `objective_refinement_draft` — no node claim, no other draft or save tool, no delegation) and
 whose hidden guidance is the `[READ-ONLY REFINEMENT MODE]` flavor naming that writer. Every excluded tool is denied, including `edit`, `write`, save/delivery
@@ -293,7 +308,9 @@ tool perk has seen active with the gate off — the delegation supervisor tool, 
 lands inside the diet at launch and is restored when navigation returns to a stage that carries it;
 a late tool its owner deactivated before perk saw it is left alone; a tool inactive at the start is
 never re-activated by perk. A late tool outside the read-only allowlist is inactive from the first
-turn and is not restored at gate exit.
+turn and is not restored at gate exit. Lazy-loaded tools follow their package's current selection
+rather than the starting set, and stage exclusion still applies to them: a `subagent` the model
+enabled is still removed in a stage that excludes delegation.
 
 Pi owns its builtins (`read`, `edit`, `write`, `bash`, `grep`, `find`, and related host tools); this
 reference does not redefine them. Stage scoping is fail-open at compatibility boundaries: a bare

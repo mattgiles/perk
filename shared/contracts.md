@@ -698,11 +698,13 @@ stage/snapshot semantics remain. `/btw`'s `gating.isActive()` supplier sees the 
 active tool set to `READ_ONLY_TOOLS` (`read`/`grep`/`find`/`ls`/`bash` + `ask_user_question` +
 `plan_review` + the `plan_draft`/`objective_draft`/`gist_draft` session-data carve-outs + `objective_node`
 (delegates a bounded node transition to the canonical Python plane) + the **`web` seam**
-providers' research tools, the read-only Linear tools, the pi-fff search family (both mode
+providers' research tools (including pi-web-access's `source_check` and its `web_enable` lazy
+loader), the read-only Linear tools, the pi-fff search family (both mode
 name-sets — `fffind`/`ffgrep`/`fff-multi-grep` + override's `multi_grep`; the override names
 `find`/`grep` are already present — local search belongs in read-only exploration, and FFF's
 frecency state lives under `~/.pi/agent/fff/`, outside the worktree), and the pi-subagents delegation family
-(`subagent`/`wait` + `subagent_supervisor` — kept reachable for the gated delegation flows
+(`subagent`/`subagents_enable`/`wait` + `subagent_supervisor` — `subagents_enable` being its lazy
+loader; kept reachable for the gated delegation flows
 and for answering ad-hoc children's supervisor asks; **accepted no-backstop posture**: spawned
 children are unscoped by design (§8.40 adopt-never-impersonates) — `subagent` itself can spawn
 ad-hoc read-write children, a deliberate documented leniency like the arg-blind
@@ -728,12 +730,14 @@ claimed run-scoped scratch path, §8.48 — the relayed param is verified agains
 other path refused; no worktree writes), and `run_dream_wave` (the gated learn-dream session's
 wave call: NO parameters — its manifest read AND its one write, the fixed-name run-scratch
 bundle beside that manifest, are both derived from the claimed run's manifest path, §8.61 —
-the no-aimable-writer posture on both sides)) via `pi.setActiveTools`, **snapshot-then-restore** (the restore
+the no-aimable-writer posture on both sides)) via `pi.setActiveTools` — lazy-owned members
+(`subagent` and pi-web-access's four default tools) are installed only while their owner has them
+selected (§8.40) — **snapshot-then-restore** (the restore
 falls back to the full configured `pi.getAllTools()` set — never a hardcoded list); (2) rejects
 **every** tool outside that same `READ_ONLY_TOOLS` set at `tool_call`, including `plan_save`, delivery
 and unknown/late foreign mutators, even when toolset narrowing failed. This backstop applies to all
 effective read-only sessions, parents too. `edit`/`write` keep their file-modification denial wording;
-other excluded tools receive a read-only not-allowlisted denial. Listed non-bash tools pass this gate but retain downstream authority checks. Listed `bash`
+other excluded tools receive a read-only not-allowlisted denial (an excluded lazy loader receives the stage-naming loader denial, §8.40). Listed non-bash tools pass this gate but retain downstream authority checks. Listed `bash`
 additionally requires its argument check, in this order: (a) the whole-string destructive veto over
 the walker's **veto view** (`commandPositions.ts`'s `vetoText`: every substitution, `${…}` and
 heredoc body collapsed out of the text that holds it, each substitution's own text appended on a
@@ -7291,9 +7295,12 @@ not re-engineered — and plannotator's idle-phase strip of its load-time phase 
 OWN `session_start`, after perk's first-engagement snapshot, which is exactly why every
 plannotator phase tool must be enumerated (an un-enumerated one is a snapshot member the
 `resources_discover` re-apply restores). Stage placement:
-the research families (web union + Linear reads + FFF local search) ride EVERY stage list; delegation
-(`subagent`/`wait`/`subagent_supervisor`/`intercom`) and `todo` are worktree-family only among the
-gate-OFF stage lists (delegation additionally rides the read-only gate — §8.3);
+the research families (web union + Linear reads + FFF local search) ride EVERY stage list — the
+web union carries pi-web-access's four default tools (`web_search`, `source_check`,
+`fetch_content`, `get_search_content`) plus its lazy loader `web_enable`; delegation
+(`subagent`/`subagents_enable`/`wait`/`subagent_supervisor`/`intercom` — `subagents_enable` being
+pi-subagents' lazy loader) and `todo` are worktree-family only among the gate-OFF stage lists
+(delegation additionally rides the read-only gate — §8.3);
 `LINEAR_MUTATING_TOOLS` (incl. `linear_configure_auth`, which writes `~/.pi/agent/auth.json`)
 and plannotator's two phase tools (`PLANNOTATOR_PHASE_TOOLS`: `plannotator_submit_plan`,
 `plannotator_mark_done`) appear in NO stage list — in the census, so subtracted from every
@@ -7306,13 +7313,14 @@ read-only **gate** IS inherited by adopted children (§8.3), so the child-side e
 in `READ_ONLY_TOOLS`, gate membership being their only governance surface.
 
 **Composition with the read-only gate (§8.3).** Gate ON → `setActiveTools(READ_ONLY_TOOLS)`
-**unchanged** — no stage filter, preserving every gated carve-out byte-for-byte (the gate-ON
+(minus the lazy-owned tools their owner currently hides — below) — no stage filter, preserving every gated carve-out byte-for-byte (the gate-ON
 allowlist is §8.3's) — with ONE named exception: the isolated `objective-refine` stage selects
 its own explicit gate-ON allowlist `REFINEMENT_READ_ONLY_TOOLS` (`gatedToolsFor(stage)`) for both
 the active set and the `tool_call` backstop, and its own read-only mode-context flavor; the
 refinement draft tool lives in `PERK_TOOLS` but never in `READ_ONLY_TOOLS`, so no other gated
 stage gains it (§8.68). Gate OFF + known stage → a **subtractive filter over the reconciliation
-baseline `snapshot ∪ admitted`** — the one shared pre-engagement snapshot (the host's active
+baseline `snapshot ∪ admitted`** (lazy-owned names excepted — their membership is the owner's
+live selection, below) — the one shared pre-engagement snapshot (the host's active
 starting set, never `getAllTools()`) plus every name the registry census recorded beside it never
 saw that a gate-OFF reconciliation has since seen active. Admission is sticky: perk's own filtering
 (a stage list, the gate) never evicts an admitted name, so navigating back to an admitting stage or
@@ -7353,10 +7361,47 @@ AUTHORING stage lists — `plan` / `objective-plan` / `objective-author` — and
 worktree family); the `objective-author` and `objective-save` lists, identical until then, now
 differ by this one name.
 
+**Lazy-owned tools and their loaders.** pi-subagents and pi-web-access each hide their heavy
+tools until the model calls a **lazy loader** — a borrowed tool that activates its package's
+other tools on demand. `LAZY_TOOL_LOADERS` (`toolGating.ts`, loader → tools) is the SSOT:
+`subagents_enable` → `subagent`; `web_enable` → `web_search`, `source_check`, `fetch_content`,
+`get_search_content`. A **lazy-owned tool**'s ACTIVATION is its owner's decision; perk owns only
+its ELIGIBILITY (mode/stage). At EVERY reconciliation (gate ON and OFF) a lazy-owned name's
+membership is its owner's current selection (the live active set): the gate-ON allowlist is a
+ceiling (installed only while the owner has it selected); the gate-OFF baseline drops snapshot
+members the owner has since hidden and keeps ones the owner has since enabled; and the stage
+filter still applies over that baseline (an owner-enabled `subagent` is stripped in a stage whose
+list excludes it, e.g. `objective-plan`, `gist-save`). perk never re-activates or restores a
+lazy-owned tool — Pi's transcript restore (which runs before `session_tree` handlers) and the
+owner's recorded-selection replay on `session_start`/`session_tree` do; perk only keeps or (by
+stage) strips. A loader has exactly the eligibility of the tools it enables — it rides the same
+family constant (pinned in `toolGating.test.ts`: in `READ_ONLY_TOOLS`,
+`REFINEMENT_READ_ONLY_TOOLS` and every stage list, the loader is present iff all its tools are).
+The one `tool_call` backstop stage scoping has: a loader call outside its eligibility is refused
+with a stage-naming reason — `perk read-only mode: <loader> is blocked (its tools — <tools> — are
+not allowlisted in the gated <stage> session).` (or `… in this gated session).` when unscoped)
+under the gate, and `perk stage scoping: <loader> is blocked (its tools — <tools> — are not
+available in the <stage> stage).` gate-OFF in a known stage whose list excludes it; an unscoped
+or unknown-stage session never refuses. The refusal exists because the owner re-advertises its
+loader every turn in its own `before_agent_start`, which runs AFTER perk's handler (extension
+order), so schema removal cannot hide it; the enabled tool itself remains under the fail-open
+filter. The two owners' replay rules as observed differ — both replay recorded
+`toolsAdded`/`toolsRemoved` declarations and hide on a message-less branch (a cold-door session
+is message-less: perk's workflow-state claims are `custom` entries), but on a declaration-less
+non-empty branch pi-subagents keeps the current state while pi-web-access enables all its tools;
+pi-subagents' `before_agent_start` edits `selectedTools` and the active set, pi-web-access's only
+the active set — perk's rule is owner-agnostic. Residuals: an owner's recorded-selection replay
+on `session_tree` runs after perk's sync and can re-add a stage-excluded lazy tool until perk's
+next reconciliation (the existing foreign-toggle class, not a new one); the owner re-advertises
+its loader even where perk refuses it, so `subagents_enable` stays model-visible in e.g.
+`gist-save`/`objective-refine` with a clear refusal on call; a runner child under the read-only
+floor may call an allowlisted loader (unchanged — `subagent` is already allowlisted for gated
+children).
+
 **Fail postures.** Stage scoping is **fail-open** where the gate is fail-closed: no stage, an
 unknown stage id (version skew), or any lookup miss → no filtering. Absent tool names
 are inert (`setActiveTools` ignores unknown names). There is no `tool_call` backstop for stage
-scoping (schema removal is the same structural
+scoping except the lazy-loader refusal above (schema removal is the same structural
 lever the gate's allowlist uses; the full read-only tool-call allowlist and bash argument check
 remain the gate's job) and no
 config surface for the map (the §8.39 non-interference posture; fail-open on unknown ids covers
