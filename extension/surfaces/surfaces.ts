@@ -204,14 +204,18 @@ export function createPerkStatus(): PerkStatusHandle {
 
 /**
  * The raw material for one composed footer line. Left group (charter order 1–2): `identity`,
- * `objective` — the segment renders verbatim (it carries its own 🎯 mark).
+ * `objective` — the segment renders un-themed as one control-free line (it carries its own 🎯
+ * mark).
  * Right group (charter order 4, 5, +context, 6): `branch`, `model`, `thinking`, `cache`,
  * `context`, `guests` — right-aligned, non-segment system text dim-themed.
  */
 export interface FooterParts {
   /** e.g. `perk v0.0.1` — standing identity (D7), dim. */
   identity: string;
-  /** The composed perk status value (`handle.get()`), verbatim — it carries its own 🎯 mark. */
+  /**
+   * The composed perk status value (`handle.get()`), un-themed — it carries its own 🎯 mark.
+   * Rendered through `sanitizeOneLine`; a value that folds to empty is omitted.
+   */
   objective?: string;
   /** Git branch (dim); omitted when not in a repo. */
   branch?: string;
@@ -223,7 +227,10 @@ export interface FooterParts {
   cache?: string;
   /** Context usage — rendered `<pct>%/<window>` (dim; warning >70, error >90; `?` when null). */
   context?: { percent: number | null; contextWindow: number };
-  /** Guest extension statuses (dim), pre-sorted by slot key; sanitized here. */
+  /**
+   * Guest extension statuses (dim), pre-sorted by slot key. Foreign text: each renders through
+   * `sanitizeOneLine` (its own styling is dropped) and a guest that folds to empty is omitted.
+   */
   guests: string[];
 }
 
@@ -245,7 +252,7 @@ export interface UsageEntryLike {
 /**
  * The prompt-cache-hit rate of the latest usage-bearing assistant message, as a percentage —
  * an exact local mirror of pi 0.84.1's default-footer `CH` computation (pi's cache-stats helpers
- * are unexported; the `sanitizeGuestStatus` reimplementation precedent). Includes pi's display
+ * are unexported; the `sanitizeOneLine` reimplementation precedent). Includes pi's display
  * gate: returns `null` unless the session shows cache activity — total cacheRead or cacheWrite
  * > 0 summed over assistant messages, `toolResult` messages carrying `usage`, and
  * `branch_summary`/`compaction` entries' entry-level `usage` — AND the latest usage-bearing
@@ -282,10 +289,16 @@ export function latestCacheHitRate(entries: readonly UsageEntryLike[]): number |
   return latest;
 }
 
-/** Pi's `sanitizeStatusText` behavior, reimplemented locally (pi does not export it). */
-function sanitizeGuestStatus(text: string): string {
-  return text
-    .replace(/[\r\n\t]/g, " ")
+/**
+ * The one-line display projection: `stripTerminalControls`, then Pi's `sanitizeStatusText`
+ * whitespace policy (reimplemented locally — pi does not export it): LF/tab → space, collapse
+ * space runs, trim. For every display sink whose renderer emits exactly ONE row — an embedded
+ * LF there would break the row and the TUI's row accounting. Sinks whose renderer splits the
+ * text into rows itself use `stripTerminalControls` alone, so indentation survives.
+ */
+export function sanitizeOneLine(text: string): string {
+  return stripTerminalControls(text)
+    .replace(/[\n\t]/g, " ")
     .replace(/ +/g, " ")
     .trim();
 }
@@ -312,16 +325,17 @@ function formatContextSegment(
  */
 export function composeFooterLine(parts: FooterParts, theme: ThemeLike, width: number): string {
   const keep = {
-    guests: parts.guests.map((g) => sanitizeGuestStatus(g)),
+    guests: parts.guests.map(sanitizeOneLine).filter((g) => g.length > 0),
     model: true,
     thinking: true,
     branch: true,
     cache: true,
     context: true,
   };
+  const objective = parts.objective === undefined ? undefined : sanitizeOneLine(parts.objective);
   const compose = (): string => {
     const left = [theme.fg("dim", parts.identity)];
-    if (parts.objective !== undefined) left.push(parts.objective);
+    if (objective !== undefined && objective.length > 0) left.push(objective);
     const right: string[] = [];
     if (keep.branch && parts.branch !== undefined) right.push(theme.fg("dim", parts.branch));
     if (keep.model && parts.model !== undefined) right.push(theme.fg("dim", parts.model));
@@ -542,10 +556,11 @@ export const TRANSCRIPT_MARKER_MAX_LINES = 1;
 
 /**
  * The collapsed-marker grammar: the `report()` transition grammar `perk: <scope> — <message>`,
- * dim, D9-truncated. Emoji stay footer-only (D3).
+ * dim, D9-truncated. Emoji stay footer-only (D3). The message is untrusted persisted text and
+ * the marker is one row, so it renders through `sanitizeOneLine`.
  */
 function markerLine(scope: string, message: string, theme: ThemeLike, width: number): string {
-  return truncateToWidth(theme.fg("dim", `perk: ${scope} — ${message}`), width);
+  return truncateToWidth(theme.fg("dim", `perk: ${scope} — ${sanitizeOneLine(message)}`), width);
 }
 
 /** The three-clause object-shape guard: a plain (non-null, non-array) object or null. */
@@ -583,8 +598,21 @@ function skipControlSequence(text: string, start: number): number {
   return index;
 }
 
-/** Strip terminal controls from the display projection; the persisted report text stays exact. */
-function stripTerminalControls(text: string): string {
+/**
+ * THE perk display sanitizer: every display sink perk itself renders untrusted text through
+ * (transcript markers, footer segments, the `/btw` overlay) projects that text through this
+ * function. It is line-structure-preserving: LF (0x0a) and tab (0x09) survive, because renderers
+ * that split text into rows need the LFs and pi-tui already renders a tab as three spaces on every
+ * surface. Everything else a terminal would interpret is removed: every other C0 byte (CR, BEL,
+ * backspace, ...), DEL, bare C1 bytes 0x80-0x9f, and every ESC- or C1-introduced CSI, OSC, DCS,
+ * SOS, PM, APC or nF/single-character escape sequence. An unterminated control string drops from
+ * its opener through the end of input (the safe arm: a terminal would swallow the same bytes).
+ *
+ * Only the render-time projection changes; persisted payloads and in-memory state are never
+ * touched. There is exactly one control-stripping implementation (no second helper may exist);
+ * sinks whose renderer emits a single row use the `sanitizeOneLine` fold composed on it.
+ */
+export function stripTerminalControls(text: string): string {
   let clean = "";
   let index = 0;
   while (index < text.length) {
@@ -621,7 +649,8 @@ function stripTerminalControls(text: string): string {
       index = skipControlString(text, index + 1, false);
       continue;
     }
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
+    const lineStructure = code === 0x0a || code === 0x09;
+    if (!lineStructure && (code <= 0x1f || (code >= 0x7f && code <= 0x9f))) {
       index += 1;
       continue;
     }
@@ -706,7 +735,10 @@ export const workflowStateEntryRenderer: TranscriptRenderer = (entry, options, t
     render(width) {
       const collapsed = markerLine("workflow", message, theme, width);
       if (!options.expanded) return [collapsed];
-      return [collapsed, truncateToWidth(theme.fg("dim", JSON.stringify(data)), width)];
+      // JSON.stringify escapes C0 but passes C1 raw; strip only (a space fold would misstate
+      // string values, and the JSON never carries a raw LF).
+      const json = stripTerminalControls(JSON.stringify(data));
+      return [collapsed, truncateToWidth(theme.fg("dim", json), width)];
     },
   };
 };
@@ -731,7 +763,8 @@ export const objectiveBudgetEntryRenderer: TranscriptRenderer = (entry, options,
         width,
       );
       if (!options.expanded) return [collapsed];
-      return [collapsed, truncateToWidth(theme.fg("dim", `activated at ${activatedAt}`), width)];
+      const activated = sanitizeOneLine(`activated at ${activatedAt}`);
+      return [collapsed, truncateToWidth(theme.fg("dim", activated), width)];
     },
   };
 };
@@ -748,13 +781,16 @@ export const btwThreadEntryRenderer: TranscriptRenderer = (entry, options, theme
   const question = data.question;
   const answer = data.answer;
   if (typeof question !== "string" || typeof answer !== "string") return undefined;
-  const headline = question.split("\n", 1)[0] ?? "";
+  // Sanitize the whole persisted strings BEFORE deriving rows, so a control string spanning a
+  // newline ends where a terminal would end it; the headline is one row, so it folds.
+  const safeAnswer = stripTerminalControls(answer);
+  const headline = sanitizeOneLine(stripTerminalControls(question).split("\n", 1)[0] ?? "");
   return {
     render(width) {
       if (!options.expanded) return [markerLine("btw", headline, theme, width)];
       return [
         truncateToWidth(theme.fg("accent", `perk: btw — ${headline}`), width),
-        ...answer.split("\n").map((line) => truncateToWidth(theme.fg("dim", line), width)),
+        ...safeAnswer.split("\n").map((line) => truncateToWidth(theme.fg("dim", line), width)),
       ];
     },
   };

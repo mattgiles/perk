@@ -119,7 +119,7 @@ families — in the pi 0.80.4+ audit §2.3 adoption, see §6.)*
 
 | Surface | Owner | Status | Note |
 |---|---|---|---|
-| `ctx.ui.custom` overlay | `vendor/btw/btw.ts` (`BtwOverlay`) | **Sanctioned exception** (§6 D6) | The **one** `ctx.ui.custom` use — `/btw`'s human-only side-chat popover. Human-invoked only, `hasUI`-gated, no model tool, not a stage/door → never machine-reachable. `ctx.ui.custom` stays **declined for all workflow surfaces**. |
+| `ctx.ui.custom` overlay | `vendor/btw/btw.ts` (`BtwOverlay`) | **Sanctioned exception** (§6 D6) | The **one** `ctx.ui.custom` use — `/btw`'s human-only side-chat popover. Human-invoked only, `hasUI`-gated, no model tool, not a stage/door → never machine-reachable. `ctx.ui.custom` stays **declined for all workflow surfaces**. Its display sinks render through the surfaces module's sanitizer/one-line projection (§6). |
 | `setWorkingMessage` | `vendor/whimsical/whimsical.ts` (via the `setWorkingMessage` surfaces seam) | **Permitted** (never declined) | Text-only label on pi's existing default spinner; the new seam no-ops headless. Distinct from the still-declined `setWorkingIndicator` (D5). |
 | `ctx.ui.select` | `vendor/btw/btw.ts` close flow | Already adopted | `confirm`/`select`/`input` are charter-permitted interactive prompts (§3). |
 
@@ -291,7 +291,7 @@ composing, in fixed order:
   surface the sole-owner law displaced). The footer gains a prompt-cache-hit segment between
   thinking and context (pi's stats adjacency): pi's default-footer `CH` computation mirrored
   locally in `surfaces.ts latestCacheHitRate` (pi's cache-stats helpers are unexported — the
-  `sanitizeGuestStatus` precedent), rendered `CH<rate.toFixed(1)>%` (e.g. `CH42.3%`), dim.
+  `sanitizeOneLine` precedent), rendered `CH<rate.toFixed(1)>%` (e.g. `CH42.3%`), dim.
   Display-gated on cache activity: absent until the session's total cacheRead/cacheWrite > 0
   AND the latest usage-bearing assistant message has prompt tokens > 0 (a trailing
   zero-prompt-token assistant message resets it — exactly pi's behavior). Read **live** in
@@ -323,13 +323,25 @@ The two renderer shapes are intentionally distinct:
   invisible.
 - A **full `perk:report-detail` entry** always renders every logical row, regardless of Pi's
   expanded flag. The first row uses the report severity color (`error`, `warning`, or dim for
-  info); continuation rows are dim; blank interior rows stay blank. Terminal escape and control
-  sequences are stripped only from the display projection, leaving the persisted payload exact.
-  Every displayed row passes through `truncateToWidth`, and styling is computed in `render()` so
+  info); continuation rows are dim; blank interior rows stay blank. Every displayed row passes through `truncateToWidth`, and styling is computed in `render()` so
   theme changes are never cached.
   Its payload is exactly `{ text, severity }`, validated as a plain object with non-blank text and
   a known severity; malformed data renders nothing. These durable entries remain excluded from
   model context.
+
+**The display-sanitizer law (every perk display sink).** The surfaces module exports the ONE
+display sanitizer, `stripTerminalControls` (line-structure-preserving: LF and tab survive; every
+other C0 byte, DEL, bare C1 byte and every ESC- or C1-introduced control sequence is removed), and
+its one-line projection, `sanitizeOneLine` (the sanitizer, then Pi's `sanitizeStatusText`
+whitespace fold). The rule is by row shape: a sink whose renderer emits one row folds; a sink
+whose renderer splits the text into rows itself strips only, so indentation survives. Every
+collapsed marker, every expanded marker row, the footer's objective segment and each guest status
+(a segment that folds to empty is omitted), and every `/btw` overlay sink (the Markdown answer,
+including the streaming partial and the plain-text fallback; the question, error, tool-name/args
+and status rows) renders through them, and the overlay's input draft is scrubbed of control bytes
+on entry. Only the display projection changes: persisted entries, in-memory thread state and raw
+tool identifiers stay byte-exact. `vendor/btw` imports both helpers from the surfaces module under
+its named exception; no second control-stripping helper may exist.
 
 ### Declined
 

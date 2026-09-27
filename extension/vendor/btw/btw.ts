@@ -15,7 +15,12 @@
 //     assigning `agent.state.messages` would be silently discarded; parent `system` messages are
 //     never seeded (they would become the side session's provider-visible tool loadout);
 //   - the summary is a tool-free one-shot over `ModelRegistry.streamSimple` (request-time auth,
-//     live `--api-key`/extension providers), not a temporary AgentSession.
+//     live `--api-key`/extension providers), not a temporary AgentSession;
+//   - every overlay display sink renders through the surfaces module's display sanitizer: the
+//     Markdown answer (final, streaming partial, plain-text fallback) is control-stripped, and the
+//     single-row question, error, tool-call and status rows are folded to one control-free line;
+//     the input draft is scrubbed of control bytes on entry. Persisted entries, in-memory thread
+//     state and the raw tool identifiers `tool_execution_end` matches on stay byte-exact.
 //
 // Charter note: `/btw`'s UI is a `ctx.ui.custom` overlay — the ONE sanctioned exception to the §6 D6
 // decline (docs/design/tui-charter.md). It is human-invoked only (no model tool, not a stage/door),
@@ -69,6 +74,8 @@ import {
   btwThreadEntryRenderer,
   btwThreadResetEntryRenderer,
   registerTranscriptRenderer,
+  sanitizeOneLine,
+  stripTerminalControls,
 } from "../../surfaces/surfaces.ts";
 import {
   extractEventAssistantText,
@@ -390,6 +397,11 @@ class BtwOverlay extends Container implements Focusable {
     }
 
     this.input.handleInput(data);
+    // A paste can carry ESC/BEL/C1 bytes the Input keeps and echoes inside the frame; scrub the
+    // draft (not `data`: bracketed-paste markers and arrow keys are themselves CSI sequences).
+    const value = this.input.getValue();
+    const clean = stripTerminalControls(value);
+    if (clean !== value) this.input.setValue(clean);
   }
 
   setDraft(value: string): void {
@@ -448,7 +460,7 @@ class BtwOverlay extends Container implements Focusable {
     }
 
     lines.push(this.theme.fg("borderMuted", `├${"─".repeat(innerWidth)}┤`));
-    lines.push(this.frameLine(this.theme.fg("warning", status), innerWidth));
+    lines.push(this.frameLine(this.theme.fg("warning", sanitizeOneLine(status)), innerWidth));
     lines.push(
       `${this.theme.fg("borderMuted", "│")}${inputLine}${this.theme.fg("borderMuted", "│")}`,
     );
@@ -501,13 +513,16 @@ export function registerBtw(
   }
 
   function renderMarkdownLines(text: string, width: number): string[] {
-    if (!text) return [];
+    // The one entry for every multi-line answer sink (final, streaming partial, fallback): strip
+    // controls but keep line structure; the answer state itself stays raw.
+    const safe = stripTerminalControls(text);
+    if (!safe) return [];
     try {
-      const md = new Markdown(text, 0, 0, mdTheme);
+      const md = new Markdown(safe, 0, 0, mdTheme);
       return md.render(width);
     } catch {
       // Fall back to plain text wrapping if Markdown rendering fails
-      return text.split("\n").flatMap((line) => {
+      return safe.split("\n").flatMap((line) => {
         if (!line) return [""];
         const wrapped: string[] = [];
         for (let i = 0; i < line.length; i += width) {
@@ -542,7 +557,7 @@ export function registerBtw(
     const lines: string[] = [];
     for (const item of thread.slice(-6)) {
       // User message
-      const userText = item.question.trim().split("\n")[0] ?? "";
+      const userText = sanitizeOneLine(item.question);
       lines.push(
         theme.fg("accent", theme.bold("You: ")) + truncateToWidth(userText, width - 5, "…"),
       );
@@ -555,18 +570,24 @@ export function registerBtw(
     }
 
     if (pendingQuestion) {
-      const userText = pendingQuestion.trim().split("\n")[0] ?? "";
+      const userText = sanitizeOneLine(pendingQuestion);
       lines.push(
         theme.fg("accent", theme.bold("You: ")) + truncateToWidth(userText, width - 5, "…"),
       );
 
       // Show tool calls inline (§5-conformed glyphs via the extracted core)
       if (pendingToolCalls.length > 0) {
-        lines.push(...renderToolCallLines(pendingToolCalls, theme, width));
+        // Fold a display copy: the stored entries keep the RAW name `tool_execution_end` matches.
+        const displayCalls = pendingToolCalls.map((tc) => ({
+          ...tc,
+          toolName: sanitizeOneLine(tc.toolName),
+          args: sanitizeOneLine(tc.args),
+        }));
+        lines.push(...renderToolCallLines(displayCalls, theme, width));
       }
 
       if (pendingError) {
-        lines.push(renderErrorLine(theme, pendingError));
+        lines.push(renderErrorLine(theme, sanitizeOneLine(pendingError)));
       } else if (pendingAnswer) {
         lines.push("");
         const mdLines = renderMarkdownLines(pendingAnswer, width);
