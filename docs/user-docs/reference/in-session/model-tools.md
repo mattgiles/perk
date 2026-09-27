@@ -261,6 +261,14 @@ every command position is checked. This does not admit the flagless context form
 extra arguments, lookalike verbs, `review-post`, `gh api`, real-file redirects, or a mutation
 chained after a query.
 
+The gate also admits the perk library workers in their `--json` forms: `perk librarian list …
+--json`, `perk librarian record … --json`, and `perk librarian remove … --json`, with `--json`
+last and any whitespace-separated arguments before it. They write only the gitignored
+`docs/library/` cache, and the CLI itself refuses — before taking its lock — unless every path it
+would touch is gitignored and nothing under the library is tracked (see
+[Librarian commands](../cli/librarian.md)). A form without `--json` or with `--json` not last,
+other `perk librarian` verbs, real-file redirects and chained mutations stay blocked.
+
 Perk-owned report waves deliver the constant `perk.parent-restrictions/1 = {readOnly: true}`
 packet and `worktree: false` to every native runner child. The packet — or a malformed /
 unsupported-version one — establishes a read-only floor before lifecycle work that gate exit, later

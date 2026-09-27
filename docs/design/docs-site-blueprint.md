@@ -72,6 +72,17 @@ the §1 corpus selector (**81** total sources counting the four `.mdx` pages; `_
 the one excluded source), **80** routed pages, **80** sidebar entries (Home, the four section
 landings, and the 75 enumerated in §3 — counted from `docs/site/src/sidebar.mjs`).
 
+*Amendment (2026-09-26, node 1.2, objective #2551):* the corpus has grown by one file —
+`reference/cli/librarian.md` (the `perk librarian` group reference — the catalogued, gitignored
+perk library; Reference › CLI, after `remote-and-utility`) — now recorded in the §2 route table
+(a new row beside the `cli/*` split children), the §3 sidebar map, and the §4 inventory (the
+`cli.md` split row now names seven children). This amendment records only its own page.
+Corpus-wide totals re-derived fresh from the tree at this amendment's commit, as its own
+measurement: **78** files by the §1 corpus selector (**82** total sources counting the four
+`.mdx` pages; `_authoring.md` stays the one excluded source), **81** routed pages, **81** sidebar
+entries (Home, the four section landings, and the 76 enumerated in §3 — counted from
+`docs/site/src/sidebar.mjs`).
+
 ## §1 Purpose & binding scope
 
 ### What this blueprint binds
@@ -218,6 +229,7 @@ node that creates them.
 | `docs/user-docs/reference/cli/pr.md` *(split child — node 4.1)* | `/reference/cli/pr/` | Reference › CLI |
 | `docs/user-docs/reference/cli/learn-and-gist.md` *(split child — node 4.1)* | `/reference/cli/learn-and-gist/` | Reference › CLI |
 | `docs/user-docs/reference/cli/remote-and-utility.md` *(split child — node 4.1)* | `/reference/cli/remote-and-utility/` | Reference › CLI |
+| `docs/user-docs/reference/cli/librarian.md` *(added 2026-09-26)* | `/reference/cli/librarian/` | Reference › CLI |
 | `docs/user-docs/reference/in-session.md` | `/reference/in-session/` | Reference › In-session (hub) |
 | `docs/user-docs/reference/in-session/stages-and-doors.mdx` *(split child — node 4.2)* | `/reference/in-session/stages-and-doors/` | Reference › In-session |
 | `docs/user-docs/reference/in-session/workflow-commands.md` *(split child — node 4.2)* | `/reference/in-session/workflow-commands/` | Reference › In-session |
@@ -332,7 +344,7 @@ index order.
 
 1. Requirements & compatibility
 2. **CLI** — hub, then children: Setup & health, Plan, Objective, PR, Learn & gist,
-   Remote & utility.
+   Remote & utility, *Librarian* (added 2026-09-26).
 3. **In-session commands & tools** — hub, then children: Stages & doors, Workflow commands,
    Review & authoring, Model-facing tools.
 4. **Configuration** — hub, then children: Repository layout, Workflow & CI, Backends,
@@ -405,7 +417,7 @@ contents and the §5 anchor family-assignment rule.
 
 | Source path | Quadrant | Disposition | Hub + children | Editorial intent | Node |
 |---|---|---|---|---|---|
-| `docs/user-docs/reference/cli.md` | Reference | split | Hub `/reference/cli/` + 6 children | Hub keeps: orientation; the **stage-launcher spine entries** (`perk implement`, `perk submit`, `perk address`, `perk land`, `perk ready` stay on the hub as the command-map's spine); the command-group map; shared conventions (aliases, `--json`). Children by family: `cli/setup-and-health.md` (`perk init`, `perk doctor`, `perk doctor workflow` + `check`/`smoke-test`); `cli/plan.md` (the `perk plan` group); `cli/objective.md` (the `perk objective` group incl. `stack`); `cli/pr.md` (the `perk pr` group; cross-links the flat spine verbs on the hub); `cli/learn-and-gist.md` (the `perk learn` + `perk gist` groups); `cli/remote-and-utility.md` (`perk workflow`, `perk worktree`, `perk state`, `perk registry`, `perk skills`, `perk release-notes`). | 4.1 |
+| `docs/user-docs/reference/cli.md` | Reference | split | Hub `/reference/cli/` + 7 children | Hub keeps: orientation; the **stage-launcher spine entries** (`perk implement`, `perk submit`, `perk address`, `perk land`, `perk ready` stay on the hub as the command-map's spine); the command-group map; shared conventions (aliases, `--json`). Children by family: `cli/setup-and-health.md` (`perk init`, `perk doctor`, `perk doctor workflow` + `check`/`smoke-test`); `cli/plan.md` (the `perk plan` group); `cli/objective.md` (the `perk objective` group incl. `stack`); `cli/pr.md` (the `perk pr` group; cross-links the flat spine verbs on the hub); `cli/learn-and-gist.md` (the `perk learn` + `perk gist` groups); `cli/remote-and-utility.md` (`perk workflow`, `perk worktree`, `perk state`, `perk registry`, `perk skills`, `perk release-notes`); `cli/librarian.md` (the `perk librarian` group — added 2026-09-26, node 1.2 of objective #2551). | 4.1 |
 | `docs/user-docs/reference/in-session.md` | Reference | split | Hub `/reference/in-session/` + 4 children | Hub keeps: orientation; the complete surface map; ancillary in-session features. Children by family: `in-session/stages-and-doors.mdx` (the stage/door model); `in-session/workflow-commands.md` (spine commands `/plan` `/plan-save` `/implement-here` `/implement` `/submit` `/ready` `/address` `/land` `/learn`, objective doors, gist doors, utility commands `/ci` `/commit-and-compact` `/perk-selfcheck` `/learn-docs` `/learn-code`); `in-session/review-and-authoring.md` (`/pr-review`, `/pr-review-terminal`, `/pr-review-browser`, `/plan-review-browser`, `/objective-review-browser`); `in-session/model-tools.md` (the universal model-facing tools). | 4.2 |
 | `docs/user-docs/reference/configuration.md` | Reference | split | Hub `/reference/configuration/` + 5 children | Hub keeps: orientation; file precedence + overlay semantics; the table map; value types. Children by family: `configuration/repository-layout.md` (the dot-directory contract); `configuration/workflow-and-ci.md` (`[worktree]`, `[workflow]`, `[ci]`, `[[ci.checks]]`); `configuration/backends.md` (`[providers]`, `[issues]`, `[linear]`); `configuration/models-and-compaction.md` (`[models]`, `[models.stages.<id>]`, `[models.subagents]`, `[compaction]`); `configuration/skills-and-bindings.md` (`[skills]`, `[[bindings]]`, repo-authored skills under `.perk/skills/`). **The fifth `backends` family is a deliberate blueprint refinement of node 4.3's four-name list** — the config tables `[providers]`/`[issues]`/`[linear]` fit none of the four named families; recorded here as a blueprint decision so 4.3's plan inherits it without re-deciding. | 4.3 |
 | `docs/user-docs/reference/providers-and-backends.md` | Reference | split | Hub `/reference/providers-and-backends/` + 2 children | Hub keeps: the supported-set overview + comparison; known caveats & maturity. Children by family: `providers-and-backends/providers.md` (the provider seam: postures, what selection does, fallback semantics); `providers-and-backends/issue-backends.md` (GitHub/Linear: auth, config, labels, identifiers, doctor groups, project-backed objectives, native footprint). User-confirmed split; satisfies node 4.4's "split only if the committed inventory requires it" and the `Linear` search-matrix row. | 4.4 |

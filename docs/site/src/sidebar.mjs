@@ -110,6 +110,7 @@ export const sidebar = [
       "reference/cli/pr",
       "reference/cli/learn-and-gist",
       "reference/cli/remote-and-utility",
+      "reference/cli/librarian",
       "reference/in-session",
       "reference/in-session/stages-and-doors",
       "reference/in-session/workflow-commands",
