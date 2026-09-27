@@ -80,6 +80,14 @@ An allowlisted command whose *argument* turns the read into a write (`find -dele
 removing the command from the allowlist.
 _Avoid_: destructive command, mutating command
 
+**Exec-bearing input**:
+A submitted environment assignment, literal executable-word suffix, or option that makes an
+otherwise admitted read launch another program (`GIT_EXTERNAL_DIFF=… git diff`, `rg=payload`,
+`rg --pre …`, `git diff --ext-diff`). Assignment/command-word routes are walker refusals; scoped
+selector/helper options are whole-string veto rows. Unlike an argument-level writer, the effect is
+choosing code to run, not making the admitted program itself write.
+_Avoid_: command injection, executable argument, environment exploit
+
 **List form**:
 The argument shape under which an argument-sensitive `git` subcommand only reads: every word an
 enumerated option or a positional, with a list-implying option among them (positionals are then
