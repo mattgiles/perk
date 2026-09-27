@@ -109,6 +109,10 @@ const COMMANDS: [string, string[]][] = [
   ["time LC_ALL=C sort f", ["sort f"]],
   ["time -p LC_ALL=C sort f", ["sort f"]],
   ["time -p GIT_OPTIONAL_LOCKS=0 git status", ["git status"]],
+  ["time </dev/null LC_ALL=C sort f", ["sort f"]],
+  ["time -p </dev/null LC_ALL=C sort f", ["sort f"]],
+  // a redirect starts the timed simple command: a later `-p` is its literal executable word
+  ["time </dev/null -p ls", ["-p ls"]],
   ["ls; time LC_ALL=C sort f", ["ls", "sort f"]],
   ["ls && time LC_ALL=C sort f", ["ls", "sort f"]],
   ["ls &&\ntime LC_ALL=C sort f", ["ls", "sort f"]],
@@ -289,6 +293,11 @@ const REFUSALS: [string, CommandRefusal][] = [
   ["time -pp rg", "wrapper-usage"],
   ["time -p -p rg", "wrapper-usage"],
   ["time -p -- rg", "wrapper-usage"],
+  // a redirection after keyword time starts the timed command: reserved words are program names
+  ["time </dev/null if ls", "unmodeled-syntax"],
+  ["time 2>/dev/null ! ls", "unmodeled-syntax"],
+  ["time -p </dev/null for f in a; do ls; done", "unmodeled-syntax"],
+  ["time </dev/null time LC_ALL=C sort", "unsafe-environment-assignment"],
   // a shell prefix or an env entry is a literal safe pair: nothing else, no quoting or expansion
   ["X=1 grep foo f", "unsafe-environment-assignment"],
   ["X=1 Y=2 grep foo f", "unsafe-environment-assignment"],

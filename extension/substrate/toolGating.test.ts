@@ -1050,6 +1050,7 @@ test("isReadOnlyBashCommand: argument-level writers and non-list forms are block
     // npm audit fix, sort -o, tree -o, xxd's output operand
     "npm audit fix",
     "npm audit fix --force",
+    "npm \\\naudit fix", // a continued separator still names the destructive audit action
     "sort -o out f",
     "sort -o./out.txt f",
     "sort -ro out f",
@@ -1291,12 +1292,17 @@ test("isReadOnlyBashCommand: a NAME=value or suffixed word is never the admitted
     "git diff2>/dev/null",
     "git stash list-x",
     "git stash show.x",
+    "git stash\\\nshow", // a continuation alone joins `stashshow`
+    "git worktree\\\nlist",
+    "git config\\\nget user.name",
     "git reflog show-x",
     "git remote show-x origin",
     "git worktree list-x",
     "git config get-x a.b",
     "gh pr view-x 1",
     "gh pr view=1",
+    "gh pr\\\nview 1", // a continuation alone joins `prview`
+    "npm\\\nls", // joins the executable word
     "gh auth status-x",
     "gh search prs-x q",
     "npm ls-x",
@@ -1319,6 +1325,9 @@ test("isReadOnlyBashCommand: a NAME=value or suffixed word is never the admitted
     "git diff 2>/dev/null",
     "git status&>/dev/null",
     "git show\\\n  --stat",
+    "git stash \\\nshow",
+    "git worktree \\\nlist",
+    "git config \\\nget user.name",
     "rg \\\n--glob '*.ts' foo",
     "gh \\\npr \\\nview 1",
     "npm \\\nls",
@@ -1338,6 +1347,7 @@ test("isReadOnlyBashCommand: a NAME=value or suffixed word is never the admitted
     "git worktree list",
     "git config get user.name",
     "wget -O - https://example.com",
+    "wget -O- https://example.com",
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed: ${cmd}`);
   }
@@ -1354,6 +1364,10 @@ test("isReadOnlyBashCommand: shell keywords and `time` follow bash's reading of 
     // only the keyword `time` (a pipeline's start, before any prefix) takes a prefix after it
     "env time LC_ALL=C sort f",
     "echo x | time LC_ALL=C sort f",
+    "time </dev/null if ls",
+    "time 2>/dev/null ! ls",
+    "time </dev/null -p ls",
+    "time </dev/null time LC_ALL=C sort f",
     "LC_ALL=C time LC_ALL=C sort f",
     "! time LC_ALL=C sort f",
     "if time LC_ALL=C sort f; then ls; fi",
@@ -1363,6 +1377,8 @@ test("isReadOnlyBashCommand: shell keywords and `time` follow bash's reading of 
   for (const cmd of [
     "time LC_ALL=C sort f",
     "time -p LC_ALL=C sort f",
+    "time </dev/null LC_ALL=C sort f",
+    "time -p </dev/null LC_ALL=C sort f",
     "time rg foo",
     "echo x | time rg foo",
     "env time -p rg foo",
@@ -1382,15 +1398,19 @@ test("isReadOnlyBashCommand: a direct program selector is vetoed beside its allo
     "rg '--pre=python' foo",
     "rg -n --hostname-bin=python foo",
     "rg --hostname-bin python foo",
+    "rg</dev/null --pre=python foo",
+    "rg 3<host.txt --hostname-bin python foo",
     "timeout 5 rg --pre python foo",
     "find . -exec rg --pre python foo {} \\;",
     "sort --compress-program=python f",
     "sort --compress-program python f",
     "sort --comp=python f",
+    "sort</dev/null --compress-program=python f",
     'sort -k1 "--compress-program=python" f',
     "bat --pager=python f",
     "bat --pager python f",
     "bat '--pager=python' f",
+    "bat</dev/null --pager=python f",
     "less +!python f",
     "less '+!python' f",
     "less '+#python' f",
@@ -1409,6 +1429,7 @@ test("isReadOnlyBashCommand: a direct program selector is vetoed beside its allo
     "more -p python f",
     "more -ppython f",
     "more -sp python f",
+    "more</dev/null -p python f",
     "more '+!python' f",
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
@@ -1447,6 +1468,8 @@ test("isReadOnlyBashCommand: explicit git helper switches are vetoed on every re
   for (const cmd of [
     "git diff --ext-diff",
     "git diff --textconv",
+    "git diff</dev/null --ext-diff",
+    "git diff 3<input --textconv",
     "git log -p --ext-diff",
     "git log --textconv -p",
     "git show --ext-diff HEAD",
@@ -1467,13 +1490,18 @@ test("isReadOnlyBashCommand: explicit git helper switches are vetoed on every re
     "rg $(echo foo) --pre python",
     "sort $(echo f) --comp=python",
     "git diff \\\n  --ext-diff",
+    "git diff --ext-diff\\\n HEAD",
     "git grep --textconv foo",
     "git cat-file --textconv HEAD:f",
     "git cat-file --filters HEAD:f",
+    "git cat-file</dev/null --filters HEAD:f",
     "git hash-object --path=f f",
     "git hash-object --path f --stdin",
     "git hash-object --filters f",
     "git hash-object --stdin-paths",
+    "git hash-object</dev/null --path=f f",
+    "rg --pre=python\\\n foo",
+    "bat --pager=python\\\n f",
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
   }

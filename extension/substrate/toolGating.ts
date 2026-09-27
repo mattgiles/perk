@@ -680,17 +680,24 @@ function textCarries(content: unknown, needles: readonly string[]): boolean {
 
 /**
  * Between the words of ONE command: blanks and `\`-newline continuations, never a bare newline — an
- * argument walk must not cross into the next command.
+ * argument walk must not cross into the next command. At least one real blank is required because
+ * Bash removes a continuation; `a\\⏎b` is the single word `ab`, while `a \\⏎b` remains two words.
  */
-const SEP = String.raw`(?:[ \t]|\\\n)+`;
+const SEP = String.raw`(?=(?:[ \t]|\\\n)*[ \t])(?:[ \t]|\\\n)+`;
 /**
  * One shell word as the argument-level rows read it: an escaped character (`\;`), a whole quoted
  * span (`\"` stays inside a double-quoted one) or a single unquoted character — one per iteration
  * and the alternatives disjoint, so backtracking stays linear — never an unescaped operator.
  */
 const WORD = String.raw`(?:\\[^\n]|'[^']*'|"(?:[^"\\]|\\[\s\S])*"|[^\s'"|;&\\])+`;
-/** The argument walk: any number of further words of the same command. */
-const WORDS = `(?:${SEP}${WORD})*`;
+/** An input redirection and its operand; unlike shell words, the operand may be adjacent. */
+const INPUT_REDIRECT = String.raw`\d*(?:<<<|<<-|<<|<>|<&|<)(?:[ \t]|\\\n)*${WORD}`;
+/**
+ * The argument walk: further words or adjacent input redirections of the same command. Output
+ * redirects either become spaces in the sanitized veto view (`/dev/null`/fd duplication) or meet
+ * the destructive redirect veto first.
+ */
+const WORDS = `(?:(?:${SEP}${WORD})|${INPUT_REDIRECT})*`;
 /**
  * An optional opening quote or escape before a flag word (`'-i.bak'`, `"-w"`, `$'-D'`, `\-i`): bash
  * removes it, so a veto reads through it.
@@ -701,7 +708,7 @@ const Q = String.raw`(?:\$?['"]|\\)?`;
  * backtick, an operator or the end — `$` alone is the end of the whole scanned text, not of the
  * command.
  */
-const END = String.raw`(?=[\s='"\x60|;&()<>]|$)`;
+const END = String.raw`(?=(?:\\\n)*(?:[\s='"\x60|;&()<>]|$))`;
 /**
  * The end of a command or subcommand word in an allowlist row: a blank, an adjacent redirection
  * (`git diff>/dev/null`) or the end of the simple command, after any `\`-newline continuations
@@ -863,7 +870,7 @@ const DESTRUCTIVE_PATTERNS = [
   ),
   // In more's compatibility mode `-p` names a startup command: every spelling is refused.
   veto(String.raw`more\b${WORDS}${SEP}${Q}-[a-zA-Z]*p`),
-  /\bnpm\s+audit\s+fix\b/i,
+  new RegExp(String.raw`\bnpm${SEP}audit${SEP}fix\b`, "i"),
   /\bsudo\b/i,
   /\bsu\b/i,
   /\bkill\b/i,
@@ -952,7 +959,7 @@ const SAFE_PATTERNS = [
   keyed(`node${SEP}--version`, "i"),
   keyed(`python${SEP}--version`, "i"),
   /^\s*curl\s/i,
-  keyed(`wget${SEP}-O${SEP}-`, "i"),
+  keyed(`wget${SEP}(?:-O-|-O${SEP}-)`, "i"),
   keyed("jq"),
   // `sed` in every form (`-i` is vetoed).
   keyed("sed"),

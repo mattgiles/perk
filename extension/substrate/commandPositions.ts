@@ -665,9 +665,16 @@ class Dispatcher {
         this.close(cmd, frame, token.start, token.op);
         cmd = fresh(startsPipeline(cmd, token.op));
       } else if (token.kind === "redirect") {
-        // An operand is never the command: the state is left as it was.
+        // An operand is never the command. A redirect after keyword `time` starts the timed simple
+        // command, ending the keyword's option scan; Bash then reads a following keyword/`-p` as
+        // the literal program word, not more timing grammar.
         cmd.touched = true;
-        if (cmd.state === "command" && cmd.origin === "shell") cmd.prefixed = true;
+        if (cmd.state === "wrapper" && cmd.wrapper?.spec.keyword === true) {
+          cmd.state = "command";
+          cmd.origin = "shell";
+          cmd.wrapper = null;
+          cmd.prefixed = true;
+        } else if (cmd.state === "command" && cmd.origin === "shell") cmd.prefixed = true;
         if (token.operand === null) this.refuse("unmodeled-syntax");
         else this.nested(token.operand);
       } else if (token.kind === "body") this.nested(token.content);
