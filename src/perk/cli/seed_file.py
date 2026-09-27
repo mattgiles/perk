@@ -1,10 +1,15 @@
 """Local-file (and URL) seeding for the seed-from-source cold doors.
 
-A small, backend-free leaf shared by three cold doors: ``plan from``, ``objective author --from``,
-and ``skills create --from``. When the door's argument resolves to an existing readable file, perk
-reads the file as **untrusted seed DATA**, primes an authoring session with it, and on save mints a
-**fresh** perk artifact (no in-place adoption — a file has no backend identity to stamp). The file
-on disk is never modified.
+A small, backend-free leaf shared by four cold doors. Three are seed-from-source doors — ``plan
+from``, ``objective author --from``, and ``skills create --from``: when the door's argument
+resolves to an existing readable file, perk reads the file as **untrusted seed DATA**, primes an
+authoring session with it, and on save mints a **fresh** perk artifact (no in-place adoption — a
+file has no backend identity to stamp). The file on disk is never modified.
+
+A fourth consumer, ``objective replan --from``, reuses only :func:`detect_seed_file` +
+:func:`read_seed_file` — for **guidance** steering an existing objective's replan, not seeding:
+no fresh artifact is minted from the file and :func:`render_seed_file_scratch` is not used (the
+guidance rides the replan's own scratch).
 
 ``skills create --from`` adds a URL sub-mode: an http(s) ``SKILL.md`` URL is **not** materialized to
 a scratch — :func:`detect_seed_url` only scheme-detects it and the in-session agent owns the fetch
