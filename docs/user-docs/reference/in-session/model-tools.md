@@ -262,13 +262,18 @@ extra arguments, lookalike verbs, `review-post`, `gh api`, real-file redirects, 
 chained after a query.
 
 The gate also admits the perk library workers in their `--json` forms: `perk librarian list …
---json`, `perk librarian record … --json`, and `perk librarian remove … --json`, with `--json`
-last and any whitespace-separated arguments before it. They write only the gitignored
-`docs/library/` cache: the CLI itself refuses unless its representative ignore probes (the
-catalog, the lock file, and each directory the operation changes) pass and nothing under the
-library is tracked. The probes run before the lock is taken, except `remove`'s probe of its entry
-directory, which needs the catalog (see [Librarian commands](../cli/librarian.md)). A form without `--json` or with `--json` not last,
-other `perk librarian` verbs, real-file redirects and chained mutations stay blocked.
+--json`, `perk librarian record … --json`, `perk librarian remove … --json`,
+`perk librarian add source … --json`, `perk librarian check … --json`, and
+`perk librarian refresh … --json`, with `--json` last and any whitespace-separated arguments
+before it. They write only the gitignored `docs/library/` cache: the CLI itself refuses unless
+its representative ignore probes (the catalog, the lock file, and each directory the operation
+changes) pass and nothing under the library is tracked. The probes run before the lock is taken,
+except the probes of `remove`'s entry directory and `refresh`'s checkout, which need the catalog
+(see [Librarian commands](../cli/librarian.md)). The network verbs (`add source`, `check`,
+`refresh`) run their git operations without global or system git config and with hooks
+disabled, so nothing a cloned repository selects can execute. A form without `--json` or with
+`--json` not last, `perk librarian add docs`, other `perk librarian` verbs, real-file redirects
+and chained mutations stay blocked.
 
 Perk-owned report waves deliver the constant `perk.parent-restrictions/1 = {readOnly: true}`
 packet and `worktree: false` to every native runner child. The packet — or a malformed /

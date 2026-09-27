@@ -1634,3 +1634,101 @@ def test_parse_cat_file_batch_rejects_non_blobs_and_truncation():
         git._parse_cat_file_batch(f"{oid} commit 3\nabc\n".encode())
     with pytest.raises(git.GitError, match="truncated"):
         git._parse_cat_file_batch(f"{oid} blob 10\nabc\n".encode())
+# --- the library's config-pinned ops -----------------------------------------------------
+
+
+def _record_run(monkeypatch) -> dict:
+    captured: dict = {}
+
+    def _record(argv, *, cwd=None, timeout=None, env=None, **_kwargs):
+        captured.update(argv=argv, cwd=cwd, timeout=timeout, env=env)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _record)
+    return captured
+
+
+def test_clone_partial_pins_the_exact_argv_and_library_env(monkeypatch, tmp_path):
+    captured = _record_run(monkeypatch)
+    hooks = tmp_path / "hooks"
+    dest = tmp_path / "lib" / "widget"
+    git.clone_partial("https://github.com/acme/widget.git", dest, pinned=hooks)
+    assert captured["argv"] == [
+        "git",
+        "-c",
+        f"core.hooksPath={hooks}",
+        "clone",
+        "--quiet",
+        "--filter=blob:none",
+        "https://github.com/acme/widget.git",
+        str(dest),
+    ]
+    assert captured["cwd"] == dest.parent
+    assert captured["timeout"] == git.CLONE_TIMEOUT == 600
+    env = captured["env"]
+    assert env["GIT_CONFIG_GLOBAL"] == "/dev/null"
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+
+
+def test_clone_partial_unpinned_keeps_the_ambient_config(monkeypatch, tmp_path):
+    monkeypatch.delenv("GIT_CONFIG_GLOBAL", raising=False)
+    monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
+    captured = _record_run(monkeypatch)
+    dest = tmp_path / "widget"
+    git.clone_partial("https://github.com/acme/widget.git", dest)
+    assert captured["argv"][:3] == ["git", "clone", "--quiet"]
+    assert "GIT_CONFIG_GLOBAL" not in captured["env"]
+    assert "GIT_CONFIG_NOSYSTEM" not in captured["env"]
+
+
+@pytest.mark.parametrize(
+    ("call", "tail"),
+    [
+        (lambda repo, hooks: git.fetch(repo, pinned=hooks), ["fetch", "origin"]),
+        (
+            lambda repo, hooks: git.merge_ff_only(repo, "origin/main", pinned=hooks),
+            ["merge", "--ff-only", "origin/main"],
+        ),
+        (
+            lambda repo, hooks: git.checkout_detached(repo, "a" * 40, pinned=hooks),
+            ["checkout", "--detach", "a" * 40],
+        ),
+        (
+            lambda repo, hooks: git.remote_branch_head(repo, "main", pinned=hooks),
+            ["ls-remote", "origin", "refs/heads/main"],
+        ),
+    ],
+)
+def test_pinned_library_ops_prefix_the_hooks_pin(monkeypatch, tmp_path, call, tail):
+    captured = _record_run(monkeypatch)
+    hooks = tmp_path / "hooks"
+    call(tmp_path, hooks)
+    assert captured["argv"] == ["git", "-c", f"core.hooksPath={hooks}", *tail]
+    assert captured["env"]["GIT_CONFIG_GLOBAL"] == "/dev/null"
+    assert captured["env"]["GIT_CONFIG_NOSYSTEM"] == "1"
+
+
+def test_clone_partial_live_over_a_bare_repo(git_repo_with_remote, tmp_path):
+    _clone, remote, _advance = git_repo_with_remote
+    subprocess.run(
+        ["git", "-C", str(remote), "config", "uploadpack.allowFilter", "true"],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    dest = tmp_path / "partial"
+    dest.mkdir()
+    hooks = tmp_path / "hooks"
+    hooks.mkdir()
+    git.clone_partial(remote.as_uri(), dest, pinned=hooks)
+    assert (dest / ".git").is_dir()
+    assert git.config_get(dest, "remote.origin.partialclonefilter") == "blob:none"
+    assert git.head_commit(dest) == _sha(remote, "main")
+
+
+def test_clone_partial_of_a_bogus_url_raises(tmp_path):
+    dest = tmp_path / "bogus"
+    dest.mkdir()
+    with pytest.raises(git.GitError):
+        git.clone_partial((tmp_path / "nowhere.git").as_uri(), dest)
