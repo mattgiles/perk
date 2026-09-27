@@ -70,8 +70,10 @@ launched from a shell **inside a perk session** inherits `PERK_RUN_ID`/`PI_SESSI
 probe's bound perk extension then tries to claim that run id against the main checkout (no handoff
 there) and emits a loud-but-harmless `workflow-state linkage error`. Guard: launch probes with
 `env -u PERK_RUN_ID -u PI_SESSION_FILE node probe.ts`. This is the **third victim** of the env-leak
-family already documented in `pi/extension-api.md` (node-test harness runs, `pi --mode json -p`
-probes) — the guard belongs here because this doc carries the construction recipe probe authors
+family already documented in `pi/extension-api.md` (`pi --mode json -p` probes and headless probe
+scripts that never call `loadPerkSession`; the node-test harness arm was resolved by
+`loadPerkSession`'s `applyEnv` baseline — `pi/extension-api.md` § "The inherited `PERK_RUN_ID`
+leak") — the guard belongs here because this doc carries the construction recipe probe authors
 copy.
 
 The same leak reaches **cold doors driven from an in-session shell**: `perk objective create` run
@@ -444,7 +446,7 @@ check the root export list before importing a Pi type by name; mirror/derive dee
 - `extension/workerMain.ts` — the worker entrypoint
 - `extension/worker/stageExecutionE2e.test.ts` + `extension/testing/harness.ts` — the faux-model e2e tier
 - `docs/learned/pi/extension-api.md` — `ctx.mode`/`ctx.hasUI`, the root-export-list rule
-- `docs/learned/pi/context-system.md` — context loading + the read-only bash allowlist
+- `docs/learned/pi/context-system.md` — context loading; `pi/read-only-bash-gate.md` — the read-only bash allowlist
 - `docs/learned/toolchain/biome.md` — the TS-stripping / Biome gotchas + the distributive-`Omit` gotcha hit building the emitter
 - `docs/learned/toolchain/worktree-node-modules.md` — worktree SDK resolution + the stale-global smoke trap
 - `docs/design/archive/pi-adoption-audit.md` — the complete 0.80.5-verified adoption inventory + follow-up

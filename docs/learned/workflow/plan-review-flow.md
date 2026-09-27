@@ -405,10 +405,13 @@ document. The cross-plane fixture that pins the mirror's dialect gap (`shared/fi
 
 ## Testing recipes
 
-- **Dialog flows are untestable through the harness** (`headfulUIContext` has no
-  `editor`/`select`) — test via the extracted `executePlanReview` core with a fake ctx carrying a
-  scripted `PlanReviewUI` (the askUser.ts pure-core recipe). The registered-tool path can only be
-  harness-tested for arms that never reach a dialog (headless / bad_input / no_plan / bridge).
+- **Dialogs are harness-testable through a registered tool, not through a command.** A tool's
+  dialogs are scripted through `invokeTool`'s `opts.ui` overlay (`select`/`input`/`editor`/`confirm`
+  over the recording UI — the `plan_review` launch-chooser pin in `extension/pi/v1/planReview.test.ts`).
+  Dialogs reached through `invokeCommand` are untestable offline — the real `createCommandContext`
+  carries no dialog fakes — so the extracted `executePlanReview` core with a fake ctx carrying a
+  scripted `PlanReviewUI` (the askUser.ts pure-core recipe) remains the way to cover the
+  command-launched arms.
 - **Type injected dependencies as the minimal structural slice** (e.g. `{ review(plan, signal) }`),
   not the concrete bridge — a recording fake bridge (canned `ReviewOutcome` + a reviewed-plans
   capture) collapses bus + envelope + timers per test.
@@ -562,7 +565,7 @@ detected only at push time as `push_rejected` — loud but late, by design.
 - `extension/pi/v1/providers/plannotator.ts` — `extractDirectEdits`, the Direct Edits format pin
 - `docs/learned/workflow/plan-save-surfaces.md` — the save-side source resolution + recovery carrier
 - `docs/learned/workflow/provider-seam.md` — the plannotator augment-posture provider
-- `docs/learned/pi/extension-api.md` — `ctx.ui.editor` facts + the `headfulUIContext` gap
+- `docs/learned/pi/extension-api.md` — `ctx.ui.editor` facts + `invokeTool`'s `opts.ui` overlay
 - `docs/learned/pi/tool-param-decode.md` — the tri-state param decode the door's `plan` param uses
 - `docs/learned/pi/extension-seams.md` — minimal structural slices + the type-only-import cycle break
 - `extension/pi/v1/draftReview.ts` (+ `draftReview.test.ts`) — the current-review slot + the decision ladder

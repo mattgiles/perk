@@ -32,6 +32,9 @@ can't derive from the package's root type exports.
   await — "`ctx.ui.editor` facts".
 - Pi's own compaction lands BEFORE `agent_settled`; a driven-compaction door observes
   `session_compact` and arbitrates — "Pi's own compaction runs BEFORE `agent_settled`".
+- A detached task from a slash command must latch `session_shutdown` and never touch a dead `ctx`
+  (test via `invokeCommand` + `reload`, never `runCommandHandler`) — "Background work launched from
+  a slash command outlives its activation".
 - Pi sanitizes session names only for newlines; strip terminal controls yourself —
   "`setSessionName` / `getSessionName` facts".
 - Seam-forwarding + sink tests never prove registration — "A new Pi registration needs a live
@@ -170,6 +173,45 @@ throws `Already compacted`. The recipe (`extension/pi/v1/drivenCompaction.ts`):
 
 `ctx.compact` from an extension aborts an in-flight foreign compaction. A seam's pending record is
 process-local and lost on `/reload`.
+
+## Background work launched from a slash command outlives its activation
+
+The detached-task consequence of "A captured `ctx` goes stale on session replacement" above. On
+`/reload`, session replacement and quit the SDK emits `session_shutdown` and THEN invalidates the
+runner: every getter on a captured `ctx` (`hasUI`, `ui`, `cwd`, `isIdle`, …) throws, and the old
+runtime's tracked event-bus subscriptions are removed. A detached task started from a command
+handler (`void (async () => …)()`) that settles later and reports through `ctx` throws; a catch
+reporting through the same `ctx` throws again; the rejection escapes the `void` task as an
+unhandled rejection that can kill Pi.
+
+The landed pattern (`extension/pi/v1/simplify.ts`):
+
+- an installer-local `live` flag flipped by `pi.on("session_shutdown")`;
+- an `isLive()` check right after the awaited work, and inside the catch, before touching `ctx`/`pi`;
+- a terminal catch at the task boundary that reports on **stderr only**;
+- skip the activity `end()` once the activation is dead;
+- capture `ctx.cwd` at launch rather than reading it lazily inside callbacks.
+
+A wave pending across a reload loses its completion subscription (the invalidation removes it), so
+it settles only on its engine deadline + the 60 s settlement grace (`WAVE_SETTLEMENT_GRACE_MS`) —
+its failure path IS the stale-ctx path.
+
+### Harness trap: `runCommandHandler` cannot reproduce stale-ctx bugs
+
+`h.runCommandHandler(name, args)` hands the handler a synthesized plain-object ctx with none of the
+SDK's `assertActive` getters, so a reload-lifecycle test built on it passed with the bug present.
+Use `h.invokeCommand(name)` — a real `createCommandContext()` through `session.prompt` — paired with
+`h.reload()` and a wave that settles after the reload: no subagents responder + a small
+`PERK_WAVE_RPC_PING_MS` forces a quick wave-level failure after invalidation
+(`extension/pi/v1/simplify.test.ts`). The same rule for status/widget effects is `pi/tui-surfaces.md`
+§ "Harness recipes" ("`invokeCommand`, never `runCommandHandler`").
+
+### An idle-launched slash command has no live `ctx.signal`
+
+`ExtensionContext.signal` is the current streaming run's signal — `undefined` for a command invoked
+while idle. Threading it into background work gives no cancel path for the ordinary invocation:
+build an independent cancel gesture, or state an honest no-cancel contract (settle on completion,
+failure or the engine deadline — the simplify doors chose the latter, contracts §8.74).
 
 ## `setSessionName` / `getSessionName` facts
 
@@ -481,7 +523,7 @@ tools or *months-old* code:
   single version truth for every dist-scoped fact here.
 - **Re-verify at each pin bump.** A bump silently re-asserts every dist-scoped fact here: its
   plan re-reads each against the newly *installed* dist (resolved per
-  `toolchain/worktree-node-modules.md`; deep-source reads need `pi/context-system.md`'s read-only
+  `toolchain/worktree-node-modules.md`; deep-source reads need `pi/read-only-bash-gate.md`'s read-only
   allowlist) and corrects or dates changes. Last full re-verification: the `0.87.0` dist —
   provenance, not a currency promise; the pin is.
 
@@ -491,8 +533,9 @@ tools or *months-old* code:
 - `docs/learned/pi/context-injection.md` — conditional strip on the every-call `context` event
 - `docs/learned/workflow/skill-bindings.md` — branch persistence powering the cold↔warm dedup
 - `docs/learned/toolchain/worktree-node-modules.md` — getting the right installed SDK in a worktree
-- `docs/learned/pi/tool-param-decode.md` — the pure-decode export that works around the
-  `headfulUIContext` gap
+- `docs/learned/pi/tool-param-decode.md` — the pure-decode export (the preferred decode-coverage
+  shape beside `invokeTool`'s `opts.ui` overlay)
+- `extension/pi/v1/simplify.ts` — the `session_shutdown` liveness latch for detached command work
 - `docs/learned/workflow/session-data.md` — the run-id lifecycle behind the `PERK_RUN_ID` leak
 - `docs/learned/workflow/plan-review-flow.md` — the `ctx.ui.editor` consumer + its testing split
 - `docs/design/archive/context-payload-baseline.md` — the committed payload-census baseline these

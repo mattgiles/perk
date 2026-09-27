@@ -69,6 +69,23 @@ folds a probe that fails to run into the typed refusal; shared with the checkout
 base→top; `pr_merge_base_diff` is its single-PR arity, and `review_context_cmd.py::_combined_diff`
 is now only the `UserFacingCliError` translation boundary.
 
+## Ignore probes are name-only, index-blind under --no-index, and order-sensitive
+
+The `git check-ignore` mechanics live in `src/perk/substrate/git.py::ignored_subset`'s docstring —
+`-z` needs `--stdin`; `--no-index` reports a tracked-but-covered file as ignored, so a "cache-only"
+guard needs a separate `:(literal)` tracked sweep via `tracked_paths`; a path git still C-quotes
+reads as unignored, so the probe fails closed. Read them there. Two cross-cutting rules the
+docstring does not carry:
+
+- **A probe beyond a symlink is fatal (exit 128, `pathspec … is beyond a symbolic link`), not
+  "unignored".** Walk the path's components for symlinks *before* the ignore probe
+  (`src/perk/library/guard.py::require_unlinked_components`); in the opposite order a typed refusal
+  (`entry_path_invalid`) degrades into a `GitError` → `io_error`.
+- **Ignore probes never look where a link points** — a symlinked leaf passes the probe while the
+  write lands outside the fenced directory. The write-site rule (refuse redirects without following
+  links) is `workflow/init-doctor.md` § "Every write site behind an ignore-probe fence refuses
+  redirects without following links".
+
 ## Two roots
 
 `main_worktree_root(cwd)` vs the invocation `repo_root`: from a linked worktree they differ, and the
@@ -82,9 +99,13 @@ the cold-door consequence — the launcher must compute both, not derive one fro
 ## Cross-references
 
 - `src/perk/substrate/git.py` — `diff_range`, `fetch_refspecs`, `stack_merge_base_diff`,
-  `pr_merge_base_diff`, `check_stack_topology`, `StackTopologyError`, `main_worktree_root`
+  `pr_merge_base_diff`, `check_stack_topology`, `StackTopologyError`, `main_worktree_root`,
+  `ignored_subset`, `tracked_paths`
 - `tests/test_git.py` — the config-pin controls, the two-stage never-execute control, the argv pins
 - `docs/learned/workflow/github-gateway.md` — the 406 `too_large` fallback and `diff_source` disclosure
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the conflict probe + rebase primitive
 - `docs/learned/workflow/vacuity-proof-tests.md` — live controls for never-execute seams
 - `docs/learned/workflow/cold-door-launch.md` — the two-roots consequence for launchers
+- `docs/learned/workflow/init-doctor.md` — the link-blind write-site rule behind an ignore-probe fence
+- `src/perk/library/` — `guard.py::require_unlinked_components` (walk before probe), `lock.py` (the
+  no-follow open)

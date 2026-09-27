@@ -22,8 +22,8 @@ duplicate them here.
 
 - Wave mechanics are CODE, module-owned: `reportWave.ts` is the logical core over the confined
   transport tier (`transport.ts`); every flow is a mechanism (`waves/<flow>Wave.ts`) + installer
-  (`pi/v1/…`) pair catalogued in "Orientation" (upstream pi-subagents mechanics live in
-  `pi/subagents.md`, not here).
+  (`pi/v1/…`) pair catalogued in "Orientation", the simplify doors' wave included (upstream
+  pi-subagents mechanics live in `pi/subagents.md`, not here).
 - Every wave spawn carries the fixed contract incl. the explicit acceptance disable
   (`acceptance: {level: "none"}`) AND the intercom-bridge disable (`intercomBridge: {mode:
   "off"}`) — waves are completion-only — "The fixed spawn contract carries an explicit acceptance
@@ -131,6 +131,10 @@ censuses raw `WAVE_RPC_`/channel tokens (tests included). The flow entrypoints:
   launch only after a complete first wave and an in-budget bundle write.
 - `scoutWave.ts` — the `perk.scout` delegation wave behind the `run_scout_wave` tool
   (`extension/pi/v1/scoutWave.ts`): 1–4 briefs, one fresh-context lane each, best-effort.
+- `simplifyWave.ts` — the `/simplify-plan`/`/simplify-objective` doors' single-assignment, strict,
+  zero-retry `perk.simplifier` wave (`extension/waves/simplifyWave.ts` is the mechanism;
+  `extension/pi/v1/simplify.ts` the installer: two warm doors and **no tool**) — the fourth
+  mechanism/installer instance, after scout.
 
 **The settled entrypoint + installer split.** Every flow now has two files: the *mechanism* under
 `extension/waves/<flow>Wave.ts` owns the closed report schema, the code-composed
@@ -164,10 +168,14 @@ in `contracts.md` and don't let passing tests imply end-to-end behavior.
 ## The fixed spawn contract carries an explicit acceptance disable
 
 Every wave spawn carries `acceptance: {level: "none", reason}` (`WAVE_ACCEPTANCE`, a fixed
-`WaveSpawnParams` field — no per-lane/per-flow opt-out). Without it, pi-subagents (since 0.46.0)
-auto-infers a generic acceptance contract for reviewer/analyst-named or read-only children and
-injects a fenced `acceptance-report` completion instruction into every lane — a competing
-completion contract observed steering a child into invalid `structured_output` attempts.
+`WaveSpawnParams` field — no per-lane/per-flow opt-out). Without it, pi-subagents infers an
+acceptance contract and injects a competing completion instruction — observed steering a child into
+invalid `structured_output` attempts. In the installed engine (0.71.0) inference keys **only on a
+declared `acceptanceRole`** (since 0.70.1; perk's defs declare none, so they infer `attested`); under
+an `outputSchema` the inferred instruction asks for an `acceptanceReport` object inside
+`structured_output`; and since 0.63.0 inferred acceptance reports are kept out of reviewer/read-only
+child prompts (CHANGELOG). The disable stays correct and stays fixed — the engine facts' home is
+`docs/learned/pi/subagents.md` (its **Acceptance hazard** paragraph).
 Beside it rides `intercomBridge: {mode: "off"}` (`WAVE_INTERCOM_BRIDGE`, the same fixed-field
 shape): pi-subagents ≥ 0.68.0 discards parent-side `progress_update` requests yet still appends
 a bridge template telling children to send them — perk children never ask decisions, so the
@@ -237,6 +245,16 @@ mechanical: delete the DORMANT paragraphs, drop the tests' `extraExtensions` reg
 workaround (the harness binds perk's extension, so live registration reaches it for free), and
 flip census-absence pins to census-membership pins. Worth repeating for future risky wirings.
 
+The third instance (the `perk.simplifier` lane, dormant in #2557, flipped live in #2561 the same day)
+added the practice that made the flip mechanical: at the dormant landing's objective reconcile,
+write an explicit **dormant-qualifier inventory** into the flip node — the def description and its
+prose-invariants pin, the wave header, contracts §8.3, the config comments, the `[models.subagents]`
+doc rows, plus the items the dormant plan deferred (the prose-map row, the CHANGELOG entry). Pin at
+least one qualifier in a test ("Ships dormant" in the def description) so the flip must invert a pin
+rather than silently leave the qualifier behind. Residual: the 40 000-char `proposal` cap fails a
+whole report (`lane-failed`, no retry) when a draft cannot be cut under it — no live evidence yet;
+cap tuning is an ordinary plan.
+
 The companion prose rule: **a dormant def/module must not be described in present-tense "perk
 does X" prose** — materialized substrate is not live behavior; qualify activation state until the
 wiring lands.
@@ -255,7 +273,12 @@ passes — plus negative/positive semantic pins.
 Corollary for agent-def prose: **prompt rules stated globally can be internally impossible.** A
 def requiring both "wrap any quoted draft text in delimiters" and "emit a bare byte-exact anchor
 field" holds two representations of quoted draft text to contradictory rules — state the
-exception explicitly or the completion contract is unsatisfiable.
+exception explicitly or the completion contract is unsatisfiable. The second exemption class: a
+report field that IS the replacement artifact (the simplifier's `proposal`, which under `lite`
+carries retained source prose verbatim) cannot obey a "wrap quoted draft text" rule either — wrapping
+would make the proposal unusable as a draft. Scope wrap rules to commentary fields, name both
+exemptions explicitly (anchor fields, whole-document fields), and pin both clauses in the def's
+prose-invariants test. **Audit every output field that can contain source text**, not only anchors.
 
 ## Budgeted block-packing renderers
 
@@ -378,9 +401,13 @@ perk-side application.)
 
 The normalization distinction lives at the `lane-failed` / `malformed-report` reason comments in
 `reportWave.ts`: `ok: true` with a `null` report is `lane-failed` (structured output never
-validated — the engine populates `structuredOutput` only on schema-valid lanes), while a
-non-object/non-null report or a non-boolean `ok` is `malformed-report`. Flow code messaging
-skipped lanes must not conflate them.
+validated), while a non-object/non-null report or a non-boolean `ok` is `malformed-report`. Since
+pi-subagents 0.71.0 a **failed** lane can retain a schema-valid report as evidence, so coverage is
+`ok: true` AND an object report — `normalizeAssignments` classifies `ok: false` as `lane-failed`
+regardless of a retained report (pinned in `extension/waves/reportWave.test.ts`); "valid ⇒ covered"
+is false. `shared/contracts.md` §8.35's "covered angle ⟺ ok lane ⟺ schema-valid report" carries the
+same stale framing and needs a contracts amendment (routed, #2583). Flow code messaging skipped
+lanes must not conflate the reasons.
 
 The broader rule (from the session-corpus audit): **a child's harness status is not report
 validity is not wave coverage.** Validate the report artifact separately, retry a failed required
@@ -523,7 +550,15 @@ order so collection retains the true coverage denominator even when some lanes n
 Ponytail is required and exclusively owns the standalone YAGNI/simplification pass. Do not dilute
 that ownership into another angle or count a missing Ponytail as covered. The honest TOCTOU posture
 is that repository or target instability yields incomplete coverage, never falsely accepted
-coverage; the system does not claim head-SHA immutability.
+coverage; the system does not claim head-SHA immutability. **Ponytail-bound defs come in two
+roles.** All share the source-bound recheck clauses — the first-action exact-file read, the
+frontmatter-name check, terminate without calling `structured_output`, never resolve a same-named
+project/user skill, and the "short {pass} pass" stability clause (`review` or `simplify`). Only
+*reviewer* defs carry the ownership-boundary clauses (exclusive owner of standalone findings;
+ordinary lanes mention simplification only when inseparable; no second standalone Ponytail finding),
+because they apply only where Ponytail is one angle among siblings — a lane that IS the whole pass
+(`perk.simplifier`) omits them. `tests/test_subagent_agents.py::test_ponytail_defs_source_bind_only_the_exact_skill_paths`
+encodes the split; a new Ponytail-bound def copies the recheck paragraph and decides its role.
 
 ### Adjacent tripwires
 
@@ -746,7 +781,7 @@ Instances:
 - `extension/authoring/review/draftContext.ts` — the draft pair's flow-owned pending/context
   slots (opaque refs only)
 - `extension/waves/prReviewWave.ts`, `adversarialReviewWave.ts`, `draftReviewWave.ts`,
-  `reviewClassifierWave.ts`, `objectiveExplorerWave.ts`, `scoutWave.ts` +
+  `reviewClassifierWave.ts`, `objectiveExplorerWave.ts`, `scoutWave.ts`, `simplifyWave.ts` +
   `extension/learning/analystWave.ts`, `audit.ts`, `harvest.ts`, `dream.ts`, `dreamReducer.ts`,
   `dreamAnalysis.ts` — the flow entrypoints
 - `extension/waves/laneIdentity.ts` — `orchestrationKey` + the routing-token fence;
@@ -755,5 +790,6 @@ Instances:
   — the surviving offline coverage
 - `extension/pi/v1/codeReview/reviewWave.ts` — the start/collect tool pair (live — the review
   doors drive it)
+- `extension/pi/v1/simplify.ts` — the simplify doors' installer (two warm doors, no tool)
 - `docs/design/pi-subagents-child-execution-policy.md` — the binding record for the two-boolean
   child policy (the constant packet is its producer half)

@@ -85,11 +85,15 @@ Both are deterministic and need no timing slack.
 
 ## UI-interacting tools: exported pure decode + pure core
 
-The test harness's `headfulUIContext` has no `select`/`input` fakes, so a registered-tool-level
-UI-interaction test isn't possible offline. The pattern: export the handler's decode as a pure
-function (the `decodeAskUserParams` pattern) and compose it with the file's pure core + fake-UI
-tests; the handler stays a thin wiring layer. That export is what makes param handling testable at
-all (see `pi/extension-api.md`).
+The harness's `invokeTool(name, params, { ui })` overlays scripted `select`/`input`/`editor`/`confirm`
+answers over the recording UI (precedents: `plan_review`'s launch chooser in
+`extension/pi/v1/planReview.test.ts`; `run_ci`'s confirm arms in `extension/pi/v1/delivery/ci.test.ts`),
+so a registered tool's dialog flow IS testable offline. Only `invokeCommand` (a real `session.prompt`)
+has no dialogs. The pattern: export the handler's decode as a pure function (the `decodeAskUserParams`
+pattern) and compose it with the file's pure core + fake-UI tests; the handler stays a thin wiring
+layer. That export is the **preferred** shape for decode/branch coverage — cheap, exhaustive and
+independent of the dialog script — not a workaround forced by a harness gap; reserve `opts.ui`
+overlays for the end-to-end dialog wiring (see `pi/extension-api.md`).
 
 ## Live-path note
 
@@ -103,6 +107,6 @@ programmatic callers, not live-session drift.
 - `extension/substrate/toolParams.test.ts` — the decode + ordering-proof pins
 - `docs/learned/workflow/cold-door-client.md` — the contrasting advisory decode policy (never reuse
   its helpers here)
-- `docs/learned/pi/extension-api.md` — the `headfulUIContext` gap that forces the pure-decode export
+- `docs/learned/pi/extension-api.md` — `invokeTool`'s `opts.ui` overlay + the pure-decode recipe
 - `docs/learned/workflow/issue-backend.md` — the opaque-id relaxation behind `idParam`
 - `docs/learned/workflow/plan-save-surfaces.md` — the fallback chain that forced the optionality flip
