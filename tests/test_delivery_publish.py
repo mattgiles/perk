@@ -26,9 +26,16 @@ from perk.delivery import (
     StatusResult,
     SyncRequest,
     SyncResult,
+    pr_body,
     publish,
 )
 from perk.delivery import sync as sync_mod
+from perk.delivery.change_stats import (
+    ChangeStats,
+    ChangeStatsUnavailable,
+    RowStats,
+    render_pr_section,
+)
 from perk.delivery.journal import (
     EventRole,
     JournalEvent,
@@ -74,6 +81,23 @@ from perk.objective import NodeStatus, ObjectiveNode
 from perk.substrate import git
 
 ROOT = Path("/repo")
+
+
+def stats_for(base: str, head: str) -> ChangeStats:
+    """A deterministic stub count for the change-stats runtime seam."""
+    return ChangeStats(
+        base=base,
+        head=head,
+        rows=(
+            RowStats("code", "Code", 10, 2, 1),
+            RowStats("tests", "Tests", 5, 0, 0),
+            RowStats("comments", "Comments", 0, 0, 0),
+            RowStats("learned_docs", "Learned docs", 0, 0, 0),
+            RowStats("other", "Other", 0, 0, 0),
+        ),
+    )
+
+
 OBJECTIVE = "500"
 LINEAGE = "01LINEAGE"
 MAIN = "m" * 40
@@ -145,7 +169,7 @@ class _FakePersistence:
         return self._world.get_plan(issue_id=issue_id)
 
     def get_plan_body(self, *, issue_id: str) -> str | None:
-        return None
+        return self._world.plan_body
 
     def update_plan_header(self, *, issue_id: str, fields: dict[str, object]) -> PlanHeaderUpdate:
         return self._world.update_plan_header(issue_id=issue_id, fields=fields)
@@ -292,6 +316,11 @@ class _World:
         self.sync_checkpoint_updates: dict[str, tuple[str | None, str | None]] = {}
         self.sync_calls: list[dict[str, object]] = []
         self.use_bound_sync_dispatcher = False
+        # The change-stats runtime seam: every (base, head) counted, and an optional failure.
+        self.stats_calls: list[tuple[str, str]] = []
+        self.stats_error: ChangeStatsUnavailable | None = None
+        self.update_body_boom: Exception | None = None
+        self.plan_body: str | None = None
 
     # ---------------------------------------------------------------- train + issues
 
@@ -534,6 +563,8 @@ class _World:
         )
 
     def _update_pr_body(self, *, number, body, repo_root):
+        if self.update_body_boom is not None:
+            raise self.update_body_boom
         self.bodies.append(body)
         self.timeline.append(("update_pr_body", number))
         boom = self.after_effect_boom.pop("update_pr_body", None)
@@ -729,6 +760,7 @@ class _World:
             now=lambda: "2026-01-01T00:00:00Z",
             sleep=self.sleeps.append,
             validate_pr_body=lambda body, *, pr_number: self.validate_errors,
+            change_stats=self._change_stats,
         )
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(publish, "_DEFAULT_PUBLISH_RUNTIME", runtime)
@@ -743,6 +775,12 @@ class _World:
         if result.layer is None:
             raise AssertionError("layer publish returned no layer detail")
         return result.layer
+
+    def _change_stats(self, root: Path, base: str, head: str) -> ChangeStats:
+        self.stats_calls.append((base, head))
+        if self.stats_error is not None:
+            raise self.stats_error
+        return stats_for(base, head)
 
     def ready(self, plan_id: str, objective_id: str = OBJECTIVE) -> PublishResult.Ready:
         """Drive the stacked ready arm (mark-ready-if-draft, then the stamp append)."""
@@ -828,6 +866,44 @@ def test_bottom_layer_fresh_publish_no_stack_work():
     (outcome,) = world.persistence.outcomes
     assert outcome.role is EventRole.COMPLETED
     assert outcome.observed == {"branch_sha": C1, "pr": 77, "stack": None}
+
+
+def test_fresh_publish_carries_the_change_stats_section_and_fields():
+    world = _bottom_world()
+    world.plan_body = "# The plan"
+    result = world.publish("101")
+    # Counted once, over the verified parent head .. the published candidate.
+    assert world.stats_calls == [(MAIN, C1)]
+    assert result.change_stats == stats_for(MAIN, C1)
+    assert result.change_stats_note is None
+    assert result.plan_embedded is True
+    section = render_pr_section(stats_for(MAIN, C1), note=None)
+    assert len(world.bodies) == 2  # the create pass, then the footer-bearing update pass
+    for body in world.bodies:
+        train_at = body.index("### Train context")
+        assert train_at < body.index(section) < body.index("<details><summary>Plan #101")
+
+
+def test_fresh_publish_with_unavailable_stats_carries_the_note():
+    world = _bottom_world()
+    world.stats_error = ChangeStatsUnavailable("cloc_missing", "cloc is not installed.")
+    result = world.publish("101")
+    assert result.change_stats is None
+    assert result.change_stats_note == "cloc is not installed."
+    assert "_Unavailable: cloc is not installed._" in world.bodies[-1]
+    assert world.persistence.checkpoints == [("101", MAIN, C1)]  # the publish still completes
+
+
+def test_near_cap_stacked_plan_drops_the_embed_on_both_passes():
+    world = _bottom_world()
+    world.plan_body = "x" * (pr_body.PR_BODY_MAX_CHARS - 500)
+    result = world.publish("101")
+    assert result.plan_embedded is False
+    assert len(world.bodies) == 2
+    for body in world.bodies:
+        assert "<details>" not in body
+        assert "too large to embed" in body
+        assert len(body) <= pr_body.PR_BODY_MAX_CHARS
 
 
 def test_second_layer_create_registers_the_stack():
@@ -1591,6 +1667,39 @@ def test_lower_claimed_layer_delegates_to_triggered_sync():
         result.stack_number is None and result.stack_size is None and result.stack_position is None
     )
     assert result.cascade == world.sync_result
+    # The trigger's head moved: its body is refreshed with fresh stats over the new range.
+    assert world.stats_calls == [(MAIN, C1)]
+    assert result.change_stats == stats_for(MAIN, C1)
+    assert result.change_stats_note is None
+    assert world.events("update_pr_body") == [("update_pr_body", 55)]
+    refreshed = world.bodies[-1]
+    assert render_pr_section(stats_for(MAIN, C1), note=None) in refreshed
+    assert "`gh pr checkout 55`" in refreshed
+    assert refreshed.index("### Train context") < refreshed.index("### Change stats")
+
+
+def test_cascade_body_refresh_failure_is_a_note_not_an_error():
+    world = _lower_published_world()
+    affected = (SyncResult.Layer("1", "101", "plan-101", 55, P1, C1),)
+    world.sync_result = _sync_result(affected=affected)
+    world.update_body_boom = GitHubError("HTTP 502")
+    result = world.publish("101")
+    assert result.change_stats == stats_for(MAIN, C1)
+    assert result.change_stats_note == "PR body refresh failed after cascade: HTTP 502"
+    assert result.operation_id == "01SYNC"
+
+
+def test_cascade_body_refresh_validation_failure_is_a_note():
+    world = _lower_published_world()
+    affected = (SyncResult.Layer("1", "101", "plan-101", 55, P1, C1),)
+    world.sync_result = _sync_result(affected=affected)
+    world.validate_errors = ("footer missing",)
+    world.stats_error = ChangeStatsUnavailable("cloc_missing", "cloc is not installed.")
+    result = world.publish("101")
+    assert result.change_stats is None
+    assert result.change_stats_note == (
+        "cloc is not installed.; PR body refresh failed after cascade: footer missing"
+    )
 
 
 def test_lower_layer_publish_enters_the_bound_sync_lock_exactly_once(monkeypatch):
@@ -1662,6 +1771,11 @@ def test_cascade_noop_uses_fresh_post_sync_checkpoints_and_typed_operation():
     assert result.parent_checkpoint_sha == MAIN and result.published_head_sha == C1
     assert result.cascade is not None and result.cascade.no_op is True
     assert world.reconstruct_calls == 2
+    # A no-op cascade leaves the body alone (it already describes this head); stats ride the
+    # envelope only.
+    assert world.stats_calls == [(MAIN, C1)]
+    assert result.change_stats == stats_for(MAIN, C1)
+    assert world.events("update_pr_body") == [] and world.bodies == []
 
 
 def test_cascade_refuses_sync_result_missing_the_trigger():
@@ -1802,6 +1916,10 @@ def test_top_layer_pure_noop_converge_writes_nothing():
     assert world.persistence.prepared == [] and world.persistence.outcomes == []
     assert world.persistence.checkpoints == []
     assert world.events("header") == [] and world.pushes == []
+    # Envelope-only stats over the recorded checkpoint pair; no body write.
+    assert world.stats_calls == [(P1, P2)]
+    assert result.change_stats == stats_for(P1, P2)
+    assert world.bodies == []
 
 
 def test_top_layer_remote_drift_refuses():

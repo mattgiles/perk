@@ -31,6 +31,7 @@ from typing import Never, Protocol, cast
 from perk import plan
 from perk.backends.issue_backend import IssueBackendError, PlanHeaderUpdate, PlanState
 from perk.backends.objective_store import ObjectiveStoreError
+from perk.delivery import change_stats as change_stats_mod
 from perk.delivery import pr_body
 from perk.delivery import sync as sync_mod
 from perk.delivery.facade import (
@@ -160,12 +161,16 @@ class _ValidateBody(Protocol):
 
 @dataclass(frozen=True)
 class _PublishRuntime:
-    """The replaceable non-authority runtime used by publication tests."""
+    """The replaceable non-authority runtime used by publication tests.
+
+    ``change_stats`` counts a layer's ``(repo_root, base_sha, head_sha)`` range; it has no
+    default so every constructor decides (tests must never shell cloc by accident)."""
 
     mint_operation_id: Callable[[], str]
     now: Callable[[], str]
     sleep: Callable[[float], None]
     validate_pr_body: _ValidateBody
+    change_stats: Callable[[Path, str, str], change_stats_mod.ChangeStats]
 
 
 _DEFAULT_PUBLISH_RUNTIME = _PublishRuntime(
@@ -173,6 +178,7 @@ _DEFAULT_PUBLISH_RUNTIME = _PublishRuntime(
     now=plan.now_iso,
     sleep=time.sleep,
     validate_pr_body=prs.validate_pr_body,
+    change_stats=change_stats_mod.summarize,
 )
 
 
@@ -226,6 +232,23 @@ def _compose_body(
         pr_number=pr_number,
         sections=sections,
     )
+
+
+def _stats_or_note(
+    pub: _Publication, base_sha: str, head_sha: str
+) -> tuple[change_stats_mod.ChangeStats | None, str | None]:
+    """The layer's change stats over ``base_sha..head_sha``, or ``(None, note)`` — an
+    unavailable count never fails a publication."""
+    try:
+        return pub.runtime.change_stats(pub.context.repo_root, base_sha, head_sha), None
+    except change_stats_mod.ChangeStatsUnavailable as exc:
+        return None, change_stats_mod.normalize_note(exc.message)
+
+
+def _stats_sections(
+    stats: change_stats_mod.ChangeStats | None, note: str | None
+) -> tuple[str, ...]:
+    return (change_stats_mod.render_pr_section(stats, note=note),)
 
 
 def _header_fields(pub: _Publication, pr_number: int) -> dict[str, object]:
@@ -726,7 +749,8 @@ def _cascade(pub: _Publication, objective_id: str) -> PublishResult.Layer:
             error_type="publication_drift",
         )
     ctx = _derive_ctx(pub, updated)
-    layer = updated.layers[_layer_index(updated, pub.plan_id)]
+    index = _layer_index(updated, pub.plan_id)
+    layer = updated.layers[index]
     if layer.pr_number is None:
         raise PublicationError(
             f"layer {layer.node_id} (plan #{pub.plan_id}) stages no PR after suffix propagation",
@@ -772,6 +796,27 @@ def _cascade(pub: _Publication, objective_id: str) -> PublishResult.Layer:
             f"layer {layer.node_id} has no complete checkpoint pair after suffix propagation",
             error_type="publication_drift",
         )
+    stats, stats_note = _stats_or_note(pub, parent_checkpoint, published_head)
+    composed = _compose_body(
+        pub, _body_facts(updated, ctx, index), pr.number, _stats_sections(stats, stats_note)
+    )
+    if not result.no_op:
+        # The trigger's head moved, so its body is refreshed to describe the new head. The
+        # publication already succeeded and is journaled: a refresh failure is reported on the
+        # note, never raised. Successor bodies are not rewritten — each footnote names the
+        # range it describes.
+        refresh_error = _refresh_body(pub, pr.number, composed.text)
+        if refresh_error is not None:
+            stats_note = change_stats_mod.normalize_note(
+                "; ".join(
+                    part
+                    for part in (
+                        stats_note,
+                        f"PR body refresh failed after cascade: {refresh_error}",
+                    )
+                    if part
+                )
+            )
     header_update = PlanHeaderUpdate(fields_updated=(), dry_run=False)
     if pub.trigger_run_id is not None:
         merged = plan.merge_untrusted_str_list(
@@ -784,7 +829,7 @@ def _cascade(pub: _Publication, objective_id: str) -> PublishResult.Layer:
         pr=pr,
         branch=ctx.branch,
         header_update=header_update,
-        plan_embedded=pub.plan_body is not None,
+        plan_embedded=composed.plan_embedded,
         pr_checked=True,
         parent_branch=ctx.parent_branch,
         operation_id=result.operation_id,
@@ -796,7 +841,19 @@ def _cascade(pub: _Publication, objective_id: str) -> PublishResult.Layer:
         resumed=result.resumed,
         converged_noop=result.no_op,
         cascade=result,
+        change_stats=stats,
+        change_stats_note=stats_note,
     )
+
+
+def _refresh_body(pub: _Publication, pr_number: int, body: str) -> str | None:
+    """Write ``body`` to the PR and self-check it; the failure text, or ``None`` on success."""
+    try:
+        pub.context.github.update_pr_body(pr_number, body=body)
+    except GitHubError as exc:
+        return str(exc)
+    errors = pub.runtime.validate_pr_body(body, pr_number=pr_number)
+    return "; ".join(errors) if errors else None
 
 
 def _layer_index(train: DeliveryTrain, plan_id: str) -> int:
@@ -1019,11 +1076,14 @@ def _complete_publication(
     is the resume arms' recorded own-PR pin: when the prepared record named a concrete PR,
     the head-selector lookup must rediscover exactly it (else ``publication_drift``)."""
     facts = _body_facts(train, ctx, index)
+    # Counted once: both body passes carry the same section.
+    stats, stats_note = _stats_or_note(pub, parent_sha, candidate_sha)
+    sections = _stats_sections(stats, stats_note)
     pr = pub.context.github.create_pr(
         head=ctx.branch,
         base=ctx.parent_branch,
         title=pub.plan_state.title,
-        body=_compose_body(pub, facts, None).text,
+        body=_compose_body(pub, facts, None, sections).text,
         draft=True,
     )
     if expected_pr_number is not None and pr.number != expected_pr_number:
@@ -1046,7 +1106,7 @@ def _complete_publication(
         # target a stale parent. Draft state is never touched on an existing PR — draft-by-
         # default is for creation only; `/ready` stays the separate per-layer gesture.
         pub.context.github.update_pr_base(pr.number, base=ctx.parent_branch)
-    composed = _compose_body(pub, facts, pr.number)
+    composed = _compose_body(pub, facts, pr.number, sections)
     body = composed.text
     pub.context.github.update_pr_body(pr.number, body=body)
     errors = pub.runtime.validate_pr_body(body, pr_number=pr.number)
@@ -1097,6 +1157,8 @@ def _complete_publication(
         published_head_sha=candidate_sha,
         resumed=resumed,
         converged_noop=False,
+        change_stats=stats,
+        change_stats_note=stats_note,
     )
 
 
@@ -1413,11 +1475,16 @@ def _noop_converged(
             "parent checkpoint — broken stored state",
             error_type="publication_drift",
         )
+    # Envelope-only stats: the body already describes this head, so nothing is written.
+    stats, stats_note = _stats_or_note(pub, parent_checkpoint, checkpoint)
+    composed = _compose_body(
+        pub, _body_facts(train, ctx, index), pr_number, _stats_sections(stats, stats_note)
+    )
     return PublishResult.Layer(
         pr=pr,
         branch=ctx.branch,
         header_update=PlanHeaderUpdate(fields_updated=(), dry_run=False),
-        plan_embedded=pub.plan_body is not None,
+        plan_embedded=composed.plan_embedded,
         pr_checked=True,
         parent_branch=ctx.parent_branch,
         operation_id=None,
@@ -1428,6 +1495,8 @@ def _noop_converged(
         published_head_sha=checkpoint,
         resumed=False,
         converged_noop=True,
+        change_stats=stats,
+        change_stats_note=stats_note,
     )
 
 

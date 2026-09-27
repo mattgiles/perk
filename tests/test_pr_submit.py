@@ -753,6 +753,7 @@ def _publication_result(
     cascade: delivery.SyncResult | None = None,
     fields_updated: tuple[str, ...] = ("branch", "pr", "lifecycle_stage"),
     converged_noop: bool = False,
+    change_stats_note: str | None = None,
 ) -> delivery.PublishResult:
     layer = delivery.PublishResult.Layer(
         pr=github.PullRequest(number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=False),
@@ -772,6 +773,8 @@ def _publication_result(
         resumed=cascade.resumed if cascade is not None else False,
         converged_noop=cascade.no_op if cascade is not None else converged_noop,
         cascade=cascade,
+        change_stats=None if change_stats_note is not None else _STATS,
+        change_stats_note=change_stats_note,
     )
     return delivery.PublishResult(kind="layer", plan_id="7", dry_run=False, layer=layer)
 
@@ -854,6 +857,26 @@ def test_stacked_submit_delegates_to_delivery_publish(monkeypatch):
     ]
     assert data["plan_header"]["fields_updated"] == ["branch", "pr", "lifecycle_stage"]
     assert calls["pushed"] is False and calls["header"] is None
+    # The layer's change stats ride the envelope; the incremental seam is never consulted.
+    assert data["change_stats"] == change_stats.ChangeStatsOut.from_domain(_STATS).model_dump(
+        mode="json"
+    )
+    assert data["change_stats_note"] is None
+    assert calls["stats_base"] is None
+
+
+def test_stacked_submit_copies_an_unavailable_stats_note(monkeypatch):
+    _authed(monkeypatch)
+    _stub_gh(monkeypatch)
+    _stub_get_plan_header(monkeypatch, {"delivery_lineage": "01LINEAGE", "run_id": "01HDR"})
+    _stub_delivery_publish(
+        monkeypatch, result=_publication_result(change_stats_note="cloc is not installed.")
+    )
+    result = _run_stacked(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["change_stats"] is None
+    assert data["change_stats_note"] == "cloc is not installed."
 
 
 def test_stacked_cascade_envelope_bookkeeping_and_human_render(monkeypatch):

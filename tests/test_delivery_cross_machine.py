@@ -49,6 +49,7 @@ from perk.delivery import (
     recover,
 )
 from perk.delivery._fakes import FakeDeliveryGit, FakeDeliveryGitHub
+from perk.delivery.change_stats import ChangeStats, RowStats
 from perk.delivery.finalize import (
     LandFinalization,
     LearnConsumeUpdate,
@@ -94,6 +95,27 @@ from perk.substrate import git as git_mod
 OBJECTIVE = "500"
 LINEAGE = "01LINEAGE"
 NOW = "2026-02-02T00:00:00Z"
+
+
+def _stub_change_stats(root: Path, base: str, head: str) -> ChangeStats:
+    """The change-stats runtime seam — never shells cloc in the cross-machine harness."""
+    del root
+    return ChangeStats(
+        base=base,
+        head=head,
+        rows=tuple(
+            RowStats(row_id, label, 1, 0, 0)
+            for row_id, label in (
+                ("code", "Code"),
+                ("tests", "Tests"),
+                ("comments", "Comments"),
+                ("learned_docs", "Learned docs"),
+                ("other", "Other"),
+            )
+        ),
+    )
+
+
 M1 = "d" * 40  # fabricated merge commits (the merge facts ride the stateful fake)
 M2 = "e" * 40
 
@@ -836,6 +858,7 @@ class _Machine:
             now=lambda: NOW,
             sleep=lambda _seconds: None,
             validate_pr_body=lambda body, *, pr_number: (),
+            change_stats=_stub_change_stats,
         )
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(publish, "_DEFAULT_PUBLISH_RUNTIME", runtime)

@@ -386,6 +386,8 @@ def _stacked_submit_impl(
         stack_position=result.stack_position,
         operation_id=result.operation_id,
         operation=result.cascade,
+        change_stats=result.change_stats,
+        change_stats_note=result.change_stats_note,
     )
 
 
