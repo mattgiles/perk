@@ -399,6 +399,22 @@ def test_drift_is_retained_when_the_drifted_page_is_not_re_observed(repo):
     assert any(note.startswith("drift retained: 1 comparison") for note in retained.notes)
 
 
+def test_vanished_page_drift_is_retained_when_the_page_is_not_re_observed(repo):
+    # Page existence is a comparison too: a validator-less page that vanished (404) and then
+    # errors (500) never confirmed its return, so the seed's unchanged ETag must not clear it.
+    _docs_entry(repo)
+    site = _site(etags=False)
+    site.pages[SEED] = ("<p>seed</p>", '"seed-v1"')
+    first = _only(_check(repo, site)).view.entry
+    assert (first.evidence, first.drifted) == ("strong", False)
+    del site.pages[API]
+    assert _only(_check(repo, site, force=True)).view.entry.drifted is True
+    site.statuses[API] = 500
+    retained = _only(_check(repo, site, force=True))
+    assert retained.view.entry.drifted is True
+    assert any(note.startswith("drift retained: 1 comparison") for note in retained.notes)
+
+
 def test_drift_is_retained_when_a_recorded_validator_is_not_returned(repo):
     _docs_entry(repo)
     site = _site()
@@ -586,6 +602,44 @@ class _CountingStream(httpx.SyncByteStream):
 
 def _streaming(stream: _CountingStream, **headers: str) -> httpx.MockTransport:
     return httpx.MockTransport(lambda _request: httpx.Response(200, headers=headers, stream=stream))
+
+
+@pytest.mark.parametrize("raw_etag", [b'"\xff"', b'"\xc3\xa9"', b'W/"caf\xe9-1"'])
+def test_a_non_ascii_validator_round_trips_byte_exactly(repo, raw_etag):
+    # obs-text validator bytes are legal; the next conditional request must send back exactly
+    # the bytes the server sent, and never abort the check.
+    _docs_entry(repo, pages=(SEED,))
+    sent: list[bytes | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) != SEED:
+            return httpx.Response(404)
+        condition = dict(request.headers.raw).get(b"If-None-Match")
+        sent.append(condition)
+        if condition == raw_etag:
+            return httpx.Response(304, headers=[(b"ETag", raw_etag)])
+        return httpx.Response(200, headers=[(b"ETag", raw_etag)])
+
+    transport = httpx.MockTransport(handler)
+    first = check.check_entries(repo, slugs=(), force=False, now=lambda: LATER, transport=transport)
+    assert _only(first).view.entry.evidence == "strong"
+    second = check.check_entries(repo, slugs=(), force=True, now=lambda: LATER, transport=transport)
+    result = _only(second)
+    assert (result.action, result.view.entry.drifted) == ("probed", False)
+    assert sent == [None, raw_etag]
+
+
+def test_an_unencodable_recorded_validator_is_a_noted_probe_error(repo):
+    _docs_entry(repo, pages=(SEED, GUIDE))
+    layout = _layout(repo)
+    catalog = cat.load_catalog(layout)
+    entry = catalog.get("pi")
+    assert entry is not None
+    pages = (cat.PageMarker(url=SEED, etag='"\u2603"'), cat.PageMarker(url=GUIDE))
+    cat.write_catalog(layout, catalog.with_entry(replace(entry, upstream=cat.DocsUpstream(pages))))
+    result = _only(_check(repo, _site()))
+    assert result.action == "probed"
+    assert any("cannot be sent" in note for note in result.notes)
 
 
 def test_a_page_probe_consumes_no_body():

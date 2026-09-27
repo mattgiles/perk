@@ -1019,7 +1019,8 @@ const SAFE_PATTERNS = [
   // cache-only preflight. The three network verbs — `check` (the only freshness probe),
   // `refresh` and `add source` — mutate only that same cache behind the same preflight, and
   // their git operations run config-pinned (no global/system config, hooks disabled), so nothing
-  // a cloned tree selects can execute. `add docs` is not admitted.
+  // a cloned tree or the user's global config selects can execute (env config and a checkout's
+  // repo-local config stay trusted, §8.75(i)). `add docs` is not admitted.
   // `--json` last, any whitespace-separated arguments before it; the destructive veto still
   // blocks real-file redirects and chained mutations.
   /^\s*perk\s+librarian\s+(?:list|record|remove|check|refresh|add\s+source)\b(?:\s+\S+)*\s+--json\s*$/,

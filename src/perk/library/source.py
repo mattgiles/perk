@@ -9,8 +9,10 @@ names the checkout's state and the rerun that completes the operation.
 
 Every executing git operation runs config-pinned (``pinned=`` an empty temporary hooks
 directory — :data:`perk.substrate.git.LIBRARY_GIT_ENV`), so nothing the cloned tree or the
-user's global config selects can execute. ``upstream.head_sha`` is always the checkout's HEAD —
-the revision the local mirror holds; only a clone, a re-pin or a fast-forward changes it.
+user's global config selects can execute; env config and the checkout's repo-local config stay
+trusted (an adopted pre-existing checkout brings its creator's). ``upstream.head_sha`` is
+always the checkout's HEAD — the revision the local mirror holds; only a clone, a re-pin or a
+fast-forward changes it.
 """
 
 import contextlib
@@ -119,6 +121,7 @@ def add_source(
                     requested=requested,
                     pin=pin,
                     fresh=fresh,
+                    snapshot=snapshot,
                     stale_after=stale_after,
                     hooks=hooks,
                     now=now,
@@ -291,13 +294,27 @@ def _record_source(
     requested: str | None,
     pin: str | None,
     fresh: bool,
+    snapshot: Entry | None,
     stale_after: int | None,
     hooks: Path,
     now: Clock | None,
 ) -> AddSourceOutcome:
-    """The lock phase of ``add source``: re-check eligibility, re-pin, write the entry."""
+    """The lock phase of ``add source``: re-check eligibility, re-pin, write the entry.
+
+    A fresh clone was made outside the lock, so its recording is fenced on the catalog still
+    holding the pre-clone ``snapshot`` for the path: another run that adopted (or re-pinned)
+    the checkout meanwhile owns it now, and recording this run's pin over it would pair a
+    ``ref`` with another revision's HEAD.
+    """
     with library_lock(repo_root):
         catalog = load_catalog(layout)
+        if fresh and catalog.owner_of(rel) != snapshot:
+            raise LibraryError(
+                "checkout_invalid",
+                f"{rel} was catalogued or changed by another `perk librarian add source` while "
+                "this one cloned — the checkout is left as that run recorded it; rerun to "
+                "reconcile",
+            )
         existing, chosen = _eligibility(
             catalog, ref=ref, rel=rel, requested=requested, pin=pin, fresh=fresh
         )
@@ -480,7 +497,8 @@ def _refresh_checkout(
     else:
         ahead = _ancestry(checkout, previous, remote_tip)
         if ahead:
-            if not git.merge_ff_only(checkout, tracking, pinned=hooks):
+            # The exact classified SHA — a name like `origin/main` could resolve to a tag.
+            if not git.merge_ff_only(checkout, remote_tip, pinned=hooks):
                 raise LibraryError(
                     "io_error",
                     f"refresh: fast-forwarding {checkout} to {tracking} failed — inspect the "

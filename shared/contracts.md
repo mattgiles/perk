@@ -13788,11 +13788,14 @@ completes the operation.
   `GIT_CONFIG_NOSYSTEM=1` (`git.LIBRARY_GIT_ENV`) and `-c core.hooksPath=<an empty temporary
   directory>` — the `pinned=` keyword of `clone_partial` / `fetch` / `merge_ff_only` /
   `checkout_detached` / `remote_branch_head` / `is_dirty` (`None` keeps every other caller
-  unchanged). No configured hook, filter driver, fsmonitor, credential helper, `insteadOf`
-  rewrite or config-file proxy applies, so nothing a cloned tree selects can execute. Documented costs: private repositories
-  use the `git@`/`ssh://` form (ssh-agent auth is outside git config); LFS content arrives as
-  pointer files. Env config (`GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`) and env proxies still apply.
-  Repo-local config of a checkout perk did not create is not audited.
+  unchanged). No hook, filter driver, fsmonitor, credential helper, `insteadOf` rewrite or
+  config-file proxy configured in global/system config applies, and no hook runs, so nothing a
+  cloned tree or the user's global/system config selects can execute. Documented costs: private
+  repositories use the `git@`/`ssh://` form (ssh-agent auth is outside git config); LFS content
+  arrives as pointer files. **Trust boundary** (documented, not audited): env config
+  (`GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`, `GIT_CONFIG_PARAMETERS`) and env proxies still apply, and
+  a checkout's repo-local `.git/config` is honoured — for a perk clone it is what git wrote at
+  clone time; for an adopted pre-existing checkout it is whatever its creator configured.
 - *Repo-refs.* `parse_repo_ref` (pure) accepts, in order: scp-like `git@<host>:<org>/<repo>[.git]`
   (clone URL `git@<host>:<org>/<repo>.git`); an `https`/`http`/`ssh` URL whose path is exactly
   `/<org>/<repo>[.git][/]` — no query/fragment, no port, no userinfo except an `ssh://` login
@@ -13820,7 +13823,11 @@ completes the operation.
   toplevel equal to the target, the **stored** `remote.origin.url` equal to the clone URL
   (comparable under `insteadOf` rewrites) and a resolvable HEAD — else `checkout_invalid`
   ("rerun later, or delete it and rerun"); a valid uncatalogued checkout (a killed run's) is
-  catalogued. Under the lock: eligibility again; a **re-pin** (an existing checkout, a `--ref`
+  catalogued. Under the lock: a fresh clone (made outside the lock) is recorded only while the
+  catalog's owner of the path still equals the pre-clone read — otherwise another run adopted or
+  re-pinned the checkout meanwhile and recording this run's pin would pair a `ref` with another
+  revision's HEAD (`checkout_invalid`, the checkout kept as that run recorded it); eligibility
+  again; a **re-pin** (an existing checkout, a `--ref`
   differing from the recorded `ref`) refuses a dirty tree (`checkout_dirty`), fetches
   (`fetch_failed`) and detaches; the entry is new (`stale_after` default 24 h), a revision change
   (a fresh clone or a re-pin: `ref` = the pin, markers from the checkout, `checked_at` /
@@ -13845,7 +13852,8 @@ completes the operation.
   classification by **ancestry, never by the merge's exit code**
   (`merge --ff-only` also exits 0 for "Already up to date"): `origin/<branch>` gone →
   `skipped_non_ff` with evidence `none` and `drifted` kept; the tip equal to HEAD →
-  `up_to_date`; HEAD an ancestor of the tip → fast-forward → `fast_forwarded`; otherwise
+  `up_to_date`; HEAD an ancestor of the tip → fast-forward to that exact classified SHA (a name such as
+  `origin/main` could resolve to a same-named tag) → `fast_forwarded`; otherwise
   `skipped_non_ff` ("local commits ahead of …" / "diverged from …") with `drifted = true`; an
   unanswerable ancestry probe is `io_error`. Every post-fetch arm records `checked_at`, evidence
   `strong` (unless the tip is gone), `drifted` as above (`false` for `up_to_date` /
@@ -13873,7 +13881,11 @@ completes the operation.
   `200` → each of ETag / Last-Modified / the sitemap's per-URL `lastmod` is **baselined** when
   recorded `None`, **moved** when both differ, any observed one strong — and a recorded marker
   the response omits leaves that page not re-observed; `404`/`410` → moved, strong; any other
-  status or a transport error → not observed (noted). The **inventory fingerprint**
+  status or a transport error → not observed (noted) — a page's existence is itself a recorded
+  comparison, so any probed page not observed this run counts as not re-observed, validators or
+  not. Validators travel as latin-1 text (a 1:1 map of the raw header bytes), so an obs-text
+  ETag round-trips byte-exactly; a recorded value outside latin-1 is a noted probe error. The
+  **inventory fingerprint**
   (`sitemap=<sha256 of the sorted loc⇥lastmod lines>` and/or `llms=<sha256 of the body>`,
   `;`-joined — never an HTML body) is compared only when every inventory request answered
   definitively (a readable 200 whose sitemap parsed, or 404/410), baselined / moved alike. Evidence: `strong` if any page gave

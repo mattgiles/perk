@@ -271,7 +271,9 @@ changes) pass and nothing under the library is tracked. The probes run before th
 except the probes of `remove`'s entry directory and `refresh`'s checkout, which need the catalog
 (see [Librarian commands](../cli/librarian.md)). The network verbs (`add source`, `check`,
 `refresh`) run their git operations without global or system git config and with hooks
-disabled, so nothing a cloned repository selects can execute. A form without `--json` or with
+disabled, so nothing a cloned repository's content or that config selects can execute (git
+config from environment variables and a checkout's own repository-local config stay trusted —
+see [Librarian commands](../cli/librarian.md)). A form without `--json` or with
 `--json` not last, `perk librarian add docs`, other `perk librarian` verbs, real-file redirects
 and chained mutations stay blocked.
 

@@ -92,18 +92,28 @@ class HttpProbe:
         self._client.close()
 
     def page(self, url: str, *, etag: str | None, last_modified: str | None) -> PageResponse:
-        """A conditional ``GET`` of ``url`` that reads no body."""
-        headers: dict[str, str] = {}
-        if etag is not None:
-            headers["If-None-Match"] = etag
-        if last_modified is not None:
-            headers["If-Modified-Since"] = last_modified
+        """A conditional ``GET`` of ``url`` that reads no body.
+
+        Validators travel as latin-1 text — a 1:1 map of the header's raw bytes — so an
+        obs-text validator round-trips byte-exactly into the next conditional request. A
+        recorded value outside latin-1 (never produced here) cannot be sent: ``ProbeError``.
+        """
+        headers: dict[bytes, bytes] = {}
+        try:
+            if etag is not None:
+                headers[b"If-None-Match"] = etag.encode("latin-1")
+            if last_modified is not None:
+                headers[b"If-Modified-Since"] = last_modified.encode("latin-1")
+        except UnicodeEncodeError as exc:
+            raise ProbeError(
+                f"{url}: the recorded validator cannot be sent as a header ({exc})"
+            ) from exc
         try:
             with self._client.stream("GET", url, headers=headers) as response:
                 return PageResponse(
                     status=response.status_code,
-                    etag=response.headers.get("ETag"),
-                    last_modified=response.headers.get("Last-Modified"),
+                    etag=_raw_header(response, b"etag"),
+                    last_modified=_raw_header(response, b"last-modified"),
                 )
         except (httpx.HTTPError, httpx.InvalidURL) as exc:
             raise _probe_error(url, exc) from exc
@@ -124,6 +134,14 @@ class HttpProbe:
                 return TextResponse(status=200, body=b"".join(chunks))
         except (httpx.HTTPError, httpx.InvalidURL) as exc:
             raise _probe_error(url, exc) from exc
+
+
+def _raw_header(response: httpx.Response, name: bytes) -> str | None:
+    """The first ``name`` header's raw bytes as latin-1 text (a 1:1 byte map)."""
+    for key, value in response.headers.raw:
+        if key.lower() == name:
+            return value.decode("latin-1")
+    return None
 
 
 def _probe_error(url: str, exc: Exception) -> ProbeError:

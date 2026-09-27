@@ -379,5 +379,6 @@ _Avoid_: cache, rate limit
 
 **Config-pinned git**:
 The library's executing git operations, run without global/system config and with hooks
-disabled, so nothing a cloned tree (or the user's config) selects can execute.
+disabled, so nothing a cloned tree or the user's global/system config selects can execute; env
+config and a checkout's own repo-local config remain trusted (unaudited).
 _Avoid_: sandboxed git, safe clone

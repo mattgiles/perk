@@ -1634,6 +1634,8 @@ def test_parse_cat_file_batch_rejects_non_blobs_and_truncation():
         git._parse_cat_file_batch(f"{oid} commit 3\nabc\n".encode())
     with pytest.raises(git.GitError, match="truncated"):
         git._parse_cat_file_batch(f"{oid} blob 10\nabc\n".encode())
+
+
 # --- the library's config-pinned ops -----------------------------------------------------
 
 

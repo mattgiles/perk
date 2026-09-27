@@ -27,7 +27,8 @@ _GIT_ENV = {"GIT_TERMINAL_PROMPT": "0"}
 # global and system config, so no configured hooks path, filter driver, credential helper,
 # `insteadOf` rewrite or config-file proxy applies — nothing a cloned tree selects can execute.
 # Paired with a `-c core.hooksPath=<empty dir>` pin (the `pinned=` keyword below). Env config
-# (`GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`) and env proxies still apply.
+# (`GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`), env proxies and the checkout's repo-local config still
+# apply — the trusted, unaudited remainder.
 LIBRARY_GIT_ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
 
 # A blobless partial clone of a whole repository can be slow on a large upstream.

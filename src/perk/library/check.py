@@ -350,12 +350,6 @@ def _apply_page(
     return _PageVerdict(baselined, moved=moved, strong=strong, observed=complete)
 
 
-def _has_marker(marker: PageMarker) -> bool:
-    return any(
-        value is not None for value in (marker.etag, marker.last_modified, marker.sitemap_lastmod)
-    )
-
-
 def _probe_docs(entry: Entry, http: HttpProbe, now: datetime) -> _Probed:
     """Bounded conditional page requests + the inventory fingerprint → evidence and drift."""
     recorded = entry.upstream if isinstance(entry.upstream, DocsUpstream) else DocsUpstream()
@@ -369,6 +363,7 @@ def _probe_docs(entry: Entry, http: HttpProbe, now: datetime) -> _Probed:
 
     markers: list[PageMarker] = []
     moved = strong = False
+    # Comparisons not repeated this run; a page's existence is one, validators or not.
     unobserved = 0
     consecutive_errors = 0
     for position, marker in enumerate(probed):
@@ -381,13 +376,13 @@ def _probe_docs(entry: Entry, http: HttpProbe, now: datetime) -> _Probed:
             remaining = probed[position:]
             run.notes.append(f"{len(remaining)} page(s) not probed ({stop})")
             markers.extend(remaining)
-            unobserved += sum(1 for page in remaining if _has_marker(page))
+            unobserved += len(remaining)
             break
         response = run.page(marker)
         if response is None:
             consecutive_errors += 1
             markers.append(marker)
-            unobserved += 1 if _has_marker(marker) else 0
+            unobserved += 1
             continue
         consecutive_errors = 0
         verdict = _apply_page(marker, response, lastmods.get(marker.url))
@@ -398,7 +393,7 @@ def _probe_docs(entry: Entry, http: HttpProbe, now: datetime) -> _Probed:
                 else f"HTTP {response.status}"
             )
             run.notes.append(f"{marker.url}: {reason} — not observed")
-            unobserved += 1 if _has_marker(marker) else 0
+            unobserved += 1
         markers.append(verdict.marker)
         moved |= verdict.moved
         strong |= verdict.strong

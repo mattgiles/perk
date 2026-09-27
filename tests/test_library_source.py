@@ -345,9 +345,46 @@ def test_a_clone_another_run_catalogued_meanwhile_is_never_deleted(repo, upstrea
 
     monkeypatch.setattr(source, "library_lock", adopting_lock)
     error = _refusal(lambda: _add(repo, slug="widget"))
-    assert error.error_type == "invalid_input"
+    assert error.error_type == "checkout_invalid"
+    assert "while this one cloned" in str(error)
     assert _checkout(repo).is_dir()
     assert _catalog(repo).entries == tuple(adopted)
+
+
+def test_a_fresh_clone_never_records_its_pin_over_a_concurrent_repin(repo, upstream, monkeypatch):
+    # Interleaving: this run clones and detaches at v1; before it takes the lock, another run
+    # reuses the checkout, re-pins it to v2 and records that under the same slug. Recording v1
+    # now would pair the ref with v2's HEAD.
+    upstream.tag("v1", "HEAD~1")
+    v2 = upstream.advance_origin()
+    upstream.tag("v2", v2)
+    real_lock = source.library_lock
+    repinned: list[cat.Entry] = []
+
+    @contextlib.contextmanager
+    def repinning_lock(root):
+        if not repinned:
+            run_git(_checkout(repo), "checkout", "-q", "--detach", v2)
+            entry = cat.Entry(
+                kind="source",
+                slug="widget",
+                source=CLONE_URL,
+                path=ENTRY_PATH,
+                added_at="2026-09-27T00:00:00Z",
+                stale_after=86_400,
+                upstream=cat.SourceUpstream(branch="main", head_sha=v2),
+                ref="v2",
+            )
+            _set_entry(repo, entry)
+            repinned.append(entry)
+        with real_lock(root):
+            yield
+
+    monkeypatch.setattr(source, "library_lock", repinning_lock)
+    error = _refusal(lambda: _add(repo, pin="v1"))
+    assert error.error_type == "checkout_invalid"
+    assert _head(_checkout(repo)) == v2
+    assert _catalog(repo).entries == tuple(repinned)
 
 
 def test_clone_failure_leaves_nothing_behind(repo, upstream, monkeypatch):
@@ -525,6 +562,19 @@ def test_refresh_fast_forwards(repo, upstream):
     assert _head(_checkout(repo)) == new
     assert git.current_branch(_checkout(repo)) == "main"
     _assert_docs_clean(repo)
+
+
+def test_refresh_fast_forwards_to_the_classified_tip_despite_a_shadowing_tag(repo, upstream):
+    # An upstream tag named `origin/main` outranks the remote-tracking ref in git's name
+    # resolution; the merge must use the exact tip the ancestry check classified.
+    _add(repo)
+    old = upstream.sha("main")
+    upstream.tag("origin/main", old)
+    new = upstream.advance_origin()
+    outcome = _refresh(repo)
+    assert outcome.action == "fast_forwarded"
+    assert _head(_checkout(repo)) == new
+    assert _head_sha(outcome.view.entry) == new
 
 
 def test_refresh_skips_a_dirty_checkout_without_writing(repo, upstream):

@@ -209,9 +209,13 @@ URL, and query strings are refused.
 
 **The git policy.** Every git operation that runs over a library checkout — the clone, fetches,
 checkouts, fast-forwards, the uncommitted-changes check, and `check`'s probe — ignores your
-global and system git config and runs with hooks disabled, so nothing a cloned repository (or
-your config — hooks, filters, an fsmonitor) selects can execute.
-The costs: no credential helper, no `insteadOf` rewrite, and no config-file proxy (proxy
+global and system git config and runs with hooks disabled, so nothing a cloned repository's
+content, or your global or system config (hooks, filters, an fsmonitor), selects can execute.
+Two things stay trusted and are not audited: git configuration set through environment
+variables (`GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`, `GIT_CONFIG_PARAMETERS`),
+and a checkout's own repository-local `.git/config`. For a checkout `add source` cloned, that
+file is what git wrote at clone time; for an existing checkout it adopts (see below), it is
+whatever its creator configured — adopt only checkouts you trust. The costs: no credential helper, no `insteadOf` rewrite, and no config-file proxy (proxy
 environment variables still apply). **Private repositories** therefore need the `git@…` or
 `ssh://…` form (ssh-agent authentication does not depend on git config). Repositories that use
 Git LFS clone with LFS pointer files instead of the large files.
@@ -219,10 +223,12 @@ Git LFS clone with LFS pointer files instead of the large files.
 **Reruns and existing checkouts.** The command is idempotent: rerunning it over a valid checkout
 reports `reused` and changes nothing (a new `--stale-after` is the only thing it updates). A
 valid checkout of the same URL that is not yet catalogued — for example one an interrupted run
-left behind — is catalogued as it stands. A directory at the target that is not a checkout of
+left behind — is catalogued as it stands, including its repository-local git config, which later
+`refresh` and re-pin runs honour. A directory at the target that is not a checkout of
 that URL (a plain directory, another remote, a linked worktree) is `checkout_invalid` — rerun
 later if another `add source` may still be running, otherwise delete it and rerun. If the target
-appears while the command is cloning, it is `checkout_invalid` and the directory is left alone.
+appears while the command is cloning — or another `add source` catalogs or re-pins the checkout
+before this one records it — it is `checkout_invalid` and the directory is left alone.
 A failed clone is `clone_failed`; a clone that cannot be recorded is removed again, so nothing is
 left behind. An entry already catalogued at the path must be re-added with the same URL and slug
 (`invalid_input` — `remove` it first to switch URLs); a slug another entry uses is `slug_exists`.
