@@ -362,6 +362,19 @@ _Avoid_: sanitized payload, rendered text, cleaned entry
 
 ### The perk library
 
+**Librarian**:
+The shipped `librarian` skill — the model-facing rules for consulting, checking, refreshing and
+adding library entries, plus the documentation crawl workflow — paired with the `perk librarian`
+CLI group, the deterministic workers it drives. The skill decides; the workers act.
+_Avoid_: library skill, docs skill
+
+**Staging handshakes**:
+`sources.json` (the per-page inventory) and `failed-pages.json` (the crawl's failure report),
+written by the `librarian` skill's crawl script into the staging directory and consumed by
+`perk librarian record --publish` (markers seeded from the inventory; a non-empty report refused
+unless accepted).
+_Avoid_: manifest, crawl log
+
 **Repo-ref**:
 The user-facing spelling of a source repository (`owner/repo`, `host/org/repo`, `https://…`,
 `ssh://…`, `git@host:org/repo`), normalised by `parse_repo_ref` to a `RepoRef` (host/org/repo plus

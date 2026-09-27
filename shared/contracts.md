@@ -13671,7 +13671,7 @@ exit, no `plan_review`.
    (§8.57).
 7. **Boundaries.** No browser/plannotator dependency; no persistence, retry, supersede, or
    cancel; dream drafts refused; refinement sessions excluded by the stage gate.
-## §8.75 · The perk library (layout, catalog, lock, staging/publish, the read-only carve-out, the network verbs)
+## §8.75 · The perk library (layout, catalog, lock, staging/publish, the read-only carve-out, the network verbs, the `librarian` skill)
 
 The **perk library** is a catalogued, gitignored offline reference of external documentation
 mirrors and source checkouts. Python owns it end to end (`perk/library/` + the `perk librarian`
@@ -13712,12 +13712,16 @@ integer seconds (defaults `docs` 1 209 600 = 14 d, `source` 86 400 = 24 h; the C
 `--stale-after <int>[smhd]`). The **derived `status`** (never stored) names the next action, by
 precedence: `pinned` (a source entry with a `ref`) › `drifted` (the stored flag) › `unknown`
 (never checked) › `stale` (`now - checked_at ≥ stale_after`) › `unverifiable` (checked, `evidence
-== "none"`) › `fresh`. Two staging handshakes the hardened crawl script writes: the per-page
-inventory `<mirror>/sources.json` (`{"pages": [{"source_url": …}, …]}` at minimum — read
-advisorily to seed one `PageMarker` per distinct `source_url`; absent → no markers; malformed → no
-markers plus a warning; today a mirror-specific artifact), and the crawl report
-`<staging>/failed-pages.json` (a JSON list; non-empty refuses publish unless `--accept-failures`;
-deleted after the commit so a published mirror never carries it).
+== "none"`) › `fresh`. Two staging handshakes the `librarian` skill's crawl script
+(`skills/librarian/scripts/copy_docs_to_markdown.py`, (j)) writes: the per-page inventory
+`<mirror>/sources.json` (the script writes `{"seed_url", "scope_prefix", "pages": [{"source_url",
+"path"}, …]}`; the reader needs only `{"pages": [{"source_url": …}, …]}` — read advisorily to seed
+one `PageMarker` per distinct `source_url`; absent → no markers; malformed → no markers plus a
+warning), and the crawl report `<staging>/failed-pages.json` (a JSON list — the script writes
+`{url, stage, reason}` records; non-empty refuses publish unless `--accept-failures`; deleted after
+the commit so a published mirror never carries it). `record --publish` still accepts a staging
+directory carrying neither (a hand-built mirror): the completeness guarantee is the script's, not
+the worker's.
 
 **(c) The lock.** `<main>/.perk/workflow/library.lock` (through `cache.workflow_dir`), an exclusive
 non-blocking `flock`, machine-local, held across every catalog read-modify-write and entry-directory
@@ -13957,3 +13961,69 @@ completes the operation.
   `none` reads `unverifiable`. A completed check exits 0 even with `failed` results; exit 1 is
   reserved for whole-command refusals (`entry_not_found`, `catalog_malformed`, a preflight
   refusal, `library_busy`, `io_error`).
+
+**(j) The `librarian` skill and its crawl script.** `skills/librarian/SKILL.md` is a shipped
+`PERK_SKILLS` member with `stages: [plan, objective-plan, objective-author, implement, address,
+learn]`, ambient and description-discovered (no `disable-model-invocation`, no `[[bindings]]`
+row) — the §8.57 canonical carrier of the library's model-facing rules: (1) **consult once**
+(`list --json`, then read the matching entry by its absolute path); (2) **check, not eagerly** —
+only the entries a task depends on whose status is `stale` **or `unknown`** (a published or added
+entry is `unknown` until its first check baselines it, and never ages into `stale`); (3)
+**refresh only on evidence** (`drifted`, or `unverifiable` plus task-evidenced drift; source →
+`refresh`, docs → the workflow with `--replace`); (4) **reuse before acquiring** (an installed
+dependency under `node_modules/`, `.pi/npm/node_modules/` or `site-packages` metadata); (5) **add
+when missing** — plus the documentation workflow (dry-run → scope → crawl into a new or empty
+direct child of `.staging/` → prune → fix → `record --publish`) and the source path (`add source`,
+pinned to the version the repo uses when known; `git@`/`ssh://` for private repositories). The
+skill names only built surfaces, and states that the `--json` workers run in read-only sessions
+while the crawl script does not (interpreters are never admitted, §8.3). The script
+(stdlib-only, Python ≥ 3.10, `python3 <skill-dir>/scripts/copy_docs_to_markdown.py`; `curl` and
+`html2markdown` on `PATH`):
+
+- *Arguments.* `URL OUTPUT_DIR [--scope-prefix P] [--max-pages N] [--dry-run]`: the seed is an
+  absolute `http`/`https` URL with a netloc, its path and `--scope-prefix` must normalize (below),
+  `N ≥ 1` — refusals are argparse errors (exit 2). The tools are resolved before any network (a
+  missing one is exit 2 with the install hint; `--dry-run` needs only `curl`).
+- *Fetch once.* Breadth-first over in-origin, in-prefix, non-asset links, each page fetched once
+  (`curl --no-progress-meter --fail --location --max-redirs 5`) and that HTML converted by
+  `html2markdown` over stdin — an HTTP status ≥ 400 is a fetch failure, never mirrored content.
+- *URL → path.* The path splits on `/`, empty segments collapse, a `.`, `..` or NUL-bearing
+  segment is `UnsafePath`; segments are never percent-decoded (`%2e%2e` is an inert filename).
+  After stripping the scope prefix: no segments → `docs-home.md`, else the segments with the last
+  suffix replaced by (or extended with) `.md`. The **reserved root names** `index.md`,
+  `sources.json` and `failed-pages.json` belong to the artifacts: a page mapping to the root
+  `index.md` maps to `docs-home.md` instead (the scope root's name, so the two meet as a
+  collision), and the `.json` names — unreachable, since a `.json` URL is an asset — are refused
+  as a guard. A link whose path is unsafe is **rejected**: never queued, fetched or inventoried,
+  reported as a `WARNING:`, not a failed page.
+- *Collisions.* Destinations are claimed in crawl order; a later page whose path equals a claimed
+  file, lies beneath one (`a.md/b.md` after `a.md`) or is a parent directory of one (`a.md` after
+  `a.md/b.md`) is skipped with a `WARNING:` — neither a failure nor inventoried.
+- *Contained, atomic writes.* Every page and artifact write refuses a symlinked directory
+  component beneath `OUTPUT_DIR`, a symlinked final target, and a target (or temporary file)
+  resolving outside the resolved output root (`UnsafePath`), then writes a temporary sibling
+  `.<name>.<random>.tmp` (never a page or artifact name) and `os.replace`s it over the target, so
+  no truncated file can exist. A failed write removes the temporary file; a failed removal raises
+  `StagingUntrustworthy` naming the leftover. A page's `UnsafePath`/`OSError` is that page's
+  `write` failure.
+- *The output directory.* Non-dry-run, before any network: `OUTPUT_DIR` must not be a symlink and,
+  if it exists, must be an empty directory — otherwise exit 2 ("refusing to write into a non-empty
+  directory"); there is no override (a re-crawl deletes the staging directory first). `--dry-run`
+  never inspects or creates it and writes nothing.
+- *Artifacts, in order.* The pages, then `failed-pages.json` (always written; `[]` on a clean
+  crawl; `{url, stage, reason}` records, `stage` ∈ `fetch`/`convert`/`write`, `reason` one line),
+  `sources.json` (`{seed_url, scope_prefix, pages: [{source_url, path}]}` — the written pages only,
+  crawl order, POSIX relative paths) and, **last**, `index.md`. No page can occupy `index.md`, and
+  it appears only complete and last, so `record --publish` (which requires an `index.md` file) can
+  publish only a crawl whose report and inventory were fully written — a crawl killed earlier is
+  `staging_invalid`.
+- *Exit codes.* `0` every discovered page copied; `1` the crawl completed with ≥ 1 failure or copied
+  nothing (`--dry-run`: a discovery fetch failed); `2` refused or aborted without a usable crawl —
+  arguments, a missing tool, the output directory, an artifact write refusal, or
+  `StagingUntrustworthy` (the staging directory must be deleted). Stdout summarises pages copied,
+  the scope prefix, the index, and the failed / rejected / skipped counts; each failure, rejection
+  and collision is one stderr `WARNING:`.
+- *Accepted limits.* `OUTPUT_DIR`'s ancestors are not audited (publish's `require_real_roots` and
+  staging symlink walk own that boundary); a symlink planted between the component walk and the
+  rename is an accepted check-then-write window; a followed redirect can place off-scope content
+  under an in-scope path (what the site serves for that URL).
