@@ -1,6 +1,7 @@
 """Environment verification for ``perk init`` (and, later, ``perk doctor``).
 
-Presence checks for the tools perk's workflow needs, plus the one real version gate:
+Presence checks for the tools perk's workflow needs (``cloc`` counts every submitted PR's change
+stats), plus the one real version gate:
 **node >= 22** (the extension relies on Node's native ``.ts`` type-stripping). Checks are
 pure + side-effect-free; the caller decides fatality (init: missing required tool -> exit 2).
 """
@@ -8,6 +9,7 @@ pure + side-effect-free; the caller decides fatality (init: missing required too
 import shutil
 from dataclasses import dataclass
 
+from perk.substrate import cloc
 from perk.substrate.proc import ProcFailure, run_captured
 
 _MIN_NODE_MAJOR = 22
@@ -109,6 +111,7 @@ def check_environment() -> list[EnvCheck]:
             "https://raw.githubusercontent.com/mattgiles/skills/main/scripts/install.sh | sh "
             "(macOS), or: go install github.com/mattgiles/skills/cmd/skills@latest",
         ),
+        _check_tool("cloc", cloc.INSTALL_HINT),
         _check_optional_tool(
             "ast-grep",
             "Optional: install ast-grep for structural code search "

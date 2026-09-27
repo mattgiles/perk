@@ -20,6 +20,7 @@ remote execution.
 | `node` | Version 22 or newer | This is the one tool-version gate in the environment check. The Pi extension relies on Node's native TypeScript type stripping. |
 | `pi` | Version 0.87.0 or newer | Pi is the agent harness perk launches. 0.87.0 is the supported minimum: the extension's context-evidence leaf, `/btw`'s side-session seeding, and its thread summarization use Pi's `buildSessionProjection()` session projection and `ModelRegistry.streamSimple`, both added in 0.87.0. perk still enforces no Pi version gate — on an older Pi the extension's hooks fail (`buildSessionProjection is not a function`) and perk's owned guidance is not injected, so upgrade Pi rather than expecting a typed refusal. |
 | `skills` | Required | perk uses the skills CLI to synchronize its workflow skills. perk does not enforce a separate skills version gate. |
+| `cloc` | Required | `perk pr submit` and `perk pr stats` count the PR's change stats with it. No version gate is enforced. A missing `cloc` fails `perk init` / `perk doctor` like any required tool, but submit degrades to an "unavailable" note in the PR body rather than failing. |
 
 `ast-grep` is optional. Its absence produces a warning from `perk init` and `perk doctor`,
 but never blocks either command.
