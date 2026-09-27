@@ -52,8 +52,10 @@ MODES: tuple[str, ...] = ("nudge", "transclude")
 # `command:learn-harvest` (learn/harvest_cmd.py — cold-only, no warm call site),
 # `command:learn-dream` (learn/dream_cmd.py — cold-only, no warm call site),
 # `command:objective-replan` (objective/replan_cmd.py), `command:replan`
-# (plan/replan_cmd.py), `command:skills-create` (skills/create_cmd.py), and
-# `command:skills-refine` (skills/refine_cmd.py).
+# (plan/replan_cmd.py), `command:skills-create` (skills/create_cmd.py),
+# `command:skills-refine` (skills/refine_cmd.py), and the two librarian docs doors —
+# `command:librarian-add` (librarian/add/docs_cmd.py) and `command:librarian-refresh`
+# (librarian/refresh_cmd.py's human docs arm), both cold-only with no warm call site.
 # Commands that ARE registry stages bind via `stage:<id>` (the kind-selection rule, §8.9) and are
 # deliberately excluded here.
 DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
@@ -75,6 +77,8 @@ DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
         "skills-refine",
         "simplify-plan",
         "simplify-objective",
+        "librarian-add",
+        "librarian-refresh",
     }
 )
 

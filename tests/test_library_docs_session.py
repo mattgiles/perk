@@ -1,0 +1,531 @@
+"""The docs doors' deterministic half (``perk/library/docs_session.py``, contracts.md §8.75(k)).
+
+Real filesystem + real git over a scaffolded consumer repo (it carries the managed gitignore
+block). The converter probe and the dry-run spawn are faked at the module's own seams
+(``docs_session.which`` / ``docs_session.run_captured``); the crawl script is planted at the
+skill's delivery read path.
+"""
+
+import json
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+from _librarian_site import load_script
+
+from perk.library import catalog as cat
+from perk.library import docs_session, ops
+from perk.library.errors import LibraryError
+from perk.library.inventory import read_scope_prefix
+from perk.library.layout import LibraryLayout
+from perk.substrate.proc import ProcFailure
+
+SCRIPT_REL = Path(".agents/skills/librarian/scripts/copy_docs_to_markdown.py")
+URL = "https://d.example/docs/start"
+
+
+def _plant_script(repo: Path) -> Path:
+    script = repo / SCRIPT_REL
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("# the crawl script\n", encoding="utf-8")
+    return script
+
+
+def _layout(repo: Path) -> LibraryLayout:
+    return LibraryLayout.for_repo(repo)
+
+
+def _publish(repo: Path, slug: str = "pi", *, inventory: object | None = None) -> Path:
+    staging = _layout(repo).staging / f"{slug}-src"
+    staging.mkdir(parents=True)
+    (staging / "index.md").write_text("# docs\n", encoding="utf-8")
+    if inventory is not None:
+        (staging / "sources.json").write_text(json.dumps(inventory), encoding="utf-8")
+    ops.publish(
+        repo,
+        staging=staging,
+        slug=slug,
+        source="https://pi.dev/docs",
+        replace=False,
+        accept_failures=False,
+        stale_after=None,
+    )
+    return _layout(repo).docs_entry_dir(slug)
+
+
+@pytest.fixture
+def converters(monkeypatch: pytest.MonkeyPatch) -> dict[str, str | None]:
+    """Both converters present unless a test sets a tool to ``None``."""
+    found: dict[str, str | None] = {"curl": "/usr/bin/curl", "html2markdown": "/usr/bin/h2m"}
+    monkeypatch.setattr(docs_session, "which", lambda tool: found.get(tool))
+    return found
+
+
+@pytest.fixture
+def repo(scaffolded_perk_repo: Path, converters: dict[str, str | None]) -> Path:
+    _plant_script(scaffolded_perk_repo)
+    return scaffolded_perk_repo
+
+
+def _plan_add(
+    repo: Path,
+    *,
+    url: str = URL,
+    slug: str | None = None,
+    scope_prefix: str | None = None,
+    dry_run: bool = False,
+) -> docs_session.DocsCrawlPlan:
+    return docs_session.plan_add_docs(
+        repo, url=url, slug=slug, scope_prefix=scope_prefix, dry_run=dry_run
+    )
+
+
+# --- the default slug ------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("url", "slug"),
+    [
+        ("https://pi.dev/docs", "pi"),
+        ("https://docs.astro.build/en/", "astro"),
+        ("https://starlight.astro.build/", "starlight"),
+        ("https://linear.app/developers", "linear"),
+        ("https://www.example.com/x", "example"),
+        ("https://www.docs.example.com/x", "example"),
+        ("https://Docs.Example.COM/x", "example"),
+        ("http://127.0.0.1:8000/docs", "127"),
+    ],
+)
+def test_derive_slug(url, slug):
+    assert docs_session.derive_slug(url) == slug
+
+
+@pytest.mark.parametrize(
+    "url", ["https://-bad.example/docs", "http://[::1]/docs", "https://docs./"]
+)
+def test_derive_slug_refuses_a_label_outside_the_grammar(url):
+    with pytest.raises(LibraryError) as excinfo:
+        docs_session.derive_slug(url)
+    assert excinfo.value.error_type == "invalid_slug"
+    assert "--slug" in str(excinfo.value)
+
+
+# --- the scope prefix ------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "normalized"),
+    [
+        ("docs/x", "/docs/x/"),
+        ("/docs//x/", "/docs/x/"),
+        ("/docs/", "/docs/"),
+        ("/", "/"),
+        ("//", "/"),
+    ],
+)
+def test_validate_scope_prefix_normalizes(text, normalized):
+    assert docs_session.validate_scope_prefix(text) == normalized
+
+
+@pytest.mark.parametrize("text", ["../x", "/docs/./x", "/docs/../x", "a\x00b", "/do cs/", " ", ""])
+def test_validate_scope_prefix_refuses(text):
+    with pytest.raises(LibraryError) as excinfo:
+        docs_session.validate_scope_prefix(text)
+    assert excinfo.value.error_type == "invalid_input"
+
+
+def test_validate_scope_prefix_matches_the_crawl_scripts_normalization():
+    script = load_script()
+    for text in ("docs/x", "/docs//x/", "/", "//", "/a/b/c"):
+        assert docs_session.validate_scope_prefix(text) == script.normalize_scope_prefix(text, URL)
+
+
+# --- prerequisites ---------------------------------------------------------------------------
+
+
+def test_require_converters_passes_when_both_resolve(converters):
+    docs_session.require_converters()
+
+
+def test_require_converters_names_the_missing_tool_and_its_hint(converters):
+    converters["html2markdown"] = None
+    with pytest.raises(LibraryError) as excinfo:
+        docs_session.require_converters()
+    assert excinfo.value.error_type == "missing_converter"
+    message = str(excinfo.value)
+    assert "`html2markdown` is not on PATH" in message
+    assert "brew install html2markdown" in message
+    assert "curl" not in message
+
+
+def test_require_converters_names_every_missing_tool_in_one_refusal(converters):
+    converters["curl"] = None
+    converters["html2markdown"] = None
+    with pytest.raises(LibraryError) as excinfo:
+        docs_session.require_converters()
+    message = str(excinfo.value)
+    assert "`curl` is not on PATH" in message and "install curl" in message
+    assert "`html2markdown` is not on PATH" in message
+
+
+def test_librarian_script_path(tmp_path):
+    script = _plant_script(tmp_path)
+    assert docs_session.librarian_script_path(tmp_path) == script
+
+
+def test_librarian_script_path_absent_is_skill_missing(tmp_path):
+    with pytest.raises(LibraryError) as excinfo:
+        docs_session.librarian_script_path(tmp_path)
+    assert excinfo.value.error_type == "skill_missing"
+    assert "perk init" in str(excinfo.value)
+
+
+def test_a_directory_at_the_script_path_is_skill_missing(tmp_path):
+    (tmp_path / SCRIPT_REL).mkdir(parents=True)
+    with pytest.raises(LibraryError) as excinfo:
+        docs_session.librarian_script_path(tmp_path)
+    assert excinfo.value.error_type == "skill_missing"
+
+
+def test_a_dangling_symlink_at_the_script_path_is_skill_missing(tmp_path):
+    link = tmp_path / SCRIPT_REL
+    link.parent.mkdir(parents=True)
+    link.symlink_to(tmp_path / "gone.py")
+    with pytest.raises(LibraryError) as excinfo:
+        docs_session.librarian_script_path(tmp_path)
+    assert excinfo.value.error_type == "skill_missing"
+
+
+# --- staging names ---------------------------------------------------------------------------
+
+
+def test_fresh_staging_dir_previews_the_first_free_name_and_writes_nothing(scaffolded_perk_repo):
+    layout = _layout(scaffolded_perk_repo)
+    assert docs_session.fresh_staging_dir(layout, "d") == layout.staging / "d"
+    assert not layout.staging.exists()
+    (layout.staging / "d").mkdir(parents=True)
+    assert docs_session.fresh_staging_dir(layout, "d") == layout.staging / "d-2"
+    (layout.staging / "d-2").symlink_to(scaffolded_perk_repo / "nowhere")
+    assert docs_session.fresh_staging_dir(layout, "d") == layout.staging / "d-3"
+    assert sorted(child.name for child in layout.staging.iterdir()) == ["d", "d-2"]
+
+
+def test_claim_staging_dir_claims_empty_siblings_and_removes_nothing(scaffolded_perk_repo):
+    layout = _layout(scaffolded_perk_repo)
+    first = docs_session.claim_staging_dir(layout, "d")
+    assert first == layout.staging / "d"
+    assert first.is_dir() and list(first.iterdir()) == []
+    (first / "page.md").write_text("kept\n", encoding="utf-8")
+    second = docs_session.claim_staging_dir(layout, "d")
+    assert second == layout.staging / "d-2"
+    (layout.staging / "d-3").write_text("a file\n", encoding="utf-8")
+    (layout.staging / "d-4").symlink_to(scaffolded_perk_repo / "nowhere")
+    third = docs_session.claim_staging_dir(layout, "d")
+    assert third == layout.staging / "d-5"
+    assert (first / "page.md").read_text(encoding="utf-8") == "kept\n"
+    assert (layout.staging / "d-3").is_file()
+    assert (layout.staging / "d-4").is_symlink()
+
+
+# --- the recorded scope ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        (json.dumps({"scope_prefix": "/docs/", "pages": []}), "/docs/"),
+        (json.dumps({"scope_prefix": "/"}), "/"),
+        (json.dumps({"scope_prefix": ""}), None),
+        (json.dumps({"scope_prefix": 7}), None),
+        (json.dumps({"pages": []}), None),
+        (json.dumps(["not", "a", "map"]), None),
+        ("{not json", None),
+    ],
+)
+def test_read_scope_prefix(tmp_path, content, expected):
+    (tmp_path / "sources.json").write_text(content, encoding="utf-8")
+    assert read_scope_prefix(tmp_path) == expected
+
+
+def test_read_scope_prefix_without_an_inventory(tmp_path):
+    assert read_scope_prefix(tmp_path) is None
+
+
+# --- plan_add_docs ---------------------------------------------------------------------------
+
+
+def test_plan_add_docs_claims_the_staging_dir_and_builds_the_commands(repo):
+    layout = _layout(repo)
+    plan = _plan_add(repo, scope_prefix="docs")
+    assert plan.slug == "d"
+    assert plan.scope_prefix == "/docs/"
+    assert plan.staging_dir == layout.staging / "d"
+    assert plan.staging_dir.is_dir() and list(plan.staging_dir.iterdir()) == []
+    assert plan.main_root == layout.main_root
+    assert plan.current_dir is None and plan.replace is False and plan.warnings == ()
+    assert plan.crawl_argv == (
+        sys.executable,
+        str(layout.main_root / SCRIPT_REL),
+        URL,
+        str(layout.staging / "d"),
+        "--scope-prefix",
+        "/docs/",
+    )
+    assert plan.publish_argv == (
+        "perk",
+        "librarian",
+        "record",
+        "--publish",
+        str(layout.staging / "d"),
+        "--slug",
+        "d",
+        "--source",
+        URL,
+        "--json",
+    )
+
+
+def test_plan_add_docs_defaulted_scope_carries_no_flag(repo):
+    plan = _plan_add(repo)
+    assert plan.scope_prefix == ""
+    assert "--scope-prefix" not in plan.crawl_argv
+
+
+def test_plan_add_docs_root_scope_is_carried(repo):
+    plan = _plan_add(repo, scope_prefix="/")
+    assert plan.crawl_argv[-2:] == ("--scope-prefix", "/")
+
+
+def test_plan_add_docs_dry_run_claims_nothing(repo):
+    layout = _layout(repo)
+    plan = _plan_add(repo, dry_run=True)
+    assert plan.staging_dir == layout.staging / "d"
+    assert not layout.staging.exists()
+
+
+def test_plan_add_docs_explicit_slug_is_validated(repo):
+    assert _plan_add(repo, slug="mine").slug == "mine"
+    with pytest.raises(LibraryError) as excinfo:
+        _plan_add(repo, slug="Bad")
+    assert excinfo.value.error_type == "invalid_slug"
+
+
+@pytest.mark.parametrize("kind", ["docs", "source"])
+def test_plan_add_docs_refuses_a_catalogued_slug_of_either_kind(repo, kind):
+    layout = _layout(repo)
+    if kind == "docs":
+        _publish(repo, "d")
+    else:
+        entry = cat.Entry(
+            kind="source",
+            slug="d",
+            source="https://github.com/acme/d.git",
+            path="source-code/github.com/acme/d",
+            added_at="2026-01-01T00:00:00Z",
+            stale_after=86_400,
+            upstream=cat.SourceUpstream(branch="main", head_sha=None),
+        )
+        layout.root.mkdir(parents=True, exist_ok=True)
+        cat.write_catalog(layout, cat.Catalog(entries=(entry,)))
+    staged_before = sorted(layout.staging.iterdir()) if layout.staging.exists() else []
+    with pytest.raises(LibraryError) as excinfo:
+        _plan_add(repo)
+    assert excinfo.value.error_type == "slug_exists"
+    assert "perk librarian refresh d" in str(excinfo.value)
+    staged_after = sorted(layout.staging.iterdir()) if layout.staging.exists() else []
+    assert staged_after == staged_before
+
+
+def test_plan_add_docs_refuses_an_uncatalogued_mirror(repo):
+    target = _layout(repo).docs_entry_dir("d")
+    target.mkdir(parents=True)
+    with pytest.raises(LibraryError) as excinfo:
+        _plan_add(repo)
+    assert excinfo.value.error_type == "slug_exists"
+    assert "record --adopt" in str(excinfo.value)
+
+
+def test_plan_add_docs_refuses_a_symlinked_mirror(repo, tmp_path):
+    target = _layout(repo).docs_entry_dir("d")
+    target.parent.mkdir(parents=True)
+    target.symlink_to(tmp_path)
+    with pytest.raises(LibraryError) as excinfo:
+        _plan_add(repo)
+    assert excinfo.value.error_type == "slug_exists"
+
+
+def test_plan_add_docs_propagates_a_malformed_catalog(repo):
+    layout = _layout(repo)
+    layout.root.mkdir(parents=True)
+    layout.catalog_path.write_text("{not json", encoding="utf-8")
+    with pytest.raises(LibraryError) as excinfo:
+        _plan_add(repo)
+    assert excinfo.value.error_type == "catalog_malformed"
+
+
+def test_plan_add_docs_probes_past_a_symlinked_staging_leftover(repo, tmp_path):
+    layout = _layout(repo)
+    layout.staging.mkdir(parents=True)
+    (layout.staging / "d").symlink_to(tmp_path)
+    plan = _plan_add(repo)
+    assert plan.staging_dir == layout.staging / "d-2"
+    assert (layout.staging / "d").is_symlink()
+
+
+# --- plan_refresh_docs -----------------------------------------------------------------------
+
+
+def test_plan_refresh_docs_refuses_an_absent_slug(repo):
+    with pytest.raises(LibraryError) as excinfo:
+        docs_session.plan_refresh_docs(repo, slug="ghost")
+    assert excinfo.value.error_type == "entry_not_found"
+
+
+def test_plan_refresh_docs_refuses_a_source_entry(repo):
+    layout = _layout(repo)
+    entry = cat.Entry(
+        kind="source",
+        slug="widget",
+        source="https://github.com/acme/widget.git",
+        path="source-code/github.com/acme/widget",
+        added_at="2026-01-01T00:00:00Z",
+        stale_after=86_400,
+        upstream=cat.SourceUpstream(branch="main", head_sha=None),
+    )
+    layout.root.mkdir(parents=True)
+    cat.write_catalog(layout, cat.Catalog(entries=(entry,)))
+    with pytest.raises(LibraryError) as excinfo:
+        docs_session.plan_refresh_docs(repo, slug="widget")
+    assert excinfo.value.error_type == "entry_not_found"
+
+
+def test_plan_refresh_docs_recovers_the_recorded_scope(repo):
+    current = _publish(repo, inventory={"scope_prefix": "/docs/", "pages": []})
+    plan = docs_session.plan_refresh_docs(repo, slug="pi")
+    layout = _layout(repo)
+    assert plan.url == "https://pi.dev/docs"
+    assert plan.scope_prefix == "/docs/"
+    assert plan.current_dir == current
+    assert plan.replace is True
+    assert plan.staging_dir == layout.staging / "pi"
+    assert plan.staging_dir.is_dir()
+    assert plan.publish_argv[-2:] == ("--replace", "--json")
+    assert plan.warnings == ()
+
+
+def test_plan_refresh_docs_recovers_the_root_scope(repo):
+    _publish(repo, inventory={"scope_prefix": "/", "pages": []})
+    plan = docs_session.plan_refresh_docs(repo, slug="pi")
+    assert plan.scope_prefix == "/"
+    assert plan.crawl_argv[-2:] == ("--scope-prefix", "/")
+
+
+def test_plan_refresh_docs_without_an_inventory_defaults_the_scope(repo):
+    _publish(repo)
+    plan = docs_session.plan_refresh_docs(repo, slug="pi")
+    assert plan.scope_prefix == ""
+    assert "--scope-prefix" not in plan.crawl_argv
+    assert plan.warnings == ()
+
+
+def test_plan_refresh_docs_warns_on_an_unusable_recorded_scope(repo):
+    _publish(repo, inventory={"scope_prefix": "../x", "pages": []})
+    plan = docs_session.plan_refresh_docs(repo, slug="pi")
+    assert plan.scope_prefix == ""
+    [warning] = plan.warnings
+    assert "'../x'" in warning
+
+
+def test_plan_refresh_docs_claims_past_a_leftover(repo):
+    _publish(repo)
+    layout = _layout(repo)
+    (layout.staging / "pi").mkdir(parents=True)
+    (layout.staging / "pi" / "half.md").write_text("half\n", encoding="utf-8")
+    plan = docs_session.plan_refresh_docs(repo, slug="pi")
+    assert plan.staging_dir == layout.staging / "pi-2"
+    assert (layout.staging / "pi" / "half.md").is_file()
+
+
+def test_plan_refresh_docs_refuses_a_missing_converter(repo, converters):
+    _publish(repo)
+    converters["curl"] = None
+    with pytest.raises(LibraryError) as excinfo:
+        docs_session.plan_refresh_docs(repo, slug="pi")
+    assert excinfo.value.error_type == "missing_converter"
+    assert not (_layout(repo).staging / "pi").exists()
+
+
+def test_entry_kind(repo):
+    assert docs_session.entry_kind(repo, "pi") is None
+    _publish(repo)
+    assert docs_session.entry_kind(repo, "pi") == "docs"
+
+
+# --- shell safety ----------------------------------------------------------------------------
+
+
+def test_the_commands_round_trip_through_the_shell(scaffolded_perk_repo, tmp_path, converters):
+    spaced = tmp_path / "my repo"
+    shutil.copytree(scaffolded_perk_repo, spaced, symlinks=True)
+    _plant_script(spaced)
+    url = "https://d.example/docs/start?x=1&y=2"
+    plan = docs_session.plan_add_docs(
+        spaced, url=url, slug=None, scope_prefix="/docs/", dry_run=False
+    )
+    assert shlex.split(plan.publish_command) == list(plan.publish_argv)
+    assert shlex.split(plan.crawl_command) == list(plan.crawl_argv)
+    assert plan.crawl_argv[0] == sys.executable
+    assert " " in plan.crawl_argv[1] and "&" in plan.crawl_argv[2]
+
+
+# --- the dry-run spawn -----------------------------------------------------------------------
+
+
+def test_run_dry_run_runs_the_crawl_argv_with_dry_run(repo, monkeypatch):
+    plan = _plan_add(repo, dry_run=True)
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((tuple(argv), kwargs))
+        return subprocess.CompletedProcess(argv, 1, "map\n", "WARNING: x\n")
+
+    monkeypatch.setattr(docs_session, "run_captured", fake_run)
+    completed = docs_session.run_dry_run(plan)
+    assert completed.returncode == 1
+    [(argv, kwargs)] = calls
+    assert argv == (*plan.crawl_argv, "--dry-run")
+    assert kwargs == {"cwd": plan.main_root, "timeout": docs_session.DRY_RUN_TIMEOUT_SECONDS}
+
+
+def test_run_dry_run_translates_a_spawn_failure(repo, monkeypatch):
+    plan = _plan_add(repo, dry_run=True)
+
+    def fail(argv, **kwargs):
+        raise ProcFailure("spawn", tuple(argv), cause_text="no such file")
+
+    monkeypatch.setattr(docs_session, "run_captured", fail)
+    with pytest.raises(LibraryError) as excinfo:
+        docs_session.run_dry_run(plan)
+    assert excinfo.value.error_type == "io_error"
+    assert "could not run" in str(excinfo.value)
+
+
+def test_first_use_creates_the_library_through_the_claim(repo):
+    layout = _layout(repo)
+    assert not layout.root.exists()
+    plan = _plan_add(repo)
+    assert plan.staging_dir.is_dir()
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+    ).stdout
+    assert "docs/library" not in status

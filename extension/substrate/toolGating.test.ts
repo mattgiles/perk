@@ -595,6 +595,8 @@ test("perk librarian workers are admitted only in their --json-last forms", () =
     "perk librarian check pi click --force --json",
     "cd repo && perk librarian check --json",
     "perk librarian refresh pi --json",
+    // A `#` inside a word is literal, not a comment.
+    "perk librarian record --publish docs/library/.staging/pi --slug pi --source https://pi.dev/docs#intro --json",
   ])
     assert.equal(isReadOnlyBashCommand(command), true, command);
   for (const command of [
@@ -612,6 +614,28 @@ test("perk librarian workers are admitted only in their --json-last forms", () =
     "perk librarianx list --json",
   ])
     assert.equal(isReadOnlyBashCommand(command), false, command);
+});
+
+test("perk librarian admission needs a real trailing --json, never a comment or a redirection operand", () => {
+  // Bash drops a comment and hands a redirection its operand, so each of these runs the human
+  // form — on a docs entry the write-capable refresh door (§8.75(k)) — and must stay blocked.
+  for (const command of [
+    "perk librarian refresh pi # --json",
+    "perk librarian refresh pi\t# --json",
+    "perk librarian refresh pi #x --json",
+    "perk librarian refresh pi #--json",
+    "perk librarian refresh pi \\\n# --json",
+    "perk librarian refresh pi <<< --json",
+    "perk librarian refresh pi < --json",
+    "perk librarian refresh pi 0< --json",
+    "perk librarian list # --json",
+    "perk librarian add source foo/bar # --json",
+    "perk librarian record --publish x --slug pi --source https://x <<< --json",
+  ]) {
+    const verdict = readOnlyBashVerdict(command);
+    assert.equal(verdict.allowed, false, command);
+    assert.ok(!verdict.allowed && verdict.reason.startsWith("not allowlisted"), command);
+  }
 });
 
 test("isReadOnlyBashCommand: blocks destructive / non-allowlisted commands", () => {

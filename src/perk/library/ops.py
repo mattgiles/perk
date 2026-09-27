@@ -188,7 +188,7 @@ def publish(
         require_ignored(layout, probe_paths_for(layout, dirs=[target, displaced_probe, staged]))
         with library_lock(repo_root):
             catalog = load_catalog(layout)
-            existing = _publish_eligibility(layout, catalog, slug=slug, replace=replace)
+            existing = publish_eligibility(layout, catalog, slug=slug, replace=replace)
             markers, inventory_warning = read_inventory(staged)
             moment = (now or utc_now)()
             entry = Entry(
@@ -292,10 +292,14 @@ def _check_failed_pages(staged: Path, *, accept_failures: bool) -> None:
         )
 
 
-def _publish_eligibility(
+def publish_eligibility(
     layout: LibraryLayout, catalog: Catalog, *, slug: str, replace: bool
 ) -> Entry | None:
-    """The existing entry being replaced (``None`` for a fresh publish), or a typed refusal."""
+    """The existing entry being replaced (``None`` for a fresh publish), or a typed refusal.
+
+    One policy for publish's under-lock check and the ``add docs`` door's early refusal, so a
+    paid session never ends in a publish the door could have refused.
+    """
     target = layout.docs_entry_dir(slug)
     existing = catalog.get(slug)
     target_present = target.exists() or target.is_symlink()
@@ -304,7 +308,8 @@ def _publish_eligibility(
             raise LibraryError(
                 "slug_exists",
                 f"slug {slug} is already catalogued ({existing.kind} entry at {existing.path}) — "
-                "pass --replace to refresh it, or pick another --slug",
+                f"refresh it (`perk librarian refresh {slug}`, or `record --publish … "
+                "--replace`), or pick another --slug",
             )
         if target_present:
             raise LibraryError(

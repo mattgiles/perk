@@ -431,9 +431,10 @@ def _refreshable(entry: Entry | None, slug: str) -> Entry:
     if entry.kind == "docs":
         raise LibraryError(
             "needs_session",
-            f"refreshing docs entry {slug} is judgment work — re-crawl into "
+            f"refreshing docs entry {slug} is judgment work — `perk librarian refresh {slug}` "
+            "(without --json) launches the refresh session from a terminal; or re-crawl into "
             "docs/library/.staging/<dir>, curate, then `perk librarian record --publish <dir> "
-            f"--slug {slug} --source {entry.source} --replace` from a session",
+            f"--slug {slug} --source {entry.source} --replace`",
         )
     if entry.ref is not None:
         raise LibraryError(

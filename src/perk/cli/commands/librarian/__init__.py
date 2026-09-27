@@ -12,6 +12,11 @@ ignore probes, a tracked-content sweep, real-directory roots) and refuses anythi
 reach outside the gitignored cache — which is what admits the ``--json`` forms to read-only perk
 sessions.
 
+Two human forms are doors rather than workers: ``add docs`` and the human ``refresh`` of a
+documentation entry claim a staging directory and launch a curating session (mirroring a site is
+judgment work — there is no session-free add); the ``--json`` forms stay the deterministic
+workers, and neither door is admitted to read-only sessions.
+
 ``--json`` → stdout, human text → stderr; exit codes ``0`` ok · ``1`` typed refusal / op failure
 · ``2`` not-a-repo. No verb aliases: the read-only gate grammar names exactly the six verbs.
 """

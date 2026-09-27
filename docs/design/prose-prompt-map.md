@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **240** canonical source units
-- **1267** logical fragments
+- **242** canonical source units
+- **1269** logical fragments
 - **16** session shapes and **12** assemblies
 - **14** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -1547,6 +1547,8 @@ Expert configuration guidance, structural search, and ancillary model utilities.
 
 | Unit | Role | Audience | Canonical source | Consumed by |
 | --- | --- | --- | --- | --- |
+| `markdown:prompts/stages/librarian/add-docs.md` | `launch` | `shipped` | [`prompts/stages/librarian/add-docs.md`](../../prompts/stages/librarian/add-docs.md) · `file` | — |
+| `markdown:prompts/stages/librarian/refresh-docs.md` | `launch` | `shipped` | [`prompts/stages/librarian/refresh-docs.md`](../../prompts/stages/librarian/refresh-docs.md) · `file` | — |
 | `markdown:skills/ast-grep/SKILL.md` | `skill-detail` | `both` | [`skills/ast-grep/SKILL.md`](../../skills/ast-grep/SKILL.md) · `file` | — |
 | `markdown:skills/ast-grep/references/rule_reference.md` | `skill-detail` | `both` | [`skills/ast-grep/references/rule_reference.md`](../../skills/ast-grep/references/rule_reference.md) · `file` | — |
 | `markdown:skills/dignified-python/SKILL.md` | `skill-detail` | `both` | [`skills/dignified-python/SKILL.md`](../../skills/dignified-python/SKILL.md) · `file` | — |
@@ -1575,6 +1577,10 @@ Expert configuration guidance, structural search, and ancillary model utilities.
 <details>
 <summary>Logical fragments</summary>
 
+- `markdown:prompts/stages/librarian/add-docs.md`
+  - `body` — Document body (`file-body`)
+- `markdown:prompts/stages/librarian/refresh-docs.md`
+  - `body` — Document body (`file-body`)
 - `markdown:skills/ast-grep/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:ast-grep-code-search` — ast-grep Code Search (`heading:ast-grep-code-search`)

@@ -66,15 +66,15 @@ def parse_stale_after(text: str) -> int:
     return int(match.group(1)) * _UNIT_SECONDS[match.group(2)]
 
 
-def validate_source_url(url: str) -> str:
-    """An absolute ``http(s)`` URL with a host; else ``invalid_source``."""
+def validate_source_url(url: str, *, label: str = "--source") -> str:
+    """An absolute ``http(s)`` URL with a host; else ``invalid_source`` naming ``label``."""
     try:
         parts = urllib.parse.urlsplit(url)
     except ValueError as exc:  # e.g. an unmatched IPv6 bracket
-        raise LibraryError("invalid_source", f"invalid --source {url!r}: {exc}") from exc
+        raise LibraryError("invalid_source", f"invalid {label} {url!r}: {exc}") from exc
     if parts.scheme not in ("http", "https") or not parts.netloc:
         raise LibraryError(
-            "invalid_source", f"invalid --source {url!r}: use an absolute http(s) URL"
+            "invalid_source", f"invalid {label} {url!r}: use an absolute http(s) URL"
         )
     return url
 

@@ -800,7 +800,10 @@ everyday text utilities, read-only `gh`/`perk` queries, the exact review-context
 the existing command-keyed browser/search entries; this change adds no command. The perk library
 workers are admitted in their deterministic `--json` forms only — `perk librarian
 list|record|remove|check|refresh|add source … --json` with `--json` last and any
-whitespace-separated arguments before it (`add docs` is not admitted). They mutate only the
+whitespace-separated arguments before it — none starting a comment (`#`) or holding a
+redirection (`<`/`>`), so the trailing `--json` is always a real argument, never comment text or
+a redirection operand (the human `refresh` of a docs entry is the write-capable door,
+§8.75(k)) — and `add docs` is not admitted. They mutate only the
 gitignored `docs/library/` cache — the network verbs (`check`, `refresh`, `add source`) behind the
 same preflight, their git operations config-pinned with hooks disabled (§8.75(i)): the same
 accepted leniency as `perk pr review-context`'s scratch write, made operational by the CLI's
@@ -2977,6 +2980,8 @@ perk's workflow skills are prompt-hidden; `transclude` exists for the user-bindi
 | `command:skills-refine` | `perk-skill-author` | `nudge` |
 | `command:simplify-plan` | `perk-simplify` | `nudge` |
 | `command:simplify-objective` | `perk-simplify` | `nudge` |
+| `command:librarian-add` | `librarian` | `nudge` |
+| `command:librarian-refresh` | `librarian` | `nudge` |
 
 **Validation depth (shape-only, registry-free):** the Python loader rejects unsupported
 `schema_version` values (a structural load error); the TS reader is a thin structural parse.
@@ -13671,7 +13676,7 @@ exit, no `plan_review`.
    (§8.57).
 7. **Boundaries.** No browser/plannotator dependency; no persistence, retry, supersede, or
    cancel; dream drafts refused; refinement sessions excluded by the stage gate.
-## §8.75 · The perk library (layout, catalog, lock, staging/publish, the read-only carve-out, the network verbs, the `librarian` skill)
+## §8.75 · The perk library (layout, catalog, lock, staging/publish, the read-only carve-out, the network verbs, the `librarian` skill, the docs doors)
 
 The **perk library** is a catalogued, gitignored offline reference of external documentation
 mirrors and source checkouts. Python owns it end to end (`perk/library/` + the `perk librarian`
@@ -13812,7 +13817,8 @@ paths).
 `kind_mismatch`, `adopt_not_found`, `adopt_invalid`, `directory_catalogued`, `entry_not_found`,
 `entry_path_invalid`, `io_error`, `not_a_repo`, and for the network verbs (§8.75(i))
 `invalid_repo_ref`, `clone_failed`, `ref_not_found`, `checkout_invalid`, `checkout_dirty`,
-`fetch_failed`, `entry_pinned`, `entry_missing`, `needs_session`. Every expected filesystem/git failure is
+`fetch_failed`, `entry_pinned`, `entry_missing`, `needs_session`, and for the docs doors
+(§8.75(k)) `missing_converter`, `skill_missing`, `crawl_refused`. Every expected filesystem/git failure is
 translated at the library boundary (`translating_io`: the `OSError` family and `GitError` →
 `io_error`), so a worker never emits a traceback where an envelope is promised. Options are plain
 strings parsed inside the command (a bad value is a typed refusal, never a Click usage error).
@@ -13900,8 +13906,8 @@ completes the operation.
   completes the re-pin. There is no unpin verb: `remove` + `add source` tracks the default
   branch again.
 - *`refresh <slug>`.* Lock-free classification: `entry_not_found`; a docs entry is
-  `needs_session` (re-crawl into `.staging/`, curate, `record --publish … --replace` from a
-  session); a pinned entry is `entry_pinned` (re-pin with `add source <source> --ref <new>`, or
+  `needs_session` under `--json` (its message names the door); the human form is the
+  docs-refresh door ((k)); a pinned entry is `entry_pinned` (re-pin with `add source <source> --ref <new>`, or
   `remove` + `add source`). Under the lock: the entry must still be the same unpinned source
   entry (`entry_removed_meanwhile`); the symlink walk and ignore probe of the checkout; a
   missing checkout is `entry_missing` (`add source <source>` re-clones it); the checkout
@@ -13964,19 +13970,24 @@ completes the operation.
 
 **(j) The `librarian` skill and its crawl script.** `skills/librarian/SKILL.md` is a shipped
 `PERK_SKILLS` member with `stages: [plan, objective-plan, objective-author, implement, address,
-learn]`, ambient and description-discovered (no `disable-model-invocation`, no `[[bindings]]`
-row) — the §8.57 canonical carrier of the library's model-facing rules: (1) **consult once**
+learn]`, bound at `command:librarian-add` / `command:librarian-refresh` (`nudge`) and otherwise
+ambient and description-discovered (no `disable-model-invocation`) — the §8.57 canonical carrier of the library's model-facing rules: (1) **consult once**
 (`list --json`, then read the matching entry by its absolute path); (2) **check, not eagerly** —
 only the entries a task depends on whose status is `stale` **or `unknown`** (a published or added
 entry is `unknown` until its first check baselines it, and never ages into `stale`); (3)
 **refresh only on evidence** (`drifted`, or `unverifiable` plus task-evidenced drift; source →
-`refresh`, docs → the workflow with `--replace`); (4) **reuse before acquiring** (an installed
+`refresh --json`, docs → the docs-refresh door (k)); (4) **reuse before acquiring** (an installed
 dependency under `node_modules/`, `.pi/npm/node_modules/` or `site-packages` metadata); (5) **add
-when missing** — plus the documentation workflow (dry-run → scope → crawl into a new or empty
-direct child of `.staging/` → prune → fix → `record --publish`) and the source path (`add source`,
-pinned to the version the repo uses when known; `git@`/`ssh://` for private repositories). The
-skill names only built surfaces, and states that the `--json` workers run in read-only sessions
-while the crawl script does not (interpreters are never admitted, §8.3). The script
+when missing** (docs → the `add docs` door (k)) — plus the documentation workflow the door
+sessions follow (dry-run → scope → crawl into the seeded staging directory, or by hand a new or
+empty direct child of `.staging/` → prune → fix → `record --publish`) and the source path
+(`add source`, pinned to the version the repo uses when known; `git@`/`ssh://` for private
+repositories). The skill names the doors (`perk librarian add docs <url> …`, the human
+`perk librarian refresh <slug>`) as the only way a documentation mirror is added or refreshed, and
+states that the `--json` workers run in read-only sessions while the crawl script does not
+(interpreters are never admitted, §8.3) — a documentation mirror is added or refreshed through the
+doors (k), never from a read-only session (a needed mirror is recorded as a follow-up door command
+for the human). The script
 (stdlib-only, Python ≥ 3.10, `python3 <skill-dir>/scripts/copy_docs_to_markdown.py`; `curl` and
 `html2markdown` on `PATH`):
 
@@ -14033,3 +14044,57 @@ while the crawl script does not (interpreters are never admitted, §8.3). The sc
   staging symlink walk own that boundary); a symlink planted between the component walk and the
   rename is an accepted check-then-write window; a followed redirect can place off-scope content
   under an in-scope path (what the site serves for that URL).
+
+**(k) The session-backed docs doors** (`perk/library/docs_session.py` — the deterministic half —
+and `perk/cli/commands/librarian/door.py`). `add docs <url> [--slug <slug>] [--scope-prefix
+<prefix>] [--dry-run] [pi-args…]` and the human `refresh <slug>` of a docs entry are write-capable
+cold doors borrowing the `save` stage descriptor (`mode: read-write`, `worktree: none` → the main
+checkout; the borrow is otherwise inert), `repo_root` = `LibraryLayout.main_root`,
+`binding_trigger` = `command:librarian-add` / `command:librarian-refresh` (the `librarian` skill
+delivered once by the binding nudge; the seeds carry no read-path pointer line). There is **no
+session-free add**: pruning and artifact fixes are judgment work.
+
+- *Pre-session order (add).* Input validation (the URL through `invalid_source`; `--slug` through
+  the slug grammar; `--scope-prefix` normalized like the crawl script's — empty segments collapse,
+  `.`/`..`/NUL/whitespace or a blank value is `invalid_input`, zero segments is the root `/`,
+  which is valid) → the **default slug** (the URL host lowercased, a leading `www.` then a leading
+  `docs.` label stripped, the first remaining label; a label outside the grammar is
+  `invalid_slug` asking for `--slug`) → the preflight's roots and tracked sweep →
+  `publish_eligibility`'s create-only arm (`slug_exists` for a catalogued slug of either kind or an
+  uncatalogued/symlinked `documentation/<slug>` — the same policy `record --publish` rechecks
+  under the lock) → `skill_missing` unless the crawl script is a regular file at the skill's
+  delivery read path `<main>/.agents/skills/librarian/scripts/copy_docs_to_markdown.py` (skills
+  ship through the `skills` CLI, never the wheel; remediation `perk init`) →
+  `missing_converter` unless `curl` **and** `html2markdown` resolve on `PATH` (one refusal naming
+  each missing tool with its install hint — checked on `--dry-run` too) → the cache-only ignore
+  probe over the first free staging name and the entry directory (§8.75(d); every `.staging/`
+  sibling is the same path class, and the free name is never beyond a symlink) → the **atomic
+  staging claim**: `.staging/` created as needed, then `mkdir` **without** `exist_ok` over
+  `<slug>`, `<slug>-2`, … — whatever occupies a name (directory, file, symlink) is skipped and
+  never deleted, so two doors opened before either crawl never share a directory. The claim is the
+  door's only write; an abandoned session leaves an empty staging directory that `list`/doctor
+  report for the human.
+- *The refresh door.* `refresh <slug>` without `--json` on a catalogued docs entry: the same
+  skeleton (roots, tracked sweep, the entry's symlink-component walk, `skill_missing`,
+  `missing_converter`, the probe, the claim), `url` = the entry's `source`, the publish carrying
+  `--replace`. The prior crawl's `scope_prefix` (root `/` included) is recovered advisorily from
+  the published mirror's `sources.json` — absent/malformed → the default scope; a recorded value
+  the normalization refuses → the default scope **plus a warning** naming it, so a refresh never
+  changes scope silently. `refresh --json` stays the deterministic worker (`needs_session` for a
+  docs entry); source entries are unchanged on both forms. No `--dry-run`, no pi-args.
+- *The seed* (`prompts/stages/librarian/add-docs.md` / `refresh-docs.md`) carries the flow only
+  (§8.57 — the skill is the detail tier), the soft scope (write only under the gitignored library;
+  no structural sandbox) and **exact shell-quoted commands** built once in `DocsCrawlPlan`
+  (`shlex.join`, so a checkout path with spaces, a URL with `&`/`?` or a scope prefix round-trips
+  through `shlex.split`): the crawl through **perk's own interpreter** (`sys.executable` — a
+  compatible `python3` on `PATH` is never assumed) — `<python> <script> <url> <staging>
+  [--scope-prefix <prefix>]` — and the publish `perk librarian record --publish <staging> --slug
+  <slug> --source <url> [--replace] --json`.
+- *`--dry-run` (add only).* Runs `crawl_argv + --dry-run` (the same argv; `cwd` the main checkout;
+  a 600 s timeout), relays the script's stdout then stderr, and maps its exit: `0` / `1` relayed,
+  `2` → `crawl_refused` (the script's stderr), anything else (a signal's negative code included)
+  → `io_error`; a spawn failure or timeout → `io_error`. No session; nothing written (the
+  staging name is only previewed — the launch claims its own, which may differ).
+- *Surfaces.* `add docs` has no `--json` (its success is an exec; the dry-run payload is the
+  script's human map); trailing arguments pass through to `pi`. Neither door is admitted to
+  read-only sessions (§8.3 admits only the `--json` worker forms).

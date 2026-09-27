@@ -31,25 +31,31 @@ mirror or a checkout.
 3. **Refresh only on evidence.** Refresh when the task depends on a fact that may have moved AND
    `check` reports `drifted`, or when the entry is `unverifiable` and the task itself evidences
    drift (the mirror contradicts observed behavior, a version the repo pins, an upstream
-   changelog). Source: `perk librarian refresh <slug> --json`. Documentation: the documentation
-   workflow below with `--replace`. A refresh without evidence churns a reference that was fine.
+   changelog). Source: `perk librarian refresh <slug> --json`. Documentation:
+   `perk librarian refresh <slug>` from a terminal — it launches the refresh session (the
+   documentation workflow below, published with `--replace`). A refresh without evidence churns a
+   reference that was fine.
 4. **Reuse before acquiring.** The dependency is often already on disk: `node_modules/<pkg>/` and
    `.pi/npm/node_modules/<pkg>/` (`src/`, `docs/`; `package.json`'s `repository` and `version`
    give the clone URL and the pin), or
    `.venv/lib/python*/site-packages/<dist>-<version>.dist-info/METADATA` (`Project-URL`,
    `Version`). Consult it when it answers the question; clone only when it is insufficient or a
    retained, pinned reference is wanted.
-5. **Add when missing.** Source code: `add source` (below). Documentation: the documentation
-   workflow, honoring its failed-page report. A new entry is `unknown` — run its first `check`
-   when the task relies on freshness.
+5. **Add when missing.** Source code: `add source` (below). Documentation:
+   `perk librarian add docs <url> [--slug <slug>] [--scope-prefix <prefix>]` from a terminal — it
+   launches the curating session (the documentation workflow below); `--dry-run` previews the
+   URL → file map first. A new entry is `unknown` — run its first `check` when the task relies on
+   freshness.
 
 ## Read-only sessions
 
 The `--json` worker forms — `list`, `check`, `refresh`, `add source`, `record`, `remove`, with
 `--json` as the last argument — are admitted in read-only perk sessions. The crawl script is not:
 interpreters are never admitted. From a read-only planning session, consult, check and
-`add source` directly, and record a needed documentation mirror as an implementation step; run
-the documentation workflow from a read-write session.
+`add source` directly. A documentation mirror is added or refreshed only through the doors —
+`perk librarian add docs <url> …` and `perk librarian refresh <slug>` — which launch a curating
+session from a terminal and are not admitted here: when a task needs a mirror that does not exist
+yet, record the door command as a follow-up step for the human.
 
 ## Adding source code
 
@@ -65,21 +71,30 @@ the documentation workflow from a read-write session.
 
 ## The documentation workflow
 
+`perk librarian add docs <url>` (a new entry) and `perk librarian refresh <slug>` (an existing
+documentation entry) each launch a session seeded with this workflow — the seed names the URL,
+slug, scope, the empty staging directory it created for that session, and the exact, shell-quoted
+crawl and publish commands (the crawl runs through perk's own interpreter — the one the door
+verified); the steps below are the detail that session follows. There is no session-free add:
+pruning and artifact fixes are judgment work.
+
 Prerequisites: `curl` and `html2markdown` on `PATH` (`brew install html2markdown`). The bundled
-crawl script is stdlib Python, resolved relative to this skill's directory and invoked as
-`python3 <skill-dir>/scripts/copy_docs_to_markdown.py` (for example
+crawl script is stdlib Python (≥ 3.10): a door session runs it with the exact command its seed
+names; by hand, `python3 <skill-dir>/scripts/copy_docs_to_markdown.py` (for example
 `python3 .agents/skills/librarian/scripts/copy_docs_to_markdown.py`).
 
 1. **Dry-run.** `… URL <staging> --dry-run` prints the URL → file map and writes nothing.
 2. **Scope.** Pass `--scope-prefix /docs/x/` when the site hosts several products or versions
-   (the default is the seed URL's parent path); `--max-pages` caps the crawl (default 100).
-3. **Crawl into a direct child of `.staging/`** — `<library_root>/.staging/<slug>` from
-   `list --json`, a **new or empty** directory (the script refuses a non-empty one; delete a stale
-   staging directory before re-crawling). The crawl writes the pages, then `failed-pages.json`,
+   (the default is the seed URL's parent path; `--scope-prefix /` keeps the whole site in
+   scope); `--max-pages` caps the crawl (default 100).
+3. **Crawl into the staging directory the seed created for you** (or, by hand, a new or empty
+   direct child of `.staging/` — `<library_root>/.staging/<slug>` from `list --json`; the script
+   refuses a non-empty one). The crawl writes the pages, then `failed-pages.json`,
    `sources.json` and, last, `index.md` — a crawl that did not finish has no `index.md` and cannot
    be published. Unsafe links (`.`/`..` segments, paths beneath an artifact name) are rejected
    and colliding paths skipped, each with a `WARNING:`. **Exit 1** means pages failed: read `failed-pages.json`, then re-crawl or decide to
-   accept. **Exit 2** means the staging directory is untrustworthy: delete it.
+   accept. **Exit 2** means the staging directory is untrustworthy: delete and recreate only your
+   own staging directory, then re-crawl.
 4. **Prune** pages outside the requested doc set (other products or versions, marketing, blog,
    changelog, navigation-only pages), deleting each pruned page's `sources.json` entry and its
    `index.md` link.
@@ -94,5 +109,8 @@ prefix, and the `index.md` entrypoint.
 
 ## Refreshing documentation
 
-`perk librarian refresh <slug>` refuses a documentation entry (`needs_session`): re-run the
-documentation workflow into a fresh staging directory and publish with `--replace`.
+`perk librarian refresh <slug>` on a documentation entry launches the refresh session: re-run the
+workflow into the staging directory the seed created, with the prior crawl's scope (recovered from
+the published mirror's `sources.json`), and publish with `--replace` — the prior revision stays
+published until that publish commits. The `--json` form stays the deterministic worker and refuses
+with `needs_session`.

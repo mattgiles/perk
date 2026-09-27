@@ -283,7 +283,8 @@ The gate also admits the perk library workers in their `--json` forms: `perk lib
 --json`, `perk librarian record … --json`, `perk librarian remove … --json`,
 `perk librarian add source … --json`, `perk librarian check … --json`, and
 `perk librarian refresh … --json`, with `--json` last and any whitespace-separated arguments
-before it. They write only the gitignored `docs/library/` cache: the CLI itself refuses unless
+before it — none of which may start a comment (`#`) or contain a redirection (`<` or `>`), so the
+final `--json` is always a real argument. They write only the gitignored `docs/library/` cache: the CLI itself refuses unless
 its representative ignore probes (the catalog, the lock file, and each directory the operation
 changes) pass and nothing under the library is tracked. The probes run before the lock is taken,
 except the probes of `remove`'s entry directory and `refresh`'s checkout, which need the catalog

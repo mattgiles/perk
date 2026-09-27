@@ -8,112 +8,33 @@ The network and the converter are faked at the script's own seams (``fetch_html`
 output-directory check and ``mkdir``, just before the page's write.
 """
 
-import importlib.util
 import json
-import re
 import subprocess
-import sys
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 import pytest
+from _librarian_site import Redirect as _Redirect
+from _librarian_site import SiteValue, load_script
+from _librarian_site import fake_site as _fake_site
+from _librarian_site import http_error as _http_error
+from _librarian_site import page as _page
+from _librarian_site import run_script as _run
 
 from perk.library import ops
 from perk.library.catalog import DocsUpstream, PageMarker
 from perk.library.errors import LibraryError
 from perk.library.layout import LibraryLayout
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_PATH = REPO_ROOT / "skills" / "librarian" / "scripts" / "copy_docs_to_markdown.py"
-
 SITE = "https://d.example"
 SEED = f"{SITE}/docs/start"
 ARTIFACTS = ("failed-pages.json", "sources.json", "index.md")
 
 
-@dataclass(frozen=True)
-class _Redirect:
-    """A page served from another URL after curl followed a redirect."""
-
-    to: str
-    html: str
-
-
-type SiteValue = str | _Redirect | subprocess.CalledProcessError
-
-
 @pytest.fixture(scope="module")
 def script() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("copy_docs_to_markdown", SCRIPT_PATH)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def _run(script: ModuleType, argv: list[str]) -> int:
-    try:
-        return script.main(argv)
-    except SystemExit as exc:
-        assert isinstance(exc.code, int)
-        return exc.code
-
-
-def _page(title: str, *hrefs: str) -> str:
-    links = "".join(f'<a href="{href}">{href}</a>' for href in hrefs)
-    return f"<html><body><h1>{title}</h1><p>{title} body.</p>{links}</body></html>"
-
-
-def _http_error(url: str, status: int = 404) -> subprocess.CalledProcessError:
-    return subprocess.CalledProcessError(
-        22, ["curl", url], stderr=f"curl: (22) The requested URL returned error: {status}\n"
-    )
-
-
-def _stub_markdown(html_text: str) -> str:
-    """A deterministic stand-in for html2markdown: `<h1>` → `# …`, `<a href>` → `[…](…)`."""
-    text = re.sub(r"<h1>(.*?)</h1>", r"# \1\n\n", html_text)
-    text = re.sub(r'<a href="([^"]*)">(.*?)</a>', r"[\2](\1)\n", text)
-    text = re.sub(r"<p>(.*?)</p>", r"\1\n\n", text)
-    return re.sub(r"<[^>]+>", "", text)
-
-
-def _fake_site(
-    monkeypatch: pytest.MonkeyPatch,
-    script: ModuleType,
-    pages: Mapping[str, SiteValue],
-    *,
-    on_convert: Callable[[int], None] | None = None,
-) -> list[str]:
-    """Serve ``pages`` through the script's seams; returns the log of fetched URLs."""
-    fetched: list[str] = []
-    conversions = [0]
-
-    def fetch_html(url: str) -> object:
-        fetched.append(url)
-        value = pages.get(url, _http_error(url))
-        if isinstance(value, subprocess.CalledProcessError):
-            raise value
-        if isinstance(value, _Redirect):
-            return script.Fetched(html=value.html, url=value.to)
-        return script.Fetched(html=value, url=url)
-
-    def convert_html(html_text: str) -> str:
-        index = conversions[0]
-        conversions[0] += 1
-        if on_convert is not None:
-            on_convert(index)
-        return _stub_markdown(html_text)
-
-    monkeypatch.setattr(script, "fetch_html", fetch_html)
-    monkeypatch.setattr(script, "convert_html", convert_html)
-    monkeypatch.setattr(script, "which", lambda tool: f"/usr/bin/{tool}")
-    return fetched
+    return load_script()
 
 
 def _three_page_site() -> dict[str, SiteValue]:

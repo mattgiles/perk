@@ -1,6 +1,6 @@
 ---
 title: "Librarian commands"
-description: "Exact reference for the perk librarian group — list, record, remove, add source, check, and refresh entries in the catalogued, gitignored perk library."
+description: "Exact reference for the perk librarian group — list, record, remove, add source, add docs, check, and refresh entries in the catalogued, gitignored perk library."
 sidebar:
   order: 3017
 ---
@@ -8,7 +8,8 @@ sidebar:
 # Librarian commands
 
 This page holds the exact reference for the `perk librarian` group: the deterministic workers
-that tend the **perk library**. For the full command map and shared conventions, start at the
+that tend the **perk library**, and the two doors that open a curating session for a
+documentation mirror. For the full command map and shared conventions, start at the
 [CLI commands hub](../cli.md).
 
 ## The librarian group
@@ -16,11 +17,14 @@ that tend the **perk library**. For the full command map and shared conventions,
 ### `perk librarian`
 
 Tend the perk library — the catalogued, gitignored offline reference of external documentation
-mirrors and source checkouts under `docs/library/`. The group has six workers: `list`
-(offline, lock-free), `record` (records documentation mirrors), `remove`, `add source` (clones or
-re-pins a source checkout), `check` (the **only** command that probes upstreams for changes), and
-`refresh` (fast-forwards a source checkout). `add source` and `refresh` reach the network only
-for their own checkout. There are no verb aliases.
+mirrors and source checkouts under `docs/library/`. The group has six verbs: `list`
+(offline, lock-free), `record` (records documentation mirrors), `remove`, `add` (`add source`
+clones or re-pins a source checkout), `check` (the **only** command that probes upstreams for
+changes), and `refresh` (fast-forwards a source checkout). `add source` and `refresh` reach the
+network only for their own checkout. Two forms also open a session instead of running a worker:
+`add docs` and the human `refresh` of a documentation entry launch a curating session that
+mirrors a documentation site (see [`perk librarian add docs`](#perk-librarian-add-docs)). There
+are no verb aliases.
 
 **Where the library lives.** The library lives in the repository's **main checkout**, even when
 you run a command from a linked worktree: every worker resolves the main checkout and reports
@@ -43,7 +47,8 @@ the library — consult the listing once, check only the `stale` or `unknown` en
 depends on, refresh only on evidence, reuse a dependency already installed locally, and add an
 entry when one is missing — plus the documentation workflow. It is exposed to the `plan`,
 `objective-plan`, `objective-author`, `implement`, `address`, and `learn` stages and is
-discovered by its description. Its bundled crawl script (stdlib Python; needs `curl` and
+discovered by its description; the two documentation doors (`add docs` and the human `refresh`
+of a documentation entry) deliver it to their sessions directly. Its bundled crawl script (stdlib Python; needs `curl` and
 `html2markdown` on `PATH`) crawls a documentation site into a new or empty
 `docs/library/.staging/<slug>/` directory, writes the `sources.json` inventory and the
 `failed-pages.json` report there, and writes `index.md` last, so a crawl that did not finish
@@ -199,7 +204,62 @@ The human render prints `removed <slug> (<kind>) — <path>`. `--json` emits the
 
 ### `perk librarian add`
 
-`perk librarian add <kind>` adds a library entry by kind. `source` is the only kind.
+`perk librarian add <kind>` adds a library entry by kind: `source` clones a source checkout, and
+`docs` launches the session that mirrors a documentation site.
+
+### `perk librarian add docs`
+
+`perk librarian add docs <url> [--slug <slug>] [--scope-prefix <prefix>] [--dry-run] [pi-args…]`
+launches a perk session in the repository's main checkout that mirrors a documentation site into
+the library as a new documentation entry. Mirroring is judgment work — choosing the scope,
+pruning off-topic pages, fixing conversion artifacts — so there is no session-free add: the door
+checks everything it can first, then hands the session a seeded flow that the `librarian` skill
+details.
+
+- **`<url>`** — the seed page, an absolute `http` or `https` URL (`invalid_source` otherwise).
+- **`--slug <slug>`** — the entry slug. It defaults to the URL's first host label after dropping
+  a leading `www.` and then a leading `docs.`: `https://pi.dev/docs` → `pi`,
+  `https://docs.astro.build/en/` → `astro`. When that label is not a valid slug, the command
+  refuses with `invalid_slug` and asks for `--slug`. The door always prints the slug it chose.
+- **`--scope-prefix <prefix>`** — the URL path prefix to keep in scope, such as `/docs/`; `/`
+  keeps the whole site. Without it, the crawl keeps the seed URL's parent path. A prefix with a
+  `.` or `..` segment, whitespace, or a blank value is `invalid_input`.
+- **`--dry-run`** — runs the crawl script's own dry-run and prints the URL → file map, the scope
+  prefix, and the counts. No session starts and nothing is written. Exit `0` means every
+  discovered page was reachable; exit `1` means a discovery fetch failed (the `WARNING:` lines
+  say which); a script refusal is `crawl_refused`, and any other script exit is `io_error`.
+- **Trailing arguments** pass through to `pi`.
+
+**Before the session.** The command refuses, and starts nothing, when:
+
+- `slug_exists` — the slug is already catalogued (refresh that entry with
+  `perk librarian refresh <slug>`, or pick another `--slug`), or `documentation/<slug>/` already
+  exists uncatalogued (adopt it with `record --adopt`, delete it, or pick another `--slug`).
+- `skill_missing` — the `librarian` skill's crawl script is not installed at
+  `.agents/skills/librarian/scripts/copy_docs_to_markdown.py` in the main checkout. Run
+  `perk init` (it syncs perk's skills), then rerun.
+- `missing_converter` — `curl` or `html2markdown` is not on `PATH` (install `html2markdown` with
+  `brew install html2markdown`). This is checked on `--dry-run` too.
+- a cache-only preflight refusal (`library_root_invalid`, `library_tracked_content`,
+  `library_not_ignored`), or `catalog_malformed`.
+
+**The staging directory.** On a real launch, the command creates an empty
+`docs/library/.staging/<slug>/` directory for the session — or `<slug>-2/`, `<slug>-3/`, … when
+that name is already taken — and never deletes a staging directory. If you abandon the session,
+the empty directory stays behind; `perk librarian list` reports it under `staging:`, and you can
+delete it.
+
+**What the session does.** The seed names the URL, the slug, the scope, the staging directory, and
+two exact, shell-quoted commands: the crawl (the `librarian` skill's script run through perk's own
+Python interpreter) into the staging directory, and the publish
+(`perk librarian record --publish <staging> --slug <slug> --source <url> --json`). The session
+crawls, prunes and fixes the staged mirror, publishes it (adding `--accept-failures` only after
+judging a partial crawl's report), and reports what it published. Its scope is soft: it is told
+to write only under the gitignored library — never a commit, never `docs/library/README.md`,
+never `catalog.json` by hand — but no sandbox enforces that.
+
+`add docs` has no `--json` form and is not admitted in read-only perk sessions; run it from a
+terminal.
 
 ### `perk librarian add source`
 
@@ -334,9 +394,18 @@ fetched or recorded. Outcomes:
 | `skipped_dirty` | The checkout has uncommitted changes — commit, stash, or discard them. |
 | `skipped_non_ff` | The checkout is detached or on another branch, has local commits ahead, or has diverged — or the default branch no longer exists upstream; the detail says which. Local commits or divergence mark the entry `drifted`; a vanished branch leaves it `unverifiable`. |
 
-Refusals: a documentation entry is `needs_session` — refreshing a mirror means re-crawling into
-`docs/library/.staging/`, curating, and `perk librarian record --publish … --replace` from a perk
-session following the `librarian` skill. A pinned entry is `entry_pinned` — re-pin with `add source … --ref <new>`, or remove and
+**Documentation entries.** Refreshing a mirror is judgment work, so `perk librarian refresh
+<slug>` on a documentation entry (without `--json`) launches the refresh session — the same door
+as [`add docs`](#perk-librarian-add-docs), with the same `skill_missing` and `missing_converter`
+refusals and the same staging directory rules. The session re-crawls the entry's source URL into
+the new staging directory with the prior crawl's scope (read from the published mirror's
+`sources.json`; when the recorded scope is unusable, the command prints a `warning:` and the crawl
+uses the default scope), curates, and publishes with `record --publish … --replace`. The prior
+revision stays published until that publish succeeds. `refresh --json` on a documentation entry
+refuses with `needs_session` and names the door. `refresh` of a documentation entry takes no
+`--dry-run` and no `pi` arguments.
+
+Refusals: a pinned entry is `entry_pinned` — re-pin with `add source … --ref <new>`, or remove and
 re-add it to track the default branch. A missing checkout is `entry_missing` — `add source`
 re-clones it. A failed fetch is `fetch_failed`. If the catalog cannot be written after a
 fast-forward, the command reports `io_error`: the checkout is already fast-forwarded, and
