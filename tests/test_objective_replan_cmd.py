@@ -8,11 +8,12 @@ the fresh-run-id + `supersedes` handoff threading, and the refusals.
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from perk import github, objective
-from perk.backends import resolve
-from perk.backends.objective_store import ObjectiveState
+from perk.backends import engagement, resolve
+from perk.backends.objective_store import AdoptableObjectiveSource, ObjectiveState
 from perk.cli.cli import cli
 from perk.cli.commands.objective import replan_cmd
 from perk.delivery import DeliveryError, PrepareRequest, PrepareResult
@@ -38,9 +39,19 @@ def _node(node_id: str, status: objective.NodeStatus, pr: str | None = None):
 class _FakeStore:
     backend_id = "github"
 
-    def __init__(self, *, state: ObjectiveState | None, raise_engagement: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        state: ObjectiveState | None,
+        raise_engagement: bool = False,
+        sources: dict[str, AdoptableObjectiveSource] | None = None,
+        comments: tuple[engagement.EngagementComment, ...] = (),
+    ) -> None:
         self._state = state
         self._raise_engagement = raise_engagement
+        self._sources = sources
+        self._comments = comments
+        self.source_calls: list[str] = []
 
     def get_objective(self, *, objective_id: str):
         return self._state
@@ -50,19 +61,21 @@ class _FakeStore:
             from perk.backends.objective_store import ObjectiveStoreError
 
             raise ObjectiveStoreError("boom")
-        return ()
+        return self._comments
 
     def read_description_edits(self, *, objective_id: str):
         return ()
 
     def read_node_engagement(self, *, objective_id: str, node_id: str):
-        from perk.backends import engagement
-
         return engagement.EMPTY_NODE_ENGAGEMENT
 
     def read_objective_source(self, *, source_id: str):
-        from perk.backends.objective_store import AdoptableObjectiveSource
-
+        self.source_calls.append(source_id)
+        # With a `sources` map the fake answers ONLY from it (a miss is `None` — the subject's
+        # prose read then falls back to the title); without one it returns the default
+        # old-objective prose every existing test relies on.
+        if self._sources is not None:
+            return self._sources.get(source_id)
         return AdoptableObjectiveSource(
             id=source_id, url="u/42", title="Old objective", prose="The old objective rationale."
         )
@@ -602,3 +615,280 @@ def test_junk_delivery_policy_refuses_fail_closed(monkeypatch, unborn_git_repo_f
         result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.stdout)["error_type"] == "invalid_delivery_policy"
+
+
+# ----------------------------------------------------------------- `--from` guidance (§8.32)
+
+_STEER = "Drop phase 3 and pivot the remaining work toward the gizmo rewrite."
+
+
+def _write_steer(d: str, body: str = _STEER) -> Path:
+    path = Path(d) / "steer.md"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def _boom_launch(**_k) -> None:
+    raise AssertionError("a refused --from must never launch")
+
+
+def test_from_file_appends_guidance_block_and_seed_arm(monkeypatch, unborn_git_repo_factory):
+    store = _FakeStore(state=_state(_UNFINISHED_NODES))
+    _patch(monkeypatch, store)
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        steer = _write_steer(d)
+        result = runner.invoke(cli, ["objective", "replan", "42", "--from", "steer.md", "--json"])
+        assert result.exit_code == 0, result.output
+        text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
+    assert "<untrusted_replan_guidance>" in text
+    assert f"from: file {steer.resolve()}" in text
+    assert _STEER in text
+    assert text.index("</untrusted_objective_unfinished_nodes>") < text.index(
+        "<untrusted_replan_guidance>"
+    )
+    assert "<untrusted_replan_guidance>" in (launched["prompt"] or "")
+    # Guidance only: the supersede handoff is unchanged, a fresh run_id is minted, and the file
+    # arm does no network read.
+    assert launched["handoff_extra"] == {"supersedes": "42"}
+    assert launched["run_id_override"] is None
+    assert "reading guidance source" not in result.stderr
+
+
+def test_from_source_reads_store_and_narrates(monkeypatch, unborn_git_repo_factory):
+    source = AdoptableObjectiveSource(
+        id="99", url="u/99", title="Steer it", prose="Pivot the remaining work to X."
+    )
+    store = _FakeStore(state=_state(_UNFINISHED_NODES), sources={"99": source})
+    _patch(monkeypatch, store)
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "replan", "42", "--from", "99", "--json"])
+        assert result.exit_code == 0, result.output
+        text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
+        dry = runner.invoke(
+            cli, ["objective", "replan", "42", "--from", "99", "--dry-run", "--json"]
+        )
+        assert dry.exit_code == 0, dry.output
+    assert "from: source 99 — Steer it (u/99)" in text
+    assert "Pivot the remaining work to X." in text
+    assert "reading guidance source 99" in result.stderr
+    assert "read guidance source 99" in result.stderr
+    assert launched["handoff_extra"] == {"supersedes": "42"}
+    payload = json.loads(dry.stdout)
+    assert payload["from"] == "99" and payload["from_kind"] == "source"
+
+
+def test_from_source_strips_hash_prefix(monkeypatch, unborn_git_repo_factory):
+    source = AdoptableObjectiveSource(id="99", url="u/99", title="Steer it", prose="Steer text.")
+    store = _FakeStore(state=_state(_UNFINISHED_NODES), sources={"99": source})
+    _patch(monkeypatch, store)
+    monkeypatch.setattr(launch, "launch_stage", _boom_launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(
+            cli, ["objective", "replan", "42", "--from", "#99", "--dry-run", "--json"]
+        )
+        assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["from"] == "99"
+    assert "99" in store.source_calls
+
+
+def test_from_file_dry_run_json_kind(monkeypatch, unborn_git_repo_factory):
+    store = _FakeStore(state=_state(_UNFINISHED_NODES))
+    _patch(monkeypatch, store)
+    monkeypatch.setattr(launch, "launch_stage", _boom_launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        _write_steer(d)
+        result = runner.invoke(
+            cli, ["objective", "replan", "42", "--from", "steer.md", "--dry-run", "--json"]
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload["from_kind"] == "file"
+        assert Path(payload["from"]).resolve() == (Path(d) / "steer.md").resolve()
+    # The guidance keys are appended before `dry_run`, which stays the last key.
+    assert list(payload)[-3:] == ["from", "from_kind", "dry_run"]
+
+
+def test_from_missing_source_refuses_guidance_not_found(monkeypatch, unborn_git_repo_factory):
+    store = _FakeStore(state=_state(_UNFINISHED_NODES), sources={})
+    service = _patch(monkeypatch, store)
+    monkeypatch.setattr(launch, "launch_stage", _boom_launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "replan", "42", "--from", "77", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+        assert not (Path(d) / _SCRATCH_REL).exists()
+    assert payload["error_type"] == "guidance_not_found"
+    assert "77" in payload["message"]
+    # The source read precedes the objective lookup.
+    assert service.requests == []
+
+
+def test_from_bodiless_source_refuses_guidance_empty(monkeypatch, unborn_git_repo_factory):
+    source = AdoptableObjectiveSource(id="99", url="u/99", title="Blank", prose="   ")
+    store = _FakeStore(state=_state(_UNFINISHED_NODES), sources={"99": source})
+    _patch(monkeypatch, store)
+    monkeypatch.setattr(launch, "launch_stage", _boom_launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "replan", "42", "--from", "99", "--json"])
+        assert result.exit_code == 1
+    assert json.loads(result.stdout)["error_type"] == "guidance_empty"
+
+
+def test_from_empty_file_refuses_seed_file_error(monkeypatch, unborn_git_repo_factory):
+    store = _FakeStore(state=_state(_UNFINISHED_NODES))
+    _patch(monkeypatch, store)
+    monkeypatch.setattr(launch, "launch_stage", _boom_launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        _write_steer(d, body="")
+        result = runner.invoke(cli, ["objective", "replan", "42", "--from", "steer.md", "--json"])
+        assert result.exit_code == 1
+    assert json.loads(result.stdout)["error_type"] == "seed_file_error"
+
+
+def test_from_blank_refuses_invalid_input(monkeypatch, unborn_git_repo_factory):
+    store = _FakeStore(state=_state(_UNFINISHED_NODES))
+    _patch(monkeypatch, store)
+    monkeypatch.setattr(launch, "launch_stage", _boom_launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "replan", "42", "--from", "  ", "--json"])
+        assert result.exit_code == 1
+    assert json.loads(result.stdout)["error_type"] == "invalid_input"
+
+
+@pytest.mark.parametrize("alias", ["42", "#42"])
+def test_from_aliasing_the_objective_refuses_invalid_input(
+    monkeypatch, unborn_git_repo_factory, alias
+):
+    store = _FakeStore(state=_state(_UNFINISHED_NODES))
+    service = _patch(monkeypatch, store)
+    monkeypatch.setattr(launch, "launch_stage", _boom_launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        # A real (non-dry-run) launch: the refusal must precede even the banner.
+        result = runner.invoke(cli, ["objective", "replan", "42", "--from", alias, "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.stdout)
+        assert not (Path(d) / _SCRATCH_REL).exists()
+    assert payload["error_type"] == "invalid_input"
+    assert "#42" in payload["message"]
+    assert store.source_calls == []  # never read as guidance (nor as the subject's prose)
+    assert service.requests == []
+    assert "skills \u00b7" not in result.stderr
+
+
+def test_from_aliasing_the_replan_scratch_refuses_invalid_input(
+    monkeypatch, unborn_git_repo_factory
+):
+    store = _FakeStore(state=_state(_UNFINISHED_NODES))
+    service = _patch(monkeypatch, store)
+    monkeypatch.setattr(launch, "launch_stage", _boom_launch)
+    sentinel = "SENTINEL: a prior replan's scratch, which must survive the refusal.\n"
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        scratch = Path(d) / _SCRATCH_REL
+        scratch.parent.mkdir(parents=True, exist_ok=True)
+        scratch.write_text(sentinel, encoding="utf-8")
+        result = runner.invoke(
+            cli, ["objective", "replan", "42", "--from", _SCRATCH_REL, "--dry-run", "--json"]
+        )
+        assert result.exit_code == 1
+        assert scratch.read_text(encoding="utf-8") == sentinel  # refusal precedes the write
+    assert json.loads(result.stdout)["error_type"] == "invalid_input"
+    assert service.requests == []
+
+
+def test_from_another_objective_is_accepted_as_data(monkeypatch, unborn_git_repo_factory):
+    sibling = AdoptableObjectiveSource(
+        id="43", url="u/43", title="Sibling", prose="Sibling prose.", has_objective_header=True
+    )
+    store = _FakeStore(state=_state(_UNFINISHED_NODES), sources={"43": sibling})
+    _patch(monkeypatch, store)
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        result = runner.invoke(cli, ["objective", "replan", "42", "--from", "43", "--json"])
+        assert result.exit_code == 0, result.output
+        text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
+    assert "from: source 43 — Sibling (u/43)" in text
+    assert "Sibling prose." in text
+    assert launched["handoff_extra"] == {"supersedes": "42"}
+
+
+def test_from_guidance_precedes_stacked_facts(monkeypatch, unborn_git_repo_factory):
+    nodes = [_node("1.1", objective.NodeStatus.IN_PROGRESS, pr="#12")]
+    comment = engagement.EngagementComment(
+        id="c1",
+        body="Please reconsider the gizmo milestone.",
+        created_at="2024-01-01T00:00:00Z",
+        edited_at=None,
+        author=engagement.EngagementAuthor(kind="human", display_name="alice", id="u1"),
+    )
+    store = _FakeStore(state=_stacked_state(nodes), comments=(comment,))
+    service = _patch(monkeypatch, store)
+    _configure_stacked(service, store, claimed=(_claimed_layer("1.1", "12", 34),))
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        _write_steer(d)
+        result = runner.invoke(cli, ["objective", "replan", "42", "--from", "steer.md", "--json"])
+        assert result.exit_code == 0, result.output
+        text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
+    # Steer first, enforced constraints next, engagement last.
+    assert text.index("</untrusted_replan_guidance>") < text.index("<stacked_delivery_facts>")
+    assert text.index("</stacked_delivery_facts>") < text.index("<untrusted_objective_engagement>")
+    assert text.rstrip().endswith("</untrusted_objective_engagement>")
+
+
+def test_without_from_is_byte_identical(monkeypatch, unborn_git_repo_factory):
+    store = _FakeStore(state=_state(_UNFINISHED_NODES))
+    _patch(monkeypatch, store)
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d, unborn_git_repo_factory)
+        dry = runner.invoke(cli, ["objective", "replan", "42", "--dry-run", "--json"])
+        assert dry.exit_code == 0, dry.output
+        result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
+        assert result.exit_code == 0, result.output
+        text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
+    payload = json.loads(dry.stdout)
+    assert list(payload) == [
+        "success",
+        "error_type",
+        "objective",
+        "supersedes",
+        "scratch_path",
+        "unfinished_nodes",
+        "dry_run",
+    ]
+    assert "<untrusted_replan_guidance>" not in text
+    assert "untrusted_replan_guidance" not in (launched["prompt"] or "")
+    assert "reading guidance source" not in dry.stderr + result.stderr
+    assert launched["handoff_extra"] == {"supersedes": "42"}
