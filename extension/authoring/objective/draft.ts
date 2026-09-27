@@ -351,6 +351,13 @@ export interface PreservedNodeFields {
   adopt_issue?: string;
   pr?: string;
   status?: string;
+  /**
+   * The node's explicit dependency list — present iff the node carries a `depends_on` array.
+   * The rendered table shows an omitted field and `[]` alike (`-`), but they schedule
+   * differently: `[]` is an explicitly independent node, while a roadmap whose nodes ALL omit
+   * the field falls back to sequential inference.
+   */
+  depends_on?: string[];
 }
 
 /**
@@ -370,8 +377,9 @@ const PRESERVED_NODE_KEYS = ["slug", "comment", "adopt_issue", "pr", "status"] a
 /**
  * The complement of `renderObjectiveDraft`: `base`/`delivery` when present on the decoded draft,
  * and per roadmap node with a non-blank string `id` each of `slug`/`comment`/`adopt_issue`/`pr`/
- * `status` only when it is a non-blank string (verbatim). A duplicate id keeps the LAST node (the
- * Python save rejects duplicates anyway). Pure; never throws.
+ * `status` only when it is a non-blank string (verbatim), plus `depends_on` (its string members)
+ * whenever the node carries a `depends_on` array — `[]` included. A duplicate id keeps the LAST
+ * node (the Python save rejects duplicates anyway). Pure; never throws.
  */
 export function preservedObjectiveFields(draft: ObjectiveDraft): PreservedObjectiveFields {
   const nodes: Record<string, PreservedNodeFields> = {};
@@ -383,6 +391,9 @@ export function preservedObjectiveFields(draft: ObjectiveDraft): PreservedObject
       const value = nodeString(node, key);
       if (value.trim()) fields[key] = value;
     }
+    const deps = (node as Record<string, unknown>).depends_on;
+    if (Array.isArray(deps))
+      fields.depends_on = deps.filter((d): d is string => typeof d === "string");
     nodes[id] = fields;
   }
   return {

@@ -457,7 +457,8 @@ What arrives, as one message: the lane's report (diagnosis, anchored cuts, the f
 proposal, the items it deliberately kept, the net delta) as untrusted data, the fold-in guidance,
 and — when the draft changed while the lane ran — a draft-moved note. A failed run posts one loud
 notice and injects nothing; re-run the door. One run is pending at a time per session; it settles
-on completion, failure, or the wave deadline (there is no cancel).
+on completion, failure, or the wave deadline (there is no cancel). A run still pending when the
+session reloads or is replaced is dropped silently.
 
 ### `/simplify-plan`
 
@@ -473,8 +474,9 @@ stages or when no non-blank plan draft exists (write one with `plan_draft` first
 Usage: `/simplify-objective [lite|full|ultra] [focus…]`. Runs in `objective-author` or
 `objective-save` on the rendered objective draft (never raw JSON); the agent rewrites it with
 `objective_draft`. The message also carries the structured fields the rendered draft cannot show —
-`base`, `delivery`, and each node's `slug`, `comment`, `adopt_issue`, `pr` and `status`, read from
-the current draft when the lane finished — so the rewrite keeps them unchanged. A cut that merges
+`base`, `delivery`, and each node's `slug`, `comment`, `adopt_issue`, `pr`, `status` and exact
+`depends_on` list (an omitted list and an empty one schedule differently), read from the current
+draft when the lane finished — so the rewrite keeps them unchanged. A cut that merges
 or removes a node linked to an adopted issue or a PR comes back as a separate scope-change decision.
 The door refuses outside those stages, when the draft is missing or invalid, and for a
 `perk learn dream` session's draft (one carrying a dream report). An `objective-plan` session gets

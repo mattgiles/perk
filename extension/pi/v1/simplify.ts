@@ -25,7 +25,8 @@
 // nothing injected, no retry. The pending flag is installer-local (per activation, never
 // module-global) and clears on every settle. No abort signal is threaded: an idle-launched slash
 // command has no live `ctx.signal`, so a pending run settles only on completion, failure, or the
-// wave's engine deadline. A pending run dies with its activation.
+// wave's engine deadline. A run that settles after its activation shut down (reload, session
+// replacement, quit) is inert — the captured ctx is invalidated by then, so it touches nothing.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
@@ -239,6 +240,12 @@ export interface SimplifyRun {
   launch: Extract<SimplifyDraftRead, { ok: true }>;
   /** The completion re-read; a throw counts as `ok: false`. */
   readLive: () => SimplifyDraftRead;
+  /**
+   * Whether the launching activation is still live. A run that settles after `session_shutdown`
+   * is inert: the captured `pi`/`ctx` are invalidated (their getters throw), so nothing is read,
+   * reported, or injected.
+   */
+  isLive: () => boolean;
   model?: string;
   /** Test seam; production validates the exact source-bound Ponytail skill. */
   requiredSkillPreflight?: SimplifyWaveOptions["requiredSkillPreflight"];
@@ -255,7 +262,7 @@ function readLiveSafely(readLive: () => SimplifyDraftRead): SimplifyDraftRead {
 /**
  * Run the wave and inject the result: a complete wave → the live re-read → ONE message (idle →
  * `sendUserMessage`, streaming → `followUp`); anything else → one loud error and nothing
- * injected. Never throws.
+ * injected; a settle after the activation shut down → nothing at all.
  */
 export async function runSimplifyAndInject(
   pi: Pick<ExtensionAPI, "sendUserMessage">,
@@ -286,6 +293,7 @@ export async function runSimplifyAndInject(
         ? { requiredSkillPreflight: run.requiredSkillPreflight }
         : {}),
     });
+    if (!run.isLive()) return;
     const entry = result.complete
       ? result.reports.find((r) => r.key === SIMPLIFY_ASSIGNMENT_KEY)
       : undefined;
@@ -322,6 +330,7 @@ export async function runSimplifyAndInject(
     if (ctx.isIdle()) pi.sendUserMessage(text);
     else pi.sendUserMessage(text, { deliverAs: "followUp" });
   } catch (err) {
+    if (!run.isLive()) return;
     failed(` unexpectedly: ${boundedDetail(String(err))}`);
   }
 }
@@ -353,6 +362,12 @@ export function registerSimplifyDoors(
   status: ActivityHandle,
 ): void {
   let pending = false;
+  // Session shutdown precedes the ctx invalidation (reload, replacement, quit): a run still
+  // pending then must settle without touching its captured context.
+  let live = true;
+  pi.on("session_shutdown", async () => {
+    live = false;
+  });
   for (const subject of [PLAN_SUBJECT, OBJECTIVE_SUBJECT]) {
     const { scope } = subject;
     registerPerkCommand(pi, scope, {
@@ -386,7 +401,8 @@ export function registerSimplifyDoors(
           return;
         }
         pending = true;
-        const model = subagentModel(ctx.cwd, "simplifier");
+        const cwd = ctx.cwd;
+        const model = subagentModel(cwd, "simplifier");
         const running = `simplifier running (${parsed.intensity}) on the working ${subject.subject} draft…`;
         const end = status.beginActivity(ctx, running);
         report(ctx, scope, "info", running);
@@ -400,12 +416,17 @@ export function registerSimplifyDoors(
               nodeScoped: stage === "objective-plan",
               launch,
               readLive: () => subject.readDraft(pi, ctx),
+              isLive: () => live,
               ...(model !== undefined ? { model } : {}),
-              requiredSkillPreflight: (req) => preflightPonytailSkill(req, ctx.cwd),
+              requiredSkillPreflight: (req) => preflightPonytailSkill(req, cwd),
             });
+          } catch (err) {
+            // The terminal boundary: the captured ctx may be the thing that failed, so this
+            // reports on stderr only and never touches it.
+            console.error(`perk: ${scope} — the simplify run failed unexpectedly: ${String(err)}`);
           } finally {
             pending = false;
-            end();
+            if (live) end();
           }
         })();
       },

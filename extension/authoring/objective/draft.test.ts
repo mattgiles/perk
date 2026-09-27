@@ -530,6 +530,7 @@ test("preservedObjectiveFields: every omitted field round-trips keyed by node id
         adopt_issue: "#12",
         pr: "#34",
         status: "in_progress",
+        depends_on: [],
       },
       "1.2": {},
     },
@@ -551,6 +552,30 @@ test("preservedObjectiveFields: id-less/blank-id nodes omitted; blank/mistyped f
   assert.deepEqual(fields, { nodes: { "2.1": {} } });
   assert.equal("base" in fields, false);
   assert.equal("delivery" in fields, false);
+});
+
+test("preservedObjectiveFields: depends_on keeps omitted distinct from [] (they schedule differently)", () => {
+  const fields = preservedObjectiveFields({
+    prose: "P",
+    roadmap: [
+      { id: "1.1" },
+      { id: "1.2", depends_on: [] },
+      { id: "1.3", depends_on: ["1.1", 7, "1.2"] },
+      { id: "1.4", depends_on: "1.1" },
+    ],
+  });
+  assert.deepEqual(fields.nodes, {
+    "1.1": {},
+    "1.2": { depends_on: [] },
+    "1.3": { depends_on: ["1.1", "1.2"] },
+    "1.4": {},
+  });
+  // The rendered table cannot tell 1.1 from 1.2 — the preserved block is what carries it.
+  const rendered = renderObjectiveDraft({
+    prose: "P",
+    roadmap: [{ id: "1.1" }, { id: "1.2", depends_on: [] }],
+  });
+  assert.match(rendered, /\| 1\.1 \| {2}\| - \| pending \|\n\| 1\.2 \| {2}\| - \| pending \|/);
 });
 
 test("preservedObjectiveFields: a duplicate id keeps the last node", () => {

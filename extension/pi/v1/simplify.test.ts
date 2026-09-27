@@ -182,7 +182,10 @@ test("simplifyGuidance: objective/full carries the preserved-fields carry-throug
   const text = simplifyGuidance({ subject: "objective", intensity: "full", nodeScoped: false });
   assert.match(text, /objective_draft/);
   assert.doesNotMatch(text, /plan_draft/);
-  assert.match(text, /carry the preserved structured fields block above through UNCHANGED/);
+  assert.match(text, /carry the preserved structured fields block above through the rewrite/);
+  assert.match(text, /a block read from the CURRENT working draft .* is carried unchanged/);
+  assert.match(text, /a LAUNCH-TIME block .* is carried unless the current draft says otherwise/);
+  assert.match(text, /an absent key stays omitted, `\[\]` stays an explicit empty list/);
   assert.match(text, /carrying `adopt_issue` or `pr` linkage is NOT folded silently/);
   assert.doesNotMatch(text, /node's stated deliverables/);
 });
@@ -372,6 +375,7 @@ function objectiveRun(overrides: Partial<SimplifyRun> = {}): SimplifyRun {
     nodeScoped: false,
     launch: OBJECTIVE_LAUNCH,
     readLive: () => OBJECTIVE_LAUNCH,
+    isLive: () => true,
     requiredSkillPreflight: async () => ({ ok: true }),
     ...overrides,
   };
@@ -447,6 +451,7 @@ test("runSimplifyAndInject: nodeScoped + model thread into the one spawn", async
       nodeScoped,
       launch,
       readLive: () => launch,
+      isLive: () => true,
       model: "test-simplifier-model",
       requiredSkillPreflight: async () => ({ ok: true }),
     });
@@ -491,6 +496,50 @@ test("runSimplifyAndInject: a lane-failed aggregate → one error naming the lan
     errors[0]?.message ?? "",
     /simplify \(full\) on the working objective draft failed — lane \(lane-failed\): simplifier exploded; nothing was injected/,
   );
+});
+
+test("runSimplifyAndInject: a settle after the activation shut down touches neither pi nor ctx", async () => {
+  const aggregates = [
+    okAggregate(),
+    {
+      state: "complete",
+      value: [{ key: "simplify", ok: false, error: "simplifier exploded", report: null }],
+    },
+  ];
+  for (const aggregate of aggregates) {
+    const adapter = createMemoryWaveAdapter({ aggregate });
+    let live = true;
+    const stale = (): never => {
+      throw new Error("stale ctx");
+    };
+    const pi = { sendUserMessage: stale } as unknown as Parameters<typeof runSimplifyAndInject>[0];
+    const ctx = {
+      get hasUI(): boolean {
+        return live ? true : stale();
+      },
+      get ui(): unknown {
+        return live ? { notify: () => {} } : stale();
+      },
+      get cwd(): string {
+        return stale();
+      },
+      isIdle: stale,
+    } as unknown as Parameters<typeof runSimplifyAndInject>[1];
+    await runSimplifyAndInject(
+      pi,
+      ctx,
+      reportWaveOver(adapter),
+      objectiveRun({
+        readLive: stale,
+        isLive: () => live,
+        requiredSkillPreflight: async () => {
+          live = false; // the activation shuts down while the lane runs
+          return { ok: true };
+        },
+      }),
+    );
+    assert.equal(adapter.calls.spawn.length, 1);
+  }
 });
 
 test("SimplifyRun: no abort signal is part of the run (the deliberate non-behavior)", () => {
@@ -879,13 +928,14 @@ test("doors: /simplify-objective — the RENDERED draft is cut; the live preserv
           adopt_issue: "#12",
           pr: "#34",
           status: "in_progress",
+          depends_on: [],
         },
-        "1.2": {},
+        "1.2": { depends_on: ["1.1"] },
       },
     });
     assert.equal(countOf(text, `${PRESERVED_LIVE_LABEL}\n${expected}`), 1);
     assert.equal(countOf(text, SIMPLIFY_DRAFT_MOVED_NOTE), 0);
-    assert.match(text, /carry the preserved structured fields block above through UNCHANGED/);
+    assert.match(text, /carry the preserved structured fields block above through the rewrite/);
   } finally {
     h.dispose();
   }
@@ -994,6 +1044,44 @@ test("doors: no Ponytail package → skill-unavailable, zero spawns, nothing inj
     assert.equal(fake.spawns.length, 0);
     assert.equal(injected.length, 0);
   } finally {
+    h.dispose();
+  }
+});
+
+test("doors: a run that settles after its activation shut down is inert — no stale-context throw escapes", async () => {
+  // No subagents responder: the wave's ping times out and settles a wave-level failure AFTER the
+  // reload has shut the activation down and invalidated its captured ctx.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
+  installPonytailCoreSkill(cwd);
+  plantSimplifySkill(cwd);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_WAVE_RPC_PING_MS: "300" },
+  });
+  const rejections: unknown[] = [];
+  const onRejection = (reason: unknown): void => {
+    rejections.push(reason);
+  };
+  process.on("unhandledRejection", onRejection);
+  try {
+    await h.invokeTool("plan_draft", { plan: DRAFT_MD });
+    const injected = spyInjections(h);
+    const { lines } = await captureStderr(async () => {
+      // The real prompt path: the handler receives the runner's own command ctx, whose getters
+      // throw once the activation is invalidated.
+      await h.invokeCommand("simplify-plan");
+      await h.reload();
+      await new Promise((r) => setTimeout(r, 800));
+    });
+    assert.deepEqual(rejections, [], "no rejection escapes the background run");
+    assert.equal(injected.length, 0, "nothing injected into the replaced session");
+    assert.equal(
+      lines.some((l) => l.includes("simplify (ultra) on the working plan draft failed")),
+      false,
+      "the late settle reports nothing",
+    );
+  } finally {
+    process.off("unhandledRejection", onRejection);
     h.dispose();
   }
 });
