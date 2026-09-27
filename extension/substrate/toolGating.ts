@@ -1105,8 +1105,12 @@ const SAFE_PATTERNS = [
   // a cloned tree or the user's global config selects can execute (env config and a checkout's
   // repo-local config stay trusted, §8.75(i)). `add docs` is not admitted.
   // `--json` last, any whitespace-separated arguments before it; the destructive veto still
-  // blocks real-file redirects and chained mutations.
-  /^\s*perk\s+librarian\s+(?:list|record|remove|check|refresh|add\s+source)\b(?:\s+\S+)*\s+--json\s*$/,
+  // blocks real-file redirects and chained mutations. The trailing `--json` must be a real
+  // argument: the simple-command text keeps a trailing comment and redirection operands, so an
+  // argument word may not start a comment (`#`) or hold a redirection (`<`/`>`) — otherwise
+  // `refresh <slug> # --json` or `refresh <slug> <<< --json` would run the human form, which on
+  // a docs entry is the write-capable refresh door (§8.75(k)).
+  /^\s*perk\s+librarian\s+(?:list|record|remove|check|refresh|add\s+source)\b(?:\s+(?!#)[^\s<>]+)*\s+--json\s*$/,
   // Read-only `gh` queries — the guidance in the managed AGENTS block ("GitHub access goes
   // through gh") must be followable in read-only sessions. Query-shaped subcommands only;
   // `gh api` stays blocked (it can POST/PATCH), as do all mutating subcommands (create/edit/

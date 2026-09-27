@@ -800,7 +800,10 @@ everyday text utilities, read-only `gh`/`perk` queries, the exact review-context
 the existing command-keyed browser/search entries; this change adds no command. The perk library
 workers are admitted in their deterministic `--json` forms only — `perk librarian
 list|record|remove|check|refresh|add source … --json` with `--json` last and any
-whitespace-separated arguments before it (`add docs` is not admitted). They mutate only the
+whitespace-separated arguments before it — none starting a comment (`#`) or holding a
+redirection (`<`/`>`), so the trailing `--json` is always a real argument, never comment text or
+a redirection operand (the human `refresh` of a docs entry is the write-capable door,
+§8.75(k)) — and `add docs` is not admitted. They mutate only the
 gitignored `docs/library/` cache — the network verbs (`check`, `refresh`, `add source`) behind the
 same preflight, their git operations config-pinned with hooks disabled (§8.75(i)): the same
 accepted leniency as `perk pr review-context`'s scratch write, made operational by the CLI's
