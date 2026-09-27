@@ -30,7 +30,8 @@ from perk.cli.ensure import UserFacingCliError
 # `delivery.SyncResult` there — the resolved deviation recorded in
 # docs/planning/archive/stacked-prs/final-census.md.
 from perk.delivery import SyncResult as DeliverySyncResult
-from perk.delivery import pr_body
+from perk.delivery import change_stats, pr_body
+from perk.delivery.change_stats import ChangeStats, ChangeStatsOut
 from perk.github import GitHubError
 from perk.run import launch
 from perk.state import cache
@@ -62,6 +63,10 @@ class PrSubmitResult:
     stack_position: int | None = None
     operation_id: str | None = None
     operation: DeliverySyncResult | None = None
+    # The PR's change stats (both None on --dry-run); when the stats could not be computed,
+    # `change_stats_note` carries the one-line reason instead.
+    change_stats: ChangeStats | None = None
+    change_stats_note: str | None = None
 
 
 @click.command("submit")
@@ -214,17 +219,24 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
             issue=issue,
             run_id=run_id,
         )
-    # Resolve the PR merge target / conflict-probe base: the plan's pinned base wins
-    # (cache.plan-ref → plan-header), else the GitHub default branch (byte-identical to before).
-    # Mirror the `isinstance(...).strip()` guard the start-point resolver uses (launch.py) so all
-    # three base readers treat a malformed/non-string cached value identically (ignore it), rather
-    # than stringifying it into a bogus branch name.
+    # Resolve the PR merge target / conflict-probe base. An existing PR's actual target is
+    # authoritative (perk never retargets an incremental PR, and `create_pr` returns an existing
+    # PR base-blind), so it governs create, the change stats, the probe and the envelope alike.
+    # Otherwise the plan's pinned base wins (cache.plan-ref → plan-header), else the GitHub
+    # default branch. Mirror the `isinstance(...).strip()` guard the start-point resolver uses
+    # (launch.py) so all three base readers treat a malformed/non-string cached value identically
+    # (ignore it), rather than stringifying it into a bogus branch name.
+    existing = github.find_pr_for_branch(branch=branch, repo_root=repo_root)
     pinned = plan_ref.base or state.header.get("base")
-    base = (
-        pinned.strip()
-        if isinstance(pinned, str) and pinned.strip()
-        else github.default_branch(repo_root)
-    )
+    if existing is not None and existing.base_ref.strip():
+        base = existing.base_ref.strip()
+    elif isinstance(pinned, str) and pinned.strip():
+        base = pinned.strip()
+    else:
+        base = github.default_branch(repo_root)
+    # Computed once, before the push: HEAD is local, and both body passes carry the section.
+    stats, stats_note = _change_stats_for(repo_root, base=base)
+    sections = (change_stats.render_pr_section(stats, note=stats_note),)
     # Auto-force (--force-with-lease): perk plan branches are single-author and expected to
     # diverge after amend/squash/rebase; a no-op on the first push.
     git.push(repo_root, branch, force=True)
@@ -237,7 +249,7 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
         head=branch,
         base=base,
         title=state.title,
-        body=_compose_pr_body(issue=issue, plan_body=plan_body).text,
+        body=_compose_pr_body(issue=issue, plan_body=plan_body, sections=sections).text,
         repo_root=repo_root,
         draft=True,
     )
@@ -256,7 +268,9 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
     if pr.existed and pr.state == "CLOSED":
         github.reopen_pr(number=pr.number, repo_root=repo_root)
         user_output(click.style(f"↺ reopened closed PR #{pr.number} for this branch", fg="yellow"))
-    composed = _compose_pr_body(issue=issue, plan_body=plan_body, pr_number=pr.number)
+    composed = _compose_pr_body(
+        issue=issue, plan_body=plan_body, pr_number=pr.number, sections=sections
+    )
     full_body = composed.text
     github.update_pr_body(number=pr.number, body=full_body, repo_root=repo_root)
     # Post-write self-check: exactly what catches the issue-numbered-footer bug.
@@ -300,6 +314,8 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None
         mergeable=mergeable,
         conflicts=conflicts,
         delivery="incremental",
+        change_stats=stats,
+        change_stats_note=stats_note,
     )
 
 
@@ -392,6 +408,17 @@ def _probe_mergeability(
     if not probe.determined:
         return None, ()
     return probe.mergeable, probe.conflicts
+
+
+def _change_stats_for(repo_root: Path, *, base: str) -> tuple[ChangeStats | None, str | None]:
+    """The PR's change stats over ``merge-base(origin/<base>, HEAD)..HEAD`` — fetched fresh, the
+    remote being the authority. Never raises: an unavailable count degrades to ``(None, note)``
+    (a one-line reason) so a cloc or range failure can never sink the submit."""
+    try:
+        rng = change_stats.resolve_range(repo_root, base=base, fetch=True)
+        return change_stats.summarize(repo_root, rng.base, rng.head), None
+    except change_stats.ChangeStatsUnavailable as exc:
+        return None, change_stats.normalize_note(exc.message)
 
 
 def _safe_plan_body(*, issue: str, repo_root: Path) -> str | None:
@@ -548,6 +575,10 @@ class PrSubmitOut(OutputModel):
     stack: StackRefOut | None
     operation_id: str | None
     operation: DeliveryOperationOut | None
+    # Additive change-stats fields: the rows over the PR's range, or null with a one-line
+    # `change_stats_note` when they could not be computed (both null on --dry-run).
+    change_stats: ChangeStatsOut | None
+    change_stats_note: str | None
 
     @classmethod
     def from_domain(cls, result: PrSubmitResult) -> "PrSubmitOut":
@@ -584,6 +615,12 @@ class PrSubmitOut(OutputModel):
                 if result.operation is not None
                 else None
             ),
+            change_stats=(
+                ChangeStatsOut.from_domain(result.change_stats)
+                if result.change_stats is not None
+                else None
+            ),
+            change_stats_note=result.change_stats_note,
         )
 
 
@@ -605,6 +642,16 @@ def _render_human(result: PrSubmitResult) -> None:
         + click.style(f"#{result.pr.number}", fg="cyan")
         + f" → {result.pr.url} ({embed}; footer checked)"
     )
+    if result.change_stats is not None:
+        compact = change_stats.render_compact(result.change_stats)
+        user_output(click.style(f"  change stats: {compact}", dim=True))
+    elif result.change_stats_note is not None:
+        user_output(
+            click.style(
+                f"⚠ change stats unavailable: {result.change_stats_note} — run perk doctor",
+                fg="yellow",
+            )
+        )
     if result.delivery == "stacked":
         if result.stack_number is not None:
             user_output(

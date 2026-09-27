@@ -223,6 +223,23 @@ def _pr_submit_result():
         base="main",
         mergeable=False,
         conflicts=("perk/foo.py", "perk/bar.py"),
+        change_stats=_change_stats(),
+    )
+
+
+def _change_stats():
+    from perk.delivery.change_stats import ChangeStats, RowStats
+
+    return ChangeStats(
+        base="a" * 40,
+        head="b" * 40,
+        rows=(
+            RowStats("code", "Code", 120, 30, 12),
+            RowStats("tests", "Tests", 80, 5, 3),
+            RowStats("comments", "Comments", 14, 2, 1),
+            RowStats("learned_docs", "Learned docs", 0, 0, 0),
+            RowStats("other", "Other", 9, 1, 0),
+        ),
     )
 
 

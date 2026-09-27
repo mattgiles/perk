@@ -29,5 +29,47 @@
   "delivery": null,
   "stack": null,
   "operation_id": null,
-  "operation": null
+  "operation": null,
+  "change_stats": {
+    "base": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "rows": [
+      {
+        "id": "code",
+        "label": "Code",
+        "added": 120,
+        "removed": 30,
+        "modified": 12
+      },
+      {
+        "id": "tests",
+        "label": "Tests",
+        "added": 80,
+        "removed": 5,
+        "modified": 3
+      },
+      {
+        "id": "comments",
+        "label": "Comments",
+        "added": 14,
+        "removed": 2,
+        "modified": 1
+      },
+      {
+        "id": "learned_docs",
+        "label": "Learned docs",
+        "added": 0,
+        "removed": 0,
+        "modified": 0
+      },
+      {
+        "id": "other",
+        "label": "Other",
+        "added": 9,
+        "removed": 1,
+        "modified": 0
+      }
+    ]
+  },
+  "change_stats_note": null
 }
