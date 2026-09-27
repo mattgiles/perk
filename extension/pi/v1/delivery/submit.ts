@@ -252,24 +252,25 @@ export function publishDepsFor(pi: ExtensionAPI, ctx: ExtensionContext): Publish
 }
 
 /**
- * The change-stats line (pure) — `\nchange stats: code +A −R ~M · …` over the non-zero rows,
- * `\nchange stats: no counted lines` when every row is zero, `\nchange stats unavailable:
- * <note>` when only the note came back, and `""` when neither did (an older CLI).
+ * The change-stats lines (pure) — `\nchange stats: code +A −R ~M · …` over the non-zero rows
+ * (`\nchange stats: no counted lines` when every row is zero), followed by `\nchange stats
+ * warning: <note>` when a note rides alongside the counts (a failed PR-body refresh after a
+ * cascade); `\nchange stats unavailable: <note>` when only the note came back; `""` when neither
+ * did (an older CLI).
  */
 export function renderChangeStatsLine(change: PublishedChange): string {
   const stats = change.change_stats;
-  if (stats !== undefined) {
-    const rows = stats.rows.filter((r) => r.added !== 0 || r.removed !== 0 || r.modified !== 0);
-    if (rows.length === 0) return "\nchange stats: no counted lines";
-    const parts = rows.map(
-      (r) => `${r.label.toLowerCase()} +${r.added} \u2212${r.removed} ~${r.modified}`,
-    );
-    return `\nchange stats: ${parts.join(" · ")}`;
-  }
-  if (change.change_stats_note !== undefined) {
-    return `\nchange stats unavailable: ${change.change_stats_note}`;
-  }
-  return "";
+  const note = change.change_stats_note;
+  if (stats === undefined) return note === undefined ? "" : `\nchange stats unavailable: ${note}`;
+  const rows = stats.rows.filter((r) => r.added !== 0 || r.removed !== 0 || r.modified !== 0);
+  const counts =
+    rows.length === 0
+      ? "no counted lines"
+      : rows
+          .map((r) => `${r.label.toLowerCase()} +${r.added} \u2212${r.removed} ~${r.modified}`)
+          .join(" · ");
+  const warning = note === undefined ? "" : `\nchange stats warning: ${note}`;
+  return `\nchange stats: ${counts}${warning}`;
 }
 
 /**

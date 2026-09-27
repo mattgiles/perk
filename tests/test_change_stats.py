@@ -83,17 +83,30 @@ def test_partitions_require_one_trailing_residual():
 # --- summarize over a real temporary repository ---------------------------------------------
 
 
+@dataclass(frozen=True, order=True)
+class _File:
+    """One materialized file as cloc receives it: its side (``a`` = base, ``b`` = head), its base
+    name (what cloc's language detection sees), and its bytes."""
+
+    side: str
+    name: str
+    data: bytes
+
+
+def _file(path: Path, root: Path) -> _File:
+    return _File(path.relative_to(root).parts[0], path.name, path.read_bytes())
+
+
 @dataclass(frozen=True)
 class _Call:
-    added: list[str]
-    removed: list[str]
-    compared: list[tuple[str, str]]
-    blobs: dict[str, bytes]
+    added: list[_File]
+    removed: list[_File]
+    compared: list[tuple[_File, _File]]
 
 
 class _Recorder:
-    """A fake cloc runner: records each partition's pairs (with file bytes read at call time,
-    before the temporary trees vanish) and returns a canned report per partition."""
+    """A fake cloc runner: records each partition's pairs (file bytes read at call time, before
+    the temporary trees vanish) and returns a canned report per partition."""
 
     def __init__(self, reports: dict[str, cloc.DiffReport] | None = None) -> None:
         self.reports = reports or {}
@@ -101,18 +114,19 @@ class _Recorder:
 
     def __call__(self, pairs: cloc.DiffPairs, *, workdir: Path) -> cloc.DiffReport:
         root = workdir.parent
-
-        def rel(path: Path) -> str:
-            return path.relative_to(root).as_posix()
-
-        files = [*pairs.added, *pairs.removed, *(x for pair in pairs.compared for x in pair)]
         self.calls[workdir.name] = _Call(
-            added=sorted(rel(p) for p in pairs.added),
-            removed=sorted(rel(p) for p in pairs.removed),
-            compared=sorted((rel(a), rel(b)) for a, b in pairs.compared),
-            blobs={rel(p): p.read_bytes() for p in files},
+            added=sorted(_file(p, root) for p in pairs.added),
+            removed=sorted(_file(p, root) for p in pairs.removed),
+            compared=sorted((_file(a, root), _file(b, root)) for a, b in pairs.compared),
         )
         return self.reports.get(workdir.name, cloc.DiffReport(languages={}))
+
+
+def _show(repo: Path, spec: str) -> bytes:
+    """The committed bytes of ``<rev>:<path>`` (``git cat-file blob`` — no conversions)."""
+    return subprocess.run(
+        ["git", "cat-file", "blob", spec], cwd=repo, check=True, capture_output=True
+    ).stdout
 
 
 def _matrix_repo(repo: Path) -> tuple[str, str]:
@@ -146,40 +160,107 @@ def test_summarize_materializes_and_partitions_every_entry(git_repo):
 
     assert set(recorder.calls) == {"rest", "tests"}  # no learned entries → no learned call
     rest, tests = recorder.calls["rest"], recorder.calls["tests"]
-    assert rest.added == ["b/web/[id].tsx"]
-    assert rest.removed == ["a/src/gone.py"]
-    assert rest.compared == [("a/src/keep.py", "b/src/keep.py")]
+    # Every side is byte-equal to its committed blob and keeps its base name.
+    assert rest.added == [_File("b", "[id].tsx", _show(git_repo, f"{head}:web/[id].tsx"))]
+    assert rest.removed == [_File("a", "gone.py", _show(git_repo, f"{base}:src/gone.py"))]
+    assert rest.compared == [
+        (
+            _File("a", "keep.py", _show(git_repo, f"{base}:src/keep.py")),
+            _File("b", "keep.py", _show(git_repo, f"{head}:src/keep.py")),
+        )
+    ]
     # The rename with edits is ONE compared pair, owned by its new (tests) path.
     assert (tests.added, tests.removed) == ([], [])
-    assert tests.compared == [("a/src/helper.py", "b/tests/helper.py")]
-    assert not any("helper" in name for name in rest.blobs)
-    # The `|`-bearing path is unrepresentable in cloc's list grammar — counted nowhere.
-    assert all("a|b" not in name for call in recorder.calls.values() for name in call.blobs)
-
-    # Both materialized sides are byte-equal to the blobs.
-    blob = {
-        "a/src/keep.py": f"{base}:src/keep.py",
-        "b/src/keep.py": f"{head}:src/keep.py",
-        "a/src/gone.py": f"{base}:src/gone.py",
-        "b/web/[id].tsx": f"{head}:web/[id].tsx",
-    }
-    for name, spec in blob.items():
-        assert rest.blobs[name] == _git(git_repo, "show", spec).encode()
-    for name, spec in {
-        "a/src/helper.py": f"{base}:src/helper.py",
-        "b/tests/helper.py": f"{head}:tests/helper.py",
-    }.items():
-        assert tests.blobs[name] == _git(git_repo, "show", spec).encode()
+    assert tests.compared == [
+        (
+            _File("a", "helper.py", _show(git_repo, f"{base}:src/helper.py")),
+            _File("b", "helper.py", _show(git_repo, f"{head}:tests/helper.py")),
+        )
+    ]
+    # The `|`-bearing name is unrepresentable in cloc's list grammar — counted nowhere.
+    names = [f.name for call in recorder.calls.values() for f in (*call.added, *call.removed)]
+    assert "a|b.py" not in names
 
     assert [row.id for row in stats.rows] == [row_id for row_id, _ in cs.ROWS]
     assert (stats.base, stats.head) == (base, head)
+
+
+def test_summarize_counts_committed_bytes_despite_archive_attributes(git_repo):
+    # `export-ignore`, `export-subst` and eol attributes are archive/checkout policies, not
+    # exclusions from a PR's diff: every changed file is counted as the commits store it.
+    (git_repo / ".gitattributes").write_text(
+        "tests export-ignore\nsrc/v.py export-subst\n*.txt text eol=crlf\n", encoding="utf-8"
+    )
+    (git_repo / "tests").mkdir()
+    (git_repo / "tests" / "test_x.py").write_text("assert 1\n", encoding="utf-8")
+    (git_repo / "src").mkdir()
+    (git_repo / "src" / "v.py").write_text('VERSION = "$Format:%H$"\n', encoding="utf-8")
+    (git_repo / "notes.txt").write_text("a\n", encoding="utf-8")
+    _git(git_repo, "add", "-A")
+    _git(git_repo, "commit", "-qm", "base")
+    base = _head(git_repo)
+    (git_repo / "tests" / "test_x.py").write_text("assert 1\nassert 2\n", encoding="utf-8")
+    (git_repo / "src" / "v.py").write_text('VERSION = "$Format:%H$"\nX = 1\n', encoding="utf-8")
+    (git_repo / "notes.txt").write_text("a\nb\n", encoding="utf-8")
+    _git(git_repo, "add", "-A")
+    _git(git_repo, "commit", "-qm", "head")
+    head = _head(git_repo)
+
+    recorder = _Recorder()
+    cs.summarize(git_repo, base, head, run_cloc=recorder)
+    assert recorder.calls["tests"].compared == [
+        (
+            _File("a", "test_x.py", _show(git_repo, f"{base}:tests/test_x.py")),
+            _File("b", "test_x.py", _show(git_repo, f"{head}:tests/test_x.py")),
+        )
+    ]
+    rest = recorder.calls["rest"]
+    assert (rest.added, rest.removed) == ([], [])
+    assert rest.compared == [
+        (
+            _File("a", "notes.txt", b"a\n"),
+            _File("b", "notes.txt", b"a\nb\n"),
+        ),
+        (
+            _File("a", "v.py", b'VERSION = "$Format:%H$"\n'),
+            _File("b", "v.py", b'VERSION = "$Format:%H$"\nX = 1\n'),
+        ),
+    ]
+
+
+def test_summarize_skips_a_non_utf8_name_instead_of_failing(git_repo):
+    import os
+
+    base = _head(git_repo)
+
+    def _add(path: str, content: bytes) -> None:
+        oid = (
+            subprocess.run(
+                ["git", "hash-object", "-w", "--stdin"],
+                cwd=git_repo,
+                input=content,
+                check=True,
+                capture_output=True,
+            )
+            .stdout.decode()
+            .strip()
+        )
+        _git(git_repo, "update-index", "--add", "--cacheinfo", f"100644,{oid},{path}")
+
+    # Index-only: some filesystems refuse the latin-1 name outright.
+    _add(os.fsdecode(b"caf\xe9.py"), b"x = 1\n")
+    _add("odd;dir/ok.py", b"y = 1\n")  # only the base name reaches cloc: a `;` directory is fine
+    _git(git_repo, "commit", "-qm", "names")
+    recorder = _Recorder()
+    cs.summarize(git_repo, base, _head(git_repo), run_cloc=recorder)
+    assert recorder.calls["rest"].added == [_File("b", "ok.py", b"y = 1\n")]
 
 
 def test_summarize_same_base_and_head_does_no_work(monkeypatch, tmp_path):
     def _never(*_args, **_kwargs):
         raise AssertionError("no git or cloc work for an empty range")
 
-    monkeypatch.setattr(cs.git, "diff_name_status", _never)
+    monkeypatch.setattr(cs.git, "diff_entries", _never)
     stats = cs.summarize(tmp_path, "a" * 40, "a" * 40, run_cloc=_never)
     assert len(stats.rows) == 5 and all(row.is_zero for row in stats.rows)
 
@@ -188,7 +269,7 @@ def test_summarize_no_entries_skips_cloc(monkeypatch, tmp_path):
     def _never(*_args, **_kwargs):
         raise AssertionError("no cloc call for a range with no changed files")
 
-    monkeypatch.setattr(cs.git, "diff_name_status", lambda *_a: ())
+    monkeypatch.setattr(cs.git, "diff_entries", lambda *_a: ())
     stats = cs.summarize(tmp_path, "a" * 40, "b" * 40, run_cloc=_never)
     assert all(row.is_zero for row in stats.rows)
 
@@ -283,17 +364,17 @@ def test_summarize_maps_git_errors(git_repo):
     assert info.value.kind == "git_failed"
 
 
-def test_summarize_maps_archive_failures(monkeypatch, git_repo):
+def test_summarize_maps_blob_read_failures(monkeypatch, git_repo):
     base, head = _matrix_repo(git_repo)
 
     def _boom(*_args, **_kwargs):
-        raise git.GitError("archive exploded")
+        raise git.GitError("cat-file exploded")
 
-    monkeypatch.setattr(cs.git, "archive_paths", _boom)
+    monkeypatch.setattr(cs.git, "read_blobs", _boom)
     with pytest.raises(cs.ChangeStatsUnavailable) as info:
         cs.summarize(git_repo, base, head, run_cloc=_Recorder())
     assert info.value.kind == "git_failed"
-    assert "archive exploded" in info.value.message
+    assert "cat-file exploded" in info.value.message
 
 
 def test_summarize_symlink_side_degrades_to_add_or_remove(git_repo):
@@ -311,8 +392,9 @@ def test_summarize_symlink_side_degrades_to_add_or_remove(git_repo):
     recorder = _Recorder()
     cs.summarize(git_repo, base, _head(git_repo), run_cloc=recorder)
     rest = recorder.calls["rest"]
-    assert rest.removed == ["a/flip.py"]  # file → symlink: only the old side counts
-    assert rest.added == ["b/link.py"]  # symlink → file: only the new side counts
+    # file → symlink: only the old side counts; symlink → file: only the new side counts.
+    assert rest.removed == [_File("a", "flip.py", b"a = 1\n")]
+    assert rest.added == [_File("b", "link.py", b"b = 2\n")]
     assert rest.compared == []
 
 

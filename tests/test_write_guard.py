@@ -48,6 +48,9 @@ ALLOWED = frozenset(
         "cli/version_check.py",
         # Remote runner: writes tracked `.github/` workflow artifacts (human-invoked).
         "run/workflow_artifacts.py",
+        # Change stats: writes committed blob bytes into its own private TemporaryDirectory
+        # (never under `.perk/workflow/`, never shared, deleted when the count finishes).
+        "delivery/change_stats.py",
         # The maintainer-only stop-before-exec profiling record (contracts.md §8.72(i)): one
         # process writes the operator-named `PERK_PROFILE_HANDOFF` file it alone owns, outside
         # `.perk/workflow/`, immediately before exiting — never raced.

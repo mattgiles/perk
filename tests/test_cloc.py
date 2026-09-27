@@ -74,7 +74,7 @@ def test_empty_pairs_render_headers_only(tmp_path):
     )
 
 
-@pytest.mark.parametrize("name", ["a|b.py", "a;b.py", "a\nb.py", "trailing.py "])
+@pytest.mark.parametrize("name", ["a|b.py", "a;b.py", "a\nb.py", "trailing.py ", "caf\udce9.py"])
 def test_unrepresentable_path_raises_parse(tmp_path, name):
     assert cloc.representable(name) is False
     with pytest.raises(cloc.ClocError) as info:

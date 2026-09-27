@@ -45,8 +45,9 @@ mergeability probe, and the `--json` `base` field.
 
 Every submitted PR body carries a **Change stats** section (after `Plan: #N`, or after the
 stacked `Train context`, and before the plan embed): the lines **added / removed / modified**
-over the PR's exact range, counted by [cloc](https://github.com/AlDanial/cloc)
-(whitespace-insensitive; blank lines and files cloc does not recognize are excluded) and split
+over the PR's exact range, counted by [cloc](https://github.com/AlDanial/cloc) over the committed
+file contents (whitespace-insensitive; blank lines, symlinks, submodules, and files cloc does not
+recognize are excluded; `.gitattributes` archive and end-of-line settings do not apply) and split
 into five rows — **Code** (source outside tests), **Tests** (paths under `test/`, `tests/`,
 `__tests__/`, `fixtures/`, `testing/`, … plus `*.test.ts`, `test_*.py`, `*_test.go`,
 `conftest.py`, …), **Comments** (comment lines in source and test files), **Learned docs**
@@ -60,7 +61,9 @@ pointer when it would not fit. The `--json` report gains `change_stats` (`{base,
 the human output adds a `change stats: …` line. When cloc is missing or the range cannot be
 resolved, submit still succeeds: the section reads `_Unavailable: <reason>._`, `change_stats` is
 null, `change_stats_note` carries the one-line reason, and the human output warns
-`⚠ change stats unavailable: … — run perk doctor`. `--dry-run` computes nothing (both null).
+`⚠ change stats unavailable: … — run perk doctor`. A note can also ride beside populated stats
+(a stacked cascade whose PR-body refresh failed): the human output then adds
+`⚠ change stats warning: …`. `--dry-run` computes nothing (both null).
 
 A plan that is a **stacked delivery layer** (its plan-ref or plan header carries a
 `delivery_lineage`) routes through the delivery module's publish operation instead of the plain

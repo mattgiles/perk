@@ -39,11 +39,13 @@ def test_prek_ruff_rev_matches_pyproject_floor():
 # The dignified-python §1.9 subprocess discipline (docs/design/archive/dignified-convergence.md):
 # every `subprocess.run(...)` lives inside one of these sanctioned wrapper functions
 # (module stem, function name), and passes explicit `check=` and `timeout=` keywords.
-# `perk.substrate.proc.run_captured` is the ONE captured primitive (every captured facade
-# translates its ProcFailure); the other three are the inherited-stdio streaming idiom,
-# which is a different shape and keeps its own literals.
+# `perk.substrate.proc.run_captured` is the ONE captured text-mode primitive (every captured
+# facade translates its ProcFailure) and `run_captured_bytes` its bytes-mode twin (raw blob
+# contents and `-z` pathnames that text decoding would corrupt); the other three are the
+# inherited-stdio streaming idiom, which is a different shape and keeps its own literals.
 _SANCTIONED_SUBPROCESS_WRAPPERS = {
     ("proc", "run_captured"),
+    ("proc", "run_captured_bytes"),
     ("proc", "run_interactive"),
     ("run_worker", "_spawn_worker"),
     ("materialize", "run_worktree_setup"),

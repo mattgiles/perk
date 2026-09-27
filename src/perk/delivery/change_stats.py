@@ -2,10 +2,12 @@
 (Code, Tests, Comments, Learned docs, Other), counted by cloc.
 
 **perk owns the diff pairs; cloc only counts.** The module lists the range's changed files with
-git, materializes both sides from git objects, partitions every file in Python by its
-repo-relative path, and hands cloc one explicit pair list per partition. Partition ownership is
-therefore disjoint by construction — a rename is one compared pair owned by its **new** path (the
-file's new role) — and cloc is never invoked for an empty range or an empty partition.
+git, materializes both sides from the raw committed blobs (no attribute, filter or end-of-line
+conversion — the counts describe exactly what the commits store), partitions every file in Python
+by its repo-relative path, and hands cloc one explicit pair list per partition. Partition
+ownership is therefore disjoint by construction — a rename is one compared pair owned by its
+**new** path (the file's new role) — and cloc is never invoked for an empty range or an empty
+partition.
 
 Classification is data: an ordered partition tuple (first match wins, a residual last), crossed
 with a language-class set (prose vs source, by cloc language name), routed by a six-arm table onto
@@ -17,11 +19,10 @@ posture (publication degrades to a one-line note, the standalone worker fails lo
 
 import logging
 import re
-import tarfile
 import tempfile
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from perk.boundary import OutputModel
@@ -95,8 +96,6 @@ ROWS: tuple[tuple[str, str], ...] = (
     ("other", "Other"),
 )
 
-# Paths per `git archive` call — bounds the argv length on large ranges.
-_ARCHIVE_BATCH = 500
 # U+2212, the typographic minus the renderers print before a removed count.
 _MINUS = "\u2212"
 _NOTE_MAX_CHARS = 200
@@ -221,31 +220,33 @@ def summarize(
     """Count ``base..head`` (commit SHAs) into the five rows.
 
     ``run_cloc`` is the internal seam (``cloc.diff_pairs``'s signature). Raises
-    ``ChangeStatsUnavailable``: ``git_failed`` (listing or materializing the range),
+    ``ChangeStatsUnavailable``: ``git_failed`` (listing, reading or materializing the range),
     ``cloc_missing`` / ``cloc_failed`` (counting it).
     """
     if base == head:
         return _stats(base, head, {})
     try:
-        listed = git.diff_name_status(repo_root, base, head)
+        listed = git.diff_entries(repo_root, base, head)
     except git.GitError as exc:
         raise ChangeStatsUnavailable("git_failed", f"could not list the diff: {exc}") from exc
     entries = [entry for entry in listed if _representable(entry)]
     if not entries:
         return _stats(base, head, {})
+    try:
+        blobs = git.read_blobs(
+            repo_root,
+            [oid for entry in entries for oid in (entry.old_blob, entry.new_blob) if oid],
+        )
+    except git.GitError as exc:
+        raise ChangeStatsUnavailable("git_failed", f"could not read the diff: {exc}") from exc
     with tempfile.TemporaryDirectory(prefix="perk-change-stats-") as tmp:
         root = Path(tmp)
-        side_a, side_b = root / "a", root / "b"
-        a_paths = [e.old_path or e.path for e in entries if e.status in ("D", "M", "R")]
-        b_paths = [e.path for e in entries if e.status in ("A", "M", "R")]
         try:
-            _materialize(repo_root, base, a_paths, side_a, scratch=root)
-            _materialize(repo_root, head, b_paths, side_b, scratch=root)
-        except (git.GitError, tarfile.TarError, OSError) as exc:
+            by_partition = _materialize(entries, blobs, root)
+        except OSError as exc:
             raise ChangeStatsUnavailable(
                 "git_failed", f"could not materialize the diff: {exc}"
             ) from exc
-        by_partition = _pair_up(entries, side_a, side_b)
         totals: dict[str, list[int]] = {}
         for part in PARTITIONS:
             pairs = by_partition.get(part.id)
@@ -257,50 +258,33 @@ def summarize(
 
 
 def _representable(entry: git.DiffEntry) -> bool:
+    """Whether cloc's list grammar can carry the entry's materialized file names (only the base
+    name reaches cloc — each side lands under its own scratch directory)."""
     for path in (entry.path, entry.old_path):
-        if path is not None and not cloc.representable(path):
+        if path is not None and not cloc.representable(PurePosixPath(path).name):
             _log.debug("change stats: skipping %r (unrepresentable in a cloc list file)", path)
             return False
     return True
 
 
 def _materialize(
-    repo_root: Path, ref: str, rel_paths: Sequence[str], dest: Path, *, scratch: Path
-) -> None:
-    """Extract the regular files among ``rel_paths`` at ``ref`` under ``dest``.
-
-    Symlinks, submodule entries and ``export-ignore``d paths never land as regular files; the
-    pairing step treats such a side as absent.
-    """
-    dest.mkdir(parents=True, exist_ok=True)
-    unique = list(dict.fromkeys(rel_paths))
-    for index in range(0, len(unique), _ARCHIVE_BATCH):
-        tar_path = scratch / f"{dest.name}-{index // _ARCHIVE_BATCH}.tar"
-        git.archive_paths(repo_root, ref, unique[index : index + _ARCHIVE_BATCH], dest=tar_path)
-        with tarfile.open(tar_path) as tar:
-            tar.extractall(dest, filter=_regular_files_only)
-        tar_path.unlink()
-
-
-def _regular_files_only(member: tarfile.TarInfo, dest: str) -> tarfile.TarInfo | None:
-    if not member.isfile():
-        return None
-    return tarfile.data_filter(member, dest)
-
-
-def _pair_up(
-    entries: Iterable[git.DiffEntry], side_a: Path, side_b: Path
+    entries: Sequence[git.DiffEntry], blobs: Mapping[str, bytes], root: Path
 ) -> dict[str, _PartitionPairs]:
-    """Route each entry to its partition's pairs. A side that did not materialize as a regular
-    file is absent: a compared pair missing one side degrades to an add or a remove, an entry
-    with no counted side is dropped."""
+    """Write each entry's regular-file sides as the committed blob bytes and route the entry to
+    its partition's pairs.
+
+    Every side lands at ``<root>/<a|b>/<entry index>/<base name>``: a private directory per
+    entry keeps same-named files apart (case-insensitive filesystems included), and the base
+    name keeps cloc's language detection. A side without a blob (absent, a symlink, a submodule)
+    is absent: a compared pair missing one side degrades to an add or a remove, and an entry
+    with no counted side is dropped.
+    """
     by_partition: dict[str, _PartitionPairs] = {}
-    for entry in entries:
-        old = entry.old_path or entry.path
-        left = side_a / old if entry.status != "A" else None
-        right = side_b / entry.path if entry.status != "D" else None
-        left = left if left is not None and left.is_file() else None
-        right = right if right is not None and right.is_file() else None
+    for index, entry in enumerate(entries):
+        left = _write_side(
+            root / "a" / str(index), entry.old_path or entry.path, entry.old_blob, blobs
+        )
+        right = _write_side(root / "b" / str(index), entry.path, entry.new_blob, blobs)
         pairs = by_partition.setdefault(partition_of(entry.path), _PartitionPairs())
         if left is not None and right is not None:
             pairs.compared.append((left, right))
@@ -311,6 +295,17 @@ def _pair_up(
         else:
             _log.debug("change stats: skipping %r (no regular file on either side)", entry.path)
     return by_partition
+
+
+def _write_side(
+    directory: Path, rel_path: str, blob: str | None, blobs: Mapping[str, bytes]
+) -> Path | None:
+    if blob is None:
+        return None
+    directory.mkdir(parents=True)
+    target = directory / PurePosixPath(rel_path).name
+    target.write_bytes(blobs[blob])
+    return target
 
 
 def _count(run_cloc: ClocRunner, pairs: cloc.DiffPairs, *, workdir: Path) -> cloc.DiffReport:

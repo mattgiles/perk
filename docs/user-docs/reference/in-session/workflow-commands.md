@@ -107,8 +107,10 @@ The success line (the `submit` tool result and the `/submit` report alike) ends 
 stats line — `change stats: code +120 −30 ~12 · tests +80 −5 ~3 · …` over the non-zero rows of
 the PR body's **Change stats** table (`change stats: no counted lines` when every row is zero).
 When the stats could not be computed (cloc missing, the base could not be fetched) the line reads
-`change stats unavailable: <reason>` and the submit still succeeds; an older perk CLI that
-reports neither prints no line. See [`perk pr submit`](../cli/pr.md#perk-pr-submit) for the rows
+`change stats unavailable: <reason>` and the submit still succeeds. When the counts are fresh
+but something around them failed (a stacked cascade whose PR-body refresh failed), a
+`change stats warning: <note>` line follows the counts. An older perk CLI that reports neither
+prints no line. See [`perk pr submit`](../cli/pr.md#perk-pr-submit) for the rows
 and the counting rules.
 
 Authorization is bound to this session, run, worktree and unchanged attempt counter; direct,

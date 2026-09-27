@@ -45,7 +45,9 @@ export interface PublishedChange {
   /** The PR's cloc change stats (every row, in order; renderers hide zero rows). Absent on an
    * old or malformed envelope, or when the stats were unavailable (see `change_stats_note`). */
   change_stats?: ChangeStats;
-  /** The one-line reason the change stats could not be computed. */
+  /** A one-line note: with `change_stats` absent, why the stats could not be computed; beside
+   * populated `change_stats`, what went wrong around them (a failed PR-body refresh after a
+   * cascade — the counts are fresh but the PR body may be stale). */
   change_stats_note?: string;
 }
 

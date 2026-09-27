@@ -406,16 +406,22 @@ def test_change_stats_human_render(capsys):
     )
     submit_cmd._render_human(result)
     rendered = capsys.readouterr().err
-    assert (
-        "  change stats: code +120 \u221230 ~12 · tests +80 \u22125 ~3 · other +4 \u22120 ~0"
-        in (rendered)
-    )
-    assert "unavailable" not in rendered
+    compact = "code +120 \u221230 ~12 · tests +80 \u22125 ~3 · other +4 \u22120 ~0"
+    assert f"  change stats: {compact}" in rendered
+    assert "unavailable" not in rendered and "warning" not in rendered
 
     note = "could not fetch origin/main: offline"
     submit_cmd._render_human(replace(result, change_stats=None, change_stats_note=note))
     rendered = capsys.readouterr().err
     assert f"⚠ change stats unavailable: {note} — run perk doctor" in rendered
+
+    # A note beside populated stats (a failed body refresh after a cascade) is still surfaced.
+    refresh = "PR body refresh failed after cascade: HTTP 502"
+    submit_cmd._render_human(replace(result, change_stats_note=refresh))
+    rendered = capsys.readouterr().err
+    assert f"  change stats: {compact}" in rendered
+    assert f"⚠ change stats warning: {refresh}" in rendered
+    assert "unavailable" not in rendered
 
 
 def test_change_stats_seam_never_raises(monkeypatch, tmp_path):

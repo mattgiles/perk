@@ -697,6 +697,18 @@ test("renderPublishedMessage: the change-stats line variants", () => {
     renderPublishedMessage({ pr, plan_embedded: true, change_stats_note: "range unresolved" }),
     "Opened draft PR #42 → u/pr/42 (plan embedded)\nchange stats unavailable: range unresolved",
   );
+  // A note beside populated counts (a failed body refresh after a cascade) still surfaces.
+  assert.equal(
+    renderPublishedMessage({
+      pr,
+      plan_embedded: true,
+      change_stats: CHANGE_STATS,
+      change_stats_note: "PR body refresh failed after cascade: HTTP 502",
+    }),
+    "Opened draft PR #42 → u/pr/42 (plan embedded)\n" +
+      "change stats: code +120 \u221230 ~12 · tests +80 \u22125 ~3 · learned docs +2 \u22120 ~0\n" +
+      "change stats warning: PR body refresh failed after cascade: HTTP 502",
+  );
   // An older CLI reports neither field: the message is the bare headline.
   assert.equal(
     renderPublishedMessage({ pr, plan_embedded: true }),

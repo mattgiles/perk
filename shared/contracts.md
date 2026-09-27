@@ -2339,9 +2339,13 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
   `tests` = the test-path regex, `rest` residual; first match wins) × a prose/source language
   class (by cloc language name) × a six-arm routing table (learned → Learned docs; tests code →
   Tests, tests comment → Comments; rest prose → Other; rest source code → Code, rest source
-  comment → Comments). **perk owns the pairs; cloc only counts:** `git diff --name-status -z
-  --find-renames` lists the range, both sides are materialized from `git archive` (regular files
-  only), every file is partitioned in Python, and cloc receives one explicit
+  comment → Comments). **perk owns the pairs; cloc only counts:** `git diff --raw -z
+  --no-abbrev --find-renames` lists the range (read in bytes mode — a non-UTF-8 name decodes
+  losslessly and is skipped as unrepresentable, never a failure), both sides are materialized
+  from the raw committed blobs (`git cat-file --batch`, regular-file modes only — no
+  `export-ignore` / `export-subst` / eol / filter conversion, so the counts describe exactly what
+  the commits store; each side lands in its own scratch directory under its base name), every
+  file is partitioned in Python, and cloc receives one explicit
   `--diff-list-file` per non-empty partition under a pinned argv (`--config <devnull>`,
   `--show-errors`, `--diff-timeout 0`, `--ignore-whitespace`) — a rename is one compared pair
   owned by its **new** path, an empty range or partition never invokes cloc, and cloc-reported
@@ -2360,9 +2364,11 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
   failure, an unresolvable range or a git failure never fails submit — the section reads
   `_Unavailable: <note>._` (one line, ≤ 200 chars). The `--json` envelope gains two additive
   trailing fields, `change_stats` (`{base, head, rows: [{id, label, added, removed, modified}]}`
-  or null) and `change_stats_note` (string or null); `--dry-run` leaves both null. The warm
-  `/submit` success message appends one `change stats: …` / `change stats unavailable: …` line
-  (absent when an older CLI reports neither).
+  or null) and `change_stats_note` (string or null — the reason when `change_stats` is null, a
+  warning such as a failed cascade body refresh when both are set); `--dry-run` leaves both null.
+  The warm `/submit` success message appends a `change stats: …` line (plus a
+  `change stats warning: …` line when a note rides beside the counts) or a
+  `change stats unavailable: …` line (nothing when an older CLI reports neither).
 - **Mergeability probe.** **After** the PR is created + the body validated, `perk pr submit` runs
   a deterministic **local** `git merge-tree --write-tree origin/<base> <head-ref>` probe (no GitHub
   round-trip, no reliance on GitHub's eventually-consistent `mergeable` field). Incremental submit

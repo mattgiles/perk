@@ -178,8 +178,15 @@ def render_list_file(pairs: DiffPairs, *, workdir: Path) -> str:
 
 def representable(path: str) -> bool:
     """Whether cloc's list-file grammar can carry ``path`` unchanged: no ``|`` / ``;`` / line
-    break, and no leading/trailing whitespace (cloc trims both)."""
-    return not any(char in path for char in _UNREPRESENTABLE) and path == path.strip()
+    break, no leading/trailing whitespace (cloc trims both), and encodable in the UTF-8 list
+    file (a non-UTF-8 name decoded with ``surrogateescape`` is not)."""
+    if any(char in path for char in _UNREPRESENTABLE) or path != path.strip():
+        return False
+    try:
+        path.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def _listed(path: Path, workdir: Path) -> str:

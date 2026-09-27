@@ -63,8 +63,9 @@ class PrSubmitResult:
     stack_position: int | None = None
     operation_id: str | None = None
     operation: DeliverySyncResult | None = None
-    # The PR's change stats (both None on --dry-run); when the stats could not be computed,
-    # `change_stats_note` carries the one-line reason instead.
+    # The PR's change stats (both None on --dry-run). `change_stats_note` is a one-line note:
+    # alone, why the stats could not be computed; beside populated stats, what went wrong around
+    # them (a failed PR-body refresh after a stacked cascade).
     change_stats: ChangeStats | None = None
     change_stats_note: str | None = None
 
@@ -577,8 +578,9 @@ class PrSubmitOut(OutputModel):
     stack: StackRefOut | None
     operation_id: str | None
     operation: DeliveryOperationOut | None
-    # Additive change-stats fields: the rows over the PR's range, or null with a one-line
-    # `change_stats_note` when they could not be computed (both null on --dry-run).
+    # Additive change-stats fields: the rows over the PR's range (null when they could not be
+    # computed) and a one-line `change_stats_note` (the reason, or a warning beside populated
+    # stats); both null on --dry-run.
     change_stats: ChangeStatsOut | None
     change_stats_note: str | None
 
@@ -647,6 +649,10 @@ def _render_human(result: PrSubmitResult) -> None:
     if result.change_stats is not None:
         compact = change_stats.render_compact(result.change_stats)
         user_output(click.style(f"  change stats: {compact}", dim=True))
+        if result.change_stats_note is not None:
+            user_output(
+                click.style(f"⚠ change stats warning: {result.change_stats_note}", fg="yellow")
+            )
     elif result.change_stats_note is not None:
         user_output(
             click.style(
