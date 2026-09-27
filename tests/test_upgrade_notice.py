@@ -195,6 +195,7 @@ def _write_store(home: Path, version: str) -> Path:
     return store
 
 
+@pytest.mark.slow
 @pytest.mark.xdist_group("upgrade_notice_cli")
 def test_cli_emits_notice_on_stale_store(git_repo, monkeypatch, stub_registry_show):
     store = _write_store(git_repo, _OLD)

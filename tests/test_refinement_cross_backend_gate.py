@@ -265,6 +265,7 @@ def _seed_pointer(seed: str) -> Path:
 # --------------------------------------------------------------------------- the doors gate
 
 
+@pytest.mark.slow
 def test_phase2_gate_github_refinement_doors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

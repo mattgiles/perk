@@ -9,6 +9,8 @@ import ast
 import tomllib
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -92,6 +94,7 @@ def _subprocess_call_sites(
     return sites
 
 
+@pytest.mark.slow
 def test_subprocess_run_only_in_sanctioned_wrappers_with_check_and_timeout():
     offenders: list[str] = []
     scan_roots = (

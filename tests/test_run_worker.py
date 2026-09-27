@@ -716,6 +716,7 @@ def test_position_branch_stacked_not_ready_is_a_typed_refusal(
     assert excinfo.value.error_type == "node_not_build_ready"
 
 
+@pytest.mark.slow
 def test_positioning_parity_stacked_local_create_vs_remote_position(
     git_repo_with_remote, stub_position_branch, monkeypatch, capsys
 ):

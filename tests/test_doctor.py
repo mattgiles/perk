@@ -1435,6 +1435,7 @@ def _legacy_fix_lines(report):
     return [line for line in report.fixed if line.startswith(".pi/agents/")]
 
 
+@pytest.mark.slow
 def test_legacy_agent_defs_warn_and_are_removed_by_fix(scaffolded_perk_repo):
     # A leftover `.pi/agents/perk/` only SHADOWS the shipped defs (project rank beats package
     # rank), so it is a `warn`, never `fail`; `--fix` removes the flat tree filesystem-only,
@@ -1486,7 +1487,11 @@ def _assert_nothing_removed(root, report):
             lambda legacy: (legacy / "notes.txt").write_text("keep me\n"),
             "notes.txt (not a .md file)",
         ),
-        (lambda legacy: (legacy / "nested").mkdir(), "nested/ (directory)"),
+        pytest.param(
+            lambda legacy: (legacy / "nested").mkdir(),
+            "nested/ (directory)",
+            marks=pytest.mark.slow,
+        ),
     ],
 )
 def test_legacy_agent_defs_fix_refuses_unexpected_entries(scaffolded_perk_repo, plant, named):
@@ -1507,6 +1512,7 @@ def test_legacy_agent_defs_fix_refuses_unexpected_entries(scaffolded_perk_repo, 
     assert len(errors) == 1 and named in errors[0] and "not removed" in errors[0]
 
 
+@pytest.mark.slow
 def test_legacy_agent_defs_fix_refuses_missing_shipped_replacement(scaffolded_perk_repo):
     # No shipped replacement for a legacy def (extension not installed / a retired name): removing
     # it would leave that perk.* name with NO def — a stale shadow is never an outage, so refuse
@@ -1573,6 +1579,7 @@ def test_legacy_agent_defs_nested_symlink_is_refused(scaffolded_perk_repo, tmp_p
     assert len(errors) == 1 and "link (symlink)" in errors[0] and "alias.md (symlink)" in errors[0]
 
 
+@pytest.mark.slow
 def test_drift_detected_and_fixed_idempotently(scaffolded_perk_repo):
     (scaffolded_perk_repo / ".gitignore").write_text(
         "node_modules/\n", encoding="utf-8"
@@ -1587,6 +1594,7 @@ def test_drift_detected_and_fixed_idempotently(scaffolded_perk_repo):
     assert again.healthy and again.fixed == []  # fix is idempotent
 
 
+@pytest.mark.slow
 def test_required_perk_version_drift_detected_and_fixed(scaffolded_perk_repo):
     pin = paths.required_version_file(scaffolded_perk_repo)
 
@@ -1708,6 +1716,7 @@ def test_resource_overrides_check_defers_on_malformed_settings(scaffolded_perk_r
     assert "see the settings-wiring check" in check.message
 
 
+@pytest.mark.slow
 def test_legacy_tracked_plan_md_is_repaired(scaffolded_perk_repo):
     # `.pi/workflow/plan.md` is a legacy transient cache.plan body. A legacy repo committed it and
     # hand-added a stray ungrouped ignore line. Post-move the managed block no longer ignores it
@@ -1763,6 +1772,7 @@ def test_untrack_failure_carried_on_fix_errors(scaffolded_perk_repo, monkeypatch
     assert report_to_dict(report)["fix_errors"] == report.fix_errors
 
 
+@pytest.mark.slow
 def test_tracked_subagent_artifacts_are_untracked(scaffolded_perk_repo):
     # `.pi-subagents/` is the borrowed pi-subagents engine's transient run-artifact root. A
     # legacy repo committed artifacts before the managed gitignore entry existed; `--fix`
@@ -1810,6 +1820,7 @@ def test_subagent_untrack_failure_carried_on_fix_errors(scaffolded_perk_repo, mo
     assert report_to_dict(report)["fix_errors"] == report.fix_errors
 
 
+@pytest.mark.slow
 def test_legacy_workflow_check_warns_then_ok_after_fix(scaffolded_perk_repo):
     # A stale tracked `.pi/workflow/.gitkeep` (the old committed layout sentinel) makes the
     # `legacy-workflow` check `warn`; `--fix` untracks it and the check converges to `ok`.
@@ -1834,6 +1845,7 @@ def test_legacy_workflow_check_warns_then_ok_after_fix(scaffolded_perk_repo):
     assert {c.name: c for c in fixed.checks}["legacy-workflow"].status == "ok"
 
 
+@pytest.mark.slow
 def test_migrate_legacy_workflow_cache(scaffolded_perk_repo):
     # The forward migration: untrack a tracked legacy `.gitkeep`, move the simple active mirrors
     # (`plan-ref.json`/`agent-session.json`) to `.perk/workflow/` only when the target is absent,
@@ -1886,6 +1898,7 @@ def test_migrate_legacy_workflow_cache_keeps_present_target(scaffolded_perk_repo
     assert not any(".pi/workflow/plan-ref.json: moved" in line for line in fixed.fixed)
 
 
+@pytest.mark.slow
 def test_fix_removes_orphaned_git_clone(scaffolded_perk_repo):
     # The forward migration: a consumer previously on pi's git-clone has an orphaned
     # `.pi/git/<host>/<path>` tree after the npm install superseded it. `--fix` rmtrees it once
@@ -1903,6 +1916,7 @@ def test_fix_removes_orphaned_git_clone(scaffolded_perk_repo):
     assert not any("removed orphaned perk clone" in line for line in again.fixed)  # idempotent
 
 
+@pytest.mark.slow
 def test_fix_migrates_legacy_repo_skill_when_target_absent(scaffolded_perk_repo):
     # Legacy `.pi/skills/foo` with no `.perk/skills/foo` target → moved forward; idempotent.
     legacy = scaffolded_perk_repo / ".pi" / "skills" / "foo"
@@ -2046,6 +2060,7 @@ def test_fix_config_absent_seeds_template_without_migration(git_repo):
     assert not any("migrated to" in line for line in fixed.fixed)
 
 
+@pytest.mark.slow
 def test_fix_migrates_legacy_only_config_secret_safely(git_repo):
     # legacy-only: `--fix` moves `.pi/perk.toml` -> `.perk/config.toml` (and local likewise),
     # secret-safely; a re-run is idempotent.
@@ -2096,6 +2111,7 @@ def test_fix_removes_identical_legacy_config(git_repo):
     assert not any("removed (identical" in line for line in again.fixed)
 
 
+@pytest.mark.slow
 def test_fix_reports_conflict_when_legacy_and_target_differ(git_repo):
     # both present and differing: `--fix` reports a `fix_errors` entry (paths only), leaves both
     # files, and repeats the error every run until resolved by hand.
@@ -2139,6 +2155,7 @@ def test_cache_gc_warns_on_prunable_state(scaffolded_perk_repo):
     assert report.exit_code == 0
 
 
+@pytest.mark.slow
 def test_skills_manifest_drift_detected_and_fixed(scaffolded_perk_repo):
     # A valid legacy source declaration is still drift; report-only leaves it untouched, and
     # `--fix` re-converges it idempotently (grouped under "skills").
@@ -2181,6 +2198,7 @@ def test_config_user_edit_is_not_drift(scaffolded_perk_repo):
     assert config.status == "ok"  # user-editable config is never flagged as drift
 
 
+@pytest.mark.slow
 def test_missing_config_is_reseeded(scaffolded_perk_repo):
     (scaffolded_perk_repo / ".perk" / "config.toml").unlink()
     report = run_doctor(scaffolded_perk_repo, verify=False)
@@ -2202,6 +2220,7 @@ def test_no_silent_pass_on_unverifiable_check(scaffolded_perk_repo):
     assert settings_path.read_text(encoding="utf-8") == "{not json"
 
 
+@pytest.mark.slow
 def test_compaction_drift_detected_and_fixed(scaffolded_perk_repo):
     # `[compaction]` converges inside `settings-wiring`, so doctor dry-runs/fixes it for
     # free. Select a compaction policy that diverges from settings.json → drift → `--fix` repairs.
@@ -2222,6 +2241,7 @@ def test_compaction_drift_detected_and_fixed(scaffolded_perk_repo):
     assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
 
 
+@pytest.mark.slow
 def test_native_consumer_ordering_drift_detected_and_fixed(scaffolded_perk_repo):
     # The host-SDK bridge load-order rule (contracts §8.73) converges inside `settings-wiring`,
     # so a perk entry planted AFTER `npm:pi-subagents` is drift doctor reports (`fail`, detail
@@ -2249,6 +2269,7 @@ def test_native_consumer_ordering_drift_detected_and_fixed(scaffolded_perk_repo)
     assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
 
 
+@pytest.mark.slow
 def test_models_drift_detected_and_fixed(scaffolded_perk_repo):
     # `[models]` converges inside `settings-wiring` too, so doctor dry-runs/fixes it for free.
     # Select a default model that diverges from settings.json → drift → `--fix` repairs.
@@ -2276,6 +2297,7 @@ def test_models_drift_detected_and_fixed(scaffolded_perk_repo):
     assert "settings-wiring" in {c.name for c in drifted.checks if c.status == "fail"}
 
 
+@pytest.mark.slow
 def test_subagents_builtins_drift_detected_and_fixed(scaffolded_perk_repo):
     # `subagents.disableBuiltins` converges inside `settings-wiring` (constant desired, no
     # config read), so doctor dry-runs/fixes it for free. Hand-flip the perk-owned key to
@@ -2656,6 +2678,7 @@ def test_repo_skills_absent_without_verify(scaffolded_perk_repo):
     assert "repo-skills" not in {c.name for c in report.checks}
 
 
+@pytest.mark.slow
 def test_fix_converges_repo_skills_drift(
     scaffolded_perk_repo, monkeypatch, stub_env, converge_skills_workspace
 ):
@@ -2673,6 +2696,7 @@ def test_fix_converges_repo_skills_drift(
     assert _repo_check(report).status == "ok"
 
 
+@pytest.mark.slow
 def test_fix_repo_skills_errors_land_on_fix_errors(scaffolded_perk_repo, monkeypatch, stub_env):
     # A malformed SKILL.md is loud on fix_errors; the post-fix repo-skills check stays fail.
     _plant_repo_skill(scaffolded_perk_repo, "alpha", fm="no frontmatter here\n")
@@ -3212,6 +3236,7 @@ def test_artifact_health_malformed_state_warns_then_fix_rewrites(scaffolded_perk
     assert _health_check(fixed).status == "ok"
 
 
+@pytest.mark.slow
 def test_fix_backfills_state_file_and_is_idempotent(scaffolded_perk_repo):
     paths.managed_state_file(scaffolded_perk_repo).unlink()
     fixed = run_doctor(scaffolded_perk_repo, fix=True, verify=False)
@@ -3273,6 +3298,7 @@ def test_library_group_renders():
     assert doctor_mod._MANAGED_GROUP["library-readme"] == "library"
 
 
+@pytest.mark.slow
 def test_library_readme_managed_check_and_fix(scaffolded_perk_repo):
     repo = scaffolded_perk_repo
     absent = _library_readme_check(run_doctor(repo, verify=False))

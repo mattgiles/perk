@@ -4,6 +4,7 @@ import subprocess
 import time
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from perk import github
@@ -50,6 +51,7 @@ def _seed_pull_ref(clone: Path, pr_number: int = 7) -> tuple[str, str]:
     return head_sha, base_sha
 
 
+@pytest.mark.slow
 def test_checkout_success_json(git_repo_with_remote, monkeypatch):
     clone, _remote, advance_origin = git_repo_with_remote
     perk_dir = clone / ".perk"
@@ -170,6 +172,7 @@ def test_checkout_refreshes_existing_to_current_head(git_repo_with_remote, monke
     assert git.current_branch(wt) is None
 
 
+@pytest.mark.slow
 def test_checkout_reaps_stale_review_worktrees_only(git_repo_with_remote, monkeypatch):
     clone, _remote, _advance = git_repo_with_remote
     sha = _sha(clone)

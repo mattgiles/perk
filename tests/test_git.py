@@ -1238,6 +1238,7 @@ def _rebase_world(tmp_path):
     return repo, base, parent, feature
 
 
+@pytest.mark.slow
 def test_rebase_onto_clean_transplant(tmp_path):
     repo, base, parent, feature = _rebase_world(tmp_path)
     git.checkout_detached(repo, feature)
@@ -1309,6 +1310,7 @@ def _two_branch_remote(tmp_path):
     return work, bare, {"a1": a1, "b1": b1, "a2": a2, "b2": b2}
 
 
+@pytest.mark.slow
 def test_push_atomic_with_leases_rejects_stale_then_moves_all_refs(tmp_path):
     work, bare, shas = _two_branch_remote(tmp_path)
     # THE atomicity pin: one stale lease rejects the WHOLE push — no ref moves.
@@ -1374,6 +1376,7 @@ def test_push_atomic_with_leases_pins_the_exact_argv(monkeypatch, tmp_path):
     assert captured["timeout"] == 120
 
 
+@pytest.mark.slow
 def test_push_atomic_with_leases_capability_suppressed_transport_moves_no_ref(tmp_path):
     # The real atomic-capability refusal on the MUTATING path: with the remote's atomic
     # advertisement suppressed the client aborts before any ref update — both branches stay

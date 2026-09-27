@@ -17,6 +17,8 @@ converge.
 
 import subprocess
 
+import pytest
+
 from perk import github
 from perk.convergence.doctor import run_doctor
 from perk.state import cache
@@ -41,6 +43,7 @@ def _stub_identity(monkeypatch, *, name="acme") -> None:
     )
 
 
+@pytest.mark.slow
 def test_dot_directory_fresh_drift_repair_story(
     scaffolded_perk_repo, stub_env, monkeypatch, converge_skills_workspace
 ):
