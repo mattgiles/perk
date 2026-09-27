@@ -147,8 +147,9 @@ the default `pi-web-access` is itself a foreign package.
 
 Provider tool vocabularies are not normalized:
 
-- `pi-web-access`: `web_search`, `fetch_content`, and `get_search_content` (`code_search` stays
-  allowlisted for version tolerance);
+- `pi-web-access`: `web_search`, `source_check`, `fetch_content`, and `get_search_content`, plus
+  its `web_enable` loader — the four tools stay hidden until the model calls `web_enable`
+  (`code_search` stays allowlisted for version tolerance);
 - `ollama-web-search`: `ollama_web_search` and `ollama_web_fetch`;
 - `juicesharp-web-tools`: `web_search` and `web_fetch`.
 

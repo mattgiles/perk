@@ -18,7 +18,12 @@ import type { LoadHookSync, ModuleHooks, RegisterHooksOptions, ResolveHookSync }
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-/** The observed specifier census: every SDK import the two consumers make (drift-guarded). */
+/**
+ * The observed specifier census: every SDK import the two consumers make (drift-guarded). The
+ * census is package-wide, not limited to what perk's normal Node loading reaches: `typebox/value`
+ * is imported only by pi-subagents' binary-runner bootstrap (the compiled-host child path), yet it
+ * is censused so any consumer module that evaluates under the bridge shares the host's copy.
+ */
 export const NATIVE_SDK_CENSUS = [
   "@earendil-works/pi-coding-agent",
   "@earendil-works/pi-tui",
@@ -27,6 +32,7 @@ export const NATIVE_SDK_CENSUS = [
   "@earendil-works/pi-agent-core",
   "typebox",
   "typebox/compile",
+  "typebox/value",
 ] as const;
 export type CensusSpecifier = (typeof NATIVE_SDK_CENSUS)[number];
 
@@ -36,7 +42,8 @@ export const NATIVE_SDK_CONSUMERS = ["pi-subagents", "pi-web-access"] as const;
 export const HOST_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 /** Pi's project install root — the ONE spelling (installedPackageGuard sanctions this file). */
 export const NATIVE_CONSUMER_INSTALL_ROOT = ".pi/npm/node_modules/";
-export const BRIDGE_SCHEMA = 1;
+/** Widening the census bumps the schema: an older registry in the process is then declined. */
+export const BRIDGE_SCHEMA = 2;
 export const BRIDGE_MARKER = "perk-native-sdk-bridge";
 export const BRIDGE_DISABLE_ENV = "PERK_DISABLE_NATIVE_SDK_BRIDGE";
 /** The global-symbol registry name (the facade source re-derives the key from it). */
@@ -108,7 +115,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** The registry guard: schema 1 and one of the two recognized record shapes. */
+/** The registry guard: the current schema and one of the two recognized record shapes. */
 export function isBridgeRegistry(value: unknown): value is BridgeRegistry {
   if (!isRecord(value) || value.schema !== BRIDGE_SCHEMA) return false;
   if (value.kind === "disabled") return true;

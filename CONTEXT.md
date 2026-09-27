@@ -60,6 +60,19 @@ The activation-latched restriction a runner child derives from the packet; it co
 tool gate and cannot be cleared by gate exit, tree navigation or a same-activation restart.
 _Avoid_: child mode, inherited mode
 
+### Tool gating
+
+**Lazy loader**:
+A borrowed package's tool that activates that package's other tools on demand — `subagents_enable`,
+`web_enable`; perk gives it the eligibility of the tools it enables and refuses a call to it
+elsewhere.
+_Avoid_: enable tool, activation tool, meta-tool
+
+**Lazy-owned tool**:
+A borrowed tool whose activation its owner toggles through a registered lazy loader; perk applies
+its mode/stage eligibility but takes its membership from the owner's live selection.
+_Avoid_: hidden tool, deferred tool, heavy tool
+
 ### Read-only bash gate
 
 **Command position**:

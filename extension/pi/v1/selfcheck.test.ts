@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { formatSkillsForPrompt, type Skill, type ToolInfo } from "@earendil-works/pi-coding-agent";
 import { BINDING_HEADER } from "../../substrate/bindingDelivery.ts";
-import type { BridgeStatus } from "../../substrate/nativeSdkBridge.ts";
+import { type BridgeStatus, NATIVE_SDK_CENSUS } from "../../substrate/nativeSdkBridge.ts";
 import { REPORT_DETAIL_TYPE } from "../../surfaces/surfaces.ts";
 import { loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
 import {
@@ -379,7 +379,7 @@ test("renderCensus: full block pins the line grammar", () => {
       state: "installed",
       hostEntry: "/pi/dist/index.js",
       roots: ["/repo/consumers/pi-subagents", "/repo/consumers/pi-web-access"],
-      specifiers: 7,
+      specifiers: NATIVE_SDK_CENSUS.length,
       reused: true,
       detail: "",
     },
@@ -396,7 +396,7 @@ test("renderCensus: full block pins the line grammar", () => {
       "    per source: builtin=20 (50000c); perk=4 (11234c)",
       "  branch: 142 entries; binding-header-copies=2",
       "    perk contexts: perk:binding-context ×1 (900c); perk:mode-context ×3 (14400c); other custom_message ×0 (0c)",
-      "  native sdk bridge: installed (roots=2, specifiers=7, reused)",
+      `  native sdk bridge: installed (roots=2, specifiers=${NATIVE_SDK_CENSUS.length}, reused)`,
       "    host: /pi/dist/index.js",
       "    roots: 2 — /repo/consumers/pi-subagents, /repo/consumers/pi-web-access",
     ].join("\n"),

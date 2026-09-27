@@ -33,6 +33,9 @@ const ALLOWED_PACKAGES = new Set([
   "typebox",
   // The host aliases this peer subpath too; conflict resolution validates native reports.
   "typebox/compile",
+  // Pi >= 0.87.0's extension loader aliases this subpath (and `@sinclair/typebox/value`) onto its
+  // bundled copy; the host-SDK bridge captures it for pi-subagents' binary-runner bootstrap.
+  "typebox/value",
 ]);
 
 /**

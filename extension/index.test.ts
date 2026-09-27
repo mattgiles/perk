@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { BridgeStatus } from "./substrate/nativeSdkBridge.ts";
+import { type BridgeStatus, NATIVE_SDK_CENSUS } from "./substrate/nativeSdkBridge.ts";
 import { REPORT_DETAIL_TYPE } from "./surfaces/surfaces.ts";
 import { loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 
@@ -142,7 +142,7 @@ const BRIDGE_BASE: BridgeStatus = {
   state: "installed",
   hostEntry: "/pi/dist/index.js",
   roots: ["/repo/pi-subagents"],
-  specifiers: 7,
+  specifiers: NATIVE_SDK_CENSUS.length,
   reused: false,
   detail: "",
 };
@@ -246,7 +246,9 @@ test("sdk bridge: an installed bridge emits no warning and reports through selfc
     const detail = entries.find((entry) => entry.customType === REPORT_DETAIL_TYPE);
     assert.match(
       detail?.data?.text ?? "",
-      /\n {2}native sdk bridge: installed \(roots=1, specifiers=7, reused\)\n {4}host: \/pi\/dist\/index\.js\n {4}roots: 1 — \/repo\/pi-subagents/,
+      new RegExp(
+        `\\n {2}native sdk bridge: installed \\(roots=1, specifiers=${NATIVE_SDK_CENSUS.length}, reused\\)\\n {4}host: /pi/dist/index\\.js\\n {4}roots: 1 — /repo/pi-subagents`,
+      ),
     );
   } finally {
     h.dispose();

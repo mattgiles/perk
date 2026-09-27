@@ -11,6 +11,7 @@ import * as hostPiAiCompat from "@earendil-works/pi-ai/compat";
 import * as hostPiCodingAgent from "@earendil-works/pi-coding-agent";
 import * as hostTypebox from "typebox";
 import * as hostTypeboxCompile from "typebox/compile";
+import * as hostTypeboxValue from "typebox/value";
 import { hostPiTui } from "../surfaces/surfaces.ts";
 import type { CensusSpecifier } from "./nativeSdkBridge.ts";
 
@@ -24,5 +25,6 @@ export function hostSdkNamespaces(): ReadonlyMap<CensusSpecifier, object> {
     ["@earendil-works/pi-agent-core", hostPiAgentCore],
     ["typebox", hostTypebox],
     ["typebox/compile", hostTypeboxCompile],
+    ["typebox/value", hostTypeboxValue],
   ]);
 }

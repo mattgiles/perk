@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fauxAssistantMessage, fauxText, getCurrentTools } from "@earendil-works/pi-ai";
 import {
+  buildSessionContext,
   type ExtensionAPI,
   type ExtensionContext,
   SessionManager,
@@ -29,6 +30,7 @@ import {
   fauxModelRuntime,
   loadPerkSession,
   type PerkSession,
+  plantRawSession,
   plantSession,
   scaffoldRepo,
 } from "../testing/harness.ts";
@@ -37,6 +39,7 @@ import { loadRegistry } from "./registry.ts";
 import {
   BORROWED_TOOLS,
   FFF_SEARCH_TOOLS,
+  LAZY_TOOL_LOADERS,
   LINEAR_MUTATING_TOOLS,
   LINEAR_READ_TOOLS,
   PERK_TOOLS,
@@ -481,6 +484,124 @@ const FAKE_BORROWED_NAMES = [
   "some_foreign_tool",
 ];
 
+// --- lazy owners: loader-gated borrowed tools (contracts.md §8.40) ------------------------------
+
+/** One recorded transcript message as the owners read it (a system message may declare tools). */
+type TranscriptMessage = {
+  role?: string;
+  toolsAdded?: readonly { name: string }[];
+  toolsRemoved?: readonly { name: string }[];
+};
+
+/**
+ * A stand-in for a borrowed lazy owner, mirroring the two installed owners' activation rules
+ * (pi-subagents' `tool-activation.js`, pi-web-access's `tool-activation.ts`). Common: `tools` and
+ * `loader` register at load; on `session_start`/`session_tree` the owner reads the selected
+ * branch's messages — recorded `toolsAdded`/`toolsRemoved` declarations replay membership, a
+ * message-less branch hides `tools`, and `loader` is always kept active; the loader's `execute`
+ * activates `tools`. The owners diverge on a non-empty branch WITHOUT declarations (`"subagents"`
+ * keeps each tool's current state, `"web"` activates all) and in `before_agent_start`
+ * (`"subagents"` pushes the loader into `selectedTools` AND the active set, `"web"` only re-adds
+ * it to the active set). Bound after perk (the real `packages` order), so every owner handler
+ * runs AFTER perk's.
+ */
+function fakeLazyOwner(
+  loader: string,
+  tools: readonly string[],
+  owner: "subagents" | "web",
+): (pi: ExtensionAPI) => void {
+  return (pi) => {
+    for (const name of tools) registerFakeTool(pi, name);
+    pi.registerTool({
+      name: loader,
+      label: loader,
+      description: `fake lazy loader ${loader} (test)`,
+      parameters: { type: "object", properties: {} },
+      async execute() {
+        pi.setActiveTools([...new Set([...pi.getActiveTools(), ...tools])]);
+        return { content: [{ type: "text", text: `Enabled: ${tools.join(", ")}.` }], details: {} };
+      },
+    });
+    const select = async (_event: unknown, ctx: ExtensionContext): Promise<void> => {
+      const messages = buildSessionContext(ctx.sessionManager.getBranch())
+        .messages as TranscriptMessage[];
+      const declared = messages.some(
+        (m) =>
+          m.role === "system" &&
+          (Object.hasOwn(m, "toolsAdded") || Object.hasOwn(m, "toolsRemoved")),
+      );
+      const active = pi.getActiveTools();
+      const selected = new Set<string>();
+      if (declared) {
+        for (const m of messages) {
+          if (m.role !== "system") continue;
+          for (const t of m.toolsRemoved ?? []) selected.delete(t.name);
+          for (const t of m.toolsAdded ?? []) if (tools.includes(t.name)) selected.add(t.name);
+        }
+      } else if (messages.length > 0) {
+        for (const name of tools) {
+          if (owner === "web" || active.includes(name)) selected.add(name);
+        }
+      }
+      const next = [
+        ...active.filter((n) => !tools.includes(n)),
+        ...tools.filter((n) => selected.has(n)),
+      ];
+      pi.setActiveTools([...new Set([...next, loader])]);
+    };
+    pi.on("session_start", select);
+    pi.on("session_tree", select);
+    pi.on("before_agent_start", async (event) => {
+      if (owner === "subagents") {
+        const options = event.systemPromptOptions as { selectedTools?: string[] };
+        options.selectedTools ??= [...pi.getActiveTools()];
+        if (!options.selectedTools.includes(loader)) options.selectedTools.push(loader);
+      }
+      if (!pi.getActiveTools().includes(loader))
+        pi.setActiveTools([...pi.getActiveTools(), loader]);
+    });
+  };
+}
+
+/** pi-web-access's four lazy-owned default tools (what `web_enable` activates). */
+const WEB_LAZY_TOOLS: readonly string[] = [
+  "web_search",
+  "source_check",
+  "fetch_content",
+  "get_search_content",
+];
+
+/** Both installed owners, faithfully: pi-subagents' and pi-web-access's rules. */
+function lazyOwners(): ((pi: ExtensionAPI) => void)[] {
+  return [
+    fakeLazyOwner("subagents_enable", ["subagent"], "subagents"),
+    fakeLazyOwner("web_enable", WEB_LAZY_TOOLS, "web"),
+  ];
+}
+
+const LOADERS: readonly string[] = ["subagents_enable", "web_enable"];
+
+/** Assert each name's activity in one go. */
+function assertActivity(h: PerkSession, expected: Record<string, boolean>, when: string): void {
+  const active = new Set(h.session.getActiveToolNames());
+  for (const [name, on] of Object.entries(expected)) {
+    assert.equal(active.has(name), on, `${name} must be ${on ? "active" : "inactive"} ${when}`);
+  }
+}
+
+/** Every web lazy-owned tool expected in one activity state. */
+function webTools(on: boolean): Record<string, boolean> {
+  return Object.fromEntries(WEB_LAZY_TOOLS.map((name) => [name, on]));
+}
+
+/** Every lazy-owned tool inactive, both loaders active — a message-less branch after startup. */
+const HIDDEN_WITH_LOADERS: Record<string, boolean> = {
+  subagent: false,
+  ...webTools(false),
+  subagents_enable: true,
+  web_enable: true,
+};
+
 test("implement claim: borrowed tools follow the matrix (research/delegation/todo stay; mutating/submit drop)", async () => {
   // The load-time fake IS the regression oracle for the census-only names: a census tool in no
   // stage list is subtracted by the stage filter, while an un-enumerated name (`some_foreign_tool`
@@ -702,6 +823,8 @@ test("foreign deactivation: a late tool its owner deactivated before perk saw it
         at: "session_start",
         deactivate: ["late_tool_x"],
       }),
+      // The lazy owners ride along: their tools follow the owner, not the admission rule.
+      ...lazyOwners(),
       (pi) => {
         foreignPi = pi;
       },
@@ -717,10 +840,20 @@ test("foreign deactivation: a late tool its owner deactivated before perk saw it
     let active = h.session.getActiveToolNames();
     assert.ok(active.includes("subagent_supervisor"), "the late tool seen active is admitted");
     assert.ok(!active.includes("late_tool_x"), "the owner-deactivated late tool is respected");
+    assertActivity(h, HIDDEN_WITH_LOADERS, "after startup (the lazy owners hid their tools)");
     await navigate();
     active = h.session.getActiveToolNames();
     assert.ok(active.includes("subagent_supervisor"));
     assert.ok(!active.includes("late_tool_x"), "never seen active → never admitted");
+    assertActivity(h, HIDDEN_WITH_LOADERS, "after a navigation (the owners re-hide)");
+    await h.invokeTool("web_enable", {});
+    await navigate();
+    assert.ok(!h.session.getActiveToolNames().includes("late_tool_x"), "still never admitted");
+    assertActivity(
+      h,
+      { subagent: false, ...webTools(false) },
+      "the message-less owner re-sync re-hides what the loader enabled; perk keeps no copy",
+    );
 
     // The owner deactivates the ADMITTED tool between reconciliations: the toggle wins until the
     // next reconciliation re-installs perk's set — exactly as for a snapshot member (sticky
@@ -733,6 +866,248 @@ test("foreign deactivation: a late tool its owner deactivated before perk saw it
       h.session.getActiveToolNames().includes("subagent_supervisor"),
       "the reconciliation re-installs the admitted tool over the foreign toggle",
     );
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- lazy owners: the composed lifecycle scenarios ------------------------------------------
+
+test("lazy owners: the fakes enable exactly what LAZY_TOOL_LOADERS maps", () => {
+  assert.deepEqual(LAZY_TOOL_LOADERS, {
+    subagents_enable: ["subagent"],
+    web_enable: [...WEB_LAZY_TOOLS],
+  });
+});
+
+test("lazy owners, fresh gated plan: the owners' hiding holds under the gate, the loaders pass, and the gate stays intact", async () => {
+  const runId = "01LAZYGATEDPLAN";
+  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-only", stage: "plan" } });
+  const h = await loadAt(cwd, { env: { PERK_RUN_ID: runId }, extraExtensions: lazyOwners() });
+  try {
+    assertActivity(h, HIDDEN_WITH_LOADERS, "after a gated startup");
+    for (const loader of LOADERS) {
+      assert.equal(await h.emitToolCall(loader, {}), undefined, `${loader} passes gated in plan`);
+    }
+    await h.invokeTool("subagents_enable", {});
+    assertActivity(h, { subagent: true }, "after the loader call");
+    for (const name of ["write", "edit"]) {
+      assert.equal((await h.emitToolCall(name, {}))?.block, true, `the gate still blocks ${name}`);
+    }
+    // A re-sync on this message-less branch: the owner re-hides, and perk does not re-enable.
+    await h.emitLifecycle({
+      type: "session_tree",
+      newLeafId: h.entryIds().at(-1) ?? null,
+      oldLeafId: null,
+    });
+    assertActivity(h, HIDDEN_WITH_LOADERS, "after a session_tree re-sync");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("lazy owners, fresh read-write implement: the lazy saving survives startup, and perk-only reconciliations neither restore nor evict an owner-enabled tool", async () => {
+  const runId = "01LAZYIMPLEMENT";
+  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-write", stage: "implement" } });
+  const h = await loadAt(cwd, {
+    env: { PERK_RUN_ID: runId },
+    extraExtensions: [
+      ...lazyOwners(),
+      fakeBorrowedPackage(["subagent_supervisor"], { at: "session_start" }),
+    ],
+  });
+  try {
+    assertActivity(
+      h,
+      { ...HIDDEN_WITH_LOADERS, subagent_supervisor: true },
+      "after an implement startup",
+    );
+    await h.invokeTool("subagents_enable", {});
+    assertActivity(h, { subagent: true }, "after the loader call");
+    // Gate enter then exit, both in the implement stage — no owner hook fires on either.
+    await h.invokeCommand("plan");
+    assertActivity(h, { subagent: true, edit: false }, "while gated");
+    await h.invokeCommand("plan");
+    assertActivity(h, { subagent: true, edit: true }, "after the gate exits");
+    assertActivity(h, { web_search: false }, "a lazy tool the owner hid stays hidden");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("lazy owners, read-write gist-save: the delegation loader is stripped and refused even after its owner re-advertises it; the web loader works", async () => {
+  const runId = "01LAZYGISTSAVE0";
+  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-write", stage: "gist-save" } });
+  const h = await loadAt(cwd, { env: { PERK_RUN_ID: runId }, extraExtensions: lazyOwners() });
+  const reason =
+    "perk stage scoping: subagents_enable is blocked (its tools — subagent — are not available in the gist-save stage).";
+  try {
+    assertActivity(
+      h,
+      { subagents_enable: false, subagent: false, web_enable: true },
+      "after a gist-save startup",
+    );
+    assert.deepEqual(await h.emitToolCall("subagents_enable", {}), { block: true, reason });
+    // The owner re-adds its loader every turn, after perk's handler — the fact the refusal exists for.
+    await h.emitBeforeAgentStart();
+    assertActivity(h, { subagents_enable: true }, "after the owner's before_agent_start");
+    assert.deepEqual(await h.emitToolCall("subagents_enable", {}), { block: true, reason });
+    assert.equal(await h.emitToolCall("web_enable", {}), undefined);
+    await h.invokeTool("web_enable", {});
+    assertActivity(h, webTools(true), "after web_enable");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("lazy owners, gate exit in a non-admitting stage: the stage filter strips subagent whether or not the owner enabled it", async () => {
+  for (const callLoader of [false, true]) {
+    const runId = callLoader ? "01LAZYOBJPLANLD" : "01LAZYOBJPLAN00";
+    const cwd = scaffoldRepo({ handoff: { runId, mode: "read-only", stage: "objective-plan" } });
+    const h = await loadAt(cwd, { env: { PERK_RUN_ID: runId }, extraExtensions: lazyOwners() });
+    const arm = callLoader ? "(loader called first)" : "(loader never called)";
+    try {
+      if (callLoader) {
+        await h.invokeTool("subagents_enable", {});
+        assertActivity(h, { subagent: true }, `while gated ${arm}`);
+      }
+      await h.invokeCommand("plan");
+      assertActivity(
+        h,
+        { subagent: false, subagents_enable: false, edit: true, plan_draft: true },
+        `after the gate exits ${arm}`,
+      );
+      assert.deepEqual(await h.emitToolCall("subagents_enable", {}), {
+        block: true,
+        reason:
+          "perk stage scoping: subagents_enable is blocked (its tools — subagent — are not available in the objective-plan stage).",
+      });
+    } finally {
+      h.dispose();
+    }
+  }
+});
+
+test("lazy owners, reload: the owner re-hides on the message-less branch and perk does not fight it", async () => {
+  const runId = "01LAZYRELOAD000";
+  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-write", stage: "implement" } });
+  const h = await loadAt(cwd, { env: { PERK_RUN_ID: runId }, extraExtensions: lazyOwners() });
+  try {
+    await h.invokeTool("subagents_enable", {});
+    assertActivity(h, { subagent: true }, "after the loader call");
+    await h.reload();
+    assertActivity(h, HIDDEN_WITH_LOADERS, "after reload");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("lazy owners, recorded selection across navigation: Pi restores, the owner agrees, and perk's implement sync keeps it", async () => {
+  for (const recorded of [true, false]) {
+    const cwd = scaffoldRepo();
+    const manager = SessionManager.inMemory(cwd);
+    manager.appendCustomEntry("perk:workflow-state", { mode: "read-write" });
+    manager.appendCustomEntry("perk:workflow-state", { stage: "implement" });
+    if (recorded) {
+      manager.appendMessage({
+        role: "system",
+        content: "",
+        toolsAdded: [{ name: "subagent", description: "", parameters: { type: "object" } }],
+        timestamp: Date.now(),
+      } as never);
+    }
+    const checkpoint = manager.appendCustomEntry("perk:workflow-state", { stage: "implement" });
+    manager.appendCustomEntry("perk:workflow-state", { stage: "gist-save" });
+    const h = await loadAt(cwd, {
+      sessionManager: manager,
+      env: { PERK_RUN_ID: undefined },
+      extraExtensions: lazyOwners(),
+    });
+    const arm = recorded ? "(recorded toolsAdded)" : "(no record)";
+    try {
+      assertActivity(h, { subagent: false, ...webTools(false) }, `on the gist-save leaf ${arm}`);
+      await h.navigateTo(checkpoint);
+      assertActivity(
+        h,
+        { subagent: recorded, ...webTools(false) },
+        `after navigating to implement ${arm}`,
+      );
+    } finally {
+      h.dispose();
+    }
+  }
+});
+
+test("lazy owners, a declaration-less non-empty transcript: perk follows each owner's divergent rule", async () => {
+  const cwd = scaffoldRepo();
+  const file = plantRawSession(cwd, [
+    { custom: { type: "perk:workflow-state", data: { mode: "read-write", stage: "implement" } } },
+    { user: "hi" },
+  ]);
+  const h = await loadAt(cwd, {
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+    extraExtensions: lazyOwners(),
+  });
+  try {
+    // pi-subagents keeps the load-time state (perk's session_start ran first and kept it too);
+    // pi-web-access enables all; the resources_discover re-apply keeps both.
+    assertActivity(
+      h,
+      {
+        subagent: true,
+        ...webTools(true),
+        subagents_enable: true,
+        web_enable: true,
+      },
+      "after startup",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("eager owner (no loader registered): a gate toggle through a non-admitting stage restores delegation on re-entry", async () => {
+  // An owner that registers its tools eagerly — an older pi-subagents, or the current one's
+  // host-probe fallback — registers no loader, so nothing can re-enable a tool perk stripped.
+  // Without a registered loader the name is NOT lazy-owned: the gate-ON allowlist installs it.
+  const runId = "01LAZYEAGERPLAN";
+  const cwd = scaffoldRepo({ handoff: { runId, mode: "read-only", stage: "plan" } });
+  const h = await loadAt(cwd, {
+    env: { PERK_RUN_ID: runId },
+    extraExtensions: [fakeBorrowedPackage(["subagent", ...WEB_LAZY_TOOLS])],
+  });
+  try {
+    const eager = { subagent: true, ...webTools(true) };
+    assertActivity(h, eager, "after a gated startup");
+    await h.invokeCommand("plan");
+    assertActivity(h, { subagent: false, ...webTools(true) }, "after the gate exits into plan");
+    await h.invokeCommand("plan");
+    assertActivity(h, eager, "after the gate re-engages");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("lazy owners, bare session: a tool the owner hid before perk engaged, enabled by its loader, survives the warm gate's exit and a later toggle", async () => {
+  // The owners hide their registered tools in session_start, BEFORE perk's first engagement
+  // (the warm /plan toggle) — so the enabled tool is in neither the snapshot nor the
+  // admissions (the census saw it); only the live lazy-owned selection keeps it.
+  const cwd = scaffoldRepo();
+  const h = await loadAt(cwd, { env: { PERK_RUN_ID: undefined }, extraExtensions: lazyOwners() });
+  try {
+    assertActivity(h, HIDDEN_WITH_LOADERS, "after a bare startup");
+    await h.invokeCommand("plan");
+    await h.invokeTool("subagents_enable", {});
+    await h.invokeTool("web_enable", {});
+    const enabled = { subagent: true, ...webTools(true) };
+    assertActivity(h, enabled, "after both loaders ran under the gate");
+    await h.invokeCommand("plan");
+    assertActivity(h, { ...enabled, edit: true }, "after the gate exits");
+    // A perk-only reconciliation pair (enter + exit) neither restores nor evicts them.
+    await h.invokeCommand("plan");
+    await h.invokeCommand("plan");
+    assertActivity(h, { ...enabled, edit: true }, "after a second gate toggle");
   } finally {
     h.dispose();
   }

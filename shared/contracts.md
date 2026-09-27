@@ -698,11 +698,13 @@ stage/snapshot semantics remain. `/btw`'s `gating.isActive()` supplier sees the 
 active tool set to `READ_ONLY_TOOLS` (`read`/`grep`/`find`/`ls`/`bash` + `ask_user_question` +
 `plan_review` + the `plan_draft`/`objective_draft`/`gist_draft` session-data carve-outs + `objective_node`
 (delegates a bounded node transition to the canonical Python plane) + the **`web` seam**
-providers' research tools, the read-only Linear tools, the pi-fff search family (both mode
+providers' research tools (including pi-web-access's `source_check` and its `web_enable` lazy
+loader), the read-only Linear tools, the pi-fff search family (both mode
 name-sets — `fffind`/`ffgrep`/`fff-multi-grep` + override's `multi_grep`; the override names
 `find`/`grep` are already present — local search belongs in read-only exploration, and FFF's
 frecency state lives under `~/.pi/agent/fff/`, outside the worktree), and the pi-subagents delegation family
-(`subagent`/`wait` + `subagent_supervisor` — kept reachable for the gated delegation flows
+(`subagent`/`subagents_enable`/`wait` + `subagent_supervisor` — `subagents_enable` being its lazy
+loader; kept reachable for the gated delegation flows
 and for answering ad-hoc children's supervisor asks; **accepted no-backstop posture**: spawned
 children are unscoped by design (§8.40 adopt-never-impersonates) — `subagent` itself can spawn
 ad-hoc read-write children, a deliberate documented leniency like the arg-blind
@@ -728,12 +730,15 @@ claimed run-scoped scratch path, §8.48 — the relayed param is verified agains
 other path refused; no worktree writes), and `run_dream_wave` (the gated learn-dream session's
 wave call: NO parameters — its manifest read AND its one write, the fixed-name run-scratch
 bundle beside that manifest, are both derived from the claimed run's manifest path, §8.61 —
-the no-aimable-writer posture on both sides)) via `pi.setActiveTools`, **snapshot-then-restore** (the restore
+the no-aimable-writer posture on both sides)) via `pi.setActiveTools` — lazy-owned members
+(`subagent` and pi-web-access's four default tools, while their loader is registered) are installed
+only while their owner has them selected (§8.40; the tool-call check below keeps the full set) —
+**snapshot-then-restore** (the restore
 falls back to the full configured `pi.getAllTools()` set — never a hardcoded list); (2) rejects
 **every** tool outside that same `READ_ONLY_TOOLS` set at `tool_call`, including `plan_save`, delivery
 and unknown/late foreign mutators, even when toolset narrowing failed. This backstop applies to all
 effective read-only sessions, parents too. `edit`/`write` keep their file-modification denial wording;
-other excluded tools receive a read-only not-allowlisted denial. Listed non-bash tools pass this gate but retain downstream authority checks. Listed `bash`
+other excluded tools receive a read-only not-allowlisted denial (an excluded lazy loader receives the stage-naming loader denial, §8.40). Listed non-bash tools pass this gate but retain downstream authority checks. Listed `bash`
 additionally requires its argument check, in this order: (a) the whole-string destructive veto over
 the walker's **veto view** (`commandPositions.ts`'s `vetoText`: every substitution, `${…}` and
 heredoc body collapsed out of the text that holds it, each substitution's own text appended on a
@@ -7291,9 +7296,12 @@ not re-engineered — and plannotator's idle-phase strip of its load-time phase 
 OWN `session_start`, after perk's first-engagement snapshot, which is exactly why every
 plannotator phase tool must be enumerated (an un-enumerated one is a snapshot member the
 `resources_discover` re-apply restores). Stage placement:
-the research families (web union + Linear reads + FFF local search) ride EVERY stage list; delegation
-(`subagent`/`wait`/`subagent_supervisor`/`intercom`) and `todo` are worktree-family only among the
-gate-OFF stage lists (delegation additionally rides the read-only gate — §8.3);
+the research families (web union + Linear reads + FFF local search) ride EVERY stage list — the
+web union carries pi-web-access's four default tools (`web_search`, `source_check`,
+`fetch_content`, `get_search_content`) plus its lazy loader `web_enable`; delegation
+(`subagent`/`subagents_enable`/`wait`/`subagent_supervisor`/`intercom` — `subagents_enable` being
+pi-subagents' lazy loader) and `todo` are worktree-family only among the gate-OFF stage lists
+(delegation additionally rides the read-only gate — §8.3);
 `LINEAR_MUTATING_TOOLS` (incl. `linear_configure_auth`, which writes `~/.pi/agent/auth.json`)
 and plannotator's two phase tools (`PLANNOTATOR_PHASE_TOOLS`: `plannotator_submit_plan`,
 `plannotator_mark_done`) appear in NO stage list — in the census, so subtracted from every
@@ -7306,13 +7314,14 @@ read-only **gate** IS inherited by adopted children (§8.3), so the child-side e
 in `READ_ONLY_TOOLS`, gate membership being their only governance surface.
 
 **Composition with the read-only gate (§8.3).** Gate ON → `setActiveTools(READ_ONLY_TOOLS)`
-**unchanged** — no stage filter, preserving every gated carve-out byte-for-byte (the gate-ON
+(minus the lazy-owned tools their owner currently hides — below) — no stage filter, preserving every gated carve-out byte-for-byte (the gate-ON
 allowlist is §8.3's) — with ONE named exception: the isolated `objective-refine` stage selects
 its own explicit gate-ON allowlist `REFINEMENT_READ_ONLY_TOOLS` (`gatedToolsFor(stage)`) for both
 the active set and the `tool_call` backstop, and its own read-only mode-context flavor; the
 refinement draft tool lives in `PERK_TOOLS` but never in `READ_ONLY_TOOLS`, so no other gated
 stage gains it (§8.68). Gate OFF + known stage → a **subtractive filter over the reconciliation
-baseline `snapshot ∪ admitted`** — the one shared pre-engagement snapshot (the host's active
+baseline `snapshot ∪ admitted`** (lazy-owned names excepted — their membership is the owner's
+live selection, below) — the one shared pre-engagement snapshot (the host's active
 starting set, never `getAllTools()`) plus every name the registry census recorded beside it never
 saw that a gate-OFF reconciliation has since seen active. Admission is sticky: perk's own filtering
 (a stage list, the gate) never evicts an admitted name, so navigating back to an admitting stage or
@@ -7353,10 +7362,53 @@ AUTHORING stage lists — `plan` / `objective-plan` / `objective-author` — and
 worktree family); the `objective-author` and `objective-save` lists, identical until then, now
 differ by this one name.
 
+**Lazy-owned tools and their loaders.** pi-subagents and pi-web-access each hide their heavy
+tools until the model calls a **lazy loader** — a borrowed tool that activates its package's
+other tools on demand. `LAZY_TOOL_LOADERS` (`toolGating.ts`, loader → tools) is the SSOT:
+`subagents_enable` → `subagent`; `web_enable` → `web_search`, `source_check`, `fetch_content`,
+`get_search_content`. A tool is **lazy-owned** only while its loader is REGISTERED (active or not,
+read from the registry at each reconciliation): an owner that registers its tools eagerly and no
+loader — an older version, or its host-probe fallback — owns nothing lazily, so its tools keep the
+ordinary snapshot/allowlist behavior (nothing could re-enable a tool perk stripped). A
+lazy-owned tool's ACTIVATION is its owner's decision; perk owns only its ELIGIBILITY (mode/stage).
+At EVERY reconciliation (gate ON and OFF) a lazy-owned name's membership is its owner's current
+selection (the live active set): the gate-ON allowlist is a
+ceiling (installed only while the owner has it selected); the gate-OFF baseline drops snapshot
+members the owner has since hidden and keeps ones the owner has since enabled; and the stage
+filter still applies over that baseline (an owner-enabled `subagent` is stripped in a stage whose
+list excludes it, e.g. `objective-plan`, `gist-save`). Owner selection shapes only the INSTALLED
+set: the gate's `tool_call` backstop still checks the full allowlist, so lazy hiding is never an
+authorization boundary. perk never re-activates or restores a
+lazy-owned tool — Pi's transcript restore (which runs before `session_tree` handlers) and the
+owner's recorded-selection replay on `session_start`/`session_tree` do; perk only keeps or (by
+stage) strips. A loader has exactly the eligibility of the tools it enables — it rides the same
+family constant (pinned in `toolGating.test.ts`: in `READ_ONLY_TOOLS`,
+`REFINEMENT_READ_ONLY_TOOLS` and every stage list, the loader is present iff all its tools are).
+The one `tool_call` backstop stage scoping has: a loader call outside its eligibility is refused
+with a stage-naming reason — `perk read-only mode: <loader> is blocked (its tools — <tools> — are
+not allowlisted in the gated <stage> session).` (or `… in this gated session).` when unscoped)
+under the gate, and `perk stage scoping: <loader> is blocked (its tools — <tools> — are not
+available in the <stage> stage).` gate-OFF in a known stage whose list excludes it; an unscoped
+or unknown-stage session never refuses. The refusal exists because the owner re-advertises its
+loader every turn in its own `before_agent_start`, which runs AFTER perk's handler (extension
+order), so schema removal cannot hide it; the enabled tool itself remains under the fail-open
+filter. The two owners' replay rules as observed differ — both replay recorded
+`toolsAdded`/`toolsRemoved` declarations and hide on a message-less branch (a cold-door session
+is message-less: perk's workflow-state claims are `custom` entries), but on a declaration-less
+non-empty branch pi-subagents keeps the current state while pi-web-access enables all its tools;
+pi-subagents' `before_agent_start` edits `selectedTools` and the active set, pi-web-access's only
+the active set — perk's rule is owner-agnostic. Residuals: an owner's recorded-selection replay
+on `session_tree` runs after perk's sync and can re-add a stage-excluded lazy tool until perk's
+next reconciliation (the existing foreign-toggle class, not a new one); the owner re-advertises
+its loader even where perk refuses it, so `subagents_enable` stays model-visible in e.g.
+`gist-save`/`objective-refine` with a clear refusal on call; a runner child under the read-only
+floor may call an allowlisted loader (unchanged — `subagent` is already allowlisted for gated
+children).
+
 **Fail postures.** Stage scoping is **fail-open** where the gate is fail-closed: no stage, an
 unknown stage id (version skew), or any lookup miss → no filtering. Absent tool names
 are inert (`setActiveTools` ignores unknown names). There is no `tool_call` backstop for stage
-scoping (schema removal is the same structural
+scoping except the lazy-loader refusal above (schema removal is the same structural
 lever the gate's allowlist uses; the full read-only tool-call allowlist and bash argument check
 remain the gate's job) and no
 config surface for the map (the §8.39 non-interference posture; fail-open on unknown ids covers
@@ -13388,10 +13440,13 @@ imports (the bundle's `VIRTUAL_MODULES` under the `pi` bin, the alias files unde
 pi-tui reaches the bridge through the surfaces module's `hostPiTui` re-export. A test injects a
 status through the construction-only `nativeSdkBridge` option; production never passes it.
 
-**The census** — `NATIVE_SDK_CENSUS`, seven specifiers: `@earendil-works/pi-coding-agent`,
+**The census** — `NATIVE_SDK_CENSUS`, eight specifiers: `@earendil-works/pi-coding-agent`,
 `@earendil-works/pi-tui`, `@earendil-works/pi-ai`, `@earendil-works/pi-ai/compat`,
-`@earendil-works/pi-agent-core`, `typebox`, `typebox/compile` — the SDK imports the two consumers
-actually make (pi-subagents 0.70.1, pi-web-access 0.30.0). The **drift guard**
+`@earendil-works/pi-agent-core`, `typebox`, `typebox/compile`, `typebox/value` — the SDK imports the
+two consumers actually make (pi-subagents 0.72.1, pi-web-access 0.31.0). `typebox/value` is imported
+only by pi-subagents' binary-runner bootstrap (the compiled-host child path, not perk's normal Node
+loading) — the census is package-wide by design, so every consumer module that evaluates under the
+bridge shares the host's copy. The **drift guard**
 (`extension/substrate/nativeSdkBridge.test.ts`) scans every `.js/.mjs/.cjs` under each installed
 consumer root (nested `node_modules/` excluded) with `extension/testing/importGraph.ts::extractSpecifiers`,
 keeps `^(@earendil-works/|@mariozechner/|typebox|@sinclair/typebox)` and asserts set-equality with
@@ -13432,7 +13487,7 @@ the `require` conditions the host's `"."` export does not carry (`ERR_PACKAGE_PA
 Today's host resolves to `<pi-coding-agent>/dist/index.js`.
 
 **Facades.** `facadeUrl(hostEntryUrl, specifier)` = `<file: URL of the host entry>?perk-native-sdk-bridge=<encoded specifier>`
-— ONE physical address for all seven (so `fileURLToPath` of any facade URL is the real host entry:
+— ONE physical address for all eight (so `fileURLToPath` of any facade URL is the real host entry:
 pi-subagents' `import.meta.resolve("@earendil-works/pi-coding-agent")` → `findPiPackageRootFromEntry`
 walk still finds the host root). `facadeSource(specifier, exportNames)` is import-free ESM: it reads
 `globalThis[Symbol.for("perk.native-sdk-bridge")].namespaces.get(<specifier>)` and re-exports every
@@ -13459,10 +13514,10 @@ consumer fully evaluated before the bridge whose FIRST post-install activity is 
 from OUTSIDE its root (a subpath export imported by another package) is treated as entered — neither
 consumer exposes such a path to perk's graph today.
 
-**The registry** — `globalThis[Symbol.for("perk.native-sdk-bridge")]`, `BRIDGE_SCHEMA` = 1 — is
+**The registry** — `globalThis[Symbol.for("perk.native-sdk-bridge")]`, `BRIDGE_SCHEMA` = 2 — is
 process-wide (retained across `/reload`, session replacement and extension disposal; never
 deregistered in production; no `ctx`), a discriminated union behind `isBridgeRegistry`:
-`{ schema: 1, kind: "disabled" }` or `{ schema: 1, kind: "active", hostEntryPath, hostEntryUrl,
+`{ schema: 2, kind: "disabled" }` or `{ schema: 2, kind: "active", hostEntryPath, hostEntryUrl,
 roots: Map<root, RootState>, namespaces, facadeSources }` — **no hook handle** (the active record is
 itself the ownership marker; `registerHooks`' return is discarded).
 
@@ -13475,7 +13530,7 @@ claim the disabled record, `disabled` (any other value leaves the bridge on); (3
 no `module.registerHooks` → `unsupported:no-register-hooks`; Bun (`"bun" in process.versions`) →
 `unsupported:bun` — before any registry comparison, so an activation without the API never reuses a
 record; (4) **host entry** as above (`unsupported:embedded-host` / `failed:host-entry` claim nothing);
-(5) **registry decision** — an unrecognized value or `existing.schema !== 1` → `declined:schema-mismatch`;
+(5) **registry decision** — an unrecognized value or `existing.schema !== 2` → `declined:schema-mismatch`;
 `existing.hostEntryPath !== hostEntryPath` → `declined:host-mismatch`; otherwise **reuse**: verify
 this activation's roots, `roots.set(root, "armed")` for each root not already present (never
 remove, never downgrade), return `installed` with `reused: true` and `roots` = every registry root
@@ -13483,7 +13538,7 @@ after the merge (a decline never touches the existing record or its hooks — th
 active for its own roots); (6) **roots** — zero verified roots on a fresh install → `skipped:no-consumers`
 (nothing claimed, no hook; a later activation with roots installs normally); (7) **namespace capture
 check** — every census key present, an object, with ≥ 1 export name, else `failed:namespace-capture`;
-(8) **facade preparation** for all seven (any throw → `failed:facade-prep`); (9) **commit** — the only
+(8) **facade preparation** for all eight (any throw → `failed:facade-prep`); (9) **commit** — the only
 side effects, in order: build the complete `active` record (all roots `armed`); **claim first**
 (`global[key] = record`; a throw — frozen global — → `failed:registry-claim`, nothing registered);
 `registerHooks(createBridgeHooks(record))` — a throw releases the claim (`releaseClaim`: `delete
@@ -13499,7 +13554,7 @@ the closed union `installed | disabled | skipped:no-consumers | unsupported:no-r
 unsupported:bun | unsupported:embedded-host | declined:schema-mismatch | declined:host-mismatch |
 failed:host-entry | failed:namespace-capture | failed:facade-prep | failed:registry-claim |
 failed:register-hooks`). Per state — `hostEntry` = the host THIS activation derived when step 4 ran,
-else `null`; `specifiers` = 7 only for `installed`, else 0; `roots` = `[]` unless stated:
+else `null`; `specifiers` = 8 only for `installed`, else 0; `roots` = `[]` unless stated:
 
 | state | hostEntry | roots | reused | detail |
 |---|---|---|---|---|
