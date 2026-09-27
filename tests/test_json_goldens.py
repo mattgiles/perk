@@ -393,6 +393,14 @@ def test_golden_pr_submit() -> None:
     assert_golden("pr_submit", _result_to_dict(_pr_submit_result()))
 
 
+def test_golden_pr_stats() -> None:
+    from perk.cli.commands.pr.stats_cmd import PrStatsResult, _result_to_dict
+
+    assert_golden(
+        "pr_stats", _result_to_dict(PrStatsResult(base_ref="origin/main", stats=_change_stats()))
+    )
+
+
 def test_golden_pr_ready() -> None:
     from perk.cli.commands.pr.ready_cmd import _result_to_dict
 

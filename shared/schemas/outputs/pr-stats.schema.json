@@ -1,0 +1,112 @@
+{
+  "$defs": {
+    "ChangeStatsOut": {
+      "additionalProperties": false,
+      "description": "The ``--json`` projection; ``rows`` is ordered so a future row appends compatibly.",
+      "properties": {
+        "base": {
+          "title": "Base",
+          "type": "string"
+        },
+        "head": {
+          "title": "Head",
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/ChangeStatsRowOut"
+          },
+          "title": "Rows",
+          "type": "array"
+        }
+      },
+      "required": [
+        "base",
+        "head",
+        "rows"
+      ],
+      "title": "ChangeStatsOut",
+      "type": "object"
+    },
+    "ChangeStatsRowOut": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "added": {
+          "title": "Added",
+          "type": "integer"
+        },
+        "removed": {
+          "title": "Removed",
+          "type": "integer"
+        },
+        "modified": {
+          "title": "Modified",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "added",
+        "removed",
+        "modified"
+      ],
+      "title": "ChangeStatsRowOut",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The ``--json`` serialization boundary of :class:`PrStatsResult` (order load-bearing).",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "base_ref": {
+      "title": "Base Ref",
+      "type": "string"
+    },
+    "stats": {
+      "$ref": "#/$defs/ChangeStatsOut"
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "message",
+    "base_ref",
+    "stats"
+  ],
+  "title": "PrStatsOut",
+  "type": "object"
+}
