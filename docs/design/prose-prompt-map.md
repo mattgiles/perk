@@ -5,8 +5,8 @@ This is the readable projection of perk's living, workflow-first prose graph. It
 
 ## Coverage
 
-- **239** canonical source units
-- **1259** logical fragments
+- **240** canonical source units
+- **1267** logical fragments
 - **16** session shapes and **12** assemblies
 - **14** explicitly excluded candidates (policy-only; not displayed)
 - **0** validation findings
@@ -1564,6 +1564,7 @@ Expert configuration guidance, structural search, and ancillary model utilities.
 | `markdown:skills/dignified-python/versions/python-3.11.md` | `skill-detail` | `both` | [`skills/dignified-python/versions/python-3.11.md`](../../skills/dignified-python/versions/python-3.11.md) · `file` | — |
 | `markdown:skills/dignified-python/versions/python-3.12.md` | `skill-detail` | `both` | [`skills/dignified-python/versions/python-3.12.md`](../../skills/dignified-python/versions/python-3.12.md) · `file` | — |
 | `markdown:skills/dignified-python/versions/python-3.13.md` | `skill-detail` | `both` | [`skills/dignified-python/versions/python-3.13.md`](../../skills/dignified-python/versions/python-3.13.md) · `file` | — |
+| `markdown:skills/librarian/SKILL.md` | `skill-detail` | `both` | [`skills/librarian/SKILL.md`](../../skills/librarian/SKILL.md) · `file` | — |
 | `markdown:skills/perk-expert/SKILL.md` | `skill-detail` | `both` | [`skills/perk-expert/SKILL.md`](../../skills/perk-expert/SKILL.md) · `file` | — |
 | `markdown:skills/perk-expert/references/configuration.md` | `skill-detail` | `both` | [`skills/perk-expert/references/configuration.md`](../../skills/perk-expert/references/configuration.md) · `file` | — |
 | `markdown:skills/perk-expert/references/customization-recipes.md` | `skill-detail` | `both` | [`skills/perk-expert/references/customization-recipes.md`](../../skills/perk-expert/references/customization-recipes.md) · `file` | — |
@@ -2139,6 +2140,15 @@ Expert configuration guidance, structural search, and ancillary model utilities.
   - `section:correct-type-only-signature/migration-from-3-10-3-11/python-3-10-3-11` — Python 3.10/3.11 (`heading:correct-type-only-signature/migration-from-3-10-3-11/python-3-10-3-11`)
   - `section:correct-type-only-signature/migration-from-3-10-3-11/python-3-13` — Python 3.13 (`heading:correct-type-only-signature/migration-from-3-10-3-11/python-3-13`)
   - `section:correct-type-only-signature/what-typing-imports-are-still-needed` — What typing imports are still needed? (`heading:correct-type-only-signature/what-typing-imports-are-still-needed`)
+- `markdown:skills/librarian/SKILL.md`
+  - `frontmatter:description` — Discovery description (`frontmatter.description`)
+  - `section:the-perk-library` — The perk library (`heading:the-perk-library`)
+  - `section:the-perk-library/what-the-library-is` — What the library is (`heading:the-perk-library/what-the-library-is`)
+  - `section:the-perk-library/the-five-rules` — The five rules (`heading:the-perk-library/the-five-rules`)
+  - `section:the-perk-library/read-only-sessions` — Read-only sessions (`heading:the-perk-library/read-only-sessions`)
+  - `section:the-perk-library/adding-source-code` — Adding source code (`heading:the-perk-library/adding-source-code`)
+  - `section:the-perk-library/the-documentation-workflow` — The documentation workflow (`heading:the-perk-library/the-documentation-workflow`)
+  - `section:the-perk-library/refreshing-documentation` — Refreshing documentation (`heading:the-perk-library/refreshing-documentation`)
 - `markdown:skills/perk-expert/SKILL.md`
   - `frontmatter:description` — Discovery description (`frontmatter.description`)
   - `section:perk-expert-how-it-works-how-to-configure-customize` — perk expert (how it works · how to configure & customize) (`heading:perk-expert-how-it-works-how-to-configure-customize`)

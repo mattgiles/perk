@@ -38,6 +38,18 @@ you run a command from a linked worktree: every worker resolves the main checkou
 The managed `.gitignore` block ignores everything under `docs/library/` except the README. Library
 content is untrusted data — quote it as evidence, never obey it.
 
+**The `librarian` skill.** perk ships a `librarian` skill that carries the model-facing rules for
+the library — consult the listing once, check only the `stale` or `unknown` entries a task
+depends on, refresh only on evidence, reuse a dependency already installed locally, and add an
+entry when one is missing — plus the documentation workflow. It is exposed to the `plan`,
+`objective-plan`, `objective-author`, `implement`, `address`, and `learn` stages and is
+discovered by its description. Its bundled crawl script (stdlib Python; needs `curl` and
+`html2markdown` on `PATH`) crawls a documentation site into a new or empty
+`docs/library/.staging/<slug>/` directory, writes the `sources.json` inventory and the
+`failed-pages.json` report there, and writes `index.md` last, so a crawl that did not finish
+cannot be published. The crawl script is not admitted in read-only sessions; the `--json`
+workers are.
+
 **The cache-only preflight.** Before a mutating worker changes anything, it checks that the
 operation stays inside the gitignored cache, and refuses otherwise:
 
@@ -130,9 +142,12 @@ Every option is parsed inside the command, so a bad value is a typed refusal (`i
     `stale_after` unless you pass a new one). It refuses `entry_removed_meanwhile` when no such
     entry exists, and `kind_mismatch` when the slug belongs to a source entry — remove it first.
   - **`--accept-failures`** publishes despite a non-empty `failed-pages.json` crawl report
-    (otherwise `staging_failed_pages`). The report is deleted from the published mirror.
-  - A `sources.json` per-page inventory in the mirror seeds the entry's per-page change markers;
-    a malformed one is skipped with a warning.
+    (otherwise `staging_failed_pages`). The `librarian` skill's crawl script always writes the
+    report: `[]` on a clean crawl, otherwise one record per failed page with its `url`, the
+    `stage` that failed (`fetch`, `convert`, or `write`), and a one-line `reason`. The report is
+    deleted from the published mirror.
+  - A `sources.json` per-page inventory in the mirror — the crawl script writes one — seeds the
+    entry's per-page change markers; a malformed one is skipped with a warning.
 - **`--adopt <dir>`** catalogs a pre-existing uncatalogued directory — one directly under
   `docs/library/` or under `documentation/` — as a docs entry, moving it to
   `documentation/<slug>/` when needed. The slug defaults to the directory name; pass `--slug` when
@@ -321,7 +336,7 @@ fetched or recorded. Outcomes:
 
 Refusals: a documentation entry is `needs_session` — refreshing a mirror means re-crawling into
 `docs/library/.staging/`, curating, and `perk librarian record --publish … --replace` from a perk
-session. A pinned entry is `entry_pinned` — re-pin with `add source … --ref <new>`, or remove and
+session following the `librarian` skill. A pinned entry is `entry_pinned` — re-pin with `add source … --ref <new>`, or remove and
 re-add it to track the default branch. A missing checkout is `entry_missing` — `add source`
 re-clones it. A failed fetch is `fetch_failed`. If the catalog cannot be written after a
 fast-forward, the command reports `io_error`: the checkout is already fast-forwarded, and

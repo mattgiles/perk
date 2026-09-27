@@ -12,6 +12,7 @@ from perk.substrate.proc import ProcFailure, run_captured
 PERK_SKILLS: tuple[str, ...] = (
     "ast-grep",
     "dignified-python",
+    "librarian",
     "perk-address",
     "perk-domain-modeling",
     "perk-expert",

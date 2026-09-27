@@ -1,6 +1,6 @@
 # Skill improvements
 
-This is a proposal for a later skill-editing pass. It audits all 38 Matt Pocock skill entrypoints against all 27 perk-authored skills, with exact replacements and deletions. It also proposes narrow companion changes to three reviewer rubrics. No skill, agent, tool, binding, or workflow is changed by this document.
+This is a proposal for a later skill-editing pass. It audits all 38 Matt Pocock skill entrypoints against all 26 perk-authored skills, with exact replacements and deletions. It also proposes narrow companion changes to three reviewer rubrics. No skill, agent, tool, binding, or workflow is changed by this document.
 
 The strongest additions are small: behavioral tests with independent expectations, symptom-based debugging, evidence-backed lessons that change a future action, and review comments that distinguish a documented rule from design judgment. The largest safe cuts are duplicated descriptions, repeated examples of an already-clear rule, and historical or speculative commentary. Much of perk’s remaining detail defines behavior that the upstream workflow does not have.
 
@@ -23,14 +23,14 @@ The approved compression exemplar is used verbatim, apart from line wrapping: �
 
 | Source | Audited revision | Scope |
 | --- | --- | --- |
-| This perk checkout | `d0432c91a35f44726104d95aa53cbcabc4a1bd50` | 24 `skills/perk-*/SKILL.md` files and three `.perk/skills/*/SKILL.md` files |
+| This perk checkout | `d0432c91a35f44726104d95aa53cbcabc4a1bd50` | 24 `skills/perk-*/SKILL.md` files and two `.perk/skills/*/SKILL.md` files |
 | Local `~/dev/github/mattpocock/skills` checkout | `74ca5fe077456a0b3b2f5310cf9430999fd0b5fd` | All 38 entrypoints: 18 engineering, seven productivity, nine in-progress, four misc |
 
 Both checkouts were clean at the baseline; audit date: 2026-09-17. Upstream links below are pinned to that local revision. The in-progress category is treated as exploratory source material, not an endorsement of a finished workflow. The deprecated category contains no skill entrypoints.
 
 The owned targets are the source directories, not the managed `.agents/skills` delivery symlinks. Vendored or installed skills such as `codebase-design`, `ast-grep`, `dignified-python`, `mastering-typescript`, and browser/tooling skills are reference material, not edit targets. Neither are launch prompts, executable helpers, runtime code, or analyst-agent definitions.
 
-All 65 skill entrypoints were read. Supporting reads focused on the relevant upstream testing, domain/module design, triage, research/authoring, and skill-mechanics guidance; perk’s glossary format and backend recipes; TypeScript core/testing/review guidance; and the reviewer rubrics. Reference indexes and delivery contracts were inspected to assess ownership. This is not a claim that every line of the Pydantic, TypeScript, and operator-reference manuals received a technical freshness audit. Their complete Markdown contents are nevertheless included in the size accounting, and the only reference edit proposed is in TypeScript’s testing guide.
+All 64 skill entrypoints were read. Supporting reads focused on the relevant upstream testing, domain/module design, triage, research/authoring, and skill-mechanics guidance; perk’s glossary format and backend recipes; TypeScript core/testing/review guidance; and the reviewer rubrics. Reference indexes and delivery contracts were inspected to assess ownership. This is not a claim that every line of the Pydantic, TypeScript, and operator-reference manuals received a technical freshness audit. Their complete Markdown contents are nevertheless included in the size accounting, and the only reference edit proposed is in TypeScript’s testing guide.
 
 Perk’s [carrier contract](../../shared/contracts.md) (§8.57) matters more than resemblance to upstream: launch guidance owns the flow, bound skills own judgment and operational detail, injected context carries state/pointers, and adapters carry surface differences. Hidden-skill descriptions are catalog cues; visible descriptions are discovery cues. The [skill-author delivery rule](../../skills/perk-skill-author/SKILL.md) also requires useful guidance to survive delivery into consuming repos. Accordingly, [perk-expert’s references](../../skills/perk-expert/SKILL.md) intentionally mirror operator documentation; removing that material or replacing it with repo-only links would break delivery.
 
@@ -63,7 +63,7 @@ Perk’s [carrier contract](../../shared/contracts.md) (§8.57) matters more tha
 | [implement](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/engineering/implement/SKILL.md) | Engineering | Direct / partial | perk-implement; perk-address; perk-objective-plan | Execute a defined unit with feedback and verification. Keep perk’s plan, checklist, worktree, submit, and learning lifecycle; borrow no replacement implementation loop. |
 | [improve-codebase-architecture](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/engineering/improve-codebase-architecture/SKILL.md) | Engineering | Partial | perk-learn-harvest; perk-learn-dream; perk-pr-review; dignified-typescript | Look for observed caller/maintainer friction before proposing a deeper module. Harvest already verifies pointers; sharpen evidence, preserve fixed ranking. Whole-corpus dream is not a hotspot sampler. |
 | [prototype](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/engineering/prototype/SKILL.md) | Engineering | Partial | perk-gist-author; perk-objective-author; perk-objective-refine | Clarify the uncertainty an experiment would resolve. These perk authoring sessions stay read-only; do not run a prototype, add disposable artifact storage, or invent a new stage. |
-| [research](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/engineering/research/SKILL.md) | Engineering | Partial | copy-docs-to-markdown; perk-plan; perk-objective-author; perk-objective-refine; perk-expert | Evidence and source provenance support decisions. A docs mirror is not a research synthesis; retain source URLs and existing lookup paths without adding research agents or browsing requirements. |
+| [research](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/engineering/research/SKILL.md) | Engineering | Partial | perk-plan; perk-objective-author; perk-objective-refine; perk-expert | Evidence and source provenance support decisions. A docs mirror is not a research synthesis; retain source URLs and existing lookup paths without adding research agents or browsing requirements. |
 | [resolving-merge-conflicts](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/engineering/resolving-merge-conflicts/SKILL.md) | Engineering | Partial | perk-implement; perk-address; perk-replan; perk-objective-reconcile | Recover both sides’ intent and verify combined behavior. Conflict commands, synchronization, and publication are machinery; no new conflict recipe is proposed here. |
 | [setup-matt-pocock-skills](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/engineering/setup-matt-pocock-skills/SKILL.md) | Engineering | Partial | perk-skill-author; perk-expert | Skills need a discoverable, coherent entrypoint. Installation, preferences, skill locations, and dispatch belong to perk’s existing delivery system. |
 | [tdd](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/engineering/tdd/SKILL.md) | Engineering | Direct | perk-plan; perk-implement; perk-address; dignified-typescript; PR reviewer tests rubrics | Behavior through stable interfaces and independent expected results. Keep concrete-invariant internal tests; decline compulsory red/green ordering, pre-approved seams, and a review-only refactoring policy. |
@@ -78,16 +78,16 @@ Perk’s [carrier contract](../../shared/contracts.md) (§8.57) matters more tha
 | [teach](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/productivity/teach/SKILL.md) | Productivity | No direct counterpart | None; limited editorial relevance to perk-expert | Human teaching is a different goal from perk-learn’s operational knowledge capture. Do not infer overlap from the word “learn” or turn expert answers into a mandatory lesson. |
 | [to-questionnaire](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/productivity/to-questionnaire/SKILL.md) | Productivity | Partial | perk-grill; authoring and draft review surfaces | Ask decision-relevant questions with enough context to answer. Keep perk’s question tools, rounds, direct edits, and review surfaces; do not add a questionnaire artifact. |
 | [wait-what](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/productivity/wait-what/SKILL.md) | Productivity | Partial | perk-grill; perk-domain-modeling; perk-expert | Resolve confusion by making a concept or distinction concrete. Perk’s terminology and clarification guidance already serves this; no separate explanation protocol is needed. |
-| [writing-for-agents](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/productivity/writing-for-agents/SKILL.md) | Productivity | Direct, cross-cutting | All 27 authored skills; reviewer rubric prose | Distinct task branches in discovery cues; rules beside reasons/exceptions; useful leading words; checkable completion; delete repeated meaning. Preserve sole-carrier contract detail and deliberate portable mirrors. |
+| [writing-for-agents](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/productivity/writing-for-agents/SKILL.md) | Productivity | Direct, cross-cutting | All 26 authored skills; reviewer rubric prose | Distinct task branches in discovery cues; rules beside reasons/exceptions; useful leading words; checkable completion; delete repeated meaning. Preserve sole-carrier contract detail and deliberate portable mirrors. |
 | [claude-handoff](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/in-progress/claude-handoff/SKILL.md) | In progress | Partial | perk-plan; perk-replan; perk-objective-replan; perk-implement | Preserve decisions and evidence across sessions. Claude-specific session handoff, files, and commands are outside the permitted changes. |
 | [implement-spec](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/in-progress/implement-spec/SKILL.md) | In progress | Partial | perk-plan; perk-implement; perk-objective-plan | An implementable unit needs resolved decisions and verifiable results. Do not import its execution loop or spec storage. |
 | [loop-me](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/in-progress/loop-me/SKILL.md) | In progress | Partial | perk-implement; perk-objective-plan | Bound work and know what completion means. Perk’s checklist and completion audit already do this; no autonomous loop, new gates, or session machinery. |
 | [pr](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/in-progress/pr/SKILL.md) | In progress | Partial | perk-implement; perk-address; perk-pr-review | Describe the concrete change and validation evidence. PR composition/publication is already owned elsewhere; no new PR template or posting flow in these skills. |
 | [retro](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/in-progress/retro/SKILL.md) | In progress | Direct / partial | perk-learn; perk-learn-code; perk-learn-docs; perk-learn-dream | Capture the evidence that corrected a mistake and the future action it changes; place enforceable facts near code. Preserve perk’s classification, consolidation, and learning pipeline. |
 | [setup-ts-deep-modules](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/in-progress/setup-ts-deep-modules/SKILL.md) | In progress | Partial | dignified-typescript; perk-pr-review; perk-skill-author | Boundary and interface design overlap; prescribed TypeScript scaffolding, export layout, and tooling do not. Keep local project precedence. |
-| [writing-beats](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/in-progress/writing-beats/SKILL.md) | In progress | Partial, editorial | All 27 authored skills | Each passage should advance the reader’s understanding. Borrow economy, not the staged writing/approval process. |
+| [writing-beats](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/in-progress/writing-beats/SKILL.md) | In progress | Partial, editorial | All 26 authored skills | Each passage should advance the reader’s understanding. Borrow economy, not the staged writing/approval process. |
 | [writing-fragments](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/in-progress/writing-fragments/SKILL.md) | In progress | Partial, editorial | perk-gist-author; perk-objective-refine; perk-skill-author | Fragments can reveal what is worth saying before polishing. Perk already has working drafts; add no fragment files, new draft states, or writing loop. |
-| [writing-shape](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/in-progress/writing-shape/SKILL.md) | In progress | Partial, editorial | All 27 authored skills | Choose prose, lists, and tables for the structure of the idea. Preserve tables that encode closed choices; combine tiny repeated lessons into compact prose. |
+| [writing-shape](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/in-progress/writing-shape/SKILL.md) | In progress | Partial, editorial | All 26 authored skills | Choose prose, lists, and tables for the structure of the idea. Preserve tables that encode closed choices; combine tiny repeated lessons into compact prose. |
 | [git-guardrails-claude-code](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/misc/git-guardrails-claude-code/SKILL.md) | Misc | Partial concern; no adoption | perk-implement; perk-address; perk-expert | Safe publication overlaps in purpose. Hook installation and guardrail enforcement are tool/harness changes and stay outside this audit’s proposals. |
 | [migrate-to-shoehorn](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/misc/migrate-to-shoehorn/SKILL.md) | Misc | No direct counterpart | None; narrow conceptual overlap with dignified-typescript assertions | A library-specific migration is not a general TypeScript style skill. No new assertion dependency or migration is justified. |
 | [scaffold-exercises](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/misc/scaffold-exercises/SKILL.md) | Misc | No counterpart | None | Educational exercise scaffolding has no equivalent among these operational and house-style skills. |
@@ -125,7 +125,6 @@ Every authored skill has an explicit disposition. “Description only” means t
 | [perk-expert](#perk-expert) | ask-matt, research, wizard, wait-what | Shorten description and repeated intro catalog. Keep all conditional reads and all five portable operator references, including intentional duplication with repo docs. |
 | [dignified-typescript](#dignified-typescript) | tdd, code-review, codebase-design, setup-ts-deep-modules | Shorten description and repeated precedence advice; add independent expectations in testing.md. Keep runtime-specific guidance, all load conditions, defaults, and exceptions. |
 | [dignified-pydantic](#dignified-pydantic) | writing-for-agents; partial codebase-design boundary concerns | Delete the duplicate invocation checklist, preserve its cases in description, and remove the brittle section count. Keep all Pydantic/ty policy and technical references. |
-| [copy-docs-to-markdown](#copy-docs-to-markdown) | research, writing-for-agents | Shorten description and intro; preserve source provenance and index purpose. Keep the complete script workflow, output location, scope/pruning, and report contract. |
 
 ## Exact proposed edits
 
@@ -1588,59 +1587,11 @@ The reference-read condition stays; “48 numbered sections” describes the doc
 
 Preserve: All surrounding instructions and frontmatter fields are unchanged.
 
-### copy-docs-to-markdown
-
-Shorten description and intro; preserve source provenance and index purpose. Keep the complete script workflow, output location, scope/pruning, and report contract.
-
-#### P60 · Shorten the description
-
-Source: [.perk/skills/copy-docs-to-markdown/SKILL.md](../../.perk/skills/copy-docs-to-markdown/SKILL.md).
-
-**Before**
-
-````markdown
-description: Mirror technical documentation from a website URL into a local directory of organized Markdown files (default docs/library/<name>/), preserving the site's section structure, rewriting internal links to local relative links, and generating an index.md entrypoint. Use when asked to copy or mirror docs locally, vendor a library's documentation into the repo, crawl a documentation site into Markdown, or build a local Markdown reference of an external doc set.
-````
-
-**After**
-
-````markdown
-description: "Mirror technical documentation from a website into local Markdown, defaulting to docs/library/<name>/. Use when copying, vendoring, or refreshing a documentation site locally; preserve its section structure, rewrite internal links, and create an index.md entrypoint."
-````
-
-One task branch covers the repeated copy/mirror/vendor/crawl phrases. Preserve the output contract and default destination. Basis: [research](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/engineering/research/SKILL.md), [writing-for-agents](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/productivity/writing-for-agents/SKILL.md).
-
-Preserve: All surrounding instructions and frontmatter fields are unchanged.
-
-#### P61 · Keep purpose, provenance, and routing in two sentences
-
-Source: [.perk/skills/copy-docs-to-markdown/SKILL.md](../../.perk/skills/copy-docs-to-markdown/SKILL.md).
-
-**Before**
-
-````markdown
-Create a local Markdown reference copy of technical documentation from a documentation URL, so
-future agents can read it without network access. Keep the result readable: preserve the site
-structure, retain source URLs, and write a practical `index.md` that explains where to look for
-each topic.
-````
-
-**After**
-
-````markdown
-Create an offline Markdown reference. Preserve the site structure and source URLs, and make
-`index.md` route readers to each topic.
-````
-
-The description already names the input and output. Retain the useful source-URL requirement and index’s job. Basis: [research](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/engineering/research/SKILL.md), [writing-for-agents](https://github.com/mattpocock/skills/blob/74ca5fe077456a0b3b2f5310cf9430999fd0b5fd/skills/productivity/writing-for-agents/SKILL.md).
-
-Preserve: All tooling, script commands, scope rules, page caps, destination, pruning, inspection, and reporting remain unchanged.
-
 ### pr-reviewer companion rubric
 
 Only the existing judgment paragraphs below change. All frontmatter, tools, source lookup, context reads, wave behavior, angle ownership, findings fields, and posting/triage rules remain unchanged.
 
-#### P62 · Align automated test review with the proposed testing judgment
+#### P60 · Align automated test review with the proposed testing judgment
 
 Source: [agents/pr-reviewer.md](../../agents/pr-reviewer.md).
 
@@ -1665,7 +1616,7 @@ The reviewer must judge the same behavioral evidence the implementation skill as
 
 Preserve: Keep the tests angle, no-execution rule, binary finding bar, derived verdict, report schema, all tool/context reads, and metadata.
 
-#### P63 · Distinguish a rule breach from design judgment
+#### P61 · Distinguish a rule breach from design judgment
 
 Source: [agents/pr-reviewer.md](../../agents/pr-reviewer.md).
 
@@ -1694,7 +1645,7 @@ Preserve: No new angle, field, mandatory report template, posting bar, standards
 
 Only the existing judgment paragraphs below change. All frontmatter, tools, source lookup, context reads, wave behavior, angle ownership, findings fields, and posting/triage rules remain unchanged.
 
-#### P64 · Align human-triaged test review with the proposed testing judgment
+#### P62 · Align human-triaged test review with the proposed testing judgment
 
 Source: [agents/adversarial-reviewer.md](../../agents/adversarial-reviewer.md).
 
@@ -1719,7 +1670,7 @@ Use the same criterion in the other existing tests lane; keep its distinct human
 
 Preserve: Keep severity/confidence, FYI, no verdict, blocked semantics, read-only posture, context reads, metadata, and all orchestration.
 
-#### P65 · Apply the same rule-versus-judgment distinction in human review
+#### P63 · Apply the same rule-versus-judgment distinction in human review
 
 Source: [agents/adversarial-reviewer.md](../../agents/adversarial-reviewer.md).
 
@@ -1748,7 +1699,7 @@ Preserve: All existing severity/confidence, triage, anchors, FYI, ownership, and
 
 Only the existing judgment paragraphs below change. All frontmatter, tools, source lookup, context reads, wave behavior, angle ownership, findings fields, and posting/triage rules remain unchanged.
 
-#### P66 · Make draft criticism explain its basis
+#### P64 · Make draft criticism explain its basis
 
 Source: [agents/draft-reviewer.md](../../agents/draft-reviewer.md).
 
@@ -1801,16 +1752,15 @@ Counts compare complete original files with complete hypothetical files after al
 | [perk-expert](#perk-expert) | 757 → 659 | −98 | 16,856 → 16,758 | 121,999 → 121,317 |
 | [dignified-typescript](#dignified-typescript) | 938 → 906 | −32 | 9,019 → 9,008 | 64,830 → 64,747 |
 | [dignified-pydantic](#dignified-pydantic) | 616 → 439 | −177 | 5,596 → 5,419 | 47,703 → 46,481 |
-| [copy-docs-to-markdown](#copy-docs-to-markdown) | 430 → 371 | −59 | 430 → 371 | 3,116 → 2,760 |
 
 The “All skill Markdown” columns include the entrypoint and every existing Markdown reference/backend file in that skill directory. No executable helpers are changed or counted as prose.
 
 | Collection | Words | Δ words | UTF-8 bytes | Δ bytes |
 | --- | --- | --- | --- | --- |
-| 27 entrypoints | 25,698 → 24,429 | −1,269 | 178,473 → 170,587 | −7,886 |
-| All 49 Markdown files in the 27 skill directories | 55,501 → 54,253 | −1,248 | 400,412 → 392,674 | −7,738 |
+| 26 entrypoints | 25,268 → 24,058 | −1,210 | 175,357 → 167,827 | −7,530 |
+| All 48 Markdown files in the 26 skill directories | 55,071 → 53,882 | −1,189 | 397,296 → 389,914 | −7,382 |
 | Three companion reviewer files | 6,331 → 6,397 | +66 | 44,950 → 45,400 | +450 |
-| Skills plus companion reviewers | 61,832 → 60,650 | −1,182 | 445,362 → 438,074 | −7,288 |
+| Skills plus companion reviewers | 61,402 → 60,279 | −1,123 | 442,246 → 435,314 | −6,932 |
 
 | Companion file | Words | Δ words | UTF-8 bytes | Δ bytes |
 | --- | --- | --- | --- | --- |
@@ -1818,17 +1768,17 @@ The “All skill Markdown” columns include the entrypoint and every existing M
 | [agents/adversarial-reviewer.md](../../agents/adversarial-reviewer.md) | 2,331 → 2,358 | +27 | 16,265 → 16,449 | +184 |
 | [agents/draft-reviewer.md](../../agents/draft-reviewer.md) | 1,603 → 1,616 | +13 | 11,459 → 11,545 | +86 |
 
-The entrypoints shrink by **1,269 words (4.9%)**. Counting all skill references, the reduction is **1,248 words**; counting companion reviewers too, it is **1,182 words**. Only two skill entrypoints grow: perk-implement by 34 words and perk-address by 15, both for the agreed verification/debugging judgment. The testing reference grows by 21 words; the three reviewer files grow by 66 words together. These additions are included in every applicable total.
+The entrypoints shrink by **1,210 words (4.8%)**. Counting all skill references, the reduction is **1,189 words**; counting companion reviewers too, it is **1,123 words**. Only two skill entrypoints grow: perk-implement by 34 words and perk-address by 15, both for the agreed verification/debugging judgment. The testing reference grows by 21 words; the three reviewer files grow by 66 words together. These additions are included in every applicable total.
 
 The table deliberately includes retained reference manuals and backend recipes. The proposal document itself is excluded: it is a review artifact, not skill content delivered to an agent. Reviewer files are reported separately because they are companion prompts, not skills. These projections assume every proposal is accepted; selecting a subset changes the totals.
 
 ## Validation and implementation notes
 
-The proposal set contains **66 exact edits across 31 prospective files**: 27 skill entrypoints, one existing testing reference, and three reviewer definitions. Validation performed while authoring this document:
+The proposal set contains **64 exact edits across 30 prospective files**: 26 skill entrypoints, one existing testing reference, and three reviewer definitions. Validation performed while authoring this document:
 
 - Checked every Before span against the pinned checkout: exactly one occurrence, with no overlapping edits. Composed complete hypothetical files in memory; the source skills were never overwritten.
-- Verified all 38 upstream entrypoint paths, all 27 owned targets, and every relative file link in this document. Pinned upstream links resolve to paths present in the local audited clone; no network freshness claim is made.
-- Parsed all 27 hypothetical skill frontmatters with perk’s existing parser. Names, stages, invocation flags, reference declarations, and all other fields match the originals; only descriptions differ. All three reviewer frontmatters remain byte-identical.
+- Verified all 38 upstream entrypoint paths, all 26 owned targets, and every relative file link in this document. Pinned upstream links resolve to paths present in the local audited clone; no network freshness claim is made.
+- Parsed all 26 hypothetical skill frontmatters with perk’s existing parser. Names, stages, invocation flags, reference declarations, and all other fields match the originals; only descriptions differ. All three reviewer frontmatters remain byte-identical.
 - Checked **43 protected body spans byte-for-byte**, including complete bodies for the seven description-only skills; plan save/review and scout guidance; objective claiming/paging; refinement context and save boundaries; learning schemas/routing; review posting and report contracts; and technical reference-load rules.
 - Ran **15 existing targeted checks** against an in-memory read overlay of the hypothetical skills: all of [test_skill_semantic_contracts.py](../../tests/test_skill_semantic_contracts.py), the description-budget check in [test_prompt_surface_budgets.py](../../tests/test_prompt_surface_budgets.py), and the skill-semantic checks in [test_learn_harvest_cmd.py](../../tests/test_learn_harvest_cmd.py) and [test_learn_dream_cmd.py](../../tests/test_learn_dream_cmd.py). All passed. Worker parallelism was disabled so the overlay was actually used; reads of all 24 shipped perk skills were confirmed. This is candidate-prose verification, not a full CI run or an agent-behavior test.
 - The longest parsed hypothetical shipped-perk description is **242 UTF-8 bytes**, within the existing **896-byte** ceiling. No ceiling reset or semantic-pin edit is needed for these checked passages.

@@ -309,7 +309,7 @@ routes:
     role: skill-detail
     priority: 85
   - id: skill-utilities
-    match: { paths: ["skills/perk-expert/**", "skills/ast-grep/**", "skills/dignified-python/**"] }
+    match: { paths: ["skills/perk-expert/**", "skills/ast-grep/**", "skills/dignified-python/**", "skills/librarian/**"] }
     capability: extension.utilities
     audience: both
     role: skill-detail
