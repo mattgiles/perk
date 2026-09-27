@@ -447,7 +447,6 @@ def test_stack_context_sections_and_combined_diff(git_repo_with_remote, monkeypa
     assert git_mod.resolve_commit(clone, "refs/perk/review/2") is None
 
 
-@pytest.mark.slow
 def test_stack_context_topology_broken_refuses(git_repo_with_remote, monkeypatch):
     # A successor head that does NOT descend from its predecessor head (e.g. a lower layer
     # force-pushed after the upper branched) fails closed — never a "combined" diff that

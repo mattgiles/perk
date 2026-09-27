@@ -1212,7 +1212,6 @@ def test_publish_non_bottom_partial_reports_mixed_then_submit_resume_converges(t
 # ----------------------------------------------------------------- the LAND arm
 
 
-@pytest.mark.slow
 def test_land_accepted_handle_concludes_from_a_fresh_clone(tmp_path):
     # Machine A died after the `accepted` append (the journaled merge-request handle).
     # Machine B probes the recorded UUID (merged), corroborates each layer PR, journals
@@ -1320,7 +1319,6 @@ def test_land_accepted_handle_concludes_from_a_fresh_clone(tmp_path):
 # ----------------------------------------------------------------- the TRANSFER arm
 
 
-@pytest.mark.slow
 def test_transfer_manifest_rolls_forward_on_fresh_seams(tmp_path):
     # Machine A died mid-transfer: the successor exists (found by run_id + corroborated)
     # but ownership/finalize/completion never ran. Machine B constructs FRESH TransferSeams
@@ -1420,7 +1418,6 @@ def test_transfer_manifest_rolls_forward_on_fresh_seams(tmp_path):
     }
 
 
-@pytest.mark.slow
 def test_machines_share_no_local_state(tmp_path):
     # The zero-shared-local-state pin, by construction: separate clone paths, separate git
     # object stores, no copied metadata — only the origin and the backend world are shared.

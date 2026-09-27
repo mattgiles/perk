@@ -220,7 +220,6 @@ def test_stack_checkout_empty_diff_with_distinct_commits_refuses(git_repo_with_r
     assert not review_patch_path(wt).exists()
 
 
-@pytest.mark.slow
 def test_stack_checkout_base_not_ancestor_of_bottom_refuses(git_repo_with_remote, monkeypatch):
     # A linear chain (bottom ⊂ top) whose TOP merged a newer base-branch commit the bottom lacks:
     # merge-base(origin/main, top) is that newer commit, which is NOT an ancestor of the bottom
@@ -285,7 +284,6 @@ def test_stack_checkout_diff_failure_refuses_before_mutation(git_repo_with_remot
     assert review_patch_path(wt).read_bytes() == before
 
 
-@pytest.mark.slow
 def test_stack_checkout_topology_broken_fails_closed(git_repo_with_remote, monkeypatch):
     # feat-b forks from MAIN, not feat-a: ref-name linkage would look fine, but the commit
     # topology is broken — refuse before any worktree mutation.

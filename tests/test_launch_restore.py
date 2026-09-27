@@ -111,7 +111,6 @@ def test_restore_refuses_ahead_local_branch_without_touching_it(git_repo_with_re
     assert not (clone / ".worktrees" / "plan-42").exists()
 
 
-@pytest.mark.slow
 def test_restore_refuses_divergent_local_branch_without_touching_it(git_repo_with_remote):
     clone, _remote, _advance = git_repo_with_remote
     _push_plan_branch(clone)

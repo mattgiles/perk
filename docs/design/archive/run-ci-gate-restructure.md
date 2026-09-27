@@ -15,7 +15,7 @@ sample each and indicative only.
 | Item | Value |
 |---|---|
 | Baseline revision | `50cedb2a` — the durations feature landed, rows unchanged; clean tree |
-| After revision | `a6b73669` — the row restructure (`ba1b4ed5`) and the slow re-sweep landed; clean tree |
+| After revision | `a6b73669` — the row restructure (`ba1b4ed5`) and the first slow re-sweep landed; clean tree |
 | Host | macOS (Darwin 25.5.0, arm64, Apple M3 Pro, 11 cores), an uncontrolled shared workstation |
 | Tools | Python 3.13.9 · pytest 9.0.3 · uv 0.12.3 · node v26.3.0 |
 
@@ -154,7 +154,10 @@ the end — the host was again shared, so this is also a contended sample.
 | **wall** | 0 | **244.2** |
 
 `test-py-fast` reported `7553 passed in 236.21s`; `test-py-slow` reported `80 passed in 141.20s`;
-the docs pytest line reported `77 passed in 7.89s`. One sample each, before and after, on a shared
+the docs pytest line reported `77 passed in 7.89s`. This sample predates the valid slow
+re-classification series: the first series (57 new marks, 80 slow cases) was later aborted as
+host-contended and re-run, leaving 26 new marks and 49 slow cases (the phase-4 record), so the two
+tier rows' split here is not the landed one. One sample each, before and after, on a shared
 host whose load differed between them — indicative only. What the pair does show structurally:
 the long pole moved from `docs-check` (490 s, last to finish) to `test-py-fast`, and the typecheck
 work that ran as one 214 s serial row now runs as a 53 s row and a 21 s row, with the site
