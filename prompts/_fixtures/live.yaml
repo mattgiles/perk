@@ -213,6 +213,30 @@
 - template: "stages/objective-review-browser.md"
   vars:
     custom: "check the roadmap ordering against the dependency story"
+- template: "stages/simplify.md"
+  vars:
+    subject: "plan"
+    intensity: "ultra"
+    draft_tool: "plan_draft"
+    node_scoped: ""
+- template: "stages/simplify.md"
+  vars:
+    subject: "plan"
+    intensity: "lite"
+    draft_tool: "plan_draft"
+    node_scoped: "true"
+- template: "stages/simplify.md"
+  vars:
+    subject: "objective"
+    intensity: "full"
+    draft_tool: "objective_draft"
+    node_scoped: ""
+- template: "stages/simplify.md"
+  vars:
+    subject: "objective"
+    intensity: "lite"
+    draft_tool: "objective_draft"
+    node_scoped: ""
 - template: "stages/learn-orchestrate.md"
   vars:
     manifest_path: "/repo/.perk/workflow/scratch/runs/01RID/learn-evidence/manifest.json"

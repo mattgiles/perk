@@ -23,6 +23,7 @@ import {
   objectiveSyncGuidance,
   syncConflictResolutionGuidance,
 } from "../pi/v1/delivery/stackSync.ts";
+import { simplifyGuidance } from "../pi/v1/simplify.ts";
 import { retainedDispatch } from "../testing/fakeConflictResolver.ts";
 import {
   fauxModelRuntime,
@@ -1061,6 +1062,18 @@ const DRIVE_COVERAGE: readonly {
       }),
   },
   {
+    // The simplify doors: registered globally but stage-gated at entry to the stages whose
+    // STAGE_TOOLS carry the subject's draft tool (the browser doors' draft stages).
+    drive: "stages/simplify.md (/simplify-plan)",
+    stages: ["plan", "save", "objective-plan"],
+    text: () => simplifyGuidance({ subject: "plan", intensity: "lite", nodeScoped: true }),
+  },
+  {
+    drive: "stages/simplify.md (/simplify-objective)",
+    stages: ["objective-author", "objective-save"],
+    text: () => simplifyGuidance({ subject: "objective", intensity: "ultra", nodeScoped: false }),
+  },
+  {
     drive: "stages/objective-save.md",
     stages: ["objective-author", "objective-save"],
     text: () => render("stages/objective-save.md", { title: "Test objective" }),
@@ -1099,6 +1112,21 @@ const DRIVE_COVERAGE: readonly {
       ),
   },
 ];
+
+test("drive coverage: the simplify guidance names exactly its draft tool + plan_review in every arm", () => {
+  for (const subject of ["plan", "objective"] as const) {
+    for (const intensity of ["lite", "full", "ultra"] as const) {
+      for (const nodeScoped of subject === "plan" ? [true, false] : [false]) {
+        const named = referencedScopedTools(simplifyGuidance({ subject, intensity, nodeScoped }));
+        assert.deepEqual(
+          named.sort(),
+          [`${subject}_draft`, "plan_review"].sort(),
+          `${subject}/${intensity}/nodeScoped=${nodeScoped}`,
+        );
+      }
+    }
+  }
+});
 
 test("drive coverage: every gate-off drive's named tools are active in every stage it can land in", () => {
   for (const { drive, stages, text, namesNoTools } of DRIVE_COVERAGE) {

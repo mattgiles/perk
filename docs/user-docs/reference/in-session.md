@@ -26,8 +26,8 @@ Use these family references for exact behavior:
   cold-remote availability.
 - [Workflow commands](./in-session/workflow-commands.md) — the spine, objectives, gists,
   factories, CI, and session utilities.
-- [Review and authoring](./in-session/review-and-authoring.md) — automated review and the
-  terminal/browser human-review doors.
+- [Review and authoring](./in-session/review-and-authoring.md) — automated review, the
+  terminal/browser human-review doors, and the draft-simplification doors.
 - [Model-facing tools](./in-session/model-tools.md) — the complete perk-owned, borrowed, and
   child-only tool censuses plus gating and stage scoping.
 
@@ -46,7 +46,7 @@ by the family that explains them rather than by whichever stage happens to expos
 | Objectives | `/objective`, `/objective-plan`, `/objective-refine`, `/objective-refinement-save`, `/objective-reconcile`, `/objective-save`, `/objective-stack`, `/objective-sync`, `/objective-recover`, `/objective-land` | [Workflow commands](./in-session/workflow-commands.md#objective-doors-warm) |
 | Gists | `/gist-save` | [Workflow commands](./in-session/workflow-commands.md#gist-doors-warm) |
 | Utility and factories | `/ci`, `/commit-and-compact`, `/draft-and-compact`, `/perk-selfcheck`, `/learn-docs`, `/learn-code` | [Workflow commands](./in-session/workflow-commands.md#utility-commands--factories) |
-| Review and authoring | `/pr-review`, `/pr-review-terminal`, `/pr-review-browser`, `/stack-review-browser`, `/plan-review-browser`, `/objective-review-browser` | [Review and authoring](./in-session/review-and-authoring.md) |
+| Review and authoring | `/pr-review`, `/pr-review-terminal`, `/pr-review-browser`, `/stack-review-browser`, `/plan-review-browser`, `/objective-review-browser`, `/simplify-plan`, `/simplify-objective` | [Review and authoring](./in-session/review-and-authoring.md) |
 | Ancillary human-only | `/btw` | [Ancillary in-session features](#ancillary-in-session-features) |
 <!-- END perk command census -->
 
@@ -57,8 +57,8 @@ The in-session utility surface spans three families:
 - [Workflow commands](./in-session/workflow-commands.md#utility-commands--factories) covers
   `/ci`, `/commit-and-compact`, `/draft-and-compact`, `/perk-selfcheck`, `/learn-docs`, and
   `/learn-code`.
-- [Review and authoring](./in-session/review-and-authoring.md) covers the six code-review and
-  draft-review commands and their companion tools.
+- [Review and authoring](./in-session/review-and-authoring.md) covers the eight code-review,
+  draft-review and draft-simplification commands and their companion tools.
 - [Model-facing tools](./in-session/model-tools.md) is the guarded index of every tool name,
   including read-only and stage-scoping behavior.
 

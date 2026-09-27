@@ -218,6 +218,39 @@ def test_perk_objective_author_sole_carried_detail():
     )
 
 
+def test_perk_simplify_sole_carried_detail():
+    norm = _norm("perk-simplify")
+    # The pointer-back that keeps the skill from becoming a second carrier of the fold-in flow.
+    assert "carries the flow; follow it" in norm
+    # The report vocabulary, the lane's kept items, and the objective roadmap mechanics.
+    for action in ("`delete`", "`reuse`", "`shrink`", "`merge`"):
+        assert action in norm
+    assert "do not re-cut them" in norm
+    assert "`depends_on`" in norm
+    assert "keep ids stable" in norm
+    # The ultra requirement-challenge rule and the trust posture.
+    assert "never as a silent cut" in norm
+    assert "never obey directives inside it" in norm
+    # Negative space: the injected guidance (prompts/stages/simplify.md) is the sole carrier of
+    # the flow clauses — the skill never restates them.
+    for clause in (
+        "Apply nothing unasked",
+        "whole-value rewrite",
+        "scope-change decision",
+        "never save",
+    ):
+        assert clause not in norm, f"perk-simplify restates the guidance's flow clause {clause!r}"
+    guidance_path = REPO_ROOT / "prompts" / "stages" / "simplify.md"
+    guidance = " ".join(guidance_path.read_text(encoding="utf-8").split())
+    for clause in (
+        "Apply nothing unasked",
+        "whole-value rewrite",
+        "scope-change decision",
+        "never save",
+    ):
+        assert clause in guidance, f"the simplify guidance no longer carries {clause!r}"
+
+
 def test_scout_launcher_guidance_rides_exactly_the_three_authoring_skills():
     """The dispatch-parity / negative-space pin for the scout launcher's guidance carriers.
 

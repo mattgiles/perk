@@ -1,15 +1,16 @@
 ---
 title: "Review and authoring"
-description: "Exact behavior for automated PR review, terminal and browser human triage, and browser draft-review doors."
+description: "Exact behavior for automated PR review, terminal and browser human triage, browser draft-review doors, and draft simplification."
 sidebar:
   order: 3023
 ---
 
 # Review and authoring
 
-Six warm commands cover three distinct jobs: automated review that posts one reconciled result,
-human-triaged PR review in a terminal or browser (single PRs and whole stacks), and browser review
-of plan/objective drafts before they are saved. Their companion tools are listed with each flow; the complete availability census
+Eight warm commands cover four distinct jobs: automated review that posts one reconciled result,
+human-triaged PR review in a terminal or browser (single PRs and whole stacks), browser review
+of plan/objective drafts before they are saved, and a Ponytail-mandated cut pass over a
+plan/objective draft. Their companion tools are listed with each flow; the complete availability census
 lives in [Model-facing tools](./model-tools.md).
 
 ## Automated PR review
@@ -431,6 +432,55 @@ round; fold the diff into `objective_draft`, then re-review. **DENY** returns fe
 The door refuses when Plannotator is missing, the session is headless, the stage is not objective
 authoring, or the structured draft is missing or invalid. It never reviews raw JSON, a pasted
 parameter, or transcript text.
+
+## Draft simplification
+
+Two warm doors run a Ponytail-mandated cut pass over the working draft when you judge it too
+baroque — the invocation is the verdict. Each runs ONE fresh-context read-only `perk.simplifier`
+lane (model: `[models.subagents] simplifier`) and injects its report for the agent to fold back
+into the draft. Nothing is saved and no review opens; run the door again for another pass, then
+review when you are ready. For the task walkthrough, see
+[How to simplify a baroque draft](../../how-to/simplify-a-baroque-draft.md).
+
+Both share one grammar: an optional first token `lite`, `full` or `ultra` (exact, lower-case;
+default `ultra`), and any remaining text as a focus hint that scopes the lane's attention. A focus
+hint may not contain the `<untrusted_focus>` fence tags.
+
+- **`lite`** keeps the draft's shape: the agent lists the offered lazier alternatives and applies
+  only the ones you accept.
+- **`full`** and **`ultra`** embody the cuts in the proposal; the agent rewrites the draft from it
+  and names anything it restores (input validation at a trust boundary, data-loss protection, a
+  security measure, an accessibility basic, or your explicit requirement). `ultra` also challenges
+  the requirement itself — the agent surfaces that as a question, never a silent cut.
+
+What arrives, as one message: the lane's report (diagnosis, anchored cuts, the full simplified
+proposal, the items it deliberately kept, the net delta) as untrusted data, the fold-in guidance,
+and — when the draft changed while the lane ran — a draft-moved note. A failed run posts one loud
+notice and injects nothing; re-run the door. One run is pending at a time per session; it settles
+on completion, failure, or the wave deadline (there is no cancel). A run still pending when the
+session reloads or is replaced is dropped silently.
+
+### `/simplify-plan`
+
+Usage: `/simplify-plan [lite|full|ultra] [focus…]`. Runs in plan mode, an objective-node planning
+session (`objective-plan`), or a save-stage session, on the working plan draft; the agent rewrites
+it with `plan_draft`. In an `objective-plan` session the lane treats the node's stated deliverables
+as an explicit requirement, and a cut that would narrow them comes back as a separate scope-change
+decision for you — never folded in as an implementation choice. The door refuses outside those
+stages or when no non-blank plan draft exists (write one with `plan_draft` first).
+
+### `/simplify-objective`
+
+Usage: `/simplify-objective [lite|full|ultra] [focus…]`. Runs in `objective-author` or
+`objective-save` on the rendered objective draft (never raw JSON); the agent rewrites it with
+`objective_draft`. The message also carries the structured fields the rendered draft cannot show —
+`base`, `delivery`, and each node's `slug`, `comment`, `adopt_issue`, `pr`, `status` and exact
+`depends_on` list (an omitted list and an empty one schedule differently), read from the current
+draft when the lane finished — so the rewrite keeps them unchanged. A cut that merges
+or removes a node linked to an adopted issue or a PR comes back as a separate scope-change decision.
+The door refuses outside those stages, when the draft is missing or invalid, and for a
+`perk learn dream` session's draft (one carrying a dream report). An `objective-plan` session gets
+`/simplify-plan` only.
 
 ## Related
 

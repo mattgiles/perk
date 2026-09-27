@@ -218,7 +218,7 @@ class SubagentsTable(LenientParseModel):
     dream_analyst: StrippedStr = Field(default=None, alias="dream-analyst")
     dream_reducer: StrippedStr = Field(default=None, alias="dream-reducer")
     scout: StrippedStr = None
-    # Dormant until the simplify doors land: no shipped door or tool consumes the key yet.
+    # The simplify doors' lane (resolved at invocation).
     simplifier: StrippedStr = None
     # Dev-only: the perk-dev session-audit judgment wave's auditor (the repo-local
     # `.pi/agents/perk-dev/session-auditor.md` def) — dormant in consumer repos.

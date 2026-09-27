@@ -169,6 +169,12 @@ routes:
     audience: shipped
     role: adapter
     priority: 95
+  - id: prompt-simplify
+    match: { paths: ["prompts/stages/simplify.md"] }
+    capability: review.drafts
+    audience: shipped
+    role: launch
+    priority: 95
   - id: prompt-pr-review
     match: { paths: ["prompts/stages/pr-review*/**", "prompts/stages/pr-review*.md"] }
     capability: review.pr
@@ -272,6 +278,12 @@ routes:
     audience: shipped
     role: skill-detail
     priority: 80
+  - id: skill-simplify
+    match: { paths: ["skills/perk-simplify/**"] }
+    capability: review.drafts
+    audience: shipped
+    role: skill-detail
+    priority: 80
   - id: skill-address
     match: { paths: ["skills/perk-address/**"] }
     capability: review.address
@@ -330,6 +342,12 @@ routes:
   - id: agent-scout
     match: { paths: ["agents/scout.md"] }
     capability: foundation.tools
+    audience: shipped
+    role: subagent-instruction
+    priority: 85
+  - id: agent-simplifier
+    match: { paths: ["agents/simplifier.md"] }
+    capability: review.drafts
     audience: shipped
     role: subagent-instruction
     priority: 85
@@ -414,7 +432,7 @@ routes:
     role: tool-contract
     priority: 75
   - id: ts-plan-review
-    match: { paths: ["extension/pi/v1/planReview.ts", "extension/pi/v1/objectiveReview.ts", "extension/pi/v1/review.ts", "extension/pi/v1/planReviewBrowser.ts", "extension/pi/v1/objectiveReviewBrowser.ts", "extension/pi/v1/providers/plannotatorHandoff.ts", "extension/pi/v1/draftReview.ts", "extension/pi/v1/draftReviewWaveTools.ts"] }
+    match: { paths: ["extension/pi/v1/planReview.ts", "extension/pi/v1/objectiveReview.ts", "extension/pi/v1/review.ts", "extension/pi/v1/planReviewBrowser.ts", "extension/pi/v1/objectiveReviewBrowser.ts", "extension/pi/v1/providers/plannotatorHandoff.ts", "extension/pi/v1/draftReview.ts", "extension/pi/v1/draftReviewWaveTools.ts", "extension/pi/v1/simplify.ts"] }
     capability: review.drafts
     audience: shipped
     role: tool-contract

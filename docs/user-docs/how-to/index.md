@@ -70,6 +70,8 @@ for exactly one goal.
 - [How to delegate an investigation to perk.scout](./delegate-an-investigation-to-perk-scout.md) —
   fan a wide, read-only investigation out to parallel `perk.scout` lanes from an authoring
   session, then verify the reports before the plan relies on them.
+- [How to simplify a baroque draft](./simplify-a-baroque-draft.md) — run a Ponytail-mandated cut
+  pass over the working plan or objective draft with `/simplify-plan` or `/simplify-objective`.
 
 ## Objectives & learnings
 

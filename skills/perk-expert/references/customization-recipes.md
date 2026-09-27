@@ -22,8 +22,8 @@ that session.
      a delivery surface: `objective-reconcile`, `objective-replan`, `replan`, `learn-docs`,
      `learn-code`, `learn-harvest`, `learn-dream`, `pr-review`, `pr-review-terminal`,
      `pr-review-browser`, `stack-review-browser`, `plan-review-browser`,
-     `objective-review-browser`, `skills-create`, `skills-refine`. A `command:<id>` outside that
-     set validates but **never fires**. When a command is also a registry stage, bind `stage:<id>`.
+     `objective-review-browser`, `skills-create`, `skills-refine`, `simplify-plan`,
+     `simplify-objective`. A `command:<id>` outside that set validates but **never fires**. When a command is also a registry stage, bind `stage:<id>`.
 2. **Choose `nudge` or `transclude`** (`mode`).
    - `nudge` — a short pointer (``Follow the `<skill>` skill (read
      `.agents/skills/<skill>/SKILL.md`).``). The pointer carries the skill's read path, so it works
@@ -71,8 +71,8 @@ to perk's subagents (frontmatter/`[models.subagents]` own those).
 Fixed-key table — affects only perk's own agents (`pr-reviewer`, `review-classifier`,
 `objective-explorer`, `conflict-resolver`, `learn-analyst`, `adversarial-reviewer`,
 `draft-reviewer`, `harvest-analyst`, `dream-analyst`,
-`dream-reducer`, `scout`, `simplifier` (dormant until the simplify doors land), plus the dev-only
-`session-auditor` — dormant in consumer repos). An absent key uses
+`dream-reducer`, `scout`, `simplifier` (the `/simplify-plan` / `/simplify-objective` lane), plus
+the dev-only `session-auditor` — dormant in consumer repos). An absent key uses
 the agent's frontmatter default. The `scout` key is the model the `run_scout_wave` tool spawns in
 `/plan`, `/objective-plan` and objective-author sessions — one fresh read-only `perk.scout` lane per
 self-contained brief (1–6 per call, one attempt; reports are untrusted DATA to verify).

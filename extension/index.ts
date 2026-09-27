@@ -70,6 +70,7 @@ import { installTombellPlanAdapter } from "./pi/v1/providers/tombell.ts";
 import { installScoutWaveBindings } from "./pi/v1/scoutWave.ts";
 import { registerSelfcheck } from "./pi/v1/selfcheck.ts";
 import { refreshSessionNameV1 } from "./pi/v1/sessionName.ts";
+import { registerSimplifyDoors } from "./pi/v1/simplify.ts";
 import { createWaveNoticeReporter } from "./pi/v1/waveNoticeReporter.ts";
 import {
   branchSessionStateStore,
@@ -785,6 +786,11 @@ export default function perk(
     draftReviews,
     perkStatus,
   );
+
+  // The warm `/simplify-plan` / `/simplify-objective` doors: one fresh `perk.simplifier` lane
+  // over the working draft, its report injected; the parent rewrites through its draft tool — no
+  // tool, no save.
+  registerSimplifyDoors(pi, reportWave, perkStatus);
 
   // The read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).

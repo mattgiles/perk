@@ -343,3 +343,62 @@ export function renderObjectiveDraft(draft: ObjectiveDraft): string {
   // The approval bundle: objective first, then the stored CANONICAL report parts.
   return `${out.trimEnd()}\n\n${draft.dream_report.parts.join("\n\n")}\n`;
 }
+
+/** The per-node structured fields a rendered draft cannot carry back through a rewrite. */
+export interface PreservedNodeFields {
+  slug?: string;
+  comment?: string;
+  adopt_issue?: string;
+  pr?: string;
+  status?: string;
+  /**
+   * The node's explicit dependency list — present iff the node carries a `depends_on` array.
+   * The rendered table shows an omitted field and `[]` alike (`-`), but they schedule
+   * differently: `[]` is an explicitly independent node, while a roadmap whose nodes ALL omit
+   * the field falls back to sequential inference.
+   */
+  depends_on?: string[];
+}
+
+/**
+ * The structured objective fields `renderObjectiveDraft` omits (or renders lossily) that a
+ * whole-value `objective_draft` rewrite would drop — composed IN CODE for the simplify doors'
+ * preserved-fields block (contracts §8.74).
+ */
+export interface PreservedObjectiveFields {
+  base?: string;
+  delivery?: DeliveryChoice;
+  /** Keyed by node `id`, roadmap order; a node whose `id` is not a non-blank string is omitted. */
+  nodes: Record<string, PreservedNodeFields>;
+}
+
+const PRESERVED_NODE_KEYS = ["slug", "comment", "adopt_issue", "pr", "status"] as const;
+
+/**
+ * The complement of `renderObjectiveDraft`: `base`/`delivery` when present on the decoded draft,
+ * and per roadmap node with a non-blank string `id` each of `slug`/`comment`/`adopt_issue`/`pr`/
+ * `status` only when it is a non-blank string (verbatim), plus `depends_on` (its string members)
+ * whenever the node carries a `depends_on` array — `[]` included. A duplicate id keeps the LAST
+ * node (the Python save rejects duplicates anyway). Pure; never throws.
+ */
+export function preservedObjectiveFields(draft: ObjectiveDraft): PreservedObjectiveFields {
+  const nodes: Record<string, PreservedNodeFields> = {};
+  for (const node of draft.roadmap) {
+    const id = nodeString(node, "id");
+    if (!id.trim()) continue;
+    const fields: PreservedNodeFields = {};
+    for (const key of PRESERVED_NODE_KEYS) {
+      const value = nodeString(node, key);
+      if (value.trim()) fields[key] = value;
+    }
+    const deps = (node as Record<string, unknown>).depends_on;
+    if (Array.isArray(deps))
+      fields.depends_on = deps.filter((d): d is string => typeof d === "string");
+    nodes[id] = fields;
+  }
+  return {
+    ...(draft.base !== undefined ? { base: draft.base } : {}),
+    ...(draft.delivery !== undefined ? { delivery: draft.delivery } : {}),
+    nodes,
+  };
+}

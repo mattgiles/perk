@@ -69,4 +69,6 @@ skills:
   - source: perk
     name: perk-replan
   - source: perk
+    name: perk-simplify
+  - source: perk
     name: perk-skill-author

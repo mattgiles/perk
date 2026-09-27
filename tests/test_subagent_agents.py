@@ -173,7 +173,8 @@ def test_simplifier_prose_invariants():
     # its two quotation exemptions, and the read-only command posture — are pinned here.
     text = _source_bytes("simplifier").decode()
     frontmatter = yaml.safe_load(text.split("---", 2)[1])
-    assert "Ships dormant" in frontmatter["description"]
+    assert "Ships dormant" not in frontmatter["description"]
+    assert "/simplify-plan" in frontmatter["description"]
     assert "defaultContext" not in frontmatter
     compact = " ".join(text.split("---", 2)[2].split())
     assert "that invocation is the verdict, not a question" in compact
